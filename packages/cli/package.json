@@ -1,0 +1,26 @@
+{
+  "name": "musterd",
+  "version": "0.0.1",
+  "description": "Muster your agents and humans into persistent teams. CLI + daemon launcher.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "musterd": "./dist/bin.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@musterd/protocol": "workspace:*",
+    "@musterd/server": "workspace:*",
+    "picocolors": "^1.1.1",
+    "ulid": "^2.3.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
+}

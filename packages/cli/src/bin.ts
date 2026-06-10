@@ -1,0 +1,64 @@
+#!/usr/bin/env node
+import { parseArgs } from './args.js';
+import { CliError } from './errors.js';
+import { teamCommand } from './commands/team.js';
+import { joinCommand } from './commands/join.js';
+import { sendCommand } from './commands/send.js';
+import { inboxCommand } from './commands/inbox.js';
+import { statusCommand } from './commands/status.js';
+import { serveCommand } from './commands/serve.js';
+import { renderBanner } from './render/rows.js';
+import { theme } from './render/theme.js';
+
+const HELP = `${'musterd'} — muster your agents and humans into persistent teams
+
+usage:
+  musterd serve [--port 4849] [--host 127.0.0.1]
+  musterd team create <slug> [--as <you>] [--role <role>] [--display <name>]
+  musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]
+  musterd join <slug> --as <name> [--token <tok>] [--surface cli]
+  musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] <body...>
+  musterd inbox [--watch] [--unread] [--peek] [--limit <n>]
+  musterd status
+
+global flags: --team <slug>  --server <url>  --json  --no-color
+
+acts: message status_update request_help handoff accept decline wait`;
+
+async function main(argv: string[]): Promise<number> {
+  const command = argv[0];
+  const rest = parseArgs(argv.slice(1));
+
+  if (!command || command === 'help' || command === '--help' || command === '-h') {
+    process.stdout.write(renderBanner() + '\n\n' + HELP + '\n');
+    return 0;
+  }
+
+  switch (command) {
+    case 'serve':
+      return serveCommand(rest);
+    case 'team':
+      return teamCommand(rest);
+    case 'join':
+      return joinCommand(rest);
+    case 'send':
+      return sendCommand(rest);
+    case 'inbox':
+      return inboxCommand(rest);
+    case 'status':
+      return statusCommand(rest);
+    default:
+      throw new CliError(`unknown command "${command}" — run: musterd help`, 2);
+  }
+}
+
+main(process.argv.slice(2))
+  .then((code) => process.exit(code))
+  .catch((err) => {
+    if (err instanceof CliError) {
+      process.stderr.write(`${theme.err('✗')} ${err.message}\n`);
+      process.exit(err.exitCode);
+    }
+    process.stderr.write(`${theme.err('✗')} ${(err as Error).message}\n`);
+    process.exit(1);
+  });
