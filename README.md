@@ -37,6 +37,8 @@ musterd init
 
 `musterd init` is the magical path: it finds Claude Code / Cursor, asks if it can configure the musterd MCP server for you, then shows a live spinner that flips to `● Ada is online via claude-code` the instant your agent connects.
 
+> Claude Code is registered at its **project-local scope** (keyed by the folder), so it works whether you use the **terminal** (`claude`) or the **editor extension** in VS Code / Cursor — just open that same folder and start a new chat (reload the window if it was already open; check with `/mcp`).
+
 <details><summary>Prefer to do it by hand?</summary>
 
 ```bash

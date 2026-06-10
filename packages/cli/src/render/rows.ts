@@ -41,7 +41,7 @@ export function renderMessageRow(
 /** The roster table for `status`: MEMBER KIND ROLE PRESENCE LIFECYCLE. */
 export function renderStatusTable(members: MemberSummary[]): string {
   const header = theme.meta(
-    pad('MEMBER', 14) + pad('KIND', 8) + pad('ROLE', 14) + pad('PRESENCE', 22) + 'LIFECYCLE',
+    pad('MEMBER', 14) + pad('KIND', 8) + pad('ROLE', 14) + pad('PRESENCE', 28) + 'LIFECYCLE',
   );
   const rows = members.map((m) => {
     const name = theme.memberName(m.name, m.kind);
@@ -53,7 +53,7 @@ export function renderStatusTable(members: MemberSummary[]): string {
       padVisible(name, m.name, 14) +
       pad(m.kind, 8) +
       pad(m.role || '—', 14) +
-      padVisible(presence, presencePlain(m.presence, m.presences[0]?.surface), 22) +
+      padVisible(presence, presencePlain(m.presence, m.presences[0]?.surface), 28) +
       lifecycle
     );
   });
@@ -93,8 +93,8 @@ function pad(s: string, width: number): string {
   return s.length >= width ? s + ' ' : s + ' '.repeat(width - s.length);
 }
 
-/** Pad a colorized string using its visible (uncolored) length. */
+/** Pad a colorized string using its visible (uncolored) length, always leaving ≥1 trailing space. */
 function padVisible(colored: string, plain: string, width: number): string {
-  const extra = Math.max(0, width - plain.length);
+  const extra = Math.max(1, width - plain.length);
   return colored + ' '.repeat(extra);
 }

@@ -41,7 +41,21 @@ export const claudeCode: Harness = {
     await exec('claude', args, { timeout: 10000 });
     return {
       target: 'claude mcp (scope: local)',
-      activation: 'start a Claude Code session in this directory (run `claude`) — the agent joins on launch',
+      activation: activationHint(),
     };
   },
 };
+
+/**
+ * The MCP server is registered at Claude Code's project-local scope (keyed by this
+ * folder). Both the terminal CLI and the Claude Code editor extension read it — they
+ * just need this folder open. Lead with whichever path fits where init is running.
+ */
+function activationHint(): string {
+  const inEditor = process.env['TERM_PROGRAM'] === 'vscode' || Boolean(process.env['VSCODE_PID']);
+  const ext =
+    'in the Claude Code extension, open this folder and start a new chat (reload the window if it was already open)';
+  const term = 'in a terminal here, run `claude`';
+  const lead = inEditor ? `${ext}; or ${term}` : `${term}; or ${ext}`;
+  return `${lead} — the agent joins on launch (verify with /mcp inside the session)`;
+}
