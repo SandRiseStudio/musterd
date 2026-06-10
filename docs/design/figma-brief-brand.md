@@ -6,6 +6,8 @@
 
 ---
 
+> **Status: EXECUTED** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md)). File: [musterd / Brand](https://figma.com/design/ogOcNXhGq5THf9OBQgbYQB). Exports in [`assets/`](./assets/). Note: the ASCII block wordmark is mirrored *from* the CLI banner (`packages/cli/src/render/rows.ts`), which is the source of truth — not generated in Figma and copied back.
+
 ## File
 
 - **Figma file name:** `musterd / Brand`

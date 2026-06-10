@@ -6,6 +6,8 @@
 
 ---
 
+> **Status: EXECUTED — designed, not built** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md)). File: [musterd / Dashboard](https://figma.com/design/NeT7zIOz78OvGcWemE3Bji). 7 components, all 4 screens in light + dark, and the 3 journeys on the `Flows` page (visual strips; clickable prototype wiring deferred to the dashboard milestone). Data-model pressure-test passed — every field maps to a column, no schema gaps.
+
 ## File
 
 - **Figma file name:** `musterd / Dashboard`
