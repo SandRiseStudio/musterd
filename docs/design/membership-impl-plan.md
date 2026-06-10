@@ -31,18 +31,28 @@
 - Local-admin fast path: an admin-co-present session's no-grant claim can be approved inline.
 - Tests: request lifecycle (pending→approved issues grant→occupy; deny; expire); policy toggles pre-issued grants; admin-only enforcement on every governance route; audit coverage.
 
-## Milestone 4 — state model + roster
+## Milestone 3b — capabilities & need-to-know visibility
+- Add the fixed capability set to roles (defaults) + per-seat **narrowing** (never widen); store `charter` on role/seat.
+- Enforce capabilities on every in-band op (message/notify/observe/govern); **declare** external scopes (repo/dir/tool) without claiming to enforce them.
+- **Viewer-scoped projection**: roster/info/audit endpoints filter by the caller's `visibility_level` (admins all; non-admins see teammate handles/presence/their own acts only).
+- `claim`/`occupied` returns the seat's `charter`; `memory` field present but always `null` (reserved seam).
+- Tests: per-seat narrowing can't widen; non-admin projection hides credentials/grants/audit/policy/other charters; capability enforcement (e.g. `can_message` scope) rejects out-of-scope sends.
+
+## Milestone 4 — state model, roster, notifications
 - Resolve three axes into the roster payload (`account`, `availability`, `activity`) + `watching` list.
 - Activity: `working` from latest `status_update.meta.state`, **persist-while-alive + freshness timestamp** (stale after 5m → `working: x · Nm`, never idle), clear on release; `talking` optional.
-- CLI `render/rows.ts`: status table shows resolved badges (`created · waiting to join`, `off until 9am`, `working: x · 18m`, `observing`, account states).
-- Tests: display-resolution precedence; staleness rendering (fresh vs `· Nm`); provisioned/never-occupied; snapshots.
+- **Human availability**: implicit presence; explicit `away`/`dnd`/`away_until` via `POST /availability`; `inbox` holds + digests while away/dnd.
+- **Notification tiers** (loud directed/governance · quiet ambient · held when away) + **breakthrough**: `away` passes only `urgent`; `dnd` passes directed + `urgent`.
+- **`urgent`** = `meta.urgent` + required `meta.urgent_reason`, gated by `can_flag_urgent`, audited; recipient `wasnt_urgent` feedback recorded.
+- CLI `render/rows.ts`: status table shows resolved badges (`created · waiting to join`, `off until 9am`, `working: x · 18m`, `observing`, account states); `inbox --watch` marks loud vs quiet and surfaces approval cards.
+- Tests: display-resolution precedence; staleness rendering; away holds/urgent-breakthrough; `urgent` rejected without capability; provisioned/never-occupied; snapshots.
 
 ## Milestone 5 — CLI to seats + grants + governance
 - `team create` → store + print **agent key** + your **human credential**; set config; creator = admin.
 - `team add` (admin) → provision a `provisioned` seat (role, name?); no token printed.
 - `join` → claim: humans claim their named seat (human credential); `musterd watch`/`inbox --watch` with no claim = **observer** (role-gated).
-- Governance: `musterd role add`, `musterd seat add|disable|enable|ban|archive`, `musterd grant issue|revoke`, `musterd agent-key rotate`, `musterd policy set allow-pre-issued-grants <bool>`, `musterd requests [approve|deny <id>]`, `musterd audit`.
-- Admin-co-present approval prompt for incoming requests during `inbox --watch`.
+- Governance: `musterd role add` (+capabilities/charter), `musterd seat add|disable|enable|ban|archive`, `musterd seat caps <id>` (narrow), `musterd grant issue|revoke` (lifetime: once|ttl <h>|standing), `musterd agent-key rotate`, `musterd policy set allow-pre-issued-grants <bool>`, `musterd requests [approve|deny <id>]`, `musterd availability <available|away|dnd|until ...>`, `musterd audit`.
+- Admin-co-present approval prompt (one-keystroke **approval card** w/ surface + seat + fingerprint + batching) for incoming requests during `inbox --watch`; approval picks grant lifetime (once / N-hours / until-revoke).
 - Config: `{ server, current, agentKey, grants?: {...}, identities: { <team>: { seat, humanCredential, role, admin } } }`.
 - Tests: Scenario A on credentials; governance happy-paths; observer read-only; refusal copy.
 

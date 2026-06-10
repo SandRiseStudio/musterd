@@ -67,6 +67,18 @@ session --agent key--> connect (authenticated harness, no identity yet)
   - Else → **signal an available admin** (governance notification + `musterd requests` surface). The admin **grants an existing seat**, **creates a new seat and grants it**, or **denies**. The session waits with a clear status.
 - Agents never fall back to observing; observation is human-only.
 
+### Approval is explicit, but the admin picks the grant's lifetime
+
+Every non-pre-issued claim is **explicitly approved** (no silent auto-approve) — but at approval the admin chooses how long the issued grant lasts, so a busy operator isn't re-prompted on every reconnect:
+
+- **Just this once** — single-use; expires on release. Maximum security.
+- **For the next N hours** — a TTL grant; reconnects/restarts within the window re-occupy without re-prompting ("approve Ada for today").
+- **Until I revoke** — a standing grant for a trusted long-running harness.
+
+This is **not** a pre-issued grant (those are baked into a config *before* any claim, opt-in per team). It is approve-on-first-claim with a chosen window. The 45s grace handles blips; the TTL handles "closed the laptop for lunch." The **solo-operator "never interrupt me" path** remains the sanctioned opt-in: enable pre-issued grants for your own team.
+
+**Graceful interruption** — the approval surfaces as a one-keystroke **approval card** in `inbox --watch` *plus* a loud notification, showing **surface** (`claude-code`), **seat/role** requested, a harness **fingerprint** (so you recognize "that's my Cursor"), and **batching** ("3 claims from this harness — approve all?").
+
 ## Observer mode (humans only)
 
 A human with an observer-permitting role/credential attaches read-only: receives the live stream, shows under the roster **`watching`** list with a handle, is **not addressable**, **cannot send acts**, and is **never** promoted to a seat. `musterd inbox --watch` for a human who hasn't claimed a seat *is* observer mode.
@@ -86,6 +98,54 @@ The states from design ("created but not used", "working on x", "off until 9am",
 - Two clocks: **heartbeat = alive**, **last `status_update` = fresh**. (Optional roadmap nicety: a very-stale soft-downgrade after ~30m; skipped in v1.)
 
 **Display resolution (first match wins):** archived/banned/disabled → provisioned (`created · waiting to join`) → away (`off until <ts>`) → unoccupied (`offline`) → occupied (`working: x · Nm` / `talking: y` / `online`).
+
+## The human's day — presence, focus & notifications
+
+Humans are seats, so they share the three axes — but *how* each is set differs, and humans get a notification model agents don't need.
+
+- **Presence is implicit.** A connected human surface (CLI/app) = `online`; idle drifts to `away`. You don't announce being online.
+- **Focus/away/working is explicit, never inferred.** You *set* `away` (hold my inbox), `dnd`/`focus`, or `off until 9am`. musterd does **not** guess a human's `working: x` from activity (too creepy/inaccurate) — you set it if you want it shown. (Contrast: agents self-report `working` via tool calls.)
+- **Notification tiers:**
+  - **Loud (notify/page):** anything *directed at you* — `request_help`/`handoff` to you, `accept`/`decline` of *your* request, an @mention, and **governance approval requests**.
+  - **Quiet (stream only):** ambient `status_update`, broadcasts, others' threads.
+  - **Held:** when set away/dnd, messages queue → digest on return.
+- **Breakthrough rules:**
+  - `away` holds everything **except `urgent`-flagged** pings.
+  - `dnd`/`focus` holds quiet; lets directed pings (and `urgent`) through.
+
+### `urgent` is scarce by design
+
+`urgent` is the only thing that pierces `away`, so it must stay rare. Guardrails (not honor-system):
+- **`can_flag_urgent` is a capability** (below) — not everyone holds it; admins grant it.
+- An `urgent` ping **must carry a short reason** and is **audited / visible to admins**.
+- The recipient can mark an `urgent` as **"wasn't urgent"**, which is recorded against the sender and can cost them the capability.
+- (Roadmap) per-sender rate-limit on `urgent`.
+
+## Roles: capabilities & visibility
+
+A Role is more than a label: it carries **capabilities** (what a seat may do) at two tiers — **team/role defaults** and **per-seat overrides that may only narrow** within the role. This is Principle 7 extended from *credentials* to *capabilities*.
+
+**v0.2 capability set (minimal, fixed — no custom RBAC engine yet):**
+- `can_message` — whom this seat may message/notify (e.g. team, specific roles, none).
+- `visibility_level` — what team state it can see (drives the need-to-know projection below).
+- `tool_allowlist` — which tools/capabilities it may use.
+- `declared_resource_scopes` — repos/dirs it's allowed to touch (see enforce-vs-declare).
+- `can_flag_urgent`, `can_observe`, `is_admin` — discrete capability flags.
+
+**Need-to-know visibility (projection by viewer):**
+- **Admins see everything** about the team — roles, seats, grants, audit, policy, charters.
+- **Non-admin seats/agents see a projection** — their teammates' handles + presence + the acts addressed to them; **not** credentials, grants, audit, team policy, or other roles' charters.
+- The roster/info endpoints return a *viewer-scoped* view; the server enforces it.
+
+**Enforce vs declare (keeps Principle 4 intact):**
+- musterd **enforces everything that flows through it** — messaging, notification, visibility, governance, claims.
+- musterd **declares** external scopes (repo/dir/tool access) as the source of truth and advertises them, but **filesystem/tool enforcement is delegated** to the harness today (a sandbox on the roadmap). musterd is the *authority on what a seat may do*; it does not sit between the agent and your disk.
+
+## Scope boundaries: charter, memory, behavior
+
+- **Charter / instructions — in scope, as data.** A role/seat may carry a **charter** (what this seat is *for*) + instructions. musterd **stores and serves** them — a claiming agent receives its role's charter at claim time — but never *enforces behavior*. Identity metadata, not an execution model.
+- **Memory — reserved seam, not built.** A persistent identity wants persistent memory, but musterd is a coordination layer, not a memory store. We **reserve the seam** (the claim response can later carry a memory/context blob alongside the charter) and integrate/build memory **later**. Parked for a dedicated future brainstorm.
+- **Behavior enforcement — out.** Principle 4: we connect agents, we don't run them.
 
 ## Onboarding (`musterd init`) impact
 
@@ -110,3 +170,6 @@ Admins provision roles/seats, issue/revoke grants, set account status, approve r
 - **B — live admin approval by default; team-level admin opt-in to allow pre-issued grants.** ✅
 - **C — requests/approvals are their own governance lane**, separate from collaboration Acts. ✅
 - **D — `working` persists while alive + freshness timestamp; clears on release; no time-reversion to idle**; 5-minute freshness threshold; very-stale downgrade skipped in v1. ✅
+- **E — approval is always explicit, but the admin picks the grant lifetime** (once / N hours / until-revoke); not a pre-issued grant; graceful one-keystroke approval card + fingerprint + batching. ✅
+- **F — human presence implicit, focus/away explicit (never inferred); notification tiers loud/quiet/held; `urgent` is the only thing that pierces `away`, and it's a scarce capability** (reason-required, audited, downgradeable). ✅
+- **G — Roles carry capabilities (team default + per-seat narrowing): minimal fixed set, no custom RBAC yet; need-to-know visibility projection (admins all, others scoped); musterd enforces in-band, declares external scopes. Charter = data; memory = reserved seam; behavior = out.** ✅

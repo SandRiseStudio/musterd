@@ -12,6 +12,23 @@ Concretely:
 3. **Everything privileged is audited.** Grant issue/use/revoke, claim/occupy/release, account-status changes, key rotation, policy changes, and request decisions all append to an immutable audit log: `{ ts, actor, action, target, result }`.
 4. **Secrets are hashes at rest, never logged.** Agent keys, grants, and human credentials are stored only as hashes server-side. They never appear in logs (structured logger redacts), errors, or telemetry.
 5. **Explicit blast-radius control.** Keys and grants are rotatable/revocable; bans reject credentials immediately; archived/disabled seats can't be occupied.
+6. **Capability-scoped, need-to-know.** A seat may do only what its role's capabilities allow (comms, tools, declared resource scopes, visibility) and may *see* only what it needs. Admins see all; non-admins get a viewer-scoped projection.
+
+## Capabilities & visibility (authorization beyond credentials)
+
+Credentials decide *who*; capabilities decide *what* and *what's visible*. Both tiers are enforced server-side on every operation that flows through musterd.
+
+- **Capabilities** attach to a Role (team default) and may be **narrowed per seat** (never widened). v0.2 fixed set: `can_message` (scope), `visibility_level`, `tool_allowlist`, `declared_resource_scopes`, `can_flag_urgent`, `can_observe`, `is_admin`. (Custom RBAC engines are roadmap — a tar pit to avoid early.)
+- **Need-to-know visibility:** roster/info endpoints return a **viewer-scoped projection**. Non-admins never see credentials, grants, audit, team policy, or other roles' charters — only teammate handles, presence, and acts addressed to them.
+- **Enforce vs declare:** musterd **enforces** what flows through it (messaging, notification, visibility, governance, claims) and **declares** external scopes (repo/dir/tool) as the source of truth; filesystem/tool enforcement is delegated to the harness today, a sandbox on the roadmap. We never claim to enforce what we don't control (Principle 4).
+
+## `urgent` as a guarded capability
+
+`urgent` is the only signal that pierces a human's `away` (notification model in `membership-model.md`), so it is scarce by design, not by etiquette:
+- Gated by the **`can_flag_urgent`** capability (admin-granted; not default).
+- Every `urgent` ping **carries a required reason** and is **audited / admin-visible**.
+- Recipients can mark an `urgent` **"wasn't urgent"**, recorded against the sender; repeated abuse costs the capability.
+- (Roadmap) per-sender rate-limiting.
 
 ## Assets
 
@@ -43,7 +60,7 @@ Concretely:
 ## Credential & grant lifecycle
 
 - **Agent key:** minted at `team create`; one per team in v0.2 (per-seat/rotating keys are roadmap). `agent-key rotate` invalidates the old key. Stored hashed.
-- **Grant:** issued by an admin (live on a request, or pre-issued when policy allows). Carries `scope` (seat|role), `target`, `expires_at`, optional `single_use`. Verified on claim; recorded on use; `revoke` is immediate. Default TTL short; pre-issued grants for a stable harness MAY be longer-lived but remain revocable.
+- **Grant:** issued by an admin (live on a request, or pre-issued when policy allows). Carries `scope` (seat|role), `target`, `lifetime`, optional `single_use`. **At live approval the admin picks the lifetime: just-once (single-use), N-hours (TTL), or until-revoke (standing).** This keeps "no silent grant" while sparing the operator a re-prompt on every reconnect. Verified on claim; recorded on use; `revoke` is immediate. Pre-issued grants (team opt-in) follow the same shape but are written into a config before any claim.
 - **Human credential:** minted when a human seat is created/joined; rotatable; rejected when the seat is banned.
 - **Admin:** capability flag on a human seat; creator by default; (multi-admin delegation is roadmap).
 
