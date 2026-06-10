@@ -1,0 +1,74 @@
+import { describe, expect, it } from 'vitest';
+import { EnvelopeSchema, makeEnvelope } from './envelope.js';
+import { PROTOCOL_VERSION } from './version.js';
+
+const base = {
+  id: 'msg-1',
+  team: 'dawn',
+  from: 'Ada',
+  to: { kind: 'member', name: 'Lin' } as const,
+  ts: 1733760000000,
+};
+
+describe('EnvelopeSchema', () => {
+  it('round-trips a valid envelope and defaults body', () => {
+    const env = makeEnvelope({ ...base, act: 'handoff', body: 'auth ready' });
+    expect(env.v).toBe(PROTOCOL_VERSION);
+    expect(env.act).toBe('handoff');
+    expect(env.body).toBe('auth ready');
+    expect(EnvelopeSchema.parse(env)).toEqual(env);
+  });
+
+  it('defaults missing body to empty string', () => {
+    const env = makeEnvelope({ ...base, act: 'wait' });
+    expect(env.body).toBe('');
+  });
+
+  it('rejects an unknown act', () => {
+    const bad = { ...base, v: PROTOCOL_VERSION, act: 'shout', body: '', to: base.to };
+    expect(EnvelopeSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('preserves unknown meta keys (forward-compat)', () => {
+    const env = makeEnvelope({
+      ...base,
+      act: 'status_update',
+      meta: { progress: 0.5, futureField: 'keep me' },
+    });
+    expect(env.meta).toMatchObject({ progress: 0.5, futureField: 'keep me' });
+  });
+
+  it('requires meta.in_reply_to on accept', () => {
+    expect(() => makeEnvelope({ ...base, act: 'accept' })).toThrow();
+    const ok = makeEnvelope({ ...base, act: 'accept', meta: { in_reply_to: 'msg-0' } });
+    expect(ok.meta).toMatchObject({ in_reply_to: 'msg-0' });
+  });
+
+  it('requires meta.in_reply_to on decline', () => {
+    expect(() => makeEnvelope({ ...base, act: 'decline' })).toThrow();
+    const ok = makeEnvelope({
+      ...base,
+      act: 'decline',
+      meta: { in_reply_to: 'msg-0', reason: 'busy' },
+    });
+    expect(ok.meta).toMatchObject({ in_reply_to: 'msg-0', reason: 'busy' });
+  });
+
+  it('rejects a wrong protocol version', () => {
+    const bad = { ...makeEnvelope({ ...base, act: 'message' }), v: 'musterd/9.9' };
+    expect(EnvelopeSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('rejects an invalid team slug', () => {
+    expect(() => makeEnvelope({ ...base, team: 'Not A Slug', act: 'message' })).toThrow();
+  });
+
+  it('accepts team and broadcast recipients', () => {
+    expect(makeEnvelope({ ...base, to: { kind: 'team' }, act: 'status_update' }).to).toEqual({
+      kind: 'team',
+    });
+    expect(makeEnvelope({ ...base, to: { kind: 'broadcast' }, act: 'message' }).to).toEqual({
+      kind: 'broadcast',
+    });
+  });
+});
