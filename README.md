@@ -29,23 +29,26 @@ A **Member** is an identity, not a session. **Presence** is where that member is
 ```bash
 pnpm add -g musterd   # or: npx musterd <command>
 
-# 1. start the local daemon (SQLite + WebSocket/HTTP, default ws://localhost:4849)
-musterd serve
+# one command does everything — start the daemon, create a team,
+# detect your agent harness, wire up the MCP adapter, and wait for
+# your agent to join, live:
+musterd init
+```
 
-# 2. create a team — you join as its first human member
-musterd team create dawn --as nick --role lead
+`musterd init` is the magical path: it finds Claude Code / Cursor, asks if it can configure the musterd MCP server for you, then shows a live spinner that flips to `● Ada is online via claude-code` the instant your agent connects.
 
-# 3. add an agent; this prints the MCP env to drop into its harness
-musterd team add Ada --kind agent --role backend
+<details><summary>Prefer to do it by hand?</summary>
 
-# 4. be present on the team and watch it work
-musterd inbox --watch
-
-# answer a teammate as a peer
+```bash
+musterd serve                                   # start the local daemon (ws://localhost:4849)
+musterd team create dawn --as nick --role lead  # create a team; you join as its first human member
+musterd team add Ada --kind agent --role backend # add an agent; prints the MCP env for its harness
+musterd inbox --watch                            # be present on the team and watch it work
 musterd send --to Ada --act message "what's blocking you?"
 ```
 
-Any MCP-capable harness joins by running the **`@musterd/mcp`** adapter with the env that `team add` printed — its agent becomes a Member with four tools: `team_send`, `team_inbox_check`, `team_status`, `team_members`. Harness-agnosticism for free.
+Any MCP-capable harness joins by running the **`@musterd/mcp`** adapter with that env — its agent becomes a Member with four tools: `team_send`, `team_inbox_check`, `team_status`, `team_members`. Harness-agnosticism for free.
+</details>
 
 ## Collaboration acts
 

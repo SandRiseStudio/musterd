@@ -23,7 +23,16 @@ src/
   render/
     theme.ts          // ANSI roles from brand.md (online dot, member colors, act badges)
     rows.ts           // renderMessageRow, renderStatusTable, renderBanner, renderPresence
+  onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
+    init.ts           // the flow: daemon -> team -> detect harness -> configure -> wait-to-join
+    harness.ts        // Harness adapter interface (detect + configure)
+    mcpEntry.ts       // resolve how to launch @musterd/mcp + build the binding env
+    harnesses/
+      index.ts        // registry of supported harnesses (pluggable)
+      claudeCode.ts   // detect/configure via the `claude mcp` CLI
+      cursor.ts       // detect/configure via .cursor/mcp.json (ADR 006 adds the `cursor` surface)
   commands/
+    init.ts           // musterd init (delegates to onboard/init.ts)
     serve.ts          // musterd serve [--port]
     team.ts           // team create / team add
     join.ts           // join
@@ -51,6 +60,9 @@ src/
 ## Commands (args, flags, output, exit)
 
 All commands accept global `--team <slug>`, `--server <url>`, `--json` (machine output, no color), `--no-color`.
+
+### `musterd init`
+Interactive first-run onboarding (requires a TTY; non-TTY prints guidance and exits 2). Flow: (1) check the daemon's `/health`, offering to spawn `musterd serve` detached if it's down; (2) reuse the current team or create one; (3) detect installed harnesses (`onboard/harnesses/`) and whether musterd is already configured in each; (4) pick a harness, name the agent, mint it via `team add`; (5) with confirmation, write the harness's MCP config (`claude mcp add` / `.cursor/mcp.json`); (6) poll the roster and show a live spinner that resolves when the agent's Presence appears. Built on `@clack/prompts` (ADR 005). Read-only `detect()`; only `configure()` writes, and only after a confirm.
 
 ### `musterd serve [--port 4849] [--host 127.0.0.1]`
 Starts the daemon in the foreground. Prints the banner (`render/banner`) + `listening on ws://host:port`. Exit 0 on clean shutdown (SIGINT).

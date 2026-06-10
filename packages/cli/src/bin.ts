@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from './args.js';
 import { CliError } from './errors.js';
+import { initCommand } from './commands/init.js';
 import { teamCommand } from './commands/team.js';
 import { joinCommand } from './commands/join.js';
 import { sendCommand } from './commands/send.js';
@@ -13,6 +14,7 @@ import { theme } from './render/theme.js';
 const HELP = `${'musterd'} — muster your agents and humans into persistent teams
 
 usage:
+  musterd init                                  interactive first-run setup (recommended)
   musterd serve [--port 4849] [--host 127.0.0.1]
   musterd team create <slug> [--as <you>] [--role <role>] [--display <name>]
   musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]
@@ -35,6 +37,8 @@ async function main(argv: string[]): Promise<number> {
   }
 
   switch (command) {
+    case 'init':
+      return initCommand(rest);
     case 'serve':
       return serveCommand(rest);
     case 'team':

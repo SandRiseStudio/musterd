@@ -13,6 +13,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@clack/prompts": "^0.9.1",
+    "@musterd/mcp": "workspace:*",
     "@musterd/protocol": "workspace:*",
     "@musterd/server": "workspace:*",
     "picocolors": "^1.1.1",
