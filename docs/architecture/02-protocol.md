@@ -107,7 +107,7 @@ The CLI maps these to exit codes (`04-cli.md`).
 ```ts
 export const PROTOCOL_VERSION = 'musterd/0.1';
 export const ACTS = ['message','status_update','request_help','handoff','accept','decline','wait'] as const;
-export const SURFACES = ['cli','claude-code','codex','web','ios','slack','other'] as const;
+export const SURFACES = ['cli','claude-code','codex','cursor','web','ios','slack','other'] as const;
 
 export const Act = z.enum(ACTS);
 export const Surface = z.enum(SURFACES);

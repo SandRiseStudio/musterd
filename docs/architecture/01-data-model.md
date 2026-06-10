@@ -50,7 +50,7 @@ CREATE INDEX idx_members_team ON members(team_id);
 CREATE TABLE presence (
   id            TEXT PRIMARY KEY,            -- ULID (one per attachment/connection)
   member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
-  surface       TEXT NOT NULL CHECK (surface IN ('cli','claude-code','codex','web','ios','slack','other')),
+  surface       TEXT NOT NULL CHECK (surface IN ('cli','claude-code','codex','cursor','web','ios','slack','other')),
   status        TEXT NOT NULL DEFAULT 'online' CHECK (status IN ('online','away','offline')),
   conn_id       TEXT,                        -- transport connection id (WS), null for stateless HTTP pings
   last_seen_at  INTEGER NOT NULL,            -- updated on every heartbeat

@@ -14,7 +14,7 @@ export type Act = (typeof ACTS)[number];
 export const ActSchema = z.enum(ACTS);
 
 /** Surfaces a Member can be present on. v0.1 implements cli/claude-code/codex; the rest are reserved. */
-export const SURFACES = ['cli', 'claude-code', 'codex', 'web', 'ios', 'slack', 'other'] as const;
+export const SURFACES = ['cli', 'claude-code', 'codex', 'cursor', 'web', 'ios', 'slack', 'other'] as const;
 export type Surface = (typeof SURFACES)[number];
 export const SurfaceSchema = z.enum(SURFACES);
 
