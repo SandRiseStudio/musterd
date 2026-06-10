@@ -1,6 +1,6 @@
 # Security — threat model & principles
 
-> **Status: DRAFT, paired with SPEC v0.2.** Security is a first-class principle (Principle 7: *secure by default*), not a feature bolted on. This doc is the normative reference for the credential/grant/audit model the rest of v0.2 implements. Current shipped v0.1 is a local-first, single-user, trusted-machine tool; the model below hardens it as teams become shared.
+> **Status: DRAFT, paired with SPEC v0.3 (shared teams), deferred per ADR 007.** Security is a first-class principle (Principle 7: *secure by default*). The credential/grant/audit model below is the **v0.3** hardening for shared/remote teams and is **not** built in v0.2. Shipped v0.1 and the minimal v0.2 are local-first, single-user, single-admin, `127.0.0.1`-bound — their trust boundary is the local machine; this model activates when that boundary widens (the daemon stops being localhost-only). Principle 7 itself holds from day one — the v0.2 expression of it is simply: scoped per-member tokens, explicit activation, single-active, and secrets in chmod-600 / git-ignored configs.
 
 ## Principle 7 — secure by default
 

@@ -1,12 +1,12 @@
-# musterd protocol — SPEC v0.2 (DRAFT)
+# musterd protocol — SPEC v0.3 (DRAFT, shared-teams governance)
 
-> **Status: DRAFT, not implemented.** Normative protocol draft for the seat/grant membership model in `membership-model.md`. The **live** spec is `SPEC.md` (v0.1). When accepted, this is promoted into `SPEC.md`, the version bumps to `musterd/0.2`, and ADRs record the breaking changes. Until then `SPEC.md`/code remain v0.1. See `security.md` for the credential/grant threat model.
+> **Status: DRAFT, deferred to v0.3 (ADR 007).** This is the **shared-teams** governance model — seats, agent key + grants, capabilities, approval lane, audit. It is **not** what v0.2 ships. The minimal **v0.2** (explicit activation + single-active + grace + `working` status, keeping v0.1 per-member tokens) is defined in `membership-impl-plan.md` and ADR 007. This v0.3 design activates when the daemon stops being localhost-only and its threat model becomes real. The **live** spec is `SPEC.md` (v0.1). See `security.md` for the credential/grant threat model.
 
-Version under design: **`musterd/0.2`**. RFC 2119 keywords.
+Version under design: **`musterd/0.3`**. RFC 2119 keywords.
 
 ## 0. What changes from v0.1 (and why it's breaking)
 
-| Area | v0.1 (live) | v0.2 (draft) |
+| Area | v0.1 (live) | v0.3 (draft) |
 |---|---|---|
 | Identity | flat Member (name, kind) | **Seat** in a **Role** (Member = named Seat) |
 | Auth unit | per-member token = one member | **agent key** (harness) **+ admin-issued Grant** (seat occupancy) |
@@ -17,14 +17,14 @@ Version under design: **`musterd/0.2`**. RFC 2119 keywords.
 | Observers | none | **human-only** read-only watchers |
 | Governance | none | **own lane**: roles, seats, grants, requests, status — all **audited** |
 
-MAJOR-of-MINOR change (new join/auth) → `musterd/0.2`, gated by ADR. Envelope + the 7 acts are **unchanged**; `v` becomes `musterd/0.2`.
+MAJOR-of-MINOR change (new join/auth) → `musterd/0.3`, gated by a future ADR. Envelope + the 7 acts are **unchanged**; `v` becomes `musterd/0.3`.
 
 ## 1. Roles, Seats & Capabilities
 
 - A **Role** is admin-defined (`backend`, `frontend`, `reviewer`, `lead`…). It groups seats (capacity = its seats) **and carries default capabilities + an optional charter**.
 - A **Seat** is the identity record: `{ id, team, role, name?, kind: agent|human, account_status, occupied_by?, availability?, activity?, capabilities, charter? }`. `name` is optional for agent seats (handle `<role>-<n>` if absent), conventional for humans. A seat's `capabilities` start from its role's defaults and may be **narrowed per seat, never widened**.
-- **Capabilities (v0.2 fixed set):** `can_message` (scope), `visibility_level`, `tool_allowlist`, `declared_resource_scopes`, `can_flag_urgent`, `can_observe`, `is_admin`. Servers MUST enforce them on every in-band operation; external scopes (repo/dir/tool) are **declared** here and enforced by the harness/sandbox (Principle 4). Custom RBAC is roadmap.
-- **Charter** is identity metadata (what the seat is *for* + instructions); musterd stores and serves it, never enforces behavior. A **memory/context blob** is a **reserved seam** on the claim response (§3) — not built in v0.2.
+- **Capabilities (v0.3 fixed set):** `can_message` (scope), `visibility_level`, `tool_allowlist`, `declared_resource_scopes`, `can_flag_urgent`, `can_observe`, `is_admin`. Servers MUST enforce them on every in-band operation; external scopes (repo/dir/tool) are **declared** here and enforced by the harness/sandbox (Principle 4). Custom RBAC is roadmap.
+- **Charter** is identity metadata (what the seat is *for* + instructions); musterd stores and serves it, never enforces behavior. A **memory/context blob** is a **reserved seam** on the claim response (§3) — not built in v0.3.
 - A seat has **at most one** live occupant (single-active). Humans claim their own named seat; agent seats may be claimed by name or by an open seat in a role.
 
 ## 2. Credentials
@@ -42,7 +42,7 @@ State machine: `connecting → authenticated(key) → claim → (occupied | refu
 
 ```jsonc
 // client → server
-{ "type":"claim", "v":"musterd/0.2", "team":"dawn",
+{ "type":"claim", "v":"musterd/0.3", "team":"dawn",
   "key":"<agent key | human credential>",
   "target": { "seat":"Ada" } | { "role":"backend" } | { "observe": true },
   "grant":"<grant token>"?,            // omitted → triggers a request (default path)
@@ -51,7 +51,7 @@ State machine: `connecting → authenticated(key) → claim → (occupied | refu
 // server → client
 { "type":"occupied", "seat": <Seat>, "presence_id":"01J…", "server_time": <ms>,
   "charter": "<role/seat charter + instructions>"?,   // identity metadata, served not enforced
-  "memory": null }                                     // RESERVED SEAM — always null in v0.2
+  "memory": null }                                     // RESERVED SEAM — always null in v0.3
 { "type":"refused", "code":"claim_conflict"|"forbidden"|"not_found"|"disabled"|"banned"|"expired_grant",
   "message":"…", "claimable":["…"], "hint":"musterd team add <name> --kind agent --role backend" }
 { "type":"pending", "request_id":"01J…", "message":"asked admins to authorize this claim" }
@@ -122,11 +122,11 @@ Delivery is unchanged (at-least-once, cursor-based); **notification tiering** is
 | `POST` | `/teams/:slug/availability` | set the caller's seat availability (`available\|away\|dnd\|away_until`) |
 | `GET`  | `/teams/:slug/audit` | admin; audit records |
 
-Sending an Envelope still requires the sender to **hold the occupancy** of `from` (replaces token==member). `v` → `musterd/0.2`. All read endpoints return a **viewer-scoped projection** per the recipient's `visibility_level`.
+Sending an Envelope still requires the sender to **hold the occupancy** of `from` (replaces token==member). `v` → `musterd/0.3`. All read endpoints return a **viewer-scoped projection** per the recipient's `visibility_level`.
 
 ## 8. Error / refusal codes
 
-Add `claim_conflict` (seat occupied; 409), `expired_grant` (410/403). Reuse `forbidden` (bad key / not allowed to observe / not admin), `not_found` (no such seat/role), and surface account states via `refused.code` (`disabled`/`banned`). `version_mismatch` covers a v0.1 client hitting a v0.2 server.
+Add `claim_conflict` (seat occupied; 409), `expired_grant` (410/403). Reuse `forbidden` (bad key / not allowed to observe / not admin), `not_found` (no such seat/role), and surface account states via `refused.code` (`disabled`/`banned`). `version_mismatch` covers a v0.1/v0.2 client hitting a v0.3 server.
 
 ## 9. Migration
 

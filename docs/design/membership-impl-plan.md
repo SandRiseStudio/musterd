@@ -1,81 +1,43 @@
-# Membership model — implementation plan (SPEC v0.2: seats + grants)
+# v0.2 implementation plan — minimal trust model
 
-> **Status: plan, not started.** Implements `membership-model.md` + `spec-v0.2-draft.md` + `security.md`. Built behind the living-doc/ADR discipline. Each milestone ends green (`pnpm -r build && pnpm test`), updates affected docs, and promotes the relevant part of the draft spec into `SPEC.md`.
+> **Status: plan, not started.** Scoped per **ADR 007** (the scope cut). v0.2 fixes only the real localhost bug — implicit auto-join and "N sessions = N minds wearing one name" — plus ships the launch-visible `working` status. It **keeps v0.1 per-member tokens**; no agent key, grants, requests, audit, capabilities, or notification tiers (those are the v0.3 set: `membership-model.md`, `spec-v0.3-draft.md`, `security.md`). Each milestone ends green (`pnpm -r build && pnpm test`) and updates affected docs.
 
-## Guiding constraints
+## Scope (what v0.2 is)
 
-- One breaking bump: `PROTOCOL_VERSION` → `musterd/0.2`, in **ADR 007**.
-- Envelope + 7 acts unchanged. All change is identity/credentials/grants/state/governance.
-- Server stays the single source of truth; clients change how they authenticate, claim, and govern.
-- **Security is a gate, not a milestone:** every milestone that touches credentials/grants also lands its audit records + least-privilege checks (`security.md`), not "later."
-- Keep the suite green; update the flagship Scenario C to the claim/grant model and keep it passing.
+- **Explicit activation** — adapter dormant by default; `team_join` tool; opt-in `MUSTERD_AUTOJOIN`. *(fixes consent)*
+- **Single-active + refuse + 45s grace** — server-enforced per member. *(fixes the clone bug)*
+- **`working: x`** — persist-while-alive + freshness staleness (two-clocks). *(roster feels alive; demo value)*
+- **Maybe** (only if trivial): `disabled`/`archived` account states (one column + two CLI verbs).
+- Protocol bump to **`musterd/0.2`** — small: single-active behavior + activity fields. Envelope + 7 acts unchanged.
 
-## Milestone 1 — protocol + schema foundation
-- `@musterd/protocol`: bump version; add `Role`, `Seat`, `Grant`, `Request`, `AccountStatus`, `Activity`/`Availability` types; new `ClaimFrame`/`OccupiedFrame`/`RefusedFrame`/`PendingFrame` (replace hello/welcome); `claim_conflict`/`expired_grant` codes. Envelope/acts intact.
-- `@musterd/server` schema **v2**: `members`→`seats` (+`role`,`account_status`; drop `token_hash`); add `roles`, `grants`, `requests`, `audit`; team `policy` (+`agent_key_hash`), per-human `credential_hash`; seat `occupied_by_presence` + `grace_until`.
-- Tests: migration; frame parsing; version pin. **ADR 007 — v0.2 seats/grants/governance (breaking).**
+Out of scope (v0.3, designed on paper): seats/roles, agent key + grants, approval/request lane, capabilities + visibility projection, audit log, notification tiers + `urgent`, human observers, admin governance commands.
 
-## Milestone 2 — credentials, grants, claim, single-active, grace (security core)
-- `store/credentials.ts`: agent key (team) + human credential (per human seat); hash/verify; rotate.
-- `store/grants.ts`: issue (scoped, expiring, single-use?), verify, revoke; **every op audited**.
-- `store/seats.ts`: account-status transitions (admin-gated); `provisioned→active` on first occupy.
-- `store/occupancy.ts`: single-active occupy/release with grace; reaper frees expired grace → emits offline.
-- `store/audit.ts`: append-only audit records `{ts, actor, action, target, result}`.
-- `protocol/route.ts`: sending requires holding the occupancy of `from`.
-- `transport/ws.ts`: `hello`→`claim`; emit `occupied`/`refused`/`pending`; honor grant + grace.
-- Tests: grant-gated occupy; missing grant → `pending`; expired/revoked grant refused; second claim → `claim_conflict`; reconnect within grace keeps the seat; banned/disabled refused; audit rows written. **Least-privilege tests: agent key cannot govern; grant scope enforced.**
+## Milestone 1 — protocol + single-active server core
+- `@musterd/protocol`: bump `PROTOCOL_VERSION` → `musterd/0.2`; add `activity` fields to the member/roster types (`offline|online|working` + `state` + `last_status_at`); keep `Hello`/`Welcome` and per-member tokens. ADR 007 already records the scope; add a short **ADR 008 — single-active + grace** for the behavior change.
+- `@musterd/server`: enforce **single-active** in `ws.ts` hello — a second live presence for an already-occupied member is **refused** (new `member_busy` error) unless it's a reclaim within the **45s grace** of the prior holder's disconnect. Track `held_until` on release; reaper frees expired holds.
+- Tests: 2nd hello for a live member → refused; disconnect then re-hello within grace → re-occupies; after grace → frees; existing 18 server tests stay green (adjust any that opened two presences for one member).
 
-## Milestone 3 — governance lane (own surface)
-- `store/requests.ts`: create/decide claim & teammate requests; route to admins.
-- `transport/http.ts`: roles, seats, seat status, grants (issue/revoke), agent-key rotate, team policy (`allow_pre_issued_grants`), requests list/decide, audit read. All admin-gated.
-- Local-admin fast path: an admin-co-present session's no-grant claim can be approved inline.
-- Tests: request lifecycle (pending→approved issues grant→occupy; deny; expire); policy toggles pre-issued grants; admin-only enforcement on every governance route; audit coverage.
+## Milestone 2 — `working` activity + roster/CLI
+- Server: record `working` from the latest `status_update.meta.state`; roster resolves activity with the two-clocks rule (heartbeat = alive; last `status_update` = fresh; stale after 5m → `working: x · Nm`, never idle; clears on release/grace).
+- CLI `render/rows.ts`: status table shows `working: refactoring auth · 18m` / `online` / `offline`; (optional) `disabled`/`archived` badges.
+- Tests: activity resolution + staleness rendering; snapshot updates; persists across a long quiet period while heartbeating.
 
-## Milestone 3b — capabilities & need-to-know visibility
-- Add the fixed capability set to roles (defaults) + per-seat **narrowing** (never widen); store `charter` on role/seat.
-- Enforce capabilities on every in-band op (message/notify/observe/govern); **declare** external scopes (repo/dir/tool) without claiming to enforce them.
-- **Viewer-scoped projection**: roster/info/audit endpoints filter by the caller's `visibility_level` (admins all; non-admins see teammate handles/presence/their own acts only).
-- `claim`/`occupied` returns the seat's `charter`; `memory` field present but always `null` (reserved seam).
-- Tests: per-seat narrowing can't widen; non-admin projection hides credentials/grants/audit/policy/other charters; capability enforcement (e.g. `can_message` scope) rejects out-of-scope sends.
+## Milestone 3 — explicit activation in the MCP adapter (+ the dead-air mitigation)
+- `@musterd/mcp`: **dormant by default** — `bind()` connects/authenticates but does **not** claim presence; tools are registered. A `team_join` tool registers presence (the explicit activation); `team_leave` releases. `MUSTERD_AUTOJOIN=1` restores one-keystroke auto-join for those who want it.
+- **Dead-air mitigation (ADR 007, break 4):** the `team_join` result and tool descriptions strongly instruct the agent to call `team_inbox_check` at task boundaries; document a harness-hook pattern (e.g. Claude Code hook injecting an inbox-check reminder) in `docs/`. This is the real UX cliff — design the copy/hooks deliberately, test that a joined agent that checks its inbox sees teammate messages.
+- `musterd init`: keep auto-config of the harness; the "waiting to join" step waits for an explicit `team_join` (or auto-join if the user opted in). Update activation copy.
+- Tests (Scenario B/C updated): two agents each `team_join` as distinct members; a 3rd session as a taken member → `member_busy`; reconnect within grace keeps presence; dormant agent exposes tools without being present until `team_join`.
 
-## Milestone 4 — state model, roster, notifications
-- Resolve three axes into the roster payload (`account`, `availability`, `activity`) + `watching` list.
-- Activity: `working` from latest `status_update.meta.state`, **persist-while-alive + freshness timestamp** (stale after 5m → `working: x · Nm`, never idle), clear on release; `talking` optional.
-- **Human availability**: implicit presence; explicit `away`/`dnd`/`away_until` via `POST /availability`; `inbox` holds + digests while away/dnd.
-- **Notification tiers** (loud directed/governance · quiet ambient · held when away) + **breakthrough**: `away` passes only `urgent`; `dnd` passes directed + `urgent`.
-- **`urgent`** = `meta.urgent` + required `meta.urgent_reason`, gated by `can_flag_urgent`, audited; recipient `wasnt_urgent` feedback recorded.
-- CLI `render/rows.ts`: status table shows resolved badges (`created · waiting to join`, `off until 9am`, `working: x · 18m`, `observing`, account states); `inbox --watch` marks loud vs quiet and surfaces approval cards.
-- Tests: display-resolution precedence; staleness rendering; away holds/urgent-breakthrough; `urgent` rejected without capability; provisioned/never-occupied; snapshots.
+## Milestone 4 — docs promotion + flagship + publish-ready
+- Promote the v0.2 deltas into `SPEC.md` (`musterd/0.2`): single-active + grace, activity/`working`, explicit-activation note. Update `03-server.md`, `04-cli.md`, `05-mcp.md`.
+- Update `examples/flagship-demo.mjs` + `tests/scenarios/flagship.test.ts` to the explicit-join model (agents `team_join`; show a refused duplicate once; show `working` status in the watch pane).
+- README quickstart reflects explicit activation + opt-in auto-join; `.gitignore` secret-bearing harness configs; `init` warns when writing a secret to a repo file.
 
-## Milestone 5 — CLI to seats + grants + governance
-- `team create` → store + print **agent key** + your **human credential**; set config; creator = admin.
-- `team add` (admin) → provision a `provisioned` seat (role, name?); no token printed.
-- `join` → claim: humans claim their named seat (human credential); `musterd watch`/`inbox --watch` with no claim = **observer** (role-gated).
-- Governance: `musterd role add` (+capabilities/charter), `musterd seat add|disable|enable|ban|archive`, `musterd seat caps <id>` (narrow), `musterd grant issue|revoke` (lifetime: once|ttl <h>|standing), `musterd agent-key rotate`, `musterd policy set allow-pre-issued-grants <bool>`, `musterd requests [approve|deny <id>]`, `musterd availability <available|away|dnd|until ...>`, `musterd audit`.
-- Admin-co-present approval prompt (one-keystroke **approval card** w/ surface + seat + fingerprint + batching) for incoming requests during `inbox --watch`; approval picks grant lifetime (once / N-hours / until-revoke).
-- Config: `{ server, current, agentKey, grants?: {...}, identities: { <team>: { seat, humanCredential, role, admin } } }`.
-- Tests: Scenario A on credentials; governance happy-paths; observer read-only; refusal copy.
+## Deferred to v0.3 (designed, ready when shared teams arrive)
 
-## Milestone 6 — MCP adapter to claim + request
-- Env: `MUSTERD_TOKEN` → `MUSTERD_AGENT_KEY` + `MUSTERD_CLAIM` (seat or role) + optional pre-issued `MUSTERD_GRANT` + optional `MUSTERD_AUTOCLAIM`.
-- `bind.ts`: connect with the agent key; **dormant by default** (tools available, no claim) unless `MUSTERD_AUTOCLAIM`. `team_join` tool claims (uses `MUSTERD_GRANT` if present, else triggers a `pending` request); `team_leave` releases.
-- Refusal/pending surfaces as clear tool results; the **"ask an admin to add a teammate"** path emits a `teammate` request when there's no free seat — and, if an admin human is co-present, asks them directly.
-- Tests (Scenario B/C updated): two agents occupy two distinct seats; a 3rd claim on a taken seat → `claim_conflict`; no-grant claim → `pending` then admin-approved occupy; reconnect-within-grace keeps the seat.
-
-## Milestone 7 — onboarding (`musterd init`)
-- Optional "create teammates" loop → provision `provisioned` agent seats (role + optional name; zero/one/many).
-- Configure harness with the **agent key** (+ optional default `MUSTERD_CLAIM`).
-- Admin opt-in prompts: *"Allow pre-issued grants for this team?"* (default No) → if yes, *"Pre-grant <seat> to this harness?"* (writes `MUSTERD_GRANT`).
-- "Waiting to join" waits for **occupy** (post-approval under the default flow).
-- Update `onboard/harnesses/*` env writing + `printManual`; tests for env shape.
-
-## Milestone 8 — docs promotion + flagship + security
-- Promote `spec-v0.2-draft.md` → `SPEC.md` (`musterd/0.2`); update `01`–`05` architecture docs; fold `membership-model.md`; finalize ADR 007 (+ any sub-ADRs for grants/audit).
-- Land `security.md` as the normative security doc; ensure audit + least-privilege are covered by tests; add `.gitignore` for any secret-bearing config (`.cursor/mcp.json`, pre-issued grants) and an `init`-time secret warning.
-- Update `examples/flagship-demo.mjs` + `tests/scenarios/flagship.test.ts`: agents occupy distinct seats; show a refused 3rd claim and a no-grant request→approve once.
-- README quickstart + Principle 7 reflect agent key + grant + explicit activation.
+The full governance system lives in `membership-model.md` + `spec-v0.3-draft.md` + `security.md`: seats/roles, agent key + admin-issued grants (once/ttl/standing) + approval lane, capabilities + per-seat narrowing + need-to-know visibility, audit log, notification tiers + `urgent`, human observers. It activates when the daemon stops being localhost-only. Pre-answered landmines (see ADR 007): grant expiry gates new claims but never evicts live ones; fingerprints are recognition not security; `urgent` strike-tracking needs ≥2 humans.
 
 ## Risk / sequencing
-- **M1–M3 are the load-bearing breaking + security work**; land them behind ADR 007 with tests in the same milestones. Everything after adapts surfaces.
-- Envelope/act stability means messaging tests barely move; churn is in claim/auth/grants/governance/roster.
-- Cover **single-active + grace** and **grant scope/expiry/revoke + audit** with explicit tests early — they are the correctness + security core and the whole reason for the change.
+- **M1 (single-active + grace) is the load-bearing correctness fix** — cover it with explicit tests first; it's the whole reason for v0.2.
+- **M3's dead-air problem is the real risk**, and it's a UX/prompt-engineering problem at the MCP boundary, not a protocol one. Budget time to get the agent-facing copy + harness-hook pattern right; it's what makes a joined agent an actual teammate vs a silent one.
+- Envelope/acts unchanged → messaging tests barely move; churn is in presence/activation/roster.

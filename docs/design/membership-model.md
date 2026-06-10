@@ -1,10 +1,10 @@
-# Membership, Identity, Seats & Presence — design proposal
+# Membership, Identity, Seats & Presence — design proposal (v0.3 target)
 
-> **Status: DRAFT PROPOSAL — not yet implemented.** This describes a target model agreed during design, not current behavior. Current (v0.1) behavior is: one per-member token baked into the harness config, unconditional auto-join, N sessions = N presences of one member. When accepted this becomes SPEC v0.2 + ADRs and the code follows. Until then, do not implement against it.
+> **Status: DRAFT — deferred to v0.3 (shared teams), per ADR 007.** This is the full **shared-teams governance** model (seats, agent key + grants, capabilities, approval lane, audit). It is **not** what v0.2 builds. The minimal **v0.2** ships only the parts that fix the real localhost bug — explicit activation, single-active + grace, and `working` status, keeping v0.1 per-member tokens — defined in `membership-impl-plan.md` + ADR 007. This v0.3 design activates when the daemon stops being localhost-only and its threat model becomes real. Companion: `spec-v0.3-draft.md`, `security.md`. Do not implement this set against v0.2.
 
 > **Living document.** Found an error or better approach? Record it in `docs/decisions/NNN-<slug>.md`, make the smallest correct change, update this doc in the same commit.
 
-Companion docs: `spec-v0.2-draft.md` (protocol), `membership-impl-plan.md` (build), `security.md` (threat model). Glossary lives in `brand.md` §5; this proposal **adds** the terms **Role**, **Seat**, **Grant**.
+Companion docs: `spec-v0.3-draft.md` (protocol), `membership-impl-plan.md` (the **v0.2** build), `security.md` (threat model). Glossary lives in `brand.md` §5; this proposal **adds** the terms **Role**, **Seat**, **Grant**.
 
 ## Why
 
