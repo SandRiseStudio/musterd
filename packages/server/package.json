@@ -1,0 +1,31 @@
+{
+  "name": "@musterd/server",
+  "version": "0.0.1",
+  "description": "musterd team server daemon: SQLite store, WS+HTTP API, presence + inbox",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@musterd/protocol": "workspace:*",
+    "better-sqlite3": "^11.7.0",
+    "ulid": "^2.3.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/ws": "^8.5.13"
+  }
+}

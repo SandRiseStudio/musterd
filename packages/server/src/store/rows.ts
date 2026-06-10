@@ -1,0 +1,66 @@
+import type { Member } from '@musterd/protocol';
+
+/** Raw DB row shapes (snake_case, SQLite types). */
+export interface TeamRow {
+  id: string;
+  slug: string;
+  display: string | null;
+  default_lifecycle: string;
+  archived_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface MemberRow {
+  id: string;
+  team_id: string;
+  name: string;
+  kind: 'agent' | 'human';
+  role: string;
+  lifecycle: 'forever' | 'session' | 'until';
+  lifecycle_until: number | null;
+  availability: string | null;
+  token_hash: string | null;
+  left_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PresenceRow {
+  id: string;
+  member_id: string;
+  surface: string;
+  status: 'online' | 'away' | 'offline';
+  conn_id: string | null;
+  last_seen_at: number;
+  created_at: number;
+}
+
+export interface MessageRow {
+  id: string;
+  team_id: string;
+  from_member: string;
+  to_kind: 'member' | 'team' | 'broadcast';
+  to_member: string | null;
+  act: string;
+  body: string;
+  thread_id: string | null;
+  meta: string | null;
+  ts: number;
+  created_at: number;
+}
+
+/** Map a member row (+ its team slug) to the public protocol Member shape (no token_hash). */
+export function toMember(row: MemberRow, teamSlug: string): Member {
+  return {
+    id: row.id,
+    team: teamSlug,
+    name: row.name,
+    kind: row.kind,
+    role: row.role,
+    lifecycle: row.lifecycle,
+    lifecycle_until: row.lifecycle_until,
+    availability: row.availability ? (JSON.parse(row.availability) as Record<string, unknown>) : null,
+    created_at: row.created_at,
+  };
+}
