@@ -1,6 +1,6 @@
 # musterd protocol — SPEC v0.2 (DRAFT)
 
-> **Status: DRAFT, not implemented.** This is the normative protocol draft for the membership/identity model in `membership-model.md`. The **live** spec is `SPEC.md` (v0.1). When v0.2 is accepted and implemented, this is promoted into `SPEC.md`, the version bumps to `musterd/0.2`, and ADRs record the breaking changes. Until then `SPEC.md`/code remain v0.1.
+> **Status: DRAFT, not implemented.** Normative protocol draft for the seat/grant membership model in `membership-model.md`. The **live** spec is `SPEC.md` (v0.1). When accepted, this is promoted into `SPEC.md`, the version bumps to `musterd/0.2`, and ADRs record the breaking changes. Until then `SPEC.md`/code remain v0.1. See `security.md` for the credential/grant threat model.
 
 Version under design: **`musterd/0.2`**. RFC 2119 keywords.
 
@@ -8,102 +8,111 @@ Version under design: **`musterd/0.2`**. RFC 2119 keywords.
 
 | Area | v0.1 (live) | v0.2 (draft) |
 |---|---|---|
-| Auth unit | per-member token (`mskd_…`) = one member | **team credentials** (agent key + human credential); identity chosen by **claim** |
-| Join | `hello {team, as, token}` → presence as that member | `join {team, key, claim}` → **claim** a named member or **observe** |
-| Concurrency | N sessions = N presences of one member; fan-out | **single-active**: one live claim per member; 2nd is **refused** |
-| Member state | `presence.status` (online/away/offline) + `left_at` | **three axes**: account status · availability · activity |
+| Identity | flat Member (name, kind) | **Seat** in a **Role** (Member = named Seat) |
+| Auth unit | per-member token = one member | **agent key** (harness) **+ admin-issued Grant** (seat occupancy) |
+| Join | `hello {team, as, token}` → presence | `claim {seat\|role}` → occupy, or → **request** to an admin |
+| Authorization | token == member | **grant required**; default **live admin approval**; team opt-in pre-issued |
+| Concurrency | N sessions = N presences of one member | **single-active** per seat; 2nd → `claim_conflict` |
+| State | `presence.status` + `left_at` | **three axes**: account · availability · activity (with `working` staleness) |
 | Observers | none | **human-only** read-only watchers |
-| Activation | implicit auto-join on session start | **explicit claim**; opt-in auto-claim |
+| Governance | none | **own lane**: roles, seats, grants, requests, status — all **audited** |
 
-This is a MAJOR-of-MINOR change (new required join shape, new auth) → `musterd/0.2`, gated by ADR.
+MAJOR-of-MINOR change (new join/auth) → `musterd/0.2`, gated by ADR. Envelope + the 7 acts are **unchanged**; `v` becomes `musterd/0.2`.
 
-## 1. Credentials
+## 1. Roles & Seats
 
-- **Agent join key** — team-scoped secret. Authorizes a session to **claim an agent member** on that team. Stored hashed server-side; carried in a harness config. Not an identity.
-- **Human credential** — a human member's secret. Authorizes acting as that human member and, if the member's role permits, **observing**.
-- **Admin** — a capability on a human member (the creator by default). Authorizes governance: create/disable/ban/archive members, mint/rotate the agent key, grant observer-permitting roles.
+- A **Role** is admin-defined (`backend`, `frontend`, `reviewer`, `lead`…). Its capacity = its seats.
+- A **Seat** is the identity record: `{ id, team, role, name?, kind: agent|human, account_status, occupied_by? , availability?, activity? }`. `name` is optional for agent seats (generated handle `<role>-<n>` if absent), conventionally present for humans.
+- A seat has **at most one** live occupant (single-active). Humans claim their own named seat; agent seats may be claimed by name or by an open seat in a role.
 
-Servers MUST store only hashes of credentials. A `banned` member's human credential MUST be rejected.
+## 2. Credentials
 
-## 2. Join & claim handshake (WS)
+- **Agent join key** — team-scoped secret; authenticates a harness/session; rotatable; hashed. **Not** an identity and **not** sufficient to occupy a seat.
+- **Grant** — admin-issued authorization to occupy a seat/role. Fields: `{ id, team, scope: seat|role, target, issued_by, expires_at, revoked?, single_use? }`. **Seat/role-scoped, expiring, revocable.** Every issue/use/revoke is audited.
+- **Human credential** — per-human-seat secret; acts as that human; observes if role permits.
+- **Admin** — capability on a human seat (creator default).
 
-Replaces v0.1 `hello`. State machine: `connecting → join → (granted|refused) → [subscribed] → live`.
+Servers MUST store only hashes of keys/credentials/grants. A `banned` seat's credential MUST be rejected.
+
+## 3. Claim handshake (WS) — replaces v0.1 `hello`
+
+State machine: `connecting → authenticated(key) → claim → (occupied | refused | pending) → [subscribed] → live`.
 
 ```jsonc
 // client → server
-{ "type":"join", "v":"musterd/0.2", "team":"dawn",
-  "key":"<agent join key | human credential>",
-  "claim": { "kind":"member", "name":"Ada" }      // claim a named member
-          | { "kind":"observe" },                  // human-only, role-gated
+{ "type":"claim", "v":"musterd/0.2", "team":"dawn",
+  "key":"<agent key | human credential>",
+  "target": { "seat":"Ada" } | { "role":"backend" } | { "observe": true },
+  "grant":"<grant token>"?,            // omitted → triggers a request (default path)
   "surface":"claude-code" }
 
-// server → client (success)
-{ "type":"granted", "claim":"member"|"observer",
-  "member": <Member> | null, "observer_handle": "watcher-3" | null,
-  "presence_id":"01J…", "server_time": 1733760000000 }
-
-// server → client (failure)
-{ "type":"refused", "code":"claim_conflict"|"forbidden"|"not_found"|"disabled"|"banned",
-  "message":"…", "claimable": ["…names…"], "hint":"musterd team add <name> --kind agent" }
+// server → client
+{ "type":"occupied", "seat": <Seat>, "presence_id":"01J…", "server_time": <ms> }
+{ "type":"refused", "code":"claim_conflict"|"forbidden"|"not_found"|"disabled"|"banned"|"expired_grant",
+  "message":"…", "claimable":["…"], "hint":"musterd team add <name> --kind agent --role backend" }
+{ "type":"pending", "request_id":"01J…", "message":"asked admins to authorize this claim" }
 ```
 
 Rules:
-- `claim.member` MUST present a valid **agent key** (for agent members) or the matching **human credential** (for human members), AND the member MUST be `active` and **not currently claimed**. Otherwise `refused`.
-- `claim.observe` MUST present a **human credential** whose member role permits observing. Agents MUST NOT observe.
-- A member MAY be claimed by **at most one** live session (single-active). A second claim → `refused {code:"claim_conflict", claimable, hint}`.
-- On grant, the server creates the live attachment (presence) and, for members, marks the member `claimed`.
+- Valid **grant** for the target + seat free → `occupied` (account `provisioned`→`active`).
+- Valid grant + seat occupied → `refused {claim_conflict, claimable, hint}`.
+- **No grant** → `pending`: the server opens a **claim request** (§5) routed to admins. On approval the server emits `occupied` (or `refused` on deny/timeout). If an admin is co-present in the same session, approval MAY be immediate.
+- `observe: true` requires a **human credential** whose seat role permits observing; agents MUST be refused (`forbidden`).
+- A seat MUST have at most one live occupant.
 
-## 3. Release & grace
+## 4. Release & grace
 
-- On clean disconnect or `leave`, the claim enters a **grace window = the presence timeout (45s)**. Within the window a re-`join` with the same claim reclaims the seat (no `refused`). After it, the member returns to `claimable` and a team `presence` offline event fires.
-- During grace the member displays as `online` (held), not `offline`, so a harness restart is invisible to teammates.
+- On clean disconnect or `leave`, the occupancy is held for a **grace window = the presence timeout (45s)**. A re-`claim` of the same seat within the window re-occupies without a new grant or request. After it, the seat returns to `claimable` and a team `presence` offline event fires. During grace the seat shows `online` (held).
 
-## 4. Member account status (Axis 1)
+## 5. Governance lane (own surface, audited)
 
-`provisioned` → `active` → (`disabled` ⇄ `active`) → `banned` ; any → `archived`.
+Governance is **not** carried by the collaboration `Envelope`/Acts. It is a distinct set of operations and a **request** object.
 
-- `provisioned`: created, never successfully claimed.
-- `active`: claimable / claimed.
-- `disabled`: admin-paused; cannot be claimed; credential still valid for un-disable by admin only.
-- `banned`: cannot be claimed; human credential rejected.
-- `archived`: retired; hidden from default roster; not claimable.
+**Request** `{ id, team, kind: "claim"|"teammate", from_session, target?, status: pending|approved|denied|expired, decided_by?, ts }`. Created on a no-grant claim (kind `claim`) or an explicit "I need a teammate" (kind `teammate`). Routed to admins; surfaced via `GET /teams/:slug/requests` and a notification. An admin **approves** (issues a grant; for `teammate`, creates a seat then grants), **denies**, or it **expires**.
 
-Transitions are **admin-only** and delivered as governance operations (HTTP, §7). They are roster governance, **not** work approval.
+Governance operations (admin-only; §7 HTTP): create/rename/disable/ban/archive seats; create/rename roles; issue/revoke grants; rotate the agent key; set team policy (e.g. `allow_pre_issued_grants`); decide requests.
 
-## 5. Availability (Axis 2) & Activity (Axis 3)
+Every governance operation and every grant issue/use/revoke writes an **audit record** (`security.md`): `{ ts, actor, action, target, result }`.
 
-- **Availability** (`available | away_until(ts) | off_hours`) derives from the member's `availability` schedule. v0.2 still **stores** it; enforcement remains roadmap, but the displayed state MUST reflect a manually-set `away_until`.
-- **Activity** (`offline | online | working | talking`) applies only while claimed:
-  - `offline` = unclaimed.
-  - `online` = claimed, idle.
-  - `working` carries `meta.state` from the member's latest `status_update` (self-reported only; servers MUST NOT infer).
-  - `talking` MAY be derived from an active thread with another member (display sugar; optional).
+## 6. State model (three axes)
 
-**Display resolution (first match wins):** archived/banned/disabled → provisioned(`created · waiting to join`) → away(`off until <ts>`) → unclaimed(`offline`) → claimed(`working: x` / `talking: y` / `online`).
+**Account** (Axis 1): `provisioned → active → (disabled ⇄ active) → banned ; any → archived`. Non-active seats are not claimable.
 
-## 6. Observers (human-only)
+**Availability** (Axis 2): `available | away_until(ts) | off_hours` — from the `availability` field; v0.2 reflects a manual `away_until`, full schedule enforcement is roadmap.
 
-- A granted observer receives the live team stream and appears under a roster **`watching`** list with `observer_handle`. It is **not addressable** (no envelope `to` may target it) and MUST NOT send acts. There is **no** promotion from observer to member.
+**Activity** (Axis 3, only while occupied): `offline (unoccupied) | online (idle) | working | talking`.
+- `working` carries `meta.state` from the seat's latest `status_update`; **self-reported, never inferred**.
+- `working` **persists while occupied + alive**; after 5 min without a fresh `status_update` it is rendered **stale** (`working: x · Nm`), never reverting to `online`; it clears on release/timeout.
+- Two clocks: heartbeat = alive; last `status_update` = fresh.
 
-## 7. HTTP deltas (governance + bootstrap)
+**Display resolution (first match wins):** archived/banned/disabled → `provisioned`(`created · waiting to join`) → away(`off until <ts>`) → unoccupied(`offline`) → occupied(`working: x · Nm` / `talking: y` / `online`).
+
+## 7. HTTP deltas
 
 | Method | Path | Notes |
 |---|---|---|
-| `POST` | `/teams` | now returns `{ team, member(creator+admin), human_credential, agent_key }` |
-| `POST` | `/teams/:slug/members` | admin-only; creates a member in `provisioned`; returns its claim name (no per-member token) |
-| `POST` | `/teams/:slug/members/:name/status` | admin-only; `{ to: "disabled"|"active"|"banned"|"archived" }` |
-| `POST` | `/teams/:slug/agent-key/rotate` | admin-only; rotates the agent join key |
-| `GET`  | `/teams/:slug/members` | roster includes account status, availability, activity, and the `watching` list |
-| `POST` | `/teams/:slug/claim` | HTTP claim for stateless agents (mirror of WS `join` claim) |
+| `POST` | `/teams` | returns `{ team, seat(creator+admin human), human_credential, agent_key, policy }` |
+| `POST` | `/teams/:slug/roles` | admin; create/rename a role |
+| `POST` | `/teams/:slug/seats` | admin; provision a seat (`role`, `name?`, `kind`) in `provisioned`; returns the seat (no token) |
+| `POST` | `/teams/:slug/seats/:id/status` | admin; `{ to: active\|disabled\|banned\|archived }` |
+| `POST` | `/teams/:slug/grants` | admin; issue a grant `{ scope, target, expires_at, single_use? }` → grant token |
+| `DELETE` | `/teams/:slug/grants/:id` | admin; revoke |
+| `POST` | `/teams/:slug/agent-key/rotate` | admin |
+| `POST` | `/teams/:slug/policy` | admin; e.g. `{ allow_pre_issued_grants: bool }` |
+| `GET`  | `/teams/:slug/requests` | admin; pending claim/teammate requests |
+| `POST` | `/teams/:slug/requests/:id/decide` | admin; `{ approve: bool, grant?, create_seat? }` |
+| `POST` | `/teams/:slug/claim` | stateless claim mirror of WS `claim` |
+| `GET`  | `/teams/:slug/members` | roster: seats with role, account/availability/activity + `watching` list |
+| `GET`  | `/teams/:slug/audit` | admin; audit records |
 
-Envelope (§2 of v0.1) and the 7 acts are **unchanged** in v0.2; `v` becomes `musterd/0.2`. Sending still requires the sender to hold the claim on `from`.
+Sending an Envelope still requires the sender to **hold the occupancy** of `from` (replaces token==member). `v` → `musterd/0.2`.
 
-## 8. New/changed error codes
+## 8. Error / refusal codes
 
-Add `claim_conflict` (member already claimed; HTTP 409). Reuse `forbidden` (bad key / not allowed to observe), `not_found` (no such member), and introduce surfacing of account states via `refused.code` (`disabled`/`banned`). `version_mismatch` covers a v0.1 client hitting a v0.2 server.
+Add `claim_conflict` (seat occupied; 409), `expired_grant` (410/403). Reuse `forbidden` (bad key / not allowed to observe / not admin), `not_found` (no such seat/role), and surface account states via `refused.code` (`disabled`/`banned`). `version_mismatch` covers a v0.1 client hitting a v0.2 server.
 
 ## 9. Migration
 
-- `members.token_hash` → removed; add `account_status`; add team-level `agent_key_hash` and per-human `credential_hash`.
-- A migration (schema v2) creates the new columns/tables; since musterd is pre-1.0 and local, a one-shot reset is acceptable for existing local DBs (documented), or a best-effort migration that mints an agent key and marks existing members `active`.
-- `team add` output, `init`, the MCP env (`MUSTERD_TOKEN` → `MUSTERD_AGENT_KEY` + `MUSTERD_CLAIM`), and the CLI `join` flow all change accordingly.
+- `members` → `seats` (+ `role`, `account_status`; drop `token_hash`). Add `roles`, `grants`, `requests`, `audit`, and team `policy`/`agent_key_hash`, per-human `credential_hash`.
+- Schema v2 migration; since musterd is pre-1.0 and local, a one-shot reset of existing local DBs is acceptable (documented), or a best-effort migration that mints an agent key, creates one role per distinct `members.role`, turns members into `active` seats, and marks the creator admin.
+- Surface changes: `team add` provisions a seat (no token); MCP env `MUSTERD_TOKEN` → `MUSTERD_AGENT_KEY` + `MUSTERD_CLAIM` (+ optional pre-issued `MUSTERD_GRANT`); `init` and CLI `join` move to the claim/request flow.

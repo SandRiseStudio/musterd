@@ -1,118 +1,112 @@
-# Membership, Identity & Presence — design proposal
+# Membership, Identity, Seats & Presence — design proposal
 
-> **Status: DRAFT PROPOSAL — not yet implemented.** This describes a target model agreed during design, not current behavior. Current behavior is: one member token baked into the harness config, unconditional auto-join, N sessions = N presences of one member. When this is accepted it becomes SPEC v0.2 + ADRs and the code follows. Until then, do not implement against it.
+> **Status: DRAFT PROPOSAL — not yet implemented.** This describes a target model agreed during design, not current behavior. Current (v0.1) behavior is: one per-member token baked into the harness config, unconditional auto-join, N sessions = N presences of one member. When accepted this becomes SPEC v0.2 + ADRs and the code follows. Until then, do not implement against it.
 
-> **Living document.** If you find an error, contradiction, or better approach: record it in `docs/decisions/NNN-<slug>.md`, make the smallest correct change, and update this doc in the same commit.
+> **Living document.** Found an error or better approach? Record it in `docs/decisions/NNN-<slug>.md`, make the smallest correct change, update this doc in the same commit.
+
+Companion docs: `spec-v0.2-draft.md` (protocol), `membership-impl-plan.md` (build), `security.md` (threat model). Glossary lives in `brand.md` §5; this proposal **adds** the terms **Role**, **Seat**, **Grant**.
 
 ## Why
 
-The v0.1 adapter auto-joins every harness session as a fixed member. Opening 3 Claude Code sessions in one folder produces **3 presences of one identity**, and a team message **fans out to all 3, each able to reply as that member** — three minds wearing one name, editing the same files. That is a coordination-failure generator (the exact thing Principle 5 / MAST warns against) created by accident, and it makes "an agent is an identity, not a session" (Principle 2) incoherent under concurrency.
+The v0.1 adapter auto-joins every harness session as a fixed member. Opening 3 Claude Code sessions in one folder produces **3 presences of one identity**, and a team message **fans out to all 3, each able to reply as that member** — three minds wearing one name, editing the same files. That is a coordination-failure generator (the exact thing Principle 5 / MAST warns against) created by accident, and it makes "an agent is an identity, not a session" (Principle 2) incoherent under concurrency. We also decided **security is a first-class principle** (Principle 7), which reshapes how identities are claimed.
 
 ## Core decisions
 
-1. **Members are explicit, named, persistent, single-active.** A member is embodied by **at most one live session at a time**. There are **no auto-spawned session-members**.
-2. **Activation is explicit.** Configuring a harness makes the musterd tools *available*; it does not make a session join. A session joins by **claiming** an identity.
-3. **Identity = team-access credential + claim-at-join.** The harness config carries a **team join key**, not a member token. On join, the session **claims** a specific named member (or, for humans, **observes**).
-4. **Collision → refuse.** Claiming an already-claimed member is refused, with a helpful message: claim a different available member, or **ask an admin to create a new teammate**.
-5. **Observer = humans only**, role-gated. Read-only, appears in a "watching" list, never addressable, cannot act. No promotion from observer to member.
-6. **Admins govern the roster** (create/disable/ban/archive members). Governance ≠ work-approval (see Principle 1 note).
+1. **Identity = a Seat in a Role.** A **Role** (backend, frontend, reviewer…) groups **Seats**. A **Seat** is the durable identity — what v0.1 called a Member — now with a Role, an optional friendly name (`Ada`) or generated handle (`backend-1`), an account status, and **at most one live occupant** (single-active + grace). History accrues to the seat.
+2. **Seats are explicit and persistent. No auto-spawned session-seats.** Real parallelism = more seats (admins provision them), never anonymous clones of one identity.
+3. **Activation is explicit.** Configuring a harness makes the musterd tools *available*; it does not occupy a seat. A session occupies a seat by **claiming** it.
+4. **Claiming requires two things (security-paramount): an agent key + an admin-issued grant.** The agent key authenticates the *harness*; the **Grant** authorizes occupying a *specific seat or role*. **Default: live admin approval per claim.** A team MAY be configured by an admin to allow **pre-issued grants** (opt-in convenience).
+5. **No grant → a governance request.** The session asks an admin (local fast-path if an admin human is co-present; otherwise signal an available admin) who **grants an existing seat or creates a new seat + grants it**, or denies.
+6. **Collision → refuse.** Claiming an occupied seat is refused (`claim_conflict`) with the free seats + a hint.
+7. **Observer = humans only**, role-gated. Read-only, in a roster `watching` list, never addressable, cannot act. Not a seat; no promotion to a seat.
+8. **Governance is its own lane.** Member/seat lifecycle, grants, and requests are governance — distinct from collaboration Acts, distinct surfaces, fully audited. Governance ≠ work approval (Principle 1).
 
-## Identities & credentials (the auth change)
+## Terminology (additions)
 
-- **Team join key** — a team-scoped secret. Baked into a harness config. Grants the ability to *connect and claim an agent identity* on that team. It is **not** an identity by itself.
-- **Member** — a named roster identity with an account status (below). A member is **claimable** (active + nobody holding it) or **claimed** (a live session holds it).
-- **Human credential** — a human's own identity secret (from creating/joining the team). Lets them act as their member, and — if their role permits — **observe**.
-- **Admin** — a human member with the governance capability. The team creator is admin by default.
+- **Role** — a named function on a team, defined by admins; groups seats; its capacity = how many seats it has.
+- **Seat** — the unit of identity and the thing you claim; belongs to one Role; single live occupant. *Seat* and *Member* are the same record from two angles: **Seat** when talking about claiming/capacity, **Member** when talking about participation.
+- **Grant** — an admin-issued, **seat/role-scoped, expiring, revocable, audited** authorization to occupy a seat.
 
-> Migration from v0.1: per-member tokens (`members.token_hash`, the `mskd_…` strings) are replaced by (a) a team join key for agent claims and (b) human credentials. `team add` prints the team join key + the member name to claim, not a per-member token.
+Humans are seats too (a named seat in a role like `lead`), but a human claims *their own* named seat with a human credential; they are not interchangeable within a role the way agent seats are.
 
-### Claim-at-join handshake (replaces today's hello→token)
+## Credentials (the auth model)
+
+- **Agent join key** — team-scoped secret; authenticates a *harness/session* ("an authorized harness on this team"), **not** an identity. Hashed server-side, rotatable, in the harness config.
+- **Grant** — see above. The second factor for occupying a seat. Without a valid grant, a claim becomes a request (decision 5).
+- **Human credential** — a human seat's secret; acts as that human, and — if the seat's role permits — observes.
+- **Admin** — a capability on a human seat (creator by default): governs roles/seats, issues/revokes grants, configures the team (incl. enabling pre-issued grants), approves requests.
+
+> Migration from v0.1: per-member tokens (`mskd_…`) are replaced by team-level **agent key** + per-claim **grants** + per-human **credentials**. `team add` provisions a seat; it does **not** print a per-member token.
+
+## Claim flow (the heart)
 
 ```
-session → join { team, key, claim: { kind: "member", name: "Ada" } | { kind: "observe" }, surface }
-server  → granted { member | observer_handle, presence_id }     # success
-        | refused { reason, claimable: ["…"], hint }            # member taken / not allowed
+session --agent key--> connect (authenticated harness, no identity yet)
+        --claim {seat:"Ada" | role:"backend"}-->
+            has valid grant?  ── yes ──> seat free? ── yes ──> OCCUPY (account→active)
+                                                   └─ no  ──> REFUSE claim_conflict {claimable, hint}
+                              ── no  ──> REQUEST → admins
+                                         admin co-present & is admin? → approve locally → grant → OCCUPY
+                                         else → signal available admin → (grant existing | create+grant | deny)
 ```
 
-- `claim.member` requires the team key (agents) and the member be `active` + unclaimed.
-- `claim.observe` requires a **human credential with an observer-permitting role**.
-- Releasing the claim (disconnect / explicit leave) returns the member to `claimable`.
+- **Default** is the no-grant path → live admin approval. Secure by default; nothing occupies a seat without an admin authorizing it (once).
+- **Pre-issued grants** (team opt-in): an admin bakes a seat-scoped grant into a harness config at `init`; that harness occupies its seat without live approval. The tradeoff is explicit and admin-chosen, per team.
+- Grants are **seat/role-scoped, expiring, revocable**, and every issue/use/revoke is **audited** (`security.md`).
 
-v1 can bake a **default claim** into the config (e.g. `MUSTERD_CLAIM=Ada`) so the magical "it joined!" still works; reclaiming as someone else is just a different claim. Picking interactively from `claimable` is a roadmap nicety.
+## Single-active & grace
 
-## Single-active & refusal UX
+- A seat has **at most one** live occupant. A second claim is **refused** — never a silent second presence.
+- On disconnect/`leave`, the seat is **held for a grace window = the presence timeout (45s)**. A re-claim of the same seat within the window keeps it (harness restart / dropped socket is invisible). After grace, the seat returns to `claimable` and a team offline event fires.
 
-- A member is held by one live session. A second claim is **refused** — never a silent second presence.
-- Refusal message (agent): `"Ada" is active in another session. No other members are free — ask an admin to add a teammate: musterd team add <name> --kind agent`.
-- This is why **no session-members** is coherent: real parallelism = *more named members* (admin creates them), not anonymous clones of one.
+## Refusal & the request lane
+
+- **Occupied seat** → `claim_conflict` with the list of free seats + `musterd team add` hint.
+- **No grant** → a **claim/teammate request** on the governance lane:
+  - If an **admin human is co-present** in this session (the operator is admin) → approve locally, instantly.
+  - Else → **signal an available admin** (governance notification + `musterd requests` surface). The admin **grants an existing seat**, **creates a new seat and grants it**, or **denies**. The session waits with a clear status.
+- Agents never fall back to observing; observation is human-only.
 
 ## Observer mode (humans only)
 
-- A human with an observer-permitting role/credential attaches read-only: receives the live stream, shows up under a roster **"watching"** section with a generated handle, is **not addressable**, and **cannot send acts**.
-- `musterd inbox --watch` for a human who has not claimed a member *is* observer mode.
-- Agents are never observers. A refused agent session gets the refusal message above; it does not fall back to observing.
+A human with an observer-permitting role/credential attaches read-only: receives the live stream, shows under the roster **`watching`** list with a handle, is **not addressable**, **cannot send acts**, and is **never** promoted to a seat. `musterd inbox --watch` for a human who hasn't claimed a seat *is* observer mode.
 
 ## The three-axis state model
 
-The states from design ("created but not used", "offline", "working on x", "offline until 9am", "banned", "archived"…) are three orthogonal axes. The displayed badge is a **precedence resolution** over them.
+The states from design ("created but not used", "working on x", "off until 9am", "banned", "archived"…) are three orthogonal axes; the displayed badge is a precedence resolution.
 
-**Axis 1 — Account status** (durable, admin-controlled):
-`provisioned` (created, never claimed) → `active` → (`disabled` ⇄ active) → `banned` → `archived`.
-A `disabled`/`banned`/`archived` member cannot be claimed; `banned` also rejects its credential.
+**Axis 1 — Account status** (durable, admin-controlled): `provisioned` (seat created, never occupied) → `active` → (`disabled` ⇄ `active`) → `banned` ; any → `archived`. Disabled/banned/archived seats are not claimable; banned also rejects the human credential.
 
-**Axis 2 — Availability** (schedule-driven; the `availability` field, enforced):
-`available` · `away until <ts>` · `off-hours`. (Enforcement is roadmap; the field is reserved today.)
+**Axis 2 — Availability** (schedule-driven; the reserved `availability` field, enforced later): `available` · `away until <ts>` · `off-hours`. v0.2 stores it and reflects a manually-set `away_until`; full schedule **enforcement** stays roadmap.
 
-**Axis 3 — Activity** (live, only while claimed):
-`offline` (unclaimed — nobody embodies it) · `online` (claimed, idle) · `working: <task>` · `talking: <member>`. Observers carry `observing` on a separate watcher record.
+**Axis 3 — Activity** (live, only while a seat is occupied): `offline` (unoccupied) · `online` (occupied, idle) · `working` · `talking`.
+- **`working` is self-reported only** (agent sets `status_update.meta.state`); the server never infers it.
+- **`working` persists while the seat is occupied and the session is alive** — it does **not** time-revert to idle (a long "think" is alive via the adapter's heartbeat, independent of the agent's reasoning loop). After **5 minutes** without a fresh `status_update` it is shown **stale**: `working: refactoring auth · 18m` (dim + elapsed), never `online`. It clears on **claim-release / presence-timeout**.
+- **`talking`** MAY be derived from an active thread (display sugar; optional).
+- Two clocks: **heartbeat = alive**, **last `status_update` = fresh**. (Optional roadmap nicety: a very-stale soft-downgrade after ~30m; skipped in v1.)
 
-**Display resolution (first match wins):**
-
-| If account is… | …show |
-|---|---|
-| `archived` / `banned` / `disabled` | that word (terminal/admin state) |
-| `provisioned` (never claimed) | `created · waiting to join` |
-| else, if availability says away | `off until <ts>` |
-| else, if unclaimed | `offline` |
-| else (claimed) | `working: x` / `talking: y` / `online` |
-
-Schema impact: split today's flat `presence.status` + `members.left_at` into these axes — e.g. `members.account_status`, the existing `availability`, and a claim/activity record on the live attachment.
+**Display resolution (first match wins):** archived/banned/disabled → provisioned (`created · waiting to join`) → away (`off until <ts>`) → unoccupied (`offline`) → occupied (`working: x · Nm` / `talking: y` / `online`).
 
 ## Onboarding (`musterd init`) impact
 
-- Add an **optional** step: **"Create teammates"** — you may create **zero, one, or many** agent members during init (loop: "Add a teammate? name + role → add another? "). Skipping is fine; the team + your human membership are enough to start, and teammates can be created any time later with `team add`.
-- Configure the harness with the **team join key** (+ optional default claim of one of the members you just created).
-- Optional, opt-in, default **No**: *"Auto-claim <name> whenever a session starts here?"* — keeps the one-keystroke magic for those who want it; explicit otherwise.
-- The "waiting to join" spinner (only shown if you configured a harness + a default claim) waits for a **claim**, not a bare presence.
+- **Optional** step **"Create teammates"** — provision **zero, one, or many** agent **seats** (loop: role + optional name → add another?). Skippable; the team + your human seat are enough to start, and seats can be provisioned later with `team add`.
+- Configure the harness with the **agent key** (+ optional default `claim`).
+- The team is **live-approval by default**; `init` offers the admin an explicit opt-in: *"Allow pre-issued grants for this team?"* (default No) and, if yes, *"Pre-grant <seat> to this harness so it joins automatically?"*.
+- The "waiting to join" spinner (shown only if a harness + default claim were set) waits for an **occupy** (account → `active`), which under the default flow happens after the admin approves.
 
 ## Governance & Principle 1
 
-Admins create/disable/ban/archive members and define who may observe. **This is roster governance, not work approval.** Principle 1 ("humans are members, not approvers") is about the *collaboration loop* — humans don't gate every agent action. Admin actions never sit in the path of an agent doing its work; they manage who is on the team. Keep that line bright: no admin step should ever become a per-action approval.
+Admins provision roles/seats, issue/revoke grants, set account status, approve requests, and configure the team. **This is roster governance, not work approval.** Principle 1 ("humans are members, not approvers") is about the *collaboration loop* — humans don't gate every agent action. Admin actions govern *who is on the team and can occupy a seat*; they never sit in the path of an agent doing its work. Keep that line bright: a grant approval is a join-time, occasional, governance act — not a per-action checkpoint.
 
-## v1 vs roadmap
+## v1 (of this model) vs roadmap
 
-**In this revision (v1 of the new model):**
-- Team join key + claim-at-join; single-active; refuse-on-collision.
-- Account status `provisioned/active/disabled/banned/archived` + admin commands.
-- Human observer mode (read-only).
-- Explicit activation, with opt-in auto-claim.
-- Three-axis state with display resolution; `working/talking` activity reported by the agent via existing `status_update`.
+**In v0.2:** seats/roles; agent key + grants (issue/expire/revoke/audit); live-approval default + team opt-in pre-issued grants; the request/approval governance lane (incl. local-admin fast path); single-active + grace; account status + admin commands; human observers; explicit activation; three-axis state with the staleness model; audit log.
 
-**Roadmap (reserved, not built):**
-- Availability **enforcement** (off-hours/away windows actually gating).
-- Interactive "claim from available members" picker.
-- Scoped/rotating credentials, per-member keys, multi-admin policies.
-- An in-protocol "request a teammate" act from a refused agent to admins (today it's an out-of-band `team add`).
+**Roadmap:** availability **enforcement**; "claim any open seat in a role" *picker* UX niceties; very-stale activity soft-downgrade; scoped/rotating per-seat credentials; multi-admin policy & delegation; cross-team federation of seats.
 
 ## Resolved (design review)
 
-1. **Agent claims target a named member.** A session claims a specific member via `MUSTERD_CLAIM`; there is no "claim any free agent" in this revision (reserved for roadmap).
-2. **Two credential kinds from day one:** an **agent join key** (claims agent members) and a **human credential** (acts as a human member and/or observes, role-gated). Observer gating already needs the human side, so the split exists from the start.
-3. **`working: x` is self-reported only** — the agent sets it via `status_update.meta.state`. No server-side inference from activity.
-4. **On disconnect, a claimed member stays held for a short grace window = the presence timeout** (45s). A reconnect within the window keeps the seat; after it, the member returns to `claimable`. This makes a dropped socket / harness restart non-disruptive.
-
-## Still open (later)
-
-- An in-protocol "request a teammate" act from a refused agent to admins (today: out-of-band `team add`).
-- Interactive "claim from available members" picker and any-free claims.
-- Scoped/rotating credentials, per-member keys, multi-admin policy.
+- **A — member = named seat; claim by name or by role** (role-scoped is admin-defined, not a global free-for-all). ✅
+- **B — live admin approval by default; team-level admin opt-in to allow pre-issued grants.** ✅
+- **C — requests/approvals are their own governance lane**, separate from collaboration Acts. ✅
+- **D — `working` persists while alive + freshness timestamp; clears on release; no time-reversion to idle**; 5-minute freshness threshold; very-stale downgrade skipped in v1. ✅
