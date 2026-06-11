@@ -54,6 +54,7 @@ export const cursor: Harness = {
     return {
       target: path,
       activation: 'open this folder in Cursor (or reload the window) so Cursor starts the musterd MCP server',
+      scope: `wired into this folder only (${path}) — another project needs its own \`musterd init\`, and a second agent needs its own folder`,
     };
   },
 };

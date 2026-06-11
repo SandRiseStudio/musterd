@@ -105,13 +105,54 @@ export async function runInit(): Promise<number> {
   config = loadConfig();
   const http = new HttpClient({ server, token: creatorToken });
 
-  // 3) Pick a harness -------------------------------------------------------
+  // 2b) Intent — what are you here to do? -----------------------------------
+  // Lead with intent, not jargon: the three real first-run postures (dynamics §1–2).
+  const intent = guard(
+    await p.select({
+      message: `What would you like to do on ${pc.bold(team)}?`,
+      options: [
+        { value: 'new', label: 'Add a new agent', hint: 'connect a coding agent as a teammate' },
+        { value: 'existing', label: 'Activate an existing member', hint: 'reconnect a member that is not currently live' },
+        { value: 'watch', label: 'Just me — watch the team live', hint: 'be present and supervise' },
+      ],
+    }),
+  );
+
+  if (intent === 'watch') {
+    // Supervising posture: the human is already a member (joined at team create); nothing to mint.
+    p.note(
+      `${pc.yellow('musterd inbox --watch')}   be present and watch the team live\n` +
+        `${pc.yellow('musterd status')}         see who's online`,
+      'You are present',
+    );
+    p.outro(pc.yellow(`Watching ${team}. Run ${pc.bold('musterd inbox --watch')} when ready.`));
+    return 0;
+  }
+
+  if (intent === 'existing') {
+    // v0.2 down-payment is the framing only; reattaching a member needs its token back, which
+    // means the v0.3 seat-claim model (creator-authorized reissue). Surface it honestly, don't fake it.
+    p.note(
+      `Reconnecting an existing member somewhere new needs the seat-claim model — that lands in ${pc.bold('v0.3')}.\n` +
+        `For now, add it as a new agent, or if you still hold its token, set it up manually.`,
+      'Coming in v0.3',
+    );
+    const addNew = guard(
+      await p.confirm({ message: 'Add a new agent instead?', initialValue: true }),
+    );
+    if (!addNew) {
+      p.outro(pc.yellow(`No changes made to ${team}.`));
+      return 0;
+    }
+  }
+
+  // 3) Pick where the agent runs --------------------------------------------
   const sd = p.spinner();
-  sd.start('Detecting agent harnesses');
+  sd.start('Looking for where agents can run');
   const detected = await Promise.all(
     HARNESSES.map(async (h) => ({ h, d: await h.detect() })),
   );
-  sd.stop('Scanned for harnesses');
+  sd.stop('Scanned for places an agent can run');
 
   for (const { h, d } of detected) {
     const tag = !d.installed
@@ -125,7 +166,7 @@ export async function runInit(): Promise<number> {
   const installed = detected.filter((x) => x.d.installed);
   if (installed.length === 0) {
     p.note(
-      'No supported harness detected (Claude Code or Cursor).\n' +
+      'Found nowhere to run an agent (looked for Claude Code and Cursor).\n' +
         `Add an agent manually with:\n  ${pc.yellow(`musterd team add <name> --kind agent`)}`,
       'Nothing to configure',
     );
@@ -135,15 +176,25 @@ export async function runInit(): Promise<number> {
 
   const harness = guard(
     await p.select({
-      message: 'Which harness is your agent in?',
+      message: 'Where does this agent run?',
       options: installed.map(({ h, d }) => ({
         value: h.id,
         label: h.label,
-        hint: d.configured ? 'will be updated' : 'will be configured',
+        hint: d.configured ? 'musterd already set up here — will be repointed' : 'not set up yet — will be configured',
       })),
     }),
   );
-  const chosen = installed.find((x) => x.h.id === harness)!.h as Harness;
+  const chosenEntry = installed.find((x) => x.h.id === harness)!;
+  const chosen = chosenEntry.h as Harness;
+  if (chosenEntry.d.configured) {
+    // Re-running over an existing binding repoints it at the new member; the old one isn't deleted.
+    p.note(
+      `${pc.bold(chosen.label)} already points at a musterd member here.\n` +
+        `Setting up next mints a ${pc.bold('new')} member and repoints ${chosen.label} at it — so give it a\n` +
+        `name not already on the team (a repeat name is refused). The previous member stays on the roster.`,
+      'Heads up',
+    );
+  }
 
   // 4) Name the agent -------------------------------------------------------
   const name = guard(
@@ -198,6 +249,7 @@ export async function runInit(): Promise<number> {
     const result = await chosen.configure(entry, binding);
     activation = result.activation;
     sc.stop(`${chosen.label} configured ${pc.dim(`(${result.target})`)}`);
+    if (result.scope) p.log.info(pc.dim(result.scope));
   } catch (err) {
     sc.stop(pc.red(`Could not configure ${chosen.label}: ${(err as Error).message}`));
     p.note(printManual(chosen, entry), 'Configure it manually');
