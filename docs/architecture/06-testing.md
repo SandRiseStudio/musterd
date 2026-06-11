@@ -12,7 +12,7 @@ Test runner: **vitest** (one config per package, plus a root `pnpm test` that ru
 
 ## The three acceptance scenarios (automated)
 
-Each lives in `tests/scenarios/` and uses `seedDawn`-style setup.
+All three are automated and use `seedDawn`-style setup. By placement: **Scenario C** is the dedicated end-to-end test in [`tests/scenarios/flagship.test.ts`](../../tests/scenarios/flagship.test.ts) (run via `pnpm test:scenarios`). **Scenario A** is realized as the CLI end-to-end test [`packages/cli/src/cli.e2e.test.ts`](../../packages/cli/src/cli.e2e.test.ts), and **Scenario B**'s behavior (agent + human `request_help`→`accept` across MCP + CLI) is covered by [`packages/mcp/src/mcp.test.ts`](../../packages/mcp/src/mcp.test.ts) — they live next to the package they exercise rather than under `tests/scenarios/`. All run under the root `pnpm test`.
 
 ### Scenario A — two humans on one team
 1. `POST /teams {dawn, creator: nick}` → token_nick.
