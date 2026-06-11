@@ -32,6 +32,9 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
       },
     },
     async (args) => {
+      if (!client.joined) {
+        return textResult("you haven't joined the team yet — call team_join first, then send");
+      }
       const meta: Record<string, unknown> = { ...(args.meta ?? {}) };
       if (args.reply_to) meta['in_reply_to'] = args.reply_to;
       try {

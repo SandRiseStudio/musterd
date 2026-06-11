@@ -1,12 +1,10 @@
 import type { MusterdClient } from './client.js';
 
 /**
- * Bootstrap the session's binding to its Member: verify the server is reachable,
- * register presence (online), and open the background WS so live deliveries buffer.
- * 05-mcp.md: registering this MCP server in a harness == that agent becomes the Member.
+ * Verify the team server is reachable. Dormant by default (M3 / ADR 007): registering this MCP
+ * server in a harness makes the musterd tools *available*, it does not occupy the member's seat.
+ * A session claims presence only by calling `team_join` (or via `MUSTERD_AUTOJOIN=1`).
  */
 export async function bind(client: MusterdClient): Promise<void> {
   await client.health();
-  await client.registerPresence();
-  client.connect();
 }

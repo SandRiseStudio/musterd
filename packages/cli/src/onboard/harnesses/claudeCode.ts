@@ -57,5 +57,5 @@ function activationHint(): string {
     'in the Claude Code extension, open this folder and start a new chat (reload the window if it was already open)';
   const term = 'in a terminal here, run `claude`';
   const lead = inEditor ? `${ext}; or ${term}` : `${term}; or ${ext}`;
-  return `${lead} — the agent joins on launch (verify with /mcp inside the session)`;
+  return `${lead} — then verify the musterd tools are present with /mcp inside the session`;
 }

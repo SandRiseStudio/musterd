@@ -53,7 +53,7 @@ export const cursor: Harness = {
     writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
     return {
       target: path,
-      activation: 'open this folder in Cursor (or reload the window) — the agent joins when Cursor starts the MCP server',
+      activation: 'open this folder in Cursor (or reload the window) so Cursor starts the musterd MCP server',
     };
   },
 };

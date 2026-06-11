@@ -24,8 +24,18 @@ export class MusterdClient {
   private heartbeat: NodeJS.Timeout | null = null;
   private backoff = 1000;
   private closed = false;
+  /** True while the member should hold presence — gates reconnect, cleared by leave()/close(). */
+  private wantPresence = false;
+  private joinedFlag = false;
+  /** Resolves/rejects the in-flight join() on the first welcome / error frame. */
+  private pendingJoin: { resolve: () => void; reject: (e: Error) => void } | null = null;
 
   constructor(private config: McpConfig) {}
+
+  /** Whether this session currently occupies its member's seat (claimed presence, got welcome). */
+  get joined(): boolean {
+    return this.joinedFlag;
+  }
 
   private async request(method: string, path: string, body?: unknown): Promise<any> {
     const res = await fetch(this.config.server + path, {
@@ -46,11 +56,6 @@ export class MusterdClient {
     await this.request('GET', '/health');
   }
 
-  /** Register a presence row (online) over HTTP — the immediate, stateless attach. */
-  async registerPresence(): Promise<void> {
-    await this.request('POST', `/teams/${this.config.team}/presence`, { surface: this.config.surface, status: 'online' });
-  }
-
   sendEnvelope(envelope: Envelope) {
     return this.request('POST', `/teams/${this.config.team}/messages`, { envelope });
   }
@@ -68,8 +73,32 @@ export class MusterdClient {
     return this.request('POST', `/teams/${this.config.team}/inbox/cursor`, { last_read_message_id: messageId });
   }
 
-  /** Open the background WS so the member is present and live deliveries are buffered. */
-  connect(): void {
+  /**
+   * Claim the member's seat: open the WS, `hello`, and resolve once the server sends `welcome`.
+   * Rejects if the seat is already live in another session (`member_busy`) or the hello is refused.
+   * Idempotent while already joined. Explicit activation — nothing claims presence before this (M3).
+   */
+  join(): Promise<void> {
+    if (this.joinedFlag) return Promise.resolve();
+    this.wantPresence = true;
+    return new Promise<void>((resolve, reject) => {
+      this.pendingJoin = { resolve, reject };
+      this.openSocket();
+    });
+  }
+
+  /** Release the seat (back to dormant). The server keeps a 45s reclaim grace; tools stay registered. */
+  leave(): void {
+    this.wantPresence = false;
+    this.joinedFlag = false;
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = null;
+    this.ws?.close();
+    this.ws = null;
+  }
+
+  /** Open the background WS and send hello; (re)used by join() and reconnect. */
+  private openSocket(): void {
     if (this.closed) return;
     const ws = new WebSocket(wsBase(this.config.server) + '/ws');
     this.ws = ws;
@@ -94,28 +123,46 @@ export class MusterdClient {
         return;
       }
       if (frame.type === 'welcome') {
+        this.joinedFlag = true;
         ws.send(JSON.stringify({ type: 'subscribe', scope: 'team' }));
         this.heartbeat = setInterval(() => {
           if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'heartbeat' }));
         }, 15_000);
         this.heartbeat.unref?.();
+        this.pendingJoin?.resolve();
+        this.pendingJoin = null;
+      } else if (frame.type === 'error') {
+        // A refused hello (e.g. member_busy) is terminal — don't thrash reconnecting.
+        this.wantPresence = false;
+        this.pendingJoin?.reject(new Error(frame.code === 'member_busy' ? `member_busy: ${frame.message}` : frame.message));
+        this.pendingJoin = null;
+        ws.close();
       } else if (frame.type === 'deliver') {
         this.push(frame.envelope);
       }
     });
-    ws.on('close', () => this.scheduleReconnect());
+    ws.on('close', () => {
+      this.joinedFlag = false;
+      if (this.heartbeat) clearInterval(this.heartbeat);
+      this.heartbeat = null;
+      if (this.pendingJoin) {
+        this.pendingJoin.reject(new Error('connection closed before join completed'));
+        this.pendingJoin = null;
+        this.wantPresence = false;
+        return;
+      }
+      this.scheduleReconnect();
+    });
     ws.on('error', () => {
-      /* close handler schedules reconnect */
+      /* the close handler rejects/reschedules */
     });
   }
 
   private scheduleReconnect(): void {
-    if (this.heartbeat) clearInterval(this.heartbeat);
-    this.heartbeat = null;
-    if (this.closed) return;
+    if (this.closed || !this.wantPresence) return;
     const delay = Math.min(this.backoff, 30_000);
     this.backoff = Math.min(this.backoff * 2, 30_000);
-    const t = setTimeout(() => this.connect(), delay);
+    const t = setTimeout(() => this.openSocket(), delay);
     t.unref?.();
   }
 
@@ -138,6 +185,8 @@ export class MusterdClient {
 
   close(): void {
     this.closed = true;
+    this.wantPresence = false;
+    this.joinedFlag = false;
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.ws?.close();
   }

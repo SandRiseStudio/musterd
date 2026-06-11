@@ -42,15 +42,37 @@ function adaConfig(): McpConfig {
   return { server: base, team: 'dawn', member: 'Ada', token: tokens['Ada']!, surface: 'claude-code' };
 }
 
+async function rosterMember(name: string) {
+  const roster = await api('GET', '/teams/dawn/members', undefined, tokens['nick']);
+  return roster.json.members.find((m: any) => m.name === name);
+}
+
 describe('MCP adapter', () => {
-  it('binds Ada as present on her surface', async () => {
+  it('is dormant after bind, online after team_join, offline after team_leave', async () => {
     const client = new MusterdClient(adaConfig());
     await bind(client);
-    const roster = await api('GET', '/teams/dawn/members', undefined, tokens['nick']);
-    const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(client.joined).toBe(false);
+    expect((await rosterMember('Ada')).presence).toBe('offline'); // dormant: not present
+
+    await client.join();
+    expect(client.joined).toBe(true);
+    const ada = await rosterMember('Ada');
     expect(ada.presence).toBe('online');
     expect(ada.presences.some((p: any) => p.surface === 'claude-code')).toBe(true);
+
+    client.leave();
+    expect(client.joined).toBe(false);
     client.close();
+  });
+
+  it('refuses a second session joining as the same member (member_busy)', async () => {
+    const a1 = new MusterdClient(adaConfig());
+    await a1.join();
+    const a2 = new MusterdClient(adaConfig());
+    await expect(a2.join()).rejects.toThrow(/member_busy/i);
+    expect(a2.joined).toBe(false);
+    a1.close();
+    a2.close();
   });
 
   it('Ada sends a status_update that nick sees in his inbox', async () => {
@@ -87,7 +109,7 @@ describe('MCP adapter', () => {
 
   it('buffers a live delivery over the background WS and dedups own sends', async () => {
     const client = new MusterdClient(adaConfig());
-    await bind(client);
+    await client.join(); // join opens the background WS (bind no longer claims presence)
     await delay(150);
 
     await api('POST', '/teams/dawn/messages', {

@@ -6,7 +6,9 @@ import { formatMessage, textResult } from './format.js';
 
 const DESCRIPTION =
   'Check for new messages addressed to you or the team since you last checked. ' +
-  'Returns unread messages and marks them read. Call this to see if teammates have responded or need you.';
+  'Returns unread messages and marks them read. Call this to see if teammates have responded or need you. ' +
+  'Best practice: call it at the start and end of each task and whenever you finish a reply — teammates may ' +
+  'be waiting on you, and messages that arrived while you were heads-down only surface when you check.';
 
 export function registerInboxCheck(server: McpServer, client: MusterdClient): void {
   server.registerTool(
@@ -19,6 +21,9 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
       },
     },
     async (args) => {
+      if (!client.joined) {
+        return textResult("you haven't joined the team yet — call team_join first to receive messages");
+      }
       try {
         // Combine buffered live deliveries with the authoritative inbox fetch, dedup by id.
         const buffered = client.drainBuffer();

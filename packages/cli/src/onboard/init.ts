@@ -172,6 +172,16 @@ export async function runInit(): Promise<number> {
   const binding = { server, team, member: name, token, surface: chosen.surface };
   const entry = buildEntry(binding);
 
+  // Explicit activation (M3): the agent is dormant until it joins. Offer one-keystroke auto-join
+  // on launch for the common solo case; either way a second session as this member is refused cleanly.
+  const autojoin = guard(
+    await p.confirm({
+      message: `Auto-join the team when ${pc.cyan(name)} starts? (otherwise the agent joins when it calls team_join)`,
+      initialValue: true,
+    }),
+  );
+  if (autojoin) entry.env['MUSTERD_AUTOJOIN'] = '1';
+
   const write = guard(
     await p.confirm({ message: `Write the musterd MCP server into ${pc.bold(chosen.label)} for you?` }),
   );
@@ -196,6 +206,11 @@ export async function runInit(): Promise<number> {
 
   // 6) Wait for the agent to actually join ----------------------------------
   p.log.info(`${pc.bold('Next:')} ${activation}.`);
+  p.log.info(
+    autojoin
+      ? `${pc.cyan(name)} joins the team automatically on launch.`
+      : `In the session, tell ${pc.cyan(name)} to join the team (it calls ${pc.yellow('team_join')}).`,
+  );
   const sw = p.spinner();
   sw.start(`Waiting for ${name} to join`);
   const joined = await waitForPresence(http, team, name, 180);
@@ -204,7 +219,9 @@ export async function runInit(): Promise<number> {
   } else {
     sw.stop(pc.yellow(`Still waiting on ${name}.`));
     p.note(
-      `When you start ${chosen.label}, ${name} joins automatically.\n` +
+      (autojoin
+        ? `When you start ${chosen.label}, ${name} joins automatically.\n`
+        : `Start ${chosen.label} and have ${name} call ${pc.yellow('team_join')}.\n`) +
         `Check any time with ${pc.yellow('musterd status')}.`,
       'No rush',
     );

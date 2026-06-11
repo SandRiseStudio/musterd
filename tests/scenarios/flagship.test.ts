@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeEnvelope, PROTOCOL_VERSION, type Envelope } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
-import { MusterdClient, bind, type McpConfig } from '@musterd/mcp';
+import { MusterdClient, type McpConfig } from '@musterd/mcp';
 import { ulid } from 'ulid';
 
 /**
@@ -78,12 +78,12 @@ async function agentSend(client: MusterdClient, from: string, env: Partial<Envel
 
 describe('Scenario C — flagship 3-pane', () => {
   it('coordinates across three surfaces end to end', async () => {
-    // Ada (claude-code) and Lin (codex) attach via the MCP adapter.
+    // Ada (claude-code) and Lin (codex) explicitly join via the MCP adapter (M3: dormant until join).
     const ada = client('Ada', 'claude-code');
     const lin = client('Lin', 'codex');
-    await bind(ada);
-    await bind(lin);
-    await delay(150); // let both background sockets connect
+    await ada.join();
+    await lin.join();
+    await delay(150); // let both background sockets settle
 
     // nick (human) is present and watching: roster shows all three online on their surfaces.
     await api('POST', '/teams/dawn/presence', { surface: 'cli', status: 'online' }, tok['nick']);
