@@ -3,12 +3,12 @@ import { openDb } from './open.js';
 import { seedDawn } from './seed.js';
 
 describe('db', () => {
-  it('opens in-memory, migrates to version 1, sets foreign_keys', () => {
+  it('opens in-memory, migrates to the latest schema, sets foreign_keys', () => {
     const db = openDb(':memory:');
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('1');
+    expect(ver?.value).toBe('2');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();

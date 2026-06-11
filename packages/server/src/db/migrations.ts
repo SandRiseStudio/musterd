@@ -15,6 +15,15 @@ export const MIGRATIONS: Migration[] = [
       // schema_version is recorded by the migration runner's upsert after up() returns.
     },
   },
+  {
+    // musterd/0.2 (ADR 010): single-active + 45s reclaim grace. A presence keeps lingering
+    // after its connection drops, with `held_until` marking when the hold frees; the reaper
+    // sweeps expired holds.
+    version: 2,
+    up: (db) => {
+      db.exec('ALTER TABLE presence ADD COLUMN held_until INTEGER');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

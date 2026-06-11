@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3';
-import type { Envelope } from '@musterd/protocol';
+import { PROTOCOL_VERSION, type Envelope } from '@musterd/protocol';
 import type { MessageRow } from './rows.js';
 
 /** Insert an envelope into the append-only log. `toMemberId` set iff to.kind==='member'. */
@@ -81,7 +81,7 @@ export function rowToEnvelope(row: MessageRow, teamSlug: string, fromName: strin
         : { kind: 'broadcast' as const };
   return {
     id: row.id,
-    v: 'musterd/0.1',
+    v: PROTOCOL_VERSION,
     team: teamSlug,
     from: fromName,
     to,

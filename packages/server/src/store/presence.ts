@@ -24,13 +24,41 @@ export function attach(
     status: 'online',
     conn_id: connId,
     last_seen_at: now,
+    held_until: null,
     created_at: now,
   };
   db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @created_at)`,
+    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, created_at)
+     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @created_at)`,
   ).run(row);
   return row;
+}
+
+/**
+ * Release a presence on a clean disconnect: drop the connection but keep the row as a *hold*
+ * the same member can reclaim for `graceMs` (single-active, ADR 010). The reaper frees it when
+ * `held_until` passes. Held rows are excluded from the live/roster views below.
+ */
+export function release(db: Database, presenceId: string, graceMs: number): void {
+  const now = Date.now();
+  db.prepare(
+    'UPDATE presence SET conn_id = NULL, last_seen_at = ?, held_until = ? WHERE id = ?',
+  ).run(now, now + graceMs, presenceId);
+}
+
+/** Drop every presence row for a member (active or held) — used to reclaim on a fresh hello. */
+export function clearMemberPresence(db: Database, memberId: string): void {
+  db.prepare('DELETE FROM presence WHERE member_id = ?').run(memberId);
+}
+
+/** Does this member currently hold a *live* (connected, non-held) presence? Drives single-active. */
+export function hasActivePresence(db: Database, memberId: string): boolean {
+  const row = db
+    .prepare<[string], { n: number }>(
+      'SELECT COUNT(*) AS n FROM presence WHERE member_id = ? AND held_until IS NULL AND conn_id IS NOT NULL',
+    )
+    .get(memberId);
+  return (row?.n ?? 0) > 0;
 }
 
 export function heartbeat(db: Database, presenceId: string, status?: PresenceStatus): void {
@@ -49,12 +77,12 @@ export function detach(db: Database, presenceId: string): void {
   db.prepare('DELETE FROM presence WHERE id = ?').run(presenceId);
 }
 
-/** Does this member currently have any live presence (within timeout)? */
+/** Does this member currently have any live presence (within timeout, not a release hold)? */
 export function hasLivePresence(db: Database, memberId: string, timeoutMs: number): boolean {
   const cutoff = Date.now() - timeoutMs;
   const row = db
     .prepare<[string, number], { n: number }>(
-      'SELECT COUNT(*) AS n FROM presence WHERE member_id = ? AND last_seen_at > ?',
+      'SELECT COUNT(*) AS n FROM presence WHERE member_id = ? AND held_until IS NULL AND last_seen_at > ?',
     )
     .get(memberId, cutoff);
   return (row?.n ?? 0) > 0;
@@ -69,7 +97,7 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
   return members.map((member) => {
     const presences = db
       .prepare<[string, number], PresenceRow>(
-        'SELECT * FROM presence WHERE member_id = ? AND last_seen_at > ? ORDER BY last_seen_at DESC',
+        'SELECT * FROM presence WHERE member_id = ? AND held_until IS NULL AND last_seen_at > ? ORDER BY last_seen_at DESC',
       )
       .all(member.id, cutoff);
     const status: PresenceStatus =
@@ -90,14 +118,22 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
   });
 }
 
-/** Remove presence rows older than the timeout. Returns the removed rows (for offline events). */
+/**
+ * Remove dead presence rows — stale live ones (no heartbeat past the timeout) and release holds
+ * whose reclaim grace has expired. Returns the removed rows (for offline events).
+ */
 export function reapStale(db: Database, timeoutMs: number): PresenceRow[] {
-  const cutoff = Date.now() - timeoutMs;
+  const now = Date.now();
+  const cutoff = now - timeoutMs;
   const stale = db
-    .prepare<[number], PresenceRow>('SELECT * FROM presence WHERE last_seen_at <= ?')
-    .all(cutoff);
+    .prepare<[number, number], PresenceRow>(
+      'SELECT * FROM presence WHERE last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?)',
+    )
+    .all(cutoff, now);
   if (stale.length > 0) {
-    db.prepare('DELETE FROM presence WHERE last_seen_at <= ?').run(cutoff);
+    db.prepare(
+      'DELETE FROM presence WHERE last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?)',
+    ).run(cutoff, now);
   }
   return stale;
 }

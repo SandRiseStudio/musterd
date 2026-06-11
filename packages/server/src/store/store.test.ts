@@ -5,7 +5,16 @@ import { MusterdError } from '../errors.js';
 import { getCursor, setCursor } from './cursors.js';
 import { addMember, authMember, hashToken } from './members.js';
 import { insertMessage, listInbox } from './messages.js';
-import { attach, hasLivePresence, listPresence, reapStale } from './presence.js';
+import {
+  attach,
+  clearMemberPresence,
+  hasActivePresence,
+  hasLivePresence,
+  listPresence,
+  presenceById,
+  reapStale,
+  release,
+} from './presence.js';
 import { createTeam } from './teams.js';
 
 function freshTeam() {
@@ -100,5 +109,51 @@ describe('presence', () => {
     const removed = reapStale(db, 0);
     expect(removed.length).toBe(1);
     expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(false);
+  });
+
+  it('single-active: a live attachment is active; releasing frees the slot but keeps a reclaim hold', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const p = attach(db, ada.row.id, 'claude-code', 'c1');
+    expect(hasActivePresence(db, ada.row.id)).toBe(true);
+
+    release(db, p.id, 45_000);
+    // the active slot is free (a reclaim is allowed) but the hold row still exists...
+    expect(hasActivePresence(db, ada.row.id)).toBe(false);
+    expect(presenceById(db, p.id)).toBeDefined();
+    // ...and is excluded from the live roster, so the member reads offline immediately.
+    expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(false);
+    expect(listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')?.status).toBe('offline');
+  });
+
+  it('a reclaim hold survives the grace window, then the reaper frees it', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const p = attach(db, ada.row.id, 'claude-code', 'c1');
+
+    release(db, p.id, 45_000);
+    // within grace: a normal reap leaves the hold in place
+    expect(reapStale(db, 45_000)).toHaveLength(0);
+    expect(presenceById(db, p.id)).toBeDefined();
+
+    // past grace (held_until in the past): the reaper sweeps it
+    release(db, p.id, -1);
+    expect(reapStale(db, 45_000)).toHaveLength(1);
+    expect(presenceById(db, p.id)).toBeUndefined();
+  });
+
+  it('a fresh hello reclaims by clearing any prior holds for the member', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const first = attach(db, ada.row.id, 'claude-code', 'c1');
+    release(db, first.id, 45_000);
+
+    clearMemberPresence(db, ada.row.id);
+    const second = attach(db, ada.row.id, 'cli', 'c2');
+    const rows = listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada');
+    expect(rows?.presences).toHaveLength(1);
+    expect(rows?.presences[0]?.surface).toBe('cli');
+    expect(presenceById(db, second.id)).toBeDefined();
+    expect(presenceById(db, first.id)).toBeUndefined();
   });
 });

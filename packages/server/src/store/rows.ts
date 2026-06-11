@@ -33,6 +33,8 @@ export interface PresenceRow {
   status: 'online' | 'away' | 'offline';
   conn_id: string | null;
   last_seen_at: number;
+  /** Non-null once the connection has dropped: the member stays reclaimable until this time (ADR 010). */
+  held_until: number | null;
   created_at: number;
 }
 

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  ActivitySchema,
   LifecycleSchema,
   MemberKindSchema,
   PresenceStatusSchema,
@@ -32,5 +33,11 @@ export type Presence = z.infer<typeof PresenceSchema>;
 export const MemberSummarySchema = MemberSchema.extend({
   presence: PresenceStatusSchema,
   presences: z.array(PresenceSchema).default([]),
+  /** Coarse roster activity (musterd/0.2). Optional for back-compat; the server always sets it. */
+  activity: ActivitySchema.optional(),
+  /** Self-reported task summary backing `working`, from the latest `status_update`. */
+  state: z.string().nullish(),
+  /** When `state` was last refreshed (ms epoch); drives staleness in the roster. */
+  last_status_at: z.number().int().nullish(),
 });
 export type MemberSummary = z.infer<typeof MemberSummarySchema>;

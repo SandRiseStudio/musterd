@@ -12,7 +12,15 @@ import { log } from '../log.js';
 import { parseEnvelope } from '../protocol/validate.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { authMember } from '../store/members.js';
-import { attach, detach, hasLivePresence, heartbeat, presenceById } from '../store/presence.js';
+import {
+  attach,
+  clearMemberPresence,
+  hasActivePresence,
+  hasLivePresence,
+  heartbeat,
+  presenceById,
+  release,
+} from '../store/presence.js';
 import { toMember } from '../store/rows.js';
 import type { Connection } from './hub.js';
 
@@ -74,6 +82,12 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           if (member.name !== frame.as) {
             throw new MusterdError('forbidden', 'token does not match the requested member');
           }
+          // Single-active (ADR 010): one live attachment per member. A live holder refuses a
+          // second session; a dropped holder's release hold is silently reclaimed within grace.
+          if (hasActivePresence(ctx.db, member.id)) {
+            throw new MusterdError('member_busy', `member "${member.name}" is already active in this team`);
+          }
+          clearMemberPresence(ctx.db, member.id);
           const presence = attach(ctx.db, member.id, frame.surface, state.connId);
           const conn: Connection = {
             connId: state.connId,
@@ -139,7 +153,8 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
       const conn = state.conn;
       if (!conn) return;
       ctx.hub.remove(conn.connId);
-      detach(ctx.db, conn.presenceId);
+      // Keep the row as a reclaim hold for the grace window instead of deleting it (ADR 010).
+      release(ctx.db, conn.presenceId, ctx.config.reclaimGraceMs);
       // Emit offline only if the member now has no live presence anywhere.
       if (!hasLivePresence(ctx.db, conn.memberId, ctx.config.presenceTimeoutMs)) {
         emitPresence(ctx, conn, 'offline');

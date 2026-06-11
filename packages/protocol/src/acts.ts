@@ -32,3 +32,12 @@ export const MemberKindSchema = z.enum(MEMBER_KINDS);
 export const PRESENCE_STATUSES = ['online', 'away', 'offline'] as const;
 export type PresenceStatus = (typeof PRESENCE_STATUSES)[number];
 export const PresenceStatusSchema = z.enum(PRESENCE_STATUSES);
+
+/**
+ * Roster activity (musterd/0.2). A coarser, demo-facing read of a member than raw presence:
+ * `offline` (no live attachment), `online` (present, idle), `working` (present + a self-reported
+ * task). Resolved server-side from presence + the latest `status_update` (two-clocks rule).
+ */
+export const ACTIVITIES = ['offline', 'online', 'working'] as const;
+export type Activity = (typeof ACTIVITIES)[number];
+export const ActivitySchema = z.enum(ACTIVITIES);

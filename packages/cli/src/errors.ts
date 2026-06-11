@@ -18,6 +18,7 @@ const CODE_EXIT: Record<ErrorCode, number> = {
   forbidden: 5,
   not_found: 6,
   conflict: 9,
+  member_busy: 10,
   version_mismatch: 1,
 };
 

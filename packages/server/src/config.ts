@@ -8,11 +8,14 @@ export interface ResolvedConfig {
   heartbeatIntervalMs: number;
   presenceTimeoutMs: number;
   reaperIntervalMs: number;
+  reclaimGraceMs: number;
 }
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 export const PRESENCE_TIMEOUT_MS = 45_000;
 export const REAPER_INTERVAL_MS = 15_000;
+/** Single-active grace: a dropped holder may reclaim its member for this long before it frees (ADR 010). */
+export const RECLAIM_GRACE_MS = 45_000;
 export const DEFAULT_PORT = 4849;
 export const DEFAULT_HOST = '127.0.0.1';
 
@@ -33,5 +36,6 @@ export function resolveConfig(opts?: {
     heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
     presenceTimeoutMs: PRESENCE_TIMEOUT_MS,
     reaperIntervalMs: REAPER_INTERVAL_MS,
+    reclaimGraceMs: RECLAIM_GRACE_MS,
   };
 }

@@ -12,6 +12,9 @@ export function startReaper(ctx: Ctx): () => void {
     for (const row of removed) {
       if (seen.has(row.member_id)) continue;
       seen.add(row.member_id);
+      // A pure grace-hold expiring is not a state change: the member already went offline when its
+      // connection dropped. Only a stale *live* row (a zombie that never released) reverts to offline.
+      if (row.held_until !== null) continue;
       if (hasLivePresence(ctx.db, row.member_id, ctx.config.presenceTimeoutMs)) continue;
       const member = getMemberById(ctx.db, row.member_id);
       if (!member) continue;

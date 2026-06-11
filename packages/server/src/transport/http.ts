@@ -75,6 +75,10 @@ function summarize(ctx: Ctx, teamSlug: string, teamId: string): MemberSummary[] 
     ...toMember(s.member, teamSlug),
     presence: s.status,
     presences: s.presences,
+    // musterd/0.2: coarse activity. M1 derives it from presence; `working` (from status_update) lands in M2.
+    activity: s.status === 'offline' ? ('offline' as const) : ('online' as const),
+    state: null,
+    last_status_at: null,
   }));
 }
 

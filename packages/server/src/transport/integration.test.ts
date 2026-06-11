@@ -19,6 +19,16 @@ afterEach(async () => {
   await server.close();
 });
 
+/** Poll a predicate until it's true or we time out (for state the server reaches asynchronously). */
+async function pollUntil(pred: () => boolean, ms = 1000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (pred()) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error('pollUntil timed out');
+}
+
 async function post(path: string, body: unknown, token?: string) {
   const res = await fetch(base + path, {
     method: 'POST',
@@ -166,6 +176,55 @@ describe('WebSocket', () => {
     expect(inbox.json.messages).toHaveLength(1);
     expect(inbox.json.messages[0].act).toBe('request_help');
     n.close();
+  });
+
+  it('refuses a second live presence for the same member with member_busy', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
+
+    const a1 = new TestWs();
+    await a1.open();
+    await a1.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+
+    const a2 = new TestWs();
+    await a2.open();
+    a2.send({ type: 'hello', v: PROTOCOL_VERSION, team: 'dawn', as: 'Ada', token: ada.json.token, surface: 'cli' });
+    const err = await a2.waitFor('error');
+    expect((err as any).code).toBe('member_busy');
+
+    a1.close();
+    a2.close();
+  });
+
+  it('lets the same member reclaim its presence after disconnecting (within grace)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // nick stays present so we can observe Ada's offline event after she drops.
+    const n = new TestWs();
+    await n.open();
+    await n.hello('dawn', 'nick', nickTok, 'cli');
+
+    const a1 = new TestWs();
+    await a1.open();
+    await a1.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    a1.close();
+
+    // Wait until the server has processed the close (released the hold + emitted offline).
+    await pollUntil(() =>
+      n.frames.some(
+        (f) => f.type === 'presence' && (f as any).member === 'Ada' && (f as any).status === 'offline',
+      ),
+    );
+
+    const a2 = new TestWs();
+    await a2.open();
+    const welcome = await a2.hello('dawn', 'Ada', ada.json.token, 'cli');
+    expect(welcome.type).toBe('welcome');
+
+    n.close();
+    a2.close();
   });
 
   it('rejects a hello whose name does not match the token', async () => {

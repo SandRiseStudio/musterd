@@ -99,6 +99,7 @@ Builds an Envelope, `POST /teams/:slug/messages` (or over the live WS if `--watc
 | 6 | not found (team/member) | `not_found` |
 | 7 | server unreachable (daemon down) | (connection) |
 | 9 | conflict (name/slug taken) | `conflict` |
+| 10 | member already active elsewhere (single-active) | `member_busy` |
 
 `state/server-down`, `state/no-team`, `state/unknown-member` frames map to exits 7, 2, 6 respectively. Every error prints `✗ <message>` in red to stderr and exits with the code above.
 

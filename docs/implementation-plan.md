@@ -2,7 +2,7 @@
 
 > **Living document.** This is the working plan of record: what the original plan called for, what has shipped, where we deviated on purpose, and what remains. It supersedes the original planning file (`.cursor/plans/agent_team_coordination_layer_22ae2015.plan.md`) as the thing to consult for "where are we and what's next." Deviations from *this* doc follow the same ADR protocol as everything else (`AGENTS.md`).
 >
-> Last reconciled: **2026-06-10** (commit `65ee2cf`; `pnpm -r build` + `pnpm test` green — 50/50 tests incl. Scenario C).
+> Last reconciled: **2026-06-11** (v0.2 M1 landed — ADR 010 single-active + grace; `pnpm -r build` + `pnpm test` green — 55/55 tests).
 
 ---
 
@@ -52,15 +52,15 @@ Each is recorded in an ADR; this is the consolidated narrative.
 - Scenario A lives in `packages/cli/src/cli.e2e.test.ts` and Scenario B's behavior in `packages/mcp/src/mcp.test.ts`, not in `tests/scenarios/` as `06-testing.md` sketched — only Scenario C is there. Functionally covered; file placement differs.
 - The coverage gates in `06-testing.md` (≥95/85/75%) are **not wired** into the vitest configs — tests pass but coverage is unmeasured.
 - "Codex joins" (plan M4) was validated via the harness-agnostic env path (Scenario C binds Lin with `surface: codex`); there is no Codex-specific onboarding adapter in `musterd init` (only Claude Code + Cursor).
-- ADR numbering: `membership-impl-plan.md` M1 says to write "ADR 008 — single-active + grace"; 008 is the Figma execution and 009 is the npm scope decision, so single-active + grace becomes **ADR 010** when v0.2 M1 lands.
+- ADR numbering: `membership-impl-plan.md` M1 says to write "ADR 008 — single-active + grace"; 008 turned out to be the Figma execution and 009 the npm scope decision, so single-active + grace landed as **ADR 010** (v0.2 M1, done).
 
 ## 4. What is left
 
 In priority order. The governing sequence (per ADR 007) is: **v0.2 minimal trust model → record the demo → publish/launch**, because the demo should show explicit join + `working` status, not the auto-join behavior v0.2 deletes.
 
-### A. v0.2 — minimal trust model (next; plan: `docs/design/membership-impl-plan.md`)
-1. **M1 — protocol `musterd/0.2` + single-active server core.** Version bump, `activity` fields on roster types, server refuses a second live presence per member (`member_busy`) with 45s reclaim grace. Write **ADR 009** (single-active + grace). *Load-bearing correctness fix — test first.*
-2. **M2 — `working` activity.** Two-clocks rule (heartbeat = alive, last `status_update` = fresh; stale after 5m shown as `working: x · Nm`, never reverting to idle). CLI status/watch rendering + snapshot updates (and the Figma `cmd/status` frame, per ADR 008's lockstep rule).
+### A. v0.2 — minimal trust model (in progress; plan: `docs/design/membership-impl-plan.md`)
+1. ~~**M1 — protocol `musterd/0.2` + single-active server core.**~~ ✅ **done** (ADR 010). `PROTOCOL_VERSION` → `musterd/0.2`; `member_busy` error (CLI exit 10); roster `activity`/`state`/`last_status_at` fields (populated `offline|online` in M1, `working` lands in M2); presence schema v2 (`held_until`); server refuses a second active presence and keeps a 45s reclaim hold the reaper sweeps. Tests: single-active refuse + reclaim (`integration.test.ts`), release/grace/reaper (`store.test.ts`). `pnpm -r build` + `pnpm test` green (55 tests).
+2. **M2 — `working` activity.** *(next)* Two-clocks rule (heartbeat = alive, last `status_update` = fresh; stale after 5m shown as `working: x · Nm`, never reverting to idle). CLI status/watch rendering + snapshot updates (and the Figma `cmd/status` frame, per ADR 008's lockstep rule).
 3. **M3 — explicit activation in the MCP adapter.** Dormant by default; `team_join`/`team_leave` tools; `MUSTERD_AUTOJOIN=1` opt-in; `init` waits for explicit join. **Includes the dead-air mitigation** (ADR 007 break 4): join-result/tool-description copy that drives `team_inbox_check` at task boundaries + a documented harness-hook pattern. This is the riskiest part — it's prompt/UX engineering, not protocol work.
 4. **M4 — docs promotion + flagship update.** Promote v0.2 deltas into `SPEC.md`; update `03/04/05` architecture docs, `examples/flagship-demo.mjs`, Scenario C (show one refused duplicate + `working` in the watch pane); README quickstart reflects explicit activation; `.gitignore`/warn on secret-bearing harness configs.
 
@@ -93,4 +93,4 @@ Schedule/lifecycle enforcement, step-level streaming transport, federation, more
 | 007 | **v0.2 scope cut; governance → v0.3** | course correction |
 | 008 | Figma execution + brief/CLI reconciliation | catch-up + course correction |
 | 009 | CLI ships as `@musterd/cli` (unscoped `musterd` blocked by `multer`) | course correction |
-| 010 | *(reserved)* single-active + grace | v0.2 M1 |
+| 010 | single-active members + 45s reclaim grace | v0.2 M1 |
