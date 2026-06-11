@@ -1,0 +1,15 @@
+{
+  "name": "batond",
+  "version": "0.0.0",
+  "description": "Coordination observability for agent + human teams — see the handoff, not just the agents on either side of it. Name reservation; the real tool ships at a later version.",
+  "license": "MIT",
+  "keywords": ["observability", "agents", "multi-agent", "coordination", "opentelemetry", "tracing"],
+  "type": "module",
+  "bin": {
+    "batond": "./bin.js"
+  },
+  "files": ["README.md", "bin.js"],
+  "publishConfig": {
+    "access": "public"
+  }
+}
