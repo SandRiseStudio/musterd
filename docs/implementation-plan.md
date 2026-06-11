@@ -27,7 +27,7 @@ Everything below is on `init-musterd`, builds clean, and is covered by the test 
 | **M0 planning docs** | ✅ done | `docs/architecture/00–07`, `docs/design/brand.md` + 3 Figma briefs, `AGENTS.md`, `SPEC.md` (commit `8971acc`) |
 | **M0 Figma execution** (the briefs *executed*, originally for a separate agent) | ✅ done (late — see §3) | ADR 008; 3 Figma files; exported assets in `docs/design/assets/` |
 | **M1 scaffold + SPEC v0.1** | ✅ done | `598080d`, `381abd8`; `SPEC.md` is `musterd/0.1` |
-| **M1 reserve npm name** | 🟡 prepared, **publish pending auth** | Name is free (`npm view musterd` → 404, 2026-06-10). Placeholder package ready at [`npm-reserve/musterd/`](../npm-reserve/musterd/); publishing it needs an interactive `npm login` (no token on this machine) — see §4.B for the one command |
+| **M1 reserve npm name** | 🟡 **blocked → pivoted to `@musterd/cli`** (ADR 009) | Unscoped `musterd` is permanently rejected by npm (too similar to `multer`). Pivoted to the `@musterd` scope: placeholder ready at [`npm-reserve/musterd-cli/`](../npm-reserve/musterd-cli/) (`@musterd/cli@0.0.0`). Needs the `musterd` npm org created first (web action) — see §4.B |
 | **M2 server** | ✅ done | `@musterd/server` (`5f75030`): SQLite (schema v1 incl. ADR 001/003/006), one `routeEnvelope` path shared by WS+HTTP, presence + reaper (15s/45s), cursor-based at-least-once inbox, sha256 token auth |
 | **M3 CLI** | ✅ done | `musterd` (`14b6b1f`): `serve/team create/team add/join/send/inbox[--watch]/status`, brand ANSI theme, exit-code table, `--json`/`NO_COLOR`; Scenario A passes (`cli.e2e.test.ts`) |
 | **M4 MCP adapter** | ✅ done | `@musterd/mcp` (`d596a06`): 4 tools, env binding, background WS presence + buffer + reconnect; Scenario-B-equivalent tests pass (`mcp.test.ts`) |
@@ -52,7 +52,7 @@ Each is recorded in an ADR; this is the consolidated narrative.
 - Scenario A lives in `packages/cli/src/cli.e2e.test.ts` and Scenario B's behavior in `packages/mcp/src/mcp.test.ts`, not in `tests/scenarios/` as `06-testing.md` sketched — only Scenario C is there. Functionally covered; file placement differs.
 - The coverage gates in `06-testing.md` (≥95/85/75%) are **not wired** into the vitest configs — tests pass but coverage is unmeasured.
 - "Codex joins" (plan M4) was validated via the harness-agnostic env path (Scenario C binds Lin with `surface: codex`); there is no Codex-specific onboarding adapter in `musterd init` (only Claude Code + Cursor).
-- ADR numbering: `membership-impl-plan.md` M1 says to write "ADR 008 — single-active + grace"; 008 is now taken by the Figma execution, so that becomes **ADR 009** when v0.2 M1 lands.
+- ADR numbering: `membership-impl-plan.md` M1 says to write "ADR 008 — single-active + grace"; 008 is the Figma execution and 009 is the npm scope decision, so single-active + grace becomes **ADR 010** when v0.2 M1 lands.
 
 ## 4. What is left
 
@@ -65,7 +65,7 @@ In priority order. The governing sequence (per ADR 007) is: **v0.2 minimal trust
 4. **M4 — docs promotion + flagship update.** Promote v0.2 deltas into `SPEC.md`; update `03/04/05` architecture docs, `examples/flagship-demo.mjs`, Scenario C (show one refused duplicate + `working` in the watch pane); README quickstart reflects explicit activation; `.gitignore`/warn on secret-bearing harness configs.
 
 ### B. Launch tail (after v0.2)
-- **Reserve the npm name** — `musterd` is still unclaimed (verified 2026-06-10). A standalone placeholder (`0.0.0`, no workspace deps) is prepared at `npm-reserve/musterd/`; the real CLI package can't be published yet because its `@musterd/*` deps are `workspace:*` and unpublished. To claim the name: `npm login` then `npm publish ./npm-reserve/musterd`. Cheap insurance; do it before v0.2 completes.
+- **Reserve the npm name** — unscoped `musterd` is blocked by npm (too similar to `multer`; ADR 009), so the CLI ships as `@musterd/cli`. The real CLI package still can't be published (its `@musterd/*` deps are `workspace:*` and unpublished), so a standalone placeholder is prepared at `npm-reserve/musterd-cli/`. To claim: create the free **`musterd` org** at npmjs.com/org/create (one-time, can't be done from CLI), then `npm publish ./npm-reserve/musterd-cli`. Creating the org reserves the whole `@musterd/*` scope.
 - **Record the flagship demo** (`docs/demo.md` form 2 or 3) → `docs/assets/flagship.gif`; fixes the README's currently-broken image.
 - **Publish** the four packages; **launch post** (positioning vs MCP/A2A/Fleet/CrewAI is already written in the README).
 
@@ -92,4 +92,5 @@ Schedule/lifecycle enforcement, step-level streaming transport, federation, more
 | 006 | `cursor` surface | unplanned feature |
 | 007 | **v0.2 scope cut; governance → v0.3** | course correction |
 | 008 | Figma execution + brief/CLI reconciliation | catch-up + course correction |
-| 009 | *(reserved)* single-active + grace | v0.2 M1 |
+| 009 | CLI ships as `@musterd/cli` (unscoped `musterd` blocked by `multer`) | course correction |
+| 010 | *(reserved)* single-active + grace | v0.2 M1 |

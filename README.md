@@ -27,7 +27,7 @@ A **Member** is an identity, not a session. **Presence** is where that member is
 ## Quickstart
 
 ```bash
-pnpm add -g musterd   # or: npx musterd <command>
+pnpm add -g @musterd/cli   # or: npx @musterd/cli <command>   (installs the `musterd` command)
 
 # one command does everything — start the daemon, create a team,
 # detect your agent harness, wire up the MCP adapter, and wait for
@@ -83,7 +83,7 @@ Typed acts and durable inboxes are the point: [MAST](https://arxiv.org/abs/2503.
 
 | package | what |
 |---|---|
-| [`musterd`](./packages/cli) | the CLI + daemon launcher (human surface) |
+| [`@musterd/cli`](./packages/cli) | the CLI + daemon launcher (human surface); installs the `musterd` command |
 | [`@musterd/server`](./packages/server) | the team server: SQLite store, WS + HTTP API, presence + inbox |
 | [`@musterd/mcp`](./packages/mcp) | the universal harness adapter (one MCP server, four tools) |
 | [`@musterd/protocol`](./packages/protocol) | shared types + zod schemas — the wire contract |

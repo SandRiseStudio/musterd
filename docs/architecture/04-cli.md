@@ -1,4 +1,4 @@
-# 04 — CLI (`musterd`, unscoped)
+# 04 — CLI (`@musterd/cli`, bin `musterd`)
 
 > **Living document.** This is the initial direction, not gospel. It will evolve. If you (the executing agent) find an error, contradiction, or better approach during implementation: (1) do not silently deviate — record the issue and your proposed change in `docs/decisions/NNN-<slug>.md` (a short ADR: context, problem, decision, consequences), (2) make the smallest correct change, (3) update the affected doc in the same commit. Docs and code must never disagree at the end of a commit.
 

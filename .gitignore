@@ -8,3 +8,6 @@ coverage/
 *.db
 *.db-wal
 *.db-shm
+
+# secret-bearing harness configs (security.md operational guidance)
+.cursor/mcp.json

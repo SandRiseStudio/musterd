@@ -90,4 +90,4 @@ A task/milestone is done only when **all** are true:
 
 - Terminology: only the glossary terms (`brand.md` §5) — Team, Member, Presence, Surface, Act — for the concepts they name, in identifiers and prose. No synonyms (`room`, `user`, `session`-for-member, `event`-for-act).
 - Files: kebab-case. Types/interfaces: PascalCase. Functions/vars: camelCase. Constants: SCREAMING_SNAKE for true constants (`HEARTBEAT_INTERVAL_MS`).
-- Package names: `@musterd/protocol`, `@musterd/server`, `@musterd/mcp`; CLI is unscoped `musterd` with bin `musterd`.
+- Package names: `@musterd/protocol`, `@musterd/server`, `@musterd/mcp`, `@musterd/cli`. The CLI keeps the bin name `musterd`; its package is scoped because unscoped `musterd` is blocked on npm (ADR 009).

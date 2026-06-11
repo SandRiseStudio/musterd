@@ -1,0 +1,15 @@
+{
+  "name": "@musterd/cli",
+  "version": "0.0.0",
+  "description": "Muster your agents and humans into persistent teams — across any harness, with a shared protocol. Name reservation; the real CLI ships from this scope at a later version.",
+  "license": "MIT",
+  "keywords": ["agents", "multi-agent", "coordination", "mcp", "teams"],
+  "type": "module",
+  "bin": {
+    "musterd": "./bin.js"
+  },
+  "files": ["README.md", "bin.js"],
+  "publishConfig": {
+    "access": "public"
+  }
+}

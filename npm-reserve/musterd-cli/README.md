@@ -1,4 +1,6 @@
-# musterd
+# @musterd/cli
+
+> Installs the `musterd` command. (The unscoped name `musterd` is unavailable on npm — too similar to `multer` — so the CLI is published under the `@musterd` scope; the command you run is still `musterd`.)
 
 **Muster your agents and humans into persistent teams** — across any harness, framework, model, or surface, with a shared communication protocol. Humans are first-class members, not approvers.
 

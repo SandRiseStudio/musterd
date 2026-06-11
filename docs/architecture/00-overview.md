@@ -25,7 +25,7 @@ The load-bearing architectural idea is the **identity / presence / transport spl
 
 - `@musterd/protocol` depends on nothing in the repo. It is the contract.
 - `@musterd/server` depends on `@musterd/protocol`.
-- `musterd` (the CLI package, unscoped) depends on `@musterd/protocol` (and talks to the server over WS/HTTP — it does **not** import `@musterd/server`).
+- `@musterd/cli` (the CLI package; installs the `musterd` bin — unscoped `musterd` is blocked on npm, see ADR 009) depends on `@musterd/protocol` (and talks to the server over WS/HTTP — it does **not** import `@musterd/server`).
 - `@musterd/mcp` depends on `@musterd/protocol` (and talks to the server over WS/HTTP — it does **not** import `@musterd/server`).
 
 Only the protocol package is imported across boundaries. Everything else communicates over the wire protocol. This keeps the server replaceable (a Python server could speak the same protocol).
