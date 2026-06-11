@@ -79,7 +79,7 @@ So: **declare the lens, not the résumé.** "Attend to vulnerabilities; prioriti
 
 ## 4. Work, not just workers — boards, planning, and the insight layer
 
-*(Seeded 2026-06-12 from the kanban/standup discussion. Roadmap-level — nothing here is v0.2.)*
+*(Seeded 2026-06-12 from the kanban/standup discussion. Roadmap-level — nothing here is v0.2. **The dedicated brainstorm agenda — planning noun, leadership reporting, flow/cost metrics, the "waiting-on" view — is parked in [`planning-and-insights-brainstorm.md`](planning-and-insights-brainstorm.md) for a future session.** This section is the philosophy that note builds on.)*
 
 A team has two mechanisms for knowing who's doing what, and they attach state to different nouns:
 
