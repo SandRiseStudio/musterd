@@ -80,7 +80,7 @@ In priority order. The governing sequence (per ADR 007) is: **v0.2 minimal trust
 The full set in `membership-model.md` + `spec-v0.3-draft.md` + `security.md`: seats/roles, agent key + grants (once/TTL/standing) + approval lane, capabilities + need-to-know visibility projection, audit log, notification tiers + scarce `urgent`, human observers. **Trigger condition: the daemon stops being localhost-only.** Do not build ahead of that; the designs pre-answer the known landmines (grant expiry never evicts a live claim; fingerprints are recognition, not security; `urgent` strike-tracking needs ≥2 humans).
 
 ### E. Roadmap (post-launch, `ROADMAP.md`)
-Schedule/lifecycle enforcement, step-level streaming transport, federation, more surfaces (web dashboard — already designed in Figma — iOS, Slack), sandboxed runtime, Python SDK.
+Telemetry & observability (minimal OTel instrumentation of `@musterd/server`; `meta.otel` trace-context convention, ADR 011; the **batond** coordination-observability product — strategy in `docs/design/observability.md`, branding in `docs/design/brand-coordination-observability.md`), schedule/lifecycle enforcement, step-level streaming transport, federation, more surfaces (web dashboard — already designed in Figma — iOS, Slack), sandboxed runtime, Python SDK.
 
 ## 5. Decision log index
 
@@ -96,3 +96,4 @@ Schedule/lifecycle enforcement, step-level streaming transport, federation, more
 | 008 | Figma execution + brief/CLI reconciliation | catch-up + course correction |
 | 009 | CLI ships as `@musterd/cli` (unscoped `musterd` blocked by `multer`) | course correction |
 | 010 | single-active members + 45s reclaim grace | v0.2 M1 |
+| 011 | W3C trace context rides in `Envelope.meta.otel` (proposed) | observability |
