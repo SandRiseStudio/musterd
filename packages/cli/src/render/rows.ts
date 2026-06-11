@@ -40,17 +40,20 @@ export function renderMessageRow(
   return env.body ? `${marker}${head}\n${body}` : `${marker}${head}`;
 }
 
-/** The roster table for `status`: MEMBER KIND ROLE ACTIVITY LIFECYCLE. */
+/**
+ * The roster table for `status`: MEMBER KIND ROLE LIFECYCLE ACTIVITY.
+ * ACTIVITY is last because its `working: …` label is unbounded — a free-flowing final
+ * column never collides with the columns after it.
+ */
 export function renderStatusTable(members: MemberSummary[], now = Date.now()): string {
   const header = theme.meta(
-    pad('MEMBER', 14) + pad('KIND', 8) + pad('ROLE', 14) + pad('ACTIVITY', 28) + 'LIFECYCLE',
+    pad('MEMBER', 14) + pad('KIND', 8) + pad('ROLE', 14) + pad('LIFECYCLE', 18) + 'ACTIVITY',
   );
   const rows = members.map((m) => {
     const name = theme.memberName(m.name, m.kind);
     const label = activityLabel(m, now);
     const dot = activityOf(m) === 'offline' ? 'offline' : 'online';
     const activity = `${theme.presenceDot(dot)} ${theme.meta(label)}`;
-    const activityPlain = `${dot === 'offline' ? '○' : '●'} ${label}`;
     const lifecycle = m.lifecycle === 'until' && m.lifecycle_until
       ? `until ${new Date(m.lifecycle_until).toISOString().slice(0, 10)}`
       : m.lifecycle;
@@ -58,8 +61,8 @@ export function renderStatusTable(members: MemberSummary[], now = Date.now()): s
       padVisible(name, m.name, 14) +
       pad(m.kind, 8) +
       pad(m.role || '—', 14) +
-      padVisible(activity, activityPlain, 28) +
-      lifecycle
+      pad(lifecycle, 18) +
+      activity
     );
   });
   return [header, ...rows].join('\n');
