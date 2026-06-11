@@ -52,11 +52,26 @@ describe('renderStatusTable', () => {
     ];
     const out = renderStatusTable(members);
     expect(out).toContain('MEMBER');
-    expect(out).toContain('PRESENCE');
+    expect(out).toContain('ACTIVITY');
     expect(out).toContain('nick');
     expect(out).toContain('online via cli');
     expect(out).toContain('online via claude-code');
     expect(out).toContain('offline');
+  });
+
+  it('renders working with state, adding the age only once stale (≥5m)', () => {
+    const now = Date.UTC(2026, 5, 9, 15, 0);
+    const base = { team: 'dawn', kind: 'agent' as const, role: 'backend', lifecycle: 'session' as const, created_at: 0, presences: [{ surface: 'claude-code' as const, status: 'online' as const, last_seen_at: now }] };
+    const members: MemberSummary[] = [
+      // fresh status (2 min ago) → no age suffix
+      { ...base, id: '1', name: 'Ada', presence: 'online', activity: 'working', state: 'scaffolding tests', last_status_at: now - 2 * 60_000 },
+      // stale status (18 min ago) → age shown
+      { ...base, id: '2', name: 'Lin', presence: 'online', activity: 'working', state: 'refactoring auth', last_status_at: now - 18 * 60_000 },
+    ];
+    const out = renderStatusTable(members, now);
+    expect(out).toContain('working: scaffolding tests');
+    expect(out).not.toContain('scaffolding tests ·');
+    expect(out).toContain('working: refactoring auth · 18m');
   });
 });
 

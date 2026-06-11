@@ -14,7 +14,8 @@ import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import { addMember, authMember, getMemberById } from '../store/members.js';
-import { listInbox, rowToEnvelope } from '../store/messages.js';
+import { resolveActivity } from '../store/activity.js';
+import { latestStatusUpdate, listInbox, rowToEnvelope } from '../store/messages.js';
 import { attach, listPresence } from '../store/presence.js';
 import { toMember } from '../store/rows.js';
 import { createTeam, requireTeam } from '../store/teams.js';
@@ -71,15 +72,16 @@ const PresenceBody = z.object({
 });
 
 function summarize(ctx: Ctx, teamSlug: string, teamId: string): MemberSummary[] {
-  return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => ({
-    ...toMember(s.member, teamSlug),
-    presence: s.status,
-    presences: s.presences,
-    // musterd/0.2: coarse activity. M1 derives it from presence; `working` (from status_update) lands in M2.
-    activity: s.status === 'offline' ? ('offline' as const) : ('online' as const),
-    state: null,
-    last_status_at: null,
-  }));
+  return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => {
+    // Two-clocks rule (M2): liveness from presence, working-label from the latest status_update.
+    const activity = resolveActivity(s.status !== 'offline', latestStatusUpdate(ctx.db, s.member.id));
+    return {
+      ...toMember(s.member, teamSlug),
+      presence: s.status,
+      presences: s.presences,
+      ...activity,
+    };
+  });
 }
 
 /** Dispatch an HTTP request. Returns true if it handled the request (always, except non-matching upgrade). */

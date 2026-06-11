@@ -1,9 +1,11 @@
-import type { Envelope, MemberKind, MemberSummary, PresenceStatus } from '@musterd/protocol';
+import type { Activity, Envelope, MemberKind, MemberSummary, PresenceStatus } from '@musterd/protocol';
 import { clock, theme } from './theme.js';
 
 export type KindOf = (name: string) => MemberKind;
 
 const COLS = 80;
+/** A status older than this is shown with its age (`working: x · Nm`) to signal it may be stale. */
+const STALE_AFTER_MS = 5 * 60_000;
 
 /** The ASCII wordmark banner + tagline (brand.md). Mirrors the Figma `cmp/banner`. */
 export function renderBanner(): string {
@@ -38,14 +40,17 @@ export function renderMessageRow(
   return env.body ? `${marker}${head}\n${body}` : `${marker}${head}`;
 }
 
-/** The roster table for `status`: MEMBER KIND ROLE PRESENCE LIFECYCLE. */
-export function renderStatusTable(members: MemberSummary[]): string {
+/** The roster table for `status`: MEMBER KIND ROLE ACTIVITY LIFECYCLE. */
+export function renderStatusTable(members: MemberSummary[], now = Date.now()): string {
   const header = theme.meta(
-    pad('MEMBER', 14) + pad('KIND', 8) + pad('ROLE', 14) + pad('PRESENCE', 28) + 'LIFECYCLE',
+    pad('MEMBER', 14) + pad('KIND', 8) + pad('ROLE', 14) + pad('ACTIVITY', 28) + 'LIFECYCLE',
   );
   const rows = members.map((m) => {
     const name = theme.memberName(m.name, m.kind);
-    const presence = renderPresence(m.presence, m.presences[0]?.surface);
+    const label = activityLabel(m, now);
+    const dot = activityOf(m) === 'offline' ? 'offline' : 'online';
+    const activity = `${theme.presenceDot(dot)} ${theme.meta(label)}`;
+    const activityPlain = `${dot === 'offline' ? '○' : '●'} ${label}`;
     const lifecycle = m.lifecycle === 'until' && m.lifecycle_until
       ? `until ${new Date(m.lifecycle_until).toISOString().slice(0, 10)}`
       : m.lifecycle;
@@ -53,22 +58,44 @@ export function renderStatusTable(members: MemberSummary[]): string {
       padVisible(name, m.name, 14) +
       pad(m.kind, 8) +
       pad(m.role || '—', 14) +
-      padVisible(presence, presencePlain(m.presence, m.presences[0]?.surface), 28) +
+      padVisible(activity, activityPlain, 28) +
       lifecycle
     );
   });
   return [header, ...rows].join('\n');
 }
 
+/** Activity, falling back to a presence-derived value for older rosters that predate the field. */
+function activityOf(m: MemberSummary): Activity {
+  return m.activity ?? (m.presence === 'offline' ? 'offline' : 'online');
+}
+
+/** The text after the dot: `offline` / `online via cli` / `working: refactoring auth · 18m`. */
+function activityLabel(m: MemberSummary, now: number): string {
+  const activity = activityOf(m);
+  if (activity === 'offline') return 'offline';
+  if (activity === 'working' && m.state) {
+    const stale = m.last_status_at != null && now - m.last_status_at >= STALE_AFTER_MS;
+    const age = stale && m.last_status_at != null ? ` · ${ageLabel(m.last_status_at, now)}` : '';
+    return `working: ${m.state}${age}`;
+  }
+  const surface = m.presences[0]?.surface;
+  return surface ? `online via ${surface}` : 'online';
+}
+
+/** Coarse human age: `18m` / `2h` / `3d`. */
+function ageLabel(since: number, now: number): string {
+  const mins = Math.max(0, Math.floor((now - since) / 60_000));
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return `${Math.floor(hrs / 24)}d`;
+}
+
 export function renderPresence(status: PresenceStatus, surface?: string): string {
   const dot = theme.presenceDot(status);
   const label = surface && status !== 'offline' ? `${status} via ${surface}` : status;
   return `${dot} ${theme.meta(label)}`;
-}
-
-function presencePlain(status: PresenceStatus, surface?: string): string {
-  const label = surface && status !== 'offline' ? `${status} via ${surface}` : status;
-  return `${status === 'offline' ? '○' : '●'} ${label}`;
 }
 
 // ---- helpers ----

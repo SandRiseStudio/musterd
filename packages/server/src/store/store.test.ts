@@ -4,7 +4,8 @@ import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
 import { getCursor, setCursor } from './cursors.js';
 import { addMember, authMember, hashToken } from './members.js';
-import { insertMessage, listInbox } from './messages.js';
+import { resolveActivity } from './activity.js';
+import { insertMessage, latestStatusUpdate, listInbox } from './messages.js';
 import {
   attach,
   clearMemberPresence,
@@ -95,6 +96,39 @@ describe('messages + inbox', () => {
     expect(listInbox(db, lin.row)).toHaveLength(1);
     expect(listInbox(db, nick.row)).toHaveLength(1);
     expect(listInbox(db, ada.row)).toHaveLength(0);
+  });
+});
+
+describe('activity (two-clocks)', () => {
+  it('resolveActivity: offline when not live; online when live with no status; working with a status', () => {
+    expect(resolveActivity(false, { state: 'x', ts: 1 })).toEqual({ activity: 'offline', state: null, last_status_at: null });
+    expect(resolveActivity(true, null)).toEqual({ activity: 'online', state: null, last_status_at: null });
+    expect(resolveActivity(true, { state: 'refactoring auth', ts: 100 })).toEqual({
+      activity: 'working',
+      state: 'refactoring auth',
+      last_status_at: 100,
+    });
+  });
+
+  it('latestStatusUpdate: takes the newest status_update, prefers meta.state, else body', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    expect(latestStatusUpdate(db, ada.row.id)).toBeNull();
+
+    // body-only status
+    insertMessage(db, team.id, ada.row.id, null,
+      makeEnvelope({ id: 's1', team: 'dawn', from: 'Ada', to: { kind: 'team' }, act: 'status_update', body: 'scaffolding', ts: 100 }));
+    expect(latestStatusUpdate(db, ada.row.id)).toEqual({ state: 'scaffolding', ts: 100 });
+
+    // newer status with meta.state wins over body
+    insertMessage(db, team.id, ada.row.id, null,
+      makeEnvelope({ id: 's2', team: 'dawn', from: 'Ada', to: { kind: 'team' }, act: 'status_update', body: 'ignored body', meta: { state: 'refactoring auth', progress: 0.5 }, ts: 200 }));
+    expect(latestStatusUpdate(db, ada.row.id)).toEqual({ state: 'refactoring auth', ts: 200 });
+
+    // a non-status_update message does not change the label
+    insertMessage(db, team.id, ada.row.id, null,
+      makeEnvelope({ id: 'm3', team: 'dawn', from: 'Ada', to: { kind: 'team' }, act: 'message', body: 'just chatting', ts: 300 }));
+    expect(latestStatusUpdate(db, ada.row.id)).toEqual({ state: 'refactoring auth', ts: 200 });
   });
 });
 

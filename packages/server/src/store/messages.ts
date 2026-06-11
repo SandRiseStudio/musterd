@@ -65,6 +65,23 @@ export function listInbox(db: Database, member: { id: string; team_id: string },
   return db.prepare<unknown[], MessageRow>(sql).all(...params);
 }
 
+/**
+ * The member's most recent `status_update` reduced to a roster label + when it was set.
+ * The label is `meta.state` (the SPEC field) or, if absent, the message body. Returns null
+ * if the member has never posted a status_update with any label text.
+ */
+export function latestStatusUpdate(db: Database, memberId: string): { state: string; ts: number } | null {
+  const row = db
+    .prepare<[string], { body: string; meta: string | null; ts: number }>(
+      "SELECT body, meta, ts FROM messages WHERE from_member = ? AND act = 'status_update' ORDER BY ts DESC, id DESC LIMIT 1",
+    )
+    .get(memberId);
+  if (!row) return null;
+  const metaState = row.meta ? (JSON.parse(row.meta) as Record<string, unknown>)['state'] : undefined;
+  const state = (typeof metaState === 'string' && metaState.trim() ? metaState : row.body).trim();
+  return state ? { state, ts: row.ts } : null;
+}
+
 export function listTeamMessages(db: Database, teamId: string, limit = 200): MessageRow[] {
   return db
     .prepare<[string, number], MessageRow>('SELECT * FROM messages WHERE team_id = ? ORDER BY ts ASC, id ASC LIMIT ?')

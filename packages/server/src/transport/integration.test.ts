@@ -178,6 +178,37 @@ describe('WebSocket', () => {
     n.close();
   });
 
+  it('roster activity reflects working from a status_update, online when present, offline otherwise', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, nickTok); // never connects → offline
+
+    // nick present but idle; Ada present and working.
+    const n = new TestWs();
+    const a = new TestWs();
+    await Promise.all([n.open(), a.open()]);
+    await n.hello('dawn', 'nick', nickTok, 'cli');
+    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+
+    a.send({
+      type: 'send',
+      envelope: { id: 'su1', v: PROTOCOL_VERSION, team: 'dawn', from: 'Ada', to: { kind: 'team' }, act: 'status_update', body: '', meta: { state: 'refactoring auth' }, ts: Date.now() },
+    });
+    await a.waitFor('ack');
+
+    const roster = await get('/teams/dawn/members', nickTok);
+    const by = (name: string) => roster.json.members.find((m: any) => m.name === name);
+    expect(by('Ada').activity).toBe('working');
+    expect(by('Ada').state).toBe('refactoring auth');
+    expect(by('nick').activity).toBe('online');
+    expect(by('nick').state).toBeNull();
+    expect(by('Lin').activity).toBe('offline');
+
+    n.close();
+    a.close();
+  });
+
   it('refuses a second live presence for the same member with member_busy', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
