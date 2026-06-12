@@ -94,6 +94,15 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - On clean WS close: `detach()` immediately + emit offline (if last presence). Don't wait for the reaper.
 - `status` transitions: a member is `online` if any presence row is fresh; `away` is only set explicitly by a client (`heartbeat` with `{status:'away'}` or HTTP presence ping) — the server never invents `away`. No fresh presence ⇒ `offline`.
 
+## Single-active + reclaim grace (v0.2 — ADR 010)
+
+- **One live Presence per Member.** `attach` refuses a second concurrent Presence for a Member that already holds a live one, with `member_busy` (HTTP 409 / WS `error`). This is the wire enforcement behind "a Member is an identity, not a session."
+- **Reclaim grace.** On detach (clean close or reap), the seat is held for `PRESENCE_TIMEOUT_MS` (45s) via a `held_until` marker (presence schema v2) so the *same* Member can rejoin without being refused. The reaper sweeps expired holds. This makes a flaky reconnect or a quick restart seamless while still freeing the seat promptly.
+
+## Roster activity (v0.2)
+
+- `listPresence`/roster `summarize` resolve a coarse `activity` per Member by the **two-clocks rule** (`store/activity.ts` `resolveActivity`): the liveness clock (fresh presence?) decides `offline` vs present; the status clock (latest `status_update`, via `latestStatusUpdate` — prefers `meta.state`, falls back to body) decides `online` (idle) vs `working`. The backing summary is returned as `state`, with `last_status_at` driving the CLI's `· <age>` staleness suffix. These are **additive** roster fields; a v0.1 reader ignoring them still conforms.
+
 ## Inbox delivery semantics
 
 - **At-least-once, cursor-based, no per-recipient copies.** The `messages` table is the single log. A member's inbox is a *query* (see `listInbox`) filtered by their `inbox_cursors.last_read_ts`. "Mark read" advances the cursor.
@@ -115,4 +124,6 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - `routeEnvelope` persists + returns correct recipients for member/team/broadcast; bad act → `422 validation`.
 - Two WS clients on team `dawn`: a `send` from Ada to Lin yields a `deliver` to Lin and an `ack` to Ada; Lin offline → message appears in Lin's `inbox` fetch with correct unread count.
 - Presence: attach → online in roster; stop heartbeats → reaper offlines within ~`timeout+interval`; clean close → immediate offline.
+- Single-active: a second concurrent `attach` for the same Member → `member_busy`; after detach, a re-attach within the 45s grace succeeds (the `held_until` seat is reclaimed, not refused).
+- Activity: a present Member with a recent `status_update` resolves to `working` (with `state`/`last_status_at`); present without one → `online`; no fresh presence → `offline`.
 - `seedDawn` produces the exact fixture in `01-data-model.md`.
