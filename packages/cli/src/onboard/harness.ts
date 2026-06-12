@@ -17,6 +17,13 @@ export interface ConfigureResult {
   activation: string;
   /** One line on the binding's reach — e.g. "wired into this folder only". */
   scope?: string;
+  /**
+   * A file written inside the working tree that now contains the member's token (plaintext).
+   * Set this when the config lives in the repo (e.g. `.cursor/mcp.json`) so init can warn and
+   * offer to .gitignore it. Omit when the secret lives outside the tree (e.g. Claude Code's
+   * `-s local` config in `~/.claude.json`), where there is nothing to accidentally commit.
+   */
+  secretPath?: string;
 }
 
 /** A pluggable onboarding adapter for one agent harness. */

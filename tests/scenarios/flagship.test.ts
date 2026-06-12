@@ -85,6 +85,12 @@ describe('Scenario C — flagship 3-pane', () => {
     await lin.join();
     await delay(150); // let both background sockets settle
 
+    // A second session claiming Ada's seat is refused (single-active, M3 / ADR 010): one identity,
+    // one live occupant. This is the bug v0.2 fixed — N sessions can no longer wear one name.
+    const adaDup = client('Ada', 'claude-code');
+    await expect(adaDup.join()).rejects.toThrow(/member_busy/);
+    adaDup.close();
+
     // nick (human) is present and watching: roster shows all three online on their surfaces.
     await api('POST', '/teams/dawn/presence', { surface: 'cli', status: 'online' }, tok['nick']);
     const roster = await api('GET', '/teams/dawn/members', undefined, tok['nick']);
@@ -98,6 +104,13 @@ describe('Scenario C — flagship 3-pane', () => {
     // 1. Both agents split work and post status.
     await agentSend(ada, 'Ada', { act: 'status_update', body: 'taking the auth backend', meta: { progress: 0.1 } });
     await agentSend(lin, 'Lin', { act: 'status_update', body: 'taking the login UI', meta: { progress: 0.1 } });
+
+    // The watch pane reads live activity: a present member with a status_update resolves to
+    // `working` (two-clocks rule), with the task summary in `state`. This is what nick sees move.
+    const activity = await api('GET', '/teams/dawn/members', undefined, tok['nick']);
+    const adaRow = activity.json.members.find((m: any) => m.name === 'Ada');
+    expect(adaRow.activity).toBe('working');
+    expect(adaRow.state).toContain('auth backend');
 
     // 2. Lin hits a blocker and asks the team for help (so the whole team — and nick — sees it).
     const help = await agentSend(lin, 'Lin', {

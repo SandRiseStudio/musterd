@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { existsSync, readFileSync, appendFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import type { MemberSummary } from '@musterd/protocol';
@@ -253,6 +255,7 @@ export async function runInit(): Promise<number> {
     activation = result.activation;
     sc.stop(`${chosen.label} configured ${pc.dim(`(${result.target})`)}`);
     if (result.scope) p.log.info(pc.dim(result.scope));
+    if (result.secretPath) await warnSecretConfig(result.secretPath);
   } catch (err) {
     sc.stop(pc.red(`Could not configure ${chosen.label}: ${(err as Error).message}`));
     p.note(printManual(chosen, entry), 'Configure it manually');
@@ -335,6 +338,37 @@ async function waitForPresence(http: HttpClient, team: string, name: string, sec
     await delay(1000);
   }
   return false;
+}
+
+/**
+ * A harness config we just wrote into the working tree carries the member's token in plaintext.
+ * Warn, and if there's a `.gitignore` here that doesn't already cover it, offer to add the line —
+ * so the token isn't committed. Best-effort: never throws, only nudges.
+ */
+async function warnSecretConfig(secretPath: string): Promise<void> {
+  const rel = relative(process.cwd(), secretPath);
+  // Only manage .gitignore for files that actually live under this folder.
+  const inTree = rel && !rel.startsWith('..');
+  p.log.warn(
+    `${pc.yellow(rel || secretPath)} now holds ${pc.bold(`${pc.cyan('this agent')}'s access token`)} in plaintext — don't commit it.`,
+  );
+  if (!inTree) return;
+  const gitignore = join(process.cwd(), '.gitignore');
+  if (!existsSync(gitignore)) {
+    p.log.info(pc.dim(`No .gitignore here — if this folder is a git repo, add a line ignoring ${rel}.`));
+    return;
+  }
+  const body = readFileSync(gitignore, 'utf8');
+  const lines = body.split('\n').map((l) => l.trim());
+  if (lines.includes(rel) || lines.includes(`/${rel}`)) {
+    p.log.info(pc.dim(`Already ignored by .gitignore — you're covered.`));
+    return;
+  }
+  const add = guard(await p.confirm({ message: `Add ${pc.yellow(rel)} to .gitignore so the token isn't committed?`, initialValue: true }));
+  if (!add) return;
+  const prefix = body.length && !body.endsWith('\n') ? '\n' : '';
+  appendFileSync(gitignore, `${prefix}\n# musterd MCP config — contains a member token\n${rel}\n`);
+  p.log.success(`Added ${pc.yellow(rel)} to .gitignore.`);
 }
 
 function printManual(harness: Harness, entry: { command: string; args: string[]; env: Record<string, string> }): string {
