@@ -2,7 +2,7 @@
 
 > **Living document.** This is the working plan of record: what the original plan called for, what has shipped, where we deviated on purpose, and what remains. It supersedes the original planning file (`.cursor/plans/agent_team_coordination_layer_22ae2015.plan.md`) as the thing to consult for "where are we and what's next." Deviations from *this* doc follow the same ADR protocol as everything else (`AGENTS.md`).
 >
-> Last reconciled: **2026-06-12** (v0.2 **M4 done** — `SPEC.md` promoted to `musterd/0.2`; `03/04/05` architecture docs updated for the dormant-by-default adapter / six tools / shutdown contract / single-active + activity / intent-led `init`; *team = standing roster* recorded in the canonical glossary; flagship demo + Scenario C now show the refused duplicate + `working`; and `init` warns + offers to `.gitignore` token-bearing in-tree configs. M3 core + tail landed earlier via PR #1.) **Only open M3 item: the `provenance`/`where`-on-attach seed.** Next: the **launch tail** (§4.B — record the demo GIF, publish, launch post).
+> Last reconciled: **2026-06-12** (v0.2 **M4 done + launch tail mostly done** — all four `@musterd/*` packages published to npm at v0.0.1; launch post drafted at `docs/launch-post.md`; `publishConfig` added to the three packages missing it. Only remaining launch item: record the flagship demo GIF.) **Only open M3 item: the `provenance`/`where`-on-attach seed.** One remaining launch task: the demo GIF (manual recording).
 
 ---
 
@@ -75,9 +75,10 @@ In priority order. The governing sequence (per ADR 007) is: **v0.2 minimal trust
    - ~~**M4 tail:** `examples/flagship-demo.mjs` + Scenario C (refused duplicate + `working` in the watch pane); `.gitignore`/warn on secret-bearing harness configs.~~ ✅ — Scenario C now asserts a 2nd Ada session is refused (`member_busy`) and that a present member with a `status_update` resolves to `working` (`state` carries the task); the runnable demo joins explicitly, prints the refused-duplicate line + a `musterd status` roster snapshot showing `working`. `ConfigureResult.secretPath` (set for Cursor's in-tree `.cursor/mcp.json`, not Claude Code's `~/.claude.json`) drives an `init` warning + offer to `.gitignore` the token-bearing file; the repo `.gitignore` already lists `.cursor/mcp.json`. README quickstart already reflected explicit activation (PR #2). 62 tests green.
 
 ### B. Launch tail (after v0.2)
-- ~~**Reserve the npm name**~~ ✅ **done** — `@musterd/cli@0.0.0` published under the `musterd` org (2026-06-11); the org reserves the whole `@musterd/*` scope. Unscoped `musterd` was blocked by `multer` (ADR 009). The *real* CLI still can't publish until its `@musterd/*` workspace deps are published (a v0.2/launch task); when it does, it supersedes the `0.0.0` placeholder.
-- **Record the flagship demo** (`docs/demo.md` form 2 or 3) → `docs/assets/flagship.gif`; fixes the README's currently-broken image.
-- **Publish** the four packages; **launch post** (positioning vs MCP/A2A/Fleet/CrewAI is already written in the README).
+- ~~**Reserve the npm name**~~ ✅ **done** — `@musterd/cli@0.0.0` published 2026-06-11; org reserves `@musterd/*` scope.
+- ~~**Publish** the four packages~~ ✅ **done** (2026-06-12) — `@musterd/protocol@0.0.1`, `@musterd/server@0.0.1`, `@musterd/mcp@0.0.1`, `@musterd/cli@0.0.1` all live on npm. `publishConfig.access=public` added to the three packages that were missing it.
+- ~~**Launch post**~~ ✅ **drafted** — `docs/launch-post.md` has short (X/Bluesky), medium (HN Show HN), and long (dev.to/blog) forms.
+- **Record the flagship demo** (`docs/demo.md` form 2 or 3) → `docs/assets/flagship.gif`; fixes the README's currently-broken image. Manual step: `asciinema rec flagship.cast -c "node examples/flagship-demo.mjs"` then `agg flagship.cast docs/assets/flagship.gif`.
 
 ### C. Hygiene (non-blocking, schedule opportunistically)
 - Wire vitest coverage and either enforce or amend the `06-testing.md` gates.
