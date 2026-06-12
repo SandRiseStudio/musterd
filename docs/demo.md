@@ -10,11 +10,12 @@ It exists in three forms:
    pnpm -r build
    node examples/flagship-demo.mjs
    ```
-   Record a GIF/cast with e.g. [asciinema](https://asciinema.org):
+   Record a GIF with [vhs](https://github.com/charmbracelet/vhs):
    ```bash
-   asciinema rec flagship.cast -c "node examples/flagship-demo.mjs"
-   # then: agg flagship.cast docs/assets/flagship.gif   # asciinema gif generator
+   brew install vhs
+   vhs docs/flagship.tape   # writes docs/assets/flagship.gif
    ```
+   The tape file (`docs/flagship.tape`) is already checked in. The demo script runs fully automatically — no interaction needed.
 3. **The real 3-pane version** (for the launch recording) — three real terminals against one daemon:
    ```bash
    # pane 0: the daemon

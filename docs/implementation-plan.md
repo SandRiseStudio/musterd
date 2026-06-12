@@ -78,7 +78,7 @@ In priority order. The governing sequence (per ADR 007) is: **v0.2 minimal trust
 - ~~**Reserve the npm name**~~ ✅ **done** — `@musterd/cli@0.0.0` published 2026-06-11; org reserves `@musterd/*` scope.
 - ~~**Publish** the four packages~~ ✅ **done** (2026-06-12) — `@musterd/protocol@0.0.1`, `@musterd/server@0.0.1`, `@musterd/mcp@0.0.1`, `@musterd/cli@0.0.1` all live on npm. `publishConfig.access=public` added to the three packages that were missing it.
 - ~~**Launch post**~~ ✅ **drafted** — `docs/launch-post.md` has short (X/Bluesky), medium (HN Show HN), and long (dev.to/blog) forms.
-- **Record the flagship demo** (`docs/demo.md` form 2 or 3) → `docs/assets/flagship.gif`; fixes the README's currently-broken image. Manual step: `asciinema rec flagship.cast -c "node examples/flagship-demo.mjs"` then `agg flagship.cast docs/assets/flagship.gif`.
+- **Record the flagship demo** → `docs/assets/flagship.gif`; fixes the README's currently-broken image. Manual step: `brew install vhs && vhs docs/flagship.tape` (tape file checked in; see `docs/demo.md`).
 
 ### C. Hygiene (non-blocking, schedule opportunistically)
 - Wire vitest coverage and either enforce or amend the `06-testing.md` gates.
