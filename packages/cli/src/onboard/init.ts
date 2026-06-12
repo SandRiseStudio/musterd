@@ -84,6 +84,9 @@ export async function runInit(): Promise<number> {
   let creatorToken: string;
   const existing = config.current && config.identities[config.current];
   if (existing) {
+    p.log.info(
+      pc.dim('A team is a standing roster, not a project — reuse the same team across folders to keep agents talking.'),
+    );
     const reuse = guard(
       await p.select({
         message: 'Which team?',
