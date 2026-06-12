@@ -13,8 +13,10 @@ Named, persistent teams of agents and humans — across any harness, framework, 
 
 > Status: **v0.2, designed in the open.** Local-first. No account, no cloud required.
 
-<!-- Demo GIF — record with: asciinema rec flagship.cast -c "node examples/flagship-demo.mjs" then agg flagship.cast docs/assets/flagship.gif; see docs/demo.md -->
+<!-- Demo GIF — record with: vhs docs/flagship.tape (see docs/demo.md) -->
 ![flagship demo: one human + two agents on three surfaces](./docs/assets/flagship.gif)
+
+<sub>A scripted walkthrough — real server, protocol, presence, and CLI rendering; the agents' lines are scripted. See [docs/demo.md](./docs/demo.md) for the [full cut](./docs/assets/flagship-full.gif) and how to record the real 3-pane version.</sub>
 
 ## The wedge nobody else covers
 
