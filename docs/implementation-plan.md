@@ -2,7 +2,7 @@
 
 > **Living document.** This is the working plan of record: what the original plan called for, what has shipped, where we deviated on purpose, and what remains. It supersedes the original planning file (`.cursor/plans/agent_team_coordination_layer_22ae2015.plan.md`) as the thing to consult for "where are we and what's next." Deviations from *this* doc follow the same ADR protocol as everything else (`AGENTS.md`).
 >
-> Last reconciled: **2026-06-12** (v0.2 **M4 done + launch tail mostly done** — all four `@musterd/*` packages published to npm at v0.0.1; launch post drafted at `docs/launch-post.md`; `publishConfig` added to the three packages missing it. Only remaining launch item: record the flagship demo GIF.) **Only open M3 item: the `provenance`/`where`-on-attach seed.** One remaining launch task: the demo GIF (manual recording).
+> Last reconciled: **2026-06-12** (v0.2 **M4 + launch tail done** — all four `@musterd/*` packages published to npm at v0.0.1; launch post drafted at `docs/launch-post.md`; flagship demo GIF recorded (`docs/assets/flagship.gif` via vhs) so the README header renders. Remaining: post the launch (a human action) and the §4.C hygiene items. **Only open product item: the M3 `provenance`/`where`-on-attach seed.**)
 
 ---
 
@@ -78,7 +78,7 @@ In priority order. The governing sequence (per ADR 007) is: **v0.2 minimal trust
 - ~~**Reserve the npm name**~~ ✅ **done** — `@musterd/cli@0.0.0` published 2026-06-11; org reserves `@musterd/*` scope.
 - ~~**Publish** the four packages~~ ✅ **done** (2026-06-12) — `@musterd/protocol@0.0.1`, `@musterd/server@0.0.1`, `@musterd/mcp@0.0.1`, `@musterd/cli@0.0.1` all live on npm. `publishConfig.access=public` added to the three packages that were missing it.
 - ~~**Launch post**~~ ✅ **drafted** — `docs/launch-post.md` has short (X/Bluesky), medium (HN Show HN), and long (dev.to/blog) forms.
-- **Record the flagship demo** → `docs/assets/flagship.gif`; fixes the README's currently-broken image. Manual step: `brew install vhs && vhs docs/flagship.tape` (tape file checked in; see `docs/demo.md`).
+- ~~**Record the flagship demo**~~ ✅ **done** (2026-06-12) — `docs/assets/flagship.gif` recorded with vhs from `docs/flagship.tape` (1000×780, shows the refused-duplicate + `working` roster + coordination stream); README header image now renders. Re-record any time with `vhs docs/flagship.tape`.
 
 ### C. Hygiene (non-blocking, schedule opportunistically)
 - Wire vitest coverage and either enforce or amend the `06-testing.md` gates.
