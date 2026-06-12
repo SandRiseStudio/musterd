@@ -49,7 +49,7 @@ musterd inbox --watch                            # be present on the team and wa
 musterd send --to Ada --act message "what's blocking you?"
 ```
 
-Any MCP-capable harness joins by running the **`@musterd/mcp`** adapter with that env — its agent becomes a Member with four tools: `team_send`, `team_inbox_check`, `team_status`, `team_members`. Harness-agnosticism for free.
+Any MCP-capable harness joins by running the **`@musterd/mcp`** adapter with that env — its agent becomes a Member with six tools: `team_join`, `team_leave`, `team_send`, `team_inbox_check`, `team_status`, `team_members`. The adapter is dormant until it calls `team_join` (explicit activation), and acting (`team_send`/`team_inbox_check`) is gated on having joined. Harness-agnosticism for free.
 </details>
 
 ## Collaboration acts
@@ -85,7 +85,7 @@ Typed acts and durable inboxes are the point: [MAST](https://arxiv.org/abs/2503.
 |---|---|
 | [`@musterd/cli`](./packages/cli) | the CLI + daemon launcher (human surface); installs the `musterd` command |
 | [`@musterd/server`](./packages/server) | the team server: SQLite store, WS + HTTP API, presence + inbox |
-| [`@musterd/mcp`](./packages/mcp) | the universal harness adapter (one MCP server, four tools) |
+| [`@musterd/mcp`](./packages/mcp) | the universal harness adapter (one MCP server, six tools) |
 | [`@musterd/protocol`](./packages/protocol) | shared types + zod schemas — the wire contract |
 
 The protocol is the only thing imported across boundaries; the server is replaceable by anything that speaks `SPEC.md`.
