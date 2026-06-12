@@ -1,6 +1,6 @@
 # Design — the agent primer (`musterd init` writes standing context)
 
-> **Status:** spec, ready to implement. Grounds out the 🔴 onboarding-gap finding in `docs/implementation-plan.md` §4.A item 3. Decision recorded in ADR 012.
+> **Status:** ✅ implemented (`packages/cli/src/onboard/primer.ts` + init wiring; tests in `onboard/onboard.test.ts`). The **collision guard** (§7) remains unbuilt. Grounds out the 🔴 onboarding-gap finding in `docs/implementation-plan.md` §4.A item 3. Decision recorded in ADR 012.
 
 ## 1. Problem
 

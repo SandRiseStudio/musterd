@@ -10,6 +10,7 @@ import { renderBanner } from '../render/rows.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
 import { buildEntry } from './mcpEntry.js';
+import { renderPrimer, upsertPrimer } from './primer.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -262,6 +263,23 @@ export async function runInit(): Promise<number> {
     return 1;
   }
 
+  // 5b) Seed the agent primer so the agent knows the team working-loop (ADR 012) ----------
+  const writePrimer = guard(
+    await p.confirm({
+      message: `Write an ${pc.bold('AGENTS.md')} primer so ${pc.cyan(name)} knows how to use musterd?`,
+      initialValue: true,
+    }),
+  );
+  if (writePrimer) {
+    try {
+      const { path, action } = upsertPrimer(process.cwd(), renderPrimer({ member: name, team, role }));
+      const verb = action === 'created' ? 'Wrote' : action === 'appended' ? 'Added the primer to' : 'Updated';
+      p.log.success(`${verb} ${pc.bold('AGENTS.md')} ${pc.dim(`(${path})`)} — ${pc.cyan(name)} now has the team playbook.`);
+    } catch (err) {
+      p.log.warn(`Couldn't write AGENTS.md (${(err as Error).message}) — paste the primer from \`musterd init\`'s manual output if you want it.`);
+    }
+  }
+
   // 6) Wait for the agent to actually join ----------------------------------
   p.log.info(`${pc.bold('Next:')} ${activation}.`);
   p.log.info(
@@ -375,9 +393,12 @@ function printManual(harness: Harness, entry: { command: string; args: string[];
   const envLines = Object.entries(entry.env)
     .map(([k, v]) => `  ${k}=${v}`)
     .join('\n');
+  // Also surface the primer so the manual path isn't worse off — the agent still needs to know the playbook.
+  const primer = renderPrimer({ member: entry.env['MUSTERD_MEMBER'] ?? 'your agent', team: entry.env['MUSTERD_TEAM'] ?? 'your team' });
+  const primerNote = `\n\nThen add this to ${pc.bold('AGENTS.md')} in this folder so the agent knows the playbook:\n${primer}`;
   if (harness.id === 'claude-code') {
     const e = Object.entries(entry.env).map(([k, v]) => `-e ${k}=${v}`).join(' ');
-    return `Run:\n  claude mcp add musterd -s local ${e} -- ${entry.command} ${entry.args.join(' ')}`;
+    return `Run:\n  claude mcp add musterd -s local ${e} -- ${entry.command} ${entry.args.join(' ')}${primerNote}`;
   }
-  return `Add to .cursor/mcp.json under "mcpServers":\n  "musterd": {\n    "command": "${entry.command}",\n    "args": ${JSON.stringify(entry.args)},\n    "env": { …see below… }\n  }\n${envLines}`;
+  return `Add to .cursor/mcp.json under "mcpServers":\n  "musterd": {\n    "command": "${entry.command}",\n    "args": ${JSON.stringify(entry.args)},\n    "env": { …see below… }\n  }\n${envLines}${primerNote}`;
 }

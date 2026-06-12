@@ -24,9 +24,10 @@ src/
     theme.ts          // ANSI roles from brand.md (online dot, member colors, act badges)
     rows.ts           // renderMessageRow, renderStatusTable, renderBanner, renderPresence
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
-    init.ts           // the flow: daemon -> team -> intent -> where-it-runs -> configure -> wait-to-join
-    harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope
+    init.ts           // the flow: daemon -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
+    harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
     mcpEntry.ts       // resolve how to launch @musterd/mcp + build the binding env
+    primer.ts         // renderPrimer + idempotent upsertPrimer → AGENTS.md agent primer (ADR 012)
     harnesses/
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
@@ -74,7 +75,8 @@ Interactive first-run onboarding (requires a TTY; non-TTY prints guidance and ex
 5. **Name + mint** — name the agent (no spaces), optional role, `team add` mints it.
 6. **Activation** — offer `MUSTERD_AUTOJOIN=1` per-binding (*"Auto-join the team when `<name>` starts?"*). If off, the agent joins when it calls `team_join` in-session. The agent is **dormant until it joins** (see `05-mcp.md`).
 7. **Configure** — with confirmation, write the target's MCP config (`claude mcp add -s local` / `.cursor/mcp.json`). `ConfigureResult.scope` prints a per-folder caveat: *"wired into this folder only (`<path>`) — another project needs its own `musterd init`, and a second agent needs its own folder."* If the config lands **inside the working tree** with the token in plaintext (`ConfigureResult.secretPath` — e.g. Cursor's `.cursor/mcp.json`; Claude Code's `-s local` config lives in `~/.claude.json` *outside* the repo, so no warning), init warns that the file holds the member's token and offers to add it to `.gitignore` so it isn't committed.
-8. **Wait-to-join** — poll the roster, live spinner that resolves when the agent's Presence appears (or a no-rush note if it doesn't within the window).
+8. **Agent primer** — with confirmation (default yes), write a musterd primer into the folder's `AGENTS.md` (`onboard/primer.ts`; ADR 012 / `docs/design/agent-primer.md`). This is the fix for the onboarding gap: a fresh agent that only *has* the `team_*` tools doesn't know it's on a team or the working-loop, so init seeds the cross-tool agent-context file both Claude Code and Cursor read every session with the member's identity and the loop (join at session start → `team_inbox_check` at task boundaries → `status_update`/`request_help`/`handoff`/`accept`). The block is **marker-delimited** (`<!-- musterd:start -->`…`<!-- musterd:end -->`), so `upsertPrimer` is idempotent and never clobbers the user's own `AGENTS.md` content (create / append-below-prose / update-in-place). The manual-setup printout (`printManual`) includes the block too.
+9. **Wait-to-join** — poll the roster, live spinner that resolves when the agent's Presence appears (or a no-rush note if it doesn't within the window).
 
 ### `musterd serve [--port 4849] [--host 127.0.0.1]`
 Starts the daemon in the foreground. Prints the banner (`render/banner`) + `listening on ws://host:port`. Exit 0 on clean shutdown (SIGINT).
