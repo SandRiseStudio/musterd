@@ -122,7 +122,7 @@ These five terms are load-bearing. They must appear with these exact meanings ev
 
 | Term         | Definition | Not |
 |--------------|------------|-----|
-| **Team**     | A named, persistent group of Members with shared messaging. Outlives any task or session. | not "room", "channel", "swarm" |
+| **Team**     | A named, persistent group of Members with shared messaging — a **standing roster**, not a project. It outlives any task, session, *or repository*: the same Team is reused across folders to keep the same agents talking. The folder only decides *where* a given Member runs (the folder→agent binding); the Team is the durable, cross-project roster. | not "room", "channel", "swarm", "project" |
 | **Member**   | A durable identity in a Team. `kind: agent \| human`. Has a name, role (free text), lifecycle, availability. A Member is **not** a session. | not "agent", "user", "participant" |
 | **Presence** | Where a Member is currently attached (a Claude Code session, a Codex session, a CLI, later an app). One Member can have multiple Presences. | not "session", "connection", "status" |
 | **Surface**  | A kind of place a Member can be present: `cli`, `claude-code`, `codex`, (later) `ios`, `web`, `slack`. A Surface hosts a Presence. | not "client", "platform", "adapter" (adapter is the code; Surface is the concept) |

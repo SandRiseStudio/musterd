@@ -24,12 +24,12 @@ src/
     theme.ts          // ANSI roles from brand.md (online dot, member colors, act badges)
     rows.ts           // renderMessageRow, renderStatusTable, renderBanner, renderPresence
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
-    init.ts           // the flow: daemon -> team -> detect harness -> configure -> wait-to-join
-    harness.ts        // Harness adapter interface (detect + configure)
+    init.ts           // the flow: daemon -> team -> intent -> where-it-runs -> configure -> wait-to-join
+    harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope
     mcpEntry.ts       // resolve how to launch @musterd/mcp + build the binding env
     harnesses/
-      index.ts        // registry of supported harnesses (pluggable)
-      claudeCode.ts   // detect/configure via the `claude mcp` CLI
+      index.ts        // registry of supported run targets (pluggable)
+      claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
       cursor.ts       // detect/configure via .cursor/mcp.json (ADR 006 adds the `cursor` surface)
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts)
@@ -62,7 +62,19 @@ src/
 All commands accept global `--team <slug>`, `--server <url>`, `--json` (machine output, no color), `--no-color`.
 
 ### `musterd init`
-Interactive first-run onboarding (requires a TTY; non-TTY prints guidance and exits 2). Flow: (1) check the daemon's `/health`, offering to spawn `musterd serve` detached if it's down; (2) reuse the current team or create one; (3) detect installed harnesses (`onboard/harnesses/`) and whether musterd is already configured in each; (4) pick a harness, name the agent, mint it via `team add`; (5) with confirmation, write the harness's MCP config (`claude mcp add` / `.cursor/mcp.json`); (6) poll the roster and show a live spinner that resolves when the agent's Presence appears. Built on `@clack/prompts` (ADR 005). Read-only `detect()`; only `configure()` writes, and only after a confirm.
+Interactive first-run onboarding (requires a TTY; non-TTY prints guidance and exits 2). Built on `@clack/prompts` (ADR 005). Read-only `detect()`; only `configure()` writes, and only after a confirm. The flow leads with **intent**, not jargon (2026-06-12 dogfood — the old "what harness is your agent in?" opener buried the point):
+
+1. **Daemon** — check `/health`, offering to spawn `musterd serve` detached if it's down.
+2. **Team** — reuse the current team or create one. A dim hint states the conceptual commitment: *"A team is a standing roster, not a project — reuse the same team across folders to keep agents talking."* (See `00-overview.md` / `brand.md` §5.)
+3. **Intent** — *what are you here to do on `<team>`?* Three real first-run postures (`human-agent-dynamics.md` §1–2):
+   - **Add a new agent** — connect a coding agent as a teammate (the main path).
+   - **Activate an existing member** — reconnect a member that isn't currently live. **v0.2 stub:** reattaching a member needs the seat-claim model (creator-authorized token reissue), which is the v0.3 security surface — so this branch surfaces an honest *"coming in v0.3"* note and offers to add a new agent instead. The framing is the v0.2 down-payment.
+   - **Just me — watch the team live** — the supervising posture: the human is already a member (joined at team create), so nothing is minted; it routes to `inbox --watch` / `status`.
+4. **Where the agent runs** — detect run targets (`onboard/harnesses/`) and whether musterd is already configured in each. UI copy avoids "harness"/"tool" jargon: *"Where does this agent run?"*, *"detecting agent tools"*. Each option's hint distinguishes set-up state (*"not set up yet — will be configured"* vs *"musterd already set up here — will be repointed"*). Selecting an **already-configured** target shows a **Heads up** note: re-running mints a *new* member and repoints the target at it (a repeat name is refused by the conflict guard, so the warning is accurate); the previous member stays on the roster.
+5. **Name + mint** — name the agent (no spaces), optional role, `team add` mints it.
+6. **Activation** — offer `MUSTERD_AUTOJOIN=1` per-binding (*"Auto-join the team when `<name>` starts?"*). If off, the agent joins when it calls `team_join` in-session. The agent is **dormant until it joins** (see `05-mcp.md`).
+7. **Configure** — with confirmation, write the target's MCP config (`claude mcp add -s local` / `.cursor/mcp.json`). `ConfigureResult.scope` prints a per-folder caveat: *"wired into this folder only (`<path>`) — another project needs its own `musterd init`, and a second agent needs its own folder."*
+8. **Wait-to-join** — poll the roster, live spinner that resolves when the agent's Presence appears (or a no-rush note if it doesn't within the window).
 
 ### `musterd serve [--port 4849] [--host 127.0.0.1]`
 Starts the daemon in the foreground. Prints the banner (`render/banner`) + `listening on ws://host:port`. Exit 0 on clean shutdown (SIGINT).
@@ -84,7 +96,7 @@ Builds an Envelope, `POST /teams/:slug/messages` (or over the live WS if `--watc
 - With `--watch`: opens WS, holds presence (heartbeats every 15s), streams `deliver` frames as rows live; `◉ watching` indicator. This is the human's "be present on the team" mode and the left/right pane of the flagship demo. Ctrl-C exits 0. Output: `cmd/inbox-watch`.
 
 ### `musterd status`
-`GET /teams/:slug/members`. Renders the roster table: `MEMBER | KIND | ROLE | PRESENCE | LIFECYCLE`, 80-col aligned, presence dot + surface per `brand.md`. Output: `cmd/status`.
+`GET /teams/:slug/members`. Renders the roster table: `MEMBER | KIND | ROLE | LIFECYCLE | ACTIVITY` (v0.2 M2 — the old `PRESENCE` column was renamed **ACTIVITY** and moved **last** because its `working: <status> · <age>` label is unbounded and free-flowing, so a long label can't collide with later columns; `ce89bf1`). ACTIVITY resolves via the two-clocks rule (`store/activity.ts`): liveness → `offline`/present, latest `status_update` → `online`/`working`, with the `· <age>` staleness suffix shown only once stale ≥5m. 80-col aligned, presence dot + surface per `brand.md`. Output: `cmd/status` *(the Figma `cmd/status` frame still shows the old `PRESENCE` column + order — frame drift tracked under ADR 008 lockstep; `disabled`/`archived` badges skipped, they need schema + verbs).*
 
 ## Exit codes (must match the State frames' annotations)
 

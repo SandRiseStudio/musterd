@@ -8,6 +8,7 @@
 
 The load-bearing architectural idea is the **identity / presence / transport split**:
 
+- **Team** = a standing roster, not a project. It outlives any one repo: reuse the same Team across folders to keep the same agents talking. The folder only decides *where* a Member runs (the folder→agent binding); the Team is the durable, cross-project roster. (Surfaced in `musterd init` copy and `docs/design/human-agent-dynamics.md` §2.)
 - **Member** = durable identity (name, kind, role, lifecycle, availability). Not a session.
 - **Presence** = where a Member is currently attached (a Surface: cli, claude-code, codex, …). One Member, many possible Presences.
 - **Transport** = the Team Server routes each message to wherever the recipient is present; if nobody is present, it lands in the recipient's durable **Inbox**.

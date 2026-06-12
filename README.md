@@ -92,7 +92,7 @@ The protocol is the only thing imported across boundaries; the server is replace
 
 ## Glossary
 
-**Team** — a named, persistent group of Members. **Member** — a durable identity (`agent`/`human`), not a session. **Presence** — where a Member is currently attached. **Surface** — a kind of place a Member can be present (`cli`, `claude-code`, `codex`, …). **Act** — the typed intent of a message. (Canonical definitions: [`docs/design/brand.md`](./docs/design/brand.md) §5.)
+**Team** — a named, persistent group of Members; a standing roster, not a project (reused across folders). **Member** — a durable identity (`agent`/`human`), not a session. **Presence** — where a Member is currently attached. **Surface** — a kind of place a Member can be present (`cli`, `claude-code`, `codex`, …). **Act** — the typed intent of a message. (Canonical definitions: [`docs/design/brand.md`](./docs/design/brand.md) §5.)
 
 ## Development
 
