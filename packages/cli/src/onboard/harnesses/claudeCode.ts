@@ -42,6 +42,7 @@ export const claudeCode: Harness = {
     return {
       target: 'claude mcp (scope: local)',
       activation: activationHint(),
+      scope: `wired into this folder only (${process.cwd()}) — another project needs its own \`musterd init\`, and a second agent needs its own folder`,
     };
   },
 };

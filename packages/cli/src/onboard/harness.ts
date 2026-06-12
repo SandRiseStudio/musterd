@@ -15,6 +15,8 @@ export interface ConfigureResult {
   target: string;
   /** Anything the user must do to activate it (e.g. "restart Cursor"). */
   activation: string;
+  /** One line on the binding's reach — e.g. "wired into this folder only". */
+  scope?: string;
 }
 
 /** A pluggable onboarding adapter for one agent harness. */
