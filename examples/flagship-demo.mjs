@@ -5,8 +5,8 @@
 //
 // Build first: pnpm -r build
 import { createServer, openDb } from '../packages/server/dist/index.js';
-import { MusterdClient, bind } from '../packages/mcp/dist/index.js';
-import { renderMessageRow, renderBanner } from '../packages/cli/dist/render/rows.js';
+import { MusterdClient } from '../packages/mcp/dist/index.js';
+import { renderMessageRow, renderBanner, renderStatusTable } from '../packages/cli/dist/render/rows.js';
 import { makeEnvelope } from '../packages/protocol/dist/index.js';
 import { ulid } from 'ulid';
 
@@ -35,11 +35,26 @@ async function main() {
   const ada = await api('POST', '/teams/dawn/members', { name: 'Ada', kind: 'agent', role: 'backend' }, team.token);
   const lin = await api('POST', '/teams/dawn/members', { name: 'Lin', kind: 'agent', role: 'frontend' }, team.token);
 
-  // The two agents attach via the MCP adapter, on different surfaces.
+  // The two agents attach via the MCP adapter, on different surfaces, and explicitly join
+  // (M3: the adapter is dormant until it joins — registering the tools doesn't claim the seat).
   const adaC = new MusterdClient({ server: base, team: 'dawn', member: 'Ada', token: ada.token, surface: 'claude-code' });
   const linC = new MusterdClient({ server: base, team: 'dawn', member: 'Lin', token: lin.token, surface: 'codex' });
-  await bind(adaC);
-  await bind(linC);
+  await adaC.join();
+  await linC.join();
+  await delay(150);
+
+  // Single-active: a second session trying to be Ada is refused (the "N minds, one name" bug, fixed).
+  const adaDup = new MusterdClient({ server: base, team: 'dawn', member: 'Ada', token: ada.token, surface: 'claude-code' });
+  try {
+    await adaDup.join();
+  } catch (err) {
+    console.log('\x1b[2m── a 2nd session tried to be Ada ──\x1b[0m');
+    console.log('  \x1b[31m✗ ' + String(err.message).replace(/^member_busy:\s*/, '') + '\x1b[0m\n');
+  }
+  adaDup.close();
+
+  // nick is present and watching (what `musterd inbox --watch` does — holds a CLI presence).
+  await api('POST', '/teams/dawn/presence', { surface: 'cli', status: 'online' }, team.token);
 
   console.log('\x1b[2m── pane 3: nick — musterd inbox --watch (dawn) ◉ watching ──\x1b[0m\n');
 
@@ -55,6 +70,12 @@ async function main() {
 
   await post('Ada', ada.token, { kind: 'team' }, 'status_update', 'taking the auth backend', { progress: 0.1 });
   await post('Lin', lin.token, { kind: 'team' }, 'status_update', 'taking the login UI', { progress: 0.1 });
+
+  // A roster snapshot: both present agents now read as `working` (two-clocks rule) with their task.
+  const roster = await api('GET', '/teams/dawn/members', undefined, team.token);
+  console.log('\n\x1b[2m── musterd status (dawn) ──\x1b[0m');
+  console.log(renderStatusTable(roster.members) + '\n');
+
   const help = await post('Lin', lin.token, { kind: 'team' }, 'request_help', 'what shape is the /session response?', { blocking: true });
   await post('nick', team.token, { kind: 'team' }, 'message', 'good q — Ada owns that contract');
   await post('Ada', ada.token, { kind: 'team' }, 'accept', '{ token, expiresAt } — sending a typed client', { in_reply_to: help.id }, help.id);
