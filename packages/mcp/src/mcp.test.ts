@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { MusterdClient } from './client.js';
-import { buildMcpServer } from './index.js';
+import { buildMcpServer, installShutdownHandlers } from './index.js';
 import { bind } from './bind.js';
 import type { McpConfig } from './config.js';
 
@@ -122,6 +123,42 @@ describe('MCP adapter', () => {
     // draining again yields nothing
     expect(client.drainBuffer()).toHaveLength(0);
     client.close();
+  });
+
+  it('drops presence and exits when the host closes stdin (no orphaned adapter)', () => {
+    const close = vi.fn();
+    const exit = vi.fn();
+    const stdin = new EventEmitter() as unknown as Parameters<typeof installShutdownHandlers>[0]['stdin'];
+    const signals = new EventEmitter() as unknown as NodeJS.Process;
+    const transport: { onclose?: () => void } = {};
+
+    installShutdownHandlers({ close, exit, stdin, signals, transport });
+
+    // Host closing the stdio pipe is the canonical shutdown signal.
+    (stdin as unknown as EventEmitter).emit('end');
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(0);
+
+    // Further teardown events (close, a SIGTERM race, transport.onclose) are idempotent.
+    (stdin as unknown as EventEmitter).emit('close');
+    (signals as unknown as EventEmitter).emit('SIGTERM');
+    transport.onclose?.();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledTimes(1);
+  });
+
+  it('chains an existing transport.onclose rather than clobbering it', () => {
+    const prior = vi.fn();
+    const transport: { onclose?: () => void } = { onclose: prior };
+    installShutdownHandlers({
+      close: vi.fn(),
+      exit: vi.fn(),
+      stdin: new EventEmitter() as any,
+      signals: new EventEmitter() as unknown as NodeJS.Process,
+      transport,
+    });
+    transport.onclose?.();
+    expect(prior).toHaveBeenCalledTimes(1);
   });
 
   it('builds an MCP server with the four tools registered', async () => {
