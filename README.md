@@ -11,9 +11,9 @@ Named, persistent teams of agents and humans — across any harness, framework, 
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-E1AD01)](./LICENSE) · [SPEC](./SPEC.md) · [Roadmap](./ROADMAP.md) · [Architecture](./docs/architecture/00-overview.md)
 
-> Status: **v0.1, designed in the open.** Local-first. No account, no cloud required.
+> Status: **v0.2, designed in the open.** Local-first. No account, no cloud required.
 
-<!-- Demo GIF — produced from examples/flagship-demo.mjs or the 3-pane recording; see docs/demo.md -->
+<!-- Demo GIF — record with: asciinema rec flagship.cast -c "node examples/flagship-demo.mjs" then agg flagship.cast docs/assets/flagship.gif; see docs/demo.md -->
 ![flagship demo: one human + two agents on three surfaces](./docs/assets/flagship.gif)
 
 ## The wedge nobody else covers
