@@ -26,12 +26,27 @@ Only `@musterd/protocol` is imported across package boundaries. The CLI and MCP 
 |-----------|-------------|
 | protocol  | `pnpm --filter @musterd/protocol test` (act-meta rules, envelope round-trip, version pin; ≥95% lines) |
 | server    | `pnpm --filter @musterd/server test` (`03-server.md` acceptance list; ≥85%) |
-| cli       | `pnpm --filter musterd test` + Scenario A (`06-testing.md`) + Figma terminal snapshot match |
+| cli       | `pnpm --filter @musterd/cli test` + Scenario A (`06-testing.md`) + Figma terminal snapshot match |
 | mcp       | `pnpm --filter @musterd/mcp test` + Scenario B |
 | flagship  | `pnpm test:scenarios` (Scenario C — the 3-pane demo as an automated test) |
 | any "done"| `pnpm -r build && pnpm -r lint && pnpm test` all green |
 
 A milestone is **done** only when the `07-conventions.md` "Definition of done" checklist is fully satisfied.
+
+## Running the CLI from source (local dev / dogfooding)
+
+To exercise your source build (not the published `@musterd/cli`, which lags `main`):
+
+```bash
+pnpm -r build                          # or: pnpm --filter @musterd/cli build
+node packages/cli/dist/bin.js <cmd>    # e.g. node packages/cli/dist/bin.js status
+
+# or put a real `musterd` on PATH (run from the package dir — NOT with --filter):
+pnpm -C packages/cli link --global     # `pnpm --filter @musterd/cli link --global` fails: Unknown option 'recursive'
+pnpm -C packages/cli unlink --global   # to undo
+```
+
+Isolate dogfood state from your real `~/.musterd` with env: `MUSTERD_CONFIG`, `MUSTERD_DB`, `MUSTERD_SERVER`/`MUSTERD_PORT`. Rebuild after any source change — the bin runs `dist/`, not `src/`.
 
 ## Hard rules (violating these is a bug, not a choice)
 
