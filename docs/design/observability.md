@@ -41,7 +41,7 @@ If a future feature looks like one of these, the default answer is "integrate, d
 
 ## 4. Layer 1 — instrumenting musterd (v0.x, minimal)
 
-> **Status: ✅ shipped for `@musterd/server` (2026-06-15, ADR 015).** The envelope span and the synchronous metric set below are implemented and off-by-default. The two **observable gauges** (`musterd.presence.active`, `musterd.inbox.lag`) are deferred (they need DB-sampling callbacks). CLI/MCP instrumentation and the `meta.otel` emit/honor in the adapter (§6 step 2) are still to come.
+> **Status: ✅ shipped for `@musterd/server` (2026-06-15, ADR 015).** The envelope span and the **full metric set below** — including the two observable gauges (`musterd.presence.active`, `musterd.inbox.lag`, DB-sampled on collection) — are implemented and off-by-default. The adapter's `meta.otel` emit/honor (§6 step 2) is also done. Still to come: a full CLI/MCP telemetry SDK (so the adapter emit fires in production, not just under a host-provided context).
 
 Scope: `@musterd/server` first; CLI and MCP adapter only get error/diagnostic logging until there's a reason for more.
 

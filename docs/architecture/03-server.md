@@ -105,7 +105,7 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 
 ## Telemetry (v0.2 — ADR 015, off by default)
 
-- `telemetry.ts` adds minimal OpenTelemetry (observability.md §4). `routeEnvelope` is wrapped in a `musterd.envelope.process` span with `musterd.*` attributes (team/act/from/to.kind/envelope.id/thread + `otel.traceparent` from `meta.otel`, ADR 011) — **never the body**. Metrics: `musterd.envelopes` (counter), `musterd.delivery.latency` (histogram), `musterd.errors` (counter; recorded at the transport boundary in `http.ts`/`ws.ts`), `musterd.presence.churn` (counter). The §4 observable gauges (`presence.active`, `inbox.lag`) are deferred.
+- `telemetry.ts` adds minimal OpenTelemetry (observability.md §4). `routeEnvelope` is wrapped in a `musterd.envelope.process` span with `musterd.*` attributes (team/act/from/to.kind/envelope.id/thread + `otel.traceparent` from `meta.otel`, ADR 011) — **never the body**. Metrics: `musterd.envelopes` (counter), `musterd.delivery.latency` (histogram), `musterd.errors` (counter; recorded at the transport boundary in `http.ts`/`ws.ts`), `musterd.presence.churn` (counter), and two observable gauges sampled on collection — `musterd.presence.active` (live presences by surface) and `musterd.inbox.lag` (age of the slowest unread inbox), backed by `store/metrics.ts` and registered via `registerRuntimeGauges` in `listen()` (only when telemetry is enabled).
 - **Off unless** a standard OTLP endpoint env is set (`OTEL_EXPORTER_OTLP_ENDPOINT` etc.); never when `OTEL_SDK_DISABLED=true`. No phone-home. `createServer().listen()` calls `startTelemetry()` (dynamic-imports the SDK only when enabled); `close()` flushes it. When off, the `@opentelemetry/api` calls are no-ops.
 
 ## Inbox delivery semantics

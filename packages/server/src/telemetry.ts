@@ -157,3 +157,35 @@ export function recordPresenceChurn(event: 'attach' | 'detach', surface?: string
     ...(surface ? { 'musterd.surface': surface } : {}),
   });
 }
+
+/** Snapshot supplier for the observable gauges — injected so telemetry stays free of SQL/ctx. */
+export interface RuntimeSampler {
+  presenceBySurface: () => { surface: string; count: number }[];
+  inboxLagMs: () => number;
+}
+
+/**
+ * Register the observable gauges sampled on each metric collection (observability.md §4):
+ * `musterd.presence.active` (live presences by surface) and `musterd.inbox.lag` (how stale the
+ * slowest inbox is). No-op without a registered provider — the callback never fires (no DB sampling)
+ * when telemetry is off, so this is safe to call unconditionally.
+ */
+export function registerRuntimeGauges(sampler: RuntimeSampler): void {
+  const meter = metrics.getMeter(SCOPE);
+  const active = meter.createObservableGauge('musterd.presence.active', {
+    description: 'Live presences, by surface',
+  });
+  const lag = meter.createObservableGauge('musterd.inbox.lag', {
+    description: 'Age of the slowest inbox (oldest unread message)',
+    unit: 'ms',
+  });
+  meter.addBatchObservableCallback(
+    (obs) => {
+      for (const row of sampler.presenceBySurface()) {
+        obs.observe(active, row.count, { 'musterd.surface': row.surface });
+      }
+      obs.observe(lag, sampler.inboxLagMs());
+    },
+    [active, lag],
+  );
+}

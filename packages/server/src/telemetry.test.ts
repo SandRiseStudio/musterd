@@ -14,6 +14,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   recordError,
+  registerRuntimeGauges,
   resetTelemetryForTests,
   telemetryEnabled,
   withEnvelopeSpan,
@@ -112,5 +113,28 @@ describe('envelope instrumentation', () => {
     const envelopes = all.find((m) => m.descriptor.name === 'musterd.envelopes')!;
     const total = envelopes.dataPoints.reduce((n, dp) => n + (dp.value as number), 0);
     expect(total).toBeGreaterThanOrEqual(1);
+  });
+
+  it('observes the runtime gauges (presence.active by surface, inbox.lag) on collect', async () => {
+    registerRuntimeGauges({
+      presenceBySurface: () => [
+        { surface: 'cli', count: 1 },
+        { surface: 'claude-code', count: 2 },
+      ],
+      inboxLagMs: () => 12_000,
+    });
+
+    const { resourceMetrics } = await reader.collect();
+    const all = resourceMetrics.scopeMetrics.flatMap((s) => s.metrics);
+
+    const active = all.find((m) => m.descriptor.name === 'musterd.presence.active')!;
+    expect(active).toBeTruthy();
+    const bySurface = Object.fromEntries(
+      active.dataPoints.map((dp) => [dp.attributes['musterd.surface'], dp.value]),
+    );
+    expect(bySurface).toEqual({ cli: 1, 'claude-code': 2 });
+
+    const lag = all.find((m) => m.descriptor.name === 'musterd.inbox.lag')!;
+    expect(lag.dataPoints[0]!.value).toBe(12_000);
   });
 });
