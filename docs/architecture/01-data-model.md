@@ -112,6 +112,7 @@ CREATE TABLE schema_meta (
 - Single forward-only migration runner. `schema_meta.schema_version` gates it. v1 ships version `1` = the DDL above. A migration is a `(version, up(db))` pair in `packages/server/src/db/migrations.ts`; the runner applies any with version > current inside a transaction, then bumps `schema_version`.
 - No down-migrations in v1.
 - **v2 (`musterd/0.2`, ADR 010):** `ALTER TABLE presence ADD COLUMN held_until INTEGER`. Non-null once a connection has cleanly dropped — the row becomes a *reclaim hold* (`conn_id` cleared, `held_until = now + 45s`) instead of being deleted, so the member can reconnect within the grace window. Single-active is decided by *active* presence (`conn_id` set, `held_until` NULL); held rows are excluded from the live roster and swept by the reaper when `held_until` passes. The v1 DDL block above is unchanged; this is an additive ALTER.
+- **v3 (`musterd/0.2`, ADR 014):** `ALTER TABLE presence ADD COLUMN provenance TEXT` + `ADD COLUMN workspace TEXT`. The provenance/where-on-attach seed: `provenance` (`session | asked | hook | scheduled | daemon`) records *why* this attachment exists; `workspace` records the gracefully-degrading "where" label (folder, qualified by branch/subpath). Both are nullable, captured once at attach from the client's `hello`, surfaced on the roster, and never guessed by the server. Additive ALTERs; pre-v3 rows read `null`.
 
 ## Seed data for tests (`06-testing.md` references this)
 

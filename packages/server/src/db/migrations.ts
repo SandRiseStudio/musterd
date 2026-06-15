@@ -24,6 +24,16 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE presence ADD COLUMN held_until INTEGER');
     },
   },
+  {
+    // musterd/0.2 (ADR 014): provenance/where-on-attach seed. Two facts captured once at attach —
+    // `provenance` (why this presence exists) and `workspace` (the gracefully-degrading "where"
+    // label). Both nullable; pre-0.2 rows and clients that don't send them simply read null.
+    version: 3,
+    up: (db) => {
+      db.exec('ALTER TABLE presence ADD COLUMN provenance TEXT');
+      db.exec('ALTER TABLE presence ADD COLUMN workspace TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

@@ -1,4 +1,5 @@
-import { SURFACES, type Surface } from '@musterd/protocol';
+import { SURFACES, type Provenance, type Surface } from '@musterd/protocol';
+import { resolveProvenance, resolveWorkspace } from './workspace.js';
 
 export interface McpConfig {
   server: string;
@@ -6,6 +7,10 @@ export interface McpConfig {
   member: string;
   token: string;
   surface: Surface;
+  /** Why this session attaches (provenance/where seed, ADR 014). Defaults to `session`. */
+  provenance: Provenance;
+  /** The gracefully-degrading "where" label, resolved once at load. */
+  workspace: string;
 }
 
 /** Read + validate the MCP server's identity binding from env (05-mcp.md). */
@@ -25,5 +30,13 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   const surface = (SURFACES as readonly string[]).includes(surfaceRaw)
     ? (surfaceRaw as Surface)
     : 'other';
-  return { server, team: team!, member: member!, token: token!, surface };
+  return {
+    server,
+    team: team!,
+    member: member!,
+    token: token!,
+    surface,
+    provenance: resolveProvenance(env),
+    workspace: resolveWorkspace(env),
+  };
 }

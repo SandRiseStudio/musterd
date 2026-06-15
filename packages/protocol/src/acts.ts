@@ -50,3 +50,14 @@ export const PresenceStatusSchema = z.enum(PRESENCE_STATUSES);
 export const ACTIVITIES = ['offline', 'online', 'working'] as const;
 export type Activity = (typeof ACTIVITIES)[number];
 export const ActivitySchema = z.enum(ACTIVITIES);
+
+/**
+ * Provenance (musterd/0.2): *why* a presence exists, captured as a fact at attach time — never
+ * guessed (human-agent-dynamics §2). `session` = a human opened a harness session; `asked` = a
+ * member was asked to do something; `hook` = a harness hook/function fired; `scheduled` = a timer
+ * started it; `daemon` = an always-on process. It dissolves the driving-posture confusion without
+ * modelling humans: `(session)` says "someone is behind this", `(scheduled)` says "nobody need be".
+ */
+export const PROVENANCES = ['session', 'asked', 'hook', 'scheduled', 'daemon'] as const;
+export type Provenance = (typeof PROVENANCES)[number];
+export const ProvenanceSchema = z.enum(PROVENANCES);

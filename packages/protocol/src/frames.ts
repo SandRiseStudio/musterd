@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PresenceStatusSchema, SurfaceSchema } from './acts.js';
+import { PresenceStatusSchema, ProvenanceSchema, SurfaceSchema } from './acts.js';
 import { EnvelopeSchema } from './envelope.js';
 import { ErrorCodeSchema } from './errors.js';
 import { MemberSchema } from './member.js';
@@ -14,6 +14,11 @@ export const HelloFrame = z.object({
   as: z.string(),
   token: z.string(),
   surface: SurfaceSchema,
+  // Attach-time context (musterd/0.2, additive). Provenance = why this presence exists; workspace
+  // = a gracefully-degrading "where" label (folder, qualified by branch/subpath). Both sticky for
+  // the session: recorded once at join, read out of the roster — never re-declared per status.
+  provenance: ProvenanceSchema.optional(),
+  workspace: z.string().max(120).optional(),
 });
 
 export const SubscribeFrame = z.object({

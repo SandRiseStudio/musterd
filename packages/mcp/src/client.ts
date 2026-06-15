@@ -118,6 +118,8 @@ export class MusterdClient {
           as: this.config.member,
           token: this.config.token,
           surface: this.config.surface,
+          provenance: this.config.provenance,
+          workspace: this.config.workspace,
         }),
       );
     });

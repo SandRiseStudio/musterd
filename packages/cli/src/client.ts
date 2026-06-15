@@ -92,6 +92,9 @@ export interface WatchOpts {
   as: string;
   token: string;
   surface: string;
+  /** Attach-time context (ADR 014): why this watch session exists + its workspace label. */
+  provenance?: string;
+  workspace?: string;
   onDeliver: (env: Envelope) => void;
   onPresence?: (member: string, status: string, surface?: string) => void;
   onReady?: () => void;
@@ -112,6 +115,8 @@ export function watch(opts: WatchOpts): { close: () => void } {
         as: opts.as,
         token: opts.token,
         surface: opts.surface,
+        ...(opts.provenance ? { provenance: opts.provenance } : {}),
+        ...(opts.workspace ? { workspace: opts.workspace } : {}),
       }),
     );
   });

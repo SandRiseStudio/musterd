@@ -80,17 +80,29 @@ function activityOf(m: MemberSummary): Activity {
   return m.activity ?? (m.presence === 'offline' ? 'offline' : 'online');
 }
 
-/** The text after the dot: `offline` / `online via cli` / `working: refactoring auth · 18m`. */
+/**
+ * The text after the dot. Examples:
+ *   `offline`
+ *   `online via claude-code (session) · movetrail@feat/login`
+ *   `working: refactoring auth · 18m (session) · movetrail@feat/login`
+ * Provenance (`why`) and workspace (`where`) are attach-time context (ADR 014), read from the live
+ * presence and shown dim alongside the activity — location context, not an authoritative scope.
+ */
 function activityLabel(m: MemberSummary, now: number): string {
   const activity = activityOf(m);
   if (activity === 'offline') return 'offline';
+  const p = m.presences[0];
+  let core: string;
   if (activity === 'working' && m.state) {
     const stale = m.last_status_at != null && now - m.last_status_at >= STALE_AFTER_MS;
     const age = stale && m.last_status_at != null ? ` · ${ageLabel(m.last_status_at, now)}` : '';
-    return `working: ${m.state}${age}`;
+    core = `working: ${m.state}${age}`;
+  } else {
+    core = p?.surface ? `online via ${p.surface}` : 'online';
   }
-  const surface = m.presences[0]?.surface;
-  return surface ? `online via ${surface}` : 'online';
+  const why = p?.provenance ? ` (${p.provenance})` : '';
+  const where = p?.workspace ? ` · ${p.workspace}` : '';
+  return `${core}${why}${where}`;
 }
 
 /** Coarse human age: `18m` / `2h` / `3d`. */

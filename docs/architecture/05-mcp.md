@@ -21,7 +21,11 @@ MUSTERD_MEMBER   = Ada
 MUSTERD_TOKEN    = mskd_...        # the join token from `musterd team add Ada`
 MUSTERD_SURFACE  = claude-code     # or codex; defaults to 'other'
 MUSTERD_AUTOJOIN = 1               # optional; opt-in auto-join on launch (off by default)
+MUSTERD_PROVENANCE = session       # optional; why this session attaches (ADR 014): session|asked|hook|scheduled|daemon. defaults to 'session'
+MUSTERD_WORKSPACE  = auth-rewrite  # optional; declared 'where' label; overrides the auto folder@branch detection
 ```
+
+On `team_join` the adapter sends two attach-time facts on the `hello` (provenance/where seed, ADR 014): **`provenance`** (from `MUSTERD_PROVENANCE`, default `session`) and a **`workspace`** label resolved once at load — the declared `MUSTERD_WORKSPACE` if set, else a gracefully-degrading auto-label (`cwd` folder, qualified by git branch when informative, else the cwd subpath within the repo, else the bare folder). Both are read context only — they carry no routing/auth meaning — and surface dim on the roster (`online via claude-code (session) · repo@branch`).
 
 ### Dormant by default (v0.2 M3 / ADR 007)
 
