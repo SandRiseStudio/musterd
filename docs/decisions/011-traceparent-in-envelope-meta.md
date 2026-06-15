@@ -1,6 +1,6 @@
 # 011 — W3C trace context rides in `Envelope.meta.otel`
 
-- Status: accepted (2026-06-15) — first implementation landed: `@musterd/server` records `meta.otel.traceparent` as the `musterd.otel.traceparent` span attribute (ADR 015). `@musterd/mcp` emit/honor is the next step.
+- Status: accepted (2026-06-15) — implemented both sides: `@musterd/server` records `meta.otel.traceparent` as a span attribute (ADR 015); `@musterd/mcp` **emits** its active trace context as `meta.otel` on send and **honors** incoming `meta.otel` as a span link on inbox check (`packages/mcp/src/otel.ts`). The adapter formats/parses the W3C `traceparent` directly (no `@opentelemetry/core`) and the plumbing is inert without an active context/provider.
 - Date: 2026-06-11
 
 ## Context
