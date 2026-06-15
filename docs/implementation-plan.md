@@ -91,7 +91,7 @@ In priority order. The governing sequence (per ADR 007) is: **v0.2 minimal trust
 The full set in `membership-model.md` + `spec-v0.3-draft.md` + `security.md`: seats/roles, agent key + grants (once/TTL/standing) + approval lane, capabilities + need-to-know visibility projection, audit log, notification tiers + scarce `urgent`, human observers. **Trigger condition: the daemon stops being localhost-only.** Do not build ahead of that; the designs pre-answer the known landmines (grant expiry never evicts a live claim; fingerprints are recognition, not security; `urgent` strike-tracking needs ≥2 humans).
 
 ### E. Roadmap (post-launch, `ROADMAP.md`)
-Telemetry & observability (minimal OTel instrumentation of `@musterd/server`; `meta.otel` trace-context convention, ADR 011; the **batond** coordination-observability product — strategy in `docs/design/observability.md`, branding in `docs/design/brand-coordination-observability.md`), schedule/lifecycle enforcement, step-level streaming transport, federation, more surfaces (web dashboard — already designed in Figma — iOS, Slack), sandboxed runtime, Python SDK.
+Telemetry & observability — **Layer 1 server instrumentation ✅ done (ADR 015):** `@musterd/server` envelope span + metrics, off by default, OTLP-out; `meta.otel` trace-context convention accepted (ADR 011) and recorded server-side. *Remaining observability:* `@musterd/mcp` emit/honor of `meta.otel`, the deferred observable gauges (`presence.active`, `inbox.lag`), and the **batond** coordination-observability product — strategy in `docs/design/observability.md`, branding in `docs/design/brand-coordination-observability.md`. Then: schedule/lifecycle enforcement, step-level streaming transport, federation, more surfaces (web dashboard — already designed in Figma — iOS, Slack), sandboxed runtime, Python SDK.
 
 ## 5. Decision log index
 
@@ -107,7 +107,8 @@ Telemetry & observability (minimal OTel instrumentation of `@musterd/server`; `m
 | 008 | Figma execution + brief/CLI reconciliation | catch-up + course correction |
 | 009 | CLI ships as `@musterd/cli` (unscoped `musterd` blocked by `multer`) | course correction |
 | 010 | single-active members + 45s reclaim grace | v0.2 M1 |
-| 011 | W3C trace context rides in `Envelope.meta.otel` (proposed) | observability |
+| 011 | W3C trace context rides in `Envelope.meta.otel` (accepted; first impl in 015) | observability |
 | 012 | `musterd init` writes an agent primer (`AGENTS.md`) | agent UX (onboarding gap) |
 | 013 | coverage gates wired; cli/mcp enforced as ratchet floors; ESLint/Prettier added (supersedes 004) | hygiene |
 | 014 | provenance + workspace ("where") captured at attach (additive `hello`/presence fields) | agent UX (presence) |
+| 015 | OTel Layer 1: minimal native server instrumentation (envelope span + metrics, off by default) | observability |

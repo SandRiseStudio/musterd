@@ -5,6 +5,7 @@ import { log } from '../log.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { insertMessage, rowToEnvelope } from '../store/messages.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
+import { withEnvelopeSpan } from '../telemetry.js';
 
 export interface RouteResult {
   message: MessageRow;
@@ -17,6 +18,15 @@ export interface RouteResult {
  * The envelope must already be schema-valid; this enforces identity + resolves/persists/delivers.
  */
 export function routeEnvelope(
+  ctx: Ctx,
+  team: TeamRow,
+  sender: MemberRow,
+  env: Envelope,
+): RouteResult {
+  return withEnvelopeSpan(env, () => routeEnvelopeInner(ctx, team, sender, env));
+}
+
+function routeEnvelopeInner(
   ctx: Ctx,
   team: TeamRow,
   sender: MemberRow,

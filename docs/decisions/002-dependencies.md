@@ -23,3 +23,4 @@ We need to record what runtime deps each package takes and why, and the one arch
 
 - No web framework / no arg-parsing library to track for CVEs or API drift; both are easily added later behind an ADR if the surface grows.
 - The CLI build depends on the server build (`serve.ts`); the dependency graph in `00-overview.md` notes this is launcher-only, not a protocol coupling.
+- **Later addition (ADR 015):** `@musterd/server` takes the OpenTelemetry SDK (`@opentelemetry/api` + `sdk-node` + OTLP exporters) — the one justified runtime-dep addition, flagged in advance by `observability.md` §4. The heavy SDK is dynamically imported and loads only when telemetry is enabled; `@opentelemetry/api` (eager) is a no-op without a provider.

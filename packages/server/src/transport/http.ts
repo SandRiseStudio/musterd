@@ -20,6 +20,7 @@ import { latestStatusUpdate, listInbox, rowToEnvelope } from '../store/messages.
 import { attach, listPresence } from '../store/presence.js';
 import { toMember } from '../store/rows.js';
 import { createTeam, requireTeam } from '../store/teams.js';
+import { recordError } from '../telemetry.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -29,6 +30,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 
 function sendError(res: ServerResponse, err: unknown): void {
   const me = asMusterdError(err);
+  recordError(me.code);
   sendJson(res, me.httpStatus, me.toBody());
 }
 

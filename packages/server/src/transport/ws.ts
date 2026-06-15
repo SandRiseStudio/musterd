@@ -18,6 +18,7 @@ import {
   release,
 } from '../store/presence.js';
 import { toMember } from '../store/rows.js';
+import { recordError, recordPresenceChurn } from '../telemetry.js';
 import type { Connection } from './hub.js';
 
 interface ConnState {
@@ -112,6 +113,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           state.authenticated = true;
           state.conn = conn;
           ctx.hub.add(conn);
+          recordPresenceChurn('attach', frame.surface);
           send(ws, {
             type: 'welcome',
             member: toMember(member, team.slug),
@@ -164,7 +166,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           }
         }
       } catch (err) {
-        send(ws, asMusterdError(err).toFrame());
+        const me = asMusterdError(err);
+        recordError(me.code);
+        send(ws, me.toFrame());
       }
     });
 
@@ -172,6 +176,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
       const conn = state.conn;
       if (!conn) return;
       ctx.hub.remove(conn.connId);
+      recordPresenceChurn('detach');
       // Keep the row as a reclaim hold for the grace window instead of deleting it (ADR 010).
       release(ctx.db, conn.presenceId, ctx.config.reclaimGraceMs);
       // Emit offline only if the member now has no live presence anywhere.
