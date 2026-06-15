@@ -1,4 +1,4 @@
-import type { PresenceStatus, Surface } from '@musterd/protocol';
+import type { Provenance, PresenceStatus, Surface } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import type { MemberRow, PresenceRow } from './rows.js';
@@ -6,7 +6,19 @@ import type { MemberRow, PresenceRow } from './rows.js';
 export interface PresenceSummary {
   member: MemberRow;
   status: PresenceStatus;
-  presences: { surface: Surface; status: PresenceStatus; last_seen_at: number }[];
+  presences: {
+    surface: Surface;
+    status: PresenceStatus;
+    last_seen_at: number;
+    provenance: Provenance | null;
+    workspace: string | null;
+  }[];
+}
+
+/** Attach-time context the client may supply (musterd/0.2, ADR 014). */
+export interface AttachContext {
+  provenance?: Provenance | null;
+  workspace?: string | null;
 }
 
 /** Create a presence row (a new attachment) for a member on a surface. */
@@ -15,6 +27,7 @@ export function attach(
   memberId: string,
   surface: Surface,
   connId: string | null,
+  ctx: AttachContext = {},
 ): PresenceRow {
   const now = Date.now();
   const row: PresenceRow = {
@@ -25,11 +38,13 @@ export function attach(
     conn_id: connId,
     last_seen_at: now,
     held_until: null,
+    provenance: ctx.provenance ?? null,
+    workspace: ctx.workspace ?? null,
     created_at: now,
   };
   db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @created_at)`,
+    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, created_at)
+     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @created_at)`,
   ).run(row);
   return row;
 }
@@ -119,6 +134,8 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         surface: p.surface as Surface,
         status: p.status,
         last_seen_at: p.last_seen_at,
+        provenance: (p.provenance as Provenance | null) ?? null,
+        workspace: p.workspace ?? null,
       })),
     };
   });

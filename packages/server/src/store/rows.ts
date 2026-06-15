@@ -35,6 +35,10 @@ export interface PresenceRow {
   last_seen_at: number;
   /** Non-null once the connection has dropped: the member stays reclaimable until this time (ADR 010). */
   held_until: number | null;
+  /** Why this presence exists, captured at attach (musterd/0.2, ADR 014). Null on pre-0.2 rows. */
+  provenance: string | null;
+  /** The gracefully-degrading "where" label captured at attach (ADR 014). Null when unknown. */
+  workspace: string | null;
   created_at: number;
 }
 

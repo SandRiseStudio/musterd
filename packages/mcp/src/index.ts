@@ -14,6 +14,7 @@ import { registerStatus } from './tools/status.js';
 export { MusterdClient } from './client.js';
 export { loadMcpConfig, type McpConfig } from './config.js';
 export { bind } from './bind.js';
+export { resolveWorkspace, resolveProvenance } from './workspace.js';
 
 /**
  * Drop presence and exit on every way the host can go away. The WS socket keeps Node's event loop

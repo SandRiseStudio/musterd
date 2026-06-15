@@ -132,6 +132,33 @@ describe('renderStatusTable', () => {
     expect(out).not.toContain('scaffolding tests ·');
     expect(out).toContain('working: refactoring auth · 18m');
   });
+
+  it('renders provenance (why) and workspace (where) dim alongside activity (ADR 014)', () => {
+    const members: MemberSummary[] = [
+      {
+        id: '1',
+        team: 'dawn',
+        name: 'Ada',
+        kind: 'agent',
+        role: 'backend',
+        lifecycle: 'session',
+        created_at: 0,
+        presence: 'online',
+        activity: 'online',
+        presences: [
+          {
+            surface: 'claude-code',
+            status: 'online',
+            last_seen_at: 0,
+            provenance: 'session',
+            workspace: 'movetrail@feat/login',
+          },
+        ],
+      },
+    ];
+    const out = renderStatusTable(members);
+    expect(out).toContain('online via claude-code (session) · movetrail@feat/login');
+  });
 });
 
 describe('renderBanner', () => {

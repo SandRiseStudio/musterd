@@ -97,7 +97,10 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             );
           }
           clearMemberPresence(ctx.db, member.id);
-          const presence = attach(ctx.db, member.id, frame.surface, state.connId);
+          const presence = attach(ctx.db, member.id, frame.surface, state.connId, {
+            provenance: frame.provenance ?? null,
+            workspace: frame.workspace ?? null,
+          });
           const conn: Connection = {
             connId: state.connId,
             memberId: member.id,

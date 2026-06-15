@@ -4,6 +4,7 @@ import {
   LifecycleSchema,
   SurfaceSchema,
   PresenceStatusSchema,
+  ProvenanceSchema,
   PROTOCOL_VERSION,
   type MemberSummary,
 } from '@musterd/protocol';
@@ -70,6 +71,8 @@ const AddMemberBody = z.object({
 const PresenceBody = z.object({
   surface: SurfaceSchema,
   status: PresenceStatusSchema.optional(),
+  provenance: ProvenanceSchema.optional(),
+  workspace: z.string().max(120).optional(),
 });
 
 function summarize(ctx: Ctx, teamSlug: string, teamId: string): MemberSummary[] {
@@ -197,7 +200,10 @@ export async function handleHttp(
       if (method === 'POST' && rest === '/presence') {
         const { member } = authMember(ctx.db, slug, bearer(req));
         const body = parseOrBadRequest(PresenceBody, await readJson(req));
-        const p = attach(ctx.db, member.id, body.surface, null);
+        const p = attach(ctx.db, member.id, body.surface, null, {
+          provenance: body.provenance ?? null,
+          workspace: body.workspace ?? null,
+        });
         if (body.status) {
           ctx.db.prepare('UPDATE presence SET status = ? WHERE id = ?').run(body.status, p.id);
         }

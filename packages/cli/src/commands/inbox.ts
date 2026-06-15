@@ -1,3 +1,4 @@
+import { resolveWorkspace } from '@musterd/mcp';
 import type { Envelope, MemberKind } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { watch } from '../client.js';
@@ -62,6 +63,9 @@ function watchInbox(
       as: identity.name,
       token: identity.token,
       surface: identity.surface || 'cli',
+      // A human running `inbox --watch` is explicitly here (the supervising posture) — `session`.
+      provenance: 'session',
+      workspace: resolveWorkspace(),
       onDeliver: (env) => process.stdout.write(renderMessageRow(env, kindOf) + '\n'),
       onPresence: (member, status, surface) =>
         process.stdout.write(

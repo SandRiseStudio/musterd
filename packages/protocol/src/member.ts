@@ -4,6 +4,7 @@ import {
   LifecycleSchema,
   MemberKindSchema,
   PresenceStatusSchema,
+  ProvenanceSchema,
   SurfaceSchema,
 } from './acts.js';
 
@@ -26,6 +27,10 @@ export const PresenceSchema = z.object({
   surface: SurfaceSchema,
   status: PresenceStatusSchema,
   last_seen_at: z.number().int(),
+  /** Why this attachment exists (musterd/0.2). Recorded at attach; null on pre-0.2 rows. */
+  provenance: ProvenanceSchema.nullish(),
+  /** The "where" label captured at attach (folder, qualified by branch/subpath). */
+  workspace: z.string().nullish(),
 });
 export type Presence = z.infer<typeof PresenceSchema>;
 

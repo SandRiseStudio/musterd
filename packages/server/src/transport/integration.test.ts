@@ -270,6 +270,33 @@ describe('WebSocket', () => {
     a.close();
   });
 
+  it('records provenance + workspace from the hello and surfaces them on the roster (ADR 014)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    const a = new TestWs();
+    await a.open();
+    a.send({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Ada',
+      token: ada.json.token,
+      surface: 'claude-code',
+      provenance: 'session',
+      workspace: 'movetrail@feat/login',
+    });
+    await a.waitFor('welcome');
+
+    const roster = await get('/teams/dawn/members', nickTok);
+    const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(adaRow.presences[0].provenance).toBe('session');
+    expect(adaRow.presences[0].workspace).toBe('movetrail@feat/login');
+
+    a.close();
+  });
+
   it('refuses a second live presence for the same member with member_busy', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);

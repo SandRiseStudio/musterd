@@ -15,6 +15,34 @@ describe('WS frames', () => {
     expect(f.type).toBe('hello');
   });
 
+  it('parses provenance + workspace on hello (ADR 014)', () => {
+    const f = WSClientFrame.parse({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Ada',
+      token: 'mskd_x',
+      surface: 'claude-code',
+      provenance: 'session',
+      workspace: 'movetrail@feat/login',
+    });
+    expect(f.type === 'hello' && f.provenance).toBe('session');
+    expect(f.type === 'hello' && f.workspace).toBe('movetrail@feat/login');
+  });
+
+  it('rejects an unknown provenance value in hello', () => {
+    const r = WSClientFrame.safeParse({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Ada',
+      token: 'x',
+      surface: 'cli',
+      provenance: 'vibes',
+    });
+    expect(r.success).toBe(false);
+  });
+
   it('rejects an unknown surface in hello', () => {
     const r = WSClientFrame.safeParse({
       type: 'hello',

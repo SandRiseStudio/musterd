@@ -63,10 +63,10 @@ export function routeEnvelope(ctx: Ctx, sender: Member, env: Envelope): RouteRes
 //         -> return RouteResult
 
 // store/presence.ts
-export function attach(db, memberId, surface, connId): Presence;          // creates row, status online
+export function attach(db, memberId, surface, connId, ctx?): Presence;    // creates row, status online; ctx = { provenance, workspace } (ADR 014)
 export function heartbeat(db, presenceId): void;                          // bumps last_seen_at
 export function detach(db, presenceId): void;                             // removes row
-export function listPresence(db, teamId): PresenceSummary[];              // for status/roster
+export function listPresence(db, teamId): PresenceSummary[];              // for status/roster (incl. provenance/workspace)
 export function reapStale(db, timeoutMs): { offlined: string[] };         // presence ids removed
 
 // store/messages.ts
