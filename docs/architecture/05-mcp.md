@@ -159,6 +159,11 @@ src/
 - A **dormant** session holds no socket and no presence — there is nothing to reconnect until it calls `team_join`.
 - If the server is unreachable at tool-call time, tools return a clear error string (not throw) so the agent can decide to retry — but never silently drop a `team_send`.
 
+## Trace-context propagation (ADR 011 — `otel.ts`)
+
+- **Emit:** `team_send` attaches the adapter's active OTel trace context to the envelope as `meta.otel` (`{ traceparent, tracestate? }`) when one exists and the caller didn't set it. **Honor:** `team_inbox_check` records a `musterd.inbox.received` span **linked** to each incoming message's `meta.otel` — causality without claiming ownership (the sender's trace lives in a different backend).
+- The adapter formats/parses the W3C `traceparent` directly (only `@opentelemetry/api`; no `@opentelemetry/core`). This is **convention plumbing**: inert when there's no active context / no registered provider (adapter telemetry SDK is deferred — observability.md §4). The server records the same `traceparent` on its envelope span (ADR 015), so the handoff is one causal chain across runtimes.
+
 ## Acceptance tests (`06-testing.md`)
 
 - With env pointing at a live test server + a `team add Ada` token: MCP boot is **dormant** — the server roster shows Ada `offline`. After `team_join`, the roster shows Ada online with the surface from env.

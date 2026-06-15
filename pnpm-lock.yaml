@@ -99,6 +99,9 @@ importers:
       '@musterd/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@opentelemetry/api':
+        specifier: ^1.9.1
+        version: 1.9.1
       ulid:
         specifier: ^2.3.0
         version: 2.4.0
@@ -112,6 +115,12 @@ importers:
       '@musterd/server':
         specifier: workspace:*
         version: link:../server
+      '@opentelemetry/context-async-hooks':
+        specifier: ^2.8.0
+        version: 2.8.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/sdk-trace-base':
+        specifier: ^2.8.0
+        version: 2.8.0(@opentelemetry/api@1.9.1)
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1

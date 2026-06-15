@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Envelope } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
+import { linkReceived } from '../otel.js';
 import { formatMessage, textResult } from './format.js';
 
 const DESCRIPTION =
@@ -37,6 +38,8 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         if (messages.length === 0) {
           return textResult('no new messages');
         }
+        // Link any sender trace context (meta.otel) to our trace as causality (ADR 011 receiver).
+        linkReceived(messages);
         // Advance the cursor to the newest message read.
         const newest = messages[messages.length - 1]!;
         await client.markRead(newest.id).catch(() => undefined);

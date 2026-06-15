@@ -4,6 +4,7 @@ import { ulid } from 'ulid';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
+import { withTraceContext } from '../otel.js';
 import { textResult } from './format.js';
 
 const DESCRIPTION =
@@ -48,6 +49,9 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
       }
       const meta: Record<string, unknown> = { ...(args.meta ?? {}) };
       if (args.reply_to) meta['in_reply_to'] = args.reply_to;
+      // Ride the adapter's active trace context along as meta.otel (ADR 011) so a handoff links the
+      // sender's and receiver's traces across runtimes. Inert when there's no active context.
+      const metaToSend = withTraceContext(Object.keys(meta).length ? meta : null);
       try {
         const envelope = makeEnvelope({
           id: ulid(),
@@ -57,7 +61,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
           act: args.act as Act,
           body: args.body,
           thread: args.thread ?? null,
-          meta: Object.keys(meta).length ? meta : null,
+          meta: metaToSend,
         });
         await client.sendEnvelope(envelope);
         client.markSeen(envelope.id); // don't echo our own send back via inbox

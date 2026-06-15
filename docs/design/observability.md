@@ -97,7 +97,7 @@ This layer should ship as its **own product** (working name **batond**, reversib
 ## 6. Sequencing
 
 1. ~~**Now (v0.2/M-next):** Layer 1 server instrumentation (§4). ADR 011 accepted as a recommended convention.~~ ✅ **done (ADR 015)** — server envelope span + counters/histogram, off by default; ADR 011 accepted, server records `traceparent`. (Deferred within §4: the two observable gauges.)
-2. **With first SDK/adapters that own an OTel context:** emit/honor `meta.otel` in `@musterd/mcp` and examples.
+2. ~~**With first SDK/adapters that own an OTel context:** emit/honor `meta.otel` in `@musterd/mcp` and examples.~~ ✅ **done** — the adapter emits its active trace context as `meta.otel` on `team_send` and links incoming `meta.otel` on `team_inbox_check` (ADR 011; `packages/mcp/src/otel.ts`). Convention plumbing only — inert until the adapter runs under a trace context (adapter telemetry SDK is still deferred per §4).
 3. **With the web dashboard:** first derived coordination views (time-to-unblock, waiting-on), per the roadmap's insight-layer entry.
 4. **Later, by explicit decision:** the standalone product (§5), once dogfooding proves which views matter.
 
