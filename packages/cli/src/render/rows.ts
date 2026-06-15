@@ -1,4 +1,10 @@
-import type { Activity, Envelope, MemberKind, MemberSummary, PresenceStatus } from '@musterd/protocol';
+import type {
+  Activity,
+  Envelope,
+  MemberKind,
+  MemberSummary,
+  PresenceStatus,
+} from '@musterd/protocol';
 import { clock, theme } from './theme.js';
 
 export type KindOf = (name: string) => MemberKind;
@@ -54,9 +60,10 @@ export function renderStatusTable(members: MemberSummary[], now = Date.now()): s
     const label = activityLabel(m, now);
     const dot = activityOf(m) === 'offline' ? 'offline' : 'online';
     const activity = `${theme.presenceDot(dot)} ${theme.meta(label)}`;
-    const lifecycle = m.lifecycle === 'until' && m.lifecycle_until
-      ? `until ${new Date(m.lifecycle_until).toISOString().slice(0, 10)}`
-      : m.lifecycle;
+    const lifecycle =
+      m.lifecycle === 'until' && m.lifecycle_until
+        ? `until ${new Date(m.lifecycle_until).toISOString().slice(0, 10)}`
+        : m.lifecycle;
     return (
       padVisible(name, m.name, 14) +
       pad(m.kind, 8) +

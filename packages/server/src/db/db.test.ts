@@ -18,9 +18,10 @@ describe('db', () => {
     const db = openDb(':memory:');
     const s = seedDawn(db);
     const members = db
-      .prepare<[string], { name: string; kind: string; role: string }>(
-        'SELECT name, kind, role FROM members WHERE team_id = ? ORDER BY created_at',
-      )
+      .prepare<
+        [string],
+        { name: string; kind: string; role: string }
+      >('SELECT name, kind, role FROM members WHERE team_id = ? ORDER BY created_at')
       .all(s.teamId);
     expect(members).toEqual([
       { name: 'nick', kind: 'human', role: 'lead' },
@@ -34,7 +35,7 @@ describe('db', () => {
   it('is idempotent when migrations re-run', () => {
     const db = openDb(':memory:');
     // running again should not throw or duplicate
-    const before = db.prepare("SELECT count(*) AS n FROM schema_meta").get() as { n: number };
+    const before = db.prepare('SELECT count(*) AS n FROM schema_meta').get() as { n: number };
     expect(before.n).toBe(1);
     db.close();
   });

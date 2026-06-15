@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import { makeEnvelope } from '@musterd/protocol';
+import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
+import { resolveActivity } from './activity.js';
 import { getCursor, setCursor } from './cursors.js';
 import { addMember, authMember, hashToken } from './members.js';
-import { resolveActivity } from './activity.js';
 import { insertMessage, latestStatusUpdate, listInbox } from './messages.js';
 import {
   attach,
@@ -39,7 +39,9 @@ describe('teams + members', () => {
     const { db, team } = freshTeam();
     const { row, token } = addMember(db, team, { name: 'Ada', kind: 'agent' });
     expect(row.token_hash).toBe(hashToken(token));
-    const stored = db.prepare<[string], { token_hash: string }>('SELECT token_hash FROM members WHERE id = ?').get(row.id);
+    const stored = db
+      .prepare<[string], { token_hash: string }>('SELECT token_hash FROM members WHERE id = ?')
+      .get(row.id);
     expect(stored?.token_hash).not.toContain(token);
   });
 
@@ -63,7 +65,15 @@ describe('messages + inbox', () => {
     const { db, team } = freshTeam();
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
     const lin = addMember(db, team, { name: 'Lin', kind: 'agent' });
-    const env = makeEnvelope({ id: 'm1', team: 'dawn', from: 'Ada', to: { kind: 'member', name: 'Lin' }, act: 'handoff', body: 'x', ts: 100 });
+    const env = makeEnvelope({
+      id: 'm1',
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'member', name: 'Lin' },
+      act: 'handoff',
+      body: 'x',
+      ts: 100,
+    });
     insertMessage(db, team.id, ada.row.id, lin.row.id, env);
 
     const linInbox = listInbox(db, lin.row);
@@ -76,14 +86,26 @@ describe('messages + inbox', () => {
     const { db, team } = freshTeam();
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
     const lin = addMember(db, team, { name: 'Lin', kind: 'agent' });
-    const env = makeEnvelope({ id: 'm1', team: 'dawn', from: 'Ada', to: { kind: 'member', name: 'Lin' }, act: 'message', body: 'hi', ts: 100 });
+    const env = makeEnvelope({
+      id: 'm1',
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'member', name: 'Lin' },
+      act: 'message',
+      body: 'hi',
+      ts: 100,
+    });
     insertMessage(db, team.id, ada.row.id, lin.row.id, env);
 
     let cur = getCursor(db, lin.row.id);
-    expect(listInbox(db, lin.row, { unreadOnly: true, cursorTs: cur.last_read_ts })).toHaveLength(1);
+    expect(listInbox(db, lin.row, { unreadOnly: true, cursorTs: cur.last_read_ts })).toHaveLength(
+      1,
+    );
     setCursor(db, lin.row.id, 'm1', 100);
     cur = getCursor(db, lin.row.id);
-    expect(listInbox(db, lin.row, { unreadOnly: true, cursorTs: cur.last_read_ts })).toHaveLength(0);
+    expect(listInbox(db, lin.row, { unreadOnly: true, cursorTs: cur.last_read_ts })).toHaveLength(
+      0,
+    );
   });
 
   it('delivers team messages to all members except the sender', () => {
@@ -91,7 +113,15 @@ describe('messages + inbox', () => {
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
     const lin = addMember(db, team, { name: 'Lin', kind: 'agent' });
     const nick = addMember(db, team, { name: 'nick', kind: 'human' });
-    const env = makeEnvelope({ id: 'm1', team: 'dawn', from: 'Ada', to: { kind: 'team' }, act: 'status_update', body: 'go', ts: 100 });
+    const env = makeEnvelope({
+      id: 'm1',
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'team' },
+      act: 'status_update',
+      body: 'go',
+      ts: 100,
+    });
     insertMessage(db, team.id, ada.row.id, null, env);
     expect(listInbox(db, lin.row)).toHaveLength(1);
     expect(listInbox(db, nick.row)).toHaveLength(1);
@@ -101,8 +131,16 @@ describe('messages + inbox', () => {
 
 describe('activity (two-clocks)', () => {
   it('resolveActivity: offline when not live; online when live with no status; working with a status', () => {
-    expect(resolveActivity(false, { state: 'x', ts: 1 })).toEqual({ activity: 'offline', state: null, last_status_at: null });
-    expect(resolveActivity(true, null)).toEqual({ activity: 'online', state: null, last_status_at: null });
+    expect(resolveActivity(false, { state: 'x', ts: 1 })).toEqual({
+      activity: 'offline',
+      state: null,
+      last_status_at: null,
+    });
+    expect(resolveActivity(true, null)).toEqual({
+      activity: 'online',
+      state: null,
+      last_status_at: null,
+    });
     expect(resolveActivity(true, { state: 'refactoring auth', ts: 100 })).toEqual({
       activity: 'working',
       state: 'refactoring auth',
@@ -116,18 +154,58 @@ describe('activity (two-clocks)', () => {
     expect(latestStatusUpdate(db, ada.row.id)).toBeNull();
 
     // body-only status
-    insertMessage(db, team.id, ada.row.id, null,
-      makeEnvelope({ id: 's1', team: 'dawn', from: 'Ada', to: { kind: 'team' }, act: 'status_update', body: 'scaffolding', ts: 100 }));
+    insertMessage(
+      db,
+      team.id,
+      ada.row.id,
+      null,
+      makeEnvelope({
+        id: 's1',
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: 'scaffolding',
+        ts: 100,
+      }),
+    );
     expect(latestStatusUpdate(db, ada.row.id)).toEqual({ state: 'scaffolding', ts: 100 });
 
     // newer status with meta.state wins over body
-    insertMessage(db, team.id, ada.row.id, null,
-      makeEnvelope({ id: 's2', team: 'dawn', from: 'Ada', to: { kind: 'team' }, act: 'status_update', body: 'ignored body', meta: { state: 'refactoring auth', progress: 0.5 }, ts: 200 }));
+    insertMessage(
+      db,
+      team.id,
+      ada.row.id,
+      null,
+      makeEnvelope({
+        id: 's2',
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: 'ignored body',
+        meta: { state: 'refactoring auth', progress: 0.5 },
+        ts: 200,
+      }),
+    );
     expect(latestStatusUpdate(db, ada.row.id)).toEqual({ state: 'refactoring auth', ts: 200 });
 
     // a non-status_update message does not change the label
-    insertMessage(db, team.id, ada.row.id, null,
-      makeEnvelope({ id: 'm3', team: 'dawn', from: 'Ada', to: { kind: 'team' }, act: 'message', body: 'just chatting', ts: 300 }));
+    insertMessage(
+      db,
+      team.id,
+      ada.row.id,
+      null,
+      makeEnvelope({
+        id: 'm3',
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'team' },
+        act: 'message',
+        body: 'just chatting',
+        ts: 300,
+      }),
+    );
     expect(latestStatusUpdate(db, ada.row.id)).toEqual({ state: 'refactoring auth', ts: 200 });
   });
 });
@@ -138,7 +216,9 @@ describe('presence', () => {
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
     attach(db, ada.row.id, 'claude-code', 'c1');
     expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(true);
-    expect(listPresence(db, team.id, 45_000).find((p) => p.member.name === 'Ada')?.status).toBe('online');
+    expect(listPresence(db, team.id, 45_000).find((p) => p.member.name === 'Ada')?.status).toBe(
+      'online',
+    );
     // reap with a 0ms timeout removes everything
     const removed = reapStale(db, 0);
     expect(removed.length).toBe(1);
@@ -157,7 +237,9 @@ describe('presence', () => {
     expect(presenceById(db, p.id)).toBeDefined();
     // ...and is excluded from the live roster, so the member reads offline immediately.
     expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(false);
-    expect(listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')?.status).toBe('offline');
+    expect(listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')?.status).toBe(
+      'offline',
+    );
   });
 
   it('a reclaim hold survives the grace window, then the reaper frees it', () => {

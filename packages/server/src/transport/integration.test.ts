@@ -1,8 +1,8 @@
+import { PROTOCOL_VERSION, type WSServerFrame } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
-import { PROTOCOL_VERSION, type WSServerFrame } from '@musterd/protocol';
-import { createServer, type RunningServer } from '../index.js';
 import { openDb } from '../db/open.js';
+import { createServer, type RunningServer } from '../index.js';
 
 let server: RunningServer;
 let base: string;
@@ -32,14 +32,19 @@ async function pollUntil(pred: () => boolean, ms = 1000): Promise<void> {
 async function post(path: string, body: unknown, token?: string) {
   const res = await fetch(base + path, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   });
   return { status: res.status, json: (await res.json()) as any };
 }
 
 async function get(path: string, token?: string) {
-  const res = await fetch(base + path, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  const res = await fetch(base + path, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
   return { status: res.status, json: (await res.json()) as any };
 }
 
@@ -73,7 +78,13 @@ class TestWs {
     if (existing) return Promise.resolve(existing);
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => reject(new Error(`timeout waiting for ${type}`)), ms);
-      this.waiters.push({ type, resolve: (f) => { clearTimeout(t); resolve(f); } });
+      this.waiters.push({
+        type,
+        resolve: (f) => {
+          clearTimeout(t);
+          resolve(f);
+        },
+      });
     });
   }
   hello(team: string, as: string, token: string, surface = 'cli') {
@@ -92,7 +103,10 @@ describe('HTTP API', () => {
   });
 
   it('creates a team + creator token; duplicate slug is 409', async () => {
-    const r = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human', role: 'lead' } });
+    const r = await post('/teams', {
+      slug: 'dawn',
+      creator: { name: 'nick', kind: 'human', role: 'lead' },
+    });
     expect(r.status).toBe(201);
     expect(r.json.token).toMatch(/^mskd_/);
     const dup = await post('/teams', { slug: 'dawn', creator: { name: 'x', kind: 'human' } });
@@ -107,8 +121,14 @@ describe('HTTP API', () => {
     const boTok = bo.json.token;
 
     const env = {
-      id: 'mh1', v: PROTOCOL_VERSION, team: 'dawn', from: 'nick',
-      to: { kind: 'member', name: 'bo' }, act: 'message', body: 'hi bo', ts: Date.now(),
+      id: 'mh1',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'member', name: 'bo' },
+      act: 'message',
+      body: 'hi bo',
+      ts: Date.now(),
     };
     const sent = await post('/teams/dawn/messages', { envelope: env }, nickTok);
     expect(sent.status).toBe(201);
@@ -123,9 +143,22 @@ describe('HTTP API', () => {
   it('rejects an invalid act with 422 validation', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, team.json.token);
-    const bad = await post('/teams/dawn/messages', {
-      envelope: { id: 'x', v: PROTOCOL_VERSION, team: 'dawn', from: 'nick', to: { kind: 'member', name: 'bo' }, act: 'yell', body: '', ts: 1 },
-    }, team.json.token);
+    const bad = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          id: 'x',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'bo' },
+          act: 'yell',
+          body: '',
+          ts: 1,
+        },
+      },
+      team.json.token,
+    );
     expect(bad.status).toBe(422);
     expect(bad.json.error.code).toBe('validation');
   });
@@ -145,7 +178,16 @@ describe('WebSocket', () => {
 
     a.send({
       type: 'send',
-      envelope: { id: 'mw1', v: PROTOCOL_VERSION, team: 'dawn', from: 'Ada', to: { kind: 'member', name: 'Lin' }, act: 'handoff', body: 'ready', ts: Date.now() },
+      envelope: {
+        id: 'mw1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'member', name: 'Lin' },
+        act: 'handoff',
+        body: 'ready',
+        ts: Date.now(),
+      },
     });
 
     const ack = await a.waitFor('ack');
@@ -168,7 +210,16 @@ describe('WebSocket', () => {
     await n.hello('dawn', 'nick', nickTok, 'cli');
     n.send({
       type: 'send',
-      envelope: { id: 'mw2', v: PROTOCOL_VERSION, team: 'dawn', from: 'nick', to: { kind: 'member', name: 'Ada' }, act: 'request_help', body: 'help', ts: Date.now() },
+      envelope: {
+        id: 'mw2',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'nick',
+        to: { kind: 'member', name: 'Ada' },
+        act: 'request_help',
+        body: 'help',
+        ts: Date.now(),
+      },
     });
     await n.waitFor('ack');
 
@@ -193,7 +244,17 @@ describe('WebSocket', () => {
 
     a.send({
       type: 'send',
-      envelope: { id: 'su1', v: PROTOCOL_VERSION, team: 'dawn', from: 'Ada', to: { kind: 'team' }, act: 'status_update', body: '', meta: { state: 'refactoring auth' }, ts: Date.now() },
+      envelope: {
+        id: 'su1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: '',
+        meta: { state: 'refactoring auth' },
+        ts: Date.now(),
+      },
     });
     await a.waitFor('ack');
 
@@ -219,7 +280,14 @@ describe('WebSocket', () => {
 
     const a2 = new TestWs();
     await a2.open();
-    a2.send({ type: 'hello', v: PROTOCOL_VERSION, team: 'dawn', as: 'Ada', token: ada.json.token, surface: 'cli' });
+    a2.send({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Ada',
+      token: ada.json.token,
+      surface: 'cli',
+    });
     const err = await a2.waitFor('error');
     expect((err as any).code).toBe('member_busy');
 
@@ -245,7 +313,8 @@ describe('WebSocket', () => {
     // Wait until the server has processed the close (released the hold + emitted offline).
     await pollUntil(() =>
       n.frames.some(
-        (f) => f.type === 'presence' && (f as any).member === 'Ada' && (f as any).status === 'offline',
+        (f) =>
+          f.type === 'presence' && (f as any).member === 'Ada' && (f as any).status === 'offline',
       ),
     );
 
@@ -263,7 +332,14 @@ describe('WebSocket', () => {
     const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
     const w = new TestWs();
     await w.open();
-    w.send({ type: 'hello', v: PROTOCOL_VERSION, team: 'dawn', as: 'Lin', token: ada.json.token, surface: 'cli' });
+    w.send({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Lin',
+      token: ada.json.token,
+      surface: 'cli',
+    });
     const err = await w.waitFor('error');
     expect((err as any).code).toBe('forbidden');
     w.close();

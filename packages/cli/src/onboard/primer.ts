@@ -34,11 +34,11 @@ export function renderPrimer(opts: { member: string; team: string; role?: string
     '- **Check your inbox at every task boundary.** Call `team_inbox_check` when you start, when',
     '  you finish a unit of work, and after you’ve been heads-down — messages addressed to you',
     '  wait there and teammates expect a reply.',
-    '- **Say what you’re doing.** Post `team_send {act:\'status_update\'}` when you pick up or finish',
+    "- **Say what you’re doing.** Post `team_send {act:'status_update'}` when you pick up or finish",
     '  work, so the team (and the human watching) can see progress.',
-    '- **Ask when you’re blocked** with `team_send {act:\'request_help\'}` instead of guessing — it’s',
+    "- **Ask when you’re blocked** with `team_send {act:'request_help'}` instead of guessing — it’s",
     '  visible to the whole team.',
-    '- **Hand off cleanly.** `team_send {act:\'handoff\'}` passes a unit of work (name the artifact);',
+    "- **Hand off cleanly.** `team_send {act:'handoff'}` passes a unit of work (name the artifact);",
     '  answer a `request_help` or `handoff` with `accept` / `decline` (set `reply_to`).',
     '- **See who’s around** with `team_status` / `team_members` before you ask or hand off.',
     '',
@@ -53,7 +53,10 @@ export function renderPrimer(opts: { member: string; team: string; role?: string
  * user's own content: create the file if absent, replace the managed block in place if markers are
  * present, otherwise append the block below existing prose.
  */
-export function upsertPrimer(dir: string, block: string): { path: string; action: 'created' | 'appended' | 'updated' } {
+export function upsertPrimer(
+  dir: string,
+  block: string,
+): { path: string; action: 'created' | 'appended' | 'updated' } {
   const path = join(dir, 'AGENTS.md');
   if (!existsSync(path)) {
     writeFileSync(path, block + '\n', 'utf8');

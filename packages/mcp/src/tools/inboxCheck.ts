@@ -1,6 +1,6 @@
-import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Envelope } from '@musterd/protocol';
+import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { formatMessage, textResult } from './format.js';
 
@@ -22,7 +22,9 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
     },
     async (args) => {
       if (!client.joined) {
-        return textResult("you haven't joined the team yet — call team_join first to receive messages");
+        return textResult(
+          "you haven't joined the team yet — call team_join first to receive messages",
+        );
       }
       try {
         // Combine buffered live deliveries with the authoritative inbox fetch, dedup by id.
@@ -43,7 +45,15 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {
-            messages: messages.map((m) => ({ id: m.id, from: m.from, act: m.act, body: m.body, ts: m.ts, thread: m.thread ?? null, meta: m.meta ?? null })),
+            messages: messages.map((m) => ({
+              id: m.id,
+              from: m.from,
+              act: m.act,
+              body: m.body,
+              ts: m.ts,
+              thread: m.thread ?? null,
+              meta: m.meta ?? null,
+            })),
           },
         };
       } catch (err) {

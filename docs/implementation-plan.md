@@ -2,7 +2,7 @@
 
 > **Living document.** This is the working plan of record: what the original plan called for, what has shipped, where we deviated on purpose, and what remains. It supersedes the original planning file (`.cursor/plans/agent_team_coordination_layer_22ae2015.plan.md`) as the thing to consult for "where are we and what's next." Deviations from *this* doc follow the same ADR protocol as everything else (`AGENTS.md`).
 >
-> Last reconciled: **2026-06-12** (v0.2 **M4 + launch tail done** — all four `@musterd/*` packages published to npm at v0.0.1; launch post drafted at `docs/launch-post.md`; flagship demo GIF recorded (`docs/assets/flagship.gif` via vhs) so the README header renders. Remaining: post the launch (a human action) and the §4.C hygiene items. **Only open product item: the M3 `provenance`/`where`-on-attach seed.**)
+> Last reconciled: **2026-06-15** (§4.C **hygiene done** — ADR 013: vitest coverage wired + enforced, ESLint flat config + Prettier added, scenario-placement doc reconciled; see §4.C. Prior milestone: v0.2 **M4 + launch tail done** — all four `@musterd/*` packages published to npm at v0.0.1; launch post drafted at `docs/launch-post.md`; flagship demo GIF recorded (`docs/assets/flagship.gif` via vhs) so the README header renders. Remaining: post the launch (a human action); raise cli/mcp coverage to the 75% target (now-tracked §4.C follow-up). **Only open product item: the M3 `provenance`/`where`-on-attach seed.**)
 
 ---
 
@@ -49,8 +49,8 @@ Each is recorded in an ADR; this is the consolidated narrative.
 **UI/UX executed against reality (ADR 008).** The Figma execution (skipped in the rush to build) was completed for all three briefs — but with the direction flipped where code already existed: the CLI is the source of truth for terminal output and the ASCII banner, and the frames mirror it (MCP env block on `team add`, `cli` default surface). The Dashboard file is *designed, not built* (v0.3), and its data-model pressure-test passed with zero schema gaps. Launch assets (README header, social card, avatar, badge) are exported into `docs/design/assets/`.
 
 **Smaller drifts worth knowing (no ADR needed, recorded here):**
-- Scenario A lives in `packages/cli/src/cli.e2e.test.ts` and Scenario B's behavior in `packages/mcp/src/mcp.test.ts`, not in `tests/scenarios/` as `06-testing.md` sketched — only Scenario C is there. Functionally covered; file placement differs.
-- The coverage gates in `06-testing.md` (≥95/85/75%) are **not wired** into the vitest configs — tests pass but coverage is unmeasured.
+- Scenario A lives in `packages/cli/src/cli.e2e.test.ts` and Scenario B's behavior in `packages/mcp/src/mcp.test.ts`, not in `tests/scenarios/` as `06-testing.md` sketched — only Scenario C is there. Functionally covered; file placement differs. **Reconciled:** `06-testing.md` §"The three acceptance scenarios" now documents this placement explicitly (the §4.C "one-line doc fix" — done).
+- ~~The coverage gates in `06-testing.md` (≥95/85/75%) are **not wired**~~ **Done (ADR 013).** Coverage is wired (`pnpm coverage`, v8) with per-package gates enforced: protocol/server at their documented targets (both met), cli/mcp as regression-ratchet floors at current coverage (cli ~44%, mcp ~57%) with 75% kept as the tracked target.
 - "Codex joins" (plan M4) was validated via the harness-agnostic env path (Scenario C binds Lin with `surface: codex`); there is no Codex-specific onboarding adapter in `musterd init` (only Claude Code + Cursor).
 - ADR numbering: `membership-impl-plan.md` M1 says to write "ADR 008 — single-active + grace"; 008 turned out to be the Figma execution and 009 the npm scope decision, so single-active + grace landed as **ADR 010** (v0.2 M1, done).
 
@@ -82,9 +82,10 @@ In priority order. The governing sequence (per ADR 007) is: **v0.2 minimal trust
 - ~~**Record the flagship demo**~~ ✅ **done** (2026-06-12) — `examples/flagship-demo.mjs` rewritten as a *narrated, self-paced* walkthrough (cast + premise intro, per-beat captions). Two cuts from one script: the **lean header cut** (`docs/flagship.tape` → `docs/assets/flagship.gif`, ~25s — drops the single-active digression and the private handoff to stay first-touch legible) and the **full cut** (`DEMO_FULL=1`, `docs/flagship-full.tape` → `flagship-full.gif`, ~40s — keeps both, satisfying the "show refused duplicate + working" requirement). README renders the header cut with an honest "scripted walkthrough" caption; `docs/demo.md` elevates the **real 3-pane recording (form 3)** as the authentic launch cut still to be recorded. Re-record any time with `vhs docs/flagship.tape` (or `vhs docs/flagship-full.tape`).
 
 ### C. Hygiene (non-blocking, schedule opportunistically)
-- Wire vitest coverage and either enforce or amend the `06-testing.md` gates.
-- ESLint/Prettier setup (ADR 004 said deferred, not dropped).
-- Move/alias Scenario A/B into `tests/scenarios/` or amend `06-testing.md` to match reality (one-line doc fix).
+- ~~Wire vitest coverage and either enforce or amend the `06-testing.md` gates.~~ ✅ **done (ADR 013)** — `pnpm coverage` (v8), per-package gates enforced; protocol/server at documented targets, cli/mcp as ratchet floors (75% target tracked).
+- ~~ESLint/Prettier setup (ADR 004 said deferred, not dropped).~~ ✅ **done** — flat-config ESLint (`@typescript-eslint` + `import` order/no-default-export, the `07-conventions.md` rules) and Prettier wired; `pnpm lint`/`lint:fix`/`format`/`format:check` scripts; repo lints clean and is Prettier-formatted. ADR 004 superseded on this point.
+- ~~Move/alias Scenario A/B into `tests/scenarios/` or amend `06-testing.md` to match reality (one-line doc fix).~~ ✅ **done** — `06-testing.md` documents the actual placement (A in `cli.e2e.test.ts`, B in `mcp.test.ts`, C in `tests/scenarios/`).
+- **Remaining (new, tracked):** raise cli/mcp coverage to the documented 75% target — the gap is the interactive `cli/src/onboard` wizard and the `mcp/src/tools` handlers, which need behavioral tests against stdio/prompt I/O.
 
 ### D. v0.3 — shared-teams governance (designed, deliberately not built)
 The full set in `membership-model.md` + `spec-v0.3-draft.md` + `security.md`: seats/roles, agent key + grants (once/TTL/standing) + approval lane, capabilities + need-to-know visibility projection, audit log, notification tiers + scarce `urgent`, human observers. **Trigger condition: the daemon stops being localhost-only.** Do not build ahead of that; the designs pre-answer the known landmines (grant expiry never evicts a live claim; fingerprints are recognition, not security; `urgent` strike-tracking needs ≥2 humans).
@@ -108,3 +109,4 @@ Telemetry & observability (minimal OTel instrumentation of `@musterd/server`; `m
 | 010 | single-active members + 45s reclaim grace | v0.2 M1 |
 | 011 | W3C trace context rides in `Envelope.meta.otel` (proposed) | observability |
 | 012 | `musterd init` writes an agent primer (`AGENTS.md`) | agent UX (onboarding gap) |
+| 013 | coverage gates wired; cli/mcp enforced as ratchet floors; ESLint/Prettier added (supersedes 004) | hygiene |

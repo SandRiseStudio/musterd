@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Database } from 'better-sqlite3';
 import type { Lifecycle, MemberKind } from '@musterd/protocol';
+import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { MusterdError } from '../errors.js';
 import type { MemberRow, TeamRow } from './rows.js';
@@ -30,7 +30,10 @@ export function addMember(
   input: AddMemberInput,
 ): { row: MemberRow; token: string } {
   if (!input.name || /\s/.test(input.name)) {
-    throw new MusterdError('bad_request', 'member name is required and must not contain whitespace');
+    throw new MusterdError(
+      'bad_request',
+      'member name is required and must not contain whitespace',
+    );
   }
   const existing = getMemberByName(db, team.id, input.name);
   if (existing && existing.left_at === null) {
@@ -77,18 +80,26 @@ export function getMemberById(db: Database, id: string): MemberRow | undefined {
 
 export function listMembers(db: Database, teamId: string): MemberRow[] {
   return db
-    .prepare<[string], MemberRow>('SELECT * FROM members WHERE team_id = ? AND left_at IS NULL ORDER BY created_at')
+    .prepare<
+      [string],
+      MemberRow
+    >('SELECT * FROM members WHERE team_id = ? AND left_at IS NULL ORDER BY created_at')
     .all(teamId);
 }
 
 /** Authenticate a token to a specific member in a specific team. Throws unauthorized/forbidden. */
-export function authMember(db: Database, teamSlug: string, token: string): { team: TeamRow; member: MemberRow } {
+export function authMember(
+  db: Database,
+  teamSlug: string,
+  token: string,
+): { team: TeamRow; member: MemberRow } {
   const team = requireTeam(db, teamSlug);
   const hash = hashToken(token);
   const member = db
-    .prepare<[string, string], MemberRow>(
-      'SELECT * FROM members WHERE team_id = ? AND token_hash = ? AND left_at IS NULL',
-    )
+    .prepare<
+      [string, string],
+      MemberRow
+    >('SELECT * FROM members WHERE team_id = ? AND token_hash = ? AND left_at IS NULL')
     .get(team.id, hash);
   if (!member) throw new MusterdError('unauthorized', 'invalid token for this team');
   return { team, member };

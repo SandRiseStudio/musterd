@@ -1,16 +1,12 @@
 import type { IncomingMessage } from 'node:http';
+import { WSClientFrame, PROTOCOL_VERSION, type WSServerFrame } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { WebSocketServer, type WebSocket } from 'ws';
-import {
-  WSClientFrame,
-  PROTOCOL_VERSION,
-  type WSServerFrame,
-} from '@musterd/protocol';
 import type { Ctx } from '../context.js';
 import { MusterdError, asMusterdError } from '../errors.js';
 import { log } from '../log.js';
-import { parseEnvelope } from '../protocol/validate.js';
 import { routeEnvelope } from '../protocol/route.js';
+import { parseEnvelope } from '../protocol/validate.js';
 import { authMember } from '../store/members.js';
 import {
   attach,
@@ -35,10 +31,20 @@ function send(ws: WebSocket, frame: WSServerFrame): void {
 }
 
 /** Emit a presence event to the team if the member just went online/offline. */
-function emitPresence(ctx: Ctx, conn: Connection, status: 'online' | 'offline', surface?: string): void {
+function emitPresence(
+  ctx: Ctx,
+  conn: Connection,
+  status: 'online' | 'offline',
+  surface?: string,
+): void {
   ctx.hub.broadcastTeam(
     conn.teamId,
-    { type: 'presence', member: conn.memberName, status, ...(surface ? { surface: surface as never } : {}) },
+    {
+      type: 'presence',
+      member: conn.memberName,
+      status,
+      ...(surface ? { surface: surface as never } : {}),
+    },
     undefined,
   );
 }
@@ -85,7 +91,10 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // Single-active (ADR 010): one live attachment per member. A live holder refuses a
           // second session; a dropped holder's release hold is silently reclaimed within grace.
           if (hasActivePresence(ctx.db, member.id)) {
-            throw new MusterdError('member_busy', `member "${member.name}" is already active in this team`);
+            throw new MusterdError(
+              'member_busy',
+              `member "${member.name}" is already active in this team`,
+            );
           }
           clearMemberPresence(ctx.db, member.id);
           const presence = attach(ctx.db, member.id, frame.surface, state.connId);
@@ -133,11 +142,18 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               .prepare<[string], { slug: string }>('SELECT slug FROM teams WHERE id = ?')
               .get(conn.teamId);
             const member = ctx.db
-              .prepare<[string], import('../store/rows.js').MemberRow>('SELECT * FROM members WHERE id = ?')
+              .prepare<
+                [string],
+                import('../store/rows.js').MemberRow
+              >('SELECT * FROM members WHERE id = ?')
               .get(conn.memberId);
-            if (!team || !member) throw new MusterdError('server_error', 'connection lost its identity');
+            if (!team || !member)
+              throw new MusterdError('server_error', 'connection lost its identity');
             const teamRow = ctx.db
-              .prepare<[string], import('../store/rows.js').TeamRow>('SELECT * FROM teams WHERE id = ?')
+              .prepare<
+                [string],
+                import('../store/rows.js').TeamRow
+              >('SELECT * FROM teams WHERE id = ?')
               .get(conn.teamId)!;
             const result = routeEnvelope(ctx, teamRow, member, env);
             send(ws, { type: 'ack', id: result.message.id });

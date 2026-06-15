@@ -16,6 +16,8 @@ export interface HttpClientOpts {
 export class HttpClient {
   constructor(private opts: HttpClientOpts) {}
 
+  // reason: returns parsed JSON of varying shape; callers narrow at each call site.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async request(method: string, path: string, body?: unknown): Promise<any> {
     let res: Response;
     try {
@@ -49,7 +51,11 @@ export class HttpClient {
   }
 
   createTeam(slug: string, creator: { name: string; role?: string }, display?: string) {
-    return this.request('POST', '/teams', { slug, display, creator: { name: creator.name, kind: 'human', role: creator.role } });
+    return this.request('POST', '/teams', {
+      slug,
+      display,
+      creator: { name: creator.name, kind: 'human', role: creator.role },
+    });
   }
   addMember(slug: string, body: Record<string, unknown>) {
     return this.request('POST', `/teams/${slug}/members`, body);
@@ -60,7 +66,10 @@ export class HttpClient {
   send(slug: string, envelope: Envelope) {
     return this.request('POST', `/teams/${slug}/messages`, { envelope });
   }
-  inbox(slug: string, opts: { unread?: boolean; limit?: number } = {}): Promise<{ messages: Envelope[]; cursor: { last_read_ts: number } }> {
+  inbox(
+    slug: string,
+    opts: { unread?: boolean; limit?: number } = {},
+  ): Promise<{ messages: Envelope[]; cursor: { last_read_ts: number } }> {
     const q = new URLSearchParams();
     if (opts.unread) q.set('unread', '1');
     if (opts.limit) q.set('limit', String(opts.limit));
@@ -68,7 +77,9 @@ export class HttpClient {
     return this.request('GET', `/teams/${slug}/inbox${qs ? `?${qs}` : ''}`);
   }
   markRead(slug: string, lastReadMessageId: string) {
-    return this.request('POST', `/teams/${slug}/inbox/cursor`, { last_read_message_id: lastReadMessageId });
+    return this.request('POST', `/teams/${slug}/inbox/cursor`, {
+      last_read_message_id: lastReadMessageId,
+    });
   }
   presence(slug: string, surface: string, status?: string) {
     return this.request('POST', `/teams/${slug}/presence`, { surface, status });
@@ -93,7 +104,16 @@ export function watch(opts: WatchOpts): { close: () => void } {
   let heartbeat: NodeJS.Timeout | undefined;
 
   ws.on('open', () => {
-    ws.send(JSON.stringify({ type: 'hello', v: PROTOCOL_VERSION, team: opts.team, as: opts.as, token: opts.token, surface: opts.surface }));
+    ws.send(
+      JSON.stringify({
+        type: 'hello',
+        v: PROTOCOL_VERSION,
+        team: opts.team,
+        as: opts.as,
+        token: opts.token,
+        surface: opts.surface,
+      }),
+    );
   });
   ws.on('message', (data) => {
     const frame = JSON.parse(data.toString()) as WSServerFrame;

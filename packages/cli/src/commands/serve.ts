@@ -17,7 +17,9 @@ export async function serveCommand(parsed: Parsed): Promise<number> {
   const { port, host: boundHost } = await server.listen();
 
   process.stdout.write(renderBanner() + '\n\n');
-  process.stdout.write(`${theme.ok('●')} listening on ${theme.accent(`ws://${boundHost}:${port}`)}\n`);
+  process.stdout.write(
+    `${theme.ok('●')} listening on ${theme.accent(`ws://${boundHost}:${port}`)}\n`,
+  );
   process.stdout.write(theme.meta('ctrl-c to stop') + '\n');
 
   await new Promise<void>((resolveP) => {

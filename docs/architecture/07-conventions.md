@@ -7,7 +7,7 @@
 - **TypeScript**, strict. Node 22, ESM (`"type":"module"`). Target `ES2022`, `moduleResolution: "bundler"` (or `nodenext`; pick one repo-wide — record in ADR if you change).
 - Package manager: **pnpm workspaces** (`pnpm-workspace.yaml` lists `packages/*`).
 - Build: `tsc` per package emitting to `dist/` (or `tsup` if bundling helps the CLI/MCP bins — ADR if added). `@musterd/protocol` is consumed as source-or-dist via workspace `*`.
-- Test: vitest. Static gate for v0.1 is **strict `tsc --noEmit`** (ADR 004); ESLint (`@typescript-eslint`) + Prettier are roadmap, and the conventions below are followed by hand until then.
+- Test: vitest. Static gates: **strict `tsc --noEmit`** plus **ESLint** (flat config, `@typescript-eslint` + `import`) and **Prettier** (ADR 013, which supersedes ADR 004's deferral). The "Lint / format rules" below are now machine-enforced: `pnpm lint` (and `pnpm format:check`) must be clean.
 
 ## tsconfig (root `tsconfig.base.json`, extended per package)
 
@@ -80,8 +80,8 @@ Known ADRs to write while implementing (because the docs already flagged simplif
 
 A task/milestone is done only when **all** are true:
 1. Code compiles (`pnpm -r build`) with no TS errors.
-2. Strict typecheck clean (`pnpm -r exec tsc --noEmit`). ESLint is roadmap (ADR 004); `pnpm -r lint` is a no-op placeholder for now.
-3. `pnpm test` green, including the relevant acceptance scenario(s) and coverage gates (`06-testing.md`).
+2. Strict typecheck clean (`pnpm -r exec tsc --noEmit`); `pnpm lint` and `pnpm format:check` clean (ESLint + Prettier, ADR 013).
+3. `pnpm test` green, including the relevant acceptance scenario(s); `pnpm coverage` meets the gates (`06-testing.md`).
 4. Docs touched by the change are updated in the same commit; no doc/code disagreement.
 5. Any deviation from these docs has an ADR.
 6. For CLI changes: output still matches the Figma terminal frames (snapshot tests pass).

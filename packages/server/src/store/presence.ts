@@ -1,5 +1,5 @@
-import type { Database } from 'better-sqlite3';
 import type { PresenceStatus, Surface } from '@musterd/protocol';
+import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import type { MemberRow, PresenceRow } from './rows.js';
 
@@ -54,9 +54,10 @@ export function clearMemberPresence(db: Database, memberId: string): void {
 /** Does this member currently hold a *live* (connected, non-held) presence? Drives single-active. */
 export function hasActivePresence(db: Database, memberId: string): boolean {
   const row = db
-    .prepare<[string], { n: number }>(
-      'SELECT COUNT(*) AS n FROM presence WHERE member_id = ? AND held_until IS NULL AND conn_id IS NOT NULL',
-    )
+    .prepare<
+      [string],
+      { n: number }
+    >('SELECT COUNT(*) AS n FROM presence WHERE member_id = ? AND held_until IS NULL AND conn_id IS NOT NULL')
     .get(memberId);
   return (row?.n ?? 0) > 0;
 }
@@ -81,9 +82,10 @@ export function detach(db: Database, presenceId: string): void {
 export function hasLivePresence(db: Database, memberId: string, timeoutMs: number): boolean {
   const cutoff = Date.now() - timeoutMs;
   const row = db
-    .prepare<[string, number], { n: number }>(
-      'SELECT COUNT(*) AS n FROM presence WHERE member_id = ? AND held_until IS NULL AND last_seen_at > ?',
-    )
+    .prepare<
+      [string, number],
+      { n: number }
+    >('SELECT COUNT(*) AS n FROM presence WHERE member_id = ? AND held_until IS NULL AND last_seen_at > ?')
     .get(memberId, cutoff);
   return (row?.n ?? 0) > 0;
 }
@@ -92,13 +94,17 @@ export function hasLivePresence(db: Database, memberId: string, timeoutMs: numbe
 export function listPresence(db: Database, teamId: string, timeoutMs: number): PresenceSummary[] {
   const cutoff = Date.now() - timeoutMs;
   const members = db
-    .prepare<[string], MemberRow>('SELECT * FROM members WHERE team_id = ? AND left_at IS NULL ORDER BY created_at')
+    .prepare<
+      [string],
+      MemberRow
+    >('SELECT * FROM members WHERE team_id = ? AND left_at IS NULL ORDER BY created_at')
     .all(teamId);
   return members.map((member) => {
     const presences = db
-      .prepare<[string, number], PresenceRow>(
-        'SELECT * FROM presence WHERE member_id = ? AND held_until IS NULL AND last_seen_at > ? ORDER BY last_seen_at DESC',
-      )
+      .prepare<
+        [string, number],
+        PresenceRow
+      >('SELECT * FROM presence WHERE member_id = ? AND held_until IS NULL AND last_seen_at > ? ORDER BY last_seen_at DESC')
       .all(member.id, cutoff);
     const status: PresenceStatus =
       presences.length === 0
@@ -126,9 +132,10 @@ export function reapStale(db: Database, timeoutMs: number): PresenceRow[] {
   const now = Date.now();
   const cutoff = now - timeoutMs;
   const stale = db
-    .prepare<[number, number], PresenceRow>(
-      'SELECT * FROM presence WHERE last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?)',
-    )
+    .prepare<
+      [number, number],
+      PresenceRow
+    >('SELECT * FROM presence WHERE last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?)')
     .all(cutoff, now);
   if (stale.length > 0) {
     db.prepare(

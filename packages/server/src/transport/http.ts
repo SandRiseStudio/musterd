@@ -10,11 +10,11 @@ import {
 import { z } from 'zod';
 import type { Ctx } from '../context.js';
 import { MusterdError, asMusterdError } from '../errors.js';
-import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { routeEnvelope } from '../protocol/route.js';
+import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
+import { resolveActivity } from '../store/activity.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import { addMember, authMember, getMemberById } from '../store/members.js';
-import { resolveActivity } from '../store/activity.js';
 import { latestStatusUpdate, listInbox, rowToEnvelope } from '../store/messages.js';
 import { attach, listPresence } from '../store/presence.js';
 import { toMember } from '../store/rows.js';
@@ -44,7 +44,8 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 function bearer(req: IncomingMessage): string {
   const h = req.headers['authorization'];
-  if (!h || !h.startsWith('Bearer ')) throw new MusterdError('unauthorized', 'missing bearer token');
+  if (!h || !h.startsWith('Bearer '))
+    throw new MusterdError('unauthorized', 'missing bearer token');
   return h.slice('Bearer '.length).trim();
 }
 
@@ -74,7 +75,10 @@ const PresenceBody = z.object({
 function summarize(ctx: Ctx, teamSlug: string, teamId: string): MemberSummary[] {
   return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => {
     // Two-clocks rule (M2): liveness from presence, working-label from the latest status_update.
-    const activity = resolveActivity(s.status !== 'offline', latestStatusUpdate(ctx.db, s.member.id));
+    const activity = resolveActivity(
+      s.status !== 'offline',
+      latestStatusUpdate(ctx.db, s.member.id),
+    );
     return {
       ...toMember(s.member, teamSlug),
       presence: s.status,
@@ -85,7 +89,11 @@ function summarize(ctx: Ctx, teamSlug: string, teamId: string): MemberSummary[] 
 }
 
 /** Dispatch an HTTP request. Returns true if it handled the request (always, except non-matching upgrade). */
-export async function handleHttp(ctx: Ctx, req: IncomingMessage, res: ServerResponse): Promise<void> {
+export async function handleHttp(
+  ctx: Ctx,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
   try {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
@@ -117,7 +125,10 @@ export async function handleHttp(ctx: Ctx, req: IncomingMessage, res: ServerResp
 
       if (method === 'GET' && rest === '') {
         const team = requireTeam(ctx.db, slug);
-        return sendJson(res, 200, { team: { id: team.id, slug: team.slug, display: team.display }, members: summarize(ctx, slug, team.id) });
+        return sendJson(res, 200, {
+          team: { id: team.id, slug: team.slug, display: team.display },
+          members: summarize(ctx, slug, team.id),
+        });
       }
 
       if (method === 'POST' && rest === '/members') {
@@ -143,7 +154,12 @@ export async function handleHttp(ctx: Ctx, req: IncomingMessage, res: ServerResp
         const body = (await readJson(req)) as { envelope?: unknown };
         const env = parseEnvelope(body.envelope);
         const result = routeEnvelope(ctx, team, member, env);
-        const ack = rowToEnvelope(result.message, team.slug, member.name, env.to.kind === 'member' ? env.to.name : null);
+        const ack = rowToEnvelope(
+          result.message,
+          team.slug,
+          member.name,
+          env.to.kind === 'member' ? env.to.name : null,
+        );
         return sendJson(res, 201, { ack });
       }
 
@@ -168,7 +184,8 @@ export async function handleHttp(ctx: Ctx, req: IncomingMessage, res: ServerResp
       if (method === 'POST' && rest === '/inbox/cursor') {
         const { member } = authMember(ctx.db, slug, bearer(req));
         const body = (await readJson(req)) as { last_read_message_id?: string };
-        if (!body.last_read_message_id) throw new MusterdError('bad_request', 'last_read_message_id required');
+        if (!body.last_read_message_id)
+          throw new MusterdError('bad_request', 'last_read_message_id required');
         const row = ctx.db
           .prepare<[string], { ts: number }>('SELECT ts FROM messages WHERE id = ?')
           .get(body.last_read_message_id);
@@ -184,7 +201,9 @@ export async function handleHttp(ctx: Ctx, req: IncomingMessage, res: ServerResp
         if (body.status) {
           ctx.db.prepare('UPDATE presence SET status = ? WHERE id = ?').run(body.status, p.id);
         }
-        return sendJson(res, 200, { presence: { id: p.id, surface: p.surface, status: body.status ?? p.status } });
+        return sendJson(res, 200, {
+          presence: { id: p.id, surface: p.surface, status: body.status ?? p.status },
+        });
       }
     }
 

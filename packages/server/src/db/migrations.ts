@@ -28,18 +28,17 @@ export const MIGRATIONS: Migration[] = [
 
 function currentVersion(db: Database): number {
   const row = db
-    .prepare<[], { value: string }>(
-      "SELECT value FROM schema_meta WHERE key = 'schema_version'",
-    )
+    .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key = 'schema_version'")
     .get();
   return row ? Number(row.value) : 0;
 }
 
 function tableExists(db: Database, name: string): boolean {
   const row = db
-    .prepare<[string], { name: string }>(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
-    )
+    .prepare<
+      [string],
+      { name: string }
+    >("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
     .get(name);
   return Boolean(row);
 }

@@ -1,13 +1,13 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args.js';
-import { teamCommand } from './commands/team.js';
-import { sendCommand } from './commands/send.js';
 import { inboxCommand } from './commands/inbox.js';
+import { sendCommand } from './commands/send.js';
 import { statusCommand } from './commands/status.js';
+import { teamCommand } from './commands/team.js';
 
 let server: RunningServer;
 let dir: string;
@@ -70,7 +70,11 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     // switch to bo's config and read inbox
     writeFileSync(
       boConfig,
-      JSON.stringify({ server: process.env['MUSTERD_SERVER'], current: 'dawn', identities: { dawn: { name: 'bo', token: boToken, surface: 'cli' } } }),
+      JSON.stringify({
+        server: process.env['MUSTERD_SERVER'],
+        current: 'dawn',
+        identities: { dawn: { name: 'bo', token: boToken, surface: 'cli' } },
+      }),
     );
     process.env['MUSTERD_CONFIG'] = boConfig;
 
@@ -91,7 +95,11 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     const tok = JSON.parse(added.out).token as string;
     writeFileSync(
       boConfig,
-      JSON.stringify({ server: process.env['MUSTERD_SERVER'], current: 'solo', identities: { solo: { name: 'pat2', token: tok, surface: 'cli' } } }),
+      JSON.stringify({
+        server: process.env['MUSTERD_SERVER'],
+        current: 'solo',
+        identities: { solo: { name: 'pat2', token: tok, surface: 'cli' } },
+      }),
     );
     process.env['MUSTERD_CONFIG'] = boConfig;
     const inbox = await run(inboxCommand, []);

@@ -1,5 +1,5 @@
-import type { Database } from 'better-sqlite3';
 import { PROTOCOL_VERSION, type Envelope } from '@musterd/protocol';
+import type { Database } from 'better-sqlite3';
 import type { MessageRow } from './rows.js';
 
 /** Insert an envelope into the append-only log. `toMemberId` set iff to.kind==='member'. */
@@ -43,10 +43,13 @@ export interface InboxOpts {
  * A member's inbox: messages in their team addressed to them or to team/broadcast,
  * excluding their own sends. unreadOnly filters by the caller-supplied cursor ts.
  */
-export function listInbox(db: Database, member: { id: string; team_id: string }, opts: InboxOpts = {}): MessageRow[] {
+export function listInbox(
+  db: Database,
+  member: { id: string; team_id: string },
+  opts: InboxOpts = {},
+): MessageRow[] {
   const params: unknown[] = [member.team_id, member.id, member.id];
-  let sql =
-    `SELECT * FROM messages
+  let sql = `SELECT * FROM messages
      WHERE team_id = ?
        AND (to_member = ? OR to_kind IN ('team','broadcast'))
        AND from_member != ?`;
@@ -70,26 +73,40 @@ export function listInbox(db: Database, member: { id: string; team_id: string },
  * The label is `meta.state` (the SPEC field) or, if absent, the message body. Returns null
  * if the member has never posted a status_update with any label text.
  */
-export function latestStatusUpdate(db: Database, memberId: string): { state: string; ts: number } | null {
+export function latestStatusUpdate(
+  db: Database,
+  memberId: string,
+): { state: string; ts: number } | null {
   const row = db
-    .prepare<[string], { body: string; meta: string | null; ts: number }>(
-      "SELECT body, meta, ts FROM messages WHERE from_member = ? AND act = 'status_update' ORDER BY ts DESC, id DESC LIMIT 1",
-    )
+    .prepare<
+      [string],
+      { body: string; meta: string | null; ts: number }
+    >("SELECT body, meta, ts FROM messages WHERE from_member = ? AND act = 'status_update' ORDER BY ts DESC, id DESC LIMIT 1")
     .get(memberId);
   if (!row) return null;
-  const metaState = row.meta ? (JSON.parse(row.meta) as Record<string, unknown>)['state'] : undefined;
+  const metaState = row.meta
+    ? (JSON.parse(row.meta) as Record<string, unknown>)['state']
+    : undefined;
   const state = (typeof metaState === 'string' && metaState.trim() ? metaState : row.body).trim();
   return state ? { state, ts: row.ts } : null;
 }
 
 export function listTeamMessages(db: Database, teamId: string, limit = 200): MessageRow[] {
   return db
-    .prepare<[string, number], MessageRow>('SELECT * FROM messages WHERE team_id = ? ORDER BY ts ASC, id ASC LIMIT ?')
+    .prepare<
+      [string, number],
+      MessageRow
+    >('SELECT * FROM messages WHERE team_id = ? ORDER BY ts ASC, id ASC LIMIT ?')
     .all(teamId, limit);
 }
 
 /** Convert a stored row back to a protocol Envelope (for delivery/inbox responses). */
-export function rowToEnvelope(row: MessageRow, teamSlug: string, fromName: string, toName: string | null): Envelope {
+export function rowToEnvelope(
+  row: MessageRow,
+  teamSlug: string,
+  fromName: string,
+  toName: string | null,
+): Envelope {
   const to =
     row.to_kind === 'member'
       ? { kind: 'member' as const, name: toName ?? '' }

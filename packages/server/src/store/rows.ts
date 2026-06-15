@@ -62,7 +62,9 @@ export function toMember(row: MemberRow, teamSlug: string): Member {
     role: row.role,
     lifecycle: row.lifecycle,
     lifecycle_until: row.lifecycle_until,
-    availability: row.availability ? (JSON.parse(row.availability) as Record<string, unknown>) : null,
+    availability: row.availability
+      ? (JSON.parse(row.availability) as Record<string, unknown>)
+      : null,
     created_at: row.created_at,
   };
 }

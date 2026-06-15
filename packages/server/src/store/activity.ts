@@ -20,6 +20,7 @@ export function resolveActivity(
   lastStatus: { state: string; ts: number } | null,
 ): ActivityResolution {
   if (!live) return { activity: 'offline', state: null, last_status_at: null };
-  if (lastStatus) return { activity: 'working', state: lastStatus.state, last_status_at: lastStatus.ts };
+  if (lastStatus)
+    return { activity: 'working', state: lastStatus.state, last_status_at: lastStatus.ts };
   return { activity: 'online', state: null, last_status_at: null };
 }

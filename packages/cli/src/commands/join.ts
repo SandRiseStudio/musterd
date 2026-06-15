@@ -1,6 +1,6 @@
 import { flagStr, type Parsed } from '../args.js';
-import { loadConfig, saveConfig } from '../config.js';
 import { HttpClient } from '../client.js';
+import { loadConfig, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 

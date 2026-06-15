@@ -12,7 +12,8 @@ export function registerStatus(server: McpServer, client: MusterdClient): void {
       const { members } = await client.roster();
       const lines = members.map((m) => {
         const surface = m.presences[0]?.surface;
-        const presence = m.presence === 'offline' ? 'offline' : `${m.presence}${surface ? ` via ${surface}` : ''}`;
+        const presence =
+          m.presence === 'offline' ? 'offline' : `${m.presence}${surface ? ` via ${surface}` : ''}`;
         return `${m.name} (${m.kind}${m.role ? `, ${m.role}` : ''}) — ${presence}`;
       });
       return textResult(lines.join('\n') || 'no members');
