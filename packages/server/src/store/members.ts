@@ -101,7 +101,12 @@ export function authMember(
       MemberRow
     >('SELECT * FROM members WHERE team_id = ? AND token_hash = ? AND left_at IS NULL')
     .get(team.id, hash);
-  if (!member) throw new MusterdError('unauthorized', 'invalid token for this team');
+  if (!member)
+    throw new MusterdError(
+      'unauthorized',
+      `invalid token for team "${teamSlug}" — this member may not exist on the database this daemon is serving ` +
+        `(a daemon started against a different MUSTERD_DB will not recognize tokens minted elsewhere)`,
+    );
   return { team, member };
 }
 

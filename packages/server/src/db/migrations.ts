@@ -43,6 +43,11 @@ function currentVersion(db: Database): number {
   return row ? Number(row.value) : 0;
 }
 
+/** The applied schema version (0 if unmigrated). Surfaced in `/health` + serve logs for diagnostics. */
+export function schemaVersion(db: Database): number {
+  return tableExists(db, 'schema_meta') ? currentVersion(db) : 0;
+}
+
 function tableExists(db: Database, name: string): boolean {
   const row = db
     .prepare<

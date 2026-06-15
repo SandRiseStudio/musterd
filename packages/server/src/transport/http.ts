@@ -10,6 +10,7 @@ import {
 } from '@musterd/protocol';
 import { z } from 'zod';
 import type { Ctx } from '../context.js';
+import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
@@ -105,7 +106,14 @@ export async function handleHttp(
     const method = req.method ?? 'GET';
 
     if (method === 'GET' && path === '/health') {
-      return sendJson(res, 200, { ok: true, v: PROTOCOL_VERSION });
+      // db + schema are exposed so clients can confirm *which* database this daemon serves
+      // (a daemon silently serving the wrong db reads as "everyone offline" — dogfood finding).
+      return sendJson(res, 200, {
+        ok: true,
+        v: PROTOCOL_VERSION,
+        db: ctx.config.dbPath,
+        schema: schemaVersion(ctx.db),
+      });
     }
 
     if (method === 'POST' && path === '/teams') {

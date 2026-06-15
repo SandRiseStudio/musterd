@@ -20,6 +20,8 @@ export async function serveCommand(parsed: Parsed): Promise<number> {
   process.stdout.write(
     `${theme.ok('●')} listening on ${theme.accent(`ws://${boundHost}:${port}`)}\n`,
   );
+  // Show which db is live — a daemon silently serving the wrong db reads as "everyone offline".
+  process.stdout.write(theme.meta(`  db: ${server.dbPath}`) + '\n');
   process.stdout.write(theme.meta('ctrl-c to stop') + '\n');
 
   await new Promise<void>((resolveP) => {

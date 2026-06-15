@@ -3,7 +3,7 @@ import type { Envelope } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { linkReceived } from '../otel.js';
-import { formatMessage, textResult } from './format.js';
+import { formatMessage, notJoinedMessage, textResult } from './format.js';
 
 const DESCRIPTION =
   'Check for new messages addressed to you or the team since you last checked. ' +
@@ -23,9 +23,7 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
     },
     async (args) => {
       if (!client.joined) {
-        return textResult(
-          "you haven't joined the team yet — call team_join first to receive messages",
-        );
+        return textResult(notJoinedMessage('check your inbox', client.lastJoinError));
       }
       try {
         // Combine buffered live deliveries with the authoritative inbox fetch, dedup by id.

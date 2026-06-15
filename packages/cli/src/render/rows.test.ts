@@ -1,6 +1,6 @@
 import { PROTOCOL_VERSION, type Envelope, type MemberSummary } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { renderBanner, renderMessageRow, renderStatusTable } from './rows.js';
+import { renderBanner, renderMessageRow, renderStatusHeader, renderStatusTable } from './rows.js';
 
 // picocolors auto-disables color when stdout is not a TTY (vitest), so output is plain & deterministic.
 
@@ -158,6 +158,24 @@ describe('renderStatusTable', () => {
     ];
     const out = renderStatusTable(members);
     expect(out).toContain('online via claude-code (session) · movetrail@feat/login');
+  });
+});
+
+describe('renderStatusHeader', () => {
+  it('shows team, server, and the db path + schema when health is available', () => {
+    const out = renderStatusHeader('dawn', 'http://localhost:4849', {
+      db: '/Users/nick/musterd-demo/demo.db',
+      schema: 3,
+    });
+    expect(out).toContain('dawn');
+    expect(out).toContain('http://localhost:4849');
+    expect(out).toContain('db: /Users/nick/musterd-demo/demo.db (schema 3)');
+  });
+
+  it('omits the db segment when health is unavailable (pre-0.2 daemon)', () => {
+    const out = renderStatusHeader('dawn', 'http://localhost:4849');
+    expect(out).toContain('dawn');
+    expect(out).not.toContain('db:');
   });
 });
 
