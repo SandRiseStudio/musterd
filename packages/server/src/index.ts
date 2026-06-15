@@ -5,7 +5,8 @@ import type { Ctx } from './context.js';
 import { openDb } from './db/open.js';
 import { log } from './log.js';
 import { startReaper } from './presence/reaper.js';
-import { startTelemetry } from './telemetry.js';
+import { activePresenceBySurface, slowestInboxLagMs } from './store/metrics.js';
+import { registerRuntimeGauges, startTelemetry, telemetryEnabled } from './telemetry.js';
 import { handleHttp } from './transport/http.js';
 import { Hub } from './transport/hub.js';
 import { attachWsServer } from './transport/ws.js';
@@ -50,6 +51,12 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
       // Start telemetry before binding so the first envelope is already instrumented. No-op + instant
       // when no OTLP endpoint is configured (off by default — observability.md §4 / ADR 015).
       stopTelemetry = await startTelemetry();
+      if (telemetryEnabled()) {
+        registerRuntimeGauges({
+          presenceBySurface: () => activePresenceBySurface(db, config.presenceTimeoutMs),
+          inboxLagMs: () => slowestInboxLagMs(db),
+        });
+      }
       return await new Promise((resolve, reject) => {
         http.once('error', reject);
         http.listen(config.port, config.host, () => {
