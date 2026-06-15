@@ -150,9 +150,11 @@ describe('harness registry', () => {
     expect(cursor.surface).toBe('cursor');
   });
 
+  // Non-hermetic: shells out to the real `claude` CLI (can take ~4–8s), so give it a generous
+  // timeout — it trips vitest's 5s default under parallel load (flaky, but exercises the real probe).
   it('claude detect returns a shape even when probing the real CLI', async () => {
     const d = await claudeCode.detect();
     expect(typeof d.installed).toBe('boolean');
     expect(typeof d.configured).toBe('boolean');
-  });
+  }, 15_000);
 });

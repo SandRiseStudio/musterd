@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
 import { withTraceContext } from '../otel.js';
-import { textResult } from './format.js';
+import { notJoinedMessage, textResult } from './format.js';
 
 const DESCRIPTION =
   'Send a message to a teammate, the whole team, or broadcast. Use the right act: ' +
@@ -45,7 +45,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
     },
     async (args) => {
       if (!client.joined) {
-        return textResult("you haven't joined the team yet — call team_join first, then send");
+        return textResult(notJoinedMessage('send', client.lastJoinError));
       }
       const meta: Record<string, unknown> = { ...(args.meta ?? {}) };
       if (args.reply_to) meta['in_reply_to'] = args.reply_to;

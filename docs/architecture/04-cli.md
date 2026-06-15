@@ -79,7 +79,7 @@ Interactive first-run onboarding (requires a TTY; non-TTY prints guidance and ex
 9. **Wait-to-join** — poll the roster, live spinner that resolves when the agent's Presence appears (or a no-rush note if it doesn't within the window).
 
 ### `musterd serve [--port 4849] [--host 127.0.0.1]`
-Starts the daemon in the foreground. Prints the banner (`render/banner`) + `listening on ws://host:port`. Exit 0 on clean shutdown (SIGINT).
+Starts the daemon in the foreground. Prints the banner (`render/banner`) + `listening on ws://host:port` **and the served `db:` path** (ADR 016 — the db is chosen by `$MUSTERD_DB`, default `~/.musterd/musterd.db`; showing it makes a wrong-db daemon obvious). Exit 0 on clean shutdown (SIGINT).
 
 ### `musterd team create <slug> [--display <name>] [--as <yourname>] [--role <role>]`
 `POST /teams`. Creates the team and you as its first **human** member. Saves identity+token to config, sets `current`. Output: `cmd/team-create` frame — green `✓ team "dawn" created`, your member line, dim add hint. Errors: slug taken → `conflict` (exit 9).
@@ -98,7 +98,7 @@ Builds an Envelope, `POST /teams/:slug/messages` (or over the live WS if `--watc
 - With `--watch`: opens WS, holds presence (heartbeats every 15s), streams `deliver` frames as rows live; `◉ watching` indicator. This is the human's "be present on the team" mode and the left/right pane of the flagship demo. Ctrl-C exits 0. Output: `cmd/inbox-watch`.
 
 ### `musterd status`
-`GET /teams/:slug/members`. Renders the roster table: `MEMBER | KIND | ROLE | LIFECYCLE | ACTIVITY` (v0.2 M2 — the old `PRESENCE` column was renamed **ACTIVITY** and moved **last** because its `working: <status> · <age>` label is unbounded and free-flowing, so a long label can't collide with later columns; `ce89bf1`). ACTIVITY resolves via the two-clocks rule (`store/activity.ts`): liveness → `offline`/present, latest `status_update` → `online`/`working`, with the `· <age>` staleness suffix shown only once stale ≥5m. 80-col aligned, presence dot + surface per `brand.md`. Output: `cmd/status` *(the Figma `cmd/status` frame still shows the old `PRESENCE` column + order — frame drift tracked under ADR 008 lockstep; `disabled`/`archived` badges skipped, they need schema + verbs).*
+`GET /teams/:slug/members`. Prints a **header line** first — `team · server · db: <path> (schema N)` from `/health` (ADR 016; the db segment is omitted against a pre-0.2 daemon that doesn't report it) — so you can see *which daemon and database* you're reading before the roster. Then renders the roster table: `MEMBER | KIND | ROLE | LIFECYCLE | ACTIVITY` (v0.2 M2 — the old `PRESENCE` column was renamed **ACTIVITY** and moved **last** because its `working: <status> · <age>` label is unbounded and free-flowing, so a long label can't collide with later columns; `ce89bf1`). ACTIVITY resolves via the two-clocks rule (`store/activity.ts`): liveness → `offline`/present, latest `status_update` → `online`/`working`, with the `· <age>` staleness suffix shown only once stale ≥5m. 80-col aligned, presence dot + surface per `brand.md`. Output: `cmd/status` *(the Figma `cmd/status` frame still shows the old `PRESENCE` column + order — frame drift tracked under ADR 008 lockstep; `disabled`/`archived` badges skipped, they need schema + verbs).*
 
 ## Exit codes (must match the State frames' annotations)
 

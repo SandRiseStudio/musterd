@@ -47,6 +47,24 @@ export function renderMessageRow(
 }
 
 /**
+ * The `status` header: which team, which daemon, and — critically — which database that daemon
+ * serves. A daemon silently serving the wrong db reads as "everyone offline", so surfacing the db
+ * path makes that diagnosable at a glance (dogfood finding). `db`/`schema` are omitted pre-0.2.
+ */
+export function renderStatusHeader(
+  team: string,
+  server: string,
+  health?: { db?: string; schema?: number },
+): string {
+  const parts = [theme.accent(team), theme.meta(server)];
+  if (health?.db) {
+    const schema = health.schema != null ? ` (schema ${health.schema})` : '';
+    parts.push(theme.meta(`db: ${health.db}${schema}`));
+  }
+  return parts.join(theme.meta('  ·  '));
+}
+
+/**
  * The roster table for `status`: MEMBER KIND ROLE LIFECYCLE ACTIVITY.
  * ACTIVITY is last because its `working: …` label is unbounded — a free-flowing final
  * column never collides with the columns after it.

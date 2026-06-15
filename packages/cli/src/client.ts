@@ -50,6 +50,9 @@ export class HttpClient {
     return json;
   }
 
+  health(): Promise<{ ok: boolean; v: string; db?: string; schema?: number }> {
+    return this.request('GET', '/health');
+  }
   createTeam(slug: string, creator: { name: string; role?: string }, display?: string) {
     return this.request('POST', '/teams', {
       slug,

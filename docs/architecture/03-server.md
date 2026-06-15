@@ -117,7 +117,11 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 
 ## Auth
 
-- `authMember(token)`: `sha256(token)` → lookup `members.token_hash`. Returns the Member or throws `unauthorized`. WS `hello.token` and HTTP `Authorization: Bearer` both go through this.
+- `authMember(token)`: `sha256(token)` → lookup `members.token_hash`. Returns the Member or throws `unauthorized`. WS `hello.token` and HTTP `Authorization: Bearer` both go through this. The `unauthorized` message points at the likely cause — a token minted against a *different* db than this daemon serves (ADR 016).
+
+## Diagnostics (ADR 016)
+
+- `GET /health` → `{ ok, v, db, schema }` — `db` is the served database path, `schema` the applied migration version. `musterd serve` prints the db path on startup and logs `db`/`schema` on `listening`; `RunningServer.dbPath` exposes it. This makes "which db is this daemon serving?" answerable, so a daemon accidentally serving the wrong db (reads as "everyone offline") is self-diagnosing.
 - Team creation (`POST /teams`) needs no token; it mints the creator Member + token.
 - A token authorizes acting **as that one Member in that one Team**. `forbidden` if the envelope `from`/`team` don't match the authenticated Member.
 

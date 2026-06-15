@@ -89,8 +89,18 @@ describe('MCP adapter', () => {
     const a2 = new MusterdClient(adaConfig());
     await expect(a2.join()).rejects.toThrow(/member_busy/i);
     expect(a2.joined).toBe(false);
+    // The failure reason is retained so the dormant tool guards can surface *why* (not just
+    // "call team_join first") — a silent (auto)join failure must stay diagnosable.
+    expect(a2.lastJoinError).toMatch(/member_busy/i);
     a1.close();
     a2.close();
+  });
+
+  it('an invalid token surfaces a db/member-mismatch hint on join failure', async () => {
+    const bad = new MusterdClient({ ...adaConfig(), token: 'mskd_not_a_real_token' });
+    await expect(bad.join()).rejects.toThrow(/invalid token/i);
+    expect(bad.lastJoinError).toMatch(/different MUSTERD_DB|may not exist/i);
+    bad.close();
   });
 
   it('Ada sends a status_update that nick sees in his inbox', async () => {

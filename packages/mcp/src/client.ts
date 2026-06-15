@@ -29,12 +29,20 @@ export class MusterdClient {
   private joinedFlag = false;
   /** Resolves/rejects the in-flight join() on the first welcome / error frame. */
   private pendingJoin: { resolve: () => void; reject: (e: Error) => void } | null = null;
+  /** Why the last join attempt failed — surfaced by the dormant tool guards so a silent autojoin
+   * failure (e.g. wrong-db token rejection) is visible to the agent, not just "call team_join". */
+  private lastJoinErrorMsg: string | null = null;
 
   constructor(private config: McpConfig) {}
 
   /** Whether this session currently occupies its member's seat (claimed presence, got welcome). */
   get joined(): boolean {
     return this.joinedFlag;
+  }
+
+  /** The most recent join failure message, or null if none / since cleared by a successful join. */
+  get lastJoinError(): string | null {
+    return this.lastJoinErrorMsg;
   }
 
   // reason: returns parsed JSON of varying shape; callers narrow at each call site.
@@ -132,6 +140,7 @@ export class MusterdClient {
       }
       if (frame.type === 'welcome') {
         this.joinedFlag = true;
+        this.lastJoinErrorMsg = null;
         ws.send(JSON.stringify({ type: 'subscribe', scope: 'team' }));
         this.heartbeat = setInterval(() => {
           if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'heartbeat' }));
@@ -142,9 +151,9 @@ export class MusterdClient {
       } else if (frame.type === 'error') {
         // A refused hello (e.g. member_busy) is terminal — don't thrash reconnecting.
         this.wantPresence = false;
-        this.pendingJoin?.reject(
-          new Error(frame.code === 'member_busy' ? `member_busy: ${frame.message}` : frame.message),
-        );
+        const msg = frame.code === 'member_busy' ? `member_busy: ${frame.message}` : frame.message;
+        this.lastJoinErrorMsg = msg;
+        this.pendingJoin?.reject(new Error(msg));
         this.pendingJoin = null;
         ws.close();
       } else if (frame.type === 'deliver') {
