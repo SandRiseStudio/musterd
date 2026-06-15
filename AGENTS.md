@@ -46,6 +46,13 @@ pnpm -C packages/cli link --global     # `pnpm --filter @musterd/cli link --glob
 pnpm -C packages/cli unlink --global   # to undo
 ```
 
+`link --global` is a one-time global registration; `-C` is relative to your cwd, so to dogfood in **another** project use the absolute path (the relative form only works from the musterd repo root):
+
+```bash
+pnpm -C /ABS/PATH/TO/musterd/packages/cli link --global   # then `musterd <cmd>` works anywhere
+pnpm bin -g                                                # if `musterd` is not found, ensure this dir is on $PATH (`pnpm setup`)
+```
+
 Isolate dogfood state from your real `~/.musterd` with env: `MUSTERD_CONFIG`, `MUSTERD_DB`, `MUSTERD_SERVER`/`MUSTERD_PORT`. Rebuild after any source change — the bin runs `dist/`, not `src/`.
 
 ## Hard rules (violating these is a bug, not a choice)
