@@ -1,5 +1,5 @@
-import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { textResult } from './format.js';
 
@@ -25,9 +25,10 @@ export function registerMembers(server: McpServer, client: MusterdClient): void 
           const presences = m.presences.length
             ? m.presences.map((p) => `${p.surface}:${p.status}`).join(', ')
             : 'not present';
-          const lifecycle = m.lifecycle === 'until' && m.lifecycle_until
-            ? `until ${new Date(m.lifecycle_until).toISOString()}`
-            : m.lifecycle;
+          const lifecycle =
+            m.lifecycle === 'until' && m.lifecycle_until
+              ? `until ${new Date(m.lifecycle_until).toISOString()}`
+              : m.lifecycle;
           return `${m.name} — kind=${m.kind} role=${m.role || '—'} lifecycle=${lifecycle} presence=[${presences}]`;
         });
         return textResult(lines.join('\n'));

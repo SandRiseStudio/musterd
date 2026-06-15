@@ -1,9 +1,9 @@
 import type { Envelope, MemberKind } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
-import { wsBase } from '../config.js';
 import { watch } from '../client.js';
-import { theme } from '../render/theme.js';
+import { wsBase } from '../config.js';
 import { renderMessageRow } from '../render/rows.js';
+import { theme } from '../render/theme.js';
 import { kindLookup, resolve } from './helpers.js';
 
 export async function inboxCommand(parsed: Parsed): Promise<number> {
@@ -64,7 +64,9 @@ function watchInbox(
       surface: identity.surface || 'cli',
       onDeliver: (env) => process.stdout.write(renderMessageRow(env, kindOf) + '\n'),
       onPresence: (member, status, surface) =>
-        process.stdout.write(theme.meta(`· ${member} ${status}${surface ? ` (${surface})` : ''}`) + '\n'),
+        process.stdout.write(
+          theme.meta(`· ${member} ${status}${surface ? ` (${surface})` : ''}`) + '\n',
+        ),
       onError: (msg) => {
         process.stderr.write(`${theme.err('✗')} ${msg}\n`);
       },

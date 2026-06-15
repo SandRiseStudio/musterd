@@ -2,10 +2,10 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildEntry, buildMcpEnv } from './mcpEntry.js';
-import { cursor } from './harnesses/cursor.js';
 import { claudeCode } from './harnesses/claudeCode.js';
+import { cursor } from './harnesses/cursor.js';
 import { HARNESSES } from './harnesses/index.js';
+import { buildEntry, buildMcpEnv } from './mcpEntry.js';
 import { renderPrimer, upsertPrimer } from './primer.js';
 
 const binding = {
@@ -119,7 +119,10 @@ describe('agent primer', () => {
     upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn', role: 'backend' }));
     const once = readFileSync(join(cwd, 'AGENTS.md'), 'utf8');
     // Re-run with a changed role: only the managed block changes; exactly one block remains.
-    const { action } = upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn', role: 'platform' }));
+    const { action } = upsertPrimer(
+      cwd,
+      renderPrimer({ member: 'Ada', team: 'dawn', role: 'platform' }),
+    );
     expect(action).toBe('updated');
     const twice = readFileSync(join(cwd, 'AGENTS.md'), 'utf8');
     expect(twice.match(/musterd:start/g)).toHaveLength(1);

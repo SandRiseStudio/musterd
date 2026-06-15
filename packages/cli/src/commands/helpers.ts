@@ -1,8 +1,8 @@
 import type { MemberKind, MemberSummary } from '@musterd/protocol';
+import { flagStr } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig, type Config, type Identity } from '../config.js';
 import { CliError } from '../errors.js';
-import { flagStr } from '../args.js';
 
 export interface Resolved {
   config: Config;

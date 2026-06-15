@@ -37,6 +37,8 @@ export class MusterdClient {
     return this.joinedFlag;
   }
 
+  // reason: returns parsed JSON of varying shape; callers narrow at each call site.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async request(method: string, path: string, body?: unknown): Promise<any> {
     const res = await fetch(this.config.server + path, {
       method,
@@ -64,13 +66,17 @@ export class MusterdClient {
     return this.request('GET', `/teams/${this.config.team}/members`);
   }
 
-  async fetchInbox(unreadOnly = true): Promise<{ messages: Envelope[]; cursor: { last_read_ts: number } }> {
+  async fetchInbox(
+    unreadOnly = true,
+  ): Promise<{ messages: Envelope[]; cursor: { last_read_ts: number } }> {
     const q = unreadOnly ? '?unread=1' : '';
     return this.request('GET', `/teams/${this.config.team}/inbox${q}`);
   }
 
   markRead(messageId: string) {
-    return this.request('POST', `/teams/${this.config.team}/inbox/cursor`, { last_read_message_id: messageId });
+    return this.request('POST', `/teams/${this.config.team}/inbox/cursor`, {
+      last_read_message_id: messageId,
+    });
   }
 
   /**
@@ -134,7 +140,9 @@ export class MusterdClient {
       } else if (frame.type === 'error') {
         // A refused hello (e.g. member_busy) is terminal — don't thrash reconnecting.
         this.wantPresence = false;
-        this.pendingJoin?.reject(new Error(frame.code === 'member_busy' ? `member_busy: ${frame.message}` : frame.message));
+        this.pendingJoin?.reject(
+          new Error(frame.code === 'member_busy' ? `member_busy: ${frame.message}` : frame.message),
+        );
         this.pendingJoin = null;
         ws.close();
       } else if (frame.type === 'deliver') {

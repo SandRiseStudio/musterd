@@ -5,8 +5,8 @@ import type { Ctx } from './context.js';
 import { openDb } from './db/open.js';
 import { log } from './log.js';
 import { startReaper } from './presence/reaper.js';
-import { Hub } from './transport/hub.js';
 import { handleHttp } from './transport/http.js';
+import { Hub } from './transport/hub.js';
 import { attachWsServer } from './transport/ws.js';
 
 export interface ServerOptions {

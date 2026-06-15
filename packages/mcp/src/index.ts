@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { bind } from './bind.js';
 import { MusterdClient } from './client.js';
 import { loadMcpConfig } from './config.js';
-import { bind } from './bind.js';
-import { registerSend } from './tools/send.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
-import { registerStatus } from './tools/status.js';
-import { registerMembers } from './tools/members.js';
 import { registerJoin } from './tools/join.js';
 import { registerLeave } from './tools/leave.js';
+import { registerMembers } from './tools/members.js';
+import { registerSend } from './tools/send.js';
+import { registerStatus } from './tools/status.js';
 
 export { MusterdClient } from './client.js';
 export { loadMcpConfig, type McpConfig } from './config.js';
@@ -28,7 +28,10 @@ export function installShutdownHandlers(opts: {
   transport: { onclose?: (() => void) | undefined };
   exit?: (code: number) => void;
   signals?: NodeJS.Process;
-  stdin?: { on(event: 'end' | 'close', cb: () => void): unknown; off?: (event: string, cb: () => void) => unknown };
+  stdin?: {
+    on(event: 'end' | 'close', cb: () => void): unknown;
+    off?: (event: string, cb: () => void) => unknown;
+  };
 }): () => void {
   const exit = opts.exit ?? ((code: number) => process.exit(code));
   const proc = opts.signals ?? process;
@@ -57,7 +60,10 @@ export function installShutdownHandlers(opts: {
 }
 
 /** Build (but do not connect) the MCP server with the musterd tools registered. */
-export function buildMcpServer(client: MusterdClient, config: ReturnType<typeof loadMcpConfig>): McpServer {
+export function buildMcpServer(
+  client: MusterdClient,
+  config: ReturnType<typeof loadMcpConfig>,
+): McpServer {
   const server = new McpServer({ name: 'musterd', version: '0.0.1' });
   registerJoin(server, client, config);
   registerLeave(server, client, config);
@@ -77,9 +83,9 @@ async function main(): Promise<void> {
   await server.connect(transport);
   // Opt-in one-keystroke activation; off by default so a session never silently occupies a seat.
   if (process.env['MUSTERD_AUTOJOIN'] === '1') {
-    await client.join().catch((err) =>
-      process.stderr.write(`musterd autojoin failed: ${(err as Error).message}\n`),
-    );
+    await client
+      .join()
+      .catch((err) => process.stderr.write(`musterd autojoin failed: ${(err as Error).message}\n`));
   }
 
   installShutdownHandlers({ close: () => client.close(), transport });

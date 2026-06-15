@@ -1,7 +1,7 @@
 import type { Lifecycle, MemberKind } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
-import { loadConfig, saveConfig } from '../config.js';
 import { HttpClient } from '../client.js';
+import { loadConfig, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 
@@ -14,7 +14,8 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
 
 async function teamCreate(parsed: Parsed): Promise<number> {
   const slug = parsed.positionals[1];
-  if (!slug) throw new CliError('usage: musterd team create <slug> [--as <you>] [--role <role>]', 2);
+  if (!slug)
+    throw new CliError('usage: musterd team create <slug> [--as <you>] [--role <role>]', 2);
   const config = loadConfig();
   const server = flagStr(parsed.flags, 'server') ?? config.server;
   const name = flagStr(parsed.flags, 'as') ?? defaultUser();
@@ -33,7 +34,9 @@ async function teamCreate(parsed: Parsed): Promise<number> {
     return 0;
   }
   process.stdout.write(`${theme.ok('✓')} team "${slug}" created\n`);
-  process.stdout.write(`you are now a member: ${theme.memberName(name, 'human')} (human${role ? `, ${role}` : ''})\n`);
+  process.stdout.write(
+    `you are now a member: ${theme.memberName(name, 'human')} (human${role ? `, ${role}` : ''})\n`,
+  );
   process.stdout.write(theme.meta('add members with: musterd team add <name> --kind agent') + '\n');
   return 0;
 }
@@ -67,14 +70,20 @@ async function teamAdd(parsed: Parsed): Promise<number> {
     process.stdout.write(JSON.stringify({ member: res.member, token: res.token }) + '\n');
     return 0;
   }
-  process.stdout.write(`${theme.ok('✓')} added ${theme.memberName(name, kind)} (${kind}${role ? `, ${role}` : ''}) to ${team}\n`);
+  process.stdout.write(
+    `${theme.ok('✓')} added ${theme.memberName(name, kind)} (${kind}${role ? `, ${role}` : ''}) to ${team}\n`,
+  );
   if (kind === 'agent') {
     process.stdout.write(theme.meta('connect this agent via MCP with env:') + '\n');
     process.stdout.write(
-      theme.meta(`  MUSTERD_TEAM=${team} MUSTERD_MEMBER=${name} MUSTERD_TOKEN=${res.token} MUSTERD_SURFACE=claude-code`) + '\n',
+      theme.meta(
+        `  MUSTERD_TEAM=${team} MUSTERD_MEMBER=${name} MUSTERD_TOKEN=${res.token} MUSTERD_SURFACE=claude-code`,
+      ) + '\n',
     );
   } else {
-    process.stdout.write(theme.meta(`they join with: musterd join ${team} --as ${name} --token ${res.token}`) + '\n');
+    process.stdout.write(
+      theme.meta(`they join with: musterd join ${team} --as ${name} --token ${res.token}`) + '\n',
+    );
   }
   return 0;
 }

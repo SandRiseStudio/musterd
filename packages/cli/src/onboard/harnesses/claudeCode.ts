@@ -8,6 +8,8 @@ async function has(cmd: string, args: string[]): Promise<{ ok: boolean; out: str
   try {
     const { stdout } = await exec(cmd, args, { timeout: 8000 });
     return { ok: true, out: stdout };
+    // reason: exec rejection is an untyped error-like with optional stdout/message.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
     return { ok: false, out: String(err?.stdout ?? err?.message ?? '') };
   }
@@ -35,7 +37,17 @@ export const claudeCode: Harness = {
   async configure(entry) {
     // claude mcp add musterd -s local -e K=V ... -- <command> <args...>
     const envArgs = Object.entries(entry.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
-    const args = ['mcp', 'add', 'musterd', '-s', 'local', ...envArgs, '--', entry.command, ...entry.args];
+    const args = [
+      'mcp',
+      'add',
+      'musterd',
+      '-s',
+      'local',
+      ...envArgs,
+      '--',
+      entry.command,
+      ...entry.args,
+    ];
     // Replace any prior definition so re-running init is idempotent.
     await exec('claude', ['mcp', 'remove', 'musterd', '-s', 'local']).catch(() => undefined);
     await exec('claude', args, { timeout: 10000 });

@@ -1,15 +1,16 @@
-import { ulid } from 'ulid';
 import { makeEnvelope, type Act, type Recipient } from '@musterd/protocol';
+import { ulid } from 'ulid';
 import { flagStr, parseMeta, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
-import { theme } from '../render/theme.js';
 import { renderMessageRow } from '../render/rows.js';
+import { theme } from '../render/theme.js';
 import { kindLookup, resolve } from './helpers.js';
 
 function parseRecipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };
   if (to === '@broadcast') return { kind: 'broadcast' };
-  if (to.startsWith('@')) throw new CliError(`unknown recipient "${to}" (use @team or @broadcast)`, 2);
+  if (to.startsWith('@'))
+    throw new CliError(`unknown recipient "${to}" (use @team or @broadcast)`, 2);
   return { kind: 'member', name: to };
 }
 

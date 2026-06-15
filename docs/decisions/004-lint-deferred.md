@@ -1,6 +1,6 @@
 # 004 — ESLint deferred; strict tsc is the v0.1 static gate
 
-- Status: accepted
+- Status: superseded by ADR 013 (2026-06-15) — ESLint + Prettier are now wired and enforced. Strict `tsc` remains a gate; it is no longer the *only* one.
 - Date: 2026-06-09
 
 ## Context

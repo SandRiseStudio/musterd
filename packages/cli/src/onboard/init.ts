@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import * as p from '@clack/prompts';
-import pc from 'picocolors';
 import type { MemberSummary } from '@musterd/protocol';
+import pc from 'picocolors';
 import { HttpClient } from '../client.js';
 import { loadConfig, saveConfig, type Config } from '../config.js';
 import { renderBanner } from '../render/rows.js';
@@ -49,7 +49,9 @@ async function startDaemon(server: string): Promise<boolean> {
 
 export async function runInit(): Promise<number> {
   if (!process.stdout.isTTY) {
-    process.stderr.write('musterd init is interactive — run it in a terminal (or use `musterd team add` directly).\n');
+    process.stderr.write(
+      'musterd init is interactive — run it in a terminal (or use `musterd team add` directly).\n',
+    );
     return 2;
   }
 
@@ -67,9 +69,14 @@ export async function runInit(): Promise<number> {
     s.stop(`Team server is up at ${pc.dim(server)}`);
   } else {
     s.stop(`No team server at ${pc.dim(server)}`);
-    const start = guard(await p.confirm({ message: 'Start the local daemon now? (runs in the background)' }));
+    const start = guard(
+      await p.confirm({ message: 'Start the local daemon now? (runs in the background)' }),
+    );
     if (!start) {
-      p.note(`Run ${pc.yellow('musterd serve')} in another terminal, then re-run init.`, 'Need the daemon');
+      p.note(
+        `Run ${pc.yellow('musterd serve')} in another terminal, then re-run init.`,
+        'Need the daemon',
+      );
       return 1;
     }
     const s2 = p.spinner();
@@ -88,13 +95,19 @@ export async function runInit(): Promise<number> {
   const existing = config.current && config.identities[config.current];
   if (existing) {
     p.log.info(
-      pc.dim('A team is a standing roster, not a project — reuse the same team across folders to keep agents talking.'),
+      pc.dim(
+        'A team is a standing roster, not a project — reuse the same team across folders to keep agents talking.',
+      ),
     );
     const reuse = guard(
       await p.select({
         message: 'Which team?',
         options: [
-          { value: config.current!, label: config.current!, hint: `you are ${config.identities[config.current!]!.name}` },
+          {
+            value: config.current!,
+            label: config.current!,
+            hint: `you are ${config.identities[config.current!]!.name}`,
+          },
           { value: '__new__', label: 'Create a new team' },
         ],
       }),
@@ -118,8 +131,16 @@ export async function runInit(): Promise<number> {
       message: `What would you like to do on ${pc.bold(team)}?`,
       options: [
         { value: 'new', label: 'Add a new agent', hint: 'connect a coding agent as a teammate' },
-        { value: 'existing', label: 'Activate an existing member', hint: 'reconnect a member that is not currently live' },
-        { value: 'watch', label: 'Just me — watch the team live', hint: 'be present and supervise' },
+        {
+          value: 'existing',
+          label: 'Activate an existing member',
+          hint: 'reconnect a member that is not currently live',
+        },
+        {
+          value: 'watch',
+          label: 'Just me — watch the team live',
+          hint: 'be present and supervise',
+        },
       ],
     }),
   );
@@ -155,9 +176,7 @@ export async function runInit(): Promise<number> {
   // 3) Pick where the agent runs --------------------------------------------
   const sd = p.spinner();
   sd.start('Looking for where agents can run');
-  const detected = await Promise.all(
-    HARNESSES.map(async (h) => ({ h, d: await h.detect() })),
-  );
+  const detected = await Promise.all(HARNESSES.map(async (h) => ({ h, d: await h.detect() })));
   sd.stop('Scanned for places an agent can run');
 
   for (const { h, d } of detected) {
@@ -186,7 +205,9 @@ export async function runInit(): Promise<number> {
       options: installed.map(({ h, d }) => ({
         value: h.id,
         label: h.label,
-        hint: d.configured ? 'musterd already set up here — will be repointed' : 'not set up yet — will be configured',
+        hint: d.configured
+          ? 'musterd already set up here — will be repointed'
+          : 'not set up yet — will be configured',
       })),
     }),
   );
@@ -203,15 +224,18 @@ export async function runInit(): Promise<number> {
   }
 
   // 4) Name the agent -------------------------------------------------------
-  const name = guard(
-    await p.text({
-      message: 'Name your agent',
-      placeholder: 'Ada',
-      defaultValue: 'Ada',
-      validate: (v) => (v && /\s/.test(v) ? 'no spaces in a member name' : undefined),
-    }),
-  ).trim() || 'Ada';
-  const role = guard(await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' })).trim();
+  const name =
+    guard(
+      await p.text({
+        message: 'Name your agent',
+        placeholder: 'Ada',
+        defaultValue: 'Ada',
+        validate: (v) => (v && /\s/.test(v) ? 'no spaces in a member name' : undefined),
+      }),
+    ).trim() || 'Ada';
+  const role = guard(
+    await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
+  ).trim();
 
   // 5) Mint the member + write the harness config ---------------------------
   const sm = p.spinner();
@@ -240,7 +264,9 @@ export async function runInit(): Promise<number> {
   if (autojoin) entry.env['MUSTERD_AUTOJOIN'] = '1';
 
   const write = guard(
-    await p.confirm({ message: `Write the musterd MCP server into ${pc.bold(chosen.label)} for you?` }),
+    await p.confirm({
+      message: `Write the musterd MCP server into ${pc.bold(chosen.label)} for you?`,
+    }),
   );
   if (!write) {
     p.note(printManual(chosen, entry), 'Manual setup');
@@ -272,11 +298,19 @@ export async function runInit(): Promise<number> {
   );
   if (writePrimer) {
     try {
-      const { path, action } = upsertPrimer(process.cwd(), renderPrimer({ member: name, team, role }));
-      const verb = action === 'created' ? 'Wrote' : action === 'appended' ? 'Added the primer to' : 'Updated';
-      p.log.success(`${verb} ${pc.bold('AGENTS.md')} ${pc.dim(`(${path})`)} — ${pc.cyan(name)} now has the team playbook.`);
+      const { path, action } = upsertPrimer(
+        process.cwd(),
+        renderPrimer({ member: name, team, role }),
+      );
+      const verb =
+        action === 'created' ? 'Wrote' : action === 'appended' ? 'Added the primer to' : 'Updated';
+      p.log.success(
+        `${verb} ${pc.bold('AGENTS.md')} ${pc.dim(`(${path})`)} — ${pc.cyan(name)} now has the team playbook.`,
+      );
     } catch (err) {
-      p.log.warn(`Couldn't write AGENTS.md (${(err as Error).message}) — paste the primer from \`musterd init\`'s manual output if you want it.`);
+      p.log.warn(
+        `Couldn't write AGENTS.md (${(err as Error).message}) — paste the primer from \`musterd init\`'s manual output if you want it.`,
+      );
     }
   }
 
@@ -291,7 +325,9 @@ export async function runInit(): Promise<number> {
   sw.start(`Waiting for ${name} to join`);
   const joined = await waitForPresence(http, team, name, 180);
   if (joined) {
-    sw.stop(`${pc.green('●')} ${pc.cyan(name)} is online via ${chosen.surface} ${pc.green('— it worked!')}`);
+    sw.stop(
+      `${pc.green('●')} ${pc.cyan(name)} is online via ${chosen.surface} ${pc.green('— it worked!')}`,
+    );
   } else {
     sw.stop(pc.yellow(`Still waiting on ${name}.`));
     p.note(
@@ -313,19 +349,29 @@ export async function runInit(): Promise<number> {
   return 0;
 }
 
-async function createTeam(config: Config, server: string): Promise<{ team: string; creatorToken: string }> {
+async function createTeam(
+  config: Config,
+  server: string,
+): Promise<{ team: string; creatorToken: string }> {
   const slug = guard(
     await p.text({
       message: 'Name your team',
       placeholder: 'dawn',
       defaultValue: 'dawn',
-      validate: (v) => (/^[a-z0-9-]{1,32}$/.test(v) ? undefined : 'use lowercase letters, numbers, hyphens (1–32)'),
+      validate: (v) =>
+        /^[a-z0-9-]{1,32}$/.test(v) ? undefined : 'use lowercase letters, numbers, hyphens (1–32)',
     }),
   );
   const you = guard(
-    await p.text({ message: 'Your name on the team', placeholder: 'nick', defaultValue: process.env['USER'] ?? 'me' }),
+    await p.text({
+      message: 'Your name on the team',
+      placeholder: 'nick',
+      defaultValue: process.env['USER'] ?? 'me',
+    }),
   ).trim();
-  const role = guard(await p.text({ message: 'Your role (optional)', placeholder: 'lead', defaultValue: '' })).trim();
+  const role = guard(
+    await p.text({ message: 'Your role (optional)', placeholder: 'lead', defaultValue: '' }),
+  ).trim();
 
   const http = new HttpClient({ server });
   const sp = p.spinner();
@@ -344,7 +390,12 @@ async function createTeam(config: Config, server: string): Promise<{ team: strin
   }
 }
 
-async function waitForPresence(http: HttpClient, team: string, name: string, seconds: number): Promise<boolean> {
+async function waitForPresence(
+  http: HttpClient,
+  team: string,
+  name: string,
+  seconds: number,
+): Promise<boolean> {
   for (let i = 0; i < seconds; i++) {
     try {
       const { members } = await http.roster(team);
@@ -373,7 +424,9 @@ async function warnSecretConfig(secretPath: string): Promise<void> {
   if (!inTree) return;
   const gitignore = join(process.cwd(), '.gitignore');
   if (!existsSync(gitignore)) {
-    p.log.info(pc.dim(`No .gitignore here — if this folder is a git repo, add a line ignoring ${rel}.`));
+    p.log.info(
+      pc.dim(`No .gitignore here — if this folder is a git repo, add a line ignoring ${rel}.`),
+    );
     return;
   }
   const body = readFileSync(gitignore, 'utf8');
@@ -382,22 +435,35 @@ async function warnSecretConfig(secretPath: string): Promise<void> {
     p.log.info(pc.dim(`Already ignored by .gitignore — you're covered.`));
     return;
   }
-  const add = guard(await p.confirm({ message: `Add ${pc.yellow(rel)} to .gitignore so the token isn't committed?`, initialValue: true }));
+  const add = guard(
+    await p.confirm({
+      message: `Add ${pc.yellow(rel)} to .gitignore so the token isn't committed?`,
+      initialValue: true,
+    }),
+  );
   if (!add) return;
   const prefix = body.length && !body.endsWith('\n') ? '\n' : '';
   appendFileSync(gitignore, `${prefix}\n# musterd MCP config — contains a member token\n${rel}\n`);
   p.log.success(`Added ${pc.yellow(rel)} to .gitignore.`);
 }
 
-function printManual(harness: Harness, entry: { command: string; args: string[]; env: Record<string, string> }): string {
+function printManual(
+  harness: Harness,
+  entry: { command: string; args: string[]; env: Record<string, string> },
+): string {
   const envLines = Object.entries(entry.env)
     .map(([k, v]) => `  ${k}=${v}`)
     .join('\n');
   // Also surface the primer so the manual path isn't worse off — the agent still needs to know the playbook.
-  const primer = renderPrimer({ member: entry.env['MUSTERD_MEMBER'] ?? 'your agent', team: entry.env['MUSTERD_TEAM'] ?? 'your team' });
+  const primer = renderPrimer({
+    member: entry.env['MUSTERD_MEMBER'] ?? 'your agent',
+    team: entry.env['MUSTERD_TEAM'] ?? 'your team',
+  });
   const primerNote = `\n\nThen add this to ${pc.bold('AGENTS.md')} in this folder so the agent knows the playbook:\n${primer}`;
   if (harness.id === 'claude-code') {
-    const e = Object.entries(entry.env).map(([k, v]) => `-e ${k}=${v}`).join(' ');
+    const e = Object.entries(entry.env)
+      .map(([k, v]) => `-e ${k}=${v}`)
+      .join(' ');
     return `Run:\n  claude mcp add musterd -s local ${e} -- ${entry.command} ${entry.args.join(' ')}${primerNote}`;
   }
   return `Add to .cursor/mcp.json under "mcpServers":\n  "musterd": {\n    "command": "${entry.command}",\n    "args": ${JSON.stringify(entry.args)},\n    "env": { …see below… }\n  }\n${envLines}${primerNote}`;

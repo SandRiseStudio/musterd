@@ -10,7 +10,10 @@ export function createTeam(
   input: { slug: string; display?: string | null; defaultLifecycle?: string },
 ): TeamRow {
   if (!SLUG_RE.test(input.slug)) {
-    throw new MusterdError('bad_request', `invalid team slug "${input.slug}" (use [a-z0-9-], 1..32)`);
+    throw new MusterdError(
+      'bad_request',
+      `invalid team slug "${input.slug}" (use [a-z0-9-], 1..32)`,
+    );
   }
   if (getTeamBySlug(db, input.slug)) {
     throw new MusterdError('conflict', `team "${input.slug}" already exists`);

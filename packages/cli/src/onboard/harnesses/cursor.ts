@@ -53,7 +53,8 @@ export const cursor: Harness = {
     writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
     return {
       target: path,
-      activation: 'open this folder in Cursor (or reload the window) so Cursor starts the musterd MCP server',
+      activation:
+        'open this folder in Cursor (or reload the window) so Cursor starts the musterd MCP server',
       scope: `wired into this folder only (${path}) — another project needs its own \`musterd init\`, and a second agent needs its own folder`,
       secretPath: path,
     };

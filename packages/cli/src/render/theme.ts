@@ -1,5 +1,5 @@
-import pc from 'picocolors';
 import type { Act, MemberKind, PresenceStatus } from '@musterd/protocol';
+import pc from 'picocolors';
 
 /** ANSI color roles, mapped per brand.md §2. Honors NO_COLOR / non-TTY via picocolors. */
 export const theme = {

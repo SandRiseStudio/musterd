@@ -16,7 +16,12 @@ export interface RouteResult {
  * The single validate→persist→deliver path shared by WS `send` and HTTP POST messages.
  * The envelope must already be schema-valid; this enforces identity + resolves/persists/delivers.
  */
-export function routeEnvelope(ctx: Ctx, team: TeamRow, sender: MemberRow, env: Envelope): RouteResult {
+export function routeEnvelope(
+  ctx: Ctx,
+  team: TeamRow,
+  sender: MemberRow,
+  env: Envelope,
+): RouteResult {
   if (env.from !== sender.name || env.team !== team.slug) {
     throw new MusterdError('forbidden', 'envelope from/team must match the authenticated member');
   }
@@ -48,8 +53,7 @@ export function routeEnvelope(ctx: Ctx, team: TeamRow, sender: MemberRow, env: E
   let delivered = 0;
   for (const recipientId of recipients) {
     const recipient = getMemberById(ctx.db, recipientId);
-    const toName =
-      env.to.kind === 'member' && recipient ? recipient.name : null;
+    const toName = env.to.kind === 'member' && recipient ? recipient.name : null;
     const outgoing = rowToEnvelope(message, team.slug, sender.name, toName);
     delivered += ctx.hub.deliver(recipientId, { type: 'deliver', envelope: outgoing });
   }

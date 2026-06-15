@@ -1,7 +1,7 @@
-import { ulid } from 'ulid';
-import { makeEnvelope, type Act, type Recipient } from '@musterd/protocol';
-import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { makeEnvelope, type Act, type Recipient } from '@musterd/protocol';
+import { ulid } from 'ulid';
+import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
 import { textResult } from './format.js';
@@ -24,10 +24,21 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
       description: DESCRIPTION,
       inputSchema: {
         to: z.string().default('@team').describe("member name, or '@team', or '@broadcast'"),
-        act: z.enum(['message', 'status_update', 'request_help', 'handoff', 'accept', 'decline', 'wait']),
+        act: z.enum([
+          'message',
+          'status_update',
+          'request_help',
+          'handoff',
+          'accept',
+          'decline',
+          'wait',
+        ]),
         body: z.string(),
         thread: z.string().optional().describe('thread id to reply within'),
-        reply_to: z.string().optional().describe('message id this accepts/declines (required for accept/decline)'),
+        reply_to: z
+          .string()
+          .optional()
+          .describe('message id this accepts/declines (required for accept/decline)'),
         meta: z.record(z.unknown()).optional().describe('act-specific fields, e.g. {progress:0.5}'),
       },
     },

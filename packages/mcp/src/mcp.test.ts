@@ -1,11 +1,11 @@
 import { EventEmitter } from 'node:events';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
-import { MusterdClient } from './client.js';
-import { buildMcpServer, installShutdownHandlers } from './index.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bind } from './bind.js';
+import { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
+import { buildMcpServer, installShutdownHandlers } from './index.js';
 
 let server: RunningServer;
 let base: string;
@@ -14,7 +14,10 @@ let tokens: Record<string, string> = {};
 async function api(method: string, path: string, body?: unknown, token?: string) {
   const res = await fetch(base + path, {
     method,
-    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   return { status: res.status, json: (await res.json()) as any };
@@ -28,9 +31,17 @@ beforeEach(async () => {
   server = createServer({ db: openDb(':memory:'), port: 0 });
   const { port } = await server.listen();
   base = `http://127.0.0.1:${port}`;
-  const team = await api('POST', '/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human', role: 'lead' } });
+  const team = await api('POST', '/teams', {
+    slug: 'dawn',
+    creator: { name: 'nick', kind: 'human', role: 'lead' },
+  });
   tokens['nick'] = team.json.token;
-  const ada = await api('POST', '/teams/dawn/members', { name: 'Ada', kind: 'agent', role: 'backend' }, tokens['nick']);
+  const ada = await api(
+    'POST',
+    '/teams/dawn/members',
+    { name: 'Ada', kind: 'agent', role: 'backend' },
+    tokens['nick'],
+  );
   tokens['Ada'] = ada.json.token;
 });
 
@@ -40,7 +51,13 @@ afterEach(async () => {
 });
 
 function adaConfig(): McpConfig {
-  return { server: base, team: 'dawn', member: 'Ada', token: tokens['Ada']!, surface: 'claude-code' };
+  return {
+    server: base,
+    team: 'dawn',
+    member: 'Ada',
+    token: tokens['Ada']!,
+    surface: 'claude-code',
+  };
 }
 
 async function rosterMember(name: string) {
@@ -81,7 +98,15 @@ describe('MCP adapter', () => {
     await bind(client);
     const { ulid } = await import('ulid');
     const { makeEnvelope } = await import('@musterd/protocol');
-    const env = makeEnvelope({ id: ulid(), team: 'dawn', from: 'Ada', to: { kind: 'team' }, act: 'status_update', body: 'scaffolded auth', meta: { progress: 0.4 } });
+    const env = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'team' },
+      act: 'status_update',
+      body: 'scaffolded auth',
+      meta: { progress: 0.4 },
+    });
     await client.sendEnvelope(env);
     const inbox = await api('GET', '/teams/dawn/inbox?unread=1', undefined, tokens['nick']);
     expect(inbox.json.messages.map((m: any) => m.body)).toContain('scaffolded auth');
@@ -95,8 +120,14 @@ describe('MCP adapter', () => {
 
     // nick asks Ada for help (over HTTP)
     const env = {
-      id: 'rh1', v: PROTOCOL_VERSION, team: 'dawn', from: 'nick',
-      to: { kind: 'member', name: 'Ada' }, act: 'request_help', body: 'tests failing on token hash', ts: Date.now(),
+      id: 'rh1',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'member', name: 'Ada' },
+      act: 'request_help',
+      body: 'tests failing on token hash',
+      ts: Date.now(),
     };
     await api('POST', '/teams/dawn/messages', { envelope: env }, tokens['nick']);
 
@@ -113,9 +144,23 @@ describe('MCP adapter', () => {
     await client.join(); // join opens the background WS (bind no longer claims presence)
     await delay(150);
 
-    await api('POST', '/teams/dawn/messages', {
-      envelope: { id: 'live1', v: PROTOCOL_VERSION, team: 'dawn', from: 'nick', to: { kind: 'member', name: 'Ada' }, act: 'message', body: 'live ping', ts: Date.now() },
-    }, tokens['nick']);
+    await api(
+      'POST',
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          id: 'live1',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'Ada' },
+          act: 'message',
+          body: 'live ping',
+          ts: Date.now(),
+        },
+      },
+      tokens['nick'],
+    );
     await delay(100);
 
     const buffered = client.drainBuffer();
@@ -128,7 +173,9 @@ describe('MCP adapter', () => {
   it('drops presence and exits when the host closes stdin (no orphaned adapter)', () => {
     const close = vi.fn();
     const exit = vi.fn();
-    const stdin = new EventEmitter() as unknown as Parameters<typeof installShutdownHandlers>[0]['stdin'];
+    const stdin = new EventEmitter() as unknown as Parameters<
+      typeof installShutdownHandlers
+    >[0]['stdin'];
     const signals = new EventEmitter() as unknown as NodeJS.Process;
     const transport: { onclose?: () => void } = {};
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { parseArgs } from './args.js';
-import { CliError } from './errors.js';
+import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
-import { teamCommand } from './commands/team.js';
 import { joinCommand } from './commands/join.js';
 import { sendCommand } from './commands/send.js';
-import { inboxCommand } from './commands/inbox.js';
-import { statusCommand } from './commands/status.js';
 import { serveCommand } from './commands/serve.js';
+import { statusCommand } from './commands/status.js';
+import { teamCommand } from './commands/team.js';
+import { CliError } from './errors.js';
 import { renderBanner } from './render/rows.js';
 import { theme } from './render/theme.js';
 

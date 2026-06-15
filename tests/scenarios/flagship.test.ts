@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { makeEnvelope, PROTOCOL_VERSION, type Envelope } from '@musterd/protocol';
-import { createServer, openDb, type RunningServer } from '@musterd/server';
-import { MusterdClient, type McpConfig } from '@musterd/mcp';
 import { ulid } from 'ulid';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { MusterdClient, type McpConfig } from '@musterd/mcp';
+import { makeEnvelope, type Envelope } from '@musterd/protocol';
+import { createServer, openDb, type RunningServer } from '@musterd/server';
 
 /**
  * Scenario C — the flagship 3-pane scenario (06-testing.md), automated.
@@ -19,7 +19,10 @@ let clients: MusterdClient[] = [];
 async function api(method: string, path: string, body?: unknown, token?: string) {
   const res = await fetch(base + path, {
     method,
-    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   return { status: res.status, json: (await res.json()) as any };
@@ -30,11 +33,24 @@ beforeEach(async () => {
   server = createServer({ db: openDb(':memory:'), port: 0 });
   const { port } = await server.listen();
   base = `http://127.0.0.1:${port}`;
-  const team = await api('POST', '/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human', role: 'lead' } });
+  const team = await api('POST', '/teams', {
+    slug: 'dawn',
+    creator: { name: 'nick', kind: 'human', role: 'lead' },
+  });
   tok['nick'] = team.json.token;
-  const ada = await api('POST', '/teams/dawn/members', { name: 'Ada', kind: 'agent', role: 'backend' }, tok['nick']);
+  const ada = await api(
+    'POST',
+    '/teams/dawn/members',
+    { name: 'Ada', kind: 'agent', role: 'backend' },
+    tok['nick'],
+  );
   tok['Ada'] = ada.json.token;
-  const lin = await api('POST', '/teams/dawn/members', { name: 'Lin', kind: 'agent', role: 'frontend' }, tok['nick']);
+  const lin = await api(
+    'POST',
+    '/teams/dawn/members',
+    { name: 'Lin', kind: 'agent', role: 'frontend' },
+    tok['nick'],
+  );
   tok['Lin'] = lin.json.token;
 });
 
@@ -59,7 +75,11 @@ function client(member: string, surface: McpConfig['surface']): MusterdClient {
 // several sends land in the same wall-clock millisecond (the log orders by ts, then id).
 let sendClock = Date.now();
 
-async function agentSend(client: MusterdClient, from: string, env: Partial<Envelope> & Pick<Envelope, 'act'>) {
+async function agentSend(
+  client: MusterdClient,
+  from: string,
+  env: Partial<Envelope> & Pick<Envelope, 'act'>,
+) {
   const full = makeEnvelope({
     id: ulid(),
     team: 'dawn',
@@ -102,8 +122,16 @@ describe('Scenario C — flagship 3-pane', () => {
     expect(roster.json.members.find((m: any) => m.name === 'nick').presence).toBe('online');
 
     // 1. Both agents split work and post status.
-    await agentSend(ada, 'Ada', { act: 'status_update', body: 'taking the auth backend', meta: { progress: 0.1 } });
-    await agentSend(lin, 'Lin', { act: 'status_update', body: 'taking the login UI', meta: { progress: 0.1 } });
+    await agentSend(ada, 'Ada', {
+      act: 'status_update',
+      body: 'taking the auth backend',
+      meta: { progress: 0.1 },
+    });
+    await agentSend(lin, 'Lin', {
+      act: 'status_update',
+      body: 'taking the login UI',
+      meta: { progress: 0.1 },
+    });
 
     // The watch pane reads live activity: a present member with a status_update resolves to
     // `working` (two-clocks rule), with the task summary in `state`. This is what nick sees move.
@@ -159,7 +187,9 @@ describe('Scenario C — flagship 3-pane', () => {
     expect(acts).toEqual(['status_update', 'status_update', 'request_help', 'accept', 'accept']);
 
     // The request_help → accept pair is threaded.
-    const accept = transcript.json.messages.find((m: Envelope) => m.act === 'accept' && m.thread === help.id);
+    const accept = transcript.json.messages.find(
+      (m: Envelope) => m.act === 'accept' && m.thread === help.id,
+    );
     expect(accept).toBeTruthy();
 
     ada.close();
