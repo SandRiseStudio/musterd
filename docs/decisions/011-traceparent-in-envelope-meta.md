@@ -1,6 +1,6 @@
 # 011 — W3C trace context rides in `Envelope.meta.otel`
 
-- Status: proposed
+- Status: accepted (2026-06-15) — first implementation landed: `@musterd/server` records `meta.otel.traceparent` as the `musterd.otel.traceparent` span attribute (ADR 015). `@musterd/mcp` emit/honor is the next step.
 - Date: 2026-06-11
 
 ## Context

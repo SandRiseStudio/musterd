@@ -41,6 +41,8 @@ If a future feature looks like one of these, the default answer is "integrate, d
 
 ## 4. Layer 1 — instrumenting musterd (v0.x, minimal)
 
+> **Status: ✅ shipped for `@musterd/server` (2026-06-15, ADR 015).** The envelope span and the synchronous metric set below are implemented and off-by-default. The two **observable gauges** (`musterd.presence.active`, `musterd.inbox.lag`) are deferred (they need DB-sampling callbacks). CLI/MCP instrumentation and the `meta.otel` emit/honor in the adapter (§6 step 2) are still to come.
+
 Scope: `@musterd/server` first; CLI and MCP adapter only get error/diagnostic logging until there's a reason for more.
 
 ### Spans
@@ -94,7 +96,7 @@ This layer should ship as its **own product** (working name **batond**, reversib
 
 ## 6. Sequencing
 
-1. **Now (v0.2/M-next):** Layer 1 server instrumentation (§4). ADR 011 accepted as a recommended convention.
+1. ~~**Now (v0.2/M-next):** Layer 1 server instrumentation (§4). ADR 011 accepted as a recommended convention.~~ ✅ **done (ADR 015)** — server envelope span + counters/histogram, off by default; ADR 011 accepted, server records `traceparent`. (Deferred within §4: the two observable gauges.)
 2. **With first SDK/adapters that own an OTel context:** emit/honor `meta.otel` in `@musterd/mcp` and examples.
 3. **With the web dashboard:** first derived coordination views (time-to-unblock, waiting-on), per the roadmap's insight-layer entry.
 4. **Later, by explicit decision:** the standalone product (§5), once dogfooding proves which views matter.
