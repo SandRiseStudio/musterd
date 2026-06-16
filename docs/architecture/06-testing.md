@@ -57,7 +57,7 @@ Wired into the root `vitest.config.ts` (`coverage`, v8 provider) and enforced by
 
 - `@musterd/protocol`: ≥ 95% lines (it's small and pure) — **enforced**, met (~100%).
 - `@musterd/server`: ≥ 85% lines, with route/presence/inbox/auth paths covered by integration tests specifically — **enforced**, met (~86%).
-- `musterd` (cli) + `@musterd/mcp`: **target ≥ 75% lines** (the command/tool dispatch and error→exit mapping must be covered). Not yet met — the gap is the interactive onboarding wizard (`cli/src/onboard`) and the MCP tool handlers (`mcp/src/tools`). Enforced today as **regression-ratchet floors** at current coverage (cli ~44%, mcp ~57%) so they can't slip; raising them to 75% is a tracked follow-up. The floors only ever move up.
+- `musterd` (cli) + `@musterd/mcp`: **target ≥ 75% lines** (the command/tool dispatch and error→exit mapping must be covered). Not yet met — the gap is the interactive onboarding wizard (`cli/src/onboard`) and the MCP tool handlers (`mcp/src/tools`). Enforced today as **regression-ratchet floors** at current coverage (cli ~46%, mcp ~64%) so they can't slip; raising them to 75% is a tracked follow-up. The floors only ever move up — ratchet them when coverage rises (mcp went 57→64 with the OTel-propagation tests).
 - Root `pnpm test` runs unit+integration+scenario and must be green for any milestone to be "done" (`07-conventions.md` definition of done); `pnpm coverage` additionally enforces the gates above. CI runs the same commands.
 
 ## How to run

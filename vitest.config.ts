@@ -20,8 +20,8 @@ export default defineConfig({
       thresholds: {
         'packages/protocol/src/**': { lines: 95 },
         'packages/server/src/**': { lines: 85 },
-        'packages/cli/src/**': { lines: 44 },
-        'packages/mcp/src/**': { lines: 57 },
+        'packages/cli/src/**': { lines: 46 },
+        'packages/mcp/src/**': { lines: 64 },
       },
     },
   },
