@@ -100,6 +100,9 @@ Builds an Envelope, `POST /teams/:slug/messages` (or over the live WS if `--watc
 ### `musterd status`
 `GET /teams/:slug/members`. Prints a **header line** first — `team · server · db: <path> (schema N)` from `/health` (ADR 016; the db segment is omitted against a pre-0.2 daemon that doesn't report it) — so you can see *which daemon and database* you're reading before the roster. Then renders the roster table: `MEMBER | KIND | ROLE | LIFECYCLE | ACTIVITY` (v0.2 M2 — the old `PRESENCE` column was renamed **ACTIVITY** and moved **last** because its `working: <status> · <age>` label is unbounded and free-flowing, so a long label can't collide with later columns; `ce89bf1`). ACTIVITY resolves via the two-clocks rule (`store/activity.ts`): liveness → `offline`/present, latest `status_update` → `online`/`working`, with the `· <age>` staleness suffix shown only once stale ≥5m. 80-col aligned, presence dot + surface per `brand.md`. Output: `cmd/status` *(the Figma `cmd/status` frame still shows the old `PRESENCE` column + order — frame drift tracked under ADR 008 lockstep; `disabled`/`archived` badges skipped, they need schema + verbs).*
 
+### `musterd reclaim <member>`
+`POST /teams/:slug/members/:name/reclaim`. Force-drops a member's live session so it can rejoin — the sanctioned escape hatch (ADR 017 follow-up) instead of editing the daemon's DB. Newest-wins self-heals a *reconnecting* session, but an orphaned presence that never comes back needs this. Any team member may reclaim any member (localhost/v0.2; the v0.3 seat model will gate it). Output: `✓ reclaimed <member> — any live session was dropped; it can rejoin now`. Errors: unknown member → `not_found` (exit 6).
+
 ## Exit codes (must match the State frames' annotations)
 
 | exit | condition | error code |

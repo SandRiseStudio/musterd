@@ -3,6 +3,7 @@ import { parseArgs } from './args.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
+import { reclaimCommand } from './commands/reclaim.js';
 import { sendCommand } from './commands/send.js';
 import { serveCommand } from './commands/serve.js';
 import { statusCommand } from './commands/status.js';
@@ -22,6 +23,7 @@ usage:
   musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] <body...>
   musterd inbox [--watch] [--unread] [--peek] [--limit <n>]
   musterd status
+  musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
 
 global flags: --team <slug>  --server <url>  --json  --no-color
 
@@ -51,6 +53,8 @@ async function main(argv: string[]): Promise<number> {
       return inboxCommand(rest);
     case 'status':
       return statusCommand(rest);
+    case 'reclaim':
+      return reclaimCommand(rest);
     default:
       throw new CliError(`unknown command "${command}" — run: musterd help`, 2);
   }
