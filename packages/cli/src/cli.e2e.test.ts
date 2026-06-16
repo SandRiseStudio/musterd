@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
@@ -8,6 +8,7 @@ import { inboxCommand } from './commands/inbox.js';
 import { sendCommand } from './commands/send.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
+import { cachedTeamLive } from './onboard/init.js';
 
 let server: RunningServer;
 let dir: string;
@@ -104,5 +105,19 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     process.env['MUSTERD_CONFIG'] = boConfig;
     const inbox = await run(inboxCommand, []);
     expect(inbox.out).toContain("inbox empty — nobody's mustered anything yet");
+  });
+});
+
+describe('cachedTeamLive (init reuse probe, ADR 016)', () => {
+  it('is true for a live team+token, false for a stale token or a missing team', async () => {
+    const server = process.env['MUSTERD_SERVER']!;
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    const token = JSON.parse(readFileSync(nickConfig, 'utf8')).identities.dawn.token as string;
+
+    expect(await cachedTeamLive(server, 'dawn', token)).toBe(true);
+    // stale token (e.g. minted against a since-wiped db) → not live
+    expect(await cachedTeamLive(server, 'dawn', 'mskd_bogus_token')).toBe(false);
+    // team that doesn't exist on this daemon (e.g. db reset) → not live
+    expect(await cachedTeamLive(server, 'ghost-team', token)).toBe(false);
   });
 });

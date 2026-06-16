@@ -14,6 +14,22 @@ import { renderPrimer, upsertPrimer } from './primer.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Is the cached team+token still valid on this daemon? An authenticated inbox probe fails (caught)
+ * when the team no longer exists (db reset) or the token is stale (minted against another db) — so
+ * init can avoid offering a dead "reuse" option and fall back to creating a team. (Dogfood: ADR 016.)
+ */
+export async function cachedTeamLive(
+  server: string,
+  team: string,
+  token: string,
+): Promise<boolean> {
+  return new HttpClient({ server, token })
+    .inbox(team, { limit: 1 })
+    .then(() => true)
+    .catch(() => false);
+}
+
 function bail(): never {
   p.cancel('Onboarding cancelled — run `musterd init` any time.');
   process.exit(130);
@@ -93,7 +109,13 @@ export async function runInit(): Promise<number> {
   let team: string;
   let creatorToken: string;
   const existing = config.current && config.identities[config.current];
-  if (existing) {
+  // Only offer to reuse the cached team if it's actually live on *this* daemon. A wiped/replaced db
+  // or a different server makes the saved team+token stale; offering it would fail mid-flow (the
+  // db-mismatch dogfood class). Probe with an authenticated call so init stays the single entry point.
+  const cachedLive = existing
+    ? await cachedTeamLive(server, config.current!, config.identities[config.current!]!.token)
+    : false;
+  if (existing && cachedLive) {
     p.log.info(
       pc.dim(
         'A team is a standing roster, not a project — reuse the same team across folders to keep agents talking.',
@@ -119,6 +141,13 @@ export async function runInit(): Promise<number> {
       creatorToken = config.identities[team]!.token;
     }
   } else {
+    if (existing && !cachedLive) {
+      p.log.warn(
+        pc.yellow(
+          `Your saved team "${config.current}" isn't on this daemon (its database was reset or you're pointed at a different server) — let's set one up.`,
+        ),
+      );
+    }
     ({ team, creatorToken } = await createTeam(config, server));
   }
   config = loadConfig();
