@@ -31,29 +31,29 @@ A joined agent that goes heads-down won't see a teammate's message until it **ca
 
 ### Claude Code hook pattern
 
-Claude Code runs shell hooks on lifecycle events; a hook's stdout can be fed back to the agent as context. Two useful events:
+Claude Code runs shell hooks on lifecycle events. **Use events whose stdout is injected into the model's context** — `SessionStart` and `UserPromptSubmit`. (A plain `Stop`-hook `echo` only *logs* to the transcript; to actually re-engage the model from `Stop` you'd need to emit `{"decision":"block","reason":…}` and guard against loops — more machinery than a nudge warrants. Prefer the context-injecting events.)
 
-- **`SessionStart`** — emit a reminder to join + check in at the top of the session.
-- **`Stop`** (the agent is about to finish its turn) — remind it to post a one-line `status_update` on what it just did (this is what flips the roster to `working:`) **and** `team_inbox_check` before going idle, so progress is visible and replies that arrived while it worked get picked up.
+- **`SessionStart`** — remind the agent to join + check in at the top of the session.
+- **`UserPromptSubmit`** (fires when you send a prompt — a natural task boundary) — remind it to post a one-line `status_update` on the work it just finished (this is what flips the roster to `working:`) and to `team_inbox_check` for replies. Phrase it to self-filter ("*if you finished a unit of work*") so it nudges at real boundaries, not every turn.
 
-Illustrative `~/.claude/settings.json` (adapt to your Claude Code version — see Claude Code's hooks reference for the exact schema and output keys):
+**Self-gate to musterd folders.** Make the hook global but only fire where a musterd primer exists, so non-musterd projects stay silent — no per-folder setup, and every future musterd folder is covered automatically. Illustrative `~/.claude/settings.json` (adapt to your Claude Code version — see Claude Code's hooks reference for the exact schema):
 
 ```json
 {
   "hooks": {
     "SessionStart": [
       { "hooks": [ { "type": "command",
-        "command": "echo 'You are on a musterd team. Call team_join now, then team_inbox_check.'" } ] }
+        "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/AGENTS.md\"; test -f \"$f\" && grep -q musterd:start \"$f\" && echo 'You are on a musterd team. Call team_join (if not auto-joined), then team_inbox_check.' || true" } ] }
     ],
-    "Stop": [
+    "UserPromptSubmit": [
       { "hooks": [ { "type": "command",
-        "command": "echo 'Before finishing: post a one-line team_send status_update on what you just did, then call team_inbox_check — a teammate may be waiting on you.'" } ] }
+        "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/AGENTS.md\"; test -f \"$f\" && grep -q musterd:start \"$f\" && echo 'musterd: if you finished a unit of work since your last update, post a one-line team_send status_update (flips you to working: on the roster); then team_inbox_check for replies.' || true" } ] }
     ]
   }
 }
 ```
 
-The reminder text is deliberately imperative and names the exact tools. Keep it short; a noisy hook trains the model to ignore it.
+The gate is `grep -q musterd:start AGENTS.md` (the marker `musterd init` writes, ADR 012); `|| true` keeps the hook exit 0 so it never errors a turn. Keep the reminder short and name the exact tools; a noisy hook trains the model to ignore it. Global settings are read at session start, so **reload the agent's session** after adding hooks. Review/disable later via `/hooks`.
 
 ### The honest caveat
 

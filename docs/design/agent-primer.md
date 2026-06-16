@@ -101,4 +101,4 @@ The recording also died on identity collisions — member names reused across fo
 - **Harness-native.** `AGENTS.md` is already read every session by both supported harnesses — zero new moving parts at runtime, nothing to keep alive, nothing to reconnect. The primer is just context the model sees, the same way it sees the repo's own `AGENTS.md`.
 - **Standing, not per-prompt.** It fixes the gap at its root (no context at session start) rather than papering over it with reminders in tool results.
 - **Honest with the model.** It tells the agent the working loop in the agent's own terms (join → inbox at boundaries → status/request_help/handoff/accept), which is exactly what the failed recording showed agents don't infer on their own.
-- **Composes with what exists.** Idempotent managed block sits alongside the user's own `AGENTS.md`; the `team_join` result and `harness-hooks.md` Stop-hook remain complementary belts.
+- **Composes with what exists.** Idempotent managed block sits alongside the user's own `AGENTS.md`; the `team_join` result and `harness-hooks.md` hooks remain complementary belts.
