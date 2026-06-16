@@ -49,7 +49,7 @@ The fix: `installShutdownHandlers` drops Presence (`client.close()`) and exits `
 - **`SIGINT` / `SIGTERM` / `SIGHUP`** — for hosts that signal instead.
 - **`transport.onclose`** — chained (not clobbered) onto any prior handler.
 
-Phantom Presence now drops within the 45s reclaim grace instead of lingering. The `docs/harness-hooks.md` Stop-hook (SessionStart/Stop) remains a **complementary belt** for hosts that don't close cleanly — no longer the primary mechanism.
+Phantom Presence now drops within the 45s reclaim grace instead of lingering. The `docs/harness-hooks.md` hooks (`SessionStart` + `UserPromptSubmit`) remain a **complementary belt** for keeping an agent checked-in/reporting — no longer the primary mechanism.
 
 ## The 6 tools (JSON schemas — verbatim contract)
 
