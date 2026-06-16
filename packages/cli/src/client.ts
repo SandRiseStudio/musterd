@@ -87,6 +87,9 @@ export class HttpClient {
   presence(slug: string, surface: string, status?: string) {
     return this.request('POST', `/teams/${slug}/presence`, { surface, status });
   }
+  reclaim(slug: string, member: string): Promise<{ ok: boolean; member: string }> {
+    return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(member)}/reclaim`);
+  }
 }
 
 export interface WatchOpts {

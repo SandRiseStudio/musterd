@@ -33,7 +33,7 @@ A joined agent that goes heads-down won't see a teammate's message until it **ca
 
 Claude Code runs shell hooks on lifecycle events. **Use events whose stdout is injected into the model's context** — `SessionStart` and `UserPromptSubmit`. (A plain `Stop`-hook `echo` only *logs* to the transcript; to actually re-engage the model from `Stop` you'd need to emit `{"decision":"block","reason":…}` and guard against loops — more machinery than a nudge warrants. Prefer the context-injecting events.)
 
-- **`SessionStart`** — remind the agent to join + check in at the top of the session.
+- **`SessionStart`** — orient the agent and have it **check in**. *Don't lead with "call team_join"*: `musterd init` enables auto-join by default, so the session is usually already online — telling it to join is redundant and (pre-ADR-017) could trigger a `member_busy` spiral. Phrase join as a *fallback only* ("if a tool says you're not joined").
 - **`UserPromptSubmit`** (fires when you send a prompt — a natural task boundary) — remind it to post a one-line `status_update` on the work it just finished (this is what flips the roster to `working:`) and to `team_inbox_check` for replies. Phrase it to self-filter ("*if you finished a unit of work*") so it nudges at real boundaries, not every turn.
 
 **Self-gate to musterd folders.** Make the hook global but only fire where a musterd primer exists, so non-musterd projects stay silent — no per-folder setup, and every future musterd folder is covered automatically. Illustrative `~/.claude/settings.json` (adapt to your Claude Code version — see Claude Code's hooks reference for the exact schema):
@@ -43,7 +43,7 @@ Claude Code runs shell hooks on lifecycle events. **Use events whose stdout is i
   "hooks": {
     "SessionStart": [
       { "hooks": [ { "type": "command",
-        "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/AGENTS.md\"; test -f \"$f\" && grep -q musterd:start \"$f\" && echo 'You are on a musterd team. Call team_join (if not auto-joined), then team_inbox_check.' || true" } ] }
+        "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/AGENTS.md\"; test -f \"$f\" && grep -q musterd:start \"$f\" && echo 'You are on a musterd team (auto-joined on launch). Run team_inbox_check now to see anything waiting. Only call team_join if a tool says you are not joined.' || true" } ] }
     ],
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command",

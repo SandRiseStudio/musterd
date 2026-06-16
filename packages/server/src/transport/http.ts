@@ -16,9 +16,9 @@ import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import { getCursor, setCursor } from '../store/cursors.js';
-import { addMember, authMember, getMemberById } from '../store/members.js';
+import { addMember, authMember, getMemberById, getMemberByName } from '../store/members.js';
 import { latestStatusUpdate, listInbox, rowToEnvelope } from '../store/messages.js';
-import { attach, listPresence } from '../store/presence.js';
+import { attach, clearMemberPresence, listPresence } from '../store/presence.js';
 import { toMember } from '../store/rows.js';
 import { createTeam, requireTeam } from '../store/teams.js';
 import { recordError } from '../telemetry.js';
@@ -220,6 +220,35 @@ export async function handleHttp(
         return sendJson(res, 200, {
           presence: { id: p.id, surface: p.surface, status: body.status ?? p.status },
         });
+      }
+
+      // Operator escape hatch (ADR 017 follow-up): forcibly drop a member's live session so it can
+      // rejoin — for a stuck/orphaned presence newest-wins can't displace (no new session is coming).
+      // localhost-only/v0.2: any team member may reclaim any member; the v0.3 seat model will gate this.
+      const reclaimMatch = rest.match(/^\/members\/([^/]+)\/reclaim$/);
+      if (method === 'POST' && reclaimMatch) {
+        const { team } = authMember(ctx.db, slug, bearer(req));
+        const targetName = decodeURIComponent(reclaimMatch[1]!);
+        const target = getMemberByName(ctx.db, team.id, targetName);
+        if (!target || target.left_at !== null)
+          throw new MusterdError('not_found', `no member "${targetName}" in ${slug}`);
+        // Displace any live session (same mechanism as a newer hello), then free the seat + go offline.
+        for (const old of ctx.hub.connsForMember(target.id)) {
+          old.send({
+            type: 'error',
+            code: 'superseded',
+            message: `your session as "${target.name}" was reclaimed by an operator`,
+          });
+          old.close?.();
+          ctx.hub.remove(old.connId);
+        }
+        clearMemberPresence(ctx.db, target.id);
+        ctx.hub.broadcastTeam(team.id, {
+          type: 'presence',
+          member: target.name,
+          status: 'offline',
+        });
+        return sendJson(res, 200, { ok: true, member: target.name });
       }
     }
 

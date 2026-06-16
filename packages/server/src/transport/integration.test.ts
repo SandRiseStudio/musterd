@@ -326,6 +326,33 @@ describe('WebSocket', () => {
     a2.close();
   });
 
+  it('reclaim drops a member’s live session and frees the seat (ADR 017 follow-up)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    const a = new TestWs();
+    await a.open();
+    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+
+    const r = await post('/teams/dawn/members/Ada/reclaim', {}, nickTok);
+    expect(r.status).toBe(200);
+    expect(r.json.member).toBe('Ada');
+
+    // The live session is told it was superseded ...
+    const superseded = await a.waitFor('error');
+    expect((superseded as any).code).toBe('superseded');
+    // ... and the seat is freed (Ada reads offline on the roster).
+    const roster = await get('/teams/dawn/members', nickTok);
+    expect(roster.json.members.find((m: any) => m.name === 'Ada').activity).toBe('offline');
+
+    // Reclaiming an unknown member is a 404.
+    const miss = await post('/teams/dawn/members/Ghost/reclaim', {}, nickTok);
+    expect(miss.status).toBe(404);
+
+    a.close();
+  });
+
   it('lets the same member reclaim its presence after disconnecting (within grace)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.token;

@@ -5,6 +5,7 @@ import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args.js';
 import { inboxCommand } from './commands/inbox.js';
+import { reclaimCommand } from './commands/reclaim.js';
 import { sendCommand } from './commands/send.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
@@ -105,6 +106,22 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     process.env['MUSTERD_CONFIG'] = boConfig;
     const inbox = await run(inboxCommand, []);
     expect(inbox.out).toContain("inbox empty — nobody's mustered anything yet");
+  });
+});
+
+describe('reclaim command (ADR 017 follow-up)', () => {
+  it('reclaims a member (idempotent with no live session) and 404s an unknown one', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
+
+    // No live WS session here, but reclaim is a safe no-op that still succeeds.
+    const ok = await run(reclaimCommand, ['Ada']);
+    expect(ok.code).toBe(0);
+    expect(ok.out).toContain('reclaimed');
+    expect(ok.out).toContain('Ada');
+
+    // Unknown member → not_found (CLI exit 6).
+    await expect(run(reclaimCommand, ['Ghost'])).rejects.toMatchObject({ exitCode: 6 });
   });
 });
 
