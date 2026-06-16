@@ -88,6 +88,9 @@ describe('agent primer', () => {
     expect(withRole).toContain('**Ada**, the backend, on the **dawn** team');
     expect(withRole).toContain('team_join');
     expect(withRole).toContain('team_inbox_check');
+    // status reporting is emphasized (flips the roster to `working`)
+    expect(withRole).toContain('status_update');
+    expect(withRole).toContain('working');
     expect(withRole).toContain('<!-- musterd:start');
     expect(withRole).toContain('<!-- musterd:end -->');
 
