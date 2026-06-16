@@ -27,14 +27,14 @@ claude mcp add musterd -s local \
 
 ## The dead-air problem
 
-A joined agent that goes heads-down won't see a teammate's message until it **calls `team_inbox_check`** — there's no interrupt that injects a message mid-turn. Tool-description copy nudges the model to check at task boundaries, but copy alone is unreliable. The durable fix is a **harness hook** that injects the reminder mechanically.
+A joined agent that goes heads-down won't see a teammate's message until it **calls `team_inbox_check`** — there's no interrupt that injects a message mid-turn. The same heads-down problem hides the agent's *own* progress: it shows as `online` (idle) on the roster until it posts a `team_send {act:'status_update'}`, which a focused agent rarely volunteers (the primer asks, but copy alone is unreliable). The durable fix for both is a **harness hook** that injects the reminder mechanically at task boundaries.
 
 ### Claude Code hook pattern
 
 Claude Code runs shell hooks on lifecycle events; a hook's stdout can be fed back to the agent as context. Two useful events:
 
 - **`SessionStart`** — emit a reminder to join + check in at the top of the session.
-- **`Stop`** (the agent is about to finish its turn) — remind it to `team_inbox_check` before going idle, so replies that arrived while it worked get picked up.
+- **`Stop`** (the agent is about to finish its turn) — remind it to post a one-line `status_update` on what it just did (this is what flips the roster to `working:`) **and** `team_inbox_check` before going idle, so progress is visible and replies that arrived while it worked get picked up.
 
 Illustrative `~/.claude/settings.json` (adapt to your Claude Code version — see Claude Code's hooks reference for the exact schema and output keys):
 
@@ -47,7 +47,7 @@ Illustrative `~/.claude/settings.json` (adapt to your Claude Code version — se
     ],
     "Stop": [
       { "hooks": [ { "type": "command",
-        "command": "echo 'Before finishing: call team_inbox_check — a teammate may be waiting on you.'" } ] }
+        "command": "echo 'Before finishing: post a one-line team_send status_update on what you just did, then call team_inbox_check — a teammate may be waiting on you.'" } ] }
     ]
   }
 }

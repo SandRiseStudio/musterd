@@ -133,6 +133,33 @@ describe('renderStatusTable', () => {
     expect(out).toContain('working: refactoring auth · 18m');
   });
 
+  it('clips a long, multi-line status to one tidy roster line', () => {
+    const longState =
+      'Working on FindMyMoney scan/pricing.\nDone: bounded the URL-inference pass with per-file dedupe and caps; now implementing /api/scan blocking on codegen so the gap list settles server-side.';
+    const members: MemberSummary[] = [
+      {
+        id: '1',
+        team: 'dawn',
+        name: 'Mike',
+        kind: 'agent',
+        role: 'backend',
+        lifecycle: 'forever',
+        created_at: 0,
+        presence: 'online',
+        activity: 'working',
+        state: longState,
+        presences: [{ surface: 'claude-code', status: 'online', last_seen_at: 0 }],
+      },
+    ];
+    const out = renderStatusTable(members);
+    expect(out).toContain('working: Working on FindMyMoney');
+    expect(out).toContain('…'); // clipped
+    expect(out).not.toContain('\nDone:'); // newline collapsed, not spilled into the table
+    // the working cell stays on one line
+    const mikeLine = out.split('\n').find((l) => l.includes('Mike'))!;
+    expect(mikeLine.length).toBeLessThan(160);
+  });
+
   it('renders provenance (why) and workspace (where) dim alongside activity (ADR 014)', () => {
     const members: MemberSummary[] = [
       {

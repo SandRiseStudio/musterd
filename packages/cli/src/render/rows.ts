@@ -114,13 +114,23 @@ function activityLabel(m: MemberSummary, now: number): string {
   if (activity === 'working' && m.state) {
     const stale = m.last_status_at != null && now - m.last_status_at >= STALE_AFTER_MS;
     const age = stale && m.last_status_at != null ? ` · ${ageLabel(m.last_status_at, now)}` : '';
-    core = `working: ${m.state}${age}`;
+    core = `working: ${clipStatus(m.state)}${age}`;
   } else {
     core = p?.surface ? `online via ${p.surface}` : 'online';
   }
   const why = p?.provenance ? ` (${p.provenance})` : '';
   const where = p?.workspace ? ` · ${p.workspace}` : '';
   return `${core}${why}${where}`;
+}
+
+/**
+ * Clip a self-reported status to one tidy roster line: collapse whitespace and cap length. The full
+ * text is preserved in `status --json`; agents sometimes post a paragraph (keep the table readable).
+ */
+const STATUS_MAX = 72;
+function clipStatus(state: string): string {
+  const oneLine = state.replace(/\s+/g, ' ').trim();
+  return oneLine.length > STATUS_MAX ? oneLine.slice(0, STATUS_MAX - 1) + '…' : oneLine;
 }
 
 /** Coarse human age: `18m` / `2h` / `3d`. */
