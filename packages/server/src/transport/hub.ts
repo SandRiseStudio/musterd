@@ -7,6 +7,8 @@ export interface Connection {
   teamId: string;
   presenceId: string;
   send: (frame: WSServerFrame) => void;
+  /** Force-close the underlying socket (used to displace a superseded same-identity session). */
+  close?: () => void;
 }
 
 /**

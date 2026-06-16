@@ -1,6 +1,6 @@
 # 010 — single-active members + 45s reclaim grace
 
-- Status: accepted
+- Status: accepted; the `member_busy` **refusal** is superseded by **ADR 017** (2026-06-16) — single-active is now newest-wins (a second same-identity attach takes over via `superseded` instead of being refused). The single-active *invariant* (one live presence) and the 45s reclaim grace remain.
 - Date: 2026-06-11
 - Protocol: `musterd/0.2` (M1)
 

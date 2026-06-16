@@ -19,6 +19,7 @@ const CODE_EXIT: Record<ErrorCode, number> = {
   not_found: 6,
   conflict: 9,
   member_busy: 10,
+  superseded: 11,
   version_mismatch: 1,
 };
 

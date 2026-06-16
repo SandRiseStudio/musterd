@@ -32,7 +32,7 @@ On `team_join` the adapter sends two attach-time facts on the `hello` (provenanc
 The original design auto-claimed a Presence on startup. That was the **"N minds, one name"** bug: three Claude Code sessions all bound to `Ada` meant three sessions wearing one identity, each silently acting as that Member. v0.2 deletes the auto-claim. The new contract:
 
 1. **Startup (`bind`) is reachability-only** — `GET /health` and nothing else. No Presence, no WS, no seat occupied. The tools are registered and callable, but the session is *dormant*. (This also closed the ADR-010 HTTP-presence hole: a dormant session can't hold a phantom claim.)
-2. **The agent goes online by calling `team_join`** — that opens the background WS `hello` (as Member/surface), registers the Presence, and starts the 15s heartbeat. Only now can it send and receive. The server enforces **single-active**: a second live session for the same Member is refused on the WS hello with `member_busy`, and the tool surfaces that cleanly (the session stays dormant; inspection tools still work).
+2. **The agent goes online by calling `team_join`** — that opens the background WS `hello` (as Member/surface), registers the Presence, and starts the 15s heartbeat. Only now can it send and receive. The server enforces **single-active, newest-wins** (ADR 017): if the Member already has a live session, this one **takes over** and the older one is told it was `superseded` (it stops, doesn't reconnect). So `team_join` always reclaims your own seat — a reload/orphaned adapter can't lock you out (the dogfood deadlock that ADR 017 fixed).
 3. **Acting is gated on join.** `team_send` and `team_inbox_check` refuse while dormant (`"call team_join first"`). This closes the *acting-as-member* tail of the bug: a session that never joined cannot send messages or drain the shared inbox cursor on the shared token. (The full close — a session that joined elsewhere still acting over HTTP — is the v0.3 seat-claim model.) If a prior (auto)join **failed**, the guard appends the reason (`MusterdClient.lastJoinError`) — e.g. a wrong-db token rejection — so a silent autojoin failure is diagnosable, not just "call team_join first" (ADR 016).
 4. **`MUSTERD_AUTOJOIN=1`** opts a session into calling `team_join` automatically right after connect — the convenience path for the common solo case (one human, one agent, one folder). Off by default so a session never silently occupies a seat. `musterd init` offers to set it per-binding.
 5. **Buffered deliveries:** while joined, inbound `deliver` envelopes are buffered in memory for `team_inbox_check` to drain (the agent pulls; MCP has no server-push to the model, so we expose a check tool the agent calls).
@@ -65,7 +65,7 @@ Tool names are stable; descriptions are written for the *agent* reading them.
   "inputSchema": { "type": "object", "properties": {} }
 }
 ```
-Opens the background WS `hello` (Member/surface from env), registers the Presence, starts the heartbeat. Idempotent (`"Already joined …"`). On the server refusing single-active, returns a plain-language `member_busy` explanation and leaves the session dormant. The success result reminds the agent to `team_inbox_check` now and at every task boundary (dead-air mitigation — messages that arrived while heads-down only surface on a check).
+Opens the background WS `hello` (Member/surface from env), registers the Presence, starts the heartbeat. Idempotent (`"Already joined …"`). Newest-wins (ADR 017): if the Member is already live elsewhere, this session takes over and the older one is `superseded` — so join always succeeds for your own identity (no lockout). The success result reminds the agent to `team_inbox_check` now and at every task boundary (dead-air mitigation — messages that arrived while heads-down only surface on a check).
 
 ### `team_leave`
 ```json
@@ -167,7 +167,7 @@ src/
 ## Acceptance tests (`06-testing.md`)
 
 - With env pointing at a live test server + a `team add Ada` token: MCP boot is **dormant** — the server roster shows Ada `offline`. After `team_join`, the roster shows Ada online with the surface from env.
-- A second session for the same Member calling `team_join` is refused with `member_busy` (single-active); the first stays online.
+- A second session for the same Member calling `team_join` **takes over** (newest-wins, ADR 017); the first is `superseded` and goes dormant without reconnecting.
 - `team_send` / `team_inbox_check` **before** `team_join` return the "call team_join first" guard (no message sent, cursor untouched).
 - After join: `team_send {act:'status_update', body:'...'}` persists a message visible to a CLI `inbox` on the same team.
 - A CLI `send --to Ada` then `team_inbox_check` returns that message once and advances the cursor (second check returns nothing).
