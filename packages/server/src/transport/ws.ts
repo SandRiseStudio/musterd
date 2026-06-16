@@ -11,7 +11,6 @@ import { authMember } from '../store/members.js';
 import {
   attach,
   clearMemberPresence,
-  hasActivePresence,
   hasLivePresence,
   heartbeat,
   presenceById,
@@ -89,13 +88,18 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           if (member.name !== frame.as) {
             throw new MusterdError('forbidden', 'token does not match the requested member');
           }
-          // Single-active (ADR 010): one live attachment per member. A live holder refuses a
-          // second session; a dropped holder's release hold is silently reclaimed within grace.
-          if (hasActivePresence(ctx.db, member.id)) {
-            throw new MusterdError(
-              'member_busy',
-              `member "${member.name}" is already active in this team`,
-            );
+          // Single-active, newest-wins (ADR 017, supersedes ADR 010's refusal): one live
+          // attachment per member, and a fresh hello from the *same identity* takes the seat —
+          // so a reloaded/orphaned adapter can't lock the member out of its own seat. Displace any
+          // existing live session: tell it it was superseded, close it, and evict it from the hub.
+          for (const old of ctx.hub.connsForMember(member.id)) {
+            old.send({
+              type: 'error',
+              code: 'superseded',
+              message: `your session as "${member.name}" was taken over by a newer one`,
+            });
+            old.close?.();
+            ctx.hub.remove(old.connId);
           }
           clearMemberPresence(ctx.db, member.id);
           const presence = attach(ctx.db, member.id, frame.surface, state.connId, {
@@ -109,6 +113,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             teamId: team.id,
             presenceId: presence.id,
             send: (f) => send(ws, f),
+            close: () => ws.close(),
           };
           state.authenticated = true;
           state.conn = conn;

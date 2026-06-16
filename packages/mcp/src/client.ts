@@ -149,9 +149,14 @@ export class MusterdClient {
         this.pendingJoin?.resolve();
         this.pendingJoin = null;
       } else if (frame.type === 'error') {
-        // A refused hello (e.g. member_busy) is terminal — don't thrash reconnecting.
+        // A refused hello, or being superseded by a newer same-identity session (ADR 017), is
+        // terminal — stop holding the seat and don't thrash reconnecting (a reconnect would just
+        // displace the session that displaced us — ping-pong).
         this.wantPresence = false;
-        const msg = frame.code === 'member_busy' ? `member_busy: ${frame.message}` : frame.message;
+        const msg =
+          frame.code === 'member_busy' || frame.code === 'superseded'
+            ? `${frame.code}: ${frame.message}`
+            : frame.message;
         this.lastJoinErrorMsg = msg;
         this.pendingJoin?.reject(new Error(msg));
         this.pendingJoin = null;

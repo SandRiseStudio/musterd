@@ -105,11 +105,19 @@ describe('Scenario C — flagship 3-pane', () => {
     await lin.join();
     await delay(150); // let both background sockets settle
 
-    // A second session claiming Ada's seat is refused (single-active, M3 / ADR 010): one identity,
-    // one live occupant. This is the bug v0.2 fixed — N sessions can no longer wear one name.
+    // Newest-wins (ADR 017, supersedes ADR 010's refusal): a second session claiming Ada's seat
+    // *takes over*, and the original is superseded — one identity, one live occupant, and a reload
+    // can never lock a member out of its own seat. (This is the fix for the dogfood deadlock.)
     const adaDup = client('Ada', 'claude-code');
-    await expect(adaDup.join()).rejects.toThrow(/member_busy/);
+    await adaDup.join();
+    expect(adaDup.joined).toBe(true);
+    await delay(150);
+    expect(ada.joined).toBe(false); // the original was displaced
+    // Restore the original session as the live occupant for the rest of the scenario.
     adaDup.close();
+    await delay(100);
+    await ada.join();
+    await delay(150);
 
     // nick (human) is present and watching: roster shows all three online on their surfaces.
     await api('POST', '/teams/dawn/presence', { surface: 'cli', status: 'online' }, tok['nick']);

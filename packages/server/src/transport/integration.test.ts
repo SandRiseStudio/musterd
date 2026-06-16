@@ -299,7 +299,7 @@ describe('WebSocket', () => {
     a.close();
   });
 
-  it('refuses a second live presence for the same member with member_busy', async () => {
+  it('a second live session for the same member takes over; the first is superseded (ADR 017)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
 
@@ -307,18 +307,20 @@ describe('WebSocket', () => {
     await a1.open();
     await a1.hello('dawn', 'Ada', ada.json.token, 'claude-code');
 
+    // The newer session wins: it gets `welcome`, and the older one is told it was superseded.
     const a2 = new TestWs();
     await a2.open();
-    a2.send({
-      type: 'hello',
-      v: PROTOCOL_VERSION,
-      team: 'dawn',
-      as: 'Ada',
-      token: ada.json.token,
-      surface: 'cli',
-    });
-    const err = await a2.waitFor('error');
-    expect((err as any).code).toBe('member_busy');
+    const welcome = await a2.hello('dawn', 'Ada', ada.json.token, 'cli');
+    expect(welcome.type).toBe('welcome');
+
+    const superseded = await a1.waitFor('error');
+    expect((superseded as any).code).toBe('superseded');
+
+    // Exactly one live presence remains — the new one (single-active still holds).
+    const roster = await get('/teams/dawn/members', team.json.token);
+    const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(adaRow.presences).toHaveLength(1);
+    expect(adaRow.presences[0].surface).toBe('cli');
 
     a1.close();
     a2.close();

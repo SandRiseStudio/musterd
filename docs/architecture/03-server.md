@@ -94,9 +94,9 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - On clean WS close: `detach()` immediately + emit offline (if last presence). Don't wait for the reaper.
 - `status` transitions: a member is `online` if any presence row is fresh; `away` is only set explicitly by a client (`heartbeat` with `{status:'away'}` or HTTP presence ping) — the server never invents `away`. No fresh presence ⇒ `offline`.
 
-## Single-active + reclaim grace (v0.2 — ADR 010)
+## Single-active + reclaim grace (v0.2 — ADR 010, newest-wins per ADR 017)
 
-- **One live Presence per Member.** `attach` refuses a second concurrent Presence for a Member that already holds a live one, with `member_busy` (HTTP 409 / WS `error`). This is the wire enforcement behind "a Member is an identity, not a session."
+- **One live Presence per Member — newest wins.** On a WS `hello` for a Member that already holds a live Presence, the handler **displaces** the existing session: it sends each old connection a `superseded` error frame, force-closes it (`Connection.close`), evicts it from the hub, then attaches the new Presence. The newest session is the one live occupant. (ADR 017 replaced ADR 010's *refuse with `member_busy`* — refusing locked a Member out of its own seat after a reload/orphaned adapter; the dogfood deadlock.) The displaced adapter treats `superseded` as terminal and does not reconnect, so there's no ping-pong and orphans self-heal.
 - **Reclaim grace.** On detach (clean close or reap), the seat is held for `PRESENCE_TIMEOUT_MS` (45s) via a `held_until` marker (presence schema v2) so the *same* Member can rejoin without being refused. The reaper sweeps expired holds. This makes a flaky reconnect or a quick restart seamless while still freeing the seat promptly.
 
 ## Roster activity (v0.2)
@@ -133,6 +133,6 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - `routeEnvelope` persists + returns correct recipients for member/team/broadcast; bad act → `422 validation`.
 - Two WS clients on team `dawn`: a `send` from Ada to Lin yields a `deliver` to Lin and an `ack` to Ada; Lin offline → message appears in Lin's `inbox` fetch with correct unread count.
 - Presence: attach → online in roster; stop heartbeats → reaper offlines within ~`timeout+interval`; clean close → immediate offline.
-- Single-active: a second concurrent `attach` for the same Member → `member_busy`; after detach, a re-attach within the 45s grace succeeds (the `held_until` seat is reclaimed, not refused).
+- Single-active newest-wins: a second concurrent `hello` for the same Member takes over and the first receives `superseded` (ADR 017); after detach, a re-attach within the 45s grace succeeds (the `held_until` seat is reclaimed).
 - Activity: a present Member with a recent `status_update` resolves to `working` (with `state`/`last_status_at`); present without one → `online`; no fresh presence → `offline`.
 - `seedDawn` produces the exact fixture in `01-data-model.md`.

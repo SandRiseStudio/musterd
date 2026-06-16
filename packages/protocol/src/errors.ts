@@ -9,6 +9,7 @@ export const ERROR_CODES = [
   'not_found',
   'conflict',
   'member_busy',
+  'superseded',
   'version_mismatch',
   'server_error',
 ] as const;
@@ -24,6 +25,7 @@ export const ERROR_HTTP_STATUS: Record<ErrorCode, number> = {
   not_found: 404,
   conflict: 409,
   member_busy: 409,
+  superseded: 409,
   version_mismatch: 426,
   server_error: 500,
 };

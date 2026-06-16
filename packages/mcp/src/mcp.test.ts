@@ -83,15 +83,22 @@ describe('MCP adapter', () => {
     client.close();
   });
 
-  it('refuses a second session joining as the same member (member_busy)', async () => {
+  it('a second session for the same member takes over; the first is superseded (ADR 017)', async () => {
     const a1 = new MusterdClient(adaConfig());
     await a1.join();
+    expect(a1.joined).toBe(true);
+
+    // Newest wins: the second session joins successfully (no member_busy lockout) ...
     const a2 = new MusterdClient(adaConfig());
-    await expect(a2.join()).rejects.toThrow(/member_busy/i);
-    expect(a2.joined).toBe(false);
-    // The failure reason is retained so the dormant tool guards can surface *why* (not just
-    // "call team_join first") — a silent (auto)join failure must stay diagnosable.
-    expect(a2.lastJoinError).toMatch(/member_busy/i);
+    await a2.join();
+    expect(a2.joined).toBe(true);
+
+    // ... and the first is displaced — it stops holding the seat and won't reconnect.
+    await vi.waitFor(() => {
+      expect(a1.joined).toBe(false);
+      expect(a1.lastJoinError).toMatch(/superseded/i);
+    });
+
     a1.close();
     a2.close();
   });

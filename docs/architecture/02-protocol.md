@@ -97,6 +97,8 @@ The WS `send` and HTTP `POST …/messages` share one validation+route path on th
 | `forbidden`       | 403 | token valid but not a member of this team / not this member |
 | `not_found`       | 404 | team/member not found |
 | `conflict`        | 409 | duplicate (e.g. team slug taken, member name taken) |
+| `member_busy`     | 409 | (v0.2, ADR 010) a Member was already live — *no longer thrown on hello since ADR 017's newest-wins; retained for compatibility* |
+| `superseded`      | 409 | (v0.2, ADR 017) your session was taken over by a newer same-identity attach — terminal; don't reconnect |
 | `version_mismatch`| 426 | client `v` not compatible with server |
 | `server_error`    | 500 | unexpected |
 
