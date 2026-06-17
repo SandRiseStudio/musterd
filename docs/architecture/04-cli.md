@@ -58,6 +58,17 @@ src/
 - `MUSTERD_SERVER` env overrides `server`. `--team <slug>` overrides `current`. `--as <name>` selects identity within a team.
 - Tokens live here (chmod 600 on write). Never logged.
 
+**Identity resolution (ADR 018) — aligned with the MCP adapter.** This global config is the
+*last* source, not the only one. `resolve()` picks the active team+identity in this order:
+**explicit `--flags` → `MUSTERD_*` env → workspace `.musterd/binding.json` (explicit `MUSTERD_BINDING`
+path, else cwd walk-up) → this global config**. The env + binding paths key identity to the
+*workspace*, the same way the MCP adapter resolves it, so an agent that shells out to `musterd`
+in its folder acts as *that* member — not whoever last wrote the global single-slot-per-team
+(the 2026-06-16/17 dogfood collision). `musterd init` writes the binding file (0600, gitignored).
+Relatedly, `join --as <name>` without `--token` now **refuses** when the cached identity belongs to
+a different member, rather than silently relabeling its token (which "succeeded" then failed every
+send with `from/team must match`).
+
 ## Commands (args, flags, output, exit)
 
 All commands accept global `--team <slug>`, `--server <url>`, `--json` (machine output, no color), `--no-color`.

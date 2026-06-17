@@ -14,8 +14,23 @@ export async function joinCommand(parsed: Parsed): Promise<number> {
   const config = loadConfig();
   const server = flagStr(parsed.flags, 'server') ?? config.server;
   const surface = flagStr(parsed.flags, 'surface') ?? 'cli';
-  const token = flagStr(parsed.flags, 'token') ?? config.identities[slug]?.token;
-  if (!token) throw new CliError(`no token for "${name}" — pass --token <tok>`, 4);
+
+  // Only reuse the cached token when it belongs to the member we're joining as. Relabeling
+  // another member's token as `name` would "succeed" here, then fail every send with
+  // `from/team must match the authenticated member` (the token authenticates as someone else).
+  // The global config has one identity slot per team, so two agents on one machine collide here.
+  const explicitToken = flagStr(parsed.flags, 'token');
+  const cached = config.identities[slug];
+  const token = explicitToken ?? (cached?.name === name ? cached.token : undefined);
+  if (!token) {
+    if (cached && cached.name !== name) {
+      throw new CliError(
+        `the cached identity for "${slug}" is "${cached.name}", not "${name}" — pass --token <tok> to join as ${name}`,
+        4,
+      );
+    }
+    throw new CliError(`no token for "${name}" — pass --token <tok>`, 4);
+  }
 
   const http = new HttpClient({ server, token });
   await http.presence(slug, surface);

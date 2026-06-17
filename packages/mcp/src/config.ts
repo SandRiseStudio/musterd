@@ -1,4 +1,5 @@
 import { SURFACES, type Provenance, type Surface } from '@musterd/protocol';
+import { findBinding } from './binding.js';
 import { resolveProvenance, resolveWorkspace } from './workspace.js';
 
 export interface McpConfig {
@@ -13,19 +14,26 @@ export interface McpConfig {
   workspace: string;
 }
 
-/** Read + validate the MCP server's identity binding from env (05-mcp.md). */
+/**
+ * Read + validate the MCP server's identity binding (05-mcp.md). Aligned with the CLI (ADR 018):
+ * `MUSTERD_*` env wins (the host-injection contract / hosted setups with no writable fs), then the
+ * workspace `.musterd/binding.json` — the same file the CLI reads, so the two can't drift.
+ */
 export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
-  const server = env['MUSTERD_SERVER'] ?? 'http://localhost:4849';
-  const team = env['MUSTERD_TEAM'];
-  const member = env['MUSTERD_MEMBER'];
-  const token = env['MUSTERD_TOKEN'];
-  const surfaceRaw = env['MUSTERD_SURFACE'] ?? 'other';
+  const binding = findBinding(process.cwd(), env);
+  const server = env['MUSTERD_SERVER'] ?? binding?.server ?? 'http://localhost:4849';
+  const team = env['MUSTERD_TEAM'] ?? binding?.team;
+  const member = env['MUSTERD_MEMBER'] ?? binding?.member;
+  const token = env['MUSTERD_TOKEN'] ?? binding?.token;
+  const surfaceRaw = env['MUSTERD_SURFACE'] ?? binding?.surface ?? 'other';
   const missing: string[] = [];
   if (!team) missing.push('MUSTERD_TEAM');
   if (!member) missing.push('MUSTERD_MEMBER');
   if (!token) missing.push('MUSTERD_TOKEN');
   if (missing.length) {
-    throw new Error(`musterd MCP: missing required env: ${missing.join(', ')}`);
+    throw new Error(
+      `musterd MCP: no identity — set ${missing.join(', ')} or provide a .musterd/binding.json`,
+    );
   }
   const surface = (SURFACES as readonly string[]).includes(surfaceRaw)
     ? (surfaceRaw as Surface)

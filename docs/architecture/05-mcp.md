@@ -23,7 +23,17 @@ MUSTERD_SURFACE  = claude-code     # or codex; defaults to 'other'
 MUSTERD_AUTOJOIN = 1               # optional; opt-in auto-join on launch (off by default)
 MUSTERD_PROVENANCE = session       # optional; why this session attaches (ADR 014): session|asked|hook|scheduled|daemon. defaults to 'session'
 MUSTERD_WORKSPACE  = auth-rewrite  # optional; declared 'where' label; overrides the auto folder@branch detection
+MUSTERD_BINDING    = /abs/.musterd/binding.json  # optional; explicit binding-file path (ADR 018)
 ```
+
+**Identity resolution (ADR 018) — aligned with the CLI.** `MUSTERD_*` env wins; if it carries no
+identity the adapter falls back to the **workspace binding file** `<workspace>/.musterd/binding.json`
+(`{server, team, member, token, surface}`, schema `BindingSchema` in `@musterd/protocol`) — the
+explicit `MUSTERD_BINDING` path if set, else walking up from cwd. `musterd init` writes that file
+(0600, gitignored) as the single source of truth so the CLI and the adapter resolve to the **same**
+member in a given folder — two agents on one machine no longer collide on the CLI's global
+`~/.musterd/config.json` single-slot-per-team (the 2026-06-16/17 dogfood failure). Env is kept
+first-class for host-injection and hosted/no-filesystem setups.
 
 On `team_join` the adapter sends two attach-time facts on the `hello` (provenance/where seed, ADR 014): **`provenance`** (from `MUSTERD_PROVENANCE`, default `session`) and a **`workspace`** label resolved once at load — the declared `MUSTERD_WORKSPACE` if set, else a gracefully-degrading auto-label (`cwd` folder, qualified by git branch when informative, else the cwd subpath within the repo, else the bare folder). Both are read context only — they carry no routing/auth meaning — and surface dim on the roster (`online via claude-code (session) · repo@branch`).
 
