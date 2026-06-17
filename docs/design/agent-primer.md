@@ -102,3 +102,12 @@ The recording also died on identity collisions — member names reused across fo
 - **Standing, not per-prompt.** It fixes the gap at its root (no context at session start) rather than papering over it with reminders in tool results.
 - **Honest with the model.** It tells the agent the working loop in the agent's own terms (join → inbox at boundaries → status/request_help/handoff/accept), which is exactly what the failed recording showed agents don't infer on their own.
 - **Composes with what exists.** Idempotent managed block sits alongside the user's own `AGENTS.md`; the `team_join` result and `harness-hooks.md` hooks remain complementary belts.
+
+## 10. Future: agent-pullable primer (the Flue `flue add` pattern)
+
+The §2 decision is a **push** — `init` writes standing context once, at setup time. A complementary **pull** path is worth considering later, modeled on Flue's `flue add` (source inspected 2026-06-17; see `docs/design/landscape.md` §4):
+
+- Flue's CLI detects whether the caller is an AI agent (`@vercel/detect-agent`). If so it writes raw markdown instructions to **stdout** for the agent to act on; if a human, it prints `… --print | claude` pipe instructions instead.
+- Instructions are **versioned** with a mandatory "Upgrade Guide" section, so they survive protocol drift rather than going stale like a one-shot file.
+
+Applied to musterd, a `musterd primer --print` (same agent/human branching) would let an agent **self-onboard mid-session** — pull the current working-loop into its own context on demand — not only at `init` time. This closes two gaps the push model leaves open: an agent dropped into an already-configured repo whose `AGENTS.md` predates a SPEC change, and an agent that wants to re-read the loop after compaction. Lower priority than the collision guard (§7); recorded here so the option isn't re-derived from scratch. Not yet scoped to an ADR.

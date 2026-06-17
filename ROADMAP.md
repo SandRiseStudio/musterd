@@ -20,6 +20,6 @@ musterd v0.1 is deliberately small: a protocol (`SPEC.md`), a local team server,
 
 ## How priorities are decided
 
-The wedge is **persistent teams with identity, presence, and humans as peers** — the coordination layer where, per MAST (arXiv 2503.13657), ~79% of multi-agent failures actually happen. Roadmap work is weighed by whether it strengthens that layer (identity, durable inboxes, typed collaboration acts, human partnership) rather than by adding more agents or more orchestration.
+The wedge is **persistent teams with identity, presence, and humans as peers** — the coordination layer where, per MAST (arXiv 2503.13657), ~79% of multi-agent failures actually happen. Roadmap work is weighed by whether it strengthens that layer (identity, durable inboxes, typed collaboration acts, human partnership) rather than by adding more agents or more orchestration. Why that layer is defensible — neighboring frameworks (e.g. Flue) build deep per-agent durability and delegate coordination to the substrate, stopping exactly where musterd starts — is documented in `docs/design/landscape.md`.
 
 Changes to `SPEC.md` are versioned and gated by an ADR (`docs/decisions/`). New collaboration **acts** or envelope-required fields are a spec-version bump.
