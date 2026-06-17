@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import type { MemberSummary } from '@musterd/protocol';
 import pc from 'picocolors';
 import { HttpClient } from '../client.js';
-import { loadConfig, saveConfig, type Config } from '../config.js';
+import { loadConfig, saveBinding, saveConfig, type Config } from '../config.js';
 import { renderBanner } from '../render/rows.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
@@ -282,6 +282,16 @@ export async function runInit(): Promise<number> {
   const binding = { server, team, member: name, token, surface: chosen.surface };
   const entry = buildEntry(binding);
 
+  // ADR 018: write the workspace binding — the single file both the CLI and the MCP adapter read,
+  // so an agent that shells out to `musterd` resolves to *this* member (not the global config's
+  // single shared slot). It carries a token, so warn + offer to gitignore it.
+  try {
+    const bindingPath = saveBinding(process.cwd(), binding);
+    await warnSecretConfig(bindingPath);
+  } catch (err) {
+    p.log.warn(`Couldn't write .musterd/binding.json (${(err as Error).message}).`);
+  }
+
   // Explicit activation (M3): the agent is dormant until it joins. Offer one-keystroke auto-join
   // on launch for the common solo case; either way a second session as this member is refused cleanly.
   const autojoin = guard(
@@ -472,7 +482,7 @@ async function warnSecretConfig(secretPath: string): Promise<void> {
   );
   if (!add) return;
   const prefix = body.length && !body.endsWith('\n') ? '\n' : '';
-  appendFileSync(gitignore, `${prefix}\n# musterd MCP config — contains a member token\n${rel}\n`);
+  appendFileSync(gitignore, `${prefix}\n# musterd — contains a member token\n${rel}\n`);
   p.log.success(`Added ${pc.yellow(rel)} to .gitignore.`);
 }
 
