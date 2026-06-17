@@ -35,7 +35,7 @@ src/
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts)
     serve.ts          // musterd serve [--port]
-    team.ts           // team create / team add
+    team.ts           // team create / team add / team remove
     join.ts           // join
     send.ts           // send
     inbox.ts          // inbox [--watch]
@@ -98,6 +98,9 @@ Starts the daemon in the foreground. Prints the banner (`render/banner`) + `list
 ### `musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]`
 `POST /teams/:slug/members`. Prints `✓ added <name> (<kind>, <role>)` and the **join token + ready-to-paste connect hint** (the token is shown once). For agents the hint is the MCP/`join` invocation; copy it into the agent's surface. Output: `cmd/team-add`.
 
+### `musterd team remove <name>`
+`POST /teams/:slug/members/:name/remove`. **Soft-removes** a member from the roster (ADR 019) — the sanctioned way to clear a mistaken or stale member instead of editing the daemon's DB. Sets `left_at` via the existing `leaveMember`, so the member drops off every list/auth/route path (all filter `left_at IS NULL`) while its message history + provenance survive; any live session is dropped (same mechanism as reclaim) so the seat frees immediately. Idempotent — removing an already-removed member is a clean `not_found`, never an error stack. Any team member may remove any member (localhost/v0.2; the v0.3 seat model will gate it). No un-remove/reactivate flow — that's the v0.3 seat-claim model. Output: `✓ removed <member> from <team> — off the roster; message history is kept`. Errors: unknown/already-removed member → `not_found` (exit 6).
+
 ### `musterd join <slug> --as <name> [--token <tok>] [--surface cli]`
 Attaches a Presence for an existing member and stores identity locally. If `--token` omitted, uses config. Opens a short WS `hello` to confirm + register presence, then exits 0 (presence is held by `inbox --watch` or one-shot pings; plain `join` just registers and confirms). Output: `cmd/join` (`✓ <name> joined <slug>` + presence line).
 
@@ -135,6 +138,7 @@ Builds an Envelope, `POST /teams/:slug/messages` (or over the live WS if `--watc
 
 - `team create` → config gets identity+token, `current` set; rerun same slug → exit 9.
 - `team add Ada --kind agent` → prints a token; that token authenticates as Ada (verified against a live test server).
+- `team remove Ada` → Ada drops off `status`; a second `remove Ada` (and an unknown member) → `not_found` (exit 6); the member row + its message history survive in the db.
 - Two CLI identities (`nick`, `lin` as a human for the test) on `dawn`: `nick send --to lin` then `lin inbox` shows the message with unread=1; second `lin inbox` shows unread=0.
 - `inbox --watch` receives a message sent after it started watching, live.
 - Output of `status`, `inbox`, `send` matches the Figma terminal frames (snapshot tests against the frozen sample data).

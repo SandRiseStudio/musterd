@@ -353,6 +353,36 @@ describe('WebSocket', () => {
     a.close();
   });
 
+  it('remove soft-deletes a member, drops its live session, and is idempotent (ADR 019)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    const a = new TestWs();
+    await a.open();
+    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+
+    const r = await post('/teams/dawn/members/Ada/remove', {}, nickTok);
+    expect(r.status).toBe(200);
+    expect(r.json.member).toBe('Ada');
+    expect(r.json.kind).toBe('agent');
+
+    // The live session is told it was superseded (the seat is freed) ...
+    const superseded = await a.waitFor('error');
+    expect((superseded as any).code).toBe('superseded');
+    // ... and Ada is gone from the roster entirely (left_at filters her out).
+    const roster = await get('/teams/dawn/members', nickTok);
+    expect(roster.json.members.find((m: any) => m.name === 'Ada')).toBeUndefined();
+
+    // Idempotent: a second remove (now left_at-stamped) and an unknown member both 404.
+    const again = await post('/teams/dawn/members/Ada/remove', {}, nickTok);
+    expect(again.status).toBe(404);
+    const miss = await post('/teams/dawn/members/Ghost/remove', {}, nickTok);
+    expect(miss.status).toBe(404);
+
+    a.close();
+  });
+
   it('lets the same member reclaim its presence after disconnecting (within grace)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.token;

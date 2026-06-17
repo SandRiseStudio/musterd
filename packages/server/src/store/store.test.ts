@@ -4,7 +4,14 @@ import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
 import { resolveActivity } from './activity.js';
 import { getCursor, setCursor } from './cursors.js';
-import { addMember, authMember, hashToken } from './members.js';
+import {
+  addMember,
+  authMember,
+  getMemberByName,
+  hashToken,
+  leaveMember,
+  listMembers,
+} from './members.js';
 import { insertMessage, latestStatusUpdate, listInbox } from './messages.js';
 import {
   attach,
@@ -57,6 +64,20 @@ describe('teams + members', () => {
     const { db, team } = freshTeam();
     addMember(db, team, { name: 'Ada', kind: 'agent' });
     expect(() => addMember(db, team, { name: 'Ada', kind: 'agent' })).toThrow(/already exists/);
+  });
+
+  it('leaveMember soft-removes from the roster but keeps the row (ADR 019)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    expect(listMembers(db, team.id).map((m) => m.name)).toContain('Ada');
+
+    leaveMember(db, ada.row.id);
+    // Off the live roster ...
+    expect(listMembers(db, team.id).map((m) => m.name)).not.toContain('Ada');
+    // ... but the row survives (history/provenance), now stamped with left_at.
+    const row = getMemberByName(db, team.id, 'Ada');
+    expect(row).toBeDefined();
+    expect(row?.left_at).not.toBeNull();
   });
 });
 
