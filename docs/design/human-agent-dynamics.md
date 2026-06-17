@@ -1,6 +1,6 @@
 # Human–Agent Dynamics — a working philosophy
 
-> **Status: PHILOSOPHY, not spec.** Nothing here is buildable as written; it is the conceptual ground under decisions other docs make buildable. It came out of the first real dogfooding session (2026-06-11, the day v0.2 M1 landed): a human driving an agent through musterd noticed the roster showed the agent online and *himself* offline, and pulled the thread. Where this note proposes anything concrete it is flagged as a **design seed** with the milestone it belongs to. Companions: `membership-model.md` (v0.3 governance — the *enforced* layer below), `membership-impl-plan.md` (v0.2), `../decisions/007-v0.2-scope-cut.md`.
+> **Status: PHILOSOPHY, not spec.** Nothing here is buildable as written; it is the conceptual ground under decisions other docs make buildable. It came out of the first real dogfooding session (2026-06-11, the day v0.2 M1 landed): a human driving an agent through musterd noticed the roster showed the agent online and *himself* offline, and pulled the thread. Where this note proposes anything concrete it is flagged as a **design seed** with the milestone it belongs to. Companions: `research-foundation.md` (the *empirical* ground — the Co-Gym result this philosophy operationalizes), `membership-model.md` (v0.3 governance — the *enforced* layer below), `membership-impl-plan.md` (v0.2), `../decisions/007-v0.2-scope-cut.md`.
 
 > **Living document.** Same protocol as everything else: corrections via ADR + smallest correct change, update this doc in the same commit.
 
@@ -51,7 +51,7 @@ Two structural observations:
 
 The four postures then become an *emergent reading* of provenance + initiative + disposition + the live conversation — a field nobody maintains and therefore nobody lets go stale.
 
-**Open seed (unscheduled): driver co-presence.** The adapter knows when it is running inside a human-initiated session; it *could* emit a paired human presence ("nick — driving Tim"). Cheap signal, makes the roster tell the truth in the driving posture. Deliberately not committed to a milestone: it may fall out more cleanly from provenance display than from a second presence row. Revisit when M3's activation work touches the adapter.
+**Open seed (driver co-presence) — now evidence-backed.** The adapter knows when it is running inside a human-initiated session; it *could* emit a paired human presence ("nick — driving Tim"). Cheap signal, makes the roster tell the truth in the driving posture. Originally parked as unscheduled (it may fall out more cleanly from provenance display than from a second presence row). The Co-Gym dual-control finding (`research-foundation.md`: humans co-act 21–32% of the time — they are participants, not spectators) promotes this from "nice signal" to "the roster is lying about a measured participant," and it is now tracked as part of the human↔agent-loop re-centering in `../implementation-plan.md` §4. Still revisit the *mechanism* (paired presence vs. provenance render) when adapter work next happens.
 
 ## 3. Expertise: declared, enforced, demonstrated
 
