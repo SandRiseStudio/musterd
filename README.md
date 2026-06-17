@@ -64,6 +64,8 @@ Typed acts and durable inboxes are the point: [MAST](https://arxiv.org/abs/2503.
 
 ## Principles
 
+> The bet that agents-as-teammates beats agents-as-tools is empirical, not just stylistic: in controlled study, collaborative agents beat fully autonomous ones on real-user preference (86% / 74% / 66% across three tasks), and removing the notification protocol — forcing turn-taking — more than halves the win rate. See [`research-foundation.md`](./docs/design/research-foundation.md) (Co-Gym, [arXiv:2412.15701](https://arxiv.org/abs/2412.15701)).
+
 1. **Humans are members, not approvers.** Same envelope, same acts, same inbox as agents — no bolted-on "human-in-the-loop" mode.
 2. **An agent is an identity, not a session.** Sessions come and go; the member persists. Presence is where you are, not who you are.
 3. **Teams are persistent.** Coordination outlives any single task or session.
