@@ -7,6 +7,7 @@ import pc from 'picocolors';
 import { HttpClient } from '../client.js';
 import { loadConfig, saveBinding, saveConfig, type Config } from '../config.js';
 import { renderBanner } from '../render/rows.js';
+import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
 import { buildEntry } from './mcpEntry.js';
@@ -104,6 +105,12 @@ export async function runInit(): Promise<number> {
     }
     s2.stop(`Daemon listening at ${pc.dim(server)}`);
   }
+
+  // 1b) Folder-suitability guard (ADR 020) ----------------------------------
+  // Before minting a member / writing a binding / appending a primer, surface a confirm if this
+  // folder looks like the wrong place (the musterd source tree, an already-bound folder, an
+  // unrelated AGENTS.md). Warn, don't block — the happy path is one extra keystroke.
+  if (!(await confirmInitTarget())) return 0;
 
   // 2) Team -----------------------------------------------------------------
   let team: string;
@@ -265,6 +272,11 @@ export async function runInit(): Promise<number> {
   const role = guard(
     await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
   ).trim();
+
+  // 4b) Cross-folder name-reuse guard (ADR 020) -----------------------------
+  // The name is known now, so this is where the registry check belongs (the early folder guard
+  // runs before naming). Warn, don't block — default-yes, same as the folder guard.
+  if (!(await confirmNameReuse(name, team, config))) return 0;
 
   // 5) Mint the member + write the harness config ---------------------------
   const sm = p.spinner();
@@ -446,6 +458,59 @@ async function waitForPresence(
     await delay(1000);
   }
   return false;
+}
+
+/**
+ * Folder-suitability guard (ADR 020). If the target folder looks wrong — the musterd source tree,
+ * already bound to a member, or holding an unrelated AGENTS.md — warn and ask before init mints a
+ * member / writes a binding / appends a primer. Default-allow (guard, not block): the user can
+ * accept and run anywhere they genuinely mean to, including this repo for dogfooding. Best-effort:
+ * a guard failure never blocks a genuine run. Returns false only when the user declines.
+ */
+async function confirmInitTarget(): Promise<boolean> {
+  let warnings: string[] = [];
+  try {
+    warnings = inspectInitTarget(process.cwd()).warnings;
+  } catch {
+    return true;
+  }
+  if (warnings.length === 0) return true;
+  for (const w of warnings) p.log.warn(pc.yellow(w));
+  const go = guard(
+    await p.confirm({ message: 'Set up an agent in this folder anyway?', initialValue: true }),
+  );
+  if (!go) {
+    p.outro(pc.yellow('No changes made — re-run `musterd init` in the project folder you mean.'));
+  }
+  return go;
+}
+
+/**
+ * Cross-folder name-reuse guard (ADR 020). If the chosen name is already bound in *another* folder
+ * (per the global registry), warn — running here too means two folders driving one member, and on
+ * the same team the mint will be refused outright (names are unique per team). Default-allow and
+ * best-effort, like {@link confirmInitTarget}. Returns false only when the user declines.
+ */
+async function confirmNameReuse(name: string, team: string, config: Config): Promise<boolean> {
+  let hit: { folder: string; team: string } | null = null;
+  try {
+    hit = nameBoundElsewhere(name, process.cwd(), config.bindings);
+  } catch {
+    return true;
+  }
+  if (!hit) return true;
+  p.log.warn(
+    pc.yellow(
+      `${pc.bold(name)} is already bound in ${pc.dim(hit.folder)} (team ${hit.team}). ` +
+        `Setting up here makes a second folder drive that name` +
+        (hit.team === team
+          ? ' — and the mint will be refused, since names are unique per team.'
+          : '.'),
+    ),
+  );
+  const go = guard(await p.confirm({ message: 'Use this name here anyway?', initialValue: true }));
+  if (!go) p.outro(pc.yellow('No changes made — pick another name or run in the bound folder.'));
+  return go;
 }
 
 /**
