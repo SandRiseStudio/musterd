@@ -7,7 +7,7 @@ import pc from 'picocolors';
 import { HttpClient } from '../client.js';
 import { loadConfig, saveBinding, saveConfig, type Config } from '../config.js';
 import { renderBanner } from '../render/rows.js';
-import { inspectInitTarget } from './guard.js';
+import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
 import { buildEntry } from './mcpEntry.js';
@@ -273,6 +273,11 @@ export async function runInit(): Promise<number> {
     await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
   ).trim();
 
+  // 4b) Cross-folder name-reuse guard (ADR 020) -----------------------------
+  // The name is known now, so this is where the registry check belongs (the early folder guard
+  // runs before naming). Warn, don't block — default-yes, same as the folder guard.
+  if (!(await confirmNameReuse(name, team, config))) return 0;
+
   // 5) Mint the member + write the harness config ---------------------------
   const sm = p.spinner();
   sm.start(`Adding ${name} to ${team}`);
@@ -477,6 +482,34 @@ async function confirmInitTarget(): Promise<boolean> {
   if (!go) {
     p.outro(pc.yellow('No changes made — re-run `musterd init` in the project folder you mean.'));
   }
+  return go;
+}
+
+/**
+ * Cross-folder name-reuse guard (ADR 020). If the chosen name is already bound in *another* folder
+ * (per the global registry), warn — running here too means two folders driving one member, and on
+ * the same team the mint will be refused outright (names are unique per team). Default-allow and
+ * best-effort, like {@link confirmInitTarget}. Returns false only when the user declines.
+ */
+async function confirmNameReuse(name: string, team: string, config: Config): Promise<boolean> {
+  let hit: { folder: string; team: string } | null = null;
+  try {
+    hit = nameBoundElsewhere(name, process.cwd(), config.bindings);
+  } catch {
+    return true;
+  }
+  if (!hit) return true;
+  p.log.warn(
+    pc.yellow(
+      `${pc.bold(name)} is already bound in ${pc.dim(hit.folder)} (team ${hit.team}). ` +
+        `Setting up here makes a second folder drive that name` +
+        (hit.team === team
+          ? ' — and the mint will be refused, since names are unique per team.'
+          : '.'),
+    ),
+  );
+  const go = guard(await p.confirm({ message: 'Use this name here anyway?', initialValue: true }));
+  if (!go) p.outro(pc.yellow('No changes made — pick another name or run in the bound folder.'));
   return go;
 }
 

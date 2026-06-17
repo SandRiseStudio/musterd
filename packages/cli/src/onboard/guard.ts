@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { BINDING_DIR, BINDING_FILE, BindingSchema } from '@musterd/protocol';
+import type { BindingRef } from '../config.js';
 import { hasPrimerMarkers } from './primer.js';
 
 /**
@@ -75,6 +76,27 @@ function readBindingAt(cwd: string): { member: string; team: string } | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Cross-folder name-reuse check (ADR 020). Given the candidate member name and the global config's
+ * binding registry, return the *other* folder this name is already bound in (if any). Pure: the
+ * caller passes the registry, so this is unit-testable without touching disk. This is the one
+ * collision case the per-folder guard above can't see — there is no other global index of bindings.
+ * The same-folder entry (a re-run in this folder) is intentionally ignored; that's heuristic (2).
+ */
+export function nameBoundElsewhere(
+  name: string,
+  cwd: string,
+  bindings: Record<string, BindingRef>,
+): { folder: string; team: string } | null {
+  const here = resolve(cwd);
+  for (const [folder, ref] of Object.entries(bindings)) {
+    if (ref.member === name && resolve(folder) !== here) {
+      return { folder, team: ref.team };
+    }
+  }
+  return null;
 }
 
 function hasUnrelatedAgentsMd(cwd: string): boolean {

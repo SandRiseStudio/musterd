@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { inspectInitTarget } from './guard.js';
+import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import { claudeCode } from './harnesses/claudeCode.js';
 import { cursor } from './harnesses/cursor.js';
 import { HARNESSES } from './harnesses/index.js';
@@ -195,6 +195,33 @@ describe('init target guard', () => {
     writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: 'musterd-monorepo' }));
     writeFileSync(join(cwd, 'AGENTS.md'), '# Unrelated\n');
     expect(inspectInitTarget(cwd).warnings.length).toBe(2);
+  });
+});
+
+describe('cross-folder name-reuse (nameBoundElsewhere)', () => {
+  const reg = (folder: string, member: string, team = 'dawn') => ({
+    [folder]: { team, member, surface: 'claude-code' },
+  });
+
+  it('flags a name bound in a different folder, returning that folder + team', () => {
+    const hit = nameBoundElsewhere('Ada', '/work/api', reg('/work/web', 'Ada', 'dawn'));
+    expect(hit).toEqual({ folder: '/work/web', team: 'dawn' });
+  });
+
+  it('ignores the same folder (a re-run here is heuristic 2, not name reuse)', () => {
+    expect(nameBoundElsewhere('Ada', '/work/web', reg('/work/web', 'Ada'))).toBeNull();
+  });
+
+  it('normalizes paths before comparing (trailing slash / relative segments)', () => {
+    expect(nameBoundElsewhere('Ada', '/work/web/', reg('/work/web/sub/..', 'Ada'))).toBeNull();
+  });
+
+  it('returns null when the name is bound nowhere', () => {
+    expect(nameBoundElsewhere('Lin', '/work/api', reg('/work/web', 'Ada'))).toBeNull();
+  });
+
+  it('returns null on an empty registry', () => {
+    expect(nameBoundElsewhere('Ada', '/work/api', {})).toBeNull();
   });
 });
 
