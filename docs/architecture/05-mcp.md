@@ -23,6 +23,7 @@ MUSTERD_SURFACE  = claude-code     # or codex; defaults to 'other'
 MUSTERD_AUTOJOIN = 1               # optional; opt-in auto-join on launch (off by default)
 MUSTERD_PROVENANCE = session       # optional; why this session attaches (ADR 014): session|asked|hook|scheduled|daemon. defaults to 'session'
 MUSTERD_WORKSPACE  = auth-rewrite  # optional; declared 'where' label; overrides the auto folder@branch detection
+MUSTERD_DRIVER     = nick          # optional; the human driving this session (driver co-presence, ADR 021). `init` bakes the operator's name in; roster shows 'driven by nick'
 MUSTERD_BINDING    = /abs/.musterd/binding.json  # optional; explicit binding-file path (ADR 018)
 ```
 

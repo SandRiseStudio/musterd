@@ -12,13 +12,15 @@ export interface PresenceSummary {
     last_seen_at: number;
     provenance: Provenance | null;
     workspace: string | null;
+    driver: string | null;
   }[];
 }
 
-/** Attach-time context the client may supply (musterd/0.2, ADR 014). */
+/** Attach-time context the client may supply (musterd/0.2, ADR 014 + ADR 021). */
 export interface AttachContext {
   provenance?: Provenance | null;
   workspace?: string | null;
+  driver?: string | null;
 }
 
 /** Create a presence row (a new attachment) for a member on a surface. */
@@ -40,11 +42,12 @@ export function attach(
     held_until: null,
     provenance: ctx.provenance ?? null,
     workspace: ctx.workspace ?? null,
+    driver: ctx.driver ?? null,
     created_at: now,
   };
   db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @created_at)`,
+    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, created_at)
+     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @created_at)`,
   ).run(row);
   return row;
 }
@@ -136,6 +139,7 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         last_seen_at: p.last_seen_at,
         provenance: (p.provenance as Provenance | null) ?? null,
         workspace: p.workspace ?? null,
+        driver: p.driver ?? null,
       })),
     };
   });

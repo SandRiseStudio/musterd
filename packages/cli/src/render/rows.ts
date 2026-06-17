@@ -101,10 +101,12 @@ function activityOf(m: MemberSummary): Activity {
 /**
  * The text after the dot. Examples:
  *   `offline`
- *   `online via claude-code (session) · movetrail@feat/login`
- *   `working: refactoring auth · 18m (session) · movetrail@feat/login`
- * Provenance (`why`) and workspace (`where`) are attach-time context (ADR 014), read from the live
- * presence and shown dim alongside the activity — location context, not an authoritative scope.
+ *   `online via claude-code (session) · driven by nick · movetrail@feat/login`
+ *   `working: refactoring auth · 18m (session) · driven by nick · movetrail@feat/login`
+ * Provenance (`why`), driver (`who`), and workspace (`where`) are attach-time context (ADR 014 +
+ * ADR 021), read from the live presence and shown dim alongside the activity. `driven by …` makes
+ * the roster tell the truth when a human is steering the agent's session, instead of showing that
+ * human offline — location/co-presence context, not an authoritative scope.
  */
 function activityLabel(m: MemberSummary, now: number): string {
   const activity = activityOf(m);
@@ -119,8 +121,9 @@ function activityLabel(m: MemberSummary, now: number): string {
     core = p?.surface ? `online via ${p.surface}` : 'online';
   }
   const why = p?.provenance ? ` (${p.provenance})` : '';
+  const who = p?.driver ? ` · driven by ${p.driver}` : '';
   const where = p?.workspace ? ` · ${p.workspace}` : '';
-  return `${core}${why}${where}`;
+  return `${core}${why}${who}${where}`;
 }
 
 /**

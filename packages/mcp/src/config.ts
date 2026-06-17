@@ -1,6 +1,6 @@
 import { SURFACES, type Provenance, type Surface } from '@musterd/protocol';
 import { findBinding } from './binding.js';
-import { resolveProvenance, resolveWorkspace } from './workspace.js';
+import { resolveDriver, resolveProvenance, resolveWorkspace } from './workspace.js';
 
 export interface McpConfig {
   server: string;
@@ -12,6 +12,8 @@ export interface McpConfig {
   provenance: Provenance;
   /** The gracefully-degrading "where" label, resolved once at load. */
   workspace: string;
+  /** The human driving this session, if one is (driver co-presence, ADR 021). */
+  driver?: string | undefined;
 }
 
 /**
@@ -46,5 +48,6 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     surface,
     provenance: resolveProvenance(env),
     workspace: resolveWorkspace(env),
+    driver: resolveDriver(env),
   };
 }

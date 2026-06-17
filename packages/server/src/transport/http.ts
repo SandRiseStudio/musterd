@@ -82,6 +82,7 @@ const PresenceBody = z.object({
   status: PresenceStatusSchema.optional(),
   provenance: ProvenanceSchema.optional(),
   workspace: z.string().max(120).optional(),
+  driver: z.string().max(80).optional(),
 });
 
 function summarize(ctx: Ctx, teamSlug: string, teamId: string): MemberSummary[] {
@@ -219,6 +220,7 @@ export async function handleHttp(
         const p = attach(ctx.db, member.id, body.surface, null, {
           provenance: body.provenance ?? null,
           workspace: body.workspace ?? null,
+          driver: body.driver ?? null,
         });
         if (body.status) {
           ctx.db.prepare('UPDATE presence SET status = ? WHERE id = ?').run(body.status, p.id);

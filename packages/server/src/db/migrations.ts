@@ -34,6 +34,16 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE presence ADD COLUMN workspace TEXT');
     },
   },
+  {
+    // musterd/0.2 (ADR 021): driver co-presence. `driver` names the human steering an agent's
+    // session, captured once at attach so the roster can say "driven by nick" instead of showing
+    // the driving human offline. Nullable; clients that don't send it (or non-human-driven
+    // presences) simply read null. Additive, like the ADR 014 columns above.
+    version: 4,
+    up: (db) => {
+      db.exec('ALTER TABLE presence ADD COLUMN driver TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

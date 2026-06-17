@@ -34,6 +34,17 @@ export function resolveProvenance(env: NodeJS.ProcessEnv = process.env): Provena
   return (PROVENANCES as readonly string[]).includes(raw ?? '') ? (raw as Provenance) : 'session';
 }
 
+/**
+ * Driver co-presence (ADR 021): the human steering this session, read from `MUSTERD_DRIVER`
+ * (capped at 80 chars). `init` bakes the operator's name into the agent's MCP env, so the roster
+ * can render `driven by nick` instead of showing the driving human offline. Undefined when unset
+ * — the adapter authenticates only as the agent and never invents a driver it wasn't told about.
+ */
+export function resolveDriver(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const raw = env['MUSTERD_DRIVER']?.trim();
+  return raw ? raw.slice(0, 80) : undefined;
+}
+
 interface GitContext {
   /** Current branch, or '' when detached/unavailable (a detached HEAD is not informative). */
   branch: string;

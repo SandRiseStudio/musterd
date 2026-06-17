@@ -128,6 +128,7 @@ export class MusterdClient {
           surface: this.config.surface,
           provenance: this.config.provenance,
           workspace: this.config.workspace,
+          ...(this.config.driver ? { driver: this.config.driver } : {}),
         }),
       );
     });

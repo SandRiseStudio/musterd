@@ -186,6 +186,36 @@ describe('renderStatusTable', () => {
     const out = renderStatusTable(members);
     expect(out).toContain('online via claude-code (session) · movetrail@feat/login');
   });
+
+  it('names the driving human (driver co-presence, ADR 021)', () => {
+    const members: MemberSummary[] = [
+      {
+        id: '1',
+        team: 'dawn',
+        name: 'Ada',
+        kind: 'agent',
+        role: 'backend',
+        lifecycle: 'session',
+        created_at: 0,
+        presence: 'online',
+        activity: 'online',
+        presences: [
+          {
+            surface: 'claude-code',
+            status: 'online',
+            last_seen_at: 0,
+            provenance: 'session',
+            workspace: 'movetrail@feat/login',
+            driver: 'nick',
+          },
+        ],
+      },
+    ];
+    const out = renderStatusTable(members);
+    expect(out).toContain(
+      'online via claude-code (session) · driven by nick · movetrail@feat/login',
+    );
+  });
 });
 
 describe('renderStatusHeader', () => {

@@ -19,6 +19,12 @@ export const HelloFrame = z.object({
   // the session: recorded once at join, read out of the roster — never re-declared per status.
   provenance: ProvenanceSchema.optional(),
   workspace: z.string().max(120).optional(),
+  // Driver co-presence (musterd/0.2, additive; ADR 021). When a human is steering this agent's
+  // session, the human's name — so the roster can say "driven by nick" instead of showing the
+  // driving human as offline. Set by the adapter from `MUSTERD_DRIVER`; the adapter authenticates
+  // only as the agent and never holds the human's token, so this names the driver without
+  // impersonating them. Absent when no human is driving (e.g. a scheduled/daemon presence).
+  driver: z.string().max(80).optional(),
 });
 
 export const SubscribeFrame = z.object({

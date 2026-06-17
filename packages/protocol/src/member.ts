@@ -31,6 +31,9 @@ export const PresenceSchema = z.object({
   provenance: ProvenanceSchema.nullish(),
   /** The "where" label captured at attach (folder, qualified by branch/subpath). */
   workspace: z.string().nullish(),
+  /** Driver co-presence (musterd/0.2; ADR 021): the human steering this agent's session, when one
+   * is. Lets the roster name the co-present human instead of showing them offline; null otherwise. */
+  driver: z.string().nullish(),
 });
 export type Presence = z.infer<typeof PresenceSchema>;
 
