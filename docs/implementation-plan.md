@@ -119,3 +119,5 @@ Telemetry & observability — **Layer 1 ✅ done:** `@musterd/server` envelope s
 | 015 | OTel Layer 1: minimal native server instrumentation (envelope span + metrics, off by default) | observability |
 | 016 | expose served db (`/health`, serve log, `status` header); surface join failures | diagnostics (dogfood) |
 | 017 | single-active **newest-wins** (supersedes ADR 010's `member_busy` refusal); `superseded` code | trust model (dogfood) |
+| 018 | one workspace binding (`.musterd/binding.json`) read by both the CLI and the MCP adapter | agent UX (identity) |
+| 019 | `musterd team remove <name>` soft-removes a member (`leaveMember`/`left_at`); HTTP route + CLI verb | trust model (dogfood) |
