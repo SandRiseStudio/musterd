@@ -2,6 +2,7 @@ import {
   ErrorBodySchema,
   PROTOCOL_VERSION,
   type Envelope,
+  type MemberKind,
   type MemberSummary,
   type WSServerFrame,
 } from '@musterd/protocol';
@@ -89,6 +90,12 @@ export class HttpClient {
   }
   reclaim(slug: string, member: string): Promise<{ ok: boolean; member: string }> {
     return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(member)}/reclaim`);
+  }
+  removeMember(
+    slug: string,
+    member: string,
+  ): Promise<{ ok: boolean; member: string; kind: MemberKind }> {
+    return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(member)}/remove`);
   }
 }
 

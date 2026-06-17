@@ -4,12 +4,14 @@ import { HttpClient } from '../client.js';
 import { loadConfig, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { resolve } from './helpers.js';
 
 export async function teamCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
   if (sub === 'create') return teamCreate(parsed);
   if (sub === 'add') return teamAdd(parsed);
-  throw new CliError('usage: musterd team <create|add> ...', 2);
+  if (sub === 'remove') return teamRemove(parsed);
+  throw new CliError('usage: musterd team <create|add|remove> ...', 2);
 }
 
 async function teamCreate(parsed: Parsed): Promise<number> {
@@ -85,6 +87,27 @@ async function teamAdd(parsed: Parsed): Promise<number> {
       theme.meta(`they join with: musterd join ${team} --as ${name} --token ${res.token}`) + '\n',
     );
   }
+  return 0;
+}
+
+/**
+ * Soft-remove a member from a team's roster (ADR 019). The sanctioned way to clear a mistaken or
+ * stale member instead of editing the daemon's DB: it sets `left_at`, so the member drops off every
+ * roster/auth path while its message history + provenance survive. Idempotent — an already-removed
+ * (or never-existing) member is a clean `not_found`, not an error stack.
+ */
+async function teamRemove(parsed: Parsed): Promise<number> {
+  const name = parsed.positionals[1];
+  if (!name) throw new CliError('usage: musterd team remove <name>', 2);
+  const { team, http } = resolve(parsed.flags);
+  const res = await http.removeMember(team, name);
+  if (parsed.flags['json']) {
+    process.stdout.write(JSON.stringify(res) + '\n');
+    return 0;
+  }
+  process.stdout.write(
+    `${theme.ok('✓')} removed ${theme.memberName(res.member, res.kind)} from ${team} — off the roster; message history is kept\n`,
+  );
   return 0;
 }
 

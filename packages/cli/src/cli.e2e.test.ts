@@ -128,6 +128,29 @@ describe('reclaim command (ADR 017 follow-up)', () => {
   });
 });
 
+describe('team remove command (ADR 019)', () => {
+  it('soft-removes a member off the roster; unknown member errors', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
+
+    // Ada is on the roster before removal.
+    const before = await run(statusCommand, []);
+    expect(before.out).toContain('Ada');
+
+    const removed = await run(teamCommand, ['remove', 'Ada']);
+    expect(removed.code).toBe(0);
+    expect(removed.out).toContain('removed');
+    expect(removed.out).toContain('Ada');
+
+    // ... and gone from `status` afterwards.
+    const after = await run(statusCommand, []);
+    expect(after.out).not.toContain('Ada');
+
+    // Unknown (or already-removed) member → not_found (CLI exit 6).
+    await expect(run(teamCommand, ['remove', 'Ghost'])).rejects.toMatchObject({ exitCode: 6 });
+  });
+});
+
 describe('join honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
   it('refuses to join as a different member than the cached identity without a token', async () => {
     // nick creates dawn and adds Ada; the cached config identity is nick.
