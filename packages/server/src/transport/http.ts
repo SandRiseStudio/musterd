@@ -16,7 +16,13 @@ import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import { getCursor, setCursor } from '../store/cursors.js';
-import { addMember, authMember, getMemberById, getMemberByName } from '../store/members.js';
+import {
+  addMember,
+  authMember,
+  getMemberById,
+  getMemberByName,
+  leaveMember,
+} from '../store/members.js';
 import { latestStatusUpdate, listInbox, rowToEnvelope } from '../store/messages.js';
 import { attach, clearMemberPresence, listPresence } from '../store/presence.js';
 import { toMember } from '../store/rows.js';
@@ -249,6 +255,38 @@ export async function handleHttp(
           status: 'offline',
         });
         return sendJson(res, 200, { ok: true, member: target.name });
+      }
+
+      // Soft-remove a member from the roster (ADR 019): set left_at so it drops off every
+      // list/auth/route path (all filter `left_at IS NULL`) while message history + provenance
+      // survive. Idempotent — an already-left member 404s rather than erroring. Like reclaim, this
+      // is ungated on localhost-only v0.2; the v0.3 seat model will govern who may remove whom.
+      const removeMatch = rest.match(/^\/members\/([^/]+)\/remove$/);
+      if (method === 'POST' && removeMatch) {
+        const { team } = authMember(ctx.db, slug, bearer(req));
+        const targetName = decodeURIComponent(removeMatch[1]!);
+        const target = getMemberByName(ctx.db, team.id, targetName);
+        if (!target || target.left_at !== null)
+          throw new MusterdError('not_found', `no member "${targetName}" in ${slug}`);
+        leaveMember(ctx.db, target.id);
+        // Free the seat immediately: drop any live session (same mechanism as reclaim) so removal
+        // doesn't leave a zombie presence holding a name that's no longer on the roster.
+        for (const old of ctx.hub.connsForMember(target.id)) {
+          old.send({
+            type: 'error',
+            code: 'superseded',
+            message: `your session as "${target.name}" was removed by an operator`,
+          });
+          old.close?.();
+          ctx.hub.remove(old.connId);
+        }
+        clearMemberPresence(ctx.db, target.id);
+        ctx.hub.broadcastTeam(team.id, {
+          type: 'presence',
+          member: target.name,
+          status: 'offline',
+        });
+        return sendJson(res, 200, { ok: true, member: target.name, kind: target.kind });
       }
     }
 

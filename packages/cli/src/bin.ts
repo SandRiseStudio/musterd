@@ -19,6 +19,7 @@ usage:
   musterd serve [--port 4849] [--host 127.0.0.1]
   musterd team create <slug> [--as <you>] [--role <role>] [--display <name>]
   musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]
+  musterd team remove <name>                    soft-remove a member from the roster (history is kept)
   musterd join <slug> --as <name> [--token <tok>] [--surface cli]
   musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] <body...>
   musterd inbox [--watch] [--unread] [--peek] [--limit <n>]
