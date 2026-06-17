@@ -7,6 +7,7 @@ import pc from 'picocolors';
 import { HttpClient } from '../client.js';
 import { loadConfig, saveBinding, saveConfig, type Config } from '../config.js';
 import { renderBanner } from '../render/rows.js';
+import { inspectInitTarget } from './guard.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
 import { buildEntry } from './mcpEntry.js';
@@ -104,6 +105,12 @@ export async function runInit(): Promise<number> {
     }
     s2.stop(`Daemon listening at ${pc.dim(server)}`);
   }
+
+  // 1b) Folder-suitability guard (ADR 020) ----------------------------------
+  // Before minting a member / writing a binding / appending a primer, surface a confirm if this
+  // folder looks like the wrong place (the musterd source tree, an already-bound folder, an
+  // unrelated AGENTS.md). Warn, don't block — the happy path is one extra keystroke.
+  if (!(await confirmInitTarget())) return 0;
 
   // 2) Team -----------------------------------------------------------------
   let team: string;
@@ -446,6 +453,31 @@ async function waitForPresence(
     await delay(1000);
   }
   return false;
+}
+
+/**
+ * Folder-suitability guard (ADR 020). If the target folder looks wrong — the musterd source tree,
+ * already bound to a member, or holding an unrelated AGENTS.md — warn and ask before init mints a
+ * member / writes a binding / appends a primer. Default-allow (guard, not block): the user can
+ * accept and run anywhere they genuinely mean to, including this repo for dogfooding. Best-effort:
+ * a guard failure never blocks a genuine run. Returns false only when the user declines.
+ */
+async function confirmInitTarget(): Promise<boolean> {
+  let warnings: string[] = [];
+  try {
+    warnings = inspectInitTarget(process.cwd()).warnings;
+  } catch {
+    return true;
+  }
+  if (warnings.length === 0) return true;
+  for (const w of warnings) p.log.warn(pc.yellow(w));
+  const go = guard(
+    await p.confirm({ message: 'Set up an agent in this folder anyway?', initialValue: true }),
+  );
+  if (!go) {
+    p.outro(pc.yellow('No changes made — re-run `musterd init` in the project folder you mean.'));
+  }
+  return go;
 }
 
 /**

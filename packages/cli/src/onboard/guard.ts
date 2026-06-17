@@ -1,0 +1,88 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { BINDING_DIR, BINDING_FILE, BindingSchema } from '@musterd/protocol';
+import { hasPrimerMarkers } from './primer.js';
+
+/**
+ * Folder-suitability guard (ADR 020). `musterd init` binds an agent to the *folder* it runs in
+ * (a Claude Code `-s local` config + a `.musterd/binding.json` + an `AGENTS.md` primer), so a
+ * wrong-folder run is an easy multi-artifact slip whose only undo is manual — the 2026-06-15
+ * dogfood that wired a member into the musterd source repo (implementation-plan §4.A finding c).
+ *
+ * This is the *pure* heuristic layer: it inspects the target folder and returns human-readable
+ * warnings; the interactive confirm lives in `init.ts`. Keeping the logic out of the @clack prompt
+ * layer is what makes it unit-testable. Every check is best-effort and non-throwing — a guard
+ * failure must never block a genuine run (init must stay runnable in any folder the user means,
+ * including this repo, for dogfooding).
+ */
+export interface InitTargetReport {
+  warnings: string[];
+}
+
+/** Inspect `cwd` for signs it isn't the project the user meant to set up an agent in. */
+export function inspectInitTarget(cwd: string): InitTargetReport {
+  const warnings: string[] = [];
+
+  // (1) The musterd source checkout itself — the exact dogfound slip.
+  if (isMusterdSourceTree(cwd)) {
+    warnings.push(
+      'This folder looks like the musterd source tree — init would wire an agent into the repo itself, not your project.',
+    );
+  }
+
+  // (2) Already bound to a member here — init will mint a new member and repoint the binding.
+  const bound = readBindingAt(cwd);
+  if (bound) {
+    warnings.push(
+      `This folder is already bound to ${bound.member} on ${bound.team} — init will mint a new member and repoint the binding here.`,
+    );
+  }
+
+  // (3) An unrelated AGENTS.md (no musterd primer markers) the primer would append to.
+  if (hasUnrelatedAgentsMd(cwd)) {
+    warnings.push(
+      "This folder already has an AGENTS.md without a musterd primer — init's primer block will be appended to it.",
+    );
+  }
+
+  return { warnings };
+}
+
+/** The monorepo root (by package name) or its `packages/{cli,server}` layout. */
+function isMusterdSourceTree(cwd: string): boolean {
+  try {
+    const pkgPath = join(cwd, 'package.json');
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { name?: string };
+      if (pkg.name === 'musterd-monorepo') return true;
+    }
+  } catch {
+    // unreadable/!JSON package.json — fall through to the layout check
+  }
+  return (
+    existsSync(join(cwd, 'packages', 'cli', 'package.json')) &&
+    existsSync(join(cwd, 'packages', 'server', 'package.json'))
+  );
+}
+
+/** Read the binding *in this exact folder* (not a parent), via the shared protocol schema. */
+function readBindingAt(cwd: string): { member: string; team: string } | null {
+  try {
+    const path = join(cwd, BINDING_DIR, BINDING_FILE);
+    if (!existsSync(path)) return null;
+    const b = BindingSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    return { member: b.member, team: b.team };
+  } catch {
+    return null;
+  }
+}
+
+function hasUnrelatedAgentsMd(cwd: string): boolean {
+  try {
+    const path = join(cwd, 'AGENTS.md');
+    if (!existsSync(path)) return false;
+    return !hasPrimerMarkers(readFileSync(path, 'utf8'));
+  } catch {
+    return false;
+  }
+}

@@ -15,6 +15,11 @@ const END = '<!-- musterd:end -->';
 const START_PREFIX = '<!-- musterd:start';
 const END_MARKER = '<!-- musterd:end -->';
 
+/** True when `content` already carries a managed musterd primer block (both markers present). */
+export function hasPrimerMarkers(content: string): boolean {
+  return content.includes(START_PREFIX) && content.includes(END_MARKER);
+}
+
 /** Render the managed primer block (including the start/end markers) for a member on a team. */
 export function renderPrimer(opts: { member: string; team: string; role?: string }): string {
   const role = opts.role?.trim();

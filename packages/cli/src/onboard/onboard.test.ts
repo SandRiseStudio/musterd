@@ -1,7 +1,8 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { inspectInitTarget } from './guard.js';
 import { claudeCode } from './harnesses/claudeCode.js';
 import { cursor } from './harnesses/cursor.js';
 import { HARNESSES } from './harnesses/index.js';
@@ -143,6 +144,57 @@ describe('agent primer', () => {
     writeFileSync(agents, withUser);
     upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
     expect(readFileSync(agents, 'utf8')).toContain('## My own notes\nkeep me');
+  });
+});
+
+describe('init target guard', () => {
+  let cwd: string;
+  beforeEach(() => {
+    cwd = mkdtempSync(join(tmpdir(), 'musterd-guard-'));
+  });
+
+  it('trips nothing in a clean folder', () => {
+    expect(inspectInitTarget(cwd).warnings).toEqual([]);
+  });
+
+  it('trips on the musterd source tree (by package name)', () => {
+    writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: 'musterd-monorepo' }));
+    const { warnings } = inspectInitTarget(cwd);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('source tree');
+  });
+
+  it('trips on the musterd source tree (by packages/{cli,server} layout)', () => {
+    mkdirSync(join(cwd, 'packages', 'cli'), { recursive: true });
+    mkdirSync(join(cwd, 'packages', 'server'), { recursive: true });
+    writeFileSync(join(cwd, 'packages', 'cli', 'package.json'), '{}');
+    writeFileSync(join(cwd, 'packages', 'server', 'package.json'), '{}');
+    expect(inspectInitTarget(cwd).warnings[0]).toContain('source tree');
+  });
+
+  it('trips on a folder already bound to a member, naming who', () => {
+    mkdirSync(join(cwd, '.musterd'), { recursive: true });
+    writeFileSync(join(cwd, '.musterd', 'binding.json'), JSON.stringify(binding));
+    const { warnings } = inspectInitTarget(cwd);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('Ada');
+    expect(warnings[0]).toContain('dawn');
+  });
+
+  it('trips on an unrelated AGENTS.md (no primer markers)', () => {
+    writeFileSync(join(cwd, 'AGENTS.md'), '# Contributor guide\n\nBuild with care.\n');
+    expect(inspectInitTarget(cwd).warnings[0]).toContain('AGENTS.md');
+  });
+
+  it('does NOT trip on an AGENTS.md that already has the musterd primer', () => {
+    upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
+    expect(inspectInitTarget(cwd).warnings).toEqual([]);
+  });
+
+  it('accumulates multiple warnings', () => {
+    writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: 'musterd-monorepo' }));
+    writeFileSync(join(cwd, 'AGENTS.md'), '# Unrelated\n');
+    expect(inspectInitTarget(cwd).warnings.length).toBe(2);
   });
 });
 
