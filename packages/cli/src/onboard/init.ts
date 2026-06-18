@@ -11,7 +11,7 @@ import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
 import { buildEntry } from './mcpEntry.js';
-import { renderPrimer, upsertPrimer } from './primer.js';
+import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -348,12 +348,17 @@ export async function runInit(): Promise<number> {
   }
 
   // 5b) Seed the agent primer so the agent knows the team working-loop (ADR 012) ----------
-  const writePrimer = guard(
-    await p.confirm({
-      message: `Write an ${pc.bold('AGENTS.md')} primer so ${pc.cyan(name)} knows how to use musterd?`,
-      initialValue: true,
-    }),
-  );
+  // The prompt is honest about what writing does *at the decision point*: against an existing,
+  // unmarked AGENTS.md the primer is appended (your content is kept), not overwritten — saying
+  // "Write an AGENTS.md?" there reads like a clobber (2026-06-18 dogfood).
+  const primerTarget = classifyPrimerTarget(process.cwd());
+  const primerPrompt =
+    primerTarget === 'unmarked'
+      ? `Append a musterd primer to the ${pc.bold('AGENTS.md')} already here? ${pc.dim('(your content is kept — the block goes at the end)')}`
+      : primerTarget === 'managed'
+        ? `Update the musterd primer in this folder's ${pc.bold('AGENTS.md')}?`
+        : `Write an ${pc.bold('AGENTS.md')} primer so ${pc.cyan(name)} knows how to use musterd?`;
+  const writePrimer = guard(await p.confirm({ message: primerPrompt, initialValue: true }));
   if (writePrimer) {
     try {
       const { path, action } = upsertPrimer(
