@@ -20,6 +20,26 @@ export function hasPrimerMarkers(content: string): boolean {
   return content.includes(START_PREFIX) && content.includes(END_MARKER);
 }
 
+/**
+ * What writing the primer into `<dir>/AGENTS.md` will do — so the confirm prompt can be honest at
+ * the decision point (the dogfood paper-cut: a "Write an AGENTS.md?" prompt next to an existing,
+ * unmarked AGENTS.md reads like overwrite when it is actually an append). Maps 1:1 to
+ * {@link upsertPrimer}'s action: `none`→`created`, `unmarked`→`appended`, `managed`→`updated`.
+ */
+export type PrimerTarget = 'none' | 'unmarked' | 'managed';
+
+/** Classify the AGENTS.md in `dir`: absent, present-without-markers, or already-managed. */
+export function classifyPrimerTarget(dir: string): PrimerTarget {
+  const path = join(dir, 'AGENTS.md');
+  if (!existsSync(path)) return 'none';
+  try {
+    return hasPrimerMarkers(readFileSync(path, 'utf8')) ? 'managed' : 'unmarked';
+  } catch {
+    // Unreadable AGENTS.md: treat as absent so init still offers to write (upsert handles the rest).
+    return 'none';
+  }
+}
+
 /** Render the managed primer block (including the start/end markers) for a member on a team. */
 export function renderPrimer(opts: { member: string; team: string; role?: string }): string {
   const role = opts.role?.trim();

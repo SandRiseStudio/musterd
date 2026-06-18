@@ -7,7 +7,7 @@ import { claudeCode } from './harnesses/claudeCode.js';
 import { cursor } from './harnesses/cursor.js';
 import { HARNESSES } from './harnesses/index.js';
 import { buildEntry, buildMcpEnv } from './mcpEntry.js';
-import { renderPrimer, upsertPrimer } from './primer.js';
+import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
 
 const binding = {
   server: 'http://localhost:4849',
@@ -144,6 +144,26 @@ describe('agent primer', () => {
     writeFileSync(agents, withUser);
     upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
     expect(readFileSync(agents, 'utf8')).toContain('## My own notes\nkeep me');
+  });
+
+  // classifyPrimerTarget drives the honest init confirm; each value maps to upsertPrimer's action.
+  it('classifies an absent AGENTS.md as `none` (the prompt offers to write a fresh file)', () => {
+    expect(classifyPrimerTarget(cwd)).toBe('none');
+    expect(upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' })).action).toBe('created');
+  });
+
+  it('classifies an existing unmarked AGENTS.md as `unmarked` (the prompt says append)', () => {
+    writeFileSync(join(cwd, 'AGENTS.md'), '# My project\n\nBuild with care.\n');
+    expect(classifyPrimerTarget(cwd)).toBe('unmarked');
+    expect(upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' })).action).toBe(
+      'appended',
+    );
+  });
+
+  it('classifies an already-managed AGENTS.md as `managed` (the prompt says update)', () => {
+    upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
+    expect(classifyPrimerTarget(cwd)).toBe('managed');
+    expect(upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' })).action).toBe('updated');
   });
 });
 
