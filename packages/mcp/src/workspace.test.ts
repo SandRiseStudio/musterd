@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveProvenance, resolveWorkspace } from './workspace.js';
+import { resolveDriver, resolveProvenance, resolveWorkspace } from './workspace.js';
 
 describe('resolveWorkspace (where-on-attach seed, ADR 014)', () => {
   it('uses the declared override verbatim, capped at 120 chars', () => {
@@ -34,5 +34,18 @@ describe('resolveProvenance', () => {
   });
   it('falls back to session for an unknown value', () => {
     expect(resolveProvenance({ MUSTERD_PROVENANCE: 'vibes' })).toBe('session');
+  });
+});
+
+describe('resolveDriver (driver co-presence, ADR 021)', () => {
+  it('reads and trims MUSTERD_DRIVER', () => {
+    expect(resolveDriver({ MUSTERD_DRIVER: '  nick  ' })).toBe('nick');
+  });
+  it('is undefined when unset or empty (never invents a driver)', () => {
+    expect(resolveDriver({})).toBeUndefined();
+    expect(resolveDriver({ MUSTERD_DRIVER: '   ' })).toBeUndefined();
+  });
+  it('caps the name at 80 chars', () => {
+    expect(resolveDriver({ MUSTERD_DRIVER: 'n'.repeat(200) })?.length).toBe(80);
   });
 });

@@ -30,6 +30,33 @@ describe('WS frames', () => {
     expect(f.type === 'hello' && f.workspace).toBe('movetrail@feat/login');
   });
 
+  it('parses an optional driver on hello (driver co-presence, ADR 021)', () => {
+    const f = WSClientFrame.parse({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Ada',
+      token: 'mskd_x',
+      surface: 'claude-code',
+      provenance: 'session',
+      driver: 'nick',
+    });
+    expect(f.type === 'hello' && f.driver).toBe('nick');
+  });
+
+  it('rejects a driver longer than 80 chars in hello', () => {
+    const r = WSClientFrame.safeParse({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Ada',
+      token: 'x',
+      surface: 'cli',
+      driver: 'n'.repeat(81),
+    });
+    expect(r.success).toBe(false);
+  });
+
   it('rejects an unknown provenance value in hello', () => {
     const r = WSClientFrame.safeParse({
       type: 'hello',

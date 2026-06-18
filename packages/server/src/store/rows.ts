@@ -39,6 +39,8 @@ export interface PresenceRow {
   provenance: string | null;
   /** The gracefully-degrading "where" label captured at attach (ADR 014). Null when unknown. */
   workspace: string | null;
+  /** The human driving this session, captured at attach (musterd/0.2, ADR 021). Null when none. */
+  driver: string | null;
   created_at: number;
 }
 

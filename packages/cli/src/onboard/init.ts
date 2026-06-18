@@ -314,6 +314,13 @@ export async function runInit(): Promise<number> {
   );
   if (autojoin) entry.env['MUSTERD_AUTOJOIN'] = '1';
 
+  // Driver co-presence (ADR 021): the operator running init is the human who will drive this agent,
+  // so bake their name into the agent's MCP env. The adapter sends it on `hello` and the roster
+  // renders `driven by <name>` instead of showing the driving human offline. Best-effort: only when
+  // a saved operator identity exists; the human can always override via `MUSTERD_DRIVER`.
+  const driver = config.current ? config.identities[config.current]?.name?.trim() : undefined;
+  if (driver) entry.env['MUSTERD_DRIVER'] = driver;
+
   const write = guard(
     await p.confirm({
       message: `Write the musterd MCP server into ${pc.bold(chosen.label)} for you?`,

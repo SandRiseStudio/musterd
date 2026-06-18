@@ -105,6 +105,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           const presence = attach(ctx.db, member.id, frame.surface, state.connId, {
             provenance: frame.provenance ?? null,
             workspace: frame.workspace ?? null,
+            driver: frame.driver ?? null,
           });
           const conn: Connection = {
             connId: state.connId,
