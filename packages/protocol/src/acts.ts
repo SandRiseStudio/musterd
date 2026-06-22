@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-/** The seven collaboration acts (Co-Gym-grounded). Order is stable. */
+/**
+ * The eight collaboration acts (Co-Gym-grounded). Order is stable; new acts append.
+ * `resolve` (musterd/0.3, ADR 025) is the terminal act — it closes a thread (the proto-work-item),
+ * supplying the open-vs-done axis the prior seven lacked (`accept` ≠ finished).
+ */
 export const ACTS = [
   'message',
   'status_update',
@@ -9,6 +13,7 @@ export const ACTS = [
   'accept',
   'decline',
   'wait',
+  'resolve',
 ] as const;
 export type Act = (typeof ACTS)[number];
 export const ActSchema = z.enum(ACTS);

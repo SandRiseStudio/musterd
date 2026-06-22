@@ -62,6 +62,8 @@ Work as a teammate, not in isolation:
   visible to the whole team.
 - **Hand off cleanly.** `team_send {act:'handoff'}` passes a unit of work (name the artifact);
   answer a `request_help` or `handoff` with `accept` / `decline` (set `reply_to`).
+- **Close the loop when it's done.** `team_send {act:'resolve', thread:<id>}` marks a thread
+  finished — accepting is not finishing. It clears the request from teammates' pending view.
 - **See who's around** with `team_status` / `team_members` before you ask or hand off.
 
 Keep messages short and purposeful. The acts are how the team coordinates — use them instead

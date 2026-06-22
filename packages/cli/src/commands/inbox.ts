@@ -3,7 +3,7 @@ import type { Envelope, MemberKind } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { watch } from '../client.js';
 import { wsBase } from '../config.js';
-import { renderMessageRow } from '../render/rows.js';
+import { isActionNeeded, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { kindLookup, resolve } from './helpers.js';
 
@@ -55,6 +55,9 @@ function watchInbox(
   identity: { name: string; token: string; surface: string },
   kindOf: (name: string) => MemberKind,
 ): Promise<number> {
+  // Ring the terminal bell on an action-needed act, but only on a real TTY and unless --no-bell.
+  // The bell is the cheapest true "push" we have for the watching-but-distracted human (ADR 024).
+  const bell = process.stdout.isTTY === true && parsed.flags['no-bell'] !== true;
   return new Promise((resolveP) => {
     process.stdout.write(`${theme.accent('inbox')} — ${team}  ${theme.ok('◉ watching')}\n`);
     const session = watch({
@@ -66,7 +69,14 @@ function watchInbox(
       // A human running `inbox --watch` is explicitly here (the supervising posture) — `session`.
       provenance: 'session',
       workspace: resolveWorkspace(),
-      onDeliver: (env) => process.stdout.write(renderMessageRow(env, kindOf) + '\n'),
+      onDeliver: (env) => {
+        // Surface request_help / @you-directed acts above the status_update stream so they can't be
+        // missed; everything else streams plainly (piece A of the human-reachability nudge, ADR 024).
+        const flagged = isActionNeeded(env, identity.name);
+        if (flagged && bell) process.stdout.write('\u0007');
+        const banner = flagged ? theme.actionNeeded() + '\n' : '';
+        process.stdout.write(banner + renderMessageRow(env, kindOf) + '\n');
+      },
       onPresence: (member, status, surface) =>
         process.stdout.write(
           theme.meta(`· ${member} ${status}${surface ? ` (${surface})` : ''}`) + '\n',

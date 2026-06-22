@@ -3,6 +3,7 @@ import { flagStr } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, identityFromEnv, loadConfig, type Config, type Identity } from '../config.js';
 import { CliError } from '../errors.js';
+import { openActionNeeded } from '../render/rows.js';
 
 export interface Resolved {
   config: Config;
@@ -57,6 +58,26 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
     identity: match.identity,
     http: new HttpClient({ server, token: match.identity.token }),
   };
+}
+
+/**
+ * The "what's waiting for me" summary, read off the durable inbox cursor: how many unread
+ * action-needed messages (request_help / @me) the member has, and the oldest one's timestamp.
+ * Threads that carry a `resolve` are dropped — a closed request no longer waits (ADR 025) — so this
+ * is the open-vs-done view ADR 024's read-cursor alone couldn't give. Returns undefined when nothing
+ * waits. The comeback / return-path half of the human-reachability nudge (ADR 024) — it needs no
+ * resident process, just a normal inbox read.
+ */
+export async function pendingActionSummary(
+  http: HttpClient,
+  team: string,
+  me: string,
+): Promise<{ count: number; since: number } | undefined> {
+  const res = await http.inbox(team, { unread: true });
+  const waiting = openActionNeeded(res.messages, me);
+  if (waiting.length === 0) return undefined;
+  const since = waiting.reduce((min, m) => Math.min(min, m.ts), Infinity);
+  return { count: waiting.length, since };
 }
 
 /** Build a name→kind lookup from a roster (defaults unknown names to 'agent'). */

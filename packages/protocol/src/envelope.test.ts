@@ -54,6 +54,13 @@ describe('EnvelopeSchema', () => {
     expect(ok.meta).toMatchObject({ in_reply_to: 'msg-0', reason: 'busy' });
   });
 
+  it('requires thread on resolve (the thread it closes)', () => {
+    expect(() => makeEnvelope({ ...base, act: 'resolve' })).toThrow();
+    const ok = makeEnvelope({ ...base, act: 'resolve', thread: 'msg-0', body: 'merged' });
+    expect(ok.act).toBe('resolve');
+    expect(ok.thread).toBe('msg-0');
+  });
+
   it('rejects a wrong protocol version', () => {
     const bad = { ...makeEnvelope({ ...base, act: 'message' }), v: 'musterd/9.9' };
     expect(EnvelopeSchema.safeParse(bad).success).toBe(false);

@@ -11,6 +11,14 @@ export const theme = {
   warn: (s: string) => pc.yellow(s),
   err: (s: string) => pc.red(s),
 
+  /**
+   * A high-salience, sticky banner for an act that needs the human *now* — `request_help` or an
+   * act addressed to them. Inverse-yellow so it survives a stream of team `status_update`s in the
+   * watch pane (the supervising-human turn-taking failure Co-Gym's notification ablation measured;
+   * see ADR 024). Outranks `accent` (plain bold-yellow) on purpose.
+   */
+  actionNeeded: (label = '⚑ ACTION NEEDED') => pc.bold(pc.inverse(pc.yellow(` ${label} `))),
+
   presenceDot(status: PresenceStatus): string {
     if (status === 'online') return pc.green('●');
     if (status === 'away') return pc.yellow('●');
@@ -21,6 +29,7 @@ export const theme = {
     const label = `[${act}]`;
     if (act === 'request_help') return pc.bold(pc.yellow(label));
     if (act === 'decline') return pc.red(label);
+    if (act === 'resolve') return pc.bold(pc.green(label)); // terminal/done — reads as completion
     return pc.dim(pc.white(label));
   },
 };

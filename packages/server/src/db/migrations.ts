@@ -44,6 +44,37 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE presence ADD COLUMN driver TEXT');
     },
   },
+  {
+    // musterd/0.3 (ADR 025): the terminal `resolve` act (thread-close). The `act` CHECK is frozen in
+    // the v1 DDL and SQLite can't ALTER a CHECK in place, so rebuild the `messages` table with the
+    // widened constraint and copy the log across. Safe with foreign_keys ON: no table references
+    // `messages`, and the copied rows still reference live teams/members.
+    version: 5,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE messages_new (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          from_member TEXT NOT NULL REFERENCES members(id),
+          to_kind     TEXT NOT NULL CHECK (to_kind IN ('member','team','broadcast')),
+          to_member   TEXT REFERENCES members(id),
+          act         TEXT NOT NULL CHECK (act IN
+                        ('message','status_update','request_help','handoff','accept','decline','wait','resolve')),
+          body        TEXT NOT NULL DEFAULT '',
+          thread_id   TEXT,
+          meta        TEXT,
+          ts          INTEGER NOT NULL,
+          created_at  INTEGER NOT NULL
+        );
+        INSERT INTO messages_new SELECT * FROM messages;
+        DROP TABLE messages;
+        ALTER TABLE messages_new RENAME TO messages;
+        CREATE INDEX idx_messages_team_ts ON messages(team_id, ts);
+        CREATE INDEX idx_messages_thread ON messages(thread_id);
+        CREATE INDEX idx_messages_to_member ON messages(to_member);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

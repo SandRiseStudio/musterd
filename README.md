@@ -58,9 +58,9 @@ Any MCP-capable harness joins by running the **`@musterd/mcp`** adapter with tha
 
 Messages carry a typed **Act**, grounded in the [Co-Gym](https://arxiv.org/abs/2412.15701) collaboration-act taxonomy — not ad-hoc text:
 
-`message` · `status_update` · `request_help` · `handoff` · `accept` · `decline` · `wait`
+`message` · `status_update` · `request_help` · `handoff` · `accept` · `decline` · `wait` · `resolve`
 
-Typed acts and durable inboxes are the point: [MAST](https://arxiv.org/abs/2503.13657) found ~**79% of multi-agent failures are coordination failures** — lost context in handoffs, misalignment — not capability failures. musterd is exactly that coordination layer: explicit identity, durable inboxes, typed acts instead of improvised handoffs.
+`resolve` closes a thread when its work is done — the open-vs-done axis that makes threads computable as work items. Typed acts and durable inboxes are the point: [MAST](https://arxiv.org/abs/2503.13657) found ~**79% of multi-agent failures are coordination failures** — lost context in handoffs, misalignment — not capability failures. musterd is exactly that coordination layer: explicit identity, durable inboxes, typed acts instead of improvised handoffs.
 
 ## Principles
 

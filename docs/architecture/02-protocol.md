@@ -4,7 +4,7 @@
 
 This is the implementation-facing distillation of `SPEC.md`. `SPEC.md` is the normative, versioned, public protocol; this file restates it as concrete JSON shapes + the WS/HTTP contract the server and clients implement. **If this file and `SPEC.md` disagree, `SPEC.md` wins** and you fix this file (with an ADR if substantive). The canonical zod schemas live in `@musterd/protocol` and are the executable form of both.
 
-Protocol version: **`musterd/0.1`** (string constant `PROTOCOL_VERSION` in `@musterd/protocol`).
+Protocol version: **`musterd/0.3`** (string constant `PROTOCOL_VERSION` in `@musterd/protocol`).
 
 ## The Envelope
 
@@ -13,7 +13,7 @@ Every message on the wire is an Envelope:
 ```jsonc
 {
   "id": "01J...",            // ULID, client-generated; server authoritative if it collides
-  "v": "musterd/0.1",        // protocol version
+  "v": "musterd/0.3",        // protocol version
   "team": "dawn",            // team slug
   "from": "Ada",             // member name (sender), within team
   "to": {                    // recipient — exactly one of these shapes:
@@ -33,20 +33,22 @@ Every message on the wire is an Envelope:
 - `{ "kind": "team" }` — every current Member of the team (excluding sender) gets it in inbox/stream.
 - `{ "kind": "broadcast" }` — same delivery as team in v1; reserved to later mean cross-team/announce. Treat as team for delivery; keep the distinct kind.
 
-## The 7 Acts (Co-Gym-grounded)
+## The 8 Acts (Co-Gym-grounded)
 
-| Act             | Meaning | Required `meta` | Optional `meta` |
-|-----------------|---------|-----------------|-----------------|
+| Act             | Meaning | Required `meta`/fields | Optional `meta` |
+|-----------------|---------|------------------------|-----------------|
 | `message`       | plain communication, no protocol semantics | — | — |
 | `status_update` | "here's what I'm doing / did" | — | `progress` (0..1), `state` (free text) |
 | `request_help`  | asking a specific member or the team to assist/unblock | — | `blocking` (bool), `topic` (string) |
 | `handoff`       | transferring a piece of work to someone | — | `artifact` (string ref), `summary` (string) |
-| `accept`        | accepting a prior `request_help`/`handoff` | `in_reply_to` (ULID) | — |
-| `decline`       | declining a prior `request_help`/`handoff` | `in_reply_to` (ULID) | `reason` (string) |
+| `accept`        | accepting a prior `request_help`/`handoff` | `meta.in_reply_to` (ULID) | — |
+| `decline`       | declining a prior `request_help`/`handoff` | `meta.in_reply_to` (ULID) | `reason` (string) |
 | `wait`          | "hold / I'm blocked / pause for me" | — | `until` (epoch ms), `reason` (string) |
+| `resolve`       | closing a thread — the work it tracks is **done** (v0.3, ADR 025) | `thread` (ULID) | `reason` (string) |
 
 Rules:
 - `accept`/`decline` **must** carry `meta.in_reply_to` pointing at the message they answer, and **should** set `thread` to that message's thread (or its id if it was a root).
+- `resolve` **must** carry a non-empty `thread` (the id of the thread it closes; a no-thread root is closed by its own id). It is the thread-terminal "done" — any member may send it (v0.3 doesn't enforce a closer); UIs treat a resolved thread's open asks as no longer pending (ADR 024/025).
 - Unknown `meta` keys are allowed and preserved (forward-compat); unknown **acts** are rejected (validation error). This asymmetry is intentional: acts are the contract, meta is extensible.
 - Streaming/step-level granularity (StreamMA finding) is a **v2 transport option**, noted in `SPEC.md`; v1 sends whole envelopes.
 
@@ -108,7 +110,7 @@ The CLI maps these to exit codes (`04-cli.md`).
 
 ```ts
 export const PROTOCOL_VERSION = 'musterd/0.1';
-export const ACTS = ['message','status_update','request_help','handoff','accept','decline','wait'] as const;
+export const ACTS = ['message','status_update','request_help','handoff','accept','decline','wait','resolve'] as const;
 export const SURFACES = ['cli','claude-code','codex','cursor','web','ios','slack','other'] as const;
 
 export const Act = z.enum(ACTS);
@@ -123,7 +125,7 @@ export const Envelope = z.object({
   from: z.string(), to: Recipient, act: Act,
   body: z.string().default(''), thread: z.string().nullish(),
   meta: z.record(z.unknown()).nullish(), ts: z.number().int(),
-}).superRefine(actMetaRules);   // enforces accept/decline -> meta.in_reply_to, etc.
+}).superRefine(actMetaRules);   // enforces accept/decline -> meta.in_reply_to; resolve -> thread
 
 export type Envelope = z.infer<typeof Envelope>;
 export const Member = z.object({ /* mirrors members table, no token_hash */ });

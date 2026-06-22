@@ -38,6 +38,7 @@ export type Envelope = z.infer<typeof EnvelopeSchema>;
 export function actMetaRules(
   env: {
     act: z.infer<typeof ActSchema>;
+    thread?: string | null | undefined;
     meta?: Record<string, unknown> | null | undefined;
   },
   ctx: z.RefinementCtx,
@@ -50,6 +51,17 @@ export function actMetaRules(
         code: z.ZodIssueCode.custom,
         path: ['meta', 'in_reply_to'],
         message: `act "${env.act}" requires meta.in_reply_to (the message id it answers)`,
+      });
+    }
+  }
+  // `resolve` is thread-terminal: it MUST name the thread it closes (ADR 025). The thread id is the
+  // root message's id — a no-thread root is closed by passing its own id as `thread`.
+  if (env.act === 'resolve') {
+    if (typeof env.thread !== 'string' || env.thread.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['thread'],
+        message: 'act "resolve" requires thread (the id of the thread it closes)',
       });
     }
   }

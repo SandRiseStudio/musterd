@@ -112,6 +112,88 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
   });
 });
 
+describe('comeback summary on status (ADR 024)', () => {
+  it('leads status with the count of unread action-needed messages, then clears once read', async () => {
+    // nick creates dawn and adds bo (the away human).
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    const added = await run(teamCommand, ['add', 'bo', '--kind', 'human', '--json']);
+    const boToken = JSON.parse(added.out).token as string;
+
+    // nick directs a request_help at bo and a plain @team status_update (the latter must NOT count).
+    await run(sendCommand, ['--to', 'bo', '--act', 'request_help', 'can you review the auth PR?']);
+    await run(sendCommand, ['--act', 'status_update', '--to', '@team', 'still refactoring']);
+
+    // bo comes back and runs `status` — sees the waiting request up top.
+    writeFileSync(
+      boConfig,
+      JSON.stringify({
+        server: process.env['MUSTERD_SERVER'],
+        current: 'dawn',
+        identities: { dawn: { name: 'bo', token: boToken, surface: 'cli' } },
+      }),
+    );
+    process.env['MUSTERD_CONFIG'] = boConfig;
+
+    const status1 = await run(statusCommand, []);
+    expect(status1.out).toContain('1 request waiting for you');
+
+    // After bo reads the inbox (cursor advances), status no longer nags.
+    await run(inboxCommand, []);
+    const status2 = await run(statusCommand, []);
+    expect(status2.out).not.toContain('waiting for you');
+  });
+});
+
+describe('thread-close clears the comeback summary (ADR 025)', () => {
+  it('stops nagging once the request is resolved, even before the inbox is read', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    const added = await run(teamCommand, ['add', 'bo', '--kind', 'human', '--json']);
+    const boToken = JSON.parse(added.out).token as string;
+
+    // nick directs a request_help at bo; capture the envelope id (its thread root).
+    const ask = await run(sendCommand, [
+      '--to',
+      'bo',
+      '--act',
+      'request_help',
+      '--json',
+      'can you review the auth PR?',
+    ]);
+    const askId = JSON.parse(ask.out).id as string;
+
+    writeFileSync(
+      boConfig,
+      JSON.stringify({
+        server: process.env['MUSTERD_SERVER'],
+        current: 'dawn',
+        identities: { dawn: { name: 'bo', token: boToken, surface: 'cli' } },
+      }),
+    );
+
+    // bo (away) would see 1 waiting...
+    process.env['MUSTERD_CONFIG'] = boConfig;
+    const before = await run(statusCommand, []);
+    expect(before.out).toContain('1 request waiting for you');
+
+    // ...but nick resolves the thread, and bo's status goes quiet without reading the inbox.
+    process.env['MUSTERD_CONFIG'] = nickConfig;
+    const done = await run(sendCommand, [
+      '--act',
+      'resolve',
+      '--to',
+      '@team',
+      '--thread',
+      askId,
+      'merged — thanks',
+    ]);
+    expect(done.code).toBe(0);
+
+    process.env['MUSTERD_CONFIG'] = boConfig;
+    const after = await run(statusCommand, []);
+    expect(after.out).not.toContain('waiting for you');
+  });
+});
+
 describe('reclaim command (ADR 017 follow-up)', () => {
   it('reclaims a member (idempotent with no live session) and 404s an unknown one', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);

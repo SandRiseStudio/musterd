@@ -145,6 +145,54 @@ function ageLabel(since: number, now: number): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
+/**
+ * Does this delivered act need the human's attention now? `request_help` (a call for help anyone on
+ * the team can answer) or anything addressed specifically to me (`handoff`/`message`/`wait` → me).
+ * `resolve` is terminal — a thread-close is good news, never an action — so it never flags, even
+ * when addressed to me. Drives the watch-stream ⚑ salience per delivery and (via {@link openActionNeeded})
+ * the comeback "N requests waiting" summary, so a real ask can't slip past buried in a stream of team
+ * `status_update`s — the recipient-side half of the notification loop (ADR 024). Pure, so the live
+ * and comeback paths classify identically.
+ */
+export function isActionNeeded(env: Envelope, me: string): boolean {
+  if (env.act === 'resolve') return false;
+  if (env.act === 'request_help') return true;
+  return env.to.kind === 'member' && env.to.name === me;
+}
+
+/** The thread an envelope belongs to: its `thread` root id, or its own id if it is a root. */
+function threadKey(env: Envelope): string {
+  return env.thread ?? env.id;
+}
+
+/**
+ * The still-open action-needed messages in a set: those {@link isActionNeeded} whose thread has no
+ * `resolve` (ADR 025). This is the open-vs-done axis ADR 024's read-cursor deliberately doesn't
+ * track — a resolved request stops counting as waiting even if it is still unread, because the work
+ * it asked for is done. Pure; the comeback summary reads it off the inbox.
+ */
+export function openActionNeeded(messages: Envelope[], me: string): Envelope[] {
+  const resolved = new Set<string>();
+  for (const m of messages) {
+    if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
+  }
+  return messages.filter((m) => isActionNeeded(m, me) && !resolved.has(threadKey(m)));
+}
+
+/**
+ * The comeback banner that leads `status`: `⚑ 2 requests waiting for you since 14:32 …`. Counted off
+ * the durable inbox cursor (unread, action-needed messages). Returns '' when nothing waits, so a
+ * caller can prepend it unconditionally without adding a blank line of noise on the common path.
+ */
+export function renderPendingSummary(count: number, sinceTs: number): string {
+  if (count <= 0) return '';
+  const noun = count === 1 ? 'request' : 'requests';
+  return (
+    theme.actionNeeded(`⚑ ${count} ${noun} waiting for you`) +
+    theme.meta(` since ${clock(sinceTs)} — musterd inbox to read`)
+  );
+}
+
 export function renderPresence(status: PresenceStatus, surface?: string): string {
   const dot = theme.presenceDot(status);
   const label = surface && status !== 'offline' ? `${status} via ${surface}` : status;

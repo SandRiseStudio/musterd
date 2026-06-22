@@ -148,6 +148,36 @@ describe('messages + inbox', () => {
     expect(listInbox(db, nick.row)).toHaveLength(1);
     expect(listInbox(db, ada.row)).toHaveLength(0);
   });
+
+  it('persists a resolve act, closing a thread (ADR 025 — schema v5 widened the act CHECK)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const lin = addMember(db, team, { name: 'Lin', kind: 'agent' });
+    // Lin asks; Ada closes the thread once done. `resolve` carries the thread id it closes.
+    const ask = makeEnvelope({
+      id: 'm1',
+      team: 'dawn',
+      from: 'Lin',
+      to: { kind: 'team' },
+      act: 'request_help',
+      body: 'review auth?',
+      ts: 100,
+    });
+    insertMessage(db, team.id, lin.row.id, null, ask);
+    const done = makeEnvelope({
+      id: 'm2',
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'team' },
+      act: 'resolve',
+      thread: 'm1',
+      body: 'merged',
+      ts: 200,
+    });
+    expect(() => insertMessage(db, team.id, ada.row.id, null, done)).not.toThrow();
+    const linInbox = listInbox(db, lin.row);
+    expect(linInbox.map((m) => `${m.act}:${m.thread_id ?? ''}`)).toContain('resolve:m1');
+  });
 });
 
 describe('activity (two-clocks)', () => {

@@ -92,15 +92,15 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
 ```json
 {
   "name": "team_send",
-  "description": "Send a message to a teammate, the whole team, or broadcast. Use the right act: status_update to report progress, request_help when blocked, handoff to pass work, accept/decline to answer a request_help/handoff (set reply_to), wait to signal you're paused.",
+  "description": "Send a message to a teammate, the whole team, or broadcast. Use the right act: status_update to report progress, request_help when blocked, handoff to pass work, accept/decline to answer a request_help/handoff (set reply_to), wait to signal you're paused, resolve to close a thread when the work is done (set thread to the thread/root id).",
   "inputSchema": {
     "type": "object",
     "required": ["act", "body"],
     "properties": {
       "to":   { "type": "string", "description": "member name, or '@team', or '@broadcast'. Default '@team'." },
-      "act":  { "type": "string", "enum": ["message","status_update","request_help","handoff","accept","decline","wait"] },
+      "act":  { "type": "string", "enum": ["message","status_update","request_help","handoff","accept","decline","wait","resolve"] },
       "body": { "type": "string" },
-      "thread":   { "type": "string", "description": "thread id to reply within (optional)" },
+      "thread":   { "type": "string", "description": "thread id to reply within (optional; required for resolve — the thread it closes)" },
       "reply_to": { "type": "string", "description": "message id this accepts/declines (required for accept/decline)" },
       "meta": { "type": "object", "description": "act-specific fields, e.g. {progress:0.5} for status_update" }
     }

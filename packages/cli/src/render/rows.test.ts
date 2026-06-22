@@ -1,6 +1,14 @@
 import { PROTOCOL_VERSION, type Envelope, type MemberSummary } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { renderBanner, renderMessageRow, renderStatusHeader, renderStatusTable } from './rows.js';
+import {
+  isActionNeeded,
+  openActionNeeded,
+  renderBanner,
+  renderMessageRow,
+  renderPendingSummary,
+  renderStatusHeader,
+  renderStatusTable,
+} from './rows.js';
 
 // picocolors auto-disables color when stdout is not a TTY (vitest), so output is plain & deterministic.
 
@@ -233,6 +241,88 @@ describe('renderStatusHeader', () => {
     const out = renderStatusHeader('dawn', 'http://localhost:4849');
     expect(out).toContain('dawn');
     expect(out).not.toContain('db:');
+  });
+});
+
+describe('isActionNeeded (ADR 024 — recipient-side salience)', () => {
+  it('flags request_help regardless of recipient', () => {
+    expect(isActionNeeded(env({ act: 'request_help', to: { kind: 'team' } }), 'nick')).toBe(true);
+    expect(isActionNeeded(env({ act: 'request_help', to: { kind: 'broadcast' } }), 'nick')).toBe(
+      true,
+    );
+  });
+
+  it('flags any act addressed specifically to me', () => {
+    expect(
+      isActionNeeded(env({ act: 'handoff', to: { kind: 'member', name: 'nick' } }), 'nick'),
+    ).toBe(true);
+    expect(
+      isActionNeeded(env({ act: 'message', to: { kind: 'member', name: 'nick' } }), 'nick'),
+    ).toBe(true);
+  });
+
+  it('does not flag a team status_update or an act directed at someone else', () => {
+    expect(isActionNeeded(env({ act: 'status_update', to: { kind: 'team' } }), 'nick')).toBe(false);
+    expect(
+      isActionNeeded(env({ act: 'message', to: { kind: 'member', name: 'Ada' } }), 'nick'),
+    ).toBe(false);
+  });
+
+  it('never flags a resolve — a thread-close is done, not an action (ADR 025)', () => {
+    expect(
+      isActionNeeded(
+        env({ act: 'resolve', to: { kind: 'member', name: 'nick' }, thread: 'r1' }),
+        'nick',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('openActionNeeded (ADR 025 — open-vs-done axis)', () => {
+  it('drops a request whose thread carries a resolve, even unread', () => {
+    const ask = env({
+      id: 'r1',
+      act: 'request_help',
+      from: 'Ada',
+      to: { kind: 'team' },
+      thread: null,
+    });
+    const done = env({
+      id: 'r2',
+      act: 'resolve',
+      from: 'Lin',
+      to: { kind: 'team' },
+      thread: 'r1', // closes the ask's thread (the ask is a root, so its id is the thread id)
+    });
+    expect(openActionNeeded([ask], 'nick')).toHaveLength(1);
+    expect(openActionNeeded([ask, done], 'nick')).toHaveLength(0);
+  });
+
+  it('keeps an unresolved request and ignores resolves of other threads', () => {
+    const ask = env({ id: 'a1', act: 'request_help', to: { kind: 'team' }, thread: null });
+    const otherDone = env({ id: 'x2', act: 'resolve', to: { kind: 'team' }, thread: 'other' });
+    expect(openActionNeeded([ask, otherDone], 'nick')).toHaveLength(1);
+  });
+});
+
+describe('renderPendingSummary (ADR 024 — comeback summary)', () => {
+  const since = Date.UTC(2026, 5, 9, 14, 32);
+
+  it('returns empty string when nothing is waiting (no noise on the common path)', () => {
+    expect(renderPendingSummary(0, since)).toBe('');
+  });
+
+  it('uses the singular for one request', () => {
+    const out = renderPendingSummary(1, since);
+    expect(out).toContain('1 request waiting for you');
+    expect(out).not.toContain('requests');
+    expect(out).toContain('musterd inbox to read');
+  });
+
+  it('pluralizes and shows the since-time for several', () => {
+    const out = renderPendingSummary(3, since);
+    expect(out).toContain('3 requests waiting for you');
+    expect(out).toMatch(/since \d\d:\d\d/); // local HH:MM — timezone-robust
   });
 });
 

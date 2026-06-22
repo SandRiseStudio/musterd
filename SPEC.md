@@ -1,7 +1,7 @@
 # musterd protocol — SPEC
 
-**Version:** `musterd/0.2` (draft)
-**Status:** v0.2 draft — designed in the open, versioned from the first commit. v0.2 adds the **minimal trust model** (single-active Members + reclaim grace) and **roster activity** over v0.1; it is a backward-compatible MINOR (new optional fields + one new error). The full shared-teams governance model is designed for v0.3 (`docs/design/membership-model.md`, `spec-v0.3-draft.md`, `security.md`) and deliberately not yet specified here.
+**Version:** `musterd/0.3` (draft)
+**Status:** v0.3 draft — designed in the open, versioned from the first commit. v0.3 adds the terminal **`resolve` act** (thread-close — the open-vs-done axis, ADR 025) over v0.2; it is a backward-compatible MINOR (one new act, no change to existing fields). v0.2 added the **minimal trust model** (single-active Members + reclaim grace) and **roster activity** over v0.1. The full shared-teams governance model is otherwise designed for v0.3 (`docs/design/membership-model.md`, `spec-v0.3-draft.md`, `security.md`) and deliberately not yet specified here.
 **License:** MIT (same as the implementation).
 
 > This is the normative protocol. Implementations (this repo's `@musterd/server`, `@musterd/protocol`, and any third-party server or client) MUST conform to it. The implementation-facing distillation with file/function detail is `docs/architecture/02-protocol.md`; where that and this file disagree, **this file wins**. Changes to this spec are versioned and require an ADR (`docs/decisions/`).
@@ -28,11 +28,11 @@ Every message is an Envelope (JSON):
 ```jsonc
 {
   "id":   "<ULID>",            // client-generated, globally unique
-  "v":    "musterd/0.2",       // protocol version; MUST match server's supported version
+  "v":    "musterd/0.3",       // protocol version; MUST match server's supported version
   "team": "<team-slug>",       // [a-z0-9-], 1..32
   "from": "<member-name>",     // sender, a Member in `team`
   "to":   { "kind": "member", "name": "<member-name>" },  // or {"kind":"team"} or {"kind":"broadcast"}
-  "act":  "<act>",             // one of the 7 acts (§3)
+  "act":  "<act>",             // one of the 8 acts (§3)
   "body": "<string>",          // human/agent-readable content; MAY be empty
   "thread": "<ULID|null>",     // optional thread root id; null/absent starts a thread
   "meta": { },                 // optional, act-specific (§3); unknown keys MUST be preserved
@@ -49,20 +49,22 @@ Validation: an Envelope with an unknown `act` MUST be rejected. Unknown `meta` k
 
 ## 3. Collaboration acts
 
-Acts are the typed intents of coordination, grounded in the **Co-Gym** collaboration-act taxonomy (Shao et al., *Collaborative Gym*, arXiv 2412.15701). v0.1 defines seven:
+Acts are the typed intents of coordination, grounded in the **Co-Gym** collaboration-act taxonomy (Shao et al., *Collaborative Gym*, arXiv 2412.15701). v0.1 defined seven; **v0.3 adds `resolve`** (ADR 025) for eight:
 
-| Act             | Meaning | Required `meta` | Optional `meta` |
-|-----------------|---------|-----------------|-----------------|
+| Act             | Meaning | Required `meta`/fields | Optional `meta` |
+|-----------------|---------|------------------------|-----------------|
 | `message`       | plain communication, no protocol semantics | — | — |
 | `status_update` | report what you are doing / have done | — | `progress` (0..1), `state` (string) |
 | `request_help`  | ask a Member or the Team to assist / unblock you | — | `blocking` (bool), `topic` (string) |
 | `handoff`       | transfer a unit of work to someone | — | `artifact` (string), `summary` (string) |
-| `accept`        | accept a prior `request_help`/`handoff` | `in_reply_to` (ULID) | — |
-| `decline`       | decline a prior `request_help`/`handoff` | `in_reply_to` (ULID) | `reason` (string) |
+| `accept`        | accept a prior `request_help`/`handoff` | `meta.in_reply_to` (ULID) | — |
+| `decline`       | decline a prior `request_help`/`handoff` | `meta.in_reply_to` (ULID) | `reason` (string) |
 | `wait`          | signal you are paused / blocked | — | `until` (epoch ms), `reason` (string) |
+| `resolve`       | close a thread — mark the work it tracks **done** | `thread` (ULID) | `reason` (string) |
 
 Rules:
 - `accept` and `decline` MUST carry `meta.in_reply_to` referencing the Envelope they answer, and SHOULD set `thread` to that Envelope's thread (or its `id` if it was a root).
+- `resolve` is **thread-terminal**: it MUST carry a non-empty `thread` naming the thread it closes (a no-thread root is closed by passing its own `id`). It marks the thread — the proto-work-item — **done**, supplying the open-vs-done axis the other acts lack (`accept` ≠ finished). It MAY follow an `accept` or close a thread directly without one. **Authority:** any Member of the Team MAY `resolve` a thread; v0.3 does not enforce a closer (the norm is the opener or the assignee). Conforming UIs SHOULD treat a thread carrying a `resolve` as closed and stop surfacing its open `request_help`/directed asks as pending.
 - Acts are the stable contract; `meta` is the extension point. New acts are a versioned change to this spec.
 
 ## 4. Identity, Presence, Lifecycle
@@ -88,7 +90,7 @@ Both bindings MUST funnel sends through one validate→persist→route path so s
 
 ## 6. Versioning & compatibility
 
-- The version string is `musterd/MAJOR.MINOR`. `v0.1` was the first; **`v0.2`** is current (single-active newest-wins + reclaim grace, roster activity, attach provenance/workspace, driver co-presence — all additive; new error codes `member_busy`/`superseded`).
+- The version string is `musterd/MAJOR.MINOR`. `v0.1` was the first; `v0.2` added single-active newest-wins + reclaim grace, roster activity, attach provenance/workspace, driver co-presence (new error codes `member_busy`/`superseded`); **`v0.3`** is current — it adds the terminal `resolve` act (ADR 025). All MINOR additions are additive (a new act and new optional fields, no change to existing required fields).
 - Within a MAJOR, MINOR additions MUST be backward-compatible (new optional `meta`, new optional fields, new endpoints, new error codes). New **acts** or any change to envelope-required fields are a MINOR-or-greater, spec-versioned change requiring an ADR.
 - A server MUST reject a client whose declared `v` it does not support, with a `version_mismatch` error.
 

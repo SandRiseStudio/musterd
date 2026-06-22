@@ -66,6 +66,8 @@ export function renderPrimer(opts: { member: string; team: string; role?: string
     '  visible to the whole team.',
     "- **Hand off cleanly.** `team_send {act:'handoff'}` passes a unit of work (name the artifact);",
     '  answer a `request_help` or `handoff` with `accept` / `decline` (set `reply_to`).',
+    "- **Close the loop when it's done.** `team_send {act:'resolve', thread:<id>}` marks a thread",
+    '  finished — accepting is not finishing. It clears the request from teammates’ pending view.',
     '- **See who’s around** with `team_status` / `team_members` before you ask or hand off.',
     '',
     'The `team_*` calls are tools — invoke them directly and use what they return. Never write down',

@@ -10,7 +10,8 @@ import { notJoinedMessage, textResult } from './format.js';
 const DESCRIPTION =
   'Send a message to a teammate, the whole team, or broadcast. Use the right act: ' +
   'status_update to report progress, request_help when blocked, handoff to pass work, ' +
-  'accept/decline to answer a request_help/handoff (set reply_to), wait to signal you are paused.';
+  'accept/decline to answer a request_help/handoff (set reply_to), wait to signal you are paused, ' +
+  'resolve to close a thread when the work is done (set thread to the thread/root id).';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };
@@ -33,6 +34,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
           'accept',
           'decline',
           'wait',
+          'resolve',
         ]),
         body: z.string(),
         thread: z.string().optional().describe('thread id to reply within'),
