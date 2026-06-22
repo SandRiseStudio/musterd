@@ -126,7 +126,7 @@ These five terms are load-bearing. They must appear with these exact meanings ev
 | **Member**   | A durable identity in a Team. `kind: agent \| human`. Has a name, role (free text), lifecycle, availability. A Member is **not** a session. | not "agent", "user", "participant" |
 | **Presence** | Where a Member is currently attached (a Claude Code session, a Codex session, a CLI, later an app). One Member can have multiple Presences. | not "session", "connection", "status" |
 | **Surface**  | A kind of place a Member can be present: `cli`, `claude-code`, `codex`, (later) `ios`, `web`, `slack`. A Surface hosts a Presence. | not "client", "platform", "adapter" (adapter is the code; Surface is the concept) |
-| **Act**      | The typed intent of a message: `message`, `status_update`, `request_help`, `handoff`, `accept`, `decline`, `wait`. Grounded in the Co-Gym collaboration-act taxonomy. | not "type", "kind", "event", "verb" |
+| **Act**      | The typed intent of a message: `message`, `status_update`, `request_help`, `handoff`, `accept`, `decline`, `wait`, `resolve`. Grounded in the Co-Gym collaboration-act taxonomy. | not "type", "kind", "event", "verb" |
 
 Secondary nouns (consistent but not in the core five): **Inbox** (a Member's durable mailbox for messages received while offline), **Envelope** (the on-wire message structure), **Roster** (a Team's list of Members), **Lifecycle** (`forever | session | until <ts>`), **Availability** (a Member's schedule; v1 stores it, does not enforce it).
 

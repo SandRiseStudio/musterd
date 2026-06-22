@@ -20,7 +20,7 @@ Define these as components with variants; screens may only compose these:
 
 1. `ui/member-chip` — avatar/initial + name + kind icon (agent/human). Variants: `kind=agent|human`, `size=sm|md`.
 2. `ui/presence-dot` — variants `online|away|offline`; tooltip shows the Surface (`claude-code`, `codex`, `cli`).
-3. `ui/act-badge` — one variant per Act (`message, status_update, request_help, handoff, accept, decline, wait`). Color roles per `brand.md` (request_help=accent, decline=danger, others neutral with subtle tints).
+3. `ui/act-badge` — one variant per Act (`message, status_update, request_help, handoff, accept, decline, wait, resolve`). Color roles per `brand.md` (request_help=accent, decline=danger, resolve=success/done, others neutral with subtle tints).
 4. `ui/message-row` — timestamp, member-chip (from), act-badge, body, optional `to` (member/team/broadcast), optional thread indicator.
 5. `ui/lifecycle-tag` — `forever | session | until <date>`.
 6. `ui/roster-item` — member-chip + role + presence-dot + lifecycle-tag, used in lists.

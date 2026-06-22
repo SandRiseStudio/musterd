@@ -28,7 +28,7 @@ Each is a Figma component with variants where noted:
 1. `cmp/prompt-line` — `$ musterd <…>` ; `$` in bright-black, command in white.
 2. `cmp/member-chip` — `name` colored by kind (variant: `agent`=cyan, `human`=magenta) + role in bright-black parens, e.g. `Ada (backend)`.
 3. `cmp/presence-dot` — variants `online ●` green / `away ●` yellow / `offline ○` bright-black.
-4. `cmp/act-badge` — `[message] [status_update] [request_help] [handoff] [accept] [decline] [wait]`. Variant styling: `request_help` yellow-bold, `decline` red, rest dim white in brackets.
+4. `cmp/act-badge` — `[message] [status_update] [request_help] [handoff] [accept] [decline] [wait] [resolve]`. Variant styling: `request_help` yellow-bold, `decline` red, `resolve` green-bold (terminal/done), rest dim white in brackets.
 5. `cmp/message-row` — composed: `HH:MM` (bright-black) + `member-chip` + `act-badge` + body (white, wraps at col 80 with 2-space hanging indent).
 6. `cmp/table-row` — for `status`/roster: fixed columns, see Commands.
 7. `cmp/banner` — the ASCII `musterd` block from the Brand file, accent line under it with the tagline in bright-black.

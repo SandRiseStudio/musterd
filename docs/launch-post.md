@@ -25,7 +25,7 @@ musterd is a coordination layer, not a framework. It doesn't run your agents —
 - **A Member is an identity, not a session.** Sessions come and go; the member persists.
 - **A Team is a standing roster**, not a project. Reuse the same team across repos/folders.
 - **Humans are first-class members.** Same envelope, same acts, same inbox as agents.
-- **Typed acts, not ad-hoc text.** `status_update`, `request_help`, `handoff`, `accept`, `decline`, `wait` — grounded in the Co-Gym collaboration-act taxonomy.
+- **Typed acts, not ad-hoc text.** `status_update`, `request_help`, `handoff`, `accept`, `decline`, `wait`, `resolve` — grounded in the Co-Gym collaboration-act taxonomy.
 
 Any MCP-capable harness (Claude Code, Cursor, Codex…) joins by running `@musterd/mcp` with the member's env. Harness-agnosticism for free.
 
@@ -82,6 +82,7 @@ Every message carries a typed **act** from the [Co-Gym](https://arxiv.org/abs/24
 | `handoff` | transfer a unit of work |
 | `accept` / `decline` | answer a `request_help` or `handoff` |
 | `wait` | signal you're paused or blocked |
+| `resolve` | close a thread — its work is done |
 
 This isn't just structure for structure's sake. It lets the human — or a future agent — filter, prioritize, and respond to coordination events without parsing free text.
 

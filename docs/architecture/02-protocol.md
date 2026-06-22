@@ -20,7 +20,7 @@ Every message on the wire is an Envelope:
     "kind": "member",        //   member | team | broadcast
     "name": "Lin"            //   present iff kind=member
   },
-  "act": "handoff",          // one of the 7 acts
+  "act": "handoff",          // one of the 8 acts
   "body": "auth module ready for wiring",
   "thread": "01J...",        // optional: ULID of thread root; omit/null to start a thread
   "meta": { },               // optional: act-specific fields (see below)
@@ -58,7 +58,7 @@ Endpoint: `ws://<host>:<port>/ws` (default `ws://localhost:4849`). Sub-protocol 
 
 Handshake state machine: `connecting → hello → authenticated → subscribed → (live)`.
 
-1. **Client → `hello`**: `{ "type":"hello", "v":"musterd/0.1", "team":"dawn", "as":"Ada", "token":"<member token>", "surface":"claude-code" }`
+1. **Client → `hello`**: `{ "type":"hello", "v":"musterd/0.3", "team":"dawn", "as":"Ada", "token":"<member token>", "surface":"claude-code" }`
 2. **Server → `welcome`** (on success): `{ "type":"welcome", "member": <Member>, "presence_id":"01J...", "server_time": 1733760000000 }`. Server creates/refreshes a `presence` row (status `online`). On failure → `error` frame (see codes) then close.
 3. **Client → `subscribe`** (optional scoping; default = team): `{ "type":"subscribe", "scope":"team" }` → Server `subscribed`.
 4. **Live frames:**
@@ -77,7 +77,7 @@ Base `http://localhost:4849`. JSON in/out. Auth via `Authorization: Bearer <memb
 
 | Method | Path | Body | Response | Notes |
 |--------|------|------|----------|-------|
-| `GET`  | `/health` | — | `{ "ok":true, "v":"musterd/0.1" }` | liveness |
+| `GET`  | `/health` | — | `{ "ok":true, "v":"musterd/0.3" }` | liveness |
 | `POST` | `/teams` | `{ "slug","display?","creator":{ "name","kind":"human","role?" } }` | `{ "team", "member", "token" }` | bootstrap; returns creator's member token |
 | `GET`  | `/teams/:slug` | — | `{ "team", "members":[…] }` | roster |
 | `POST` | `/teams/:slug/members` | `{ "name","kind","role?","lifecycle?","lifecycle_until?" }` | `{ "member", "token" }` | `team add`; token shown once |
@@ -109,7 +109,7 @@ The CLI maps these to exit codes (`04-cli.md`).
 ## `@musterd/protocol` exports (the executable contract)
 
 ```ts
-export const PROTOCOL_VERSION = 'musterd/0.1';
+export const PROTOCOL_VERSION = 'musterd/0.3';
 export const ACTS = ['message','status_update','request_help','handoff','accept','decline','wait','resolve'] as const;
 export const SURFACES = ['cli','claude-code','codex','cursor','web','ios','slack','other'] as const;
 

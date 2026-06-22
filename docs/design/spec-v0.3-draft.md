@@ -17,7 +17,9 @@ Version under design: **`musterd/0.3`**. RFC 2119 keywords.
 | Observers | none | **human-only** read-only watchers |
 | Governance | none | **own lane**: roles, seats, grants, requests, status — all **audited** |
 
-MAJOR-of-MINOR change (new join/auth) → `musterd/0.3`, gated by a future ADR. Envelope + the 7 acts are **unchanged**; `v` becomes `musterd/0.3`.
+MAJOR-of-MINOR change (new join/auth) → `musterd/0.3`, gated by a future ADR. The envelope is **unchanged** by this governance lane.
+
+> **Note (2026-06-22):** `musterd/0.3` has already been opened by ADR 025, which added the terminal `resolve` act — so the current act set is **eight**, not seven, and `v` is already `musterd/0.3`. This governance work layers onto that same MINOR (or a later one); it does not itself change the acts.
 
 ## 1. Roles, Seats & Capabilities
 
