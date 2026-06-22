@@ -77,7 +77,7 @@ Credentials decide *who*; capabilities decide *what* and *what's visible*. Both 
 
 - `.gitignore` every secret-bearing config: `.cursor/mcp.json`, any file holding `MUSTERD_AGENT_KEY`/`MUSTERD_GRANT`, and `~/.musterd/config.json` is chmod 600.
 - `init` shows a one-line warning when it writes a secret to a repo-local file, and offers to add it to `.gitignore`.
-- The daemon binds to `127.0.0.1` by default; exposing it beyond localhost is an explicit, documented step that SHOULD require transport security (roadmap: TLS/authn for remote).
+- The daemon binds to `127.0.0.1` by default; exposing it beyond localhost is an explicit, documented step that SHOULD require transport security (roadmap: TLS/authn for remote). The full networking substrate for cross-machine/cross-network teams — daemon reachability, NAT, overlay-vs-hosted-relay topologies, and the secured off-loopback bind these credentials ride on — is designed in `deployment-topology.md`.
 
 ## Out of scope (roadmap, named so we don't design into a corner)
 
