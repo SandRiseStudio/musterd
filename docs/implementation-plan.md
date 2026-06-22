@@ -32,8 +32,8 @@ Everything below is on `init-musterd`, builds clean, and is covered by the test 
 | **M3 CLI** | ✅ done | `musterd` (`14b6b1f`): `serve/team create/team add/join/send/inbox[--watch]/status`, brand ANSI theme, exit-code table, `--json`/`NO_COLOR`; Scenario A passes (`cli.e2e.test.ts`) |
 | **M4 MCP adapter** | ✅ done | `@musterd/mcp` (`d596a06`): 4 tools, env binding, background WS presence + buffer + reconnect; Scenario-B-equivalent tests pass (`mcp.test.ts`) |
 | **M5 flagship demo (automated + script)** | ✅ done | `tests/scenarios/flagship.test.ts` (Scenario C, green) + runnable `examples/flagship-demo.mjs` + `docs/demo.md` |
-| **M5 flagship demo (recording)** | ❌ **not done** | `docs/assets/flagship.gif` is referenced by `README.md` but does not exist — the README has a broken image today |
-| **M6 launch polish** | 🟡 mostly | `README.md` (principles, positioning table, quickstart), `ROADMAP.md`, MIT `LICENSE` exist. Remaining: the GIF, npm publish, the actual launch post |
+| **M5 flagship demo (recording)** | 🟡 scripted cut done; real 3-pane outstanding | `docs/assets/flagship.gif` (lean cut, recorded 2026-06-12) + `docs/assets/flagship-full.gif` exist and are wired into `README.md` with an honest "scripted walkthrough" caption. Only the optional **real 3-pane recording** (form 3) remains — unblocked by the primer (ADR 012) + driver co-presence (ADR 021). See §4.B. |
+| **M6 launch polish** | 🟡 mostly | `README.md` (principles, positioning table, quickstart), `ROADMAP.md`, MIT `LICENSE` exist; the flagship GIF is wired; `@musterd/*@0.0.1` is published (all four packages, 2026-06-12); the launch post is drafted (`docs/launch-post.md`). Remaining (human actions): **publish the current cut** — the live 0.0.1 is stale by 18 package commits, so a republish requires a version bump — and post the launch. |
 | **Beyond plan: `musterd init`** | ✅ done (unplanned) | Interactive onboarding (`01ddfb9`, `abf318b`): daemon check, team create, harness detect/configure (Claude Code CLI + extension, Cursor), live wait-for-join. ADR 005/006 |
 
 ## 3. Deviations — intentional evolution from the original plan
