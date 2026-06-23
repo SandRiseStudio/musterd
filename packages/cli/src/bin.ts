@@ -44,7 +44,16 @@ async function main(argv: string[]): Promise<number> {
   const command = argv[0];
   const rest = parseArgs(argv.slice(1));
 
-  if (!command || command === 'help' || command === '--help' || command === '-h') {
+  // `--help`/`-h` anywhere prints usage and exits — never runs the command (e.g. `notify --help`
+  // must not launch the resident notifier).
+  const wantsHelp =
+    !command ||
+    command === 'help' ||
+    command === '--help' ||
+    command === '-h' ||
+    rest.flags['help'] === true ||
+    argv.slice(1).some((a) => a === '--help' || a === '-h');
+  if (wantsHelp) {
     process.stdout.write(renderBanner() + '\n\n' + HELP + '\n');
     return 0;
   }
