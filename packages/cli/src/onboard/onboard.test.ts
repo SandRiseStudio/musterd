@@ -201,9 +201,9 @@ describe('init target guard', () => {
     expect(warnings[0]).toContain('dawn');
   });
 
-  it('trips on an unrelated AGENTS.md (no primer markers)', () => {
+  it('does NOT trip on an unrelated AGENTS.md — the primer step asks in context (§5b)', () => {
     writeFileSync(join(cwd, 'AGENTS.md'), '# Contributor guide\n\nBuild with care.\n');
-    expect(inspectInitTarget(cwd).warnings[0]).toContain('AGENTS.md');
+    expect(inspectInitTarget(cwd).warnings).toEqual([]);
   });
 
   it('does NOT trip on an AGENTS.md that already has the musterd primer', () => {
@@ -213,7 +213,8 @@ describe('init target guard', () => {
 
   it('accumulates multiple warnings', () => {
     writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: 'musterd-monorepo' }));
-    writeFileSync(join(cwd, 'AGENTS.md'), '# Unrelated\n');
+    mkdirSync(join(cwd, '.musterd'), { recursive: true });
+    writeFileSync(join(cwd, '.musterd', 'binding.json'), JSON.stringify(binding));
     expect(inspectInitTarget(cwd).warnings.length).toBe(2);
   });
 });

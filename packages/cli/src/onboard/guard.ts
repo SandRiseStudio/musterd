@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { BINDING_DIR, BINDING_FILE, BindingSchema } from '@musterd/protocol';
 import type { BindingRef } from '../config.js';
-import { hasPrimerMarkers } from './primer.js';
 
 /**
  * Folder-suitability guard (ADR 020). `musterd init` binds an agent to the *folder* it runs in
@@ -39,12 +38,9 @@ export function inspectInitTarget(cwd: string): InitTargetReport {
     );
   }
 
-  // (3) An unrelated AGENTS.md (no musterd primer markers) the primer would append to.
-  if (hasUnrelatedAgentsMd(cwd)) {
-    warnings.push(
-      "This folder already has an AGENTS.md without a musterd primer — init's primer block will be appended to it.",
-    );
-  }
+  // An unrelated AGENTS.md is intentionally *not* warned here: the primer step (init.ts §5b) asks
+  // about appending in context ("Append a musterd primer to the AGENTS.md already here?"), so a
+  // duplicate up-front warning would fire before any prompt and read as alarming (2026-06-23 dogfood).
 
   return { warnings };
 }
@@ -97,14 +93,4 @@ export function nameBoundElsewhere(
     }
   }
   return null;
-}
-
-function hasUnrelatedAgentsMd(cwd: string): boolean {
-  try {
-    const path = join(cwd, 'AGENTS.md');
-    if (!existsSync(path)) return false;
-    return !hasPrimerMarkers(readFileSync(path, 'utf8'));
-  } catch {
-    return false;
-  }
 }
