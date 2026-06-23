@@ -10,7 +10,7 @@ v0.1 attached a **Presence row per connection** with no per-member ceiling. The 
 auto-joined every session as a fixed member, so three Claude Code sessions on one member became
 three minds wearing one name — the bug [ADR 007](007-v0.2-scope-cut.md) was written to fix. ADR 007
 cut the v0.3 governance design back to a **minimal trust model**; this ADR records the server-core
-half of that cut (`docs/design/membership-impl-plan.md` M1). The MCP-side half — explicit
+half of that cut (`docs/archive/membership-impl-plan.md` M1). The MCP-side half — explicit
 activation, dormant-by-default — is M3 and gets its own note.
 
 ## Decision
