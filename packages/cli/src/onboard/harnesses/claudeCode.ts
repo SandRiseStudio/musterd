@@ -1,11 +1,84 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import type { Harness, ProvisionServer } from '../harness.js';
+import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
 
 const exec = promisify(execFile);
+
+/**
+ * Claude Code's project-local settings (gitignored by Claude Code). The per-user/local home for
+ * permission defaults (ADR 027 — `-s local` keeps everything project-scoped, never the user's
+ * global setup). Mirrors `claude mcp add -s local`'s scope for the permission half.
+ */
+interface ClaudeSettings {
+  permissions?: { allow?: string[]; ask?: string[]; deny?: string[] };
+}
+function settingsLocalPath(): string {
+  return join(process.cwd(), '.claude', 'settings.local.json');
+}
+function readSettings(path: string): ClaudeSettings {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as ClaudeSettings;
+  } catch {
+    return {};
+  }
+}
+const PERM_LISTS = ['allow', 'ask', 'deny'] as const;
+
+/**
+ * Merge role permission defaults into `.claude/settings.local.json` additively (never a clamp —
+ * ADR 026 §4 / 028). Returns only the entries *newly* added (so the manifest records exactly what to
+ * remove later, never an entry the user already had). No-op lists stay untouched.
+ */
+function mergePermissions(perms: ProvisionPermissions): ProvisionPermissions {
+  const path = settingsLocalPath();
+  const settings = readSettings(path);
+  settings.permissions ??= {};
+  const added: ProvisionPermissions = { allow: [], ask: [], deny: [] };
+  let changed = false;
+  for (const list of PERM_LISTS) {
+    const existing = settings.permissions[list] ?? [];
+    const have = new Set(existing);
+    for (const entry of perms[list]) {
+      if (!have.has(entry)) {
+        existing.push(entry);
+        have.add(entry);
+        added[list].push(entry);
+        changed = true;
+      }
+    }
+    if (existing.length > 0) settings.permissions[list] = existing;
+  }
+  if (changed) {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  }
+  return added;
+}
+
+/** Remove the given permission entries from `.claude/settings.local.json` (exact reversal). */
+function removePermissions(perms: ProvisionPermissions): void {
+  const path = settingsLocalPath();
+  if (!existsSync(path)) return;
+  const settings = readSettings(path);
+  if (!settings.permissions) return;
+  let changed = false;
+  for (const list of PERM_LISTS) {
+    const drop = new Set(perms[list]);
+    if (drop.size === 0) continue;
+    const existing = settings.permissions[list];
+    if (!existing) continue;
+    const kept = existing.filter((e) => !drop.has(e));
+    if (kept.length !== existing.length) {
+      changed = true;
+      if (kept.length > 0) settings.permissions[list] = kept;
+      else delete settings.permissions[list];
+    }
+  }
+  if (changed) writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+}
 
 async function has(cmd: string, args: string[]): Promise<{ ok: boolean; out: string }> {
   try {
@@ -97,24 +170,40 @@ export const claudeCode: Harness = {
     };
   },
 
-  // Provision a role's MCP servers (ADR 026 Universe-2). Each is `claude mcp add <name> -s local`,
-  // additive and per-user/local (ADR 027). Per-server idempotency: remove+re-add *only that name*,
-  // never touching the user's other servers. `${ENV}` secrets are passed through verbatim: execFile
-  // runs no shell, so the literal `${VAR}` string lands in the config as a *reference* — Claude Code
-  // expands `${VAR}` / `${VAR:-default}` from the environment at server-launch time (it is never
-  // resolved or baked by musterd). Tokens are never logged — only server *names* are returned.
-  async provision(servers: ProvisionServer[]) {
+  // Provision a role's MCP servers + permission defaults (ADR 026 Universe-2). Each server is
+  // `claude mcp add <name> -s local`, additive and per-user/local (ADR 027). Per-server idempotency:
+  // remove+re-add *only that name*, never touching the user's other servers. `${ENV}` secrets are
+  // passed through verbatim: execFile runs no shell, so the literal `${VAR}` string lands in the
+  // config as a *reference* — Claude Code expands `${VAR}` / `${VAR:-default}` from the environment
+  // at server-launch time (never resolved/baked by musterd). Permissions merge into
+  // `.claude/settings.local.json` additively (not a clamp). Tokens are never logged — only names.
+  async provision(plan: ProvisionPlan) {
     const bin = (await resolveClaudeBin()) ?? 'claude';
-    const added: string[] = [];
-    for (const s of servers) {
+    const servers: string[] = [];
+    for (const s of plan.servers) {
       const envArgs = Object.entries(s.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
       const args = ['mcp', 'add', s.name, '-s', 'local', ...envArgs, '--', s.command, ...s.args];
       // Per-server idempotency: re-running replaces only this server's prior definition.
       await exec(bin, ['mcp', 'remove', s.name, '-s', 'local']).catch(() => undefined);
       await exec(bin, args, { timeout: 10000 });
-      added.push(s.name);
+      servers.push(s.name);
     }
-    return { added, target: 'claude mcp (scope: local)', activation: activationHint() };
+    const permissions = mergePermissions(plan.permissions);
+    return {
+      servers,
+      permissions,
+      target: 'claude mcp (scope: local)',
+      activation: activationHint(),
+    };
+  },
+
+  // Reverse a provision (ADR 027): remove exactly the named servers and the listed permissions.
+  async unprovision(plan: UnprovisionPlan) {
+    const bin = (await resolveClaudeBin()) ?? 'claude';
+    for (const name of plan.servers) {
+      await exec(bin, ['mcp', 'remove', name, '-s', 'local']).catch(() => undefined);
+    }
+    removePermissions(plan.permissions);
   },
 };
 

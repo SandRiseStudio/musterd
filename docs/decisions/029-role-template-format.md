@@ -42,13 +42,14 @@ a clean, ADR-gated follow-up — the schema and loader are format-agnostic behin
 
 ### Scope note (deviation recorded)
 
-Phase 1's Claude Code renderer provisions a role's **`tools.mcp_servers`** (via `claude mcp add`)
-and injects its **charter** into `AGENTS.md`. `tools.resource_scopes` are **declared-only**
-(coordination, not a sandbox — ADR 026 §1/§4) and `tools.permissions` are **parsed and
-forward-compatible but not yet written** into harness settings. Harness *permission* provisioning,
-the Cursor/Codex renderers, and a `musterd uninstall` command are explicit fast-follows (see
-provisioning-recipe.md "Settled vs open"), kept out of this slice to hold it to the smallest correct
-change.
+Phase 1's renderers provision a role's **`tools.mcp_servers`** and **`tools.permissions`** and inject
+its **charter** into `AGENTS.md`. `tools.resource_scopes` remain **declared-only** (coordination,
+not a sandbox — ADR 026 §1/§4). The **Claude Code** renderer writes MCP servers via `claude mcp add`
+and permission defaults into `.claude/settings.local.json`; the **Cursor** renderer writes MCP
+servers into `.cursor/mcp.json` (Cursor has no managed allowlist, so permissions degrade to declared
+intent). `musterd uninstall` reverses all of it (ADR 030). The **Codex** renderer is the remaining
+fast-follow — its global-TOML config collides with the per-user/local scope rule (ADR 027) and needs
+its own adapter (see provisioning-recipe.md "Settled vs open").
 
 ## Consequences
 

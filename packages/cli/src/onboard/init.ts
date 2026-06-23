@@ -490,6 +490,10 @@ async function waitForPresence(
  * charter so the primer step can inject it. A harness without a provision renderer degrades to
  * charter-only. Best-effort: a provisioning hiccup never fails init. Returns the charter, if any.
  */
+function hasPermissions(p: { allow: string[]; ask: string[]; deny: string[] }): boolean {
+  return p.allow.length + p.ask.length + p.deny.length > 0;
+}
+
 async function provisionRole(harness: Harness, member: string): Promise<string | undefined> {
   const names = listRoleNames(process.cwd());
   const pick = guard(
@@ -517,9 +521,9 @@ async function provisionRole(harness: Harness, member: string): Promise<string |
     return undefined;
   }
 
-  const servers = role.tools.mcp_servers;
-  if (servers.length === 0) {
-    p.log.info(pc.dim(`${role.role} adds no MCP servers — applying its charter only.`));
+  const { mcp_servers: servers, permissions } = role.tools;
+  if (servers.length === 0 && !hasPermissions(permissions)) {
+    p.log.info(pc.dim(`${role.role} adds no tools — applying its charter only.`));
     return role.charter;
   }
   if (!harness.provision) {
@@ -532,15 +536,23 @@ async function provisionRole(harness: Harness, member: string): Promise<string |
   const sp = p.spinner();
   sp.start(`Provisioning ${role.role} tools into ${harness.label}`);
   try {
-    const result = await harness.provision(servers, 'local');
+    const result = await harness.provision({ servers, permissions }, 'local');
+    const permCount =
+      result.permissions.allow.length +
+      result.permissions.ask.length +
+      result.permissions.deny.length;
     sp.stop(
-      `Provisioned ${result.added.length} MCP server${result.added.length === 1 ? '' : 's'}: ${pc.cyan(result.added.join(', '))} ${pc.dim(`(${result.target})`)}`,
+      `Provisioned ${result.servers.length} MCP server${result.servers.length === 1 ? '' : 's'}` +
+        (result.servers.length ? `: ${pc.cyan(result.servers.join(', '))}` : '') +
+        (permCount ? ` + ${permCount} permission${permCount === 1 ? '' : 's'}` : '') +
+        ` ${pc.dim(`(${result.target})`)}`,
     );
     try {
       writeProvisionManifest(process.cwd(), {
         role: role.role,
         harness: harness.id,
-        mcpServers: result.added,
+        mcpServers: result.servers,
+        permissions: result.permissions,
       });
     } catch (err) {
       p.log.warn(`Couldn't record the provisioning manifest (${(err as Error).message}).`);

@@ -30,6 +30,31 @@ describe('provision manifest', () => {
     expect(typeof m.provisionedAt).toBe('string');
   });
 
+  it('records and unions provisioned permissions across re-provisions', () => {
+    const dir = tmp();
+    writeProvisionManifest(dir, {
+      role: 'reviewer',
+      harness: 'claude-code',
+      mcpServers: [],
+      permissions: { allow: ['read'], ask: ['bash'], deny: [] },
+    });
+    writeProvisionManifest(dir, {
+      role: 'backend',
+      harness: 'claude-code',
+      mcpServers: [],
+      permissions: { allow: ['edit', 'read'], ask: [], deny: [] },
+    });
+    const m = readProvisionManifest(dir)!;
+    expect(m.permissions.allow).toEqual(['edit', 'read']); // sorted union
+    expect(m.permissions.ask).toEqual(['bash']);
+  });
+
+  it('defaults permissions to empty when omitted (back-compatible manifest)', () => {
+    const dir = tmp();
+    writeProvisionManifest(dir, { role: 'x', harness: 'h', mcpServers: ['s'] });
+    expect(readProvisionManifest(dir)!.permissions).toEqual({ allow: [], ask: [], deny: [] });
+  });
+
   it('unions server names across re-provisions (stays a complete removal set)', () => {
     const dir = tmp();
     writeProvisionManifest(dir, {

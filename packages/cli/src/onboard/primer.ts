@@ -120,3 +120,26 @@ export function upsertPrimer(
   writeFileSync(path, content + sep + block + '\n', 'utf8');
   return { path, action: 'appended' };
 }
+
+/**
+ * Remove the managed primer block from `<dir>/AGENTS.md` (ADR 027 reversibility — `musterd
+ * uninstall`), keeping the user's own prose outside the markers. Tidies the seam left behind so the
+ * file doesn't accumulate blank lines. Returns what happened: `removed`, `absent` (no markers), or
+ * `missing` (no AGENTS.md). Never throws on a missing file.
+ */
+export function removePrimer(dir: string): {
+  path: string;
+  action: 'removed' | 'absent' | 'missing';
+} {
+  const path = join(dir, 'AGENTS.md');
+  if (!existsSync(path)) return { path, action: 'missing' };
+  const content = readFileSync(path, 'utf8');
+  const startIdx = content.indexOf(START_PREFIX);
+  const endIdx = content.indexOf(END_MARKER);
+  if (startIdx < 0 || endIdx <= startIdx) return { path, action: 'absent' };
+  const before = content.slice(0, startIdx).replace(/\n+$/, '');
+  const after = content.slice(endIdx + END_MARKER.length).replace(/^\n+/, '');
+  const joined = [before, after].filter((s) => s.length > 0).join('\n\n');
+  writeFileSync(path, joined.length > 0 ? joined + '\n' : '', 'utf8');
+  return { path, action: 'removed' };
+}

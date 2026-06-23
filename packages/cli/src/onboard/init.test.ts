@@ -26,8 +26,9 @@ const h = vi.hoisted(() => {
       activation: 'run `claude` here',
       scope: 'wired into this folder only',
     })),
-    provision: vi.fn(async (servers: { name: string }[]) => ({
-      added: servers.map((s) => s.name),
+    provision: vi.fn(async (plan: { servers: { name: string }[] }) => ({
+      servers: plan.servers.map((s) => s.name),
+      permissions: { allow: [], ask: [], deny: [] },
       target: 'claude mcp (scope: local)',
     })),
   };
@@ -93,8 +94,9 @@ beforeEach(() => {
     activation: 'run `claude` here',
     scope: 'wired into this folder only',
   });
-  h.harness.provision.mockImplementation(async (servers: { name: string }[]) => ({
-    added: servers.map((s) => s.name),
+  h.harness.provision.mockImplementation(async (plan: { servers: { name: string }[] }) => ({
+    servers: plan.servers.map((s) => s.name),
+    permissions: { allow: [], ask: [], deny: [] },
     target: 'claude mcp (scope: local)',
   }));
 
@@ -278,8 +280,8 @@ describe('runInit — add-agent happy path', () => {
     h.confirmQueue.push(true, true, true); // autojoin, connect, primer
     expect(await runInit()).toBe(0);
     expect(h.harness.provision).toHaveBeenCalled();
-    const servers = h.harness.provision.mock.calls[0]![0] as { name: string }[];
-    expect(servers.map((s) => s.name)).toContain('supabase');
+    const plan = h.harness.provision.mock.calls[0]![0] as { servers: { name: string }[] };
+    expect(plan.servers.map((s) => s.name)).toContain('supabase');
     // manifest records what was provisioned
     const manifest = JSON.parse(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'));
     expect(manifest.mcpServers).toContain('supabase');

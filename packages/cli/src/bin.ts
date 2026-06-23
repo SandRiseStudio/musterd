@@ -9,6 +9,7 @@ import { sendCommand } from './commands/send.js';
 import { serveCommand } from './commands/serve.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
+import { uninstallCommand } from './commands/uninstall.js';
 import { CliError } from './errors.js';
 import { renderBanner } from './render/rows.js';
 import { theme } from './render/theme.js';
@@ -27,6 +28,7 @@ usage:
   musterd status
   musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
   musterd reset [--force] [--no-backup]         wipe the local db + identities back to a clean slate (daemon must be stopped)
+  musterd uninstall [--force]                   remove what musterd added to this folder's harness (servers, permissions, primer)
 
 global flags: --team <slug>  --server <url>  --json  --no-color
 
@@ -60,6 +62,8 @@ async function main(argv: string[]): Promise<number> {
       return reclaimCommand(rest);
     case 'reset':
       return resetCommand(rest);
+    case 'uninstall':
+      return uninstallCommand(rest);
     default:
       throw new CliError(`unknown command "${command}" — run: musterd help`, 2);
   }

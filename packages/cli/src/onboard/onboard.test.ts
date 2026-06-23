@@ -7,7 +7,7 @@ import { claudeCode } from './harnesses/claudeCode.js';
 import { cursor } from './harnesses/cursor.js';
 import { HARNESSES } from './harnesses/index.js';
 import { buildEntry, buildMcpEnv } from './mcpEntry.js';
-import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
+import { classifyPrimerTarget, removePrimer, renderPrimer, upsertPrimer } from './primer.js';
 
 const binding = {
   server: 'http://localhost:4849',
@@ -74,6 +74,41 @@ describe('cursor harness', () => {
     await cursor.configure(buildEntry(binding), binding);
     const written = JSON.parse(readFileSync(join(cwd, '.cursor', 'mcp.json'), 'utf8'));
     expect(written.mcpServers.other).toBeTruthy();
+    expect(written.mcpServers.musterd).toBeTruthy();
+  });
+
+  it('provisions role MCP servers additively and reports no permissions (Cursor has no allowlist)', async () => {
+    await cursor.configure(buildEntry(binding), binding); // seed musterd
+    const result = await cursor.provision!({
+      servers: [
+        {
+          name: 'figma',
+          command: 'npx',
+          args: ['-y', 'figma-mcp'],
+          env: { FIGMA_API_KEY: '${FIGMA_API_KEY}' },
+        },
+      ],
+      permissions: { allow: ['edit'], ask: [], deny: [] },
+    });
+    expect(result.servers).toEqual(['figma']);
+    expect(result.permissions).toEqual({ allow: [], ask: [], deny: [] });
+    const written = JSON.parse(readFileSync(join(cwd, '.cursor', 'mcp.json'), 'utf8'));
+    expect(written.mcpServers.musterd).toBeTruthy(); // untouched
+    expect(written.mcpServers.figma.env.FIGMA_API_KEY).toBe('${FIGMA_API_KEY}'); // reference kept
+  });
+
+  it('unprovisions exactly the named servers, leaving the rest', async () => {
+    await cursor.configure(buildEntry(binding), binding);
+    await cursor.provision!({
+      servers: [{ name: 'figma', command: 'npx', args: [], env: {} }],
+      permissions: { allow: [], ask: [], deny: [] },
+    });
+    await cursor.unprovision!({
+      servers: ['figma'],
+      permissions: { allow: [], ask: [], deny: [] },
+    });
+    const written = JSON.parse(readFileSync(join(cwd, '.cursor', 'mcp.json'), 'utf8'));
+    expect(written.mcpServers.figma).toBeUndefined();
     expect(written.mcpServers.musterd).toBeTruthy();
   });
 });
@@ -164,6 +199,32 @@ describe('agent primer', () => {
     upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
     expect(classifyPrimerTarget(cwd)).toBe('managed');
     expect(upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' })).action).toBe('updated');
+  });
+
+  it('injects a role charter inside the managed block when provided', () => {
+    const block = renderPrimer({
+      member: 'Ada',
+      team: 'dawn',
+      role: 'backend',
+      charter: 'own the data layer',
+    });
+    expect(block).toContain('## Your charter (backend)');
+    expect(block).toContain('own the data layer');
+  });
+
+  it('removePrimer strips the managed block, keeping the user’s prose', () => {
+    writeFileSync(join(cwd, 'AGENTS.md'), '# My project\n\nBuild with care.\n');
+    upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
+    expect(removePrimer(cwd).action).toBe('removed');
+    const out = readFileSync(join(cwd, 'AGENTS.md'), 'utf8');
+    expect(out).toContain('# My project');
+    expect(out).not.toContain('musterd:start');
+  });
+
+  it('removePrimer reports `absent`/`missing` when there is no managed block', () => {
+    expect(removePrimer(cwd).action).toBe('missing');
+    writeFileSync(join(cwd, 'AGENTS.md'), '# Just mine\n');
+    expect(removePrimer(cwd).action).toBe('absent');
   });
 });
 

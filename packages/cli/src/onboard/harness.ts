@@ -31,9 +31,32 @@ export interface ProvisionServer extends McpServerEntry {
   name: string;
 }
 
+/** Harness permission entries, split by disposition (Claude Code's `allow`/`ask`/`deny`). */
+export interface ProvisionPermissions {
+  allow: string[];
+  ask: string[];
+  deny: string[];
+}
+
+/** What a role asks a harness to provision: its MCP servers + permission defaults (ADR 026). */
+export interface ProvisionPlan {
+  servers: ProvisionServer[];
+  permissions: ProvisionPermissions;
+}
+
+/** What `musterd uninstall` asks a harness to remove — by name/value, exactly what was added. */
+export interface UnprovisionPlan {
+  /** MCP server names to remove (role servers + the musterd server itself). */
+  servers: string[];
+  /** Permission entries to remove (only those musterd added — see the manifest, ADR 030). */
+  permissions: ProvisionPermissions;
+}
+
 export interface ProvisionResult {
   /** Names of the MCP servers actually registered (for the uninstall manifest, ADR 030). */
-  added: string[];
+  servers: string[];
+  /** Permission entries *newly* added (not ones the user already had) — recorded for exact removal. */
+  permissions: ProvisionPermissions;
   /** Where they were written (CLI invoked / path). */
   target: string;
   /** Anything the user must do to activate them, if different from the musterd server's. */
@@ -51,9 +74,15 @@ export interface Harness {
   configure: (entry: McpServerEntry, binding: AgentBinding) => Promise<ConfigureResult>;
   /**
    * Provision a role's Universe-2 tools (ADR 026) into this harness — additively, reversibly, and
-   * per-user/local (ADR 027). Each server is registered with per-server idempotency (remove+re-add
-   * only that name, never the user's others). Optional: a harness without a renderer yet degrades
-   * to charter-only. `scope` is `local` in Phase 1 (a `shared` opt-in is a fast-follow).
+   * per-user/local (ADR 027). MCP servers register with per-server idempotency (remove+re-add only
+   * that name, never the user's others); permission defaults merge into the harness's own
+   * allow/ask/deny without clamping. Optional: a harness without a renderer degrades to
+   * charter-only. `scope` is `local` in Phase 1 (a `shared` opt-in is a fast-follow).
    */
-  provision?: (servers: ProvisionServer[], scope?: 'local' | 'shared') => Promise<ProvisionResult>;
+  provision?: (plan: ProvisionPlan, scope?: 'local' | 'shared') => Promise<ProvisionResult>;
+  /**
+   * Reverse a provision (ADR 027 reversibility): remove exactly the named MCP servers and the
+   * listed permission entries this harness added. Best-effort — a missing entry is a no-op.
+   */
+  unprovision?: (plan: UnprovisionPlan, scope?: 'local' | 'shared') => Promise<void>;
 }

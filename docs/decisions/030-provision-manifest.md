@@ -29,17 +29,21 @@ on read through `ProvisionManifestSchema` (hard rule #4):
   "role": "backend",
   "harness": "claude-code",
   "mcpServers": ["supabase"],
+  "permissions": { "allow": ["edit", "read"], "ask": ["bash"], "deny": [] },
   "provisionedAt": "2026-06-23T18:00:00.000Z"
 }
 ```
 
-- **`mcpServers`** is the load-bearing field — the **names** musterd registered, which is exactly
-  what a future `musterd uninstall` passes to `claude mcp remove <name> -s local` to reverse the
-  provision precisely, touching nothing the user added themselves.
-- **Names accumulate across re-provisions (union).** Provisioning a second role keeps the first
-  role's servers in the removal set, so the manifest is always a *complete* record of musterd's
-  footprint; `role` / `harness` / `provisionedAt` reflect the latest provision.
-- **`version`** gates forward-compatible evolution of the shape.
+- **`mcpServers`** + **`permissions`** are the load-bearing fields — the server **names** and the
+  permission **entries** musterd registered, which is exactly what `musterd uninstall` passes to
+  `claude mcp remove <name> -s local` and to the settings-removal step to reverse the provision
+  precisely, touching nothing the user added themselves. `permissions` records only the entries
+  musterd *newly* added (not ones the user already had), so removal never strips a user's own rule.
+- **Both accumulate across re-provisions (union).** Provisioning a second role keeps the first
+  role's servers + permissions in the removal set, so the manifest is always a *complete* record of
+  musterd's footprint; `role` / `harness` / `provisionedAt` reflect the latest provision.
+- **`version`** gates forward-compatible evolution of the shape; `permissions` defaults to empty on
+  read, so an earlier manifest without it still parses.
 
 ### Location + secrecy
 
@@ -53,10 +57,10 @@ init does not warn on it.
 the token, 0600, gitignored); provisioning footprint is a separate concern with a different
 lifecycle and no secret — keeping them apart keeps each file's job singular.
 
-**Scope:** the manifest is *written* in this build; the `musterd uninstall` command that *consumes*
-it is the noted fast-follow (recipe "Settled vs open"). Writing it now is what makes that uninstall
-buildable later without guesswork — closing ADR 027's reversibility gap at the point the footprint
-grows, not after.
+**Built alongside:** `musterd uninstall` (per-folder) now *consumes* this manifest — removing the
+recorded servers + permissions, the musterd server itself, and the managed `AGENTS.md` primer block,
+then clearing the local `.musterd/` state — closing ADR 027's reversibility gap. It is purely local:
+the member stays on the team roster (offline); server-side removal is the v0.3 seat model.
 
 ## Consequences
 

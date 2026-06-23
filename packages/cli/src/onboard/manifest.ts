@@ -17,12 +17,22 @@ import { z } from 'zod';
  */
 export const PROVISION_MANIFEST_FILE = 'provisioned.json';
 
+const PermissionsSchema = z
+  .object({
+    allow: z.array(z.string()).default([]),
+    ask: z.array(z.string()).default([]),
+    deny: z.array(z.string()).default([]),
+  })
+  .default({ allow: [], ask: [], deny: [] });
+
 export const ProvisionManifestSchema = z.object({
   version: z.literal(1),
   role: z.string(),
   harness: z.string(),
   /** MCP server names musterd registered into the harness (removable exactly). */
   mcpServers: z.array(z.string()),
+  /** Permission entries musterd added to the harness's allow/ask/deny (removable exactly). */
+  permissions: PermissionsSchema,
   /** ISO timestamp of the most recent provision. */
   provisionedAt: z.string(),
 });
@@ -50,15 +60,25 @@ export function readProvisionManifest(dir: string): ProvisionManifest | null {
  */
 export function writeProvisionManifest(
   dir: string,
-  entry: { role: string; harness: string; mcpServers: string[] },
+  entry: {
+    role: string;
+    harness: string;
+    mcpServers: string[];
+    permissions?: { allow: string[]; ask: string[]; deny: string[] };
+  },
 ): string {
   const prior = readProvisionManifest(dir);
   const merged = new Set<string>([...(prior?.mcpServers ?? []), ...entry.mcpServers]);
+  const mergePerm = (list: 'allow' | 'ask' | 'deny') =>
+    [
+      ...new Set([...(prior?.permissions[list] ?? []), ...(entry.permissions?.[list] ?? [])]),
+    ].sort();
   const manifest: ProvisionManifest = {
     version: 1,
     role: entry.role,
     harness: entry.harness,
     mcpServers: [...merged].sort(),
+    permissions: { allow: mergePerm('allow'), ask: mergePerm('ask'), deny: mergePerm('deny') },
     provisionedAt: new Date().toISOString(),
   };
   const bindingDir = join(dir, BINDING_DIR);
