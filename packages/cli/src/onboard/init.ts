@@ -13,7 +13,14 @@ import { HARNESSES } from './harnesses/index.js';
 import { writeProvisionManifest } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
 import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
-import { GENERALIST, isBuiltin, listRoleNames, loadRole } from './role.js';
+import {
+  GENERALIST,
+  isBuiltin,
+  listRoleNames,
+  loadRole,
+  resolveRoleLabel,
+  type RoleTemplate,
+} from './role.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -262,7 +269,7 @@ export async function runInit(): Promise<number> {
     );
   }
 
-  // 4) Name the agent -------------------------------------------------------
+  // 4) Name the agent + choose its role -------------------------------------
   const name =
     guard(
       await p.text({
@@ -272,9 +279,13 @@ export async function runInit(): Promise<number> {
         validate: (v) => (v && /\s/.test(v) ? 'no spaces in a member name' : undefined),
       }),
     ).trim() || 'Ada';
-  const role = guard(
-    await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
-  ).trim();
+
+  // The role template is chosen *before* the member is minted, so the roster/primer role label is
+  // derived from it — the label you see matches the tools the agent gets (ADR 038). A non-generalist
+  // pick offers an explicit override; generalist/no-template falls back to a free-text label as
+  // before. Provisioning the template's tools happens later (§5a), once the harness is wired.
+  const template = await selectRole(name);
+  const role = resolveRoleLabel({ template, freeText: await askRoleLabel(template) });
 
   // 4b) Cross-folder name-reuse guard (ADR 020) -----------------------------
   // The name is known now, so this is where the registry check belongs (the early folder guard
@@ -360,12 +371,12 @@ export async function runInit(): Promise<number> {
     return 1;
   }
 
-  // 5a) Provision a role's tools (ADR 026 Universe-2; additive/reversible/local per ADR 027) -----
-  // After the musterd server is wired, optionally apply a role template: it provisions the role's
-  // MCP servers into this harness and contributes a charter to the primer. `generalist` (the
-  // default) provisions nothing extra — only the musterd server + the standard playbook (ADR 028).
-  // Identity is unchanged here — the member's role label was set above; this is Universe-2 only.
-  const charter = await provisionRole(chosen, name);
+  // 5a) Provision the chosen role's tools (ADR 026 Universe-2; additive/reversible/local per ADR 027)
+  // The template was picked in §4 (and already drove the roster label); now that the musterd server
+  // is wired, provision its MCP servers into this harness and pull its charter into the primer.
+  // `generalist`/no template provisions nothing extra — only the musterd server + the standard
+  // playbook (ADR 028). This is Universe-2 only; identity (the role label) was set at mint.
+  const charter = await provisionRoleTools(chosen, template);
 
   // 5b) Seed the agent primer so the agent knows the team working-loop (ADR 012) ----------
   // The prompt is honest about what writing does *at the decision point*: against an existing,
@@ -493,18 +504,13 @@ async function waitForPresence(
 }
 
 /**
- * Offer + apply a role template (ADR 026 §3, provisioning-recipe.md). Lists the built-in seed
- * library plus any `.musterd/roles/*.json`; `generalist` is the default and provisions nothing
- * extra. For a richer role, provisions its MCP servers into the chosen harness (additive/local —
- * ADR 027), records what was added in the uninstall manifest (ADR 030), and returns the role's
- * charter so the primer step can inject it. A harness without a provision renderer degrades to
- * charter-only. Best-effort: a provisioning hiccup never fails init. Returns the charter, if any.
+ * Step 4 — pick the role template *before* the member is minted (ADR 038). Lists the built-in seed
+ * library plus any `.musterd/roles/*.json`; `generalist` is the default and means "no template"
+ * (returns undefined). For a richer pick the template is loaded and returned so its `role` can drive
+ * the roster/primer label (via {@link resolveRoleLabel}) and its tools can be provisioned later
+ * (§5a). A load failure degrades to no-template (warn, return undefined) so init never wedges here.
  */
-function hasPermissions(p: { allow: string[]; ask: string[]; deny: string[] }): boolean {
-  return p.allow.length + p.ask.length + p.deny.length > 0;
-}
-
-async function provisionRole(harness: Harness, member: string): Promise<string | undefined> {
+async function selectRole(member: string): Promise<RoleTemplate | undefined> {
   const names = listRoleNames(process.cwd());
   const pick = guard(
     await p.select({
@@ -522,14 +528,55 @@ async function provisionRole(harness: Harness, member: string): Promise<string |
     }),
   );
   if (pick === GENERALIST) return undefined;
-
-  let role;
   try {
-    role = loadRole(process.cwd(), pick);
+    return loadRole(process.cwd(), pick);
   } catch (err) {
     p.log.warn(`Couldn't load role "${pick}" (${(err as Error).message}) — skipping provisioning.`);
     return undefined;
   }
+}
+
+/**
+ * The free-text side of the role label (ADR 038, Decision #2). With **no template** (generalist /
+ * unloadable) it's the same optional free-text prompt as before. With a **template** the label is
+ * already settled to `template.role`, so we only offer an explicit *override gate* (default: keep);
+ * accepting it opens the free-text prompt. Returns the raw free text (or undefined when the template
+ * label is kept) — {@link resolveRoleLabel} applies the precedence.
+ */
+async function askRoleLabel(template: RoleTemplate | undefined): Promise<string | undefined> {
+  if (!template) {
+    return guard(
+      await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
+    ).trim();
+  }
+  const override = guard(
+    await p.confirm({
+      message: `Override the role label ${pc.bold(template.role)}? ${pc.dim('(it matches the tools you chose — default keeps it)')}`,
+      initialValue: false,
+    }),
+  );
+  if (!override) return undefined;
+  return guard(
+    await p.text({ message: 'Role label', placeholder: template.role, defaultValue: '' }),
+  ).trim();
+}
+
+/**
+ * Step 5a — provision the already-chosen template's tools (ADR 026 §3, provisioning-recipe.md).
+ * Provisions its MCP servers into the chosen harness (additive/local — ADR 027), records what was
+ * added in the uninstall manifest (ADR 030), and returns the role's charter so the primer step can
+ * inject it. No template → nothing to do. A harness without a provision renderer degrades to
+ * charter-only. Best-effort: a provisioning hiccup never fails init. Returns the charter, if any.
+ */
+function hasPermissions(p: { allow: string[]; ask: string[]; deny: string[] }): boolean {
+  return p.allow.length + p.ask.length + p.deny.length > 0;
+}
+
+async function provisionRoleTools(
+  harness: Harness,
+  role: RoleTemplate | undefined,
+): Promise<string | undefined> {
+  if (!role) return undefined;
 
   const { mcp_servers: servers, permissions } = role.tools;
   if (servers.length === 0 && !hasPermissions(permissions)) {

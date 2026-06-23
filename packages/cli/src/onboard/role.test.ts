@@ -9,6 +9,7 @@ import {
   listRoleNames,
   loadRole,
   parseRole,
+  resolveRoleLabel,
   userRolesDir,
 } from './role.js';
 
@@ -133,5 +134,29 @@ describe('loadRole / listRoleNames', () => {
     const names = listRoleNames(tmp());
     expect(names).toContain(GENERALIST);
     expect(names).not.toContain('data');
+  });
+});
+
+describe('resolveRoleLabel', () => {
+  const backend = parseRole({ role: 'backend', charter: 'own the server' });
+
+  it('derives the label from the template when no free text is given', () => {
+    expect(resolveRoleLabel({ template: backend })).toBe('backend');
+    expect(resolveRoleLabel({ template: backend, freeText: '' })).toBe('backend');
+    expect(resolveRoleLabel({ template: backend, freeText: '   ' })).toBe('backend');
+  });
+
+  it('lets an explicit free-text override win over the template', () => {
+    expect(resolveRoleLabel({ template: backend, freeText: 'platform' })).toBe('platform');
+    expect(resolveRoleLabel({ template: backend, freeText: '  platform  ' })).toBe('platform');
+  });
+
+  it('falls back to empty for generalist / no template with no free text', () => {
+    expect(resolveRoleLabel({})).toBe('');
+    expect(resolveRoleLabel({ template: undefined, freeText: '' })).toBe('');
+  });
+
+  it('uses free text alone when there is no template', () => {
+    expect(resolveRoleLabel({ freeText: 'docs' })).toBe('docs');
   });
 });

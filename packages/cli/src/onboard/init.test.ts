@@ -240,7 +240,7 @@ describe('runInit — add-agent happy path', () => {
 
   it('declining the connect step prints manual setup and exits 0', async () => {
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
-    h.selectQueue.push('new', 'claude-code');
+    h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role-template
     h.confirmQueue.push(true, false); // autojoin yes, connect NO
     expect(await runInit()).toBe(0);
     expect(h.harness.configure).not.toHaveBeenCalled();
@@ -249,7 +249,7 @@ describe('runInit — add-agent happy path', () => {
   it('returns 1 when minting the member fails', async () => {
     h.http.addMember.mockRejectedValue(new Error('member "Ada" already exists'));
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
-    h.selectQueue.push('new', 'claude-code');
+    h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role-template
     h.confirmQueue.push(true); // autojoin (mint happens before connect)
     expect(await runInit()).toBe(1);
   });
@@ -274,11 +274,17 @@ describe('runInit — add-agent happy path', () => {
     expect(await runInit()).toBe(0);
   });
 
-  it('provisioning a richer role calls provision and injects its charter', async () => {
-    h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
-    h.selectQueue.push('new', 'claude-code', 'backend'); // intent, harness, role = backend
-    h.confirmQueue.push(true, true, true); // autojoin, connect, primer
+  it('provisioning a richer role calls provision and derives the label from the template', async () => {
+    h.textQueue.push('dawn', 'nick', '', 'Ada'); // slug, you, your-role, name (no free-text role)
+    h.selectQueue.push('new', 'claude-code', 'backend'); // intent, harness, role-template = backend
+    h.confirmQueue.push(false, true, true, true); // override-label NO, autojoin, connect, primer
     expect(await runInit()).toBe(0);
+    // roster/primer label is derived from the chosen template, not a free-text prompt (ADR 038)
+    expect(h.http.addMember).toHaveBeenCalledWith('dawn', {
+      name: 'Ada',
+      kind: 'agent',
+      role: 'backend',
+    });
     expect(h.harness.provision).toHaveBeenCalled();
     const plan = h.harness.provision.mock.calls[0]![0] as { servers: { name: string }[] };
     expect(plan.servers.map((s) => s.name)).toContain('supabase');
@@ -286,8 +292,22 @@ describe('runInit — add-agent happy path', () => {
     const manifest = JSON.parse(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'));
     expect(manifest.mcpServers).toContain('supabase');
     expect(manifest.role).toBe('backend');
-    // the role's charter lands in the managed primer block
+    // the role's charter lands in the managed primer block, labelled with the derived role
     expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).toContain('## Your charter');
+  });
+
+  it('an explicit free-text override wins over the template-derived label', async () => {
+    h.textQueue.push('dawn', 'nick', '', 'Ada', 'platform'); // …name, then the override label
+    h.selectQueue.push('new', 'claude-code', 'backend'); // role-template = backend
+    h.confirmQueue.push(true, true, true, true); // override-label YES, autojoin, connect, primer
+    expect(await runInit()).toBe(0);
+    expect(h.http.addMember).toHaveBeenCalledWith('dawn', {
+      name: 'Ada',
+      kind: 'agent',
+      role: 'platform',
+    });
+    // the tools still come from the chosen template, regardless of the label override
+    expect(h.harness.provision).toHaveBeenCalled();
   });
 
   it('appends to an existing unmarked AGENTS.md (primer target = unmarked)', async () => {

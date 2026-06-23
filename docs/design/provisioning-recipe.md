@@ -52,6 +52,13 @@ tools:                            # → LOCAL harness; adapter PROVISIONS (muste
 
 The **server stores only the identity half** (what it enforces + projects to the roster). The **`tools:` block never goes to the server** — musterd-server stays the authority on *capabilities*, not a registry of harness tooling.
 
+Because both projections come from **one** template, the agent's **role label** (the identity-half
+projection, on the roster + in the primer) is **derived from the chosen template** rather than typed
+independently: `init` picks the template *before* minting the member and feeds the template's `role`
+into the mint, so the label you see always matches the tools you got. A free-text label is only an
+explicit override or the generalist/no-template fallback (**ADR 038**, client-side at mint — no wire
+change).
+
 ## 2. Two universes (ADR 026)
 
 - **Universe 1 — musterd's own acts** (`team_*`): governed by `can_message` / `can_flag_urgent` / `can_observe` / `visibility_level`, **enforced server-side**.
@@ -124,4 +131,15 @@ musterd works fully in a plain shared folder, where per-role tooling degrades to
 
 **Built in Phase 1:** Role JSON schema + zod parser; the built-in seed library; the **Claude Code** renderer (`provision()` → `claude mcp add -s local`, per-server idempotency, `${ENV}` passed verbatim as a reference — Claude Code expands `${VAR}`/`${VAR:-default}` at launch, musterd never resolves/bakes it; **permission defaults merged into `.claude/settings.local.json`** additively); the **Cursor** renderer (MCP servers merged into `.cursor/mcp.json`; Cursor has no managed allowlist, so permissions degrade to declared/charter); the **Codex** renderer (MCP servers merged into the project-local `.codex/config.toml` via a minimal `[mcp_servers.*]`-scoped TOML helper — no TOML dep; no permission model, so permissions degrade like Cursor; ADR 031) — **all three required harnesses are now complete**; the manifest (servers **+ permissions**); charter → `AGENTS.md` (additive, reuses `upsertPrimer`); init's role step (`generalist`=nothing extra; identity unchanged); **`musterd uninstall`** — per-folder reversal that consumes the manifest to remove exactly what init added (role servers + permissions, the musterd server, the primer block) and clears local `.musterd/` state (the member stays on the roster — server-side removal is v0.3); **`musterd role`** — `list` / `show` / `create` for role templates, where `create --from <builtin>` round-trips a built-in into an editable `.musterd/roles/<name>.json` (which then overrides the built-in of that name).
 
-**Open / fast-follow (not built):** the **free-text role label vs. role template** unification — today an agent's roster/primer role is a free-text label set independently of which template provisions its tools, so the two can drift. The fix (template pick drives the label; free-text only as fallback/override) was **deferred until claim-on-first-use lands** — which it now has (ADR 032), so the hook is open: claim assigns the seat's role (a `{role}` claim already mints `<role>-<n>` with that role), and a template pick can drive it next. Not yet wired; the human `init`/`createTeam` role prompt stays free-text (no template for humans). • `resource_scopes` stay **declared-only** (coordination, not a sandbox — ADR 026 §4). • how charter injection updates a *running* session (vs next session) on a re-claim. (All the v0.3-gated identity/claim/governance work — seats, the claim handshake, grants, server-side capability enforcement — remains §5–§6 / SPEC Appendix A, future.)
+**Built (ADR 038 — role label from the template):** the **free-text role label vs. role template**
+unification. `init` now **picks the role template before minting the member** and **derives the
+roster/primer role label from it** (`addMember`'s existing `role` field — no wire change), so the
+label you see always matches the tools you got. Precedence is **explicit free-text override >
+template `role` > empty**, factored into a pure `resolveRoleLabel`; a non-generalist pick offers an
+explicit *override gate* (default keeps the template label), while generalist/no-template falls back
+to the free-text prompt as before. `claim --role` / `team add --role` are already label-aligned (they
+mint `<role>` with that role) and stay out of scope — they label without provisioning; `init` is
+where a template both labels *and* provisions. The human `init`/`createTeam` creator-role prompt
+stays free-text (no template for humans).
+
+**Open / fast-follow (not built):** `resource_scopes` stay **declared-only** (coordination, not a sandbox — ADR 026 §4). • how charter injection updates a *running* session (vs next session) on a re-claim. (All the v0.3-gated identity/claim/governance work — seats, the claim handshake, grants, server-side capability enforcement — remains §5–§6 / SPEC Appendix A, future.)

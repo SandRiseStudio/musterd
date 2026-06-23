@@ -127,6 +127,23 @@ export function isBuiltin(name: string): boolean {
   return name in BUILTIN_ROLES;
 }
 
+/**
+ * Derive an agent's roster/primer **role label** from the role template that provisions its tools,
+ * so the label you see always matches the tooling you got (provisioning-recipe.md §1 "two
+ * projections"; ADR 038). Precedence: an **explicit free-text override wins**; otherwise the
+ * **chosen template's `role`** drives it; otherwise **empty** (generalist / no template — labelling
+ * is opt-in, the ADR 028 default-nothing posture). Pure + side-effect-free so the interactive init
+ * flow stays a thin caller (hard-to-test `@clack` prompts kept out of the logic).
+ */
+export function resolveRoleLabel(opts: {
+  template?: RoleTemplate | undefined;
+  freeText?: string | undefined;
+}): string {
+  const explicit = opts.freeText?.trim();
+  if (explicit) return explicit;
+  return opts.template?.role ?? '';
+}
+
 function zodMessage(err: unknown): string {
   if (err instanceof z.ZodError) {
     return err.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
