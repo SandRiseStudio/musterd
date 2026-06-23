@@ -309,7 +309,7 @@ describe('cross-folder name-reuse (nameBoundElsewhere)', () => {
 
 describe('harness registry', () => {
   it('exposes claude-code and cursor with distinct surfaces', () => {
-    expect(HARNESSES.map((h) => h.id).sort()).toEqual(['claude-code', 'cursor']);
+    expect(HARNESSES.map((h) => h.id).sort()).toEqual(['claude-code', 'codex', 'cursor']);
     expect(claudeCode.surface).toBe('claude-code');
     expect(cursor.surface).toBe('cursor');
   });
