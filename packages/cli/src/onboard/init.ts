@@ -108,8 +108,9 @@ export async function runInit(): Promise<number> {
 
   // 1b) Folder-suitability guard (ADR 020) ----------------------------------
   // Before minting a member / writing a binding / appending a primer, surface a confirm if this
-  // folder looks like the wrong place (the musterd source tree, an already-bound folder, an
-  // unrelated AGENTS.md). Warn, don't block — the happy path is one extra keystroke.
+  // folder looks like the wrong place (the musterd source tree, an already-bound folder). Warn,
+  // don't block — the happy path is one extra keystroke. (An unrelated AGENTS.md is handled
+  // in-context at the primer step, §5b, not warned here — 2026-06-23 dogfood.)
   if (!(await confirmInitTarget())) return 0;
 
   // 2) Team -----------------------------------------------------------------
@@ -308,7 +309,7 @@ export async function runInit(): Promise<number> {
   // on launch for the common solo case; either way a second session as this member is refused cleanly.
   const autojoin = guard(
     await p.confirm({
-      message: `Auto-join the team when ${pc.cyan(name)} starts? (otherwise the agent joins when it calls team_join)`,
+      message: `Have ${pc.cyan(name)} join the team automatically on launch? ${pc.dim('(otherwise it stays offline until it joins on its own)')}`,
       initialValue: true,
     }),
   );
@@ -323,7 +324,7 @@ export async function runInit(): Promise<number> {
 
   const write = guard(
     await p.confirm({
-      message: `Write the musterd MCP server into ${pc.bold(chosen.label)} for you?`,
+      message: `Connect musterd to ${pc.bold(chosen.label)} now? ${pc.dim('(adds the musterd tools so the agent can reach the team)')}`,
     }),
   );
   if (!write) {
@@ -382,7 +383,7 @@ export async function runInit(): Promise<number> {
   p.log.info(
     autojoin
       ? `${pc.cyan(name)} joins the team automatically on launch.`
-      : `In the session, tell ${pc.cyan(name)} to join the team (it calls ${pc.yellow('team_join')}).`,
+      : `In the session, just ask ${pc.cyan(name)} to join the team. ${pc.dim('(behind the scenes it calls the team_join tool)')}`,
   );
   const sw = p.spinner();
   sw.start(`Waiting for ${name} to join`);
@@ -396,7 +397,7 @@ export async function runInit(): Promise<number> {
     p.note(
       (autojoin
         ? `When you start ${chosen.label}, ${name} joins automatically.\n`
-        : `Start ${chosen.label} and have ${name} call ${pc.yellow('team_join')}.\n`) +
+        : `Start ${chosen.label} and ask ${name} to join the team.\n`) +
         `Check any time with ${pc.yellow('musterd status')}.`,
       'No rush',
     );
@@ -473,8 +474,8 @@ async function waitForPresence(
 }
 
 /**
- * Folder-suitability guard (ADR 020). If the target folder looks wrong — the musterd source tree,
- * already bound to a member, or holding an unrelated AGENTS.md — warn and ask before init mints a
+ * Folder-suitability guard (ADR 020). If the target folder looks wrong — the musterd source tree
+ * or already bound to a member — warn and ask before init mints a
  * member / writes a binding / appends a primer. Default-allow (guard, not block): the user can
  * accept and run anywhere they genuinely mean to, including this repo for dogfooding. Best-effort:
  * a guard failure never blocks a genuine run. Returns false only when the user declines.
