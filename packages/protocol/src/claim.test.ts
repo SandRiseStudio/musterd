@@ -5,6 +5,7 @@ import {
   isClaimed,
   nextRoleHandle,
   parseClaimPolicy,
+  ResolvedSessionSchema,
 } from './index.js';
 
 describe('parseClaimPolicy (MUSTERD_CLAIM grammar)', () => {
@@ -50,6 +51,17 @@ describe('nextRoleHandle (pool seats)', () => {
 
   it('ignores unrelated member names', () => {
     expect(nextRoleHandle('backend', ['Ada', 'frontend-1'])).toBe('backend-1');
+  });
+});
+
+describe('ResolvedSessionSchema (ADR 034 live-claim channel)', () => {
+  it('requires a member and a token', () => {
+    expect(ResolvedSessionSchema.parse({ member: 'Ada', token: 'mskd_x' })).toEqual({
+      member: 'Ada',
+      token: 'mskd_x',
+    });
+    expect(() => ResolvedSessionSchema.parse({ member: 'Ada' })).toThrow();
+    expect(() => ResolvedSessionSchema.parse({ member: '', token: 't' })).toThrow();
   });
 });
 

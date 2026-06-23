@@ -86,14 +86,41 @@ export async function claimAndJoin(
   target: ClaimTarget,
 ): Promise<ClaimResult> {
   const result = await claimSeat(client, config, target);
-  client.setIdentity(result.member, result.token);
+  await finishClaim(client, config, result.member, result.token);
+  return result;
+}
+
+/**
+ * Adopt a seat an external `musterd claim --for <code>` already minted for this running session (ADR
+ * 034) and go online — the live-delivery counterpart of `claimAndJoin`. The seat exists; we just bind
+ * identity, persist, and `join()`. No-op once already joined (an in-session `team_join` may have won
+ * the race).
+ */
+export async function adoptIdentity(
+  client: MusterdClient,
+  config: McpConfig,
+  member: string,
+  token: string,
+): Promise<void> {
+  if (client.joined) return;
+  await finishClaim(client, config, member, token);
+}
+
+/** Bind identity, persist the seat into the workspace binding, clear the marker, and occupy. */
+async function finishClaim(
+  client: MusterdClient,
+  config: McpConfig,
+  member: string,
+  token: string,
+): Promise<void> {
+  client.setIdentity(member, token);
   const binding: Binding = {
     server: config.server,
     team: config.team,
-    member: result.member,
-    token: result.token,
+    member,
+    token,
     surface: config.surface,
-    claim: { mode: 'seat', name: result.member },
+    claim: { mode: 'seat', name: member },
   };
   try {
     saveBinding(process.cwd(), binding);
@@ -102,7 +129,6 @@ export async function claimAndJoin(
   }
   clearPendingMarker(config);
   await client.join();
-  return result;
 }
 
 function conflict(name: string, members: MemberSummary[]): ClaimConflictError {

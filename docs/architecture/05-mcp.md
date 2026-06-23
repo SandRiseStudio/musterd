@@ -159,12 +159,12 @@ src/
   index.ts        // stdio MCP server; registers the 6 tools; reads env config;
                   //   installShutdownHandlers (drop presence + exit on host teardown);
                   //   autojoin(): claim+join on launch when a default claim exists (ADR 032);
-                  //   writes a pending marker when unclaimed (ADR 033)
+                  //   when unclaimed: writes a pending marker (ADR 033) + startResolutionWatcher (ADR 034)
   config.ts       // env -> { server, team, member?, token?, surface, claim, connId, claimCode }; validates
   client.ts       // HTTP + background WS client; join()/leave()/close(); `joined`/`claimed`;
                   //   setIdentity() (late claim); addMember() (tokenless mint); buffers live while joined
-  claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() (shared by team_join + autojoin)
-  pending.ts      // pending-presence markers (.musterd/pending/<code>.json) — write + clear
+  claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() + adoptIdentity() (live claim, ADR 034)
+  pending.ts      // pending markers (.musterd/pending/<code>.json) + resolution sidecars (ADR 034)
   tools/
     join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)
@@ -192,6 +192,7 @@ src/
 - A second session for the same Member calling `team_join` **takes over** (newest-wins, ADR 017); the first is `superseded` and goes dormant without reconnecting.
 - `team_send` / `team_inbox_check` **before** `team_join` return the not-ready guard (no message sent, cursor untouched): the *pending* "claim a seat" hint when unclaimed, or the dormant "call team_join first" when claimed-but-not-joined.
 - An **unclaimed** binding (claim policy only): boot is a **pending presence** — a `.musterd/pending/<code>.json` marker exists; `team_join {as:'Ada'}` auto-mints Ada, writes the binding, and goes online; `{role:'backend'}` claims `backend-1`. Claiming a name another live session holds returns `claim_conflict`.
+- **Live external claim (ADR 034):** while a pending session is running, `musterd claim Ada --for <code>` drops a `<code>.resolved.json` sidecar; the session's resolution watcher adopts the seat and goes online **without a relaunch** (the sidecar is read-once + deleted; the binding is the durable fallback for a missed watcher).
 - After join: `team_send {act:'status_update', body:'...'}` persists a message visible to a CLI `inbox` on the same team.
 - A CLI `send --to Ada` then `team_inbox_check` returns that message once and advances the cursor (second check returns nothing).
 - `accept` without `reply_to` → validation error surfaced as a tool error string.

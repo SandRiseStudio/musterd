@@ -1,7 +1,13 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BINDING_DIR, BINDING_FILE, BindingSchema } from '@musterd/protocol';
+import {
+  BINDING_DIR,
+  BINDING_FILE,
+  BindingSchema,
+  PENDING_DIR,
+  RESOLVED_SUFFIX,
+} from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
@@ -128,5 +134,25 @@ describe('musterd claim (L2 floor, ADR 032)', () => {
     await expect(run(['Ada', '--team', 'dawn'])).rejects.toMatchObject({ exitCode: 2 });
     const ok = await run(['Ada', '--team', 'dawn', '--for', 'AB12']);
     expect(ok.code).toBe(0);
+  });
+
+  it('hands the seat to a waiting session via a resolution sidecar, clearing the marker (ADR 034)', async () => {
+    writePending(cwd, {
+      code: 'AB12',
+      team: 'dawn',
+      workspace: cwd,
+      surface: 'claude-code',
+      connId: 'c1',
+      ts: 1,
+    });
+    const { out } = await run(['Ada', '--team', 'dawn', '--for', 'AB12']);
+    expect(out).toContain('going online as Ada now');
+    // marker consumed, resolution dropped with the token
+    expect(existsSync(join(cwd, BINDING_DIR, PENDING_DIR, 'AB12.json'))).toBe(false);
+    const resolved = JSON.parse(
+      readFileSync(join(cwd, BINDING_DIR, PENDING_DIR, `AB12${RESOLVED_SUFFIX}`), 'utf8'),
+    );
+    expect(resolved.member).toBe('Ada');
+    expect(resolved.token).toMatch(/^mskd_/);
   });
 });

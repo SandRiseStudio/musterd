@@ -1,10 +1,20 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   BINDING_DIR,
   PENDING_DIR,
   PendingSessionSchema,
+  RESOLVED_SUFFIX,
   type PendingSession,
+  type ResolvedSession,
 } from '@musterd/protocol';
 
 export type PendingMarker = PendingSession;
@@ -48,7 +58,7 @@ export function listPendingForWorkspace(startDir: string, team: string): Pending
   if (!existsSync(dir)) return [];
   const out: PendingMarker[] = [];
   for (const name of readdirSync(dir)) {
-    if (!name.endsWith('.json')) continue;
+    if (!name.endsWith('.json') || name.endsWith(RESOLVED_SUFFIX)) continue;
     try {
       const parsed = PendingSessionSchema.parse(JSON.parse(readFileSync(join(dir, name), 'utf8')));
       if (parsed.team === team) out.push(parsed);
@@ -65,5 +75,28 @@ export function consumePending(startDir: string, code: string): void {
     rmSync(join(pendingDir(startDir), `${code}.json`), { force: true });
   } catch {
     // already gone / unwritable — nothing to do
+  }
+}
+
+/**
+ * Hand a freshly-claimed identity to an *already-running* pending session (ADR 034): drop a 0600
+ * resolution sidecar `<code>.resolved.json` next to the marker so the adapter watching that code
+ * adopts the seat and goes online. Carries the token → 0600; the adapter deletes it on pickup, so
+ * its on-disk life is one poll interval. Best-effort: a write failure just means the running session
+ * picks the seat up on its next launch / `team_join` (the binding is still written).
+ */
+export function writeResolution(startDir: string, code: string, resolved: ResolvedSession): void {
+  try {
+    const dir = pendingDir(startDir);
+    mkdirSync(dir, { recursive: true });
+    const p = join(dir, `${code}${RESOLVED_SUFFIX}`);
+    writeFileSync(p, JSON.stringify(resolved) + '\n', 'utf8');
+    try {
+      chmodSync(p, 0o600);
+    } catch {
+      // best-effort on platforms without chmod semantics
+    }
+  } catch {
+    // delivery to a live session is best-effort; the binding is the durable channel
   }
 }

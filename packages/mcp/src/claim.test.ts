@@ -1,12 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BINDING_DIR, BINDING_FILE, PENDING_DIR } from '@musterd/protocol';
+import { BINDING_DIR, BINDING_FILE, PENDING_DIR, RESOLVED_SUFFIX } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ClaimConflictError, claimAndJoin, claimSeat } from './claim.js';
+import { adoptIdentity, ClaimConflictError, claimAndJoin, claimSeat } from './claim.js';
 import type { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
-import { clearPendingMarker, writePendingMarker } from './pending.js';
+import { clearPendingMarker, readAndConsumeResolution, writePendingMarker } from './pending.js';
+import { startResolutionWatcher } from './index.js';
 
 function baseConfig(over: Partial<McpConfig> = {}): McpConfig {
   return {
@@ -130,6 +131,96 @@ describe('pending markers (ADR 033)', () => {
     expect(marker.token).toBeUndefined();
     clearPendingMarker(config, cwd);
     expect(existsSync(p!)).toBe(false);
+  });
+});
+
+describe('live claim adoption (ADR 034)', () => {
+  let cwd: string;
+  beforeEach(() => {
+    cwd = mkdtempSync(join(tmpdir(), 'musterd-adopt-'));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  function resolutionFile(code: string): string {
+    return join(cwd, BINDING_DIR, PENDING_DIR, `${code}${RESOLVED_SUFFIX}`);
+  }
+  function dropResolution(config: McpConfig, body: unknown): void {
+    writePendingMarker(config, cwd); // the discovery marker the watcher clears on pickup
+    const p = resolutionFile(config.claimCode);
+    writeFileSync(p, JSON.stringify(body));
+  }
+
+  it('readAndConsumeResolution returns the seat and deletes both files', () => {
+    const config = baseConfig();
+    dropResolution(config, { member: 'Ada', token: 'mskd_x' });
+    const resolved = readAndConsumeResolution(config, cwd);
+    expect(resolved).toEqual({ member: 'Ada', token: 'mskd_x' });
+    expect(existsSync(resolutionFile('AB12'))).toBe(false);
+    expect(existsSync(join(cwd, BINDING_DIR, PENDING_DIR, 'AB12.json'))).toBe(false);
+  });
+
+  it('drops a malformed resolution and keeps waiting (returns null)', () => {
+    const config = baseConfig();
+    dropResolution(config, { member: 'Ada' }); // no token
+    expect(readAndConsumeResolution(config, cwd)).toBeNull();
+    expect(existsSync(resolutionFile('AB12'))).toBe(false); // the bad file is cleared
+  });
+
+  it('returns null when nothing is waiting', () => {
+    expect(readAndConsumeResolution(baseConfig(), cwd)).toBeNull();
+  });
+
+  it('adoptIdentity binds + joins, and no-ops once already joined', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+    const setIdentity = vi.fn();
+    const join = vi.fn(async () => undefined);
+    await adoptIdentity(
+      fakeClient({ setIdentity: setIdentity as never, join: join as never }),
+      baseConfig(),
+      'Ada',
+      'mskd_x',
+    );
+    expect(setIdentity).toHaveBeenCalledWith('Ada', 'mskd_x');
+    expect(join).toHaveBeenCalled();
+    expect(JSON.parse(readFileSync(join2(cwd), 'utf8')).member).toBe('Ada');
+
+    const join2nd = vi.fn(async () => undefined);
+    await adoptIdentity(
+      fakeClient({ joined: true as never, join: join2nd as never }),
+      baseConfig(),
+      'Bo',
+      't',
+    );
+    expect(join2nd).not.toHaveBeenCalled(); // already joined → no double-occupy
+  });
+
+  it('startResolutionWatcher brings a pending session online when a resolution appears', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+    const config = baseConfig();
+    let member: string | undefined;
+    let joined = false;
+    const client = fakeClient({
+      get claimed() {
+        return Boolean(member);
+      },
+      get joined() {
+        return joined;
+      },
+      setIdentity: ((m: string) => {
+        member = m;
+      }) as never,
+      join: (async () => {
+        joined = true;
+      }) as never,
+    });
+    const stop = startResolutionWatcher(client, config, { intervalMs: 5 });
+    dropResolution(config, { member: 'Ada', token: 'mskd_x' });
+    await vi.waitFor(() => expect(joined).toBe(true), { timeout: 500 });
+    expect(member).toBe('Ada');
+    stop();
   });
 });
 

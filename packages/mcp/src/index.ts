@@ -2,10 +2,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { bind } from './bind.js';
-import { claimAndJoin, type ClaimTarget } from './claim.js';
+import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
 import { MusterdClient } from './client.js';
 import { isClaimedConfig, loadMcpConfig, type McpConfig } from './config.js';
-import { writePendingMarker } from './pending.js';
+import { readAndConsumeResolution, writePendingMarker } from './pending.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
 import { registerJoin } from './tools/join.js';
 import { registerLeave } from './tools/leave.js';
@@ -102,19 +102,59 @@ export async function autojoin(client: MusterdClient, config: McpConfig): Promis
   }
 }
 
+/**
+ * Watch for a resolution an external `musterd claim --for <code>` drops for this pending session (ADR
+ * 034) and adopt it — bringing an already-running unclaimed adapter online without a relaunch. Polls
+ * (portable + testable, no `fs.watch`); the interval is unref'd so it never holds the process open.
+ * Stops itself once the session is claimed (here or via an in-session `team_join`). Returns a stop fn.
+ */
+export function startResolutionWatcher(
+  client: MusterdClient,
+  config: McpConfig,
+  opts: { intervalMs?: number } = {},
+): () => void {
+  let stopped = false;
+  const tick = async (): Promise<void> => {
+    if (stopped || client.claimed || client.joined) return;
+    const resolved = readAndConsumeResolution(config);
+    if (!resolved) return;
+    try {
+      await adoptIdentity(client, config, resolved.member, resolved.token);
+    } catch (err) {
+      process.stderr.write(`musterd claim adoption failed: ${(err as Error).message}\n`);
+    }
+  };
+  const timer = setInterval(() => void tick(), opts.intervalMs ?? 1000);
+  timer.unref?.();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
 async function main(): Promise<void> {
   const config = loadMcpConfig();
   const client = new MusterdClient(config);
   await bind(client); // dormant: reachability only, no presence claimed
   // A session that starts unclaimed is a pending presence — drop a marker so `musterd claim` can
-  // find it (ADR 033). Best-effort; removed once the session claims a seat.
-  if (!isClaimedConfig(config)) writePendingMarker(config);
+  // find it (ADR 033) and watch for an external claim that brings it online live (ADR 034).
+  let stopWatcher: (() => void) | undefined;
+  if (!isClaimedConfig(config)) {
+    writePendingMarker(config);
+    stopWatcher = startResolutionWatcher(client, config);
+  }
   const server = buildMcpServer(client, config);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   await autojoin(client, config);
 
-  installShutdownHandlers({ close: () => client.close(), transport });
+  installShutdownHandlers({
+    close: () => {
+      stopWatcher?.();
+      client.close();
+    },
+    transport,
+  });
 }
 
 // Run only when invoked directly (not when imported by tests).

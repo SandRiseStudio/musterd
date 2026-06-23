@@ -64,6 +64,21 @@ export function formatClaimPolicy(policy: ClaimPolicy): string {
  * file — the marker is the *visibility + disambiguation* affordance, not an IPC channel.
  */
 export const PENDING_DIR = 'pending';
+
+/**
+ * The per-session **resolution** an external `musterd claim --for <code>` drops next to a pending
+ * marker (ADR 034, extends ADR 033) so an *already-running* unclaimed adapter can adopt the seat and
+ * go online without relaunching. Written `<code>.resolved.json` (0600); unlike the marker it **does**
+ * carry the token, so it is a secret — the adapter reads it once and deletes it immediately (its
+ * on-disk life is one poll interval). Keyed by the same `code` as the marker it answers.
+ */
+export const RESOLVED_SUFFIX = '.resolved.json';
+export const ResolvedSessionSchema = z.object({
+  member: z.string().min(1),
+  token: z.string().min(1),
+});
+export type ResolvedSession = z.infer<typeof ResolvedSessionSchema>;
+
 export const PendingSessionSchema = z.object({
   /** Short human-typable disambiguation code, shown in the session's first output. */
   code: z.string().min(1),

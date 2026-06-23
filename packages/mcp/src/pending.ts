@@ -1,6 +1,13 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { BINDING_DIR, PENDING_DIR, type PendingSession } from '@musterd/protocol';
+import {
+  BINDING_DIR,
+  PENDING_DIR,
+  RESOLVED_SUFFIX,
+  ResolvedSessionSchema,
+  type PendingSession,
+  type ResolvedSession,
+} from '@musterd/protocol';
 import type { McpConfig } from './config.js';
 
 /**
@@ -25,6 +32,36 @@ function nearestMusterdDir(startDir: string): string {
 
 function markerPath(startDir: string, code: string): string {
   return join(nearestMusterdDir(startDir), PENDING_DIR, `${code}.json`);
+}
+
+function resolutionPath(startDir: string, code: string): string {
+  return join(nearestMusterdDir(startDir), PENDING_DIR, `${code}${RESOLVED_SUFFIX}`);
+}
+
+/**
+ * Pick up a resolution `musterd claim --for <code>` left for *this* session, if any (ADR 034). Reads
+ * `<code>.resolved.json`, then **deletes it immediately** (and the marker) so the token's on-disk life
+ * is one poll interval. Returns the seat to adopt, or null when nothing is waiting / it's malformed.
+ */
+export function readAndConsumeResolution(
+  config: McpConfig,
+  startDir: string = process.cwd(),
+): ResolvedSession | null {
+  const p = resolutionPath(startDir, config.claimCode);
+  if (!existsSync(p)) return null;
+  let parsed: ResolvedSession | null = null;
+  try {
+    parsed = ResolvedSessionSchema.parse(JSON.parse(readFileSync(p, 'utf8')));
+  } catch {
+    parsed = null; // malformed/partial write — drop it below and keep waiting
+  }
+  try {
+    rmSync(p, { force: true });
+  } catch {
+    // best-effort
+  }
+  if (parsed) clearPendingMarker(config, startDir);
+  return parsed;
 }
 
 /** Write this session's pending marker. Best-effort: a write failure never blocks the session. */

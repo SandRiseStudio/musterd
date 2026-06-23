@@ -10,7 +10,12 @@ import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, loadConfig, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
-import { consumePending, listPendingForWorkspace, type PendingMarker } from '../onboard/pending.js';
+import {
+  consumePending,
+  listPendingForWorkspace,
+  writeResolution,
+  type PendingMarker,
+} from '../onboard/pending.js';
 import { theme } from '../render/theme.js';
 
 /** What the caller asked to claim — a named seat, or the next open seat in a role pool. */
@@ -74,18 +79,28 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     claim: { mode: 'seat', name: result.member },
   };
   saveBinding(process.cwd(), next);
-  if (marker) consumePending(process.cwd(), marker.code);
+  // Bring the matched running session online now (ADR 034): hand it the seat via a resolution
+  // sidecar its watcher adopts, then drop the discovery marker so it isn't re-listed.
+  let live = false;
+  if (marker) {
+    writeResolution(process.cwd(), marker.code, { member: result.member, token: result.token });
+    consumePending(process.cwd(), marker.code);
+    live = true;
+  }
 
   if (flags['json']) {
     process.stdout.write(
-      JSON.stringify({ team, member: result.member, reused: result.reused }) + '\n',
+      JSON.stringify({ team, member: result.member, reused: result.reused, live }) + '\n',
     );
     return 0;
   }
   const how = result.reused ? 'reclaimed your seat' : 'claimed a fresh seat';
+  const tail = live
+    ? `the waiting ${marker!.surface} session is going online as ${result.member} now.`
+    : `bound this folder to ${result.member}; the agent here will occupy it on launch (or call team_join).`;
   process.stdout.write(
     `${theme.ok('✓')} ${theme.memberName(result.member, 'agent')} — ${how} on ${team}\n` +
-      `${pc.dim(`bound this folder to ${result.member}; the agent here will occupy it on launch (or call team_join).`)}\n`,
+      `${pc.dim(tail)}\n`,
   );
   return 0;
 }
