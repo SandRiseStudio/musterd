@@ -7,8 +7,8 @@
 - **Product:** v0.2 scope **complete** — the minimal trust model (explicit activation; single-active *newest-wins* + 45s reclaim grace; self-reported `working` status), plus observability **Layer 1** and a long dogfood-driven onboarding/diagnostics hardening pass.
 - **Protocol:** `SPEC.md` is **`musterd/0.3`** — the terminal **`resolve` act** (thread-close → the open-vs-done axis) shipped over v0.2 (ADR 025). The full **shared-teams governance** set (seats/roles, agent key + grants, approval lane, capabilities, audit, notification tiers, observers) is **designed but not specified** (`SPEC.md` Appendix A; rationale in `docs/design/membership-model.md`) and **not built** — trigger: the daemon stops being localhost-only.
 - **Published:** `@musterd/*@0.2.0` on npm (git tag `v0.2.0`).
-- **Quality:** `pnpm -r build && pnpm test` green; coverage gates wired (ADR 013); lint/format clean.
-- **Open:** post the launch (a human action); the optional **real 3-pane demo** recording (unblocked — ADRs 012 + 021); raise cli/mcp coverage to the 75% target.
+- **Quality:** `pnpm -r build && pnpm test` green; coverage gates wired (ADR 013), all packages at their documented targets — cli/mcp reached the **75%** line target (onboarding-wizard + MCP tool-handler tests) and the floors were ratcheted up to match.
+- **Open:** post the launch (a human action); the optional **real 3-pane demo** recording (unblocked — ADRs 012 + 021).
 
 ## The original plan (recap)
 

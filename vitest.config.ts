@@ -12,16 +12,15 @@ export default defineConfig({
       include: ['packages/*/src/**'],
       exclude: ['**/*.test.ts', '**/dist/**', 'packages/*/src/index.ts'],
       reporter: ['text', 'text-summary'],
-      // Per-package line gates (06-testing.md "Coverage gates").
-      // protocol/server are enforced at their documented targets (both already met).
-      // cli/mcp are enforced as regression-ratchet floors at current coverage; the
-      // documented 75% target is tracked as a follow-up (interactive onboarding +
-      // tool handlers need behavioral tests). See ADR 013.
+      // Per-package line gates (06-testing.md "Coverage gates"), enforced at their
+      // documented targets — all met. The cli/mcp 75% target was reached by adding
+      // behavioral tests for the interactive onboarding wizard (cli/src/onboard) and
+      // the MCP tool handlers (mcp/src/tools); the floors only ever ratchet up. See ADR 013.
       thresholds: {
         'packages/protocol/src/**': { lines: 95 },
         'packages/server/src/**': { lines: 85 },
-        'packages/cli/src/**': { lines: 46 },
-        'packages/mcp/src/**': { lines: 64 },
+        'packages/cli/src/**': { lines: 75 },
+        'packages/mcp/src/**': { lines: 75 },
       },
     },
   },
