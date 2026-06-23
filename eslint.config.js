@@ -9,7 +9,17 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**', 'npm-reserve/**', 'docs/**'],
+    // packages/web is a React/TSX surface with its own toolchain (TanStack Start + Vite);
+    // it is type-checked by its own tsc and not linted by this Node-oriented flat config.
+    // TODO: give packages/web a dedicated React/jsx-a11y ESLint config.
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/coverage/**',
+      'npm-reserve/**',
+      'docs/**',
+      'packages/web/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

@@ -135,3 +135,7 @@ Secondary nouns (consistent but not in the core five): **Inbox** (a Member's dur
 ## 6. Reversibility note
 
 This entire identity is intentionally small: one name, one accent color, one wordmark, five terms, two typefaces, plain voice. Every choice here can be walked back without code changes beyond a palette constant and a banner string. Do not expand the brand (logos, mascots, multi-color systems, illustration) without an ADR and an explicit decision to invest.
+
+## 7. Web surface (carve-out)
+
+The **landing / marketing web surface** (`packages/web`) is allowed to go maximal — immersive WebGL, gradients, glows, depth, motion, and a deep-black ground — while the **product chrome** (CLI, terminal frames, the future dashboard's functional UI) stays minimal under §1–§6. The shared anchor is unchanged on every surface: mustard `#E1AD01` is still the one accent, Inter + JetBrains Mono are still the only typefaces, the wordmark is still lowercase JetBrains Mono, and copy stays plain and declarative (the *experience* carries the spectacle, never the words). This split, its guardrails (reduced-motion fallback, static-first content), and its limits are recorded in `docs/decisions/037-web-surface-aesthetic.md`.

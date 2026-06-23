@@ -1,0 +1,38 @@
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding-top: clamp(40px, 7vh, 80px);
+  padding-bottom: clamp(40px, 7vh, 80px);
+  margin-top: clamp(40px, 8vh, 96px);
+  border-top: 1px solid var(--hairline);
+}
+.footer__mark {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.footer__word {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.footer__by {
+  font-size: 0.82rem;
+  color: var(--text-faint);
+}
+.footer__links {
+  display: flex;
+  gap: 22px;
+}
+.footer__link {
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  transition: color 0.3s var(--ease-out);
+}
+.footer__link:hover {
+  color: var(--accent);
+}

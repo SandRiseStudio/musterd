@@ -10,7 +10,8 @@ export default defineConfig({
       provider: 'v8',
       // Only the shipped source counts — not tests, build output, or pure barrels.
       include: ['packages/*/src/**'],
-      exclude: ['**/*.test.ts', '**/dist/**', 'packages/*/src/index.ts'],
+      // packages/web is the prerendered roadmap UI — no coverage floor (verified by build + tsc).
+      exclude: ['**/*.test.ts', '**/dist/**', 'packages/*/src/index.ts', 'packages/web/**'],
       reporter: ['text', 'text-summary'],
       // Per-package line gates (06-testing.md "Coverage gates"), enforced at their
       // documented targets — all met. The cli/mcp 75% target was reached by adding

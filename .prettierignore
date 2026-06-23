@@ -4,3 +4,6 @@ pnpm-lock.yaml
 docs/design/assets
 docs/assets
 *.gif
+# packages/web carries its own toolchain (TanStack Start + Vite) and is excluded from the
+# root Node config — see eslint.config.js / vitest.config.ts. Same rationale for prettier.
+packages/web

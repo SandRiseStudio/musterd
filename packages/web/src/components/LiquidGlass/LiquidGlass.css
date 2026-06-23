@@ -1,0 +1,137 @@
+.lg-stage {
+  position: relative;
+  width: 100%;
+  height: clamp(260px, 38vw, 380px);
+  border-radius: 20px;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid var(--hairline);
+  box-shadow:
+    0 30px 60px -20px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.lg-scene {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.lg-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(60% 80% at 22% 20%, rgba(239, 201, 76, 0.28), transparent 60%),
+    radial-gradient(70% 90% at 85% 90%, rgba(184, 134, 11, 0.22), transparent 60%),
+    linear-gradient(140deg, #14110a 0%, #0b0b0d 55%, #0a0a0c 100%);
+}
+
+/* The drifting light the lens refracts. Position is driven by JS (left/top), not transform. */
+.lg-orb {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 32%, #fffaf0, #efc94c 44%, #e1ad01 82%);
+  box-shadow: 0 0 40px rgba(225, 173, 1, 0.7);
+}
+
+.lg-caption {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 0 clamp(20px, 4vw, 40px) clamp(20px, 4vw, 36px);
+  margin: 0;
+  font-size: clamp(1.1rem, 2.4vw, 1.7rem);
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  color: #fdf6e3;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
+  max-width: 24ch;
+}
+
+/* ── the lens ──────────────────────────────────────────────────────────────── */
+.lg-lens {
+  position: absolute;
+  width: 132px;
+  height: 132px;
+  border-radius: 26px;
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+  cursor: grab;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 0.5s var(--ease-out);
+}
+.lg-stage.is-live .lg-lens {
+  opacity: 1;
+}
+.lg-lens:active {
+  cursor: grabbing;
+}
+
+.lg-lens-clip {
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 round 26px);
+}
+.lg-blur {
+  position: absolute;
+  inset: 0;
+  will-change: filter;
+}
+.lg-refraction {
+  position: absolute;
+  pointer-events: none;
+  transform-origin: top left;
+  will-change: filter;
+}
+.lg-refraction-scene {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+}
+.lg-tint {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+.lg-glint {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 1.5px 1.5px 4px rgba(255, 255, 255, 0.7),
+    inset -2px -2px 5px rgba(0, 0, 0, 0.28);
+}
+
+.lg-housing {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.lg-hint {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(253, 246, 227, 0.55);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lg-hint {
+    display: none;
+  }
+}
