@@ -5,20 +5,41 @@ import { findBinding, identityFromEnv, loadConfig, type Config, type Identity } 
 import { CliError } from '../errors.js';
 import { openActionNeeded } from '../render/rows.js';
 
+/**
+ * Where a resolved identity came from. `env`/`binding` are workspace-explicit; `flag` means the
+ * caller named it with `--as`; `config` is the ambient global-config fallback — a *credential store*
+ * default that may **read** but never **act** (ADR 036).
+ */
+export type IdentitySource = 'env' | 'binding' | 'flag' | 'config';
+
 export interface Resolved {
   config: Config;
   team: string;
   identity: Identity;
+  identitySource: IdentitySource;
+  /** True when the identity is workspace-explicit (env/binding) or named via `--as`. Acts require it. */
+  explicit: boolean;
   http: HttpClient;
 }
 
+/** The read/operator resolution: a team is required, an identity is not (ADR 036). */
+export interface ResolvedRead {
+  config: Config;
+  team: string;
+  server: string;
+  http: HttpClient;
+  identity?: Identity;
+  identitySource?: IdentitySource;
+  explicit: boolean;
+}
+
 /**
- * Resolve the active team + identity. Precedence is aligned with the MCP adapter (ADR 018):
- * explicit flags → `MUSTERD_*` env → workspace `.musterd/binding.json` → global config. The
- * binding/env paths key identity to the *workspace*, so two agents on one machine can't collide
+ * Gather candidate identities + the active team. Precedence is aligned with the MCP adapter
+ * (ADR 018): explicit flags → `MUSTERD_*` env → workspace `.musterd/binding.json` → global config.
+ * The binding/env paths key identity to the *workspace*, so two agents on one machine can't collide
  * on the global config's single-slot-per-team (the 2026-06-16 dogfood failure).
  */
-export function resolve(flags: Record<string, string | boolean>): Resolved {
+function gather(flags: Record<string, string | boolean>) {
   const config = loadConfig();
   const env = process.env;
   const binding = findBinding();
@@ -27,22 +48,34 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
   const server =
     flagStr(flags, 'server') ?? env['MUSTERD_SERVER'] ?? binding?.server ?? config.server;
 
-  // Candidate identities, highest precedence first.
-  const sources: { team: string; identity: Identity }[] = [];
-  if (envId) sources.push(envId);
+  // Candidate identities, highest precedence first, each tagged with its provenance.
+  const sources: { team: string; identity: Identity; source: IdentitySource }[] = [];
+  if (envId) sources.push({ team: envId.team, identity: envId.identity, source: 'env' });
   // A policy-only (unclaimed) binding carries no identity yet — skip it as an identity source
   // (the caller resolves identity by claiming; see `musterd claim`).
   if (binding && isClaimed(binding)) {
     sources.push({
       team: binding.team,
       identity: { name: binding.member, token: binding.token, surface: binding.surface },
+      source: 'binding',
     });
   }
   for (const [slug, identity] of Object.entries(config.identities)) {
-    sources.push({ team: slug, identity });
+    sources.push({ team: slug, identity, source: 'config' });
   }
 
   const team = flagStr(flags, 'team') ?? envId?.team ?? binding?.team ?? config.current;
+  return { config, server, sources, team, asName: flagStr(flags, 'as') };
+}
+
+/**
+ * Resolve the team + identity for an **act** (anything that writes/acts as a member). An ambient
+ * global-config identity is *not* enough — acting requires the identity to be workspace-explicit
+ * (env/binding) or named with `--as` (ADR 036). This keeps a bare `cd` into an unrelated folder
+ * from silently acting as a real teammate.
+ */
+export function resolve(flags: Record<string, string | boolean>): Resolved {
+  const { config, server, sources, team, asName } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -50,15 +83,57 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
   if (!match) {
     throw new CliError(`no identity for team "${team}" — run: musterd join ${team} --as <name>`, 4);
   }
-  const asName = flagStr(flags, 'as');
   if (asName && match.identity.name !== asName) {
     throw new CliError(`stored identity for "${team}" is ${match.identity.name}, not ${asName}`, 5);
   }
+  const explicit = match.source === 'env' || match.source === 'binding' || asName != null;
+  if (!explicit) {
+    throw new CliError(
+      `no active identity in this folder for team "${team}" — ` +
+        `run: musterd claim <name>  (bind this folder), or pass --as ${match.identity.name}`,
+      4,
+    );
+  }
+  const identitySource: IdentitySource =
+    match.source === 'config' && asName ? 'flag' : match.source;
   return {
     config,
     team,
     identity: match.identity,
+    identitySource,
+    explicit: true,
     http: new HttpClient({ server, token: match.identity.token }),
+  };
+}
+
+/**
+ * Resolve for a **read/operator** command: a team is required, an identity is optional. Returns the
+ * ambient identity (if any) plus whether it is `explicit`, so callers can show member-specific
+ * signal (e.g. the comeback summary) only when someone is genuinely active here (ADR 036). Never
+ * refuses on a missing/ambient identity — `status` must still print the (auth-free) roster anywhere.
+ */
+export function resolveRead(flags: Record<string, string | boolean>): ResolvedRead {
+  const { config, server, sources, team, asName } = gather(flags);
+  if (!team) {
+    throw new CliError('no team — run: musterd team create <name>', 2);
+  }
+  const match = sources.find((s) => s.team === team);
+  let identity: Identity | undefined;
+  let identitySource: IdentitySource | undefined;
+  let explicit = false;
+  if (match && (!asName || match.identity.name === asName)) {
+    identity = match.identity;
+    explicit = match.source === 'env' || match.source === 'binding' || asName != null;
+    identitySource = match.source === 'config' && asName ? 'flag' : match.source;
+  }
+  return {
+    config,
+    team,
+    server,
+    http: new HttpClient(identity ? { server, token: identity.token } : { server }),
+    explicit,
+    ...(identity ? { identity } : {}),
+    ...(identitySource ? { identitySource } : {}),
   };
 }
 

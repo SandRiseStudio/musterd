@@ -1,9 +1,12 @@
 import type { Parsed } from '../args.js';
 import { renderPendingSummary, renderStatusHeader, renderStatusTable } from '../render/rows.js';
-import { pendingActionSummary, resolve } from './helpers.js';
+import { pendingActionSummary, resolveRead } from './helpers.js';
 
 export async function statusCommand(parsed: Parsed): Promise<number> {
-  const { config, team, identity, http } = resolve(parsed.flags);
+  // `status` is a read: it shows the (auth-free) roster anywhere, even from an unbound folder with
+  // no active identity (ADR 036). The per-member comeback summary needs a genuine actor, so it only
+  // runs when someone is explicitly active here.
+  const { config, team, identity, explicit, http } = resolveRead(parsed.flags);
   const res = await http.roster(team);
   if (parsed.flags['json']) {
     process.stdout.write(JSON.stringify(res.members) + '\n');
@@ -11,7 +14,11 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
   }
   // Lead with what's waiting for me (comeback path, ADR 024): a returning/away human sees the
   // unanswered request_help / @me acts up top, read off the durable inbox cursor — best-effort.
-  const pending = await pendingActionSummary(http, team, identity.name).catch(() => undefined);
+  // Skipped for an ambient/absent identity: an inbox is member-specific (and auth-gated).
+  const pending =
+    explicit && identity
+      ? await pendingActionSummary(http, team, identity.name).catch(() => undefined)
+      : undefined;
   if (pending) {
     process.stdout.write(renderPendingSummary(pending.count, pending.since) + '\n');
   }

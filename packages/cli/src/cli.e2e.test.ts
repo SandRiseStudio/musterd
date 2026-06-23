@@ -1,10 +1,10 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args.js';
-import { resolve } from './commands/helpers.js';
+import { resolve, resolveRead } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { joinCommand } from './commands/join.js';
 import { reclaimCommand } from './commands/reclaim.js';
@@ -17,7 +17,8 @@ import { cachedTeamLive } from './onboard/init.js';
 let server: RunningServer;
 let dir: string;
 let nickConfig: string;
-let boConfig: string;
+let cwdDir: string;
+let cwdSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(async () => {
   server = createServer({ db: openDb(':memory:'), port: 0 });
@@ -25,15 +26,35 @@ beforeEach(async () => {
   process.env['MUSTERD_SERVER'] = `http://127.0.0.1:${port}`;
   dir = mkdtempSync(join(tmpdir(), 'musterd-cli-'));
   nickConfig = join(dir, 'nick.json');
-  boConfig = join(dir, 'bo.json');
   process.env['MUSTERD_CONFIG'] = nickConfig;
+  // The creating folder is now auto-bound (ADR 036), so each test gets its own throwaway cwd — both
+  // to absorb that binding write and to give the team creator (nick) an *active* folder to act from.
+  cwdDir = mkdtempSync(join(tmpdir(), 'musterd-cwd-'));
+  cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(cwdDir);
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await server.close();
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(cwdDir, { recursive: true, force: true });
   delete process.env['MUSTERD_SERVER'];
   delete process.env['MUSTERD_CONFIG'];
+  actAsNobody();
 });
+
+/** Act explicitly as a member via `MUSTERD_*` env — the way a second member (its own session) acts
+ *  from someone else's folder now that an ambient global-config identity can only read (ADR 036). */
+function actAs(team: string, member: string, token: string): void {
+  process.env['MUSTERD_TEAM'] = team;
+  process.env['MUSTERD_MEMBER'] = member;
+  process.env['MUSTERD_TOKEN'] = token;
+}
+function actAsNobody(): void {
+  delete process.env['MUSTERD_TEAM'];
+  delete process.env['MUSTERD_MEMBER'];
+  delete process.env['MUSTERD_TOKEN'];
+}
 
 /** Run a command fn with captured stdout. */
 async function run(fn: (p: ReturnType<typeof parseArgs>) => Promise<number>, argv: string[]) {
@@ -72,16 +93,8 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     expect(sent.code).toBe(0);
     expect(sent.out).toContain('sent');
 
-    // switch to bo's config and read inbox
-    writeFileSync(
-      boConfig,
-      JSON.stringify({
-        server: process.env['MUSTERD_SERVER'],
-        current: 'dawn',
-        identities: { dawn: { name: 'bo', token: boToken, surface: 'cli' } },
-      }),
-    );
-    process.env['MUSTERD_CONFIG'] = boConfig;
+    // bo (a second human, her own session) reads her inbox — explicit via env (ADR 036).
+    actAs('dawn', 'bo', boToken);
 
     const inbox1 = await run(inboxCommand, []);
     expect(inbox1.out).toContain('(1 unread)');
@@ -98,15 +111,7 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     // pat has received nothing
     const added = await run(teamCommand, ['add', 'pat2', '--kind', 'human', '--json']);
     const tok = JSON.parse(added.out).token as string;
-    writeFileSync(
-      boConfig,
-      JSON.stringify({
-        server: process.env['MUSTERD_SERVER'],
-        current: 'solo',
-        identities: { solo: { name: 'pat2', token: tok, surface: 'cli' } },
-      }),
-    );
-    process.env['MUSTERD_CONFIG'] = boConfig;
+    actAs('solo', 'pat2', tok);
     const inbox = await run(inboxCommand, []);
     expect(inbox.out).toContain("inbox empty — nobody's mustered anything yet");
   });
@@ -123,16 +128,8 @@ describe('comeback summary on status (ADR 024)', () => {
     await run(sendCommand, ['--to', 'bo', '--act', 'request_help', 'can you review the auth PR?']);
     await run(sendCommand, ['--act', 'status_update', '--to', '@team', 'still refactoring']);
 
-    // bo comes back and runs `status` — sees the waiting request up top.
-    writeFileSync(
-      boConfig,
-      JSON.stringify({
-        server: process.env['MUSTERD_SERVER'],
-        current: 'dawn',
-        identities: { dawn: { name: 'bo', token: boToken, surface: 'cli' } },
-      }),
-    );
-    process.env['MUSTERD_CONFIG'] = boConfig;
+    // bo comes back and runs `status` — sees the waiting request up top (explicit via env, ADR 036).
+    actAs('dawn', 'bo', boToken);
 
     const status1 = await run(statusCommand, []);
     expect(status1.out).toContain('1 request waiting for you');
@@ -161,22 +158,14 @@ describe('thread-close clears the comeback summary (ADR 025)', () => {
     ]);
     const askId = JSON.parse(ask.out).id as string;
 
-    writeFileSync(
-      boConfig,
-      JSON.stringify({
-        server: process.env['MUSTERD_SERVER'],
-        current: 'dawn',
-        identities: { dawn: { name: 'bo', token: boToken, surface: 'cli' } },
-      }),
-    );
-
-    // bo (away) would see 1 waiting...
-    process.env['MUSTERD_CONFIG'] = boConfig;
+    // bo (away) would see 1 waiting — explicit via env (ADR 036).
+    actAs('dawn', 'bo', boToken);
     const before = await run(statusCommand, []);
     expect(before.out).toContain('1 request waiting for you');
 
-    // ...but nick resolves the thread, and bo's status goes quiet without reading the inbox.
-    process.env['MUSTERD_CONFIG'] = nickConfig;
+    // ...but nick (back to his auto-bound folder) resolves the thread, and bo's status goes quiet
+    // without reading the inbox.
+    actAsNobody();
     const done = await run(sendCommand, [
       '--act',
       'resolve',
@@ -188,7 +177,7 @@ describe('thread-close clears the comeback summary (ADR 025)', () => {
     ]);
     expect(done.code).toBe(0);
 
-    process.env['MUSTERD_CONFIG'] = boConfig;
+    actAs('dawn', 'bo', boToken);
     const after = await run(statusCommand, []);
     expect(after.out).not.toContain('waiting for you');
   });
@@ -320,5 +309,44 @@ describe('cachedTeamLive (init reuse probe, ADR 016)', () => {
     expect(await cachedTeamLive(server, 'dawn', 'mskd_bogus_token')).toBe(false);
     // team that doesn't exist on this daemon (e.g. db reset) → not live
     expect(await cachedTeamLive(server, 'ghost-team', token)).toBe(false);
+  });
+});
+
+describe('an active identity is required to act (ADR 036)', () => {
+  it('an unbound folder reads freely but refuses to act as the ambient config identity', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']); // auto-binds cwdDir as nick
+    // Move to an unrelated, unbound folder — the global config still *caches* nick@dawn (ambient).
+    const elsewhere = mkdtempSync(join(tmpdir(), 'musterd-unbound-'));
+    cwdSpy.mockReturnValue(elsewhere);
+
+    // `status` is a free read: it still shows the (auth-free) roster, no identity needed.
+    const status = await run(statusCommand, []);
+    expect(status.out).toContain('nick');
+
+    // `resolveRead` reports the ambient identity as NOT explicit (read-only).
+    expect(resolveRead({}).explicit).toBe(false);
+
+    // An act refuses — the ambient config can't act; the guidance names claim + --as.
+    await expect(
+      run(sendCommand, ['--to', 'nick', '--act', 'message', 'hi']),
+    ).rejects.toMatchObject({ exitCode: 4 });
+
+    // Naming the member with --as is explicit intent → the act goes through.
+    const sent = await run(sendCommand, ['--as', 'nick', '--to', 'nick', '--act', 'message', 'hi']);
+    expect(sent.code).toBe(0);
+    expect(sent.out).toContain('sent');
+    expect(resolve({ as: 'nick' }).explicit).toBe(true);
+
+    rmSync(elsewhere, { recursive: true, force: true });
+  });
+
+  it('team create auto-binds the folder, so the creator acts immediately with no --as', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'bo', '--kind', 'human']);
+    // Same (now auto-bound) folder: the binding makes nick explicit without --as.
+    expect(resolve({}).identitySource).toBe('binding');
+    const sent = await run(sendCommand, ['--to', 'bo', '--act', 'message', 'hi bo']);
+    expect(sent.code).toBe(0);
+    expect(sent.out).toContain('sent');
   });
 });

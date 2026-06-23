@@ -165,6 +165,9 @@ describe('notify against a live daemon', () => {
     process.env['MUSTERD_SERVER'] = serverUrl;
     dir = mkdtempSync(join(tmpdir(), 'musterd-notify-'));
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
+    // `team create` auto-binds the cwd (ADR 036) — point cwd at a throwaway dir so the binding
+    // (and the notifier's resolved identity) land in the temp, not the real repo.
+    vi.spyOn(process, 'cwd').mockReturnValue(dir);
   });
 
   afterEach(async () => {

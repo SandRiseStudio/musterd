@@ -25,5 +25,8 @@ Every deviation is an ADR; `docs/decisions/` is the index and the detail. The sh
 - **ADRs 011, 015** — observability Layer 1 (envelope span + metrics, off by default) and the `meta.otel` trace-context convention.
 - **ADRs 024–025** — the first post-launch human↔agent-loop work: the reachability nudge (024) and the `resolve` act (025).
 - **ADRs 026–028** — harness tool environment (the *two universes*; Role as a harness-agnostic provisioning template), non-invasive harness coexistence, and *compose, don't capture* (defer to proven/universal tools — MCP, git/worktrees, the harness; reinvent nothing they do well). **Direction, deferred** — see `ROADMAP.md`.
+- **ADRs 029–031** — provisioning made real: the role-template format (029), the provision manifest (030), and the Codex harness adapter (031) — all three required adapters (Cursor / Claude Code / Codex) ship.
+- **ADRs 032–034** — **claim-on-first-use**: a session may start *unclaimed* (bound to a folder claim policy), become a pending presence (033), and be brought online by an external `musterd claim` **without a relaunch** (034) — all riding existing primitives, no wire change.
+- **ADRs 035–036** — closing the human side of the loop on localhost: **`musterd notify`** (035) buzzes a human when a directed act lands while they aren't watching (the localhost down-payment on the v0.3 notification tiers), and **active-identity-to-act** (036) makes the global config a credential store, not an act-authority — no command silently acts as a real teammate from an unrelated folder.
 
 For per-ADR detail — context, options, consequences, the dogfood findings each one closed — read the ADRs. They are the record; this file is only the map of where we are.

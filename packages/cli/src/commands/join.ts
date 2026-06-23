@@ -1,6 +1,7 @@
+import type { Binding } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
-import { loadConfig, saveConfig } from '../config.js';
+import { loadConfig, saveBinding, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 
@@ -39,6 +40,18 @@ export async function joinCommand(parsed: Parsed): Promise<number> {
   config.current = slug;
   config.identities[slug] = { name, token, surface };
   saveConfig(config);
+  // Auto-bind the joining folder so it's immediately *active* here (ADR 036): acts work without
+  // `--as`, while other unbound folders stay read-only. The credential is cached globally; the
+  // authority to act is this binding.
+  const binding: Binding = {
+    server,
+    team: slug,
+    member: name,
+    token,
+    surface: surface as Binding['surface'],
+    claim: { mode: 'seat', name },
+  };
+  saveBinding(process.cwd(), binding);
 
   if (parsed.flags['json']) {
     process.stdout.write(JSON.stringify({ team: slug, member: name, surface }) + '\n');

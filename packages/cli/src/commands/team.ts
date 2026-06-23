@@ -1,7 +1,7 @@
-import type { Lifecycle, MemberKind } from '@musterd/protocol';
+import type { Binding, Lifecycle, MemberKind } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
-import { loadConfig, saveConfig } from '../config.js';
+import { loadConfig, saveBinding, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 import { resolve } from './helpers.js';
@@ -30,6 +30,18 @@ async function teamCreate(parsed: Parsed): Promise<number> {
   config.current = slug;
   config.identities[slug] = { name, token: res.token, surface: 'cli' };
   saveConfig(config);
+  // Auto-bind the creating folder so it's immediately *active* — you can act here without `--as`,
+  // while every other unbound folder stays read-only (ADR 036). The global config alone no longer
+  // authorizes acting; this binding does.
+  const binding: Binding = {
+    server,
+    team: slug,
+    member: name,
+    token: res.token,
+    surface: 'cli',
+    claim: { mode: 'seat', name },
+  };
+  saveBinding(process.cwd(), binding);
 
   if (parsed.flags['json']) {
     process.stdout.write(JSON.stringify({ team: res.team, member: res.member }) + '\n');
@@ -39,6 +51,7 @@ async function teamCreate(parsed: Parsed): Promise<number> {
   process.stdout.write(
     `you are now a member: ${theme.memberName(name, 'human')} (human${role ? `, ${role}` : ''})\n`,
   );
+  process.stdout.write(theme.meta('bound this folder as your seat — act here with no --as') + '\n');
   process.stdout.write(theme.meta('add members with: musterd team add <name> --kind agent') + '\n');
   return 0;
 }
@@ -49,17 +62,13 @@ async function teamAdd(parsed: Parsed): Promise<number> {
   if (!name || (kind !== 'agent' && kind !== 'human')) {
     throw new CliError('usage: musterd team add <name> --kind <agent|human> [--role <role>]', 2);
   }
-  const config = loadConfig();
-  const server = flagStr(parsed.flags, 'server') ?? config.server;
-  const team = flagStr(parsed.flags, 'team') ?? config.current;
-  if (!team) throw new CliError('no team — run: musterd team create <name>', 2);
-  const identity = config.identities[team];
-  if (!identity) throw new CliError(`no identity for team "${team}"`, 4);
+  // Adding a member is an admin act, so it needs an *active* identity (binding/env/--as), not just
+  // an ambient global-config default (ADR 036). `resolve()` enforces that.
+  const { team, http } = resolve(parsed.flags);
 
   const role = flagStr(parsed.flags, 'role');
   const lifecycle = flagStr(parsed.flags, 'lifecycle') as Lifecycle | undefined;
   const until = flagStr(parsed.flags, 'until');
-  const http = new HttpClient({ server, token: identity.token });
   const res = await http.addMember(team, {
     name,
     kind,
