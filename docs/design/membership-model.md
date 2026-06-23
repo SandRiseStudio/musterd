@@ -113,6 +113,14 @@ Humans are seats, so they share the three axes — but *how* each is set differs
   - `away` holds everything **except `urgent`-flagged** pings.
   - `dnd`/`focus` holds quiet; lets directed pings (and `urgent`) through.
 
+> **Localhost down-payment (shipped).** This tiered model is the v0.3 governed target (gated on the
+> daemon leaving localhost, ADR 007). The pre-1.0 slice is already built: ADR 024 wired the
+> recipient-side **Loud** salience for a *watching* human (banner + terminal bell) and the comeback
+> summary; ADR 035 adds **`musterd notify`**, an opt-in client-side notifier that fires an OS
+> notification when a directed (Loud) act lands while the human **isn't** watching. It is one flat
+> rule — no `away`/`dnd`/`held` tiers, no `urgent` capability, no per-recipient policy — those tier
+> names are the extension seam this superset fills in.
+
 ### `urgent` is scarce by design
 
 `urgent` is the only thing that pierces `away`, so it must stay rare. Guardrails (not honor-system):

@@ -4,6 +4,7 @@ import { claimCommand } from './commands/claim.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
+import { notifyCommand } from './commands/notify.js';
 import { reclaimCommand } from './commands/reclaim.js';
 import { resetCommand } from './commands/reset.js';
 import { roleCommand } from './commands/role.js';
@@ -28,6 +29,7 @@ usage:
   musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] <body...>
   musterd inbox [--watch] [--unread] [--peek] [--limit <n>]
   musterd status
+  musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away
   musterd claim <name> | --role <role> [--for <code>] [--surface <s>]   claim a seat for this folder (claim-on-first-use)
   musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
   musterd role list | show <name> | create <name> [--from <builtin>] [--force]   manage role provisioning templates (.musterd/roles/)
@@ -62,6 +64,8 @@ async function main(argv: string[]): Promise<number> {
       return inboxCommand(rest);
     case 'status':
       return statusCommand(rest);
+    case 'notify':
+      return notifyCommand(rest);
     case 'claim':
       return claimCommand(rest);
     case 'reclaim':

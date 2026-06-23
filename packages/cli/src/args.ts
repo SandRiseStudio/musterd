@@ -6,7 +6,7 @@ export interface Parsed {
   metaPairs: string[];
 }
 
-const BOOLEAN_FLAGS = new Set(['watch', 'unread', 'peek', 'json', 'no-color', 'no-bell']);
+const BOOLEAN_FLAGS = new Set(['watch', 'unread', 'peek', 'json', 'no-color', 'no-bell', 'once']);
 
 export function parseArgs(argv: string[]): Parsed {
   const positionals: string[] = [];
