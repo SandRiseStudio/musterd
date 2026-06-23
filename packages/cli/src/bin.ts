@@ -5,6 +5,7 @@ import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
 import { reclaimCommand } from './commands/reclaim.js';
 import { resetCommand } from './commands/reset.js';
+import { roleCommand } from './commands/role.js';
 import { sendCommand } from './commands/send.js';
 import { serveCommand } from './commands/serve.js';
 import { statusCommand } from './commands/status.js';
@@ -27,6 +28,7 @@ usage:
   musterd inbox [--watch] [--unread] [--peek] [--limit <n>]
   musterd status
   musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
+  musterd role list | show <name> | create <name> [--from <builtin>] [--force]   manage role provisioning templates (.musterd/roles/)
   musterd reset [--force] [--no-backup]         wipe the local db + identities back to a clean slate (daemon must be stopped)
   musterd uninstall [--force]                   remove what musterd added to this folder's harness (servers, permissions, primer)
 
@@ -60,6 +62,8 @@ async function main(argv: string[]): Promise<number> {
       return statusCommand(rest);
     case 'reclaim':
       return reclaimCommand(rest);
+    case 'role':
+      return roleCommand(rest);
     case 'reset':
       return resetCommand(rest);
     case 'uninstall':
