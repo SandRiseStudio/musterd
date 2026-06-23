@@ -30,6 +30,8 @@ export interface RoadmapItem {
   blurb: string;
   detail?: string;
   refs?: Ref[];
+  /** ids of items this one builds on — drawn as dependency edges on the map. */
+  dependsOn?: string[];
 }
 
 const REPO = 'https://github.com/SandRiseStudio/musterd/blob/main';
@@ -60,15 +62,25 @@ export const STATUS_META: Record<Status, { label: string; tone: string; cssVar: 
   },
 };
 
-export const CATEGORY_META: Record<Category, { label: string }> = {
-  'human-loop': { label: 'Human ↔ agent loop' },
-  observability: { label: 'Telemetry & observability' },
-  transport: { label: 'Transport & topology' },
-  surfaces: { label: 'Surfaces' },
-  insights: { label: 'Work items & insight' },
-  harness: { label: 'Harness environment' },
-  platform: { label: 'Platform' },
+export const CATEGORY_META: Record<Category, { label: string; short: string; color: string }> = {
+  'human-loop': { label: 'Human ↔ agent loop', short: 'human loop', color: '#f2b441' },
+  observability: { label: 'Telemetry & observability', short: 'telemetry', color: '#54c8c2' },
+  transport: { label: 'Transport & topology', short: 'transport', color: '#7aa2f7' },
+  surfaces: { label: 'Surfaces', short: 'surfaces', color: '#c792ea' },
+  insights: { label: 'Work items & insight', short: 'insight', color: '#ec7fa0' },
+  harness: { label: 'Harness environment', short: 'harness', color: '#8fd694' },
+  platform: { label: 'Platform', short: 'platform', color: '#b3aba3' },
 };
+
+export const CATEGORY_ORDER: Category[] = [
+  'human-loop',
+  'observability',
+  'transport',
+  'surfaces',
+  'insights',
+  'harness',
+  'platform',
+];
 
 export const STATUS_ORDER: Status[] = ['shipped', 'near-term', 'reserved', 'out-of-scope'];
 
@@ -144,6 +156,7 @@ export const ROADMAP: RoadmapItem[] = [
     detail:
       'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is.',
     refs: [doc('docs/design/research-foundation.md', 'research-foundation.md')],
+    dependsOn: ['notify-nudge'],
   },
 
   // ── reserved ──────────────────────────────────────────────────────────────
@@ -155,6 +168,7 @@ export const ROADMAP: RoadmapItem[] = [
     blurb: 'A full CLI/MCP telemetry SDK, then MAST-aware views over the act-typed log that agent-observability tools cannot see.',
     detail: 'The seed of a standalone coordination-observability product.',
     refs: [doc('docs/design/observability.md', 'observability.md')],
+    dependsOn: ['telemetry-l1'],
   },
   {
     id: 'schedule-enforcement',
@@ -187,6 +201,7 @@ export const ROADMAP: RoadmapItem[] = [
     status: 'reserved',
     category: 'transport',
     blurb: 'A Member belongs to one Team today. Teams that address one another, and identities recognized across Teams, come later.',
+    dependsOn: ['cross-network'],
   },
   {
     id: 'web-dashboard',
@@ -202,6 +217,7 @@ export const ROADMAP: RoadmapItem[] = [
     status: 'reserved',
     category: 'surfaces',
     blurb: 'An iOS app and a Slack surface, so a Member is reachable wherever its human or agent already lives.',
+    dependsOn: ['web-dashboard'],
   },
   {
     id: 'board-insights',
@@ -212,6 +228,7 @@ export const ROADMAP: RoadmapItem[] = [
     detail:
       'Time-to-unblock, cycle time, load distribution, bottlenecks — plus a declared backlog noun for planned work. The natural home is the web dashboard.',
     refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+    dependsOn: ['resolve-act', 'web-dashboard'],
   },
   {
     id: 'own-harness',
@@ -221,6 +238,7 @@ export const ROADMAP: RoadmapItem[] = [
     blurb: 'A Role becomes a harness-agnostic provisioning template, rendered per-harness — then musterd’s own harness, then mixed-harness teams.',
     detail: 'Provisioning is a starting point, not a security boundary. It stays additive, reversible, and non-obligating.',
     refs: [adr(26, 'ADRs 026–030')],
+    dependsOn: ['harness-adapters'],
   },
   {
     id: 'sandboxed-runtime',

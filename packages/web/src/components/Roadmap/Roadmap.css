@@ -1,207 +1,405 @@
 .roadmap {
   position: relative;
-  padding: clamp(80px, 12vh, 160px) var(--gutter) clamp(60px, 10vh, 120px);
+  padding: clamp(72px, 11vh, 150px) var(--gutter) clamp(60px, 10vh, 120px);
 }
 
-/* ── legend ──────────────────────────────────────────────────────────────── */
+/* ── intro ───────────────────────────────────────────────────────────────── */
+.roadmap__head {
+  text-align: center;
+  max-width: 760px;
+}
+.roadmap__eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--mustard-300);
+  margin: 0 0 18px;
+}
+.roadmap__title {
+  font-size: clamp(1.9rem, 5vw, 3rem);
+  letter-spacing: -0.035em;
+  margin: 0 auto 18px;
+  max-width: 16ch;
+}
+.roadmap__lede {
+  margin: 0 auto;
+  max-width: 54ch;
+  font-size: clamp(1rem, 2vw, 1.16rem);
+  color: var(--text-dim);
+}
+
+/* ── legend (map key) ────────────────────────────────────────────────────── */
 .legend {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 18px 28px;
-  padding-bottom: clamp(48px, 8vh, 96px);
-  border-bottom: 1px solid var(--hairline);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px 22px;
+  margin-top: clamp(34px, 6vh, 60px);
+  text-align: left;
 }
 .legend__item {
   display: grid;
   grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
   column-gap: 10px;
   align-items: baseline;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
 }
 .legend__dot {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   grid-row: 1;
   align-self: center;
-  box-shadow: 0 0 12px currentColor;
+}
+.legend__item[data-status='shipped'] .legend__dot {
+  background: var(--status-shipped);
+  box-shadow: 0 0 12px var(--glow-mustard);
+}
+.legend__item[data-status='near-term'] .legend__dot {
+  background: var(--status-near-term);
+  box-shadow: 0 0 12px rgba(239, 201, 76, 0.6);
+}
+.legend__item[data-status='reserved'] .legend__dot {
+  background: transparent;
+  border: 2px solid var(--status-reserved);
+}
+.legend__item[data-status='out-of-scope'] .legend__dot {
+  background: transparent;
+  border: 2px dashed var(--status-out);
 }
 .legend__label {
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   color: var(--text);
 }
 .legend__tone {
   grid-column: 2;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: var(--text-faint);
   line-height: 1.4;
 }
 
-/* ── groups ──────────────────────────────────────────────────────────────── */
-.roadmap__groups {
+/* ── category key ────────────────────────────────────────────────────────── */
+.catkey {
   display: flex;
-  flex-direction: column;
-  gap: clamp(56px, 9vh, 110px);
-  padding-top: clamp(48px, 8vh, 96px);
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 16px;
+  margin-top: 22px;
+}
+.catkey__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+.catkey__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--cat);
+  box-shadow: 0 0 9px -1px var(--cat);
 }
 
-.group__head {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 28px;
+/* ── the winding road ────────────────────────────────────────────────────── */
+.roadmap__map {
+  margin-top: clamp(32px, 5vh, 60px);
+  max-width: 1120px; /* a touch wider than the text column → more room to wind */
 }
-.group__dot {
-  width: 11px;
-  height: 11px;
+.road {
+  --card-w: 232px;
+  --head-w: 280px;
+  position: relative;
+  width: 100%;
+}
+
+.road__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.road__base {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.road__draw {
+  fill: none;
+  stroke: var(--mustard-500);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.road__edge {
+  fill: none;
+  stroke: rgba(225, 173, 1, 0.38);
+  stroke-width: 1.4;
+  stroke-dasharray: 1.5 7;
+  stroke-linecap: round;
+  animation: edge-flow 1.4s linear infinite;
+}
+.road__edge[data-status='reserved'],
+.road__edge[data-status='out-of-scope'] {
+  stroke: rgba(161, 161, 170, 0.34);
+}
+@keyframes edge-flow {
+  to {
+    stroke-dashoffset: -8.5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .road__edge {
+    animation: none;
+  }
+}
+
+.road__marker {
+  opacity: 0;
+  transition: opacity 0.3s var(--ease-out);
+  filter: drop-shadow(0 0 7px var(--mustard-500));
+}
+.road__marker-halo {
+  fill: var(--mustard-500);
+  opacity: 0.35;
+}
+.road__marker-core {
+  fill: #fff5da;
+}
+@media (prefers-reduced-motion: reduce) {
+  .road__marker {
+    display: none;
+  }
+}
+
+/* stops */
+.road__stops {
+  position: relative;
+  z-index: 1;
+}
+.road__stop {
+  position: relative;
+  padding: 6px 0;
+}
+/* desktop: pull consecutive stops together — they're far apart horizontally, so the
+   road winds tighter and the whole map is much shorter vertically. */
+@media (min-width: 761px) {
+  .road__stop--node {
+    margin-top: -34px;
+  }
+}
+.road__stop--node .card {
+  width: var(--card-w);
+  margin-left: calc(var(--x, 0.5) * (100% - var(--card-w)));
+}
+.road__stop--head .phasehead {
+  width: var(--head-w);
+  margin-left: calc(var(--x, 0.5) * (100% - var(--head-w)));
+}
+
+/* ── the dot on the road ─────────────────────────────────────────────────── */
+.road__stop[data-status='shipped'] {
+  --dot: var(--mustard-500);
+  --glow: var(--glow-mustard);
+}
+.road__stop[data-status='near-term'] {
+  --dot: var(--mustard-300);
+  --glow: rgba(239, 201, 76, 0.6);
+}
+.road__stop[data-status='reserved'] {
+  --dot: var(--zinc-400);
+  --glow: rgba(161, 161, 170, 0.4);
+}
+.road__stop[data-status='out-of-scope'] {
+  --dot: var(--zinc-500);
+  --glow: rgba(113, 113, 122, 0.4);
+}
+
+.road__dot {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  box-shadow: 0 0 16px currentColor;
+  background: var(--dot);
+  opacity: 0.45;
+  box-shadow: 0 0 0 5px var(--ground);
+  transition:
+    opacity 0.45s var(--ease-out),
+    box-shadow 0.45s var(--ease-out);
+  z-index: 2;
 }
-.group__title {
-  font-size: clamp(1.5rem, 4vw, 2.1rem);
+.road__dot[data-passed='true'] {
+  opacity: 1;
+  box-shadow:
+    0 0 0 5px var(--ground),
+    0 0 16px var(--glow);
+}
+.road__stop[data-status='reserved'] .road__dot {
+  background: transparent;
+  border: 2px solid var(--dot);
+}
+.road__stop[data-status='out-of-scope'] .road__dot {
+  background: transparent;
+  border: 2px dashed var(--dot);
+}
+.road__dot--station {
+  top: -10px;
+  width: 18px;
+  height: 18px;
+  box-shadow: 0 0 0 6px var(--surface-raised);
+}
+.road__dot--station[data-passed='true'] {
+  box-shadow:
+    0 0 0 6px var(--surface-raised),
+    0 0 22px var(--glow);
+}
+.road__stop[data-status='near-term'] .road__dot[data-passed='true'] {
+  animation: dot-pulse 2.6s var(--ease-in-out) infinite;
+}
+@keyframes dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 5px var(--ground), 0 0 10px var(--glow);
+  }
+  50% {
+    box-shadow: 0 0 0 5px var(--ground), 0 0 26px 5px var(--glow);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .road__stop[data-status='near-term'] .road__dot[data-passed='true'] {
+    animation: none;
+  }
+}
+
+/* ── phase station chip ──────────────────────────────────────────────────── */
+.road__stop--head {
+  padding: clamp(22px, 3vh, 38px) 0 30px;
+}
+.phasehead {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 26px;
+  border-radius: 16px;
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 16px 38px -22px rgba(0, 0, 0, 0.7);
+  text-align: center;
+}
+.road__stop--head[data-status='near-term'] .phasehead {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow:
+    0 0 50px -8px var(--glow-mustard-soft),
+    0 16px 38px -22px rgba(0, 0, 0, 0.7);
+}
+.phasehead__here {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: #1a1405;
+  background: var(--accent);
+  padding: 3px 11px;
+  border-radius: 999px;
+  box-shadow: 0 0 18px var(--glow-mustard);
+}
+.phasehead__label {
+  font-size: clamp(1.3rem, 3.2vw, 1.9rem);
   font-weight: 700;
   letter-spacing: -0.03em;
 }
-.group__count {
-  margin-left: auto;
-  font-size: 0.95rem;
+.phasehead__tone {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-faint);
+}
+.phasehead__count {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-size: 0.76rem;
   color: var(--text-faint);
 }
 
-.group__items {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
-  gap: 18px;
-}
-
-/* ── card ────────────────────────────────────────────────────────────────── */
+/* ── compact card ────────────────────────────────────────────────────────── */
 .card {
   position: relative;
-  padding: 22px 22px 20px;
-  border-radius: 16px;
-  background: var(--surface-solid);
+  padding: 15px 16px 14px 18px;
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--cat, var(--accent)) 7%, var(--surface-solid)),
+    var(--surface-solid) 60%
+  );
   border: 1px solid var(--hairline);
-  overflow: hidden;
   transition:
-    transform 0.7s var(--ease-out),
-    opacity 0.7s var(--ease-out),
-    border-color 0.4s var(--ease-out),
-    box-shadow 0.4s var(--ease-out);
-  transition-delay: calc(var(--i, 0) * 60ms);
+    border-color 0.35s var(--ease-out),
+    box-shadow 0.35s var(--ease-out),
+    transform 0.35s var(--ease-out);
 }
-.card[data-reveal='out'] {
-  opacity: 0;
-  transform: translateY(22px);
-}
-.card[data-reveal='in'] {
-  opacity: 1;
-  transform: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .card {
-    transition: border-color 0.4s, box-shadow 0.4s;
-    transition-delay: 0ms;
-  }
-}
-
-/* Status accent bar down the left edge. */
-.card::before {
+/* category accent bar */
+.card::after {
   content: '';
   position: absolute;
   left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--accent-bar, var(--zinc-500));
-  opacity: 0.5;
-  transition: opacity 0.4s var(--ease-out);
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--cat, var(--accent));
+  box-shadow: 0 0 10px -1px var(--cat, var(--accent));
 }
-.card[data-status='shipped'] {
-  --accent-bar: var(--status-shipped);
-}
-.card[data-status='near-term'] {
-  --accent-bar: var(--status-near-term);
-}
-.card[data-status='reserved'] {
-  --accent-bar: var(--status-reserved);
-}
-.card[data-status='out-of-scope'] {
-  --accent-bar: var(--status-out);
-}
-
-.card:hover,
-.card:focus-within {
-  border-color: var(--hairline-strong);
-  box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.8);
-}
-.card:hover::before,
-.card:focus-within::before {
-  opacity: 1;
-}
-
-.card__top {
-  margin-bottom: 14px;
+.card:hover {
+  border-color: color-mix(in srgb, var(--cat, var(--accent)) 55%, transparent);
+  box-shadow:
+    0 0 26px -10px var(--cat, var(--accent)),
+    0 18px 40px -26px rgba(0, 0, 0, 0.85);
+  transform: translateY(-2px);
+  z-index: 3;
 }
 .card__category {
-  font-size: 11px;
-  letter-spacing: 0.1em;
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--text-faint);
+  color: var(--cat, var(--text-faint));
+  margin-bottom: 8px;
 }
 .card__title {
-  font-size: 1.18rem;
+  font-size: 1.02rem;
   font-weight: 600;
   letter-spacing: -0.02em;
-  margin-bottom: 8px;
+  margin: 0 0 6px;
 }
 .card__blurb {
   margin: 0;
-  font-size: 0.94rem;
-  line-height: 1.55;
+  font-size: 0.85rem;
+  line-height: 1.5;
   color: var(--text-dim);
 }
-
-/* Detail: collapsed by default, expands on hover/focus (grid-rows 0fr→1fr collapse). */
-.card__detail {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  margin-top: 0;
-  transition:
-    grid-template-rows 0.45s var(--ease-out),
-    opacity 0.45s var(--ease-out),
-    margin-top 0.45s var(--ease-out);
-}
-.card__detail > p {
-  overflow: hidden;
-  margin: 0;
-  font-size: 0.88rem;
-  line-height: 1.55;
-  color: var(--text-faint);
-}
-.card:hover .card__detail,
-.card:focus-within .card__detail {
-  grid-template-rows: 1fr;
-  opacity: 1;
-  margin-top: 12px;
-}
-@media (prefers-reduced-motion: reduce) {
-  .card__detail {
-    transition: opacity 0.3s;
-  }
-}
-
 .card__refs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
+  gap: 6px;
+  margin-top: 12px;
 }
 .card__ref {
-  font-size: 11px;
+  font-size: 10.5px;
   letter-spacing: 0.04em;
-  padding: 3px 9px;
+  padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid var(--hairline);
   color: var(--text-faint);
@@ -212,4 +410,19 @@
 .card__ref:hover {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+/* ── mobile: near-straight, wider cards ──────────────────────────────────── */
+@media (max-width: 760px) {
+  .road {
+    --card-w: calc(100% - 6px);
+    --head-w: calc(100% - 6px);
+  }
+  .phasehead {
+    align-items: flex-start;
+    text-align: left;
+  }
+  .road__stop {
+    padding: 16px 0;
+  }
 }

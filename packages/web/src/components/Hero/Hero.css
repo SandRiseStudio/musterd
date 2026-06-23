@@ -13,10 +13,10 @@
   inset: 0;
   z-index: -3;
   background:
-    radial-gradient(120% 90% at 50% 8%, rgba(225, 173, 1, 0.22), transparent 55%),
-    radial-gradient(80% 60% at 78% 18%, rgba(239, 201, 76, 0.12), transparent 60%),
-    radial-gradient(100% 80% at 20% 100%, rgba(184, 134, 11, 0.1), transparent 60%),
-    var(--ground);
+    radial-gradient(120% 90% at 50% 6%, rgba(225, 173, 1, 0.3), transparent 55%),
+    radial-gradient(80% 60% at 80% 16%, rgba(239, 201, 76, 0.18), transparent 60%),
+    radial-gradient(110% 80% at 18% 102%, rgba(184, 134, 11, 0.16), transparent 60%),
+    var(--hero-ground);
 }
 
 .hero__canvas {
@@ -35,7 +35,7 @@
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: radial-gradient(110% 75% at 50% 42%, transparent 55%, rgba(6, 6, 8, 0.7) 100%);
+  background: radial-gradient(120% 80% at 50% 42%, transparent 62%, rgba(10, 9, 14, 0.45) 100%);
   pointer-events: none;
 }
 

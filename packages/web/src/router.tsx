@@ -6,6 +6,14 @@ export function getRouter() {
     routeTree,
     defaultPreload: 'intent',
     scrollRestoration: true,
+    defaultNotFoundComponent: () => (
+      <main className="shell" style={{ padding: '20vh 0' }}>
+        <h1 className="mono">404</h1>
+        <p>
+          Nothing here. <a href="/">Back to the roadmap.</a>
+        </p>
+      </main>
+    ),
   });
 }
 

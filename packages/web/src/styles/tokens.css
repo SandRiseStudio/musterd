@@ -35,16 +35,20 @@
   --danger: #ef4444;
   --info: #60a5fa;
 
-  /* Surface (web-only expansion) */
-  --ground: #060608; /* deeper than zinc-950 for the immersive ground */
-  --surface: rgba(24, 24, 27, 0.6);
-  --surface-solid: #131316;
-  --hairline: rgba(255, 255, 255, 0.08);
-  --hairline-strong: rgba(255, 255, 255, 0.14);
+  /* Surface (web-only expansion). The hero keeps a dark ground for the night-sky
+     particles; the rest of the page is markedly brighter. */
+  --hero-ground: #0a0a10; /* immersive dark, just for the hero */
+  --ground: #2b2b37; /* page / content ground — lifted again */
+  --ground-2: #353541; /* lighter, for gradients */
+  --surface: rgba(72, 70, 88, 0.4);
+  --surface-solid: #383744; /* cards */
+  --surface-raised: #434250;
+  --hairline: rgba(255, 255, 255, 0.16);
+  --hairline-strong: rgba(255, 255, 255, 0.3);
 
-  --text: #ededf0;
-  --text-dim: var(--zinc-400);
-  --text-faint: var(--zinc-500);
+  --text: #f7f6fa;
+  --text-dim: #d0d0da;
+  --text-faint: #a6a6b2;
 
   --accent: var(--mustard-500);
   --accent-bright: var(--mustard-300);
