@@ -69,8 +69,9 @@ export async function notifyCommand(
     const tick = async () => {
       // Best-effort: a transient inbox/roster read failure must not kill the resident loop.
       await pollOnce(notifyDeps, seen).catch(() => undefined);
+      // NB: do NOT unref the timer — unlike `inbox --watch` there is no socket holding the event
+      // loop open, so an unref'd timer lets the process exit right after the first poll.
       timer = setTimeout(tick, opts.intervalMs);
-      timer.unref?.();
     };
     void tick();
     process.on('SIGINT', () => {
