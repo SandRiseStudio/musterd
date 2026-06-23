@@ -17,10 +17,11 @@ The MCP server process is configured (via env, set by whoever registers the MCP 
 ```
 MUSTERD_SERVER   = http://localhost:4849
 MUSTERD_TEAM     = dawn
-MUSTERD_MEMBER   = Ada
-MUSTERD_TOKEN    = mskd_...        # the join token from `musterd team add Ada`
+MUSTERD_MEMBER   = Ada             # optional (claim-on-first-use, ADR 032): omit to start as a pending presence
+MUSTERD_TOKEN    = mskd_...        # optional; the join token from `musterd team add Ada` (absent ⇒ unclaimed)
 MUSTERD_SURFACE  = claude-code     # or codex; defaults to 'other'
-MUSTERD_AUTOJOIN = 1               # optional; opt-in auto-join on launch (off by default)
+MUSTERD_CLAIM    = seat:Ada        # optional; folder claim policy (ADR 032): chat | seat:<name> | role:<role>. drives team_join {} + autojoin
+MUSTERD_AUTOJOIN = 1               # optional; opt-in auto-join/claim on launch (off by default)
 MUSTERD_PROVENANCE = session       # optional; why this session attaches (ADR 014): session|asked|hook|scheduled|daemon. defaults to 'session'
 MUSTERD_WORKSPACE  = auth-rewrite  # optional; declared 'where' label; overrides the auto folder@branch detection
 MUSTERD_DRIVER     = nick          # optional; the human driving this session (driver co-presence, ADR 021). `init` bakes the operator's name in; roster shows 'driven by nick'
@@ -29,12 +30,15 @@ MUSTERD_BINDING    = /abs/.musterd/binding.json  # optional; explicit binding-fi
 
 **Identity resolution (ADR 018) — aligned with the CLI.** `MUSTERD_*` env wins; if it carries no
 identity the adapter falls back to the **workspace binding file** `<workspace>/.musterd/binding.json`
-(`{server, team, member, token, surface}`, schema `BindingSchema` in `@musterd/protocol`) — the
-explicit `MUSTERD_BINDING` path if set, else walking up from cwd. `musterd init` writes that file
+(`{server, team, member?, token?, surface, claim?}`, schema `BindingSchema` in `@musterd/protocol`) —
+the explicit `MUSTERD_BINDING` path if set, else walking up from cwd. `musterd init` writes that file
 (0600, gitignored) as the single source of truth so the CLI and the adapter resolve to the **same**
 member in a given folder — two agents on one machine no longer collide on the CLI's global
 `~/.musterd/config.json` single-slot-per-team (the 2026-06-16/17 dogfood failure). Env is kept
-first-class for host-injection and hosted/no-filesystem setups.
+first-class for host-injection and hosted/no-filesystem setups. **Identity is now optional**
+(claim-on-first-use, ADR 032): only the **team** is required to load — `member`/`token` may be absent,
+leaving the session a pending presence that claims a seat on first use (`team_join` / `musterd claim`,
+which then writes the resolved seat back into this same binding).
 
 On `team_join` the adapter sends two attach-time facts on the `hello` (provenance/where seed, ADR 014): **`provenance`** (from `MUSTERD_PROVENANCE`, default `session`) and a **`workspace`** label resolved once at load — the declared `MUSTERD_WORKSPACE` if set, else a gracefully-degrading auto-label (`cwd` folder, qualified by git branch when informative, else the cwd subpath within the repo, else the bare folder). Both are read context only — they carry no routing/auth meaning — and surface dim on the roster (`online via claude-code (session) · repo@branch`).
 
@@ -44,9 +48,10 @@ The original design auto-claimed a Presence on startup. That was the **"N minds,
 
 1. **Startup (`bind`) is reachability-only** — `GET /health` and nothing else. No Presence, no WS, no seat occupied. The tools are registered and callable, but the session is *dormant*. (This also closed the ADR-010 HTTP-presence hole: a dormant session can't hold a phantom claim.)
 2. **The agent goes online by calling `team_join`** — that opens the background WS `hello` (as Member/surface), registers the Presence, and starts the 15s heartbeat. Only now can it send and receive. The server enforces **single-active, newest-wins** (ADR 017): if the Member already has a live session, this one **takes over** and the older one is told it was `superseded` (it stops, doesn't reconnect). So `team_join` always reclaims your own seat — a reload/orphaned adapter can't lock you out (the dogfood deadlock that ADR 017 fixed).
-3. **Acting is gated on join.** `team_send` and `team_inbox_check` refuse while dormant (`"call team_join first"`). This closes the *acting-as-member* tail of the bug: a session that never joined cannot send messages or drain the shared inbox cursor on the shared token. (The full close — a session that joined elsewhere still acting over HTTP — is the v0.3 seat-claim model.) If a prior (auto)join **failed**, the guard appends the reason (`MusterdClient.lastJoinError`) — e.g. a wrong-db token rejection — so a silent autojoin failure is diagnosable, not just "call team_join first" (ADR 016).
-4. **`MUSTERD_AUTOJOIN=1`** opts a session into calling `team_join` automatically right after connect — the convenience path for the common solo case (one human, one agent, one folder). Off by default so a session never silently occupies a seat. `musterd init` offers to set it per-binding.
-5. **Buffered deliveries:** while joined, inbound `deliver` envelopes are buffered in memory for `team_inbox_check` to drain (the agent pulls; MCP has no server-push to the model, so we expose a check tool the agent calls).
+3. **Acting is gated on readiness.** `team_send` and `team_inbox_check` refuse until the session is a live occupant — distinguishing two states (claim-on-first-use, ADR 032/033): **pending** (no seat claimed — *"you're a pending presence … claim one first"*, with the session's claim-code) vs **dormant** (claimed but not joined — *"call team_join first"*). This closes the *acting-as-member* tail of the bug: a session that never joined cannot send messages or drain the shared inbox cursor on the shared token. (The full close — a session that joined elsewhere still acting over HTTP — is the v0.3 seat-claim model.) If a prior (auto)join **failed**, the guard appends the reason (`MusterdClient.lastJoinError`) — so a silent autojoin failure is diagnosable, not just "call team_join first" (ADR 016).
+4. **Claim-on-first-use (ADR 032).** A session may start **unclaimed** — bound only to a folder *claim policy* (`MUSTERD_CLAIM`: `chat` / `seat:Ada` / `role:backend`, resolved via the ADR 018 ladder), with no fixed identity. It is then a **pending presence** (reachable, holds no seat; it drops a `.musterd/pending/<code>.json` marker so `musterd claim` can find it — ADR 033). `team_join` is **overloaded** to claim a seat: `{as:"Ada"}` (named, auto-minted locally if new via the unauthenticated `POST /members`), `{role:"backend"}` (next open `<role>-<n>` pool handle), or `{}` (the folder policy). Claiming sets the session's identity, persists it into `.musterd/binding.json`, and occupies the seat. A name another live session holds → `claim_conflict` (the mint's unique-name refusal) with the roster + a fresh-name/`--role` hint; your own reloaded seat → newest-wins. **No wire change** — this rides the existing `hello`/members primitives (`SPEC.md` A.3 stays Unreleased).
+5. **`MUSTERD_AUTOJOIN=1` / a non-`chat` policy** opts a session into claiming + joining automatically right after connect — the convenience path for the common solo case. A claimed binding with `AUTOJOIN=1` just joins; a pending binding with a `seat`/`role` policy auto-claims that seat. A `chat` policy never auto-claims. `musterd init` offers to set autojoin per-binding and stamps `seat:<name>` as the folder policy.
+6. **Buffered deliveries:** while joined, inbound `deliver` envelopes are buffered in memory for `team_inbox_check` to drain (the agent pulls; MCP has no server-push to the model, so we expose a check tool the agent calls).
 
 This means: registering the MCP server in a harness == that harness's agent *can become* Member `Ada` on team `dawn` via surface `claude-code` — but only when it explicitly joins. No per-harness code.
 
@@ -64,19 +69,22 @@ Phantom Presence now drops within the 45s reclaim grace instead of lingering. Th
 
 ## The 6 tools (JSON schemas — verbatim contract)
 
-Two lifecycle tools (`team_join` / `team_leave`) gate the four working tools. Inspection (`team_status` / `team_members`) works while dormant; sending and inbox draining require a live join.
+Two lifecycle tools (`team_join` / `team_leave`) gate the four working tools. Inspection (`team_status` / `team_members`) works while dormant/pending; sending and inbox draining require a live join.
 
 Tool names are stable; descriptions are written for the *agent* reading them.
 
-### `team_join`
+### `team_join` (overloaded — claim-on-first-use, ADR 032)
 ```json
 {
   "name": "team_join",
-  "description": "Join your team and go online as your member — call this once when you start working so teammates can see you and reach you. Until you join you are dormant (you can look at the roster but cannot send or receive). After joining, check your inbox at task boundaries.",
-  "inputSchema": { "type": "object", "properties": {} }
+  "description": "Claim a seat on your team and go online — call this once when you start working. Overloaded (claim-on-first-use): {as:\"Ada\"} claims a named seat (auto-minted if new); {role:\"backend\"} claims the next open seat in a role pool (e.g. backend-2); {} uses this folder's claim policy. The result tells you who you are. Until you claim you are a pending presence — reachable, but you cannot send or check your inbox. After joining, check your inbox.",
+  "inputSchema": { "type": "object", "properties": {
+    "as":   { "type": "string", "description": "claim this named seat (auto-minted locally if new)" },
+    "role": { "type": "string", "description": "claim the next open seat in this role pool" }
+  } }
 }
 ```
-Opens the background WS `hello` (Member/surface from env), registers the Presence, starts the heartbeat. Idempotent (`"Already joined …"`). Newest-wins (ADR 017): if the Member is already live elsewhere, this session takes over and the older one is `superseded` — so join always succeeds for your own identity (no lockout). The success result reminds the agent to `team_inbox_check` now and at every task boundary (dead-air mitigation — messages that arrived while heads-down only surface on a check).
+Resolves the target (`as` → named seat; `role` → next `<role>-<n>` handle; neither → the folder `MUSTERD_CLAIM` policy; `chat` with no target → asks the session to name itself, with its claim-code). Then **mint-or-reuse** the seat (auto-mint = the unauthenticated `POST /members`; the session's own already-held seat is reused without re-minting), set the session's identity, **persist it into `.musterd/binding.json`** + clear the pending marker, and open the WS `hello`. Idempotent once joined (`"Already joined …"`). A name another live session holds → `claim_conflict` with the roster + a fresh-name/`--role` hint (the mint's unique-name refusal); your own reloaded seat → newest-wins (ADR 017). The success result returns the **assigned identity** (a fresh session learns who it is; its charter is in `AGENTS.md`) and reminds the agent to `team_inbox_check` now and at every task boundary.
 
 ### `team_leave`
 ```json
@@ -107,7 +115,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
   }
 }
 ```
-Maps `to` → Recipient (`@team`/`@broadcast`/name), builds an Envelope (`from`=MUSTERD_MEMBER), validates with `@musterd/protocol`, `POST …/messages` (or live WS). Returns the stored message id + a one-line confirmation. **Refuses while dormant** (`"call team_join first"`) — a session that hasn't joined cannot send.
+Maps `to` → Recipient (`@team`/`@broadcast`/name), builds an Envelope (`from`=the claimed member), validates with `@musterd/protocol`, `POST …/messages` (or live WS). Returns the stored message id + a one-line confirmation. **Refuses until ready** — *pending* (no seat → claim one) or *dormant* (claimed, not joined → `team_join`), via `notReadyMessage` (ADR 032/033).
 
 ### `team_inbox_check`
 ```json
@@ -120,7 +128,7 @@ Maps `to` → Recipient (`@team`/`@broadcast`/name), builds an Envelope (`from`=
   } }
 }
 ```
-Drains the in-memory buffer + `GET /inbox?unread=1`, advances the cursor, returns rows as structured `{from, act, body, ts, thread, meta}` plus a compact text rendering. Dedupes by envelope id (at-least-once). **Refuses while dormant** (`"call team_join first to receive messages"`) — a session that hasn't joined cannot drain the shared inbox cursor.
+Drains the in-memory buffer + `GET /inbox?unread=1`, advances the cursor, returns rows as structured `{from, act, body, ts, thread, meta}` plus a compact text rendering. Dedupes by envelope id (at-least-once). **Refuses until ready** (pending → claim a seat; dormant → `team_join`) — a session that hasn't joined cannot drain the shared inbox cursor.
 
 ### `team_status`
 ```json
@@ -150,17 +158,20 @@ Same data source as `team_status`, filtered/detailed. (`team_status` = quick ros
 src/
   index.ts        // stdio MCP server; registers the 6 tools; reads env config;
                   //   installShutdownHandlers (drop presence + exit on host teardown);
-                  //   MUSTERD_AUTOJOIN=1 opt-in auto-join after connect
-  config.ts       // env -> { server, team, member, token, surface }; validates
-  client.ts       // HTTP + background WS client; join()/leave()/close(); `joined` flag;
-                  //   presence + inbox buffer live only while joined
+                  //   autojoin(): claim+join on launch when a default claim exists (ADR 032);
+                  //   writes a pending marker when unclaimed (ADR 033)
+  config.ts       // env -> { server, team, member?, token?, surface, claim, connId, claimCode }; validates
+  client.ts       // HTTP + background WS client; join()/leave()/close(); `joined`/`claimed`;
+                  //   setIdentity() (late claim); addMember() (tokenless mint); buffers live while joined
+  claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() (shared by team_join + autojoin)
+  pending.ts      // pending-presence markers (.musterd/pending/<code>.json) — write + clear
   tools/
-    join.ts       // team_join  — go online (WS hello + presence + heartbeat)
+    join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)
-    send.ts       // refuses while dormant
-    inboxCheck.ts // refuses while dormant
-    status.ts     // works while dormant
-    members.ts    // works while dormant
+    send.ts       // refuses until ready (pending → claim; dormant → join)
+    inboxCheck.ts // refuses until ready (pending → claim; dormant → join)
+    status.ts     // works while dormant/pending
+    members.ts    // works while dormant/pending
   bind.ts         // reachability check only (GET /health) — claims no presence
 ```
 
@@ -179,7 +190,8 @@ src/
 
 - With env pointing at a live test server + a `team add Ada` token: MCP boot is **dormant** — the server roster shows Ada `offline`. After `team_join`, the roster shows Ada online with the surface from env.
 - A second session for the same Member calling `team_join` **takes over** (newest-wins, ADR 017); the first is `superseded` and goes dormant without reconnecting.
-- `team_send` / `team_inbox_check` **before** `team_join` return the "call team_join first" guard (no message sent, cursor untouched).
+- `team_send` / `team_inbox_check` **before** `team_join` return the not-ready guard (no message sent, cursor untouched): the *pending* "claim a seat" hint when unclaimed, or the dormant "call team_join first" when claimed-but-not-joined.
+- An **unclaimed** binding (claim policy only): boot is a **pending presence** — a `.musterd/pending/<code>.json` marker exists; `team_join {as:'Ada'}` auto-mints Ada, writes the binding, and goes online; `{role:'backend'}` claims `backend-1`. Claiming a name another live session holds returns `claim_conflict`.
 - After join: `team_send {act:'status_update', body:'...'}` persists a message visible to a CLI `inbox` on the same team.
 - A CLI `send --to Ada` then `team_inbox_check` returns that message once and advances the cursor (second check returns nothing).
 - `accept` without `reply_to` → validation error surfaced as a tool error string.

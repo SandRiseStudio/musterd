@@ -1,4 +1,4 @@
-import type { MemberKind, MemberSummary } from '@musterd/protocol';
+import { isClaimed, type MemberKind, type MemberSummary } from '@musterd/protocol';
 import { flagStr } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, identityFromEnv, loadConfig, type Config, type Identity } from '../config.js';
@@ -30,7 +30,9 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
   // Candidate identities, highest precedence first.
   const sources: { team: string; identity: Identity }[] = [];
   if (envId) sources.push(envId);
-  if (binding) {
+  // A policy-only (unclaimed) binding carries no identity yet — skip it as an identity source
+  // (the caller resolves identity by claiming; see `musterd claim`).
+  if (binding && isClaimed(binding)) {
     sources.push({
       team: binding.team,
       identity: { name: binding.member, token: binding.token, surface: binding.surface },

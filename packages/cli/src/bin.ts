@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from './args.js';
+import { claimCommand } from './commands/claim.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
@@ -27,6 +28,7 @@ usage:
   musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] <body...>
   musterd inbox [--watch] [--unread] [--peek] [--limit <n>]
   musterd status
+  musterd claim <name> | --role <role> [--for <code>] [--surface <s>]   claim a seat for this folder (claim-on-first-use)
   musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
   musterd role list | show <name> | create <name> [--from <builtin>] [--force]   manage role provisioning templates (.musterd/roles/)
   musterd reset [--force] [--no-backup]         wipe the local db + identities back to a clean slate (daemon must be stopped)
@@ -60,6 +62,8 @@ async function main(argv: string[]): Promise<number> {
       return inboxCommand(rest);
     case 'status':
       return statusCommand(rest);
+    case 'claim':
+      return claimCommand(rest);
     case 'reclaim':
       return reclaimCommand(rest);
     case 'role':

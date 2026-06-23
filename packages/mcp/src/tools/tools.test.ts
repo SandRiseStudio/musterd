@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as pathJoin } from 'node:path';
 import { makeEnvelope, type Envelope, type MemberSummary } from '@musterd/protocol';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
 import { formatMessage, notJoinedMessage, textResult } from './format.js';
@@ -35,6 +38,11 @@ const config: McpConfig = {
   member: 'Ada',
   token: 't',
   surface: 'claude-code',
+  provenance: 'session',
+  workspace: 'repo',
+  claim: { mode: 'chat' },
+  connId: 'conn-1',
+  claimCode: 'AB12',
 };
 
 function member(over: Partial<MemberSummary> = {}): MemberSummary {
@@ -115,7 +123,7 @@ describe('team_send handler', () => {
   it('blocks when not joined and surfaces the last join error', async () => {
     const handler = capture(
       registerSend,
-      { joined: false, lastJoinError: 'token rejected' },
+      { joined: false, claimed: true, lastJoinError: 'token rejected', claimCode: 'AB12' },
       config,
     );
     const r = await handler({ to: '@team', act: 'message', body: 'x' });
@@ -195,9 +203,27 @@ describe('team_inbox_check handler', () => {
   }
 
   it('blocks when not joined', async () => {
-    const handler = capture(registerInboxCheck, { joined: false, lastJoinError: null });
+    const handler = capture(registerInboxCheck, {
+      joined: false,
+      claimed: true,
+      lastJoinError: null,
+      claimCode: 'AB12',
+    });
     const r = await handler({});
     expect(text(r)).toContain('call team_join first');
+  });
+
+  it('refuses with a claim hint while pending (unclaimed)', async () => {
+    const handler = capture(registerInboxCheck, {
+      joined: false,
+      claimed: false,
+      lastJoinError: null,
+      claimCode: 'ZZ99',
+    });
+    const r = await handler({});
+    expect(text(r)).toContain('pending presence');
+    expect(text(r)).toContain('ZZ99');
+    expect(text(r)).toContain("team_join {as:'Ada'}");
   });
 
   it('reports no new messages when empty', async () => {
@@ -323,7 +349,40 @@ describe('team_status handler', () => {
   });
 });
 
-describe('team_join handler', () => {
+describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
+  // claimAndJoin persists the claimed seat to <cwd>/.musterd — keep that off the real tree.
+  let tmpCwd: string;
+  beforeEach(() => {
+    tmpCwd = mkdtempSync(pathJoin(tmpdir(), 'musterd-join-'));
+    vi.spyOn(process, 'cwd').mockReturnValue(tmpCwd);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(tmpCwd, { recursive: true, force: true });
+  });
+
+  /** A pending (unclaimed) client whose claim path is fully stubbed; identity is set on claim. */
+  function pendingClient(over: Partial<MusterdClient> = {}): Partial<MusterdClient> {
+    let member: string | undefined;
+    return {
+      joined: false,
+      get claimed() {
+        return Boolean(member);
+      },
+      get member() {
+        return member;
+      },
+      claimCode: 'AB12',
+      roster: (async () => ({ members: [] })) as any,
+      addMember: (async () => ({ token: 'mskd_minted' })) as any,
+      setIdentity: ((m: string) => {
+        member = m;
+      }) as any,
+      join: (async () => undefined) as any,
+      ...over,
+    };
+  }
+
   it('is idempotent when already joined', async () => {
     const join = vi.fn(async () => undefined);
     const handler = capture(registerJoin, { joined: true, join: join as any }, config);
@@ -331,41 +390,93 @@ describe('team_join handler', () => {
     expect(join).not.toHaveBeenCalled();
   });
 
-  it('joins and returns the stay-in-sync guidance', async () => {
+  it('claims a named seat with {as} and returns the stay-in-sync guidance', async () => {
+    const setIdentity = vi.fn();
+    const join = vi.fn(async () => undefined);
     const handler = capture(
       registerJoin,
-      { joined: false, join: (async () => undefined) as any },
-      config,
+      pendingClient({ setIdentity: setIdentity as any, join: join as any }),
+      { ...config, member: undefined, token: undefined },
     );
-    const out = text(await handler({}));
+    const out = text(await handler({ as: 'Ada' }));
+    expect(setIdentity).toHaveBeenCalledWith('Ada', 'mskd_minted');
+    expect(join).toHaveBeenCalled();
     expect(out).toContain('Joined dawn as Ada (claude-code)');
     expect(out).toContain('team_inbox_check');
   });
 
-  it('explains a member_busy collision distinctly from a generic failure', async () => {
-    const busy = capture(
+  it('claims the next open pool seat with {role}', async () => {
+    const setIdentity = vi.fn();
+    const handler = capture(
       registerJoin,
-      {
-        joined: false,
-        join: (async () => {
-          throw new Error('member_busy: already active');
-        }) as any,
-      },
-      config,
+      pendingClient({
+        roster: (async () => ({ members: [{ name: 'backend-1' }] })) as any,
+        setIdentity: setIdentity as any,
+      }),
+      { ...config, member: undefined, token: undefined, claim: { mode: 'chat' } },
     );
-    expect(text(await busy({}))).toContain('already live in another session');
+    const out = text(await handler({ role: 'backend' }));
+    expect(setIdentity).toHaveBeenCalledWith('backend-2', 'mskd_minted');
+    expect(out).toContain('Joined dawn as backend-2 (role backend)');
+  });
 
-    const generic = capture(
+  it('re-occupies an already-bound identity on bare team_join {} (back-compat)', async () => {
+    // A claimed binding (init-minted seat) with no policy: {} should join the existing seat,
+    // not report "pending". claimSeat reuses the held token rather than re-minting.
+    const addMember = vi.fn();
+    const join = vi.fn(async () => undefined);
+    const handler = capture(
       registerJoin,
-      {
-        joined: false,
-        join: (async () => {
-          throw new Error('connection refused');
-        }) as any,
-      },
-      config,
+      pendingClient({ addMember: addMember as never, join: join as never }),
+      config, // member: 'Ada', token: 't', claim: chat
     );
-    expect(text(await generic({}))).toContain('Could not join dawn as Ada: connection refused');
+    const out = text(await handler({}));
+    expect(addMember).not.toHaveBeenCalled();
+    expect(join).toHaveBeenCalled();
+    expect(out).toContain('Joined dawn as Ada');
+  });
+
+  it('asks the session to name itself when policy is chat and no target is given', async () => {
+    const handler = capture(registerJoin, pendingClient(), {
+      ...config,
+      member: undefined,
+      token: undefined,
+      claim: { mode: 'chat' },
+      claimCode: 'ZZ99',
+    });
+    const out = text(await handler({}));
+    expect(out).toContain('pending presence');
+    expect(out).toContain('ZZ99');
+    expect(out).toContain("team_join {as:'Ada'}");
+  });
+
+  it('follows the folder seat policy when no target is given', async () => {
+    const setIdentity = vi.fn();
+    const handler = capture(registerJoin, pendingClient({ setIdentity: setIdentity as any }), {
+      ...config,
+      member: undefined,
+      token: undefined,
+      claim: { mode: 'seat', name: 'Polly' },
+    });
+    const out = text(await handler({}));
+    expect(setIdentity).toHaveBeenCalledWith('Polly', 'mskd_minted');
+    expect(out).toContain('Joined dawn as Polly');
+  });
+
+  it('refuses a name already taken by another session (claim_conflict)', async () => {
+    const handler = capture(
+      registerJoin,
+      pendingClient({
+        roster: (async () => ({ members: [{ name: 'Ada' }, { name: 'Bo' }] })) as any,
+        addMember: (async () => {
+          throw new Error('member "Ada" already exists in "dawn"');
+        }) as any,
+      }),
+      { ...config, member: undefined, token: undefined },
+    );
+    const out = text(await handler({ as: 'Ada' }));
+    expect(out).toContain("Can't claim that seat");
+    expect(out).toContain('Ada, Bo'); // the offered roster
   });
 });
 

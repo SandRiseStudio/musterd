@@ -44,7 +44,22 @@ describe('loadMcpConfig identity alignment (ADR 018)', () => {
     expect(cfg.token).toBe('mskd_from_env');
   });
 
-  it('errors clearly when neither env nor a binding provides an identity', () => {
-    expect(() => loadMcpConfig({})).toThrow(/no identity/);
+  it('errors clearly when neither env nor a binding provides a team', () => {
+    // Identity is now optional (claim-on-first-use, ADR 032) — only the team is required to load.
+    expect(() => loadMcpConfig({})).toThrow(/no team/);
+  });
+
+  it('loads as a pending presence (no identity) when only a team + claim policy is given', () => {
+    const cfg = loadMcpConfig({ MUSTERD_TEAM: 'lab', MUSTERD_CLAIM: 'role:backend' });
+    expect(cfg.member).toBeUndefined();
+    expect(cfg.token).toBeUndefined();
+    expect(cfg.team).toBe('lab');
+    expect(cfg.claim).toEqual({ mode: 'role', role: 'backend' });
+  });
+
+  it('reads the claim policy from the binding file when MUSTERD_CLAIM is unset', () => {
+    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    // The fixture binding has a concrete identity and no policy → defaults to chat.
+    expect(cfg.claim).toEqual({ mode: 'chat' });
   });
 });

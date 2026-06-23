@@ -40,6 +40,43 @@ export class MusterdClient {
     return this.joinedFlag;
   }
 
+  /** Whether this session has claimed a seat yet (holds a concrete member + token). */
+  get claimed(): boolean {
+    return Boolean(this.config.member && this.config.token);
+  }
+
+  /** The claimed seat's member name, or undefined while pending (unclaimed). */
+  get member(): string | undefined {
+    return this.config.member;
+  }
+
+  /** This session's pending-presence disambiguation code (ADR 033). */
+  get claimCode(): string {
+    return this.config.claimCode;
+  }
+
+  /**
+   * Bind this session to a freshly-claimed seat (claim-on-first-use, ADR 032). After this, `join()`
+   * occupies it and the act tools can send as it. Refuses to silently swap a live seat — claim only
+   * applies to a pending or already-matching session.
+   */
+  setIdentity(member: string, token: string): void {
+    if (this.config.member && this.config.member !== member && this.joinedFlag) {
+      throw new Error(`already live as ${this.config.member}; leave before claiming ${member}`);
+    }
+    this.config.member = member;
+    this.config.token = token;
+  }
+
+  /** Mint (or look up the roster of) seats with no identity — the unauthenticated local floor. */
+  async addMember(name: string, role?: string): Promise<{ token: string }> {
+    return this.request('POST', `/teams/${this.config.team}/members`, {
+      name,
+      kind: 'agent',
+      ...(role ? { role } : {}),
+    });
+  }
+
   /** The most recent join failure message, or null if none / since cleared by a successful join. */
   get lastJoinError(): string | null {
     return this.lastJoinErrorMsg;
@@ -50,7 +87,11 @@ export class MusterdClient {
   private async request(method: string, path: string, body?: unknown): Promise<any> {
     const res = await fetch(this.config.server + path, {
       method,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.config.token}` },
+      headers: {
+        'content-type': 'application/json',
+        // No bearer while pending — minting/roster are unauthenticated; a claimed session adds it.
+        ...(this.config.token ? { authorization: `Bearer ${this.config.token}` } : {}),
+      },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     const text = await res.text();
@@ -94,6 +135,11 @@ export class MusterdClient {
    */
   join(): Promise<void> {
     if (this.joinedFlag) return Promise.resolve();
+    if (!this.config.member || !this.config.token) {
+      return Promise.reject(
+        new Error('unclaimed — claim a seat first (team_join {as} or `musterd claim <name>`)'),
+      );
+    }
     this.wantPresence = true;
     return new Promise<void>((resolve, reject) => {
       this.pendingJoin = { resolve, reject };

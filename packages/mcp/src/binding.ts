@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { BINDING_DIR, BINDING_FILE, BindingSchema, type Binding } from '@musterd/protocol';
 
@@ -30,4 +30,22 @@ function readBinding(path: string): Binding | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Persist the workspace binding after an in-session claim (ADR 032), so a reconnect / a shelled-out
+ * `musterd` resolves to the seat this session just claimed (ADR 018's single source of truth). Holds
+ * a token → 0600. Mirrors the CLI's `saveBinding`; the shared `BindingSchema` locks the shape.
+ */
+export function saveBinding(dir: string, binding: Binding): string {
+  const bindingDir = join(dir, BINDING_DIR);
+  mkdirSync(bindingDir, { recursive: true });
+  const p = join(bindingDir, BINDING_FILE);
+  writeFileSync(p, JSON.stringify(binding, null, 2) + '\n', 'utf8');
+  try {
+    chmodSync(p, 0o600);
+  } catch {
+    // best-effort on platforms without chmod semantics
+  }
+  return p;
 }

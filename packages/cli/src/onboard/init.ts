@@ -294,7 +294,17 @@ export async function runInit(): Promise<number> {
     return 1;
   }
 
-  const binding = { server, team, member: name, token, surface: chosen.surface };
+  // Stamp the folder's claim policy alongside the minted identity (claim-on-first-use, ADR 032):
+  // `init` mints the primary seat as before (back-compat), but also records `seat:<name>` so a
+  // re-launched session re-occupies it and the claim-on-first-use path is available without re-init.
+  const binding = {
+    server,
+    team,
+    member: name,
+    token,
+    surface: chosen.surface,
+    claim: { mode: 'seat' as const, name },
+  };
   const entry = buildEntry(binding);
 
   // ADR 018: write the workspace binding — the single file both the CLI and the MCP adapter read,

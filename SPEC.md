@@ -153,6 +153,17 @@ Servers MUST store only hashes of keys/credentials/grants. A `banned` seat's cre
 
 ## A.3 Claim handshake (WS) — replaces the live `hello`
 
+> **Note (local claim-on-first-use is already shipped *without* this frame — ADRs 032/033).** The
+> *local* claim experience from `provisioning-recipe.md` §5–§6 — the overloaded `team_join`,
+> `musterd claim`, the `MUSTERD_CLAIM` folder policy, and client-side pending presence — is built on
+> the **existing** `hello`/members primitives, not this handshake: locally a seat is a member + its
+> per-member token, auto-mint is the unauthenticated `POST /members`, occupy is `hello` (newest-wins
+> + grace, §74), and `claim_conflict` is the unique-name `conflict` on mint. This appendix's
+> `claim`/grant frame is the **governed, off-localhost** path (agent key + admin grant + the request
+> lane); it stays Unreleased until the daemon's threat model becomes real. Server-side pending
+> presence (a seatless session on the roster) is likewise reserved here — locally it is a client-side
+> state (ADR 033).
+
 State machine: `connecting → authenticated(key) → claim → (occupied | refused | pending) → [subscribed] → live`.
 
 ```jsonc

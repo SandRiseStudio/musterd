@@ -68,6 +68,8 @@ function readBindingAt(cwd: string): { member: string; team: string } | null {
     const path = join(cwd, BINDING_DIR, BINDING_FILE);
     if (!existsSync(path)) return null;
     const b = BindingSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    // A policy-only (unclaimed) binding has no bound name to compare against.
+    if (!b.member) return null;
     return { member: b.member, team: b.team };
   } catch {
     return null;

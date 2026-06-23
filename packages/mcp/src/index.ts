@@ -2,8 +2,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { bind } from './bind.js';
+import { claimAndJoin, type ClaimTarget } from './claim.js';
 import { MusterdClient } from './client.js';
-import { loadMcpConfig } from './config.js';
+import { isClaimedConfig, loadMcpConfig, type McpConfig } from './config.js';
+import { writePendingMarker } from './pending.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
 import { registerJoin } from './tools/join.js';
 import { registerLeave } from './tools/leave.js';
@@ -75,19 +77,42 @@ export function buildMcpServer(
   return server;
 }
 
+/**
+ * Launch-time autojoin (claim-on-first-use, ADR 032). Fires ⇔ a default claim exists: a session with
+ * a concrete identity just `join()`s (today's `MUSTERD_AUTOJOIN=1` path); a pending session with a
+ * `seat`/`role` folder policy auto-claims that seat and occupies it. A `chat` policy never
+ * auto-claims — the session stays a pending presence until a human names it. Best-effort: a failure
+ * is reported to stderr and leaves the session pending/dormant rather than crashing the adapter.
+ */
+export async function autojoin(client: MusterdClient, config: McpConfig): Promise<void> {
+  try {
+    if (isClaimedConfig(config)) {
+      if (process.env['MUSTERD_AUTOJOIN'] === '1') await client.join();
+      return;
+    }
+    const target: ClaimTarget | null =
+      config.claim.mode === 'seat'
+        ? { seat: config.claim.name }
+        : config.claim.mode === 'role'
+          ? { role: config.claim.role }
+          : null;
+    if (target) await claimAndJoin(client, config, target);
+  } catch (err) {
+    process.stderr.write(`musterd autojoin failed: ${(err as Error).message}\n`);
+  }
+}
+
 async function main(): Promise<void> {
   const config = loadMcpConfig();
   const client = new MusterdClient(config);
   await bind(client); // dormant: reachability only, no presence claimed
+  // A session that starts unclaimed is a pending presence — drop a marker so `musterd claim` can
+  // find it (ADR 033). Best-effort; removed once the session claims a seat.
+  if (!isClaimedConfig(config)) writePendingMarker(config);
   const server = buildMcpServer(client, config);
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  // Opt-in one-keystroke activation; off by default so a session never silently occupies a seat.
-  if (process.env['MUSTERD_AUTOJOIN'] === '1') {
-    await client
-      .join()
-      .catch((err) => process.stderr.write(`musterd autojoin failed: ${(err as Error).message}\n`));
-  }
+  await autojoin(client, config);
 
   installShutdownHandlers({ close: () => client.close(), transport });
 }

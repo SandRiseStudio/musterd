@@ -25,3 +25,23 @@ export function notJoinedMessage(action: string, lastJoinError: string | null): 
   const base = `you haven't joined the team yet — call team_join first, then ${action}`;
   return lastJoinError ? `${base}.\nNote: the last join attempt failed: ${lastJoinError}` : base;
 }
+
+/**
+ * Guard message for an acting tool when the session isn't ready (claim-on-first-use, ADR 032/033).
+ * Two distinct states: **pending** (no seat claimed yet → name yourself), and **dormant** (claimed
+ * but not joined → just join). Refusing cleanly here is what "pending presence … team_send /
+ * team_inbox_check refuse while unclaimed" means.
+ */
+export function notReadyMessage(
+  client: { claimed: boolean; lastJoinError: string | null; claimCode: string },
+  action: string,
+): string {
+  if (!client.claimed) {
+    return (
+      `you're a pending presence (unclaimed, code ${client.claimCode}) — you hold no seat, so you ` +
+      `can't ${action}. Claim one first: team_join {as:'Ada'} (named) or team_join {role:'backend'} ` +
+      `(pool), or have a human run \`musterd claim <name>\` here.`
+    );
+  }
+  return notJoinedMessage(action, client.lastJoinError);
+}

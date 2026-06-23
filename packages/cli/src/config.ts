@@ -84,6 +84,9 @@ export function saveBinding(dir: string, binding: Binding): string {
  * never defeat `saveBinding`.
  */
 function recordBinding(dir: string, binding: Binding): void {
+  // A policy-only (unclaimed) binding has no member name to register — the cross-folder name-reuse
+  // guard (ADR 020) only tracks concrete identities.
+  if (!binding.member) return;
   try {
     const config = loadConfig();
     config.bindings[resolve(dir)] = {
