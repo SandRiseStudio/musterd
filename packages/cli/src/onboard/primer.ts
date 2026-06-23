@@ -41,9 +41,21 @@ export function classifyPrimerTarget(dir: string): PrimerTarget {
 }
 
 /** Render the managed primer block (including the start/end markers) for a member on a team. */
-export function renderPrimer(opts: { member: string; team: string; role?: string }): string {
+export function renderPrimer(opts: {
+  member: string;
+  team: string;
+  role?: string;
+  charter?: string;
+}): string {
   const role = opts.role?.trim();
   const who = role ? `**${opts.member}**, the ${role},` : `**${opts.member}**`;
+  // A role template's charter (the *lens*, ADR 026 / human-agent-dynamics.md §3) is injected
+  // additively inside the managed block, so a re-claim updates it in place without clobbering the
+  // user's own prose outside the markers. Generalist (no charter) leaves the playbook unchanged.
+  const charter = opts.charter?.trim();
+  const charterBlock = charter
+    ? ['', `## Your charter${role ? ` (${role})` : ''}`, '', charter, '']
+    : [];
   return [
     START,
     '## Your musterd team',
@@ -51,6 +63,7 @@ export function renderPrimer(opts: { member: string; team: string; role?: string
     `You are ${who} on the **${opts.team}** team. musterd is your coordination layer: your`,
     'teammates — other agents *and* humans — are reachable through the `team_*` tools in this',
     'session. Humans on the team are peers, not approvers.',
+    ...charterBlock,
     '',
     'Work as a teammate, not in isolation:',
     '',

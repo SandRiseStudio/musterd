@@ -26,6 +26,20 @@ export interface ConfigureResult {
   secretPath?: string;
 }
 
+/** A named MCP server entry to provision (a role's `tools.mcp_servers`); secrets stay `${ENV}`. */
+export interface ProvisionServer extends McpServerEntry {
+  name: string;
+}
+
+export interface ProvisionResult {
+  /** Names of the MCP servers actually registered (for the uninstall manifest, ADR 030). */
+  added: string[];
+  /** Where they were written (CLI invoked / path). */
+  target: string;
+  /** Anything the user must do to activate them, if different from the musterd server's. */
+  activation?: string;
+}
+
 /** A pluggable onboarding adapter for one agent harness. */
 export interface Harness {
   id: string;
@@ -35,4 +49,11 @@ export interface Harness {
   detect: () => Promise<DetectResult>;
   /** Write the musterd MCP server into this harness's config. */
   configure: (entry: McpServerEntry, binding: AgentBinding) => Promise<ConfigureResult>;
+  /**
+   * Provision a role's Universe-2 tools (ADR 026) into this harness — additively, reversibly, and
+   * per-user/local (ADR 027). Each server is registered with per-server idempotency (remove+re-add
+   * only that name, never the user's others). Optional: a harness without a renderer yet degrades
+   * to charter-only. `scope` is `local` in Phase 1 (a `shared` opt-in is a fast-follow).
+   */
+  provision?: (servers: ProvisionServer[], scope?: 'local' | 'shared') => Promise<ProvisionResult>;
 }

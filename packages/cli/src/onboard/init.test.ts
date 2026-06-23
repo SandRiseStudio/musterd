@@ -26,6 +26,10 @@ const h = vi.hoisted(() => {
       activation: 'run `claude` here',
       scope: 'wired into this folder only',
     })),
+    provision: vi.fn(async (servers: { name: string }[]) => ({
+      added: servers.map((s) => s.name),
+      target: 'claude mcp (scope: local)',
+    })),
   };
   const config: {
     server: string;
@@ -89,6 +93,10 @@ beforeEach(() => {
     activation: 'run `claude` here',
     scope: 'wired into this folder only',
   });
+  h.harness.provision.mockImplementation(async (servers: { name: string }[]) => ({
+    added: servers.map((s) => s.name),
+    target: 'claude mcp (scope: local)',
+  }));
 
   Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
   vi.spyOn(process.stdout, 'write').mockReturnValue(true);
@@ -105,10 +113,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Queue a full happy-path answer set: create team → add agent → configure → primer. */
+/** Queue a full happy-path answer set: create team → add agent → configure → role → primer. */
 function happyAnswers() {
   h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend'); // slug, you, your-role, name, role
-  h.selectQueue.push('new', 'claude-code'); // intent, harness
+  h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role-template
   h.confirmQueue.push(true, true, true); // autojoin, connect, write-primer
 }
 
@@ -259,9 +267,25 @@ describe('runInit — add-agent happy path', () => {
 
   it('declining the primer still completes successfully', async () => {
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
-    h.selectQueue.push('new', 'claude-code');
+    h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role
     h.confirmQueue.push(true, true, false); // autojoin, connect, primer NO
     expect(await runInit()).toBe(0);
+  });
+
+  it('provisioning a richer role calls provision and injects its charter', async () => {
+    h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
+    h.selectQueue.push('new', 'claude-code', 'backend'); // intent, harness, role = backend
+    h.confirmQueue.push(true, true, true); // autojoin, connect, primer
+    expect(await runInit()).toBe(0);
+    expect(h.harness.provision).toHaveBeenCalled();
+    const servers = h.harness.provision.mock.calls[0]![0] as { name: string }[];
+    expect(servers.map((s) => s.name)).toContain('supabase');
+    // manifest records what was provisioned
+    const manifest = JSON.parse(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'));
+    expect(manifest.mcpServers).toContain('supabase');
+    expect(manifest.role).toBe('backend');
+    // the role's charter lands in the managed primer block
+    expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).toContain('## Your charter');
   });
 
   it('appends to an existing unmarked AGENTS.md (primer target = unmarked)', async () => {
@@ -284,7 +308,7 @@ describe('runInit — secret/gitignore handling', () => {
       secretPath: join(cwd, '.cursor', 'mcp.json'),
     });
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
-    h.selectQueue.push('new', 'claude-code');
+    h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role
     h.confirmQueue.push(true, true, true, true); // autojoin, connect, gitignore-add, primer
     expect(await runInit()).toBe(0);
     const gi = readFileSync(join(cwd, '.gitignore'), 'utf8');

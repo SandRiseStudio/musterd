@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { Harness } from '../harness.js';
+import type { Harness, ProvisionServer } from '../harness.js';
 
 const exec = promisify(execFile);
 
@@ -95,6 +95,26 @@ export const claudeCode: Harness = {
       activation: activationHint(),
       scope: `wired into this folder only (${process.cwd()}) — another project needs its own \`musterd init\`, and a second agent needs its own folder`,
     };
+  },
+
+  // Provision a role's MCP servers (ADR 026 Universe-2). Each is `claude mcp add <name> -s local`,
+  // additive and per-user/local (ADR 027). Per-server idempotency: remove+re-add *only that name*,
+  // never touching the user's other servers. `${ENV}` secrets are passed through verbatim: execFile
+  // runs no shell, so the literal `${VAR}` string lands in the config as a *reference* — Claude Code
+  // expands `${VAR}` / `${VAR:-default}` from the environment at server-launch time (it is never
+  // resolved or baked by musterd). Tokens are never logged — only server *names* are returned.
+  async provision(servers: ProvisionServer[]) {
+    const bin = (await resolveClaudeBin()) ?? 'claude';
+    const added: string[] = [];
+    for (const s of servers) {
+      const envArgs = Object.entries(s.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+      const args = ['mcp', 'add', s.name, '-s', 'local', ...envArgs, '--', s.command, ...s.args];
+      // Per-server idempotency: re-running replaces only this server's prior definition.
+      await exec(bin, ['mcp', 'remove', s.name, '-s', 'local']).catch(() => undefined);
+      await exec(bin, args, { timeout: 10000 });
+      added.push(s.name);
+    }
+    return { added, target: 'claude mcp (scope: local)', activation: activationHint() };
   },
 };
 

@@ -10,8 +10,10 @@ import { renderBanner } from '../render/rows.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
+import { writeProvisionManifest } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
 import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
+import { GENERALIST, isBuiltin, listRoleNames, loadRole } from './role.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -348,6 +350,13 @@ export async function runInit(): Promise<number> {
     return 1;
   }
 
+  // 5a) Provision a role's tools (ADR 026 Universe-2; additive/reversible/local per ADR 027) -----
+  // After the musterd server is wired, optionally apply a role template: it provisions the role's
+  // MCP servers into this harness and contributes a charter to the primer. `generalist` (the
+  // default) provisions nothing extra — only the musterd server + the standard playbook (ADR 028).
+  // Identity is unchanged here — the member's role label was set above; this is Universe-2 only.
+  const charter = await provisionRole(chosen, name);
+
   // 5b) Seed the agent primer so the agent knows the team working-loop (ADR 012) ----------
   // The prompt is honest about what writing does *at the decision point*: against an existing,
   // unmarked AGENTS.md the primer is appended (your content is kept), not overwritten — saying
@@ -364,7 +373,7 @@ export async function runInit(): Promise<number> {
     try {
       const { path, action } = upsertPrimer(
         process.cwd(),
-        renderPrimer({ member: name, team, role }),
+        renderPrimer({ member: name, team, role, ...(charter ? { charter } : {}) }),
       );
       const verb =
         action === 'created' ? 'Wrote' : action === 'appended' ? 'Added the primer to' : 'Updated';
@@ -471,6 +480,80 @@ async function waitForPresence(
     await delay(1000);
   }
   return false;
+}
+
+/**
+ * Offer + apply a role template (ADR 026 §3, provisioning-recipe.md). Lists the built-in seed
+ * library plus any `.musterd/roles/*.json`; `generalist` is the default and provisions nothing
+ * extra. For a richer role, provisions its MCP servers into the chosen harness (additive/local —
+ * ADR 027), records what was added in the uninstall manifest (ADR 030), and returns the role's
+ * charter so the primer step can inject it. A harness without a provision renderer degrades to
+ * charter-only. Best-effort: a provisioning hiccup never fails init. Returns the charter, if any.
+ */
+async function provisionRole(harness: Harness, member: string): Promise<string | undefined> {
+  const names = listRoleNames(process.cwd());
+  const pick = guard(
+    await p.select({
+      message: `Provision a role for ${pc.cyan(member)}? ${pc.dim('(adds tools + a charter; generalist adds nothing extra)')}`,
+      options: names.map((n) => ({
+        value: n,
+        label: n,
+        hint:
+          n === GENERALIST
+            ? 'nothing extra — just the musterd tools'
+            : isBuiltin(n)
+              ? 'built-in role'
+              : 'from .musterd/roles/',
+      })),
+    }),
+  );
+  if (pick === GENERALIST) return undefined;
+
+  let role;
+  try {
+    role = loadRole(process.cwd(), pick);
+  } catch (err) {
+    p.log.warn(`Couldn't load role "${pick}" (${(err as Error).message}) — skipping provisioning.`);
+    return undefined;
+  }
+
+  const servers = role.tools.mcp_servers;
+  if (servers.length === 0) {
+    p.log.info(pc.dim(`${role.role} adds no MCP servers — applying its charter only.`));
+    return role.charter;
+  }
+  if (!harness.provision) {
+    p.log.warn(
+      `Tool provisioning isn't supported for ${harness.label} yet — applying ${role.role}'s charter only.`,
+    );
+    return role.charter;
+  }
+
+  const sp = p.spinner();
+  sp.start(`Provisioning ${role.role} tools into ${harness.label}`);
+  try {
+    const result = await harness.provision(servers, 'local');
+    sp.stop(
+      `Provisioned ${result.added.length} MCP server${result.added.length === 1 ? '' : 's'}: ${pc.cyan(result.added.join(', '))} ${pc.dim(`(${result.target})`)}`,
+    );
+    try {
+      writeProvisionManifest(process.cwd(), {
+        role: role.role,
+        harness: harness.id,
+        mcpServers: result.added,
+      });
+    } catch (err) {
+      p.log.warn(`Couldn't record the provisioning manifest (${(err as Error).message}).`);
+    }
+    p.log.info(
+      pc.dim(
+        'Tooling is provisioned additively and per-user/local — a future `musterd uninstall` removes exactly these. Provisioning is a starting point, not a sandbox.',
+      ),
+    );
+  } catch (err) {
+    sp.stop(pc.yellow(`Couldn't provision ${role.role} tools: ${(err as Error).message}`));
+  }
+  return role.charter;
 }
 
 /**
