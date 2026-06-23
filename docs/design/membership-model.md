@@ -1,10 +1,10 @@
 # Membership, Identity, Seats & Presence — design proposal (v0.3 target)
 
-> **Status: DRAFT — deferred to v0.3 (shared teams), per ADR 007.** This is the full **shared-teams governance** model (seats, agent key + grants, capabilities, approval lane, audit). It is **not** what v0.2 builds. The minimal **v0.2** ships only the parts that fix the real localhost bug — explicit activation, single-active + grace, and `working` status, keeping v0.1 per-member tokens — defined in `membership-impl-plan.md` + ADR 007. This v0.3 design activates when the daemon stops being localhost-only and its threat model becomes real. Companion: `spec-v0.3-draft.md`, `security.md`. Do not implement this set against v0.2.
+> **Status: DRAFT — deferred to v0.3 (shared teams), per ADR 007.** This is the full **shared-teams governance** model (seats, agent key + grants, capabilities, approval lane, audit). It is **not** what v0.2 builds. The minimal **v0.2** ships only the parts that fix the real localhost bug — explicit activation, single-active + grace, and `working` status, keeping v0.1 per-member tokens — defined in `docs/archive/membership-impl-plan.md` + ADR 007. This v0.3 design activates when the daemon stops being localhost-only and its threat model becomes real. Companion: `spec-v0.3-draft.md`, `security.md`. Do not implement this set against v0.2.
 
 > **Living document.** Found an error or better approach? Record it in `docs/decisions/NNN-<slug>.md`, make the smallest correct change, update this doc in the same commit.
 
-Companion docs: `spec-v0.3-draft.md` (protocol), `membership-impl-plan.md` (the **v0.2** build), `security.md` (threat model). Glossary lives in `brand.md` §5; this proposal **adds** the terms **Role**, **Seat**, **Grant**.
+Companion docs: `spec-v0.3-draft.md` (protocol), `docs/archive/membership-impl-plan.md` (the **v0.2** build), `security.md` (threat model). Glossary lives in `brand.md` §5; this proposal **adds** the terms **Role**, **Seat**, **Grant**.
 
 ## Why
 
@@ -141,6 +141,8 @@ A Role is more than a label: it carries **capabilities** (what a seat may do) at
 - musterd **enforces everything that flows through it** — messaging, notification, visibility, governance, claims.
 - musterd **declares** external scopes (repo/dir/tool access) as the source of truth and advertises them, but **filesystem/tool enforcement is delegated** to the harness today (a sandbox on the roadmap). musterd is the *authority on what a seat may do*; it does not sit between the agent and your disk.
 
+> **ADR 026** names this split the **two universes** (musterd-enforced acts vs the harness's tools) and extends the "declare" half with a third move — **provision**: a Role becomes a harness-agnostic provisioning template (charter + capability defaults + MCP/tool recipe), rendered per-harness by the adapter, phased toward mixed-harness teams. Provisioning is a *starting point, not a security boundary*. **ADR 027** is the guardrail: anything musterd writes into a harness stays additive/reversible/non-obligating.
+
 ## Scope boundaries: charter, memory, behavior
 
 - **Charter / instructions — in scope, as data.** A role/seat may carry a **charter** (what this seat is *for*) + instructions. musterd **stores and serves** them — a claiming agent receives its role's charter at claim time — but never *enforces behavior*. Identity metadata, not an execution model.
@@ -153,6 +155,10 @@ A Role is more than a label: it carries **capabilities** (what a seat may do) at
 - Configure the harness with the **agent key** (+ optional default `claim`).
 - The team is **live-approval by default**; `init` offers the admin an explicit opt-in: *"Allow pre-issued grants for this team?"* (default No) and, if yes, *"Pre-grant <seat> to this harness so it joins automatically?"*.
 - The "waiting to join" spinner (shown only if a harness + default claim were set) waits for an **occupy** (account → `active`), which under the default flow happens after the admin approves.
+
+### Local onboarding & provisioning → `provisioning-recipe.md`
+
+The *local* (pre-governance) rendering of this seat/claim model — how `init`, claim-on-first-use, the `team_join` tool surface, role templates, and per-harness provisioning actually work — lives in **`provisioning-recipe.md`** (the design under ADR 026/027/028). In brief: `init` is **once per folder** and writes a **claim policy**, not a fixed identity; agents arrive by **claim-on-first-use** (a session connects unclaimed and a human assigns it — explicitly, via a picker / `musterd claim` / a pre-set binding); locally, claiming **auto-mints** the seat, with the grant/approval governance below layering on only when the team leaves localhost. This un-stubs `init`'s parked "activate an existing member" branch; the wire-level handshake is `SPEC.md` Appendix A.3.
 
 ## Governance & Principle 1
 

@@ -1,5 +1,7 @@
 # v0.2 implementation plan — minimal trust model
 
+> **⛔ ARCHIVED (2026-06-23).** This v0.2 build plan is **complete** — v0.2 shipped. Current status lives in `docs/implementation-plan.md`; the per-change record is the ADRs. Kept for history; not maintained. (Original status below.)
+
 > **Status: plan, not started.** Scoped per **ADR 007** (the scope cut). v0.2 fixes only the real localhost bug — implicit auto-join and "N sessions = N minds wearing one name" — plus ships the launch-visible `working` status. It **keeps v0.1 per-member tokens**; no agent key, grants, requests, audit, capabilities, or notification tiers (those are the v0.3 set: `membership-model.md`, `spec-v0.3-draft.md`, `security.md`). Each milestone ends green (`pnpm -r build && pnpm test`) and updates affected docs.
 
 ## Scope (what v0.2 is)

@@ -76,6 +76,20 @@ When you find an error, contradiction, missing field, or a better approach:
 
 Pre-flagged ADRs you will likely write: **001** (members table folds memberships — `01-data-model.md` already calls this out) and any dependency additions (`hono`, `cac`/`mri`, `tsup`, …).
 
+## Where each doc lives (one job per doc — keep them from going stale)
+
+Every doc has **one job and one lifecycle**, and **one fact has one home** — link, don't duplicate (duplication is what drifts and goes stale). Before adding to a doc, check it's the right home:
+
+- **`SPEC.md`** — the single normative protocol (model, envelope, acts, transport, versioning). **Appendix A** holds *Unreleased* (designed, not yet specified). Rewritten in place; every change is versioned **and** ADR-gated. There is no separate "draft spec."
+- **`docs/decisions/NNN-*.md` (ADRs)** — the decision spine (*why*, dated). **Immutable once accepted — never edit a decision; supersede it with a new ADR.** They are the per-change record; don't re-narrate them elsewhere, link to them.
+- **`docs/architecture/00–07`** — how it's built *now* (impl-facing distillation of SPEC + structure). Rewritten to track code.
+- **`docs/design/*`** — durable *why*: philosophy, research (Co-Gym, MAST), brand, landscape, deployment topology. Rarely changes; an exploratory design **freezes** once its decisions land in ADRs. **Not** a home for evolving plans or status.
+- **`docs/archive/*`** — completed or superseded docs, kept for history. Do not maintain them.
+- **`ROADMAP.md`** — what's next (reserved-but-unbuilt, out-of-scope-by-principle). Forward-looking; replaced, not accreted.
+- **`docs/implementation-plan.md`** — where we are *now*: a short, mostly-derived status snapshot + how we deviated (pointers to ADRs). Touch only when the milestone state changes.
+
+**The four anti-patterns that made docs stale before — avoid all of them:** (1) a doc doing several jobs at once (status + findings-log + roadmap + index) — its parts have different lifecycles, so it accretes strikethroughs instead of being rewritten; (2) hand-narrating status that's derivable from ADRs / git tags / the test count; (3) re-narrating a decision a doc/plan when an ADR already records it; (4) two specs (a "live" and a "draft") hand-synced — there is one `SPEC.md`, and unreleased work is its Appendix A.
+
 ## What is out of scope for v1 (do not build — it's on `ROADMAP.md`)
 
 Sandbox runtime, schedule **enforcement** (availability is stored, not enforced), team-to-team federation, iOS/web/Slack surfaces, the web dashboard *build* (it's designed in Figma now, built later), Python SDK. Keep the schema fields that anticipate these; don't wire behavior to them.
