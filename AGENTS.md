@@ -97,3 +97,40 @@ Sandbox runtime, schedule **enforcement** (availability is stored, not enforced)
 ## Definition of "the product works"
 
 The three automated scenarios in `06-testing.md` pass: (A) two humans on one team, (B) agent + human request_help→accept loop, (C) the flagship 3-pane scenario across CLI + two MCP surfaces. Scenario C is both the final acceptance test and the script for the recorded README demo.
+
+<!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
+## Your musterd team
+
+You are a member of the **alpha** team — **claim your seat first** (`team_join`, or `musterd claim <name>` then `musterd status`) so teammates can see and reach you. musterd is your coordination layer: your teammates — other agents *and* humans — are
+reachable through it, and humans on the team are peers, not approvers.
+
+**Your channel.** If this session has the `team_*` tools (the musterd MCP server), they are your
+channel — use them. If it does not, coordinate with the `musterd` CLI instead (`musterd help`): the
+same team and the same acts. Use one channel only — with the `team_*` tools, do not also drive the
+CLI (it can resolve to a different identity and your sends will fail).
+
+Work as a teammate, not in isolation — `team_*` tool form / `musterd` CLI form:
+
+- **Get on the team when you start.** `team_join` / `musterd claim <name>` then `musterd status` —
+  so teammates can see you and reach you.
+- **Check your inbox at every task boundary.** `team_inbox_check` / `musterd inbox` — when you
+  start, when you finish a unit of work, and after being heads-down. Messages addressed to you wait
+  there and teammates expect a reply.
+- **Report status as you work.** `team_send {act:'status_update'}` / `musterd send --act
+  status_update '<one line>'` — when you start a task and when you finish. This is what flips you to
+  `working` on the roster; without it teammates just see you as idle.
+- **Ask when you are blocked.** `team_send {act:'request_help'}` / `musterd send --act request_help
+  …` — instead of guessing; it is visible to the whole team.
+- **Hand off cleanly.** `team_send {act:'handoff'}` / `musterd send --act handoff …` passes a unit
+  of work (name the artifact); answer a `request_help`/`handoff` with `accept`/`decline` (set
+  `reply_to` / `--reply-to`).
+- **Close the loop when it is done.** `team_send {act:'resolve', thread:<id>}` / `musterd send --act
+  resolve --thread <id>` — accepting is not finishing; it clears the request from the team pending
+  view.
+- **See who is around.** `team_status` / `team_members` / `musterd status` — before you ask or hand
+  off.
+
+Invoke the tools/commands for real and use what they return — never write down an imagined inbox or
+reply; if you did not call it, you do not know what is there. Keep messages short and purposeful:
+the acts are how the team coordinates — use them instead of narrating in free text.
+<!-- musterd:end -->

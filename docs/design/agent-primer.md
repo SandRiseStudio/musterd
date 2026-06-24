@@ -8,6 +8,10 @@ A fresh Claude Code / Cursor agent dropped into a session where the musterd MCP 
 
 The harness-native fix for "give an agent standing context every session" is the agent-context file the harness already reads on every run: **`AGENTS.md`** (the cross-tool convention — read by both Claude Code and Cursor). So: when `musterd init` wires an agent into a folder, it should also seed that folder's `AGENTS.md` with a musterd primer.
 
+**Two follow-ups (2026-06-24 dogfood).** The original primer assumed two things that don't always hold, so it's now (a) **channel-aware** and (b) **self-claim-aware**:
+- *Channel.* The first cut spoke only of the `team_*` MCP tools and **banned the `musterd` CLI**. But an agent without the MCP server provisioned — e.g. a fresh session in musterd's *own* repo — coordinates via the CLI; the ban actively misled it. The primer now documents both forms (`team_*` tool / `musterd` CLI) and keeps the one-channel-at-a-time caution (don't drive the CLI *alongside* the tools — different identity → failed sends) only where it applies.
+- *Seat.* `renderPrimer`'s `member` is now optional. A provisioned agent is named (`You are **Ada** …`); an **unprovisioned** agent is told to claim its seat first (`musterd claim <name>`), which is exactly the fresh-agent path and avoids a primer that names a seat the agent doesn't hold.
+
 ## 2. Decision
 
 After a successful `configure()` (and in the manual-setup path), `musterd init` **writes or updates an `AGENTS.md` in the binding folder** (`process.cwd()` — the same folder Claude Code's `-s local` scope and Cursor's `.cursor/mcp.json` are keyed to) with a marker-delimited **musterd primer block** that teaches the agent its identity and the team working-loop. Idempotent, never clobbers the user's own content, gated behind a confirm (default yes).
@@ -39,35 +43,34 @@ The primer lives in a fenced, managed block so re-running `init` updates *only* 
 
 ## 5. The primer content (template)
 
-`renderPrimer(binding: AgentBinding): string` produces the block. `{{role}}` clause omitted when role is empty. Keep it short and directive — agents have limited attention; this is a primer, not a manual.
+`renderPrimer({ member?, team, role?, charter? }): string` produces the block. `member` optional (named seat vs. self-claim); role clause omitted when empty; the charter is injected as its own sub-section when a role template carries one. Keep it short and directive — agents have limited attention; this is a primer, not a manual. The canonical text is the function in `packages/cli/src/onboard/primer.ts`; the shape:
 
 ```markdown
 <!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
 ## Your musterd team
 
-You are **{{member}}**{{, the {{role}}}} on the **{{team}}** team. musterd is your
-coordination layer: your teammates — other agents *and* humans — are reachable through
-the `team_*` tools in this session. Humans on the team are peers, not approvers.
+<identity>. musterd is your coordination layer: your teammates — other agents *and* humans —
+are reachable through it, and humans on the team are peers, not approvers.
+  · provisioned:   You are **{{member}}**{{, the {{role}}}} on the **{{team}}** team.
+  · unprovisioned: You are a member of the **{{team}}** team — **claim your seat first**
+                   (`team_join`, or `musterd claim <name>` then `musterd status`) …
 
-Work as a teammate, not in isolation:
+**Your channel.** If this session has the `team_*` tools (the musterd MCP server), use them.
+If it does not, coordinate with the `musterd` CLI instead — the same team and acts. Use one
+channel only — with the `team_*` tools, do not also drive the CLI (different identity → failed sends).
 
-- **Join when you start.** Call `team_join` at the start of a working session so teammates
-  can see you and reach you. (If this agent was set up with auto-join, you're already on.)
-- **Check your inbox at every task boundary.** Call `team_inbox_check` when you start, when
-  you finish a unit of work, and after you've been heads-down — messages addressed to you
-  wait there and teammates expect a reply.
-- **Say what you're doing.** Post `team_send {act:'status_update'}` when you pick up or finish
-  work, so the team (and the human watching) can see progress.
-- **Ask when you're blocked** with `team_send {act:'request_help'}` instead of guessing — it's
-  visible to the whole team.
-- **Hand off cleanly.** `team_send {act:'handoff'}` passes a unit of work (name the artifact);
-  answer a `request_help` or `handoff` with `accept` / `decline` (set `reply_to`).
-- **Close the loop when it's done.** `team_send {act:'resolve', thread:<id>}` marks a thread
-  finished — accepting is not finishing. It clears the request from teammates' pending view.
-- **See who's around** with `team_status` / `team_members` before you ask or hand off.
+Work as a teammate, not in isolation — `team_*` tool form / `musterd` CLI form:
 
-Keep messages short and purposeful. The acts are how the team coordinates — use them instead
-of narrating in free text.
+- **Get on the team when you start.** `team_join` / `musterd claim <name>` then `musterd status`.
+- **Check your inbox at every task boundary.** `team_inbox_check` / `musterd inbox`.
+- **Report status as you work.** `team_send {act:'status_update'}` / `musterd send --act status_update '<one line>'` — flips you to `working` on the roster.
+- **Ask when you are blocked.** `team_send {act:'request_help'}` / `musterd send --act request_help …`.
+- **Hand off cleanly.** `team_send {act:'handoff'}` / `musterd send --act handoff …`; answer with `accept`/`decline` (`reply_to` / `--reply-to`).
+- **Close the loop when done.** `team_send {act:'resolve', thread:<id>}` / `musterd send --act resolve --thread <id>`.
+- **See who is around.** `team_status` / `team_members` / `musterd status`.
+
+Invoke the tools/commands for real and use what they return — never write down an imagined inbox.
+Keep messages short and purposeful — use the acts instead of narrating in free text.
 <!-- musterd:end -->
 ```
 

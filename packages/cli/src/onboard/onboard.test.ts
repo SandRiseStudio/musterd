@@ -124,6 +124,9 @@ describe('agent primer', () => {
     expect(withRole).toContain('**Ada**, the backend, on the **dawn** team');
     expect(withRole).toContain('team_join');
     expect(withRole).toContain('team_inbox_check');
+    // channel-aware: the CLI form is documented alongside the team_* tools (ADR 012 follow-up)
+    expect(withRole).toContain('musterd inbox');
+    expect(withRole).toContain('musterd help');
     // status reporting is emphasized (flips the roster to `working`)
     expect(withRole).toContain('status_update');
     expect(withRole).toContain('working');
@@ -133,6 +136,17 @@ describe('agent primer', () => {
     const noRole = renderPrimer({ member: 'Lin', team: 'dawn', role: '   ' });
     expect(noRole).toContain('**Lin** on the **dawn** team');
     expect(noRole).not.toContain(', the ');
+  });
+
+  it('renders a self-claim primer when no seat is assigned (the fresh, unprovisioned agent)', () => {
+    const unprovisioned = renderPrimer({ team: 'alpha' });
+    expect(unprovisioned).toContain('claim your seat first');
+    expect(unprovisioned).toContain('musterd claim');
+    // still the full working-loop, both channels
+    expect(unprovisioned).toContain('team_inbox_check');
+    expect(unprovisioned).toContain('musterd inbox');
+    // no fixed-seat identity line when there's no member
+    expect(unprovisioned).not.toContain('You are **');
   });
 
   it('creates AGENTS.md when absent', () => {
