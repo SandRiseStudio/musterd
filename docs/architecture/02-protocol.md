@@ -131,7 +131,7 @@ export type Envelope = z.infer<typeof Envelope>;
 export const Member = z.object({ /* mirrors members table, no token_hash */ });
 export const WSClientFrame = z.discriminatedUnion('type', [ Hello, Subscribe, Send, Heartbeat ]);
 export const WSServerFrame = z.discriminatedUnion('type', [ Welcome, Subscribed, Ack, Deliver, PresenceEvt, ErrorFrame ]);
-export const ErrorCode = z.enum(['bad_request','validation','unauthorized','forbidden','not_found','conflict','version_mismatch','server_error']);
+export const ErrorCode = z.enum(['bad_request','validation','unauthorized','forbidden','not_found','conflict','member_busy','superseded','version_mismatch','server_error']);
 ```
 
 `actMetaRules` is the single place encoding the per-act `meta` requirements from the table above; both server and clients import it so validation is identical everywhere. **Changing any of these schemas requires an ADR** (`00-overview.md` hard rule).

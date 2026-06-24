@@ -165,6 +165,9 @@ src/
                   //   setIdentity() (late claim); addMember() (tokenless mint); buffers live while joined
   claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() + adoptIdentity() (live claim, ADR 034)
   pending.ts      // pending markers (.musterd/pending/<code>.json) + resolution sidecars (ADR 034)
+  binding.ts      // locate + parse the workspace .musterd/binding.json (ADR 018; shared format with the CLI)
+  workspace.ts    // the gracefully-degrading "where" label captured at join (ADR 014)
+  otel.ts         // cross-runtime trace-context propagation through the envelope (ADR 011)
   tools/
     join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)
@@ -172,6 +175,7 @@ src/
     inboxCheck.ts // refuses until ready (pending → claim; dormant → join)
     status.ts     // works while dormant/pending
     members.ts    // works while dormant/pending
+    format.ts     // compact text rendering of a message for an agent to read
   bind.ts         // reachability check only (GET /health) — claims no presence
 ```
 

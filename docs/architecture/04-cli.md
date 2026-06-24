@@ -18,21 +18,32 @@ The human surface. `npx`-installable, bin name `musterd`. Talks to the server ov
 ```
 src/
   bin.ts              // shebang entry; parse argv; dispatch; map errors -> exit codes
-  config.ts           // load/save ~/.musterd/config.json
+  args.ts             // argv parser → { command, positionals, flags }
+  config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API
+  errors.ts           // CliError(code) -> message + exit code
   render/
     theme.ts          // ANSI roles from brand.md (online dot, member colors, act badges)
     rows.ts           // renderMessageRow, renderStatusTable, renderBanner, renderPresence
+  notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)
+    os.ts             // OS push notification (macOS/Linux/Windows)
+    select.ts         // pick which away human to nudge
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
     guard.ts          // inspectInitTarget(cwd): pure folder-suitability heuristics → warnings (ADR 020)
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
     mcpEntry.ts       // resolve how to launch @musterd/mcp + build the binding env
+    manifest.ts       // provision manifest read/write (ADR 030) — records what init wrote, for uninstall
+    pending.ts        // client-side pending-presence markers (ADR 033)
     primer.ts         // renderPrimer + idempotent upsertPrimer → AGENTS.md agent primer (ADR 012)
+    role.ts           // Role = harness-agnostic provisioning template; resolve/apply (ADR 026/029/038)
+    roles/builtins.ts // the shipped built-in role template seed library
     harnesses/
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
       cursor.ts       // detect/configure via .cursor/mcp.json (ADR 006 adds the `cursor` surface)
+      codex.ts        // detect/configure via project-local .codex/config.toml (ADR 031)
+      codexToml.ts    // TOML read/merge helper for the codex adapter
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts)
     serve.ts          // musterd serve [--port]
@@ -41,7 +52,13 @@ src/
     send.ts           // send
     inbox.ts          // inbox [--watch]
     status.ts         // status
-  errors.ts           // CliError(code) -> message + exit code
+    claim.ts          // claim a seat by name or open role (ADR 032/034/036)
+    reclaim.ts        // operator force-drop of a member's stuck live session (ADR 017 follow-up)
+    notify.ts         // human-reachability nudge loop (ADR 024/035)
+    role.ts           // role list / show / create (ADR 029/038)
+    reset.ts          // local clean-slate db + config wipe (ADR 022)
+    uninstall.ts      // per-folder uninstall — unwinds what init wrote (ADR 027)
+    helpers.ts        // shared command helpers (active-identity resolution, ADR 036)
 ```
 
 ## Config file `~/.musterd/config.json`
@@ -148,6 +165,12 @@ The **L2 universal floor** of claim-on-first-use (ADR 032) — needs only the da
 
 ### `musterd notify [--interval <seconds>] [--once]`
 The **localhost notification down-payment** (ADR 035) — an opt-in, headless, client-side notifier the human leaves running so a directed act that lands while they're **not** watching still reaches them (the not-watching case `inbox --watch`'s bell can't cover). Polls the durable inbox cursor (`GET /inbox?unread=1`) with the same `openActionNeeded` predicate as the comeback summary; on a not-yet-seen action-needed act (`request_help`/`handoff`/`accept`/`decline`/@mention) it fires an **OS notification** by shelling out to `osascript` (macOS) / `notify-send` (Linux) — no runtime dep, dynamic strings passed as injection-safe AppleScript `argv`. **Suppressed when the human is actively watching** (roster `presence !== 'offline'` — the watch bell already reached them), so it owns only the not-watching case. De-dupe is two-layered: the durable cursor (reading the inbox clears it) + an in-memory seen set (no re-nag within a run). `--once` polls once and exits (cron-friendly + testable); default is the resident loop (`--interval` seconds, default 10). Needs an **active identity** like any act (ADR 036). Client-side only — **no wire change / no SPEC bump**; the v0.3 governed tiers (`SPEC.md` A.6a) are the superset. Other platforms no-op (the comeback summary still serves them).
+
+### `musterd role <list|show|create> [<name>] [--from <builtin>] [--force]`
+Manage role **provisioning templates** (ADR 026/029/038; `docs/design/provisioning-recipe.md` §3) — a pure local-file + built-in-library command that **never touches the daemon or the server roster** (Universe-2 only; identity unchanged). `role list` shows the shipped built-ins plus any user templates in `.musterd/roles/*.json`; `role show <name>` prints a fully-resolved template (built-in or user, with `inspect with: musterd role show <name>`); `role create <name> [--from <builtin>]` scaffolds an editable user template under `.musterd/roles/` (refuses to overwrite without `--force`). A Role projects into two places at use-time — the identity half (role label) and the harness-provisioning half (MCP servers + permissions `init` writes) — so editing a template changes what the next `init` provisions.
+
+### `musterd uninstall [--force|--yes]`
+Per-folder **uninstall** (ADR 027 — the reversibility gap `reset` left open): removes *exactly* what `musterd init` wrote into this folder's harness and restores the prior state — the role-provisioned MCP servers + permission entries (from the manifest, ADR 030), the musterd MCP server itself, the managed AGENTS.md primer block (the user's own prose is kept), and the local `.musterd/` state (binding + manifest) and registry entry. Purely local: it **never touches the server roster** — the member stays on the team (offline); removing it server-side is the v0.3 seat model. Never imports `@musterd/server`. Confirms on a TTY; `--force`/`--yes` skips the prompt.
 
 ## Exit codes (must match the State frames' annotations)
 

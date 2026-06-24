@@ -18,6 +18,7 @@ The daemon. SQLite store + WebSocket + HTTP API + presence tracker + inbox deliv
 src/
   index.ts            // entry: createServer(opts) -> { listen, close }; CLI bin starts it
   config.ts           // env + defaults (port 4849, host, db path, tunable timeouts) + secured-bind guard, scheme, Origin/Host check (ADR 040)
+  context.ts          // Ctx: the per-server bundle (db, hub, config) threaded through routing/transport
   db/
     open.ts           // openDb(path): Database; sets PRAGMAs; runs migrations
     migrations.ts     // ordered [{version, up(db)}]; runMigrations(db)
@@ -27,8 +28,10 @@ src/
     teams.ts          // createTeam, getTeamBySlug, listMembers, archiveTeam
     members.ts        // addMember (issues token), getMember, authMember(token), leaveMember
     messages.ts       // insertMessage, listInbox(memberId, since), listTeamMessages
-    presence.ts       // attach, heartbeat, detach, listPresence, reapStale
+    presence.ts       // attach, heartbeat, detach/release, listPresence, reapStale (kind-scoped single-active, ADR 042)
+    activity.ts       // resolveActivity: the two-clocks rule → offline/online/working (v0.2 M2)
     cursors.ts        // getCursor, setCursor, unreadCount
+    metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
   protocol/
     validate.ts       // thin wrappers over @musterd/protocol schemas + error mapping
     route.ts          // routeEnvelope(): the ONE validate+persist+deliver path (WS & HTTP share it)
@@ -38,6 +41,7 @@ src/
     hub.ts            // in-memory connection registry: member -> Set<conn>; broadcast/deliver
   presence/
     reaper.ts         // setInterval: mark/remove presence rows past timeout; emit offline events
+  telemetry.ts        // minimal OpenTelemetry, off unless an OTLP endpoint is set (ADR 015)
   errors.ts           // MusterdError(code,message) + toHttp()/toFrame()
   log.ts              // structured logger (07-conventions format)
 ```
