@@ -18,11 +18,13 @@ After a successful `configure()` (and in the manual-setup path), `musterd init` 
 
 Non-goals: we do **not** try to make the agent autonomous or script its behavior. The primer gives context; the agent still decides. We do **not** write per-harness rule files (`.cursor/rules/*.mdc`, etc.) in v1 — `AGENTS.md` covers both supported harnesses; a `Harness.primerPath()` hook is the extension point if that changes.
 
-## 3. Where it's written
+## 3. Where it's written / delivered
 
-- **Path:** `<cwd>/AGENTS.md`, where `<cwd>` is the folder `init` is run in (already the binding folder for both harnesses — `claude mcp add -s local` keys on cwd; Cursor's `.cursor/mcp.json` is written under cwd).
-- **One file, both harnesses.** Claude Code and Cursor both read `AGENTS.md`. No per-harness branching in v1.
-- **Extension point:** add an optional `primerPath?(cwd: string): string` to the `Harness` interface (default → `join(cwd, 'AGENTS.md')`) if a future harness needs a different location. Not implemented in v1.
+Two surfaces, **one source** (`renderPrimer` in `@musterd/protocol`):
+- **`AGENTS.md` (file surface)** — `<cwd>/AGENTS.md`, the folder `init` is run in (the binding folder for both harnesses — `claude mcp add -s local` keys on cwd; Cursor's `.cursor/mcp.json` is written under cwd). The cross-tool convention; one file, no per-harness branching. This covers the **CLI / no-MCP** path (incl. musterd's own dev repo).
+- **MCP `instructions` (file-free surface, 2026-06-24)** — `buildMcpServer` returns the same primer as the server's `instructions` on initialize, which every MCP-speaking harness injects as standing context. This covers the **provisioned (MCP)** path on *any* harness **without touching `CLAUDE.md` or per-harness files** — the deliberate boundary below.
+- **We do not write into harness-owned files** (`CLAUDE.md`, `GEMINI.md`, `.cursor/rules`, `.github/copilot-instructions.md`). That would be invasive, proliferating, and a wider uninstall surface; `AGENTS.md` + MCP `instructions` cover both paths. A user *may* add a one-line `@AGENTS.md`-style import to their own `CLAUDE.md` — single-sourced, their choice, not something musterd writes.
+- **Extension point:** an optional `primerPath?(cwd: string): string` on the `Harness` interface (default → `join(cwd, 'AGENTS.md')`) if a future harness needs a different file location. Not implemented.
 
 ## 4. File format — marker-delimited, idempotent
 
