@@ -2,6 +2,7 @@
 import { parseArgs } from './args.js';
 import { availabilityCommand } from './commands/availability.js';
 import { claimCommand } from './commands/claim.js';
+import { reachabilityNudge } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
@@ -40,7 +41,7 @@ usage:
   musterd reset [--force] [--no-backup]         wipe the local db + identities back to a clean slate (daemon must be stopped)
   musterd uninstall [--force]                   remove what musterd added to this folder's harness (servers, permissions, primer)
 
-global flags: --team <slug>  --server <url>  --json  --no-color
+global flags: --team <slug>  --server <url>  --json  --no-color  --quiet (suppress the reachability nudge)
 
 acts: message status_update request_help handoff accept decline wait`;
 
@@ -62,6 +63,16 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  const code = await dispatch(command, rest);
+  // Agent-side reachability (ADR 046): append a one-line nudge to stderr when a directed act is
+  // waiting for the acting member, so a heads-down agent that never runs `inbox` still sees it.
+  // Best-effort — never fails the command, never touches stdout (keeps --json/pipes clean).
+  const nudge = await reachabilityNudge(command, rest);
+  if (nudge) process.stderr.write(nudge + '\n');
+  return code;
+}
+
+async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Promise<number> {
   switch (command) {
     case 'init':
       return initCommand(rest);

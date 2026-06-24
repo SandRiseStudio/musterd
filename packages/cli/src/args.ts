@@ -14,6 +14,7 @@ const BOOLEAN_FLAGS = new Set([
   'no-color',
   'no-bell',
   'once',
+  'quiet',
   'urgent',
   'follow',
   'insecure-trust-proxy',

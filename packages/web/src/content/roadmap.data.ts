@@ -209,24 +209,23 @@ export const ROADMAP: RoadmapItem[] = [
       'A per-user macOS LaunchAgent today; systemd (--user) and Windows are the named seam. The CLI manages musterd’s own daemon’s lifecycle — not member agents — so the clean-core principle stays intact.',
     refs: [adr(45, 'ADR 045')],
   },
+  {
+    id: 'agent-reachability',
+    title: 'Agent-side reachability',
+    status: 'shipped',
+    category: 'human-loop',
+    blurb: 'The agent half of the reachability loop: a directed act waiting for an agent surfaces on every command it runs, so a heads-down agent can’t miss a request_help addressed to it.',
+    detail:
+      'The mirror of ADR 024’s human comeback summary, on the agent side. A dogfood finding — a seat-holding agent read its inbox once and left a directed request_help unanswered. A one-line stderr nudge appended to every acting command, built from the same pending-action predicate; client-side, no wire change.',
+    refs: [adr(46, 'ADR 046'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
+    dependsOn: ['notify-nudge'],
+  },
 
   // ── near-term ─────────────────────────────────────────────────────────────
   // Order within this status is priority order (2026-06-24 reprioritization). Gate: publish v0.2
   // before new dev. Then Wave 1 (loop-hardening, below), then Wave 2 (v0.3 governance → full tiers).
 
   // Wave 1 — harden the coordination loop (small, additive, no v0.3 dependency).
-  {
-    id: 'agent-reachability',
-    wave: 1,
-    title: 'Agent-side reachability',
-    status: 'near-term',
-    category: 'human-loop',
-    blurb: 'The agent half of the reachability loop: a directed act waiting for an agent surfaces on every command it runs, so a heads-down agent can’t miss a request_help addressed to it.',
-    detail:
-      'The mirror of ADR 024’s human comeback summary, on the agent side. A dogfood finding — a seat-holding agent read its inbox once and left a directed request_help unanswered. Client-side, no wire change.',
-    refs: [adr(46, 'ADR 046'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
-    dependsOn: ['notify-nudge'],
-  },
   {
     id: 'service-roster-guard',
     wave: 1,

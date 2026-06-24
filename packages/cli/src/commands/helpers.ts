@@ -1,9 +1,9 @@
 import { isClaimed, type MemberKind, type MemberSummary } from '@musterd/protocol';
-import { flagStr } from '../args.js';
+import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, identityFromEnv, loadConfig, type Config, type Identity } from '../config.js';
 import { CliError } from '../errors.js';
-import { openActionNeeded } from '../render/rows.js';
+import { openActionNeeded, renderReachabilityNudge } from '../render/rows.js';
 
 /**
  * Where a resolved identity came from. `env`/`binding` are workspace-explicit; `flag` means the
@@ -155,6 +155,46 @@ export async function pendingActionSummary(
   if (waiting.length === 0) return undefined;
   const since = waiting.reduce((min, m) => Math.min(min, m.ts), Infinity);
   return { count: waiting.length, since };
+}
+
+/**
+ * Commands that carry no acting identity, or already surface the pending acts themselves, so the
+ * post-command reachability nudge (ADR 046) is skipped for them: `inbox` renders the acts and
+ * `status` leads with the comeback summary (double-surfacing); the rest re-resolve to nothing
+ * anyway, but listing them keeps the intent explicit and avoids a pointless inbox read.
+ */
+const NUDGE_SKIP_COMMANDS = new Set([
+  'inbox',
+  'status',
+  'serve',
+  'service',
+  'init',
+  'reset',
+  'role',
+  'uninstall',
+]);
+
+/**
+ * The agent-side reachability nudge (ADR 046): after an acting command runs, re-resolve the identity
+ * and — only when it is *explicit* (an env/binding/`--as` actor, never an ambient global-config read,
+ * ADR 036) — return a one-line banner naming the directed acts waiting for that member. Returns '' to
+ * print nothing. Best-effort and silent on any failure: the nudge must never fail a command. Honours
+ * `--json`/`--quiet`/`MUSTERD_NO_NUDGE=1` (scripts that want a clean sidecar) and skips commands that
+ * either show the acts already or carry no identity ({@link NUDGE_SKIP_COMMANDS}).
+ */
+export async function reachabilityNudge(command: string, parsed: Parsed): Promise<string> {
+  if (NUDGE_SKIP_COMMANDS.has(command)) return '';
+  if (parsed.flags['json'] === true || parsed.flags['quiet'] === true) return '';
+  if (process.env['MUSTERD_NO_NUDGE'] === '1') return '';
+  try {
+    const { http, team, identity, explicit } = resolveRead(parsed.flags);
+    if (!explicit || !identity) return '';
+    const pending = await pendingActionSummary(http, team, identity.name);
+    if (!pending) return '';
+    return renderReachabilityNudge(pending.count, pending.since, identity.name);
+  } catch {
+    return '';
+  }
 }
 
 /** Build a name→kind lookup from a roster (defaults unknown names to 'agent'). */

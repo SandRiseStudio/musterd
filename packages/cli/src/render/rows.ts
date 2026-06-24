@@ -217,6 +217,22 @@ export function renderPendingSummary(count: number, sinceTs: number): string {
   );
 }
 
+/**
+ * The agent-side reachability nudge (ADR 046): the same open-action count as the comeback summary,
+ * but addressed to a named member and appended to *any* acting command's stderr — so a heads-down
+ * agent that never thinks to run `inbox` still sees a directed act waiting. Names the member (it is
+ * surfaced away from `status`, where "you" has no anchor) and points at the fix. Returns '' when
+ * nothing waits, so a caller can append it unconditionally. Pure — same predicate as the live path.
+ */
+export function renderReachabilityNudge(count: number, sinceTs: number, me: string): string {
+  if (count <= 0) return '';
+  const noun = count === 1 ? 'act' : 'acts';
+  return (
+    theme.actionNeeded(`⚑ ${count} ${noun} waiting for ${me}`) +
+    theme.meta(` — musterd inbox  (since ${clock(sinceTs)})`)
+  );
+}
+
 export function renderPresence(status: PresenceStatus, surface?: string): string {
   const dot = theme.presenceDot(status);
   const label = surface && status !== 'offline' ? `${status} via ${surface}` : status;
