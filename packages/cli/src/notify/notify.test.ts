@@ -84,6 +84,39 @@ describe('pendingToNotify', () => {
     const done = env({ act: 'resolve', from: 'nick', to: { kind: 'team' }, thread: help.id });
     expect(pendingToNotify([help, done], 'nick', new Set())).toEqual([]);
   });
+
+  // ---- tiering by availability (SPEC A.6a; ADR 044) ----
+
+  it('away holds the Loud (directed) set but an urgent ping breaks through', () => {
+    const help = env({ act: 'request_help', from: 'lin', to: { kind: 'team' } });
+    const urgent = env({
+      act: 'request_help',
+      from: 'lin',
+      to: { kind: 'team' },
+      meta: { urgent: true, urgent_reason: 'prod down' },
+    });
+    const picked = pendingToNotify([help, urgent], 'nick', new Set(), { status: 'away' });
+    expect(picked.map((m) => m.id)).toEqual([urgent.id]);
+  });
+
+  it('dnd passes directed pings and urgent (quiet was never a candidate)', () => {
+    const help = env({ act: 'handoff', from: 'lin', to: toNick });
+    const quiet = env({ act: 'status_update', from: 'lin', to: { kind: 'team' } });
+    const urgent = env({
+      act: 'status_update',
+      from: 'lin',
+      to: { kind: 'team' },
+      meta: { urgent: true, urgent_reason: 'pager' },
+    });
+    const picked = pendingToNotify([help, quiet, urgent], 'nick', new Set(), { status: 'dnd' });
+    expect(picked.map((m) => m.id).sort()).toEqual([help.id, urgent.id].sort());
+  });
+
+  it('available passes the Loud set as before (the ADR 035 baseline)', () => {
+    const help = env({ act: 'request_help', from: 'lin', to: { kind: 'team' } });
+    expect(pendingToNotify([help], 'nick', new Set(), { status: 'available' })).toHaveLength(1);
+    expect(pendingToNotify([help], 'nick', new Set(), null)).toHaveLength(1);
+  });
 });
 
 describe('toNotifyItem', () => {
@@ -127,6 +160,7 @@ describe('pollOnce', () => {
       me: 'nick',
       inbox: async () => [help],
       isReachable: async () => false, // away
+      availability: async () => null,
       notify: (n) => fired.push(n),
     };
     expect((await pollOnce(deps, seen)).length).toBe(1);
@@ -142,6 +176,7 @@ describe('pollOnce', () => {
       me: 'nick',
       inbox: async () => [help],
       isReachable: async () => true, // a live watch pane
+      availability: async () => null,
       notify: (n) => fired.push(n),
     };
     expect(await pollOnce(deps, seen)).toEqual([]);
@@ -231,6 +266,10 @@ describe('notify against a live daemon', () => {
         const me = roster.members.find((m) => m.name === 'nick');
         return me != null && me.presence !== 'offline';
       },
+      availability: async () => {
+        const roster = await nick.roster('dawn');
+        return roster.members.find((m) => m.name === 'nick')?.availability ?? null;
+      },
       notify: (n) => fired.push(n),
     };
 
@@ -243,6 +282,54 @@ describe('notify against a live daemon', () => {
     const unread = await nick.inbox('dawn', { unread: true });
     await nick.markRead('dawn', unread.messages[unread.messages.length - 1]!.id);
     expect(await pollOnce(deps, new Set())).toEqual([]);
+  });
+
+  it('away holds a normal request_help but an urgent ping breaks through (ADR 044)', async () => {
+    const { nickToken, linToken } = await setup();
+    const lin = new HttpClient({ server: serverUrl, token: linToken });
+    const nick = new HttpClient({ server: serverUrl, token: nickToken });
+
+    // nick goes away (explicit, never inferred).
+    await nick.setAvailability('dawn', { status: 'away' });
+
+    const normal = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'lin',
+      to: toNick,
+      act: 'request_help',
+      body: 'low-pri review',
+      thread: null,
+      meta: null,
+    });
+    const urgent = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'lin',
+      to: toNick,
+      act: 'request_help',
+      body: 'prod is down',
+      thread: null,
+      meta: { urgent: true, urgent_reason: 'prod is down' },
+    });
+    await lin.send('dawn', normal);
+    await lin.send('dawn', urgent);
+
+    const fired: NotifyItem[] = [];
+    const deps: NotifyDeps = {
+      me: 'nick',
+      inbox: async () => (await nick.inbox('dawn', { unread: true })).messages,
+      isReachable: async () => false, // away, nothing open
+      availability: async () => {
+        const roster = await nick.roster('dawn');
+        return roster.members.find((m) => m.name === 'nick')?.availability ?? null;
+      },
+      notify: (n) => fired.push(n),
+    };
+
+    await pollOnce(deps, new Set());
+    // Only the urgent ping pierces the away hold.
+    expect(fired.map((n) => n.body)).toEqual(['prod is down']);
   });
 
   it('command --once wiring: resolves identity and fires via the injected sink', async () => {

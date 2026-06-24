@@ -228,6 +228,8 @@ Delivery is unchanged (at-least-once, cursor-based); **notification tiering** is
 
 **`urgent`** is an envelope `meta.urgent: true` with a **required** `meta.urgent_reason`. It MUST be gated by the sender seat's **`can_flag_urgent`** capability, is **audited**, and the recipient MAY mark it `wasnt_urgent` (recorded against the sender). Servers MUST reject `urgent` from a seat lacking the capability. (Acts themselves are unchanged; `urgent` is a meta flag, not a new act.)
 
+> **Localhost down-payment (ADR 044).** v0.2 ships the *mechanism* of this section without the governance, mirroring ADR 035's notify down-payment. **Shipped:** the availability axis is self-set + stored + on the roster (`POST /teams/:slug/availability`, reusing `members.availability` — no migration); `meta.urgent`+`meta.urgent_reason` is enforced by `actMetaRules` (additive optional meta → **no protocol-version bump**); and the Loud/Quiet/Held tiers + away/dnd breakthrough run **client-side** in `musterd notify`. **Deferred to the v0.3 governed superset (the named seams):** `can_flag_urgent` enforcement (urgent is **ungated** on localhost), `urgent` auditing, the recipient `wasnt_urgent` feedback, `off_hours` + schedule enforcement, and the A.7 admin endpoints / A.9 seats migration.
+
 ## A.7 HTTP deltas
 
 | Method | Path | Notes |

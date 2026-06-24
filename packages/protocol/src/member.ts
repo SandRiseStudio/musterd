@@ -8,6 +8,21 @@ import {
   SurfaceSchema,
 } from './acts.js';
 
+/**
+ * The self-set availability axis (SPEC A.6 Axis 2) — explicit, **never inferred**. `away_until(ts)`
+ * is encoded as `{ status: 'away', until: <ms epoch> }`. The localhost down-payment (ADR 044) stores
+ * and exposes this; `off_hours` / full schedule enforcement is roadmap.
+ */
+export const AvailabilityStatusSchema = z.enum(['available', 'away', 'dnd']);
+export type AvailabilityStatus = z.infer<typeof AvailabilityStatusSchema>;
+
+export const AvailabilitySchema = z.object({
+  status: AvailabilityStatusSchema,
+  /** For `away_until`: when the member expects to be back (ms epoch). Only meaningful with `away`. */
+  until: z.number().int().positive().nullish(),
+});
+export type Availability = z.infer<typeof AvailabilitySchema>;
+
 /** A durable identity in a Team. Never a session. Mirrors the `members` table (minus token_hash). */
 export const MemberSchema = z.object({
   id: z.string(),
@@ -17,7 +32,7 @@ export const MemberSchema = z.object({
   role: z.string().default(''),
   lifecycle: LifecycleSchema.default('forever'),
   lifecycle_until: z.number().int().nullish(),
-  availability: z.record(z.unknown()).nullish(),
+  availability: AvailabilitySchema.nullish(),
   created_at: z.number().int(),
 });
 export type Member = z.infer<typeof MemberSchema>;

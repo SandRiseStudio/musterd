@@ -101,6 +101,55 @@ describe('renderStatusTable', () => {
     expect(out).toContain('offline');
   });
 
+  it('renders self-declared availability, overriding the activity label (ADR 044)', () => {
+    const until = Date.UTC(2026, 5, 24, 17, 0);
+    const members: MemberSummary[] = [
+      // away_until: even though present, availability outranks the live activity (off until <ts>).
+      {
+        id: '1',
+        team: 'dawn',
+        name: 'nick',
+        kind: 'human',
+        role: 'lead',
+        lifecycle: 'forever',
+        created_at: 0,
+        presence: 'online',
+        presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
+        availability: { status: 'away', until },
+      },
+      // dnd renders plainly.
+      {
+        id: '2',
+        team: 'dawn',
+        name: 'Ada',
+        kind: 'agent',
+        role: 'backend',
+        lifecycle: 'session',
+        created_at: 0,
+        presence: 'online',
+        presences: [{ surface: 'claude-code', status: 'online', last_seen_at: 0 }],
+        availability: { status: 'dnd' },
+      },
+      // available is the implicit default — never overrides the activity column.
+      {
+        id: '3',
+        team: 'dawn',
+        name: 'Lin',
+        kind: 'agent',
+        role: 'frontend',
+        lifecycle: 'session',
+        created_at: 0,
+        presence: 'online',
+        presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
+        availability: { status: 'available' },
+      },
+    ];
+    const out = renderStatusTable(members);
+    expect(out).toContain('off until 2026-06-24');
+    expect(out).toContain('dnd');
+    expect(out).toContain('online via cli'); // Lin: available falls through to activity
+  });
+
   it('renders working with state, adding the age only once stale (≥5m)', () => {
     const now = Date.UTC(2026, 5, 9, 15, 0);
     const base = {
