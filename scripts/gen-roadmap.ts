@@ -16,9 +16,13 @@ import {
   CATEGORY_META,
   CATEGORY_ORDER,
   ROADMAP,
+  SEQUENCE_GATE,
   STATUS_META,
   STATUS_ORDER,
+  WAVE_META,
+  WAVE_ORDER,
   WEDGE,
+  waveRank,
   type Ref,
   type RoadmapItem,
   type Status,
@@ -54,8 +58,12 @@ function renderItem(item: RoadmapItem): string {
 }
 
 function renderStatus(status: Status): string | null {
+  // Within a status, order by build wave (priority), then category. Shipped/out-of-scope items are
+  // unwaved (waveRank = ∞) so they keep their category order.
   const items = ROADMAP.filter((i) => i.status === status).sort(
-    (a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category),
+    (a, b) =>
+      waveRank(a) - waveRank(b) ||
+      CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category),
   );
   if (items.length === 0) return null;
   return [
@@ -67,6 +75,29 @@ function renderStatus(status: Status): string | null {
   ].join('\n');
 }
 
+/**
+ * The priority/sequence view: the build order across all unshipped work, grouped by wave. Status above
+ * is the coarse grouping; this is what we build next. Generated from the same `wave` field.
+ */
+function renderSequence(): string {
+  const lines = [
+    '## Build sequence',
+    '',
+    '_Priority order across all unshipped work — the coarse status grouping above, re-cut by what we build next._',
+    '',
+    `**Gate — ship v0.2.** ${SEQUENCE_GATE}`,
+  ];
+  for (const wave of WAVE_ORDER) {
+    const items = ROADMAP.filter((i) => i.wave === wave);
+    if (items.length === 0) continue;
+    lines.push('', `### ${WAVE_META[wave].label} — ${WAVE_META[wave].tone}`, '');
+    for (const item of items) {
+      lines.push(`- **${item.title}** · ${CATEGORY_META[item.category].label}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 function renderWedge(): string {
   return [`## ${WEDGE.heading}`, '', WEDGE.body, '', `See: ${WEDGE.refs.map((r) => `[${r.label}](${r.href})`).join(', ')}.`].join(
     '\n',
@@ -75,6 +106,7 @@ function renderWedge(): string {
 
 function generatedRegion(): string {
   const sections = STATUS_ORDER.map(renderStatus).filter((s): s is string => s !== null);
+  sections.push(renderSequence());
   sections.push(renderWedge());
   return sections.join('\n\n');
 }

@@ -9,6 +9,13 @@
 
 export type Status = 'shipped' | 'near-term' | 'reserved' | 'out-of-scope';
 
+/**
+ * Build-order lane — priority/sequence, orthogonal to {@link Status}. Status is the coarse
+ * "how imminent/designed" grouping; `wave` is the linear order we actually build in. Every unshipped,
+ * in-scope item carries one; shipped/out-of-scope items omit it.
+ */
+export type Wave = 1 | 2 | 3 | 'later';
+
 export type Category =
   | 'human-loop'
   | 'observability'
@@ -33,6 +40,8 @@ export interface RoadmapItem {
   refs?: Ref[];
   /** ids of items this one builds on — drawn as dependency edges on the map. */
   dependsOn?: string[];
+  /** Build-order lane (priority/sequence). Unset on shipped + out-of-scope items. */
+  wave?: Wave;
 }
 
 const REPO = 'https://github.com/SandRiseStudio/musterd/blob/main';
@@ -84,6 +93,24 @@ export const CATEGORY_ORDER: Category[] = [
 ];
 
 export const STATUS_ORDER: Status[] = ['shipped', 'near-term', 'reserved', 'out-of-scope'];
+
+export const WAVE_ORDER: Wave[] = [1, 2, 3, 'later'];
+
+export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
+  1: { label: 'Wave 1', tone: 'Harden the coordination loop — small, additive, evidence-backed.' },
+  2: { label: 'Wave 2', tone: 'The v0.3 governance rock, then the full governed tiers it unlocks.' },
+  3: { label: 'Wave 3', tone: 'Reach + the second-product seed.' },
+  later: { label: 'Later', tone: 'No near-term pull; opportunistic.' },
+};
+
+/** The launch gate that precedes all new dev — not a roadmap item (a one-shot op), but part of the sequence. */
+export const SEQUENCE_GATE =
+  'Ship v0.2 — publish to npm + the launch post — before new dev, so adoption feedback informs the rest.';
+
+/** Rank an item for priority sorting within a status (unwaved items sort last, by category). */
+export function waveRank(item: RoadmapItem): number {
+  return item.wave === undefined ? Number.POSITIVE_INFINITY : WAVE_ORDER.indexOf(item.wave);
+}
 
 export const ROADMAP: RoadmapItem[] = [
   // ── shipped ───────────────────────────────────────────────────────────────
@@ -161,22 +188,120 @@ export const ROADMAP: RoadmapItem[] = [
     ],
   },
 
+  {
+    id: 'availability-urgent',
+    title: 'Availability axis + urgent breakthrough',
+    status: 'shipped',
+    category: 'human-loop',
+    blurb: 'A human sets their own availability (available/away/dnd, away_until); an urgent flag with a required reason breaks through an away/dnd hold, and the notify loop tiers delivery by it.',
+    detail:
+      'The localhost down-payment on the governed model: availability is stored and on the roster, urgent rides meta with no version bump, tiering runs client-side. can_flag_urgent gating, audit, and the wasnt_urgent feedback are the v0.3 superset.',
+    refs: [adr(44, 'ADR 044'), doc('SPEC.md', 'SPEC A.6a')],
+    dependsOn: ['notify-nudge'],
+  },
+  {
+    id: 'service-lifecycle',
+    title: 'Daemon service lifecycle',
+    status: 'shipped',
+    category: 'platform',
+    blurb: 'musterd service runs the daemon as a background service that survives a closed terminal, restarts on crash, and starts at login — without raw launchctl.',
+    detail:
+      'A per-user macOS LaunchAgent today; systemd (--user) and Windows are the named seam. The CLI manages musterd’s own daemon’s lifecycle — not member agents — so the clean-core principle stays intact.',
+    refs: [adr(45, 'ADR 045')],
+  },
+
   // ── near-term ─────────────────────────────────────────────────────────────
+  // Order within this status is priority order (2026-06-24 reprioritization). Gate: publish v0.2
+  // before new dev. Then Wave 1 (loop-hardening, below), then Wave 2 (v0.3 governance → full tiers).
+
+  // Wave 1 — harden the coordination loop (small, additive, no v0.3 dependency).
+  {
+    id: 'agent-reachability',
+    wave: 1,
+    title: 'Agent-side reachability',
+    status: 'near-term',
+    category: 'human-loop',
+    blurb: 'The agent half of the reachability loop: a directed act waiting for an agent surfaces on every command it runs, so a heads-down agent can’t miss a request_help addressed to it.',
+    detail:
+      'The mirror of ADR 024’s human comeback summary, on the agent side. A dogfood finding — a seat-holding agent read its inbox once and left a directed request_help unanswered. Client-side, no wire change.',
+    refs: [adr(46, 'ADR 046'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
+    dependsOn: ['notify-nudge'],
+  },
+  {
+    id: 'service-roster-guard',
+    wave: 1,
+    title: 'Service guardrails',
+    status: 'near-term',
+    category: 'platform',
+    blurb: 'musterd service stop/restart warns when other members hold live sessions, so bouncing a shared daemon doesn’t silently drop a teammate.',
+    detail:
+      'Ties the daemon lifecycle command to roster awareness. A dogfood finding — a shared daemon was restarted three times under a live teammate with no in-band heads-up. --force overrides.',
+    refs: [adr(47, 'ADR 047')],
+    dependsOn: ['service-lifecycle'],
+  },
+  {
+    id: 'agent-presence-touch',
+    wave: 1,
+    title: 'Ambient agent presence',
+    status: 'near-term',
+    category: 'human-loop',
+    blurb: 'An agent doing bursty one-shot CLI work shows present on the roster instead of offline until it opens a watch socket.',
+    detail:
+      'Today presence needs a resident WS session; a sequence of one-shots reads as offline. A short-TTL presence touch on each authenticated command closes the gap — liveness from real actions, while working: <x> still comes from a self-reported status_update. Needs its own ADR (presence-write semantics).',
+    refs: [adr(10, 'ADR 010'), adr(17, 'ADR 017')],
+  },
+  {
+    id: 'cli-ergonomics',
+    wave: 1,
+    title: 'CLI ergonomics',
+    status: 'near-term',
+    category: 'platform',
+    blurb: 'Unknown flags warn instead of being silently dropped, and inbox gains --act/--from filters.',
+    detail:
+      'Dogfood papercuts: inbox --act handoff silently ignored the flag and printed everything. Small and additive.',
+  },
+  {
+    id: 'seat-binding-ergonomics',
+    wave: 1,
+    title: 'Frictionless seat binding',
+    status: 'near-term',
+    category: 'harness',
+    blurb: 'A low-friction way to bind a working folder to a seat, so an agent shelling out repeatedly doesn’t re-export identity env on every call.',
+    detail:
+      'The mechanism exists (musterd claim writes .musterd/binding.json); the gap is making it the obvious default for a long-lived working seat. A dogfood finding — ~6 repeated MUSTERD_* env exports in one session.',
+    refs: [adr(36, 'ADR 036'), adr(32, 'ADRs 032–034')],
+  },
+
+  // Wave 2 — the v0.3 governance rock, then the full governed notification tiers it unlocks.
+  {
+    id: 'v03-governance',
+    wave: 2,
+    title: 'v0.3 governance — seats, grants, capabilities',
+    status: 'near-term',
+    category: 'platform',
+    blurb: 'Seats with account status, roles with default capabilities, per-seat narrowing, issued grants, and credentialed remote join — the enforced layer the wire already anticipates.',
+    detail:
+      'Designed in SPEC A.7/A.9 and spec-v0.3-draft.md. The prerequisite rock for the full notification tiers (can_flag_urgent, audit, wasnt_urgent), schedule enforcement, and safe multi-user/remote teams. Includes the members→seats migration and the credentialed remote join cross-network carries.',
+    refs: [doc('docs/design/spec-v0.3-draft.md', 'spec-v0.3-draft.md'), doc('SPEC.md', 'SPEC A.7/A.9')],
+    dependsOn: ['cross-network'],
+  },
   {
     id: 'notification-tiers',
+    wave: 2,
     title: 'Notification tiers',
     status: 'near-term',
     category: 'human-loop',
     blurb: 'The full reachability set: route an agent’s request for help to a human by salience and availability, not only when they are watching.',
     detail:
-      'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is.',
+      'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is. The localhost availability + urgent down-payment shipped; the governed superset (can_flag_urgent, audit, wasnt_urgent, off_hours) needs the v0.3 capability model.',
     refs: [doc('docs/design/research-foundation.md', 'research-foundation.md')],
-    dependsOn: ['notify-nudge'],
+    dependsOn: ['notify-nudge', 'availability-urgent', 'v03-governance'],
   },
 
   // ── reserved ──────────────────────────────────────────────────────────────
   {
     id: 'telemetry-l2',
+    wave: 3,
     title: 'Telemetry — Layer 2 + SDK',
     status: 'reserved',
     category: 'observability',
@@ -187,13 +312,16 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'schedule-enforcement',
+    wave: 2,
     title: 'Schedule & lifecycle enforcement',
     status: 'reserved',
     category: 'platform',
     blurb: 'availability and lifecycle: until are stored today but not enforced. Later: honor windows for routing and auto-expire members.',
+    dependsOn: ['v03-governance'],
   },
   {
     id: 'step-streaming',
+    wave: 'later',
     title: 'Step-level streaming transport',
     status: 'reserved',
     category: 'transport',
@@ -202,6 +330,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'federation',
+    wave: 'later',
     title: 'Team-to-team federation',
     status: 'reserved',
     category: 'transport',
@@ -210,6 +339,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'web-dashboard',
+    wave: 3,
     title: 'Web dashboard',
     status: 'reserved',
     category: 'surfaces',
@@ -218,6 +348,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'more-surfaces',
+    wave: 3,
     title: 'iOS & Slack surfaces',
     status: 'reserved',
     category: 'surfaces',
@@ -226,6 +357,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'board-insights',
+    wave: 3,
     title: 'Work items, board & insight layer',
     status: 'reserved',
     category: 'insights',
@@ -236,7 +368,20 @@ export const ROADMAP: RoadmapItem[] = [
     dependsOn: ['resolve-act', 'web-dashboard'],
   },
   {
+    id: 'coordination-density',
+    wave: 3,
+    title: 'Coordination-density insight',
+    status: 'reserved',
+    category: 'insights',
+    blurb: 'An insight that flags when a team’s traffic is all broadcast-journal and no directed or threaded exchange — coordination that only looks collaborative.',
+    detail:
+      'A dogfood finding: status_updates posted into a channel where no one shares the work degrade into a journal. A signal only musterd’s act-typed log can compute — a candidate metric for the standalone coordination-observability product.',
+    refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+    dependsOn: ['board-insights'],
+  },
+  {
     id: 'own-harness',
+    wave: 'later',
     title: 'Role templates & mixed-harness teams',
     status: 'reserved',
     category: 'harness',
@@ -247,6 +392,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'sandboxed-runtime',
+    wave: 'later',
     title: 'Sandboxed runtime',
     status: 'reserved',
     category: 'platform',
@@ -254,6 +400,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'python-sdk',
+    wave: 'later',
     title: 'Python client SDK',
     status: 'reserved',
     category: 'platform',
