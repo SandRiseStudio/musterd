@@ -1,5 +1,13 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { z } from 'zod';
+
+export interface TlsConfig {
+  /** Filesystem path to the PEM certificate (chain). */
+  certPath: string;
+  /** Filesystem path to the PEM private key. */
+  keyPath: string;
+}
 
 export interface ResolvedConfig {
   port: number;
@@ -9,6 +17,16 @@ export interface ResolvedConfig {
   presenceTimeoutMs: number;
   reaperIntervalMs: number;
   reclaimGraceMs: number;
+  /** Native TLS material, or null to serve plaintext (ADR 040). */
+  tls: TlsConfig | null;
+  /** Operator acknowledges a TLS-terminating proxy/overlay in front (ADR 040). */
+  trustProxy: boolean;
+  /** The scheme this listener actually serves: `wss` only with native TLS. */
+  scheme: 'ws' | 'wss';
+  /** Extra Host header hostnames allowed on the WS upgrade (besides loopback + bound host). */
+  allowedHosts: string[];
+  /** Origin values allowed on the WS upgrade (CLI/MCP clients send none; browsers do). */
+  allowedOrigins: string[];
 }
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -23,19 +41,140 @@ export function defaultDbPath(): string {
   return process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 'musterd.db');
 }
 
-export function resolveConfig(opts?: {
+/** A positive-integer millisecond env value (ADR 040 tunable resilience constants). */
+const PosIntMs = z.coerce.number().int().positive();
+
+/** Read a tunable timeout from env, falling back to its compiled-in default. Zod-validated (rule #4). */
+function envMs(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const parsed = PosIntMs.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(
+      `${name} must be a positive integer (milliseconds), got ${JSON.stringify(raw)}`,
+    );
+  }
+  return parsed.data;
+}
+
+/** Parse a truthy env flag (`1`/`true`/`yes`, case-insensitive). */
+function envBool(name: string): boolean {
+  const raw = (process.env[name] ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+/** Split a comma/space-separated env allowlist into trimmed, non-empty entries. */
+function envList(name: string): string[] {
+  return (process.env[name] ?? '')
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+export interface ConfigOptions {
   port?: number;
   host?: string;
   dbPath?: string;
-}): ResolvedConfig {
+  tlsCert?: string;
+  tlsKey?: string;
+  trustProxy?: boolean;
+}
+
+export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
   const envPort = process.env['MUSTERD_PORT'];
+  const certPath = opts?.tlsCert ?? process.env['MUSTERD_TLS_CERT'];
+  const keyPath = opts?.tlsKey ?? process.env['MUSTERD_TLS_KEY'];
+  if (Boolean(certPath) !== Boolean(keyPath)) {
+    throw new Error(
+      'TLS is half-configured: set both the certificate (MUSTERD_TLS_CERT / --tls-cert) and the key ' +
+        '(MUSTERD_TLS_KEY / --tls-key), or neither.',
+    );
+  }
+  const tls: TlsConfig | null = certPath && keyPath ? { certPath, keyPath } : null;
+
   return {
     port: opts?.port ?? (envPort ? Number(envPort) : DEFAULT_PORT),
     host: opts?.host ?? process.env['MUSTERD_HOST'] ?? DEFAULT_HOST,
     dbPath: opts?.dbPath ?? defaultDbPath(),
-    heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
-    presenceTimeoutMs: PRESENCE_TIMEOUT_MS,
-    reaperIntervalMs: REAPER_INTERVAL_MS,
-    reclaimGraceMs: RECLAIM_GRACE_MS,
+    heartbeatIntervalMs: envMs('MUSTERD_HEARTBEAT_INTERVAL_MS', HEARTBEAT_INTERVAL_MS),
+    presenceTimeoutMs: envMs('MUSTERD_PRESENCE_TIMEOUT_MS', PRESENCE_TIMEOUT_MS),
+    reaperIntervalMs: envMs('MUSTERD_REAPER_INTERVAL_MS', REAPER_INTERVAL_MS),
+    reclaimGraceMs: envMs('MUSTERD_RECLAIM_GRACE_MS', RECLAIM_GRACE_MS),
+    tls,
+    trustProxy: opts?.trustProxy ?? envBool('MUSTERD_INSECURE_TRUST_PROXY'),
+    scheme: tls ? 'wss' : 'ws',
+    allowedHosts: envList('MUSTERD_ALLOWED_HOSTS'),
+    allowedOrigins: envList('MUSTERD_ALLOWED_ORIGINS'),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Secured off-loopback bind guard (ADR 040). Pure + unit-testable.
+// ---------------------------------------------------------------------------
+
+/** Strip IPv6 brackets and lowercase a bare hostname. */
+function normalizeHost(host: string): string {
+  return host.trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+}
+
+/** A host that keeps the daemon on the local machine — never needs TLS (ADR 040). */
+export function isLoopbackHost(host: string): boolean {
+  const h = normalizeHost(host);
+  if (h === 'localhost' || h === '::1') return true;
+  // IPv4 loopback block 127.0.0.0/8.
+  return /^127(?:\.\d{1,3}){3}$/.test(h);
+}
+
+/**
+ * Refuse to bind beyond loopback in plaintext (Principle 7, ADR 040). A non-loopback bind is allowed
+ * only with native TLS or an explicit `--insecure-trust-proxy` acknowledging a TLS-terminating proxy/
+ * overlay in front. Throws a helpful refusal (ADR 036 style) otherwise. Pure: takes the decided inputs.
+ */
+export function assertBindSecurity(cfg: {
+  host: string;
+  hasTls: boolean;
+  trustProxy: boolean;
+}): void {
+  if (isLoopbackHost(cfg.host)) return;
+  if (cfg.hasTls || cfg.trustProxy) return;
+  throw new Error(
+    `refusing to bind ${cfg.host} in plaintext — a non-loopback bind exposes musterd beyond this machine. ` +
+      'Either configure TLS (MUSTERD_TLS_CERT + MUSTERD_TLS_KEY, or --tls-cert/--tls-key) for native ' +
+      'wss://, or pass --insecure-trust-proxy (MUSTERD_INSECURE_TRUST_PROXY=1) when a TLS-terminating ' +
+      'proxy or overlay sits in front. To share a team across machines without exposing a port, run an ' +
+      'overlay (Tailscale/WireGuard) and keep the bind on loopback — see docs/guides/cross-network-overlay.md.',
+  );
+}
+
+/** Extract the bare hostname from a `Host` header value (`host`, `host:port`, `[::1]:port`). */
+export function hostnameOf(hostHeader: string): string {
+  const h = hostHeader.trim();
+  if (h.startsWith('[')) {
+    const end = h.indexOf(']');
+    return (end >= 0 ? h.slice(1, end) : h).toLowerCase();
+  }
+  const colon = h.indexOf(':');
+  return (colon >= 0 ? h.slice(0, colon) : h).toLowerCase();
+}
+
+/**
+ * Origin/Host gate for the WS upgrade (ADR 040) — blunts cross-site / DNS-rebinding abuse. Pure so it
+ * can be unit-tested without a socket. Runs unconditionally (rebinding can target loopback too).
+ */
+export function checkUpgrade(
+  headers: { host?: string | undefined; origin?: string | undefined },
+  cfg: { boundHost: string; allowedHosts: string[]; allowedOrigins: string[] },
+): { ok: true } | { ok: false; reason: string } {
+  // A present Origin means a browser; legitimate musterd clients (CLI, MCP via `ws`) send none.
+  if (headers.origin !== undefined && !cfg.allowedOrigins.includes(headers.origin)) {
+    return { ok: false, reason: `origin not allowed: ${headers.origin}` };
+  }
+  if (!headers.host) return { ok: false, reason: 'missing Host header' };
+  const hostname = hostnameOf(headers.host);
+  const allowed =
+    isLoopbackHost(hostname) ||
+    hostname === normalizeHost(cfg.boundHost) ||
+    cfg.allowedHosts.some((h) => normalizeHost(h) === hostname);
+  if (!allowed) return { ok: false, reason: `host not allowed: ${headers.host}` };
+  return { ok: true };
 }

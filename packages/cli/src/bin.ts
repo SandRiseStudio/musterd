@@ -21,7 +21,7 @@ const HELP = `${'musterd'} — muster your agents and humans into persistent tea
 
 usage:
   musterd init                                  interactive first-run setup (recommended)
-  musterd serve [--port 4849] [--host 127.0.0.1]
+  musterd serve [--port 4849] [--host 127.0.0.1] [--tls-cert <pem> --tls-key <pem> | --insecure-trust-proxy]
   musterd team create <slug> [--as <you>] [--role <role>] [--display <name>]
   musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]
   musterd team remove <name>                    soft-remove a member from the roster (history is kept)

@@ -100,12 +100,12 @@ This is the one item in this doc that ripples into `spec-v0.3-draft.md` (the pre
 ## 9. Phasing
 
 1. **Document Topology B now** (overlay/tunnel) — a docs-only deliverable that makes cross-network teams *possible today* with no musterd code, by standing on Tailscale/WireGuard. Highest value per effort. ✅ **done** — decided in ADR 039, published as `../guides/cross-network-overlay.md`.
-2. **Topology A: secured bind** (§5) — the off-loopback-requires-TLS guard, `wss://` client support, Origin/Host checks, tunable timeouts (§6). Pairs with the v0.3 credential model; ships when shared teams ship.
+2. **Topology A: secured bind** (§5) — the off-loopback-requires-TLS guard, `wss://` client support, Origin/Host checks, tunable timeouts (§6). ✅ **transport built** in ADR 040 (the guard, native TLS, Origin/Host gate, env-tunable timeouts). The credentialed remote join it carries is still the v0.3 credential model; the bind ships ready for it.
 3. **Topology C: hosted relay** — a rendezvous service and protocol so neither side needs a reachable address or an overlay. Largest build; its own threat model and ops. Named, not scheduled.
 
 ## 10. Open questions
 
 - ~~Single-active vs. multi-presence **for humans** across machines~~ — **decided** (§7: humans multi-presence, agents single-active); the open part is the ADR for the mechanics (deliver-to-all + kind-scoped single-active) when scheduled.
-- Native TLS in the daemon vs. "always run a reverse proxy / overlay" as the documented stance (do we ever terminate TLS in-process, or only ever sit behind something that does?).
-- Heartbeat/grace/timeout constants: WAN-tuned defaults vs. per-team config (§6).
+- ~~Native TLS in the daemon vs. "always run a reverse proxy / overlay" as the documented stance~~ — **decided** (ADR 040): support **both** — native in-process TLS (`MUSTERD_TLS_CERT`/`MUSTERD_TLS_KEY`) *and* `--insecure-trust-proxy` for a TLS-terminating proxy/overlay in front; either satisfies the off-loopback guard.
+- ~~Heartbeat/grace/timeout constants: WAN-tuned defaults vs. per-team config (§6)~~ — **decided** (ADR 040): env-overridable per team, today's values kept as defaults (no behavior change out of the box).
 - Does Topology C reuse the same wire protocol end-to-end (relay is a dumb pipe) or introduce a relay-specific framing? Prefer the former.

@@ -77,7 +77,7 @@ Credentials decide *who*; capabilities decide *what* and *what's visible*. Both 
 
 - `.gitignore` every secret-bearing config: `.cursor/mcp.json`, any file holding `MUSTERD_AGENT_KEY`/`MUSTERD_GRANT`, and `~/.musterd/config.json` is chmod 600.
 - `init` shows a one-line warning when it writes a secret to a repo-local file, and offers to add it to `.gitignore`.
-- The daemon binds to `127.0.0.1` by default; exposing it beyond localhost is an explicit, documented step that SHOULD require transport security (roadmap: TLS/authn for remote). The full networking substrate for cross-machine/cross-network teams — daemon reachability, NAT, overlay-vs-hosted-relay topologies, and the secured off-loopback bind these credentials ride on — is designed in `deployment-topology.md`.
+- The daemon binds to `127.0.0.1` by default; exposing it beyond localhost is an explicit, guarded step. The daemon **refuses** a non-loopback bind in plaintext (ADR 040): it requires native TLS (`MUSTERD_TLS_CERT` + `MUSTERD_TLS_KEY`, serving `wss://`) **or** `--insecure-trust-proxy` acknowledging a TLS-terminating proxy/overlay in front. The WS upgrade enforces Origin/Host checks (cross-site / DNS-rebinding defense), `serve` logs the effective host + scheme, and the resilience timeouts are env-tunable for WAN teams. The full networking substrate for cross-machine/cross-network teams — daemon reachability, NAT, overlay-vs-hosted-relay topologies, and the secured off-loopback bind these credentials ride on — is designed in `deployment-topology.md` (decided in ADR 039); the secured bind itself is ADR 040. The near-term zero-code path is an overlay (`../guides/cross-network-overlay.md`).
 
 ## Out of scope (roadmap, named so we don't design into a corner)
 

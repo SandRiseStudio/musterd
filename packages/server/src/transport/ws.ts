@@ -2,6 +2,7 @@ import type { IncomingMessage } from 'node:http';
 import { WSClientFrame, PROTOCOL_VERSION, type WSServerFrame } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { checkUpgrade } from '../config.js';
 import type { Ctx } from '../context.js';
 import { MusterdError, asMusterdError } from '../errors.js';
 import { log } from '../log.js';
@@ -55,6 +56,21 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
   server.on('upgrade', (req: IncomingMessage, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname !== '/ws') {
+      socket.destroy();
+      return;
+    }
+    // Origin/Host gate (ADR 040): blunt cross-site / DNS-rebinding abuse of a now-exposed daemon.
+    const check = checkUpgrade(
+      { host: req.headers.host, origin: req.headers.origin },
+      {
+        boundHost: ctx.config.host,
+        allowedHosts: ctx.config.allowedHosts,
+        allowedOrigins: ctx.config.allowedOrigins,
+      },
+    );
+    if (!check.ok) {
+      log.warn({ msg: 'ws_upgrade_rejected', reason: check.reason });
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
     }

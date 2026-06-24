@@ -17,7 +17,7 @@ The daemon. SQLite store + WebSocket + HTTP API + presence tracker + inbox deliv
 ```
 src/
   index.ts            // entry: createServer(opts) -> { listen, close }; CLI bin starts it
-  config.ts           // env + defaults (port 4849, host, db path, timeouts)
+  config.ts           // env + defaults (port 4849, host, db path, tunable timeouts) + secured-bind guard, scheme, Origin/Host check (ADR 040)
   db/
     open.ts           // openDb(path): Database; sets PRAGMAs; runs migrations
     migrations.ts     // ordered [{version, up(db)}]; runMigrations(db)
@@ -78,15 +78,18 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 
 ## Startup sequence (`createServer().listen()`)
 
-1. Load config (`config.ts`): port `MUSTERD_PORT||4849`, host `MUSTERD_HOST||127.0.0.1`, db `MUSTERD_DB||~/.musterd/musterd.db` (or injected `db` for tests).
+1. Load config (`config.ts`): port `MUSTERD_PORT||4849`, host `MUSTERD_HOST||127.0.0.1`, db `MUSTERD_DB||~/.musterd/musterd.db` (or injected `db` for tests), plus TLS (`MUSTERD_TLS_CERT`/`MUSTERD_TLS_KEY`), `--insecure-trust-proxy`, the WS upgrade allowlists (`MUSTERD_ALLOWED_HOSTS`/`MUSTERD_ALLOWED_ORIGINS`), and the env-tunable timeouts (ADR 040).
+   - **Secured-bind guard (ADR 040).** `createServer` calls `assertBindSecurity` immediately, before opening the db: it **refuses** a non-loopback host (anything outside `localhost`/`::1`/`127.0.0.0/8`) unless native TLS is configured *or* `--insecure-trust-proxy` is set — a helpful refusal naming the host and the three ways forward. With TLS the daemon is an `https`/`wss` server (`createHttpsServer`); else plaintext `http`/`ws`. Loopback default is unchanged.
 2. `openDb()` → set `WAL` + `foreign_keys` → `runMigrations()`.
 3. Build the `hub` (empty connection registry).
 4. Mount HTTP routes (`transport/http.ts`) and WS upgrade handler (`transport/ws.ts`) on one `http.Server`.
 5. Start the presence `reaper` interval.
-6. `listen(port, host)` → resolve with bound address.
+6. `listen(port, host)` → resolve with bound address. The WS upgrade handler runs the pure `checkUpgrade` Origin/Host gate (ADR 040) on every upgrade — a present `Origin` (a browser; CLI/MCP clients send none) must be allowlisted, and the `Host` must be loopback, the bound host, or allowlisted — rejecting with `403` otherwise to blunt cross-site / DNS-rebinding abuse.
 7. `close()`: stop reaper, close all WS conns, close http server, `db.close()`.
 
 ## Presence heartbeat rules (load-bearing constants)
+
+> These four constants are the **defaults**; each is **env-overridable** for WAN-tuned teams (ADR 040) via `MUSTERD_HEARTBEAT_INTERVAL_MS`, `MUSTERD_PRESENCE_TIMEOUT_MS`, `MUSTERD_REAPER_INTERVAL_MS`, `MUSTERD_RECLAIM_GRACE_MS` (positive-integer ms, zod-validated). Out of the box the values below are unchanged. The reaper and the WS close path read them from `ctx.config`, so an override takes effect everywhere; the newest-wins self-heal (ADR 017) is tested at WAN-like timing.
 
 - `HEARTBEAT_INTERVAL_MS = 15_000` — clients send `heartbeat` (or any frame) at this cadence.
 - `PRESENCE_TIMEOUT_MS = 45_000` — 3 missed intervals. A presence row with `now - last_seen_at > timeout` is stale.
@@ -121,7 +124,7 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 
 ## Diagnostics (ADR 016)
 
-- `GET /health` → `{ ok, v, db, schema }` — `db` is the served database path, `schema` the applied migration version. `musterd serve` prints the db path on startup and logs `db`/`schema` on `listening`; `RunningServer.dbPath` exposes it. This makes "which db is this daemon serving?" answerable, so a daemon accidentally serving the wrong db (reads as "everyone offline") is self-diagnosing.
+- `GET /health` → `{ ok, v, db, schema }` — `db` is the served database path, `schema` the applied migration version. `musterd serve` prints the db path **and the effective host + scheme** (`ws://…` vs `wss://…`, plus a note when a TLS-terminating proxy is trusted) on startup and logs `host`/`scheme`/`db`/`schema` on `listening`; `RunningServer.dbPath` and `RunningServer.scheme` expose them (ADR 040 extends this posture so "what is this daemon exposing?" is answerable). This makes "which db is this daemon serving?" answerable, so a daemon accidentally serving the wrong db (reads as "everyone offline") is self-diagnosing.
 - Team creation (`POST /teams`) needs no token; it mints the creator Member + token.
 - A token authorizes acting **as that one Member in that one Team**. `forbidden` if the envelope `from`/`team` don't match the authenticated Member.
 

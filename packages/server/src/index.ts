@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { createServer as createHttpServer, type Server } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import type { Database } from 'better-sqlite3';
-import { resolveConfig } from './config.js';
+import { assertBindSecurity, resolveConfig } from './config.js';
 import type { Ctx } from './context.js';
 import { schemaVersion } from './db/migrations.js';
 import { openDb } from './db/open.js';
@@ -16,6 +18,12 @@ export interface ServerOptions {
   port?: number;
   host?: string;
   dbPath?: string;
+  /** Path to a PEM certificate to serve native TLS (wss://); pair with tlsKey (ADR 040). */
+  tlsCert?: string;
+  /** Path to the PEM private key for tlsCert. */
+  tlsKey?: string;
+  /** Acknowledge a TLS-terminating proxy/overlay in front, allowing a non-loopback plaintext bind. */
+  trustProxy?: boolean;
   /** Inject a database (e.g. an in-memory one) for tests; bypasses dbPath. */
   db?: Database;
 }
@@ -28,18 +36,36 @@ export interface RunningServer {
   readonly port: number;
   /** The resolved database path this daemon serves (diagnostics — which db is live). */
   readonly dbPath: string;
+  /** The scheme this listener serves: `wss` with native TLS, else `ws` (ADR 040). */
+  readonly scheme: 'ws' | 'wss';
 }
 
 /** Construct (but do not start) a musterd server. Call listen() to bind. */
 export function createServer(opts: ServerOptions = {}): RunningServer {
   const config = resolveConfig(opts);
+  // Secure by default (ADR 040): never bind beyond loopback in plaintext. Fail fast, before any
+  // resource (db, socket) is opened, with guidance on how to widen the bind safely.
+  assertBindSecurity({
+    host: config.host,
+    hasTls: config.tls !== null,
+    trustProxy: config.trustProxy,
+  });
   const db = opts.db ?? openDb(config.dbPath);
   const hub = new Hub();
   const ctx: Ctx = { db, hub, config };
 
-  const http: Server = createHttpServer((req, res) => {
+  const handler = (
+    req: import('node:http').IncomingMessage,
+    res: import('node:http').ServerResponse,
+  ) => {
     void handleHttp(ctx, req, res);
-  });
+  };
+  const http: Server = config.tls
+    ? (createHttpsServer(
+        { cert: readFileSync(config.tls.certPath), key: readFileSync(config.tls.keyPath) },
+        handler,
+      ) as unknown as Server)
+    : createHttpServer(handler);
   attachWsServer(ctx, http);
   let stopReaper: (() => void) | null = null;
   let stopTelemetry: (() => Promise<void>) | null = null;
@@ -52,6 +78,9 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
     },
     get dbPath() {
       return config.dbPath;
+    },
+    get scheme() {
+      return config.scheme;
     },
     async listen() {
       // Start telemetry before binding so the first envelope is already instrumented. No-op + instant
@@ -73,6 +102,8 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
             msg: 'listening',
             host: config.host,
             port: boundPort,
+            scheme: config.scheme,
+            trustProxy: config.trustProxy,
             db: config.dbPath,
             schema: schemaVersion(db),
           });
