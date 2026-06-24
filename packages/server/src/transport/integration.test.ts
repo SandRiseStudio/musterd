@@ -352,6 +352,94 @@ describe('WebSocket', () => {
     a2.close();
   });
 
+  it('a human seat fans out: two concurrent sessions both stay live, neither superseded (ADR 042)', async () => {
+    // The team creator (nick) is a human seat.
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+
+    const phone = new TestWs();
+    const laptop = new TestWs();
+    await Promise.all([phone.open(), laptop.open()]);
+    const w1 = await phone.hello('dawn', 'nick', nickTok, 'cli');
+    const w2 = await laptop.hello('dawn', 'nick', nickTok, 'claude-code');
+    expect(w1.type).toBe('welcome');
+    expect(w2.type).toBe('welcome');
+
+    // Neither human session is displaced — give a superseded frame a chance to arrive, then assert none did.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(phone.frames.some((f) => f.type === 'error')).toBe(false);
+    expect(laptop.frames.some((f) => f.type === 'error')).toBe(false);
+
+    // Both presences are live; the roster collapses them to ONE member row carrying both surfaces.
+    const roster = await get('/teams/dawn/members', nickTok);
+    const nickRow = roster.json.members.find((m: any) => m.name === 'nick');
+    expect(nickRow.activity).not.toBe('offline');
+    expect(nickRow.presences).toHaveLength(2);
+    expect(nickRow.presences.map((p: any) => p.surface).sort()).toEqual(['claude-code', 'cli']);
+    expect(roster.json.members.filter((m: any) => m.name === 'nick')).toHaveLength(1);
+
+    phone.close();
+    laptop.close();
+  });
+
+  it('delivers a directed message AND a @team broadcast to BOTH of a human’s sessions (ADR 042)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // nick holds two live sessions; Ada is the sender.
+    const phone = new TestWs();
+    const laptop = new TestWs();
+    const a = new TestWs();
+    await Promise.all([phone.open(), laptop.open(), a.open()]);
+    await phone.hello('dawn', 'nick', nickTok, 'cli');
+    await laptop.hello('dawn', 'nick', nickTok, 'claude-code');
+    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+
+    // Directed message to nick → both of nick's sessions receive the deliver.
+    a.send({
+      type: 'send',
+      envelope: {
+        id: 'mp1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'member', name: 'nick' },
+        act: 'message',
+        body: 'direct',
+        ts: Date.now(),
+      },
+    });
+    const d1 = await phone.waitFor('deliver');
+    const d2 = await laptop.waitFor('deliver');
+    expect((d1 as any).envelope.id).toBe('mp1');
+    expect((d2 as any).envelope.id).toBe('mp1');
+
+    // @team broadcast → both of nick's sessions receive it too.
+    a.send({
+      type: 'send',
+      envelope: {
+        id: 'mp2',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'team' },
+        act: 'message',
+        body: 'broadcast',
+        ts: Date.now(),
+      },
+    });
+    await pollUntil(
+      () =>
+        phone.frames.some((f) => f.type === 'deliver' && (f as any).envelope.id === 'mp2') &&
+        laptop.frames.some((f) => f.type === 'deliver' && (f as any).envelope.id === 'mp2'),
+    );
+
+    phone.close();
+    laptop.close();
+    a.close();
+  });
+
   it('reclaim drops a member’s live session and frees the seat (ADR 017 follow-up)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.token;

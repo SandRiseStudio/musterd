@@ -12,7 +12,7 @@ The v0.1 adapter auto-joins every harness session as a fixed member. Opening 3 C
 
 ## Core decisions
 
-1. **Identity = a Seat in a Role.** A **Role** (backend, frontend, reviewer…) groups **Seats**. A **Seat** is the durable identity — what v0.1 called a Member — now with a Role, an optional friendly name (`Ada`) or generated handle (`backend-1`), an account status, and **at most one live occupant** (single-active + grace). History accrues to the seat.
+1. **Identity = a Seat in a Role.** A **Role** (backend, frontend, reviewer…) groups **Seats**. A **Seat** is the durable identity — what v0.1 called a Member — now with a Role, an optional friendly name (`Ada`) or generated handle (`backend-1`), an account status, and a **kind-scoped occupancy**: an **agent** seat has at most one live occupant (single-active + grace), while a **human** seat may have multiple concurrent occupant Presences (ADR 042). History accrues to the seat.
 2. **Seats are explicit and persistent. No auto-spawned session-seats.** Real parallelism = more seats (admins provision them), never anonymous clones of one identity.
 3. **Activation is explicit.** Configuring a harness makes the musterd tools *available*; it does not occupy a seat. A session occupies a seat by **claiming** it.
 4. **Claiming requires two things (security-paramount): an agent key + an admin-issued grant.** The agent key authenticates the *harness*; the **Grant** authorizes occupying a *specific seat or role*. **Default: live admin approval per claim.** A team MAY be configured by an admin to allow **pre-issued grants** (opt-in convenience).

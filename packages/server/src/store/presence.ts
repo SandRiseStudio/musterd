@@ -23,7 +23,11 @@ export interface AttachContext {
   driver?: string | null;
 }
 
-/** Create a presence row (a new attachment) for a member on a surface. */
+/**
+ * Create a presence row (a new attachment) for a member on a surface. A member may hold multiple
+ * rows at once: agents are kept single-active by the ws hello path (clear-then-attach), while human
+ * seats fan out and accumulate live rows (kind-scoped single-active, ADR 042).
+ */
 export function attach(
   db: Database,
   memberId: string,
@@ -64,12 +68,16 @@ export function release(db: Database, presenceId: string, graceMs: number): void
   ).run(now, now + graceMs, presenceId);
 }
 
-/** Drop every presence row for a member (active or held) — used to reclaim on a fresh hello. */
+/**
+ * Drop every presence row for a member (active or held). Used to keep an **agent** seat
+ * single-active on a fresh hello (kind-scoped — humans fan out instead, ADR 042), and to free a
+ * seat on operator reclaim/remove (any kind).
+ */
 export function clearMemberPresence(db: Database, memberId: string): void {
   db.prepare('DELETE FROM presence WHERE member_id = ?').run(memberId);
 }
 
-/** Does this member currently hold a *live* (connected, non-held) presence? Drives single-active. */
+/** Does this member currently hold a *live* (connected, non-held) presence? Drives agent single-active. */
 export function hasActivePresence(db: Database, memberId: string): boolean {
   const row = db
     .prepare<

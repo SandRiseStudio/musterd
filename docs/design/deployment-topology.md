@@ -84,12 +84,14 @@ A human is a seat, claimable from any machine with their human credential — so
 
 **Decision (confirmed):** **humans may hold multiple concurrent Presences on one seat; agents stay single-active.** The single-active rule exists to prevent *parallel autonomous minds* — an agent hazard, not a human one. A person watching on a phone while acting on a laptop is exactly the humans-as-peers experience musterd is for, and it matches the original split ("one Member, many possible Presences"). So the single-active displacement (newest-wins, ADR 017) is **kind-scoped**: it applies to agent seats; human seats fan out instead.
 
-This needs an ADR when scheduled, because it touches the v0.3 spec and the server's presence/delivery path:
+The mechanics are now built and recorded in **ADR 042** (single-active becomes kind-scoped in the
+server's presence/delivery path and in SPEC §4 / Appendix A):
 - **Deliver-to-all-presences** for a human seat (every live surface gets the push; the durable cursor still dedupes).
 - **Which presence "acts"** — sends/claims attribute to the seat, not a surface, so any of a human's presences may act; no contention because there's one identity behind them.
-- **Roster rendering** of a human with N surfaces (collapse to the seat; optionally show surfaces).
+- **Roster rendering** of a human with N surfaces (collapse to the seat; the `presences[]` array carries the surfaces).
 
-This is the one item in this doc that ripples into `spec-v0.3-draft.md` (the presence/claim model) rather than being pure transport.
+This is the one item in this doc that ripples into the spec's presence/claim model (SPEC §4 +
+Appendix A, via ADR 042) rather than being pure transport.
 
 ## 8. What this is explicitly NOT
 
@@ -105,7 +107,7 @@ This is the one item in this doc that ripples into `spec-v0.3-draft.md` (the pre
 
 ## 10. Open questions
 
-- ~~Single-active vs. multi-presence **for humans** across machines~~ — **decided** (§7: humans multi-presence, agents single-active); the open part is the ADR for the mechanics (deliver-to-all + kind-scoped single-active) when scheduled.
+- ~~Single-active vs. multi-presence **for humans** across machines~~ — **decided** (§7: humans multi-presence, agents single-active) **and built** (ADR 042: kind-scoped single-active — agent seats displace, human seats fan out, deliver-to-all-presences, roster collapse; no protocol-version bump).
 - ~~Native TLS in the daemon vs. "always run a reverse proxy / overlay" as the documented stance~~ — **decided** (ADR 040): support **both** — native in-process TLS (`MUSTERD_TLS_CERT`/`MUSTERD_TLS_KEY`) *and* `--insecure-trust-proxy` for a TLS-terminating proxy/overlay in front; either satisfies the off-loopback guard.
 - ~~Heartbeat/grace/timeout constants: WAN-tuned defaults vs. per-team config (§6)~~ — **decided** (ADR 040): env-overridable per team, today's values kept as defaults (no behavior change out of the box).
 - Does Topology C reuse the same wire protocol end-to-end (relay is a dumb pipe) or introduce a relay-specific framing? Prefer the former.
