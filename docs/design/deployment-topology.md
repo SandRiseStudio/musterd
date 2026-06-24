@@ -2,6 +2,13 @@
 
 > **Status: DRAFT — roadmap, not v0.2.** This designs the **networking substrate** for a team whose members live on different machines and different networks (home / office / cloud, behind NAT). It is the transport-and-reachability companion to two docs that already exist: `membership-model.md` (the shared-teams *authorization* model — seats, agent key + grants, human credentials) and `security.md` (the threat model). Those answer *who may occupy a seat once the boundary widens*; this answers *how a member on another network reaches the team at all, securely*. Shipped v0.1 and minimal v0.2 are `127.0.0.1`-bound and single-machine; nothing here is required for v0.2 conformance.
 
+> **Status update (2026-06-23): framework decided in ADR 039.** The topology framework below — the
+> one-team-one-daemon invariant, Topology B (overlay) as the near-term answer, A (secured bind) next, C
+> (relay) named-not-scheduled, and humans-multi-presence (§7) — is now a recorded decision (ADR 039),
+> so this doc **freezes** as its durable *why*. The Topology B recipe is published as an operator guide:
+> `../guides/cross-network-overlay.md`. Changing the framework supersedes ADR 039; don't edit decisions
+> back into this doc silently.
+
 > **Living document.** Found an error or better approach? Record it in `docs/decisions/NNN-<slug>.md`, make the smallest correct change, update this doc in the same commit.
 
 Companions: `membership-model.md`, `security.md`, `spec-v0.3-draft.md`, `../architecture/00-overview.md` (the identity/presence/transport split), `../architecture/03-server.md` (the daemon). This is **not** federation — see §8.
@@ -92,7 +99,7 @@ This is the one item in this doc that ripples into `spec-v0.3-draft.md` (the pre
 
 ## 9. Phasing
 
-1. **Document Topology B now** (overlay/tunnel) — a docs-only deliverable that makes cross-network teams *possible today* with no musterd code, by standing on Tailscale/WireGuard. Highest value per effort.
+1. **Document Topology B now** (overlay/tunnel) — a docs-only deliverable that makes cross-network teams *possible today* with no musterd code, by standing on Tailscale/WireGuard. Highest value per effort. ✅ **done** — decided in ADR 039, published as `../guides/cross-network-overlay.md`.
 2. **Topology A: secured bind** (§5) — the off-loopback-requires-TLS guard, `wss://` client support, Origin/Host checks, tunable timeouts (§6). Pairs with the v0.3 credential model; ships when shared teams ship.
 3. **Topology C: hosted relay** — a rendezvous service and protocol so neither side needs a reachable address or an overlay. Largest build; its own threat model and ops. Named, not scheduled.
 
