@@ -61,6 +61,25 @@ describe('EnvelopeSchema', () => {
     expect(ok.thread).toBe('msg-0');
   });
 
+  it('requires a non-empty meta.urgent_reason when meta.urgent is true (ADR 044)', () => {
+    expect(() => makeEnvelope({ ...base, act: 'request_help', meta: { urgent: true } })).toThrow();
+    expect(() =>
+      makeEnvelope({ ...base, act: 'request_help', meta: { urgent: true, urgent_reason: '  ' } }),
+    ).toThrow();
+    const ok = makeEnvelope({
+      ...base,
+      act: 'request_help',
+      meta: { urgent: true, urgent_reason: 'prod is down' },
+    });
+    expect(ok.meta).toMatchObject({ urgent: true, urgent_reason: 'prod is down' });
+  });
+
+  it('leaves non-urgent envelopes untouched (urgent_reason only required when urgent)', () => {
+    const env = makeEnvelope({ ...base, act: 'message', meta: { urgent: false } });
+    expect(env.meta).toMatchObject({ urgent: false });
+    expect(makeEnvelope({ ...base, act: 'message' }).meta).toBeNull();
+  });
+
   it('rejects a wrong protocol version', () => {
     const bad = { ...makeEnvelope({ ...base, act: 'message' }), v: 'musterd/9.9' };
     expect(EnvelopeSchema.safeParse(bad).success).toBe(false);

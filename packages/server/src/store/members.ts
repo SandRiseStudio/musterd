@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Lifecycle, MemberKind } from '@musterd/protocol';
+import type { Availability, Lifecycle, MemberKind } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { MusterdError } from '../errors.js';
@@ -108,6 +108,23 @@ export function authMember(
         `(a daemon started against a different MUSTERD_DB will not recognize tokens minted elsewhere)`,
     );
   return { team, member };
+}
+
+/**
+ * Set (or clear) a member's self-declared availability (SPEC A.6 Axis 2; ADR 044). Reuses the
+ * existing `members.availability` TEXT column — JSON-encoded, no migration. Passing `null` returns
+ * the member to the implicit-`available` default. Never inferred: only the member's own act sets it.
+ */
+export function setAvailability(
+  db: Database,
+  memberId: string,
+  availability: Availability | null,
+): void {
+  db.prepare('UPDATE members SET availability = ?, updated_at = ? WHERE id = ?').run(
+    availability ? JSON.stringify(availability) : null,
+    Date.now(),
+    memberId,
+  );
 }
 
 export function leaveMember(db: Database, memberId: string): void {

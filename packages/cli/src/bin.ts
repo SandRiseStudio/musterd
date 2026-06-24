@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from './args.js';
+import { availabilityCommand } from './commands/availability.js';
 import { claimCommand } from './commands/claim.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
@@ -26,9 +27,10 @@ usage:
   musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]
   musterd team remove <name>                    soft-remove a member from the roster (history is kept)
   musterd join <slug> --as <name> [--token <tok>] [--surface cli]
-  musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] <body...>
+  musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] <body...>
   musterd inbox [--watch] [--unread] [--peek] [--limit <n>]
   musterd status
+  musterd availability <available|away|dnd> [--until <iso>]   set your availability (away holds notifications; dnd passes directed + urgent)
   musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away
   musterd claim <name> | --role <role> [--for <code>] [--surface <s>]   claim a seat for this folder (claim-on-first-use)
   musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
@@ -73,6 +75,8 @@ async function main(argv: string[]): Promise<number> {
       return inboxCommand(rest);
     case 'status':
       return statusCommand(rest);
+    case 'availability':
+      return availabilityCommand(rest);
     case 'notify':
       return notifyCommand(rest);
     case 'claim':

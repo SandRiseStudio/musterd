@@ -54,6 +54,20 @@ export function actMetaRules(
       });
     }
   }
+  // Urgency breakthrough (SPEC A.6a, ADR 044): `meta.urgent: true` is the scarce flag that pierces an
+  // away/dnd recipient's hold. It MUST carry a non-empty `meta.urgent_reason` so the cost is legible
+  // (and, in the v0.3 governed model, auditable). An additive optional meta pair — no version bump.
+  // The `can_flag_urgent` capability that gates *who* may set it is the named v0.3 seam, not built here.
+  if (meta['urgent'] === true) {
+    const reason = meta['urgent_reason'];
+    if (typeof reason !== 'string' || reason.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'urgent_reason'],
+        message: 'meta.urgent requires a non-empty meta.urgent_reason',
+      });
+    }
+  }
   // `resolve` is thread-terminal: it MUST name the thread it closes (ADR 025). The thread id is the
   // root message's id — a no-thread root is closed by passing its own id as `thread`.
   if (env.act === 'resolve') {

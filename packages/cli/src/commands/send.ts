@@ -25,6 +25,14 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
 
   const meta = parseMeta(parsed.metaPairs) ?? {};
   if (replyTo) meta['in_reply_to'] = replyTo;
+  // Urgency breakthrough (ADR 044): `--urgent` flags the envelope so it pierces an away/dnd
+  // recipient's hold; `--urgent-reason` is required (the protocol rejects urgent without it). UNGATED
+  // on localhost — the `can_flag_urgent` capability that scopes who may flag is the v0.3 seam.
+  if (parsed.flags['urgent'] === true) {
+    meta['urgent'] = true;
+    const reason = flagStr(parsed.flags, 'urgent-reason');
+    if (reason) meta['urgent_reason'] = reason;
+  }
 
   let envelope;
   try {

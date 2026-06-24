@@ -88,6 +88,12 @@ export class HttpClient {
   presence(slug: string, surface: string, status?: string) {
     return this.request('POST', `/teams/${slug}/presence`, { surface, status });
   }
+  setAvailability(
+    slug: string,
+    body: { status: string; until?: number | null },
+  ): Promise<{ member: MemberSummary }> {
+    return this.request('POST', `/teams/${slug}/availability`, body);
+  }
   reclaim(slug: string, member: string): Promise<{ ok: boolean; member: string }> {
     return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(member)}/reclaim`);
   }

@@ -52,6 +52,13 @@ export async function notifyCommand(
       const me = roster.members.find((m) => m.name === identity.name);
       return me != null && me.presence !== 'offline';
     },
+    // The recipient's own availability tiers delivery (ADR 044): away holds all but `urgent`; dnd
+    // passes directed + `urgent`. Read off the roster, same as reachability — no new wire field.
+    availability: async () => {
+      const roster = await http.roster(team).catch(() => ({ members: [] }));
+      const me = roster.members.find((m) => m.name === identity.name);
+      return me?.availability ?? null;
+    },
     notify: deps.notify ?? osNotify,
   };
 

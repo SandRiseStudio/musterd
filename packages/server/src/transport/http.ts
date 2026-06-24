@@ -5,6 +5,7 @@ import {
   SurfaceSchema,
   PresenceStatusSchema,
   ProvenanceSchema,
+  AvailabilityStatusSchema,
   PROTOCOL_VERSION,
   type MemberSummary,
 } from '@musterd/protocol';
@@ -22,6 +23,7 @@ import {
   getMemberById,
   getMemberByName,
   leaveMember,
+  setAvailability,
 } from '../store/members.js';
 import { latestStatusUpdate, listInbox, rowToEnvelope } from '../store/messages.js';
 import { attach, clearMemberPresence, listPresence } from '../store/presence.js';
@@ -75,6 +77,17 @@ const AddMemberBody = z.object({
   role: z.string().nullish(),
   lifecycle: LifecycleSchema.optional(),
   lifecycle_until: z.number().int().nullish(),
+});
+
+/**
+ * Set the caller's own availability (SPEC A.7; ADR 044). `until` (ms epoch) is only meaningful with
+ * `away` (the `away_until` encoding); the server clears it for `available`/`dnd` so the stored shape
+ * stays honest. The caller may only set their own seat — availability is never inferred or set by
+ * others on localhost (the `can_*` governance is the v0.3 seam).
+ */
+const AvailabilityBody = z.object({
+  status: AvailabilityStatusSchema,
+  until: z.number().int().positive().nullish(),
 });
 
 const PresenceBody = z.object({
@@ -228,6 +241,20 @@ export async function handleHttp(
         return sendJson(res, 200, {
           presence: { id: p.id, surface: p.surface, status: body.status ?? p.status },
         });
+      }
+
+      if (method === 'POST' && rest === '/availability') {
+        const { team, member } = authMember(ctx.db, slug, bearer(req));
+        const body = parseOrBadRequest(AvailabilityBody, await readJson(req));
+        // `until` rides only `away` (the away_until encoding); drop it otherwise so the stored shape
+        // can't claim "back at 5pm" while available/dnd.
+        const availability =
+          body.status === 'away' && body.until != null
+            ? { status: body.status, until: body.until }
+            : { status: body.status };
+        setAvailability(ctx.db, member.id, availability);
+        const me = summarize(ctx, team.slug, team.id).find((m) => m.name === member.name);
+        return sendJson(res, 200, { member: me });
       }
 
       // Operator escape hatch (ADR 017 follow-up): forcibly drop a member's live session so it can

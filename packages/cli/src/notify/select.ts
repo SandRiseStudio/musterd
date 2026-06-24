@@ -1,16 +1,37 @@
-import type { Envelope } from '@musterd/protocol';
+import type { Availability, Envelope } from '@musterd/protocol';
 import { openActionNeeded } from '../render/rows.js';
 import type { NotifyItem } from './os.js';
 
+/** An envelope carrying the `urgent` breakthrough flag (SPEC A.6a; ADR 044). */
+export function isUrgent(env: Envelope): boolean {
+  return env.meta?.['urgent'] === true;
+}
+
 /**
- * The open, action-needed messages for `me` that haven't been notified this run. {@link openActionNeeded}
- * (ADR 024/025) is the *correct-across-runs* layer — an item is a candidate only while
- * unread-and-unresolved, so reading the inbox (cursor advances) drops it; `seen` is the
- * *non-nagging-within-a-run* layer — a fired or watch-suppressed id won't re-fire on the next poll
- * (ADR 035 §2, the ADR 014 "never repeat" ethos). Pure.
+ * The messages for `me` to notify this run, after recipient-side **tiering** (SPEC A.6a; ADR 044).
+ * {@link openActionNeeded} (ADR 024/025) is the **Loud** set (directed acts, still-open); availability
+ * then gates it:
+ *   - `available` — pass Loud (directed). (the ADR 035 baseline)
+ *   - `dnd`       — hold quiet, pass Loud (directed) + `urgent`.
+ *   - `away`      — hold everything except an `urgent` breakthrough.
+ * `urgent` pierces every tier. Two dedup layers as before: {@link openActionNeeded} is correct across
+ * runs (an item is a candidate only while unread-and-unresolved, so reading the inbox drops it) and
+ * `seen` is non-nagging within a run (ADR 035 §2). Pure.
  */
-export function pendingToNotify(messages: Envelope[], me: string, seen: Set<string>): Envelope[] {
-  return openActionNeeded(messages, me).filter((env) => !seen.has(env.id));
+export function pendingToNotify(
+  messages: Envelope[],
+  me: string,
+  seen: Set<string>,
+  availability?: Availability | null,
+): Envelope[] {
+  const status = availability?.status ?? 'available';
+  // away holds the Loud set too; available/dnd pass it. (dnd "holds quiet" — quiet was never a
+  // candidate here, since notify only ever considers the Loud/directed set + urgent.)
+  const loud = status === 'away' ? [] : openActionNeeded(messages, me);
+  const urgent = messages.filter(isUrgent); // breakthrough at every tier
+  const byId = new Map<string, Envelope>();
+  for (const env of [...loud, ...urgent]) byId.set(env.id, env);
+  return [...byId.values()].filter((env) => !seen.has(env.id));
 }
 
 /** Friendly verb for the notification title, by act. Matches the A.6a Loud set. */
@@ -46,6 +67,8 @@ export interface NotifyDeps {
   inbox: () => Promise<Envelope[]>;
   /** Is the human reachable in-stream right now (a live `inbox --watch`/app presence)? */
   isReachable: () => Promise<boolean>;
+  /** The recipient's self-declared availability, for tiering (null = implicit-available; ADR 044). */
+  availability: () => Promise<Availability | null>;
   /** Fire one OS notification. */
   notify: (n: NotifyItem) => void;
 }
@@ -58,7 +81,8 @@ export interface NotifyDeps {
  * Returns what it fired (for tests / a future verbose mode).
  */
 export async function pollOnce(deps: NotifyDeps, seen: Set<string>): Promise<NotifyItem[]> {
-  const pending = pendingToNotify(await deps.inbox(), deps.me, seen);
+  const availability = await deps.availability();
+  const pending = pendingToNotify(await deps.inbox(), deps.me, seen, availability);
   if (pending.length === 0) return [];
   // One reachability read for the whole batch — the posture is the human's, not per-message.
   const reachable = await deps.isReachable();

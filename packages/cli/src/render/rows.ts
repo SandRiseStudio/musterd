@@ -75,8 +75,11 @@ export function renderStatusTable(members: MemberSummary[], now = Date.now()): s
   );
   const rows = members.map((m) => {
     const name = theme.memberName(m.name, m.kind);
-    const label = activityLabel(m, now);
-    const dot = activityOf(m) === 'offline' ? 'offline' : 'online';
+    // Availability (SPEC A.6 Axis 2) outranks the activity-derived label in the display resolution
+    // (away → `off until <ts>`); when unset/available it falls through to the live activity (ADR 044).
+    const avail = availabilityLabel(m);
+    const label = avail ?? activityLabel(m, now);
+    const dot = avail ? 'away' : activityOf(m) === 'offline' ? 'offline' : 'online';
     const activity = `${theme.presenceDot(dot)} ${theme.meta(label)}`;
     const lifecycle =
       m.lifecycle === 'until' && m.lifecycle_until
@@ -91,6 +94,27 @@ export function renderStatusTable(members: MemberSummary[], now = Date.now()): s
     );
   });
   return [header, ...rows].join('\n');
+}
+
+/**
+ * The explicit availability label, or null to fall through to the live activity. `away` renders
+ * `off until <ts>` (or bare `away` with no `away_until`), `dnd` renders `dnd`; `available` is the
+ * implicit default and never overrides the activity column (SPEC A.6 display resolution; ADR 044).
+ */
+function availabilityLabel(m: MemberSummary): string | null {
+  const a = m.availability;
+  if (!a || a.status === 'available') return null;
+  if (a.status === 'dnd') return 'dnd';
+  return a.until ? `off until ${shortTs(a.until)}` : 'away';
+}
+
+/** Compact `YYYY-MM-DD HH:MM` for an away_until timestamp. */
+function shortTs(ms: number): string {
+  const d = new Date(ms);
+  const date = d.toISOString().slice(0, 10);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${date} ${hh}:${mm}`;
 }
 
 /** Activity, falling back to a presence-derived value for older rosters that predate the field. */

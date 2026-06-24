@@ -1,4 +1,4 @@
-import type { Member } from '@musterd/protocol';
+import { AvailabilitySchema, type Member } from '@musterd/protocol';
 
 /** Raw DB row shapes (snake_case, SQLite types). */
 export interface TeamRow {
@@ -68,8 +68,10 @@ export function toMember(row: MemberRow, teamSlug: string): Member {
     role: row.role,
     lifecycle: row.lifecycle,
     lifecycle_until: row.lifecycle_until,
+    // Parse defensively: a malformed/legacy availability blob degrades to `null` (implicit-available)
+    // rather than failing the whole roster projection.
     availability: row.availability
-      ? (JSON.parse(row.availability) as Record<string, unknown>)
+      ? (AvailabilitySchema.safeParse(JSON.parse(row.availability)).data ?? null)
       : null,
     created_at: row.created_at,
   };

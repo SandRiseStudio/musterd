@@ -272,6 +272,39 @@ describe('WebSocket', () => {
     a.close();
   });
 
+  it('sets and exposes a member’s self-declared availability on the roster (ADR 044)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const by = async (name: string) =>
+      (await get('/teams/dawn/members', nickTok)).json.members.find((m: any) => m.name === name);
+
+    // default: no availability set (implicit-available).
+    expect((await by('nick')).availability).toBeNull();
+
+    // away_until: until rides only `away`.
+    const until = Date.now() + 3_600_000;
+    const set = await post('/teams/dawn/availability', { status: 'away', until }, nickTok);
+    expect(set.status).toBe(200);
+    expect(set.json.member.availability).toEqual({ status: 'away', until });
+    expect((await by('nick')).availability).toEqual({ status: 'away', until });
+
+    // dnd drops any until (the stored shape stays honest).
+    await post('/teams/dawn/availability', { status: 'dnd', until }, nickTok);
+    expect((await by('nick')).availability).toEqual({ status: 'dnd' });
+
+    // available returns to the implicit default shape.
+    await post('/teams/dawn/availability', { status: 'available' }, nickTok);
+    expect((await by('nick')).availability).toEqual({ status: 'available' });
+
+    // a bad status is a 400 bad_request.
+    const bad = await post('/teams/dawn/availability', { status: 'vacation' }, nickTok);
+    expect(bad.status).toBe(400);
+
+    // unauthenticated is refused.
+    const noauth = await post('/teams/dawn/availability', { status: 'away' });
+    expect(noauth.status).toBe(401);
+  });
+
   it('records provenance + workspace from the hello and surfaces them on the roster (ADR 014)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.token;
