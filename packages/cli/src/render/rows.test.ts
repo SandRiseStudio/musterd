@@ -6,6 +6,7 @@ import {
   renderBanner,
   renderMessageRow,
   renderPendingSummary,
+  renderReachabilityNudge,
   renderStatusHeader,
   renderStatusTable,
 } from './rows.js';
@@ -371,6 +372,27 @@ describe('renderPendingSummary (ADR 024 — comeback summary)', () => {
   it('pluralizes and shows the since-time for several', () => {
     const out = renderPendingSummary(3, since);
     expect(out).toContain('3 requests waiting for you');
+    expect(out).toMatch(/since \d\d:\d\d/); // local HH:MM — timezone-robust
+  });
+});
+
+describe('renderReachabilityNudge (ADR 046 — agent-side reachability)', () => {
+  const since = Date.UTC(2026, 5, 9, 14, 17);
+
+  it('returns empty string when nothing is waiting (no noise on the common path)', () => {
+    expect(renderReachabilityNudge(0, since, 'David')).toBe('');
+  });
+
+  it('names the member and uses the singular for one act', () => {
+    const out = renderReachabilityNudge(1, since, 'David');
+    expect(out).toContain('1 act waiting for David');
+    expect(out).not.toContain('acts');
+    expect(out).toContain('musterd inbox');
+  });
+
+  it('pluralizes and shows the since-time for several', () => {
+    const out = renderReachabilityNudge(3, since, 'David');
+    expect(out).toContain('3 acts waiting for David');
     expect(out).toMatch(/since \d\d:\d\d/); // local HH:MM — timezone-robust
   });
 });

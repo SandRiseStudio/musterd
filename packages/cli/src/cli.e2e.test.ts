@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args.js';
-import { resolve, resolveRead } from './commands/helpers.js';
+import { reachabilityNudge, resolve, resolveRead } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { joinCommand } from './commands/join.js';
 import { reclaimCommand } from './commands/reclaim.js';
@@ -180,6 +180,65 @@ describe('thread-close clears the comeback summary (ADR 025)', () => {
     actAs('dawn', 'bo', boToken);
     const after = await run(statusCommand, []);
     expect(after.out).not.toContain('waiting for you');
+  });
+});
+
+describe('agent-side reachability nudge (ADR 046)', () => {
+  it('surfaces a directed act on an unrelated command, then self-clears once the inbox is read', async () => {
+    // nick creates dawn and adds Ada (a heads-down agent).
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const adaToken = JSON.parse(added.out).token as string;
+
+    // nick directs a request_help at Ada.
+    await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'real test please']);
+
+    // Ada acts (explicit via env, ADR 036) — runs an unrelated `send`. The nudge fires for that
+    // command, naming the waiting act, even though `send` never shows the inbox itself.
+    actAs('dawn', 'Ada', adaToken);
+    const nudge = await reachabilityNudge(
+      'send',
+      parseArgs(['--to', 'nick', '--act', 'message', 'ok']),
+    );
+    expect(nudge).toContain('1 act waiting for Ada');
+    expect(nudge).toContain('musterd inbox');
+
+    // After Ada reads the inbox (cursor advances), the nudge goes quiet.
+    await run(inboxCommand, []);
+    expect(await reachabilityNudge('send', parseArgs([]))).toBe('');
+  });
+
+  it('skips commands that show the acts themselves (inbox/status) and suppresses on --json/--quiet', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const adaToken = JSON.parse(added.out).token as string;
+    await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'real test please']);
+    actAs('dawn', 'Ada', adaToken);
+
+    // No double-surfacing: inbox renders the acts, status leads with the comeback summary.
+    expect(await reachabilityNudge('inbox', parseArgs([]))).toBe('');
+    expect(await reachabilityNudge('status', parseArgs([]))).toBe('');
+    // Sidecar opt-outs keep --json/piped output and quiet scripts clean.
+    expect(await reachabilityNudge('send', parseArgs(['--json']))).toBe('');
+    expect(await reachabilityNudge('send', parseArgs(['--quiet']))).toBe('');
+    // MUSTERD_NO_NUDGE=1 silences it too.
+    process.env['MUSTERD_NO_NUDGE'] = '1';
+    expect(await reachabilityNudge('send', parseArgs([]))).toBe('');
+    delete process.env['MUSTERD_NO_NUDGE'];
+  });
+
+  it('prints nothing for an ambient-only (read) identity — never acts as the global config (ADR 036)', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']); // auto-binds cwdDir as nick
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
+    await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'real test please']);
+
+    // Move to an unbound folder: nick@dawn is ambient (config) only — not explicit, so no nudge.
+    const elsewhere = mkdtempSync(join(tmpdir(), 'musterd-unbound-'));
+    cwdSpy.mockReturnValue(elsewhere);
+    actAsNobody();
+    expect(resolveRead({}).explicit).toBe(false);
+    expect(await reachabilityNudge('send', parseArgs([]))).toBe('');
+    rmSync(elsewhere, { recursive: true, force: true });
   });
 });
 

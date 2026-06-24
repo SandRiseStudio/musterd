@@ -1,6 +1,6 @@
 # 046 — Agent-side reachability: the directed-act nudge on every command
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-06-24
 
 ## Context
@@ -22,7 +22,7 @@ Make a directed act waiting for an agent impossible to miss during normal work, 
 change, (b) requiring the agent to run a resident process (`--watch`/`notify` — an agent shelling out
 one-shots won't), (c) nagging, or (d) adding meaningful latency to every command.
 
-## Decision (proposed)
+## Decision
 
 Append a **one-line reachability banner** to the output of any **authenticated, acting** command, built
 from the *same* pure predicate the human comeback summary already uses

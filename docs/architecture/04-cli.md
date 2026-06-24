@@ -115,7 +115,9 @@ unauthenticated; `inbox` + writes already require a member token.
 
 ## Commands (args, flags, output, exit)
 
-All commands accept global `--team <slug>`, `--server <url>`, `--json` (machine output, no color), `--no-color`.
+All commands accept global `--team <slug>`, `--server <url>`, `--json` (machine output, no color), `--no-color`, `--quiet` (suppress the reachability nudge below).
+
+**Agent-side reachability nudge (ADR 046).** After any **acting** command returns, `bin.ts` re-resolves the identity (`resolveRead`) and — only when it is **explicit** (env/binding/`--as`, never an ambient global-config read, ADR 036) — appends a one-line banner to **stderr** naming the directed acts waiting for that member: `⚑ N acts waiting for <me> — musterd inbox (since <t>)`. It is the agent-side mirror of `status`'s comeback summary, surfaced everywhere an agent already is so a heads-down agent can't sit on a `request_help` it never looked for. Built from the same `pendingActionSummary`/`openActionNeeded` predicate, so it self-clears once the inbox cursor advances or the thread is resolved. **Skipped** for commands that show the acts themselves or carry no identity (`inbox`, `status`, `serve`, `service`, `init`, `reset`, `role`, `uninstall`) and suppressed by `--json`/`--quiet`/`MUSTERD_NO_NUDGE=1`. Best-effort: any read failure is swallowed — the nudge never fails or delays a command beyond one inbox read, and never touches stdout (keeps `--json`/pipes clean). No wire change (rides the existing inbox cursor, like `notify`).
 
 ### `musterd init`
 Interactive first-run onboarding (requires a TTY; non-TTY prints guidance and exits 2). Built on `@clack/prompts` (ADR 005). Read-only `detect()`; only `configure()` writes, and only after a confirm. The flow leads with **intent**, not jargon (2026-06-12 dogfood — the old "what harness is your agent in?" opener buried the point):
