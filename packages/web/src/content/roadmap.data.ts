@@ -161,6 +161,28 @@ export const ROADMAP: RoadmapItem[] = [
     ],
   },
 
+  {
+    id: 'availability-urgent',
+    title: 'Availability axis + urgent breakthrough',
+    status: 'shipped',
+    category: 'human-loop',
+    blurb: 'A human sets their own availability (available/away/dnd, away_until); an urgent flag with a required reason breaks through an away/dnd hold, and the notify loop tiers delivery by it.',
+    detail:
+      'The localhost down-payment on the governed model: availability is stored and on the roster, urgent rides meta with no version bump, tiering runs client-side. can_flag_urgent gating, audit, and the wasnt_urgent feedback are the v0.3 superset.',
+    refs: [adr(44, 'ADR 044'), doc('SPEC.md', 'SPEC A.6a')],
+    dependsOn: ['notify-nudge'],
+  },
+  {
+    id: 'service-lifecycle',
+    title: 'Daemon service lifecycle',
+    status: 'shipped',
+    category: 'platform',
+    blurb: 'musterd service runs the daemon as a background service that survives a closed terminal, restarts on crash, and starts at login — without raw launchctl.',
+    detail:
+      'A per-user macOS LaunchAgent today; systemd (--user) and Windows are the named seam. The CLI manages musterd’s own daemon’s lifecycle — not member agents — so the clean-core principle stays intact.',
+    refs: [adr(45, 'ADR 045')],
+  },
+
   // ── near-term ─────────────────────────────────────────────────────────────
   {
     id: 'notification-tiers',
@@ -169,9 +191,60 @@ export const ROADMAP: RoadmapItem[] = [
     category: 'human-loop',
     blurb: 'The full reachability set: route an agent’s request for help to a human by salience and availability, not only when they are watching.',
     detail:
-      'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is.',
+      'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is. The localhost availability + urgent down-payment shipped; the governed superset (can_flag_urgent, audit, wasnt_urgent, off_hours) remains.',
     refs: [doc('docs/design/research-foundation.md', 'research-foundation.md')],
+    dependsOn: ['notify-nudge', 'availability-urgent'],
+  },
+  {
+    id: 'agent-reachability',
+    title: 'Agent-side reachability',
+    status: 'near-term',
+    category: 'human-loop',
+    blurb: 'The agent half of the reachability loop: a directed act waiting for an agent surfaces on every command it runs, so a heads-down agent can’t miss a request_help addressed to it.',
+    detail:
+      'The mirror of ADR 024’s human comeback summary, on the agent side. A dogfood finding — a seat-holding agent read its inbox once and left a directed request_help unanswered. Client-side, no wire change.',
+    refs: [adr(46, 'ADR 046'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
     dependsOn: ['notify-nudge'],
+  },
+  {
+    id: 'service-roster-guard',
+    title: 'Service guardrails',
+    status: 'near-term',
+    category: 'platform',
+    blurb: 'musterd service stop/restart warns when other members hold live sessions, so bouncing a shared daemon doesn’t silently drop a teammate.',
+    detail:
+      'Ties the daemon lifecycle command to roster awareness. A dogfood finding — a shared daemon was restarted three times under a live teammate with no in-band heads-up. --force overrides.',
+    refs: [adr(47, 'ADR 047')],
+    dependsOn: ['service-lifecycle'],
+  },
+  {
+    id: 'agent-presence-touch',
+    title: 'Ambient agent presence',
+    status: 'near-term',
+    category: 'human-loop',
+    blurb: 'An agent doing bursty one-shot CLI work shows present on the roster instead of offline until it opens a watch socket.',
+    detail:
+      'Today presence needs a resident WS session; a sequence of one-shots reads as offline. A short-TTL presence touch on each authenticated command closes the gap — liveness from real actions, while working: <x> still comes from a self-reported status_update. Needs its own ADR (presence-write semantics).',
+    refs: [adr(10, 'ADR 010'), adr(17, 'ADR 017')],
+  },
+  {
+    id: 'cli-ergonomics',
+    title: 'CLI ergonomics',
+    status: 'near-term',
+    category: 'platform',
+    blurb: 'Unknown flags warn instead of being silently dropped, and inbox gains --act/--from filters.',
+    detail:
+      'Dogfood papercuts: inbox --act handoff silently ignored the flag and printed everything. Small and additive.',
+  },
+  {
+    id: 'seat-binding-ergonomics',
+    title: 'Frictionless seat binding',
+    status: 'near-term',
+    category: 'harness',
+    blurb: 'A low-friction way to bind a working folder to a seat, so an agent shelling out repeatedly doesn’t re-export identity env on every call.',
+    detail:
+      'The mechanism exists (musterd claim writes .musterd/binding.json); the gap is making it the obvious default for a long-lived working seat. A dogfood finding — ~6 repeated MUSTERD_* env exports in one session.',
+    refs: [adr(36, 'ADR 036'), adr(32, 'ADRs 032–034')],
   },
 
   // ── reserved ──────────────────────────────────────────────────────────────
@@ -234,6 +307,17 @@ export const ROADMAP: RoadmapItem[] = [
       'Time-to-unblock, cycle time, load distribution, bottlenecks — plus a declared backlog noun for planned work. The natural home is the web dashboard.',
     refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
     dependsOn: ['resolve-act', 'web-dashboard'],
+  },
+  {
+    id: 'coordination-density',
+    title: 'Coordination-density insight',
+    status: 'reserved',
+    category: 'insights',
+    blurb: 'An insight that flags when a team’s traffic is all broadcast-journal and no directed or threaded exchange — coordination that only looks collaborative.',
+    detail:
+      'A dogfood finding: status_updates posted into a channel where no one shares the work degrade into a journal. A signal only musterd’s act-typed log can compute — a candidate metric for the standalone coordination-observability product.',
+    refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+    dependsOn: ['board-insights'],
   },
   {
     id: 'own-harness',

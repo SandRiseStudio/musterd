@@ -108,3 +108,30 @@ Everything in musterd v0.2 attaches to *members*. The missing noun is *the work 
 - **v0.3 (already designed):** grants/capabilities = the enforced layer; this note adds the *why* under that design.
 - **Unscheduled seeds:** driver co-presence; surfacing provenance in roster rendering; whether scheduled/working-hours agents need first-class lifecycle support beyond `provenance: scheduled`; the board-as-projection + insight layer (§4) for the dashboard era, with the planning noun (stored intent) as its one legitimate declared object.
 - **Never:** a stored "relationship" or "autonomy level" field on a member; presence semantics overloaded to imply who is behind an agent; **execution state stored beside the act log instead of derived from it**; metrics that count message volume instead of outcomes.
+
+## 6. Dogfood finding — reachability is symmetric, our tooling isn't (2026-06-24)
+
+A self-review of an agent (David) holding a real seat while building the v0.2 notification work surfaced
+a structural asymmetry: **we built the human side of the reachability loop and left the agent side bare.**
+A human who steps away is served by the comeback summary (ADR 024), `notify` (ADR 035), and now the
+availability axis + `urgent` breakthrough (ADR 044). An agent that goes heads-down has **none of that** —
+it read its inbox once, never held a presence (so it rendered `offline` the whole session), and left a
+directed `request_help` unanswered. The agent committed the exact anti-patterns the features it was
+shipping exist to prevent.
+
+The lesson isn't "agents should poll more" — it's that **the loop must be symmetric**:
+
+- **Agent-side reachability** (roadmap *Agent-side reachability*): the mirror of the human comeback
+  summary — a directed act waiting for an agent surfaces on *every command it runs*, so a heads-down
+  agent can't miss a `request_help` addressed to it. Client-side, no wire change.
+- **Ambient agent presence** (roadmap *Ambient agent presence*): an agent doing bursty one-shot CLI work
+  should read *present*, not `offline`, without a resident watch socket — liveness from real actions,
+  while `working: <x>` still comes from a self-reported `status_update`.
+
+A second observation seeds the insight layer (§4): when teammates don't share the work, `status_update`s
+degrade into a **broadcast journal** — coordination that only *looks* collaborative. A
+**coordination-density** signal (directed/threaded vs. broadcast-only traffic) is something only the
+act-typed log can compute, and a candidate metric for the standalone observability product.
+
+> The through-line of §1–§3: the relationship is symmetric (peers, either may steer or supervise). Our
+> *reachability tooling* must be too — a gap to close, not a new principle.
