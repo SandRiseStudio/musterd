@@ -28,6 +28,9 @@ src/
   notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)
     os.ts             // OS push notification (macOS/Linux/Windows)
     select.ts         // pick which away human to nudge
+  service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)
+    launchd.ts        // pure: plist generation + launchctl argv builders + status parsing (platform seam)
+    manage.ts         // install/uninstall/start/stop/restart/status + log tail (injectable launchctl runner)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
     guard.ts          // inspectInitTarget(cwd): pure folder-suitability heuristics → warnings (ADR 020)
@@ -47,6 +50,7 @@ src/
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts)
     serve.ts          // musterd serve [--port]
+    service.ts        // musterd service install/uninstall/start/stop/restart/status/logs (ADR 045)
     team.ts           // team create / team add / team remove
     join.ts           // join
     send.ts           // send
@@ -132,6 +136,9 @@ Interactive first-run onboarding (requires a TTY; non-TTY prints guidance and ex
 
 ### `musterd serve [--port 4849] [--host 127.0.0.1]`
 Starts the daemon in the foreground. Prints the banner (`render/banner`) + `listening on ws://host:port` **and the served `db:` path** (ADR 016 — the db is chosen by `$MUSTERD_DB`, default `~/.musterd/musterd.db`; showing it makes a wrong-db daemon obvious). Exit 0 on clean shutdown (SIGINT).
+
+### `musterd service <install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow]`
+Runs the daemon as a background **service** so it survives a closed terminal/session, restarts on crash, and starts at login — without raw `launchctl` (ADR 045). **macOS only for now** (a per-user **LaunchAgent** at `~/Library/LaunchAgents/studio.sandrise.musterd.plist`); Linux (`systemd --user`) and Windows are the named seam (`serviceSupported`), and an unsupported platform refuses with that guidance. This manages **musterd's own daemon's** lifecycle — a human-side concern like `notify` — **not** member agents; the "musterd connects agents, it does not run them" principle is intact, and the daemon stays a clean core with no knowledge of launchd. The plist embeds the **running** node + CLI entry (`process.execPath` + resolved `argv[1]`) so it's self-correcting, with `RunAtLoad` + `KeepAlive` (+ `ThrottleInterval`); `--port`/`--host` flow into the embedded `serve`. Verbs → launchd: `install` (write + `bootout`-ignored + `bootstrap`, idempotent — supersedes a hand-authored plist), `start` (`bootstrap`), `stop` (`bootout`), `restart` (`kickstart -k`, falling back to `bootstrap` from cold), `uninstall` (`bootout` + remove plist), `status` (parse `launchctl print` + probe `/health`), `logs [--follow]` (tail `~/.musterd/daemon.{log,err.log}`; `--follow`/`-f` hands off to `tail -f`). No new dependency (`launchctl`/`tail` are OS tools, like ADR 035's `osascript`). **Dev-build caveat:** run from a workspace checkout it embeds that `dist/bin.js` — a rebuild needs `service restart` (KeepAlive doesn't hot-reload). Errors: a failed `bootstrap`/`restart` → exit 1 with the `launchctl` status; unsupported platform → exit 2.
 
 ### `musterd team create <slug> [--display <name>] [--as <yourname>] [--role <role>]`
 `POST /teams`. Creates the team and you as its first **human** member. Saves identity+token to config, sets `current`, and **auto-binds the current folder** to you (ADR 036) so you can act there with no `--as`. Output: `cmd/team-create` frame — green `✓ team "dawn" created`, your member line, the dim *bound this folder* note, dim add hint. Errors: slug taken → `conflict` (exit 9).
