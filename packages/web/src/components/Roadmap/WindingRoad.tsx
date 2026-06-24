@@ -5,6 +5,8 @@ import {
   ROADMAP,
   STATUS_META,
   STATUS_ORDER,
+  WAVE_META,
+  waveRank,
   type RoadmapItem,
   type Status,
 } from '../../content/roadmap.data';
@@ -50,7 +52,8 @@ export function WindingRoad() {
   const stops = useMemo<Stop[]>(() => {
     const out: Stop[] = [];
     for (const status of STATUS_ORDER) {
-      const items = ROADMAP.filter((i) => i.status === status);
+      // Within a status, the road follows build order (wave); stable sort keeps array order per wave.
+      const items = ROADMAP.filter((i) => i.status === status).sort((a, b) => waveRank(a) - waveRank(b));
       out.push({ kind: 'head', key: `head-${status}`, status, count: items.length, active: status === ACTIVE });
       for (const item of items) out.push({ kind: 'node', key: item.id, status, item });
     }
@@ -310,7 +313,14 @@ function NodeStop({ stop, x, dotRef }: { stop: Extract<Stop, { kind: 'node' }>; 
         style={{ '--cat': cat.color } as CSSProperties}
       >
         <span className="road__dot" data-status={item.status} ref={dotRef} aria-hidden="true" />
-        <span className="card__category mono">{CATEGORY_META[item.category].label}</span>
+        <span className="card__meta">
+          <span className="card__category mono">{CATEGORY_META[item.category].label}</span>
+          {item.wave ? (
+            <span className="card__wave mono" data-wave={String(item.wave)} title={WAVE_META[item.wave].tone}>
+              {WAVE_META[item.wave].label}
+            </span>
+          ) : null}
+        </span>
         <h4 className="card__title">{item.title}</h4>
         <p className="card__blurb">{item.blurb}</p>
         {item.refs?.length ? (

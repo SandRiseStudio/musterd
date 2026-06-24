@@ -370,13 +370,34 @@
   transform: translateY(-2px);
   z-index: 3;
 }
+.card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
 .card__category {
-  display: block;
   font-size: 10.5px;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--cat, var(--text-faint));
-  margin-bottom: 8px;
+}
+/* Wave = build-order lane (priority). A small chip; Wave 1 (active) is accented, the rest dim. */
+.card__wave {
+  flex: none;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--text-faint) 50%, transparent);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.card__wave[data-wave='1'] {
+  border-color: color-mix(in srgb, var(--status-near-term) 70%, transparent);
+  color: var(--status-near-term);
 }
 .card__title {
   font-size: 1.02rem;

@@ -9,6 +9,13 @@
 
 export type Status = 'shipped' | 'near-term' | 'reserved' | 'out-of-scope';
 
+/**
+ * Build-order lane — priority/sequence, orthogonal to {@link Status}. Status is the coarse
+ * "how imminent/designed" grouping; `wave` is the linear order we actually build in. Every unshipped,
+ * in-scope item carries one; shipped/out-of-scope items omit it.
+ */
+export type Wave = 1 | 2 | 3 | 'later';
+
 export type Category =
   | 'human-loop'
   | 'observability'
@@ -33,6 +40,8 @@ export interface RoadmapItem {
   refs?: Ref[];
   /** ids of items this one builds on — drawn as dependency edges on the map. */
   dependsOn?: string[];
+  /** Build-order lane (priority/sequence). Unset on shipped + out-of-scope items. */
+  wave?: Wave;
 }
 
 const REPO = 'https://github.com/SandRiseStudio/musterd/blob/main';
@@ -84,6 +93,24 @@ export const CATEGORY_ORDER: Category[] = [
 ];
 
 export const STATUS_ORDER: Status[] = ['shipped', 'near-term', 'reserved', 'out-of-scope'];
+
+export const WAVE_ORDER: Wave[] = [1, 2, 3, 'later'];
+
+export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
+  1: { label: 'Wave 1', tone: 'Harden the coordination loop — small, additive, evidence-backed.' },
+  2: { label: 'Wave 2', tone: 'The v0.3 governance rock, then the full governed tiers it unlocks.' },
+  3: { label: 'Wave 3', tone: 'Reach + the second-product seed.' },
+  later: { label: 'Later', tone: 'No near-term pull; opportunistic.' },
+};
+
+/** The launch gate that precedes all new dev — not a roadmap item (a one-shot op), but part of the sequence. */
+export const SEQUENCE_GATE =
+  'Ship v0.2 — publish to npm + the launch post — before new dev, so adoption feedback informs the rest.';
+
+/** Rank an item for priority sorting within a status (unwaved items sort last, by category). */
+export function waveRank(item: RoadmapItem): number {
+  return item.wave === undefined ? Number.POSITIVE_INFINITY : WAVE_ORDER.indexOf(item.wave);
+}
 
 export const ROADMAP: RoadmapItem[] = [
   // ── shipped ───────────────────────────────────────────────────────────────
@@ -190,6 +217,7 @@ export const ROADMAP: RoadmapItem[] = [
   // Wave 1 — harden the coordination loop (small, additive, no v0.3 dependency).
   {
     id: 'agent-reachability',
+    wave: 1,
     title: 'Agent-side reachability',
     status: 'near-term',
     category: 'human-loop',
@@ -201,6 +229,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'service-roster-guard',
+    wave: 1,
     title: 'Service guardrails',
     status: 'near-term',
     category: 'platform',
@@ -212,6 +241,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'agent-presence-touch',
+    wave: 1,
     title: 'Ambient agent presence',
     status: 'near-term',
     category: 'human-loop',
@@ -222,6 +252,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'cli-ergonomics',
+    wave: 1,
     title: 'CLI ergonomics',
     status: 'near-term',
     category: 'platform',
@@ -231,6 +262,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'seat-binding-ergonomics',
+    wave: 1,
     title: 'Frictionless seat binding',
     status: 'near-term',
     category: 'harness',
@@ -243,6 +275,7 @@ export const ROADMAP: RoadmapItem[] = [
   // Wave 2 — the v0.3 governance rock, then the full governed notification tiers it unlocks.
   {
     id: 'v03-governance',
+    wave: 2,
     title: 'v0.3 governance — seats, grants, capabilities',
     status: 'near-term',
     category: 'platform',
@@ -254,6 +287,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'notification-tiers',
+    wave: 2,
     title: 'Notification tiers',
     status: 'near-term',
     category: 'human-loop',
@@ -267,6 +301,7 @@ export const ROADMAP: RoadmapItem[] = [
   // ── reserved ──────────────────────────────────────────────────────────────
   {
     id: 'telemetry-l2',
+    wave: 3,
     title: 'Telemetry — Layer 2 + SDK',
     status: 'reserved',
     category: 'observability',
@@ -277,6 +312,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'schedule-enforcement',
+    wave: 2,
     title: 'Schedule & lifecycle enforcement',
     status: 'reserved',
     category: 'platform',
@@ -285,6 +321,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'step-streaming',
+    wave: 'later',
     title: 'Step-level streaming transport',
     status: 'reserved',
     category: 'transport',
@@ -293,6 +330,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'federation',
+    wave: 'later',
     title: 'Team-to-team federation',
     status: 'reserved',
     category: 'transport',
@@ -301,6 +339,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'web-dashboard',
+    wave: 3,
     title: 'Web dashboard',
     status: 'reserved',
     category: 'surfaces',
@@ -309,6 +348,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'more-surfaces',
+    wave: 3,
     title: 'iOS & Slack surfaces',
     status: 'reserved',
     category: 'surfaces',
@@ -317,6 +357,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'board-insights',
+    wave: 3,
     title: 'Work items, board & insight layer',
     status: 'reserved',
     category: 'insights',
@@ -328,6 +369,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'coordination-density',
+    wave: 3,
     title: 'Coordination-density insight',
     status: 'reserved',
     category: 'insights',
@@ -339,6 +381,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'own-harness',
+    wave: 'later',
     title: 'Role templates & mixed-harness teams',
     status: 'reserved',
     category: 'harness',
@@ -349,6 +392,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'sandboxed-runtime',
+    wave: 'later',
     title: 'Sandboxed runtime',
     status: 'reserved',
     category: 'platform',
@@ -356,6 +400,7 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'python-sdk',
+    wave: 'later',
     title: 'Python client SDK',
     status: 'reserved',
     category: 'platform',
