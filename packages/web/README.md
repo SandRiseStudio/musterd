@@ -13,8 +13,9 @@ dashboard will grow into, so that surface adds routes here rather than starting 
 - **Liquid glass** — a single tasteful SVG-displacement refraction accent (ported from the reference
   CodePen), over DOM content only.
 - Aesthetic direction and its guardrails: `docs/decisions/037-web-surface-aesthetic.md` +
-  `docs/design/brand.md` §7. Content is a typed projection of the repo's `ROADMAP.md`
-  (`src/content/roadmap.data.ts`); **ROADMAP.md stays the source of truth.**
+  `docs/design/brand.md` §7. Content is the typed roadmap **source of truth**
+  (`src/content/roadmap.data.ts`), imported directly here; **the repo's `ROADMAP.md` is generated
+  from it** (`pnpm roadmap:gen`, ADR 041). Edit the data module, not `ROADMAP.md`.
 
 ## Develop
 

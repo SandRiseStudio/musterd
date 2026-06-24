@@ -4,14 +4,16 @@
   "type": "module",
   "packageManager": "pnpm@10.28.2",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "pnpm -r build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"**/*.{ts,js,mjs,json,md}\"",
-    "format:check": "prettier --check \"packages/**/*.ts\" \"tests/**/*.ts\" \"*.{ts,json}\"",
+    "format:check": "prettier --check \"packages/**/*.ts\" \"tests/**/*.ts\" \"*.{ts,json}\" && pnpm roadmap:check",
+    "roadmap:gen": "node --disable-warning=ExperimentalWarning scripts/gen-roadmap.ts",
+    "roadmap:check": "node --disable-warning=ExperimentalWarning scripts/gen-roadmap.ts --check",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "test:scenarios": "vitest run tests/scenarios",

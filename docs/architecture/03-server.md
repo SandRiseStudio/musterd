@@ -6,7 +6,7 @@ The daemon. SQLite store + WebSocket + HTTP API + presence tracker + inbox deliv
 
 ## Stack
 
-- Runtime: Node ≥ 20 (repo targets Node 22).
+- Runtime: Node ≥ 22 (repo-wide `engines`; native TypeScript execution is relied on by repo tooling).
 - HTTP + WS: a single Node `http.Server`; HTTP routes handled directly (no framework needed — small surface), WS via the `ws` package upgraded on `/ws`. (If a router helps, `hono` is acceptable — record the choice in an ADR if you add a dep.)
 - DB: `better-sqlite3` (synchronous).
 - Validation: `@musterd/protocol` zod schemas at every boundary.

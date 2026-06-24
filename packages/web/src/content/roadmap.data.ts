@@ -1,9 +1,10 @@
 /*
- * Structured projection of ROADMAP.md.
+ * The roadmap — single source of truth.
  *
- * ROADMAP.md is the source of truth; this file is a hand-maintained, typed view of it
- * for the web surface. When the roadmap changes, update ROADMAP.md first, then mirror the
- * change here. Copy stays plain and declarative, and honest about status, per brand.md §4.
+ * This typed module is canonical: the web roadmap map imports it directly, and ROADMAP.md's
+ * item region is GENERATED from it (`pnpm roadmap:gen`, via scripts/gen-roadmap.ts). Edit here;
+ * never hand-edit the generated region of ROADMAP.md. Copy stays plain and declarative, and
+ * honest about status, per brand.md §4.
  */
 
 export type Status = 'shipped' | 'near-term' | 'reserved' | 'out-of-scope';
@@ -145,6 +146,20 @@ export const ROADMAP: RoadmapItem[] = [
       'musterd claim --for <code> drops an ephemeral resolved sidecar the adapter adopts. The binding stays the durable channel; the sidecar is the live overlay.',
     refs: [adr(32, 'ADRs 032–034')],
   },
+  {
+    id: 'cross-network',
+    title: 'Cross-network teams',
+    status: 'shipped',
+    category: 'transport',
+    blurb: 'Two people on two machines can share a team today — run the daemon on a Tailscale/WireGuard overlay and point each member’s MUSTERD_SERVER at its overlay address.',
+    detail:
+      'The topology framework is decided (one team = one daemon, not federation): overlay now, secured bind next, hosted relay later. The secured off-loopback bind shipped — the daemon refuses a non-loopback plaintext bind without TLS (wss://) or a trusted proxy, gates the WS upgrade on Origin/Host, and makes WAN timeouts tunable. Still ahead: the v0.3 credentialed remote join it carries, and a hosted relay for those who won’t run an overlay.',
+    refs: [
+      adr(39, 'ADRs 039–040'),
+      doc('docs/guides/cross-network-overlay.md', 'overlay guide'),
+      doc('docs/design/deployment-topology.md', 'deployment-topology.md'),
+    ],
+  },
 
   // ── near-term ─────────────────────────────────────────────────────────────
   {
@@ -184,16 +199,6 @@ export const ROADMAP: RoadmapItem[] = [
     category: 'transport',
     blurb: 'v0.1 sends whole Envelopes. A v2 transport adds step-level streaming, which beats wait-for-complete for collaborating agents.',
     detail: 'The broadcast recipient kind is already distinct on the wire to anticipate richer delivery semantics.',
-  },
-  {
-    id: 'cross-network',
-    title: 'Cross-network teams',
-    status: 'reserved',
-    category: 'transport',
-    blurb: 'Members on different machines are conceptually a valid team today; the networking substrate is not designed yet.',
-    detail:
-      'Near-term answer is docs-only — stand on a Tailscale/WireGuard-style overlay. Then a secured off-loopback bind (wss://, TLS), then a hosted relay. Still one team = one daemon.',
-    refs: [doc('docs/design/deployment-topology.md', 'deployment-topology.md')],
   },
   {
     id: 'federation',
