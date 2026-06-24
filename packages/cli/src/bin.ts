@@ -10,6 +10,7 @@ import { resetCommand } from './commands/reset.js';
 import { roleCommand } from './commands/role.js';
 import { sendCommand } from './commands/send.js';
 import { serveCommand } from './commands/serve.js';
+import { serviceCommand } from './commands/service.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
 import { uninstallCommand } from './commands/uninstall.js';
@@ -22,6 +23,7 @@ const HELP = `${'musterd'} — muster your agents and humans into persistent tea
 usage:
   musterd init                                  interactive first-run setup (recommended)
   musterd serve [--port 4849] [--host 127.0.0.1] [--tls-cert <pem> --tls-key <pem> | --insecure-trust-proxy]
+  musterd service <install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow]   run the daemon as a background service (macOS LaunchAgent)
   musterd team create <slug> [--as <you>] [--role <role>] [--display <name>]
   musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]
   musterd team remove <name>                    soft-remove a member from the roster (history is kept)
@@ -63,6 +65,8 @@ async function main(argv: string[]): Promise<number> {
       return initCommand(rest);
     case 'serve':
       return serveCommand(rest);
+    case 'service':
+      return serviceCommand(rest);
     case 'team':
       return teamCommand(rest);
     case 'join':
