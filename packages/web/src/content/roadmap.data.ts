@@ -184,17 +184,10 @@ export const ROADMAP: RoadmapItem[] = [
   },
 
   // ── near-term ─────────────────────────────────────────────────────────────
-  {
-    id: 'notification-tiers',
-    title: 'Notification tiers',
-    status: 'near-term',
-    category: 'human-loop',
-    blurb: 'The full reachability set: route an agent’s request for help to a human by salience and availability, not only when they are watching.',
-    detail:
-      'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is. The localhost availability + urgent down-payment shipped; the governed superset (can_flag_urgent, audit, wasnt_urgent, off_hours) remains.',
-    refs: [doc('docs/design/research-foundation.md', 'research-foundation.md')],
-    dependsOn: ['notify-nudge', 'availability-urgent'],
-  },
+  // Order within this status is priority order (2026-06-24 reprioritization). Gate: publish v0.2
+  // before new dev. Then Wave 1 (loop-hardening, below), then Wave 2 (v0.3 governance → full tiers).
+
+  // Wave 1 — harden the coordination loop (small, additive, no v0.3 dependency).
   {
     id: 'agent-reachability',
     title: 'Agent-side reachability',
@@ -247,6 +240,30 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [adr(36, 'ADR 036'), adr(32, 'ADRs 032–034')],
   },
 
+  // Wave 2 — the v0.3 governance rock, then the full governed notification tiers it unlocks.
+  {
+    id: 'v03-governance',
+    title: 'v0.3 governance — seats, grants, capabilities',
+    status: 'near-term',
+    category: 'platform',
+    blurb: 'Seats with account status, roles with default capabilities, per-seat narrowing, issued grants, and credentialed remote join — the enforced layer the wire already anticipates.',
+    detail:
+      'Designed in SPEC A.7/A.9 and spec-v0.3-draft.md. The prerequisite rock for the full notification tiers (can_flag_urgent, audit, wasnt_urgent), schedule enforcement, and safe multi-user/remote teams. Includes the members→seats migration and the credentialed remote join cross-network carries.',
+    refs: [doc('docs/design/spec-v0.3-draft.md', 'spec-v0.3-draft.md'), doc('SPEC.md', 'SPEC A.7/A.9')],
+    dependsOn: ['cross-network'],
+  },
+  {
+    id: 'notification-tiers',
+    title: 'Notification tiers',
+    status: 'near-term',
+    category: 'human-loop',
+    blurb: 'The full reachability set: route an agent’s request for help to a human by salience and availability, not only when they are watching.',
+    detail:
+      'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is. The localhost availability + urgent down-payment shipped; the governed superset (can_flag_urgent, audit, wasnt_urgent, off_hours) needs the v0.3 capability model.',
+    refs: [doc('docs/design/research-foundation.md', 'research-foundation.md')],
+    dependsOn: ['notify-nudge', 'availability-urgent', 'v03-governance'],
+  },
+
   // ── reserved ──────────────────────────────────────────────────────────────
   {
     id: 'telemetry-l2',
@@ -264,6 +281,7 @@ export const ROADMAP: RoadmapItem[] = [
     status: 'reserved',
     category: 'platform',
     blurb: 'availability and lifecycle: until are stored today but not enforced. Later: honor windows for routing and auto-expire members.',
+    dependsOn: ['v03-governance'],
   },
   {
     id: 'step-streaming',
