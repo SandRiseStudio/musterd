@@ -67,6 +67,10 @@ The fix: `installShutdownHandlers` drops Presence (`client.close()`) and exits `
 
 Phantom Presence now drops within the 45s reclaim grace instead of lingering. The `docs/harness-hooks.md` hooks (`SessionStart` + `UserPromptSubmit`) remain a **complementary belt** for keeping an agent checked-in/reporting — no longer the primary mechanism.
 
+## Standing context — the primer as MCP `instructions` (ADR 012 follow-up)
+
+`buildMcpServer` sets the server's **`instructions`** (returned on `initialize`) to the agent primer — `renderPrimer` from `@musterd/protocol`, the **same source** the CLI writes into `AGENTS.md`. This is the *file-free* onboarding surface: any MCP-speaking harness injects `instructions` as standing context, so the agent learns it's on a team and how to coordinate **without touching `CLAUDE.md` or any per-harness file** (the boundary ADR 012 set; `AGENTS.md` remains the surface for the CLI / no-MCP path). `primerInstructions(config)` is the pure wiring: a **provisioned** session (`config.member` set) gets a named-seat primer; an **unclaimed** session gets the "claim a seat first" variant. The primer is channel-aware — it documents both the `team_*` tools and the `musterd` CLI.
+
 ## The 6 tools (JSON schemas — verbatim contract)
 
 Two lifecycle tools (`team_join` / `team_leave`) gate the four working tools. Inspection (`team_status` / `team_members`) works while dormant/pending; sending and inbox draining require a live join.
@@ -195,6 +199,7 @@ src/
 - With env pointing at a live test server + a `team add Ada` token: MCP boot is **dormant** — the server roster shows Ada `offline`. After `team_join`, the roster shows Ada online with the surface from env.
 - A second session for the same Member calling `team_join` **takes over** (newest-wins, ADR 017); the first is `superseded` and goes dormant without reconnecting.
 - `team_send` / `team_inbox_check` **before** `team_join` return the not-ready guard (no message sent, cursor untouched): the *pending* "claim a seat" hint when unclaimed, or the dormant "call team_join first" when claimed-but-not-joined.
+- `primerInstructions` returns the primer the server advertises as `instructions`: a named-seat block when `config.member` is set, the "claim your seat first" variant when it isn't — both channel-aware (no file written).
 - An **unclaimed** binding (claim policy only): boot is a **pending presence** — a `.musterd/pending/<code>.json` marker exists; `team_join {as:'Ada'}` auto-mints Ada, writes the binding, and goes online; `{role:'backend'}` claims `backend-1`. Claiming a name another live session holds returns `claim_conflict`.
 - **Live external claim (ADR 034):** while a pending session is running, `musterd claim Ada --for <code>` drops a `<code>.resolved.json` sidecar; the session's resolution watcher adopts the seat and goes online **without a relaunch** (the sidecar is read-once + deleted; the binding is the durable fallback for a missed watcher).
 - After join: `team_send {act:'status_update', body:'...'}` persists a message visible to a CLI `inbox` on the same team.

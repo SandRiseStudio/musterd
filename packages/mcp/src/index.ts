@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { renderPrimer } from '@musterd/protocol';
 import { bind } from './bind.js';
 import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
 import { MusterdClient } from './client.js';
@@ -62,12 +63,25 @@ export function installShutdownHandlers(opts: {
   };
 }
 
+/**
+ * The standing primer this server returns as MCP `instructions` on initialize (ADR 012 follow-up):
+ * the same `renderPrimer` the CLI writes into AGENTS.md, so an agent is onboarded **without any file**
+ * — works on every MCP-speaking harness. A provisioned session names its seat; an unclaimed one is
+ * told to `team_join` first. Pure, so it's unit-testable without standing up the server.
+ */
+export function primerInstructions(config: McpConfig): string {
+  return renderPrimer({ team: config.team, ...(config.member ? { member: config.member } : {}) });
+}
+
 /** Build (but do not connect) the MCP server with the musterd tools registered. */
 export function buildMcpServer(
   client: MusterdClient,
   config: ReturnType<typeof loadMcpConfig>,
 ): McpServer {
-  const server = new McpServer({ name: 'musterd', version: '0.0.1' });
+  const server = new McpServer(
+    { name: 'musterd', version: '0.2.0' },
+    { instructions: primerInstructions(config) },
+  );
   registerJoin(server, client, config);
   registerLeave(server, client, config);
   registerSend(server, client, config);

@@ -1,19 +1,21 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PRIMER_END_MARKER, PRIMER_START_PREFIX } from '@musterd/protocol';
 
 /**
- * The agent primer (ADR 012 / docs/design/agent-primer.md). `musterd init` seeds the binding
- * folder's AGENTS.md — the cross-tool agent-context file both Claude Code and Cursor read every
- * session — with a marker-delimited block giving a fresh agent standing context: who it is and
- * the team working-loop (join → inbox at task boundaries → status/request_help/handoff/accept).
- * Without it, a fresh agent doesn't know it's on a team or how to coordinate (2026-06-12 dogfood).
+ * AGENTS.md file I/O for the agent primer (ADR 012 / docs/design/agent-primer.md). The **pure
+ * renderer** lives in `@musterd/protocol` (`renderPrimer`, re-exported below) so the CLI and the MCP
+ * server share one source of truth; this module adds the idempotent create/append/update + uninstall
+ * against the binding folder's `AGENTS.md` (the cross-tool agent-context file harnesses read each
+ * session). Without it, a fresh agent doesn't know it's on a team or how to coordinate (2026-06-12).
  */
 
-const START = '<!-- musterd:start (managed by `musterd init` — edit outside these markers) -->';
-const END = '<!-- musterd:end -->';
+// The shared renderer, re-exported so existing call sites keep importing it from here.
+export { renderPrimer } from '@musterd/protocol';
+
 // Stable prefixes used for matching, so a hand-edited start line still re-anchors on re-run.
-const START_PREFIX = '<!-- musterd:start';
-const END_MARKER = '<!-- musterd:end -->';
+const START_PREFIX = PRIMER_START_PREFIX;
+const END_MARKER = PRIMER_END_MARKER;
 
 /** True when `content` already carries a managed musterd primer block (both markers present). */
 export function hasPrimerMarkers(content: string): boolean {
@@ -38,60 +40,6 @@ export function classifyPrimerTarget(dir: string): PrimerTarget {
     // Unreadable AGENTS.md: treat as absent so init still offers to write (upsert handles the rest).
     return 'none';
   }
-}
-
-/** Render the managed primer block (including the start/end markers) for a member on a team. */
-export function renderPrimer(opts: {
-  member: string;
-  team: string;
-  role?: string;
-  charter?: string;
-}): string {
-  const role = opts.role?.trim();
-  const who = role ? `**${opts.member}**, the ${role},` : `**${opts.member}**`;
-  // A role template's charter (the *lens*, ADR 026 / human-agent-dynamics.md §3) is injected
-  // additively inside the managed block, so a re-claim updates it in place without clobbering the
-  // user's own prose outside the markers. Generalist (no charter) leaves the playbook unchanged.
-  const charter = opts.charter?.trim();
-  const charterBlock = charter
-    ? ['', `## Your charter${role ? ` (${role})` : ''}`, '', charter, '']
-    : [];
-  return [
-    START,
-    '## Your musterd team',
-    '',
-    `You are ${who} on the **${opts.team}** team. musterd is your coordination layer: your`,
-    'teammates — other agents *and* humans — are reachable through the `team_*` tools in this',
-    'session. Humans on the team are peers, not approvers.',
-    ...charterBlock,
-    '',
-    'Work as a teammate, not in isolation:',
-    '',
-    '- **Join when you start.** Call `team_join` at the start of a working session so teammates',
-    '  can see you and reach you. (If this agent was set up with auto-join, you’re already on.)',
-    '- **Check your inbox at every task boundary.** Call `team_inbox_check` when you start, when',
-    '  you finish a unit of work, and after you’ve been heads-down — messages addressed to you',
-    '  wait there and teammates expect a reply.',
-    "- **Report status as you work.** Post `team_send {act:'status_update'}` *when you start a task*",
-    '  and when you finish — a single short line on what you’re doing now (one sentence, not an essay).',
-    '  This is what flips you to `working` on the roster; without it teammates just see you as idle.',
-    "- **Ask when you’re blocked** with `team_send {act:'request_help'}` instead of guessing — it’s",
-    '  visible to the whole team.',
-    "- **Hand off cleanly.** `team_send {act:'handoff'}` passes a unit of work (name the artifact);",
-    '  answer a `request_help` or `handoff` with `accept` / `decline` (set `reply_to`).',
-    "- **Close the loop when it's done.** `team_send {act:'resolve', thread:<id>}` marks a thread",
-    '  finished — accepting is not finishing. It clears the request from teammates’ pending view.',
-    '- **See who’s around** with `team_status` / `team_members` before you ask or hand off.',
-    '',
-    'The `team_*` calls are tools — invoke them directly and use what they return. Never write down',
-    'an imagined inbox or reply: if you didn’t call the tool, you don’t know what’s there. Do **not**',
-    'shell out to the `musterd` CLI to coordinate — it authenticates as a different identity and your',
-    'sends will fail; the `team_*` tools are your only channel.',
-    '',
-    'Keep messages short and purposeful. The acts are how the team coordinates — use them instead',
-    'of narrating in free text.',
-    END,
-  ].join('\n');
 }
 
 /**

@@ -6,3 +6,4 @@ export * from './envelope.js';
 export * from './member.js';
 export * from './errors.js';
 export * from './frames.js';
+export * from './primer.js';

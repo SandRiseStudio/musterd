@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bind } from './bind.js';
 import { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
-import { buildMcpServer, installShutdownHandlers } from './index.js';
+import { buildMcpServer, installShutdownHandlers, primerInstructions } from './index.js';
 
 let server: RunningServer;
 let base: string;
@@ -231,5 +231,18 @@ describe('MCP adapter', () => {
     expect(mcp).toBeTruthy();
     // McpServer exposes registered tools on its internal registry; smoke check construction only.
     client.close();
+  });
+
+  it('serves the primer as MCP instructions — file-free onboarding (ADR 012 follow-up)', () => {
+    // A provisioned session names its seat.
+    const named = primerInstructions(adaConfig());
+    expect(named).toContain('## Your musterd team');
+    expect(named).toContain('**Ada** on the **dawn** team');
+    expect(named).toContain('team_inbox_check');
+
+    // An unclaimed session (no member) is told to claim a seat first.
+    const unclaimed = primerInstructions({ server: base, team: 'dawn' });
+    expect(unclaimed).toContain('claim your seat first');
+    expect(unclaimed).not.toContain('You are **');
   });
 });
