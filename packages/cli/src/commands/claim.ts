@@ -67,7 +67,13 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     throw new CliError(`no pending session with code "${forCode}" in this folder`, 2);
   }
 
-  const result = await claimSeat(http, team, target, { binding, members });
+  const result = await claimSeat(http, team, target, {
+    binding,
+    members,
+    adoptToken: flagStr(flags, 'token'),
+    surface,
+    server,
+  });
 
   const next: Binding = {
     server,
@@ -94,7 +100,11 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     );
     return 0;
   }
-  const how = result.reused ? 'reclaimed your seat' : 'claimed a fresh seat';
+  const how = result.adopted
+    ? 'adopted the seat'
+    : result.reused
+      ? 'reclaimed your seat'
+      : 'claimed a fresh seat';
   const tail = live
     ? `the waiting ${marker!.surface} session is going online as ${result.member} now.`
     : `bound this folder to ${result.member}; the agent here will occupy it on launch (or call team_join).`;
@@ -108,12 +118,18 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
 interface ClaimContext {
   binding: Binding | null;
   members: MemberSummary[];
+  /** The seat's token (the code a teammate's `team add` printed), to adopt an existing seat (ADR 055). */
+  adoptToken?: string | undefined;
+  surface?: string | undefined;
+  server: string;
 }
 export interface ClaimResult {
   member: string;
   token: string;
   /** True when we re-occupied the folder's own already-bound seat rather than minting a new one. */
   reused: boolean;
+  /** True when we adopted a teammate-created seat by its token (ADR 055) rather than minting. */
+  adopted?: boolean;
 }
 
 /**
@@ -133,6 +149,31 @@ export async function claimSeat(
     // Re-occupy the folder's own seat without re-minting (we hold its token): own reload / re-claim.
     if (ctx.binding && isClaimed(ctx.binding) && ctx.binding.member === name) {
       return { member: name, token: ctx.binding.token, reused: true };
+    }
+    // Adopt a seat a teammate created for us (ADR 055): we already hold its token (the code their
+    // `team add` printed), so bind it to THIS folder — no mint, and no global-config clobber the way
+    // `join --token` does. Validate the token by registering presence, and refuse if it authenticates
+    // as a different member (the silent mismatch `join` warns about).
+    if (ctx.adoptToken) {
+      let who: string | undefined;
+      try {
+        const authed = new HttpClient({ server: ctx.server, token: ctx.adoptToken });
+        who = (await authed.presence(team, ctx.surface ?? 'cli')).member;
+      } catch {
+        throw new CliError(
+          `that token didn't authenticate against ${team} — re-check the code from whoever ran ` +
+            `\`musterd team add ${name}\``,
+          4,
+        );
+      }
+      if (who && who !== name) {
+        throw new CliError(
+          `that token belongs to "${who}", not "${name}" — run \`musterd claim ${who} --token <code>\`, ` +
+            `or get ${name}'s own code`,
+          4,
+        );
+      }
+      return { member: name, token: ctx.adoptToken, reused: false, adopted: true };
     }
     try {
       const res = await http.addMember(team, { name, kind: 'agent' });
@@ -190,10 +231,13 @@ function isConflict(err: unknown): boolean {
 
 function conflictError(name: string, members: MemberSummary[]): CliError {
   const taken = members.map((m) => m.name);
-  const hint = taken.length > 0 ? ` Names already on the team: ${taken.join(', ')}.` : '';
+  const hint = taken.length > 0 ? ` Names on the team: ${taken.join(', ')}.` : '';
+  // ADR 055 no-dead-end rule: a name-conflict must name a runnable next step, not just refuse.
   return new CliError(
-    `"${name}" is already a seat on this team and this folder doesn't hold its token — ` +
-      `pick another name or claim a pool seat with --role <role>.${hint}`,
+    `"${name}" is already a seat and this folder doesn't hold its token. ` +
+      `If a teammate created it for you, adopt it: musterd claim ${name} --token <code> ` +
+      `(the code their \`musterd team add\` printed). ` +
+      `Otherwise take a fresh pool seat: musterd claim --role <role>, or pick another name.${hint}`,
     9,
   );
 }

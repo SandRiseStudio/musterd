@@ -30,7 +30,7 @@ export function renderPrimer(opts: {
   const role = opts.role?.trim();
   const identity = opts.member
     ? `You are ${role ? `**${opts.member}**, the ${role},` : `**${opts.member}**`} on the **${opts.team}** team.`
-    : `You are a member of the **${opts.team}** team — **claim your seat first** (\`team_join\`, or \`musterd claim <name>\` then \`musterd status\`) so teammates can see and reach you.`;
+    : `You are a member of the **${opts.team}** team — **claim your seat first** (\`team_join\`, or \`musterd claim <name>\` then \`musterd status\`; if a teammate handed you a seat + code, adopt it with \`musterd claim <name> --token <code>\`) so teammates can see and reach you.`;
   // A role template's charter (the *lens*, ADR 026 / human-agent-dynamics.md §3) is injected
   // additively inside the managed block, so a re-claim updates it in place without clobbering the
   // user's own prose outside the markers. Generalist (no charter) leaves the playbook unchanged.
@@ -54,7 +54,8 @@ export function renderPrimer(opts: {
     'Work as a teammate, not in isolation — `team_*` tool form / `musterd` CLI form:',
     '',
     '- **Get on the team when you start.** `team_join` / `musterd claim <name>` then `musterd status` —',
-    '  so teammates can see you and reach you.',
+    '  so teammates can see you and reach you. If a teammate prepared a seat for you, adopt it with',
+    '  `musterd claim <name> --token <code>` (binds this folder; no global identity clobber).',
     '- **Check your inbox at every task boundary.** `team_inbox_check` / `musterd inbox` — when you',
     '  start, when you finish a unit of work, and after being heads-down. Messages addressed to you wait',
     '  there and teammates expect a reply.',

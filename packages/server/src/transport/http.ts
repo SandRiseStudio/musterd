@@ -248,6 +248,7 @@ export async function handleHttp(
         }
         return sendJson(res, 200, {
           presence: { id: p.id, surface: p.surface, status: body.status ?? p.status },
+          member: member.name,
         });
       }
 

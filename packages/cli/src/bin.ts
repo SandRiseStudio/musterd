@@ -35,7 +35,7 @@ usage:
   musterd status
   musterd availability <available|away|dnd> [--until <iso>]   set your availability (away holds notifications; dnd passes directed + urgent)
   musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away
-  musterd claim <name> | --role <role> [--for <code>] [--surface <s>]   claim a seat for this folder (claim-on-first-use)
+  musterd claim <name> [--token <code>] | --role <role> [--for <code>] [--surface <s>]   claim a seat (or adopt a teammate's seat with --token)
   musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
   musterd role list | show <name> | create <name> [--from <builtin>] [--force]   manage role provisioning templates (.musterd/roles/)
   musterd reset [--force] [--no-backup]         wipe the local db + identities back to a clean slate (daemon must be stopped)

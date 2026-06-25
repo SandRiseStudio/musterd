@@ -91,7 +91,11 @@ export class HttpClient {
       last_read_message_id: lastReadMessageId,
     });
   }
-  presence(slug: string, surface: string, status?: string) {
+  presence(
+    slug: string,
+    surface: string,
+    status?: string,
+  ): Promise<{ presence: { id: string; surface: string; status: string }; member: string }> {
     return this.request('POST', `/teams/${slug}/presence`, { surface, status });
   }
   setAvailability(

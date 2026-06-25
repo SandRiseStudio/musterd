@@ -93,6 +93,50 @@ describe('musterd claim (L2 floor, ADR 032)', () => {
     await expect(run(['Ada', '--team', 'dawn'])).rejects.toMatchObject({ exitCode: 9 });
   });
 
+  it('the name-conflict error names a runnable next step (ADR 055 no-dead-end)', async () => {
+    await new HttpClient({ server: process.env['MUSTERD_SERVER']! }).addMember('dawn', {
+      name: 'Ada',
+      kind: 'agent',
+    });
+    await expect(run(['Ada', '--team', 'dawn'])).rejects.toMatchObject({
+      message: expect.stringContaining('musterd claim Ada --token'),
+    });
+  });
+
+  it('adopts a teammate-created seat by its token, binding the folder with no clobber (ADR 055)', async () => {
+    // A teammate's `team add` minted Ada elsewhere and printed its token (the hand-off code).
+    const res = await new HttpClient({ server: process.env['MUSTERD_SERVER']! }).addMember('dawn', {
+      name: 'Ada',
+      kind: 'agent',
+    });
+    const token = res.token as string;
+    const { code, out } = await run(['Ada', '--team', 'dawn', '--token', token]);
+    expect(code).toBe(0);
+    expect(out).toContain('adopted the seat');
+    const b = readBinding();
+    expect(b.member).toBe('Ada');
+    expect(b.token).toBe(token); // the handed-off token, not a fresh mint
+  });
+
+  it('refuses an adopt token that does not authenticate (ADR 055)', async () => {
+    await new HttpClient({ server: process.env['MUSTERD_SERVER']! }).addMember('dawn', {
+      name: 'Ada',
+      kind: 'agent',
+    });
+    await expect(
+      run(['Ada', '--team', 'dawn', '--token', 'mskd_bogusbogusbogus']),
+    ).rejects.toMatchObject({ exitCode: 4 });
+  });
+
+  it('refuses an adopt token that belongs to a different seat (ADR 055)', async () => {
+    const http = new HttpClient({ server: process.env['MUSTERD_SERVER']! });
+    await http.addMember('dawn', { name: 'Ada', kind: 'agent' });
+    const bob = await http.addMember('dawn', { name: 'Bob', kind: 'agent' });
+    await expect(
+      run(['Ada', '--team', 'dawn', '--token', bob.token as string]),
+    ).rejects.toMatchObject({ exitCode: 4 });
+  });
+
   it('claims the next open pool seat for a role', async () => {
     const first = await run(['--role', 'backend', '--team', 'dawn']);
     expect(first.code).toBe(0);

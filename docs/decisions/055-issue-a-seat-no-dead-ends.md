@@ -1,7 +1,29 @@
 # 055 — Issue a seat to a teammate, and never dead-end a claim
 
-- Status: proposed
+- Status: accepted — core implemented 2026-06-25
 - Date: 2026-06-25
+
+## Implementation status (2026-06-25)
+
+Built and tested (unit + live against the daemon): the **adopt path** and the **no-dead-end conflict
+message**, which together remove the disaster's trap.
+
+- `musterd claim <name> --token <code>` adopts an existing seat: validates the token by registering
+  presence (refusing a token that authenticates as a *different* member), then writes only the folder
+  `binding.json` — **no global-config clobber** (unlike `join --token`). Verified live: adopting `Zola`
+  in a fresh folder bound it there while the machine's cached `David` identity was untouched.
+- The `claim <name>` name-conflict now names a runnable next step (`musterd claim <name> --token <code>`
+  / `--role`) instead of dead-ending — the no-dead-end rule, applied to the conflict path.
+- `team add <name>` advertises the adopt line (`musterd claim <name> --token <token>`) over the
+  clobbering `join --token`. The server's `POST /presence` now echoes the authed member so adopt can
+  verify the token↔seat mapping. The `AGENTS.md` primer teaches the adopt path.
+
+Pragmatic simplification vs the design below: the hand-off credential is the **member token** that
+`team add` already mints (not yet a separate short-lived claim *code*). It writes to the per-folder
+binding, so it does not clobber — the key property. **Follow-ups not yet built:** a dedicated
+single-use/TTL claim code distinct from the durable token (§Decision 1); the test-guarded no-dead-end
+rule applied to *every* `join`/`reclaim` terminal error (only the `claim` conflict is reworded so far,
+§Decision 2); the shared-config overwrite warning (§Decision 3).
 
 ## Context
 

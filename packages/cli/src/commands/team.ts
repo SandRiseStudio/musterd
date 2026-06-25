@@ -91,6 +91,12 @@ async function teamAdd(parsed: Parsed): Promise<number> {
         `  MUSTERD_TEAM=${team} MUSTERD_MEMBER=${name} MUSTERD_TOKEN=${res.token} MUSTERD_SURFACE=claude-code`,
       ) + '\n',
     );
+    // Hand-off path (ADR 055): the agent adopts the seat in its own folder with no global-config
+    // clobber — preferred over `join --token`, which overwrites this machine's cached identity.
+    process.stdout.write(
+      theme.meta(`or adopt it in the agent's folder: musterd claim ${name} --token ${res.token}`) +
+        '\n',
+    );
   } else {
     process.stdout.write(
       theme.meta(`they join with: musterd join ${team} --as ${name} --token ${res.token}`) + '\n',
