@@ -43,10 +43,12 @@ The repo carries **zod** and no serialization lib (SQL is a TS constant to dodge
 - **JSON** — zero new deps, but braces/commas/quotes make a 3-line file fussier to hand-edit and
   trailing-comma errors are a classic foot-gun; it quietly undercuts the thesis.
 
-**Recommendation: TOML + `smol-toml`.** Hand-editability is not a nice-to-have here — it is the
-property the durable tier exists to provide; JSON saves a dependency by taxing the exact thing we're
-optimizing. This is the one item in the stack worth explicitly ratifying (a single new runtime dep);
-the JSON fallback is a clean downgrade if the answer is "no new deps."
+**Decision (ratified 2026-06-25): TOML + `smol-toml`.** Hand-editability is not a nice-to-have here
+— it is the property the durable tier exists to provide; JSON saves a dependency by taxing the exact
+thing we're optimizing. The single new runtime dep is accepted. `smol-toml` is **added to
+`@musterd/protocol` when the format layer is built** — not ahead of a consumer, so the lockfile
+never carries an unused dep. The JSON fallback is recorded only as the downgrade path if the dep is
+ever reverted.
 
 ## Schema
 
