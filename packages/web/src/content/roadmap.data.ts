@@ -220,24 +220,23 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [adr(46, 'ADR 046'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
     dependsOn: ['notify-nudge'],
   },
+  {
+    id: 'service-roster-guard',
+    title: 'Service guardrails',
+    status: 'shipped',
+    category: 'platform',
+    blurb: 'musterd service stop/restart refuses when other members hold live sessions, so bouncing a shared daemon doesn’t silently drop a teammate.',
+    detail:
+      'Ties the daemon lifecycle command to roster awareness. A dogfood finding — a shared daemon was restarted three times under a live teammate with no in-band heads-up. The CLI reads a derived connections count from /health and refuses by default; --force overrides, and it fails open when the daemon is unreachable. The daemon stays a clean core that only reports.',
+    refs: [adr(47, 'ADR 047')],
+    dependsOn: ['service-lifecycle'],
+  },
 
   // ── near-term ─────────────────────────────────────────────────────────────
   // Order within this status is priority order (2026-06-24 reprioritization). Gate: publish v0.2
   // before new dev. Then Wave 1 (loop-hardening, below), then Wave 2 (v0.3 governance → full tiers).
 
   // Wave 1 — harden the coordination loop (small, additive, no v0.3 dependency).
-  {
-    id: 'service-roster-guard',
-    wave: 1,
-    title: 'Service guardrails',
-    status: 'near-term',
-    category: 'platform',
-    blurb: 'musterd service stop/restart warns when other members hold live sessions, so bouncing a shared daemon doesn’t silently drop a teammate.',
-    detail:
-      'Ties the daemon lifecycle command to roster awareness. A dogfood finding — a shared daemon was restarted three times under a live teammate with no in-band heads-up. --force overrides.',
-    refs: [adr(47, 'ADR 047')],
-    dependsOn: ['service-lifecycle'],
-  },
   {
     id: 'agent-presence-touch',
     wave: 1,

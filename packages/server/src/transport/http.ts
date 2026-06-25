@@ -26,7 +26,12 @@ import {
   setAvailability,
 } from '../store/members.js';
 import { latestStatusUpdate, listInbox, rowToEnvelope } from '../store/messages.js';
-import { attach, clearMemberPresence, listPresence } from '../store/presence.js';
+import {
+  attach,
+  clearMemberPresence,
+  countLivePresences,
+  listPresence,
+} from '../store/presence.js';
 import { toMember } from '../store/rows.js';
 import { createTeam, requireTeam } from '../store/teams.js';
 import { recordError } from '../telemetry.js';
@@ -128,11 +133,14 @@ export async function handleHttp(
     if (method === 'GET' && path === '/health') {
       // db + schema are exposed so clients can confirm *which* database this daemon serves
       // (a daemon silently serving the wrong db reads as "everyone offline" — dogfood finding).
+      // `connections` is the cross-team live-session count the CLI's `service stop|restart` guard
+      // reads before bouncing a shared daemon out from under a teammate (ADR 047).
       return sendJson(res, 200, {
         ok: true,
         v: PROTOCOL_VERSION,
         db: ctx.config.dbPath,
         schema: schemaVersion(ctx.db),
+        connections: countLivePresences(ctx.db, ctx.config.presenceTimeoutMs),
       });
     }
 

@@ -116,6 +116,24 @@ export function hasLivePresence(db: Database, memberId: string, timeoutMs: numbe
   return (row?.n ?? 0) > 0;
 }
 
+/**
+ * How many distinct members hold a *live* presence right now, across **all** teams in this db.
+ * The daemon hosts every team, so this cross-team count is the honest answer to "who is connected"
+ * — used by the CLI's `service stop|restart` guard (ADR 047) to refuse bouncing a shared daemon out
+ * from under a teammate. Counts members, not rows: a member fanned out over two surfaces is one
+ * session. Mirrors the live filter used by the roster (fresh heartbeat, not a release hold).
+ */
+export function countLivePresences(db: Database, timeoutMs: number): number {
+  const cutoff = Date.now() - timeoutMs;
+  const row = db
+    .prepare<
+      [number],
+      { n: number }
+    >('SELECT COUNT(DISTINCT member_id) AS n FROM presence WHERE held_until IS NULL AND last_seen_at > ?')
+    .get(cutoff);
+  return row?.n ?? 0;
+}
+
 /** Roster presence summary for a team. A member is online if any fresh presence; else offline. */
 export function listPresence(db: Database, teamId: string, timeoutMs: number): PresenceSummary[] {
   const cutoff = Date.now() - timeoutMs;

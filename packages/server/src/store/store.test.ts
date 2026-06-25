@@ -16,6 +16,7 @@ import { insertMessage, latestStatusUpdate, listInbox } from './messages.js';
 import {
   attach,
   clearMemberPresence,
+  countLivePresences,
   hasActivePresence,
   hasLivePresence,
   listPresence,
@@ -274,6 +275,31 @@ describe('presence', () => {
     const removed = reapStale(db, 0);
     expect(removed.length).toBe(1);
     expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(false);
+  });
+
+  it('countLivePresences counts distinct live members across all teams, ignoring offline/held (ADR 047)', () => {
+    const { db, team } = freshTeam();
+    const other = createTeam(db, { slug: 'dusk' });
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const bo = addMember(db, other, { name: 'Bo', kind: 'human' });
+
+    expect(countLivePresences(db, 45_000)).toBe(0);
+
+    // a member fanned out over two surfaces still counts once
+    attach(db, ada.row.id, 'claude-code', 'c1');
+    attach(db, ada.row.id, 'cli', 'c2');
+    expect(countLivePresences(db, 45_000)).toBe(1);
+
+    // a second member on another team adds to the cross-team count
+    const boP = attach(db, bo.row.id, 'cli', 'c3');
+    expect(countLivePresences(db, 45_000)).toBe(2);
+
+    // a release hold no longer counts as live
+    release(db, boP.id, 45_000);
+    expect(countLivePresences(db, 45_000)).toBe(1);
+
+    // an expired (stale) heartbeat doesn't count
+    expect(countLivePresences(db, 0)).toBe(0);
   });
 
   it('single-active: a live attachment is active; releasing frees the slot but keeps a reclaim hold', () => {
