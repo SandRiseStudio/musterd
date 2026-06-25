@@ -31,7 +31,9 @@ import {
   clearMemberPresence,
   countLivePresences,
   listPresence,
+  touchAmbientPresence,
 } from '../store/presence.js';
+import type { MemberRow, TeamRow } from '../store/rows.js';
 import { toMember } from '../store/rows.js';
 import { createTeam, requireTeam } from '../store/teams.js';
 import { recordError } from '../telemetry.js';
@@ -102,6 +104,38 @@ const PresenceBody = z.object({
   workspace: z.string().max(120).optional(),
   driver: z.string().max(80).optional(),
 });
+
+/**
+ * Authenticate a request and write an ambient presence touch for the caller (ADR 057): a one-shot
+ * authenticated command is itself proof of liveness, so it flips a bursty agent present between watch
+ * sockets. A no-op when the member already holds a resident session; on an offline→online transition we
+ * emit the same presence event the WS attach path does, so live watchers update. Surface defaults to
+ * `cli` but honors `x-musterd-surface` so an adapter one-shot can label its real surface.
+ */
+function authTouch(
+  ctx: Ctx,
+  slug: string,
+  req: IncomingMessage,
+): { team: TeamRow; member: MemberRow } {
+  const auth = authMember(ctx.db, slug, bearer(req));
+  const hint = req.headers['x-musterd-surface'];
+  const parsed = SurfaceSchema.safeParse(Array.isArray(hint) ? hint[0] : hint);
+  const surface = parsed.success ? parsed.data : 'cli';
+  const flipped = touchAmbientPresence(
+    ctx.db,
+    auth.member.id,
+    surface,
+    ctx.config.presenceTimeoutMs,
+  );
+  if (flipped) {
+    ctx.hub.broadcastTeam(auth.team.id, {
+      type: 'presence',
+      member: auth.member.name,
+      status: 'online',
+    });
+  }
+  return auth;
+}
 
 function summarize(ctx: Ctx, teamSlug: string, teamId: string): MemberSummary[] {
   return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => {
@@ -191,7 +225,7 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/messages') {
-        const { team, member } = authMember(ctx.db, slug, bearer(req));
+        const { team, member } = authTouch(ctx, slug, req);
         const body = (await readJson(req)) as { envelope?: unknown };
         const env = parseEnvelope(body.envelope);
         const result = routeEnvelope(ctx, team, member, env);
@@ -205,7 +239,7 @@ export async function handleHttp(
       }
 
       if (method === 'GET' && rest === '/inbox') {
-        const { team, member } = authMember(ctx.db, slug, bearer(req));
+        const { team, member } = authTouch(ctx, slug, req);
         const unread = url.searchParams.get('unread') === '1';
         const since = url.searchParams.get('since');
         const cursor = getCursor(ctx.db, member.id);
@@ -223,7 +257,7 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/inbox/cursor') {
-        const { member } = authMember(ctx.db, slug, bearer(req));
+        const { member } = authTouch(ctx, slug, req);
         const body = (await readJson(req)) as { last_read_message_id?: string };
         if (!body.last_read_message_id)
           throw new MusterdError('bad_request', 'last_read_message_id required');
@@ -253,7 +287,7 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/availability') {
-        const { team, member } = authMember(ctx.db, slug, bearer(req));
+        const { team, member } = authTouch(ctx, slug, req);
         const body = parseOrBadRequest(AvailabilityBody, await readJson(req));
         // `until` rides only `away` (the away_until encoding); drop it otherwise so the stored shape
         // can't claim "back at 5pm" while available/dnd.
@@ -271,7 +305,7 @@ export async function handleHttp(
       // localhost-only/v0.2: any team member may reclaim any member; the v0.3 seat model will gate this.
       const reclaimMatch = rest.match(/^\/members\/([^/]+)\/reclaim$/);
       if (method === 'POST' && reclaimMatch) {
-        const { team } = authMember(ctx.db, slug, bearer(req));
+        const { team } = authTouch(ctx, slug, req);
         const targetName = decodeURIComponent(reclaimMatch[1]!);
         const target = getMemberByName(ctx.db, team.id, targetName);
         if (!target || target.left_at !== null)
@@ -301,7 +335,7 @@ export async function handleHttp(
       // is ungated on localhost-only v0.2; the v0.3 seat model will govern who may remove whom.
       const removeMatch = rest.match(/^\/members\/([^/]+)\/remove$/);
       if (method === 'POST' && removeMatch) {
-        const { team } = authMember(ctx.db, slug, bearer(req));
+        const { team } = authTouch(ctx, slug, req);
         const targetName = decodeURIComponent(removeMatch[1]!);
         const target = getMemberByName(ctx.db, team.id, targetName);
         if (!target || target.left_at !== null)

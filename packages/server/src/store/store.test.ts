@@ -23,6 +23,7 @@ import {
   presenceById,
   reapStale,
   release,
+  touchAmbientPresence,
 } from './presence.js';
 import { createTeam } from './teams.js';
 
@@ -348,5 +349,95 @@ describe('presence', () => {
     expect(rows?.presences[0]?.surface).toBe('cli');
     expect(presenceById(db, second.id)).toBeDefined();
     expect(presenceById(db, first.id)).toBeUndefined();
+  });
+});
+
+describe('ambient presence (ADR 057)', () => {
+  function presenceRows(db: ReturnType<typeof freshTeam>['db'], memberId: string) {
+    return db
+      .prepare('SELECT id, surface, conn_id, status, provenance FROM presence WHERE member_id = ?')
+      .all(memberId) as {
+      id: string;
+      surface: string;
+      conn_id: string | null;
+      status: string;
+      provenance: string | null;
+    }[];
+  }
+
+  it('a touch on an offline member flips it present, and reports the transition', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(false);
+
+    const flipped = touchAmbientPresence(db, ada.row.id, 'cli', 45_000);
+    expect(flipped).toBe(true);
+    expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(true);
+    expect(listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')?.status).toBe(
+      'online',
+    );
+    const rows = presenceRows(db, ada.row.id);
+    expect(rows).toHaveLength(1);
+    // ambient rows are connectionless and stamped with session provenance
+    expect(rows[0]?.conn_id).toBeNull();
+    expect(rows[0]?.provenance).toBe('session');
+  });
+
+  it('upserts a single row — many commands never accumulate rows', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    for (let i = 0; i < 5; i++) {
+      const flipped = touchAmbientPresence(db, ada.row.id, 'cli', 45_000);
+      // only the first touch is a transition; the rest just refresh the one row
+      expect(flipped).toBe(i === 0);
+    }
+    expect(presenceRows(db, ada.row.id)).toHaveLength(1);
+  });
+
+  it('is a no-op when a resident (connected) session already owns liveness', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    attach(db, ada.row.id, 'claude-code', 'c1'); // a real watch socket
+
+    const flipped = touchAmbientPresence(db, ada.row.id, 'cli', 45_000);
+    expect(flipped).toBe(false);
+    // no second row was added — the resident session is left alone
+    const rows = presenceRows(db, ada.row.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.surface).toBe('claude-code');
+    expect(rows[0]?.conn_id).toBe('c1');
+  });
+
+  it('refreshes a stale ambient row (the reaper later sweeps it like any live row)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    touchAmbientPresence(db, ada.row.id, 'cli', 45_000);
+
+    // the member went idle past the window: it now reads offline...
+    expect(hasLivePresence(db, ada.row.id, 0)).toBe(false);
+    // ...and a fresh command re-flips it present (a transition again), still one row
+    const flipped = touchAmbientPresence(db, ada.row.id, 'cli', 0);
+    expect(flipped).toBe(true);
+    expect(presenceRows(db, ada.row.id)).toHaveLength(1);
+
+    // and a 0ms reap removes the connectionless ambient row (held_until is null → a real offline)
+    const removed = reapStale(db, 0);
+    expect(removed).toHaveLength(1);
+    expect(removed[0]?.held_until).toBeNull();
+  });
+
+  it('does not displace or touch a reclaim hold (newest-session-wins stays the only eviction)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const p = attach(db, ada.row.id, 'claude-code', 'c1');
+    release(db, p.id, 45_000); // a hold during the grace window
+
+    // a one-shot command must not resurrect or overwrite the hold; it adds its own ambient row
+    const flipped = touchAmbientPresence(db, ada.row.id, 'cli', 45_000);
+    expect(flipped).toBe(true);
+    const hold = presenceById(db, p.id);
+    expect(hold?.held_until).not.toBeNull(); // the hold is intact, untouched
+    const ambient = presenceRows(db, ada.row.id).find((r) => r.id !== p.id);
+    expect(ambient?.conn_id).toBeNull();
   });
 });
