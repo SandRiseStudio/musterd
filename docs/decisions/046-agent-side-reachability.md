@@ -74,7 +74,11 @@ full "Notification tiers" item is the superset; this is the cheap, correct floor
 - **`packages/cli/src/args.ts`** — add `quiet` to `BOOLEAN_FLAGS`.
 - **Tests (`bin`/helpers):** (1) pure render; (2) integration against a live in-memory daemon — a
   `request_help → me` makes the banner appear after an unrelated `send`, and disappears after the inbox
-  cursor advances; (3) ambient-only identity prints nothing; (4) `--json`/`--quiet` suppress it.
+  cursor advances; (3) ambient-only identity prints nothing; (4) `--json`/`--quiet` suppress it;
+  (5) **recipient-shape regression guard** — a directed act whose `to` is the `{kind: "member", name:
+  "<me>"}` envelope shape is counted as directed-to-me; assert specifically against that shape (not a
+  bare `to === name` string), so a future refactor can't silently regress directed-act detection into a
+  false "nothing for you."
 - **Docs:** note the nudge in `04-cli.md` (global behavior section) and tick the roadmap item to shipped
   on landing.
 
@@ -97,3 +101,13 @@ full "Notification tiers" item is the superset; this is the cheap, correct floor
 - Self-clearing and quiet-able; reuses the audited ADR 024/025 predicate so live and nudge paths classify
   identically.
 - A small per-command read cost on acting commands; bounded and best-effort.
+
+## Addendum (2026-06-25)
+
+Reproduced live while dogfooding: a directed `request_help` (Jasmine → David) was nearly missed by an
+ad-hoc inbox filter that tested `to === "David"` when the wire shape is `{kind: "member", name:
+"David"}` — the predicate returned a false "nothing for you," the exact silent-miss this ADR exists to
+prevent, caused by the recipient shape rather than a missed read. Hence test case (5) above. The
+*blocked-agent* variant of the same miss (a frozen loop that can't surface anything) is handled
+separately by [ADR 053](053-inbox-reaches-blocked-agent.md); the *idle-wait* efficiency of watching for
+the next directed act by [ADR 054](054-wake-on-message.md).
