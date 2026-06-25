@@ -289,9 +289,9 @@ export const ROADMAP: RoadmapItem[] = [
     title: 'CLI ergonomics',
     status: 'near-term',
     category: 'platform',
-    blurb: 'Unknown flags warn instead of being silently dropped, and inbox gains --act/--from filters.',
+    blurb: 'The papercuts a fresh agent hits in its first five minutes: directed acts buried in the broadcast firehose, a heavyweight accept, and missing whoami/version.',
     detail:
-      'Dogfood papercuts: inbox --act handoff silently ignored the flag and printed everything. Small and additive.',
+      'Dogfood papercuts, several from the 2026-06-25 onboarding retry: (1) inbox --act handoff silently ignored the flag and printed everything; (2) a directed handoff drowns in @team status_updates — plain inbox shows the firehose oldest-first, so the agent had to head/tail to find its own act; inbox should foreground directed/unread acts (and gain --act/--from filters); (3) accept requires meta.in_reply_to and getting the id forces inbox --json | parse — accept should auto-target the latest open directed act (and inbox should surface copyable ids); (4) musterd whoami and musterd --version do not exist (a fresh agent reaches for both first); (5) no edit/supersede/resolve for a sent act, so a correction leaves overlapping copies in the recipient inbox. All small and additive.',
   },
   {
     id: 'obs-evals-gate',
