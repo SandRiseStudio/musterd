@@ -2,6 +2,8 @@
 
 > **Living document.** The empirical ground under musterd's founding thesis. This is _evidence for_ the thesis, not the thesis itself (that lives in `README.md` and `human-agent-dynamics.md`). Corrections via ADR + smallest correct change; update this doc in the same commit. Status: **recorded 2026-06-17**.
 
+> **Ingest side of the research practice (ADR 056).** This doc is the canonical home for the _external_ research musterd consumes — it is fed by the standing **research radar** (a recurring scan/triage of new multi-agent-coordination and human-agent-collaboration work). New evidence lands here; when a finding would change a decision it graduates to an ADR + roadmap item. The _produced_ side — musterd's own findings, dataset-first and MAST-in-the-wild — lives in `../research/`.
+
 musterd's founding bet — *named, persistent teams where humans are members, not approvers, and agents are teammates, not tools* — is not a hunch. It rests on a specific result that this doc records so the rationale stops being implicit and the plan can be checked against it.
 
 ## The result

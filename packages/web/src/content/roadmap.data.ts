@@ -356,6 +356,29 @@ export const ROADMAP: RoadmapItem[] = [
     dependsOn: ['telemetry-l2', 'board-insights'],
   },
   {
+    id: 'coordination-dataset',
+    wave: 'later',
+    title: 'Coordination-traces dataset & MAST-in-the-wild',
+    status: 'reserved',
+    category: 'observability',
+    blurb: 'The first research artifact: an open, redacted dataset of real human+agent coordination traces on HuggingFace, plus MAST failure detectors over the act-typed log — the data no single-agent vendor can produce.',
+    detail:
+      'Dataset-first on the HF ladder (dataset → benchmark + leaderboard → paper → judge model), MAST-in-the-wild as the first thesis (ADR 056). Substrate is telemetry-l2 + coordination-density; reproducibility rides on the flywheel’s pinned experiment manifests (ADR 051) and baselines (ADR 052). Release is gated on the opt-in + redaction posture (ADR 051) — no dataset ships before consent/redaction is enforced.',
+    refs: [adr(56, 'ADR 056'), doc('docs/research/README.md', 'docs/research/')],
+    dependsOn: ['telemetry-l2', 'coordination-density'],
+  },
+  {
+    id: 'research-intake',
+    wave: 'later',
+    title: 'Research radar (ingest)',
+    status: 'reserved',
+    category: 'observability',
+    blurb: 'A standing scan/triage of new multi-agent-coordination research, funneled into research-foundation.md — findings that change a decision graduate to an ADR.',
+    detail:
+      'The ingest half of the research practice (ADR 056): keep musterd shaped by the field. A recurring agent emits a triaged digest of arXiv / HF Papers / venue work; a human decides what graduates to an ADR + roadmap item. No auto-merge of findings into the thesis.',
+    refs: [adr(56, 'ADR 056'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
+  },
+  {
     id: 'schedule-enforcement',
     wave: 2,
     title: 'Schedule & lifecycle enforcement',
