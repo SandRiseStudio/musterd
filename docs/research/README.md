@@ -7,7 +7,7 @@
 Research is the publishable output of the trace → eval → experiment flywheel (ADR 051), made citable by reproducible experiment manifests (ADR 051) + the baseline requirement (ADR 052). It runs both ways:
 
 - **Produce** — dataset-first. The HuggingFace artifact ladder, in order: **dataset → benchmark + leaderboard → paper (arXiv → HF Papers) → fine-tuned coordination-judge model**.
-- **Ingest** — the research radar feeds `../design/research-foundation.md`; findings that change a decision graduate to an ADR.
+- **Ingest** — the research radar feeds `../design/research-foundation.md`; findings that change a decision graduate to an ADR. Implementation plan (not built): `../design/research-radar-plan.md`.
 
 ## First thesis — MAST in the wild
 
