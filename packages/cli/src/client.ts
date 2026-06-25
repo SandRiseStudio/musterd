@@ -12,6 +12,8 @@ import { CliError, exitForCode, isConnRefused } from './errors.js';
 export interface HttpClientOpts {
   server: string;
   token?: string;
+  /** This client's surface, sent as `x-musterd-surface` so ambient presence labels it (ADR 057). */
+  surface?: string;
 }
 
 export class HttpClient {
@@ -27,6 +29,7 @@ export class HttpClient {
         headers: {
           'content-type': 'application/json',
           ...(this.opts.token ? { authorization: `Bearer ${this.opts.token}` } : {}),
+          ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });

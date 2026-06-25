@@ -166,6 +166,85 @@ describe('HTTP API', () => {
     expect(bad.status).toBe(422);
     expect(bad.json.error.code).toBe('validation');
   });
+
+  it('ambient presence: a one-shot authenticated command flips the agent present (ADR 057)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const adaTok = ada.json.token;
+
+    // Ada has never opened a socket → offline.
+    const before = await get('/teams/dawn/members', nickTok);
+    expect(before.json.members.find((m: any) => m.name === 'Ada')?.activity).toBe('offline');
+
+    // A single one-shot read command is enough to read present — no watch socket.
+    await get('/teams/dawn/inbox', adaTok);
+    const after = await get('/teams/dawn/members', nickTok);
+    const adaRow = after.json.members.find((m: any) => m.name === 'Ada');
+    expect(adaRow?.activity).toBe('online'); // present, but no status_update → not "working"
+    expect(adaRow?.presence).toBe('online');
+    // the ambient row is connectionless and carries the surface header
+    expect(adaRow?.presences?.[0]?.surface).toBe('cli');
+  });
+
+  it('ambient presence: a status_update reads working, and the surface header is honored (ADR 057)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const adaTok = ada.json.token;
+
+    const res = await fetch(base + '/teams/dawn/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${adaTok}`,
+        'x-musterd-surface': 'claude-code',
+      },
+      body: JSON.stringify({
+        envelope: {
+          id: 'su1',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'team' },
+          act: 'status_update',
+          body: 'refactoring the reaper',
+          ts: Date.now(),
+        },
+      }),
+    });
+    expect(res.status).toBe(201);
+
+    const roster = await get('/teams/dawn/members', nickTok);
+    const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+    // posting a status both flips present (ambient) and sets the working label (two-clocks rule)
+    expect(adaRow?.activity).toBe('working');
+    expect(adaRow?.state).toBe('refactoring the reaper');
+    expect(adaRow?.presences?.[0]?.surface).toBe('claude-code');
+  });
+
+  it('ambient presence: a live watcher sees the offline→online transition event (ADR 057)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const adaTok = ada.json.token;
+
+    // nick watches the team roster live.
+    const watcher = new TestWs();
+    await watcher.open();
+    await watcher.hello('dawn', 'nick', nickTok);
+    watcher.send({ type: 'subscribe', scope: 'team' });
+
+    // Ada runs a one-shot; the watcher should receive a presence online event for Ada.
+    await get('/teams/dawn/inbox', adaTok);
+    await pollUntil(() =>
+      watcher.frames.some(
+        (f) =>
+          f.type === 'presence' && (f as any).member === 'Ada' && (f as any).status === 'online',
+      ),
+    );
+    watcher.ws.close();
+  });
 });
 
 describe('WebSocket', () => {

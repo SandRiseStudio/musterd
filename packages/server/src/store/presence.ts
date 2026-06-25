@@ -104,6 +104,59 @@ export function detach(db: Database, presenceId: string): void {
   db.prepare('DELETE FROM presence WHERE id = ?').run(presenceId);
 }
 
+/**
+ * Ambient presence (ADR 057): a connectionless liveness touch written when a member runs an
+ * authenticated command, so a bursty one-shot agent reads present instead of offline between watch
+ * sockets. Liveness only — the `working: <x>` label still comes solely from a status_update
+ * (two-clocks rule, ADR 010).
+ *
+ * Three invariants hold it together:
+ *  - **No-op under a resident session.** If the member already holds a live *connected* presence (a
+ *    real socket), its heartbeat owns liveness; we add nothing (ambient is the fallback for one-shots).
+ *  - **Upsert, never append.** Refresh the member's single connectionless, non-held row (or create one
+ *    if absent) — a thousand commands leave one ambient row, not a thousand to reap. The explicit
+ *    `POST /presence` ping keeps its own row-per-call behavior and is not routed here.
+ *  - **Never displaces.** It only writes its own `conn_id = NULL` row; it never closes a socket or
+ *    clears rows, so newest-session-wins (ADR 017) stays the only eviction path.
+ *
+ * Returns true when this touch flipped the member from no-live-presence to present (an offline→online
+ * transition), so the caller can emit a presence event to live watchers.
+ */
+export function touchAmbientPresence(
+  db: Database,
+  memberId: string,
+  surface: Surface,
+  timeoutMs: number,
+  ctx: AttachContext = {},
+): boolean {
+  // A live resident session (real socket) already owns liveness — don't add a competing row.
+  if (hasActivePresence(db, memberId)) return false;
+  const wasLive = hasLivePresence(db, memberId, timeoutMs);
+  const provenance: Provenance = ctx.provenance ?? 'session';
+  const existing = db
+    .prepare<
+      [string],
+      { id: string }
+    >('SELECT id FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
+    .get(memberId);
+  if (existing) {
+    db.prepare(
+      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ? WHERE id = ?',
+    ).run(
+      Date.now(),
+      'online',
+      surface,
+      provenance,
+      ctx.workspace ?? null,
+      ctx.driver ?? null,
+      existing.id,
+    );
+  } else {
+    attach(db, memberId, surface, null, { ...ctx, provenance });
+  }
+  return !wasLive;
+}
+
 /** Does this member currently have any live presence (within timeout, not a release hold)? */
 export function hasLivePresence(db: Database, memberId: string, timeoutMs: number): boolean {
   const cutoff = Date.now() - timeoutMs;
