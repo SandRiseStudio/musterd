@@ -238,6 +238,17 @@ export const ROADMAP: RoadmapItem[] = [
 
   // Wave 1 — harden the coordination loop (small, additive, no v0.3 dependency).
   {
+    id: 'seat-binding-ergonomics',
+    wave: 1,
+    title: 'Hand off & claim a seat without leaving the tool',
+    status: 'near-term',
+    category: 'harness',
+    blurb: 'A teammate can issue a ready seat to another agent in one command (a claim code), the receiver adopts it in one command, and no claim/join/reclaim error ever dead-ends — it always prints the next command.',
+    detail:
+      'Elevated after a 2026-06-25 dogfood disaster: a fresh agent handed a pre-created named seat could not claim it (team add mints a join --token; claim <name> refuses it; join/reclaim fought a shared cached identity), burned its whole session on acquisition, and escalated to hand-editing the live SQLite DB. The fix: team add emits a one-time claim code that the receiver adopts via claim --for <code> (binds its own folder, mints its own token — no token copy-paste, no shared-identity clobber); a no-dead-end rule (every terminal error names a runnable next command, test-guarded); per-folder binding as the identity channel; and the primer teaching seat acquisition. Also subsumes the original papercut — an agent shelling out repeatedly re-exporting MUSTERD_* env (~6x in one session).',
+    refs: [adr(55, 'ADR 055'), adr(32, 'ADRs 032–034'), adr(36, 'ADR 036'), adr(12, 'ADR 012')],
+  },
+  {
     id: 'agent-presence-touch',
     wave: 1,
     title: 'Ambient agent presence',
@@ -282,18 +293,6 @@ export const ROADMAP: RoadmapItem[] = [
     detail:
       'Dogfood papercuts: inbox --act handoff silently ignored the flag and printed everything. Small and additive.',
   },
-  {
-    id: 'seat-binding-ergonomics',
-    wave: 1,
-    title: 'Frictionless seat binding',
-    status: 'near-term',
-    category: 'harness',
-    blurb: 'A low-friction way to bind a working folder to a seat, so an agent shelling out repeatedly doesn’t re-export identity env on every call.',
-    detail:
-      'The mechanism exists (musterd claim writes .musterd/binding.json); the gap is making it the obvious default for a long-lived working seat. A dogfood finding — ~6 repeated MUSTERD_* env exports in one session.',
-    refs: [adr(36, 'ADR 036'), adr(32, 'ADRs 032–034')],
-  },
-
   {
     id: 'obs-evals-gate',
     wave: 1,
