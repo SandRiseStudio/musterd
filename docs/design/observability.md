@@ -35,9 +35,20 @@ Two layers, with a hard line between them:
 
 - Trace storage / a spans database — export OTLP, let Langfuse/Braintrust/Phoenix/Datadog/ClickHouse store it.
 - Generic LLM-call dashboards, token/cost accounting, prompt management.
-- An eval platform.
+- An eval platform **in musterd core**. The eval + experiment *engine* is **batond's** domain (§5, ADR 051), not the protocol's — musterd core still builds none of it.
 
 If a future feature looks like one of these, the default answer is "integrate, don't build" — overriding that requires an ADR.
+
+### The flywheel (ADR 051)
+
+The strategy above extends to evals and experiments as one loop — **observe (trace) → hypothesize → experiment → compare → promote → observe** — without crossing the build/buy line:
+
+- **Emit in musterd, engine in batond.** musterd emits the coordination trace; batond runs the eval + experiment engine over it.
+- **OTel wire, Langfuse semantics.** Wire format stays OTel (ADR 011/015, portable). For the higher-level objects — **prompt-as-versioned-artifact, datasets, scores, experiments** — batond adopts **Langfuse's data model/vocabulary** (OSS, OTel-compatible, a connected MCP surface) rather than inventing its own, and builds the coordination-semantic layer *on top* — it does not rebuild the trace/prompt/score stores.
+- **Coordination-native moat, both ends.** The trace unit is the *team task* (coordination acts + agent-turn detail on one timeline); the eval unit is the *team outcome* (did the human+agent team hit the Goal's definition-of-done — ADR 048's derived status / ADR 050's projections *are* the eval signal); experiments vary **team topology**, not just `model × prompt × harness`. No single-agent vendor can do any of these.
+- **Prompts opt-in + versioned; meta-evals = judge calibration; model currency measured** (frontier API + open via NIM/Ollama, compared on the cost × latency × quality frontier); and the **harness-decay thesis** — measure scaffolding's diminishing returns so we know when to delete complexity models have absorbed.
+
+The day-to-day discipline that keeps this real — every agent-facing feature ships with traces + an eval — is the **definition-of-done gate, ADR 052** (`07-conventions.md`).
 
 ## 4. Layer 1 — instrumenting musterd (v0.x, minimal)
 
@@ -92,7 +103,7 @@ All Goodhart and human-vs-agent measurement cautions in `docs/design/human-agent
 
 ### Standalone ambition
 
-This layer should ship as its **own product** (working name **batond**, reversible — see `docs/design/brand-coordination-observability.md` §5): it ingests musterd logs natively but also plain OTel GenAI/agent spans, so teams not running musterd can still use the coordination lens. The protocol stays MIT and self-sufficient; the insight product must never become a requirement for using musterd.
+This layer should ship as its **own product** (working name **batond**, reversible — see `docs/design/brand-coordination-observability.md` §5): it ingests musterd logs natively but also plain OTel GenAI/agent spans, so teams not running musterd can still use the coordination lens. batond is also the **home of the eval + experiment engine** (ADR 051) — Langfuse-shaped scores/datasets/experiments plus the coordination-native additions (team-outcome evals, team-topology experiments) — built on a bought backend, never a from-scratch store. The protocol stays MIT and self-sufficient; the insight product must never become a requirement for using musterd.
 
 **First non-musterd ingestion target: Flue.** Flue's `@flue/opentelemetry` emits `workflow → operation → turn → tool` gen_ai spans, and its `task` tool produces a parent→child agent tree — a minimal multi-agent topology batond can render with *zero* musterd involved. That makes Flue the cleanest proof of the "native, not captive" claim (a real third-party framework, not a strawman) and de-risks the "captive to musterd" criticism before musterd ingestion exists. Mirror Flue's two ingestion-relevant hooks — `exportContent` (content redaction) and `resolveRootContext` (parent-trace stitching) — in batond's ingestion design. Caveat and moat: Flue has *no* cross-agent attributes (no waits/contention/blocking) — deriving the between-view is the work, not a shortcut. See `docs/design/landscape.md` §3.
 

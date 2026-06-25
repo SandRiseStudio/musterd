@@ -270,6 +270,18 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [adr(36, 'ADR 036'), adr(32, 'ADRs 032–034')],
   },
 
+  {
+    id: 'obs-evals-gate',
+    wave: 1,
+    title: 'Traces & evals first-class gate',
+    status: 'near-term',
+    category: 'observability',
+    blurb: 'Every agent-facing feature ships with its traces and an eval, the way it ships with tests — an ADR-template section and a format:check guard enforce it.',
+    detail:
+      'The cheap, compounding half of the trace → eval → experiment flywheel: an "Observability & Evaluation" section in the ADR template (traces, eval metric + dataset + baseline, experiment) and an obs-evals:check step in format:check, modeled on the arch-tree checker (presence and shape, not content). So features built through later waves carry telemetry by default and batond never retrofits.',
+    refs: [adr(52, 'ADR 052'), adr(51, 'ADR 051'), doc('docs/design/observability.md', 'observability.md')],
+  },
+
   // Wave 2 — the v0.3 governance rock, then the full governed notification tiers it unlocks.
   {
     id: 'v03-governance',
@@ -307,6 +319,18 @@ export const ROADMAP: RoadmapItem[] = [
     detail: 'The seed of a standalone coordination-observability product.',
     refs: [doc('docs/design/observability.md', 'observability.md')],
     dependsOn: ['telemetry-l1'],
+  },
+  {
+    id: 'eval-experiment-engine',
+    wave: 'later',
+    title: 'Eval & experiment engine (batond)',
+    status: 'reserved',
+    category: 'observability',
+    blurb: 'The batond half of the flywheel: team-outcome evals and side-by-side experiments over model × prompt × harness × team topology — built on a bought, Langfuse-shaped backend, never a from-scratch store.',
+    detail:
+      'Emit in musterd, engine in batond (ADR 051). OTel wire + Langfuse semantics for scores/datasets/experiments, plus the coordination-native additions no single-agent vendor can do: evals scored against a Goal’s definition-of-done (ADR 048/050), experiments that vary the team itself, judge calibration as meta-evals, and the harness-decay measurement that says when to delete complexity models have absorbed.',
+    refs: [adr(51, 'ADR 051'), doc('docs/design/observability.md', 'observability.md')],
+    dependsOn: ['telemetry-l2', 'board-insights'],
   },
   {
     id: 'schedule-enforcement',
