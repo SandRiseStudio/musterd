@@ -249,6 +249,30 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [adr(10, 'ADR 010'), adr(17, 'ADR 017')],
   },
   {
+    id: 'inbox-reaches-blocked-agent',
+    wave: 1,
+    title: 'Inbox reaches a blocked agent',
+    status: 'near-term',
+    category: 'human-loop',
+    blurb: 'A teammate’s message reaches an agent parked on an approval prompt — surfaced into the terminal the human is already at — and the sender sees “blocked awaiting approval” instead of silence.',
+    detail:
+      'A dogfood finding: with per-tool approval on, an agent frozen on a permission prompt runs no command, so ADR 046’s per-command nudge can’t fire and the message waits until the human hand-relays it — the message-bus regression. Allowlisting musterd commands doesn’t help; the block is on the agent’s own gated work. The fix is push, not pull: provisioning installs a Claude Code Notification hook that prints unread directed acts at the approval-prompt moment, and the same hook marks the seat blocked_on_approval so the sender knows to nudge. Harness-provisioned, reversible via the manifest, no wire change.',
+    refs: [adr(53, 'ADR 053'), adr(46, 'ADR 046'), adr(30, 'ADR 030')],
+    dependsOn: ['agent-reachability'],
+  },
+  {
+    id: 'wake-on-message',
+    wave: 1,
+    title: 'Wake on message',
+    status: 'near-term',
+    category: 'human-loop',
+    blurb: 'An idle agent blocks until its next directed act arrives and resumes immediately — instead of polling on a timer or missing the message in the gap.',
+    detail:
+      'A dogfood finding: asked to “wake when the other agent messages,” an agent bolted inbox-polling onto /loop — a workaround that burns turns and trades latency for cost. Add musterd inbox --wait, a blocking one-shot over the existing watch socket that exits on the first directed act, and bless the musterd inbox --wait + /loop idiom in the AGENTS.md primer. The free-agent complement to ADR 053’s blocked-agent push; neither reaches a frozen loop, so they pair.',
+    refs: [adr(54, 'ADR 054'), adr(12, 'ADR 012')],
+    dependsOn: ['agent-presence-touch'],
+  },
+  {
     id: 'cli-ergonomics',
     wave: 1,
     title: 'CLI ergonomics',
