@@ -97,11 +97,13 @@ class TestWs {
 }
 
 describe('HTTP API', () => {
-  it('health responds with the protocol version, db path, and schema version', async () => {
+  it('health responds with the protocol version, db path, schema version, and live-session count', async () => {
     const r = await get('/health');
     expect(r.json).toMatchObject({ ok: true, v: PROTOCOL_VERSION });
     expect(typeof r.json.db).toBe('string');
     expect(typeof r.json.schema).toBe('number');
+    // ADR 047: derived cross-team count of live sessions; zero on a fresh daemon.
+    expect(r.json.connections).toBe(0);
   });
 
   it('creates a team + creator token; duplicate slug is 409', async () => {
@@ -167,6 +169,18 @@ describe('HTTP API', () => {
 });
 
 describe('WebSocket', () => {
+  it('/health connections reflects a live session (ADR 047)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
+    expect((await get('/health')).json.connections).toBe(0);
+
+    const a = new TestWs();
+    await a.open();
+    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    expect((await get('/health')).json.connections).toBe(1);
+    a.close();
+  });
+
   it('delivers live to a present recipient and acks the sender', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);

@@ -88,10 +88,69 @@ describe('serviceCommand', () => {
   it('stop treats an already-stopped agent as success', async () => {
     const c = ctx(recorder({ status: 1, stdout: '', stderr: 'not loaded' }));
     const { code, out } = await capture(() =>
-      serviceCommand(parseArgs(['stop']), { platform: 'darwin', ctx: c }),
+      serviceCommand(parseArgs(['stop']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
     );
     expect(code).toBe(0);
     expect(out).toContain('was not running');
+  });
+
+  // ADR 047: the destructive verbs refuse while teammates hold live sessions, unless --force.
+  it('restart refuses when other sessions are live, with a heads-up nudge', async () => {
+    const c = ctx(recorder());
+    await expect(
+      serviceCommand(parseArgs(['restart']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 2 }),
+      }),
+    ).rejects.toThrow(/2 live sessions are connected.*--force/s);
+    // guard fired before any launchctl call
+    expect(calls).toEqual([]);
+  });
+
+  it('restart proceeds with --force despite live sessions', async () => {
+    const c = ctx(recorder());
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['restart', '--force']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 3 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain('restarted');
+  });
+
+  it('stop proceeds when no sessions are connected', async () => {
+    const c = ctx(recorder());
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['stop']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain('stopped the musterd daemon');
+  });
+
+  it('restart fails open when the daemon health is unreachable', async () => {
+    const c = ctx(recorder());
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['restart']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain('restarted');
   });
 
   it('uninstall removes the plist', async () => {

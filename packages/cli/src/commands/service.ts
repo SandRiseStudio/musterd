@@ -58,7 +58,43 @@ function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow]';
+  'usage: musterd service <install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow] [--force]';
+
+/** Fetch the daemon's `/health` (ADR 016 + 047): the live `connections` count drives the guard below. */
+async function fetchHealth(): Promise<{ connections?: number }> {
+  const server = loadConfig().server;
+  const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(2000) });
+  if (!res.ok) throw new Error(`health ${res.status}`);
+  return (await res.json()) as { connections?: number };
+}
+
+/**
+ * Guard the destructive `service` verbs (ADR 047): refuse to bounce a *shared* daemon while other
+ * members hold live sessions, so a restart is a conscious choice, not a silent teammate-drop.
+ * Fail-open — if `/health` is unreachable the daemon's already down and can't be disrupting anyone,
+ * so let the verb through. `--force` is the universal override.
+ */
+async function guardLiveSessions(
+  health: () => Promise<{ connections?: number }>,
+  force: boolean,
+): Promise<void> {
+  if (force) return;
+  let connections: number;
+  try {
+    connections = (await health()).connections ?? 0;
+  } catch {
+    return; // daemon unreachable — nothing to disrupt
+  }
+  if (connections <= 0) return;
+  const plural = connections === 1 ? '' : 's';
+  const it = connections === 1 ? 'it' : 'them';
+  throw new CliError(
+    `${connections} live session${plural} ${connections === 1 ? 'is' : 'are'} connected to this daemon — restart will drop ${it}.\n` +
+      `  Give the team a heads-up (musterd send --to @team --act status_update "bouncing the daemon, ~5s"),\n` +
+      `  then re-run with --force.`,
+    1,
+  );
+}
 
 /**
  * `musterd service <sub>` — manage the daemon as a macOS LaunchAgent (ADR 045) so it survives a closed
@@ -69,7 +105,11 @@ const USAGE =
  */
 export async function serviceCommand(
   parsed: Parsed,
-  deps: { platform?: NodeJS.Platform; ctx?: ServiceCtx } = {},
+  deps: {
+    platform?: NodeJS.Platform;
+    ctx?: ServiceCtx;
+    health?: () => Promise<{ connections?: number }>;
+  } = {},
 ): Promise<number> {
   const sub = parsed.positionals[0];
   if (!sub) throw new CliError(USAGE, 2);
@@ -90,6 +130,8 @@ export async function serviceCommand(
   if (port) serveArgs.push('--port', port);
   if (host) serveArgs.push('--host', host);
   const ctx = deps.ctx ?? resolveCtx(serveArgs);
+  const health = deps.health ?? fetchHealth;
+  const force = parsed.flags['force'] === true;
 
   const ok = (s: string) => process.stdout.write(`${theme.ok('✓')} ${s}\n`);
   const fail = (step: string, r: RunResult): never => {
@@ -127,12 +169,14 @@ export async function serviceCommand(
       return 0;
     }
     case 'stop': {
+      await guardLiveSessions(health, force);
       const r = stop(ctx);
       // bootout returns non-zero when it wasn't loaded — that's already-stopped, not an error.
       ok(r.status === 0 ? 'stopped the musterd daemon' : 'musterd daemon was not running');
       return 0;
     }
     case 'restart': {
+      await guardLiveSessions(health, force);
       const r = restart(ctx);
       if (r.status !== 0) fail('restart', r);
       ok('restarted the musterd daemon');

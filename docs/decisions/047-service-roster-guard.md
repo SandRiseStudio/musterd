@@ -1,6 +1,6 @@
 # 047 — Service guardrails: don't bounce a shared daemon out from under a live teammate
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-06-24
 
 ## Context
@@ -18,7 +18,7 @@ Make the disruptive `service` verbs **refuse by default** when other members hav
 restart is a conscious choice rather than a silent teammate-drop — **without** a new dependency, a wire
 change beyond a diagnostic field, or making the common (nobody-connected) case any harder.
 
-## Decision (proposed)
+## Decision
 
 `musterd service stop` and `service restart` **check for live sessions first** and refuse with guidance
 unless `--force` is passed:
@@ -86,8 +86,9 @@ as the rest of `service`.
 ## Open questions
 
 - **Guard `install` too?** Re-`install` over a running agent `kickstart`s (bounces) it. Arguably the same
-  hazard. Leaning: guard `install`'s *restart step* with the same `--force`, but allow the plist write +
-  bootstrap (the no-op-if-unchanged case is harmless). Decide at build time.
+  hazard. **Resolved at build time: not guarded.** `install`/`start` are setup/up intent, the guard wraps
+  the two purely-destructive verbs (`stop`/`restart`) only; folding `install`'s kickstart in is a cheap
+  follow-up if dogfood shows it bites.
 - **Self-exclusion.** A CLI one-shot is not a WS presence, so the operator's own `service` call is never
   counted. But the operator may legitimately hold a separate `inbox --watch` session and still want to
   restart — the count includes them, and `--force` covers it. Naming-who would make this clearer (the
