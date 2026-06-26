@@ -37,7 +37,7 @@ function LivePage() {
     if (saved) setForm({ ...DEFAULTS, ...saved });
   }, []);
 
-  const { envelopes, roster, status, error } = useLiveStream(cfg);
+  const { envelopes, roster, status, error, liveIds } = useLiveStream(cfg);
 
   const connect = () => {
     if (typeof window !== 'undefined') {
@@ -76,7 +76,7 @@ function LivePage() {
           )}
           <div className="lc__canvas">
             <Constellation roster={roster} envelopes={envelopes} />
-            <Stream envelopes={envelopes} roster={roster} />
+            <Stream envelopes={envelopes} roster={roster} liveIds={liveIds} />
           </div>
         </>
       )}

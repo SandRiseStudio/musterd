@@ -13,6 +13,8 @@ export interface LiveState {
   roster: MemberSummary[];
   status: ConnStatus;
   error: string | null;
+  /** Ids that arrived live over the socket (vs the initial backfill) — drives the typewriter. */
+  liveIds: Set<string>;
 }
 
 /**
@@ -25,6 +27,7 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
   const [roster, setRoster] = useState<MemberSummary[]>([]);
   const [status, setStatus] = useState<ConnStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [liveIds, setLiveIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!cfg) {
@@ -33,6 +36,7 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
     }
     let alive = true;
     setEnvelopes([]);
+    setLiveIds(new Set());
     setError(null);
     setStatus('connecting');
 
@@ -60,7 +64,12 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
       });
 
     const client = new LiveClient(cfg, {
-      onEnvelope: (e) => alive && add([e]),
+      onEnvelope: (e) => {
+        if (!alive) return;
+        // Mark live-arrived before adding (same render tick) so the row mounts knowing to type out.
+        setLiveIds((prev) => (prev.has(e.id) ? prev : new Set(prev).add(e.id)));
+        add([e]);
+      },
       // Refetch the authoritative roster on any presence change — this carries presence/activity AND
       // places a node for a member who joined mid-session (a brand-new sender otherwise shows in the
       // stream but has no constellation node). Cheap at localhost scale; debounce if it ever isn't.
@@ -81,5 +90,5 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
     };
   }, [cfg?.team, cfg?.as, cfg?.token]);
 
-  return { envelopes, roster, status, error };
+  return { envelopes, roster, status, error, liveIds };
 }

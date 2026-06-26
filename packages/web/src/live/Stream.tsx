@@ -1,28 +1,53 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
-import { Fragment } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { actTone, clock, initial, kindOf, recipientLabel, rosterIndex } from './format';
 
 /**
  * The legible half of the split-canvas: the team's act stream. Rows arrive newest-last; the last row
  * is the warm "now" live edge. Threaded replies (anything carrying `thread`) indent under a spine.
+ * Live-arrived messages type out; the view sticks to the bottom while you're already there.
  */
 export function Stream({
   envelopes,
   roster,
+  liveIds,
 }: {
   envelopes: Envelope[];
   roster: MemberSummary[];
+  liveIds: Set<string>;
 }) {
   const idx = rosterIndex(roster);
   const lastId = envelopes.length ? envelopes[envelopes.length - 1]!.id : null;
 
+  const scrollRef = useRef<HTMLElement>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const atBottom = useRef(true);
+
+  // Follow the bottom as content grows (new rows AND text typing out) — but only while the reader is
+  // already near the bottom, so scrolling up to read history is never yanked back down.
+  useEffect(() => {
+    const el = scrollRef.current;
+    const rows = rowsRef.current;
+    if (!el || !rows || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      if (atBottom.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(rows);
+    return () => ro.disconnect();
+  }, []);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
   return (
-    <section className="lc-stream">
+    <section className="lc-stream" ref={scrollRef} onScroll={onScroll}>
       <header className="lc-stream__head">
         <span className="lc-stream__title">TEAM STREAM</span>
         <span className="lc-stream__live">· live</span>
       </header>
-      <div className="lc-stream__rows">
+      <div className="lc-stream__rows" ref={rowsRef}>
         {envelopes.length === 0 && (
           <p className="lc-empty">No communication yet — waiting for the team.</p>
         )}
@@ -37,7 +62,7 @@ export function Stream({
                   <span className="lc-now__line" />
                 </div>
               )}
-              <Row env={e} idx={idx} now={isNow} />
+              <Row env={e} idx={idx} now={isNow} animate={liveIds.has(e.id)} />
             </Fragment>
           );
         })}
@@ -50,11 +75,16 @@ function Row({
   env,
   idx,
   now,
+  animate,
 }: {
   env: Envelope;
   idx: Map<string, MemberSummary>;
   now: boolean;
+  animate: boolean;
 }) {
+  // Freeze the typewriter decision at mount: a backfilled row never types, a live row types once even
+  // if props later change.
+  const [doType] = useState(animate);
   const tone = actTone(env.act);
   const kind = kindOf(env.from, idx);
   const recipient = recipientLabel(env.to);
@@ -70,7 +100,12 @@ function Row({
         <span className={`lc-badge lc-badge--${tone}`}>{env.act}</span>
         {recipient && <span className="lc-row__to">{recipient}</span>}
       </div>
-      {env.body && <p className="lc-row__body">{env.body}</p>}
+      {env.body &&
+        (doType ? (
+          <Typewriter text={env.body} className="lc-row__body" />
+        ) : (
+          <p className="lc-row__body">{env.body}</p>
+        ))}
     </div>
   );
   if (!threaded) return body;
@@ -79,5 +114,42 @@ function Row({
       <span className={`lc-thread__spine lc-thread__spine--${tone}`} />
       {body}
     </div>
+  );
+}
+
+/**
+ * Reveal `text` character-by-character, smooth but length-adaptive (capped ~1.1s) so long messages
+ * don't drag. Honors prefers-reduced-motion by showing the full text at once.
+ */
+function Typewriter({ text, className }: { text: string; className?: string }) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    ) {
+      setN(text.length);
+      return;
+    }
+    const total = text.length;
+    const tick = 16; // ms
+    const durationMs = Math.min(1100, Math.max(280, total * 22));
+    const perTick = Math.max(1, Math.ceil(total / (durationMs / tick)));
+    let i = 0;
+    setN(0);
+    const h = setInterval(() => {
+      i = Math.min(total, i + perTick);
+      setN(i);
+      if (i >= total) clearInterval(h);
+    }, tick);
+    return () => clearInterval(h);
+  }, [text]);
+
+  const typing = n < text.length;
+  return (
+    <p className={className}>
+      {text.slice(0, n)}
+      {typing && <span className="lc-caret" aria-hidden="true" />}
+    </p>
   );
 }

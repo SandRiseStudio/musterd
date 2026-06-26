@@ -377,6 +377,22 @@
   }
 }
 
+/* typewriter caret */
+.lc-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--lc-accent);
+  animation: lc-blink 1s steps(1) infinite;
+}
+@keyframes lc-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 /* ---- connect form ---- */
 .lc-form {
   flex: 1;
@@ -457,6 +473,9 @@
     animation: none;
   }
   .lc-pulse {
+    display: none;
+  }
+  .lc-caret {
     display: none;
   }
 }
