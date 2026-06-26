@@ -45,7 +45,23 @@ batond's positioning is "native to musterd, not captive to it" — it ingests mu
 
 Caveat (and the moat): Flue has **no** cross-agent attributes — no waits, contention, or "B blocked on A." Deriving the between-view is the work, not a shortcut Flue hands over.
 
-## 4. Patterns worth borrowing (non-coordination)
+## 4. The "multi-agent is a trap" critique sharpens our line (Sierra, 2026)
+
+The strongest recent argument *against* multi-agent systems comes from Sierra's head of product (Max Agency / LangChain podcast, May 2026) — and parsing it is the cleanest articulation of musterd's domain, because it reads as an attack and isn't one.
+
+His critique: most multi-agent systems are a mistake. People build them to "ship their org chart," or because two problems *feel* more comfortable held apart — not for impact. And splitting one job into a triage agent + a task agent **deprives each of the other's context**, which is "destructive of value." The fix is usually a monolith with better context engineering, not more agents. He's a self-described "monolith loyalist," and he's right — **for what he's describing.**
+
+The thing he's describing is **intra-task orchestration**: decomposing one job into sub-agents. That is precisely *not* what musterd is — "musterd connects agents; it does not run them" (ROADMAP out-of-scope; Principle 4, ADR 007). The frameworks in §1 *are* orchestrators (single driver process, parent→child `task` trees); musterd is the substrate **between actors that already exist independently**. The two are different layers, and his critique lands squarely on the orchestrator, not the coordination substrate.
+
+He even hands over the carve-out: multi-agent is justified for "truly separable jobs where there's no purpose of the first context being part of the second." **A human is the maximally separable actor** — you cannot context-engineer a person into the prompt. So the human↔agent loop (the Co-Gym wedge, `research-foundation.md`) is exactly the case his monolith argument *cannot absorb*. That is musterd's robustness: its bet is on humans-as-peers, the one coordination that no amount of context engineering collapses into a monolith.
+
+**Two consequences:**
+- **Honest exposure.** If most agentic *work* does collapse into well-engineered monoliths, the agent-to-agent coordination market is thinner than a naive multi-agent thesis assumes. musterd's durability comes from the human loop — a reason to keep the headline on humans+agents-as-peers and resist drifting toward sub-agent-swarm orchestration (the very trap he names).
+- **A design constraint, not just positioning.** His context-deprivation point means a musterd `handoff` that carries too little context recreates the value-destruction he warns about. Handoffs/threads must propagate real context (`thread_id` + `meta.otel` trace-linking lean this way); a handoff is not a bare pointer. Worth teaching explicitly in `agent-primer.md`.
+
+**Takeaway for positioning:** the best available critique of multi-agent systems is an argument *for* musterd's framing — coordination of separate actors (humans first), not orchestration of sub-agents. Use it: when someone says "but multi-agent is a trap," agree, then point at the human in the loop.
+
+## 5. Patterns worth borrowing (non-coordination)
 
 - **Agent-pullable onboarding** — Flue's `flue add` detects whether the caller is an agent (`@vercel/detect-agent`) and emits raw markdown to stdout, else prints `… --print | claude` instructions for a human; blueprints are versioned with a mandatory "Upgrade Guide". A `musterd primer --print` with the same branching would let an agent self-onboard mid-session, not just at `init`. See `agent-primer.md` §10.
 - **Two-pronged liveness** — Flue infers liveness from the substrate signal **plus** its own durable marker with a staleness cutoff, trusting neither alone. The ADR 017 deadlock root cause was liveness inferred from the WS socket alone (an orphaned socket kept a zombie "alive"). A musterd-owned heartbeat/marker independent of the WS connection is the fix shape for the residual "stuck non-reconnecting presence" follow-up.

@@ -112,7 +112,7 @@ The recording also died on identity collisions — member names reused across fo
 
 ## 10. Future: agent-pullable primer (the Flue `flue add` pattern)
 
-The §2 decision is a **push** — `init` writes standing context once, at setup time. A complementary **pull** path is worth considering later, modeled on Flue's `flue add` (source inspected 2026-06-17; see `docs/design/landscape.md` §4):
+The §2 decision is a **push** — `init` writes standing context once, at setup time. A complementary **pull** path is worth considering later, modeled on Flue's `flue add` (source inspected 2026-06-17; see `docs/design/landscape.md` §5):
 
 - Flue's CLI detects whether the caller is an AI agent (`@vercel/detect-agent`). If so it writes raw markdown instructions to **stdout** for the agent to act on; if a human, it prints `… --print | claude` pipe instructions instead.
 - Instructions are **versioned** with a mandatory "Upgrade Guide" section, so they survive protocol drift rather than going stale like a one-shot file.
