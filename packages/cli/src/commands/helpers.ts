@@ -60,8 +60,18 @@ function gather(flags: Record<string, string | boolean>) {
       source: 'binding',
     });
   }
+  // Active identity per team first (so a no-`--as` default resolves to it), then the rest of the
+  // vault (ADR 059) so `--as <name>` can name any previously-known identity for the team.
   for (const [slug, identity] of Object.entries(config.identities)) {
     sources.push({ team: slug, identity, source: 'config' });
+  }
+  for (const si of config.knownIdentities) {
+    if (config.identities[si.team]?.name === si.name) continue; // already added as the active one
+    sources.push({
+      team: si.team,
+      identity: { name: si.name, token: si.token, surface: si.surface },
+      source: 'config',
+    });
   }
 
   const team = flagStr(flags, 'team') ?? envId?.team ?? binding?.team ?? config.current;
@@ -79,12 +89,14 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
-  const match = sources.find((s) => s.team === team);
+  // ADR 059: `--as <name>` resolves any vault identity for the team, not just the active one.
+  const match = sources.find((s) => s.team === team && (!asName || s.identity.name === asName));
   if (!match) {
-    throw new CliError(`no identity for team "${team}" — run: musterd join ${team} --as <name>`, 4);
-  }
-  if (asName && match.identity.name !== asName) {
-    throw new CliError(`stored identity for "${team}" is ${match.identity.name}, not ${asName}`, 5);
+    const who = asName ? ` as ${asName}` : '';
+    throw new CliError(
+      `no identity for team "${team}"${who} — run: musterd join ${team} --as <name>`,
+      4,
+    );
   }
   const explicit = match.source === 'env' || match.source === 'binding' || asName != null;
   if (!explicit) {
@@ -121,11 +133,14 @@ export function resolveRead(flags: Record<string, string | boolean>): ResolvedRe
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
-  const match = sources.find((s) => s.team === team);
+  // ADR 059: prefer an exact `--as` match from the vault; fall back to the team's active identity.
+  const match =
+    sources.find((s) => s.team === team && (!asName || s.identity.name === asName)) ??
+    (asName ? undefined : sources.find((s) => s.team === team));
   let identity: Identity | undefined;
   let identitySource: IdentitySource | undefined;
   let explicit = false;
-  if (match && (!asName || match.identity.name === asName)) {
+  if (match) {
     identity = match.identity;
     explicit = match.source === 'env' || match.source === 'binding' || asName != null;
     identitySource = match.source === 'config' && asName ? 'flag' : match.source;

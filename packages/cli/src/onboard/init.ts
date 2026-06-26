@@ -5,7 +5,7 @@ import * as p from '@clack/prompts';
 import type { MemberSummary } from '@musterd/protocol';
 import pc from 'picocolors';
 import { HttpClient } from '../client.js';
-import { loadConfig, saveBinding, saveConfig, type Config } from '../config.js';
+import { loadConfig, rememberIdentity, saveBinding, saveConfig, type Config } from '../config.js';
 import { renderBanner } from '../render/rows.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import type { Harness } from './harness.js';
@@ -474,7 +474,9 @@ async function createTeam(
     const res = await http.createTeam(slug, { name: you, ...(role ? { role } : {}) });
     config.server = server;
     config.current = slug;
-    config.identities[slug] = { name: you, token: res.token as string, surface: 'cli' };
+    const token = res.token as string;
+    config.identities[slug] = { name: you, token, surface: 'cli' };
+    rememberIdentity(config, { team: slug, name: you, token, surface: 'cli' }); // ADR 059 vault
     saveConfig(config);
     sp.stop(`Team ${pc.bold(slug)} created — you joined as ${pc.magenta(you)}`);
     return { team: slug, creatorToken: res.token as string };

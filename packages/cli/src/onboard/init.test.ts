@@ -36,8 +36,15 @@ const h = vi.hoisted(() => {
     server: string;
     current: string | undefined;
     identities: Record<string, { name: string; token: string; surface: string }>;
+    knownIdentities: { team: string; name: string; token: string; surface: string }[];
     bindings: Record<string, { team: string; member: string; surface: string }>;
-  } = { server: 'http://localhost:4849', current: undefined, identities: {}, bindings: {} };
+  } = {
+    server: 'http://localhost:4849',
+    current: undefined,
+    identities: {},
+    knownIdentities: [],
+    bindings: {},
+  };
   return { confirmQueue, selectQueue, textQueue, http, harness, config };
 });
 
@@ -62,6 +69,9 @@ vi.mock('../config.js', () => ({
   loadConfig: () => h.config,
   saveConfig: vi.fn(),
   saveBinding: vi.fn((cwd: string) => join(cwd, '.musterd', 'binding.json')),
+  rememberIdentity: vi.fn((cfg: { knownIdentities: unknown[] }, si: unknown) => {
+    cfg.knownIdentities.push(si);
+  }),
 }));
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn(() => ({ unref: vi.fn() })) }));

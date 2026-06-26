@@ -1,7 +1,7 @@
 import type { Binding } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
-import { loadConfig, saveBinding, saveConfig } from '../config.js';
+import { loadConfig, rememberIdentity, saveBinding, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 
@@ -21,16 +21,12 @@ export async function joinCommand(parsed: Parsed): Promise<number> {
   // `from/team must match the authenticated member` (the token authenticates as someone else).
   // The global config has one identity slot per team, so two agents on one machine collide here.
   const explicitToken = flagStr(parsed.flags, 'token');
-  const cached = config.identities[slug];
-  const token = explicitToken ?? (cached?.name === name ? cached.token : undefined);
+  // ADR 059: reuse a cached token for *this* member from the vault, even if another member is the
+  // team's active identity — so re-joining as a previously-known member doesn't need --token again.
+  const cached = config.knownIdentities.find((i) => i.team === slug && i.name === name);
+  const token = explicitToken ?? cached?.token;
   if (!token) {
-    if (cached && cached.name !== name) {
-      throw new CliError(
-        `the cached identity for "${slug}" is "${cached.name}", not "${name}" — pass --token <tok> to join as ${name}`,
-        4,
-      );
-    }
-    throw new CliError(`no token for "${name}" — pass --token <tok>`, 4);
+    throw new CliError(`no token for "${name}" on "${slug}" — pass --token <tok>`, 4);
   }
 
   const http = new HttpClient({ server, token });
@@ -39,6 +35,7 @@ export async function joinCommand(parsed: Parsed): Promise<number> {
   config.server = server;
   config.current = slug;
   config.identities[slug] = { name, token, surface };
+  rememberIdentity(config, { team: slug, name, token, surface }); // ADR 059 vault
   saveConfig(config);
   // Auto-bind the joining folder so it's immediately *active* here (ADR 036): acts work without
   // `--as`, while other unbound folders stay read-only. The credential is cached globally; the

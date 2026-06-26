@@ -71,7 +71,7 @@ export async function resetCommand(parsed: Parsed): Promise<number> {
 
   // 4) Wipe the db (+ wal/shm) and reset the local config to a clean slate, keeping the server URL.
   for (const f of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) rmSync(f, { force: true });
-  saveConfig({ server: config.server, identities: {}, bindings: {} });
+  saveConfig({ server: config.server, identities: {}, knownIdentities: [], bindings: {} });
 
   process.stdout.write(
     `${theme.ok('✓')} reset — wiped ${theme.meta(dbPath)}; ` +

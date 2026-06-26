@@ -100,28 +100,68 @@ function recordBinding(dir: string, binding: Binding): void {
   }
 }
 
+/** An identity tagged with its team — the shape stored in the multi-identity vault (ADR 059). */
+export interface StoredIdentity extends Identity {
+  team: string;
+}
+
 export interface Config {
   server: string;
   current?: string;
+  /** The active/default identity per team (ADR 018). One slot per team — the `current`-team default. */
   identities: Record<string, Identity>;
+  /**
+   * ADR 059: every identity this machine has joined/claimed, keyed by (team, name). A superset of
+   * `identities` that another member joining the same team can't evict, so `--as <name>` always
+   * resolves a previously-known identity. Backfilled from `identities` on load.
+   */
+  knownIdentities: StoredIdentity[];
   /** ADR 020: tokenless registry of where members are bound, keyed by absolute folder path. */
   bindings: Record<string, BindingRef>;
+}
+
+/** Upsert an identity into the vault (ADR 059), keyed by (team, name). */
+export function rememberIdentity(config: Config, si: StoredIdentity): void {
+  const i = config.knownIdentities.findIndex((x) => x.team === si.team && x.name === si.name);
+  if (i >= 0) config.knownIdentities[i] = si;
+  else config.knownIdentities.push(si);
+}
+
+/** Backfill the vault from the legacy per-team `identities` so an old config is migrated on load. */
+function backfillVault(
+  identities: Record<string, Identity>,
+  vault: StoredIdentity[],
+): StoredIdentity[] {
+  const out = [...vault];
+  for (const [team, id] of Object.entries(identities)) {
+    if (!out.some((x) => x.team === team && x.name === id.name)) out.push({ team, ...id });
+  }
+  return out;
 }
 
 export function configPath(): string {
   return process.env['MUSTERD_CONFIG'] ?? join(homedir(), '.musterd', 'config.json');
 }
 
-const DEFAULT: Config = { server: 'http://localhost:4849', identities: {}, bindings: {} };
+const DEFAULT: Config = {
+  server: 'http://localhost:4849',
+  identities: {},
+  knownIdentities: [],
+  bindings: {},
+};
 
 export function loadConfig(): Config {
   try {
     const raw = readFileSync(configPath(), 'utf8');
     const parsed = JSON.parse(raw) as Partial<Config>;
+    const identities = parsed.identities ?? {};
     return {
       server: process.env['MUSTERD_SERVER'] ?? parsed.server ?? DEFAULT.server,
       ...(parsed.current ? { current: parsed.current } : {}),
-      identities: parsed.identities ?? {},
+      identities,
+      // ADR 059: an old config has no vault — backfill it from `identities` so a previously-cached
+      // identity is immediately resolvable by `--as`, and stays so when another member joins.
+      knownIdentities: backfillVault(identities, parsed.knownIdentities ?? []),
       bindings: parsed.bindings ?? {},
     };
   } catch {
@@ -129,6 +169,7 @@ export function loadConfig(): Config {
     return {
       server: process.env['MUSTERD_SERVER'] ?? DEFAULT.server,
       identities: {},
+      knownIdentities: [],
       bindings: {},
     };
   }

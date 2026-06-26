@@ -1,7 +1,7 @@
 import type { Binding, Lifecycle, MemberKind } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
-import { loadConfig, saveBinding, saveConfig } from '../config.js';
+import { loadConfig, rememberIdentity, saveBinding, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 import { resolve } from './helpers.js';
@@ -29,6 +29,7 @@ async function teamCreate(parsed: Parsed): Promise<number> {
   config.server = server;
   config.current = slug;
   config.identities[slug] = { name, token: res.token, surface: 'cli' };
+  rememberIdentity(config, { team: slug, name, token: res.token, surface: 'cli' }); // ADR 059 vault
   saveConfig(config);
   // Auto-bind the creating folder so it's immediately *active* — you can act here without `--as`,
   // while every other unbound folder stays read-only (ADR 036). The global config alone no longer
