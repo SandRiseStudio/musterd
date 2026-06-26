@@ -1,5 +1,10 @@
 # Migration & bootstrap — moving a live team from db-authoritative to file-authoritative
 
+> **Status: implemented** (2026-06-25, commit f3d6a42) — `musterd team export <slug>` ships (writes
+> canonical files + records `rosterHome`), the `bound_at = created_at` backfill is migration v6, and
+> per-team cutover (file-backed iff `rosterHome` set) is live. **Not yet exercised:** running the
+> migration on the live `alpha` team — gated on a dev daemon / the next release, as this doc notes.
+
 > Fifth layer of the ADR 058 stack. The prior docs assume `.musterd/` files already exist and the
 > daemon projects them. But there is a running world that predates all of this: a live daemon whose
 > **SQLite is the source of truth**, with members holding live tokens. This doc specifies the

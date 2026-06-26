@@ -1,5 +1,8 @@
 # Projection & reconcile — implementing ADR 058
 
+> **Status: implemented** (2026-06-25, commits 96902fd → 21ce328) — as-built design; the code is in
+> `packages/server/src/projection/{load,reconcile,serialize,watcher}.ts`.
+
 > Implementation design for [ADR 058](../decisions/058-durable-on-git-live-on-daemon.md). The ADR
 > drew the line (durable seat roster → git-legible files; live state → daemon). This doc answers
 > the four seams it left open — reconcile **trigger**, **delete** semantics, **secret rotation**,

@@ -32,6 +32,7 @@ usage:
   musterd team create <slug> [--as <you>] [--role <role>] [--display <name>]
   musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]
   musterd team remove <name>                    soft-remove a member from the roster (history is kept)
+  musterd team export <slug>                     move a team's roster onto git-tracked .musterd/ files (ADR 058)
   musterd join <slug> --as <name> [--token <tok>] [--surface cli]
   musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] <body...>
   musterd inbox [--watch] [--unread] [--peek] [--limit <n>]
@@ -39,7 +40,10 @@ usage:
   musterd availability <available|away|dnd> [--until <iso>]   set your availability (away holds notifications; dnd passes directed + urgent)
   musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away
   musterd claim <name> [--token <code>] | --role <role> [--for <code>] [--surface <s>]   claim a seat (or adopt a teammate's seat with --token)
+  musterd unbind                                release this folder's seat — keeps it on the team, free to re-claim (ADR 058)
   musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
+  musterd fmt [--check]                         canonicalize this folder's .musterd/ roster files (ADR 058)
+  musterd reload                                tell the running daemon to re-read the roster files (SIGHUP; after team export)
   musterd role list | show <name> | create <name> [--from <builtin>] [--force]   manage role provisioning templates (.musterd/roles/)
   musterd reset [--force] [--no-backup]         wipe the local db + identities back to a clean slate (daemon must be stopped)
   musterd uninstall [--force]                   remove what musterd added to this folder's harness (servers, permissions, primer)

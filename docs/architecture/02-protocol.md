@@ -80,12 +80,16 @@ Base `http://localhost:4849`. JSON in/out. Auth via `Authorization: Bearer <memb
 | `GET`  | `/health` | — | `{ "ok":true, "v":"musterd/0.3" }` | liveness |
 | `POST` | `/teams` | `{ "slug","display?","creator":{ "name","kind":"human","role?" } }` | `{ "team", "member", "token" }` | bootstrap; returns creator's member token |
 | `GET`  | `/teams/:slug` | — | `{ "team", "members":[…] }` | roster |
-| `POST` | `/teams/:slug/members` | `{ "name","kind","role?","lifecycle?","lifecycle_until?" }` | `{ "member", "token" }` | `team add`; token shown once |
+| `POST` | `/teams/:slug/members` | `{ "name","kind","role?","lifecycle?","lifecycle_until?" }` | `{ "member", "token" }` | `team add`; token shown once. For a **file-backed** team (ADR 058) this is *project-and-return*: the daemon reconciles the seat's committed `.musterd/seats/<name>.toml` and hands back its token, never originating the seat (a db-only team keeps the legacy originate path). |
 | `GET`  | `/teams/:slug/members` | — | `{ "members":[ <Member + presence summary> ] }` | for `status` |
+| `POST` | `/teams/:slug/members/:name/reclaim` | — | `{ "ok", "member" }` | operator force-drop of a member's stuck live session; frees the seat (clears presence + `bound_at`, ADR 017/058) |
+| `POST` | `/teams/:slug/members/:name/remove` | — | `{ "ok", "member", "kind" }` | soft-remove (`left_at`); history kept (ADR 019) |
+| `POST` | `/teams/:slug/unbind` | — | `{ "ok", "member" }` | `unbind`: the caller releases **its own** seat (authed by own token) — clears presence + `bound_at` back to *declared*; the seat stays on the team (ADR 058) |
 | `POST` | `/teams/:slug/messages` | `{ "envelope" }` | `{ "ack": <message> }` | send via HTTP (no live socket) |
 | `GET`  | `/teams/:slug/inbox?since=<cursor>&unread=1` | — | `{ "messages":[…], "cursor":{…} }` | inbox fetch |
 | `POST` | `/teams/:slug/inbox/cursor` | `{ "last_read_message_id" }` | `{ "cursor" }` | mark read |
 | `POST` | `/teams/:slug/presence` | `{ "surface","status?" }` | `{ "presence" }` | stateless presence ping |
+| `POST` | `/teams/:slug/availability` | `{ "status","until?" }` | `{ <member summary> }` | set your own availability axis (ADR 044) |
 
 The WS `send` and HTTP `POST …/messages` share one validation+route path on the server (`03-server.md`).
 

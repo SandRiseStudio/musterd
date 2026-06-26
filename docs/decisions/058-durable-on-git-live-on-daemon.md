@@ -1,7 +1,17 @@
 # 058 — Durable coordination on git, live state on the daemon
 
-- Status: proposed (sketch) — 2026-06-25
+- Status: accepted — implemented 2026-06-25 (commits 96902fd → f3d6a42 → 21ce328)
 - Date: 2026-06-25
+- Implementation: the full stack shipped across three merges — the canonical TOML format layer
+  (`@musterd/protocol seatfile.ts` + `smol-toml`) and both isomorphism guards; the server
+  projection module (`server/src/projection/{load,reconcile,serialize,watcher}.ts`), the
+  `members.bound_at` held/unheld bit (migration v6, backfilled to `created_at`), boot reconcile
+  + `fs.watch`, and the project-and-return `POST /members`; the CLI surface — `team export`
+  (db→file migration), file-writing `team add`/`claim`, `musterd fmt`, `unbind`, and `reload`
+  (SIGHUP). The five design docs in `docs/design/` (projection-reconcile, seat-file-format,
+  seat-lifecycle-as-files, migration-bootstrap) record the layer-by-layer design; this ADR is
+  the decision. Deferred only: dogfooding the live migration on team `alpha` (gated on a dev
+  daemon / next release, per migration-bootstrap.md).
 - Provocation: the Sierra/Max-Agency podcast — "coding agents are really good at file
   systems, git, grep; materialize everything into those structures so coding agents can cook"
   + "meet the models on their turf 80% of the time." Plus Sierra's Journeys: a declarative

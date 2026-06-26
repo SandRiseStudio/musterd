@@ -1,5 +1,10 @@
 # Seat file format & the isomorphism guard — the foundation under ADR 058
 
+> **Status: implemented** (2026-06-25, commit 96902fd) — `@musterd/protocol/src/seatfile.ts` ships
+> the schemas + canonical serializer; `smol-toml` is in the lockfile; both guards are tested
+> (`seatfile.test.ts` for the format layer, `projection/reconcile.test.ts` for the db round-trip);
+> `musterd fmt --check` is the guard-2 CLI. The "Upstream corrections" below are applied.
+
 > Fourth layer of the ADR 058 stack. The
 > [projection](./projection-reconcile.md) and [verb](./seat-lifecycle-as-files.md) layers both lean
 > on "the shared serializer," "canonical key order," and "the byte-equal round-trip test" without
@@ -45,10 +50,9 @@ The repo carries **zod** and no serialization lib (SQL is a TS constant to dodge
 
 **Decision (ratified 2026-06-25): TOML + `smol-toml`.** Hand-editability is not a nice-to-have here
 — it is the property the durable tier exists to provide; JSON saves a dependency by taxing the exact
-thing we're optimizing. The single new runtime dep is accepted. `smol-toml` is **added to
-`@musterd/protocol` when the format layer is built** — not ahead of a consumer, so the lockfile
-never carries an unused dep. The JSON fallback is recorded only as the downgrade path if the dep is
-ever reverted.
+thing we're optimizing. The single new runtime dep is accepted. `smol-toml` is **a dependency of
+`@musterd/protocol`** (added with the format layer, commit 96902fd). The JSON fallback is recorded
+only as the downgrade path if the dep is ever reverted.
 
 ## Schema
 
@@ -153,15 +157,17 @@ reconcile is monotonic in safety: ambiguity holds the last good state rather tha
 | Where | Change |
 |---|---|
 | `protocol/src/seatfile.ts` (new) | `TeamFileSchema`, `SeatFileSchema`, `serializeSeat`/`serializeTeam` (canonical), `seatNameFromPath`. Shared CLI + daemon. |
-| `protocol/package.json` + lockfile | add `smol-toml` (the dep to ratify). |
+| `protocol/package.json` + lockfile | `smol-toml` added (ratified). |
 | `server/src/projection/load.ts` | use `SeatFileSchema` + `smol-toml` parse; implement fail-closed per-seat skip-and-keep + health counter. |
 | `server/src/projection/serialize.ts` | thin re-export of the protocol serializer (used by guard-1 test). |
 | `cli/src/commands/fmt.ts` (new) | `musterd fmt` writes canonical; `--check` is the CI guard (sibling to ADR 043 `format:check`). |
 | `cli/src/commands/{team,claim}.ts` | write seat files via the protocol serializer (canonical from birth, so `fmt` is a no-op on freshly-written files). |
 
-## Upstream corrections (apply when this lands)
+## Upstream corrections (applied when this landed)
 
-- **ADR 058 §3** — replace "byte-equal" with the two-guard model: correctness = semantic round-trip;
+Both were applied in the implementation (commit 96902fd):
+
+- **ADR 058 §3** — "byte-equal" replaced with the two-guard model: correctness = semantic round-trip;
   byte-equality = a separate `fmt`/`format:check` tidiness guard.
 - **projection-reconcile.md → Isomorphism check** — same correction; its `:memory:` round-trip test
   is guard 1 (compare parsed structures), not a byte compare.

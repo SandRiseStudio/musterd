@@ -1,5 +1,11 @@
 # Seat lifecycle as file operations — the agent-facing verbs for ADR 058
 
+> **Status: implemented** (2026-06-25, commits f3d6a42 + 21ce328) — `team add`/`claim` write seat
+> files; `unbind` + the `bound_at` held/unheld bit shipped. The one variance from this design: the
+> `POST /members` inversion is **additive/per-team** (project-and-return for file-backed teams, the
+> legacy originate path for db-only teams) rather than a hard cutover, so un-migrated teams are
+> untouched — matching migration-bootstrap.md's per-team rollout.
+
 > Third layer of the ADR 058 stack. [058](../decisions/058-durable-on-git-live-on-daemon.md) drew
 > the durable/live line; [projection-reconcile.md](./projection-reconcile.md) built the
 > file→daemon projection. This doc redesigns the seat lifecycle **verbs** — `team add`, `claim`,
