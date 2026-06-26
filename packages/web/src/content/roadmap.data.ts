@@ -239,25 +239,45 @@ export const ROADMAP: RoadmapItem[] = [
   // Wave 1 — harden the coordination loop (small, additive, no v0.3 dependency).
   {
     id: 'seat-binding-ergonomics',
-    wave: 1,
     title: 'Hand off & claim a seat without leaving the tool',
-    status: 'near-term',
+    status: 'shipped',
     category: 'harness',
-    blurb: 'A teammate can issue a ready seat to another agent in one command (a claim code), the receiver adopts it in one command, and no claim/join/reclaim error ever dead-ends — it always prints the next command.',
+    blurb: 'A teammate issues a ready seat to another agent in one command, the receiver adopts it in one command, and a claim conflict no longer dead-ends — it names the runnable next command.',
     detail:
-      'Elevated after a 2026-06-25 dogfood disaster: a fresh agent handed a pre-created named seat could not claim it (team add mints a join --token; claim <name> refuses it; join/reclaim fought a shared cached identity), burned its whole session on acquisition, and escalated to hand-editing the live SQLite DB. The fix: team add emits a one-time claim code that the receiver adopts via claim --for <code> (binds its own folder, mints its own token — no token copy-paste, no shared-identity clobber); a no-dead-end rule (every terminal error names a runnable next command, test-guarded); per-folder binding as the identity channel; and the primer teaching seat acquisition. Also subsumes the original papercut — an agent shelling out repeatedly re-exporting MUSTERD_* env (~6x in one session).',
-    refs: [adr(55, 'ADR 055'), adr(32, 'ADRs 032–034'), adr(36, 'ADR 036'), adr(12, 'ADR 012')],
+      'Elevated after a 2026-06-25 dogfood disaster: a fresh agent handed a pre-created named seat could not claim it (team add mints a join --token; claim <name> refused it; join/reclaim fought a shared cached identity), burned its whole session on acquisition, and escalated to hand-editing the live SQLite DB. The fix shipped: claim <name> --token adopts a teammate-created seat into the folder binding with no global-identity clobber; claim --for <code> binds a pending session; the claim conflict path names the next command instead of dead-ending; per-folder binding is the identity channel; and team add + the primer teach seat acquisition. Validated by a follow-up onboarding run (a fresh agent adopted its seat end-to-end, no DB surgery). The multi-identity vault (ADR 059) hardened it further — a second agent on the same machine can no longer clobber the first’s cached token.',
+    refs: [adr(55, 'ADR 055'), adr(59, 'ADR 059'), adr(32, 'ADRs 032–034'), adr(36, 'ADR 036')],
   },
   {
     id: 'agent-presence-touch',
-    wave: 1,
     title: 'Ambient agent presence',
-    status: 'near-term',
+    status: 'shipped',
     category: 'human-loop',
-    blurb: 'An agent doing bursty one-shot CLI work shows present on the roster instead of offline until it opens a watch socket.',
+    blurb: 'An agent doing bursty one-shot CLI work shows present on the roster instead of offline — liveness from real actions, not just a resident watch socket.',
     detail:
-      'Today presence needs a resident WS session; a sequence of one-shots reads as offline. A short-TTL presence touch on each authenticated command closes the gap — liveness from real actions, while working: <x> still comes from a self-reported status_update. Needs its own ADR (presence-write semantics).',
-    refs: [adr(10, 'ADR 010'), adr(17, 'ADR 017')],
+      'Presence used to need a resident WS session; a sequence of one-shots read as offline. Now a short-TTL ambient presence touch on each authenticated command keeps a bursty agent present for the timeout window — while working: <x> still comes solely from a self-reported status_update (the two-clocks rule). No-ops under a resident session, upserts one row per member, and never displaces — so it composes with newest-session-wins and human fan-out. Unblocked the wake-on-message and blocked-agent work, which assume the roster reflects who is actually doing things.',
+    refs: [adr(57, 'ADR 057'), adr(10, 'ADR 010'), adr(17, 'ADR 017')],
+  },
+  {
+    id: 'durable-roster',
+    title: 'Durable seat roster on git',
+    status: 'shipped',
+    category: 'platform',
+    blurb: 'A team’s seat roster lives as committed .musterd/ files; the daemon is a projection of them, so the git history of seats/ is the membership audit log — while live state (presence, tokens) stays daemon-only.',
+    detail:
+      'From the Sierra/Max-Agency podcast (“materialize everything into files/git so coding agents can cook”). The durable/live line runs through the members row: seat identity (name/kind/role/lifecycle) → git-tracked seats/<name>.toml; token_hash + presence + the held/unheld bit stay daemon-private. The daemon reconciles the files (match-by-name, preserving id/token across reconciles), the file is the single writer (races are git merges), and a semantic round-trip guard keeps the projection faithful. Closes the seat-claim disaster by construction — the durable act an agent kept falling back to the filesystem to do IS a file act now. Shipped end to end: canonical TOML format + isomorphism guards, the projection/reconcile module, bound_at migration, file-backed team add/claim, musterd fmt/unbind/reload, and team export (the live db→file migration). The dogfood team alpha was migrated to a file-backed roster in production, token-preserving, with no teammate re-auth.',
+    refs: [adr(58, 'ADR 058'), doc('docs/design/projection-reconcile.md', 'projection-reconcile.md'), doc('docs/design/seat-lifecycle-as-files.md', 'seat-lifecycle-as-files.md')],
+    dependsOn: ['seat-binding-ergonomics', 'agent-presence-touch'],
+  },
+  {
+    id: 'multi-identity-vault',
+    title: 'Multi-identity vault',
+    status: 'shipped',
+    category: 'harness',
+    blurb: 'A second agent joining a team on the same machine can no longer clobber the first’s cached token — every claimed identity is kept, keyed by (team, member).',
+    detail:
+      'The global config kept one identity slot per team, so a second member joining the same team on one machine overwrote the first’s token and --as <name> stopped resolving. Now a knownIdentities vault keeps every identity this machine has joined or claimed, keyed by (team, name), backfilled from the legacy single-slot config on load. The per-folder binding stays the active-identity channel; the vault is the durable superset behind --as.',
+    refs: [adr(59, 'ADR 059')],
+    dependsOn: ['claim-on-first-use'],
   },
   {
     id: 'inbox-reaches-blocked-agent',
@@ -289,9 +309,9 @@ export const ROADMAP: RoadmapItem[] = [
     title: 'CLI ergonomics',
     status: 'near-term',
     category: 'platform',
-    blurb: 'The papercuts a fresh agent hits in its first five minutes: directed acts buried in the broadcast firehose, a heavyweight accept, and missing whoami/version.',
+    blurb: 'The papercuts a fresh agent hits in its first five minutes. Partly landed (inbox --unread/--peek/--limit); the rest are still open.',
     detail:
-      'Dogfood papercuts, several from the 2026-06-25 onboarding retry: (1) inbox --act handoff silently ignored the flag and printed everything; (2) a directed handoff drowns in @team status_updates — plain inbox shows the firehose oldest-first, so the agent had to head/tail to find its own act; inbox should foreground directed/unread acts (and gain --act/--from filters); (3) accept requires meta.in_reply_to and getting the id forces inbox --json | parse — accept should auto-target the latest open directed act (and inbox should surface copyable ids); (4) musterd whoami and musterd --version do not exist (a fresh agent reaches for both first); (5) no edit/supersede/resolve for a sent act, so a correction leaves overlapping copies in the recipient inbox. All small and additive.',
+      'Dogfood papercuts, several from the 2026-06-25 onboarding retry. Landed: inbox gained --unread (foreground unread), --peek, and --limit, so a directed act no longer drowns oldest-first in the @team firehose. Still open and additive: (1) inbox --act/--from filters (the --act handoff flag was a no-op); (2) accept auto-targets the latest open directed act instead of forcing meta.in_reply_to via inbox --json | parse, and inbox surfaces copyable ids; (3) musterd whoami and musterd --version (a fresh agent reaches for both first — still missing); (4) edit/supersede for a sent act, so a correction doesn’t leave overlapping copies in the recipient inbox.',
   },
   {
     id: 'obs-evals-gate',
