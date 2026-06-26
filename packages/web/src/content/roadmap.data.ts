@@ -105,7 +105,7 @@ export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
 
 /** The launch gate that precedes all new dev — not a roadmap item (a one-shot op), but part of the sequence. */
 export const SEQUENCE_GATE =
-  'Ship v0.2 — publish to npm + the launch post — before new dev, so adoption feedback informs the rest.';
+  'v0.2 is published on npm (the @musterd/* packages) — the gate that unblocked the waves below. The launch post is the only remaining launch-tail item, and it is human-authored; new dev proceeds on the sequence below.';
 
 /** Rank an item for priority sorting within a status (unwaved items sort last, by category). */
 export function waveRank(item: RoadmapItem): number {
@@ -233,8 +233,8 @@ export const ROADMAP: RoadmapItem[] = [
   },
 
   // ── near-term ─────────────────────────────────────────────────────────────
-  // Order within this status is priority order (2026-06-24 reprioritization). Gate: publish v0.2
-  // before new dev. Then Wave 1 (loop-hardening, below), then Wave 2 (v0.3 governance → full tiers).
+  // Order within a wave is priority order (within-wave = array order). v0.2 is published (the gate);
+  // Wave 1 (loop-hardening, below) leads with the obs-evals gate, then Wave 2 (v0.3 governance → full tiers).
 
   // Wave 1 — harden the coordination loop (small, additive, no v0.3 dependency).
   {

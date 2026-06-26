@@ -5,7 +5,7 @@
 > `pnpm roadmap:gen`.** Do not hand-edit between the generated markers; it will be overwritten. The
 > intro and footer here are hand-authored and live outside the markers.
 
-musterd v0.1 is deliberately small: a protocol (`SPEC.md`), a local team server, a human CLI, and a universal MCP adapter. The schema and wire format already **reserve** the fields the items below need, so adding them does not break v0.1 clients. Nothing here is required for v0.1 conformance.
+musterd's core is deliberately small: a protocol (`SPEC.md`), a local team server, a human CLI, and a universal MCP adapter — shipped as the `@musterd/*` packages on npm. The schema and wire format already **reserve** the fields the items below need, so each lands as a backward-compatible addition — versioned by an ADR and a SPEC minor, never a break for existing clients. The current protocol version lives in `SPEC.md`.
 
 <!-- BEGIN GENERATED ROADMAP — source: packages/web/src/content/roadmap.data.ts · regenerate: pnpm roadmap:gen -->
 
@@ -70,7 +70,7 @@ _Excluded by principle, not by timing._
 
 _Priority order across all unshipped work — the coarse status grouping above, re-cut by what we build next._
 
-**Gate — ship v0.2.** Ship v0.2 — publish to npm + the launch post — before new dev, so adoption feedback informs the rest.
+**Gate — ship v0.2.** v0.2 is published on npm (the @musterd/* packages) — the gate that unblocked the waves below. The launch post is the only remaining launch-tail item, and it is human-authored; new dev proceeds on the sequence below.
 
 ### Wave 1 — Harden the coordination loop — small, additive, evidence-backed.
 
