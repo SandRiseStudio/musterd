@@ -26,7 +26,7 @@ import { theme } from './render/theme.js';
 const HELP = `${'musterd'} — muster your agents and humans into persistent teams
 
 usage:
-  musterd init                                  interactive first-run setup (recommended)
+  musterd init [--check]                        interactive first-run setup (recommended); --check reports provisioning drift without writing
   musterd serve [--port 4849] [--host 127.0.0.1] [--tls-cert <pem> --tls-key <pem> | --insecure-trust-proxy]
   musterd service <install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow] [--force]   run the daemon as a background service (macOS LaunchAgent)
   musterd team create <slug> [--as <you>] [--role <role>] [--display <name>]

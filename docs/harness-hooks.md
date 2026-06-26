@@ -43,7 +43,7 @@ Claude Code runs shell hooks on lifecycle events. **Use events whose stdout is i
   "hooks": {
     "SessionStart": [
       { "hooks": [ { "type": "command",
-        "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/AGENTS.md\"; test -f \"$f\" && grep -q musterd:start \"$f\" && echo 'You are on a musterd team (auto-joined on launch). Run team_inbox_check now to see anything waiting. Only call team_join if a tool says you are not joined.' || true" } ] }
+        "command": "d=\"${CLAUDE_PROJECT_DIR:-.}\"; test -f \"$d/AGENTS.md\" && grep -q musterd:start \"$d/AGENTS.md\" || exit 0; cd \"$d\" 2>/dev/null; if command -v claude >/dev/null 2>&1 && ! claude mcp get musterd >/dev/null 2>&1; then echo 'musterd: this folder has the musterd:start primer but the musterd MCP server is NOT registered here — the team_* tools are unavailable. Run `musterd init` in this folder (or `musterd init --check` to confirm), then reload this session.'; else echo 'You are on a musterd team (auto-joined on launch). Run team_inbox_check now to see anything waiting. Only call team_join if a tool says you are not joined.'; fi" } ] }
     ],
     "UserPromptSubmit": [
       { "hooks": [ { "type": "command",
@@ -53,7 +53,9 @@ Claude Code runs shell hooks on lifecycle events. **Use events whose stdout is i
 }
 ```
 
-The gate is `grep -q musterd:start AGENTS.md` (the marker `musterd init` writes, ADR 012); `|| true` keeps the hook exit 0 so it never errors a turn. Keep the reminder short and name the exact tools; a noisy hook trains the model to ignore it. Global settings are read at session start, so **reload the agent's session** after adding hooks. Review/disable later via `/hooks`.
+The gate is `grep -q musterd:start AGENTS.md` (the marker `musterd init` writes, ADR 012); `|| exit 0` keeps the hook exit 0 so it never errors a turn. Keep the reminder short and name the exact tools; a noisy hook trains the model to ignore it. Global settings are read at session start, so **reload the agent's session** after adding hooks. Review/disable later via `/hooks`.
+
+**Verify, don't assume (ADR 060).** The marker is committed to the repo, but the MCP-server registration is machine-local (`claude mcp add -s local`, never committed) — so a checkout where the marker is present but `musterd init` never ran here gets an agent told it's "auto-joined" while the `team_*` tools are absent. The `SessionStart` command above therefore checks `claude mcp get musterd` *before* claiming auto-join: if the server isn't registered for this folder it prints the fix (`musterd init`) instead of an optimistic, false reassurance. The `command -v claude` guard means that when `claude` isn't on the hook's `PATH` (can't verify) it falls back to the orient message rather than crying wolf. The on-demand half of the same check is `musterd init --check`, which reports this exact "primer present, server unregistered" drift.
 
 ### The honest caveat
 

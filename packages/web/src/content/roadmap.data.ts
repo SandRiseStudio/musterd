@@ -164,6 +164,16 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [adr(29, 'ADRs 029–031'), doc('docs/design/provisioning-recipe.md', 'provisioning-recipe.md')],
   },
   {
+    id: 'verify-provisioning',
+    title: 'Verify provisioning, don’t assume',
+    status: 'shipped',
+    category: 'harness',
+    blurb: 'The SessionStart hook checks the musterd server is actually registered before telling an agent it’s auto-joined; if not, it prints the fix instead of a false reassurance.',
+    detail:
+      'Closes the gap between the committed AGENTS.md primer marker (travels with the repo) and the machine-local, token-bearing `claude mcp add -s local` registration (never committed). `musterd init --check` is the on-demand drift detector for the same "primer present, server unregistered" state — read-only, like the arch-tree / fmt --check guards.',
+    refs: [adr(60, 'ADR 060'), doc('docs/harness-hooks.md', 'harness-hooks.md')],
+  },
+  {
     id: 'claim-on-first-use',
     title: 'Claim on first use',
     status: 'shipped',
