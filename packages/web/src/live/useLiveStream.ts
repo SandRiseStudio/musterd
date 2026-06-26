@@ -61,24 +61,14 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
 
     const client = new LiveClient(cfg, {
       onEnvelope: (e) => alive && add([e]),
-      onPresence: (member, st) => {
+      // Refetch the authoritative roster on any presence change — this carries presence/activity AND
+      // places a node for a member who joined mid-session (a brand-new sender otherwise shows in the
+      // stream but has no constellation node). Cheap at localhost scale; debounce if it ever isn't.
+      onPresence: () => {
         if (!alive) return;
-        setRoster((prev) =>
-          prev.map((m) =>
-            m.name === member
-              ? {
-                  ...m,
-                  presence: st as MemberSummary['presence'],
-                  activity:
-                    st === 'offline'
-                      ? 'offline'
-                      : m.activity === 'working'
-                        ? 'working'
-                        : 'online',
-                }
-              : m,
-          ),
-        );
+        fetchRoster(cfg)
+          .then((r) => alive && setRoster(r))
+          .catch(() => {});
       },
       onStatus: (s) => alive && setStatus(s),
       onError: (msg) => alive && setError(msg),
