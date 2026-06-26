@@ -15,7 +15,7 @@ export const Route = createFileRoute('/live')({
 });
 
 const STORAGE_KEY = 'musterd.live.config';
-const DEFAULTS: LiveConfig = { server: 'http://localhost:4849', team: '', as: '', token: '' };
+const DEFAULTS: LiveConfig = { team: '', as: '', token: '' };
 
 function loadSaved(): LiveConfig | null {
   if (typeof window === 'undefined') return null;
@@ -48,7 +48,7 @@ function LivePage() {
   const disconnect = () => setCfg(null);
 
   const connected = cfg != null;
-  const canConnect = form.server && form.team && form.as && form.token;
+  const canConnect = form.team && form.as && form.token;
 
   return (
     <main className="lc">
@@ -134,10 +134,9 @@ function ConnectForm({
       <div className="lc-form__card">
         <h1 className="lc-form__title">Watch the team, live</h1>
         <p className="lc-form__sub">
-          Connect to a running daemon to stream all of a team&apos;s communication. Reads only —
-          this is an observer.
+          Stream all of a team&apos;s communication from the connected daemon. Reads only — this is
+          an observer.
         </p>
-        {field('server', 'Daemon', 'http://localhost:4849')}
         {field('team', 'Team', 'alpha')}
         {field('as', 'Observe as', 'your member name')}
         {field('token', 'Token', 'mskd_…', 'password')}

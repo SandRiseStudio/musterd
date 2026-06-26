@@ -9,8 +9,6 @@
 import { PROTOCOL_VERSION, type Envelope, type MemberSummary } from '@musterd/protocol';
 
 export interface LiveConfig {
-  /** HTTP base of the daemon, e.g. `http://localhost:4849`. */
-  server: string;
   team: string;
   /** The seat we authenticate as (an observer seat). */
   as: string;
@@ -22,17 +20,19 @@ export type ConnStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'erro
 /** Terminal auth failures — don't reconnect into them (a `superseded` reconnect war is the worst case). */
 const TERMINAL_CODES = new Set(['unauthorized', 'forbidden', 'superseded', 'version_mismatch']);
 
-/** Derive the `/ws` endpoint from the HTTP base, preserving host/port and upgrading the scheme. */
-export function wsUrlFor(server: string): string {
-  const u = new URL(server);
-  u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
-  u.pathname = '/ws';
-  u.search = '';
-  return u.toString();
+/**
+ * The dashboard talks to the daemon **same-origin** — no `server` URL. In dev a Vite proxy forwards
+ * `/teams` + `/ws` to the daemon (and strips the browser Origin so the ADR 040 gate sees a clean
+ * loopback client); in prod the daemon serves the web and these paths from one origin. This sidesteps
+ * CORS and the WS Origin gate entirely.
+ */
+export function wsUrl(): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}/ws`;
 }
 
 async function apiGet<T>(cfg: LiveConfig, path: string): Promise<T> {
-  const res = await fetch(cfg.server + path, {
+  const res = await fetch(path, {
     headers: {
       authorization: `Bearer ${cfg.token}`,
       // Label our ambient presence as the web surface (ADR 057); never touch-suppress — we want the
@@ -111,7 +111,7 @@ export class LiveClient {
 
   private open(): void {
     this.h.onStatus('connecting');
-    const ws = new WebSocket(wsUrlFor(this.cfg.server));
+    const ws = new WebSocket(wsUrl());
     this.ws = ws;
 
     ws.onopen = () => {

@@ -95,7 +95,7 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
       alive = false;
       client.close();
     };
-  }, [cfg?.server, cfg?.team, cfg?.as, cfg?.token]);
+  }, [cfg?.team, cfg?.as, cfg?.token]);
 
   return { envelopes, roster, status, error };
 }
