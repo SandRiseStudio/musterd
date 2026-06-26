@@ -132,8 +132,8 @@ function Typewriter({ text, className }: { text: string; className?: string }) {
       return;
     }
     const total = text.length;
-    const tick = 16; // ms
-    const durationMs = Math.min(1100, Math.max(280, total * 22));
+    const tick = 24; // ms per step — slower step = more gradual reveal
+    const durationMs = Math.min(1700, Math.max(360, total * 32));
     const perTick = Math.max(1, Math.ceil(total / (durationMs / tick)));
     let i = 0;
     setN(0);
