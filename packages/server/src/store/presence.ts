@@ -178,11 +178,12 @@ export function hasLivePresence(db: Database, memberId: string, timeoutMs: numbe
  */
 export function countLivePresences(db: Database, timeoutMs: number): number {
   const cutoff = Date.now() - timeoutMs;
+  // Observer seats (ADR 063) watch without participating — never counted as live sessions.
   const row = db
     .prepare<
       [number],
       { n: number }
-    >('SELECT COUNT(DISTINCT member_id) AS n FROM presence WHERE held_until IS NULL AND last_seen_at > ?')
+    >('SELECT COUNT(DISTINCT p.member_id) AS n FROM presence p JOIN members m ON m.id = p.member_id WHERE p.held_until IS NULL AND p.last_seen_at > ? AND m.observer = 0')
     .get(cutoff);
   return row?.n ?? 0;
 }
@@ -194,7 +195,7 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
     .prepare<
       [string],
       MemberRow
-    >('SELECT * FROM members WHERE team_id = ? AND left_at IS NULL ORDER BY created_at')
+    >('SELECT * FROM members WHERE team_id = ? AND left_at IS NULL AND observer = 0 ORDER BY created_at')
     .all(teamId);
   return members.map((member) => {
     const presences = db

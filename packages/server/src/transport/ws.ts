@@ -114,7 +114,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // laptop, so a new human hello attaches an *additional* presence alongside the existing
           // ones — no displacement, no clear. Delivery already pushes to all of a member's conns
           // (hub.deliver), and the durable inbox cursor dedupes (ADR 042; deployment-topology §7).
-          if (member.kind === 'agent') {
+          // Observers (ADR 063) fan out like humans — several dashboards may watch one seat — so they
+          // are exempt from agent single-active displacement.
+          if (member.kind === 'agent' && member.observer === 0) {
             for (const old of ctx.hub.connsForMember(member.id)) {
               old.send({
                 type: 'error',
@@ -137,6 +139,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             memberName: member.name,
             teamId: team.id,
             presenceId: presence.id,
+            observer: member.observer === 1,
             send: (f) => send(ws, f),
             close: () => ws.close(),
           };
@@ -150,7 +153,8 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             presence_id: presence.id,
             server_time: Date.now(),
           });
-          emitPresence(ctx, conn, 'online', frame.surface);
+          // An observer (ADR 063) watches without participating — no online presence event.
+          if (!conn.observer) emitPresence(ctx, conn, 'online', frame.surface);
           log.info({ msg: 'ws_hello', team: team.slug, member: member.name, conn: state.connId });
           return;
         }
@@ -212,8 +216,8 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
       recordPresenceChurn('detach');
       // Keep the row as a reclaim hold for the grace window instead of deleting it (ADR 010).
       release(ctx.db, conn.presenceId, ctx.config.reclaimGraceMs);
-      // Emit offline only if the member now has no live presence anywhere.
-      if (!hasLivePresence(ctx.db, conn.memberId, ctx.config.presenceTimeoutMs)) {
+      // Emit offline only if the member now has no live presence anywhere — never for an observer.
+      if (!conn.observer && !hasLivePresence(ctx.db, conn.memberId, ctx.config.presenceTimeoutMs)) {
         emitPresence(ctx, conn, 'offline');
       }
       log.info({ msg: 'ws_close', member: conn.memberName, conn: conn.connId });

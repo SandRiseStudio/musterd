@@ -21,6 +21,8 @@ export interface AddMemberInput {
   lifecycle?: Lifecycle;
   lifecycleUntil?: number | null;
   availability?: Record<string, unknown> | null;
+  /** Provision a read-only observer seat (ADR 063): hidden from roster/counts/presence, can't send. */
+  observer?: boolean;
 }
 
 /** Add a member to a team and mint its one-time token. Returns the row plus the plaintext token. */
@@ -58,15 +60,16 @@ export function addMember(
     // A freshly minted seat is *declared*, not yet *held* — bound_at is stamped on first auth touch
     // (ADR 058). The INSERT omits the column, so it defaults to NULL; kept here for the typed row.
     bound_at: null,
+    observer: input.observer ? 1 : 0,
     left_at: null,
     created_at: now,
     updated_at: now,
   };
   db.prepare(
     `INSERT INTO members
-       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, token_hash, left_at, created_at, updated_at)
+       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, token_hash, observer, left_at, created_at, updated_at)
      VALUES
-       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @token_hash, @left_at, @created_at, @updated_at)`,
+       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @token_hash, @observer, @left_at, @created_at, @updated_at)`,
   ).run(row);
   return { row, token };
 }

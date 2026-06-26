@@ -111,7 +111,9 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
   // REMOVE — a live member with no file is soft-tombstoned (never hard-deleted: the message log FK
   // and the audit history require the row to persist; auth already excludes left_at rows).
   for (const m of listMembers(db, team.id)) {
-    if (!desired.has(m.name)) {
+    // Observer seats (ADR 063) are runtime watchers, not seat files — never tombstone them for being
+    // absent from the roster files.
+    if (!desired.has(m.name) && m.observer !== 1) {
       leaveMember(db, m.id);
       result.removed.push(m.name);
     }

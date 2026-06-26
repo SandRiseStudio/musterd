@@ -88,6 +88,14 @@ export const MIGRATIONS: Migration[] = [
       db.exec('UPDATE members SET bound_at = created_at');
     },
   },
+  {
+    // Read-only observer seats (ADR 063): a member that watches the firehose but is hidden from the
+    // roster/counts/presence and can't send. Existing rows are participants (0).
+    version: 7,
+    up: (db) => {
+      db.exec('ALTER TABLE members ADD COLUMN observer INTEGER NOT NULL DEFAULT 0');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

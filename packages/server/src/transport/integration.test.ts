@@ -458,6 +458,72 @@ describe('WebSocket', () => {
     expect(limited.json.messages[0].id).toBe('t1');
   });
 
+  it('observer seat: watches the firehose but is hidden from roster/count and cannot send (ADR 063)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    const obs = await post(
+      '/teams/dawn/members',
+      { name: 'wall', kind: 'human', observer: true },
+      tok,
+    );
+    expect(obs.status).toBe(201);
+
+    const a = new TestWs();
+    const o = new TestWs();
+    await Promise.all([a.open(), o.open()]);
+    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    await o.hello('dawn', 'wall', obs.json.token, 'web');
+    await o.subscribe('team-all');
+
+    // The observer is NOT on the roster and does NOT count as a live session, even though connected:
+    // Ada + the observer are both connected, but only Ada (a participant) is counted.
+    const roster = await get('/teams/dawn', tok);
+    expect(roster.json.members.map((m: any) => m.name)).not.toContain('wall');
+    expect((await get('/health')).json.connections).toBe(1);
+
+    // It still receives a directed DM between two others via the firehose.
+    a.send({
+      type: 'send',
+      envelope: {
+        id: 'obs1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'member', name: 'Lin' },
+        act: 'message',
+        body: 'seen by the wall',
+        ts: Date.now(),
+      },
+    });
+    const deliver = await o.waitFor('deliver');
+    expect((deliver as any).envelope.body).toBe('seen by the wall');
+
+    // And it cannot send — observers are read-only.
+    const denied = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          id: 'obs2',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'wall',
+          to: { kind: 'team' },
+          act: 'message',
+          body: 'should be refused',
+          ts: Date.now(),
+        },
+      },
+      obs.json.token,
+    );
+    expect(denied.status).toBe(403);
+    expect(denied.json.error.code).toBe('forbidden');
+
+    a.close();
+    o.close();
+  });
+
   it('a message to an offline member surfaces via inbox', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.token;

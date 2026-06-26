@@ -151,6 +151,8 @@ const AddMemberBody = z.object({
   role: z.string().nullish(),
   lifecycle: LifecycleSchema.optional(),
   lifecycle_until: z.number().int().nullish(),
+  /** Provision a read-only observer seat (ADR 063), db-only even on a file-backed team. */
+  observer: z.boolean().optional(),
 });
 
 /**
@@ -185,6 +187,8 @@ function authTouch(
   req: IncomingMessage,
 ): { team: TeamRow; member: MemberRow } {
   const auth = authMember(ctx.db, slug, bearer(req));
+  // Observer seats (ADR 063) watch without participating — never flip present, no presence event.
+  if (auth.member.observer === 1) return auth;
   // A background poller (the notifier reads inbox on an away human's behalf) opts out: marking them
   // present here would make isReachable see them online and silence the notification (ADR 057).
   if (req.headers['x-musterd-no-touch'] !== undefined) return auth;
@@ -289,7 +293,11 @@ export async function handleHttp(
         // config — so without this, provisioning would fall through to the legacy originate path and
         // double-source a seat that also lives in a file. Re-reading a small JSON on an infrequent
         // provisioning call is cheap; the boot/watch reconcile catch up on the next reload (SIGHUP).
-        const roots = [...new Set([...ctx.rosterRoots, ...resolveRosterRoots()])];
+        // Observers (ADR 063) are runtime watchers, not durable seat files — always provision them
+        // db-only, even on a file-backed team, bypassing the seat-file projection below.
+        const roots = body.observer
+          ? []
+          : [...new Set([...ctx.rosterRoots, ...resolveRosterRoots()])];
         const spec = teamSpecForSlug(roots, slug);
         if (spec) {
           const result = reconcileTeam(ctx.db, spec);
@@ -323,6 +331,7 @@ export async function handleHttp(
           role: body.role ?? '',
           ...(body.lifecycle ? { lifecycle: body.lifecycle } : {}),
           lifecycleUntil: body.lifecycle_until ?? null,
+          ...(body.observer ? { observer: true } : {}),
         });
         return sendJson(res, 201, { member: toMember(row, team.slug), token });
       }

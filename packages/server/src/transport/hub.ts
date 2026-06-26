@@ -6,6 +6,8 @@ export interface Connection {
   memberName: string;
   teamId: string;
   presenceId: string;
+  /** Read-only observer seat (ADR 063): no presence events, exempt from single-active displacement. */
+  observer?: boolean;
   send: (frame: WSServerFrame) => void;
   /** Force-close the underlying socket (used to displace a superseded same-identity session). */
   close?: () => void;

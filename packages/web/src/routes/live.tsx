@@ -134,8 +134,9 @@ function ConnectForm({
       <div className="lc-form__card">
         <h1 className="lc-form__title">Watch the team, live</h1>
         <p className="lc-form__sub">
-          Stream all of a team&apos;s communication from the connected daemon. Reads only — this is
-          an observer.
+          Stream all of a team&apos;s communication from the connected daemon. Reads only. Provision a
+          hidden observer seat with <code>musterd team observe &lt;name&gt;</code> so watching never
+          shows you on the roster.
         </p>
         {field('team', 'Team', 'alpha')}
         {field('as', 'Observe as', 'your member name')}

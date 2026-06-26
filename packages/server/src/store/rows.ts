@@ -24,6 +24,8 @@ export interface MemberRow {
   /** Held-since (ADR 058): set on first authenticated touch, cleared on rotation/reclaim. Null ⇒
    * declared-but-unheld (a stray `claim` may rotate it); non-null ⇒ held, only adoptable. */
   bound_at: number | null;
+  /** Read-only observer seat (ADR 063): hidden from roster/counts/presence, can't send. 0/1. */
+  observer: number;
   left_at: number | null;
   created_at: number;
   updated_at: number;

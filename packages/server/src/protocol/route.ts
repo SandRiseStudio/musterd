@@ -35,6 +35,10 @@ function routeEnvelopeInner(
   if (env.from !== sender.name || env.team !== team.slug) {
     throw new MusterdError('forbidden', 'envelope from/team must match the authenticated member');
   }
+  // Observer seats (ADR 063) are read-only — they watch the firehose but cannot speak.
+  if (sender.observer) {
+    throw new MusterdError('forbidden', 'observer seats are read-only and cannot send');
+  }
 
   // Resolve recipients.
   let toMemberId: string | null = null;
@@ -47,10 +51,11 @@ function routeEnvelopeInner(
     toMemberId = target.id;
     recipients = [target.id];
   } else {
-    // team or broadcast: everyone currently in the team except the sender.
+    // team or broadcast: every participant currently in the team except the sender. Observers (ADR
+    // 063) aren't participants — they receive it via the firehose, not as addressed recipients.
     recipients = ctx.db
       .prepare<[string, string], { id: string }>(
-        'SELECT id FROM members WHERE team_id = ? AND left_at IS NULL AND id != ?',
+        'SELECT id FROM members WHERE team_id = ? AND left_at IS NULL AND observer = 0 AND id != ?',
       )
       .all(team.id, sender.id)
       .map((r) => r.id);

@@ -28,9 +28,10 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
   if (sub === 'create') return teamCreate(parsed);
   if (sub === 'add') return teamAdd(parsed);
+  if (sub === 'observe') return teamObserve(parsed);
   if (sub === 'remove') return teamRemove(parsed);
   if (sub === 'export') return teamExport(parsed);
-  throw new CliError('usage: musterd team <create|add|remove|export> ...', 2);
+  throw new CliError('usage: musterd team <create|add|observe|remove|export> ...', 2);
 }
 
 async function teamCreate(parsed: Parsed): Promise<number> {
@@ -129,6 +130,37 @@ async function teamAdd(parsed: Parsed): Promise<number> {
       theme.meta(`they join with: musterd join ${team} --as ${name} --token ${res.token}`) + '\n',
     );
   }
+  return 0;
+}
+
+/**
+ * Provision a read-only observer seat (ADR 063): a seat that watches the whole-team firehose from the
+ * dashboard but is hidden from the roster/counts/presence and cannot send. Resolved like `team export`
+ * (server + slug from flags/config, no active identity needed) since the dashboard provisions it
+ * out-of-band; observers are db-only even on a file-backed team, so no seat file is written.
+ */
+async function teamObserve(parsed: Parsed): Promise<number> {
+  const name = parsed.positionals[1];
+  if (!name) throw new CliError('usage: musterd team observe <name> [--team <slug>]', 2);
+  const config = loadConfig();
+  const server = flagStr(parsed.flags, 'server') ?? config.server;
+  const team = flagStr(parsed.flags, 'team') ?? config.current;
+  if (!team) throw new CliError('no team — pass --team <slug> or set a current team', 2);
+  const http = new HttpClient({ server });
+  const res = await http.addMember(team, { name, kind: 'human', observer: true });
+
+  if (parsed.flags['json']) {
+    process.stdout.write(JSON.stringify({ member: res.member, token: res.token }) + '\n');
+    return 0;
+  }
+  process.stdout.write(
+    `${theme.ok('✓')} observer "${name}" ready for ${team} — read-only, hidden from the roster\n`,
+  );
+  process.stdout.write(
+    theme.meta(
+      `open the dashboard at /live and connect:  team ${team}   as ${name}   token ${res.token}`,
+    ) + '\n',
+  );
   return 0;
 }
 
