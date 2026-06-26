@@ -118,6 +118,9 @@ function authTouch(
   req: IncomingMessage,
 ): { team: TeamRow; member: MemberRow } {
   const auth = authMember(ctx.db, slug, bearer(req));
+  // A background poller (the notifier reads inbox on an away human's behalf) opts out: marking them
+  // present here would make isReachable see them online and silence the notification (ADR 057).
+  if (req.headers['x-musterd-no-touch'] !== undefined) return auth;
   const hint = req.headers['x-musterd-surface'];
   const parsed = SurfaceSchema.safeParse(Array.isArray(hint) ? hint[0] : hint);
   const surface = parsed.success ? parsed.data : 'cli';

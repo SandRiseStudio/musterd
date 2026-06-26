@@ -41,9 +41,12 @@ async function post(path: string, body: unknown, token?: string) {
   return { status: res.status, json: (await res.json()) as any };
 }
 
-async function get(path: string, token?: string) {
+async function get(path: string, token?: string, extraHeaders?: Record<string, string>) {
   const res = await fetch(base + path, {
-    headers: token ? { authorization: `Bearer ${token}` } : {},
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(extraHeaders ?? {}),
+    },
   });
   return { status: res.status, json: (await res.json()) as any };
 }
@@ -185,6 +188,17 @@ describe('HTTP API', () => {
     expect(adaRow?.presence).toBe('online');
     // the ambient row is connectionless and carries the surface header
     expect(adaRow?.presences?.[0]?.surface).toBe('cli');
+  });
+
+  it('ambient presence: x-musterd-no-touch suppresses the touch (the notifier opt-out, ADR 057)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // A read carrying the no-touch header (a background poller, e.g. notify) must NOT flip Ada present.
+    await get('/teams/dawn/inbox', ada.json.token, { 'x-musterd-no-touch': '1' });
+    const after = await get('/teams/dawn/members', nickTok);
+    expect(after.json.members.find((m: any) => m.name === 'Ada')?.activity).toBe('offline');
   });
 
   it('ambient presence: a status_update reads working, and the surface header is honored (ADR 057)', async () => {

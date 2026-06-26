@@ -14,10 +14,21 @@ export interface HttpClientOpts {
   token?: string;
   /** This client's surface, sent as `x-musterd-surface` so ambient presence labels it (ADR 057). */
   surface?: string;
+  /**
+   * Suppress the ambient presence touch (ADR 057) for this client's requests via `x-musterd-no-touch`.
+   * For background pollers that read on a member's behalf — the notifier — which must not make an
+   * away/idle human look present and so silence the very notification they were owed.
+   */
+  noTouch?: boolean;
 }
 
 export class HttpClient {
   constructor(private opts: HttpClientOpts) {}
+
+  /** A clone of this client that never writes ambient presence — for background polling (notify). */
+  presenceNeutral(): HttpClient {
+    return new HttpClient({ ...this.opts, noTouch: true });
+  }
 
   // reason: returns parsed JSON of varying shape; callers narrow at each call site.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,6 +41,7 @@ export class HttpClient {
           'content-type': 'application/json',
           ...(this.opts.token ? { authorization: `Bearer ${this.opts.token}` } : {}),
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
+          ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });

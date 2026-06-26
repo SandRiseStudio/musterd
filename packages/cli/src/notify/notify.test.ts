@@ -256,18 +256,22 @@ describe('notify against a live daemon', () => {
     );
 
     const nick = new HttpClient({ server: serverUrl, token: nickToken });
+    // The notifier polls on the human's behalf — presence-neutral, exactly as notifyCommand does
+    // (ADR 057). Without this the poll's own inbox read would mark nick present and silence the
+    // notification: isReachable would then see them online.
+    const poll = nick.presenceNeutral();
     const fired: NotifyItem[] = [];
     const seen = new Set<string>();
     const deps: NotifyDeps = {
       me: 'nick',
-      inbox: async () => (await nick.inbox('dawn', { unread: true })).messages,
+      inbox: async () => (await poll.inbox('dawn', { unread: true })).messages,
       isReachable: async () => {
-        const roster = await nick.roster('dawn');
+        const roster = await poll.roster('dawn');
         const me = roster.members.find((m) => m.name === 'nick');
         return me != null && me.presence !== 'offline';
       },
       availability: async () => {
-        const roster = await nick.roster('dawn');
+        const roster = await poll.roster('dawn');
         return roster.members.find((m) => m.name === 'nick')?.availability ?? null;
       },
       notify: (n) => fired.push(n),
@@ -277,6 +281,10 @@ describe('notify against a live daemon', () => {
     expect((await pollOnce(deps, seen)).length).toBe(1);
     expect((await pollOnce(deps, seen)).length).toBe(0);
     expect(fired[0]!.body).toBe('deploy is failing');
+    // Regression guard (ADR 057): polling on nick's behalf must NOT have flipped them present —
+    // otherwise the notifier silences its own notifications.
+    const after = await nick.roster('dawn');
+    expect(after.members.find((m) => m.name === 'nick')?.presence).toBe('offline');
 
     // Reading the inbox advances the durable cursor → a *fresh* notifier no longer sees it.
     const unread = await nick.inbox('dawn', { unread: true });

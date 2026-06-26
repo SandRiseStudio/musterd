@@ -38,24 +38,27 @@ export async function notifyCommand(
   deps: { notify?: (n: NotifyItem) => void } = {},
 ): Promise<number> {
   const { team, identity, http } = resolve(parsed.flags);
+  // The notifier polls on the away human's behalf — its reads must NOT mark them present (ADR 057),
+  // or isReachable would see them online and the notification would silence itself.
+  const poll = http.presenceNeutral();
   const opts = parseOptions(parsed.flags);
   const seen = new Set<string>();
 
   const notifyDeps: NotifyDeps = {
     me: identity.name,
-    inbox: async () => (await http.inbox(team, { unread: true })).messages,
+    inbox: async () => (await poll.inbox(team, { unread: true })).messages,
     // Reachable in-stream = a live watch/app presence (roster `presence !== 'offline'`). When the
     // human is watching, the bell/banner already reached them (ADR 024); `notify` owns only the
     // not-watching case (ADR 035 §3). No availability state is invented.
     isReachable: async () => {
-      const roster = await http.roster(team).catch(() => ({ members: [] }));
+      const roster = await poll.roster(team).catch(() => ({ members: [] }));
       const me = roster.members.find((m) => m.name === identity.name);
       return me != null && me.presence !== 'offline';
     },
     // The recipient's own availability tiers delivery (ADR 044): away holds all but `urgent`; dnd
     // passes directed + `urgent`. Read off the roster, same as reachability — no new wire field.
     availability: async () => {
-      const roster = await http.roster(team).catch(() => ({ members: [] }));
+      const roster = await poll.roster(team).catch(() => ({ members: [] }));
       const me = roster.members.find((m) => m.name === identity.name);
       return me?.availability ?? null;
     },

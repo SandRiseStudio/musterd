@@ -88,6 +88,15 @@ state change, not a grace-hold expiry). Provenance is stamped `session` — a on
 has the agent's session behind it (ADR 014); surface defaults to `cli` but honors an optional
 `x-musterd-surface` request header so an MCP/adapter one-shot can label its real surface.
 
+### 7. Background pollers opt out (the notifier)
+
+A read carrying `x-musterd-no-touch` skips the touch. This exists for the notifier (`musterd notify`,
+ADR 035), which polls a member's inbox **on their behalf** while they are away: without the opt-out, the
+notifier's own poll would mark the human present, `isReachable` would then see them online, and the
+notification it was about to fire would silence itself — a regression caught the day ADR 057 landed. The
+`notify` command issues its inbox/roster reads through a presence-neutral client; every other client
+touches as normal.
+
 ## Consequences
 
 - A bursty one-shot agent reads `online` (or `working`, with a status) on the roster, closing the

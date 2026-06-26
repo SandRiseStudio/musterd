@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMcpConfig } from './config.js';
 
 let dir: string;
@@ -20,9 +20,16 @@ beforeEach(() => {
       surface: 'claude-code',
     }),
   );
+  // Isolate from the developer's real repo binding: findBinding() walks up from cwd, so without
+  // this an ambient ../.musterd/binding.json leaks an identity into the no-binding cases. The
+  // binding-fallback tests pass MUSTERD_BINDING explicitly, so the mocked cwd doesn't affect them.
+  vi.spyOn(process, 'cwd').mockReturnValue(dir);
 });
 
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  vi.restoreAllMocks();
+  rmSync(dir, { recursive: true, force: true });
+});
 
 describe('loadMcpConfig identity alignment (ADR 018)', () => {
   it('falls back to the workspace binding file when env carries no identity', () => {
