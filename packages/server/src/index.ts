@@ -2,12 +2,19 @@ import { readFileSync } from 'node:fs';
 import { createServer as createHttpServer, type Server } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import type { Database } from 'better-sqlite3';
-import { assertBindSecurity, resolveConfig } from './config.js';
+import {
+  RECONCILE_DEBOUNCE_MS,
+  assertBindSecurity,
+  resolveConfig,
+  resolveRosterRoots,
+} from './config.js';
 import type { Ctx } from './context.js';
 import { schemaVersion } from './db/migrations.js';
 import { openDb } from './db/open.js';
 import { log } from './log.js';
 import { startReaper } from './presence/reaper.js';
+import { reconcileAll } from './projection/reconcile.js';
+import { startRosterWatcher } from './projection/watcher.js';
 import { activePresenceBySurface, slowestInboxLagMs } from './store/metrics.js';
 import { registerRuntimeGauges, startTelemetry, telemetryEnabled } from './telemetry.js';
 import { handleHttp } from './transport/http.js';
@@ -26,6 +33,9 @@ export interface ServerOptions {
   trustProxy?: boolean;
   /** Inject a database (e.g. an in-memory one) for tests; bypasses dbPath. */
   db?: Database;
+  /** Roster roots to project + watch (ADR 058). Defaults to {@link resolveRosterRoots}; pass an
+   * explicit list to keep tests hermetic (no global-config dependency). `[]` disables reconcile. */
+  rosterRoots?: string[];
 }
 
 export interface RunningServer {
@@ -52,7 +62,9 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
   });
   const db = opts.db ?? openDb(config.dbPath);
   const hub = new Hub();
-  const ctx: Ctx = { db, hub, config };
+  // Durable roster roots (ADR 058): explicit list (tests) or the rosterHome registry + env override.
+  const rosterRoots = opts.rosterRoots ?? resolveRosterRoots();
+  const ctx: Ctx = { db, hub, config, rosterRoots };
 
   const handler = (
     req: import('node:http').IncomingMessage,
@@ -68,6 +80,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
     : createHttpServer(handler);
   attachWsServer(ctx, http);
   let stopReaper: (() => void) | null = null;
+  let stopWatcher: (() => void) | null = null;
   let stopTelemetry: (() => Promise<void>) | null = null;
   let boundPort = config.port;
 
@@ -92,12 +105,23 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
           inboxLagMs: () => slowestInboxLagMs(db),
         });
       }
+      // Boot floor (ADR 058): project the durable files into the db before serving, so the roster the
+      // first request sees matches git. Idempotent — safe to re-run; the watcher takes over at runtime.
+      if (rosterRoots.length > 0) {
+        const summary = reconcileAll(db, rosterRoots);
+        log.info({ msg: 'reconcile_boot', teams: summary.length, roots: rosterRoots.length });
+      }
       return await new Promise((resolve, reject) => {
         http.once('error', reject);
         http.listen(config.port, config.host, () => {
           const addr = http.address();
           boundPort = typeof addr === 'object' && addr ? addr.port : config.port;
           stopReaper = startReaper(ctx);
+          if (rosterRoots.length > 0) {
+            stopWatcher = startRosterWatcher(rosterRoots, RECONCILE_DEBOUNCE_MS, () => {
+              reconcileAll(db, rosterRoots);
+            });
+          }
           log.info({
             msg: 'listening',
             host: config.host,
@@ -114,6 +138,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
     close() {
       return new Promise((resolve) => {
         stopReaper?.();
+        stopWatcher?.();
         void stopTelemetry?.();
         http.close(() => {
           if (!opts.db) db.close();

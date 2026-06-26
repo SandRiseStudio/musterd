@@ -55,6 +55,9 @@ export function addMember(
     lifecycle_until: input.lifecycleUntil ?? null,
     availability: input.availability ? JSON.stringify(input.availability) : null,
     token_hash: hashToken(token),
+    // A freshly minted seat is *declared*, not yet *held* — bound_at is stamped on first auth touch
+    // (ADR 058). The INSERT omits the column, so it defaults to NULL; kept here for the typed row.
+    bound_at: null,
     left_at: null,
     created_at: now,
     updated_at: now,
@@ -107,7 +110,76 @@ export function authMember(
       `invalid token for team "${teamSlug}" — this member may not exist on the database this daemon is serving ` +
         `(a daemon started against a different MUSTERD_DB will not recognize tokens minted elsewhere)`,
     );
+  // First authenticated touch flips a *declared* seat to *held* (ADR 058). Durable across the holder
+  // going offline — unlike presence — so a stray plain `claim` can't rotate a live token away.
+  if (member.bound_at === null) {
+    const now = Date.now();
+    db.prepare('UPDATE members SET bound_at = ? WHERE id = ? AND bound_at IS NULL').run(
+      now,
+      member.id,
+    );
+    member.bound_at = now;
+  }
   return { team, member };
+}
+
+/** Is this seat currently *held* (someone has authenticated its token)? See {@link authMember}. */
+export function isHeld(member: MemberRow): boolean {
+  return member.bound_at !== null;
+}
+
+export interface MemberIdentityFields {
+  kind: MemberKind;
+  role: string;
+  lifecycle: Lifecycle;
+  lifecycleUntil: number | null;
+}
+
+/**
+ * Update a live member's durable identity in place (ADR 058 reconcile UPDATE path). Preserves `id`,
+ * `token_hash`, and `bound_at` — the daemon-private anchors that must survive a reconcile so the
+ * message log and any live token stay valid.
+ */
+export function updateMemberIdentity(db: Database, id: string, f: MemberIdentityFields): void {
+  db.prepare(
+    'UPDATE members SET kind = ?, role = ?, lifecycle = ?, lifecycle_until = ?, updated_at = ? WHERE id = ?',
+  ).run(f.kind, f.role, f.lifecycle, f.lifecycleUntil, Date.now(), id);
+}
+
+/**
+ * Revive a tombstoned seat (ADR 058: file re-added after deletion). Preserves `id` so the message
+ * log stays continuous, but **re-mints the token** (deletion was a revocation) and clears `bound_at`
+ * back to *declared*. Returns the fresh plaintext token.
+ */
+export function reviveMember(db: Database, id: string, f: MemberIdentityFields): string {
+  const token = newToken();
+  db.prepare(
+    `UPDATE members
+       SET kind = ?, role = ?, lifecycle = ?, lifecycle_until = ?,
+           token_hash = ?, bound_at = NULL, left_at = NULL, updated_at = ?
+     WHERE id = ?`,
+  ).run(f.kind, f.role, f.lifecycle, f.lifecycleUntil, hashToken(token), Date.now(), id);
+  return token;
+}
+
+/** Force a held seat back to *declared* without deleting it (operator reclaim / unbind, ADR 058). */
+export function clearBound(db: Database, id: string): void {
+  db.prepare('UPDATE members SET bound_at = NULL, updated_at = ? WHERE id = ?').run(Date.now(), id);
+}
+
+/**
+ * Re-mint a live seat's token without touching its identity (ADR 058 project-and-return). Used when a
+ * declared-but-unheld seat (e.g. one projected from a `git pull`) is claimed: it hands the claimer a
+ * fresh token and leaves `bound_at` null until they authenticate. Returns the new plaintext token.
+ */
+export function rotateToken(db: Database, id: string): string {
+  const token = newToken();
+  db.prepare('UPDATE members SET token_hash = ?, updated_at = ? WHERE id = ?').run(
+    hashToken(token),
+    Date.now(),
+    id,
+  );
+  return token;
 }
 
 /**

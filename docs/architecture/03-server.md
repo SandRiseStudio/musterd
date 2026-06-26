@@ -18,7 +18,7 @@ The daemon. SQLite store + WebSocket + HTTP API + presence tracker + inbox deliv
 src/
   index.ts            // entry: createServer(opts) -> { listen, close }; CLI bin starts it
   config.ts           // env + defaults (port 4849, host, db path, tunable timeouts) + secured-bind guard, scheme, Origin/Host check (ADR 040)
-  context.ts          // Ctx: the per-server bundle (db, hub, config) threaded through routing/transport
+  context.ts          // Ctx: the per-server bundle (db, hub, config, rosterRoots) threaded through routing/transport
   db/
     open.ts           // openDb(path): Database; sets PRAGMAs; runs migrations
     migrations.ts     // ordered [{version, up(db)}]; runMigrations(db)
@@ -42,6 +42,11 @@ src/
     hub.ts            // in-memory connection registry: member -> Set<conn>; broadcast/deliver
   presence/
     reaper.ts         // setInterval: mark/remove presence rows past timeout; emit offline events
+  projection/
+    load.ts           // read .musterd/team.toml + seats/*.toml -> TeamSpec; fail-closed per seat (ADR 058)
+    reconcile.ts      // match-by-name delta: ADD/UPDATE/REVIVE/REMOVE the projection from the files
+    serialize.ts      // db projection -> file structures (guard-1 round-trip + `team export`)
+    watcher.ts        // debounced fs.watch over each roster root -> full reconcile (ADR 058)
   telemetry.ts        // minimal OpenTelemetry, off unless an OTLP endpoint is set (ADR 015)
   errors.ts           // MusterdError(code,message) + toHttp()/toFrame()
   log.ts              // structured logger (07-conventions format)

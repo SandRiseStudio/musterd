@@ -46,6 +46,17 @@ export function requireTeam(db: Database, slug: string): TeamRow {
   return t;
 }
 
+/** Update a team's durable fields in place (ADR 058 reconcile upsert). Preserves id + created_at. */
+export function updateTeam(
+  db: Database,
+  id: string,
+  fields: { display: string | null; defaultLifecycle: string },
+): void {
+  db.prepare(
+    'UPDATE teams SET display = ?, default_lifecycle = ?, updated_at = ? WHERE id = ?',
+  ).run(fields.display, fields.defaultLifecycle, Date.now(), id);
+}
+
 export function archiveTeam(db: Database, slug: string): void {
   const t = requireTeam(db, slug);
   db.prepare('UPDATE teams SET archived_at = ?, updated_at = ? WHERE id = ?').run(

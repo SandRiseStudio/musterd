@@ -75,6 +75,19 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // musterd/0.3 (ADR 058, seat-lifecycle-as-files.md + migration-bootstrap.md): the held/unheld bit.
+    // `bound_at` is set on a seat's first authenticated touch and distinguishes a *held* seat (a
+    // teammate holds its token) from a merely *declared* one — durable across the holder going offline,
+    // which presence deliberately is not (ADR 057). Backfill every existing row to `created_at`: under
+    // the pre-058 model mint == delivery, so each legacy member is already held; a null would let a
+    // stray `claim` rotate a live token out from under an active session.
+    version: 6,
+    up: (db) => {
+      db.exec('ALTER TABLE members ADD COLUMN bound_at INTEGER');
+      db.exec('UPDATE members SET bound_at = created_at');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

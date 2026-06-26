@@ -118,6 +118,18 @@ export interface Config {
   knownIdentities: StoredIdentity[];
   /** ADR 020: tokenless registry of where members are bound, keyed by absolute folder path. */
   bindings: Record<string, BindingRef>;
+  /**
+   * ADR 058 (migration-bootstrap.md): the folder that owns each team's durable roster, keyed by slug.
+   * Written by `musterd team export`; it is the **cutover signal** — a team is file-backed (the daemon
+   * reconciles its `.musterd/` files) iff it has a `rosterHome`. The daemon reads this same registry to
+   * discover its reconcile roots ({@link resolveRosterRoots}).
+   */
+  rosterHome: Record<string, string>;
+}
+
+/** Record a team's roster home (ADR 058 `team export`) — the cutover to file-authoritative. */
+export function recordRosterHome(config: Config, slug: string, dir: string): void {
+  config.rosterHome[slug] = resolve(dir);
 }
 
 /** Upsert an identity into the vault (ADR 059), keyed by (team, name). */
@@ -148,6 +160,7 @@ const DEFAULT: Config = {
   identities: {},
   knownIdentities: [],
   bindings: {},
+  rosterHome: {},
 };
 
 export function loadConfig(): Config {
@@ -163,6 +176,7 @@ export function loadConfig(): Config {
       // identity is immediately resolvable by `--as`, and stays so when another member joins.
       knownIdentities: backfillVault(identities, parsed.knownIdentities ?? []),
       bindings: parsed.bindings ?? {},
+      rosterHome: parsed.rosterHome ?? {},
     };
   } catch {
     // Fresh objects (not DEFAULT's): callers like recordBinding mutate `bindings`/`identities`.
@@ -171,6 +185,7 @@ export function loadConfig(): Config {
       identities: {},
       knownIdentities: [],
       bindings: {},
+      rosterHome: {},
     };
   }
 }

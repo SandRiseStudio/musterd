@@ -21,6 +21,9 @@ export interface MemberRow {
   lifecycle_until: number | null;
   availability: string | null;
   token_hash: string | null;
+  /** Held-since (ADR 058): set on first authenticated touch, cleared on rotation/reclaim. Null ⇒
+   * declared-but-unheld (a stray `claim` may rotate it); non-null ⇒ held, only adoptable. */
+  bound_at: number | null;
   left_at: number | null;
   created_at: number;
   updated_at: number;

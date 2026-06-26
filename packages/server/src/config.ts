@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 
 export interface TlsConfig {
@@ -39,6 +40,39 @@ export const DEFAULT_HOST = '127.0.0.1';
 
 export function defaultDbPath(): string {
   return process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 'musterd.db');
+}
+
+/** Coalesce a burst of file events (e.g. a multi-file `git checkout`) into one reconcile pass. */
+export const RECONCILE_DEBOUNCE_MS = 250;
+
+/**
+ * Resolve the roster roots the daemon reconciles (ADR 058 / migration-bootstrap.md). A team is
+ * file-backed iff it has a `rosterHome` — written into the global `~/.musterd/config.json` by
+ * `musterd team export`. Union with the `MUSTERD_TEAMS_DIR` override (comma/colon-separated) for
+ * tests and explicit setups. Reading the global config keeps the daemon decoupled from the CLI
+ * package while sharing the `~/.musterd/` home the db already lives in. Best-effort: an absent or
+ * unreadable config yields the env-only set.
+ */
+export function resolveRosterRoots(env: NodeJS.ProcessEnv = process.env): string[] {
+  const roots = new Set<string>();
+  for (const d of (env['MUSTERD_TEAMS_DIR'] ?? '')
+    .split(/[,:]/)
+    .map((s) => s.trim())
+    .filter(Boolean)) {
+    roots.add(resolve(d));
+  }
+  try {
+    const cfgPath = env['MUSTERD_CONFIG'] ?? join(homedir(), '.musterd', 'config.json');
+    const raw = JSON.parse(readFileSync(cfgPath, 'utf8')) as {
+      rosterHome?: Record<string, unknown>;
+    };
+    for (const v of Object.values(raw.rosterHome ?? {})) {
+      if (typeof v === 'string') roots.add(resolve(v));
+    }
+  } catch {
+    // no global config / unreadable → env-only roots
+  }
+  return [...roots];
 }
 
 /** A positive-integer millisecond env value (ADR 040 tunable resilience constants). */

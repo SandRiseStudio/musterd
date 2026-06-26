@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
+import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
@@ -22,7 +23,9 @@ import {
   authMember,
   getMemberById,
   getMemberByName,
+  isHeld,
   leaveMember,
+  rotateToken,
   setAvailability,
 } from '../store/members.js';
 import { latestStatusUpdate, listInbox, rowToEnvelope } from '../store/messages.js';
@@ -210,8 +213,39 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/members') {
-        const team = requireTeam(ctx.db, slug);
         const body = parseOrBadRequest(AddMemberBody, await readJson(req));
+        // ADR 058 project-and-return: for a *file-backed* team the file is the single writer — the CLI
+        // has already written `seats/<name>.toml`; the daemon reconciles it and hands back the token,
+        // never originating the seat. A *db-only* team (no roster root declares it) keeps the legacy
+        // originate path — per-team cutover (migration-bootstrap.md), so un-migrated teams + their
+        // tests are untouched.
+        const spec = teamSpecForSlug(ctx.rosterRoots, slug);
+        if (spec) {
+          const result = reconcileTeam(ctx.db, spec);
+          const team = requireTeam(ctx.db, slug);
+          const row = getMemberByName(ctx.db, team.id, body.name);
+          if (!row || row.left_at !== null) {
+            throw new MusterdError(
+              'not_found',
+              `no seat "${body.name}" is declared in ${slug}'s roster files — write seats/${body.name}.toml first (the file is the source of truth)`,
+            );
+          }
+          // Token: minted this pass (a fresh seat) → return it. Already projected (e.g. via git pull)
+          // → mint a fresh one if the seat is unheld; refuse if a teammate already holds it (adopt
+          // with `claim --token`).
+          let token = result.minted[body.name];
+          if (!token) {
+            if (isHeld(row)) {
+              throw new MusterdError(
+                'conflict',
+                `seat "${body.name}" in "${slug}" is already held — adopt it with \`claim ${body.name} --token <code>\` or take a pool seat`,
+              );
+            }
+            token = rotateToken(ctx.db, row.id);
+          }
+          return sendJson(res, 201, { member: toMember(row, team.slug), token });
+        }
+        const team = requireTeam(ctx.db, slug);
         const { row, token } = addMember(ctx.db, team, {
           name: body.name,
           kind: body.kind,

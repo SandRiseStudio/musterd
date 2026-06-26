@@ -4,6 +4,7 @@ export * from './binding.js';
 export * from './claim.js';
 export * from './envelope.js';
 export * from './member.js';
+export * from './seatfile.js';
 export * from './errors.js';
 export * from './frames.js';
 export * from './primer.js';
