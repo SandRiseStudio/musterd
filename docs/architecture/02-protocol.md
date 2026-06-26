@@ -94,6 +94,8 @@ Base `http://localhost:4849`. JSON in/out. Auth via `Authorization: Bearer <memb
 
 The WS `send` and HTTP `POST …/messages` share one validation+route path on the server (`03-server.md`).
 
+**Serving the web UI (ADR 062).** With `--web-root <dir>` / `MUSTERD_WEB_ROOT` the daemon also serves a built web UI from that directory: any unmatched `GET` outside the API namespaces (`/health`, `/teams/*`) returns a file, with extensionless client routes (e.g. `/live`) falling back to `index.html`. This puts the dashboard, the HTTP API, and the WS on one origin — no CORS, no proxy — and the WS upgrade gate (above) admits a **same-origin** `Origin` (its host:port equals the `Host` header) so the daemon-served page can connect. Off by default (API-only).
+
 ## Error codes (shared by WS `error` frames and HTTP)
 
 | code | HTTP | meaning |

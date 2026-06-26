@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PROTOCOL_VERSION, type WSServerFrame } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
@@ -265,6 +268,55 @@ describe('HTTP API', () => {
       ),
     );
     watcher.ws.close();
+  });
+});
+
+describe('static web serving (ADR 062)', () => {
+  it('serves index + assets, falls back to index for client routes, and keeps API paths as JSON 404', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-web-'));
+    writeFileSync(join(dir, 'index.html'), '<!doctype html><title>musterd live</title>');
+    mkdirSync(join(dir, 'assets'));
+    writeFileSync(join(dir, 'assets', 'app.js'), 'console.log("hi")');
+
+    const s = createServer({ db: openDb(':memory:'), port: 0, webRoot: dir });
+    const { port } = await s.listen();
+    const b = `http://127.0.0.1:${port}`;
+    try {
+      const root = await fetch(`${b}/`);
+      expect(root.status).toBe(200);
+      expect(root.headers.get('content-type')).toMatch(/text\/html/);
+      expect(await root.text()).toMatch(/musterd live/);
+
+      const asset = await fetch(`${b}/assets/app.js`);
+      expect(asset.status).toBe(200);
+      expect(asset.headers.get('content-type')).toMatch(/javascript/);
+
+      // A client route (no file) falls back to the app shell so deep links / refresh work.
+      const spa = await fetch(`${b}/live`);
+      expect(spa.status).toBe(200);
+      expect(await spa.text()).toMatch(/musterd live/);
+
+      // A missing *asset* (has an extension) is a real 404, not the shell.
+      expect((await fetch(`${b}/assets/missing.js`)).status).toBe(404);
+
+      // API namespaces still answer as JSON — static serving never shadows them.
+      const api = await fetch(`${b}/teams/none`);
+      expect(api.status).toBe(404);
+      expect((await api.json()).error.code).toBe('not_found');
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('stays API-only (404s the web root) when no webRoot is configured', async () => {
+    const s = createServer({ db: openDb(':memory:'), port: 0 });
+    const { port } = await s.listen();
+    try {
+      const r = await fetch(`http://127.0.0.1:${port}/`);
+      expect(r.status).toBe(404);
+    } finally {
+      await s.close();
+    }
   });
 });
 

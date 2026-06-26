@@ -13,12 +13,15 @@ export async function serveCommand(parsed: Parsed): Promise<number> {
   const tlsCert = flagStr(parsed.flags, 'tls-cert');
   const tlsKey = flagStr(parsed.flags, 'tls-key');
   const trustProxy = parsed.flags['insecure-trust-proxy'] === true;
+  // Serve a built web UI same-origin (ADR 062) — flag or MUSTERD_WEB_ROOT.
+  const webRoot = flagStr(parsed.flags, 'web-root') ?? process.env['MUSTERD_WEB_ROOT'];
   const server = createServer({
     ...(portFlag ? { port: Number(portFlag) } : {}),
     ...(host ? { host } : {}),
     ...(tlsCert ? { tlsCert } : {}),
     ...(tlsKey ? { tlsKey } : {}),
     ...(trustProxy ? { trustProxy: true } : {}),
+    ...(webRoot ? { webRoot } : {}),
   });
   const { port, host: boundHost } = await server.listen();
 
@@ -35,6 +38,13 @@ export async function serveCommand(parsed: Parsed): Promise<number> {
   }
   // Show which db is live — a daemon silently serving the wrong db reads as "everyone offline".
   process.stdout.write(theme.meta(`  db: ${server.dbPath}`) + '\n');
+  if (webRoot) {
+    process.stdout.write(
+      theme.meta(
+        `  serving web UI from ${webRoot} (open ${server.scheme === 'wss' ? 'https' : 'http'}://${boundHost}:${port}/live)`,
+      ) + '\n',
+    );
+  }
   process.stdout.write(theme.meta('ctrl-c to stop') + '\n');
 
   // SIGHUP reloads the durable roster (ADR 058): re-resolve roots + reconcile, so a team exported

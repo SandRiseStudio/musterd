@@ -28,6 +28,8 @@ export interface ResolvedConfig {
   allowedHosts: string[];
   /** Origin values allowed on the WS upgrade (CLI/MCP clients send none; browsers do). */
   allowedOrigins: string[];
+  /** Absolute path to a built web UI to serve same-origin (ADR 062), or null to stay API-only. */
+  webRoot: string | null;
 }
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -112,6 +114,8 @@ export interface ConfigOptions {
   tlsCert?: string;
   tlsKey?: string;
   trustProxy?: boolean;
+  /** Serve a built web UI from this directory, same-origin (ADR 062). */
+  webRoot?: string;
 }
 
 export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
@@ -139,7 +143,13 @@ export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
     scheme: tls ? 'wss' : 'ws',
     allowedHosts: envList('MUSTERD_ALLOWED_HOSTS'),
     allowedOrigins: envList('MUSTERD_ALLOWED_ORIGINS'),
+    webRoot: webRootOf(opts?.webRoot ?? process.env['MUSTERD_WEB_ROOT']),
   };
+}
+
+/** Resolve a web-root path to absolute, or null when unset/blank (static serving stays off). */
+function webRootOf(raw: string | undefined): string | null {
+  return raw && raw.trim() ? resolve(raw.trim()) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +159,16 @@ export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
 /** Strip IPv6 brackets and lowercase a bare hostname. */
 function normalizeHost(host: string): string {
   return host.trim().toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+}
+
+/** True iff `origin`'s host:port equals the `Host` header — i.e. the daemon's own served page. */
+function isSameOrigin(origin: string, hostHeader: string | undefined): boolean {
+  if (!hostHeader) return false;
+  try {
+    return new URL(origin).host.toLowerCase() === hostHeader.trim().toLowerCase();
+  } catch {
+    return false;
+  }
 }
 
 /** A host that keeps the daemon on the local machine — never needs TLS (ADR 040). */
@@ -199,8 +219,15 @@ export function checkUpgrade(
   headers: { host?: string | undefined; origin?: string | undefined },
   cfg: { boundHost: string; allowedHosts: string[]; allowedOrigins: string[] },
 ): { ok: true } | { ok: false; reason: string } {
-  // A present Origin means a browser; legitimate musterd clients (CLI, MCP via `ws`) send none.
-  if (headers.origin !== undefined && !cfg.allowedOrigins.includes(headers.origin)) {
+  // A present Origin means a browser; legitimate musterd clients (CLI, MCP via `ws`) send none. Allow
+  // an explicitly-listed origin, OR a *same-origin* page the daemon itself serves — Origin host:port
+  // equals the Host header (ADR 062, daemon static-serve). A cross-site/DNS-rebinding Origin differs
+  // from Host and is still refused.
+  if (
+    headers.origin !== undefined &&
+    !cfg.allowedOrigins.includes(headers.origin) &&
+    !isSameOrigin(headers.origin, headers.host)
+  ) {
     return { ok: false, reason: `origin not allowed: ${headers.origin}` };
   }
   if (!headers.host) return { ok: false, reason: 'missing Host header' };

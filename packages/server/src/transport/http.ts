@@ -1,4 +1,6 @@
+import { createReadStream, existsSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { extname, join, resolve, sep } from 'node:path';
 import {
   MemberKindSchema,
   LifecycleSchema,
@@ -52,6 +54,61 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(payload);
+}
+
+const CONTENT_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm',
+  '.txt': 'text/plain; charset=utf-8',
+};
+
+function sendFile(res: ServerResponse, file: string): void {
+  res.writeHead(200, {
+    'content-type': CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
+  });
+  createReadStream(file).pipe(res);
+}
+
+/**
+ * Serve the built web UI same-origin (ADR 062). A real file is served as-is; an extensionless path
+ * (a client route like `/live`) falls back to `index.html` so deep links + refresh work. Path
+ * traversal is refused by resolving under `webRoot` and requiring containment.
+ */
+function serveStatic(webRoot: string, pathname: string, res: ServerResponse): void {
+  const root = resolve(webRoot);
+  let target: string;
+  try {
+    target = resolve(root, '.' + decodeURIComponent(pathname));
+  } catch {
+    return sendJson(res, 400, { error: { code: 'bad_request', message: 'bad path' } });
+  }
+  if (target !== root && !target.startsWith(root + sep)) {
+    res.writeHead(403, { 'content-type': 'text/plain' });
+    return void res.end('forbidden');
+  }
+  if (existsSync(target) && statSync(target).isFile()) return sendFile(res, target);
+  // SPA fallback: client routes have no file extension → serve the app shell.
+  if (extname(target) === '') {
+    const index = join(root, 'index.html');
+    if (existsSync(index)) return sendFile(res, index);
+  }
+  res.writeHead(404, { 'content-type': 'text/plain' });
+  res.end('not found');
 }
 
 function sendError(res: ServerResponse, err: unknown): void {
@@ -454,6 +511,17 @@ export async function handleHttp(
         });
         return sendJson(res, 200, { ok: true, member: target.name, kind: target.kind });
       }
+    }
+
+    // Static web UI (ADR 062): serve same-origin for any unmatched GET outside the API namespaces,
+    // so the daemon hosts the dashboard with no proxy/CORS. API paths still 404 as JSON.
+    if (
+      method === 'GET' &&
+      ctx.config.webRoot &&
+      path !== '/health' &&
+      !path.startsWith('/teams')
+    ) {
+      return serveStatic(ctx.config.webRoot, path, res);
     }
 
     throw new MusterdError('not_found', `no route for ${method} ${path}`);

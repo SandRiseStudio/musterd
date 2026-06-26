@@ -156,6 +156,19 @@ describe('WS upgrade Origin/Host gate (ADR 040)', () => {
     });
     ws.close();
   });
+
+  it('admits a same-origin browser Origin — the daemon-served page (ADR 062)', async () => {
+    const s = createServer({ db: openDb(':memory:'), port: 0 });
+    running = s;
+    const { port } = await s.listen();
+    // Origin host:port == the Host header the browser connected to → same-origin, allowed.
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { origin: `http://127.0.0.1:${port}` });
+    await new Promise<void>((res, rej) => {
+      ws.on('open', () => res());
+      ws.on('error', rej);
+    });
+    ws.close();
+  });
 });
 
 describe('newest-wins self-heal at WAN-tuned timeouts (ADR 017 / 040 §6)', () => {
