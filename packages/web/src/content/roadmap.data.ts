@@ -234,7 +234,8 @@ export const ROADMAP: RoadmapItem[] = [
 
   // ── near-term ─────────────────────────────────────────────────────────────
   // Order within a wave is priority order (within-wave = array order). v0.2 is published (the gate);
-  // Wave 1 (loop-hardening, below) leads with the obs-evals gate, then Wave 2 (v0.3 governance → full tiers).
+  // the obs-evals gate shipped (ADR 052), so Wave 1 now leads with the dogfood loop (blocked-agent +
+  // wake-on-message), then cli-ergo, then Wave 2 (v0.3 governance → full tiers).
 
   // Wave 1 — harden the coordination loop (small, additive, no v0.3 dependency).
   {
