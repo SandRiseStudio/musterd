@@ -74,6 +74,26 @@ export async function fetchHistory(
   return r.messages;
 }
 
+/**
+ * Provision a hidden read-only observer seat (ADR 063) and return its token. Lets the dashboard be
+ * "enter a team and watch" — no pre-made seat. The endpoint is unauthenticated (localhost-trust, like
+ * team creation); the seat is hidden from the roster and can't send.
+ */
+export async function provisionObserver(team: string, name: string): Promise<string> {
+  const res = await fetch(`/teams/${encodeURIComponent(team)}/members`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, kind: 'human', observer: true }),
+  });
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const msg = (json as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return (json as { token: string }).token;
+}
+
 export interface LiveHandlers {
   onEnvelope: (env: Envelope) => void;
   onPresence: (member: string, status: string, surface?: string) => void;

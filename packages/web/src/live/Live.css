@@ -464,6 +464,19 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+.lc-form__advanced {
+  background: none;
+  border: none;
+  color: var(--lc-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 2px;
+  align-self: center;
+}
+.lc-form__advanced:hover {
+  color: var(--lc-text);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .lc-node__glow {

@@ -4,6 +4,7 @@ import liveCss from '../live/Live.css?url';
 import { Constellation } from '../live/Constellation';
 import { Stream } from '../live/Stream';
 import type { LiveConfig, ConnStatus } from '../live/client';
+import { provisionObserver } from '../live/client';
 import { useLiveStream } from '../live/useLiveStream';
 
 export const Route = createFileRoute('/live')({
@@ -14,41 +15,87 @@ export const Route = createFileRoute('/live')({
   component: LivePage,
 });
 
-const STORAGE_KEY = 'musterd.live.config';
-const DEFAULTS: LiveConfig = { team: '', as: '', token: '' };
+const TEAM_KEY = 'musterd.live.team';
+const observerKey = (team: string) => `musterd.live.observer.${team}`;
 
-function loadSaved(): LiveConfig | null {
+interface ObserverCreds {
+  name: string;
+  token: string;
+}
+
+function loadObserver(team: string): ObserverCreds | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as LiveConfig) : null;
+    const raw = window.localStorage.getItem(observerKey(team));
+    return raw ? (JSON.parse(raw) as ObserverCreds) : null;
   } catch {
     return null;
   }
 }
+function saveObserver(team: string, creds: ObserverCreds) {
+  window.localStorage.setItem(observerKey(team), JSON.stringify(creds));
+}
+function forgetObserver(team: string) {
+  window.localStorage.removeItem(observerKey(team));
+}
+function genObserverName(): string {
+  return 'web-' + Math.random().toString(36).slice(2, 8);
+}
 
 function LivePage() {
-  const [form, setForm] = useState<LiveConfig>(DEFAULTS);
+  const [team, setTeam] = useState('');
+  const [advanced, setAdvanced] = useState({ open: false, as: '', token: '' });
   const [cfg, setCfg] = useState<LiveConfig | null>(null);
+  const [provisioning, setProvisioning] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  // Hydrate the form from localStorage on the client (SSR-safe).
+  // Hydrate the last team on the client (SSR-safe).
   useEffect(() => {
-    const saved = loadSaved();
-    if (saved) setForm({ ...DEFAULTS, ...saved });
+    if (typeof window === 'undefined') return;
+    setTeam(window.localStorage.getItem(TEAM_KEY) ?? '');
   }, []);
 
   const { envelopes, roster, status, error, liveIds } = useLiveStream(cfg);
 
-  const connect = () => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(form));
+  const watch = async () => {
+    setFormError(null);
+    const slug = team.trim();
+    if (!slug) return;
+    window.localStorage.setItem(TEAM_KEY, slug);
+
+    // Advanced: connect as a specific seat the operator supplied.
+    if (advanced.open && advanced.as.trim() && advanced.token.trim()) {
+      setCfg({ team: slug, as: advanced.as.trim(), token: advanced.token.trim() });
+      return;
     }
-    setCfg({ ...form });
+
+    // Default: reuse this browser's observer seat for the team, or provision one.
+    let creds = loadObserver(slug);
+    if (!creds) {
+      setProvisioning(true);
+      try {
+        const name = genObserverName();
+        const token = await provisionObserver(slug, name);
+        creds = { name, token };
+        saveObserver(slug, creds);
+      } catch (e) {
+        setFormError(e instanceof Error ? e.message : String(e));
+        setProvisioning(false);
+        return;
+      }
+      setProvisioning(false);
+    }
+    setCfg({ team: slug, as: creds.name, token: creds.token });
   };
-  const disconnect = () => setCfg(null);
+
+  // On a terminal connection error (e.g. a stale observer token after a daemon reset), drop the
+  // stored observer so the next Watch re-provisions a fresh one.
+  const reset = () => {
+    if (cfg) forgetObserver(cfg.team);
+    setCfg(null);
+  };
 
   const connected = cfg != null;
-  const canConnect = form.team && form.as && form.token;
 
   return (
     <main className="lc">
@@ -61,17 +108,19 @@ function LivePage() {
 
       {!connected ? (
         <ConnectForm
-          form={form}
-          onChange={setForm}
-          onConnect={connect}
-          canConnect={!!canConnect}
-          error={error}
+          team={team}
+          onTeam={setTeam}
+          advanced={advanced}
+          onAdvanced={setAdvanced}
+          onWatch={watch}
+          provisioning={provisioning}
+          error={formError}
         />
       ) : (
         <>
           {error && (
             <div className="lc__error">
-              {error} <button onClick={disconnect}>change connection</button>
+              {error} <button onClick={reset}>reset &amp; reconnect</button>
             </div>
           )}
           <div className="lc__canvas">
@@ -101,49 +150,76 @@ function StatusPill({ status, live }: { status: ConnStatus; live: number }) {
 }
 
 function ConnectForm({
-  form,
-  onChange,
-  onConnect,
-  canConnect,
+  team,
+  onTeam,
+  advanced,
+  onAdvanced,
+  onWatch,
+  provisioning,
   error,
 }: {
-  form: LiveConfig;
-  onChange: (c: LiveConfig) => void;
-  onConnect: () => void;
-  canConnect: boolean;
+  team: string;
+  onTeam: (v: string) => void;
+  advanced: { open: boolean; as: string; token: string };
+  onAdvanced: (a: { open: boolean; as: string; token: string }) => void;
+  onWatch: () => void;
+  provisioning: boolean;
   error: string | null;
 }) {
-  const field = (
-    key: keyof LiveConfig,
-    label: string,
-    placeholder: string,
-    type = 'text',
-  ) => (
-    <label className="lc-form__field">
-      <span>{label}</span>
-      <input
-        type={type}
-        value={form[key]}
-        placeholder={placeholder}
-        onChange={(e) => onChange({ ...form, [key]: e.target.value })}
-      />
-    </label>
-  );
   return (
     <div className="lc-form">
       <div className="lc-form__card">
         <h1 className="lc-form__title">Watch the team, live</h1>
         <p className="lc-form__sub">
-          Stream all of a team&apos;s communication from the connected daemon. Reads only. Provision a
-          hidden observer seat with <code>musterd team observe &lt;name&gt;</code> so watching never
-          shows you on the roster.
+          Enter a team to stream all of its communication. A hidden read-only observer seat is created
+          for you — watching never shows you on the roster.
         </p>
-        {field('team', 'Team', 'alpha')}
-        {field('as', 'Observe as', 'your member name')}
-        {field('token', 'Token', 'mskd_…', 'password')}
+        <label className="lc-form__field">
+          <span>Team</span>
+          <input
+            type="text"
+            value={team}
+            placeholder="alpha"
+            autoFocus
+            onChange={(e) => onTeam(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && onWatch()}
+          />
+        </label>
+
+        {advanced.open && (
+          <>
+            <label className="lc-form__field">
+              <span>Observe as (seat)</span>
+              <input
+                type="text"
+                value={advanced.as}
+                placeholder="your seat name"
+                onChange={(e) => onAdvanced({ ...advanced, as: e.target.value })}
+              />
+            </label>
+            <label className="lc-form__field">
+              <span>Token</span>
+              <input
+                type="password"
+                value={advanced.token}
+                placeholder="mskd_…"
+                onChange={(e) => onAdvanced({ ...advanced, token: e.target.value })}
+              />
+            </label>
+          </>
+        )}
+
         {error && <p className="lc-form__error">{error}</p>}
-        <button className="lc-form__connect" disabled={!canConnect} onClick={onConnect}>
-          Connect
+
+        <button className="lc-form__connect" disabled={!team.trim() || provisioning} onClick={onWatch}>
+          {provisioning ? 'Provisioning observer…' : 'Watch live'}
+        </button>
+
+        <button
+          className="lc-form__advanced"
+          onClick={() => onAdvanced({ ...advanced, open: !advanced.open })}
+        >
+          {advanced.open ? 'Use an auto observer instead' : 'Advanced — connect as a specific seat'}
         </button>
       </div>
     </div>
