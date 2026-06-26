@@ -1,5 +1,5 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   LiveClient,
   fetchHistory,
@@ -25,7 +25,6 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
   const [roster, setRoster] = useState<MemberSummary[]>([]);
   const [status, setStatus] = useState<ConnStatus>('idle');
   const [error, setError] = useState<string | null>(null);
-  const seen = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!cfg) {
@@ -33,24 +32,19 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
       return;
     }
     let alive = true;
-    seen.current = new Set();
     setEnvelopes([]);
     setError(null);
     setStatus('connecting');
 
+    // Dedupe by id against the *previous array* only — the updater must stay pure (no external
+    // mutation), or React StrictMode's double-invoke commits the second (empty) result. Delivery is
+    // at-least-once and a backfilled message can also arrive live, so dedup is load-bearing.
     const add = (incoming: Envelope[]) => {
       setEnvelopes((prev) => {
-        const next = prev.slice();
-        let changed = false;
-        for (const e of incoming) {
-          if (seen.current.has(e.id)) continue;
-          seen.current.add(e.id);
-          next.push(e);
-          changed = true;
-        }
-        if (!changed) return prev;
-        next.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
-        return next;
+        const have = new Set(prev.map((e) => e.id));
+        const fresh = incoming.filter((e) => !have.has(e.id));
+        if (fresh.length === 0) return prev;
+        return [...prev, ...fresh].sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
       });
     };
 
