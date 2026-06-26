@@ -185,6 +185,9 @@ importers:
 
   packages/web:
     dependencies:
+      '@musterd/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@tanstack/react-router':
         specifier: 1.170.16
         version: 1.170.16(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
