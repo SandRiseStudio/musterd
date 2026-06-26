@@ -78,9 +78,11 @@ Sequential, never renumbered. Template:
 The **Observability & Evaluation** section (ADR 052) answers, for any agent-facing feature: **Traces** —
 what spans/coordination acts + agent-turn detail it emits (ADR 051); **Eval** — its success metric, the
 dataset, and the **baseline** to compare against; **Experiment** — what would validate it (may be "none
-yet", but named). A planned `obs-evals:check` guard (modeled on `check-arch-trees.ts`) would enforce
-presence and shape, not content — **not yet wired into `format:check`** (which today runs prettier +
-`roadmap:check` + `arch-trees:check`).
+yet", but named). The `obs-evals:check` guard (`scripts/check-obs-evals.ts`, modeled on
+`check-arch-trees.ts`) enforces presence and shape, not content, and **is wired into `format:check`**
+(prettier + `roadmap:check` + `arch-trees:check` + `obs-evals:check`). It enforces from **ADR 060 onward**;
+ADRs 001–059 predate the gate and are grandfathered (this DoD clause still asks every agent-facing change
+for the section regardless of number).
 
 Known ADRs to write while implementing (because the docs already flagged simplifications): **001 — members table folds memberships** (`01-data-model.md`), plus any dep additions (`hono`, `cac`/`mri`, `tsup`) and any protocol-schema change.
 

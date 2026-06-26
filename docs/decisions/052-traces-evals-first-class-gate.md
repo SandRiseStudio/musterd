@@ -1,7 +1,7 @@
 # 052 — Traces & evals as definition-of-done: the first-class gate
 
-- Status: proposed
-- Date: 2026-06-24
+- Status: accepted
+- Date: 2026-06-24 (gate built 2026-06-26)
 
 ## Context
 
@@ -43,10 +43,24 @@ docs — cheaply, this week, without a platform and without cargo-culted evals w
 - Cheap and compounding: from now on, features built through Waves 1–3 carry traces + evals by default,
   so batond's engine (ADR 051) has real data to consume when it lands — no retrofit.
 - Reuses an existing, trusted mechanism (`format:check` + the ADR 043 checker pattern); low new surface.
-- **Built here vs greenlit here:** the ADR template section and the DoD clause are documentation and land
-  with this ADR. The `obs-evals:check` script is named as the this-week implementation task, tracked on
-  the roadmap (`obs-evals-gate`), not written in this commit.
+- **Now built (2026-06-26):** the ADR template section (`07-conventions.md`), the DoD clause, and the
+  `obs-evals:check` guard (`scripts/check-obs-evals.ts`, wired into `pnpm format:check`) all landed.
+  The checker mirrors `check-arch-trees.ts`: it enforces *presence and shape* (the section exists and
+  answers Traces / Eval / Experiment, or is an explicit `n/a — <reason>`), never content.
+- **Grandfathering (pragmatic):** the gate enforces from **ADR 060 onward**. ADRs 001–059 predate it and
+  are exempt — 052 is the gate itself and 056 already carries the section voluntarily; the rest are
+  pre-gate history we do not retrofit. The DoD clause in `07-conventions.md` still asks every agent-facing
+  change for the section regardless of number, so the practice runs ahead of the mechanical cutoff.
 - Risk — gaming via empty/`n/a` sections — is bounded by the baseline-and-reason requirements and normal
   review; the gate guarantees the *question is asked*, not that the answer is good.
 - Implements the day-to-day discipline ADR 051 depends on. Composes with ADR 041/043 (the checker
   family) and `07-conventions.md` (template + DoD).
+
+## Observability & Evaluation
+
+n/a as an agent-facing feature — this is a build-time documentation gate, not a runtime act, so it emits
+no coordination traces. Its own success is measurable, though: the **eval** is the share of in-scope ADRs
+(≥ 060) that carry a non-cargo-culted section — metric is reviewer-judged section quality, **dataset** is
+the ADR corpus, **baseline** is the pre-gate state (only 056 carried it voluntarily). The **experiment**
+worth running once batond exists: do features whose ADR named a real eval actually ship measurably better
+coordination outcomes than those that wrote `n/a` — i.e. does the gate change results, not just paperwork?
