@@ -30,7 +30,12 @@ import {
   rotateToken,
   setAvailability,
 } from '../store/members.js';
-import { latestStatusUpdate, listInbox, rowToEnvelope } from '../store/messages.js';
+import {
+  latestStatusUpdate,
+  listInbox,
+  listTeamMessages,
+  rowToEnvelope,
+} from '../store/messages.js';
 import {
   attach,
   clearMemberPresence,
@@ -300,6 +305,25 @@ export async function handleHttp(
           return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
         });
         return sendJson(res, 200, { messages, cursor });
+      }
+
+      // The whole team timeline — every envelope, not just the caller's inbox — for the firehose's
+      // history backfill (ADR 061). The dashboard GETs this, then live-tails via `subscribe team-all`.
+      // Authed like /inbox (any team member); read-only.
+      if (method === 'GET' && rest === '/messages') {
+        const { team } = authTouch(ctx, slug, req);
+        const since = url.searchParams.get('since');
+        const limit = url.searchParams.get('limit');
+        const rows = listTeamMessages(ctx.db, team.id, {
+          ...(since ? { since: Number(since) } : {}),
+          ...(limit ? { limit: Math.min(Math.max(Number(limit), 1), 1000) } : {}),
+        });
+        const messages = rows.map((r) => {
+          const from = getMemberById(ctx.db, r.from_member);
+          const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
+          return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
+        });
+        return sendJson(res, 200, { messages });
       }
 
       if (method === 'POST' && rest === '/inbox/cursor') {

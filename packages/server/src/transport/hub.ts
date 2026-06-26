@@ -19,6 +19,8 @@ export interface Connection {
 export class Hub {
   private byMember = new Map<string, Set<Connection>>();
   private byConn = new Map<string, Connection>();
+  /** connIds that opted into the team firehose (`subscribe` scope `team-all`, ADR 061). */
+  private firehose = new Set<string>();
 
   add(conn: Connection): void {
     this.byConn.set(conn.connId, conn);
@@ -34,6 +36,7 @@ export class Hub {
     const conn = this.byConn.get(connId);
     if (!conn) return;
     this.byConn.delete(connId);
+    this.firehose.delete(connId);
     const set = this.byMember.get(conn.memberId);
     if (set) {
       set.delete(conn);
@@ -60,5 +63,27 @@ export class Hub {
 
   connsForMember(memberId: string): Connection[] {
     return [...(this.byMember.get(memberId) ?? [])];
+  }
+
+  /** Opt a connection into the team firehose (ADR 061). Cleared on `remove`. */
+  subscribeFirehose(connId: string): void {
+    this.firehose.add(connId);
+  }
+
+  /**
+   * Push a frame to every firehose subscriber on a team, skipping members in `skipMemberIds`
+   * (recipients + sender already handled by `deliver`/`ack`, so no one is double-sent). Returns
+   * how many connections got it.
+   */
+  broadcastFirehose(teamId: string, frame: WSServerFrame, skipMemberIds?: Set<string>): number {
+    let n = 0;
+    for (const connId of this.firehose) {
+      const conn = this.byConn.get(connId);
+      if (!conn || conn.teamId !== teamId) continue;
+      if (skipMemberIds?.has(conn.memberId)) continue;
+      conn.send(frame);
+      n++;
+    }
+    return n;
   }
 }

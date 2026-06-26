@@ -91,13 +91,30 @@ export function latestStatusUpdate(
   return state ? { state, ts: row.ts } : null;
 }
 
-export function listTeamMessages(db: Database, teamId: string, limit = 200): MessageRow[] {
-  return db
-    .prepare<
-      [string, number],
-      MessageRow
-    >('SELECT * FROM messages WHERE team_id = ? ORDER BY ts ASC, id ASC LIMIT ?')
-    .all(teamId, limit);
+export interface TeamMessagesOpts {
+  since?: number;
+  limit?: number;
+}
+
+/**
+ * The whole team timeline — every persisted envelope, regardless of recipient — for the firehose's
+ * history backfill (`GET /teams/:slug/messages`, ADR 061). `since` (exclusive, by ts) pages forward;
+ * `limit` caps the page (default 200).
+ */
+export function listTeamMessages(
+  db: Database,
+  teamId: string,
+  opts: TeamMessagesOpts = {},
+): MessageRow[] {
+  const params: unknown[] = [teamId];
+  let sql = 'SELECT * FROM messages WHERE team_id = ?';
+  if (typeof opts.since === 'number') {
+    sql += ' AND ts > ?';
+    params.push(opts.since);
+  }
+  sql += ' ORDER BY ts ASC, id ASC LIMIT ?';
+  params.push(opts.limit ?? 200);
+  return db.prepare<unknown[], MessageRow>(sql).all(...params);
 }
 
 /** Convert a stored row back to a protocol Envelope (for delivery/inbox responses). */

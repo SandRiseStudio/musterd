@@ -162,7 +162,10 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
 
         switch (frame.type) {
           case 'subscribe': {
-            send(ws, { type: 'subscribed', scope: 'team' });
+            // `team-all` = the firehose: this connection receives every envelope routed on the team,
+            // not just recipient-matched ones — for read-only observers like the dashboard (ADR 061).
+            if (frame.scope === 'team-all') ctx.hub.subscribeFirehose(conn.connId);
+            send(ws, { type: 'subscribed', scope: frame.scope });
             break;
           }
           case 'heartbeat': {

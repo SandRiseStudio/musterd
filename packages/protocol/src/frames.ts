@@ -29,7 +29,9 @@ export const HelloFrame = z.object({
 
 export const SubscribeFrame = z.object({
   type: z.literal('subscribe'),
-  scope: z.enum(['team']).default('team'),
+  // `team` (default) = recipient-routed delivery, unchanged. `team-all` = the firehose: every
+  // envelope routed on the team, for read-only observers like the web dashboard (ADR 061).
+  scope: z.enum(['team', 'team-all']).default('team'),
 });
 
 export const SendFrame = z.object({
@@ -61,7 +63,7 @@ export const WelcomeFrame = z.object({
 
 export const SubscribedFrame = z.object({
   type: z.literal('subscribed'),
-  scope: z.enum(['team']),
+  scope: z.enum(['team', 'team-all']),
 });
 
 export const AckFrame = z.object({

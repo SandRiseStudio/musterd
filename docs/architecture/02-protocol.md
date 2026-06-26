@@ -60,10 +60,10 @@ Handshake state machine: `connecting → hello → authenticated → subscribed 
 
 1. **Client → `hello`**: `{ "type":"hello", "v":"musterd/0.3", "team":"dawn", "as":"Ada", "token":"<member token>", "surface":"claude-code" }`
 2. **Server → `welcome`** (on success): `{ "type":"welcome", "member": <Member>, "presence_id":"01J...", "server_time": 1733760000000 }`. Server creates/refreshes a `presence` row (status `online`). On failure → `error` frame (see codes) then close.
-3. **Client → `subscribe`** (optional scoping; default = team): `{ "type":"subscribe", "scope":"team" }` → Server `subscribed`.
+3. **Client → `subscribe`** (optional scoping; default = team): `{ "type":"subscribe", "scope":"team" }` → Server `subscribed`. Scope `"team-all"` opens the **firehose** — every envelope routed on the team, not just recipient-matched ones — for read-only observers like the web dashboard (ADR 061). Pair it with `GET …/messages` for history backfill.
 4. **Live frames:**
    - Client → `send`: `{ "type":"send", "envelope": <Envelope> }` → server validates, persists, routes; replies `{ "type":"ack", "id": <envelope.id> }`.
-   - Server → `deliver`: `{ "type":"deliver", "envelope": <Envelope> }` for each message routed to this member's presence.
+   - Server → `deliver`: `{ "type":"deliver", "envelope": <Envelope> }` for each message routed to this member's presence — or, for a `team-all` subscriber, every envelope on the team (deduped against recipients + sender, so a normal recipient never gets it twice).
    - Client → `heartbeat`: `{ "type":"heartbeat" }` every **15s**; server updates `last_seen_at`. (Server may also treat any inbound frame as a heartbeat.)
    - Server → `presence`: `{ "type":"presence", "member":"Lin", "status":"online", "surface":"codex" }` on roster presence changes.
    - Either → `error`: `{ "type":"error", "code":"...", "message":"..." }`.
@@ -87,6 +87,7 @@ Base `http://localhost:4849`. JSON in/out. Auth via `Authorization: Bearer <memb
 | `POST` | `/teams/:slug/unbind` | — | `{ "ok", "member" }` | `unbind`: the caller releases **its own** seat (authed by own token) — clears presence + `bound_at` back to *declared*; the seat stays on the team (ADR 058) |
 | `POST` | `/teams/:slug/messages` | `{ "envelope" }` | `{ "ack": <message> }` | send via HTTP (no live socket) |
 | `GET`  | `/teams/:slug/inbox?since=<cursor>&unread=1` | — | `{ "messages":[…], "cursor":{…} }` | inbox fetch |
+| `GET`  | `/teams/:slug/messages?since=<ts>&limit=<n>` | — | `{ "messages":[…] }` | whole-team timeline (firehose history backfill, ADR 061) |
 | `POST` | `/teams/:slug/inbox/cursor` | `{ "last_read_message_id" }` | `{ "cursor" }` | mark read |
 | `POST` | `/teams/:slug/presence` | `{ "surface","status?" }` | `{ "presence" }` | stateless presence ping |
 | `POST` | `/teams/:slug/availability` | `{ "status","until?" }` | `{ <member summary> }` | set your own availability axis (ADR 044) |

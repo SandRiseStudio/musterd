@@ -68,6 +68,22 @@ function routeEnvelopeInner(
     delivered += ctx.hub.deliver(recipientId, { type: 'deliver', envelope: outgoing });
   }
 
+  // Fan out to firehose observers (ADR 061): every envelope on the team, for read-only watchers like
+  // the dashboard. Skip recipients (already delivered) and the sender (got an ack) so no double-send.
+  const firehoseEnv = rowToEnvelope(
+    message,
+    team.slug,
+    sender.name,
+    env.to.kind === 'member' ? env.to.name : null,
+  );
+  const skip = new Set(recipients);
+  skip.add(sender.id);
+  const firehoseDelivered = ctx.hub.broadcastFirehose(
+    team.id,
+    { type: 'deliver', envelope: firehoseEnv },
+    skip,
+  );
+
   log.info({
     msg: 'route',
     team: team.slug,
@@ -76,6 +92,7 @@ function routeEnvelopeInner(
     to: env.to.kind,
     recipients: recipients.length,
     delivered,
+    firehose_delivered: firehoseDelivered,
   });
 
   return { message, recipients, delivered };

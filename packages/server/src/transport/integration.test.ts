@@ -94,6 +94,13 @@ class TestWs {
     this.send({ type: 'hello', v: PROTOCOL_VERSION, team, as, token, surface });
     return this.waitFor('welcome');
   }
+  subscribe(scope: 'team' | 'team-all' = 'team') {
+    this.send({ type: 'subscribe', scope });
+    return this.waitFor('subscribed');
+  }
+  countFrames(type: string) {
+    return this.frames.filter((f) => f.type === type).length;
+  }
   close() {
     this.ws.close();
   }
@@ -306,6 +313,97 @@ describe('WebSocket', () => {
 
     a.close();
     l.close();
+  });
+
+  it('firehose (subscribe team-all): an observer sees a directed DM between two other members (ADR 061)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    const lin = await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    const obs = await post('/teams/dawn/members', { name: 'Obs', kind: 'agent' }, tok);
+
+    const a = new TestWs();
+    const l = new TestWs();
+    const o = new TestWs();
+    await Promise.all([a.open(), l.open(), o.open()]);
+    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    await l.hello('dawn', 'Lin', lin.json.token, 'codex');
+    await o.hello('dawn', 'Obs', obs.json.token, 'web');
+
+    // Lin is the recipient AND a firehose subscriber (tests dedup); Obs is a pure observer.
+    const linSub = await l.subscribe('team-all');
+    const obsSub = await o.subscribe('team-all');
+    expect((linSub as any).scope).toBe('team-all');
+    expect((obsSub as any).scope).toBe('team-all');
+
+    a.send({
+      type: 'send',
+      envelope: {
+        id: 'fh1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'member', name: 'Lin' },
+        act: 'request_help',
+        body: 'firehose ping',
+        ts: Date.now(),
+      },
+    });
+    await a.waitFor('ack');
+
+    // The observer — not addressed — still receives the directed envelope.
+    const obsDeliver = await o.waitFor('deliver');
+    expect((obsDeliver as any).envelope.body).toBe('firehose ping');
+    expect((obsDeliver as any).envelope.to).toEqual({ kind: 'member', name: 'Lin' });
+
+    // The recipient gets it exactly once, despite also being on the firehose (dedup via skip set).
+    await l.waitFor('deliver');
+    await new Promise((r) => setTimeout(r, 40));
+    expect(l.countFrames('deliver')).toBe(1);
+
+    a.close();
+    l.close();
+    o.close();
+  });
+
+  it('GET /messages returns the whole team timeline incl. DMs between others, with since/limit (ADR 061)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    const lin = await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+
+    const mk = (id: string, from: string, to: any, body: string, ts: number) => ({
+      id,
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from,
+      to,
+      act: 'message',
+      body,
+      ts,
+    });
+    // A directed Ada→Lin DM (nick is neither sender nor recipient) + a team broadcast from Lin.
+    await post(
+      '/teams/dawn/messages',
+      { envelope: mk('t1', 'Ada', { kind: 'member', name: 'Lin' }, 'dm', 1000) },
+      ada.json.token,
+    );
+    await post(
+      '/teams/dawn/messages',
+      { envelope: mk('t2', 'Lin', { kind: 'team' }, 'all', 2000) },
+      lin.json.token,
+    );
+
+    // nick — party to neither — sees BOTH via the team timeline (firehose history backfill).
+    const all = await get('/teams/dawn/messages', tok);
+    expect(all.json.messages.map((m: any) => m.id)).toEqual(['t1', 't2']);
+
+    // `since` pages forward (exclusive); `limit` caps.
+    const since = await get('/teams/dawn/messages?since=1000', tok);
+    expect(since.json.messages.map((m: any) => m.id)).toEqual(['t2']);
+    const limited = await get('/teams/dawn/messages?limit=1', tok);
+    expect(limited.json.messages).toHaveLength(1);
+    expect(limited.json.messages[0].id).toBe('t1');
   });
 
   it('a message to an offline member surfaces via inbox', async () => {
