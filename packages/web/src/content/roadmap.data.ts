@@ -280,6 +280,19 @@ export const ROADMAP: RoadmapItem[] = [
     dependsOn: ['claim-on-first-use'],
   },
   {
+    // Leads Wave 1 (2026-06-26 call): cheapest item, and everything built after it carries
+    // traces+evals by default — so the dogfood-loop + governance work below never needs retrofit.
+    id: 'obs-evals-gate',
+    wave: 1,
+    title: 'Traces & evals first-class gate',
+    status: 'near-term',
+    category: 'observability',
+    blurb: 'Every agent-facing feature ships with its traces and an eval, the way it ships with tests — an ADR-template section and a format:check guard enforce it. Leads Wave 1: cheap and compounding, so later features inherit it.',
+    detail:
+      'The cheap, compounding half of the trace → eval → experiment flywheel: an "Observability & Evaluation" section in the ADR template (traces, eval metric + dataset + baseline, experiment) and an obs-evals:check step in format:check, modeled on the arch-tree checker (presence and shape, not content). So features built through later waves carry telemetry by default and batond never retrofits.',
+    refs: [adr(52, 'ADR 052'), adr(51, 'ADR 051'), doc('docs/design/observability.md', 'observability.md')],
+  },
+  {
     id: 'inbox-reaches-blocked-agent',
     wave: 1,
     title: 'Inbox reaches a blocked agent',
@@ -312,17 +325,6 @@ export const ROADMAP: RoadmapItem[] = [
     blurb: 'The papercuts a fresh agent hits in its first five minutes. Partly landed (inbox --unread/--peek/--limit); the rest are still open.',
     detail:
       'Dogfood papercuts, several from the 2026-06-25 onboarding retry. Landed: inbox gained --unread (foreground unread), --peek, and --limit, so a directed act no longer drowns oldest-first in the @team firehose. Still open and additive: (1) inbox --act/--from filters (the --act handoff flag was a no-op); (2) accept auto-targets the latest open directed act instead of forcing meta.in_reply_to via inbox --json | parse, and inbox surfaces copyable ids; (3) musterd whoami and musterd --version (a fresh agent reaches for both first — still missing); (4) edit/supersede for a sent act, so a correction doesn’t leave overlapping copies in the recipient inbox.',
-  },
-  {
-    id: 'obs-evals-gate',
-    wave: 1,
-    title: 'Traces & evals first-class gate',
-    status: 'near-term',
-    category: 'observability',
-    blurb: 'Every agent-facing feature ships with its traces and an eval, the way it ships with tests — an ADR-template section and a format:check guard enforce it.',
-    detail:
-      'The cheap, compounding half of the trace → eval → experiment flywheel: an "Observability & Evaluation" section in the ADR template (traces, eval metric + dataset + baseline, experiment) and an obs-evals:check step in format:check, modeled on the arch-tree checker (presence and shape, not content). So features built through later waves carry telemetry by default and batond never retrofits.',
-    refs: [adr(52, 'ADR 052'), adr(51, 'ADR 051'), doc('docs/design/observability.md', 'observability.md')],
   },
 
   // Wave 2 — the v0.3 governance rock, then the full governed notification tiers it unlocks.
