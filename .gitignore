@@ -4,7 +4,9 @@ dist/
 coverage/
 .DS_Store
 *.log
-.musterd/
+# ADR 058: the durable seat roster (.musterd/team.toml + seats/) is committed; only the
+# secret-bearing binding token is ignored — in any folder (** covers root + nested).
+**/.musterd/binding.json
 *.db
 *.db-wal
 *.db-shm
