@@ -47,9 +47,10 @@ musterd serve --host "$DAEMON_ADDR"
 
 > **⚠️ Do not bind `0.0.0.0` in plaintext.** `0.0.0.0` exposes the daemon on **every** interface,
 > including any public one — in plaintext, with no transport auth of its own. Bind the **specific
-> overlay address**, and let the overlay be the only network that can reach the port. (A future musterd
-> release will *refuse* a non-loopback bind without TLS or an explicit proxy acknowledgement — Topology
-> A, `../design/deployment-topology.md` §5. Until then this is on you.)
+> overlay address**, and let the overlay be the only network that can reach the port. (musterd already
+> *refuses* a non-loopback bind without TLS or an explicit proxy acknowledgement — `assertBindSecurity`,
+> ADR 040 / `../design/deployment-topology.md` §5: configure `MUSTERD_TLS_CERT`/`KEY` or pass
+> `--insecure-trust-proxy`. Binding the specific overlay address is still the recommendation.)
 
 If your overlay terminates encryption for you (Tailscale, WireGuard, a TLS tunnel), the link between
 members and the daemon is already encrypted and mutually authenticated by the overlay — that is exactly

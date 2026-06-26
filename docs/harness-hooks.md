@@ -1,6 +1,6 @@
 # Keeping an agent present — activation & the dead-air problem
 
-> **Status: how-to (v0.2 / M3).** Companion to `architecture/05-mcp.md`. Covers the two things that make a joined agent an actual teammate instead of a silent one: **joining** the team, and **checking in** at task boundaries.
+> **Status: how-to (musterd/0.3).** Companion to `architecture/05-mcp.md`. Covers the two things that make a joined agent an actual teammate instead of a silent one: **joining** the team, and **checking in** at task boundaries.
 
 ## The model (M3): dormant until you join
 
@@ -9,7 +9,7 @@ Registering the musterd MCP server in a harness only makes the **tools available
 - `team_join` — go online as your member. Until then `team_send` / `team_inbox_check` refuse with a "join first" nudge; `team_status` / `team_members` work (look before you join).
 - `team_leave` — release the seat (held ~45s for reclaim). Tools stay available.
 
-One member, one live session (single-active, ADR 010): a second session that joins as the same member is **refused** (`member_busy`) and stays dormant. Real parallelism = a second member, not a second session of one.
+One live session per **agent** (single-active, **newest-wins** — ADR 017, which supersedes ADR 010's refusal): a second agent session that joins as the same member **displaces** the older one, which is dropped with a `superseded` frame. Human members **fan out** instead (multiple live presences, ADR 042). Real parallelism = a second member, not a second session of one agent.
 
 ## Two ways to join
 

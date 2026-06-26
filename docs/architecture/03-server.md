@@ -16,7 +16,7 @@ The daemon. SQLite store + WebSocket + HTTP API + presence tracker + inbox deliv
 
 ```
 src/
-  index.ts            // entry: createServer(opts) -> { listen, close }; CLI bin starts it
+  index.ts            // entry: createServer(opts) -> { listen, reload, close, db, port, dbPath, scheme }; CLI bin starts it
   config.ts           // env + defaults (port 4849, host, db path, tunable timeouts) + secured-bind guard, scheme, Origin/Host check (ADR 040)
   context.ts          // Ctx: the per-server bundle (db, hub, config, rosterRoots) threaded through routing/transport
   db/
@@ -56,16 +56,24 @@ src/
 
 ```ts
 // index.ts
-export interface ServerOptions { port?: number; host?: string; dbPath?: string; db?: Database; }
+export interface ServerOptions {
+  port?: number; host?: string; dbPath?: string; db?: Database;  // db is injected for tests
+  tlsCert?: string; tlsKey?: string; trustProxy?: boolean;       // native TLS / proxy ack (ADR 040)
+  rosterRoots?: string[];                                        // durable roster roots (ADR 058); [] disables reconcile
+}
 export function createServer(opts?: ServerOptions): {
   listen(): Promise<{ port: number; host: string }>;
+  reload(): void;          // re-resolve roster roots + reconcile + re-point the watcher (SIGHUP, ADR 058)
   close(): Promise<void>;
   db: Database;            // exposed for tests
+  readonly port: number;   // bound port (after listen())
+  readonly dbPath: string; // the db this daemon serves (diagnostics)
+  readonly scheme: 'ws' | 'wss';
 };
 
 // protocol/route.ts — the heart. Used by both transports.
 export interface RouteResult { message: StoredMessage; recipients: string[] /* member ids */; }
-export function routeEnvelope(ctx: Ctx, sender: Member, env: Envelope): RouteResult;
+export function routeEnvelope(ctx: Ctx, team: TeamRow, sender: Member, env: Envelope): RouteResult;
 //  steps: validate(env) -> assert sender.name===env.from & sender.team===env.team
 //         -> persist via messages.insertMessage
 //         -> resolve recipients (member|team|broadcast)
@@ -90,12 +98,14 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 
 1. Load config (`config.ts`): port `MUSTERD_PORT||4849`, host `MUSTERD_HOST||127.0.0.1`, db `MUSTERD_DB||~/.musterd/musterd.db` (or injected `db` for tests), plus TLS (`MUSTERD_TLS_CERT`/`MUSTERD_TLS_KEY`), `--insecure-trust-proxy`, the WS upgrade allowlists (`MUSTERD_ALLOWED_HOSTS`/`MUSTERD_ALLOWED_ORIGINS`), and the env-tunable timeouts (ADR 040).
    - **Secured-bind guard (ADR 040).** `createServer` calls `assertBindSecurity` immediately, before opening the db: it **refuses** a non-loopback host (anything outside `localhost`/`::1`/`127.0.0.0/8`) unless native TLS is configured *or* `--insecure-trust-proxy` is set — a helpful refusal naming the host and the three ways forward. With TLS the daemon is an `https`/`wss` server (`createHttpsServer`); else plaintext `http`/`ws`. Loopback default is unchanged.
-2. `openDb()` → set `WAL` + `foreign_keys` → `runMigrations()`.
-3. Build the `hub` (empty connection registry).
+   - **Roster roots (ADR 058).** Config also resolves the durable seat-roster roots via `resolveRosterRoots` — the union of `MUSTERD_TEAMS_DIR` (comma/colon-separated) and the `rosterHome` registry in `~/.musterd/config.json` (written by `musterd team export`). Watch debounce is `RECONCILE_DEBOUNCE_MS = 250`. An explicit `opts.rosterRoots` (tests) overrides; `[]` disables reconcile.
+2. `openDb()` → set `WAL` + `foreign_keys` → `runMigrations()` (to the latest schema version).
+3. Build the `ctx` bundle (`db`, `hub`, `config`, `rosterRoots`); the `hub` starts as an empty connection registry.
 4. Mount HTTP routes (`transport/http.ts`) and WS upgrade handler (`transport/ws.ts`) on one `http.Server`.
-5. Start the presence `reaper` interval.
-6. `listen(port, host)` → resolve with bound address. The WS upgrade handler runs the pure `checkUpgrade` Origin/Host gate (ADR 040) on every upgrade — a present `Origin` (a browser; CLI/MCP clients send none) must be allowlisted, and the `Host` must be loopback, the bound host, or allowlisted — rejecting with `403` otherwise to blunt cross-site / DNS-rebinding abuse.
-7. `close()`: stop reaper, close all WS conns, close http server, `db.close()`.
+5. **Boot reconcile (ADR 058).** When roster roots exist, `reconcileAll(db, ctx.rosterRoots)` projects the durable `.musterd/` files into the db before serving (logged `reconcile_boot`) — idempotent, so the roster the first request sees matches git.
+6. `listen(port, host)` → resolve with bound address. Then start the presence `reaper` interval and, when roster roots exist, the debounced roster `watcher` (a change → full `reconcileAll`). The WS upgrade handler runs the pure `checkUpgrade` Origin/Host gate (ADR 040) on every upgrade — a present `Origin` (a browser; CLI/MCP clients send none) must be allowlisted, and the `Host` must be loopback, the bound host, or allowlisted — rejecting with `403` otherwise to blunt cross-site / DNS-rebinding abuse.
+7. `reload()` (wired to **SIGHUP** by the daemon bin): re-resolve roster roots, `reconcileAll`, and re-point the watcher — so a team exported after boot is picked up without a restart.
+8. `close()`: stop reaper + watcher, close all WS conns, close http server, `db.close()`.
 
 ## Presence heartbeat rules (load-bearing constants)
 
@@ -147,7 +157,7 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 
 ## Acceptance tests (gate before CLI work — see `06-testing.md`)
 
-- DB opens, migrates to version 1, PRAGMAs set.
+- DB opens, migrates to the latest schema version, PRAGMAs set.
 - `POST /teams` → creates team + creator member + token; duplicate slug → `409 conflict`.
 - `addMember` issues a token whose `sha256` matches stored `token_hash`; plaintext never stored.
 - `routeEnvelope` persists + returns correct recipients for member/team/broadcast; bad act → `422 validation`.

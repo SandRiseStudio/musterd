@@ -77,7 +77,7 @@ Base `http://localhost:4849`. JSON in/out. Auth via `Authorization: Bearer <memb
 
 | Method | Path | Body | Response | Notes |
 |--------|------|------|----------|-------|
-| `GET`  | `/health` | — | `{ "ok":true, "v":"musterd/0.3" }` | liveness |
+| `GET`  | `/health` | — | `{ "ok":true, "v":"musterd/0.3", "db", "schema", "connections" }` | liveness + diagnostics (ADR 016/047) |
 | `POST` | `/teams` | `{ "slug","display?","creator":{ "name","kind":"human","role?" } }` | `{ "team", "member", "token" }` | bootstrap; returns creator's member token |
 | `GET`  | `/teams/:slug` | — | `{ "team", "members":[…] }` | roster |
 | `POST` | `/teams/:slug/members` | `{ "name","kind","role?","lifecycle?","lifecycle_until?" }` | `{ "member", "token" }` | `team add`; token shown once. For a **file-backed** team (ADR 058) this is *project-and-return*: the daemon reconciles the seat's committed `.musterd/seats/<name>.toml` and hands back its token, never originating the seat (a db-only team keeps the legacy originate path). |

@@ -50,7 +50,7 @@ usage:
 
 global flags: --team <slug>  --server <url>  --json  --no-color  --quiet (suppress the reachability nudge)
 
-acts: message status_update request_help handoff accept decline wait`;
+acts: message status_update request_help handoff accept decline wait resolve`;
 
 async function main(argv: string[]): Promise<number> {
   const command = argv[0];
