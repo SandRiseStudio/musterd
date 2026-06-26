@@ -21,6 +21,7 @@ import {
 } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { writeSeatFile } from '../roster.js';
 import { resolve } from './helpers.js';
 
 export async function teamCommand(parsed: Parsed): Promise<number> {
@@ -88,6 +89,13 @@ async function teamAdd(parsed: Parsed): Promise<number> {
   const role = flagStr(parsed.flags, 'role');
   const lifecycle = flagStr(parsed.flags, 'lifecycle') as Lifecycle | undefined;
   const until = flagStr(parsed.flags, 'until');
+  // ADR 058 §5: for a file-backed team the file is the single writer — write `seats/<name>.toml`
+  // first, then `addMember` becomes project-and-return (the daemon reconciles the file, mints, hands
+  // back the token). A db-only team has no roster home, so this is skipped and the daemon originates.
+  const home = loadConfig().rosterHome[team];
+  if (home) {
+    writeSeatFile(home, name, { kind, role, lifecycle, until });
+  }
   const res = await http.addMember(team, {
     name,
     kind,
@@ -250,7 +258,7 @@ async function teamExport(parsed: Parsed): Promise<number> {
   );
   process.stdout.write(
     theme.meta(
-      'restart the daemon to pick up the new roster home; it will then reconcile these files.',
+      'provisioning (team add/claim) is file-backed immediately; SIGHUP the daemon (or restart) so its watcher tracks edits.',
     ) + '\n',
   );
   return 0;

@@ -21,6 +21,7 @@ src/
   args.ts             // argv parser → { command, positionals, flags }
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API
+  roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   errors.ts           // CliError(code) -> message + exit code
   render/
     theme.ts          // ANSI roles from brand.md (online dot, member colors, act badges)
@@ -51,7 +52,8 @@ src/
     init.ts           // musterd init (delegates to onboard/init.ts)
     serve.ts          // musterd serve [--port]
     service.ts        // musterd service install/uninstall/start/stop/restart/status/logs (ADR 045)
-    team.ts           // team create / team add / team remove
+    team.ts           // team create / team add / team remove / team export (ADR 058 db→file migration)
+    fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files (ADR 058 guard 2)
     join.ts           // join
     send.ts           // send
     inbox.ts          // inbox [--watch]

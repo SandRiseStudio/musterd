@@ -10,6 +10,7 @@ import {
   type MemberSummary,
 } from '@musterd/protocol';
 import { z } from 'zod';
+import { resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
@@ -219,7 +220,14 @@ export async function handleHttp(
         // never originating the seat. A *db-only* team (no roster root declares it) keeps the legacy
         // originate path — per-team cutover (migration-bootstrap.md), so un-migrated teams + their
         // tests are untouched.
-        const spec = teamSpecForSlug(ctx.rosterRoots, slug);
+        //
+        // Resolve roots *fresh* per call (union with the boot-time set): a team exported after the
+        // daemon started isn't in `ctx.rosterRoots` yet, but its `rosterHome` is already in the global
+        // config — so without this, provisioning would fall through to the legacy originate path and
+        // double-source a seat that also lives in a file. Re-reading a small JSON on an infrequent
+        // provisioning call is cheap; the boot/watch reconcile catch up on the next reload (SIGHUP).
+        const roots = [...new Set([...ctx.rosterRoots, ...resolveRosterRoots()])];
+        const spec = teamSpecForSlug(roots, slug);
         if (spec) {
           const result = reconcileTeam(ctx.db, spec);
           const team = requireTeam(ctx.db, slug);

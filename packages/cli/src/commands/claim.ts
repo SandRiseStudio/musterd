@@ -17,6 +17,7 @@ import {
   type PendingMarker,
 } from '../onboard/pending.js';
 import { theme } from '../render/theme.js';
+import { writeSeatFile } from '../roster.js';
 
 /** What the caller asked to claim — a named seat, or the next open seat in a role pool. */
 export type ClaimTarget = { seat: string } | { role: string };
@@ -73,6 +74,9 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     adoptToken: flagStr(flags, 'token'),
     surface,
     server,
+    // ADR 058: when this team is file-backed, a fresh mint writes its seat file first (file = single
+    // writer). Adoption/reuse never write — they occupy an already-declared seat.
+    rosterHome: config.rosterHome[team],
   });
 
   const next: Binding = {
@@ -122,6 +126,8 @@ interface ClaimContext {
   adoptToken?: string | undefined;
   surface?: string | undefined;
   server: string;
+  /** This team's roster home, when file-backed (ADR 058) — a fresh mint writes its seat file here. */
+  rosterHome?: string | undefined;
 }
 export interface ClaimResult {
   member: string;
@@ -176,6 +182,8 @@ export async function claimSeat(
       return { member: name, token: ctx.adoptToken, reused: false, adopted: true };
     }
     try {
+      // File-backed (ADR 058): write the seat file first, so `addMember` is project-and-return.
+      if (ctx.rosterHome) writeSeatFile(ctx.rosterHome, name, { kind: 'agent' });
       const res = await http.addMember(team, { name, kind: 'agent' });
       return { member: name, token: res.token as string, reused: false };
     } catch (err) {
@@ -189,6 +197,7 @@ export async function claimSeat(
   for (let attempt = 0; attempt < 2; attempt++) {
     const handle = nextRoleHandle(role, taken);
     try {
+      if (ctx.rosterHome) writeSeatFile(ctx.rosterHome, handle, { kind: 'agent', role });
       const res = await http.addMember(team, { name: handle, kind: 'agent', role });
       return { member: handle, token: res.token as string, reused: false };
     } catch (err) {

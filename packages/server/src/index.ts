@@ -40,6 +40,8 @@ export interface ServerOptions {
 
 export interface RunningServer {
   listen: () => Promise<{ port: number; host: string }>;
+  /** Re-resolve roster roots + reconcile + re-point the watcher (ADR 058). Wired to SIGHUP by the bin. */
+  reload: () => void;
   close: () => Promise<void>;
   db: Database;
   /** The bound port, available after listen() resolves. */
@@ -63,8 +65,10 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
   const db = opts.db ?? openDb(config.dbPath);
   const hub = new Hub();
   // Durable roster roots (ADR 058): explicit list (tests) or the rosterHome registry + env override.
-  const rosterRoots = opts.rosterRoots ?? resolveRosterRoots();
-  const ctx: Ctx = { db, hub, config, rosterRoots };
+  // An explicit list is fixed (hermetic tests); otherwise `reload()` re-resolves from the registry so
+  // a team exported after the daemon started is picked up without a restart.
+  const rootsExplicit = opts.rosterRoots !== undefined;
+  const ctx: Ctx = { db, hub, config, rosterRoots: opts.rosterRoots ?? resolveRosterRoots() };
 
   const handler = (
     req: import('node:http').IncomingMessage,
@@ -83,6 +87,17 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
   let stopWatcher: (() => void) | null = null;
   let stopTelemetry: (() => Promise<void>) | null = null;
   let boundPort = config.port;
+
+  // (Re)start the roster watcher for the current `ctx.rosterRoots`. Reused by listen() and reload().
+  const startWatching = () => {
+    stopWatcher?.();
+    stopWatcher = null;
+    if (ctx.rosterRoots.length > 0) {
+      stopWatcher = startRosterWatcher(ctx.rosterRoots, RECONCILE_DEBOUNCE_MS, () => {
+        reconcileAll(db, ctx.rosterRoots);
+      });
+    }
+  };
 
   return {
     db,
@@ -107,9 +122,9 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
       }
       // Boot floor (ADR 058): project the durable files into the db before serving, so the roster the
       // first request sees matches git. Idempotent — safe to re-run; the watcher takes over at runtime.
-      if (rosterRoots.length > 0) {
-        const summary = reconcileAll(db, rosterRoots);
-        log.info({ msg: 'reconcile_boot', teams: summary.length, roots: rosterRoots.length });
+      if (ctx.rosterRoots.length > 0) {
+        const summary = reconcileAll(db, ctx.rosterRoots);
+        log.info({ msg: 'reconcile_boot', teams: summary.length, roots: ctx.rosterRoots.length });
       }
       return await new Promise((resolve, reject) => {
         http.once('error', reject);
@@ -117,11 +132,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
           const addr = http.address();
           boundPort = typeof addr === 'object' && addr ? addr.port : config.port;
           stopReaper = startReaper(ctx);
-          if (rosterRoots.length > 0) {
-            stopWatcher = startRosterWatcher(rosterRoots, RECONCILE_DEBOUNCE_MS, () => {
-              reconcileAll(db, rosterRoots);
-            });
-          }
+          startWatching();
           log.info({
             msg: 'listening',
             host: config.host,
@@ -134,6 +145,15 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
           resolve({ port: boundPort, host: config.host });
         });
       });
+    },
+    reload() {
+      // Re-resolve roster roots from the registry (a team may have been exported since boot), then
+      // re-reconcile and re-point the watcher. Explicit (test) roots are fixed and not re-resolved.
+      // Wired to SIGHUP by the daemon bin — the lib never grabs process signals (tests would clash).
+      if (!rootsExplicit) ctx.rosterRoots = resolveRosterRoots();
+      const summary = reconcileAll(db, ctx.rosterRoots);
+      startWatching();
+      log.info({ msg: 'reconcile_reload', teams: summary.length, roots: ctx.rosterRoots.length });
     },
     close() {
       return new Promise((resolve) => {

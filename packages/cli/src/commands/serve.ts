@@ -37,6 +37,12 @@ export async function serveCommand(parsed: Parsed): Promise<number> {
   process.stdout.write(theme.meta(`  db: ${server.dbPath}`) + '\n');
   process.stdout.write(theme.meta('ctrl-c to stop') + '\n');
 
+  // SIGHUP reloads the durable roster (ADR 058): re-resolve roots + reconcile, so a team exported
+  // after the daemon started is picked up without a restart.
+  process.on('SIGHUP', () => {
+    server.reload();
+    process.stdout.write(theme.meta('reloaded roster roots (SIGHUP)') + '\n');
+  });
   await new Promise<void>((resolveP) => {
     process.on('SIGINT', () => {
       void server.close().then(() => resolveP());

@@ -2,6 +2,7 @@
 import { parseArgs } from './args.js';
 import { availabilityCommand } from './commands/availability.js';
 import { claimCommand } from './commands/claim.js';
+import { fmtCommand } from './commands/fmt.js';
 import { reachabilityNudge } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
@@ -96,6 +97,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return notifyCommand(rest);
     case 'claim':
       return claimCommand(rest);
+    case 'fmt':
+      return fmtCommand(rest);
     case 'reclaim':
       return reclaimCommand(rest);
     case 'role':
