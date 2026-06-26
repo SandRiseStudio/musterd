@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { loadConfig, rememberIdentity, saveBinding, type Config } from './config.js';
+import { loadConfig, rememberIdentity, removeBinding, saveBinding, type Config } from './config.js';
 
 describe('binding registry (ADR 020)', () => {
   let dir: string;
@@ -42,6 +42,20 @@ describe('binding registry (ADR 020)', () => {
     // An older config without the `bindings` field still loads cleanly.
     writeFileSync(configPath, JSON.stringify({ server: 'http://localhost:4849', identities: {} }));
     expect(loadConfig().bindings).toEqual({});
+  });
+
+  it('removeBinding (ADR 058 unbind) deletes the binding file + drops its registry entry', () => {
+    const p = saveBinding(dir, binding);
+    expect(existsSync(p)).toBe(true);
+    expect(loadConfig().bindings[resolve(dir)]).toBeDefined();
+
+    const removed = removeBinding(dir);
+    expect(removed).toBe(true);
+    expect(existsSync(p)).toBe(false);
+    expect(loadConfig().bindings[resolve(dir)]).toBeUndefined();
+
+    // Idempotent: removing an already-unbound folder is a clean no-op (false), not an error.
+    expect(removeBinding(dir)).toBe(false);
   });
 });
 

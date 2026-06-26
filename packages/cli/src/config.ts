@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { BINDING_DIR, BINDING_FILE, BindingSchema, type Binding } from '@musterd/protocol';
@@ -75,6 +75,28 @@ export function saveBinding(dir: string, binding: Binding): string {
   }
   recordBinding(dir, binding);
   return p;
+}
+
+/**
+ * Remove this folder's workspace binding (ADR 058 `unbind`): delete the 0600 `binding.json` and drop
+ * its entry from the global `bindings` registry. The inverse of {@link saveBinding}. Returns true if a
+ * binding file was actually removed. The durable seat file (if any) is untouched — unbinding stops
+ * *this folder* occupying the seat; it does not delete the seat from the team.
+ */
+export function removeBinding(dir: string): boolean {
+  const p = join(dir, BINDING_DIR, BINDING_FILE);
+  const existed = existsSync(p);
+  if (existed) rmSync(p, { force: true });
+  try {
+    const config = loadConfig();
+    if (config.bindings[resolve(dir)]) {
+      delete config.bindings[resolve(dir)];
+      saveConfig(config);
+    }
+  } catch {
+    // registry is advisory; never let a cleanup failure mask the binding-file removal
+  }
+  return existed;
 }
 
 /**

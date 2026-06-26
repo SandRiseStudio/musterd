@@ -607,6 +607,36 @@ describe('WebSocket', () => {
     a.close();
   });
 
+  it('unbind releases the caller’s own seat: drops its session + presence, keeps it on the roster (ADR 058)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    const a = new TestWs();
+    await a.open();
+    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+
+    // Ada unbinds herself with her *own* token (self-only — no target name).
+    const r = await post('/teams/dawn/unbind', {}, ada.json.token);
+    expect(r.status).toBe(200);
+    expect(r.json.member).toBe('Ada');
+
+    // Her live session is dropped and she reads offline …
+    await pollUntil(async () => {
+      const roster = await get('/teams/dawn/members', nickTok);
+      return roster.json.members.find((m: any) => m.name === 'Ada')?.activity === 'offline';
+    });
+    // … but the seat is still on the team (declared, not removed) and re-claimable by adoption.
+    const roster = await get('/teams/dawn/members', nickTok);
+    expect(roster.json.members.some((m: any) => m.name === 'Ada')).toBe(true);
+
+    // Unbind requires a valid token (self-only); an anonymous call is unauthorized.
+    const anon = await post('/teams/dawn/unbind', {}, undefined);
+    expect(anon.status).toBe(401);
+
+    a.close();
+  });
+
   it('remove soft-deletes a member, drops its live session, and is idempotent (ADR 019)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.token;

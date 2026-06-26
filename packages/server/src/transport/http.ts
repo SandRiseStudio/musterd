@@ -22,6 +22,7 @@ import { getCursor, setCursor } from '../store/cursors.js';
 import {
   addMember,
   authMember,
+  clearBound,
   getMemberById,
   getMemberByName,
   isHeld,
@@ -366,12 +367,36 @@ export async function handleHttp(
           ctx.hub.remove(old.connId);
         }
         clearMemberPresence(ctx.db, target.id);
+        // Operator reclaim also force-frees the seat's *held* state (ADR 058) — back to declared, so a
+        // fresh `claim` (without --token) may rotate it; the durable seat file is untouched.
+        clearBound(ctx.db, target.id);
         ctx.hub.broadcastTeam(team.id, {
           type: 'presence',
           member: target.name,
           status: 'offline',
         });
         return sendJson(res, 200, { ok: true, member: target.name });
+      }
+
+      // `unbind` (ADR 058): the *holder* voluntarily stops occupying its own seat — clear `bound_at`
+      // (back to declared) + drop presence, so the seat is freely re-claimable while its durable file
+      // stays on the team. Self-only: authed by the caller's own token, no target name. Distinct from
+      // `remove` (deletes the seat) and `reclaim` (operator force-frees someone else's).
+      if (method === 'POST' && rest === '/unbind') {
+        // authMember (not authTouch) so we don't write an ambient presence row we're about to clear.
+        const { team, member } = authMember(ctx.db, slug, bearer(req));
+        for (const old of ctx.hub.connsForMember(member.id)) {
+          old.close?.();
+          ctx.hub.remove(old.connId);
+        }
+        clearMemberPresence(ctx.db, member.id);
+        clearBound(ctx.db, member.id);
+        ctx.hub.broadcastTeam(team.id, {
+          type: 'presence',
+          member: member.name,
+          status: 'offline',
+        });
+        return sendJson(res, 200, { ok: true, member: member.name });
       }
 
       // Soft-remove a member from the roster (ADR 019): set left_at so it drops off every

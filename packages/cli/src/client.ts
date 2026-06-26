@@ -122,6 +122,10 @@ export class HttpClient {
   reclaim(slug: string, member: string): Promise<{ ok: boolean; member: string }> {
     return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(member)}/reclaim`);
   }
+  /** Release the caller's own seat (ADR 058 unbind): clear bound_at + presence; seat stays declared. */
+  unbind(slug: string): Promise<{ ok: boolean; member: string }> {
+    return this.request('POST', `/teams/${slug}/unbind`);
+  }
   removeMember(
     slug: string,
     member: string,

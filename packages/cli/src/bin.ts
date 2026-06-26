@@ -9,6 +9,7 @@ import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
 import { notifyCommand } from './commands/notify.js';
 import { reclaimCommand } from './commands/reclaim.js';
+import { reloadCommand } from './commands/reload.js';
 import { resetCommand } from './commands/reset.js';
 import { roleCommand } from './commands/role.js';
 import { sendCommand } from './commands/send.js';
@@ -16,6 +17,7 @@ import { serveCommand } from './commands/serve.js';
 import { serviceCommand } from './commands/service.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
+import { unbindCommand } from './commands/unbind.js';
 import { uninstallCommand } from './commands/uninstall.js';
 import { CliError } from './errors.js';
 import { renderBanner } from './render/rows.js';
@@ -99,6 +101,10 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return claimCommand(rest);
     case 'fmt':
       return fmtCommand(rest);
+    case 'unbind':
+      return unbindCommand(rest);
+    case 'reload':
+      return reloadCommand(rest);
     case 'reclaim':
       return reclaimCommand(rest);
     case 'role':

@@ -34,8 +34,10 @@ function plistPath(): string {
  * Resolve everything the lifecycle ops need from the *running* process: `process.execPath` is the
  * exact node to embed (self-correcting — whatever launched the CLI), and `argv[1]` is this CLI's
  * entry. The musterd home (`~/.musterd`, where the db already lives) holds the daemon logs.
+ *
+ * Exported so `musterd reload` can resolve the same service identity to find the daemon's pid.
  */
-function resolveCtx(serveArgs: string[]): ServiceCtx {
+export function resolveCtx(serveArgs: string[]): ServiceCtx {
   const node = process.execPath;
   const binJs = resolvePath(process.argv[1] ?? '');
   // repo root: …/packages/cli/dist/bin.js → up four. Best-effort; cwd doesn't affect the db (homedir).
