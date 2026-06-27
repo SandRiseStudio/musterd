@@ -2,32 +2,34 @@
 
 > Visual system for the musterd **live-comms dashboard** (`/live`). Derives from `docs/design/brand.md`
 > + `packages/web/src/styles/tokens.css` (mustard accent on zinc, Inter + JetBrains Mono) and extends
-> them for this surface. Reference feel: Linear/Vercel engineered-calm, with a living constellation.
+> them for this surface. Reference feel: a **warm observatory** — engineered-calm with warmth (the
+> precision of Linear, but candlelit, not cool blue-gray), with a living constellation.
 
 ## Theme
 
-Dark only — a deep-space **observatory**. Near-black ground (`#0a0a10`), luminous nodes, mustard as the
-single warm accent. The user watches in a dim room, often peripherally; light = presence, warmth =
-recency. Light mode is out of scope for this surface.
+Dark only — a **warm observatory**: espresso-black ground, cream ink, amber accent, luminous warm-jewel
+nodes. The user watches in a dim room, often peripherally; light = presence, warmth = recency. The
+warmth lives in the neutrals (ground/surface/text lean amber, not blue), not just the accent. Light
+mode is out of scope for this surface.
 
 ## Color
 
-Restrained. One accent (mustard) for "alive / now / attention"; semantic colors for act meaning only.
+Restrained, warm. One accent (mustard) for "alive / now / attention"; semantic colors for act meaning
+only. Neutrals are warm-tinted (toward amber/stone), which is what keeps it off the cool-Linear default.
 
 | Role | Value | Use |
 |---|---|---|
-| ground | `#0a0a10` | page |
-| surface | `#16161f` | rows, cards |
-| surface-2 | `#1d1d29` | raised: live row, badges, inputs |
-| border / hairline | `rgba(255,255,255,.08–.12)` | dividers, outlines |
-| text | `#f7f6fa` | body |
-| muted | `#a6a6b2` | timestamps, captions (≥4.5:1 on ground) |
+| ground | `#0f0b07` (warm espresso) | page |
+| surface | `#1c1510` / `#271c14` | rows, cards, raised |
+| border / hairline | `rgba(255,238,210,.09–.16)` (warm) | dividers, outlines |
+| text | `#f8f1e4` (cream) | body |
+| muted | `#a3927d` (warm stone) | timestamps, captions (≥4.5:1 on ground) |
 | accent (mustard) | `var(--mustard-500)` `#e1ad01` | now, request_help, focus, primary |
-| success | `#22c55e` | accept, resolve |
-| danger | `#ef4444` | decline |
-| info | `#60a5fa` | wait |
-| agent | `#0b91b2` (teal) | agent nodes/avatars |
-| human | `#d847b8` (magenta) | human nodes/avatars — warmer than agents |
+| success | `#4ccb8a` | accept, resolve |
+| danger | `#ef6f5c` (warm coral) | decline |
+| info | `#7fa3c9` (steel blue — the one cool note: "paused") | wait |
+| agent | `#1fc0a4` (warm jade) | agent nodes/avatars |
+| human | `#f0688f` (warm rose) | human nodes/avatars — warmest tone |
 
 Act → tone: request_help=accent, accept/resolve=success, decline=danger, wait=info, rest=neutral.
 

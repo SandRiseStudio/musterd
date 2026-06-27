@@ -119,19 +119,19 @@ export function Constellation({
       >
         <defs>
           <radialGradient id="lc-core-agent" cx="38%" cy="34%" r="75%">
-            <stop offset="0%" stopColor="#6fd7ef" />
-            <stop offset="55%" stopColor="#19a7c8" />
-            <stop offset="100%" stopColor="#0c6f87" />
+            <stop offset="0%" stopColor="#6eead2" />
+            <stop offset="55%" stopColor="#1fc0a4" />
+            <stop offset="100%" stopColor="#0e8a74" />
           </radialGradient>
           <radialGradient id="lc-core-human" cx="38%" cy="34%" r="75%">
-            <stop offset="0%" stopColor="#f7a6e6" />
-            <stop offset="55%" stopColor="#e052c0" />
-            <stop offset="100%" stopColor="#9c2a8c" />
+            <stop offset="0%" stopColor="#ffb1c5" />
+            <stop offset="55%" stopColor="#f0688f" />
+            <stop offset="100%" stopColor="#c23f63" />
           </radialGradient>
           <linearGradient id="lc-arc-dim" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="0" />
-            <stop offset="50%" stopColor="#ffffff" stopOpacity="0.16" />
-            <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+            <stop offset="0%" stopColor="#ffeccd" stopOpacity="0" />
+            <stop offset="50%" stopColor="#ffeccd" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="#ffeccd" stopOpacity="0" />
           </linearGradient>
           <linearGradient id="lc-arc-hot" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor="#e1ad01" stopOpacity="0.15" />

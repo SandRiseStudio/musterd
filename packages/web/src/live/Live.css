@@ -6,25 +6,25 @@
  */
 
 .lc {
-  /* — palette (DESIGN.md) — */
-  --lc-ground: #0a0a10;
-  --lc-ground-2: #0c0c14;
-  --lc-surface: #15151e;
-  --lc-surface-2: #1c1c28;
-  --lc-surface-3: #232331;
-  --lc-text: #f6f6fa;
-  --lc-dim: #c2c2cf;
-  --lc-muted: #8e8e9e;
-  --lc-faint: #5b5b69;
-  --lc-border: rgba(255, 255, 255, 0.08);
-  --lc-border-2: rgba(255, 255, 255, 0.13);
+  /* — palette (DESIGN.md): warm observatory — espresso ground, cream ink, amber accent — */
+  --lc-ground: #0f0b07;
+  --lc-ground-2: #150e08;
+  --lc-surface: #1c1510;
+  --lc-surface-2: #271c14;
+  --lc-surface-3: #32251a;
+  --lc-text: #f8f1e4;
+  --lc-dim: #ddcfba;
+  --lc-muted: #a3927d;
+  --lc-faint: #6f6051;
+  --lc-border: rgba(255, 238, 210, 0.09);
+  --lc-border-2: rgba(255, 238, 210, 0.16);
   --lc-accent: var(--mustard-500, #e1ad01);
   --lc-accent-bright: var(--mustard-300, #efc94c);
-  --lc-success: #2fd07a;
-  --lc-danger: #f06363;
-  --lc-info: #6aa9ff;
-  --lc-agent: #19a7c8;
-  --lc-human: #e052c0;
+  --lc-success: #4ccb8a;
+  --lc-danger: #ef6f5c;
+  --lc-info: #7fa3c9;
+  --lc-agent: #1fc0a4;
+  --lc-human: #f0688f;
 
   /* — spacing (4-based) — */
   --lc-1: 2px;
@@ -201,10 +201,10 @@
   min-width: 0;
   border-right: 1px solid var(--lc-border);
   overflow: hidden;
-  /* depth: a soft radial lift in the center, vignette at the edges */
+  /* depth: a warm radial lift in the center, vignette at the edges */
   background:
-    radial-gradient(120% 90% at 50% 42%, rgba(255, 255, 255, 0.035), transparent 60%),
-    radial-gradient(140% 120% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.45)),
+    radial-gradient(120% 90% at 50% 42%, rgba(255, 206, 122, 0.06), transparent 60%),
+    radial-gradient(140% 120% at 50% 50%, transparent 52%, rgba(0, 0, 0, 0.5)),
     var(--lc-ground);
 }
 .lc-constellation__svg {
@@ -232,7 +232,7 @@
 }
 
 .lc-star {
-  fill: #fff;
+  fill: #fff3df;
   animation: lc-twinkle var(--tw, 6s) ease-in-out var(--td, 0s) infinite;
 }
 @keyframes lc-twinkle {
@@ -258,7 +258,12 @@
   filter: drop-shadow(0 0 5px color-mix(in srgb, var(--lc-accent) 55%, transparent));
 }
 .lc-arcs.is-hovering .lc-arc:not(.is-lit) {
-  opacity: 0.25;
+  opacity: 0.1;
+}
+.lc-arc.is-lit {
+  stroke: url(#lc-arc-hot);
+  stroke-width: 2.2;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--lc-accent) 55%, transparent));
 }
 
 .lc-pulse {
@@ -273,14 +278,21 @@
 }
 
 .lc-node {
-  cursor: default;
+  cursor: pointer;
   transition: opacity var(--lc-med) var(--lc-ease);
 }
 .lc-node__halo {
   opacity: 0.4;
   filter: blur(7px);
-  transition: opacity var(--lc-med) var(--lc-ease);
+  transition:
+    opacity var(--lc-med) var(--lc-ease),
+    transform var(--lc-med) var(--lc-ease);
   animation: lc-breathe 4.5s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.lc-node__core {
+  transition: transform var(--lc-med) var(--lc-ease);
   transform-box: fill-box;
   transform-origin: center;
 }
@@ -351,12 +363,25 @@
   font-size: 10px;
   opacity: 0.9;
 }
-/* hover-highlight: the hovered node + its arcs pop, others recede */
+/* hover-highlight: the hovered node lifts hard, its arcs ignite, the rest recede */
 .lc-nodes.is-hovering .lc-node:not(.is-hot) {
-  opacity: 0.4;
+  opacity: 0.18;
 }
 .lc-node.is-hot .lc-node__halo {
-  opacity: 0.8;
+  animation: none;
+  opacity: 1;
+  transform: scale(1.7);
+}
+.lc-node.is-hot .lc-node__core {
+  transform: scale(1.16);
+}
+.lc-node.is-hot .lc-node__rim {
+  opacity: 1;
+  stroke: rgba(255, 245, 225, 0.85);
+  stroke-width: 1.5;
+}
+.lc-node.is-hot .lc-node__name {
+  fill: var(--lc-text);
 }
 
 @keyframes lc-breathe {
@@ -661,8 +686,8 @@
   padding: var(--lc-8);
   overflow: hidden;
   background:
-    radial-gradient(80% 60% at 50% 38%, rgba(225, 173, 1, 0.07), transparent 62%),
-    radial-gradient(120% 100% at 50% 50%, transparent 50%, rgba(0, 0, 0, 0.5)),
+    radial-gradient(78% 58% at 50% 40%, rgba(225, 173, 1, 0.11), transparent 62%),
+    radial-gradient(120% 100% at 50% 50%, transparent 48%, rgba(0, 0, 0, 0.55)),
     var(--lc-ground);
   animation: lc-fade var(--lc-med) var(--lc-ease) both;
 }

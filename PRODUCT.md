@@ -34,9 +34,10 @@ instrument — a telescope, not a toy.
 
 ## Design Principles
 
-1. **Quiet frame, living contents.** The chrome and stream are Linear-grade calm and precise; the
-   spectacle concentrates in the constellation, which is *alive* (presence, motion, depth). The one
-   product surface where coordination IS the product, so it earns selective spectacle.
+1. **Quiet frame, living contents.** The chrome and stream are calm and precise (the discipline of a
+   premium tool, but **warm** — candlelit, not cool blue-gray); the spectacle concentrates in the
+   constellation, which is *alive* (presence, motion, depth). The one product surface where
+   coordination IS the product, so it earns selective spectacle.
 2. **Calm at rest, energetic in motion.** The canvas is near-still so each message lands as an event;
    energy is front-loaded into the first ~400ms of a message's life, then it settles.
 3. **The act is the unit.** Communication (acts, arcs, the resolve payoff) is always the brightest,
