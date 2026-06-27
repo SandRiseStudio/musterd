@@ -11,9 +11,31 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   const { config, team, identity, http } = resolve(parsed.flags);
   const roster = await http.roster(team).catch(() => ({ members: [] }));
   const kindOf = kindLookup(roster.members);
+  // --all = the whole-team firehose (ADR 061): every envelope, not just my inbox.
+  const all = Boolean(parsed.flags['all']);
 
   if (parsed.flags['watch']) {
-    return watchInbox(parsed, config.server, team, identity, kindOf);
+    return watchInbox(parsed, http, config.server, team, identity, kindOf, all);
+  }
+
+  if (all) {
+    const res = await http.messages(team, { limit: 200 });
+    if (parsed.flags['json']) {
+      process.stdout.write(JSON.stringify(res.messages) + '\n');
+      return 0;
+    }
+    process.stdout.write(
+      `${theme.accent('firehose')} — ${team} (${res.messages.length} message${res.messages.length === 1 ? '' : 's'})\n`,
+    );
+    if (res.messages.length === 0) {
+      process.stdout.write(theme.meta('no communication yet') + '\n');
+      return 0;
+    }
+    for (const m of res.messages) process.stdout.write(renderMessageRow(m, kindOf) + '\n');
+    process.stdout.write(
+      theme.meta('musterd inbox --watch --all to follow the firehose live') + '\n',
+    );
+    return 0;
   }
 
   const unread = Boolean(parsed.flags['unread']);
@@ -48,18 +70,38 @@ function countUnread(messages: Envelope[], cursorTs: number, _self: string): num
   return messages.filter((m) => m.ts > cursorTs).length;
 }
 
-function watchInbox(
+async function watchInbox(
   parsed: Parsed,
+  http: ReturnType<typeof resolve>['http'],
   server: string,
   team: string,
   identity: { name: string; token: string; surface: string },
   kindOf: (name: string) => MemberKind,
+  all: boolean,
 ): Promise<number> {
   // Ring the terminal bell on an action-needed act, but only on a real TTY and unless --no-bell.
   // The bell is the cheapest true "push" we have for the watching-but-distracted human (ADR 024).
   const bell = process.stdout.isTTY === true && parsed.flags['no-bell'] !== true;
+  const seen = new Set<string>();
+
+  process.stdout.write(
+    all
+      ? `${theme.accent('firehose')} — ${team}  ${theme.ok('◉ watching all')}\n`
+      : `${theme.accent('inbox')} — ${team}  ${theme.ok('◉ watching')}\n`,
+  );
+  // Firehose: backfill recent team history before live-tailing, deduped by id against the live stream.
+  if (all) {
+    const hist = await http
+      .messages(team, { limit: 30 })
+      .catch(() => ({ messages: [] as Envelope[] }));
+    for (const m of hist.messages) {
+      seen.add(m.id);
+      process.stdout.write(renderMessageRow(m, kindOf) + '\n');
+    }
+    if (hist.messages.length > 0) process.stdout.write(theme.meta('— live —') + '\n');
+  }
+
   return new Promise((resolveP) => {
-    process.stdout.write(`${theme.accent('inbox')} — ${team}  ${theme.ok('◉ watching')}\n`);
     const session = watch({
       wsUrl: wsBase(server) + '/ws',
       team,
@@ -69,7 +111,10 @@ function watchInbox(
       // A human running `inbox --watch` is explicitly here (the supervising posture) — `session`.
       provenance: 'session',
       workspace: resolveWorkspace(),
+      scope: all ? 'team-all' : 'team',
       onDeliver: (env) => {
+        if (seen.has(env.id)) return; // a backfilled message that also arrives live
+        seen.add(env.id);
         // Surface request_help / @you-directed acts above the status_update stream so they can't be
         // missed; everything else streams plainly (piece A of the human-reachability nudge, ADR 024).
         const flagged = isActionNeeded(env, identity.name);

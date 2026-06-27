@@ -101,6 +101,17 @@ export class HttpClient {
     const qs = q.toString();
     return this.request('GET', `/teams/${slug}/inbox${qs ? `?${qs}` : ''}`);
   }
+  /** Whole-team timeline (the firehose's history side, ADR 061) — every envelope, not just my inbox. */
+  messages(
+    slug: string,
+    opts: { since?: number; limit?: number } = {},
+  ): Promise<{ messages: Envelope[] }> {
+    const q = new URLSearchParams();
+    if (opts.since) q.set('since', String(opts.since));
+    if (opts.limit) q.set('limit', String(opts.limit));
+    const qs = q.toString();
+    return this.request('GET', `/teams/${slug}/messages${qs ? `?${qs}` : ''}`);
+  }
   markRead(slug: string, lastReadMessageId: string) {
     return this.request('POST', `/teams/${slug}/inbox/cursor`, {
       last_read_message_id: lastReadMessageId,
@@ -143,6 +154,8 @@ export interface WatchOpts {
   /** Attach-time context (ADR 014): why this watch session exists + its workspace label. */
   provenance?: string;
   workspace?: string;
+  /** `team` (default) = my inbox stream; `team-all` = the whole-team firehose (ADR 061). */
+  scope?: 'team' | 'team-all';
   onDeliver: (env: Envelope) => void;
   onPresence?: (member: string, status: string, surface?: string) => void;
   onReady?: () => void;
@@ -172,7 +185,7 @@ export function watch(opts: WatchOpts): { close: () => void } {
     const frame = JSON.parse(data.toString()) as WSServerFrame;
     switch (frame.type) {
       case 'welcome':
-        ws.send(JSON.stringify({ type: 'subscribe', scope: 'team' }));
+        ws.send(JSON.stringify({ type: 'subscribe', scope: opts.scope ?? 'team' }));
         heartbeat = setInterval(() => ws.send(JSON.stringify({ type: 'heartbeat' })), 15_000);
         heartbeat.unref?.();
         opts.onReady?.();
