@@ -49,7 +49,11 @@ export function Stream({
       </header>
       <div className="lc-stream__rows" ref={rowsRef}>
         {envelopes.length === 0 && (
-          <p className="lc-empty">No communication yet — waiting for the team.</p>
+          <p className="lc-empty">
+            <strong>Listening.</strong>
+            Every message on the team will stream here the moment it&apos;s sent — requests, handoffs,
+            status, and resolutions, live.
+          </p>
         )}
         {envelopes.map((e) => {
           const isNow = e.id === lastId;

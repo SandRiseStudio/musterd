@@ -49,22 +49,17 @@ function LivePage() {
   const [provisioning, setProvisioning] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Hydrate the last team on the client (SSR-safe).
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    setTeam(window.localStorage.getItem(TEAM_KEY) ?? '');
-  }, []);
-
   const { envelopes, roster, status, error, liveIds } = useLiveStream(cfg);
 
-  const watch = async () => {
+  const watch = async (explicit?: string) => {
     setFormError(null);
-    const slug = team.trim();
+    const slug = (explicit ?? team).trim();
     if (!slug) return;
+    setTeam(slug);
     window.localStorage.setItem(TEAM_KEY, slug);
 
     // Advanced: connect as a specific seat the operator supplied.
-    if (advanced.open && advanced.as.trim() && advanced.token.trim()) {
+    if (!explicit && advanced.open && advanced.as.trim() && advanced.token.trim()) {
       setCfg({ team: slug, as: advanced.as.trim(), token: advanced.token.trim() });
       return;
     }
@@ -87,6 +82,19 @@ function LivePage() {
     }
     setCfg({ team: slug, as: creds.name, token: creds.token });
   };
+
+  // Hydrate from the URL (?team=… is a shareable watch link → auto-connect) or the last team
+  // (SSR-safe; runs once on the client).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlTeam = new URLSearchParams(window.location.search).get('team');
+    if (urlTeam) {
+      void watch(urlTeam);
+    } else {
+      setTeam(window.localStorage.getItem(TEAM_KEY) ?? '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // On a terminal connection error (e.g. a stale observer token after a daemon reset), drop the
   // stored observer so the next Watch re-provisions a fresh one.
@@ -112,7 +120,7 @@ function LivePage() {
           onTeam={setTeam}
           advanced={advanced}
           onAdvanced={setAdvanced}
-          onWatch={watch}
+          onWatch={() => void watch()}
           provisioning={provisioning}
           error={formError}
         />
@@ -136,7 +144,7 @@ function LivePage() {
 function StatusPill({ status, live }: { status: ConnStatus; live: number }) {
   const label =
     status === 'live'
-      ? `● ${live} live`
+      ? `${live} live`
       : status === 'connecting'
         ? 'connecting…'
         : status === 'reconnecting'
@@ -212,7 +220,8 @@ function ConnectForm({
         {error && <p className="lc-form__error">{error}</p>}
 
         <button className="lc-form__connect" disabled={!team.trim() || provisioning} onClick={onWatch}>
-          {provisioning ? 'Provisioning observer…' : 'Watch live'}
+          {provisioning && <span className="lc-spinner" aria-hidden="true" />}
+          {provisioning ? 'Provisioning…' : 'Watch live'}
         </button>
 
         <button
