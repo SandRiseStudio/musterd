@@ -11,6 +11,7 @@ import {
   hashToken,
   leaveMember,
   listMembers,
+  reapStaleObservers,
 } from './members.js';
 import { insertMessage, latestStatusUpdate, listInbox } from './messages.js';
 import {
@@ -439,5 +440,54 @@ describe('ambient presence (ADR 057)', () => {
     expect(hold?.held_until).not.toBeNull(); // the hold is intact, untouched
     const ambient = presenceRows(db, ada.row.id).find((r) => r.id !== p.id);
     expect(ambient?.conn_id).toBeNull();
+  });
+});
+
+describe('observer seat reaping (ADR 064)', () => {
+  it('reaps idle observer seats but keeps fresh, live, message-referenced, and participant seats', () => {
+    const { db, team } = freshTeam();
+    const now = Date.now();
+    const old = now - 100_000;
+
+    const nick = addMember(db, team, { name: 'nick', kind: 'human' }); // participant, never reaped
+    const obOld = addMember(db, team, { name: 'web-old', kind: 'human', observer: true });
+    addMember(db, team, { name: 'web-fresh', kind: 'human', observer: true }); // fresh updated_at → kept
+    const obLive = addMember(db, team, { name: 'web-live', kind: 'human', observer: true });
+    const obRef = addMember(db, team, { name: 'web-ref', kind: 'human', observer: true });
+
+    // Age out everyone except the freshly-created observer.
+    for (const id of [nick.row.id, obOld.row.id, obLive.row.id, obRef.row.id]) {
+      db.prepare('UPDATE members SET updated_at = ? WHERE id = ?').run(old, id);
+    }
+    // web-live holds a live presence → protected despite an old updated_at.
+    attach(db, obLive.row.id, 'web', 'conn-live', {
+      provenance: null,
+      workspace: null,
+      driver: null,
+    });
+    // web-ref was sent a directed message → no to_member cascade, so it must be skipped (FK safety).
+    insertMessage(
+      db,
+      team.id,
+      nick.row.id,
+      obRef.row.id,
+      makeEnvelope({
+        id: 'r1',
+        team: 'dawn',
+        from: 'nick',
+        to: { kind: 'member', name: 'web-ref' },
+        act: 'message',
+        body: 'hi',
+        ts: 100,
+      }),
+    );
+
+    const reaped = reapStaleObservers(db, now - 5_000, now - 45_000);
+
+    expect(reaped.map((m) => m.name)).toEqual(['web-old']);
+    const remaining = listMembers(db, team.id)
+      .map((m) => m.name)
+      .sort();
+    expect(remaining).toEqual(['nick', 'web-fresh', 'web-live', 'web-ref'].sort());
   });
 });

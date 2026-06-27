@@ -10,6 +10,41 @@ export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+/** Bump a member's `updated_at` to now — used as an observer's last-seen for the idle TTL (ADR 064). */
+export function touchSeen(db: Database, memberId: string): void {
+  db.prepare('UPDATE members SET updated_at = ? WHERE id = ?').run(Date.now(), memberId);
+}
+
+/**
+ * Reap idle observer seats (ADR 064): hard-delete `observer = 1` members whose `updated_at` predates
+ * `idleCutoffTs` and that have no live presence (last seen after `liveCutoffTs`). Skips any observer
+ * still referenced by a message (no `to_member` cascade) — left for manual cleanup rather than an FK
+ * failure. Presence + cursor rows cascade. Returns the reaped members for logging.
+ */
+export function reapStaleObservers(
+  db: Database,
+  idleCutoffTs: number,
+  liveCutoffTs: number,
+): { id: string; name: string; team_id: string }[] {
+  const stale = db
+    .prepare<[number, number], { id: string; name: string; team_id: string }>(
+      `SELECT id, name, team_id FROM members
+       WHERE observer = 1
+         AND updated_at < ?
+         AND id NOT IN (SELECT member_id FROM presence WHERE held_until IS NULL AND last_seen_at > ?)
+         AND id NOT IN (SELECT from_member FROM messages)
+         AND id NOT IN (SELECT to_member FROM messages WHERE to_member IS NOT NULL)`,
+    )
+    .all(idleCutoffTs, liveCutoffTs);
+  if (stale.length > 0) {
+    const del = db.prepare('DELETE FROM members WHERE id = ?');
+    db.transaction(() => {
+      for (const m of stale) del.run(m.id);
+    })();
+  }
+  return stale;
+}
+
 function newToken(): string {
   return 'mskd_' + randomBytes(24).toString('base64url');
 }

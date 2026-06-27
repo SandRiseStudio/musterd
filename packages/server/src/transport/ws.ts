@@ -8,7 +8,7 @@ import { MusterdError, asMusterdError } from '../errors.js';
 import { log } from '../log.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope } from '../protocol/validate.js';
-import { authMember } from '../store/members.js';
+import { authMember, touchSeen } from '../store/members.js';
 import {
   attach,
   clearMemberPresence,
@@ -153,8 +153,10 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             presence_id: presence.id,
             server_time: Date.now(),
           });
-          // An observer (ADR 063) watches without participating — no online presence event.
-          if (!conn.observer) emitPresence(ctx, conn, 'online', frame.surface);
+          // An observer (ADR 063) watches without participating — no online presence event. Bump its
+          // last-seen so the idle-TTL reaper keeps an actively-used seat (ADR 064).
+          if (conn.observer) touchSeen(ctx.db, member.id);
+          else emitPresence(ctx, conn, 'online', frame.surface);
           log.info({ msg: 'ws_hello', team: team.slug, member: member.name, conn: state.connId });
           return;
         }

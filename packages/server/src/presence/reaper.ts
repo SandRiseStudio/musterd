@@ -1,11 +1,22 @@
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
-import { getMemberById } from '../store/members.js';
+import { getMemberById, reapStaleObservers } from '../store/members.js';
 import { hasLivePresence, reapStale } from '../store/presence.js';
 
 /** Periodically remove stale presence rows and emit offline events for members who lost all presence. */
 export function startReaper(ctx: Ctx): () => void {
   const tick = () => {
+    // Reap idle observer seats (ADR 064) so the auto-provisioned `web-xxxx` seats don't accumulate.
+    const now = Date.now();
+    const reapedObservers = reapStaleObservers(
+      ctx.db,
+      now - ctx.config.observerTtlMs,
+      now - ctx.config.presenceTimeoutMs,
+    );
+    if (reapedObservers.length > 0) {
+      log.info({ msg: 'reap_observers', count: reapedObservers.length });
+    }
+
     const removed = reapStale(ctx.db, ctx.config.presenceTimeoutMs);
     if (removed.length === 0) return;
     const seen = new Set<string>();
