@@ -190,6 +190,50 @@ export function capabilityBadges(caps: Capabilities | undefined): CapBadge[] {
   return out;
 }
 
+/**
+ * Pretty-print an audit `action` (ADR 071). Known v0.3 actions get a short human label + a tone;
+ * unknown actions (P3 adds `grant.*`, `claim.*`, …) fall back to the raw token so the view never
+ * hides a record it doesn't recognise. The dot-namespace (`urgent.denied`) reads fine verbatim.
+ */
+export function auditActionMeta(action: string): { label: string; tone: ActTone } {
+  switch (action) {
+    case 'urgent.flagged':
+      return { label: 'urgent flagged', tone: 'status' };
+    case 'urgent.denied':
+      return { label: 'urgent denied', tone: 'danger' };
+    case 'send.denied':
+      return { label: 'send denied', tone: 'danger' };
+    case 'observe.denied':
+      return { label: 'observe denied', tone: 'danger' };
+    case 'member.reclaim':
+      return { label: 'seat reclaimed', tone: 'handoff' };
+    case 'member.remove':
+      return { label: 'member removed', tone: 'handoff' };
+    default:
+      return { label: action, tone: 'neutral' };
+  }
+}
+
+/** Compact one-line render of an audit entry's free-form `detail` object (`k: v · k: v`). */
+export function formatAuditDetail(detail: Record<string, unknown> | null): string {
+  if (!detail) return '';
+  return Object.entries(detail)
+    .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+    .join(' · ');
+}
+
+/** A precise audit timestamp — date + 24h time to the second (records can cluster within a second). */
+export function auditTime(ts: number): string {
+  return new Date(ts).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+}
+
 /** Roster sort for the rail: online before offline, then humans before agents, then by name. */
 export function rosterOrder(a: MemberSummary, b: MemberSummary): number {
   const onA = a.presence !== 'offline' ? 0 : 1;

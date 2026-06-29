@@ -75,6 +75,65 @@ export async function fetchHistory(
 }
 
 /**
+ * One append-only governance audit record (ADR 071). `action` is an **open string** — known v0.3
+ * values are `urgent.flagged|urgent.denied|send.denied|member.reclaim|member.remove|observe.denied`,
+ * and P3 adds more (`grant.*`, `claim.*`, `account_status.change`…), so the view pretty-prints
+ * unknowns rather than enumerating. `detail` is a small free-form object (e.g. `{reason}`,
+ * `{fallback:'no-admin'}`, `{account_status:'disabled'}`).
+ */
+export interface AuditEntry {
+  id: string;
+  ts: number;
+  actor: string | null;
+  action: string;
+  target: string | null;
+  result: 'allow' | 'deny';
+  detail: Record<string, unknown> | null;
+}
+
+/** A fetch error that carries the daemon's error code so the view can tailor copy (401 vs 403). */
+export class AuditFetchError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'AuditFetchError';
+  }
+}
+
+/**
+ * The **admin-only** governance audit log (`GET /teams/:slug/audit`, ADR 071). Newest-first; pages
+ * older via `before` (ms-epoch). Requires a seat with `is_admin`/`visibility_level: admin` — a 401
+ * (no token) or 403 (non-admin) surfaces as an {@link AuditFetchError} so the route can explain it.
+ */
+export async function fetchAudit(
+  cfg: LiveConfig,
+  opts: { limit?: number; before?: number } = {},
+): Promise<AuditEntry[]> {
+  const q = new URLSearchParams();
+  if (opts.limit != null) q.set('limit', String(opts.limit));
+  if (opts.before != null) q.set('before', String(opts.before));
+  const qs = q.toString();
+  const res = await fetch(
+    `/teams/${encodeURIComponent(cfg.team)}/audit${qs ? `?${qs}` : ''}`,
+    { headers: { authorization: `Bearer ${cfg.token}`, 'x-musterd-surface': 'web' } },
+  );
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const err = (json as { error?: { code?: string; message?: string } }).error;
+    throw new AuditFetchError(
+      err?.message ?? `HTTP ${res.status}`,
+      err?.code ?? `http_${res.status}`,
+      res.status,
+    );
+  }
+  return (json as { audit: AuditEntry[] }).audit;
+}
+
+/**
  * Provision a hidden read-only observer seat (ADR 063) and return its token. Lets the dashboard be
  * "enter a team and watch" — no pre-made seat. The endpoint is unauthenticated (localhost-trust, like
  * team creation); the seat is hidden from the roster and can't send.
