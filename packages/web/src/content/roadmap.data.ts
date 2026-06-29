@@ -355,18 +355,65 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [adr(67, 'ADR 067'), adr(24, 'ADR 024'), adr(36, 'ADR 036')],
   },
 
-  // Wave 2 — the v0.3 governance rock, then the full governed notification tiers it unlocks.
+  // Wave 2 — the v0.3 governance rock, phased so the breaking auth swap is isolated (ADR 069 build plan).
   {
-    id: 'v03-governance',
+    id: 'v03-p0-plan',
+    title: 'v0.3 governance — build plan & spec reconciliation',
+    status: 'shipped',
+    category: 'platform',
+    blurb: 'The phased decomposition of the v0.3 governance rock, the four directional decisions, and the spec-gap resolutions — so the breaking auth change lands as one isolated, reviewed moment.',
+    detail:
+      'The governance model is fully designed (SPEC Appendix A + membership-model.md + security.md); ADR 069 turns it into a buildable plan. Decisions: one-shot schema reset (safe because ADR 058 made the daemon a projection of git seat-files); hard cutover to claim/grant everywhere (no dual-path); durable seat fields (account_status + capability narrowing) live in the git seat-files, credentials stay daemon-private; deliver the plan then start P1. Pins the open spec gaps: credential/grant token format, request expiry (1h), pending-claim push contract, decide→grant-lifetime binding, and the A.9↔ADR-058 reconciliation (members→seats is a seat-file extension, not a row migration).',
+    refs: [adr(69, 'ADR 069'), doc('SPEC.md', 'SPEC Appendix A'), doc('docs/design/membership-model.md', 'membership-model.md')],
+    dependsOn: ['cross-network'],
+  },
+  {
+    id: 'v03-p1-seats',
     wave: 2,
-    title: 'v0.3 governance — seats, grants, capabilities',
+    title: 'v0.3 P1 — seats data model',
     status: 'near-term',
     category: 'platform',
-    blurb: 'Seats with account status, roles with default capabilities, per-seat narrowing, issued grants, and credentialed remote join — the enforced layer the wire already anticipates.',
+    blurb: 'The substrate: account_status + capabilities on a seat, roles carrying default capabilities + charter, per-seat narrowing (never widening). Permissive defaults, no enforcement yet.',
     detail:
-      'Designed in SPEC A.7/A.9 and spec-v0.3-draft.md. The prerequisite rock for the full notification tiers (can_flag_urgent, audit, wasnt_urgent), schedule enforcement, and safe multi-user/remote teams. Includes the members→seats migration and the credentialed remote join cross-network carries.',
-    refs: [doc('docs/design/spec-v0.3-draft.md', 'spec-v0.3-draft.md'), doc('SPEC.md', 'SPEC A.7/A.9')],
-    dependsOn: ['cross-network'],
+      'Extends the ADR 058 git seat-file schema with account_status + capability narrowing, adds roles/<name>.toml for role defaults + charter, and projects both through reconcile into new daemon columns; lifts the CLI role-template’s already-shaped capacity/charter/capabilities into a shared @musterd/protocol type. A one-shot reset rebuilds the daemon DB from the extended files (no row-migration code). Pure substrate — token auth unchanged, nothing enforced — so it ships green with no flag day.',
+    refs: [adr(69, 'ADR 069'), adr(58, 'ADR 058'), adr(26, 'ADR 026')],
+    dependsOn: ['v03-p0-plan'],
+  },
+  {
+    id: 'v03-p2-enforcement',
+    wave: 2,
+    title: 'v0.3 P2 — in-band enforcement & audit',
+    status: 'near-term',
+    category: 'platform',
+    blurb: 'The first real governance value, on the existing token auth: gate urgent on can_flag_urgent, admin-only governance routes, viewer-scoped visibility, account-status enforcement, and an append-only audit log.',
+    detail:
+      'Turns the capabilities from P1 into enforcement at the routeEnvelope / roster-projection seams: can_flag_urgent gates the urgent meta flag (+ audit + recipient wasnt_urgent) — completing the notification-tiers governed superset; is_admin gates the today-ungated reclaim/remove + the new governance routes; visibility_level projects the roster per viewer; account_status (disabled/banned/archived) blocks claim/send; can_observe formalizes the ADR 063 observer. Every governed op writes an audit record (GET /audit, admin). Ships on the existing occupant==seat token auth — no flag day.',
+    refs: [adr(69, 'ADR 069'), adr(44, 'ADR 044'), adr(63, 'ADR 063')],
+    dependsOn: ['v03-p1-seats'],
+  },
+  {
+    id: 'v03-p3-credentials',
+    wave: 2,
+    title: 'v0.3 P3 — credentials & the claim handshake',
+    status: 'near-term',
+    category: 'platform',
+    blurb: 'The breaking auth rework: team agent key + admin-issued grants + human credentials, the WS claim frame replacing hello, and the no-grant request/approval lane — cut over across every surface at once.',
+    detail:
+      'Replaces token==member with agent key (authenticates a harness) + grant (authorizes a seat). The claim frame replaces hello (occupied/refused/pending); grants carry lifetime once|ttl|standing picked at live approval; the request lane routes a no-grant claim to admins (local-admin fast path + one-keystroke approval card); team policy allow_pre_issued_grants is the opt-in. Surface migration in one coordinated set: team add provisions a seat (no token), MUSTERD_TOKEN→MUSTERD_AGENT_KEY+MUSTERD_CLAIM (+ optional MUSTERD_GRANT), init/join move to the claim flow. The single isolated breaking moment (ADR 069 decision 2).',
+    refs: [adr(69, 'ADR 069'), doc('SPEC.md', 'SPEC A.2/A.3/A.5'), doc('docs/design/security.md', 'security.md')],
+    dependsOn: ['v03-p1-seats'],
+  },
+  {
+    id: 'v03-p4-remote-join',
+    wave: 2,
+    title: 'v0.3 P4 — credentialed remote join',
+    status: 'near-term',
+    category: 'transport',
+    blurb: 'Plug the agent key + grant + human credential into the already-built secured off-loopback bind, so a teammate on another machine joins over wss with a real credential, not a locally-minted token.',
+    detail:
+      'The credential layer ADR 039/040 named but did not build. The secured transport (TLS/wss refuse-plaintext bind, Origin/Host gate) is done and waiting; P4 is mostly integration — the cross-network claim flow over that channel + docs. Falls out of P3’s credential model once it exists.',
+    refs: [adr(69, 'ADR 069'), adr(39, 'ADR 039'), adr(40, 'ADR 040')],
+    dependsOn: ['v03-p3-credentials', 'cross-network'],
   },
   {
     id: 'notification-tiers',
@@ -376,9 +423,9 @@ export const ROADMAP: RoadmapItem[] = [
     category: 'human-loop',
     blurb: 'The full reachability set: route an agent’s request for help to a human by salience and availability, not only when they are watching.',
     detail:
-      'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is. The localhost availability + urgent down-payment shipped; the governed superset (can_flag_urgent, audit, wasnt_urgent, off_hours) needs the v0.3 capability model.',
+      'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is. The localhost availability + urgent down-payment shipped; the governed superset (can_flag_urgent, audit, wasnt_urgent) lands inside v0.3 P2 enforcement, with off_hours/schedule enforcement deferred to Wave 3.',
     refs: [doc('docs/design/research-foundation.md', 'research-foundation.md')],
-    dependsOn: ['notify-nudge', 'availability-urgent', 'v03-governance'],
+    dependsOn: ['notify-nudge', 'availability-urgent', 'v03-p2-enforcement'],
   },
 
   // ── reserved ──────────────────────────────────────────────────────────────
@@ -435,7 +482,7 @@ export const ROADMAP: RoadmapItem[] = [
     status: 'reserved',
     category: 'platform',
     blurb: 'availability and lifecycle: until are stored today but not enforced. Later: honor windows for routing and auto-expire members.',
-    dependsOn: ['v03-governance'],
+    dependsOn: ['v03-p2-enforcement'],
   },
   {
     id: 'step-streaming',
