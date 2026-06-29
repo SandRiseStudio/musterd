@@ -409,3 +409,64 @@ describe('an active identity is required to act (ADR 036)', () => {
     expect(sent.out).toContain('sent');
   });
 });
+
+describe('inbox --wait — wake on message (ADR 054)', () => {
+  /** Stand up dawn with an agent seat; return the agent's token. */
+  async function dawnWithAgent(name: string): Promise<string> {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    const added = await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
+    return JSON.parse(added.out).token as string;
+  }
+
+  it('drains the durable inbox: a directed act already waiting wakes it immediately (exit 0)', async () => {
+    const token = await dawnWithAgent('Ada');
+    // A request_help is directed at Ada *before* she waits — the startup-race the pre-check guards.
+    await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'review the auth PR']);
+
+    actAs('dawn', 'Ada', token);
+    const woke = await run(inboxCommand, ['--wait', '--timeout', '1']);
+    expect(woke.code).toBe(0);
+    expect(woke.out).toContain('review the auth PR');
+
+    // It advanced the read cursor (not --peek), so a second wait finds nothing and times out (124).
+    const again = await run(inboxCommand, ['--wait', '--timeout', '1']);
+    expect(again.code).toBe(124);
+  });
+
+  it('times out non-zero when nothing directed arrives, and ignores broadcast journal traffic', async () => {
+    const token = await dawnWithAgent('Ada');
+    // A plain @team status_update is journal traffic — it must NOT wake a waiting agent.
+    await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'still refactoring']);
+
+    actAs('dawn', 'Ada', token);
+    const out = await run(inboxCommand, ['--wait', '--timeout', '1']);
+    expect(out.code).toBe(124);
+  });
+
+  it('blocks on the live socket, then wakes the instant a directed act is sent', async () => {
+    const token = await dawnWithAgent('Ada');
+
+    // One capture for the whole test — `run()` nests stdout spies, which would clobber a pending wait.
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: any) => {
+      chunks.push(String(c));
+      return true;
+    });
+    try {
+      // Ada waits (identity captured synchronously before any await, so the later env switch is safe).
+      actAs('dawn', 'Ada', token);
+      const waitP = inboxCommand(parseArgs(['--wait', '--timeout', '5']));
+
+      // Let the socket connect + subscribe, then nick (his bound folder) sends Ada a directed act.
+      await new Promise((r) => setTimeout(r, 300));
+      actAsNobody();
+      await sendCommand(parseArgs(['--to', 'Ada', '--act', 'request_help', 'wake up please']));
+
+      const code = await waitP;
+      expect(code).toBe(0);
+      expect(chunks.join('')).toContain('wake up please');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

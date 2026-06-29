@@ -326,13 +326,12 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'wake-on-message',
-    wave: 1,
     title: 'Wake on message',
-    status: 'near-term',
+    status: 'shipped',
     category: 'human-loop',
     blurb: 'An idle agent blocks until its next directed act arrives and resumes immediately — instead of polling on a timer or missing the message in the gap.',
     detail:
-      'A dogfood finding: asked to “wake when the other agent messages,” an agent bolted inbox-polling onto /loop — a workaround that burns turns and trades latency for cost. Add musterd inbox --wait, a blocking one-shot over the existing watch socket that exits on the first directed act, and bless the musterd inbox --wait + /loop idiom in the AGENTS.md primer. The free-agent complement to ADR 053’s blocked-agent push; neither reaches a frozen loop, so they pair.',
+      'A dogfood finding: asked to “wake when the other agent messages,” an agent bolted inbox-polling onto /loop — a workaround that burns turns and trades latency for cost. Shipped musterd inbox --wait, a blocking one-shot over the existing watch socket that exits on the first directed act (exit 0 on a message, 124 on timeout); it first drains the durable inbox so a message that landed just before the wait isn’t missed, wakes only on acts directed to the seat (not broadcast journal traffic, narrowable with --from/--act), and --timeout bounds the wait (--timeout 0 unbounded). The musterd inbox --wait + /loop idiom is now blessed in the AGENTS.md primer. The free-agent complement to ADR 053’s blocked-agent push; neither reaches a frozen loop, so they pair.',
     refs: [adr(54, 'ADR 054'), adr(12, 'ADR 012')],
     dependsOn: ['agent-presence-touch'],
   },

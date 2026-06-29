@@ -1,12 +1,12 @@
 # 054 — Wake on message: a blocking inbox-wait primitive and the `/loop` idiom
 
-- Status: proposed
+- Status: accepted — implemented 2026-06-29
 - Date: 2026-06-25
 
 ## Context
 
-In the 2026-06-25 two-agent dogfood, an operator asked one agent: *"can you poll, and as soon as a
-message arrives from the other agent, start your work?"* The agent reached for `/loop` — a Claude
+In the 2026-06-25 two-agent dogfood, an operator asked one agent: _"can you poll, and as soon as a
+message arrives from the other agent, start your work?"_ The agent reached for `/loop` — a Claude
 Code skill that re-invokes a prompt on an interval (or self-paced) — and bolted inbox-polling onto
 it. It worked, but it is a workaround for a missing first-class primitive.
 
@@ -21,9 +21,9 @@ immediately — which the daemon can already do (it holds the watch WS and knows
 act lands), but the CLI exposes no blocking primitive for it.
 
 This is the **free-agent** case. It is the complement of ADR 053, not a substitute: `/loop` and a
-blocking wait both need the agent's loop to be *running*, so neither reaches an agent **blocked on an
+blocking wait both need the agent's loop to be _running_, so neither reaches an agent **blocked on an
 approval prompt** — that is ADR 053's job (push delivery through the human at the prompt). 054 makes
-the *waiting* efficient; 053 makes the *blocked* reachable.
+the _waiting_ efficient; 053 makes the _blocked_ reachable.
 
 ## Problem
 
@@ -44,7 +44,7 @@ then prints that act and exits non-zero-on-timeout / zero-on-message so it compo
   instead of streaming. No SPEC bump, no server change beyond reusing the push it already sends.
 - **Scoped to directed acts by default.** Broadcast journal traffic shouldn't wake a waiting agent;
   `--act`/`--from` filters (the same ones ADR's CLI-ergonomics item adds to `inbox`) narrow it
-  further. Composes with the durable cursor so a message that arrived *during* startup isn't missed.
+  further. Composes with the durable cursor so a message that arrived _during_ startup isn't missed.
 - **Composes with `/loop`.** The intended idiom becomes `musterd inbox --wait && <do the work>` under
   a harness re-invoker — block cheaply, act on wake — instead of a timed poll that mostly finds
   nothing.
@@ -54,7 +54,7 @@ then prints that act and exits non-zero-on-timeout / zero-on-message so it compo
 Document the wake pattern in the `AGENTS.md` primer (ADR 012) so it is **standing context**, not a
 thing each operator must rediscover: a short "to wait for the next message, run `musterd inbox
 --wait`; under a harness loop, pair it with `/loop`" note in the managed block. The primer already
-teaches the working-loop; this adds the *idle*-loop.
+teaches the working-loop; this adds the _idle_-loop.
 
 ### Why a primitive and not just docs
 
@@ -70,6 +70,19 @@ point the primer at it.
   hang a shell loop. Lean: default-bounded with a clear timeout exit code; `--wait=0` for unbounded.
 - **Reconnect.** If the watch WS drops mid-wait, reconnect-and-resume from the cursor vs exit and let
   the outer `/loop` re-enter. Lean on the latter — keep the primitive a clean one-shot.
+
+## Resolved as built (2026-06-29)
+
+- **Spelling.** `inbox --wait` — kept on the one inbox surface, beside the thing it reads.
+- **Timeout.** Default-bounded at 300s with a clear timeout exit code (`124`, mirroring coreutils
+  `timeout(1)`); `--timeout <seconds>` overrides and `--timeout 0` waits unbounded. Exit `0` only on a
+  directed act, so a shell loop can tell "woke on a message" from "nothing yet".
+- **Reconnect.** Kept a clean one-shot: a dropped/refused socket exits with the timeout code and lets
+  the outer `/loop` re-enter, rather than reconnecting internally.
+- **Startup race.** Before opening the socket, `--wait` drains the durable inbox and wakes immediately
+  on the earliest unread directed act — so a message that landed just before the wait isn't missed.
+- **Scope.** Wakes on acts **directed to this seat** (not broadcast journal traffic), never the seat's
+  own echo; `--from`/`--act` narrow further. `--json` prints the raw envelope for scripting.
 
 ## Consequences
 

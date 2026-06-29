@@ -8,6 +8,7 @@ export interface Parsed {
 
 const BOOLEAN_FLAGS = new Set([
   'watch',
+  'wait',
   'unread',
   'peek',
   'json',

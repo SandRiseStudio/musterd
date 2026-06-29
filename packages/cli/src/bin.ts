@@ -38,6 +38,7 @@ usage:
   musterd join <slug> --as <name> [--token <tok>] [--surface cli]
   musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] <body...>
   musterd inbox [--watch] [--all] [--unread] [--peek] [--limit <n>]
+  musterd inbox --wait [--timeout <seconds>] [--from <name>] [--act <act>] [--json]   block until the next directed act, then exit (pairs with /loop)
   musterd status
   musterd availability <available|away|dnd> [--until <iso>]   set your availability (away holds notifications; dnd passes directed + urgent)
   musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away

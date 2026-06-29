@@ -1,11 +1,18 @@
 import { resolveWorkspace } from '@musterd/mcp';
 import type { Envelope, MemberKind } from '@musterd/protocol';
-import type { Parsed } from '../args.js';
+import { flagStr, type Parsed } from '../args.js';
 import { watch } from '../client.js';
 import { wsBase } from '../config.js';
 import { isActionNeeded, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { kindLookup, resolve } from './helpers.js';
+
+/** Block-until-message exit code on timeout — mirrors coreutils `timeout(1)` so shell loops can tell
+ *  "no message yet" from a real failure. Zero is reserved for "a directed act woke me". */
+export const WAIT_TIMEOUT_EXIT = 124;
+/** Default `--wait` bound (seconds): long enough to be a real event-wait, short enough that a dropped
+ *  socket can't hang a `/loop` re-invoker forever (ADR 054). `--timeout 0` waits unbounded. */
+const DEFAULT_WAIT_TIMEOUT_S = 300;
 
 export async function inboxCommand(parsed: Parsed): Promise<number> {
   const { config, team, identity, http } = resolve(parsed.flags);
@@ -13,6 +20,13 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   const kindOf = kindLookup(roster.members);
   // --all = the whole-team firehose (ADR 061): every envelope, not just my inbox.
   const all = Boolean(parsed.flags['all']);
+
+  // --wait (ADR 054): block on the watch socket until the next directed act for this seat arrives,
+  // then print it and exit 0 — the efficient, no-poll form of the wake-on-message pattern. Pairs with
+  // a harness re-invoker (`/loop`): `musterd inbox --wait && <do the work>`.
+  if (parsed.flags['wait']) {
+    return waitInbox(parsed, http, config.server, team, identity, kindOf);
+  }
 
   if (parsed.flags['watch']) {
     return watchInbox(parsed, http, config.server, team, identity, kindOf, all);
@@ -136,5 +150,109 @@ async function watchInbox(
       resolveP(0);
     };
     process.on('SIGINT', stop);
+  });
+}
+
+/**
+ * Does `env` wake a `--wait`? A **directed act for this seat** by default (broadcast journal traffic
+ * shouldn't wake a waiting agent — ADR 054), never the seat's own send, optionally narrowed by
+ * `--from`/`--act`. The same directed-to-me notion `isActionNeeded` uses, minus request_help-to-team.
+ */
+function wakesWait(
+  env: Envelope,
+  me: string,
+  filter: { from?: string | undefined; act?: string | undefined },
+): boolean {
+  if (env.from === me) return false; // never wake on my own echo
+  if (!(env.to.kind === 'member' && env.to.name === me)) return false;
+  if (filter.from && env.from !== filter.from) return false;
+  if (filter.act && env.act !== filter.act) return false;
+  return true;
+}
+
+/**
+ * `musterd inbox --wait` (ADR 054): a blocking one-shot consumer of the watch socket. Rides the same
+ * push `--watch` uses, but exits on the **first directed act** for this seat instead of streaming —
+ * exit 0 on a message, {@link WAIT_TIMEOUT_EXIT} on timeout. It first drains the durable inbox so a
+ * message that landed *just before* the wait started (the startup race) isn't missed.
+ */
+async function waitInbox(
+  parsed: Parsed,
+  http: ReturnType<typeof resolve>['http'],
+  server: string,
+  team: string,
+  identity: { name: string; token: string; surface: string },
+  kindOf: (name: string) => MemberKind,
+): Promise<number> {
+  const json = Boolean(parsed.flags['json']);
+  const peek = Boolean(parsed.flags['peek']);
+  const filter = { from: flagStr(parsed.flags, 'from'), act: flagStr(parsed.flags, 'act') };
+  const timeoutRaw = flagStr(parsed.flags, 'timeout');
+  const timeoutS = timeoutRaw !== undefined ? Number(timeoutRaw) : DEFAULT_WAIT_TIMEOUT_S;
+  if (Number.isNaN(timeoutS) || timeoutS < 0) {
+    process.stderr.write(`${theme.err('✗')} --timeout must be a non-negative number of seconds\n`);
+    return 2;
+  }
+
+  // Emit a matched act and consume it (advance the read cursor unless --peek), then exit 0.
+  const deliver = async (env: Envelope): Promise<number> => {
+    process.stdout.write((json ? JSON.stringify(env) : renderMessageRow(env, kindOf)) + '\n');
+    if (!peek) await http.markRead(team, env.id).catch(() => undefined);
+    return 0;
+  };
+
+  // Startup-race guard: a directed act may have landed between the last check and this wait. Drain the
+  // durable inbox first and wake immediately on the earliest unread match, before opening the socket.
+  const pending = await http.inbox(team, { unread: true }).catch(() => undefined);
+  if (pending) {
+    const hit = pending.messages.find(
+      (m) => m.ts > pending.cursor.last_read_ts && wakesWait(m, identity.name, filter),
+    );
+    if (hit) return deliver(hit);
+  }
+
+  return new Promise<number>((resolveP) => {
+    let done = false;
+    const finish = (code: number, after?: () => Promise<void>) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      session.close();
+      const tail = after ? after() : Promise.resolve();
+      void tail.then(() => resolveP(code));
+    };
+
+    const timer =
+      timeoutS > 0
+        ? setTimeout(() => {
+            process.stderr.write(theme.meta(`no directed act within ${timeoutS}s`) + '\n');
+            finish(WAIT_TIMEOUT_EXIT);
+          }, timeoutS * 1000)
+        : undefined;
+
+    const session = watch({
+      wsUrl: wsBase(server) + '/ws',
+      team,
+      as: identity.name,
+      token: identity.token,
+      surface: identity.surface || 'cli',
+      // A waiting agent is genuinely here and reachable — a resident session, like `--watch`.
+      provenance: 'session',
+      workspace: resolveWorkspace(),
+      scope: 'team',
+      onDeliver: (env) => {
+        if (done || !wakesWait(env, identity.name, filter)) return;
+        finish(0, async () => {
+          await deliver(env);
+        });
+      },
+      onError: (msg) => {
+        // A dropped/refused socket shouldn't hang the wait — surface it and let an outer loop re-enter.
+        process.stderr.write(`${theme.err('✗')} ${msg}\n`);
+        finish(WAIT_TIMEOUT_EXIT);
+      },
+    });
+
+    process.on('SIGINT', () => finish(WAIT_TIMEOUT_EXIT));
   });
 }
