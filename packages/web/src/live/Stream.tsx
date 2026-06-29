@@ -7,6 +7,7 @@ import {
   dayLabel,
   initial,
   kindOf,
+  memberColor,
   recipientLabel,
   rosterIndex,
 } from './format';
@@ -121,7 +122,9 @@ function Row({
       <div className="lc-row__head">
         <time className="lc-row__ts">{clock(env.ts)}</time>
         <span className={`lc-chip lc-chip--${kind}`}>
-          <span className="lc-chip__avatar">{initial(env.from)}</span>
+          <span className="lc-chip__avatar" style={{ background: memberColor(env.from, kind) }}>
+            {initial(env.from)}
+          </span>
           <span className="lc-chip__name">{env.from}</span>
         </span>
         <span className={`lc-badge lc-badge--${tone}`}>{env.act}</span>

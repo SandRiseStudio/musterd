@@ -1,17 +1,22 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
 import { useEffect, useMemo, useRef } from 'react';
 import type { ConstellationHandle, GLData } from './constellation-scene';
+import { memberColor } from './format';
 
 /** Roster + stream → the scene's data shape (nodes + directed-exchange edges, latest = active). */
 function computeData(roster: MemberSummary[], envelopes: Envelope[]): GLData {
   const names = new Set(roster.map((m) => m.name));
-  const nodes = roster.map((m) => ({
-    name: m.name,
-    kind: (m.kind === 'human' ? 'human' : 'agent') as 'human' | 'agent',
-    online: m.presence !== 'offline',
-    working: m.activity === 'working',
-    label: m.state ?? null,
-  }));
+  const nodes = roster.map((m) => {
+    const kind = (m.kind === 'human' ? 'human' : 'agent') as 'human' | 'agent';
+    return {
+      name: m.name,
+      kind,
+      online: m.presence !== 'offline',
+      working: m.activity === 'working',
+      label: m.state ?? null,
+      color: memberColor(m.name, kind),
+    };
+  });
   const set = new Map<string, { from: string; to: string }>();
   let last: { from: string; to: string } | null = null;
   for (const e of envelopes) {

@@ -13,6 +13,8 @@ export interface GLNode {
   online: boolean;
   working: boolean;
   label: string | null;
+  /** This member's unique colour (an `hsl()` string) — used for the node glow. */
+  color: string;
 }
 export interface GLEdge {
   from: string;
@@ -40,8 +42,6 @@ export interface ConstellationHandle {
 const DPR_CAP = 2;
 const R = 2.55; // ring radius (world units)
 
-const C_AGENT = new THREE.Color('#2ad6bb'); // warm jade
-const C_HUMAN = new THREE.Color('#ff86a8'); // warm rose
 const C_MUSTARD = new THREE.Color('#f2c83e');
 const C_OFFLINE = new THREE.Color('#80715f');
 
@@ -184,7 +184,7 @@ export function mountConstellation(
 
   function colorFor(n: GLNode): THREE.Color {
     if (!n.online) return C_OFFLINE;
-    return n.kind === 'human' ? C_HUMAN : C_AGENT;
+    return new THREE.Color(n.color); // each member's unique colour (ADR-less UI; format.memberColor)
   }
 
   function makeNode(n: GLNode): NodeObj {

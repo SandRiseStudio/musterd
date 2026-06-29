@@ -65,3 +65,18 @@ export function rosterIndex(roster: MemberSummary[]): Map<string, MemberSummary>
 export function kindOf(name: string, idx: Map<string, MemberSummary>): Kind {
   return idx.get(name)?.kind === 'human' ? 'human' : 'agent';
 }
+
+/**
+ * A deterministic, per-member colour so every agent (and human) is individually distinguishable —
+ * stable across sessions (hashed from the name, not assigned by index). Agents sit in a cool jewel
+ * band, humans in a warm band, so kind still reads at a glance while individuals stay unique. The
+ * golden-ratio hash spreads similar names apart. Returns an `hsl()` string usable in CSS and three.js.
+ */
+export function memberColor(name: string, kind: Kind): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  const t = (h * 0.618033988749895) % 1;
+  // agents: 150°→280° (green · teal · cyan · blue · indigo); humans: 320°→70° (magenta · rose · coral · amber)
+  const hue = kind === 'human' ? Math.round((320 + t * 110) % 360) : Math.round(150 + t * 130);
+  return `hsl(${hue}, 68%, 62%)`;
+}
