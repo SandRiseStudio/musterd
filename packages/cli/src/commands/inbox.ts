@@ -20,6 +20,11 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   const kindOf = kindLookup(roster.members);
   // --all = the whole-team firehose (ADR 061): every envelope, not just my inbox.
   const all = Boolean(parsed.flags['all']);
+  // --from/--act narrow the listing to one sender / one act type (ADR 067) — the papercut where a
+  // directed act drowns in the journal. A lens, not a mutation: when a filter is active the read
+  // cursor is left untouched (treated as a peek) so a narrowed view can't silently mark the rest read.
+  const filter = { from: flagStr(parsed.flags, 'from'), act: flagStr(parsed.flags, 'act') };
+  const filtering = Boolean(filter.from || filter.act);
 
   // --wait (ADR 054): block on the watch socket until the next directed act for this seat arrives,
   // then print it and exit 0 — the efficient, no-poll form of the wake-on-message pattern. Pairs with
@@ -34,18 +39,19 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
 
   if (all) {
     const res = await http.messages(team, { limit: 200 });
+    const messages = res.messages.filter((m) => matchesFilter(m, filter));
     if (parsed.flags['json']) {
-      process.stdout.write(JSON.stringify(res.messages) + '\n');
+      process.stdout.write(JSON.stringify(messages) + '\n');
       return 0;
     }
     process.stdout.write(
-      `${theme.accent('firehose')} — ${team} (${res.messages.length} message${res.messages.length === 1 ? '' : 's'})\n`,
+      `${theme.accent('firehose')} — ${team} (${messages.length} message${messages.length === 1 ? '' : 's'})\n`,
     );
-    if (res.messages.length === 0) {
+    if (messages.length === 0) {
       process.stdout.write(theme.meta('no communication yet') + '\n');
       return 0;
     }
-    for (const m of res.messages) process.stdout.write(renderMessageRow(m, kindOf) + '\n');
+    for (const m of messages) process.stdout.write(renderMessageRow(m, kindOf) + '\n');
     process.stdout.write(
       theme.meta('musterd inbox --watch --all to follow the firehose live') + '\n',
     );
@@ -54,7 +60,7 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
 
   const unread = Boolean(parsed.flags['unread']);
   const res = await http.inbox(team, { unread });
-  const messages = res.messages;
+  const messages = res.messages.filter((m) => matchesFilter(m, filter));
 
   if (parsed.flags['json']) {
     process.stdout.write(JSON.stringify(messages) + '\n');
@@ -71,8 +77,8 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
     const isUnread = m.ts > res.cursor.last_read_ts;
     process.stdout.write(renderMessageRow(m, kindOf, { unread: isUnread }) + '\n');
   }
-  // Advance the read cursor unless peeking.
-  if (!parsed.flags['peek'] && messages.length > 0) {
+  // Advance the read cursor unless peeking — or filtering (a narrowed lens must not mark the rest read).
+  if (!parsed.flags['peek'] && !filtering && messages.length > 0) {
     const last = messages[messages.length - 1]!;
     await http.markRead(team, last.id).catch(() => undefined);
   }
@@ -82,6 +88,16 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
 
 function countUnread(messages: Envelope[], cursorTs: number, _self: string): number {
   return messages.filter((m) => m.ts > cursorTs).length;
+}
+
+/** `inbox --from <name>` / `--act <act>` narrowing (ADR 067): keep only matching senders/act types. */
+function matchesFilter(
+  env: Envelope,
+  filter: { from?: string | undefined; act?: string | undefined },
+): boolean {
+  if (filter.from && env.from !== filter.from) return false;
+  if (filter.act && env.act !== filter.act) return false;
+  return true;
 }
 
 async function watchInbox(

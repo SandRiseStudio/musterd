@@ -21,13 +21,16 @@ import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
 import { unbindCommand } from './commands/unbind.js';
 import { uninstallCommand } from './commands/uninstall.js';
+import { whoamiCommand } from './commands/whoami.js';
 import { CliError } from './errors.js';
 import { renderBanner } from './render/rows.js';
 import { theme } from './render/theme.js';
+import { cliVersion } from './version.js';
 
 const HELP = `${'musterd'} — muster your agents and humans into persistent teams
 
 usage:
+  musterd --version                             print the installed @musterd/cli version
   musterd init [--check]                        interactive first-run setup (recommended); --check reports provisioning drift without writing
   musterd serve [--port 4849] [--host 127.0.0.1] [--tls-cert <pem> --tls-key <pem> | --insecure-trust-proxy]
   musterd service <install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow] [--force]   run the daemon as a background service (macOS LaunchAgent)
@@ -38,9 +41,10 @@ usage:
   musterd team export <slug>                     move a team's roster onto git-tracked .musterd/ files (ADR 058)
   musterd join <slug> --as <name> [--token <tok>] [--surface cli]
   musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] <body...>
-  musterd inbox [--watch] [--all] [--unread] [--peek] [--limit <n>]
+  musterd inbox [--watch] [--all] [--unread] [--peek] [--limit <n>] [--from <name>] [--act <act>]
   musterd inbox --wait [--timeout <seconds>] [--from <name>] [--act <act>] [--json]   block until the next directed act, then exit (pairs with /loop)
   musterd nudge                                 print directed acts waiting for this seat (read-only; the approval-prompt hook target)
+  musterd whoami                                show the seat this folder resolves to (member, team, surface, source)
   musterd status
   musterd availability <available|away|dnd> [--until <iso>]   set your availability (away holds notifications; dnd passes directed + urgent)
   musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away
@@ -55,11 +59,24 @@ usage:
 
 global flags: --team <slug>  --server <url>  --json  --no-color  --quiet (suppress the reachability nudge)
 
-acts: message status_update request_help handoff accept decline wait resolve`;
+acts: message status_update request_help handoff accept decline wait resolve  (accept/decline auto-target the latest open request unless you pass --reply-to)`;
 
 async function main(argv: string[]): Promise<number> {
   const command = argv[0];
   const rest = parseArgs(argv.slice(1));
+
+  // `--version`/`-v`/`version` print the CLI version and exit (ADR 067) — the first thing a fresh
+  // agent reaches for. Checked before help so `musterd --version` isn't swallowed by the help path.
+  if (
+    command === 'version' ||
+    command === '--version' ||
+    command === '-v' ||
+    rest.flags['version'] === true ||
+    argv.some((a) => a === '--version' || a === '-v')
+  ) {
+    process.stdout.write(cliVersion() + '\n');
+    return 0;
+  }
 
   // `--help`/`-h` anywhere prints usage and exits — never runs the command (e.g. `notify --help`
   // must not launch the resident notifier).
@@ -104,6 +121,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return inboxCommand(rest);
     case 'nudge':
       return nudgeCommand(rest);
+    case 'whoami':
+      return whoamiCommand(rest);
     case 'status':
       return statusCommand(rest);
     case 'availability':

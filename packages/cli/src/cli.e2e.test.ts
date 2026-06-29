@@ -12,6 +12,7 @@ import { reclaimCommand } from './commands/reclaim.js';
 import { sendCommand } from './commands/send.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
+import { whoamiCommand } from './commands/whoami.js';
 import { saveBinding } from './config.js';
 import { cachedTeamLive } from './onboard/init.js';
 
@@ -408,6 +409,77 @@ describe('an active identity is required to act (ADR 036)', () => {
     const sent = await run(sendCommand, ['--to', 'bo', '--act', 'message', 'hi bo']);
     expect(sent.code).toBe(0);
     expect(sent.out).toContain('sent');
+  });
+});
+
+describe('CLI ergonomics papercuts (ADR 067)', () => {
+  async function dawnWithAgent(name: string): Promise<string> {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    const added = await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
+    return JSON.parse(added.out).token as string;
+  }
+
+  it('whoami names the seat this folder resolves to, with its source', async () => {
+    const token = await dawnWithAgent('Ada');
+    actAs('dawn', 'Ada', token);
+    const who = await run(whoamiCommand, []);
+    expect(who.code).toBe(0);
+    expect(who.out).toContain('Ada');
+    expect(who.out).toContain('dawn');
+    expect(who.out).toContain('env'); // identity came from MUSTERD_* env
+
+    const json = await run(whoamiCommand, ['--json']);
+    const parsed = JSON.parse(json.out);
+    expect(parsed).toMatchObject({ team: 'dawn', member: 'Ada', source: 'env', explicit: true });
+  });
+
+  it('inbox --act and --from narrow the listing without advancing the cursor', async () => {
+    const token = await dawnWithAgent('Ada');
+    await run(teamCommand, ['add', 'Bo', '--kind', 'agent']);
+    await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'please review']);
+    await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'refactoring']);
+    actAsNobody(); // nick's bound folder is fine; switch sender to Bo for a from-filter contrast
+    await run(sendCommand, ['--as', 'nick', '--to', 'Ada', '--act', 'message', 'from nick only']);
+
+    actAs('dawn', 'Ada', token);
+    // --act keeps only the request_help
+    const byAct = await run(inboxCommand, ['--act', 'request_help', '--peek']);
+    expect(byAct.out).toContain('please review');
+    expect(byAct.out).not.toContain('refactoring');
+    // --from keeps only nick's (the status_update is @team from nick too, but the act filter is separate)
+    const byFrom = await run(inboxCommand, ['--from', 'nick']);
+    expect(byFrom.out).toContain('please review');
+
+    // Filtering is a peek — the cursor never advanced, so a plain inbox still shows them unread.
+    const plain = await run(inboxCommand, ['--peek']);
+    expect(plain.out).toContain('please review');
+  });
+
+  it('accept auto-targets the latest open request when no --reply-to is given', async () => {
+    const token = await dawnWithAgent('Ada');
+    const ask = await run(sendCommand, [
+      '--to',
+      'Ada',
+      '--act',
+      'request_help',
+      '--json',
+      'can you take the build?',
+    ]);
+    const askId = JSON.parse(ask.out).id as string;
+
+    actAs('dawn', 'Ada', token);
+    const accepted = await run(sendCommand, ['--act', 'accept', '--to', 'nick', '--json', 'on it']);
+    const env = JSON.parse(accepted.out);
+    expect(env.meta.in_reply_to).toBe(askId);
+    expect(env.thread).toBe(askId); // inherited the request's thread
+  });
+
+  it('accept errors with guidance when there is no open request to answer', async () => {
+    const token = await dawnWithAgent('Ada');
+    actAs('dawn', 'Ada', token);
+    await expect(
+      run(sendCommand, ['--act', 'accept', '--to', 'nick', 'on it']),
+    ).rejects.toMatchObject({ exitCode: 2 });
   });
 });
 

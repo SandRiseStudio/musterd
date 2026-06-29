@@ -336,13 +336,13 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'cli-ergonomics',
-    wave: 1,
     title: 'CLI ergonomics',
-    status: 'near-term',
+    status: 'shipped',
     category: 'platform',
-    blurb: 'The papercuts a fresh agent hits in its first five minutes. Partly landed (inbox --unread/--peek/--limit); the rest are still open.',
+    blurb: 'The papercuts a fresh agent hits in its first five minutes — identity, version, inbox filters, one-command replies.',
     detail:
-      'Dogfood papercuts, several from the 2026-06-25 onboarding retry. Landed: inbox gained --unread (foreground unread), --peek, and --limit, so a directed act no longer drowns oldest-first in the @team firehose. Still open and additive: (1) inbox --act/--from filters (the --act handoff flag was a no-op); (2) accept auto-targets the latest open directed act instead of forcing meta.in_reply_to via inbox --json | parse, and inbox surfaces copyable ids; (3) musterd whoami and musterd --version (a fresh agent reaches for both first — still missing); (4) edit/supersede for a sent act, so a correction doesn’t leave overlapping copies in the recipient inbox.',
+      'Dogfood papercuts, several from the 2026-06-25 onboarding retry. Earlier half landed first (inbox --unread/--peek/--limit). The rest shipped as ADR 067: musterd whoami (which seat does this folder resolve to, + source) and musterd --version (both the first things a fresh agent reaches for); inbox --from/--act filters (the --act flag was previously a no-op), a lens that never advances the read cursor; and accept/decline auto-targeting the latest open request_help/handoff (inheriting its thread) so closing a loop is one command instead of inbox --json | parse | --reply-to. No wire change — all client-side over existing read/send paths. One residual spins out to Later: edit/supersede a sent act (a correction shouldn’t leave overlapping copies in the recipient inbox) — that implies a new wire concept, not a papercut.',
+    refs: [adr(67, 'ADR 067'), adr(24, 'ADR 024'), adr(36, 'ADR 036')],
   },
 
   // Wave 2 — the v0.3 governance rock, then the full governed notification tiers it unlocks.

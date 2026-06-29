@@ -22,6 +22,7 @@ src/
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
+  version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   errors.ts           // CliError(code) -> message + exit code
   render/
     theme.ts          // ANSI roles from brand.md (online dot, member colors, act badges)
@@ -61,6 +62,7 @@ src/
     send.ts           // send
     inbox.ts          // inbox [--watch] [--wait] (ADR 054)
     nudge.ts          // print directed acts waiting for this seat — the approval-prompt hook target (ADR 053)
+    whoami.ts         // print the seat this folder resolves to: member/team/surface/source (ADR 067)
     status.ts         // status
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036)
