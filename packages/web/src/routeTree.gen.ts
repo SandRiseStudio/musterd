@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as AuditRouteImport } from './routes/audit'
+import { Route as ApprovalPreviewRouteImport } from './routes/approval-preview'
 import { Route as IndexRouteImport } from './routes/index'
 
 const LiveRoute = LiveRouteImport.update({
@@ -23,6 +24,11 @@ const AuditRoute = AuditRouteImport.update({
   path: '/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApprovalPreviewRoute = ApprovalPreviewRouteImport.update({
+  id: '/approval-preview',
+  path: '/approval-preview',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -31,30 +37,34 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/approval-preview': typeof ApprovalPreviewRoute
   '/audit': typeof AuditRoute
   '/live': typeof LiveRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/approval-preview': typeof ApprovalPreviewRoute
   '/audit': typeof AuditRoute
   '/live': typeof LiveRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/approval-preview': typeof ApprovalPreviewRoute
   '/audit': typeof AuditRoute
   '/live': typeof LiveRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/audit' | '/live'
+  fullPaths: '/' | '/approval-preview' | '/audit' | '/live'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/audit' | '/live'
-  id: '__root__' | '/' | '/audit' | '/live'
+  to: '/' | '/approval-preview' | '/audit' | '/live'
+  id: '__root__' | '/' | '/approval-preview' | '/audit' | '/live'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApprovalPreviewRoute: typeof ApprovalPreviewRoute
   AuditRoute: typeof AuditRoute
   LiveRoute: typeof LiveRoute
 }
@@ -75,6 +85,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuditRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/approval-preview': {
+      id: '/approval-preview'
+      path: '/approval-preview'
+      fullPath: '/approval-preview'
+      preLoaderRoute: typeof ApprovalPreviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApprovalPreviewRoute: ApprovalPreviewRoute,
   AuditRoute: AuditRoute,
   LiveRoute: LiveRoute,
 }
