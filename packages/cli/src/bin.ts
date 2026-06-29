@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from './args.js';
 import { agentCommand } from './commands/agent.js';
+import { auditCommand } from './commands/audit.js';
 import { availabilityCommand } from './commands/availability.js';
 import { claimCommand } from './commands/claim.js';
 import { fmtCommand } from './commands/fmt.js';
@@ -46,6 +47,7 @@ usage:
   musterd nudge                                 print directed acts waiting for this seat (read-only; the approval-prompt hook target)
   musterd whoami                                show the seat this folder resolves to (member, team, surface, source)
   musterd status
+  musterd audit [--limit <n>] [--before <ms-epoch>] [--json]   read the governance audit log (admin-only, ADR 071/074)
   musterd availability <available|away|dnd> [--until <iso>]   set your availability (away holds notifications; dnd passes directed + urgent)
   musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away
   musterd claim <name> [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--force]   claim a seat (or adopt a teammate's seat with --token; --force repoints a folder bound to a live member)
@@ -107,6 +109,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return initCommand(rest);
     case 'agent':
       return agentCommand(rest);
+    case 'audit':
+      return auditCommand(rest);
     case 'serve':
       return serveCommand(rest);
     case 'service':

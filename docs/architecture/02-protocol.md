@@ -139,6 +139,10 @@ export const Member = z.object({ /* mirrors members table, no token_hash */ });
 export const WSClientFrame = z.discriminatedUnion('type', [ Hello, Subscribe, Send, Heartbeat ]);
 export const WSServerFrame = z.discriminatedUnion('type', [ Welcome, Subscribed, Ack, Deliver, PresenceEvt, ErrorFrame ]);
 export const ErrorCode = z.enum(['bad_request','validation','unauthorized','forbidden','not_found','conflict','member_busy','superseded','version_mismatch','server_error']);
+export const AuditEntry = z.object({ id, ts, actor:string|null, action:string, target:string|null, result:z.enum(['allow','deny']), detail:record|null });  // ADR 071/074 — `action` is an OPEN string (P3 adds verbs); the audit-log wire contract
+export const AuditResponse = z.object({ audit: AuditEntry[] });
 ```
 
 `actMetaRules` is the single place encoding the per-act `meta` requirements from the table above; both server and clients import it so validation is identical everywhere. **Changing any of these schemas requires an ADR** (`00-overview.md` hard rule).
+
+`AuditEntry`/`AuditResponse` (ADR 071/074) are the wire contract for the admin-only `GET /teams/:slug/audit` governance log. `action` is deliberately an **open string** rather than an enum: ADR 071 shapes the table for P3 verbs (`grant.*`, `claim.*`, `account_status.change`, `key.rotate`, `policy.change`, `request.decide`) that add rows not schema, and the CLI renders unknown verbs plainly instead of rejecting them. The server's internal `AuditAction` union (in `@musterd/server`) is the enumerated write-side type; this protocol schema is the permissive read-side contract.

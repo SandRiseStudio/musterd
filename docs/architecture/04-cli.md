@@ -54,6 +54,7 @@ src/
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report
     agent.ts          // musterd agent <name>: add an agent + isolated worktree + binding + MCP register (ADR 065)
+    audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074)
     serve.ts          // musterd serve [--port]
     service.ts        // musterd service install/uninstall/start/stop/restart/status/logs (ADR 045)
     team.ts           // team create / team add / team remove / team export (ADR 058 db→file migration)
@@ -228,6 +229,10 @@ The **L2 universal floor** of claim-on-first-use (ADR 032) — needs only the da
 ### `musterd reclaim <member>`
 
 `POST /teams/:slug/members/:name/reclaim`. Force-drops a member's live session so it can rejoin — the sanctioned escape hatch (ADR 017 follow-up) instead of editing the daemon's DB. Newest-wins self-heals a _reconnecting_ session, but an orphaned presence that never comes back needs this. Any team member may reclaim any member (localhost/v0.2; the v0.3 seat model will gate it). Output: `✓ reclaimed <member> — any live session was dropped; it can rejoin now`. Errors: unknown member → `not_found` (exit 6).
+
+### `musterd audit [--limit <n>] [--before <ms-epoch>] [--json]`
+
+`GET /teams/:slug/audit` — the governance audit log reader (ADR 071), admin-only. Pretty-prints entries newest-first: `<HH:MM> <actor> [<action>] <allow|deny> → <target> <detail>`, `allow` green / `deny` red, `action` dim, the `detail` JSON blob in meta. `--limit` caps the page (integer 1..500; server default 100); `--before <ms-epoch>` pages entries older than a ts (the oldest row's ts is printed as the next `--before` cursor); `--json` passes the raw `AuditEntry[]` through. `action` is an **open string** (ADR 074) — unknown verbs render plainly instead of erroring, so P3's new governance actions (`grant.*`, `claim.*`, `account_status.change`, …) don't require a CLI release. Needs an **active admin identity** like any act (ADR 036); an ambient global-config read can't list who-did-what across the team. The response is parsed through `AuditResponseSchema` at the client boundary. Output: `cmd/audit`-style `audit — <team> (<n> entries)` + rows. Errors: non-admin → `forbidden` (exit 5); `--limit`/`--before` out of range → `bad_request` (exit 2).
 
 ### `musterd notify [--interval <seconds>] [--once]`
 

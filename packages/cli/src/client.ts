@@ -1,6 +1,8 @@
 import {
+  AuditResponseSchema,
   ErrorBodySchema,
   PROTOCOL_VERSION,
+  type AuditResponse,
   type Envelope,
   type MemberKind,
   type MemberSummary,
@@ -142,6 +144,26 @@ export class HttpClient {
     member: string,
   ): Promise<{ ok: boolean; member: string; kind: MemberKind }> {
     return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(member)}/remove`);
+  }
+  /**
+   * The governance audit log (ADR 071) — admin-only `GET /teams/:slug/audit`. Newest-first, capped;
+   * `limit` (1..500) and `before` (<ms-epoch>) page older entries. The response is parsed through
+   * `AuditResponseSchema` at this boundary (ADR 074) so a malformed body never reaches the command.
+   */
+  async audit(
+    slug: string,
+    opts: { limit?: number; before?: number } = {},
+  ): Promise<AuditResponse> {
+    const q = new URLSearchParams();
+    if (opts.limit) q.set('limit', String(opts.limit));
+    if (opts.before) q.set('before', String(opts.before));
+    const qs = q.toString();
+    const json = await this.request('GET', `/teams/${slug}/audit${qs ? `?${qs}` : ''}`);
+    const parsed = AuditResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('audit response did not match the protocol schema', 1);
+    }
+    return parsed.data;
   }
 }
 
