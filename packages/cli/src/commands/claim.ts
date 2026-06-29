@@ -10,6 +10,7 @@ import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, loadConfig, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
+import { liveBindingClobber } from '../onboard/guard.js';
 import {
   consumePending,
   listPendingForWorkspace,
@@ -48,6 +49,24 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
 
   const http = new HttpClient({ server });
   const { members } = await http.roster(team);
+
+  // ADR 066 clobber guard. Claiming a *different* seat into a folder silently repoints its
+  // binding — fine for a stale/offline seat, a collision when the bound member is live (two
+  // sessions then drive one tree). Refuse and point at the isolated-workspace path; --force
+  // repoints anyway. Checked before any mint, so a refused claim leaves no orphan seat.
+  const guardTarget = 'seat' in target ? target.seat : null;
+  const clobber = liveBindingClobber(binding, members, guardTarget);
+  if (clobber && !flags['force']) {
+    const where = clobber.workspace ? ` (live in ${clobber.workspace})` : '';
+    throw new CliError(
+      `this folder is already bound to ${clobber.member}, who is live right now${where} — ` +
+        `claiming here would evict them and point both sessions at one working tree. ` +
+        `Give the new agent its own workspace instead: musterd agent <name> ` +
+        `(adds the seat + a git worktree + binding), or run this claim from a separate worktree. ` +
+        `Re-run with --force to repoint this folder anyway.`,
+      2,
+    );
+  }
 
   // Disambiguate which pending session (if any) this claim is for. Informational + lets `--for`
   // scope the marker that gets cleared; identity delivery is via the binding either way (ADR 033).

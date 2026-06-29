@@ -41,7 +41,7 @@ usage:
   musterd status
   musterd availability <available|away|dnd> [--until <iso>]   set your availability (away holds notifications; dnd passes directed + urgent)
   musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away
-  musterd claim <name> [--token <code>] | --role <role> [--for <code>] [--surface <s>]   claim a seat (or adopt a teammate's seat with --token)
+  musterd claim <name> [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--force]   claim a seat (or adopt a teammate's seat with --token; --force repoints a folder bound to a live member)
   musterd unbind                                release this folder's seat — keeps it on the team, free to re-claim (ADR 058)
   musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
   musterd fmt [--check]                         canonicalize this folder's .musterd/ roster files (ADR 058)

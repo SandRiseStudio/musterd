@@ -158,6 +158,50 @@ describe('musterd claim (L2 floor, ADR 032)', () => {
     expect(readBinding().member).toBe('Polly');
   });
 
+  it('refuses to clobber a folder bound to a currently-live different member (ADR 066)', async () => {
+    // Bind this folder to Ada and make her live (a presence attachment on the roster).
+    await run(['Ada', '--team', 'dawn']);
+    const token = readBinding().token;
+    await new HttpClient({ server: process.env['MUSTERD_SERVER']!, token }).presence('dawn', 'cli');
+    // Claiming a *different* seat here would silently evict the live Ada — refuse (exit 2).
+    await expect(run(['Bob', '--team', 'dawn'])).rejects.toMatchObject({
+      exitCode: 2,
+      message: expect.stringContaining('musterd agent'),
+    });
+    // The binding is untouched and no Bob seat was minted (guard runs before any mint).
+    expect(readBinding().member).toBe('Ada');
+    const { members } = await new HttpClient({ server: process.env['MUSTERD_SERVER']! }).roster(
+      'dawn',
+    );
+    expect(members.some((m) => m.name === 'Bob')).toBe(false);
+  });
+
+  it('--force repoints a folder bound to a live member anyway (ADR 066)', async () => {
+    await run(['Ada', '--team', 'dawn']);
+    const token = readBinding().token;
+    await new HttpClient({ server: process.env['MUSTERD_SERVER']!, token }).presence('dawn', 'cli');
+    const { code } = await run(['Bob', '--team', 'dawn', '--force']);
+    expect(code).toBe(0);
+    expect(readBinding().member).toBe('Bob');
+  });
+
+  it('does not refuse when the bound member is offline (stale seat is reclaimable, ADR 066)', async () => {
+    // Bind to Ada but never register a presence — she is offline, so claiming elsewhere is benign.
+    await run(['Ada', '--team', 'dawn']);
+    const { code } = await run(['Bob', '--team', 'dawn']);
+    expect(code).toBe(0);
+    expect(readBinding().member).toBe('Bob');
+  });
+
+  it('re-occupying our own live seat is never a clobber (ADR 066)', async () => {
+    await run(['Ada', '--team', 'dawn']);
+    const token = readBinding().token;
+    await new HttpClient({ server: process.env['MUSTERD_SERVER']!, token }).presence('dawn', 'cli');
+    const { code, out } = await run(['Ada', '--team', 'dawn']);
+    expect(code).toBe(0);
+    expect(out).toContain('reclaimed your seat');
+  });
+
   it('lists waiting sessions and requires --for when several are pending', async () => {
     writePending(cwd, {
       code: 'AB12',
