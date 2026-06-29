@@ -1,4 +1,4 @@
-import type { Envelope, MemberSummary } from '@musterd/protocol';
+import type { AccountStatus, Capabilities, Envelope, MemberSummary } from '@musterd/protocol';
 
 export type ActTone =
   | 'accent'
@@ -111,4 +111,92 @@ export function memberColor(name: string, kind: Kind): string {
   // agents: 150°→280° (green · teal · cyan · blue · indigo); humans: 320°→70° (magenta · rose · coral · amber)
   const hue = kind === 'human' ? Math.round((320 + t * 110) % 360) : Math.round(150 + t * 130);
   return `hsl(${hue}, 68%, 62%)`;
+}
+
+/* ─── governance projection (ADR 070 capability/account-status surface) ───────────────────────────
+ * The web read-only view of the v0.3 seat model: it renders whatever the daemon *projects* (role
+ * defaults ⊕ per-seat narrowing → effective capabilities, plus the derived account_status). Nothing is
+ * enforced here — this is the observable surface. P2 (server) is the enforcement half. */
+
+/** How an account_status reads in the rail: a tone + whether it's the healthy norm (shown quiet). */
+export interface StatusMeta {
+  label: string;
+  tone: 'ok' | 'pending' | 'danger' | 'muted';
+  /** `active` is the steady state — rendered subdued so the rail only *shouts* the exceptions. */
+  quiet: boolean;
+}
+export function accountStatusMeta(status: AccountStatus | undefined): StatusMeta {
+  switch (status) {
+    case 'active':
+      return { label: 'active', tone: 'ok', quiet: true };
+    case 'provisioned':
+      return { label: 'provisioned', tone: 'pending', quiet: false };
+    case 'disabled':
+      return { label: 'disabled', tone: 'muted', quiet: false };
+    case 'banned':
+      return { label: 'banned', tone: 'danger', quiet: false };
+    case 'archived':
+      return { label: 'archived', tone: 'muted', quiet: false };
+    default:
+      // Pre-v0.3 daemon (no account_status projected) — say so rather than inventing 'active'.
+      return { label: 'unknown', tone: 'muted', quiet: true };
+  }
+}
+
+export type BadgeTone = 'admin' | 'restrict' | 'muted';
+export interface CapBadge {
+  key: string;
+  label: string;
+  tone: BadgeTone;
+  /** The long-form tooltip explaining the capability behind the badge. */
+  title: string;
+}
+
+/**
+ * The capability badges worth showing for a seat — only **deviations from the generalist default**
+ * (everyone-can-do-everything) plus the positive `admin` marker. A fully-generalist seat shows no
+ * badges, so the rail stays calm today and lights up exactly as governance is configured. Mirrors the
+ * Universe-1 fields the protocol enforces (ADR 070); Universe-2 (tool/resource scopes) is declared-only
+ * and intentionally not surfaced as a badge.
+ */
+export function capabilityBadges(caps: Capabilities | undefined): CapBadge[] {
+  if (!caps) return [];
+  const out: CapBadge[] = [];
+  if (caps.is_admin)
+    out.push({ key: 'admin', label: 'admin', tone: 'admin', title: 'Team admin — full governance authority' });
+  if (caps.visibility_level === 'admin')
+    out.push({
+      key: 'view',
+      label: 'admin view',
+      tone: 'admin',
+      title: 'Sees everything: credentials, grants, audit, and all charters',
+    });
+  if (caps.can_message === 'none')
+    out.push({ key: 'muted', label: 'muted', tone: 'muted', title: 'May not send messages to the team' });
+  if (!caps.can_flag_urgent)
+    out.push({
+      key: 'urgent',
+      label: 'no urgent',
+      tone: 'restrict',
+      title: 'May not flag messages as urgent',
+    });
+  if (!caps.can_observe)
+    out.push({
+      key: 'observe',
+      label: 'no observe',
+      tone: 'restrict',
+      title: 'May not observe the team firehose',
+    });
+  return out;
+}
+
+/** Roster sort for the rail: online before offline, then humans before agents, then by name. */
+export function rosterOrder(a: MemberSummary, b: MemberSummary): number {
+  const onA = a.presence !== 'offline' ? 0 : 1;
+  const onB = b.presence !== 'offline' ? 0 : 1;
+  if (onA !== onB) return onA - onB;
+  const kA = a.kind === 'human' ? 0 : 1;
+  const kB = b.kind === 'human' ? 0 : 1;
+  if (kA !== kB) return kA - kB;
+  return a.name.localeCompare(b.name);
 }

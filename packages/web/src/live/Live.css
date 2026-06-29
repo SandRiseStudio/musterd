@@ -239,7 +239,7 @@
 /* ─── constellation (three.js over the dusk sky) ──────────────────────── */
 .lc-constellation {
   position: relative;
-  flex: 0 0 42%;
+  flex: 0 0 38%;
   min-width: 0;
   border-right: 1px solid var(--lc-border);
   overflow: hidden;
@@ -316,6 +316,189 @@
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
 }
 
+/* ─── roster rail (governance surface — ADR 070 capability/account-status) ─ */
+.lc-roster {
+  flex: 0 0 234px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--lc-ground-2);
+  border-right: 1px solid var(--lc-border);
+  overflow: hidden;
+}
+.lc-roster__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--lc-4);
+  padding: var(--lc-5) var(--lc-6);
+  border-bottom: 1px solid var(--lc-border);
+}
+.lc-roster__title {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--lc-muted);
+}
+.lc-roster__count {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--lc-faint);
+  white-space: nowrap;
+}
+.lc-roster__rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--lc-3) var(--lc-3) var(--lc-6);
+}
+.lc-roster__empty {
+  margin: var(--lc-6) var(--lc-4);
+  font-size: 12px;
+  color: var(--lc-faint);
+}
+
+.lc-seat {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--lc-3);
+  padding: var(--lc-3) var(--lc-3);
+  border-radius: var(--lc-r-sm);
+  transition: background var(--lc-fast) var(--lc-ease);
+}
+.lc-seat:hover {
+  background: color-mix(in srgb, var(--lc-surface) 60%, transparent);
+}
+.lc-seat--offline {
+  opacity: 0.55;
+}
+.lc-seat__dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+}
+.lc-seat__dot--on {
+  background: var(--lc-success);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--lc-success) 70%, transparent);
+}
+.lc-seat__dot--off {
+  background: var(--lc-faint);
+}
+.lc-seat__avatar {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a1119;
+}
+.lc-seat__body {
+  flex: 1;
+  min-width: 0;
+}
+.lc-seat__line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lc-3);
+}
+.lc-seat__name {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--lc-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lc-seat__kind {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.lc-seat__kind--agent {
+  color: var(--lc-agent);
+}
+.lc-seat__kind--human {
+  color: var(--lc-human);
+}
+.lc-seat__role {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.01em;
+  color: var(--lc-muted);
+  white-space: nowrap;
+}
+.lc-seat__role::before {
+  content: '·';
+  margin-right: 4px;
+  color: var(--lc-faint);
+}
+.lc-seat__gov {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lc-2);
+  margin-top: 3px;
+}
+/* account_status pill — quiet for the healthy `active` norm, loud for exceptions */
+.lc-stat {
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+}
+.lc-stat--quiet {
+  color: var(--lc-faint);
+  background: transparent;
+  border-color: var(--lc-border);
+}
+.lc-stat--ok {
+  color: var(--lc-success);
+  background: color-mix(in srgb, var(--lc-success) 14%, transparent);
+}
+.lc-stat--pending {
+  color: var(--lc-accent-bright);
+  background: color-mix(in srgb, var(--lc-accent) 16%, transparent);
+}
+.lc-stat--danger {
+  color: var(--lc-danger);
+  background: color-mix(in srgb, var(--lc-danger) 16%, transparent);
+}
+.lc-stat--muted {
+  color: var(--lc-muted);
+  background: color-mix(in srgb, var(--lc-muted) 14%, transparent);
+}
+/* capability badges — only deviations-from-generalist + the positive admin marker */
+.lc-cap {
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+.lc-cap--admin {
+  color: var(--lc-accent-bright);
+  background: color-mix(in srgb, var(--lc-accent) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 40%, transparent);
+}
+.lc-cap--restrict {
+  color: var(--lc-info);
+  background: color-mix(in srgb, var(--lc-info) 16%, transparent);
+}
+.lc-cap--muted {
+  color: var(--lc-danger);
+  background: color-mix(in srgb, var(--lc-danger) 14%, transparent);
+}
+
 /* ─── stream (the legible console) ────────────────────────────────────── */
 .lc-stream {
   flex: 1;
@@ -368,6 +551,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--lc-3);
+  /* On very wide displays (e.g. a wall-mounted TV) the stream panel is enormous; keep the
+     readable column to a comfortable measure and center it rather than stranding text at the
+     left edge while header rows span the full width. */
+  width: 100%;
+  max-width: 78ch;
+  margin-inline: auto;
 }
 .lc-empty {
   color: var(--lc-muted);
@@ -907,7 +1096,12 @@
   border-radius: 4px;
 }
 
-/* ─── responsive (collapse the constellation on narrow) ───────────────── */
+/* ─── responsive (shed the ambient panels as width tightens) ──────────── */
+@media (max-width: 1080px) {
+  .lc-roster {
+    display: none;
+  }
+}
 @media (max-width: 880px) {
   .lc-constellation {
     display: none;
