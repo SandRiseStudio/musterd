@@ -1,6 +1,13 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
 
-export type ActTone = 'accent' | 'success' | 'danger' | 'info' | 'neutral';
+export type ActTone =
+  | 'accent'
+  | 'success'
+  | 'danger'
+  | 'info'
+  | 'handoff'
+  | 'status'
+  | 'neutral';
 
 /** Map an act to its colour role — mirrors brand.md / the act-badge variants (ADR 061 view). */
 export function actTone(act: string): ActTone {
@@ -14,9 +21,40 @@ export function actTone(act: string): ActTone {
       return 'danger';
     case 'wait':
       return 'info';
+    case 'handoff':
+      return 'handoff';
+    case 'status_update':
+      return 'status';
     default:
       return 'neutral';
   }
+}
+
+/**
+ * A short, human label per act — what reads in the badge. Distinct from the raw act token so the
+ * stream stays legible (`status_update` → `status`, `request_help` → `help`) without losing meaning.
+ */
+export function actLabel(act: string): string {
+  switch (act) {
+    case 'status_update':
+      return 'status';
+    case 'request_help':
+      return 'help';
+    default:
+      return act;
+  }
+}
+
+/** Where a message went, distilled to the three audiences a reader cares about (ADR 061 firehose). */
+export type ActScope = 'direct' | 'team' | 'all';
+export function recipientScope(to: Envelope['to']): ActScope {
+  if (to.kind === 'member') return 'direct';
+  if (to.kind === 'team') return 'team';
+  return 'all';
+}
+/** The named recipient of a direct (1:1) message; null for team/broadcast. */
+export function recipientName(to: Envelope['to']): string | null {
+  return to.kind === 'member' ? to.name : null;
 }
 
 export function initial(name: string): string {
@@ -47,12 +85,6 @@ export function dayLabel(ts: number): string {
     day: 'numeric',
     ...(sameYear ? {} : { year: 'numeric' }),
   });
-}
-
-export function recipientLabel(to: Envelope['to']): string | null {
-  if (to.kind === 'member') return `→ ${to.name}`;
-  if (to.kind === 'team') return '→ team';
-  return '→ all';
 }
 
 export type Kind = 'agent' | 'human';
