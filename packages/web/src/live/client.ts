@@ -6,7 +6,16 @@
 //      not just messages addressed to this seat;
 //   2. it backfills history over HTTP first (`GET /teams/:slug/messages`) so the view isn't empty,
 //      then live-tails — the canonical "GET history, then subscribe, dedupe by id" pattern.
-import { PROTOCOL_VERSION, type Envelope, type MemberSummary } from '@musterd/protocol';
+import {
+  AuditResponseSchema,
+  PROTOCOL_VERSION,
+  type AuditEntry,
+  type Envelope,
+  type MemberSummary,
+} from '@musterd/protocol';
+
+// Re-export so the audit view + route keep importing the entry type from this client module.
+export type { AuditEntry };
 
 export interface LiveConfig {
   team: string;
@@ -74,23 +83,6 @@ export async function fetchHistory(
   return r.messages;
 }
 
-/**
- * One append-only governance audit record (ADR 071). `action` is an **open string** — known v0.3
- * values are `urgent.flagged|urgent.denied|send.denied|member.reclaim|member.remove|observe.denied`,
- * and P3 adds more (`grant.*`, `claim.*`, `account_status.change`…), so the view pretty-prints
- * unknowns rather than enumerating. `detail` is a small free-form object (e.g. `{reason}`,
- * `{fallback:'no-admin'}`, `{account_status:'disabled'}`).
- */
-export interface AuditEntry {
-  id: string;
-  ts: number;
-  actor: string | null;
-  action: string;
-  target: string | null;
-  result: 'allow' | 'deny';
-  detail: Record<string, unknown> | null;
-}
-
 /** A fetch error that carries the daemon's error code so the view can tailor copy (401 vs 403). */
 export class AuditFetchError extends Error {
   constructor(
@@ -130,7 +122,8 @@ export async function fetchAudit(
       res.status,
     );
   }
-  return (json as { audit: AuditEntry[] }).audit;
+  // Validate the wire against the shared schema at the boundary (same contract the CLI parses, ADR 074).
+  return AuditResponseSchema.parse(json).audit;
 }
 
 /**
