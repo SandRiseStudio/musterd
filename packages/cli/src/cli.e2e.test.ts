@@ -7,6 +7,7 @@ import { parseArgs } from './args.js';
 import { reachabilityNudge, resolve, resolveRead } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { joinCommand } from './commands/join.js';
+import { nudgeCommand } from './commands/nudge.js';
 import { reclaimCommand } from './commands/reclaim.js';
 import { sendCommand } from './commands/send.js';
 import { statusCommand } from './commands/status.js';
@@ -407,6 +408,38 @@ describe('an active identity is required to act (ADR 036)', () => {
     const sent = await run(sendCommand, ['--to', 'bo', '--act', 'message', 'hi bo']);
     expect(sent.code).toBe(0);
     expect(sent.out).toContain('sent');
+  });
+});
+
+describe('nudge — surface waiting acts at the approval prompt (ADR 053)', () => {
+  it('prints the directed acts waiting for the bound seat, read-only (cursor stays put)', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const token = JSON.parse(added.out).token as string;
+    await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'review the auth PR']);
+
+    actAs('dawn', 'Ada', token);
+    const nudge = await run(nudgeCommand, []);
+    expect(nudge.code).toBe(0);
+    expect(nudge.out).toContain('Ada');
+    expect(nudge.out).toContain('waiting');
+
+    // Read-only: it never advanced the cursor, so a second nudge still surfaces the same act.
+    const again = await run(nudgeCommand, []);
+    expect(again.out).toContain('waiting');
+  });
+
+  it('prints nothing (exit 0) when no directed act is waiting', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const token = JSON.parse(added.out).token as string;
+    // Only broadcast journal traffic — nothing directed at Ada.
+    await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'refactoring']);
+
+    actAs('dawn', 'Ada', token);
+    const nudge = await run(nudgeCommand, []);
+    expect(nudge.code).toBe(0);
+    expect(nudge.out).toBe('');
   });
 });
 

@@ -314,14 +314,13 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'inbox-reaches-blocked-agent',
-    wave: 1,
     title: 'Inbox reaches a blocked agent',
-    status: 'near-term',
+    status: 'shipped',
     category: 'human-loop',
-    blurb: 'A teammate’s message reaches an agent parked on an approval prompt — surfaced into the terminal the human is already at — and the sender sees “blocked awaiting approval” instead of silence.',
+    blurb: 'A teammate’s message reaches an agent parked on an approval prompt — surfaced into the terminal the human is already at — instead of waiting until the human hand-relays it.',
     detail:
-      'A dogfood finding: with per-tool approval on, an agent frozen on a permission prompt runs no command, so ADR 046’s per-command nudge can’t fire and the message waits until the human hand-relays it — the message-bus regression. Allowlisting musterd commands doesn’t help; the block is on the agent’s own gated work. The fix is push, not pull: provisioning installs a Claude Code Notification hook that prints unread directed acts at the approval-prompt moment, and the same hook marks the seat blocked_on_approval so the sender knows to nudge. Harness-provisioned, reversible via the manifest, no wire change.',
-    refs: [adr(53, 'ADR 053'), adr(46, 'ADR 046'), adr(30, 'ADR 030')],
+      'A dogfood finding: with per-tool approval on, an agent frozen on a permission prompt runs no command, so ADR 046’s per-command nudge can’t fire and the message waits until the human hand-relays it — the message-bus regression. Allowlisting musterd commands doesn’t help; the block is on the agent’s own gated work. The fix is push, not pull. Shipped: musterd nudge (a read-only print of the directed acts waiting for this seat) plus a Claude Code Notification hook that runs it at the approval-prompt moment, installed by configure (so init and agent both wire it), idempotent and marker-reversible by musterd uninstall. The hook’s authenticated read also keeps a blocked agent recently-present via ambient presence (ADR 057); the distinct blocked_on_approval label is deferred to the ambient-presence ADR (a closed presence enum, so a no-wire-change for now). Cursor/Codex degrade to ADR 046’s per-command nudge.',
+    refs: [adr(53, 'ADR 053'), adr(46, 'ADR 046'), adr(57, 'ADR 057')],
     dependsOn: ['agent-reachability'],
   },
   {

@@ -186,6 +186,7 @@ export async function pendingActionSummary(
  */
 const NUDGE_SKIP_COMMANDS = new Set([
   'inbox',
+  'nudge',
   'status',
   'serve',
   'service',

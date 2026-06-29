@@ -12,8 +12,17 @@ const exec = promisify(execFile);
  * permission defaults (ADR 027 — `-s local` keeps everything project-scoped, never the user's
  * global setup). Mirrors `claude mcp add -s local`'s scope for the permission half.
  */
+interface ClaudeHookCommand {
+  type: 'command';
+  command: string;
+}
+interface ClaudeHookMatcher {
+  matcher?: string;
+  hooks: ClaudeHookCommand[];
+}
 interface ClaudeSettings {
   permissions?: { allow?: string[]; ask?: string[]; deny?: string[] };
+  hooks?: Record<string, ClaudeHookMatcher[]>;
 }
 function settingsLocalPath(): string {
   return join(process.cwd(), '.claude', 'settings.local.json');
@@ -78,6 +87,62 @@ function removePermissions(perms: ProvisionPermissions): void {
     }
   }
   if (changed) writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+}
+
+/**
+ * The Claude Code `Notification` hook musterd installs (ADR 053). The hook fires exactly when the
+ * agent parks awaiting input/approval — the one moment a frozen single-threaded loop can't run its own
+ * inbox check — and prints the directed acts waiting for this folder's bound seat into the terminal the
+ * human is already at. The trailing marker comment makes it exactly identifiable for idempotent
+ * re-install and precise removal (`musterd uninstall`), never touching the user's own hooks.
+ */
+export const NOTIFICATION_HOOK_MARKER = 'musterd-notify-hook';
+const NOTIFICATION_HOOK_EVENT = 'Notification';
+function notificationHookCommand(): string {
+  // Best-effort, never failing the approval it rides on: cd to the project dir so the bound seat
+  // resolves, run `musterd nudge` only if the CLI is on PATH, swallow all output-noise on error.
+  return (
+    'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd nudge 2>/dev/null || true ' +
+    `# ${NOTIFICATION_HOOK_MARKER}`
+  );
+}
+
+/** True if a hook entry is one musterd installed (carries the marker in its command). */
+function isMusterdHook(m: ClaudeHookMatcher): boolean {
+  return m.hooks.some((h) => h.command.includes(NOTIFICATION_HOOK_MARKER));
+}
+
+/**
+ * Install the musterd `Notification` hook into `.claude/settings.local.json`, idempotently and
+ * additively (ADR 053): drop any prior musterd entry (re-install replaces in place) and append the
+ * current one, leaving the user's own hooks untouched. Returns the marker recorded for reversal.
+ */
+function installNotificationHook(): string {
+  const path = settingsLocalPath();
+  const settings = readSettings(path);
+  settings.hooks ??= {};
+  const existing = (settings.hooks[NOTIFICATION_HOOK_EVENT] ?? []).filter((m) => !isMusterdHook(m));
+  existing.push({ hooks: [{ type: 'command', command: notificationHookCommand() }] });
+  settings.hooks[NOTIFICATION_HOOK_EVENT] = existing;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  return NOTIFICATION_HOOK_MARKER;
+}
+
+/** Remove the musterd `Notification` hook from `.claude/settings.local.json` (exact reversal). */
+function removeNotificationHook(): void {
+  const path = settingsLocalPath();
+  if (!existsSync(path)) return;
+  const settings = readSettings(path);
+  const list = settings.hooks?.[NOTIFICATION_HOOK_EVENT];
+  if (!list) return;
+  const kept = list.filter((m) => !isMusterdHook(m));
+  if (kept.length === list.length) return; // nothing of ours
+  if (kept.length > 0) settings.hooks![NOTIFICATION_HOOK_EVENT] = kept;
+  else delete settings.hooks![NOTIFICATION_HOOK_EVENT];
+  if (settings.hooks && Object.keys(settings.hooks).length === 0) delete settings.hooks;
+  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
 }
 
 async function has(cmd: string, args: string[]): Promise<{ ok: boolean; out: string }> {
@@ -163,6 +228,13 @@ export const claudeCode: Harness = {
     // Replace any prior definition so re-running init is idempotent.
     await exec(bin, ['mcp', 'remove', 'musterd', '-s', 'local']).catch(() => undefined);
     await exec(bin, args, { timeout: 10000 });
+    // Install the approval-prompt reachability hook (ADR 053) alongside the server, so a blocked
+    // agent's inbox reaches it. Best-effort: a hook-write hiccup never fails wiring the server.
+    try {
+      installNotificationHook();
+    } catch {
+      /* non-fatal — the server is what matters; the hook is an additive reachability aid */
+    }
     return {
       target: 'claude mcp (scope: local)',
       activation: activationHint(),
@@ -197,13 +269,15 @@ export const claudeCode: Harness = {
     };
   },
 
-  // Reverse a provision (ADR 027): remove exactly the named servers and the listed permissions.
+  // Reverse a provision (ADR 027): remove exactly the named servers, permissions, and the
+  // approval-prompt notification hook (ADR 053) — marker-matched, so the user's own hooks are kept.
   async unprovision(plan: UnprovisionPlan) {
     const bin = (await resolveClaudeBin()) ?? 'claude';
     for (const name of plan.servers) {
       await exec(bin, ['mcp', 'remove', name, '-s', 'local']).catch(() => undefined);
     }
     removePermissions(plan.permissions);
+    removeNotificationHook();
   },
 };
 

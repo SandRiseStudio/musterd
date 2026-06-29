@@ -148,3 +148,66 @@ describe('claudeCode.unprovision', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe('claudeCode notification hook (ADR 053)', () => {
+  const entry = { command: 'node', args: ['mcp.js'], env: { MUSTERD_TEAM: 'dawn' } };
+  const binding = { team: 'dawn', member: 'Ada', token: 't', surface: 'claude-code' as const };
+
+  it('configure installs a Notification hook that runs `musterd nudge`, marked for reversal', async () => {
+    await claudeCode.configure(entry, binding);
+    const written = JSON.parse(readFileSync(settingsPath(), 'utf8'));
+    const hooks = written.hooks.Notification as { hooks: { command: string }[] }[];
+    expect(hooks).toHaveLength(1);
+    const cmd = hooks[0].hooks[0].command;
+    expect(cmd).toContain('musterd nudge');
+    expect(cmd).toContain('musterd-notify-hook');
+  });
+
+  it('is idempotent — re-configuring replaces musterd’s entry instead of stacking', async () => {
+    await claudeCode.configure(entry, binding);
+    await claudeCode.configure(entry, binding);
+    const written = JSON.parse(readFileSync(settingsPath(), 'utf8'));
+    expect(written.hooks.Notification).toHaveLength(1);
+  });
+
+  it('preserves the user’s own Notification hooks and other events', async () => {
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(
+      settingsPath(),
+      JSON.stringify({
+        hooks: {
+          Notification: [{ hooks: [{ type: 'command', command: 'my-own-thing' }] }],
+          Stop: [{ hooks: [{ type: 'command', command: 'mine' }] }],
+        },
+      }),
+    );
+    await claudeCode.configure(entry, binding);
+    const written = JSON.parse(readFileSync(settingsPath(), 'utf8'));
+    const cmds = written.hooks.Notification.map(
+      (m: { hooks: { command: string }[] }) => m.hooks[0].command,
+    );
+    expect(cmds).toContain('my-own-thing'); // user's hook kept
+    expect(cmds.some((c: string) => c.includes('musterd-notify-hook'))).toBe(true); // ours added
+    expect(written.hooks.Stop).toHaveLength(1); // untouched event
+  });
+
+  it('unprovision removes only musterd’s hook, leaving the user’s', async () => {
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(
+      settingsPath(),
+      JSON.stringify({
+        hooks: { Notification: [{ hooks: [{ type: 'command', command: 'my-own-thing' }] }] },
+      }),
+    );
+    await claudeCode.configure(entry, binding); // adds ours alongside the user's
+    await claudeCode.unprovision!({
+      servers: ['musterd'],
+      permissions: { allow: [], ask: [], deny: [] },
+    });
+    const written = JSON.parse(readFileSync(settingsPath(), 'utf8'));
+    const cmds = written.hooks.Notification.map(
+      (m: { hooks: { command: string }[] }) => m.hooks[0].command,
+    );
+    expect(cmds).toEqual(['my-own-thing']); // ours gone, user's kept
+  });
+});

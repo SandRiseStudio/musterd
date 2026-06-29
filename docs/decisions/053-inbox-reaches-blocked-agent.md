@@ -1,14 +1,14 @@
 # 053 — Inbox reaches a blocked agent: push delivery at the approval-prompt moment
 
-- Status: proposed
+- Status: accepted — move #1 implemented 2026-06-29 (move #2 partial; distinct label deferred)
 - Date: 2026-06-25
 
 ## Context
 
 ADR 046 made a directed act waiting for an agent surface on **every command it runs** — a one-line
 stderr nudge built from the same predicate as the human comeback summary. That closes the
-*heads-down* gap: an agent that keeps acting can't miss a `request_help`. It does **not** close the
-*blocked* gap.
+_heads-down_ gap: an agent that keeps acting can't miss a `request_help`. It does **not** close the
+_blocked_ gap.
 
 The 2026-06-25 cross-network dogfood (two Claude-Code-in-Cursor instances as two musterd agents in a
 different repo) made the distinction concrete. The human regressed into being the **message bus**,
@@ -19,11 +19,11 @@ relays it by hand.
 
 A tempting fix — "allowlist the musterd commands so inbox checks never prompt" — does **not** apply:
 the operator had **already** allowlisted every `musterd` command. The block was on the agent's
-**own work** commands (build, git, deploy) — exactly the calls the operator *deliberately* gates for
+**own work** commands (build, git, deploy) — exactly the calls the operator _deliberately_ gates for
 review. So:
 
 > A single-threaded agent loop parked on **any** approval is structurally deaf to its inbox. No
-> allowlist changes this, because the block is on the work the human *wants* to review. Pull-based
+> allowlist changes this, because the block is on the work the human _wants_ to review. Pull-based
 > inbox surfacing — ADR 046's nudge, a `/loop` poll (ADR 054), anything that needs the loop to be
 > running — cannot reach a frozen loop.
 
@@ -31,8 +31,8 @@ The reachability tooling must reach the agent through a channel that **is not** 
 
 ## Problem
 
-When an agent is blocked awaiting human approval, (a) deliver a waiting directed act to *someone who
-can act on it*, and (b) let the **sender** see that the agent is blocked rather than silent —
+When an agent is blocked awaiting human approval, (a) deliver a waiting directed act to _someone who
+can act on it_, and (b) let the **sender** see that the agent is blocked rather than silent —
 **without** a wire change, without forcing the agent to run a resident process, and without weakening
 the operator's choice to gate their own work commands.
 
@@ -66,7 +66,7 @@ human is already staring at. The dead-wait moment becomes the delivery moment.
 The same hook that delivers inbound emits the agent's state **outbound**: on firing it does a
 best-effort presence touch marking the seat `blocked_on_approval` (an ambient-presence write, ADR
 010/017 lineage — no wire change, rides an authenticated command). The roster and a sender's
-`inbox`/`team_status` then show *"David — blocked awaiting human approval (since 14:17)"* instead of
+`inbox`/`team_status` then show _"David — blocked awaiting human approval (since 14:17)"_ instead of
 silence, so the sender (or its human) knows to nudge the human rather than assume the agent is
 working. The state clears on the next acting command (the loop resumed).
 
@@ -77,18 +77,45 @@ working. The state clears on the next acting command (the loop resumed).
   the human who is, by definition, present at the prompt.
 - **Clean core.** No server or SPEC change. Delivery and state both ride existing client paths
   (inbox cursor read; presence touch). The down-payment posture again: the governed routing of
-  "Notification tiers" is the superset; this is the cheap floor for the *blocked* case.
+  "Notification tiers" is the superset; this is the cheap floor for the _blocked_ case.
 
 ## Open questions
 
 - **Throttle.** The hook can fire often during a long approval-heavy session. Lean: print only when
-  the cursor shows *new* unread since the last hook fire (in-process de-dupe, as ADR 035).
+  the cursor shows _new_ unread since the last hook fire (in-process de-dupe, as ADR 035).
 - **Codex/Cursor seam.** Do both expose an idle/approval hook? If not, move #2 (sender-side
   visibility) still works from any acting command; only move #1's terminal-injection is Claude-Code-
   first. Name it; don't fake parity.
 - **`blocked_on_approval` vs plain offline.** Whether to model it as a distinct presence value or a
   derived "stale since last touch + a pending approval" inference — settle with the ambient-presence
   ADR (it owns presence-write semantics).
+
+## Resolved as built (2026-06-29)
+
+**Move #1 (receiver-side push) — shipped.**
+
+- **`musterd nudge`** — a read-only command that prints the directed acts waiting for this folder's
+  bound seat (reusing `pendingActionSummary`/`openActionNeeded`, the same predicate as ADR 024/046, so
+  live/nudge/hook paths classify identically). It never advances the read cursor (self-clearing only
+  when the agent actually reads its inbox), swallows every failure and exits 0, and honours
+  `MUSTERD_NO_NUDGE=1`.
+- **The Claude Code `Notification` hook** is installed into `.claude/settings.local.json` by
+  `claudeCode.configure()` — so both `musterd init` and `musterd agent <name>` wire it alongside the
+  MCP server. It `cd`s to the project dir and runs `musterd nudge` best-effort. Installs idempotently
+  and additively (a trailing `# musterd-notify-hook` marker identifies our entry, so re-install
+  replaces only ours and the user's own hooks are untouched).
+- **Reversal is marker-based**, which is strictly more robust than the manifest-list the sketch
+  proposed: `claudeCode.unprovision()` (called by `musterd uninstall`) strips exactly the marked entry
+  even if the manifest is missing.
+- **Per-harness seam.** Cursor/Codex have no equivalent install yet and degrade to ADR 046's
+  per-command nudge (the floor); only Claude Code's terminal-injection is wired, as the ADR planned.
+
+**Move #2 (sender-side visibility) — partial.** Running the hook performs an authenticated inbox read,
+which fires the ambient-presence touch (ADR 057), so a blocked agent shows _recently active_ on the
+roster instead of silently aging to offline. The **distinct `blocked_on_approval` label** is **deferred**
+per open question 3: the presence wire is a closed enum (`online`/`away`/`offline`), so a new visible
+state is a wire change the ADR said to avoid — it belongs with the ambient-presence ADR that owns
+presence-write semantics, not a backdoor enum widening here.
 
 ## Consequences
 
