@@ -189,6 +189,80 @@ describe('team_send handler', () => {
     const r = await handler({ to: '@team', act: 'message', body: 'x' });
     expect(text(r)).toContain('error: network down');
   });
+
+  // accept/decline auto-targeting (ADR 067, parity with the CLI).
+  function sendClient(over: Partial<MusterdClient> = {}): {
+    client: Partial<MusterdClient>;
+    sent: Envelope[];
+  } {
+    const sent: Envelope[] = [];
+    return {
+      sent,
+      client: {
+        joined: true,
+        lastJoinError: null,
+        sendEnvelope: (async (e: Envelope) => {
+          sent.push(e);
+        }) as any,
+        markSeen: vi.fn(),
+        ...over,
+      },
+    };
+  }
+  const req = (over: Partial<Envelope>): Envelope =>
+    ({
+      id: 'x',
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'member', name: 'Ada' },
+      act: 'request_help',
+      body: '?',
+      thread: null,
+      ts: 1,
+      meta: null,
+      ...over,
+    }) as Envelope;
+
+  it('accept auto-targets the latest open request and inherits its thread (no reply_to)', async () => {
+    const { client, sent } = sendClient({
+      fetchInbox: (async () => ({
+        messages: [
+          req({ id: 'req1', ts: 1 }),
+          req({ id: 'req2', ts: 5, act: 'handoff', thread: 'root2' }),
+        ],
+        cursor: null,
+      })) as any,
+    });
+    const handler = capture(registerSend, client, config);
+    await handler({ to: 'nick', act: 'accept', body: 'on it' });
+    expect(sent[0]!.meta?.['in_reply_to']).toBe('req2'); // newest open
+    expect(sent[0]!.thread).toBe('root2'); // inherited the request's thread
+  });
+
+  it('an explicit reply_to wins over auto-targeting (no inbox read)', async () => {
+    const fetchInbox = vi.fn();
+    const { client, sent } = sendClient({ fetchInbox: fetchInbox as any });
+    const handler = capture(registerSend, client, config);
+    await handler({ to: 'nick', act: 'accept', body: 'on it', reply_to: 'explicit' });
+    expect(sent[0]!.meta?.['in_reply_to']).toBe('explicit');
+    expect(fetchInbox).not.toHaveBeenCalled();
+  });
+
+  it('accept errors with guidance when nothing is open (resolved threads excluded)', async () => {
+    const { client, sent } = sendClient({
+      fetchInbox: (async () => ({
+        messages: [
+          req({ id: 'req1', thread: 'root1', ts: 1 }),
+          req({ id: 'res1', act: 'resolve', thread: 'root1', ts: 2 }),
+        ],
+        cursor: null,
+      })) as any,
+    });
+    const handler = capture(registerSend, client, config);
+    const r = await handler({ to: 'nick', act: 'accept', body: 'on it' });
+    expect(text(r)).toContain('no open request to accept');
+    expect(sent).toHaveLength(0); // nothing sent
+  });
 });
 
 describe('team_inbox_check handler', () => {

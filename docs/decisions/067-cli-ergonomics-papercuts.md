@@ -42,7 +42,10 @@ Four additive client-side changes, no protocol or server change:
 4. **`accept`/`decline` auto-targeting** — without an explicit `--reply-to`/`--meta in_reply_to`, an
    `accept`/`decline` points at the **latest still-open `request_help`/`handoff` for this member** and
    inherits its thread, so closing the loop is one command. An explicit reply target always wins; when
-   nothing is open it errors with guidance (`--reply-to <id>`, `see musterd inbox --json`).
+   nothing is open it errors with guidance (`--reply-to <id>`, `see musterd inbox --json`). **Both
+   surfaces:** the same auto-targeting is wired into the MCP `team_send` tool (mirroring the CLI helper),
+   so an agent on the `team_*` tools and one on the CLI behave identically — `reply_to` is now optional
+   on both.
 
 ### Why this shape
 
@@ -71,7 +74,9 @@ onboarding sessions that run `whoami`/`--version` and proceed without reading a 
 `inbox --json | parse | --reply-to` workaround and the "which seat am I?" confusion are the recorded
 baseline. **Baseline**: pre-067, `accept` required a 3-step parse and `--act handoff` was a no-op.
 Coverage: `cli.e2e.test.ts` (whoami text+json, `--act`/`--from` narrowing leaves the cursor put,
-accept auto-target hits the latest open request + errors when none) and `version.test.ts`.
+accept auto-target hits the latest open request + errors when none), `version.test.ts`, and
+`packages/mcp/src/tools/tools.test.ts` (the MCP `team_send` auto-target: newest open, explicit
+`reply_to` wins, resolved-thread excluded → guidance).
 
 **Experiment** — none built yet, named for batond: across seeded "reply to a teammate's request"
 tasks, compare task-completion turns and mis-threaded-reply rate for auto-targeting vs explicit

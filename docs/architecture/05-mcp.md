@@ -104,7 +104,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
 ```json
 {
   "name": "team_send",
-  "description": "Send a message to a teammate, the whole team, or broadcast. Use the right act: status_update to report progress, request_help when blocked, handoff to pass work, accept/decline to answer a request_help/handoff (set reply_to), wait to signal you're paused, resolve to close a thread when the work is done (set thread to the thread/root id).",
+  "description": "Send a message to a teammate, the whole team, or broadcast. Use the right act: status_update to report progress, request_help when blocked, handoff to pass work, accept/decline to answer a request_help/handoff (auto-targets the latest open one — set reply_to to override), wait to signal you're paused, resolve to close a thread when the work is done (set thread to the thread/root id).",
   "inputSchema": {
     "type": "object",
     "required": ["act", "body"],
@@ -113,7 +113,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
       "act":  { "type": "string", "enum": ["message","status_update","request_help","handoff","accept","decline","wait","resolve"] },
       "body": { "type": "string" },
       "thread":   { "type": "string", "description": "thread id to reply within (optional; required for resolve — the thread it closes)" },
-      "reply_to": { "type": "string", "description": "message id this accepts/declines (required for accept/decline)" },
+      "reply_to": { "type": "string", "description": "message id this accepts/declines (optional — accept/decline auto-target the latest open request_help/handoff, ADR 067)" },
       "meta": { "type": "object", "description": "act-specific fields, e.g. {progress:0.5} for status_update" }
     }
   }
@@ -204,6 +204,6 @@ src/
 - **Live external claim (ADR 034):** while a pending session is running, `musterd claim Ada --for <code>` drops a `<code>.resolved.json` sidecar; the session's resolution watcher adopts the seat and goes online **without a relaunch** (the sidecar is read-once + deleted; the binding is the durable fallback for a missed watcher).
 - After join: `team_send {act:'status_update', body:'...'}` persists a message visible to a CLI `inbox` on the same team.
 - A CLI `send --to Ada` then `team_inbox_check` returns that message once and advances the cursor (second check returns nothing).
-- `accept` without `reply_to` → validation error surfaced as a tool error string.
+- `accept`/`decline` without `reply_to` → **auto-target the latest open `request_help`/`handoff`** for this member and inherit its thread (ADR 067, parity with the CLI `send`); only when *nothing* is open is a guidance string surfaced as a tool error. An explicit `reply_to` always wins.
 - **Shutdown:** stdin `close` (and each signal / `transport.onclose`) drops presence and exits exactly once, idempotent against races.
 - Two MCP servers (Ada via surface claude-code, Lin via surface codex) + one CLI human all on `dawn` join explicitly and exchange messages — this is the flagship scenario, run as an automated test (`06-testing.md`).
