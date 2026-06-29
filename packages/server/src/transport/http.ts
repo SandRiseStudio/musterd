@@ -9,6 +9,7 @@ import {
   ProvenanceSchema,
   AvailabilityStatusSchema,
   PROTOCOL_VERSION,
+  GENERALIST_CAPABILITIES,
   type MemberSummary,
 } from '@musterd/protocol';
 import { z } from 'zod';
@@ -20,6 +21,7 @@ import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
+import { appendAudit, listAudit } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import {
   addMember,
@@ -31,6 +33,8 @@ import {
   leaveMember,
   rotateToken,
   setAvailability,
+  setMemberGovernance,
+  teamHasAdmin,
 } from '../store/members.js';
 import {
   latestStatusUpdate,
@@ -46,7 +50,7 @@ import {
   touchAmbientPresence,
 } from '../store/presence.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
-import { toMember } from '../store/rows.js';
+import { resolveCapabilities, toMember } from '../store/rows.js';
 import { createTeam, requireTeam } from '../store/teams.js';
 import { recordError } from '../telemetry.js';
 
@@ -211,15 +215,74 @@ function authTouch(
   return auth;
 }
 
-function summarize(ctx: Ctx, teamSlug: string, teamId: string): MemberSummary[] {
+/**
+ * Authorize a **governance** operation (reclaim/remove) on the existing token auth (ADR 071, P2). The
+ * caller's effective `is_admin` is required — *except* the empty-admin fallback: a team with zero admins
+ * stays on the v0.2 open behaviour so enforcement never breaks an un-migrated team (the fallback is
+ * recorded in the audit `detail`). Returns the authed seat + whether the fallback applied.
+ */
+function authGovernance(
+  ctx: Ctx,
+  slug: string,
+  req: IncomingMessage,
+): { team: TeamRow; member: MemberRow; viaFallback: boolean } {
+  const { team, member } = authTouch(ctx, slug, req);
+  if (resolveCapabilities(member).is_admin) return { team, member, viaFallback: false };
+  if (!teamHasAdmin(ctx.db, team.id)) return { team, member, viaFallback: true };
+  throw new MusterdError('forbidden', 'this operation requires an admin seat (is_admin)');
+}
+
+/** Authorize an **admin-only read** (e.g. the audit log). Strict `is_admin` — no empty-admin fallback,
+ *  since there is no prior open behaviour to preserve for a v0.3-only endpoint. */
+function authAdmin(
+  ctx: Ctx,
+  slug: string,
+  req: IncomingMessage,
+): { team: TeamRow; member: MemberRow } {
+  const auth = authMember(ctx.db, slug, bearer(req));
+  if (!resolveCapabilities(auth.member).is_admin)
+    throw new MusterdError('forbidden', 'this resource is admin-only (visibility_level: admin)');
+  return auth;
+}
+
+/** Best-effort: resolve the calling seat from a bearer token if one is present and valid, else null.
+ *  Used by the roster reads to scope the projection (ADR 071) without making them require auth. */
+function tryAuth(ctx: Ctx, slug: string, req: IncomingMessage): MemberRow | null {
+  const h = req.headers['authorization'];
+  if (!h || !h.startsWith('Bearer ')) return null;
+  try {
+    return authMember(ctx.db, slug, h.slice('Bearer '.length).trim()).member;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Project the roster, **scoped to the viewer's `visibility_level`** (ADR 071, P2). An `admin` viewer (or
+ * the seat looking at *itself*) sees the full `Member` incl. effective `capabilities`; a `team`-level
+ * viewer (or an unauthenticated read) gets the need-to-know projection — every seat's handle, kind, role,
+ * presence, availability, and account_status, but **not** other seats' capabilities (the authority map:
+ * who is admin, who is muted, who is narrowed). Permissive by default — no token still yields a usable
+ * roster, just without the authority detail that only an admin dashboard needs.
+ */
+function summarize(
+  ctx: Ctx,
+  teamSlug: string,
+  teamId: string,
+  viewer: MemberRow | null = null,
+): MemberSummary[] {
+  const viewerIsAdmin = viewer ? resolveCapabilities(viewer).is_admin : false;
   return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => {
     // Two-clocks rule (M2): liveness from presence, working-label from the latest status_update.
     const activity = resolveActivity(
       s.status !== 'offline',
       latestStatusUpdate(ctx.db, s.member.id),
     );
+    const member = toMember(s.member, teamSlug);
+    const seesCaps = viewerIsAdmin || viewer?.id === s.member.id;
+    const { capabilities: _caps, ...needToKnow } = member;
     return {
-      ...toMember(s.member, teamSlug),
+      ...(seesCaps ? member : needToKnow),
       presence: s.status,
       presences: s.presences,
       ...activity,
@@ -260,9 +323,20 @@ export async function handleHttp(
         kind: 'human',
         role: body.creator.role ?? '',
       });
+      // Creator-admin default (ADR 071, P2): the creator's human seat is the team's first admin, so the
+      // governance routes have an authority from birth (the ADR 070 stated default, implemented here).
+      // The team is db-only at create time (no seat-file yet), so this write is uncontended by reconcile;
+      // a later `team export` carries the resolved caps into the creator's seat-file.
+      setMemberGovernance(
+        ctx.db,
+        row.id,
+        null,
+        JSON.stringify({ ...GENERALIST_CAPABILITIES, is_admin: true }),
+      );
+      const creator = getMemberById(ctx.db, row.id) ?? row;
       return sendJson(res, 201, {
         team: { id: team.id, slug: team.slug, display: team.display },
-        member: toMember(row, team.slug),
+        member: toMember(creator, team.slug),
         token,
       });
     }
@@ -276,7 +350,7 @@ export async function handleHttp(
         const team = requireTeam(ctx.db, slug);
         return sendJson(res, 200, {
           team: { id: team.id, slug: team.slug, display: team.display },
-          members: summarize(ctx, slug, team.id),
+          members: summarize(ctx, slug, team.id, tryAuth(ctx, slug, req)),
         });
       }
 
@@ -338,7 +412,33 @@ export async function handleHttp(
 
       if (method === 'GET' && rest === '/members') {
         const team = requireTeam(ctx.db, slug);
-        return sendJson(res, 200, { members: summarize(ctx, slug, team.id) });
+        return sendJson(res, 200, {
+          members: summarize(ctx, slug, team.id, tryAuth(ctx, slug, req)),
+        });
+      }
+
+      // The governance audit log (ADR 071, P2) — admin-only, since it exposes who-did-what across the
+      // team. Newest-first, capped; `?limit=` and `?before=<ts>` page older entries. `detail` is parsed
+      // back to an object for the client.
+      if (method === 'GET' && rest === '/audit') {
+        const { team } = authAdmin(ctx, slug, req);
+        const limit = Number(url.searchParams.get('limit') ?? '');
+        const before = Number(url.searchParams.get('before') ?? '');
+        const rows = listAudit(ctx.db, team.id, {
+          ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
+          ...(Number.isFinite(before) && before > 0 ? { before } : {}),
+        });
+        return sendJson(res, 200, {
+          audit: rows.map((r) => ({
+            id: r.id,
+            ts: r.ts,
+            actor: r.actor,
+            action: r.action,
+            target: r.target,
+            result: r.result,
+            detail: r.detail ? JSON.parse(r.detail) : null,
+          })),
+        });
       }
 
       if (method === 'POST' && rest === '/messages') {
@@ -432,16 +532,16 @@ export async function handleHttp(
             ? { status: body.status, until: body.until }
             : { status: body.status };
         setAvailability(ctx.db, member.id, availability);
-        const me = summarize(ctx, team.slug, team.id).find((m) => m.name === member.name);
+        const me = summarize(ctx, team.slug, team.id, member).find((m) => m.name === member.name);
         return sendJson(res, 200, { member: me });
       }
 
       // Operator escape hatch (ADR 017 follow-up): forcibly drop a member's live session so it can
       // rejoin — for a stuck/orphaned presence newest-wins can't displace (no new session is coming).
-      // localhost-only/v0.2: any team member may reclaim any member; the v0.3 seat model will gate this.
+      // Admin-gated (ADR 071, P2) with the empty-admin fallback so an un-migrated team keeps the hatch.
       const reclaimMatch = rest.match(/^\/members\/([^/]+)\/reclaim$/);
       if (method === 'POST' && reclaimMatch) {
-        const { team } = authTouch(ctx, slug, req);
+        const { team, member: caller, viaFallback } = authGovernance(ctx, slug, req);
         const targetName = decodeURIComponent(reclaimMatch[1]!);
         const target = getMemberByName(ctx.db, team.id, targetName);
         if (!target || target.left_at !== null)
@@ -464,6 +564,13 @@ export async function handleHttp(
           type: 'presence',
           member: target.name,
           status: 'offline',
+        });
+        appendAudit(ctx.db, team.id, {
+          actor: caller.name,
+          action: 'member.reclaim',
+          target: target.name,
+          result: 'allow',
+          ...(viaFallback ? { detail: { fallback: 'no-admin' } } : {}),
         });
         return sendJson(res, 200, { ok: true, member: target.name });
       }
@@ -491,11 +598,11 @@ export async function handleHttp(
 
       // Soft-remove a member from the roster (ADR 019): set left_at so it drops off every
       // list/auth/route path (all filter `left_at IS NULL`) while message history + provenance
-      // survive. Idempotent — an already-left member 404s rather than erroring. Like reclaim, this
-      // is ungated on localhost-only v0.2; the v0.3 seat model will govern who may remove whom.
+      // survive. Idempotent — an already-left member 404s rather than erroring. Admin-gated (ADR 071,
+      // P2) with the same empty-admin fallback as reclaim.
       const removeMatch = rest.match(/^\/members\/([^/]+)\/remove$/);
       if (method === 'POST' && removeMatch) {
-        const { team } = authTouch(ctx, slug, req);
+        const { team, member: caller, viaFallback } = authGovernance(ctx, slug, req);
         const targetName = decodeURIComponent(removeMatch[1]!);
         const target = getMemberByName(ctx.db, team.id, targetName);
         if (!target || target.left_at !== null)
@@ -517,6 +624,13 @@ export async function handleHttp(
           type: 'presence',
           member: target.name,
           status: 'offline',
+        });
+        appendAudit(ctx.db, team.id, {
+          actor: caller.name,
+          action: 'member.remove',
+          target: target.name,
+          result: 'allow',
+          ...(viaFallback ? { detail: { fallback: 'no-admin' } } : {}),
         });
         return sendJson(res, 200, { ok: true, member: target.name, kind: target.kind });
       }

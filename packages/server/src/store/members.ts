@@ -4,6 +4,7 @@ import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { MusterdError } from '../errors.js';
 import type { MemberRow, TeamRow } from './rows.js';
+import { resolveCapabilities } from './rows.js';
 import { requireTeam } from './teams.js';
 
 export function hashToken(token: string): string {
@@ -182,6 +183,16 @@ export function authMember(
 /** Is this seat currently *held* (someone has authenticated its token)? See {@link authMember}. */
 export function isHeld(member: MemberRow): boolean {
   return member.bound_at !== null;
+}
+
+/**
+ * Does any live seat on the team hold the `is_admin` capability (ADR 071)? The empty-admin fallback for
+ * governance routes (reclaim/remove) reads this: a team with **zero** admins stays on the v0.2 open
+ * behaviour (any member may operate) so enforcement never breaks an un-migrated team — and self-activates
+ * the instant a seat declares admin (creator default, or a seat-file `[capabilities] is_admin = true`).
+ */
+export function teamHasAdmin(db: Database, teamId: string): boolean {
+  return listMembers(db, teamId).some((m) => resolveCapabilities(m).is_admin);
 }
 
 export interface MemberIdentityFields {

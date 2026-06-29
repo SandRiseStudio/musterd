@@ -383,12 +383,12 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'v03-p2-enforcement',
     wave: 2,
     title: 'v0.3 P2 — in-band enforcement & audit',
-    status: 'near-term',
+    status: 'shipped',
     category: 'platform',
     blurb: 'The first real governance value, on the existing token auth: gate urgent on can_flag_urgent, admin-only governance routes, viewer-scoped visibility, account-status enforcement, and an append-only audit log.',
     detail:
-      'Turns the capabilities from P1 into enforcement at the routeEnvelope / roster-projection seams: can_flag_urgent gates the urgent meta flag (+ audit + recipient wasnt_urgent) — completing the notification-tiers governed superset; is_admin gates the today-ungated reclaim/remove + the new governance routes; visibility_level projects the roster per viewer; account_status (disabled/banned/archived) blocks claim/send; can_observe formalizes the ADR 063 observer. Every governed op writes an audit record (GET /audit, admin). Ships on the existing occupant==seat token auth — no flag day.',
-    refs: [adr(69, 'ADR 069'), adr(44, 'ADR 044'), adr(63, 'ADR 063')],
+      'Turns the capabilities from P1 into enforcement at the routeEnvelope / roster-projection seams: can_flag_urgent gates the urgent meta flag — downgrade-and-deliver (strip urgent, set wasnt_urgent) + audit, never reject — completing the notification-tiers governed superset; is_admin gates the today-ungated reclaim/remove (creator-admin default + an empty-admin fallback so an un-migrated team keeps its escape hatch); visibility_level projects the roster per viewer (non-admins see their own caps, not other seats’ authority map); account_status (disabled/banned/archived) + can_message:none block sending; can_observe gates the ADR 063 firehose. Every governed op writes an append-only audit record (admin-only GET /audit). Ships on the existing occupant==seat token auth — no flag day.',
+    refs: [adr(71, 'ADR 071'), adr(69, 'ADR 069'), adr(44, 'ADR 044'), adr(63, 'ADR 063')],
     dependsOn: ['v03-p1-seats'],
   },
   {

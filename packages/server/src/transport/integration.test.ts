@@ -1,11 +1,14 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, type WSServerFrame } from '@musterd/protocol';
+import { GENERALIST_CAPABILITIES, PROTOCOL_VERSION, type WSServerFrame } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
+import { listAudit } from '../store/audit.js';
+import { getMemberByName, setMemberGovernance } from '../store/members.js';
+import { getTeamBySlug } from '../store/teams.js';
 
 let server: RunningServer;
 let base: string;
@@ -1007,6 +1010,203 @@ describe('WebSocket', () => {
     });
     const err = await w.waitFor('error');
     expect((err as any).code).toBe('forbidden');
+    w.close();
+  });
+});
+
+describe('v0.3 P2 governance enforcement (ADR 071)', () => {
+  /** Narrow a seat's effective caps directly (in P1 reconcile is the only writer; tests stand in for it). */
+  function setCaps(
+    slug: string,
+    name: string,
+    partial: Partial<typeof GENERALIST_CAPABILITIES>,
+    accountStatus: string | null = null,
+  ): void {
+    const team = getTeamBySlug(server.db, slug)!;
+    const m = getMemberByName(server.db, team.id, name)!;
+    setMemberGovernance(
+      server.db,
+      m.id,
+      accountStatus,
+      JSON.stringify({ ...GENERALIST_CAPABILITIES, ...partial }),
+    );
+  }
+  function auditRows(slug: string) {
+    return listAudit(server.db, getTeamBySlug(server.db, slug)!.id);
+  }
+  function urgentEnv(from: string, to: string, id: string) {
+    return {
+      id,
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from,
+      to: { kind: 'member', name: to },
+      act: 'message',
+      body: 'ping',
+      meta: { urgent: true, urgent_reason: 'prod is down' },
+      ts: Date.now(),
+    };
+  }
+
+  it('creator seat is admin; a non-admin cannot reclaim/remove once an admin exists', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    // The creator-admin default (ADR 071) is on the returned member …
+    expect(team.json.member.capabilities.is_admin).toBe(true);
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nickTok);
+
+    // Ada (generalist, not admin) is refused governance now that nick is an admin.
+    const denied = await post('/teams/dawn/members/Bob/reclaim', {}, ada.json.token);
+    expect(denied.status).toBe(403);
+    expect(denied.json.error.code).toBe('forbidden');
+    // The admin may.
+    const ok = await post('/teams/dawn/members/Bob/reclaim', {}, nickTok);
+    expect(ok.status).toBe(200);
+    expect(auditRows('dawn').some((r) => r.action === 'member.reclaim' && r.actor === 'nick')).toBe(
+      true,
+    );
+  });
+
+  it('empty-admin fallback: with no admin on the team, any member may reclaim (no flag day)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nickTok);
+    // Strip the only admin → the team has zero admins → governance falls back to v0.2 open behaviour.
+    setCaps('dawn', 'nick', { is_admin: false });
+
+    const ok = await post('/teams/dawn/members/Bob/reclaim', {}, ada.json.token);
+    expect(ok.status).toBe(200);
+    const entry = auditRows('dawn').find((r) => r.action === 'member.reclaim');
+    expect(entry?.detail).toContain('no-admin');
+  });
+
+  it('GET /audit is admin-only', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members/Ada/reclaim', {}, nickTok); // write one entry
+
+    const adminView = await get('/teams/dawn/audit', nickTok);
+    expect(adminView.status).toBe(200);
+    expect(adminView.json.audit.length).toBeGreaterThan(0);
+    expect(adminView.json.audit[0]).toMatchObject({ action: 'member.reclaim', result: 'allow' });
+
+    const nonAdmin = await get('/teams/dawn/audit', ada.json.token);
+    expect(nonAdmin.status).toBe(403);
+    const anon = await get('/teams/dawn/audit');
+    expect(anon.status).toBe(401);
+  });
+
+  it('can_flag_urgent: an allowed seat keeps urgent + is audited; a denied seat is downgraded, not rejected', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.token;
+    const mut = await post('/teams/dawn/members', { name: 'Mut', kind: 'agent' }, nickTok);
+
+    // nick is generalist-ish (can_flag_urgent true) → urgent rides through.
+    const allowed = await post(
+      '/teams/dawn/messages',
+      { envelope: urgentEnv('nick', 'Bob', 'u-allow') },
+      nickTok,
+    );
+    expect(allowed.status).toBe(201);
+
+    // Mut is narrowed to can_flag_urgent:false → the message still lands, just downgraded.
+    setCaps('dawn', 'Mut', { can_flag_urgent: false });
+    const downgraded = await post(
+      '/teams/dawn/messages',
+      { envelope: urgentEnv('Mut', 'Bob', 'u-deny') },
+      mut.json.token,
+    );
+    expect(downgraded.status).toBe(201); // delivered, not rejected
+
+    const inbox = await get('/teams/dawn/inbox', bobTok, { 'x-musterd-no-touch': '1' });
+    const msgs = inbox.json.messages as any[];
+    const kept = msgs.find((m) => m.id === 'u-allow');
+    const down = msgs.find((m) => m.id === 'u-deny');
+    expect(kept.meta.urgent).toBe(true);
+    expect(down.meta.urgent).toBeUndefined();
+    expect(down.meta.wasnt_urgent).toBe(true);
+
+    const audit = auditRows('dawn');
+    expect(audit.some((r) => r.action === 'urgent.flagged' && r.actor === 'nick')).toBe(true);
+    expect(audit.some((r) => r.action === 'urgent.denied' && r.actor === 'Mut')).toBe(true);
+  });
+
+  it('account_status + can_message gate sends', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const dis = await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
+    const mute = await post('/teams/dawn/members', { name: 'Mute', kind: 'agent' }, nickTok);
+
+    setCaps('dawn', 'Dis', {}, 'disabled');
+    setCaps('dawn', 'Mute', { can_message: 'none' });
+
+    const baseEnv = (from: string, id: string) => ({
+      id,
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from,
+      to: { kind: 'member', name: 'Bob' },
+      act: 'message',
+      body: 'hi',
+      ts: Date.now(),
+    });
+    const disabled = await post(
+      '/teams/dawn/messages',
+      { envelope: baseEnv('Dis', 'd1') },
+      dis.json.token,
+    );
+    expect(disabled.status).toBe(403);
+    const muted = await post(
+      '/teams/dawn/messages',
+      { envelope: baseEnv('Mute', 'm1') },
+      mute.json.token,
+    );
+    expect(muted.status).toBe(403);
+    const audit = auditRows('dawn');
+    expect(audit.filter((r) => r.action === 'send.denied').length).toBe(2);
+  });
+
+  it('visibility_level: a non-admin viewer sees its own caps but not other seats’ authority map', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // Admin sees every seat's caps.
+    const adminView = await get('/teams/dawn/members', nickTok);
+    expect(adminView.json.members.find((m: any) => m.name === 'nick').capabilities).toBeDefined();
+    expect(adminView.json.members.find((m: any) => m.name === 'Ada').capabilities).toBeDefined();
+
+    // Ada (team-level) sees her own caps but not nick's.
+    const adaView = await get('/teams/dawn/members', ada.json.token);
+    expect(adaView.json.members.find((m: any) => m.name === 'Ada').capabilities).toBeDefined();
+    expect(adaView.json.members.find((m: any) => m.name === 'nick').capabilities).toBeUndefined();
+    // Handles/roles/presence still visible — only the authority map is hidden.
+    expect(adaView.json.members.find((m: any) => m.name === 'nick').name).toBe('nick');
+
+    // Anonymous read → no caps at all.
+    const anon = await get('/teams/dawn/members');
+    expect(anon.json.members.every((m: any) => m.capabilities === undefined)).toBe(true);
+  });
+
+  it('can_observe: a seat narrowed to can_observe:false is refused the firehose', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const watcher = await post('/teams/dawn/members', { name: 'Watcher', kind: 'human' }, nickTok);
+    setCaps('dawn', 'Watcher', { can_observe: false });
+
+    const w = new TestWs();
+    await w.open();
+    await w.hello('dawn', 'Watcher', watcher.json.token, 'cli');
+    w.send({ type: 'subscribe', scope: 'team-all' });
+    const err = await w.waitFor('error');
+    expect((err as any).code).toBe('forbidden');
+    expect(auditRows('dawn').some((r) => r.action === 'observe.denied')).toBe(true);
     w.close();
   });
 });

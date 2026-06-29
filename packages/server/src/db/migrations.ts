@@ -122,6 +122,31 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    // v0.3 P2 governance audit log (ADR 071 / ADR 069). The append-only coordination-governance trace:
+    // every governed decision (urgent flagged/denied, send denied, member reclaim/remove, observe denied;
+    // P3 adds grant/claim/account-status/key/policy/request verbs) writes one row. Additive — existing
+    // teams gain an empty log, no reset needed. `actor`/`target` are seat *names* (nullable: system writes
+    // have no actor); `result` is the authz outcome (allow|deny); `detail` is a JSON context blob, never
+    // secrets. No update/delete — the table is the audit trail.
+    version: 9,
+    up: (db) => {
+      db.exec(
+        `CREATE TABLE audit (
+           id         TEXT PRIMARY KEY,
+           team_id    TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+           ts         INTEGER NOT NULL,
+           actor      TEXT,
+           action     TEXT NOT NULL,
+           target     TEXT,
+           result     TEXT NOT NULL CHECK (result IN ('allow','deny')),
+           detail     TEXT,
+           created_at INTEGER NOT NULL
+         )`,
+      );
+      db.exec('CREATE INDEX idx_audit_team_ts ON audit(team_id, ts)');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

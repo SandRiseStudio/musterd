@@ -8,7 +8,8 @@ import { MusterdError, asMusterdError } from '../errors.js';
 import { log } from '../log.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope } from '../protocol/validate.js';
-import { authMember, touchSeen } from '../store/members.js';
+import { appendAudit } from '../store/audit.js';
+import { authMember, getMemberById, touchSeen } from '../store/members.js';
 import {
   attach,
   clearOrphanPresence,
@@ -18,7 +19,7 @@ import {
   presenceById,
   release,
 } from '../store/presence.js';
-import { toMember } from '../store/rows.js';
+import { resolveCapabilities, toMember } from '../store/rows.js';
 import { recordError, recordPresenceChurn } from '../telemetry.js';
 import type { Connection } from './hub.js';
 
@@ -184,7 +185,24 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           case 'subscribe': {
             // `team-all` = the firehose: this connection receives every envelope routed on the team,
             // not just recipient-matched ones — for read-only observers like the dashboard (ADR 061).
-            if (frame.scope === 'team-all') ctx.hub.subscribeFirehose(conn.connId);
+            // Gated on `can_observe` (ADR 071, P2): a seat narrowed to `can_observe:false` is refused the
+            // firehose. Generalist `can_observe:true` keeps every observer/dashboard working.
+            if (frame.scope === 'team-all') {
+              const subscriber = getMemberById(ctx.db, conn.memberId);
+              if (subscriber && !resolveCapabilities(subscriber).can_observe) {
+                appendAudit(ctx.db, conn.teamId, {
+                  actor: conn.memberName,
+                  action: 'observe.denied',
+                  target: null,
+                  result: 'deny',
+                });
+                throw new MusterdError(
+                  'forbidden',
+                  `seat "${conn.memberName}" lacks the can_observe capability`,
+                );
+              }
+              ctx.hub.subscribeFirehose(conn.connId);
+            }
             send(ws, { type: 'subscribed', scope: frame.scope });
             break;
           }

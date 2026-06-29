@@ -1,0 +1,92 @@
+import type { Database } from 'better-sqlite3';
+import { ulid } from 'ulid';
+import { log } from '../log.js';
+
+/**
+ * The v0.3 governance audit log (ADR 071, P2 of ADR 069). Append-only: every governed decision writes one
+ * row — the coordination-governance trace no single-agent observability tool can produce, and a direct
+ * feed for the batond flywheel (ADR 051). There is intentionally no update/delete API.
+ */
+
+/** A dotted governance verb. P2 emits the first five; P3 adds grant/claim/account-status/key/policy/request. */
+export type AuditAction =
+  | 'urgent.flagged'
+  | 'urgent.denied'
+  | 'send.denied'
+  | 'member.reclaim'
+  | 'member.remove'
+  | 'observe.denied';
+
+export interface AuditEntry {
+  /** Seat name that initiated the op; null for system/reaper writes. */
+  actor: string | null;
+  action: AuditAction;
+  /** Affected seat/resource name; null when not seat-scoped. */
+  target: string | null;
+  /** The authorization outcome. An executed governance op is `allow`. */
+  result: 'allow' | 'deny';
+  /** JSON-serializable context (`{ reason }`, `{ fallback: 'no-admin' }`, …); never secrets. */
+  detail?: Record<string, unknown>;
+}
+
+export interface AuditRow {
+  id: string;
+  team_id: string;
+  ts: number;
+  actor: string | null;
+  action: string;
+  target: string | null;
+  result: 'allow' | 'deny';
+  detail: string | null;
+  created_at: number;
+}
+
+/**
+ * Append an audit entry. **Best-effort observability, never a gate**: a failure here is logged and
+ * swallowed so it can never break the request path it is recording.
+ */
+export function appendAudit(db: Database, teamId: string, entry: AuditEntry): void {
+  try {
+    const now = Date.now();
+    const row: AuditRow = {
+      id: ulid(),
+      team_id: teamId,
+      ts: now,
+      actor: entry.actor,
+      action: entry.action,
+      target: entry.target,
+      result: entry.result,
+      detail: entry.detail ? JSON.stringify(entry.detail) : null,
+      created_at: now,
+    };
+    db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+       VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at)`,
+    ).run(row);
+  } catch (err) {
+    log.warn({ msg: 'audit_append_failed', action: entry.action, err: String(err) });
+  }
+}
+
+/** Read the audit log for a team, newest-first, capped. `before` pages older than a given ts. */
+export function listAudit(
+  db: Database,
+  teamId: string,
+  opts: { limit?: number; before?: number } = {},
+): AuditRow[] {
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+  if (opts.before != null) {
+    return db
+      .prepare<
+        [string, number, number],
+        AuditRow
+      >('SELECT * FROM audit WHERE team_id = ? AND ts < ? ORDER BY ts DESC, id DESC LIMIT ?')
+      .all(teamId, opts.before, limit);
+  }
+  return db
+    .prepare<
+      [string, number],
+      AuditRow
+    >('SELECT * FROM audit WHERE team_id = ? ORDER BY ts DESC, id DESC LIMIT ?')
+    .all(teamId, limit);
+}

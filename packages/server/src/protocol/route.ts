@@ -2,9 +2,11 @@ import type { Envelope } from '@musterd/protocol';
 import type { Ctx } from '../context.js';
 import { MusterdError } from '../errors.js';
 import { log } from '../log.js';
+import { appendAudit } from '../store/audit.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { insertMessage, rowToEnvelope } from '../store/messages.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
+import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
 import { withEnvelopeSpan } from '../telemetry.js';
 
 export interface RouteResult {
@@ -40,6 +42,67 @@ function routeEnvelopeInner(
     throw new MusterdError('forbidden', 'observer seats are read-only and cannot send');
   }
 
+  // v0.3 P2 send gates (ADR 071) on the existing token auth. The sender's effective capabilities +
+  // resolved account status are projected onto the row by reconcile (ADR 070); the generalist default
+  // (active, can_message:team, can_flag_urgent:true) passes everything, so an un-governed team is
+  // unaffected.
+  const caps = resolveCapabilities(sender);
+  const status = resolveAccountStatus(sender);
+  const target = env.to.kind === 'member' ? env.to.name : null;
+
+  // account_status: a disabled/banned/archived seat cannot send (provisioned/active send normally).
+  if (status === 'disabled' || status === 'banned' || status === 'archived') {
+    appendAudit(ctx.db, team.id, {
+      actor: sender.name,
+      action: 'send.denied',
+      target,
+      result: 'deny',
+      detail: { account_status: status },
+    });
+    throw new MusterdError('forbidden', `seat "${sender.name}" is ${status} and cannot send`);
+  }
+
+  // can_message: a muted seat (`none`) cannot address the team.
+  if (caps.can_message === 'none') {
+    appendAudit(ctx.db, team.id, {
+      actor: sender.name,
+      action: 'send.denied',
+      target,
+      result: 'deny',
+      detail: { can_message: 'none' },
+    });
+    throw new MusterdError('forbidden', `seat "${sender.name}" is muted (can_message: none)`);
+  }
+
+  // can_flag_urgent: the urgency breakthrough (ADR 044) is the scarce, auditable flag. A seat without
+  // the capability is **downgraded, not rejected** (the message still lands, just not as a breakthrough):
+  // strip `urgent`, mark `wasnt_urgent` so the recipient + firehose see the denied attempt, keep the
+  // reason for context. An allowed urgent is audited too (the flag is meant to be legible).
+  let outgoingEnv = env;
+  if (env.meta?.['urgent'] === true) {
+    const rawReason = env.meta['urgent_reason'];
+    const detail = typeof rawReason === 'string' ? { reason: rawReason } : {};
+    if (caps.can_flag_urgent) {
+      appendAudit(ctx.db, team.id, {
+        actor: sender.name,
+        action: 'urgent.flagged',
+        target,
+        result: 'allow',
+        detail,
+      });
+    } else {
+      const { urgent: _urgent, ...restMeta } = env.meta;
+      outgoingEnv = { ...env, meta: { ...restMeta, wasnt_urgent: true } };
+      appendAudit(ctx.db, team.id, {
+        actor: sender.name,
+        action: 'urgent.denied',
+        target,
+        result: 'deny',
+        detail,
+      });
+    }
+  }
+
   // Resolve recipients.
   let toMemberId: string | null = null;
   let recipients: string[];
@@ -61,8 +124,9 @@ function routeEnvelopeInner(
       .map((r) => r.id);
   }
 
-  // Persist (append-only log).
-  const message = insertMessage(ctx.db, team.id, sender.id, toMemberId, env);
+  // Persist (append-only log) — the urgent-downgraded envelope when applicable, so the stored meta and
+  // every delivery (direct + firehose, all derived from the row) carry the corrected flags.
+  const message = insertMessage(ctx.db, team.id, sender.id, toMemberId, outgoingEnv);
 
   // Deliver live to whoever is present. Durability is the log; this is the push.
   let delivered = 0;
