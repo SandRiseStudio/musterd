@@ -164,6 +164,16 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [adr(29, 'ADRs 029–031'), doc('docs/design/provisioning-recipe.md', 'provisioning-recipe.md')],
   },
   {
+    id: 'workspace-scoped-presence',
+    title: 'Seat stops flapping on health-check probes',
+    status: 'shipped',
+    category: 'platform',
+    blurb: 'Agent single-active displacement is scoped by workspace: a same-seat reconnect (a reload, or Claude Code’s periodic MCP health-check spawn) no longer supersedes the live session — only a genuinely different session does.',
+    detail:
+      'A dogfood finding: an autojoined agent kept getting superseded “between posts”. Cause — Claude Code transiently spawns the stdio MCP server (health checks ~90s, claude mcp get), and with autojoin each spawn joined and, under newest-wins (ADR 017), displaced the real session, then disconnected. Fix: only displace connections from a different workspace; a same-workspace hello is the same seat reconnecting and is kept. Cross-workspace newest-wins (real reload / second machine) is unchanged.',
+    refs: [adr(68, 'ADR 068'), adr(17, 'ADR 017'), adr(57, 'ADR 057')],
+  },
+  {
     id: 'agent-workspace',
     title: 'One-command agent workspaces',
     status: 'shipped',

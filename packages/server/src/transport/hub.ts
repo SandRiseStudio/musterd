@@ -8,6 +8,13 @@ export interface Connection {
   presenceId: string;
   /** Read-only observer seat (ADR 063): no presence events, exempt from single-active displacement. */
   observer?: boolean;
+  /**
+   * The client's workspace (e.g. `repo@branch`), if it sent one. Agent single-active displacement is
+   * scoped by this: a hello from the *same* workspace is the same seat reconnecting (a reload or a
+   * health-check probe that briefly spawns the MCP server), so it must not supersede the live session
+   * — only a *different* workspace is a genuinely new session that takes the seat (ADR 068).
+   */
+  workspace?: string | null;
   send: (frame: WSServerFrame) => void;
   /** Force-close the underlying socket (used to displace a superseded same-identity session). */
   close?: () => void;

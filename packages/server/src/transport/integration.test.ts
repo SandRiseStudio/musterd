@@ -708,6 +708,83 @@ describe('WebSocket', () => {
     a2.close();
   });
 
+  it('a same-workspace hello does NOT supersede the live session (ADR 068)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
+    const tok = ada.json.token as string;
+
+    const live = new TestWs();
+    await live.open();
+    live.send({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Ada',
+      token: tok,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+    });
+    expect((await live.waitFor('welcome')).type).toBe('welcome');
+
+    // A health-check probe (or a reload) briefly spawns the MCP server from the SAME workspace.
+    const probe = new TestWs();
+    await probe.open();
+    probe.send({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Ada',
+      token: tok,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+    });
+    expect((await probe.waitFor('welcome')).type).toBe('welcome');
+
+    // The live session must NOT be told it was superseded — the seat doesn't flap.
+    await expect(live.waitFor('error', 300)).rejects.toThrow(/timeout/);
+
+    probe.close(); // the probe disconnects, as a real health check does
+    live.close();
+  });
+
+  it('a different-workspace hello still supersedes (newest-wins across real sessions, ADR 017/068)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
+    const tok = ada.json.token as string;
+
+    const first = new TestWs();
+    await first.open();
+    first.send({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Ada',
+      token: tok,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+    });
+    expect((await first.waitFor('welcome')).type).toBe('welcome');
+
+    const second = new TestWs();
+    await second.open();
+    second.send({
+      type: 'hello',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      as: 'Ada',
+      token: tok,
+      surface: 'claude-code',
+      workspace: 'repo@other', // a genuinely different session
+    });
+    expect((await second.waitFor('welcome')).type).toBe('welcome');
+
+    const superseded = await first.waitFor('error');
+    expect((superseded as any).code).toBe('superseded');
+
+    first.close();
+    second.close();
+  });
+
   it('a human seat fans out: two concurrent sessions both stay live, neither superseded (ADR 042)', async () => {
     // The team creator (nick) is a human seat.
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });

@@ -11,7 +11,8 @@ import { parseEnvelope } from '../protocol/validate.js';
 import { authMember, touchSeen } from '../store/members.js';
 import {
   attach,
-  clearMemberPresence,
+  clearOrphanPresence,
+  clearPresenceById,
   hasLivePresence,
   heartbeat,
   presenceById,
@@ -116,8 +117,18 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // (hub.deliver), and the durable inbox cursor dedupes (ADR 042; deployment-topology §7).
           // Observers (ADR 063) fan out like humans — several dashboards may watch one seat — so they
           // are exempt from agent single-active displacement.
+          //
+          // Displacement is **workspace-scoped** (ADR 068). A hello from the *same* workspace is the
+          // same seat reconnecting — a session reload, or (the common case) a health-check probe that
+          // briefly spawns the autojoin MCP server every ~90s — and must NOT supersede the live
+          // session, or the seat flaps and the agent's posts "land on retry". Only a hello from a
+          // *different* workspace is a genuinely new session that should take the seat (newest-wins,
+          // ADR 017). A client that sends no workspace falls back to the old displace-all behavior.
           if (member.kind === 'agent' && member.observer === 0) {
+            const sameWorkspace = (w?: string | null): boolean =>
+              w != null && frame.workspace != null && w === frame.workspace;
             for (const old of ctx.hub.connsForMember(member.id)) {
+              if (sameWorkspace(old.workspace)) continue; // same seat reconnecting/probing — keep it
               old.send({
                 type: 'error',
                 code: 'superseded',
@@ -125,8 +136,10 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               });
               old.close?.();
               ctx.hub.remove(old.connId);
+              clearPresenceById(ctx.db, old.presenceId);
             }
-            clearMemberPresence(ctx.db, member.id);
+            // Sweep crashed-session / grace-hold leftovers, but never the live same-workspace presence.
+            clearOrphanPresence(ctx.db, member.id);
           }
           const presence = attach(ctx.db, member.id, frame.surface, state.connId, {
             provenance: frame.provenance ?? null,
@@ -140,6 +153,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             teamId: team.id,
             presenceId: presence.id,
             observer: member.observer === 1,
+            workspace: frame.workspace ?? null,
             send: (f) => send(ws, f),
             close: () => ws.close(),
           };

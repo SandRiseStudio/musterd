@@ -77,6 +77,20 @@ export function clearMemberPresence(db: Database, memberId: string): void {
   db.prepare('DELETE FROM presence WHERE member_id = ?').run(memberId);
 }
 
+/** Drop a single presence row by id — used to evict exactly a displaced connection (ADR 068). */
+export function clearPresenceById(db: Database, presenceId: string): void {
+  db.prepare('DELETE FROM presence WHERE id = ?').run(presenceId);
+}
+
+/**
+ * Drop a member's *orphaned* presence rows — held or disconnected leftovers with no live socket
+ * (`conn_id IS NULL`). A fresh agent hello uses this to clear crashed-session / grace-hold remnants
+ * without touching a live same-workspace session it deliberately keeps (ADR 068).
+ */
+export function clearOrphanPresence(db: Database, memberId: string): void {
+  db.prepare('DELETE FROM presence WHERE member_id = ? AND conn_id IS NULL').run(memberId);
+}
+
 /** Does this member currently hold a *live* (connected, non-held) presence? Drives agent single-active. */
 export function hasActivePresence(db: Database, memberId: string): boolean {
   const row = db
