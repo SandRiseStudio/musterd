@@ -5,6 +5,7 @@ import { ConstellationGL } from '../live/ConstellationGL';
 import { Stream } from '../live/Stream';
 import type { LiveConfig, ConnStatus } from '../live/client';
 import { provisionObserver } from '../live/client';
+import { firehoseSound } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
 
 export const Route = createFileRoute('/live')({
@@ -111,6 +112,7 @@ function LivePage() {
         <span className="lc__word">musterd</span>
         {connected && <span className="lc__team">/ {cfg!.team}</span>}
         <span className="lc__spacer" />
+        {connected && <SoundToggle />}
         <StatusPill status={status} live={roster.filter((m) => m.presence !== 'offline').length} />
       </header>
 
@@ -138,6 +140,38 @@ function LivePage() {
         </>
       )}
     </main>
+  );
+}
+
+/**
+ * Mute/unmute the firehose's per-act sound cues. Default OFF: enabling is the user gesture that lets
+ * the AudioContext start (browser autoplay policy), and a one-shot blip confirms it's live.
+ */
+function SoundToggle() {
+  const [on, setOn] = useState(() => firehoseSound.enabled);
+  const toggle = () => {
+    const next = !on;
+    firehoseSound.setEnabled(next);
+    setOn(next);
+    if (next) firehoseSound.chime('handoff'); // a friendly two-note "sound is on" confirmation
+  };
+  return (
+    <button
+      type="button"
+      className={`lc__sound${on ? ' lc__sound--on' : ''}`}
+      onClick={toggle}
+      aria-pressed={on}
+      title={on ? 'Mute arrival sounds' : 'Play a sound on every new message'}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M3 6.2h2.2L8.3 3.6v8.8L5.2 9.8H3z" />
+        {on ? (
+          <path d="M10.4 5.6a3.2 3.2 0 0 1 0 4.8M12.2 4a5.6 5.6 0 0 1 0 8" />
+        ) : (
+          <path d="m10.8 6 3.4 4M14.2 6l-3.4 4" />
+        )}
+      </svg>
+    </button>
   );
 }
 

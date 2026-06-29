@@ -1,5 +1,5 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   LiveClient,
   fetchHistory,
@@ -7,6 +7,7 @@ import {
   type ConnStatus,
   type LiveConfig,
 } from './client';
+import { firehoseSound } from './sound';
 
 export interface LiveState {
   envelopes: Envelope[];
@@ -28,6 +29,8 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
   const [status, setStatus] = useState<ConnStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [liveIds, setLiveIds] = useState<Set<string>>(new Set());
+  // Ids we've already sounded — at-least-once delivery + reconnect replays must not double-chime.
+  const chimedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!cfg) {
@@ -68,6 +71,12 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
         if (!alive) return;
         // Mark live-arrived before adding (same render tick) so the row mounts knowing to type out.
         setLiveIds((prev) => (prev.has(e.id) ? prev : new Set(prev).add(e.id)));
+        // Sound the arrival — but only for genuinely-now messages (a reconnect can replay recent
+        // history over the socket), and once per id. The engine itself no-ops when muted.
+        if (!chimedRef.current.has(e.id) && Date.now() - e.ts < 30_000) {
+          chimedRef.current.add(e.id);
+          firehoseSound.chime(e.act);
+        }
         add([e]);
       },
       // Refetch the authoritative roster on any presence change — this carries presence/activity AND
