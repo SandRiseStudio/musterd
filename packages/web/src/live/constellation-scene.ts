@@ -200,19 +200,20 @@ export function mountConstellation(
     activeCurve = null;
   }
 
+  const C_ARC = new THREE.Color('#ffd49a'); // warm amber thread
   function buildArc(a: THREE.Vector3, b: THREE.Vector3, active: boolean): { mesh: THREE.Mesh; curve: THREE.QuadraticBezierCurve3 } {
     const mid = a.clone().add(b).multiplyScalar(0.5);
     const dir = b.clone().sub(a);
     const perp = new THREE.Vector3(-dir.y, dir.x, 0).normalize();
-    const ctrl = mid.add(perp.multiplyScalar(0.6)).add(new THREE.Vector3(0, 0, 0.5));
+    const ctrl = mid.add(perp.multiplyScalar(0.62)).add(new THREE.Vector3(0, 0, 0.55));
     const curve = new THREE.QuadraticBezierCurve3(a.clone(), ctrl, b.clone());
-    const geo = new THREE.TubeGeometry(curve, 40, active ? 0.022 : 0.012, 6, false);
+    const geo = new THREE.TubeGeometry(curve, 50, active ? 0.05 : 0.026, 8, false);
     const mat = new THREE.MeshBasicMaterial({
-      color: active ? C_MUSTARD : new THREE.Color('#ffe7c2'),
+      color: active ? C_MUSTARD : C_ARC,
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
-      opacity: active ? 0.85 : 0.18,
+      opacity: active ? 1 : 0.5,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 1;
@@ -271,6 +272,7 @@ export function mountConstellation(
       const b = posOf.get(e.to);
       if (!a || !b) continue;
       const { mesh, curve } = buildArc(a, b, e.active);
+      mesh.userData = { from: e.from, to: e.to, active: e.active };
       arcs.push(mesh);
       root.add(mesh);
       if (e.active) activeCurve = curve;
@@ -365,9 +367,11 @@ export function mountConstellation(
     }
     for (const a of arcs) {
       const m = a.material as THREE.MeshBasicMaterial;
-      const base = m.color.equals(C_MUSTARD) ? 0.85 : 0.18;
-      // arcs touching the hovered node ignite
-      m.opacity = base;
+      const ud = a.userData as { from: string; to: string; active: boolean };
+      const connects = hovered !== null && (ud.from === hovered || ud.to === hovered);
+      let op = ud.active ? 1 : 0.5;
+      if (hovered !== null) op = connects ? (ud.active ? 1 : 0.95) : ud.active ? 0.45 : 0.14;
+      m.opacity = op;
     }
 
     if (activeCurve && pulse.visible) {

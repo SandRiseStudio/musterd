@@ -23,9 +23,30 @@ export function initial(name: string): string {
   return (name.trim()[0] ?? '?').toUpperCase();
 }
 
-/** `HH:MM` in the viewer's locale, from a ms-epoch ts. */
+/** 12-hour clock (e.g. `9:48 PM`) in the viewer's locale, from a ms-epoch ts. */
 export function clock(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+/** Local day bucket (ms at local midnight) — for grouping the stream into days. */
+export function dayKey(ts: number): number {
+  const d = new Date(ts);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** A day divider label: `Today`, `Yesterday`, or a dated weekday (`Mon, Jun 26`). */
+export function dayLabel(ts: number): string {
+  const diff = Math.round((dayKey(Date.now()) - dayKey(ts)) / 86_400_000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  const d = new Date(ts);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
 }
 
 export function recipientLabel(to: Envelope['to']): string | null {

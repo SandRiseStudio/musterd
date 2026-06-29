@@ -1,6 +1,15 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { actTone, clock, initial, kindOf, recipientLabel, rosterIndex } from './format';
+import {
+  actTone,
+  clock,
+  dayKey,
+  dayLabel,
+  initial,
+  kindOf,
+  recipientLabel,
+  rosterIndex,
+} from './format';
 
 /**
  * The legible half of the split-canvas: the team's act stream. Rows arrive newest-last; the last row
@@ -55,11 +64,19 @@ export function Stream({
             status, and resolutions, live.
           </p>
         )}
-        {envelopes.map((e) => {
+        {envelopes.map((e, i) => {
           const isNow = e.id === lastId;
+          const prev = i > 0 ? envelopes[i - 1]! : null;
+          const newDay = !prev || dayKey(e.ts) !== dayKey(prev.ts);
           return (
             <Fragment key={e.id}>
-              {isNow && envelopes.length > 1 && (
+              {newDay && (
+                <div className="lc-day">
+                  <span className="lc-day__label">{dayLabel(e.ts)}</span>
+                  <span className="lc-day__line" />
+                </div>
+              )}
+              {isNow && envelopes.length > 1 && !newDay && (
                 <div className="lc-now">
                   <span className="lc-now__dot" />
                   <span className="lc-now__label">now</span>

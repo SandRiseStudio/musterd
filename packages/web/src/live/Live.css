@@ -497,6 +497,30 @@
   );
 }
 
+/* day divider (Today / Yesterday / dated) */
+.lc-day {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-5);
+  padding: var(--lc-6) 0 var(--lc-2);
+}
+.lc-day:first-child {
+  padding-top: var(--lc-2);
+}
+.lc-day__label {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lc-muted);
+}
+.lc-day__line {
+  flex: 1;
+  height: 1px;
+  background: var(--lc-border);
+}
+
 .lc-caret {
   display: inline-block;
   width: 2px;
