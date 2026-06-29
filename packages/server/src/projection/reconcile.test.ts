@@ -1,11 +1,13 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseSeatFile, parseTeamFile } from '@musterd/protocol';
+import { GENERALIST_CAPABILITIES, parseSeatFile, parseTeamFile } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { authMember, getMemberByName, isHeld, listMembers } from '../store/members.js';
+import { listRoleNames } from '../store/roles.js';
+import { toMember } from '../store/rows.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { loadTeamSpec } from './load.js';
 import { reconcileTeam } from './reconcile.js';
@@ -21,6 +23,12 @@ function writeRoster(team: string, seats: Record<string, string>): void {
   for (const [name, body] of Object.entries(seats)) {
     writeFileSync(join(m, 'seats', `${name}.toml`), body);
   }
+}
+
+function writeRole(name: string, body: string): void {
+  const rolesDir = join(dir, '.musterd', 'roles');
+  mkdirSync(rolesDir, { recursive: true });
+  writeFileSync(join(rolesDir, `${name}.toml`), body);
 }
 
 function reconcile() {
@@ -176,5 +184,78 @@ describe('reconcile — fail-closed: a corrupt seat is skipped, siblings intact'
     expect(listMembers(db, team.id).map((m) => m.name)).toEqual(['olive']);
     expect(r.errors.length).toBe(1);
     expect(r.errors[0]).toContain('broken.toml');
+  });
+});
+
+describe('reconcile — governance projection (ADR 070, v0.3 P1)', () => {
+  function memberView(name: string) {
+    const team = getTeamBySlug(db, 'alpha')!;
+    const row = getMemberByName(db, team.id, name)!;
+    return toMember(row, 'alpha');
+  }
+
+  it('a seat with no role gets the generalist default + derived provisioned status', () => {
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = ""\n' });
+    reconcile();
+    const m = memberView('olive');
+    expect(m.capabilities).toEqual(GENERALIST_CAPABILITIES);
+    expect(m.account_status).toBe('provisioned'); // never held
+  });
+
+  it('derives active once the seat has been held (authenticated)', () => {
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = ""\n' });
+    const r = reconcile();
+    const token = r.minted['olive']!;
+    authMember(db, 'alpha', token); // first auth stamps bound_at (ADR 058)
+    expect(memberView('olive').account_status).toBe('active');
+  });
+
+  it("projects a role's default capabilities onto its seat", () => {
+    writeRole(
+      'reviewer',
+      '[capabilities]\ncan_flag_urgent = false\nvisibility_level = "admin"\nis_admin = true\n',
+    );
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    reconcile();
+    const caps = memberView('olive').capabilities!;
+    expect(caps.can_flag_urgent).toBe(false);
+    expect(caps.visibility_level).toBe('admin');
+    expect(caps.is_admin).toBe(true);
+    expect(caps.can_observe).toBe(true); // unset role field falls back to generalist
+  });
+
+  it('a per-seat override narrows the role default but cannot widen it', () => {
+    writeRole('reviewer', '[capabilities]\ncan_flag_urgent = true\n');
+    writeRoster('slug = "alpha"\n', {
+      // narrows urgent off, and tries to self-promote is_admin (role default false) → clamped
+      olive:
+        'kind = "agent"\nrole = "reviewer"\n[capabilities]\ncan_flag_urgent = false\nis_admin = true\n',
+    });
+    reconcile();
+    const caps = memberView('olive').capabilities!;
+    expect(caps.can_flag_urgent).toBe(false); // narrowed
+    expect(caps.is_admin).toBe(false); // widening clamped
+  });
+
+  it('honours an admin-set account_status override from the file', () => {
+    writeRoster('slug = "alpha"\n', {
+      olive: 'kind = "agent"\nrole = ""\naccount_status = "banned"\n',
+    });
+    reconcile();
+    expect(memberView('olive').account_status).toBe('banned');
+  });
+
+  it('drops a role from the projection when its file is removed', () => {
+    writeRole('reviewer', '[capabilities]\ncan_flag_urgent = false\n');
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    reconcile();
+    expect(memberView('olive').capabilities!.can_flag_urgent).toBe(false);
+
+    // remove the role file → seat falls back to generalist on the next reconcile
+    rmSync(join(dir, '.musterd', 'roles', 'reviewer.toml'));
+    reconcile();
+    const team = getTeamBySlug(db, 'alpha')!;
+    expect(listRoleNames(db, team.id)).toEqual([]);
+    expect(memberView('olive').capabilities!.can_flag_urgent).toBe(true); // generalist again
   });
 });

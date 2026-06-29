@@ -1,9 +1,11 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  type SeatFile,
+  parseRoleFile,
   parseSeatFile,
   parseTeamFile,
+  type RoleFile,
+  type SeatFile,
   seatNameFromPath,
   type TeamFile,
 } from '@musterd/protocol';
@@ -22,11 +24,19 @@ export interface LoadedSeat {
   seat: SeatFile;
 }
 
+export interface LoadedRole {
+  /** The role name — the filename stem (like seats). */
+  name: string;
+  role: RoleFile;
+}
+
 export interface TeamSpec {
   rootDir: string;
   team: TeamFile;
   seats: LoadedSeat[];
-  /** Per-seat parse/validation errors (fail-closed): the seat is skipped, never silently dropped. */
+  /** Role defaults (ADR 070), read from `roles/*.toml`; empty when the team has no roles dir. */
+  roles: LoadedRole[];
+  /** Per-seat/role parse/validation errors (fail-closed): the entry is skipped, never silently dropped. */
   errors: string[];
 }
 
@@ -62,5 +72,24 @@ export function loadTeamSpec(rootDir: string): TeamSpec | null {
       errors.push(`${f}: ${(e as Error).message}`);
     }
   }
-  return { rootDir, team, seats, errors };
+
+  // Role defaults (ADR 070) — `roles/<name>.toml`. Optional dir; fail-closed per role like seats.
+  const rolesDir = join(dir, 'roles');
+  const roles: LoadedRole[] = [];
+  let roleFiles: string[] = [];
+  try {
+    roleFiles = readdirSync(rolesDir).filter((f) => f.toLowerCase().endsWith('.toml'));
+  } catch {
+    roleFiles = []; // no roles/ dir — a team may define no roles (all seats are generalist)
+  }
+  for (const f of roleFiles.sort()) {
+    const name = seatNameFromPath(f); // same stem rule as seats
+    try {
+      roles.push({ name, role: parseRoleFile(readFileSync(join(rolesDir, f), 'utf8')) });
+    } catch (e) {
+      errors.push(`roles/${f}: ${(e as Error).message}`);
+    }
+  }
+
+  return { rootDir, team, seats, roles, errors };
 }

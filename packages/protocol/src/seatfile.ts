@@ -1,6 +1,11 @@
 import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
 import { LifecycleSchema, MemberKindSchema } from './acts.js';
+import {
+  AdminAccountStatusSchema,
+  type PartialCapabilities,
+  PartialCapabilitiesSchema,
+} from './capabilities.js';
 
 /**
  * The durable seat-roster file format (ADR 058 + seat-file-format.md). A team's durable tier
@@ -42,11 +47,28 @@ export const SeatFileSchema = z
     lifecycle: LifecycleSchema.optional(),
     until: z.string().datetime({ offset: true }).optional(),
     name: z.string().optional(),
+    /** Admin-set account status override (ADR 070). Only the durable, admin-controlled states live
+     *  here; `provisioned`/`active` are derived from occupancy by the daemon, never written. */
+    account_status: AdminAccountStatusSchema.optional(),
+    /** Per-seat capability **narrowing** (ADR 070) — a partial that may only narrow the seat's role
+     *  defaults, never widen (enforced by the daemon's projection via `clampNarrow`). */
+    capabilities: PartialCapabilitiesSchema.optional(),
   })
   .refine((s) => s.lifecycle !== 'until' || Boolean(s.until), {
     message: 'lifecycle "until" requires an `until` timestamp',
   });
 export type SeatFile = z.infer<typeof SeatFileSchema>;
+
+/**
+ * `roles/<name>.toml` — one per role (ADR 070). The filename stem is the role name (like seats); the
+ * body carries the role's **default capabilities** (a partial — unset fields fall back to generalist)
+ * and an optional charter. Role defaults are the ceiling a seat's per-seat capabilities narrow under.
+ */
+export const RoleFileSchema = z.object({
+  capabilities: PartialCapabilitiesSchema.default({}),
+  charter: z.string().optional(),
+});
+export type RoleFile = z.infer<typeof RoleFileSchema>;
 
 // ---------------------------------------------------------------------------
 // Parsing — TOML text → validated structure. Throws on malformed/invalid input; the daemon's
@@ -81,6 +103,11 @@ export function seatNameFromPath(path: string): string {
   return base.replace(/\.toml$/i, '');
 }
 
+/** Parse a `roles/<name>.toml`. The name is the filename stem (not in the body), like seat files. */
+export function parseRoleFile(text: string): RoleFile {
+  return RoleFileSchema.parse(parseToml(text));
+}
+
 // ---------------------------------------------------------------------------
 // Serializing — structure → canonical TOML text. Total + deterministic: fixed key order, minimal
 // emission, one style. This is the byte-exact form `musterd fmt` writes and `format:check` enforces
@@ -109,6 +136,33 @@ function line(key: string, value: string): string {
   return `${key} = ${tomlString(value)}\n`;
 }
 
+function boolLine(key: string, value: boolean): string {
+  return `${key} = ${value ? 'true' : 'false'}\n`;
+}
+
+function arrayLine(key: string, values: string[]): string {
+  return `${key} = [${values.map(tomlString).join(', ')}]\n`;
+}
+
+/**
+ * Canonical `[capabilities]` table body (shared by seat + role files). Fixed key order; only
+ * **present** keys emitted (a partial), so an empty override produces no output and the caller omits
+ * the header entirely. Booleans → `true|false`, scopes → quoted strings, declared lists → TOML arrays
+ * (an explicit `[]` is preserved — it narrows to nothing). Deterministic, for the ADR 058 guards.
+ */
+function serializeCapabilities(caps: PartialCapabilities): string {
+  let out = '';
+  if (caps.is_admin !== undefined) out += boolLine('is_admin', caps.is_admin);
+  if (caps.can_flag_urgent !== undefined) out += boolLine('can_flag_urgent', caps.can_flag_urgent);
+  if (caps.can_observe !== undefined) out += boolLine('can_observe', caps.can_observe);
+  if (caps.can_message !== undefined) out += line('can_message', caps.can_message);
+  if (caps.visibility_level !== undefined) out += line('visibility_level', caps.visibility_level);
+  if (caps.tool_allowlist !== undefined) out += arrayLine('tool_allowlist', caps.tool_allowlist);
+  if (caps.declared_resource_scopes !== undefined)
+    out += arrayLine('declared_resource_scopes', caps.declared_resource_scopes);
+  return out;
+}
+
 /**
  * Canonical `team.toml`. Key order: `slug, display, lifecycle`. `display` is omitted when empty;
  * `lifecycle` is omitted when `forever` (the default) — so the common team is a one-line file.
@@ -133,5 +187,27 @@ export function serializeSeat(seat: SeatFile): string {
     out += line('lifecycle', seat.lifecycle);
     if (seat.until) out += line('until', seat.until);
   }
+  // Admin-set account status (top-level key — must precede any table). Omitted when unset (the common
+  // active/provisioned case is derived, never written).
+  if (seat.account_status) out += line('account_status', seat.account_status);
+  // Per-seat capability narrowing as a trailing `[capabilities]` table (TOML requires tables after
+  // top-level keys). Omitted entirely when the override is absent or empty (a known normalization).
+  if (seat.capabilities) {
+    const body = serializeCapabilities(seat.capabilities);
+    if (body) out += `[capabilities]\n${body}`;
+  }
+  return out;
+}
+
+/**
+ * Canonical `roles/<name>.toml`. Key order: `charter` (top-level) then the `[capabilities]` table.
+ * An empty role (no charter, no caps) serializes to the empty string — the minimal form; the role
+ * still exists by virtue of its filename.
+ */
+export function serializeRole(role: RoleFile): string {
+  let out = '';
+  if (role.charter) out += line('charter', role.charter);
+  const body = serializeCapabilities(role.capabilities ?? {});
+  if (body) out += `[capabilities]\n${body}`;
   return out;
 }

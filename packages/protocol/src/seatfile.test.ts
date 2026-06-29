@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  parseRoleFile,
   parseSeatFile,
   parseTeamFile,
+  type RoleFile,
   seatNameFromPath,
+  serializeRole,
   serializeSeat,
   serializeTeam,
   type SeatFile,
@@ -26,6 +29,17 @@ describe('seat file — guard 2: canonical byte-equality + idempotence', () => {
     [
       'untilseat',
       'kind = "agent"\nrole = "contractor"\nlifecycle = "until"\nuntil = "2026-07-01T00:00:00Z"\n',
+    ],
+    // ADR 070: admin-set account status (top-level, before any table)
+    ['banished', 'kind = "agent"\nrole = "reviewer"\naccount_status = "banned"\n'],
+    // ADR 070: per-seat capability narrowing as a trailing [capabilities] table
+    [
+      'narrowed',
+      'kind = "agent"\nrole = "reviewer"\n[capabilities]\ncan_flag_urgent = false\ncan_message = "none"\n',
+    ],
+    [
+      'scoped',
+      'kind = "agent"\nrole = "backend"\naccount_status = "disabled"\n[capabilities]\nvisibility_level = "team"\ntool_allowlist = ["read", "grep"]\ndeclared_resource_scopes = []\n',
     ],
   ];
 
@@ -133,5 +147,67 @@ describe('seatNameFromPath', () => {
     expect(seatNameFromPath('.musterd/seats/olive.toml')).toBe('olive');
     expect(seatNameFromPath('/abs/path/.musterd/seats/david.toml')).toBe('david');
     expect(seatNameFromPath('cosmo.toml')).toBe('cosmo');
+  });
+});
+
+describe('seat file — capabilities + account_status (ADR 070)', () => {
+  it('parses account_status + a capabilities narrowing table', () => {
+    const seat = parseSeatFile(
+      'kind = "agent"\nrole = "reviewer"\naccount_status = "banned"\n[capabilities]\ncan_flag_urgent = false\ntool_allowlist = ["read"]\n',
+      'r',
+    );
+    expect(seat.account_status).toBe('banned');
+    expect(seat.capabilities).toEqual({ can_flag_urgent: false, tool_allowlist: ['read'] });
+  });
+
+  it('rejects a non-admin account_status in the file (provisioned/active are derived)', () => {
+    expect(() =>
+      parseSeatFile('kind = "agent"\nrole = "x"\naccount_status = "active"\n', 'a'),
+    ).toThrow();
+  });
+
+  it('an empty [capabilities] table normalizes away (omitted in canonical form)', () => {
+    const seat = parseSeatFile('kind = "agent"\nrole = "x"\n[capabilities]\n', 'a');
+    expect(serializeSeat(seat)).toBe('kind = "agent"\nrole = "x"\n');
+  });
+
+  it('an explicit empty list override is preserved (narrows to nothing)', () => {
+    const text = 'kind = "agent"\nrole = "x"\n[capabilities]\ntool_allowlist = []\n';
+    const seat = parseSeatFile(text, 'a');
+    expect(seat.capabilities).toEqual({ tool_allowlist: [] });
+    expect(serializeSeat(seat)).toBe(text);
+  });
+});
+
+describe('role file — roles/<name>.toml (ADR 070)', () => {
+  const canonicalRoles: string[] = [
+    '', // an empty role (exists by filename only) is the empty string
+    'charter = "Review PRs; do not merge."\n',
+    '[capabilities]\nis_admin = true\nvisibility_level = "admin"\n',
+    'charter = "Backend."\n[capabilities]\ncan_flag_urgent = false\ntool_allowlist = ["read", "edit"]\n',
+  ];
+
+  it('round-trips each canonical role file byte-for-byte', () => {
+    for (const text of canonicalRoles) {
+      expect(serializeRole(parseRoleFile(text))).toBe(text);
+    }
+  });
+
+  it('fmt is idempotent on role files', () => {
+    for (const text of canonicalRoles) {
+      const once = serializeRole(parseRoleFile(text));
+      expect(serializeRole(parseRoleFile(once))).toBe(once);
+    }
+  });
+
+  it('parse is semantic identity on role bodies', () => {
+    const bodies: RoleFile[] = [
+      { capabilities: {} },
+      { capabilities: { is_admin: true }, charter: 'lead' },
+      { capabilities: { can_message: 'none', declared_resource_scopes: ['repo/a'] } },
+    ];
+    for (const body of bodies) {
+      expect(parseRoleFile(serializeRole(body))).toEqual(body);
+    }
   });
 });

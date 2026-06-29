@@ -96,6 +96,32 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE members ADD COLUMN observer INTEGER NOT NULL DEFAULT 0');
     },
   },
+  {
+    // v0.3 P1 seats data model (ADR 070 / ADR 069). Additive + backward-compatible: a NULL
+    // `account_status` is the derived provisioned/active state, and NULL `capabilities` is the
+    // generalist default — so existing rows behave exactly as before until reconcile projects the
+    // file-backed values. No row-migration code (the durable values come from the git files); the
+    // one-shot reset stays the documented fallback for a db-only team (ADR 069 decision 1).
+    version: 8,
+    up: (db) => {
+      // Admin-set account-status override (disabled/banned/archived); NULL ⇒ derived from occupancy.
+      db.exec('ALTER TABLE members ADD COLUMN account_status TEXT');
+      // Resolved effective capabilities (JSON); NULL ⇒ generalist default.
+      db.exec('ALTER TABLE members ADD COLUMN capabilities TEXT');
+      // Role defaults (ADR 070), projected from roles/<name>.toml. capabilities is a partial JSON.
+      db.exec(
+        `CREATE TABLE roles (
+           team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+           name TEXT NOT NULL,
+           capabilities TEXT NOT NULL DEFAULT '{}',
+           charter TEXT,
+           created_at INTEGER NOT NULL,
+           updated_at INTEGER NOT NULL,
+           PRIMARY KEY (team_id, name)
+         )`,
+      );
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

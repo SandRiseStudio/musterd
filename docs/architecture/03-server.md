@@ -32,7 +32,8 @@ src/
     activity.ts       // resolveActivity: the two-clocks rule → offline/online/working (v0.2 M2)
     cursors.ts        // getCursor, setCursor, unreadCount
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
-    rows.ts           // raw DB row shapes (TeamRow/MemberRow/PresenceRow/MessageRow) + toMember mapper
+    roles.ts          // roles table: role defaults (capabilities + charter), projected from roles/*.toml (ADR 070)
+    rows.ts           // raw DB row shapes (TeamRow/MemberRow/PresenceRow/MessageRow) + toMember (resolves account_status + capabilities, ADR 070)
   protocol/
     validate.ts       // thin wrappers over @musterd/protocol schemas + error mapping
     route.ts          // routeEnvelope(): the ONE validate+persist+deliver path (WS & HTTP share it)

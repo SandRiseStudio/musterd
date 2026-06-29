@@ -1,4 +1,11 @@
-import { AvailabilitySchema, type Member } from '@musterd/protocol';
+import {
+  type AccountStatus,
+  AvailabilitySchema,
+  type Capabilities,
+  CapabilitiesSchema,
+  GENERALIST_CAPABILITIES,
+  type Member,
+} from '@musterd/protocol';
 
 /** Raw DB row shapes (snake_case, SQLite types). */
 export interface TeamRow {
@@ -26,6 +33,12 @@ export interface MemberRow {
   bound_at: number | null;
   /** Read-only observer seat (ADR 063): hidden from roster/counts/presence, can't send. 0/1. */
   observer: number;
+  /** Admin-set account-status override (ADR 070): disabled|banned|archived. NULL ⇒ derived from
+   * occupancy (`bound_at`): held ⇒ active, never-held ⇒ provisioned. */
+  account_status: string | null;
+  /** Resolved effective capabilities as JSON (ADR 070), projected by reconcile from role defaults ⊕
+   * per-seat narrowing. NULL ⇒ the generalist default (a db-only or not-yet-reconciled seat). */
+  capabilities: string | null;
   left_at: number | null;
   created_at: number;
   updated_at: number;
@@ -63,6 +76,25 @@ export interface MessageRow {
   created_at: number;
 }
 
+/**
+ * Resolve a seat's account status (ADR 070 Axis 1). An admin override (disabled/banned/archived) in
+ * the column wins; otherwise it is **derived** from occupancy — a seat that has ever been held
+ * (`bound_at`) is `active`, one that never has is `provisioned`. A malformed override degrades to the
+ * derived value rather than failing the projection.
+ */
+export function resolveAccountStatus(row: MemberRow): AccountStatus {
+  const override = row.account_status;
+  if (override === 'disabled' || override === 'banned' || override === 'archived') return override;
+  return row.bound_at !== null ? 'active' : 'provisioned';
+}
+
+/** Resolve a seat's effective capabilities (ADR 070): the reconcile-projected JSON, or the generalist
+ *  default for a db-only / not-yet-reconciled seat. Parsed defensively (a bad blob ⇒ generalist). */
+export function resolveCapabilities(row: MemberRow): Capabilities {
+  if (!row.capabilities) return GENERALIST_CAPABILITIES;
+  return CapabilitiesSchema.safeParse(JSON.parse(row.capabilities)).data ?? GENERALIST_CAPABILITIES;
+}
+
 /** Map a member row (+ its team slug) to the public protocol Member shape (no token_hash). */
 export function toMember(row: MemberRow, teamSlug: string): Member {
   return {
@@ -78,6 +110,8 @@ export function toMember(row: MemberRow, teamSlug: string): Member {
     availability: row.availability
       ? (AvailabilitySchema.safeParse(JSON.parse(row.availability)).data ?? null)
       : null,
+    account_status: resolveAccountStatus(row),
+    capabilities: resolveCapabilities(row),
     created_at: row.created_at,
   };
 }

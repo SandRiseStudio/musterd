@@ -7,6 +7,7 @@ import {
   ProvenanceSchema,
   SurfaceSchema,
 } from './acts.js';
+import { AccountStatusSchema, CapabilitiesSchema } from './capabilities.js';
 
 /**
  * The self-set availability axis (SPEC A.6 Axis 2) — explicit, **never inferred**. `away_until(ts)`
@@ -33,6 +34,10 @@ export const MemberSchema = z.object({
   lifecycle: LifecycleSchema.default('forever'),
   lifecycle_until: z.number().int().nullish(),
   availability: AvailabilitySchema.nullish(),
+  /** Account status — Axis 1 (ADR 070). Optional for back-compat; the server always resolves it. */
+  account_status: AccountStatusSchema.optional(),
+  /** Effective capabilities (ADR 070). Optional for back-compat; the server always resolves it. */
+  capabilities: CapabilitiesSchema.optional(),
   created_at: z.number().int(),
 });
 export type Member = z.infer<typeof MemberSchema>;

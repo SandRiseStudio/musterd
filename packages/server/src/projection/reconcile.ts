@@ -1,4 +1,4 @@
-import type { Lifecycle } from '@musterd/protocol';
+import { effectiveCapabilities, type Lifecycle } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { log } from '../log.js';
 import {
@@ -8,8 +8,10 @@ import {
   listMembers,
   type MemberIdentityFields,
   reviveMember,
+  setMemberGovernance,
   updateMemberIdentity,
 } from '../store/members.js';
+import { deleteRoles, listRoleNames, roleDefaultsMap, upsertRole } from '../store/roles.js';
 import { createTeam, getTeamBySlug, updateTeam } from '../store/teams.js';
 import { type LoadedSeat, loadTeamSpec, type TeamSpec } from './load.js';
 
@@ -60,6 +62,18 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
     });
   }
 
+  // Project role defaults (ADR 070): upsert the roles present in the files, drop the ones absent.
+  const desiredRoles = new Set(spec.roles.map((r) => r.name));
+  for (const { name, role } of spec.roles) {
+    upsertRole(db, team.id, name, role.capabilities ?? {}, role.charter ?? null);
+  }
+  deleteRoles(
+    db,
+    team.id,
+    listRoleNames(db, team.id).filter((n) => !desiredRoles.has(n)),
+  );
+  const roleDefaults = roleDefaultsMap(db, team.id);
+
   const result: ReconcileResult = {
     slug: spec.team.slug,
     added: [],
@@ -106,6 +120,20 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       updateMemberIdentity(db, existing.id, fields);
       result.updated.push(name);
     }
+  }
+
+  // Project each seat's governance state (ADR 070), separate from the identity/mint paths above so
+  // reconcile is the single writer of capabilities + the admin account-status override. Effective caps
+  // = role defaults ⊕ per-seat narrowing (clampNarrow, never widening); the account-status override is
+  // taken straight from the file (provisioned/active are derived at read time, not stored).
+  for (const { name, seat } of spec.seats) {
+    const m = getMemberByName(db, team.id, name);
+    if (!m) continue;
+    const caps = effectiveCapabilities(
+      roleDefaults.get(seat.role ?? '') ?? {},
+      seat.capabilities ?? {},
+    );
+    setMemberGovernance(db, m.id, seat.account_status ?? null, JSON.stringify(caps));
   }
 
   // REMOVE — a live member with no file is soft-tombstoned (never hard-deleted: the message log FK

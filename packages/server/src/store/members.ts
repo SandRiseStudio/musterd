@@ -110,15 +110,19 @@ export function addMember(
     // (ADR 058). The INSERT omits the column, so it defaults to NULL; kept here for the typed row.
     bound_at: null,
     observer: input.observer ? 1 : 0,
+    // Governance is projected by reconcile (ADR 070), not at mint — a fresh seat is NULL (⇒ derived
+    // account status + generalist capabilities) until the file-backed values are reconciled in.
+    account_status: null,
+    capabilities: null,
     left_at: null,
     created_at: now,
     updated_at: now,
   };
   db.prepare(
     `INSERT INTO members
-       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, token_hash, observer, left_at, created_at, updated_at)
+       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, token_hash, observer, account_status, capabilities, left_at, created_at, updated_at)
      VALUES
-       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @token_hash, @observer, @left_at, @created_at, @updated_at)`,
+       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @token_hash, @observer, @account_status, @capabilities, @left_at, @created_at, @updated_at)`,
   ).run(row);
   return { row, token };
 }
@@ -217,6 +221,24 @@ export function reviveMember(db: Database, id: string, f: MemberIdentityFields):
 /** Force a held seat back to *declared* without deleting it (operator reclaim / unbind, ADR 058). */
 export function clearBound(db: Database, id: string): void {
   db.prepare('UPDATE members SET bound_at = NULL, updated_at = ? WHERE id = ?').run(Date.now(), id);
+}
+
+/**
+ * Project a seat's governance state onto its member row (ADR 070, v0.3 P1). Kept **separate** from the
+ * identity/mint paths so reconcile is the single writer of capabilities + the admin account-status
+ * override, and the mint/revive/db-only paths stay untouched (their rows default to NULL ⇒
+ * generalist/derived, the backward-compatible state). `accountStatus` is the admin override only
+ * (disabled/banned/archived) or NULL; `capabilities` is the resolved effective JSON.
+ */
+export function setMemberGovernance(
+  db: Database,
+  id: string,
+  accountStatus: string | null,
+  capabilities: string,
+): void {
+  db.prepare(
+    'UPDATE members SET account_status = ?, capabilities = ?, updated_at = ? WHERE id = ?',
+  ).run(accountStatus, capabilities, Date.now(), id);
 }
 
 /**
