@@ -45,6 +45,11 @@ const C_HUMAN = new THREE.Color('#ff86a8'); // warm rose
 const C_MUSTARD = new THREE.Color('#f2c83e');
 const C_OFFLINE = new THREE.Color('#80715f');
 
+/** ease-in-out cubic — gentle accelerate/decelerate for a smoother comet glide. */
+function easeInOut(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
 function radialTexture(stops: [number, string][]): THREE.Texture {
   const s = 128;
   const c = document.createElement('canvas');
@@ -467,40 +472,42 @@ export function mountConstellation(
     }
 
     if (activeCurve && pulse.visible) {
-      pulseT = (pulseT + dt / 2.6) % 1;
+      // ambient comet on the current thread — slow, constant glide
+      pulseT = (pulseT + dt / 3.6) % 1;
       activeCurve.getPointAt(pulseT, pulse.position);
-      pulse.scale.setScalar(0.26 + 0.06 * Math.sin(t * 6));
+      pulse.scale.setScalar(0.26 + 0.05 * Math.sin(t * 4));
     }
 
-    // transient event comets (one per directed message)
+    // transient event comets (one per directed message) — slower, eased glide
     for (let i = livePulses.length - 1; i >= 0; i--) {
       const lp = livePulses[i]!;
-      lp.t += dt / 1.15;
+      lp.t += dt / 1.9;
       if (lp.t >= 1) {
         root.remove(lp.sprite);
         (lp.sprite.material as THREE.Material).dispose();
         livePulses.splice(i, 1);
         continue;
       }
-      const tt = lp.dir > 0 ? lp.t : 1 - lp.t;
+      const eased = easeInOut(lp.t);
+      const tt = lp.dir > 0 ? eased : 1 - eased;
       lp.curve.getPointAt(tt < 0 ? 0 : tt > 1 ? 1 : tt, lp.sprite.position);
-      const fade = lp.t < 0.12 ? lp.t / 0.12 : lp.t > 0.82 ? (1 - lp.t) / 0.18 : 1;
+      const fade = lp.t < 0.16 ? lp.t / 0.16 : lp.t > 0.8 ? (1 - lp.t) / 0.2 : 1;
       (lp.sprite.material as THREE.SpriteMaterial).opacity = fade;
       lp.sprite.scale.setScalar(0.3 + 0.12 * Math.sin(lp.t * Math.PI));
     }
-    // broadcast / settle ripples (expanding ring from the sender)
+    // broadcast / settle ripples (expanding ring from the sender) — slower, gentler ease-out
     for (let i = ripples.length - 1; i >= 0; i--) {
       const rp = ripples[i]!;
-      rp.t += dt / 1.05;
+      rp.t += dt / 1.7;
       if (rp.t >= 1) {
         root.remove(rp.sprite);
         (rp.sprite.material as THREE.Material).dispose();
         ripples.splice(i, 1);
         continue;
       }
-      const e = 1 - (1 - rp.t) * (1 - rp.t);
-      rp.sprite.scale.setScalar(0.6 + e * 3.6);
-      (rp.sprite.material as THREE.SpriteMaterial).opacity = (1 - rp.t) * 0.72;
+      const e = 1 - Math.pow(1 - rp.t, 3);
+      rp.sprite.scale.setScalar(0.55 + e * 3.8);
+      (rp.sprite.material as THREE.SpriteMaterial).opacity = (1 - rp.t) * (1 - rp.t) * 0.78;
     }
 
     projectLabels();

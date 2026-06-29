@@ -145,8 +145,9 @@ function Row({
 }
 
 /**
- * Reveal `text` character-by-character, smooth but length-adaptive (capped ~1.1s) so long messages
- * don't drag. Honors prefers-reduced-motion by showing the full text at once.
+ * Reveal `text` one character at a time — a gentle, gradual typewriter. The per-character interval is
+ * length-adaptive (clamped 22–60ms) so short lines aren't instant and long ones don't crawl, but it's
+ * always 1 char per step so the reveal stays smooth. Honors prefers-reduced-motion (shows full text).
  */
 function Typewriter({ text, className }: { text: string; className?: string }) {
   const [n, setN] = useState(0);
@@ -159,16 +160,15 @@ function Typewriter({ text, className }: { text: string; className?: string }) {
       return;
     }
     const total = text.length;
-    const tick = 24; // ms per step — slower step = more gradual reveal
-    const durationMs = Math.min(1700, Math.max(360, total * 32));
-    const perTick = Math.max(1, Math.ceil(total / (durationMs / tick)));
+    // aim for ~total*45ms reading time, clamped to a comfortable per-char pace
+    const tickMs = Math.min(60, Math.max(22, Math.round(2000 / Math.max(total, 1))));
     let i = 0;
     setN(0);
     const h = setInterval(() => {
-      i = Math.min(total, i + perTick);
+      i += 1;
       setN(i);
       if (i >= total) clearInterval(h);
-    }, tick);
+    }, tickMs);
     return () => clearInterval(h);
   }, [text]);
 
