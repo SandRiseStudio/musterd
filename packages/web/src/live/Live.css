@@ -237,21 +237,31 @@
   transition: opacity var(--lc-med) var(--lc-ease);
 }
 .lc-gl-label__name {
+  padding: 2px 8px;
+  border-radius: 7px;
+  background: rgba(13, 9, 6, 0.62);
+  border: 1px solid rgba(255, 238, 210, 0.12);
   font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
+  font-size: 12.5px;
+  font-weight: 600;
   letter-spacing: -0.01em;
-  color: var(--lc-dim);
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  box-shadow: 0 2px 10px -3px rgba(0, 0, 0, 0.6);
 }
 .lc-gl-label.is-offline .lc-gl-label__name {
-  color: var(--lc-faint);
+  color: var(--lc-dim);
+  background: rgba(13, 9, 6, 0.46);
+  font-weight: 500;
 }
 .lc-gl-label__state {
+  margin-top: 3px;
   font-family: var(--font-sans, sans-serif);
-  font-size: 10px;
+  font-size: 10.5px;
+  font-weight: 500;
   color: var(--lc-accent-bright);
-  opacity: 0.92;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(0, 0, 0, 0.6);
 }
 .lc-constellation__caption {
   position: absolute;
