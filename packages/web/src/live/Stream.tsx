@@ -106,12 +106,18 @@ function Row({
   // Freeze the typewriter decision at mount: a backfilled row never types, a live row types once even
   // if props later change.
   const [doType] = useState(animate);
+  // A resolve that arrives live "settles": a one-time green brighten → calm, synchronized with the
+  // constellation's resolve pulse + ripple. Frozen at mount so it fires once.
+  const [settle] = useState(animate && env.act === 'resolve');
   const tone = actTone(env.act);
   const kind = kindOf(env.from, idx);
   const recipient = recipientLabel(env.to);
   const threaded = env.thread != null;
   const body = (
-    <div className={`lc-row lc-row--enter${now ? ' lc-row--now' : ''}`} data-tone={tone}>
+    <div
+      className={`lc-row lc-row--enter${now ? ' lc-row--now' : ''}${settle ? ' lc-row--settle' : ''}`}
+      data-tone={tone}
+    >
       <div className="lc-row__head">
         <time className="lc-row__ts">{clock(env.ts)}</time>
         <span className={`lc-chip lc-chip--${kind}`}>

@@ -24,8 +24,16 @@ export interface GLData {
   edges: GLEdge[];
 }
 
+/** A live event to animate: a directed message (pulse along its arc), a team broadcast (ripple from
+ * the sender), or a resolve (a green pulse + a settle ripple at the recipient). */
+export type SceneEvent =
+  | { kind: 'pulse'; from: string; to: string; color: string }
+  | { kind: 'ripple'; from: string; color: string }
+  | { kind: 'settle'; from: string; to: string; color: string };
+
 export interface ConstellationHandle {
   update: (data: GLData) => void;
+  emit: (ev: SceneEvent) => void;
   dispose: () => void;
 }
 
@@ -100,10 +108,25 @@ export function mountConstellation(
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(46, width / height, 0.1, 100);
-  camera.position.set(0, 0, 6.6);
-
   const root = new THREE.Group(); // rotated by parallax
   scene.add(root);
+
+  // Keep the whole ring in frame at any panel size: set the camera distance to fit the ring's *height*
+  // (the panel is always tall), then horizontally *squish* the field to fit narrow panels — so nodes
+  // and their arcs never clip off the sides when the window shrinks.
+  function fitCamera() {
+    width = host.clientWidth || 1;
+    height = host.clientHeight || 1;
+    camera.aspect = width / height;
+    const tanH = Math.tan(((camera.fov * Math.PI) / 180) / 2);
+    const need = R * 1.18; // ring extent + glow/label margin
+    camera.position.z = need / tanH;
+    camera.updateProjectionMatrix();
+    const halfW = camera.position.z * tanH * camera.aspect;
+    root.scale.x = Math.min(1, halfW / need);
+    renderer.setSize(width, height);
+  }
+  fitCamera();
 
   const glowTex = radialTexture([
     [0, 'rgba(255,255,255,1)'],
@@ -310,14 +333,11 @@ export function mountConstellation(
   host.addEventListener('pointermove', onMove, { passive: true });
   host.addEventListener('pointerleave', onLeave, { passive: true });
 
-  const onResize = () => {
-    width = host.clientWidth || 1;
-    height = host.clientHeight || 1;
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-    renderer.setSize(width, height);
-  };
+  const onResize = () => fitCamera();
   window.addEventListener('resize', onResize);
+  const ro =
+    typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => fitCamera()) : null;
+  ro?.observe(host);
 
   const projected = new THREE.Vector3();
   function projectLabels() {
@@ -329,6 +349,78 @@ export function mountConstellation(
       const sy = (-projected.y * 0.5 + 0.5) * height;
       o.label.style.transform = `translate(-50%, 0) translate(${sx}px, ${sy + 22}px)`;
       o.label.style.opacity = projected.z < 1 ? (o.data.online ? '1' : '0.6') : '0';
+    }
+  }
+
+  // — transient, data-driven event animations: a comet per directed message, a ripple per broadcast —
+  interface LivePulse {
+    sprite: THREE.Sprite;
+    curve: THREE.QuadraticBezierCurve3;
+    dir: number;
+    t: number;
+  }
+  interface Ripple {
+    sprite: THREE.Sprite;
+    t: number;
+  }
+  const livePulses: LivePulse[] = [];
+  const ripples: Ripple[] = [];
+
+  function arcCurve(a: THREE.Vector3, b: THREE.Vector3): THREE.QuadraticBezierCurve3 {
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    const d = b.clone().sub(a);
+    const perp = new THREE.Vector3(-d.y, d.x, 0).normalize();
+    const ctrl = mid.add(perp.multiplyScalar(0.62)).add(new THREE.Vector3(0, 0, 0.55));
+    return new THREE.QuadraticBezierCurve3(a.clone(), ctrl, b.clone());
+  }
+  function emitPulse(from: string, to: string, color: string) {
+    if (reduced) return;
+    const s0 = [from, to].sort()[0]!;
+    const a = posOf.get(s0);
+    const b = posOf.get(s0 === from ? to : from);
+    if (!a || !b) return;
+    const curve = arcCurve(a, b); // built on the sorted pair so it rides the visible arc
+    const sp = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: coreTex,
+        color: new THREE.Color(color),
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    sp.scale.setScalar(0.36);
+    sp.renderOrder = 3;
+    root.add(sp);
+    livePulses.push({ sprite: sp, curve, dir: from === s0 ? 1 : -1, t: 0 });
+  }
+  function emitRipple(from: string, color: string) {
+    if (reduced) return;
+    const p = posOf.get(from);
+    if (!p) return;
+    const sp = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: ringTex,
+        color: new THREE.Color(color),
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        opacity: 0.85,
+      }),
+    );
+    sp.position.copy(p);
+    sp.scale.setScalar(0.6);
+    sp.renderOrder = 3;
+    root.add(sp);
+    ripples.push({ sprite: sp, t: 0 });
+  }
+  function emit(ev: SceneEvent) {
+    if (ev.kind === 'pulse') emitPulse(ev.from, ev.to, ev.color);
+    else if (ev.kind === 'ripple') emitRipple(ev.from, ev.color);
+    else if (ev.kind === 'settle') {
+      // a resolve: the act travels, then the thread settles where it lands
+      emitPulse(ev.from, ev.to, ev.color);
+      emitRipple(ev.to, ev.color);
     }
   }
 
@@ -380,6 +472,37 @@ export function mountConstellation(
       pulse.scale.setScalar(0.26 + 0.06 * Math.sin(t * 6));
     }
 
+    // transient event comets (one per directed message)
+    for (let i = livePulses.length - 1; i >= 0; i--) {
+      const lp = livePulses[i]!;
+      lp.t += dt / 1.15;
+      if (lp.t >= 1) {
+        root.remove(lp.sprite);
+        (lp.sprite.material as THREE.Material).dispose();
+        livePulses.splice(i, 1);
+        continue;
+      }
+      const tt = lp.dir > 0 ? lp.t : 1 - lp.t;
+      lp.curve.getPointAt(tt < 0 ? 0 : tt > 1 ? 1 : tt, lp.sprite.position);
+      const fade = lp.t < 0.12 ? lp.t / 0.12 : lp.t > 0.82 ? (1 - lp.t) / 0.18 : 1;
+      (lp.sprite.material as THREE.SpriteMaterial).opacity = fade;
+      lp.sprite.scale.setScalar(0.3 + 0.12 * Math.sin(lp.t * Math.PI));
+    }
+    // broadcast / settle ripples (expanding ring from the sender)
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const rp = ripples[i]!;
+      rp.t += dt / 1.05;
+      if (rp.t >= 1) {
+        root.remove(rp.sprite);
+        (rp.sprite.material as THREE.Material).dispose();
+        ripples.splice(i, 1);
+        continue;
+      }
+      const e = 1 - (1 - rp.t) * (1 - rp.t);
+      rp.sprite.scale.setScalar(0.6 + e * 3.6);
+      (rp.sprite.material as THREE.SpriteMaterial).opacity = (1 - rp.t) * 0.72;
+    }
+
     projectLabels();
     renderer.render(scene, camera);
     if (running && !reduced) raf = requestAnimationFrame(frame);
@@ -404,18 +527,28 @@ export function mountConstellation(
 
   return {
     update,
+    emit,
     dispose: () => {
       cancelAnimationFrame(raf);
       running = false;
       host.removeEventListener('pointermove', onMove);
       host.removeEventListener('pointerleave', onLeave);
       window.removeEventListener('resize', onResize);
+      ro?.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
       for (const o of nodes.values()) {
         o.halo.material.dispose();
         o.core.material.dispose();
         o.ring.material.dispose();
         o.label.remove();
+      }
+      for (const lp of livePulses) {
+        root.remove(lp.sprite);
+        (lp.sprite.material as THREE.Material).dispose();
+      }
+      for (const rp of ripples) {
+        root.remove(rp.sprite);
+        (rp.sprite.material as THREE.Material).dispose();
       }
       clearArcs();
       dustGeo.dispose();

@@ -26,6 +26,24 @@ function computeData(roster: MemberSummary[], envelopes: Envelope[]): GLData {
   return { nodes, edges };
 }
 
+const GREEN = '#5cd49a';
+/** Act → the colour its pulse/ripple travels in (mirrors the stream's act tones). */
+function toneColor(act: string): string {
+  switch (act) {
+    case 'request_help':
+      return '#f2c83e';
+    case 'accept':
+    case 'resolve':
+      return GREEN;
+    case 'decline':
+      return '#f3776a';
+    case 'wait':
+      return '#88a9cf';
+    default:
+      return '#ffd49a';
+  }
+}
+
 /**
  * The ambient half of the split-canvas, as a three.js scene: members are glowing 3D nodes, directed
  * exchanges are curved arcs, the active arc carries a comet. three.js is dynamically imported (kept out
@@ -34,13 +52,16 @@ function computeData(roster: MemberSummary[], envelopes: Envelope[]): GLData {
 export function ConstellationGL({
   roster,
   envelopes,
+  liveIds,
 }: {
   roster: MemberSummary[];
   envelopes: Envelope[];
+  liveIds: Set<string>;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<ConstellationHandle | null>(null);
+  const emittedRef = useRef<Set<string>>(new Set());
 
   const data = useMemo(() => computeData(roster, envelopes), [roster, envelopes]);
   const dataRef = useRef(data);
@@ -72,6 +93,25 @@ export function ConstellationGL({
   useEffect(() => {
     handleRef.current?.update(data);
   }, [data]);
+
+  // Fire a scene event for each newly *live*-arrived message: directed → a comet along its arc; a
+  // team broadcast → a ripple from the sender; a resolve → a green pulse + a settle at the recipient.
+  // Backfilled history never appears in liveIds, so it doesn't replay on load.
+  useEffect(() => {
+    const h = handleRef.current;
+    if (!h) return;
+    for (const e of envelopes) {
+      if (!liveIds.has(e.id) || emittedRef.current.has(e.id)) continue;
+      emittedRef.current.add(e.id);
+      const color = toneColor(e.act);
+      if (e.to.kind === 'member') {
+        if (e.act === 'resolve') h.emit({ kind: 'settle', from: e.from, to: e.to.name, color });
+        else h.emit({ kind: 'pulse', from: e.from, to: e.to.name, color });
+      } else {
+        h.emit({ kind: 'ripple', from: e.from, color });
+      }
+    }
+  }, [envelopes, liveIds]);
 
   const agents = roster.filter((m) => m.kind === 'agent').length;
   const humans = roster.filter((m) => m.kind === 'human').length;

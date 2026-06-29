@@ -132,7 +132,7 @@ function LivePage() {
             </div>
           )}
           <div className="lc__canvas">
-            <ConstellationGL roster={roster} envelopes={envelopes} />
+            <ConstellationGL roster={roster} envelopes={envelopes} liveIds={liveIds} />
             <Stream envelopes={envelopes} roster={roster} liveIds={liveIds} />
           </div>
         </>

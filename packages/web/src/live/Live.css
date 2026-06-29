@@ -346,6 +346,21 @@
 .lc-row--enter {
   animation: lc-enter 0.42s var(--lc-ease) both;
 }
+.lc-row--settle {
+  animation:
+    lc-enter 0.42s var(--lc-ease) both,
+    lc-settle 1.7s var(--lc-ease) both;
+}
+@keyframes lc-settle {
+  0% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--lc-success) 55%, transparent),
+      0 0 28px -4px color-mix(in srgb, var(--lc-success) 78%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
 .lc-row--now {
   background: var(--lc-surface);
   border-color: var(--lc-border);
@@ -733,7 +748,8 @@
   .lc__status--live::before {
     animation: none;
   }
-  .lc-row--enter {
+  .lc-row--enter,
+  .lc-row--settle {
     animation: none;
   }
   .lc-caret {
