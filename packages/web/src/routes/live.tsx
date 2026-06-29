@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import liveCss from '../live/Live.css?url';
-import { Constellation } from '../live/Constellation';
+import { ConstellationGL } from '../live/ConstellationGL';
 import { Stream } from '../live/Stream';
 import type { LiveConfig, ConnStatus } from '../live/client';
 import { provisionObserver } from '../live/client';
@@ -132,7 +132,7 @@ function LivePage() {
             </div>
           )}
           <div className="lc__canvas">
-            <Constellation roster={roster} envelopes={envelopes} />
+            <ConstellationGL roster={roster} envelopes={envelopes} />
             <Stream envelopes={envelopes} roster={roster} liveIds={liveIds} />
           </div>
         </>

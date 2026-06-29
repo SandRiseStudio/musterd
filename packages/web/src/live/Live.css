@@ -1,30 +1,29 @@
 /*
- * musterd — Live Comms. Split-canvas: ambient Constellation (left) + legible Stream (right).
- * Reference feel: Linear/Vercel engineered-calm — quiet, precise chrome + stream; the spectacle
- * concentrates in the constellation (depth, glow, motion). "Calm at rest, energetic in motion."
- * Derives from tokens.css (loaded globally); only this surface's system + roles are defined here.
+ * musterd — Live Comms. Split-canvas: a three.js constellation (left) over a dusk sky + a legible
+ * stream console (right). Theme: warm **dusk/dawn** mid-tone — twilight violet up top melting to an
+ * amber horizon, cream ink, mustard accent. "Calm at rest, energetic in motion."
  */
 
 .lc {
-  /* — palette (DESIGN.md): warm observatory — espresso ground, cream ink, amber accent — */
-  --lc-ground: #0f0b07;
-  --lc-ground-2: #150e08;
-  --lc-surface: #1c1510;
-  --lc-surface-2: #271c14;
-  --lc-surface-3: #32251a;
-  --lc-text: #f8f1e4;
-  --lc-dim: #ddcfba;
-  --lc-muted: #a3927d;
-  --lc-faint: #6f6051;
-  --lc-border: rgba(255, 238, 210, 0.09);
-  --lc-border-2: rgba(255, 238, 210, 0.16);
+  /* — palette: dusk/dawn warm mid-tone — */
+  --lc-ground: #1d1622; /* warm dusk base (solid areas / stream console) */
+  --lc-ground-2: #251c2c;
+  --lc-surface: #2a2030; /* rows */
+  --lc-surface-2: #362a3d; /* raised: live row, badges, inputs */
+  --lc-surface-3: #42344a;
+  --lc-text: #f8efe1; /* warm cream */
+  --lc-dim: #dccbb9;
+  --lc-muted: #ab9684;
+  --lc-faint: #786358;
+  --lc-border: rgba(255, 233, 208, 0.1);
+  --lc-border-2: rgba(255, 233, 208, 0.18);
   --lc-accent: var(--mustard-500, #e1ad01);
-  --lc-accent-bright: var(--mustard-300, #efc94c);
-  --lc-success: #4ccb8a;
-  --lc-danger: #ef6f5c;
-  --lc-info: #7fa3c9;
-  --lc-agent: #1fc0a4;
-  --lc-human: #f0688f;
+  --lc-accent-bright: #f4cf52;
+  --lc-success: #5cd49a;
+  --lc-danger: #f3776a;
+  --lc-info: #88a9cf;
+  --lc-agent: #2ad6bb;
+  --lc-human: #ff86a8;
 
   /* — spacing (4-based) — */
   --lc-1: 2px;
@@ -41,7 +40,7 @@
   --lc-r-sm: 6px;
   --lc-r-md: 9px;
   --lc-r-lg: 14px;
-  --lc-ease: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out-expo */
+  --lc-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --lc-ease-quart: cubic-bezier(0.25, 1, 0.5, 1);
   --lc-fast: 140ms;
   --lc-med: 220ms;
@@ -52,19 +51,20 @@
   flex-direction: column;
   height: 100vh;
   height: 100dvh;
-  background: var(--lc-ground);
   color: var(--lc-text);
   font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;
+  /* dusk horizon: twilight violet → warm mauve → amber */
+  background: linear-gradient(178deg, #2a2044 0%, #392842 44%, #432a1f 100%);
 }
 .lc ::selection {
-  background: color-mix(in srgb, var(--lc-accent) 32%, transparent);
+  background: color-mix(in srgb, var(--lc-accent) 34%, transparent);
   color: #fff;
 }
 
-/* ─── top bar ─────────────────────────────────────────────────────────── */
+/* ─── top bar (glass over the dusk) ───────────────────────────────────── */
 .lc__topbar {
   display: flex;
   align-items: center;
@@ -72,8 +72,11 @@
   height: 52px;
   padding: 0 var(--lc-7);
   border-bottom: 1px solid var(--lc-border);
-  background: linear-gradient(var(--lc-ground-2), var(--lc-ground));
+  background: rgba(29, 22, 34, 0.5);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   flex: 0 0 auto;
+  z-index: var(--lc-z-overlay);
 }
 .lc__word {
   display: inline-flex;
@@ -90,7 +93,7 @@
   height: 7px;
   border-radius: 50%;
   background: var(--lc-accent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--lc-accent) 70%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--lc-accent) 75%, transparent);
 }
 .lc__team {
   font-family: var(--font-mono, monospace);
@@ -110,7 +113,7 @@
   padding: 4px 10px;
   border: 1px solid var(--lc-border);
   border-radius: 999px;
-  background: var(--lc-surface);
+  background: rgba(255, 255, 255, 0.04);
 }
 .lc__status::before {
   content: '';
@@ -126,7 +129,6 @@
 .lc__status--live::before {
   background: var(--lc-success);
   opacity: 1;
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-success) 70%, transparent);
   animation: lc-ping 2.4s var(--lc-ease) infinite;
 }
 .lc__status--error {
@@ -134,9 +136,8 @@
 }
 .lc__status--connecting,
 .lc__status--reconnecting {
-  color: var(--lc-accent);
+  color: var(--lc-accent-bright);
 }
-
 @keyframes lc-ping {
   0% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-success) 55%, transparent);
@@ -152,7 +153,7 @@
   align-items: center;
   gap: var(--lc-5);
   padding: var(--lc-4) var(--lc-7);
-  background: color-mix(in srgb, var(--lc-danger) 12%, var(--lc-ground));
+  background: color-mix(in srgb, var(--lc-danger) 14%, var(--lc-ground));
   color: var(--lc-text);
   font-size: 13px;
   border-bottom: 1px solid color-mix(in srgb, var(--lc-danger) 30%, transparent);
@@ -167,11 +168,12 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  transition: border-color var(--lc-fast) var(--lc-ease), background var(--lc-fast) var(--lc-ease);
+  transition:
+    border-color var(--lc-fast) var(--lc-ease),
+    background var(--lc-fast) var(--lc-ease);
 }
 .lc__error button:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--lc-border-2);
+  background: rgba(255, 255, 255, 0.07);
 }
 .lc__error button:focus-visible {
   outline: 2px solid var(--lc-accent);
@@ -194,219 +196,63 @@
   }
 }
 
-/* ─── constellation (the living half) ─────────────────────────────────── */
+/* ─── constellation (three.js over the dusk sky) ──────────────────────── */
 .lc-constellation {
   position: relative;
-  flex: 0 0 40%;
+  flex: 0 0 42%;
   min-width: 0;
   border-right: 1px solid var(--lc-border);
   overflow: hidden;
-  /* depth: a warm radial lift in the center, vignette at the edges */
+  /* amber horizon glow at the base, a cool violet wash up top */
   background:
-    radial-gradient(120% 90% at 50% 42%, rgba(255, 206, 122, 0.06), transparent 60%),
-    radial-gradient(140% 120% at 50% 50%, transparent 52%, rgba(0, 0, 0, 0.5)),
-    var(--lc-ground);
+    radial-gradient(130% 78% at 50% 116%, rgba(255, 168, 92, 0.22), transparent 58%),
+    radial-gradient(110% 80% at 50% -8%, rgba(150, 122, 224, 0.16), transparent 60%);
 }
-.lc-constellation__svg {
-  position: relative;
+.lc-gl-canvas {
+  position: absolute;
+  inset: 0;
   z-index: var(--lc-z-rail);
-  width: 100%;
-  height: 100%;
+}
+.lc-gl-canvas canvas {
+  width: 100% !important;
+  height: 100% !important;
   display: block;
 }
-
-/* parallax layers translate by depth on pointer move (vars set by JS) */
-.lc-stars,
-.lc-nodes,
-.lc-arcs {
-  transition: transform 400ms var(--lc-ease-quart);
+.lc-gl-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  overflow: hidden;
 }
-.lc-stars {
-  transform: translate(calc(var(--px, 0) * 6px), calc(var(--py, 0) * 6px));
-}
-.lc-arcs {
-  transform: translate(calc(var(--px, 0) * 11px), calc(var(--py, 0) * 11px));
-}
-.lc-nodes {
-  transform: translate(calc(var(--px, 0) * 18px), calc(var(--py, 0) * 18px));
-}
-
-.lc-star {
-  fill: #fff3df;
-  animation: lc-twinkle var(--tw, 6s) ease-in-out var(--td, 0s) infinite;
-}
-@keyframes lc-twinkle {
-  0%,
-  100% {
-    opacity: var(--o, 0.18);
-  }
-  50% {
-    opacity: calc(var(--o, 0.18) * 2.1);
-  }
-}
-
-.lc-arc {
-  fill: none;
-  stroke: url(#lc-arc-dim);
-  stroke-width: 1.4;
+.lc-gl-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
   transition: opacity var(--lc-med) var(--lc-ease);
 }
-.lc-arc--active {
-  stroke: url(#lc-arc-hot);
-  stroke-width: 2;
-  stroke-linecap: round;
-  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--lc-accent) 55%, transparent));
-}
-.lc-arcs.is-hovering .lc-arc:not(.is-lit) {
-  opacity: 0.1;
-}
-.lc-arc.is-lit {
-  stroke: url(#lc-arc-hot);
-  stroke-width: 2.2;
-  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--lc-accent) 55%, transparent));
-}
-
-.lc-pulse {
-  fill: var(--lc-accent-bright);
-  filter: drop-shadow(0 0 7px var(--lc-accent));
-}
-.lc-pulse-tail {
-  fill: none;
-  stroke: url(#lc-arc-hot);
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-
-.lc-node {
-  cursor: pointer;
-  transition: opacity var(--lc-med) var(--lc-ease);
-}
-.lc-node__halo {
-  opacity: 0.4;
-  filter: blur(7px);
-  transition:
-    opacity var(--lc-med) var(--lc-ease),
-    transform var(--lc-med) var(--lc-ease);
-  animation: lc-breathe 4.5s ease-in-out infinite;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-.lc-node__core {
-  transition: transform var(--lc-med) var(--lc-ease);
-  transform-box: fill-box;
-  transform-origin: center;
-}
-.lc-node--agent .lc-node__halo {
-  fill: var(--lc-agent);
-}
-.lc-node--human .lc-node__halo {
-  fill: var(--lc-human);
-}
-.lc-node--agent .lc-node__core {
-  fill: url(#lc-core-agent);
-}
-.lc-node--human .lc-node__core {
-  fill: url(#lc-core-human);
-}
-.lc-node__rim {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.5);
-  stroke-width: 1;
-  opacity: 0.5;
-}
-.lc-node.is-offline {
-  opacity: 0.85;
-}
-.lc-node.is-offline .lc-node__halo {
-  opacity: 0;
-}
-.lc-node.is-offline .lc-node__core {
-  fill: #2c2c38;
-}
-.lc-node.is-offline .lc-node__rim {
-  stroke: rgba(255, 255, 255, 0.18);
-}
-.lc-node.is-working .lc-node__halo {
-  opacity: 0.62;
-}
-.lc-node__ring {
-  fill: none;
-  stroke: var(--lc-accent);
-  stroke-width: 1.4;
-  opacity: 0.75;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: lc-ring 4.5s ease-in-out infinite;
-}
-.lc-node__initial {
-  fill: #fff;
-  font-family: var(--font-sans, sans-serif);
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: -0.01em;
-}
-.lc-node.is-offline .lc-node__initial {
-  fill: #aeaeba;
-}
-.lc-node__name {
-  fill: var(--lc-dim);
+.lc-gl-label__name {
   font-family: var(--font-mono, monospace);
   font-size: 11.5px;
   letter-spacing: -0.01em;
+  color: var(--lc-dim);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
 }
-.lc-node.is-offline .lc-node__name {
-  fill: var(--lc-faint);
+.lc-gl-label.is-offline .lc-gl-label__name {
+  color: var(--lc-faint);
 }
-.lc-node__label {
-  fill: var(--lc-accent);
+.lc-gl-label__state {
   font-family: var(--font-sans, sans-serif);
   font-size: 10px;
-  opacity: 0.9;
+  color: var(--lc-accent-bright);
+  opacity: 0.92;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
 }
-/* hover-highlight: the hovered node lifts hard, its arcs ignite, the rest recede */
-.lc-nodes.is-hovering .lc-node:not(.is-hot) {
-  opacity: 0.18;
-}
-.lc-node.is-hot .lc-node__halo {
-  animation: none;
-  opacity: 1;
-  transform: scale(1.7);
-}
-.lc-node.is-hot .lc-node__core {
-  transform: scale(1.16);
-}
-.lc-node.is-hot .lc-node__rim {
-  opacity: 1;
-  stroke: rgba(255, 245, 225, 0.85);
-  stroke-width: 1.5;
-}
-.lc-node.is-hot .lc-node__name {
-  fill: var(--lc-text);
-}
-
-@keyframes lc-breathe {
-  0%,
-  100% {
-    opacity: 0.34;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.6;
-    transform: scale(1.06);
-  }
-}
-@keyframes lc-ring {
-  0%,
-  100% {
-    opacity: 0.55;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.85;
-    transform: scale(1.08);
-  }
-}
-
 .lc-constellation__caption {
   position: absolute;
   left: var(--lc-8);
@@ -417,29 +263,31 @@
   font-size: 11.5px;
   color: var(--lc-muted);
   letter-spacing: -0.01em;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
 }
 
-/* ─── stream (the legible half) ───────────────────────────────────────── */
+/* ─── stream (the legible console) ────────────────────────────────────── */
 .lc-stream {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--lc-6) var(--lc-8) var(--lc-9);
+  background: var(--lc-ground);
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-color: rgba(255, 233, 208, 0.16) transparent;
 }
 .lc-stream::-webkit-scrollbar {
   width: 10px;
 }
 .lc-stream::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 233, 208, 0.14);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: padding-box;
 }
 .lc-stream::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 233, 208, 0.26);
   background-clip: padding-box;
 }
 .lc-stream__head {
@@ -463,7 +311,7 @@
 .lc-stream__live {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  color: var(--lc-accent);
+  color: var(--lc-accent-bright);
   letter-spacing: 0.04em;
 }
 .lc-stream__rows {
@@ -515,7 +363,7 @@
   font-variant-numeric: tabular-nums;
 }
 .lc-row--now .lc-row__ts {
-  color: var(--lc-accent);
+  color: var(--lc-accent-bright);
 }
 .lc-row__to {
   font-family: var(--font-mono, monospace);
@@ -545,13 +393,13 @@
   height: 20px;
   border-radius: 50%;
   background: var(--lc-agent);
-  color: #fff;
+  color: #11201d;
   font-size: 10.5px;
-  font-weight: 600;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3) inset;
+  font-weight: 700;
 }
 .lc-chip--human .lc-chip__avatar {
   background: var(--lc-human);
+  color: #2a0f18;
 }
 .lc-chip__name {
   font-weight: 550;
@@ -576,23 +424,23 @@
 }
 .lc-badge--accent {
   color: var(--lc-accent-bright);
-  border-color: color-mix(in srgb, var(--lc-accent) 42%, transparent);
-  background: color-mix(in srgb, var(--lc-accent) 13%, transparent);
+  border-color: color-mix(in srgb, var(--lc-accent) 44%, transparent);
+  background: color-mix(in srgb, var(--lc-accent) 15%, transparent);
 }
 .lc-badge--success {
   color: var(--lc-success);
-  border-color: color-mix(in srgb, var(--lc-success) 42%, transparent);
-  background: color-mix(in srgb, var(--lc-success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--lc-success) 44%, transparent);
+  background: color-mix(in srgb, var(--lc-success) 13%, transparent);
 }
 .lc-badge--danger {
   color: var(--lc-danger);
-  border-color: color-mix(in srgb, var(--lc-danger) 42%, transparent);
-  background: color-mix(in srgb, var(--lc-danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--lc-danger) 44%, transparent);
+  background: color-mix(in srgb, var(--lc-danger) 13%, transparent);
 }
 .lc-badge--info {
   color: var(--lc-info);
-  border-color: color-mix(in srgb, var(--lc-info) 38%, transparent);
-  background: color-mix(in srgb, var(--lc-info) 12%, transparent);
+  border-color: color-mix(in srgb, var(--lc-info) 40%, transparent);
+  background: color-mix(in srgb, var(--lc-info) 13%, transparent);
 }
 
 /* threaded reply */
@@ -613,10 +461,10 @@
   align-self: stretch;
 }
 .lc-thread__spine--accent {
-  background: color-mix(in srgb, var(--lc-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--lc-accent) 65%, transparent);
 }
 .lc-thread__spine--success {
-  background: color-mix(in srgb, var(--lc-success) 60%, transparent);
+  background: color-mix(in srgb, var(--lc-success) 65%, transparent);
 }
 
 /* now marker */
@@ -631,32 +479,31 @@
   height: 6px;
   border-radius: 50%;
   background: var(--lc-accent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--lc-accent) 75%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--lc-accent) 80%, transparent);
 }
 .lc-now__label {
   font-family: var(--font-mono, monospace);
   font-size: 10.5px;
   letter-spacing: 0.14em;
-  color: var(--lc-accent);
+  color: var(--lc-accent-bright);
 }
 .lc-now__line {
   flex: 1;
   height: 1px;
   background: linear-gradient(
     to right,
-    color-mix(in srgb, var(--lc-accent) 35%, transparent),
+    color-mix(in srgb, var(--lc-accent) 38%, transparent),
     transparent
   );
 }
 
-/* typewriter caret */
 .lc-caret {
   display: inline-block;
   width: 2px;
   height: 1em;
   margin-left: 1px;
   vertical-align: -2px;
-  background: var(--lc-accent);
+  background: var(--lc-accent-bright);
   animation: lc-blink 1s steps(1) infinite;
 }
 @keyframes lc-blink {
@@ -664,7 +511,6 @@
     opacity: 0;
   }
 }
-
 @keyframes lc-enter {
   from {
     opacity: 0;
@@ -676,7 +522,7 @@
   }
 }
 
-/* ─── connect (first impression) ──────────────────────────────────────── */
+/* ─── connect (first impression, on the dusk) ─────────────────────────── */
 .lc-form {
   position: relative;
   flex: 1;
@@ -686,9 +532,8 @@
   padding: var(--lc-8);
   overflow: hidden;
   background:
-    radial-gradient(78% 58% at 50% 40%, rgba(225, 173, 1, 0.11), transparent 62%),
-    radial-gradient(120% 100% at 50% 50%, transparent 48%, rgba(0, 0, 0, 0.55)),
-    var(--lc-ground);
+    radial-gradient(70% 54% at 50% 42%, rgba(244, 207, 82, 0.13), transparent 60%),
+    radial-gradient(120% 80% at 50% 116%, rgba(255, 168, 92, 0.2), transparent 58%);
   animation: lc-fade var(--lc-med) var(--lc-ease) both;
 }
 .lc-form__card {
@@ -704,8 +549,8 @@
   flex-direction: column;
   gap: var(--lc-5);
   box-shadow:
-    0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
-    0 24px 60px -24px rgba(0, 0, 0, 0.7);
+    0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
+    0 26px 64px -26px rgba(0, 0, 0, 0.66);
   animation: lc-rise 0.5s var(--lc-ease) both;
 }
 @keyframes lc-rise {
@@ -751,7 +596,7 @@
   color: var(--lc-muted);
 }
 .lc-form__field input {
-  background: var(--lc-ground);
+  background: rgba(0, 0, 0, 0.22);
   border: 1px solid var(--lc-border-2);
   border-radius: var(--lc-r-sm);
   padding: 10px 12px;
@@ -760,18 +605,20 @@
   font-size: 14px;
   letter-spacing: normal;
   text-transform: none;
-  transition: border-color var(--lc-fast) var(--lc-ease), box-shadow var(--lc-fast) var(--lc-ease);
+  transition:
+    border-color var(--lc-fast) var(--lc-ease),
+    box-shadow var(--lc-fast) var(--lc-ease);
 }
 .lc-form__field input::placeholder {
   color: var(--lc-faint);
 }
 .lc-form__field input:hover {
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 233, 208, 0.28);
 }
 .lc-form__field input:focus {
   outline: none;
   border-color: var(--lc-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lc-accent) 22%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lc-accent) 24%, transparent);
 }
 .lc-form__error {
   margin: 0;
@@ -794,7 +641,9 @@
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
-  transition: filter var(--lc-fast) var(--lc-ease), transform var(--lc-fast) var(--lc-ease);
+  transition:
+    filter var(--lc-fast) var(--lc-ease),
+    transform var(--lc-fast) var(--lc-ease);
 }
 .lc-form__connect:hover:not(:disabled) {
   filter: brightness(1.08);
@@ -843,7 +692,7 @@
   border-radius: 4px;
 }
 
-/* ─── responsive (structural: collapse the constellation on narrow) ───── */
+/* ─── responsive (collapse the constellation on narrow) ───────────────── */
 @media (max-width: 880px) {
   .lc-constellation {
     display: none;
@@ -857,21 +706,8 @@
   .lc-form__card {
     animation: none;
   }
-  .lc-node__halo,
-  .lc-node__ring,
-  .lc-star,
   .lc__status--live::before {
     animation: none;
-  }
-  .lc-stars,
-  .lc-arcs,
-  .lc-nodes {
-    transform: none !important;
-    transition: none;
-  }
-  .lc-pulse,
-  .lc-pulse-tail {
-    display: none;
   }
   .lc-row--enter {
     animation: none;

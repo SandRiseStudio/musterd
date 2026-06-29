@@ -2,15 +2,17 @@
 
 > Visual system for the musterd **live-comms dashboard** (`/live`). Derives from `docs/design/brand.md`
 > + `packages/web/src/styles/tokens.css` (mustard accent on zinc, Inter + JetBrains Mono) and extends
-> them for this surface. Reference feel: a **warm observatory** — engineered-calm with warmth (the
-> precision of Linear, but candlelit, not cool blue-gray), with a living constellation.
+> them for this surface. Reference feel: a **warm dusk observatory** — a twilight sky melting to an
+> amber horizon, cream ink, mustard accent, with a living **three.js** constellation (real WebGL glow).
 
 ## Theme
 
-Dark only — a **warm observatory**: espresso-black ground, cream ink, amber accent, luminous warm-jewel
-nodes. The user watches in a dim room, often peripherally; light = presence, warmth = recency. The
-warmth lives in the neutrals (ground/surface/text lean amber, not blue), not just the accent. Light
-mode is out of scope for this surface.
+A warm **dusk / dawn** mid-tone — not near-black. The app background is a twilight gradient: violet up
+top, warm mauve mid, an amber horizon at the base. The left **constellation** is a three.js scene over
+that sky (glowing 3D nodes, curved arcs, a comet on the active arc, a warm dust field); the right
+**stream** is a calm warm console (solid mid-dark surface) so dense rows stay legible. Light = presence,
+warmth = recency; the warmth lives in the neutrals + the sky, not just the accent. Light mode out of
+scope.
 
 ## Color
 
@@ -19,17 +21,18 @@ only. Neutrals are warm-tinted (toward amber/stone), which is what keeps it off 
 
 | Role | Value | Use |
 |---|---|---|
-| ground | `#0f0b07` (warm espresso) | page |
-| surface | `#1c1510` / `#271c14` | rows, cards, raised |
-| border / hairline | `rgba(255,238,210,.09–.16)` (warm) | dividers, outlines |
-| text | `#f8f1e4` (cream) | body |
-| muted | `#a3927d` (warm stone) | timestamps, captions (≥4.5:1 on ground) |
-| accent (mustard) | `var(--mustard-500)` `#e1ad01` | now, request_help, focus, primary |
-| success | `#4ccb8a` | accept, resolve |
-| danger | `#ef6f5c` (warm coral) | decline |
-| info | `#7fa3c9` (steel blue — the one cool note: "paused") | wait |
-| agent | `#1fc0a4` (warm jade) | agent nodes/avatars |
-| human | `#f0688f` (warm rose) | human nodes/avatars — warmest tone |
+| sky | `linear-gradient(#2a2044 → #392842 → #432a1f)` | app bg (twilight→amber dusk) |
+| ground | `#1d1622` (warm dusk, mid-tone) | stream console, solid areas |
+| surface | `#2a2030` / `#362a3d` | rows, cards, raised |
+| border / hairline | `rgba(255,233,208,.10–.18)` (warm) | dividers, outlines |
+| text | `#f8efe1` (cream) | body |
+| muted | `#ab9684` (warm stone) | timestamps, captions (≥4.5:1) |
+| accent (mustard) | `var(--mustard-500)` `#e1ad01` / bright `#f4cf52` | now, request_help, focus, primary |
+| success | `#5cd49a` | accept, resolve |
+| danger | `#f3776a` (warm coral) | decline |
+| info | `#88a9cf` (steel blue — the one cool note: "paused") | wait |
+| agent | `#2ad6bb` (warm jade) | agent nodes/avatars |
+| human | `#ff86a8` (warm rose) | human nodes/avatars — warmest tone |
 
 Act → tone: request_help=accent, accept/resolve=success, decline=danger, wait=info, rest=neutral.
 
@@ -46,9 +49,11 @@ Deliberate two-family pairing on a contrast axis (mono "wire" vs humanist body):
 
 - **Chrome + stream (product discipline):** 140–240ms, ease-out-expo (`cubic-bezier(.16,1,.3,1)`).
   Conveys state: row arrival, hover, focus, connect↔canvas crossfade. No bounce/elastic.
-- **Constellation (ambient, the exception):** continuous, slow, purposeful — node breathing (~4s),
-  the comet pulse on the active arc, pointer parallax. This is the "living contents"; it represents
-  real presence/comms, so it's purposeful, not decoration.
+- **Constellation (three.js, ambient — the exception):** a real WebGL scene — additive-glow 3D nodes
+  that breathe, mustard working-rings on active members, curved arcs (TubeGeometry), a comet on the
+  active arc, a drifting warm dust field, and pointer parallax (the node group rotates). Raycast hover
+  lifts a node (glow blooms, core scales) and recedes the rest. Glow is sprite-based (no post-processing,
+  for reliability); member names + working labels are a projected HTML overlay so text stays crisp.
 - **Signature beat:** a `resolve` settles its thread — brightens once, cools to green — synchronized
   across constellation and stream.
 - `prefers-reduced-motion`: all continuous/ambient motion off; arrivals become instant; typewriter
@@ -66,6 +71,6 @@ Deliberate two-family pairing on a contrast axis (mono "wire" vs humanist body):
 ## Components
 
 `message-row` (timestamp · member-chip · act-badge · recipient · body), `act-badge` (per-act tone),
-`member-chip` (avatar initial + name, agent/human color), `presence node` (halo + core + breathing),
-`now` divider, connect card. Every control ships default / hover / focus-visible / active / disabled /
-loading. Empty + connecting + error states are first-class.
+`member-chip` (avatar initial + name, agent/human color), the WebGL `constellation` (three.js scene +
+projected label overlay), `now` divider, connect card. Every control ships default / hover /
+focus-visible / active / disabled / loading. Empty + connecting + error states are first-class.
