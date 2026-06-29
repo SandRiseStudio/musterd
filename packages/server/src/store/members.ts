@@ -80,6 +80,20 @@ export function addMember(
   if (lifecycle === 'until' && !input.lifecycleUntil) {
     throw new MusterdError('bad_request', 'lifecycle "until" requires a timestamp');
   }
+  // A *tombstoned* row (soft-removed, `left_at` set) still squats the (team, name) UNIQUE index, so a
+  // plain INSERT would dead-end on a constraint error with no CLI way out — the recurring "departed
+  // name can't be reused" trap (ADR 065). Re-adding a removed name is a revive, not a new row: reuse
+  // the seat's id (keeps message history continuous) and re-mint the token (ADR 058 `reviveMember`).
+  if (existing) {
+    const token = reviveMember(db, existing.id, {
+      kind: input.kind,
+      role: input.role ?? '',
+      lifecycle,
+      lifecycleUntil: input.lifecycleUntil ?? null,
+    });
+    const row = getMemberById(db, existing.id)!;
+    return { row, token };
+  }
   const token = newToken();
   const now = Date.now();
   const row: MemberRow = {

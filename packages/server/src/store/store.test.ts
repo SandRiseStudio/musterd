@@ -82,6 +82,25 @@ describe('teams + members', () => {
     expect(row).toBeDefined();
     expect(row?.left_at).not.toBeNull();
   });
+
+  it('re-adding a soft-removed name revives it instead of dead-ending on UNIQUE (ADR 065)', () => {
+    const { db, team } = freshTeam();
+    const first = addMember(db, team, { name: 'Ada', kind: 'human' });
+    leaveMember(db, first.row.id);
+
+    // The bug this guards: a tombstoned (team, name) row used to make re-add throw a UNIQUE error
+    // with no CLI escape. Re-add now revives: same id (history continuous), new kind/role, fresh token.
+    const revived = addMember(db, team, { name: 'Ada', kind: 'agent', role: 'engineer' });
+    expect(revived.row.id).toBe(first.row.id);
+    expect(revived.row.kind).toBe('agent');
+    expect(revived.row.role).toBe('engineer');
+    expect(revived.row.left_at).toBeNull();
+    expect(revived.token).not.toBe(first.token); // deletion was a revocation — token re-minted
+    expect(listMembers(db, team.id).map((m) => m.name)).toContain('Ada');
+    // The new token authenticates; the old one is dead.
+    expect(authMember(db, 'dawn', revived.token).member.id).toBe(first.row.id);
+    expect(() => authMember(db, 'dawn', first.token)).toThrow(MusterdError);
+  });
 });
 
 describe('messages + inbox', () => {

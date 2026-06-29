@@ -164,6 +164,16 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [adr(29, 'ADRs 029–031'), doc('docs/design/provisioning-recipe.md', 'provisioning-recipe.md')],
   },
   {
+    id: 'agent-workspace',
+    title: 'One-command agent workspaces',
+    status: 'shipped',
+    category: 'harness',
+    blurb: 'musterd agent <name> adds an agent AND gives it its own isolated git worktree, binding, and MCP registration — so two actors never fight over one folder’s seat.',
+    detail:
+      'Closes the identity-thrash dogfood: in Claude Code one folder = one MCP registration = one identity, so each agent needs its own workspace. The command provisions a worktree on an agent/<name> branch (sibling folder outside git), writes the binding there, and registers the server with autojoin. Re-adding a soft-removed name now revives it instead of dead-ending on a UNIQUE constraint.',
+    refs: [adr(65, 'ADR 065'), adr(59, 'ADR 059')],
+  },
+  {
     id: 'verify-provisioning',
     title: 'Verify provisioning, don’t assume',
     status: 'shipped',

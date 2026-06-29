@@ -35,6 +35,7 @@ src/
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
     doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server drift detector, read-only (ADR 060)
+    workspace.ts      // provisionWorkspace(name): git worktree / sibling folder for an isolated agent seat (ADR 065)
     guard.ts          // inspectInitTarget(cwd): pure folder-suitability heuristics → warnings (ADR 020)
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
     mcpEntry.ts       // resolve how to launch @musterd/mcp + build the binding env
@@ -51,6 +52,7 @@ src/
       codexToml.ts    // TOML read/merge helper for the codex adapter
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report
+    agent.ts          // musterd agent <name>: add an agent + isolated worktree + binding + MCP register (ADR 065)
     serve.ts          // musterd serve [--port]
     service.ts        // musterd service install/uninstall/start/stop/restart/status/logs (ADR 045)
     team.ts           // team create / team add / team remove / team export (ADR 058 db→file migration)

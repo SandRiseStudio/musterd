@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from './args.js';
+import { agentCommand } from './commands/agent.js';
 import { availabilityCommand } from './commands/availability.js';
 import { claimCommand } from './commands/claim.js';
 import { fmtCommand } from './commands/fmt.js';
@@ -30,6 +31,7 @@ usage:
   musterd serve [--port 4849] [--host 127.0.0.1] [--tls-cert <pem> --tls-key <pem> | --insecure-trust-proxy]
   musterd service <install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow] [--force]   run the daemon as a background service (macOS LaunchAgent)
   musterd team create <slug> [--as <you>] [--role <role>] [--display <name>]
+  musterd agent <name> [--role <role>] [--here | --path <dir>]   add an agent AND give it its own isolated workspace (git worktree) wired to run (ADR 065)
   musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]
   musterd team remove <name>                    soft-remove a member from the roster (history is kept)
   musterd team export <slug>                     move a team's roster onto git-tracked .musterd/ files (ADR 058)
@@ -83,6 +85,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
   switch (command) {
     case 'init':
       return initCommand(rest);
+    case 'agent':
+      return agentCommand(rest);
     case 'serve':
       return serveCommand(rest);
     case 'service':
