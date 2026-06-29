@@ -1,0 +1,274 @@
+/*
+ * musterd — ApprovalCard. The one-keystroke admin approval surface for the P3 claim/grant lane.
+ * Uses --lc-* tokens from Live.css; no edits to that file.
+ */
+
+.ac {
+  width: 100%;
+  max-width: 420px;
+  border-radius: var(--lc-r-lg);
+  border: 1px solid var(--lc-border-2);
+  background: var(--lc-ground-2);
+  overflow: hidden;
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+  color: var(--lc-text);
+}
+
+/* ── state tints ─────────────────────────────────────────────────────────── */
+.ac--pending {
+  border-color: color-mix(in srgb, var(--lc-accent) 36%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lc-accent) 12%, transparent) inset;
+}
+.ac--approved {
+  border-color: color-mix(in srgb, var(--lc-success) 36%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lc-success) 10%, transparent) inset;
+}
+.ac--denied {
+  border-color: color-mix(in srgb, var(--lc-danger) 36%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lc-danger) 10%, transparent) inset;
+}
+.ac--expired {
+  opacity: 0.55;
+}
+
+/* ── header band ─────────────────────────────────────────────────────────── */
+.ac__head {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-4);
+  padding: var(--lc-5) var(--lc-6);
+  border-bottom: 1px solid var(--lc-border);
+  background: rgba(255, 233, 208, 0.03);
+}
+.ac__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--lc-r-sm);
+  flex: 0 0 auto;
+}
+.ac--pending .ac__icon { background: color-mix(in srgb, var(--lc-accent) 15%, transparent); color: var(--lc-accent-bright); }
+.ac--approved .ac__icon { background: color-mix(in srgb, var(--lc-success) 15%, transparent); color: var(--lc-success); }
+.ac--denied .ac__icon { background: color-mix(in srgb, var(--lc-danger) 15%, transparent); color: var(--lc-danger); }
+.ac--expired .ac__icon { background: rgba(255, 255, 255, 0.06); color: var(--lc-faint); }
+.ac__icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ac__label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lc-muted);
+}
+.ac--pending .ac__label { color: color-mix(in srgb, var(--lc-accent-bright) 80%, var(--lc-muted)); }
+.ac--approved .ac__label { color: color-mix(in srgb, var(--lc-success) 80%, var(--lc-muted)); }
+.ac--denied .ac__label { color: color-mix(in srgb, var(--lc-danger) 80%, var(--lc-muted)); }
+
+.ac__batch {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lc-accent) 22%, transparent);
+  color: var(--lc-accent-bright);
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 30%, transparent);
+}
+
+/* ── body ────────────────────────────────────────────────────────────────── */
+.ac__body {
+  padding: var(--lc-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-5);
+}
+
+.ac__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lc-3);
+  font-size: 13px;
+}
+.ac__row-key {
+  width: 80px;
+  flex: 0 0 80px;
+  font-size: 11.5px;
+  color: var(--lc-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ac__row-val {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  color: var(--lc-dim);
+  word-break: break-all;
+}
+.ac__row-val--seat {
+  color: var(--lc-text);
+  font-weight: 600;
+}
+.ac__row-val--fp {
+  color: var(--lc-muted);
+  font-size: 12px;
+}
+
+/* surface pill */
+.ac__surface {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--lc-border);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--lc-info);
+}
+.ac__surface-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--lc-info);
+}
+
+/* expiry bar */
+.ac__expiry {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-3);
+  font-size: 12px;
+  color: var(--lc-muted);
+}
+.ac__expiry--urgent {
+  color: var(--lc-danger);
+}
+.ac__expiry-bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.ac__expiry-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--lc-accent);
+  transition: width 1s linear;
+}
+.ac__expiry--urgent .ac__expiry-fill {
+  background: var(--lc-danger);
+}
+
+/* lifetime badge (approved state) */
+.ac__lifetime {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  background: color-mix(in srgb, var(--lc-success) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc-success) 28%, transparent);
+  color: var(--lc-success);
+}
+.ac__lifetime svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── action bar (pending only) ───────────────────────────────────────────── */
+.ac__actions {
+  padding: var(--lc-5) var(--lc-6) var(--lc-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-4);
+  border-top: 1px solid var(--lc-border);
+}
+.ac__actions-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--lc-faint);
+}
+.ac__lifetime-btns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--lc-3);
+}
+.ac__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--lc-4) var(--lc-3);
+  border-radius: var(--lc-r-md);
+  border: 1px solid var(--lc-border-2);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--lc-dim);
+  cursor: pointer;
+  transition:
+    background var(--lc-fast) var(--lc-ease),
+    border-color var(--lc-fast) var(--lc-ease),
+    color var(--lc-fast) var(--lc-ease);
+  text-align: center;
+  line-height: 1.2;
+}
+.ac__btn:hover {
+  background: color-mix(in srgb, var(--lc-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--lc-accent) 40%, transparent);
+  color: var(--lc-accent-bright);
+}
+.ac__btn-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ac__btn-sub {
+  font-size: 10.5px;
+  color: var(--lc-faint);
+}
+.ac__btn:hover .ac__btn-sub {
+  color: color-mix(in srgb, var(--lc-accent) 60%, var(--lc-faint));
+}
+.ac__deny {
+  align-self: center;
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--lc-faint);
+  cursor: pointer;
+  padding: 2px 6px;
+  transition: color var(--lc-fast) var(--lc-ease);
+}
+.ac__deny:hover {
+  color: var(--lc-danger);
+}
+
+/* ── settled states (approved/denied/expired) ────────────────────────────── */
+.ac__settled {
+  padding: var(--lc-5) var(--lc-6) var(--lc-6);
+  font-size: 12.5px;
+  color: var(--lc-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--lc-4);
+  border-top: 1px solid var(--lc-border);
+}
+.ac--approved .ac__settled { color: var(--lc-success); }
+.ac--denied .ac__settled { color: var(--lc-danger); }
