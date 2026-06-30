@@ -48,13 +48,10 @@ describe('nextRoleHandle (pool seats)', () => {
 });
 
 describe('ResolvedSessionSchema (ADR 034 live-claim channel)', () => {
-  it('requires a member and a token', () => {
-    expect(ResolvedSessionSchema.parse({ member: 'Ada', token: 'mskd_x' })).toEqual({
-      member: 'Ada',
-      token: 'mskd_x',
-    });
-    expect(() => ResolvedSessionSchema.parse({ member: 'Ada' })).toThrow();
-    expect(() => ResolvedSessionSchema.parse({ member: '', token: 't' })).toThrow();
+  it('carries the resolved seat (v0.3, ADR 075 — no member/token)', () => {
+    expect(ResolvedSessionSchema.parse({ seat: 'Ada' })).toEqual({ seat: 'Ada' });
+    expect(() => ResolvedSessionSchema.parse({})).toThrow();
+    expect(() => ResolvedSessionSchema.parse({ seat: '' })).toThrow();
   });
 });
 

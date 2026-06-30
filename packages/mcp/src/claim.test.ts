@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BINDING_DIR, BINDING_FILE, PENDING_DIR, RESOLVED_SUFFIX } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { adoptIdentity, ClaimConflictError, claimAndJoin, claimSeat } from './claim.js';
+import { adoptIdentity, ClaimConflictError, claimAndJoin } from './claim.js';
 import type { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
 import { clearPendingMarker, readAndConsumeResolution, writePendingMarker } from './pending.js';
@@ -13,6 +13,7 @@ function baseConfig(over: Partial<McpConfig> = {}): McpConfig {
   return {
     server: 'http://x',
     team: 'dawn',
+    agent_key: 'mskey_team',
     surface: 'claude-code',
     provenance: 'session',
     workspace: 'repo',
@@ -23,62 +24,54 @@ function baseConfig(over: Partial<McpConfig> = {}): McpConfig {
   };
 }
 
-/** A fake client exposing only what claimSeat / claimAndJoin touch. */
+/**
+ * A fake client that simulates the v0.3 claim handshake: `join()` resolves the seat from the config's
+ * claim policy (seat → that name; role → `<role>-1`) and flips `joined`, mirroring an `occupied` frame.
+ */
 function fakeClient(over: Partial<MusterdClient> = {}): MusterdClient {
+  const state = { member: undefined as string | undefined, joined: false };
+  const base = {
+    roster: async () => ({ members: [] as { name: string }[] }),
+    get claimed() {
+      return Boolean(state.member);
+    },
+    get joined() {
+      return state.joined;
+    },
+    get member() {
+      return state.member;
+    },
+    join: async function (this: { config?: McpConfig }) {
+      // resolve via the config the test passes through `claimAndJoin` (set below)
+    },
+  };
+  return { ...base, ...over, _state: state } as unknown as MusterdClient;
+}
+
+/** A fake whose `join()` resolves the seat from a given config (the handshake's `occupied`). */
+function joiningClient(config: McpConfig, over: Partial<MusterdClient> = {}): MusterdClient {
+  const state = { member: undefined as string | undefined, joined: false };
   return {
-    roster: async () => ({ members: [] }),
-    addMember: async () => ({ token: 'mskd_minted' }),
-    setIdentity: () => undefined,
-    join: async () => undefined,
+    roster: async () => ({ members: [] as { name: string }[] }),
+    get claimed() {
+      return Boolean(state.member);
+    },
+    get joined() {
+      return state.joined;
+    },
+    get member() {
+      return state.member;
+    },
+    join: async () => {
+      const c = config.claim;
+      state.member = c.mode === 'seat' ? c.name : c.mode === 'role' ? `${c.role}-1` : undefined;
+      state.joined = true;
+    },
     ...over,
   } as unknown as MusterdClient;
 }
 
-describe('claimSeat (mint-or-reuse, ADR 032)', () => {
-  it('mints a fresh named seat', async () => {
-    const res = await claimSeat(fakeClient(), baseConfig(), { seat: 'Ada' });
-    expect(res).toEqual({ member: 'Ada', token: 'mskd_minted', reused: false });
-  });
-
-  it("reuses the session's own already-held seat without re-minting", async () => {
-    const addMember = vi.fn();
-    const res = await claimSeat(
-      fakeClient({ addMember: addMember as never }),
-      baseConfig({ member: 'Ada', token: 'tkn' }),
-      { seat: 'Ada' },
-    );
-    expect(res).toEqual({ member: 'Ada', token: 'tkn', reused: true });
-    expect(addMember).not.toHaveBeenCalled();
-  });
-
-  it('maps a unique-name collision to ClaimConflictError with the roster', async () => {
-    const client = fakeClient({
-      roster: (async () => ({ members: [{ name: 'Ada' }, { name: 'Bo' }] })) as never,
-      addMember: (async () => {
-        throw new Error('member "Ada" already exists in "dawn"');
-      }) as never,
-    });
-    await expect(claimSeat(client, baseConfig(), { seat: 'Ada' })).rejects.toBeInstanceOf(
-      ClaimConflictError,
-    );
-  });
-
-  it('claims the next open pool seat, retrying past a racing mint', async () => {
-    let calls = 0;
-    const client = fakeClient({
-      roster: (async () => ({ members: [{ name: 'backend-1' }] })) as never,
-      addMember: (async (name: string) => {
-        calls++;
-        if (name === 'backend-2' && calls === 1) throw new Error('conflict');
-        return { token: 'mskd_minted' };
-      }) as never,
-    });
-    const res = await claimSeat(client, baseConfig(), { role: 'backend' });
-    expect(res.member).toBe('backend-3');
-  });
-});
-
-describe('claimAndJoin', () => {
+describe('claimAndJoin (v0.3 handshake, ADR 075)', () => {
   let cwd: string;
   beforeEach(() => {
     cwd = mkdtempSync(join(tmpdir(), 'musterd-claimjoin-'));
@@ -89,24 +82,37 @@ describe('claimAndJoin', () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it('sets identity, persists the binding, clears the marker, and joins', async () => {
-    const setIdentity = vi.fn();
-    const join = vi.fn(async () => undefined);
+  it('points the claim at the seat, joins, persists the binding, and clears the marker', async () => {
     const config = baseConfig();
     writePendingMarker(config, cwd);
-    await claimAndJoin(
-      fakeClient({ setIdentity: setIdentity as never, join: join as never }),
-      config,
-      {
-        seat: 'Ada',
-      },
-    );
-    expect(setIdentity).toHaveBeenCalledWith('Ada', 'mskd_minted');
-    expect(join).toHaveBeenCalled();
-    const binding = JSON.parse(readFileSync(join2(cwd), 'utf8'));
-    expect(binding.member).toBe('Ada');
+    const res = await claimAndJoin(joiningClient(config), config, { seat: 'Ada' });
+    expect(res).toEqual({ member: 'Ada', reused: false });
+    expect(config.claim).toEqual({ mode: 'seat', name: 'Ada' });
+    const binding = JSON.parse(readFileSync(bindingPath(cwd), 'utf8'));
+    expect(binding.agent_key).toBe('mskey_team');
+    expect(binding.member).toBeUndefined(); // v0.3: no member/token in the binding
     expect(binding.claim).toEqual({ mode: 'seat', name: 'Ada' });
     expect(existsSync(join(cwd, BINDING_DIR, PENDING_DIR, 'AB12.json'))).toBe(false);
+  });
+
+  it('resolves a role pool seat server-side', async () => {
+    const config = baseConfig();
+    const res = await claimAndJoin(joiningClient(config), config, { role: 'backend' });
+    expect(res.member).toBe('backend-1');
+    expect(config.claim).toEqual({ mode: 'role', role: 'backend' });
+  });
+
+  it('maps a refused (occupied) claim to ClaimConflictError with the roster', async () => {
+    const config = baseConfig();
+    const client = joiningClient(config, {
+      roster: (async () => ({ members: [{ name: 'Ada' }, { name: 'Bo' }] })) as never,
+      join: (async () => {
+        throw new Error('claim_conflict: seat "Ada" is occupied');
+      }) as never,
+    });
+    await expect(claimAndJoin(client, config, { seat: 'Ada' })).rejects.toBeInstanceOf(
+      ClaimConflictError,
+    );
   });
 });
 
@@ -117,7 +123,7 @@ describe('pending markers (ADR 033)', () => {
   });
   afterEach(() => rmSync(cwd, { recursive: true, force: true }));
 
-  it('writes then clears a marker carrying no token', () => {
+  it('writes then clears a marker carrying no secret', () => {
     const config = baseConfig({ driver: 'nick' });
     const p = writePendingMarker(config, cwd);
     expect(p).not.toBeNull();
@@ -155,16 +161,16 @@ describe('live claim adoption (ADR 034)', () => {
 
   it('readAndConsumeResolution returns the seat and deletes both files', () => {
     const config = baseConfig();
-    dropResolution(config, { member: 'Ada', token: 'mskd_x' });
+    dropResolution(config, { seat: 'Ada' });
     const resolved = readAndConsumeResolution(config, cwd);
-    expect(resolved).toEqual({ member: 'Ada', token: 'mskd_x' });
+    expect(resolved).toEqual({ seat: 'Ada' });
     expect(existsSync(resolutionFile('AB12'))).toBe(false);
     expect(existsSync(join(cwd, BINDING_DIR, PENDING_DIR, 'AB12.json'))).toBe(false);
   });
 
   it('drops a malformed resolution and keeps waiting (returns null)', () => {
     const config = baseConfig();
-    dropResolution(config, { member: 'Ada' }); // no token
+    dropResolution(config, { member: 'Ada' }); // no `seat`
     expect(readAndConsumeResolution(config, cwd)).toBeNull();
     expect(existsSync(resolutionFile('AB12'))).toBe(false); // the bad file is cleared
   });
@@ -173,26 +179,20 @@ describe('live claim adoption (ADR 034)', () => {
     expect(readAndConsumeResolution(baseConfig(), cwd)).toBeNull();
   });
 
-  it('adoptIdentity binds + joins, and no-ops once already joined', async () => {
+  it('adoptIdentity claims the resolved seat + joins, and no-ops once already joined', async () => {
     vi.spyOn(process, 'cwd').mockReturnValue(cwd);
-    const setIdentity = vi.fn();
-    const join = vi.fn(async () => undefined);
-    await adoptIdentity(
-      fakeClient({ setIdentity: setIdentity as never, join: join as never }),
-      baseConfig(),
-      'Ada',
-      'mskd_x',
-    );
-    expect(setIdentity).toHaveBeenCalledWith('Ada', 'mskd_x');
-    expect(join).toHaveBeenCalled();
-    expect(JSON.parse(readFileSync(join2(cwd), 'utf8')).member).toBe('Ada');
+    const config = baseConfig();
+    await adoptIdentity(joiningClient(config), config, 'Ada');
+    expect(JSON.parse(readFileSync(bindingPath(cwd), 'utf8')).claim).toEqual({
+      mode: 'seat',
+      name: 'Ada',
+    });
 
     const join2nd = vi.fn(async () => undefined);
     await adoptIdentity(
-      fakeClient({ joined: true as never, join: join2nd as never }),
+      joiningClient(config, { joined: true as never, join: join2nd as never }),
       baseConfig(),
       'Bo',
-      't',
     );
     expect(join2nd).not.toHaveBeenCalled(); // already joined → no double-occupy
   });
@@ -200,30 +200,32 @@ describe('live claim adoption (ADR 034)', () => {
   it('startResolutionWatcher brings a pending session online when a resolution appears', async () => {
     vi.spyOn(process, 'cwd').mockReturnValue(cwd);
     const config = baseConfig();
-    let member: string | undefined;
     let joined = false;
+    const state = { member: undefined as string | undefined };
     const client = fakeClient({
       get claimed() {
-        return Boolean(member);
+        return Boolean(state.member);
       },
       get joined() {
         return joined;
       },
-      setIdentity: ((m: string) => {
-        member = m;
-      }) as never,
+      get member() {
+        return state.member;
+      },
       join: (async () => {
+        const c = config.claim;
+        state.member = c.mode === 'seat' ? c.name : undefined;
         joined = true;
       }) as never,
     });
     const stop = startResolutionWatcher(client, config, { intervalMs: 5 });
-    dropResolution(config, { member: 'Ada', token: 'mskd_x' });
+    dropResolution(config, { seat: 'Ada' });
     await vi.waitFor(() => expect(joined).toBe(true), { timeout: 500 });
-    expect(member).toBe('Ada');
+    expect(state.member).toBe('Ada');
     stop();
   });
 });
 
-function join2(cwd: string): string {
+function bindingPath(cwd: string): string {
   return join(cwd, BINDING_DIR, BINDING_FILE);
 }
