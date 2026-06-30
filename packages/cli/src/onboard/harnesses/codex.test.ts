@@ -9,9 +9,9 @@ import { hasServer } from './codexToml.js';
 const binding = {
   server: 'http://localhost:4849',
   team: 'dawn',
-  member: 'Ada',
-  token: 'mskd_secret',
+  agent_key: 'mskey_secret',
   surface: 'codex' as const,
+  claim: { mode: 'seat' as const, name: 'Ada' },
 };
 
 let cwd: string;
