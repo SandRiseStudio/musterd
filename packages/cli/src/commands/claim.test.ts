@@ -32,15 +32,17 @@ beforeEach(async () => {
   process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
   cwd = mkdtempSync(join(tmpdir(), 'musterd-claim-cwd-'));
   vi.spyOn(process, 'cwd').mockReturnValue(cwd);
-  // Stand up the team; capture the v0.3 composite mint (SPEC A.7): the team agent key + creator token.
+  // Stand up the team; capture the v0.3 composite mint (SPEC A.7): the team agent key + the creator's
+  // human credential (mscr_). Post-cutover (ADR 069) nick authenticates with the credential; the mskd_
+  // creator token no longer authenticates, so the admin (grants/declare-seat) calls use the credential.
   const team = (await new HttpClient({ server: serverUrl }).createTeam('dawn', {
     name: 'nick',
   })) as {
     agent_key: string;
-    token: string;
+    human_credential: string;
   };
   agentKey = team.agent_key;
-  adminToken = team.token;
+  adminToken = team.human_credential;
   process.env['MUSTERD_AGENT_KEY'] = agentKey; // claim presents this
 });
 

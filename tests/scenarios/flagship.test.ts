@@ -37,7 +37,7 @@ beforeEach(async () => {
     slug: 'dawn',
     creator: { name: 'nick', kind: 'human', role: 'lead' },
   });
-  tok['nick'] = team.json.token;
+  tok['nick'] = team.json.human_credential; // ADR 069: credential, not the removed mskd_ token
   // v0.3 (ADR 075): agents claim with the team agent key from the composite mint; a standing grant
   // per seat lets each occupy immediately (no admin-approval lane).
   tok['agent_key'] = team.json.agent_key;

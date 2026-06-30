@@ -13,7 +13,7 @@ import { sendCommand } from './commands/send.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
 import { whoamiCommand } from './commands/whoami.js';
-import { saveBinding } from './config.js';
+import { loadConfig, saveBinding } from './config.js';
 import { cachedTeamLive } from './onboard/init.js';
 
 let server: RunningServer;
@@ -192,8 +192,9 @@ describe('agent-side reachability nudge (ADR 046)', () => {
   it('surfaces a directed act on an unrelated command, then self-clears once the inbox is read', async () => {
     // nick creates dawn and adds Ada (a heads-down agent).
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
-    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
-    const adaToken = JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    // ADR 069: Ada (agent) authenticates with the team agent key + seat:Ada (set by actAs).
+    const adaToken = loadConfig().agentKeys['dawn']!;
 
     // nick directs a request_help at Ada.
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'real test please']);
@@ -215,8 +216,9 @@ describe('agent-side reachability nudge (ADR 046)', () => {
 
   it('skips commands that show the acts themselves (inbox/status) and suppresses on --json/--quiet', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
-    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
-    const adaToken = JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    // ADR 069: Ada (agent) authenticates with the team agent key + seat:Ada (set by actAs).
+    const adaToken = loadConfig().agentKeys['dawn']!;
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'real test please']);
     actAs('dawn', 'Ada', adaToken);
 
@@ -418,8 +420,10 @@ describe('an active identity is required to act (ADR 036)', () => {
 describe('CLI ergonomics papercuts (ADR 067)', () => {
   async function dawnWithAgent(name: string): Promise<string> {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
-    const added = await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
-    return JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
+    // Post-cutover (ADR 069): agents authenticate with the team agent key + their seat (actAs sets
+    // MUSTERD_AGENT_KEY + MUSTERD_CLAIM=seat:<name>), not the now-vestigial mskd_ `team add` token.
+    return loadConfig().agentKeys['dawn']!;
   }
 
   it('whoami names the seat this folder resolves to, with its source', async () => {
@@ -489,8 +493,8 @@ describe('CLI ergonomics papercuts (ADR 067)', () => {
 describe('nudge — surface waiting acts at the approval prompt (ADR 053)', () => {
   it('prints the directed acts waiting for the bound seat, read-only (cursor stays put)', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
-    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
-    const token = JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const token = loadConfig().agentKeys['dawn']!; // ADR 069: agent key + seat:Ada (via actAs)
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'review the auth PR']);
 
     actAs('dawn', 'Ada', token);
@@ -506,8 +510,8 @@ describe('nudge — surface waiting acts at the approval prompt (ADR 053)', () =
 
   it('prints nothing (exit 0) when no directed act is waiting', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
-    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
-    const token = JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const token = loadConfig().agentKeys['dawn']!; // ADR 069: agent key + seat:Ada (via actAs)
     // Only broadcast journal traffic — nothing directed at Ada.
     await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'refactoring']);
 
@@ -522,8 +526,10 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
   /** Stand up dawn with an agent seat; return the agent's token. */
   async function dawnWithAgent(name: string): Promise<string> {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
-    const added = await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
-    return JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
+    // Post-cutover (ADR 069): agents authenticate with the team agent key + their seat (actAs sets
+    // MUSTERD_AGENT_KEY + MUSTERD_CLAIM=seat:<name>), not the now-vestigial mskd_ `team add` token.
+    return loadConfig().agentKeys['dawn']!;
   }
 
   it('drains the durable inbox: a directed act already waiting wakes it immediately (exit 0)', async () => {

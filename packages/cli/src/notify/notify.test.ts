@@ -226,15 +226,17 @@ describe('notify against a live daemon', () => {
     }
   }
 
-  /** Stand up team `dawn` (nick = creator/admin) + agent `lin`; return their tokens. */
+  /**
+   * Stand up team `dawn` (nick = creator/admin) + agent `lin`. Post-cutover (ADR 069): nick auths with
+   * his human credential (mscr_); lin (agent) auths with the team agent key + `seat: 'lin'` — the mskd_
+   * `team add` token no longer authenticates.
+   */
   async function setup(): Promise<{ nickToken: string; linToken: string }> {
     await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
-    const added = await capture(() =>
-      teamCommand(parseArgs(['add', 'lin', '--kind', 'agent', '--json'])),
-    );
-    const linToken = JSON.parse(added.out).token as string;
-    const nickToken = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).identities.dawn
-      .key as string;
+    await capture(() => teamCommand(parseArgs(['add', 'lin', '--kind', 'agent', '--json'])));
+    const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
+    const linToken = cfg.agentKeys.dawn as string; // team agent key — lin sends as { key, seat: 'lin' }
+    const nickToken = cfg.identities.dawn.key as string; // nick's credential (mscr_)
     return { nickToken, linToken };
   }
 

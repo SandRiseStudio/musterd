@@ -35,7 +35,9 @@ beforeEach(async () => {
     slug: 'dawn',
     creator: { name: 'nick', kind: 'human', role: 'lead' },
   });
-  tokens['nick'] = team.json.token;
+  // Post-cutover (ADR 069): nick authenticates with his human credential (mscr_, self-identifying);
+  // the mskd_ creator token no longer authenticates.
+  tokens['nick'] = team.json.human_credential;
   // v0.3 (ADR 075): agents claim with the team agent key from the composite mint (SPEC A.7).
   tokens['agent_key'] = team.json.agent_key;
   // Declare Ada's seat (no per-seat token in v0.3 — she claims it with the team agent key).

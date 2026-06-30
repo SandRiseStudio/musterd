@@ -144,15 +144,14 @@ describe('audit command', () => {
     await expect(auditCommand(parseArgs(['--before', '-1']))).rejects.toThrow(/positive ms-epoch/);
   });
 
-  it('refuses a non-admin token with forbidden (exit 5)', async () => {
-    const ada = await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).addMember(
-      'dawn',
-      {
-        name: 'Ada2',
-        kind: 'agent',
-      },
-    );
-    const client = new HttpClient({ server: serverUrl, key: ada.token, seat: 'Ada2' });
+  it('refuses a non-admin credential with forbidden (exit 5)', async () => {
+    await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).addMember('dawn', {
+      name: 'Ada2',
+      kind: 'agent',
+    });
+    // Post-cutover (ADR 069): a non-admin agent authenticates with the team agent key + its seat.
+    const agentKey = loadConfig().agentKeys['dawn']!;
+    const client = new HttpClient({ server: serverUrl, key: agentKey, seat: 'Ada2' });
     await expect(client.audit('dawn')).rejects.toMatchObject({ exitCode: 5 });
   });
 
