@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { P3_AUDIT_ACTIONS } from './audit.js';
 import {
   ClaimFrame,
   ClaimTargetSchema,
@@ -7,7 +8,6 @@ import {
   RefusedCodeSchema,
   RefusedFrame,
 } from './claim-handshake.js';
-import { P3_AUDIT_ACTIONS } from './audit.js';
 import { ErrorCodeSchema } from './errors.js';
 import { PROTOCOL_VERSION } from './version.js';
 

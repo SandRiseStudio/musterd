@@ -21,6 +21,7 @@ src/
   args.ts             // argv parser → { command, positionals, flags }
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API
+  claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078, unwired until the P3 cutover)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   errors.ts           // CliError(code) -> message + exit code
