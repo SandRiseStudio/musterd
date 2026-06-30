@@ -63,6 +63,9 @@ export interface Identity {
    *  for an agent seat, or a human credential (`mscr_`) for a person. Replaces the v0.2 seat `token`. */
   key: string;
   surface: string;
+  /** Optional pre-issued grant (`msgr_`) carried from the binding/env so a *live* claim (the
+   *  `inbox --wait`/`--watch` WS handshake) skips the pending lane, matching the one-shot claim path. */
+  grant?: string;
 }
 
 /**
@@ -125,7 +128,12 @@ export function identityFromEnv(
   if (!('seat' in target)) return null;
   return {
     team: cred.team,
-    identity: { name: target.seat, key: cred.credential.agentKey, surface: cred.credential.surface },
+    identity: {
+      name: target.seat,
+      key: cred.credential.agentKey,
+      surface: cred.credential.surface,
+      ...(cred.credential.grant !== undefined ? { grant: cred.credential.grant } : {}),
+    },
   };
 }
 

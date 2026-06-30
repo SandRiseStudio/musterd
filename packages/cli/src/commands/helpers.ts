@@ -58,7 +58,12 @@ function gather(flags: Record<string, string | boolean>) {
   if (binding && boundSeat && binding.agent_key) {
     sources.push({
       team: binding.team,
-      identity: { name: boundSeat, key: binding.agent_key, surface: binding.surface },
+      identity: {
+        name: boundSeat,
+        key: binding.agent_key,
+        surface: binding.surface,
+        ...(binding.grant !== undefined ? { grant: binding.grant } : {}),
+      },
       source: 'binding',
     });
   }

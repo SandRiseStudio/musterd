@@ -138,6 +138,7 @@ async function watchInbox(
       // v0.3 (ADR 075): a watch IS a claim — attach by claiming our own seat with the Bearer key.
       key: identity.key,
       target: { seat: identity.name },
+      ...(identity.grant !== undefined ? { grant: identity.grant } : {}),
       surface: identity.surface || 'cli',
       // A human running `inbox --watch` is explicitly here (the supervising posture) — `session`.
       provenance: 'session',
@@ -253,6 +254,7 @@ async function waitInbox(
       // v0.3 (ADR 075): attach by claiming our own seat with the Bearer key.
       key: identity.key,
       target: { seat: identity.name },
+      ...(identity.grant !== undefined ? { grant: identity.grant } : {}),
       surface: identity.surface || 'cli',
       // A waiting agent is genuinely here and reachable — a resident session, like `--watch`.
       provenance: 'session',

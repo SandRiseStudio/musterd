@@ -58,6 +58,7 @@ function actAsNobody(): void {
   delete process.env['MUSTERD_TEAM'];
   delete process.env['MUSTERD_AGENT_KEY'];
   delete process.env['MUSTERD_CLAIM'];
+  delete process.env['MUSTERD_GRANT'];
 }
 
 /** Run a command fn with captured stdout. */
@@ -551,11 +552,21 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
   });
 
   // TODO(p3-cutover): live inbox --wait opens its own WS claim via watchClaim, which doesn't yet
-  // thread a grant (Identity carries no grant) — so a granted agent's live claim goes pending and the
-  // socket never opens. The durable-drain path (the two tests above) covers wake-on-message over HTTP.
-  // Un-skip once the grant is threaded resolve()→Identity→watchClaim. (Follow-up flagged to Cleo.)
-  it.skip('blocks on the live socket, then wakes the instant a directed act is sent', async () => {
-    const token = await dawnWithAgent('Ada');
+  it('blocks on the live socket, then wakes the instant a directed act is sent', async () => {
+    // A live `inbox --wait` IS a WS claim (ADR 075), so Ada attaches with the team agent key + a
+    // standing grant (the grant is threaded resolve()→Identity→watchClaim so the live claim occupies
+    // instead of going pending). nick (admin, his mscr_ credential) issues the grant.
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const cfg = JSON.parse(readFileSync(nickConfig, 'utf8'));
+    const agentKey = cfg.agentKeys.dawn as string;
+    const nickKey = cfg.identities.dawn.key as string;
+    const gres = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/grants`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${nickKey}` },
+      body: JSON.stringify({ scope: 'seat', target: 'Ada', lifetime: 'standing' }),
+    });
+    const grant = ((await gres.json()) as { token: string }).token;
 
     // One capture for the whole test — `run()` nests stdout spies, which would clobber a pending wait.
     const chunks: string[] = [];
@@ -564,8 +575,11 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
       return true;
     });
     try {
-      // Ada waits (identity captured synchronously before any await, so the later env switch is safe).
-      actAs('dawn', 'Ada', token);
+      // Ada waits, attaching via the agent key + grant (captured synchronously before any await).
+      process.env['MUSTERD_TEAM'] = 'dawn';
+      process.env['MUSTERD_AGENT_KEY'] = agentKey;
+      process.env['MUSTERD_CLAIM'] = 'seat:Ada';
+      process.env['MUSTERD_GRANT'] = grant;
       const waitP = inboxCommand(parseArgs(['--wait', '--timeout', '5']));
 
       // Let the socket connect + subscribe, then nick (his bound folder) sends Ada a directed act.
