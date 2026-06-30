@@ -12,6 +12,7 @@ import {
   type AuditEntry,
   type Envelope,
   type MemberSummary,
+  type Request,
 } from '@musterd/protocol';
 
 // Re-export so the audit view + route keep importing the entry type from this client module.
@@ -124,6 +125,73 @@ export async function fetchAudit(
   }
   // Validate the wire against the shared schema at the boundary (same contract the CLI parses, ADR 074).
   return AuditResponseSchema.parse(json).audit;
+}
+
+/** Re-export for routes that import the Request type from this client module. */
+export type { Request };
+
+/**
+ * List pending (or all) claim requests for the team — admin-only (ADR 077).
+ * Uses AuditFetchError so the route can tailor 401/403 copy.
+ */
+export async function fetchRequests(
+  cfg: LiveConfig,
+  opts: { pendingOnly?: boolean } = {},
+): Promise<Request[]> {
+  const q = new URLSearchParams();
+  if (opts.pendingOnly) q.set('status', 'pending');
+  const qs = q.toString();
+  const res = await fetch(
+    `/teams/${encodeURIComponent(cfg.team)}/requests${qs ? `?${qs}` : ''}`,
+    { headers: { authorization: `Bearer ${cfg.token}`, 'x-musterd-surface': 'web' } },
+  );
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const err = (json as { error?: { code?: string; message?: string } }).error;
+    throw new AuditFetchError(
+      err?.message ?? `HTTP ${res.status}`,
+      err?.code ?? `http_${res.status}`,
+      res.status,
+    );
+  }
+  return (json as { requests: Request[] }).requests;
+}
+
+/**
+ * Admin approve or deny a claim request (ADR 077).
+ * Returns { request_id, decision, delivered }.
+ */
+export async function decideRequest(
+  cfg: LiveConfig,
+  requestId: string,
+  decision:
+    | { decision: 'approve'; lifetime: 'once' | 'ttl' | 'standing'; ttl_hours?: number }
+    | { decision: 'deny' },
+): Promise<{ request_id: string; decision: string; delivered: boolean }> {
+  const res = await fetch(
+    `/teams/${encodeURIComponent(cfg.team)}/requests/${encodeURIComponent(requestId)}/decide`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${cfg.token}`,
+        'content-type': 'application/json',
+        'x-musterd-surface': 'web',
+      },
+      body: JSON.stringify(decision),
+    },
+  );
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const err = (json as { error?: { code?: string; message?: string } }).error;
+    throw new AuditFetchError(
+      err?.message ?? `HTTP ${res.status}`,
+      err?.code ?? `http_${res.status}`,
+      res.status,
+    );
+  }
+  return json as { request_id: string; decision: string; delivered: boolean };
 }
 
 /**
