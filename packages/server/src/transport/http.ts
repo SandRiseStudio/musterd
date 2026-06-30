@@ -788,16 +788,22 @@ export async function handleHttp(
           });
         }
 
-        // Step 4: single-active check.
+        // Step 4: single-active is kind-scoped (ADR 042), matching the WS path. An **agent** seat is
+        // newest-wins (ADR 017): a newer claim displaces the incumbent (superseded → close its socket +
+        // clear its presence) instead of refusing. A **human**/observer seat fans out — no displacement,
+        // a second claim just attaches another presence.
         const liveConns = ctx.hub.connsForMember(targetMember.id);
-        if (liveConns.length > 0) {
-          return sendJson(res, 409, {
-            type: 'refused',
-            code: 'claim_conflict',
-            message: `seat "${targetMember.name}" is already occupied`,
-            claimable: [],
-            hint: 'wait for the seat to be released or ask an admin to reclaim it',
-          });
+        if (liveConns.length > 0 && targetMember.kind === 'agent' && targetMember.observer === 0) {
+          for (const old of liveConns) {
+            old.send?.({
+              type: 'error',
+              code: 'superseded',
+              message: `your session as "${targetMember.name}" was taken over by a newer one`,
+            });
+            old.close?.();
+            ctx.hub.remove(old.connId);
+          }
+          clearMemberPresence(ctx.db, targetMember.id);
         }
 
         // Step 5: grant path — validate + consume, then occupy.
@@ -843,6 +849,37 @@ export async function handleHttp(
             target: targetMember.name,
             result: 'allow',
             detail: { via: 'http', surface: body.surface },
+          });
+          ctx.hub.broadcastTeam(
+            team.id,
+            { type: 'presence', member: targetMember.name, status: 'online' },
+            undefined,
+          );
+          return sendJson(res, 200, {
+            type: 'occupied',
+            seat: toMember(targetMember, team.slug),
+            presence_id: presence.id,
+            server_time: Date.now(),
+            memory: null,
+          });
+        }
+
+        // Credential self-authorize (ADR 077, SPEC A.2): a human authenticated by their OWN mscr_
+        // credential claiming their own seat is self-authorizing — the credential IS the authorization,
+        // so there is no grant and no admin-approval request. Occupy directly (Step 2 already enforced
+        // the credential matches the target seat for a seat-target claim).
+        if (authenticatedMember && authenticatedMember.id === targetMember.id) {
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
+            provenance: null,
+            workspace: null,
+            driver: null,
+          });
+          appendAudit(ctx.db, team.id, {
+            actor: targetMember.name,
+            action: 'claim.occupied',
+            target: targetMember.name,
+            result: 'allow',
+            detail: { via: 'http', surface: body.surface, auth: 'credential' },
           });
           ctx.hub.broadcastTeam(
             team.id,

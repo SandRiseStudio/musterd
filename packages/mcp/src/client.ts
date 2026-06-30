@@ -146,7 +146,9 @@ export class MusterdClient {
     }
     if (!this.claimTarget()) {
       return Promise.reject(
-        new Error('no seat to claim — name one with team_join {as} or set MUSTERD_CLAIM=seat:<name>'),
+        new Error(
+          'no seat to claim — name one with team_join {as} or set MUSTERD_CLAIM=seat:<name>',
+        ),
       );
     }
     this.wantPresence = true;
@@ -234,6 +236,16 @@ export class MusterdClient {
         const msg = `pending approval — request ${frame.request_id} (an admin must approve)`;
         this.lastJoinErrorMsg = msg;
         this.pendingJoin?.reject(new Error(msg));
+        this.pendingJoin = null;
+        ws.close();
+      } else if (frame.type === 'error' && frame.code === 'superseded') {
+        // Newest-wins (ADR 017): a newer session of this seat took it over. Stop holding and do **not**
+        // reconnect — otherwise two sessions of one identity ping-pong displacing each other forever
+        // (the claim-supersede war). Terminal, like refused/pending.
+        this.wantPresence = false;
+        this.joinedFlag = false;
+        this.lastJoinErrorMsg = `${frame.code}: ${frame.message}`;
+        this.pendingJoin?.reject(new Error(this.lastJoinErrorMsg));
         this.pendingJoin = null;
         ws.close();
       } else if (frame.type === 'deliver') {

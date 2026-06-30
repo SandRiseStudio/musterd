@@ -341,31 +341,30 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             }
           }
 
-          // Step 4: single-active check for non-observer seats.
-          if (targetMember && !('observe' in frame.target)) {
-            const live = ctx.hub.connsForMember(targetMember.id);
-            if (live.length > 0) {
-              const claimable = claimableSeats(ctx, team.id).filter(
-                (n) => n !== targetMember!.name,
-              );
-              send(ws, {
-                type: 'refused',
-                code: 'claim_conflict',
-                message: `seat "${targetMember.name}" is already occupied`,
-                claimable,
-                hint: claimable.length
-                  ? `try: ${claimable.join(', ')}`
-                  : 'wait for the seat to be released or ask an admin to reclaim it',
+          // Step 4: single-active is **kind-scoped** (ADR 042), matching the hello path. An **agent**
+          // seat is newest-wins (ADR 017): a newer claim displaces the incumbent — tell it it was
+          // superseded, close it, evict it — rather than dead-ending on `claim_conflict`, so a relaunched
+          // agent re-occupies its own seat without a manual leave. A **human**/observer seat fans out: a
+          // second claim attaches an *additional* presence with no displacement (a person may act on a
+          // laptop while watching on a phone). Unlike hello, the claim frame carries no workspace, so
+          // there is no same-workspace flap-scoping (ADR 068) here — a follow-up if probes ever claim.
+          if (
+            targetMember &&
+            !('observe' in frame.target) &&
+            targetMember.kind === 'agent' &&
+            targetMember.observer === 0
+          ) {
+            for (const old of ctx.hub.connsForMember(targetMember.id)) {
+              old.send?.({
+                type: 'error',
+                code: 'superseded',
+                message: `your session as "${targetMember.name}" was taken over by a newer one`,
               });
-              appendAudit(ctx.db, team.id, {
-                actor: null,
-                action: 'claim.refused',
-                target: targetMember.name,
-                result: 'deny',
-                detail: { code: 'claim_conflict' },
-              });
-              return;
+              old.close?.();
+              ctx.hub.remove(old.connId);
+              clearPresenceById(ctx.db, old.presenceId);
             }
+            clearOrphanPresence(ctx.db, targetMember.id);
           }
 
           // Step 5: grant path — if frame.grant is present, validate it and OCCUPY immediately.
