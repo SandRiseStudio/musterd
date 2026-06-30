@@ -21,6 +21,10 @@ const CODE_EXIT: Record<ErrorCode, number> = {
   member_busy: 10,
   superseded: 11,
   version_mismatch: 1,
+  // ADR 078 (SPEC A.8): a seat occupied at claim time reuses the 409/conflict exit (9); an expired
+  // grant is an auth refusal (5). The claim command that emits these lands in the P3.3 cutover.
+  claim_conflict: 9,
+  expired_grant: 5,
 };
 
 export function exitForCode(code: ErrorCode): number {

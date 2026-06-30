@@ -12,41 +12,44 @@ Every message on the wire is an Envelope:
 
 ```jsonc
 {
-  "id": "01J...",            // ULID, client-generated; server authoritative if it collides
-  "v": "musterd/0.3",        // protocol version
-  "team": "dawn",            // team slug
-  "from": "Ada",             // member name (sender), within team
-  "to": {                    // recipient — exactly one of these shapes:
-    "kind": "member",        //   member | team | broadcast
-    "name": "Lin"            //   present iff kind=member
+  "id": "01J...", // ULID, client-generated; server authoritative if it collides
+  "v": "musterd/0.3", // protocol version
+  "team": "dawn", // team slug
+  "from": "Ada", // member name (sender), within team
+  "to": {
+    // recipient — exactly one of these shapes:
+    "kind": "member", //   member | team | broadcast
+    "name": "Lin", //   present iff kind=member
   },
-  "act": "handoff",          // one of the 8 acts
+  "act": "handoff", // one of the 8 acts
   "body": "auth module ready for wiring",
-  "thread": "01J...",        // optional: ULID of thread root; omit/null to start a thread
-  "meta": { },               // optional: act-specific fields (see below)
-  "ts": 1733760000000        // epoch ms, client clock; server records its own created_at too
+  "thread": "01J...", // optional: ULID of thread root; omit/null to start a thread
+  "meta": {}, // optional: act-specific fields (see below)
+  "ts": 1733760000000, // epoch ms, client clock; server records its own created_at too
 }
 ```
 
 `to` variants:
+
 - `{ "kind": "member", "name": "Lin" }` — direct.
 - `{ "kind": "team" }` — every current Member of the team (excluding sender) gets it in inbox/stream.
 - `{ "kind": "broadcast" }` — same delivery as team in v1; reserved to later mean cross-team/announce. Treat as team for delivery; keep the distinct kind.
 
 ## The 8 Acts (Co-Gym-grounded)
 
-| Act             | Meaning | Required `meta`/fields | Optional `meta` |
-|-----------------|---------|------------------------|-----------------|
-| `message`       | plain communication, no protocol semantics | — | — |
-| `status_update` | "here's what I'm doing / did" | — | `progress` (0..1), `state` (free text) |
-| `request_help`  | asking a specific member or the team to assist/unblock | — | `blocking` (bool), `topic` (string) |
-| `handoff`       | transferring a piece of work to someone | — | `artifact` (string ref), `summary` (string) |
-| `accept`        | accepting a prior `request_help`/`handoff` | `meta.in_reply_to` (ULID) | — |
-| `decline`       | declining a prior `request_help`/`handoff` | `meta.in_reply_to` (ULID) | `reason` (string) |
-| `wait`          | "hold / I'm blocked / pause for me" | — | `until` (epoch ms), `reason` (string) |
-| `resolve`       | closing a thread — the work it tracks is **done** (v0.3, ADR 025) | `thread` (ULID) | `reason` (string) |
+| Act             | Meaning                                                           | Required `meta`/fields    | Optional `meta`                             |
+| --------------- | ----------------------------------------------------------------- | ------------------------- | ------------------------------------------- |
+| `message`       | plain communication, no protocol semantics                        | —                         | —                                           |
+| `status_update` | "here's what I'm doing / did"                                     | —                         | `progress` (0..1), `state` (free text)      |
+| `request_help`  | asking a specific member or the team to assist/unblock            | —                         | `blocking` (bool), `topic` (string)         |
+| `handoff`       | transferring a piece of work to someone                           | —                         | `artifact` (string ref), `summary` (string) |
+| `accept`        | accepting a prior `request_help`/`handoff`                        | `meta.in_reply_to` (ULID) | —                                           |
+| `decline`       | declining a prior `request_help`/`handoff`                        | `meta.in_reply_to` (ULID) | `reason` (string)                           |
+| `wait`          | "hold / I'm blocked / pause for me"                               | —                         | `until` (epoch ms), `reason` (string)       |
+| `resolve`       | closing a thread — the work it tracks is **done** (v0.3, ADR 025) | `thread` (ULID)           | `reason` (string)                           |
 
 Rules:
+
 - `accept`/`decline` **must** carry `meta.in_reply_to` pointing at the message they answer, and **should** set `thread` to that message's thread (or its id if it was a root).
 - `resolve` **must** carry a non-empty `thread` (the id of the thread it closes; a no-thread root is closed by its own id). It is the thread-terminal "done" — any member may send it (v0.3 doesn't enforce a closer); UIs treat a resolved thread's open asks as no longer pending (ADR 024/025).
 - Unknown `meta` keys are allowed and preserved (forward-compat); unknown **acts** are rejected (validation error). This asymmetry is intentional: acts are the contract, meta is extensible.
@@ -75,22 +78,22 @@ Heartbeat/timeout values are defined in `03-server.md` (heartbeat 15s, offline a
 
 Base `http://localhost:4849`. JSON in/out. Auth via `Authorization: Bearer <member token>` except team-creation bootstrap. All responses wrap errors as `{ "error": { "code":..., "message":... } }` with the HTTP status from the code table.
 
-| Method | Path | Body | Response | Notes |
-|--------|------|------|----------|-------|
-| `GET`  | `/health` | — | `{ "ok":true, "v":"musterd/0.3", "db", "schema", "connections" }` | liveness + diagnostics (ADR 016/047) |
-| `POST` | `/teams` | `{ "slug","display?","creator":{ "name","kind":"human","role?" } }` | `{ "team", "member", "token" }` | bootstrap; returns creator's member token |
-| `GET`  | `/teams/:slug` | — | `{ "team", "members":[…] }` | roster |
-| `POST` | `/teams/:slug/members` | `{ "name","kind","role?","lifecycle?","lifecycle_until?" }` | `{ "member", "token" }` | `team add`; token shown once. For a **file-backed** team (ADR 058) this is *project-and-return*: the daemon reconciles the seat's committed `.musterd/seats/<name>.toml` and hands back its token, never originating the seat (a db-only team keeps the legacy originate path). |
-| `GET`  | `/teams/:slug/members` | — | `{ "members":[ <Member + presence summary> ] }` | for `status` |
-| `POST` | `/teams/:slug/members/:name/reclaim` | — | `{ "ok", "member" }` | operator force-drop of a member's stuck live session; frees the seat (clears presence + `bound_at`, ADR 017/058) |
-| `POST` | `/teams/:slug/members/:name/remove` | — | `{ "ok", "member", "kind" }` | soft-remove (`left_at`); history kept (ADR 019) |
-| `POST` | `/teams/:slug/unbind` | — | `{ "ok", "member" }` | `unbind`: the caller releases **its own** seat (authed by own token) — clears presence + `bound_at` back to *declared*; the seat stays on the team (ADR 058) |
-| `POST` | `/teams/:slug/messages` | `{ "envelope" }` | `{ "ack": <message> }` | send via HTTP (no live socket) |
-| `GET`  | `/teams/:slug/inbox?since=<cursor>&unread=1` | — | `{ "messages":[…], "cursor":{…} }` | inbox fetch |
-| `GET`  | `/teams/:slug/messages?since=<ts>&limit=<n>` | — | `{ "messages":[…] }` | whole-team timeline (firehose history backfill, ADR 061) |
-| `POST` | `/teams/:slug/inbox/cursor` | `{ "last_read_message_id" }` | `{ "cursor" }` | mark read |
-| `POST` | `/teams/:slug/presence` | `{ "surface","status?" }` | `{ "presence" }` | stateless presence ping |
-| `POST` | `/teams/:slug/availability` | `{ "status","until?" }` | `{ <member summary> }` | set your own availability axis (ADR 044) |
+| Method | Path                                         | Body                                                                | Response                                                          | Notes                                                                                                                                                                                                                                                                           |
+| ------ | -------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/health`                                    | —                                                                   | `{ "ok":true, "v":"musterd/0.3", "db", "schema", "connections" }` | liveness + diagnostics (ADR 016/047)                                                                                                                                                                                                                                            |
+| `POST` | `/teams`                                     | `{ "slug","display?","creator":{ "name","kind":"human","role?" } }` | `{ "team", "member", "token" }`                                   | bootstrap; returns creator's member token                                                                                                                                                                                                                                       |
+| `GET`  | `/teams/:slug`                               | —                                                                   | `{ "team", "members":[…] }`                                       | roster                                                                                                                                                                                                                                                                          |
+| `POST` | `/teams/:slug/members`                       | `{ "name","kind","role?","lifecycle?","lifecycle_until?" }`         | `{ "member", "token" }`                                           | `team add`; token shown once. For a **file-backed** team (ADR 058) this is _project-and-return_: the daemon reconciles the seat's committed `.musterd/seats/<name>.toml` and hands back its token, never originating the seat (a db-only team keeps the legacy originate path). |
+| `GET`  | `/teams/:slug/members`                       | —                                                                   | `{ "members":[ <Member + presence summary> ] }`                   | for `status`                                                                                                                                                                                                                                                                    |
+| `POST` | `/teams/:slug/members/:name/reclaim`         | —                                                                   | `{ "ok", "member" }`                                              | operator force-drop of a member's stuck live session; frees the seat (clears presence + `bound_at`, ADR 017/058)                                                                                                                                                                |
+| `POST` | `/teams/:slug/members/:name/remove`          | —                                                                   | `{ "ok", "member", "kind" }`                                      | soft-remove (`left_at`); history kept (ADR 019)                                                                                                                                                                                                                                 |
+| `POST` | `/teams/:slug/unbind`                        | —                                                                   | `{ "ok", "member" }`                                              | `unbind`: the caller releases **its own** seat (authed by own token) — clears presence + `bound_at` back to _declared_; the seat stays on the team (ADR 058)                                                                                                                    |
+| `POST` | `/teams/:slug/messages`                      | `{ "envelope" }`                                                    | `{ "ack": <message> }`                                            | send via HTTP (no live socket)                                                                                                                                                                                                                                                  |
+| `GET`  | `/teams/:slug/inbox?since=<cursor>&unread=1` | —                                                                   | `{ "messages":[…], "cursor":{…} }`                                | inbox fetch                                                                                                                                                                                                                                                                     |
+| `GET`  | `/teams/:slug/messages?since=<ts>&limit=<n>` | —                                                                   | `{ "messages":[…] }`                                              | whole-team timeline (firehose history backfill, ADR 061)                                                                                                                                                                                                                        |
+| `POST` | `/teams/:slug/inbox/cursor`                  | `{ "last_read_message_id" }`                                        | `{ "cursor" }`                                                    | mark read                                                                                                                                                                                                                                                                       |
+| `POST` | `/teams/:slug/presence`                      | `{ "surface","status?" }`                                           | `{ "presence" }`                                                  | stateless presence ping                                                                                                                                                                                                                                                         |
+| `POST` | `/teams/:slug/availability`                  | `{ "status","until?" }`                                             | `{ <member summary> }`                                            | set your own availability axis (ADR 044)                                                                                                                                                                                                                                        |
 
 The WS `send` and HTTP `POST …/messages` share one validation+route path on the server (`03-server.md`).
 
@@ -98,20 +101,32 @@ The WS `send` and HTTP `POST …/messages` share one validation+route path on th
 
 ## Error codes (shared by WS `error` frames and HTTP)
 
-| code | HTTP | meaning |
-|------|------|---------|
-| `bad_request`     | 400 | malformed frame/body/envelope |
-| `validation`      | 422 | envelope failed schema (bad act, missing required meta, etc.) |
-| `unauthorized`    | 401 | missing/invalid token |
-| `forbidden`       | 403 | token valid but not a member of this team / not this member |
-| `not_found`       | 404 | team/member not found |
-| `conflict`        | 409 | duplicate (e.g. team slug taken, member name taken) |
-| `member_busy`     | 409 | (v0.2, ADR 010) a Member was already live — *no longer thrown on hello since ADR 017's newest-wins; retained for compatibility* |
-| `superseded`      | 409 | (v0.2, ADR 017) your session was taken over by a newer same-identity attach — terminal; don't reconnect |
-| `version_mismatch`| 426 | client `v` not compatible with server |
-| `server_error`    | 500 | unexpected |
+| code               | HTTP | meaning                                                                                                                         |
+| ------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `bad_request`      | 400  | malformed frame/body/envelope                                                                                                   |
+| `validation`       | 422  | envelope failed schema (bad act, missing required meta, etc.)                                                                   |
+| `unauthorized`     | 401  | missing/invalid token                                                                                                           |
+| `forbidden`        | 403  | token valid but not a member of this team / not this member                                                                     |
+| `not_found`        | 404  | team/member not found                                                                                                           |
+| `conflict`         | 409  | duplicate (e.g. team slug taken, member name taken)                                                                             |
+| `member_busy`      | 409  | (v0.2, ADR 010) a Member was already live — _no longer thrown on hello since ADR 017's newest-wins; retained for compatibility_ |
+| `superseded`       | 409  | (v0.2, ADR 017) your session was taken over by a newer same-identity attach — terminal; don't reconnect                         |
+| `version_mismatch` | 426  | client `v` not compatible with server                                                                                           |
+| `server_error`     | 500  | unexpected                                                                                                                      |
+| `claim_conflict`   | 409  | (P3, ADR 078/SPEC A.8) the target seat is already occupied                                                                      |
+| `expired_grant`    | 410  | (P3, ADR 078/SPEC A.8) the presented grant is past its lifetime                                                                 |
 
 The CLI maps these to exit codes (`04-cli.md`).
+
+## `claim` handshake frames (P3, ADR 078 / SPEC A.3)
+
+The governed successor to `hello` — **additive schemas, not yet wired into `WSClientFrame`/`WSServerFrame`** (that wiring is Cleo's P3.2 cutover step, part of the one atomic merge; ADR 069 decision 2). Landing the frame shapes first lets June's P3.1 substrate + Cleo's P3.2 handshake import a stable contract.
+
+- `ClaimFrame` (client→server) — `{ type:'claim', v, team, key, target:{seat}|{role}|{observe:true}, grant?, surface }`. `key` = agent key (harness) or human credential; `grant` present → occupy, omitted → open a claim request (A.5).
+- `OccupiedFrame` (server→client) — `{ type:'occupied', seat:Member, presence_id, server_time, charter?, memory:null }`. `memory` is a reserved seam, always null in v0.3.
+- `RefusedFrame` (server→client) — `{ type:'refused', code:RefusedCode, message, claimable:[…], hint }`. `RefusedCode` = `claim_conflict|forbidden|not_found|disabled|banned|expired_grant` (A.8; `disabled`/`banned` surface the seat's account state — HTTP maps those to `forbidden` 403).
+- `PendingFrame` (server→client) — `{ type:'pending', request_id, message }`. The WS stays open; the server pushes the terminal `occupied`/`refused` when an admin decides (spec-gap 3, no client polling).
+- `P3_AUDIT_ACTIONS` — a reference tuple naming the P3 audit verbs (`grant.issue/use/revoke`, `claim.occupy/refused`, `request.decide`, `key.rotate`, `policy.change`, `account_status.change`) for naming consistency; `AuditEntry.action` stays an **open string** (ADR 074).
 
 ## `@musterd/protocol` exports (the executable contract)
 
@@ -138,9 +153,17 @@ export type Envelope = z.infer<typeof Envelope>;
 export const Member = z.object({ /* mirrors members table, no token_hash */ });
 export const WSClientFrame = z.discriminatedUnion('type', [ Hello, Subscribe, Send, Heartbeat ]);
 export const WSServerFrame = z.discriminatedUnion('type', [ Welcome, Subscribed, Ack, Deliver, PresenceEvt, ErrorFrame ]);
-export const ErrorCode = z.enum(['bad_request','validation','unauthorized','forbidden','not_found','conflict','member_busy','superseded','version_mismatch','server_error']);
+export const ErrorCode = z.enum(['bad_request','validation','unauthorized','forbidden','not_found','conflict','member_busy','superseded','version_mismatch','server_error','claim_conflict','expired_grant']);  // ADR 078 adds the two P3 codes
 export const AuditEntry = z.object({ id, ts, actor:string|null, action:string, target:string|null, result:z.enum(['allow','deny']), detail:record|null });  // ADR 071/074 — `action` is an OPEN string (P3 adds verbs); the audit-log wire contract
 export const AuditResponse = z.object({ audit: AuditEntry[] });
+export const P3_AUDIT_ACTIONS = ['grant.issue','grant.use','grant.revoke','claim.occupy','claim.refused','request.decide','key.rotate','policy.change','account_status.change'] as const;  // ADR 078 — reference vocabulary; action stays OPEN
+// ADR 078 (P3, SPEC A.3) — the claim handshake frames. Additive; NOT yet in WSClientFrame/WSServerFrame (Cleo's P3.2 cutover wires them).
+export const ClaimTarget = z.union([ z.object({seat:string}), z.object({role:string}), z.object({observe:z.literal(true)}) ]);
+export const RefusedCode = z.enum(['claim_conflict','forbidden','not_found','disabled','banned','expired_grant']);
+export const ClaimFrame = z.object({ type:'claim', v, team, key:string, target:ClaimTarget, grant?:string, surface:Surface });
+export const OccupiedFrame = z.object({ type:'occupied', seat:Member, presence_id, server_time:int, charter?:string, memory:null });
+export const RefusedFrame = z.object({ type:'refused', code:RefusedCode, message, claimable:string[], hint:string });
+export const PendingFrame = z.object({ type:'pending', request_id, message });
 ```
 
 `actMetaRules` is the single place encoding the per-act `meta` requirements from the table above; both server and clients import it so validation is identical everywhere. **Changing any of these schemas requires an ADR** (`00-overview.md` hard rule).

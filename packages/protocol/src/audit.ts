@@ -35,3 +35,25 @@ export const AuditResponseSchema = z.object({
   audit: z.array(AuditEntrySchema),
 });
 export type AuditResponse = z.infer<typeof AuditResponseSchema>;
+
+/**
+ * The P3 audit-verb vocabulary (ADR 078) — the dotted governance actions the P3 server emits. This is
+ * a **reference tuple, not an enum**: `AuditEntrySchema.action` stays an OPEN string (ADR 074) so a new
+ * verb never forces a protocol bump. It exists to pin the names June's P3.1 substrate + Cleo's P3.2
+ * handshake emit (`grant.issue`/`grant.use`/`grant.revoke`, `claim.occupy`/`claim.refused`,
+ * `request.decide`, `key.rotate`, `policy.change`, `account_status.change`) so the audit log + its
+ * tests use one consistent vocabulary. P2's verbs (`urgent.flagged`/`denied`, `send.denied`,
+ * `member.reclaim`/`remove`, `observe.denied`, ADR 071) precede these.
+ */
+export const P3_AUDIT_ACTIONS = [
+  'grant.issue',
+  'grant.use',
+  'grant.revoke',
+  'claim.occupy',
+  'claim.refused',
+  'request.decide',
+  'key.rotate',
+  'policy.change',
+  'account_status.change',
+] as const;
+export type P3AuditAction = (typeof P3_AUDIT_ACTIONS)[number];

@@ -4,6 +4,7 @@ export * from './binding.js';
 export * from './capabilities.js';
 export * from './audit.js';
 export * from './claim.js';
+export * from './claim-handshake.js';
 export * from './envelope.js';
 export * from './member.js';
 export * from './seatfile.js';
