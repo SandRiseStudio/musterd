@@ -119,10 +119,12 @@ describe('Scenario C — flagship 3-pane', () => {
     await lin.join();
     await delay(150); // let both background sockets settle
 
-    // Newest-wins (ADR 017, supersedes ADR 010's refusal): a second session claiming Ada's seat
-    // *takes over*, and the original is superseded — one identity, one live occupant, and a reload
-    // can never lock a member out of its own seat. (This is the fix for the dogfood deadlock.)
-    const adaDup = client('Ada', 'claude-code');
+    // Newest-wins (ADR 017, supersedes ADR 010's refusal): a second session claiming Ada's seat from
+    // a DIFFERENT workspace (the genuine-relaunch case; a same-workspace probe would keep the
+    // incumbent, ADR 068) *takes over*, and the original is superseded — one identity, one live
+    // occupant, and a reload can never lock a member out of its own seat. (Fix for the dogfood deadlock.)
+    const adaDup = new MusterdClient({ ...cfg('Ada', 'claude-code'), workspace: 'repo-elsewhere' });
+    clients.push(adaDup);
     await adaDup.join();
     expect(adaDup.joined).toBe(true);
     await delay(150);

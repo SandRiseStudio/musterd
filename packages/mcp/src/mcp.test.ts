@@ -103,8 +103,10 @@ describe('MCP adapter', () => {
     await a1.join();
     expect(a1.joined).toBe(true);
 
-    // Newest wins: the second session joins successfully (no member_busy lockout) ...
-    const a2 = new MusterdClient(adaConfig());
+    // Newest wins: a second session from a DIFFERENT workspace claims the same seat and takes over
+    // (no member_busy lockout). Different-workspace is the genuine-relaunch case ADR 017 displaces;
+    // a *same*-workspace re-claim (a health-check probe) would instead keep the incumbent (ADR 068).
+    const a2 = new MusterdClient({ ...adaConfig(), workspace: 'repo-elsewhere' });
     await a2.join();
     expect(a2.joined).toBe(true);
 
