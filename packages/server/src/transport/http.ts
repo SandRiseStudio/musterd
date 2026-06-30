@@ -174,6 +174,17 @@ function actingSeat(req: IncomingMessage): string | undefined {
   return v && v.length > 0 ? v : undefined;
 }
 
+/**
+ * Defense-in-depth (banned = inert): a `disabled`/`banned`/`archived` seat can't READ message content
+ * either — the send gate (route.ts) already blocks its sends, this closes the residual inbox/firehose
+ * read access. Mirrors the send-gate's account_status check exactly; `active`/`provisioned` read normally.
+ */
+function assertSeatCanRead(member: MemberRow): void {
+  const status = resolveAccountStatus(member);
+  if (status === 'disabled' || status === 'banned' || status === 'archived')
+    throw new MusterdError('forbidden', `seat "${member.name}" is ${status} and cannot read`);
+}
+
 const CreateTeamBody = z.object({
   slug: z.string(),
   display: z.string().nullish(),
@@ -966,6 +977,7 @@ export async function handleHttp(
 
       if (method === 'GET' && rest === '/inbox') {
         const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
         const unread = url.searchParams.get('unread') === '1';
         const since = url.searchParams.get('since');
         const cursor = getCursor(ctx.db, member.id);
@@ -986,7 +998,8 @@ export async function handleHttp(
       // history backfill (ADR 061). The dashboard GETs this, then live-tails via `subscribe team-all`.
       // Authed like /inbox (any team member); read-only.
       if (method === 'GET' && rest === '/messages') {
-        const { team } = authTouch(ctx, slug, req);
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
         const since = url.searchParams.get('since');
         const limit = url.searchParams.get('limit');
         const rows = listTeamMessages(ctx.db, team.id, {
