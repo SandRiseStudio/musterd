@@ -3,12 +3,16 @@ import {
   ErrorBodySchema,
   PROTOCOL_VERSION,
   type AuditResponse,
+  type ClaimTarget,
   type Envelope,
   type MemberKind,
   type MemberSummary,
+  type Surface,
   type WSServerFrame,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
+import { buildClaimFrame, parseClaimResponse } from './claim-client.js';
+import type { ClaimOutcome } from './claim-client.js';
 import { CliError, exitForCode, isConnRefused } from './errors.js';
 
 export interface HttpClientOpts {
@@ -164,6 +168,70 @@ export class HttpClient {
       throw new CliError('audit response did not match the protocol schema', 1);
     }
     return parsed.data;
+  }
+
+  /**
+   * The v0.3 stateless claim mirror (SPEC A.7, ADR 075/077) — `POST /teams/:slug/claim`. One-shot path
+   * for a harness that can't hold a WS: authenticate with the team agent key (in the body, not a
+   * Bearer token) + ask to occupy a seat. Response bodies ARE the WS frame shapes, so `parseClaimResponse`
+   * handles HTTP + WS with one code path: 200 → occupied, 202 → pending (request opened, admins
+   * decide), 4xx → refused (the body is a RefusedFrame, NOT an ErrorBody — so this does NOT use the
+   * shared `request()` which throws on 4xx). 5xx/network → CliError. Additive + unwired: the live
+   * `claim`/`join` token path is untouched until the P3 atomic cutover.
+   */
+  async claim(
+    slug: string,
+    input: { key: string; target: ClaimTarget; grant?: string; surface: Surface },
+  ): Promise<ClaimOutcome> {
+    // Validate the frame shape against the protocol schema (ADR 078); send the HTTP body Cleo's
+    // endpoint expects ({ key, target, grant?, surface } — no WS type/v).
+    const frame = buildClaimFrame({
+      team: slug,
+      key: input.key,
+      target: input.target,
+      surface: input.surface,
+      ...(input.grant !== undefined ? { grant: input.grant } : {}),
+    });
+    const body = {
+      key: frame.key,
+      target: frame.target,
+      ...(frame.grant !== undefined ? { grant: frame.grant } : {}),
+      surface: frame.surface,
+    };
+    let res: Response;
+    try {
+      res = await fetch(this.opts.server + `/teams/${slug}/claim`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      if (isConnRefused(err)) {
+        throw new CliError(
+          `can't reach team server at ${this.opts.server} — is the daemon running? (musterd serve)`,
+          7,
+        );
+      }
+      throw err;
+    }
+    const text = await res.text();
+    const json: unknown = text ? JSON.parse(text) : {};
+    if (res.status === 200 || res.status === 202 || (res.status >= 400 && res.status < 500)) {
+      try {
+        return parseClaimResponse(json);
+      } catch {
+        // A 4xx that isn't a refused frame (e.g. a plain ErrorBody) falls back to the standard map.
+        const errBody = ErrorBodySchema.safeParse(json);
+        if (errBody.success) {
+          throw new CliError(errBody.data.error.message, exitForCode(errBody.data.error.code));
+        }
+        throw new CliError(`claim failed (${res.status})`, 1);
+      }
+    }
+    throw new CliError(`server error (${res.status})`, 1);
   }
 }
 

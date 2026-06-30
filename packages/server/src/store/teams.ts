@@ -1,6 +1,6 @@
+import { type AgentKeyMint, type Policy, PolicySchema, TOKEN_PREFIXES } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { type AgentKeyMint, type Policy, PolicySchema, TOKEN_PREFIXES } from '@musterd/protocol';
 import type { z } from 'zod';
 import { MusterdError } from '../errors.js';
 import { hashToken, newSecret } from './members.js';
