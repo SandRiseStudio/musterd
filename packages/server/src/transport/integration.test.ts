@@ -129,6 +129,11 @@ describe('HTTP API', () => {
     });
     expect(r.status).toBe(201);
     expect(r.json.token).toMatch(/^mskd_/);
+    // v0.3 P3 composite mint (SPEC A.7): agent key + creator credential + policy, each shown once.
+    expect(r.json.agent_key).toMatch(/^mskey_/);
+    expect(r.json.human_credential).toMatch(/^mscr_/);
+    expect(r.json.policy).toEqual({ allow_pre_issued_grants: false });
+    expect(r.json.seat.name).toBe('nick');
     const dup = await post('/teams', { slug: 'dawn', creator: { name: 'x', kind: 'human' } });
     expect(dup.status).toBe(409);
     expect(dup.json.error.code).toBe('conflict');

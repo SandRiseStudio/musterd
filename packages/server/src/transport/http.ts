@@ -35,6 +35,7 @@ import {
   getMemberByName,
   isHeld,
   leaveMember,
+  mintCredential,
   rotateToken,
   setAvailability,
   setMemberGovernance,
@@ -56,7 +57,7 @@ import {
 import { decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
-import { createTeam, requireTeam, rotateAgentKey, setPolicy } from '../store/teams.js';
+import { createTeam, getPolicy, requireTeam, rotateAgentKey, setPolicy } from '../store/teams.js';
 import { recordError } from '../telemetry.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -339,10 +340,21 @@ export async function handleHttp(
         JSON.stringify({ ...GENERALIST_CAPABILITIES, is_admin: true }),
       );
       const creator = getMemberById(ctx.db, row.id) ?? row;
+      // v0.3 P3 composite mint (SPEC A.7): the team agent key (agents present it to claim a seat) + the
+      // creator's human credential (the admin authenticates with it) + the default policy. Each secret is
+      // shown ONCE. Additive during the flip — `member`/`token` stay until the cutover removes hello/token;
+      // `seat` is the A.7 name (== member in the transition). `agent_key`/`human_credential` are inert
+      // until the claim handler (ADR 077) is wired, so this stays Model-B-additive.
+      const { agent_key } = rotateAgentKey(ctx.db, team.id);
+      const { credential } = mintCredential(ctx.db, creator.id);
       return sendJson(res, 201, {
         team: { id: team.id, slug: team.slug, display: team.display },
         member: toMember(creator, team.slug),
+        seat: toMember(creator, team.slug),
         token,
+        human_credential: credential,
+        agent_key,
+        policy: getPolicy(ctx.db, team.id),
       });
     }
 
