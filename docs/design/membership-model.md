@@ -10,6 +10,8 @@ Companion docs: `spec-v0.3-draft.md` (protocol), `docs/archive/membership-impl-p
 
 The v0.1 adapter auto-joins every harness session as a fixed member. Opening 3 Claude Code sessions in one folder produces **3 presences of one identity**, and a team message **fans out to all 3, each able to reply as that member** — three minds wearing one name, editing the same files. That is a coordination-failure generator (the exact thing Principle 5 / MAST warns against) created by accident, and it makes "an agent is an identity, not a session" (Principle 2) incoherent under concurrency. We also decided **security is a first-class principle** (Principle 7), which reshapes how identities are claimed.
 
+This governance set is also where the value lands once agents *write*. The minimalist "an agent is just a `while` loop" framing is correct about execution and exactly why the hard parts live **outside** the loop: the most-upvoted reaction to that framing in the wild is "production **write actions** need **approvals, logs, and clean rollback paths**" (see `landscape.md` §6). That is this model — the approval lane (ADR 077), the audit log (ADR 071), and `superseded`/reclaim (ADR 017) — and it is *more* necessary, not less, when the writer is one of several actors sharing a team rather than a single owned loop.
+
 ## Core decisions
 
 1. **Identity = a Seat in a Role.** A **Role** (backend, frontend, reviewer…) groups **Seats**. A **Seat** is the durable identity — what v0.1 called a Member — now with a Role, an optional friendly name (`Ada`) or generated handle (`backend-1`), an account status, and a **kind-scoped occupancy**: an **agent** seat has at most one live occupant (single-active + grace), while a **human** seat may have multiple concurrent occupant Presences (ADR 042). History accrues to the seat.
@@ -19,7 +21,7 @@ The v0.1 adapter auto-joins every harness session as a fixed member. Opening 3 C
 5. **No grant → a governance request.** The session asks an admin (local fast-path if an admin human is co-present; otherwise signal an available admin) who **grants an existing seat or creates a new seat + grants it**, or denies.
 6. **Collision → refuse.** Claiming an occupied seat is refused (`claim_conflict`) with the free seats + a hint.
 7. **Observer = humans only**, role-gated. Read-only, in a roster `watching` list, never addressable, cannot act. Not a seat; no promotion to a seat.
-8. **Governance is its own lane.** Member/seat lifecycle, grants, and requests are governance — distinct from collaboration Acts, distinct surfaces, fully audited. Governance ≠ work approval (Principle 1).
+8. **Governance is its own lane.** Member/seat lifecycle, grants, and requests are governance — distinct from collaboration Acts, distinct surfaces, fully audited. Governance ≠ work approval (Principle 1). This is also the "don't let a loop edit its own constraints" property at the coordination layer: a session cannot self-grant capability or self-approve its own claim — grants are admin-issued, expiring, revocable, and audited (the agent-key/grant two-factor, ADR 026 two-universes split). The verifier-first literature names the failure this prevents — *"a loop with access to its own constraints will edit them, so sandbox it"* (the AI-Scientist agent editing its own timeout); here the constraints live outside the occupant's reach by construction. See `landscape.md` §4 (corroboration) + §6 (write-action audit).
 
 ## Terminology (additions)
 
