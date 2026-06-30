@@ -11,7 +11,7 @@ import { ulid } from 'ulid';
 import { MusterdError } from '../errors.js';
 import type { MemberRow, TeamRow } from './rows.js';
 import { resolveCapabilities } from './rows.js';
-import { requireTeam } from './teams.js';
+import { getAgentKeyHash, requireTeam } from './teams.js';
 
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -180,13 +180,37 @@ export function listMembers(db: Database, teamId: string): MemberRow[] {
     .all(teamId);
 }
 
-/** Authenticate a token to a specific member in a specific team. Throws unauthorized/forbidden. */
+/**
+ * Authenticate a request to a specific member (seat) in a team. Throws unauthorized/forbidden.
+ *
+ * v0.3 P3 (ADR 077, SPEC A.7) **prefix-dispatch — additive, no path removed**:
+ *  - `mskey_` (team agent key): authenticates the *harness*, not a seat — so the acting seat must be
+ *    named by the caller (`actingSeat`: the Envelope `from` on a send, or the `x-musterd-seat` header on
+ *    a read, per SPEC A.7 §253). Authorizes on a valid team key + an existing, active seat. Single-active
+ *    occupancy is enforced at *claim* time (the handshake), not re-checked per request — and we
+ *    deliberately do **not** gate on live presence / `isHeld`: the claim OCCUPY path never sets
+ *    `bound_at`, and gating auth on presence would regress the ambient-presence ergonomics (ADR 057) the
+ *    legacy token path never had (a bursty stateless agent past the presence TTL would lock itself out).
+ *  - `mscr_` (human credential): self-identifying — resolves the human seat by `credential_hash`. The
+ *    credential is the authority; if `actingSeat` is supplied it must match.
+ *  - `mskd_` / unprefixed legacy: the v0.2 per-seat token path, **unchanged** (incl. the first-touch
+ *    `bound_at` flip).
+ */
 export function authMember(
   db: Database,
   teamSlug: string,
   token: string,
+  actingSeat?: string,
 ): { team: TeamRow; member: MemberRow } {
   const team = requireTeam(db, teamSlug);
+
+  if (token.startsWith(TOKEN_PREFIXES.agent_key)) {
+    return { team, member: authByAgentKey(db, team, token, actingSeat) };
+  }
+  if (token.startsWith(TOKEN_PREFIXES.credential)) {
+    return { team, member: authByCredential(db, team, token, actingSeat) };
+  }
+
   const hash = hashToken(token);
   const member = db
     .prepare<
@@ -211,6 +235,54 @@ export function authMember(
     member.bound_at = now;
   }
   return { team, member };
+}
+
+/**
+ * Agent-key (`mskey_`) auth: a valid team agent key + an acting seat the caller names (SPEC A.7 §253).
+ * The key authorizes "an authorized harness on this team"; the seat is the identity it is acting as.
+ */
+function authByAgentKey(
+  db: Database,
+  team: TeamRow,
+  key: string,
+  actingSeat: string | undefined,
+): MemberRow {
+  const keyHash = getAgentKeyHash(db, team.id);
+  if (!keyHash || hashToken(key) !== keyHash)
+    throw new MusterdError('unauthorized', `invalid agent key for team "${team.slug}"`);
+  if (!actingSeat)
+    throw new MusterdError(
+      'unauthorized',
+      'agent-key auth must name the acting seat — set the Envelope `from` (send) or the `x-musterd-seat` ' +
+        'header (reads), per SPEC A.7 §253',
+    );
+  const member = getMemberByName(db, team.id, actingSeat);
+  if (!member || member.left_at !== null)
+    throw new MusterdError('unauthorized', `no active seat "${actingSeat}" in team "${team.slug}"`);
+  return member;
+}
+
+/** Human-credential (`mscr_`) auth: self-identifying; the credential is the authority for its seat. */
+function authByCredential(
+  db: Database,
+  team: TeamRow,
+  credential: string,
+  actingSeat: string | undefined,
+): MemberRow {
+  const member = db
+    .prepare<
+      [string, string],
+      MemberRow
+    >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind = 'human'")
+    .get(team.id, hashToken(credential));
+  if (!member)
+    throw new MusterdError('unauthorized', `invalid human credential for team "${team.slug}"`);
+  if (actingSeat && actingSeat !== member.name)
+    throw new MusterdError(
+      'forbidden',
+      `credential identifies "${member.name}", not "${actingSeat}"`,
+    );
+  return member;
 }
 
 /** Is this seat currently *held* (someone has authenticated its token)? See {@link authMember}. */

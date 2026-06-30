@@ -161,6 +161,18 @@ function bearer(req: IncomingMessage): string {
   return h.slice('Bearer '.length).trim();
 }
 
+/**
+ * The seat the caller is acting as, from the `x-musterd-seat` header (SPEC A.7 §253). Required by the
+ * agent-key auth path (the key authenticates the harness, not a seat); harmless on the legacy token /
+ * credential paths, which resolve the seat from the secret itself. Both v0.3 clients set it on every
+ * authed call (ADR 077, commit 4d11b35).
+ */
+function actingSeat(req: IncomingMessage): string | undefined {
+  const h = req.headers['x-musterd-seat'];
+  const v = Array.isArray(h) ? h[0] : h;
+  return v && v.length > 0 ? v : undefined;
+}
+
 const CreateTeamBody = z.object({
   slug: z.string(),
   display: z.string().nullish(),
@@ -212,7 +224,7 @@ function authTouch(
   slug: string,
   req: IncomingMessage,
 ): { team: TeamRow; member: MemberRow } {
-  const auth = authMember(ctx.db, slug, bearer(req));
+  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req));
   // Observer seats (ADR 063) watch without participating — never flip present, no presence event.
   if (auth.member.observer === 1) return auth;
   // A background poller (the notifier reads inbox on an away human's behalf) opts out: marking them
@@ -261,7 +273,7 @@ function authAdmin(
   slug: string,
   req: IncomingMessage,
 ): { team: TeamRow; member: MemberRow } {
-  const auth = authMember(ctx.db, slug, bearer(req));
+  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req));
   if (!resolveCapabilities(auth.member).is_admin)
     throw new MusterdError('forbidden', 'this resource is admin-only (visibility_level: admin)');
   return auth;
@@ -273,7 +285,7 @@ function tryAuth(ctx: Ctx, slug: string, req: IncomingMessage): MemberRow | null
   const h = req.headers['authorization'];
   if (!h || !h.startsWith('Bearer ')) return null;
   try {
-    return authMember(ctx.db, slug, h.slice('Bearer '.length).trim()).member;
+    return authMember(ctx.db, slug, h.slice('Bearer '.length).trim(), actingSeat(req)).member;
   } catch {
     return null;
   }
@@ -943,7 +955,7 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/presence') {
-        const { member } = authMember(ctx.db, slug, bearer(req));
+        const { member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
         const body = parseOrBadRequest(PresenceBody, await readJson(req));
         const p = attach(ctx.db, member.id, body.surface, null, {
           provenance: body.provenance ?? null,
@@ -1018,7 +1030,7 @@ export async function handleHttp(
       // `remove` (deletes the seat) and `reclaim` (operator force-frees someone else's).
       if (method === 'POST' && rest === '/unbind') {
         // authMember (not authTouch) so we don't write an ambient presence row we're about to clear.
-        const { team, member } = authMember(ctx.db, slug, bearer(req));
+        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
         for (const old of ctx.hub.connsForMember(member.id)) {
           old.close?.();
           ctx.hub.remove(old.connId);
