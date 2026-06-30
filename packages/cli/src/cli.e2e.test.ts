@@ -83,10 +83,10 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     expect(created.code).toBe(0);
     expect(created.out).toContain('team "dawn" created');
 
-    // nick adds bo (capture bo's token via --json)
+    // nick adds bo — a 2nd human, who gets her own mscr_ credential (ADR 069 cutover)
     const added = await run(teamCommand, ['add', 'bo', '--kind', 'human', '--json']);
-    const boToken = JSON.parse(added.out).token as string;
-    expect(boToken).toMatch(/^mskd_/);
+    const boToken = JSON.parse(added.out).human_credential as string;
+    expect(boToken).toMatch(/^mscr_/);
 
     // status shows both members
     const status = await run(statusCommand, []);
@@ -115,7 +115,7 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     await run(teamCommand, ['add', 'pat', '--kind', 'human']);
     // pat has received nothing
     const added = await run(teamCommand, ['add', 'pat2', '--kind', 'human', '--json']);
-    const tok = JSON.parse(added.out).token as string;
+    const tok = JSON.parse(added.out).human_credential as string;
     actAs('solo', 'pat2', tok);
     const inbox = await run(inboxCommand, []);
     expect(inbox.out).toContain("inbox empty — nobody's mustered anything yet");
@@ -127,7 +127,7 @@ describe('comeback summary on status (ADR 024)', () => {
     // nick creates dawn and adds bo (the away human).
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     const added = await run(teamCommand, ['add', 'bo', '--kind', 'human', '--json']);
-    const boToken = JSON.parse(added.out).token as string;
+    const boToken = JSON.parse(added.out).human_credential as string; // 2nd human's mscr_ credential
 
     // nick directs a request_help at bo and a plain @team status_update (the latter must NOT count).
     await run(sendCommand, ['--to', 'bo', '--act', 'request_help', 'can you review the auth PR?']);
@@ -150,7 +150,7 @@ describe('thread-close clears the comeback summary (ADR 025)', () => {
   it('stops nagging once the request is resolved, even before the inbox is read', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     const added = await run(teamCommand, ['add', 'bo', '--kind', 'human', '--json']);
-    const boToken = JSON.parse(added.out).token as string;
+    const boToken = JSON.parse(added.out).human_credential as string; // 2nd human's mscr_ credential
 
     // nick directs a request_help at bo; capture the envelope id (its thread root).
     const ask = await run(sendCommand, [

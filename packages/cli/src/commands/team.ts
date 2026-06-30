@@ -110,28 +110,39 @@ async function teamAdd(parsed: Parsed): Promise<number> {
   });
 
   if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify({ member: res.member, token: res.token }) + '\n');
+    // v0.3 (ADR 069): a human gets an mscr_ credential (shown once); an agent is credential-less and
+    // claims with the team agent key. The vestigial `token` is no longer an authenticator.
+    process.stdout.write(
+      JSON.stringify({
+        member: res.member,
+        ...(res.human_credential ? { human_credential: res.human_credential } : {}),
+      }) + '\n',
+    );
     return 0;
   }
   process.stdout.write(
     `${theme.ok('✓')} added ${theme.memberName(name, kind)} (${kind}${role ? `, ${role}` : ''}) to ${team}\n`,
   );
   if (kind === 'agent') {
-    process.stdout.write(theme.meta('connect this agent via MCP with env:') + '\n');
+    // Agents authenticate with the team agent key (mskey_) + a seat claim (ADR 069/075) — not a per-seat
+    // token. The simplest hand-off is `musterd agent` in the agent's folder (isolated worktree + MCP).
+    const agentKey = loadConfig().agentKeys[team] ?? 'mskey_…';
+    process.stdout.write(theme.meta('connect this agent via MCP with the team agent key:') + '\n');
     process.stdout.write(
       theme.meta(
-        `  MUSTERD_TEAM=${team} MUSTERD_MEMBER=${name} MUSTERD_TOKEN=${res.token} MUSTERD_SURFACE=claude-code`,
+        `  MUSTERD_TEAM=${team} MUSTERD_AGENT_KEY=${agentKey} MUSTERD_CLAIM=seat:${name} MUSTERD_SURFACE=claude-code`,
       ) + '\n',
     );
-    // Hand-off path (ADR 055): the agent adopts the seat in its own folder with no global-config
-    // clobber — preferred over `join --token`, which overwrites this machine's cached identity.
     process.stdout.write(
-      theme.meta(`or adopt it in the agent's folder: musterd claim ${name} --token ${res.token}`) +
-        '\n',
+      theme.meta(`or in the agent's folder: musterd agent ${name} --team ${team}`) + '\n',
     );
   } else {
+    // Humans authenticate with their own credential (mscr_), shown once here.
     process.stdout.write(
-      theme.meta(`they join with: musterd join ${team} --as ${name} --token ${res.token}`) + '\n',
+      theme.meta(`they authenticate with their credential (shown once — store it now):`) + '\n',
+    );
+    process.stdout.write(
+      theme.meta(`  musterd join ${team} --as ${name} --key ${res.human_credential}`) + '\n',
     );
   }
   return 0;
