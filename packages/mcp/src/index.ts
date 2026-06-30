@@ -133,7 +133,7 @@ export function startResolutionWatcher(
     const resolved = readAndConsumeResolution(config);
     if (!resolved) return;
     try {
-      await adoptIdentity(client, config, resolved.member, resolved.token);
+      await adoptIdentity(client, config, resolved.seat);
     } catch (err) {
       process.stderr.write(`musterd claim adoption failed: ${(err as Error).message}\n`);
     }
