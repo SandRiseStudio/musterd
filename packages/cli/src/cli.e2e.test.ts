@@ -300,10 +300,7 @@ describe('join honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
     expect(cfg.identities.dawn.name).toBe('nick');
   });
 
-  // TODO(p3-cutover): pending Cleo's claim handler — a human re-joining via their `mscr_` credential
-  // should self-authorize and occupy (no grant), but POST /claim currently returns pending for it.
-  // Un-skip once credential-occupy is wired. (Flagged to Cleo 2026-06-30.)
-  it.skip('re-joining as the same cached member occupies via its credential (v0.3)', async () => {
+  it('re-joining as the same cached member occupies via its credential (v0.3)', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     const ok = await run(joinCommand, ['dawn', '--as', 'nick']);
     expect(ok.code).toBe(0);

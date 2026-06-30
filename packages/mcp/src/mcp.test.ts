@@ -98,10 +98,7 @@ describe('MCP adapter', () => {
     client.close();
   });
 
-  // TODO(p3-cutover): pending Cleo's claim handler — a 2nd claim of an occupied seat by the SAME agent
-  // key should newest-wins/supersede (ADR 017), but the handler currently returns claim_conflict. Un-skip
-  // once the supersede-on-same-key path lands. (Flagged to Cleo 2026-06-30.)
-  it.skip('a second session for the same member takes over; the first is superseded (ADR 017)', async () => {
+  it('a second session for the same member takes over; the first is superseded (ADR 017)', async () => {
     const a1 = new MusterdClient(adaConfig());
     await a1.join();
     expect(a1.joined).toBe(true);
