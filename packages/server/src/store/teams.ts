@@ -1,6 +1,8 @@
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
+import { type AgentKeyMint, type Policy, PolicySchema, TOKEN_PREFIXES } from '@musterd/protocol';
 import { MusterdError } from '../errors.js';
+import { hashToken, newSecret } from './members.js';
 import type { TeamRow } from './rows.js';
 
 const SLUG_RE = /^[a-z0-9-]{1,32}$/;
@@ -25,6 +27,8 @@ export function createTeam(
     display: input.display ?? null,
     default_lifecycle: input.defaultLifecycle ?? 'forever',
     archived_at: null,
+    agent_key_hash: null,
+    policy: null,
     created_at: now,
     updated_at: now,
   };
@@ -44,6 +48,54 @@ export function requireTeam(db: Database, slug: string): TeamRow {
   const t = getTeamBySlug(db, slug);
   if (!t) throw new MusterdError('not_found', `no team "${slug}"`);
   return t;
+}
+
+/* ── v0.3 P3 team secrets + policy (ADR 076) ─────────────────────────────────────────────────────
+ * Team-scoped secrets live on the team row (agent key is one-per-team, rotatable); only the sha256
+ * hash is stored (SPEC A.2). Plaintext is returned once at mint and never persisted/logged. */
+
+/**
+ * Rotate (or set) the team agent key: mint a fresh `mskey_` secret, store its hash, return the
+ * plaintext **once**. Any prior key is invalidated by the overwrite.
+ */
+export function rotateAgentKey(db: Database, teamId: string): AgentKeyMint {
+  const agentKey = newSecret(TOKEN_PREFIXES.agent_key);
+  db.prepare('UPDATE teams SET agent_key_hash = ?, updated_at = ? WHERE id = ?').run(
+    hashToken(agentKey),
+    Date.now(),
+    teamId,
+  );
+  return { agent_key: agentKey };
+}
+
+/** The team's agent-key hash, or null if none is set. */
+export function getAgentKeyHash(db: Database, teamId: string): string | null {
+  const row = db
+    .prepare<
+      [string],
+      { agent_key_hash: string | null }
+    >('SELECT agent_key_hash FROM teams WHERE id = ?')
+    .get(teamId);
+  return row?.agent_key_hash ?? null;
+}
+
+/** Set the team governance policy (overwrites). Returns the parsed, defaulted policy. */
+export function setPolicy(db: Database, teamId: string, policy: Policy): Policy {
+  const parsed = PolicySchema.parse(policy);
+  db.prepare('UPDATE teams SET policy = ?, updated_at = ? WHERE id = ?').run(
+    JSON.stringify(parsed),
+    Date.now(),
+    teamId,
+  );
+  return parsed;
+}
+
+/** The team policy, parsed with defaults applied (an unset policy ⇒ all defaults). */
+export function getPolicy(db: Database, teamId: string): Policy {
+  const row = db
+    .prepare<[string], { policy: string | null }>('SELECT policy FROM teams WHERE id = ?')
+    .get(teamId);
+  return PolicySchema.parse(row?.policy ? JSON.parse(row.policy) : {});
 }
 
 /** Update a team's durable fields in place (ADR 058 reconcile upsert). Preserves id + created_at. */

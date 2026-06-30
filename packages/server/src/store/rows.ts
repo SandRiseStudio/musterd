@@ -14,6 +14,10 @@ export interface TeamRow {
   display: string | null;
   default_lifecycle: string;
   archived_at: number | null;
+  /** v0.3 P3 (ADR 076): sha256 of the team's rotatable agent key. NULL until an admin sets one. */
+  agent_key_hash: string | null;
+  /** v0.3 P3 (ADR 076): team governance policy as JSON (`{ allow_pre_issued_grants }`). NULL ⇒ defaults. */
+  policy: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -39,6 +43,8 @@ export interface MemberRow {
   /** Resolved effective capabilities as JSON (ADR 070), projected by reconcile from role defaults ⊕
    * per-seat narrowing. NULL ⇒ the generalist default (a db-only or not-yet-reconciled seat). */
   capabilities: string | null;
+  /** v0.3 P3 (ADR 076): sha256 of this human's credential. NULL for agent seats / pre-P3 rows. */
+  credential_hash: string | null;
   left_at: number | null;
   created_at: number;
   updated_at: number;

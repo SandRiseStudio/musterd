@@ -1,5 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Availability, Lifecycle, MemberKind } from '@musterd/protocol';
+import {
+  type Availability,
+  type CredentialMint,
+  type Lifecycle,
+  type MemberKind,
+  TOKEN_PREFIXES,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { MusterdError } from '../errors.js';
@@ -58,6 +64,22 @@ export function newSecret(prefix: string): string {
 
 function newToken(): string {
   return newSecret('mskd_');
+}
+
+/** Set (or clear) a member's credential hash (ADR 076, P3.1). */
+export function setCredentialHash(db: Database, memberId: string, hash: string | null): void {
+  db.prepare('UPDATE members SET credential_hash = ?, updated_at = ? WHERE id = ?').run(
+    hash,
+    Date.now(),
+    memberId,
+  );
+}
+
+/** Mint a fresh `mscr_` human credential for a member: store its hash, return the plaintext **once**. */
+export function mintCredential(db: Database, memberId: string): CredentialMint {
+  const credential = newSecret(TOKEN_PREFIXES.credential);
+  setCredentialHash(db, memberId, hashToken(credential));
+  return { credential };
 }
 
 export interface AddMemberInput {
@@ -125,6 +147,7 @@ export function addMember(
     // account status + generalist capabilities) until the file-backed values are reconciled in.
     account_status: null,
     capabilities: null,
+    credential_hash: null,
     left_at: null,
     created_at: now,
     updated_at: now,
