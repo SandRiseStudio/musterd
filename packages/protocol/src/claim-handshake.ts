@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SurfaceSchema } from './acts.js';
+import { ProvenanceSchema, SurfaceSchema } from './acts.js';
 import { MemberSchema } from './member.js';
 import { PROTOCOL_VERSION } from './version.js';
 
@@ -60,6 +60,17 @@ export const ClaimFrame = z.object({
   /** Pre-issued grant token; omit → the server opens a claim request (A.5, default path). */
   grant: z.string().optional(),
   surface: SurfaceSchema,
+  /**
+   * The claiming session's workspace identity (ADR 068). Scopes agent single-active: a same-workspace
+   * re-claim (e.g. a Claude Code health-check MCP probe, a transient autojoin spawn) does NOT supersede
+   * the live seat — it would otherwise flap it every ~90s — while a different-workspace claim still
+   * newest-wins (ADR 017). Optional for back-compat; the MCP/CLI clients already send it on the wire.
+   */
+  workspace: z.string().optional(),
+  /** How this session was provisioned (ADR 014) + the human driving it (ADR 021) — presence metadata
+   *  the live `hello` carried; surfaced on the roster. The client already sends both; recorded at OCCUPY. */
+  provenance: ProvenanceSchema.optional(),
+  driver: z.string().optional(),
 });
 export type ClaimFrame = z.infer<typeof ClaimFrame>;
 
