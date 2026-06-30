@@ -1209,4 +1209,74 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(auditRows('dawn').some((r) => r.action === 'observe.denied')).toBe(true);
     w.close();
   });
+
+  // ── v0.3 P3.1 credential/grant admin endpoints (ADR 076) ───────────────────────────────────────
+  it('issues a grant (msgr_, shown once), lists it without the secret, and revokes it', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+
+    const issued = await post(
+      '/teams/dawn/grants',
+      { scope: 'seat', target: 'Ada', lifetime: 'once' },
+      nickTok,
+    );
+    expect(issued.status).toBe(201);
+    expect(issued.json.token).toMatch(/^msgr_/);
+    expect(issued.json.grant.single_use).toBe(true);
+    expect(auditRows('dawn').some((r) => r.action === 'grant.issue' && r.actor === 'nick')).toBe(
+      true,
+    );
+
+    // listed without the secret token/hash
+    const list = await get('/teams/dawn/grants', nickTok);
+    expect(list.status).toBe(200);
+    expect(list.json.grants).toHaveLength(1);
+    expect(JSON.stringify(list.json.grants[0])).not.toContain('msgr_');
+    expect(list.json.grants[0]).not.toHaveProperty('token_hash');
+
+    const id = issued.json.grant.id;
+    const revoked = await fetch(`${base}/teams/dawn/grants/${id}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${nickTok}` },
+    });
+    expect(revoked.status).toBe(200);
+    expect(auditRows('dawn').some((r) => r.action === 'grant.revoke')).toBe(true);
+    // a second revoke of the same id is a 404 (already revoked)
+    const again = await fetch(`${base}/teams/dawn/grants/${id}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${nickTok}` },
+    });
+    expect(again.status).toBe(404);
+  });
+
+  it('rotates the team agent key (mskey_, shown once) + sets policy — both audited', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+
+    const key = await post('/teams/dawn/agent-key/rotate', {}, nickTok);
+    expect(key.status).toBe(200);
+    expect(key.json.agent_key).toMatch(/^mskey_/);
+    expect(auditRows('dawn').some((r) => r.action === 'key.rotate')).toBe(true);
+
+    const pol = await post('/teams/dawn/policy', { allow_pre_issued_grants: true }, nickTok);
+    expect(pol.status).toBe(200);
+    expect(pol.json.policy.allow_pre_issued_grants).toBe(true);
+    expect(auditRows('dawn').some((r) => r.action === 'policy.change')).toBe(true);
+  });
+
+  it('the P3.1 admin endpoints are is_admin-only (a non-admin is 403)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.token;
+    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    const denied = await post(
+      '/teams/dawn/grants',
+      { scope: 'seat', target: 'Ada', lifetime: 'standing' },
+      ada.json.token,
+    );
+    expect(denied.status).toBe(403);
+    expect(denied.json.error.code).toBe('forbidden');
+    const key = await post('/teams/dawn/agent-key/rotate', {}, ada.json.token);
+    expect(key.status).toBe(403);
+  });
 });

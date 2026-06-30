@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { type AgentKeyMint, type Policy, PolicySchema, TOKEN_PREFIXES } from '@musterd/protocol';
+import type { z } from 'zod';
 import { MusterdError } from '../errors.js';
 import { hashToken, newSecret } from './members.js';
 import type { TeamRow } from './rows.js';
@@ -79,8 +80,12 @@ export function getAgentKeyHash(db: Database, teamId: string): string | null {
   return row?.agent_key_hash ?? null;
 }
 
-/** Set the team governance policy (overwrites). Returns the parsed, defaulted policy. */
-export function setPolicy(db: Database, teamId: string, policy: Policy): Policy {
+/** Set the team governance policy (overwrites). Re-parses to apply defaults; returns the stored policy. */
+export function setPolicy(
+  db: Database,
+  teamId: string,
+  policy: z.input<typeof PolicySchema>,
+): Policy {
   const parsed = PolicySchema.parse(policy);
   db.prepare('UPDATE teams SET policy = ?, updated_at = ? WHERE id = ?').run(
     JSON.stringify(parsed),

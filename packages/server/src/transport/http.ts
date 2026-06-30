@@ -10,6 +10,8 @@ import {
   AvailabilityStatusSchema,
   PROTOCOL_VERSION,
   GENERALIST_CAPABILITIES,
+  IssueGrantSchema,
+  PolicySchema,
   type MemberSummary,
 } from '@musterd/protocol';
 import { z } from 'zod';
@@ -23,6 +25,7 @@ import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import { appendAudit, listAudit } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
+import { issueGrant, listGrants, revokeGrant } from '../store/grants.js';
 import {
   addMember,
   authMember,
@@ -51,7 +54,7 @@ import {
 } from '../store/presence.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import { resolveCapabilities, toMember } from '../store/rows.js';
-import { createTeam, requireTeam } from '../store/teams.js';
+import { createTeam, requireTeam, rotateAgentKey, setPolicy } from '../store/teams.js';
 import { recordError } from '../telemetry.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -439,6 +442,73 @@ export async function handleHttp(
             detail: r.detail ? JSON.parse(r.detail) : null,
           })),
         });
+      }
+
+      // v0.3 P3.1 governance admin endpoints (ADR 076) — strict is_admin (authAdmin, no fallback),
+      // each audited. The grant/key/policy substrate; additive (the claim flow that consumes grants
+      // is P3.2 / the cutover). Secrets (msgr_/mskey_) are returned once and never re-fetchable.
+      if (method === 'GET' && rest === '/grants') {
+        const { team } = authAdmin(ctx, slug, req);
+        return sendJson(res, 200, { grants: listGrants(ctx.db, team.id) });
+      }
+
+      if (method === 'POST' && rest === '/grants') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const body = parseOrBadRequest(IssueGrantSchema, await readJson(req));
+        const mint = issueGrant(ctx.db, team.id, body, member.name);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'grant.issue',
+          target: body.target,
+          result: 'allow',
+          detail: { scope: body.scope, lifetime: body.lifetime },
+        });
+        return sendJson(res, 201, mint);
+      }
+
+      const grantMatch = rest.match(/^\/grants\/([^/]+)$/);
+      if (method === 'DELETE' && grantMatch) {
+        const grantId = decodeURIComponent(grantMatch[1]!);
+        const { team, member } = authAdmin(ctx, slug, req);
+        if (!revokeGrant(ctx.db, team.id, grantId)) {
+          throw new MusterdError('not_found', `no active grant "${grantId}" on ${slug}`);
+        }
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'grant.revoke',
+          target: grantId,
+          result: 'allow',
+        });
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (method === 'POST' && rest === '/agent-key/rotate') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const mint = rotateAgentKey(ctx.db, team.id);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'key.rotate',
+          target: null,
+          result: 'allow',
+        });
+        return sendJson(res, 200, mint);
+      }
+
+      if (method === 'POST' && rest === '/policy') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const policy = setPolicy(
+          ctx.db,
+          team.id,
+          parseOrBadRequest(PolicySchema, await readJson(req)),
+        );
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'policy.change',
+          target: null,
+          result: 'allow',
+          detail: policy,
+        });
+        return sendJson(res, 200, { policy });
       }
 
       if (method === 'POST' && rest === '/messages') {
