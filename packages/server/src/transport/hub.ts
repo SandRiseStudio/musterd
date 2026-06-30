@@ -18,6 +18,13 @@ export interface Connection {
   send: (frame: WSServerFrame) => void;
   /** Force-close the underlying socket (used to displace a superseded same-identity session). */
   close?: () => void;
+  // P3.2 claim-handshake fields (ADR 077): set while the connection is awaiting admin approval.
+  /** Pending request id while the WS is held open awaiting admin decide; cleared on occupation. */
+  awaitingClaim?: string | null;
+  /** Cached is_admin capability for quick admin broadcast targeting. */
+  isAdmin?: boolean;
+  /** Callback injected by the claim handler to flip state.authenticated from the HTTP decide path. */
+  _claimApproved?: (presenceId: string) => void;
 }
 
 /**
@@ -72,6 +79,38 @@ export class Hub {
 
   connsForMember(memberId: string): Connection[] {
     return [...(this.byMember.get(memberId) ?? [])];
+  }
+
+  /** Retrieve a connection by connId — used by the HTTP approve handler to find a pending WS. */
+  getConn(connId: string): Connection | undefined {
+    return this.byConn.get(connId);
+  }
+
+  /**
+   * Register a pending (unauthenticated) claim connection tracked only by connId — not yet in byMember
+   * so it does not receive normal deliver frames while waiting for admin approval (ADR 077).
+   */
+  addPending(conn: Connection): void {
+    this.byConn.set(conn.connId, conn);
+  }
+
+  /** Push a terminal claim-decision frame to a specific connection by connId. Returns true if delivered. */
+  deliverClaimDecision(connId: string, frame: WSServerFrame): boolean {
+    const conn = this.byConn.get(connId);
+    if (!conn) return false;
+    conn.send(frame);
+    return true;
+  }
+
+  /** Push a frame to all admin connections on a team (P3.2 admin notifications). Returns count. */
+  deliverToAdmins(teamId: string, frame: WSServerFrame): number {
+    let n = 0;
+    for (const conn of this.byConn.values()) {
+      if (conn.teamId !== teamId || !conn.isAdmin) continue;
+      conn.send(frame);
+      n++;
+    }
+    return n;
   }
 
   /** Opt a connection into the team firehose (ADR 061). Cleared on `remove`. */

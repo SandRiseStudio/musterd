@@ -1,13 +1,46 @@
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
+import { appendAudit } from '../store/audit.js';
 import { getMemberById, reapStaleObservers } from '../store/members.js';
 import { hasLivePresence, reapStale } from '../store/presence.js';
+import { expireRequests } from '../store/requests.js';
+import type { RequestRow } from '../store/requests.js';
 
 /** Periodically remove stale presence rows and emit offline events for members who lost all presence. */
 export function startReaper(ctx: Ctx): () => void {
   const tick = () => {
-    // Reap idle observer seats (ADR 064) so the auto-provisioned `web-xxxx` seats don't accumulate.
     const now = Date.now();
+
+    // P3.2: expire claim requests past their deadline (ADR 077 spec-gap 3). Fetch pending+expired
+    // rows BEFORE updating so we have from_session connIds to push refused frames.
+    const expiredRows = ctx.db
+      .prepare<
+        [number],
+        RequestRow
+      >("SELECT * FROM requests WHERE status = 'pending' AND expires_at < ?")
+      .all(now);
+    if (expiredRows.length > 0) {
+      expireRequests(ctx.db, now);
+      for (const row of expiredRows) {
+        ctx.hub.deliverClaimDecision(row.from_session, {
+          type: 'refused',
+          code: 'expired_grant',
+          message: 'your claim request expired — please re-claim',
+          claimable: [],
+          hint: 'musterd claim <seat> --key <mskey_...>',
+        });
+        appendAudit(ctx.db, row.team_id, {
+          actor: null,
+          action: 'request.expired',
+          target: row.target,
+          result: 'deny',
+          detail: { request_id: row.id },
+        });
+      }
+      log.info({ msg: 'reap_requests_expired', count: expiredRows.length });
+    }
+
+    // Reap idle observer seats (ADR 064) so the auto-provisioned `web-xxxx` seats don't accumulate.
     const reapedObservers = reapStaleObservers(
       ctx.db,
       now - ctx.config.observerTtlMs,

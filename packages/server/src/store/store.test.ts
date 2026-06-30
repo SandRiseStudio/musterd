@@ -11,6 +11,7 @@ import {
   hashToken,
   leaveMember,
   listMembers,
+  mintCredential,
   reapStaleObservers,
 } from './members.js';
 import { insertMessage, latestStatusUpdate, listInbox } from './messages.js';
@@ -26,7 +27,7 @@ import {
   release,
   touchAmbientPresence,
 } from './presence.js';
-import { createTeam } from './teams.js';
+import { createTeam, rotateAgentKey } from './teams.js';
 
 function freshTeam() {
   const db = openDb(':memory:');
@@ -55,11 +56,12 @@ describe('teams + members', () => {
     expect(stored?.token_hash).not.toContain(token);
   });
 
-  it('authMember resolves the right member and rejects bad tokens', () => {
+  it('rejects the removed v0.2 per-seat token (mskd_ cutover, ADR 069)', () => {
     const { db, team } = freshTeam();
     const { token } = addMember(db, team, { name: 'Ada', kind: 'agent' });
-    const ok = authMember(db, 'dawn', token);
-    expect(ok.member.name).toBe('Ada');
+    expect(token).toMatch(/^mskd_/); // addMember still mints the durable seat token_hash …
+    // … but it no longer authenticates — the team agent key + human credential are the only paths now.
+    expect(() => authMember(db, 'dawn', token)).toThrow(MusterdError);
     expect(() => authMember(db, 'dawn', 'mskd_wrong')).toThrow(MusterdError);
   });
 
@@ -97,9 +99,72 @@ describe('teams + members', () => {
     expect(revived.row.left_at).toBeNull();
     expect(revived.token).not.toBe(first.token); // deletion was a revocation — token re-minted
     expect(listMembers(db, team.id).map((m) => m.name)).toContain('Ada');
-    // The new token authenticates; the old one is dead.
-    expect(authMember(db, 'dawn', revived.token).member.id).toBe(first.row.id);
-    expect(() => authMember(db, 'dawn', first.token)).toThrow(MusterdError);
+  });
+});
+
+// v0.3 P3 (ADR 077, SPEC A.7 §253): authMember dispatches on the secret prefix. The agent key (mskey_)
+// authenticates the harness and names the acting seat out-of-band; the human credential (mscr_) is
+// self-identifying; the legacy per-seat token (mskd_) is untouched. The upgrade is additive.
+describe('authMember v0.3 prefix-dispatch (ADR 077)', () => {
+  it('agent key + acting seat resolves to the named seat', () => {
+    const { db, team } = freshTeam();
+    addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const { agent_key } = rotateAgentKey(db, team.id);
+
+    const ok = authMember(db, 'dawn', agent_key, 'Ada');
+    expect(ok.member.name).toBe('Ada');
+    // The agent-key path must NOT depend on bound_at/presence (claim never sets it; gating on it would
+    // regress ADR 057). A freshly-added, never-touched seat authenticates fine.
+    expect(ok.member.bound_at).toBeNull();
+  });
+
+  it('agent key without an acting seat is unauthorized (the key is not a seat)', () => {
+    const { db, team } = freshTeam();
+    addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const { agent_key } = rotateAgentKey(db, team.id);
+    expect(() => authMember(db, 'dawn', agent_key)).toThrow(MusterdError);
+  });
+
+  it('agent key naming a non-existent or left seat is unauthorized', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const { agent_key } = rotateAgentKey(db, team.id);
+    expect(() => authMember(db, 'dawn', agent_key, 'Nobody')).toThrow(MusterdError);
+    leaveMember(db, ada.row.id);
+    expect(() => authMember(db, 'dawn', agent_key, 'Ada')).toThrow(MusterdError);
+  });
+
+  it('a wrong agent key is unauthorized', () => {
+    const { db, team } = freshTeam();
+    addMember(db, team, { name: 'Ada', kind: 'agent' });
+    rotateAgentKey(db, team.id);
+    expect(() => authMember(db, 'dawn', 'mskey_bogus', 'Ada')).toThrow(MusterdError);
+  });
+
+  it('the team agent key cannot act as a HUMAN seat — escalation guard (security focal point 2)', () => {
+    const { db, team } = freshTeam();
+    addMember(db, team, { name: 'nick', kind: 'human' }); // a human admin seat
+    const { agent_key } = rotateAgentKey(db, team.id);
+    // The shared agent key naming a human seat must be refused as `forbidden` — otherwise any agent
+    // could set x-musterd-seat:<admin> and impersonate the human admin (privilege escalation).
+    expect(() => authMember(db, 'dawn', agent_key, 'nick')).toThrow(MusterdError);
+    try {
+      authMember(db, 'dawn', agent_key, 'nick');
+    } catch (e) {
+      expect((e as MusterdError).code).toBe('forbidden');
+    }
+  });
+
+  it('a human credential is self-identifying (no acting seat needed)', () => {
+    const { db, team } = freshTeam();
+    const human = addMember(db, team, { name: 'Nick', kind: 'human' });
+    const { credential } = mintCredential(db, human.row.id);
+
+    const ok = authMember(db, 'dawn', credential);
+    expect(ok.member.name).toBe('Nick');
+    // A matching x-musterd-seat is accepted; a mismatching one is forbidden (the credential is authority).
+    expect(authMember(db, 'dawn', credential, 'Nick').member.name).toBe('Nick');
+    expect(() => authMember(db, 'dawn', credential, 'Ada')).toThrow(MusterdError);
   });
 });
 

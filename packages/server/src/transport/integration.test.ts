@@ -35,26 +35,48 @@ async function pollUntil(pred: () => boolean, ms = 1000): Promise<void> {
   throw new Error('pollUntil timed out');
 }
 
-async function post(path: string, body: unknown, token?: string) {
+/**
+ * v0.3 auth descriptor (ADR 077, SPEC A.7 §253). A bare string is a self-identifying secret — a human
+ * `mscr_` credential. An `{ key, seat }` is an agent acting as a seat: `Bearer <agent_key>` +
+ * `x-musterd-seat`, mirroring the production HttpClient (commit 4d11b35).
+ */
+type Auth = string | { key: string; seat: string };
+function authHeaders(auth?: Auth): Record<string, string> {
+  if (!auth) return {};
+  if (typeof auth === 'string') return { authorization: `Bearer ${auth}` };
+  return { authorization: `Bearer ${auth.key}`, 'x-musterd-seat': auth.seat };
+}
+
+async function post(path: string, body: unknown, auth?: Auth) {
   const res = await fetch(base + path, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...authHeaders(auth),
     },
     body: JSON.stringify(body),
   });
   return { status: res.status, json: (await res.json()) as any };
 }
 
-async function get(path: string, token?: string, extraHeaders?: Record<string, string>) {
+async function get(path: string, auth?: Auth, extraHeaders?: Record<string, string>) {
   const res = await fetch(base + path, {
     headers: {
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...authHeaders(auth),
       ...(extraHeaders ?? {}),
     },
   });
   return { status: res.status, json: (await res.json()) as any };
+}
+
+/** Mint a standing seat grant (admin-authed) so an agent WS-claim occupies immediately, not pending. */
+async function standingGrant(adminAuth: Auth, seat: string): Promise<string> {
+  const r = await post(
+    '/teams/dawn/grants',
+    { scope: 'seat', target: seat, lifetime: 'standing' },
+    adminAuth,
+  );
+  return r.json.token as string;
 }
 
 /** A test WS client that records frames and lets you await a specific type. */
@@ -96,9 +118,22 @@ class TestWs {
       });
     });
   }
-  hello(team: string, as: string, token: string, surface = 'cli') {
-    this.send({ type: 'hello', v: PROTOCOL_VERSION, team, as, token, surface });
-    return this.waitFor('welcome');
+  /**
+   * v0.3 claim handshake (ADR 077). `key` is the team agent key (mskey_) or a human credential (mscr_);
+   * an agent seat needs a `grant` to occupy immediately (else the server opens a pending request). The
+   * success frame is `occupied` (the governed successor to `welcome`).
+   */
+  claim(team: string, key: string, seat: string, surface = 'cli', grant?: string) {
+    this.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team,
+      key,
+      target: { seat },
+      ...(grant ? { grant } : {}),
+      surface,
+    });
+    return this.waitFor('occupied');
   }
   subscribe(scope: 'team' | 'team-all' = 'team') {
     this.send({ type: 'subscribe', scope });
@@ -129,6 +164,11 @@ describe('HTTP API', () => {
     });
     expect(r.status).toBe(201);
     expect(r.json.token).toMatch(/^mskd_/);
+    // v0.3 P3 composite mint (SPEC A.7): agent key + creator credential + policy, each shown once.
+    expect(r.json.agent_key).toMatch(/^mskey_/);
+    expect(r.json.human_credential).toMatch(/^mscr_/);
+    expect(r.json.policy).toEqual({ allow_pre_issued_grants: false });
+    expect(r.json.seat.name).toBe('nick');
     const dup = await post('/teams', { slug: 'dawn', creator: { name: 'x', kind: 'human' } });
     expect(dup.status).toBe(409);
     expect(dup.json.error.code).toBe('conflict');
@@ -136,9 +176,9 @@ describe('HTTP API', () => {
 
   it('sends and reads an inbox over HTTP with unread accounting', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
+    const nickTok = team.json.human_credential;
     const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
-    const boTok = bo.json.token;
+    const boTok = bo.json.human_credential; // a human seat authenticates with its own mscr_ credential
 
     const env = {
       id: 'mh1',
@@ -160,9 +200,30 @@ describe('HTTP API', () => {
     expect(inbox2.json.messages).toHaveLength(0);
   });
 
+  it('a second human member is minted a credential that authenticates (ADR 069 cutover gap)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    // A non-creator human seat gets its own mscr_ credential, returned once (parallel to the creator).
+    const bo = await post(
+      '/teams/dawn/members',
+      { name: 'bo', kind: 'human' },
+      team.json.human_credential,
+    );
+    expect(bo.json.human_credential).toMatch(/^mscr_/);
+    // …and it authenticates as bo (the credential is self-identifying).
+    const inbox = await get('/teams/dawn/inbox', bo.json.human_credential);
+    expect(inbox.status).toBe(200);
+    // An agent member gets NO credential — it claims with the team agent key + a grant.
+    const ada = await post(
+      '/teams/dawn/members',
+      { name: 'Ada', kind: 'agent' },
+      team.json.human_credential,
+    );
+    expect(ada.json.human_credential).toBeUndefined();
+  });
+
   it('rejects an invalid act with 422 validation', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, team.json.token);
+    await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, team.json.human_credential);
     const bad = await post(
       '/teams/dawn/messages',
       {
@@ -177,7 +238,7 @@ describe('HTTP API', () => {
           ts: 1,
         },
       },
-      team.json.token,
+      team.json.human_credential,
     );
     expect(bad.status).toBe(422);
     expect(bad.json.error.code).toBe('validation');
@@ -185,9 +246,9 @@ describe('HTTP API', () => {
 
   it('ambient presence: a one-shot authenticated command flips the agent present (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
-    const adaTok = ada.json.token;
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const adaTok = { key: team.json.agent_key, seat: 'Ada' };
 
     // Ada has never opened a socket → offline.
     const before = await get('/teams/dawn/members', nickTok);
@@ -205,26 +266,29 @@ describe('HTTP API', () => {
 
   it('ambient presence: x-musterd-no-touch suppresses the touch (the notifier opt-out, ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // A read carrying the no-touch header (a background poller, e.g. notify) must NOT flip Ada present.
-    await get('/teams/dawn/inbox', ada.json.token, { 'x-musterd-no-touch': '1' });
+    await get(
+      '/teams/dawn/inbox',
+      { key: team.json.agent_key, seat: 'Ada' },
+      { 'x-musterd-no-touch': '1' },
+    );
     const after = await get('/teams/dawn/members', nickTok);
     expect(after.json.members.find((m: any) => m.name === 'Ada')?.activity).toBe('offline');
   });
 
   it('ambient presence: a status_update reads working, and the surface header is honored (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
-    const adaTok = ada.json.token;
-
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     const res = await fetch(base + '/teams/dawn/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${adaTok}`,
+        authorization: `Bearer ${team.json.agent_key}`,
+        'x-musterd-seat': 'Ada',
         'x-musterd-surface': 'claude-code',
       },
       body: JSON.stringify({
@@ -252,14 +316,14 @@ describe('HTTP API', () => {
 
   it('ambient presence: a live watcher sees the offline→online transition event (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
-    const adaTok = ada.json.token;
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const adaTok = { key: team.json.agent_key, seat: 'Ada' };
 
     // nick watches the team roster live.
     const watcher = new TestWs();
     await watcher.open();
-    await watcher.hello('dawn', 'nick', nickTok);
+    await watcher.claim('dawn', nickTok, 'nick');
     watcher.send({ type: 'subscribe', scope: 'team' });
 
     // Ada runs a one-shot; the watcher should receive a presence online event for Ada.
@@ -326,26 +390,44 @@ describe('static web serving (ADR 062)', () => {
 describe('WebSocket', () => {
   it('/health connections reflects a live session (ADR 047)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
     expect((await get('/health')).json.connections).toBe(0);
 
     const a = new TestWs();
     await a.open();
-    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
     expect((await get('/health')).json.connections).toBe(1);
     a.close();
   });
 
   it('delivers live to a present recipient and acks the sender', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
-    const lin = await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, team.json.token);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, team.json.human_credential);
 
     const a = new TestWs();
     const l = new TestWs();
     await Promise.all([a.open(), l.open()]);
-    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
-    await l.hello('dawn', 'Lin', lin.json.token, 'codex');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
+    await l.claim(
+      'dawn',
+      team.json.agent_key,
+      'Lin',
+      'codex',
+      await standingGrant(team.json.human_credential, 'Lin'),
+    );
 
     a.send({
       type: 'send',
@@ -372,18 +454,36 @@ describe('WebSocket', () => {
 
   it('firehose (subscribe team-all): an observer sees a directed DM between two other members (ADR 061)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const tok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
-    const lin = await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
-    const obs = await post('/teams/dawn/members', { name: 'Obs', kind: 'agent' }, tok);
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Obs', kind: 'agent' }, tok);
 
     const a = new TestWs();
     const l = new TestWs();
     const o = new TestWs();
     await Promise.all([a.open(), l.open(), o.open()]);
-    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
-    await l.hello('dawn', 'Lin', lin.json.token, 'codex');
-    await o.hello('dawn', 'Obs', obs.json.token, 'web');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
+    await l.claim(
+      'dawn',
+      team.json.agent_key,
+      'Lin',
+      'codex',
+      await standingGrant(team.json.human_credential, 'Lin'),
+    );
+    await o.claim(
+      'dawn',
+      team.json.agent_key,
+      'Obs',
+      'web',
+      await standingGrant(team.json.human_credential, 'Obs'),
+    );
 
     // Lin is the recipient AND a firehose subscriber (tests dedup); Obs is a pure observer.
     const linSub = await l.subscribe('team-all');
@@ -423,9 +523,9 @@ describe('WebSocket', () => {
 
   it('GET /messages returns the whole team timeline incl. DMs between others, with since/limit (ADR 061)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const tok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
-    const lin = await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
 
     const mk = (id: string, from: string, to: any, body: string, ts: number) => ({
       id,
@@ -441,12 +541,12 @@ describe('WebSocket', () => {
     await post(
       '/teams/dawn/messages',
       { envelope: mk('t1', 'Ada', { kind: 'member', name: 'Lin' }, 'dm', 1000) },
-      ada.json.token,
+      { key: team.json.agent_key, seat: 'Ada' },
     );
     await post(
       '/teams/dawn/messages',
       { envelope: mk('t2', 'Lin', { kind: 'team' }, 'all', 2000) },
-      lin.json.token,
+      { key: team.json.agent_key, seat: 'Lin' },
     );
 
     // nick — party to neither — sees BOTH via the team timeline (firehose history backfill).
@@ -463,8 +563,8 @@ describe('WebSocket', () => {
 
   it('observer seat: watches the firehose but is hidden from roster/count and cannot send (ADR 063)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const tok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
     await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
     const obs = await post(
       '/teams/dawn/members',
@@ -476,8 +576,20 @@ describe('WebSocket', () => {
     const a = new TestWs();
     const o = new TestWs();
     await Promise.all([a.open(), o.open()]);
-    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
-    await o.hello('dawn', 'wall', obs.json.token, 'web');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
+    await o.claim(
+      'dawn',
+      team.json.agent_key,
+      'wall',
+      'web',
+      await standingGrant(team.json.human_credential, 'wall'),
+    );
     await o.subscribe('team-all');
 
     // The observer is NOT on the roster and does NOT count as a live session, even though connected:
@@ -518,7 +630,7 @@ describe('WebSocket', () => {
           ts: Date.now(),
         },
       },
-      obs.json.token,
+      obs.json.human_credential, // wall is a human observer — auth with its credential, not the agent key
     );
     expect(denied.status).toBe(403);
     expect(denied.json.error.code).toBe('forbidden');
@@ -529,13 +641,13 @@ describe('WebSocket', () => {
 
   it('a message to an offline member surfaces via inbox', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // nick present, Ada offline.
     const n = new TestWs();
     await n.open();
-    await n.hello('dawn', 'nick', nickTok, 'cli');
+    await n.claim('dawn', nickTok, 'nick', 'cli');
     n.send({
       type: 'send',
       envelope: {
@@ -551,7 +663,10 @@ describe('WebSocket', () => {
     });
     await n.waitFor('ack');
 
-    const inbox = await get('/teams/dawn/inbox?unread=1', ada.json.token);
+    const inbox = await get('/teams/dawn/inbox?unread=1', {
+      key: team.json.agent_key,
+      seat: 'Ada',
+    });
     expect(inbox.json.messages).toHaveLength(1);
     expect(inbox.json.messages[0].act).toBe('request_help');
     n.close();
@@ -559,16 +674,22 @@ describe('WebSocket', () => {
 
   it('roster activity reflects working from a status_update, online when present, offline otherwise', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, nickTok); // never connects → offline
 
     // nick present but idle; Ada present and working.
     const n = new TestWs();
     const a = new TestWs();
     await Promise.all([n.open(), a.open()]);
-    await n.hello('dawn', 'nick', nickTok, 'cli');
-    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    await n.claim('dawn', nickTok, 'nick', 'cli');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
 
     a.send({
       type: 'send',
@@ -600,7 +721,7 @@ describe('WebSocket', () => {
 
   it('sets and exposes a member’s self-declared availability on the roster (ADR 044)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
+    const nickTok = team.json.human_credential;
     const by = async (name: string) =>
       (await get('/teams/dawn/members', nickTok)).json.members.find((m: any) => m.name === name);
 
@@ -631,24 +752,25 @@ describe('WebSocket', () => {
     expect(noauth.status).toBe(401);
   });
 
-  it('records provenance + workspace from the hello and surfaces them on the roster (ADR 014)', async () => {
+  it('records provenance + workspace from the claim and surfaces them on the roster (ADR 014)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const a = new TestWs();
     await a.open();
     a.send({
-      type: 'hello',
+      type: 'claim',
       v: PROTOCOL_VERSION,
       team: 'dawn',
-      as: 'Ada',
-      token: ada.json.token,
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(team.json.human_credential, 'Ada'),
       surface: 'claude-code',
       provenance: 'session',
       workspace: 'movetrail@feat/login',
     });
-    await a.waitFor('welcome');
+    await a.waitFor('occupied');
 
     const roster = await get('/teams/dawn/members', nickTok);
     const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
@@ -658,24 +780,25 @@ describe('WebSocket', () => {
     a.close();
   });
 
-  it('records the driver from the hello and surfaces it on the roster (ADR 021)', async () => {
+  it('records the driver from the claim and surfaces it on the roster (ADR 021)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const a = new TestWs();
     await a.open();
     a.send({
-      type: 'hello',
+      type: 'claim',
       v: PROTOCOL_VERSION,
       team: 'dawn',
-      as: 'Ada',
-      token: ada.json.token,
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(team.json.human_credential, 'Ada'),
       surface: 'claude-code',
       provenance: 'session',
       driver: 'nick',
     });
-    await a.waitFor('welcome');
+    await a.waitFor('occupied');
 
     const roster = await get('/teams/dawn/members', nickTok);
     const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
@@ -686,23 +809,35 @@ describe('WebSocket', () => {
 
   it('a second live session for the same member takes over; the first is superseded (ADR 017)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
 
     const a1 = new TestWs();
     await a1.open();
-    await a1.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    await a1.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
 
     // The newer session wins: it gets `welcome`, and the older one is told it was superseded.
     const a2 = new TestWs();
     await a2.open();
-    const welcome = await a2.hello('dawn', 'Ada', ada.json.token, 'cli');
-    expect(welcome.type).toBe('welcome');
+    const occupied = await a2.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'cli',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
+    expect(occupied.type).toBe('occupied');
 
     const superseded = await a1.waitFor('error');
     expect((superseded as any).code).toBe('superseded');
 
     // Exactly one live presence remains — the new one (single-active still holds).
-    const roster = await get('/teams/dawn/members', team.json.token);
+    const roster = await get('/teams/dawn/members', team.json.human_credential);
     const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
     expect(adaRow.presences).toHaveLength(1);
     expect(adaRow.presences[0].surface).toBe('cli');
@@ -711,37 +846,39 @@ describe('WebSocket', () => {
     a2.close();
   });
 
-  it('a same-workspace hello does NOT supersede the live session (ADR 068)', async () => {
+  it('a same-workspace claim does NOT supersede the live session (ADR 068)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
-    const tok = ada.json.token as string;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const grant = await standingGrant(team.json.human_credential, 'Ada');
 
     const live = new TestWs();
     await live.open();
     live.send({
-      type: 'hello',
+      type: 'claim',
       v: PROTOCOL_VERSION,
       team: 'dawn',
-      as: 'Ada',
-      token: tok,
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
       surface: 'claude-code',
       workspace: 'repo@main',
     });
-    expect((await live.waitFor('welcome')).type).toBe('welcome');
+    expect((await live.waitFor('occupied')).type).toBe('occupied');
 
     // A health-check probe (or a reload) briefly spawns the MCP server from the SAME workspace.
     const probe = new TestWs();
     await probe.open();
     probe.send({
-      type: 'hello',
+      type: 'claim',
       v: PROTOCOL_VERSION,
       team: 'dawn',
-      as: 'Ada',
-      token: tok,
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
       surface: 'claude-code',
       workspace: 'repo@main',
     });
-    expect((await probe.waitFor('welcome')).type).toBe('welcome');
+    expect((await probe.waitFor('occupied')).type).toBe('occupied');
 
     // The live session must NOT be told it was superseded — the seat doesn't flap.
     await expect(live.waitFor('error', 300)).rejects.toThrow(/timeout/);
@@ -750,36 +887,38 @@ describe('WebSocket', () => {
     live.close();
   });
 
-  it('a different-workspace hello still supersedes (newest-wins across real sessions, ADR 017/068)', async () => {
+  it('a different-workspace claim still supersedes (newest-wins across real sessions, ADR 017/068)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
-    const tok = ada.json.token as string;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const grant = await standingGrant(team.json.human_credential, 'Ada');
 
     const first = new TestWs();
     await first.open();
     first.send({
-      type: 'hello',
+      type: 'claim',
       v: PROTOCOL_VERSION,
       team: 'dawn',
-      as: 'Ada',
-      token: tok,
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
       surface: 'claude-code',
       workspace: 'repo@main',
     });
-    expect((await first.waitFor('welcome')).type).toBe('welcome');
+    expect((await first.waitFor('occupied')).type).toBe('occupied');
 
     const second = new TestWs();
     await second.open();
     second.send({
-      type: 'hello',
+      type: 'claim',
       v: PROTOCOL_VERSION,
       team: 'dawn',
-      as: 'Ada',
-      token: tok,
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
       surface: 'claude-code',
       workspace: 'repo@other', // a genuinely different session
     });
-    expect((await second.waitFor('welcome')).type).toBe('welcome');
+    expect((await second.waitFor('occupied')).type).toBe('occupied');
 
     const superseded = await first.waitFor('error');
     expect((superseded as any).code).toBe('superseded');
@@ -791,15 +930,15 @@ describe('WebSocket', () => {
   it('a human seat fans out: two concurrent sessions both stay live, neither superseded (ADR 042)', async () => {
     // The team creator (nick) is a human seat.
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
+    const nickTok = team.json.human_credential;
 
     const phone = new TestWs();
     const laptop = new TestWs();
     await Promise.all([phone.open(), laptop.open()]);
-    const w1 = await phone.hello('dawn', 'nick', nickTok, 'cli');
-    const w2 = await laptop.hello('dawn', 'nick', nickTok, 'claude-code');
-    expect(w1.type).toBe('welcome');
-    expect(w2.type).toBe('welcome');
+    const w1 = await phone.claim('dawn', nickTok, 'nick', 'cli');
+    const w2 = await laptop.claim('dawn', nickTok, 'nick', 'claude-code');
+    expect(w1.type).toBe('occupied');
+    expect(w2.type).toBe('occupied');
 
     // Neither human session is displaced — give a superseded frame a chance to arrive, then assert none did.
     await new Promise((r) => setTimeout(r, 50));
@@ -820,17 +959,23 @@ describe('WebSocket', () => {
 
   it('delivers a directed message AND a @team broadcast to BOTH of a human’s sessions (ADR 042)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // nick holds two live sessions; Ada is the sender.
     const phone = new TestWs();
     const laptop = new TestWs();
     const a = new TestWs();
     await Promise.all([phone.open(), laptop.open(), a.open()]);
-    await phone.hello('dawn', 'nick', nickTok, 'cli');
-    await laptop.hello('dawn', 'nick', nickTok, 'claude-code');
-    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    await phone.claim('dawn', nickTok, 'nick', 'cli');
+    await laptop.claim('dawn', nickTok, 'nick', 'claude-code');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
 
     // Directed message to nick → both of nick's sessions receive the deliver.
     a.send({
@@ -878,12 +1023,18 @@ describe('WebSocket', () => {
 
   it('reclaim drops a member’s live session and frees the seat (ADR 017 follow-up)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const a = new TestWs();
     await a.open();
-    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
 
     const r = await post('/teams/dawn/members/Ada/reclaim', {}, nickTok);
     expect(r.status).toBe(200);
@@ -905,15 +1056,21 @@ describe('WebSocket', () => {
 
   it('unbind releases the caller’s own seat: drops its session + presence, keeps it on the roster (ADR 058)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const a = new TestWs();
     await a.open();
-    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
 
     // Ada unbinds herself with her *own* token (self-only — no target name).
-    const r = await post('/teams/dawn/unbind', {}, ada.json.token);
+    const r = await post('/teams/dawn/unbind', {}, { key: team.json.agent_key, seat: 'Ada' });
     expect(r.status).toBe(200);
     expect(r.json.member).toBe('Ada');
 
@@ -935,12 +1092,18 @@ describe('WebSocket', () => {
 
   it('remove soft-deletes a member, drops its live session, and is idempotent (ADR 019)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const a = new TestWs();
     await a.open();
-    await a.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
 
     const r = await post('/teams/dawn/members/Ada/remove', {}, nickTok);
     expect(r.status).toBe(200);
@@ -965,17 +1128,23 @@ describe('WebSocket', () => {
 
   it('lets the same member reclaim its presence after disconnecting (within grace)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // nick stays present so we can observe Ada's offline event after she drops.
     const n = new TestWs();
     await n.open();
-    await n.hello('dawn', 'nick', nickTok, 'cli');
+    await n.claim('dawn', nickTok, 'nick', 'cli');
 
     const a1 = new TestWs();
     await a1.open();
-    await a1.hello('dawn', 'Ada', ada.json.token, 'claude-code');
+    await a1.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
     a1.close();
 
     // Wait until the server has processed the close (released the hold + emitted offline).
@@ -988,27 +1157,34 @@ describe('WebSocket', () => {
 
     const a2 = new TestWs();
     await a2.open();
-    const welcome = await a2.hello('dawn', 'Ada', ada.json.token, 'cli');
-    expect(welcome.type).toBe('welcome');
+    const occupied = await a2.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'cli',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
+    expect(occupied.type).toBe('occupied');
 
     n.close();
     a2.close();
   });
 
-  it('rejects a hello whose name does not match the token', async () => {
+  it('rejects a claim whose credential does not match the target seat', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.token);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, team.json.human_credential);
     const w = new TestWs();
     await w.open();
+    // nick's credential self-identifies as nick — it cannot occupy someone else's seat (Lin).
     w.send({
-      type: 'hello',
+      type: 'claim',
       v: PROTOCOL_VERSION,
       team: 'dawn',
-      as: 'Lin',
-      token: ada.json.token,
+      key: team.json.human_credential,
+      target: { seat: 'Lin' },
       surface: 'cli',
     });
-    const err = await w.waitFor('error');
+    const err = await w.waitFor('refused');
     expect((err as any).code).toBe('forbidden');
     w.close();
   });
@@ -1050,14 +1226,18 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
 
   it('creator seat is admin; a non-admin cannot reclaim/remove once an admin exists', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
+    const nickTok = team.json.human_credential;
     // The creator-admin default (ADR 071) is on the returned member …
     expect(team.json.member.capabilities.is_admin).toBe(true);
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nickTok);
 
     // Ada (generalist, not admin) is refused governance now that nick is an admin.
-    const denied = await post('/teams/dawn/members/Bob/reclaim', {}, ada.json.token);
+    const denied = await post(
+      '/teams/dawn/members/Bob/reclaim',
+      {},
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
     expect(denied.status).toBe(403);
     expect(denied.json.error.code).toBe('forbidden');
     // The admin may.
@@ -1070,13 +1250,17 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
 
   it('empty-admin fallback: with no admin on the team, any member may reclaim (no flag day)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nickTok);
     // Strip the only admin → the team has zero admins → governance falls back to v0.2 open behaviour.
     setCaps('dawn', 'nick', { is_admin: false });
 
-    const ok = await post('/teams/dawn/members/Bob/reclaim', {}, ada.json.token);
+    const ok = await post(
+      '/teams/dawn/members/Bob/reclaim',
+      {},
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
     expect(ok.status).toBe(200);
     const entry = auditRows('dawn').find((r) => r.action === 'member.reclaim');
     expect(entry?.detail).toContain('no-admin');
@@ -1084,8 +1268,8 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
 
   it('GET /audit is admin-only', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members/Ada/reclaim', {}, nickTok); // write one entry
 
     const adminView = await get('/teams/dawn/audit', nickTok);
@@ -1093,7 +1277,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(adminView.json.audit.length).toBeGreaterThan(0);
     expect(adminView.json.audit[0]).toMatchObject({ action: 'member.reclaim', result: 'allow' });
 
-    const nonAdmin = await get('/teams/dawn/audit', ada.json.token);
+    const nonAdmin = await get('/teams/dawn/audit', { key: team.json.agent_key, seat: 'Ada' });
     expect(nonAdmin.status).toBe(403);
     const anon = await get('/teams/dawn/audit');
     expect(anon.status).toBe(401);
@@ -1101,10 +1285,10 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
 
   it('can_flag_urgent: an allowed seat keeps urgent + is audited; a denied seat is downgraded, not rejected', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
+    const nickTok = team.json.human_credential;
     const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
-    const bobTok = bob.json.token;
-    const mut = await post('/teams/dawn/members', { name: 'Mut', kind: 'agent' }, nickTok);
+    const bobTok = bob.json.human_credential; // human seat → its own credential, not the agent key
+    await post('/teams/dawn/members', { name: 'Mut', kind: 'agent' }, nickTok);
 
     // nick is generalist-ish (can_flag_urgent true) → urgent rides through.
     const allowed = await post(
@@ -1119,7 +1303,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const downgraded = await post(
       '/teams/dawn/messages',
       { envelope: urgentEnv('Mut', 'Bob', 'u-deny') },
-      mut.json.token,
+      { key: team.json.agent_key, seat: 'Mut' },
     );
     expect(downgraded.status).toBe(201); // delivered, not rejected
 
@@ -1138,10 +1322,10 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
 
   it('account_status + can_message gate sends', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
+    const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
-    const dis = await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
-    const mute = await post('/teams/dawn/members', { name: 'Mute', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Mute', kind: 'agent' }, nickTok);
 
     setCaps('dawn', 'Dis', {}, 'disabled');
     setCaps('dawn', 'Mute', { can_message: 'none' });
@@ -1159,13 +1343,13 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const disabled = await post(
       '/teams/dawn/messages',
       { envelope: baseEnv('Dis', 'd1') },
-      dis.json.token,
+      { key: team.json.agent_key, seat: 'Dis' },
     );
     expect(disabled.status).toBe(403);
     const muted = await post(
       '/teams/dawn/messages',
       { envelope: baseEnv('Mute', 'm1') },
-      mute.json.token,
+      { key: team.json.agent_key, seat: 'Mute' },
     );
     expect(muted.status).toBe(403);
     const audit = auditRows('dawn');
@@ -1174,8 +1358,8 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
 
   it('visibility_level: a non-admin viewer sees its own caps but not other seats’ authority map', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // Admin sees every seat's caps.
     const adminView = await get('/teams/dawn/members', nickTok);
@@ -1183,7 +1367,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(adminView.json.members.find((m: any) => m.name === 'Ada').capabilities).toBeDefined();
 
     // Ada (team-level) sees her own caps but not nick's.
-    const adaView = await get('/teams/dawn/members', ada.json.token);
+    const adaView = await get('/teams/dawn/members', { key: team.json.agent_key, seat: 'Ada' });
     expect(adaView.json.members.find((m: any) => m.name === 'Ada').capabilities).toBeDefined();
     expect(adaView.json.members.find((m: any) => m.name === 'nick').capabilities).toBeUndefined();
     // Handles/roles/presence still visible — only the authority map is hidden.
@@ -1196,13 +1380,19 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
 
   it('can_observe: a seat narrowed to can_observe:false is refused the firehose', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const watcher = await post('/teams/dawn/members', { name: 'Watcher', kind: 'human' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Watcher', kind: 'human' }, nickTok);
     setCaps('dawn', 'Watcher', { can_observe: false });
 
     const w = new TestWs();
     await w.open();
-    await w.hello('dawn', 'Watcher', watcher.json.token, 'cli');
+    await w.claim(
+      'dawn',
+      team.json.agent_key,
+      'Watcher',
+      'cli',
+      await standingGrant(team.json.human_credential, 'Watcher'),
+    );
     w.send({ type: 'subscribe', scope: 'team-all' });
     const err = await w.waitFor('error');
     expect((err as any).code).toBe('forbidden');
@@ -1213,7 +1403,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
   // ── v0.3 P3.1 credential/grant admin endpoints (ADR 076) ───────────────────────────────────────
   it('issues a grant (msgr_, shown once), lists it without the secret, and revokes it', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
+    const nickTok = team.json.human_credential;
 
     const issued = await post(
       '/teams/dawn/grants',
@@ -1251,7 +1441,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
 
   it('rotates the team agent key (mskey_, shown once) + sets policy — both audited', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
+    const nickTok = team.json.human_credential;
 
     const key = await post('/teams/dawn/agent-key/rotate', {}, nickTok);
     expect(key.status).toBe(200);
@@ -1266,17 +1456,21 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
 
   it('the P3.1 admin endpoints are is_admin-only (a non-admin is 403)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const nickTok = team.json.token;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const denied = await post(
       '/teams/dawn/grants',
       { scope: 'seat', target: 'Ada', lifetime: 'standing' },
-      ada.json.token,
+      { key: team.json.agent_key, seat: 'Ada' },
     );
     expect(denied.status).toBe(403);
     expect(denied.json.error.code).toBe('forbidden');
-    const key = await post('/teams/dawn/agent-key/rotate', {}, ada.json.token);
+    const key = await post(
+      '/teams/dawn/agent-key/rotate',
+      {},
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
     expect(key.status).toBe(403);
   });
 });

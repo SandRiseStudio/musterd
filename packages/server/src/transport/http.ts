@@ -10,10 +10,13 @@ import {
   AvailabilityStatusSchema,
   PROTOCOL_VERSION,
   GENERALIST_CAPABILITIES,
+  ClaimTargetSchema,
+  DecideRequestSchema,
   IssueGrantSchema,
   PolicySchema,
   type MemberSummary,
 } from '@musterd/protocol';
+import { ulid } from 'ulid';
 import { z } from 'zod';
 import { resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
@@ -25,7 +28,13 @@ import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import { appendAudit, listAudit } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
-import { issueGrant, listGrants, revokeGrant } from '../store/grants.js';
+import {
+  consumeGrant,
+  issueGrant,
+  listGrants,
+  revokeGrant,
+  validateGrant,
+} from '../store/grants.js';
 import {
   addMember,
   authMember,
@@ -33,7 +42,10 @@ import {
   getMemberById,
   getMemberByName,
   isHeld,
+  hashToken,
   leaveMember,
+  markBound,
+  mintCredential,
   rotateToken,
   setAvailability,
   setMemberGovernance,
@@ -52,9 +64,17 @@ import {
   listPresence,
   touchAmbientPresence,
 } from '../store/presence.js';
+import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
-import { resolveCapabilities, toMember } from '../store/rows.js';
-import { createTeam, requireTeam, rotateAgentKey, setPolicy } from '../store/teams.js';
+import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
+import {
+  createTeam,
+  getAgentKeyHash,
+  getPolicy,
+  requireTeam,
+  rotateAgentKey,
+  setPolicy,
+} from '../store/teams.js';
 import { recordError } from '../telemetry.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -142,6 +162,18 @@ function bearer(req: IncomingMessage): string {
   return h.slice('Bearer '.length).trim();
 }
 
+/**
+ * The seat the caller is acting as, from the `x-musterd-seat` header (SPEC A.7 §253). Required by the
+ * agent-key auth path (the key authenticates the harness, not a seat); harmless on the legacy token /
+ * credential paths, which resolve the seat from the secret itself. Both v0.3 clients set it on every
+ * authed call (ADR 077, commit 4d11b35).
+ */
+function actingSeat(req: IncomingMessage): string | undefined {
+  const h = req.headers['x-musterd-seat'];
+  const v = Array.isArray(h) ? h[0] : h;
+  return v && v.length > 0 ? v : undefined;
+}
+
 const CreateTeamBody = z.object({
   slug: z.string(),
   display: z.string().nullish(),
@@ -193,7 +225,7 @@ function authTouch(
   slug: string,
   req: IncomingMessage,
 ): { team: TeamRow; member: MemberRow } {
-  const auth = authMember(ctx.db, slug, bearer(req));
+  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req));
   // Observer seats (ADR 063) watch without participating — never flip present, no presence event.
   if (auth.member.observer === 1) return auth;
   // A background poller (the notifier reads inbox on an away human's behalf) opts out: marking them
@@ -242,7 +274,7 @@ function authAdmin(
   slug: string,
   req: IncomingMessage,
 ): { team: TeamRow; member: MemberRow } {
-  const auth = authMember(ctx.db, slug, bearer(req));
+  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req));
   if (!resolveCapabilities(auth.member).is_admin)
     throw new MusterdError('forbidden', 'this resource is admin-only (visibility_level: admin)');
   return auth;
@@ -254,7 +286,7 @@ function tryAuth(ctx: Ctx, slug: string, req: IncomingMessage): MemberRow | null
   const h = req.headers['authorization'];
   if (!h || !h.startsWith('Bearer ')) return null;
   try {
-    return authMember(ctx.db, slug, h.slice('Bearer '.length).trim()).member;
+    return authMember(ctx.db, slug, h.slice('Bearer '.length).trim(), actingSeat(req)).member;
   } catch {
     return null;
   }
@@ -337,10 +369,21 @@ export async function handleHttp(
         JSON.stringify({ ...GENERALIST_CAPABILITIES, is_admin: true }),
       );
       const creator = getMemberById(ctx.db, row.id) ?? row;
+      // v0.3 P3 composite mint (SPEC A.7): the team agent key (agents present it to claim a seat) + the
+      // creator's human credential (the admin authenticates with it) + the default policy. Each secret is
+      // shown ONCE. Additive during the flip — `member`/`token` stay until the cutover removes hello/token;
+      // `seat` is the A.7 name (== member in the transition). `agent_key`/`human_credential` are inert
+      // until the claim handler (ADR 077) is wired, so this stays Model-B-additive.
+      const { agent_key } = rotateAgentKey(ctx.db, team.id);
+      const { credential } = mintCredential(ctx.db, creator.id);
       return sendJson(res, 201, {
         team: { id: team.id, slug: team.slug, display: team.display },
         member: toMember(creator, team.slug),
+        seat: toMember(creator, team.slug),
         token,
+        human_credential: credential,
+        agent_key,
+        policy: getPolicy(ctx.db, team.id),
       });
     }
 
@@ -399,7 +442,17 @@ export async function handleHttp(
             }
             token = rotateToken(ctx.db, row.id);
           }
-          return sendJson(res, 201, { member: toMember(row, team.slug), token });
+          return sendJson(res, 201, {
+            member: toMember(row, team.slug),
+            token,
+            // v0.3 (ADR 069): a human member needs a credential (mscr_) to authenticate — the creator gets
+            // one at team-create; this gives every *other* human seat the same, closing the "second human
+            // can't auth" gap the cutover surfaced. Agents stay credential-less (they claim with the team
+            // agent key + a grant).
+            ...(row.kind === 'human'
+              ? { human_credential: mintCredential(ctx.db, row.id).credential }
+              : {}),
+          });
         }
         const team = requireTeam(ctx.db, slug);
         const { row, token } = addMember(ctx.db, team, {
@@ -410,7 +463,17 @@ export async function handleHttp(
           lifecycleUntil: body.lifecycle_until ?? null,
           ...(body.observer ? { observer: true } : {}),
         });
-        return sendJson(res, 201, { member: toMember(row, team.slug), token });
+        return sendJson(res, 201, {
+          member: toMember(row, team.slug),
+          token,
+          // v0.3 (ADR 069): a human member needs a credential (mscr_) to authenticate — the creator gets
+          // one at team-create; this gives every *other* human seat the same, closing the "second human
+          // can't auth" gap the cutover surfaced. Agents stay credential-less (they claim with the team
+          // agent key + a grant).
+          ...(row.kind === 'human'
+            ? { human_credential: mintCredential(ctx.db, row.id).credential }
+            : {}),
+        });
       }
 
       if (method === 'GET' && rest === '/members') {
@@ -442,6 +505,145 @@ export async function handleHttp(
             detail: r.detail ? JSON.parse(r.detail) : null,
           })),
         });
+      }
+
+      // P3.2 request lane (ADR 077) — claim requests + admin decide. Strict is_admin.
+      if (method === 'GET' && rest === '/requests') {
+        const { team } = authAdmin(ctx, slug, req);
+        const pendingOnly = url.searchParams.get('status') === 'pending';
+        const requests = listRequests(ctx.db, team.id, { pendingOnly });
+        return sendJson(res, 200, { requests });
+      }
+
+      const requestDecideMatch = rest.match(/^\/requests\/([^/]+)\/decide$/);
+      if (method === 'POST' && requestDecideMatch) {
+        const { team, member: admin } = authAdmin(ctx, slug, req);
+        const requestId = decodeURIComponent(requestDecideMatch[1]!);
+        const body = parseOrBadRequest(DecideRequestSchema, await readJson(req));
+        const existing = getRequest(ctx.db, team.id, requestId);
+        if (!existing) throw new MusterdError('not_found', `no request "${requestId}"`);
+        if (existing.status !== 'pending')
+          throw new MusterdError(
+            'conflict',
+            `request "${requestId}" is already ${existing.status}`,
+          );
+
+        if (body.decision === 'approve') {
+          // Resolve the target member from the encoded target string.
+          let targetMember: MemberRow | null = null;
+          if (existing.target) {
+            if (existing.target.startsWith('seat:')) {
+              const seatName = existing.target.slice(5);
+              targetMember = getMemberByName(ctx.db, team.id, seatName) ?? null;
+            } else if (existing.target.startsWith('role:')) {
+              const roleName = existing.target.slice(5);
+              targetMember =
+                ctx.db
+                  .prepare<
+                    [string, string],
+                    MemberRow
+                  >('SELECT * FROM members WHERE team_id = ? AND role = ? AND left_at IS NULL LIMIT 1')
+                  .get(team.id, roleName) ?? null;
+            }
+          }
+          if (!targetMember) {
+            throw new MusterdError(
+              'not_found',
+              `target member not found for request "${requestId}"`,
+            );
+          }
+
+          // Account-status check before approving.
+          const status = resolveAccountStatus(targetMember);
+          if (status === 'disabled' || status === 'banned') {
+            throw new MusterdError('forbidden', `seat "${targetMember.name}" is ${status}`);
+          }
+
+          // Issue a grant so the approved session can occupy the seat.
+          const mint = issueGrant(
+            ctx.db,
+            team.id,
+            {
+              scope: existing.target?.startsWith('role:') ? 'role' : 'seat',
+              target: targetMember.name,
+              lifetime: body.lifetime,
+              ...(body.lifetime === 'ttl' && body.ttl_hours != null
+                ? { ttl_hours: body.ttl_hours }
+                : {}),
+              single_use: body.lifetime === 'once',
+            },
+            admin.name,
+          );
+
+          // Attach presence for the approved session.
+          const presence = attach(
+            ctx.db,
+            targetMember.id,
+            existing.surface as import('@musterd/protocol').Surface,
+            existing.from_session,
+            { provenance: null, workspace: null, driver: null },
+          );
+
+          // Settle the request.
+          decideRequest(ctx.db, team.id, requestId, 'approved', admin.name);
+
+          // Flip the waiting WS: find the pending connection and call _claimApproved.
+          const pendingConn = ctx.hub.getConn(existing.from_session);
+          if (pendingConn?._claimApproved) {
+            pendingConn._claimApproved(presence.id);
+          }
+
+          // Push the terminal occupied frame to the waiting WS.
+          const delivered = ctx.hub.deliverClaimDecision(existing.from_session, {
+            type: 'occupied',
+            seat: toMember(targetMember, team.slug),
+            presence_id: presence.id,
+            server_time: Date.now(),
+            memory: null,
+          });
+
+          // Broadcast presence online for non-observers.
+          if (targetMember.observer !== 1) {
+            ctx.hub.broadcastTeam(
+              team.id,
+              { type: 'presence', member: targetMember.name, status: 'online' },
+              undefined,
+            );
+          }
+
+          appendAudit(ctx.db, team.id, {
+            actor: admin.name,
+            action: 'request.decide',
+            target: targetMember.name,
+            result: 'allow',
+            detail: { decision: 'approve', request_id: requestId, delivered },
+          });
+          // Also consume the grant if once (it was issued for the seat; the approve itself IS the use).
+          if (body.lifetime === 'once') consumeGrant(ctx.db, mint.grant.id);
+          return sendJson(res, 200, {
+            request_id: requestId,
+            decision: 'approve',
+            delivered,
+          });
+        } else {
+          // Deny: settle the request and push a refused frame to the waiting WS.
+          decideRequest(ctx.db, team.id, requestId, 'denied', admin.name);
+          const delivered = ctx.hub.deliverClaimDecision(existing.from_session, {
+            type: 'refused',
+            code: 'forbidden',
+            message: `your claim request was denied by ${admin.name}`,
+            claimable: [],
+            hint: `contact ${admin.name} for details`,
+          });
+          appendAudit(ctx.db, team.id, {
+            actor: admin.name,
+            action: 'request.decide',
+            target: existing.target,
+            result: 'deny',
+            detail: { decision: 'deny', request_id: requestId, delivered },
+          });
+          return sendJson(res, 200, { request_id: requestId, decision: 'deny', delivered });
+        }
       }
 
       // v0.3 P3.1 governance admin endpoints (ADR 076) — strict is_admin (authAdmin, no fallback),
@@ -511,6 +713,243 @@ export async function handleHttp(
         return sendJson(res, 200, { policy });
       }
 
+      // P3.2 stateless claim mirror (SPEC A.7, ADR 077) — unauthenticated (key in body, not Bearer).
+      // Response bodies ARE the WS frame shapes: 200=occupied, 202=pending, 4xx=refused.
+      if (method === 'POST' && rest === '/claim') {
+        const ClaimBody = z.object({
+          key: z.string(),
+          target: ClaimTargetSchema,
+          grant: z.string().optional(),
+          surface: SurfaceSchema,
+        });
+        const body = parseOrBadRequest(ClaimBody, await readJson(req));
+        const team = requireTeam(ctx.db, slug);
+
+        // Step 1: verify key (agent key or human credential).
+        let authenticatedMember: MemberRow | null = null;
+        const keyHash = getAgentKeyHash(ctx.db, team.id);
+        if (!keyHash || hashToken(body.key) !== keyHash) {
+          authenticatedMember =
+            ctx.db
+              .prepare<
+                [string, string],
+                MemberRow
+              >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind = 'human'")
+              .get(team.id, hashToken(body.key)) ?? null;
+          if (!authenticatedMember) {
+            return sendJson(res, 403, {
+              type: 'refused',
+              code: 'forbidden',
+              message: 'invalid key — present a valid agent key or human credential',
+              claimable: [],
+              hint: `POST /teams/${slug}/claim with a valid mskey_ or mscr_ key`,
+            });
+          }
+        }
+
+        // Step 2: resolve target member.
+        let targetMember: MemberRow | null = null;
+        if ('seat' in body.target) {
+          targetMember = getMemberByName(ctx.db, team.id, body.target.seat) ?? null;
+          if (!targetMember || targetMember.left_at !== null) {
+            return sendJson(res, 404, {
+              type: 'refused',
+              code: 'not_found',
+              message: `no seat "${body.target.seat}" in team "${slug}"`,
+              claimable: [],
+              hint: `musterd team members --team ${slug}`,
+            });
+          }
+          if (authenticatedMember && authenticatedMember.id !== targetMember.id) {
+            return sendJson(res, 403, {
+              type: 'refused',
+              code: 'forbidden',
+              message: `credential identifies "${authenticatedMember.name}", not "${body.target.seat}"`,
+              claimable: [authenticatedMember.name],
+              hint: `musterd claim ${authenticatedMember.name}`,
+            });
+          }
+        } else if ('role' in body.target) {
+          targetMember =
+            ctx.db
+              .prepare<
+                [string, string],
+                MemberRow
+              >('SELECT * FROM members WHERE team_id = ? AND role = ? AND left_at IS NULL LIMIT 1')
+              .get(team.id, body.target.role) ?? null;
+          if (!targetMember) {
+            return sendJson(res, 404, {
+              type: 'refused',
+              code: 'not_found',
+              message: `no seats with role "${body.target.role}" in team "${slug}"`,
+              claimable: [],
+              hint: `musterd team members --team ${slug}`,
+            });
+          }
+        } else {
+          // observe: not supported in stateless HTTP path (no session to push to later)
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: 'observe target not supported via HTTP claim — use WS claim',
+            claimable: [],
+            hint: 'open a WS connection and send a claim frame with { observe: true }',
+          });
+        }
+
+        // Step 3: account_status check.
+        const acctStatus = resolveAccountStatus(targetMember);
+        if (acctStatus === 'disabled' || acctStatus === 'banned') {
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: acctStatus,
+            message: `seat "${targetMember.name}" is ${acctStatus}`,
+            claimable: [],
+            hint: 'contact a team admin to re-enable this seat',
+          });
+        }
+
+        // Step 4: single-active is kind-scoped (ADR 042), matching the WS path. An **agent** seat is
+        // newest-wins (ADR 017): a newer claim displaces the incumbent (superseded → close its socket +
+        // clear its presence) instead of refusing. A **human**/observer seat fans out — no displacement,
+        // a second claim just attaches another presence.
+        const liveConns = ctx.hub.connsForMember(targetMember.id);
+        if (liveConns.length > 0 && targetMember.kind === 'agent' && targetMember.observer === 0) {
+          for (const old of liveConns) {
+            old.send?.({
+              type: 'error',
+              code: 'superseded',
+              message: `your session as "${targetMember.name}" was taken over by a newer one`,
+            });
+            old.close?.();
+            ctx.hub.remove(old.connId);
+          }
+          clearMemberPresence(ctx.db, targetMember.id);
+        }
+
+        // Step 5: grant path — validate + consume, then occupy.
+        if (body.grant) {
+          const gv = validateGrant(ctx.db, team.id, body.grant);
+          if (!gv.ok) {
+            const code = gv.reason === 'expired' ? 'expired_grant' : 'forbidden';
+            return sendJson(res, 403, {
+              type: 'refused',
+              code,
+              message: `grant ${gv.reason}`,
+              claimable: [],
+              hint: 'request a new grant from a team admin',
+            });
+          }
+          const grantTarget = gv.grant.target;
+          const targetOk =
+            ('seat' in body.target &&
+              gv.grant.scope === 'seat' &&
+              grantTarget === body.target.seat) ||
+            ('role' in body.target &&
+              gv.grant.scope === 'role' &&
+              grantTarget === body.target.role);
+          if (!targetOk) {
+            return sendJson(res, 403, {
+              type: 'refused',
+              code: 'forbidden',
+              message: `grant is for ${gv.grant.scope} "${grantTarget}", not your target`,
+              claimable: [],
+              hint: 'request a grant that matches your target seat/role',
+            });
+          }
+          consumeGrant(ctx.db, gv.grant.id);
+          // OCCUPY: stateless — attach presence with null connId (no persistent socket).
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
+            provenance: null,
+            workspace: null,
+            driver: null,
+          });
+          markBound(ctx.db, targetMember.id);
+          appendAudit(ctx.db, team.id, {
+            actor: targetMember.name,
+            action: 'claim.occupied',
+            target: targetMember.name,
+            result: 'allow',
+            detail: { via: 'http', surface: body.surface },
+          });
+          ctx.hub.broadcastTeam(
+            team.id,
+            { type: 'presence', member: targetMember.name, status: 'online' },
+            undefined,
+          );
+          return sendJson(res, 200, {
+            type: 'occupied',
+            seat: toMember(targetMember, team.slug),
+            presence_id: presence.id,
+            server_time: Date.now(),
+            memory: null,
+          });
+        }
+
+        // Credential self-authorize (ADR 077, SPEC A.2): a human authenticated by their OWN mscr_
+        // credential claiming their own seat is self-authorizing — the credential IS the authorization,
+        // so there is no grant and no admin-approval request. Occupy directly (Step 2 already enforced
+        // the credential matches the target seat for a seat-target claim).
+        if (authenticatedMember && authenticatedMember.id === targetMember.id) {
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
+            provenance: null,
+            workspace: null,
+            driver: null,
+          });
+          markBound(ctx.db, targetMember.id);
+          appendAudit(ctx.db, team.id, {
+            actor: targetMember.name,
+            action: 'claim.occupied',
+            target: targetMember.name,
+            result: 'allow',
+            detail: { via: 'http', surface: body.surface, auth: 'credential' },
+          });
+          ctx.hub.broadcastTeam(
+            team.id,
+            { type: 'presence', member: targetMember.name, status: 'online' },
+            undefined,
+          );
+          return sendJson(res, 200, {
+            type: 'occupied',
+            seat: toMember(targetMember, team.slug),
+            presence_id: presence.id,
+            server_time: Date.now(),
+            memory: null,
+          });
+        }
+
+        // Step 6: no grant → create request, return 202 pending.
+        const encodedTarget =
+          'seat' in body.target
+            ? `seat:${body.target.seat}`
+            : 'role' in body.target
+              ? `role:${body.target.role}`
+              : 'observe';
+        const claimReq = createRequest(ctx.db, team.id, {
+          kind: 'claim',
+          from_session: `http:${ulid()}`,
+          target: encodedTarget,
+          surface: body.surface,
+        });
+        appendAudit(ctx.db, team.id, {
+          actor: null,
+          action: 'claim.pending',
+          target: targetMember.name,
+          result: 'allow',
+          detail: { via: 'http', request_id: claimReq.id, surface: body.surface },
+        });
+        ctx.hub.deliverToAdmins(team.id, {
+          type: 'pending',
+          request_id: claimReq.id,
+          message: `HTTP seat claim from ${body.surface}: ${encodedTarget}`,
+        });
+        return sendJson(res, 202, {
+          type: 'pending',
+          request_id: claimReq.id,
+          message: `claim request opened — waiting for admin approval (poll GET /teams/${slug}/requests/${claimReq.id})`,
+        });
+      }
+
       if (method === 'POST' && rest === '/messages') {
         const { team, member } = authTouch(ctx, slug, req);
         const body = (await readJson(req)) as { envelope?: unknown };
@@ -576,7 +1015,7 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/presence') {
-        const { member } = authMember(ctx.db, slug, bearer(req));
+        const { member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
         const body = parseOrBadRequest(PresenceBody, await readJson(req));
         const p = attach(ctx.db, member.id, body.surface, null, {
           provenance: body.provenance ?? null,
@@ -651,7 +1090,7 @@ export async function handleHttp(
       // `remove` (deletes the seat) and `reclaim` (operator force-frees someone else's).
       if (method === 'POST' && rest === '/unbind') {
         // authMember (not authTouch) so we don't write an ambient presence row we're about to clear.
-        const { team, member } = authMember(ctx.db, slug, bearer(req));
+        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
         for (const old of ctx.hub.connsForMember(member.id)) {
           old.close?.();
           ctx.hub.remove(old.connId);
