@@ -22,6 +22,13 @@ import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import { appendAudit, listAudit } from '../store/audit.js';
+import {
+  getClaimableSeats,
+  getRequest,
+  issueGrant,
+  listRequests,
+  settleRequest,
+} from '../store/claims.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import {
   addMember,
@@ -176,6 +183,15 @@ const PresenceBody = z.object({
   provenance: ProvenanceSchema.optional(),
   workspace: z.string().max(120).optional(),
   driver: z.string().max(80).optional(),
+});
+
+/** P3.2 (ADR 077): body for POST /teams/:slug/requests/:id/decide. */
+const DecideRequestBody = z.object({
+  approve: z.boolean(),
+  /** Grant lifetime — only relevant when approve=true. Defaults to 'once'. */
+  lifetime: z.enum(['once', 'ttl', 'standing']).optional(),
+  /** Hours for a ttl lifetime. */
+  ttl_hours: z.number().int().positive().optional(),
 });
 
 /**
@@ -439,6 +455,126 @@ export async function handleHttp(
             detail: r.detail ? JSON.parse(r.detail) : null,
           })),
         });
+      }
+
+      // P3.2 (ADR 077): claim request lane — admin-only (strict is_admin, no fallback).
+      if (method === 'GET' && rest === '/requests') {
+        const { team } = authAdmin(ctx, slug, req);
+        const status = url.searchParams.get('status') ?? undefined;
+        const limit = Number(url.searchParams.get('limit') ?? '');
+        const before = Number(url.searchParams.get('before') ?? '');
+        const rows = listRequests(ctx.db, team.id, {
+          ...(status ? { status } : {}),
+          ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
+          ...(Number.isFinite(before) && before > 0 ? { before } : {}),
+        });
+        return sendJson(res, 200, { requests: rows });
+      }
+
+      const decideMatch = rest.match(/^\/requests\/([^/]+)\/decide$/);
+      if (method === 'POST' && decideMatch) {
+        const requestId = decodeURIComponent(decideMatch[1]!);
+        const { team, member } = authAdmin(ctx, slug, req);
+
+        const body = DecideRequestBody.parse(await readJson(req));
+        const claimReq = getRequest(ctx.db, team.id, requestId);
+        if (!claimReq) throw new MusterdError('not_found', `no request "${requestId}" on ${slug}`);
+        if (claimReq.status !== 'pending') {
+          throw new MusterdError('conflict', `request "${requestId}" is already ${claimReq.status}`);
+        }
+
+        const targetMember = claimReq.target_seat
+          ? getMemberByName(ctx.db, team.id, claimReq.target_seat)
+          : null;
+        if (!targetMember && claimReq.target_seat) {
+          throw new MusterdError('not_found', `no seat "${claimReq.target_seat}" on ${slug}`);
+        }
+
+        if (body.approve) {
+          // Issue the grant record (for audit + future re-auth with a grant token).
+          const grantTarget = claimReq.target_seat
+            ? { seat: claimReq.target_seat }
+            : claimReq.target_role
+              ? { role: claimReq.target_role }
+              : { observe: true as const };
+          const lifetime =
+            body.lifetime === 'standing'
+              ? ('standing' as const)
+              : body.lifetime === 'ttl' && body.ttl_hours
+                ? { ttl_hours: body.ttl_hours }
+                : ('once' as const);
+          if (targetMember) issueGrant(ctx.db, team.id, grantTarget, lifetime, member.name);
+
+          settleRequest(ctx.db, requestId, 'approved', member.name);
+
+          // If the claiming WS is still connected, occupy it directly (push the terminal frame
+          // and flip auth so subsequent WS frames work).
+          const fromConn = ctx.hub.getConn(claimReq.from_conn_id);
+          if (fromConn && targetMember) {
+            // Single-active displacement (mirrors ws.ts claim occupy path).
+            if (targetMember.kind === 'agent' && targetMember.observer === 0) {
+              for (const old of ctx.hub.connsForMember(targetMember.id)) {
+                if (old.connId === fromConn.connId) continue;
+                old.send({ type: 'error', code: 'superseded', message: `seat "${targetMember.name}" was claimed by an approved request` });
+                old.close?.();
+                ctx.hub.remove(old.connId);
+              }
+            }
+            const presence = attach(ctx.db, targetMember.id, claimReq.surface as never, claimReq.from_conn_id, {
+              provenance: null,
+              workspace: null,
+              driver: null,
+            });
+            // Flip the WS auth state + wire presenceId (pending-conn callback).
+            fromConn._claimApproved?.(presence.id);
+            ctx.hub.deliverClaimDecision(fromConn.connId, {
+              type: 'occupied',
+              seat: toMember(targetMember, team.slug),
+              presence_id: presence.id,
+              server_time: Date.now(),
+              memory: null,
+            });
+            ctx.hub.broadcastTeam(team.id, { type: 'presence', member: targetMember.name, status: 'online' }, targetMember.id);
+          }
+
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'request.decide',
+            target: claimReq.target_seat,
+            result: 'allow',
+            detail: { approve: true, lifetime: body.lifetime ?? 'once', delivered: !!fromConn },
+          });
+          return sendJson(res, 200, {
+            request_id: requestId,
+            approve: true,
+            delivered: !!fromConn,
+          });
+        } else {
+          // Deny: push refused to the waiting WS if still connected.
+          settleRequest(ctx.db, requestId, 'denied', member.name);
+          const fromConn = ctx.hub.getConn(claimReq.from_conn_id);
+          if (fromConn) {
+            ctx.hub.deliverClaimDecision(fromConn.connId, {
+              type: 'refused',
+              code: 'forbidden',
+              message: 'your claim was denied by an admin',
+              claimable: targetMember ? getClaimableSeats(ctx.db, team.id) : [],
+              hint: 'contact the team admin to discuss access',
+            });
+          }
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'request.decide',
+            target: claimReq.target_seat,
+            result: 'deny',
+            detail: { approve: false, delivered: !!fromConn },
+          });
+          return sendJson(res, 200, {
+            request_id: requestId,
+            approve: false,
+            delivered: !!fromConn,
+          });
+        }
       }
 
       if (method === 'POST' && rest === '/messages') {

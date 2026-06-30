@@ -126,6 +126,85 @@ export async function fetchAudit(
   return AuditResponseSchema.parse(json).audit;
 }
 
+/** A single pending/settled claim request as returned by GET /requests. */
+export interface ClaimRequest {
+  id: string;
+  team_id: string;
+  kind: string;
+  from_conn_id: string;
+  target_seat: string | null;
+  target_role: string | null;
+  surface: string;
+  status: 'pending' | 'approved' | 'denied' | 'expired';
+  decided_by: string | null;
+  ts: number;
+  expires_at: number;
+}
+
+/**
+ * P3.2 (ADR 077): fetch claim requests for a team. Admin-only (403 if the caller lacks is_admin).
+ * Optionally filter by `status` (pending|approved|denied|expired).
+ */
+export async function fetchRequests(
+  cfg: LiveConfig,
+  opts: { status?: string; limit?: number; before?: number } = {},
+): Promise<ClaimRequest[]> {
+  const q = new URLSearchParams();
+  if (opts.status) q.set('status', opts.status);
+  if (opts.limit != null) q.set('limit', String(opts.limit));
+  if (opts.before != null) q.set('before', String(opts.before));
+  const qs = q.toString();
+  const res = await fetch(
+    `/teams/${encodeURIComponent(cfg.team)}/requests${qs ? `?${qs}` : ''}`,
+    { headers: { authorization: `Bearer ${cfg.token}`, 'x-musterd-surface': 'web' } },
+  );
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const err = (json as { error?: { code?: string; message?: string } }).error;
+    throw new AuditFetchError(
+      err?.message ?? `HTTP ${res.status}`,
+      err?.code ?? `http_${res.status}`,
+      res.status,
+    );
+  }
+  return (json as { requests: ClaimRequest[] }).requests;
+}
+
+/**
+ * P3.2 (ADR 077): approve or deny a pending claim request. Admin-only.
+ * On approve, `lifetime` controls how long the issued grant is valid.
+ */
+export async function decideRequest(
+  cfg: LiveConfig,
+  requestId: string,
+  decision: { approve: boolean; lifetime?: 'once' | 'ttl' | 'standing'; ttl_hours?: number },
+): Promise<{ request_id: string; approve: boolean; delivered: boolean }> {
+  const res = await fetch(
+    `/teams/${encodeURIComponent(cfg.team)}/requests/${encodeURIComponent(requestId)}/decide`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${cfg.token}`,
+        'x-musterd-surface': 'web',
+      },
+      body: JSON.stringify(decision),
+    },
+  );
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const err = (json as { error?: { code?: string; message?: string } }).error;
+    throw new AuditFetchError(
+      err?.message ?? `HTTP ${res.status}`,
+      err?.code ?? `http_${res.status}`,
+      res.status,
+    );
+  }
+  return json as { request_id: string; approve: boolean; delivered: boolean };
+}
+
 /**
  * Provision a hidden read-only observer seat (ADR 063) and return its token. Lets the dashboard be
  * "enter a team and watch" — no pre-made seat. The endpoint is unauthenticated (localhost-trust, like

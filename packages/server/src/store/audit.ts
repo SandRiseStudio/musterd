@@ -15,7 +15,19 @@ export type AuditAction =
   | 'send.denied'
   | 'member.reclaim'
   | 'member.remove'
-  | 'observe.denied';
+  | 'observe.denied'
+  // P3.2 (ADR 077): claim-handshake + grant/request governance actions.
+  | 'claim.occupied'
+  | 'claim.refused'
+  | 'claim.pending'
+  | 'grant.issue'
+  | 'grant.use'
+  | 'grant.revoke'
+  | 'request.decide'
+  | 'request.expired'
+  | 'key.rotate'
+  | 'policy.change'
+  | 'account_status.change';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */
