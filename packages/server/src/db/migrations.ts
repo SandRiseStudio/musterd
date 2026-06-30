@@ -181,6 +181,9 @@ export const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX idx_grants_team ON grants(team_id)');
       db.exec('CREATE INDEX idx_grants_token_hash ON grants(token_hash)');
       // The request/approval lane. Dedup by (team, from_session, target) is enforced in the store.
+      // `from_session` holds the WS connId (the claim's origin); `target` is the encoded ClaimTarget
+      // (`seat:<n>` | `role:<n>` | `observe`). `surface` + `expires_at` back the admin approval card
+      // (ADR 077): the surface badge and the expiry countdown / reaper WHERE clause.
       db.exec(
         `CREATE TABLE requests (
            id           TEXT PRIMARY KEY,
@@ -188,12 +191,15 @@ export const MIGRATIONS: Migration[] = [
            kind         TEXT NOT NULL,
            from_session TEXT NOT NULL,
            target       TEXT,
+           surface      TEXT NOT NULL DEFAULT 'cli',
            status       TEXT NOT NULL,
            decided_by   TEXT,
-           created_at   INTEGER NOT NULL
+           created_at   INTEGER NOT NULL,
+           expires_at   INTEGER NOT NULL
          )`,
       );
       db.exec('CREATE INDEX idx_requests_team ON requests(team_id, created_at)');
+      db.exec('CREATE INDEX idx_requests_expiry ON requests(status, expires_at)');
       db.exec('CREATE INDEX idx_requests_dedup ON requests(team_id, from_session, target)');
     },
   },

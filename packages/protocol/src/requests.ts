@@ -18,15 +18,20 @@ export const RequestSchema = z.object({
   id: z.string(),
   team: z.string(),
   kind: RequestKindSchema,
-  /** Opaque id of the requesting session (the claim's `from_session`). */
+  /** The requesting session's WS connId (the claim's `from_session`). */
   from_session: z.string(),
-  /** Seat/role being claimed; null for a bare teammate-join request. */
+  /** The encoded claim target — `seat:<name>` | `role:<name>` | `observe`; null for a teammate join. */
   target: z.string().nullable(),
+  /** The client surface the claim came from (`claude-code`/`cursor`/`web`/`cli`) — admin-card badge. */
+  surface: z.string(),
   status: RequestStatusSchema,
   /** Admin seat that decided it; null while pending/expired. */
   decided_by: z.string().nullable(),
-  /** Created-at, ms epoch (drives the 1h-default expiry, ADR 069 decision 2). */
+  /** Created-at, ms epoch. */
   ts: z.number().int(),
+  /** Absolute expiry (ms epoch) = created_at + the 1h default (ADR 069 decision 2); drives the
+   *  approval-card countdown + the reaper. */
+  expires_at: z.number().int(),
 });
 export type Request = z.infer<typeof RequestSchema>;
 

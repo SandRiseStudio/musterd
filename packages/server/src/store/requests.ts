@@ -18,9 +18,11 @@ export interface RequestRow {
   kind: string;
   from_session: string;
   target: string | null;
+  surface: string;
   status: string;
   decided_by: string | null;
   created_at: number;
+  expires_at: number;
 }
 
 export function toRequest(row: RequestRow): Request {
@@ -30,9 +32,11 @@ export function toRequest(row: RequestRow): Request {
     kind: row.kind as RequestKind,
     from_session: row.from_session,
     target: row.target,
+    surface: row.surface,
     status: row.status as RequestStatus,
     decided_by: row.decided_by,
     ts: row.created_at,
+    expires_at: row.expires_at,
   };
 }
 
@@ -45,7 +49,12 @@ export function toRequest(row: RequestRow): Request {
 export function createRequest(
   db: Database,
   teamId: string,
-  input: { kind: RequestKind; from_session: string; target: string | null },
+  input: {
+    kind: RequestKind;
+    from_session: string;
+    target: string | null;
+    surface?: string;
+  },
 ): Request {
   const existing = db
     .prepare<[string, string, string | null, string | null], RequestRow>(
@@ -56,19 +65,22 @@ export function createRequest(
     .get(teamId, input.from_session, input.target, input.target);
   if (existing) return toRequest(existing);
 
+  const now = Date.now();
   const row: RequestRow = {
     id: ulid(),
     team_id: teamId,
     kind: input.kind,
     from_session: input.from_session,
     target: input.target,
+    surface: input.surface ?? 'cli',
     status: 'pending',
     decided_by: null,
-    created_at: Date.now(),
+    created_at: now,
+    expires_at: now + REQUEST_TTL_MS,
   };
   db.prepare(
-    `INSERT INTO requests (id, team_id, kind, from_session, target, status, decided_by, created_at)
-     VALUES (@id, @team_id, @kind, @from_session, @target, @status, @decided_by, @created_at)`,
+    `INSERT INTO requests (id, team_id, kind, from_session, target, surface, status, decided_by, created_at, expires_at)
+     VALUES (@id, @team_id, @kind, @from_session, @target, @surface, @status, @decided_by, @created_at, @expires_at)`,
   ).run(row);
   return toRequest(row);
 }
@@ -114,12 +126,12 @@ export function listRequests(
 }
 
 /**
- * Expire pending requests older than `ttlMs` (the reaper, ADR 069 decision 2). Returns the count
- * expired. Wired to a timer by ADR 077; pure + idempotent so it is safe to call on any cadence.
+ * Expire pending requests past their stored `expires_at` (the reaper, ADR 069 decision 2). Returns the
+ * count expired. Wired to a timer by ADR 077; pure + idempotent so it is safe to call on any cadence.
  */
-export function expireRequests(db: Database, now = Date.now(), ttlMs = REQUEST_TTL_MS): number {
+export function expireRequests(db: Database, now = Date.now()): number {
   const res = db
-    .prepare("UPDATE requests SET status = 'expired' WHERE status = 'pending' AND created_at < ?")
-    .run(now - ttlMs);
+    .prepare("UPDATE requests SET status = 'expired' WHERE status = 'pending' AND expires_at < ?")
+    .run(now);
   return res.changes;
 }
