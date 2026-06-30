@@ -27,21 +27,26 @@ spec-gap resolution 2).
 
 ```ts
 interface ApprovalRequest {
-  id: string;            // request id (ULID)
-  seat: string;          // seat name or role + index requested (e.g. "Ada" or "backend-1")
-  role?: string;         // role the seat belongs to (e.g. "backend")
-  surface: string;       // harness surface (e.g. "claude-code", "cursor", "codex")
-  fingerprint: string;   // harness fingerprint (short hash shown so admin can recognise the device)
-  requestedAt: number;   // unix ms
-  expiresAt: number;     // unix ms (now + 1h default)
-  batchCount?: number;   // >1 = "N claims from this harness — approve all?"
+  id: string; // request id (ULID)
+  seat: string; // seat name or role + index requested (e.g. "Ada" or "backend-1")
+  role?: string; // role the seat belongs to (e.g. "backend")
+  surface: string; // harness surface (e.g. "claude-code", "cursor", "codex")
+  fingerprint: string; // harness fingerprint (short hash shown so admin can recognise the device)
+  requestedAt: number; // unix ms
+  expiresAt: number; // unix ms (now + 1h default)
+  batchCount?: number; // >1 = "N claims from this harness — approve all?"
 }
 
 type ApprovalState =
-  | { kind: 'pending'; request: ApprovalRequest; onApprove: (lifetime: GrantLifetime) => void; onDeny: () => void }
+  | {
+      kind: 'pending';
+      request: ApprovalRequest;
+      onApprove: (lifetime: GrantLifetime) => void;
+      onDeny: () => void;
+    }
   | { kind: 'approved'; request: ApprovalRequest; lifetime: GrantLifetime; approvedAt: number }
-  | { kind: 'denied';   request: ApprovalRequest; deniedAt: number }
-  | { kind: 'expired';  request: ApprovalRequest };
+  | { kind: 'denied'; request: ApprovalRequest; deniedAt: number }
+  | { kind: 'expired'; request: ApprovalRequest };
 
 type GrantLifetime = 'once' | { ttl_hours: number } | 'standing';
 ```
@@ -70,8 +75,14 @@ No changes to `routes/live.tsx`.
 
 ## Observability & Evaluation
 
-No server-side traces (design-only). Success = the four states render correctly under the `--lc-*` theme
-and survive `tsc` + `vite build`.
+**Traces** — none. Design-only UI component; no server-side behavior to trace. The governed
+`request.decide` audit verb this card will eventually trigger is ADR 071's substrate, not this card's.
+
+**Eval** — success = the four states (pending/approved/denied/expired) render correctly under the
+`--lc-*` theme tokens and survive `tsc` + `vite build`. Baseline: the `/approval-preview` route's
+rendering of the four states (the design-review fixture).
+
+**Experiment** — n/a — a design-only component; no agent-facing behavior to A/B.
 
 ## Consequences
 
