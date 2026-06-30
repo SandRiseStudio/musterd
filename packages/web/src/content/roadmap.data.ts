@@ -545,6 +545,18 @@ export const ROADMAP: RoadmapItem[] = [
     dependsOn: ['board-insights'],
   },
   {
+    id: 'resolve-state-gate',
+    wave: 'later',
+    title: 'Verified thread close (resolve as a state gate)',
+    status: 'reserved',
+    category: 'human-loop',
+    blurb: 'An open question, not a commitment: should closing a thread ever require a separate actor’s signal — so resolve is a verified state transition, not a self-asserted recap?',
+    detail:
+      'Surfaced from the verifier-first agentic-loop literature (landscape.md §4): “verification as a state-transition gate, not a recap,” and “a verifier can’t share the generator’s optimization target.” musterd already has the separate actor — a handoff/request_help has a counterpart who could verify — but a hard counterpart-ack gate can wedge a thread whose other party left, and a human peer may legitimately close unilaterally. The likely shape is a soft signal (record the close, flag self-closed-without-counterpart in the audit/roster) rather than a refusal, plus evidence in the close (artifact/trace meta). Parked for a dedicated session; reconciles with the terminal-done-marker thread in planning-and-insights-brainstorm.md. musterd stays the coordination signal, never the verifier (that’s batond).',
+    refs: [doc('docs/design/resolve-as-state-gate-brainstorm.md', 'resolve-as-state-gate-brainstorm.md'), adr(25, 'ADR 025')],
+    dependsOn: ['resolve-act'],
+  },
+  {
     id: 'own-harness',
     wave: 'later',
     title: 'Role templates & mixed-harness teams',
