@@ -234,13 +234,13 @@ describe('notify against a live daemon', () => {
     );
     const linToken = JSON.parse(added.out).token as string;
     const nickToken = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).identities.dawn
-      .token as string;
+      .key as string;
     return { nickToken, linToken };
   }
 
   it('fires for a request_help to an away human, then self-clears once the inbox is read', async () => {
     const { nickToken, linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, token: linToken });
+    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
     await lin.send(
       'dawn',
       makeEnvelope({
@@ -255,7 +255,7 @@ describe('notify against a live daemon', () => {
       }),
     );
 
-    const nick = new HttpClient({ server: serverUrl, token: nickToken });
+    const nick = new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' });
     // The notifier polls on the human's behalf — presence-neutral, exactly as notifyCommand does
     // (ADR 057). Without this the poll's own inbox read would mark nick present and silence the
     // notification: isReachable would then see them online.
@@ -294,8 +294,8 @@ describe('notify against a live daemon', () => {
 
   it('away holds a normal request_help but an urgent ping breaks through (ADR 044)', async () => {
     const { nickToken, linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, token: linToken });
-    const nick = new HttpClient({ server: serverUrl, token: nickToken });
+    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
+    const nick = new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' });
 
     // nick goes away (explicit, never inferred).
     await nick.setAvailability('dawn', { status: 'away' });
@@ -342,7 +342,7 @@ describe('notify against a live daemon', () => {
 
   it('command --once wiring: resolves identity and fires via the injected sink', async () => {
     const { linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, token: linToken });
+    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
     await lin.send(
       'dawn',
       makeEnvelope({
@@ -367,7 +367,7 @@ describe('notify against a live daemon', () => {
 
   it('resident loop: fires on the immediate first poll, then stops on SIGINT', async () => {
     const { linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, token: linToken });
+    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
     await lin.send(
       'dawn',
       makeEnvelope({
