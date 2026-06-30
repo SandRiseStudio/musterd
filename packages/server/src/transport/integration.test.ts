@@ -177,8 +177,8 @@ describe('HTTP API', () => {
   it('sends and reads an inbox over HTTP with unread accounting', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
-    const boTok = { key: team.json.agent_key, seat: 'bo' };
+    const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+    const boTok = bo.json.human_credential; // a human seat authenticates with its own mscr_ credential
 
     const env = {
       id: 'mh1',
@@ -630,7 +630,7 @@ describe('WebSocket', () => {
           ts: Date.now(),
         },
       },
-      { key: team.json.agent_key, seat: 'wall' },
+      obs.json.human_credential, // wall is a human observer — auth with its credential, not the agent key
     );
     expect(denied.status).toBe(403);
     expect(denied.json.error.code).toBe('forbidden');
@@ -1286,8 +1286,8 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
   it('can_flag_urgent: an allowed seat keeps urgent + is audited; a denied seat is downgraded, not rejected', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
-    const bobTok = { key: team.json.agent_key, seat: 'Bob' };
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential; // human seat → its own credential, not the agent key
     await post('/teams/dawn/members', { name: 'Mut', kind: 'agent' }, nickTok);
 
     // nick is generalist-ish (can_flag_urgent true) → urgent rides through.

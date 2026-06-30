@@ -241,6 +241,15 @@ function authByAgentKey(
   const member = getMemberByName(db, team.id, actingSeat);
   if (!member || member.left_at !== null)
     throw new MusterdError('unauthorized', `no active seat "${actingSeat}" in team "${team.slug}"`);
+  // SECURITY — occupancy binds key→seat (focal point 2). The team agent key is **shared** across all the
+  // team's agent harnesses, so it must NOT be able to act as a *human* seat: otherwise any agent could
+  // set `x-musterd-seat: <admin>` and impersonate the human admin → privilege escalation (admin ops).
+  // A human seat is reachable only via that human's own `mscr_` credential (authByCredential, kind-bound).
+  if (member.kind !== 'agent')
+    throw new MusterdError(
+      'forbidden',
+      `the team agent key may only act as an agent seat; the human seat "${actingSeat}" authenticates with its own credential`,
+    );
   return member;
 }
 

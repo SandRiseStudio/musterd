@@ -141,6 +141,20 @@ describe('authMember v0.3 prefix-dispatch (ADR 077)', () => {
     expect(() => authMember(db, 'dawn', 'mskey_bogus', 'Ada')).toThrow(MusterdError);
   });
 
+  it('the team agent key cannot act as a HUMAN seat — escalation guard (security focal point 2)', () => {
+    const { db, team } = freshTeam();
+    addMember(db, team, { name: 'nick', kind: 'human' }); // a human admin seat
+    const { agent_key } = rotateAgentKey(db, team.id);
+    // The shared agent key naming a human seat must be refused as `forbidden` — otherwise any agent
+    // could set x-musterd-seat:<admin> and impersonate the human admin (privilege escalation).
+    expect(() => authMember(db, 'dawn', agent_key, 'nick')).toThrow(MusterdError);
+    try {
+      authMember(db, 'dawn', agent_key, 'nick');
+    } catch (e) {
+      expect((e as MusterdError).code).toBe('forbidden');
+    }
+  });
+
   it('a human credential is self-identifying (no acting seat needed)', () => {
     const { db, team } = freshTeam();
     const human = addMember(db, team, { name: 'Nick', kind: 'human' });
