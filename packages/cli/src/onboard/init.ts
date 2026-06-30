@@ -29,11 +29,7 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * when the team no longer exists (db reset) or the token is stale (minted against another db) — so
  * init can avoid offering a dead "reuse" option and fall back to creating a team. (Dogfood: ADR 016.)
  */
-export async function cachedTeamLive(
-  server: string,
-  team: string,
-  key: string,
-): Promise<boolean> {
+export async function cachedTeamLive(server: string, team: string, key: string): Promise<boolean> {
   return new HttpClient({ server, key })
     .inbox(team, { limit: 1 })
     .then(() => true)
@@ -295,10 +291,10 @@ export async function runInit(): Promise<number> {
   // 5) Mint the member + write the harness config ---------------------------
   const sm = p.spinner();
   sm.start(`Adding ${name} to ${team}`);
-  let token: string;
   try {
-    const res = await http.addMember(team, { name, kind: 'agent', role });
-    token = res.token as string;
+    // v0.3 (ADR 075): declaring the seat is enough — the agent claims it with the team agent key,
+    // so there's no per-seat token to capture here anymore.
+    await http.addMember(team, { name, kind: 'agent', role });
     sm.stop(`${pc.cyan(name)} is a member of ${pc.bold(team)}`);
   } catch (err) {
     sm.stop(pc.red(`Could not add ${name}: ${(err as Error).message}`));

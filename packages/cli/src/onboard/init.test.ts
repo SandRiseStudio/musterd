@@ -11,7 +11,11 @@ const h = vi.hoisted(() => {
   const selectQueue: unknown[] = [];
   const textQueue: unknown[] = [];
   const http = {
-    createTeam: vi.fn(async () => ({ token: 'tok-creator', human_credential: 'mscr_creator', agent_key: 'mskey_team' })),
+    createTeam: vi.fn(async () => ({
+      token: 'tok-creator',
+      human_credential: 'mscr_creator',
+      agent_key: 'mskey_team',
+    })),
     addMember: vi.fn(async () => ({ token: 'tok-ada' })),
     roster: vi.fn(async () => ({ members: [{ name: 'Ada', presence: 'online' }] })),
     inbox: vi.fn(async () => ({ messages: [] })),
@@ -98,7 +102,11 @@ beforeEach(() => {
     identities: {},
     bindings: {},
   });
-  h.http.createTeam.mockResolvedValue({ token: 'tok-creator', human_credential: 'mscr_creator', agent_key: 'mskey_team' });
+  h.http.createTeam.mockResolvedValue({
+    token: 'tok-creator',
+    human_credential: 'mscr_creator',
+    agent_key: 'mskey_team',
+  });
   h.http.addMember.mockResolvedValue({ token: 'tok-ada' });
   h.http.roster.mockResolvedValue({ members: [{ name: 'Ada', presence: 'online' }] });
   h.http.inbox.mockResolvedValue({ messages: [] });

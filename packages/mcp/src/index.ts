@@ -72,8 +72,7 @@ export function installShutdownHandlers(opts: {
 export function primerInstructions(config: McpConfig): string {
   // Before claiming, name the seat the folder is bound to claim (the policy target); after, the
   // resolved seat. v0.3 (ADR 075): the seat is server-resolved at claim, so a role pool stays unnamed.
-  const seat =
-    config.member ?? (config.claim?.mode === 'seat' ? config.claim.name : undefined);
+  const seat = config.member ?? (config.claim?.mode === 'seat' ? config.claim.name : undefined);
   return renderPrimer({ team: config.team, ...(seat ? { member: seat } : {}) });
 }
 

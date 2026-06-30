@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { autoClaims, BindingSchema, formatClaimPolicy, nextRoleHandle, parseClaimPolicy, ResolvedSessionSchema } from './index.js';
+import {
+  autoClaims,
+  BindingSchema,
+  formatClaimPolicy,
+  nextRoleHandle,
+  parseClaimPolicy,
+  ResolvedSessionSchema,
+} from './index.js';
 
 describe('parseClaimPolicy (MUSTERD_CLAIM grammar)', () => {
   it('treats unset / empty / "chat" as assign-in-chat', () => {

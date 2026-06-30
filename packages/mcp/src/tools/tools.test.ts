@@ -1,12 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join as pathJoin } from 'node:path';
-import {
-  makeEnvelope,
-  nextRoleHandle,
-  type Envelope,
-  type MemberSummary,
-} from '@musterd/protocol';
+import { makeEnvelope, nextRoleHandle, type Envelope, type MemberSummary } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
@@ -445,7 +440,10 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
    * (seat → that name; role → next free `<role>-<n>` against the roster), mirroring an `occupied` frame.
    * Pass the SAME config object that `capture()` gets, since `claimAndJoin` mutates `config.claim`.
    */
-  function pendingClient(cfg: McpConfig, over: Partial<MusterdClient> = {}): Partial<MusterdClient> {
+  function pendingClient(
+    cfg: McpConfig,
+    over: Partial<MusterdClient> = {},
+  ): Partial<MusterdClient> {
     let member: string | undefined;
     const roster = (over.roster ?? (async () => ({ members: [] }))) as MusterdClient['roster'];
     return {
@@ -507,7 +505,12 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
   });
 
   it('asks the session to name itself when policy is chat and no target is given', async () => {
-    const cfg = { ...config, member: undefined, claim: { mode: 'chat' as const }, claimCode: 'ZZ99' };
+    const cfg = {
+      ...config,
+      member: undefined,
+      claim: { mode: 'chat' as const },
+      claimCode: 'ZZ99',
+    };
     const handler = capture(registerJoin, pendingClient(cfg), cfg);
     const out = text(await handler({}));
     expect(out).toContain('pending presence');

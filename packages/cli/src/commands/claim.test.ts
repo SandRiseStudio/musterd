@@ -33,7 +33,9 @@ beforeEach(async () => {
   cwd = mkdtempSync(join(tmpdir(), 'musterd-claim-cwd-'));
   vi.spyOn(process, 'cwd').mockReturnValue(cwd);
   // Stand up the team; capture the v0.3 composite mint (SPEC A.7): the team agent key + creator token.
-  const team = (await new HttpClient({ server: serverUrl }).createTeam('dawn', { name: 'nick' })) as {
+  const team = (await new HttpClient({ server: serverUrl }).createTeam('dawn', {
+    name: 'nick',
+  })) as {
     agent_key: string;
     token: string;
   };
@@ -68,7 +70,9 @@ async function run(argv: string[]) {
 }
 
 function readBinding() {
-  return BindingSchema.parse(JSON.parse(readFileSync(join(cwd, BINDING_DIR, BINDING_FILE), 'utf8')));
+  return BindingSchema.parse(
+    JSON.parse(readFileSync(join(cwd, BINDING_DIR, BINDING_FILE), 'utf8')),
+  );
 }
 
 /** Admin (nick) declares a seat (so a named claim has a target) — auth via the creator mskd_ token. */
@@ -176,9 +180,25 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
   it('lists waiting sessions and requires --for when several are pending', async () => {
     await declareSeat('Ada');
     const g = await grant('Ada');
-    writePending(cwd, { code: 'AB12', team: 'dawn', workspace: cwd, surface: 'claude-code', connId: 'c1', ts: 1 });
-    writePending(cwd, { code: 'CD34', team: 'dawn', workspace: cwd, surface: 'cursor', connId: 'c2', ts: 2 });
-    await expect(run(['Ada', '--team', 'dawn', '--grant', g])).rejects.toMatchObject({ exitCode: 2 });
+    writePending(cwd, {
+      code: 'AB12',
+      team: 'dawn',
+      workspace: cwd,
+      surface: 'claude-code',
+      connId: 'c1',
+      ts: 1,
+    });
+    writePending(cwd, {
+      code: 'CD34',
+      team: 'dawn',
+      workspace: cwd,
+      surface: 'cursor',
+      connId: 'c2',
+      ts: 2,
+    });
+    await expect(run(['Ada', '--team', 'dawn', '--grant', g])).rejects.toMatchObject({
+      exitCode: 2,
+    });
     const ok = await run(['Ada', '--team', 'dawn', '--grant', g, '--for', 'AB12']);
     expect(ok.code).toBe(0);
   });
@@ -186,7 +206,14 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
   it('hands the seat to a waiting session via a resolution sidecar carrying the seat (ADR 034)', async () => {
     await declareSeat('Ada');
     const g = await grant('Ada');
-    writePending(cwd, { code: 'AB12', team: 'dawn', workspace: cwd, surface: 'claude-code', connId: 'c1', ts: 1 });
+    writePending(cwd, {
+      code: 'AB12',
+      team: 'dawn',
+      workspace: cwd,
+      surface: 'claude-code',
+      connId: 'c1',
+      ts: 1,
+    });
     const { out } = await run(['Ada', '--team', 'dawn', '--grant', g, '--for', 'AB12']);
     expect(out).toContain('going online as Ada now');
     expect(existsSync(join(cwd, BINDING_DIR, PENDING_DIR, 'AB12.json'))).toBe(false);

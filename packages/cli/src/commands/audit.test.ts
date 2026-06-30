@@ -115,9 +115,12 @@ describe('audit command', () => {
     await capture(() => reclaimCommand(parseArgs(['Bo']))); // newer row: Bo
 
     // Read the newest entry's ts, then page beneath it to surface only the older Ada row.
-    const head = await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).audit('dawn', {
-      limit: 1,
-    });
+    const head = await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).audit(
+      'dawn',
+      {
+        limit: 1,
+      },
+    );
     const newestTs = head.audit[0]!.ts;
     const res = await capture(() => auditCommand(parseArgs(['--before', String(newestTs)])));
     expect(res.code).toBe(0);
@@ -142,10 +145,13 @@ describe('audit command', () => {
   });
 
   it('refuses a non-admin token with forbidden (exit 5)', async () => {
-    const ada = await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).addMember('dawn', {
-      name: 'Ada2',
-      kind: 'agent',
-    });
+    const ada = await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).addMember(
+      'dawn',
+      {
+        name: 'Ada2',
+        kind: 'agent',
+      },
+    );
     const client = new HttpClient({ server: serverUrl, key: ada.token, seat: 'Ada2' });
     await expect(client.audit('dawn')).rejects.toMatchObject({ exitCode: 5 });
   });

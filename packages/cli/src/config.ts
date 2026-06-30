@@ -291,7 +291,10 @@ export function loadConfig(): Config {
       identities,
       // ADR 059: an old config has no vault — backfill it from `identities` so a previously-cached
       // identity is immediately resolvable by `--as`, and stays so when another member joins.
-      knownIdentities: backfillVault(identities, (parsed.knownIdentities ?? []).map(coerceIdentity)),
+      knownIdentities: backfillVault(
+        identities,
+        (parsed.knownIdentities ?? []).map(coerceIdentity),
+      ),
       bindings: parsed.bindings ?? {},
       agentKeys: parsed.agentKeys ?? {},
       rosterHome: parsed.rosterHome ?? {},
