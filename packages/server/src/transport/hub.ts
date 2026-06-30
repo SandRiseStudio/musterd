@@ -15,22 +15,6 @@ export interface Connection {
    * — only a *different* workspace is a genuinely new session that takes the seat (ADR 068).
    */
   workspace?: string | null;
-  /**
-   * P3.2 (ADR 077): the request_id of a pending claim this connection is waiting on. Set when the
-   * server sends a `pending` frame (no-grant path); cleared when the terminal frame (occupied/refused)
-   * is pushed by POST /requests/:id/decide or the expiry reaper.
-   */
-  awaitingClaim?: string | null;
-  /** P3.2 (ADR 077): whether this seat holds is_admin capability, cached at connect time so
-   *  deliverToAdmins() can push governance notifications without a DB lookup per frame. */
-  isAdmin?: boolean;
-  /**
-   * P3.2 (ADR 077): callback set by the pending-claim WS handler on the provisional Connection.
-   * The HTTP approve handler calls this to flip the WS closure's auth state and wire the real
-   * presenceId — so the WS can handle subsequent frames (heartbeat, send) after occupation.
-   * Only present on connections that went through the no-grant pending path.
-   */
-  _claimApproved?: (presenceId: string) => void;
   send: (frame: WSServerFrame) => void;
   /** Force-close the underlying socket (used to displace a superseded same-identity session). */
   close?: () => void;
@@ -90,12 +74,6 @@ export class Hub {
     return [...(this.byMember.get(memberId) ?? [])];
   }
 
-  /** Look up a single connection by connId. Used by the HTTP approve handler to trigger the
-   *  pending→occupied transition on the waiting WS (P3.2, ADR 077). */
-  getConn(connId: string): Connection | undefined {
-    return this.byConn.get(connId);
-  }
-
   /** Opt a connection into the team firehose (ADR 061). Cleared on `remove`. */
   subscribeFirehose(connId: string): void {
     this.firehose.add(connId);
@@ -112,36 +90,6 @@ export class Hub {
       const conn = this.byConn.get(connId);
       if (!conn || conn.teamId !== teamId) continue;
       if (skipMemberIds?.has(conn.memberId)) continue;
-      conn.send(frame);
-      n++;
-    }
-    return n;
-  }
-
-  /**
-   * P3.2 (ADR 077): push an `occupied` or `refused` terminal frame to a specific connection that is
-   * waiting on an admin decision (in `awaitingClaim` state). Used by POST /requests/:id/decide and
-   * the expiry reaper. Returns true if the connection was found and the frame sent; false if it
-   * disconnected while the admin was deliberating (the decision is still recorded, just undelivered).
-   */
-  deliverClaimDecision(connId: string, frame: WSServerFrame): boolean {
-    const conn = this.byConn.get(connId);
-    if (!conn) return false;
-    conn.awaitingClaim = null;
-    conn.send(frame);
-    return true;
-  }
-
-  /**
-   * P3.2 (ADR 077): push a governance notification frame to every connected admin seat on a team.
-   * Used to surface pending claim requests to co-present admins so they can approve/deny inline
-   * without polling (local-admin fast path, membership-model.md §"Claim flow"). Returns the count
-   * of admin connections that received it.
-   */
-  deliverToAdmins(teamId: string, frame: WSServerFrame): number {
-    let n = 0;
-    for (const conn of this.byConn.values()) {
-      if (conn.teamId !== teamId || !conn.isAdmin) continue;
       conn.send(frame);
       n++;
     }

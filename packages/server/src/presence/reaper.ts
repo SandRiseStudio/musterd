@@ -1,7 +1,5 @@
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
-import { appendAudit } from '../store/audit.js';
-import { sweepExpiredRequests } from '../store/claims.js';
 import { getMemberById, reapStaleObservers } from '../store/members.js';
 import { hasLivePresence, reapStale } from '../store/presence.js';
 
@@ -17,29 +15,6 @@ export function startReaper(ctx: Ctx): () => void {
     );
     if (reapedObservers.length > 0) {
       log.info({ msg: 'reap_observers', count: reapedObservers.length });
-    }
-
-    // P3.2 (ADR 077): sweep pending claim requests that have passed their 1h expiry window.
-    // Push `refused {expired_grant}` to any still-open waiting WS connections before releasing.
-    const expiredReqs = sweepExpiredRequests(ctx.db);
-    for (const req of expiredReqs) {
-      appendAudit(ctx.db, req.team_id, {
-        actor: null,
-        action: 'request.expired',
-        target: req.target_seat,
-        result: 'deny',
-        detail: { request_id: req.id },
-      });
-      ctx.hub.deliverClaimDecision(req.from_conn_id, {
-        type: 'refused',
-        code: 'expired_grant',
-        message: 'your claim request expired — no admin responded within the time window',
-        claimable: [],
-        hint: 'reconnect and try again; contact an admin to pre-issue a grant for faster access',
-      });
-    }
-    if (expiredReqs.length > 0) {
-      log.info({ msg: 'reap_claim_requests', expired: expiredReqs.length });
     }
 
     const removed = reapStale(ctx.db, ctx.config.presenceTimeoutMs);

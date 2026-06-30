@@ -1,15 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import liveCss from '../live/Live.css?url';
 import { ApprovalQueue } from '../live/ApprovalQueue';
 import type { ApprovalRequest, GrantLifetime } from '../live/ApprovalCard';
-import {
-  AuditFetchError,
-  decideRequest,
-  fetchRequests,
-  type ClaimRequest,
-  type LiveConfig,
-} from '../live/client';
 
 export const Route = createFileRoute('/approvals')({
   head: () => ({
@@ -19,183 +12,73 @@ export const Route = createFileRoute('/approvals')({
   component: ApprovalsPage,
 });
 
-const TEAM_KEY = 'musterd.approvals.team';
-const SEAT_KEY = 'musterd.approvals.seat';
-const POLL_MS = 10_000;
+/* ── live wiring seam (ADR 069 P3.1, Jasmine's lane) ──────────────────────────
+ * When the request lane lands, replace the fixtures below with a real source:
+ *   - LOAD: GET /teams/:slug/requests (poll, or the WS request push from P3.2) → ApprovalRequest[]
+ *   - DECIDE: onApprove/onDeny → POST /teams/:slug/requests/:id/decide { decision, lifetime }
+ * The queue itself is contract-agnostic — it consumes the settled ApprovalCard UI types — so only this
+ * route's data source + the two handlers change. The request→ApprovalRequest mapping (surface,
+ * fingerprint, expiresAt) is provisional until Jasmine's P3.1 wire shape is final.
+ */
 
-/** Map the API ClaimRequest wire to the ApprovalCard UI type. */
-function toApprovalRequest(r: ClaimRequest): ApprovalRequest {
-  return {
-    id: r.id,
-    seat: r.target_seat ?? r.target_role ?? 'unknown',
-    ...(r.target_role ? { role: r.target_role } : {}),
-    surface: r.surface,
-    fingerprint: r.from_conn_id.slice(0, 8),
-    requestedAt: r.ts,
-    expiresAt: r.expires_at,
-  };
-}
-
-/** Map UI GrantLifetime → API { lifetime, ttl_hours? }. */
-function toApiLifetime(l: GrantLifetime): {
-  lifetime: 'once' | 'ttl' | 'standing';
-  ttl_hours?: number;
-} {
-  if (l === 'once') return { lifetime: 'once' };
-  if (l === 'standing') return { lifetime: 'standing' };
-  return { lifetime: 'ttl', ttl_hours: l.ttl_hours };
-}
-
-function explain(err: unknown): string {
-  if (err instanceof AuditFetchError) {
-    if (err.status === 401) return 'That token was rejected. Enter the token for an admin seat.';
-    if (err.status === 403) return 'That seat is not an admin — the approval queue is admin-only.';
-    if (err.status === 404)
-      return 'No /requests endpoint on this daemon. It needs the P3.2 build (ADR 077).';
-    return err.message;
-  }
-  return err instanceof Error ? err.message : String(err);
+/** Demo requests so the queue is viewable + interactive before the P3.1 endpoint exists. */
+function demoRequests(now: number): ApprovalRequest[] {
+  const min = 60_000;
+  return [
+    {
+      id: 'req-1',
+      seat: 'Pim',
+      role: 'engineer',
+      surface: 'claude-code',
+      fingerprint: 'cc/4.8 · darwin · a1b2c3',
+      requestedAt: now - 2 * min,
+      expiresAt: now + 58 * min,
+    },
+    {
+      id: 'req-2',
+      seat: 'observer-3',
+      surface: 'web',
+      fingerprint: 'chrome/web · e4f5a6',
+      requestedAt: now - 9 * min,
+      expiresAt: now + 6 * min, // inside the urgent window — countdown turns hot
+      batchCount: 3,
+    },
+    {
+      id: 'req-3',
+      seat: 'Cosmo',
+      role: 'reviewer',
+      surface: 'cursor',
+      fingerprint: 'cursor/0.42 · 7b8c9d',
+      requestedAt: now - 70 * min,
+      expiresAt: now - 10 * min, // already past — renders as expired
+    },
+  ];
 }
 
 function ApprovalsPage() {
-  const [team, setTeam] = useState('');
-  const [as, setAs] = useState('');
-  const [token, setToken] = useState('');
-  const [cfg, setCfg] = useState<LiveConfig | null>(null);
-  const [requests, setRequests] = useState<ApprovalRequest[]>([]);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [requests] = useState<ApprovalRequest[]>(() => demoRequests(Date.now()));
 
-  // SSR-safe hydrate of the last team/seat.
-  useState(() => {
-    if (typeof window === 'undefined') return;
-    setTeam(window.localStorage.getItem(TEAM_KEY) ?? '');
-    setAs(window.localStorage.getItem(SEAT_KEY) ?? '');
-  });
-
-  // Poll for pending requests while connected.
-  useEffect(() => {
-    if (!cfg) return;
-    const load = async () => {
-      try {
-        const rows = await fetchRequests(cfg, { status: 'pending', limit: 50 });
-        setRequests(rows.map(toApprovalRequest));
-      } catch (e) {
-        setError(explain(e));
-      }
-    };
-    void load();
-    pollRef.current = setInterval(() => void load(), POLL_MS);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [cfg]);
-
-  const connect = async () => {
-    const t = team.trim();
-    const seat = as.trim();
-    if (!t || !seat || !token.trim()) return;
-    window.localStorage.setItem(TEAM_KEY, t);
-    window.localStorage.setItem(SEAT_KEY, seat);
-    const c: LiveConfig = { team: t, as: seat, token: token.trim() };
-    setStatus('loading');
-    setError(null);
-    try {
-      const rows = await fetchRequests(c, { status: 'pending', limit: 50 });
-      setCfg(c);
-      setRequests(rows.map(toApprovalRequest));
-      setStatus('loaded');
-    } catch (e) {
-      setError(explain(e));
-      setStatus('error');
-    }
+  // SEAM: route to POST /requests/:id/decide once P3.1 lands. For now, record the intent.
+  const onApprove = (id: string, lifetime: GrantLifetime) => {
+    // eslint-disable-next-line no-console
+    console.info('[approvals] approve', id, lifetime);
   };
-
-  const onApprove = async (id: string, lifetime: GrantLifetime) => {
-    if (!cfg) return;
-    try {
-      await decideRequest(cfg, id, { approve: true, ...toApiLifetime(lifetime) });
-    } catch (e) {
-      setError(explain(e));
-    }
+  const onDeny = (id: string) => {
+    // eslint-disable-next-line no-console
+    console.info('[approvals] deny', id);
   };
-
-  const onDeny = async (id: string) => {
-    if (!cfg) return;
-    try {
-      await decideRequest(cfg, id, { approve: false });
-    } catch (e) {
-      setError(explain(e));
-    }
-  };
-
-  const connected = cfg != null && status !== 'error';
 
   return (
     <main className="lc">
       <header className="lc__topbar">
         <span className="lc__word">musterd</span>
-        <span className="lc__team">/ {connected ? `${cfg!.team} · approvals` : 'approvals'}</span>
+        <span className="lc__team">/ approvals</span>
         <span className="lc__spacer" />
-        <span className="lc__status lc__status--idle">
-          {connected ? `${requests.length} pending` : 'disconnected'}
-        </span>
+        <span className="lc__status lc__status--idle">preview</span>
       </header>
-
-      {!connected ? (
-        <div className="lc-form">
-          <div className="lc-form__card">
-            <h1 className="lc-form__title">Approval queue</h1>
-            <p className="lc-form__sub">
-              Review and approve or deny pending seat claim requests (ADR 077). Connect as an admin
-              seat to manage the queue.
-            </p>
-            <label className="lc-form__field">
-              <span>Team</span>
-              <input
-                type="text"
-                value={team}
-                placeholder="ritual"
-                onChange={(e) => setTeam(e.target.value)}
-              />
-            </label>
-            <label className="lc-form__field">
-              <span>Admin seat</span>
-              <input
-                type="text"
-                value={as}
-                placeholder="your seat name"
-                onChange={(e) => setAs(e.target.value)}
-              />
-            </label>
-            <label className="lc-form__field">
-              <span>Token</span>
-              <input
-                type="password"
-                value={token}
-                placeholder="mskd_…"
-                onChange={(e) => setToken(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && void connect()}
-              />
-            </label>
-            {error && <p className="lc-form__error">{error}</p>}
-            <button
-              className="lc-form__connect"
-              disabled={!team.trim() || !as.trim() || !token.trim() || status === 'loading'}
-              onClick={() => void connect()}
-            >
-              {status === 'loading' && <span className="lc-spinner" aria-hidden="true" />}
-              {status === 'loading' ? 'Loading…' : 'View approval queue'}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="lc__canvas">
-          {error && <p className="lc-form__error">{error}</p>}
-          <ApprovalQueue requests={requests} onApprove={onApprove} onDeny={onDeny} />
-        </div>
-      )}
+      <div className="lc__canvas">
+        <ApprovalQueue requests={requests} onApprove={onApprove} onDeny={onDeny} />
+      </div>
     </main>
   );
 }

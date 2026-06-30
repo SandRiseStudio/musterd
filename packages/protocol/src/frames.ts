@@ -1,11 +1,9 @@
 import { z } from 'zod';
 import { PresenceStatusSchema, ProvenanceSchema, SurfaceSchema } from './acts.js';
-import { ClaimFrame, OccupiedFrame, PendingFrame, RefusedFrame } from './claim-handshake.js';
 import { EnvelopeSchema } from './envelope.js';
 import { ErrorCodeSchema } from './errors.js';
 import { MemberSchema } from './member.js';
 import { PROTOCOL_VERSION } from './version.js';
-
 
 // ---- Client -> Server frames ----
 
@@ -48,7 +46,6 @@ export const HeartbeatFrame = z.object({
 
 export const WSClientFrame = z.discriminatedUnion('type', [
   HelloFrame,
-  ClaimFrame,
   SubscribeFrame,
   SendFrame,
   HeartbeatFrame,
@@ -94,9 +91,6 @@ export const ErrorFrame = z.object({
 
 export const WSServerFrame = z.discriminatedUnion('type', [
   WelcomeFrame,
-  OccupiedFrame,
-  RefusedFrame,
-  PendingFrame,
   SubscribedFrame,
   AckFrame,
   DeliverFrame,
