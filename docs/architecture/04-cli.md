@@ -28,6 +28,7 @@ src/
   render/
     theme.ts          // ANSI roles from brand.md (online dot, member colors, act badges)
     rows.ts           // renderMessageRow, renderStatusTable, renderBanner, renderPresence
+    credentials.ts    // v0.3 mint/env renderers: credentialEnv (SPEC A.9) + shown-once agent key / human credential / grant / team-create blocks (ADR 075/076, unwired until the P3 cutover)
   notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)
     os.ts             // OS push notification (macOS/Linux/Windows)
     select.ts         // pick which away human to nudge
