@@ -44,6 +44,7 @@ import {
   isHeld,
   hashToken,
   leaveMember,
+  markBound,
   mintCredential,
   rotateToken,
   setAvailability,
@@ -843,6 +844,7 @@ export async function handleHttp(
             workspace: null,
             driver: null,
           });
+          markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
             actor: targetMember.name,
             action: 'claim.occupied',
@@ -874,6 +876,7 @@ export async function handleHttp(
             workspace: null,
             driver: null,
           });
+          markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
             actor: targetMember.name,
             action: 'claim.occupied',

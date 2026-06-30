@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SurfaceSchema } from './acts.js';
+import { ProvenanceSchema, SurfaceSchema } from './acts.js';
 import { MemberSchema } from './member.js';
 import { PROTOCOL_VERSION } from './version.js';
 
@@ -67,6 +67,10 @@ export const ClaimFrame = z.object({
    * newest-wins (ADR 017). Optional for back-compat; the MCP/CLI clients already send it on the wire.
    */
   workspace: z.string().optional(),
+  /** How this session was provisioned (ADR 014) + the human driving it (ADR 021) — presence metadata
+   *  the live `hello` carried; surfaced on the roster. The client already sends both; recorded at OCCUPY. */
+  provenance: ProvenanceSchema.optional(),
+  driver: z.string().optional(),
 });
 export type ClaimFrame = z.infer<typeof ClaimFrame>;
 

@@ -33,7 +33,7 @@ afterEach(async () => {
   }
 });
 
-/** A tiny WS test client (hello → welcome / error). */
+/** A tiny WS test client (claim → occupied / refused). */
 class TestWs {
   ws: WebSocket;
   frames: WSServerFrame[] = [];
@@ -60,9 +60,19 @@ class TestWs {
       this.waiters.push({ type, resolve: (f) => (clearTimeout(t), resolve(f)) });
     });
   }
-  hello(team: string, as: string, token: string, surface = 'cli') {
-    this.ws.send(JSON.stringify({ type: 'hello', v: PROTOCOL_VERSION, team, as, token, surface }));
-    return this.waitFor('welcome');
+  claim(team: string, key: string, seat: string, surface = 'cli', grant?: string) {
+    this.ws.send(
+      JSON.stringify({
+        type: 'claim',
+        v: PROTOCOL_VERSION,
+        team,
+        key,
+        target: { seat },
+        ...(grant ? { grant } : {}),
+        surface,
+      }),
+    );
+    return this.waitFor('occupied');
   }
   close() {
     this.ws.close();
@@ -74,6 +84,16 @@ async function createTeam(base: string) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ slug: 'dawn', creator: { name: 'nick', kind: 'human' } }),
+  });
+  return (await res.json()) as { agent_key: string; human_credential: string };
+}
+
+/** Mint a standing seat grant (admin-authed) so an agent claim occupies immediately. */
+async function standingGrant(base: string, adminCred: string, seat: string): Promise<string> {
+  const res = await fetch(base + '/teams/dawn/grants', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${adminCred}` },
+    body: JSON.stringify({ scope: 'seat', target: seat, lifetime: 'standing' }),
   });
   return ((await res.json()) as { token: string }).token;
 }
@@ -182,34 +202,35 @@ describe('newest-wins self-heal at WAN-tuned timeouts (ADR 017 / 040 §6)', () =
     const base = `http://127.0.0.1:${port}`;
     const wsUrl = `ws://127.0.0.1:${port}/ws`;
 
-    const nickTok = await createTeam(base);
-    const adaRes = await fetch(base + '/teams/dawn/members', {
+    const { agent_key, human_credential } = await createTeam(base);
+    await fetch(base + '/teams/dawn/members', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${nickTok}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${human_credential}` },
       body: JSON.stringify({ name: 'Ada', kind: 'agent' }),
     });
-    const adaTok = ((await adaRes.json()) as { token: string }).token;
+    const grant = await standingGrant(base, human_credential, 'Ada');
 
-    // Ada attaches, then drops (a flaky WAN link).
+    // Ada attaches, then drops (a flaky WAN link). The claims carry no workspace → displace-all
+    // newest-wins (ADR 017), so the self-heal path is exercised without same-workspace flap-scoping.
     const a1 = new TestWs(wsUrl);
     await a1.open();
-    await a1.hello('dawn', 'Ada', adaTok, 'claude-code');
+    await a1.claim('dawn', agent_key, 'Ada', 'claude-code', grant);
     a1.close();
 
     // Simulate WAN latency before the same identity reconnects; well within the widened grace.
     await new Promise((r) => setTimeout(r, 250));
 
-    // The same Ada reclaims her held seat — welcome, not a busy refusal.
+    // The same Ada reclaims her held seat — occupied, not a busy refusal.
     const a2 = new TestWs(wsUrl);
     await a2.open();
-    const welcome = await a2.hello('dawn', 'Ada', adaTok, 'cli');
-    expect(welcome.type).toBe('welcome');
+    const occupied = await a2.claim('dawn', agent_key, 'Ada', 'cli', grant);
+    expect(occupied.type).toBe('occupied');
 
     // A newer concurrent session still wins (the intended self-heal), displacing a2.
     const a3 = new TestWs(wsUrl);
     await a3.open();
-    const welcome3 = await a3.hello('dawn', 'Ada', adaTok, 'cli');
-    expect(welcome3.type).toBe('welcome');
+    const occupied3 = await a3.claim('dawn', agent_key, 'Ada', 'cli', grant);
+    expect(occupied3.type).toBe('occupied');
     const superseded = await a2.waitFor('error');
     expect((superseded as { code?: string }).code).toBe('superseded');
 

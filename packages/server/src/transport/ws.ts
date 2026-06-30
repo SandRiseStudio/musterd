@@ -15,13 +15,7 @@ import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope } from '../protocol/validate.js';
 import { appendAudit } from '../store/audit.js';
 import { consumeGrant, validateGrant } from '../store/grants.js';
-import {
-  authMember,
-  getMemberById,
-  getMemberByName,
-  hashToken,
-  touchSeen,
-} from '../store/members.js';
+import { getMemberById, getMemberByName, hashToken, markBound } from '../store/members.js';
 import {
   attach,
   clearOrphanPresence,
@@ -129,84 +123,6 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
       const frame = frameResult.data;
 
       try {
-        if (frame.type === 'hello') {
-          if (frame.v !== PROTOCOL_VERSION) {
-            throw new MusterdError('version_mismatch', `server speaks ${PROTOCOL_VERSION}`);
-          }
-          const { team, member } = authMember(ctx.db, frame.team, frame.token);
-          if (member.name !== frame.as) {
-            throw new MusterdError('forbidden', 'token does not match the requested member');
-          }
-          // Single-active is *kind-scoped* (ADR 042). **Agent** seats stay single-active,
-          // newest-wins (ADR 017, supersedes ADR 010's refusal): one live attachment per agent,
-          // and a fresh hello from the *same identity* takes the seat — so a reloaded/orphaned
-          // adapter can't lock the agent out of its own seat, and N parallel autonomous minds can't
-          // wear one identity. Displace any existing live session: tell it it was superseded, close
-          // it, and evict it from the hub.
-          // **Human** seats *fan out* instead: a person may watch on a phone while acting on a
-          // laptop, so a new human hello attaches an *additional* presence alongside the existing
-          // ones — no displacement, no clear. Delivery already pushes to all of a member's conns
-          // (hub.deliver), and the durable inbox cursor dedupes (ADR 042; deployment-topology §7).
-          // Observers (ADR 063) fan out like humans — several dashboards may watch one seat — so they
-          // are exempt from agent single-active displacement.
-          //
-          // Displacement is **workspace-scoped** (ADR 068). A hello from the *same* workspace is the
-          // same seat reconnecting — a session reload, or (the common case) a health-check probe that
-          // briefly spawns the autojoin MCP server every ~90s — and must NOT supersede the live
-          // session, or the seat flaps and the agent's posts "land on retry". Only a hello from a
-          // *different* workspace is a genuinely new session that should take the seat (newest-wins,
-          // ADR 017). A client that sends no workspace falls back to the old displace-all behavior.
-          if (member.kind === 'agent' && member.observer === 0) {
-            const sameWorkspace = (w?: string | null): boolean =>
-              w != null && frame.workspace != null && w === frame.workspace;
-            for (const old of ctx.hub.connsForMember(member.id)) {
-              if (sameWorkspace(old.workspace)) continue; // same seat reconnecting/probing — keep it
-              old.send({
-                type: 'error',
-                code: 'superseded',
-                message: `your session as "${member.name}" was taken over by a newer one`,
-              });
-              old.close?.();
-              ctx.hub.remove(old.connId);
-              clearPresenceById(ctx.db, old.presenceId);
-            }
-            // Sweep crashed-session / grace-hold leftovers, but never the live same-workspace presence.
-            clearOrphanPresence(ctx.db, member.id);
-          }
-          const presence = attach(ctx.db, member.id, frame.surface, state.connId, {
-            provenance: frame.provenance ?? null,
-            workspace: frame.workspace ?? null,
-            driver: frame.driver ?? null,
-          });
-          const conn: Connection = {
-            connId: state.connId,
-            memberId: member.id,
-            memberName: member.name,
-            teamId: team.id,
-            presenceId: presence.id,
-            observer: member.observer === 1,
-            workspace: frame.workspace ?? null,
-            send: (f) => send(ws, f),
-            close: () => ws.close(),
-          };
-          state.authenticated = true;
-          state.conn = conn;
-          ctx.hub.add(conn);
-          recordPresenceChurn('attach', frame.surface);
-          send(ws, {
-            type: 'welcome',
-            member: toMember(member, team.slug),
-            presence_id: presence.id,
-            server_time: Date.now(),
-          });
-          // An observer (ADR 063) watches without participating — no online presence event. Bump its
-          // last-seen so the idle-TTL reaper keeps an actively-used seat (ADR 064).
-          if (conn.observer) touchSeen(ctx.db, member.id);
-          else emitPresence(ctx, conn, 'online', frame.surface);
-          log.info({ msg: 'ws_hello', team: team.slug, member: member.name, conn: state.connId });
-          return;
-        }
-
         // P3.2 claim frame (ADR 077): governed successor to hello. Authenticates with the team agent
         // key (harness) or a human credential, optionally with a pre-issued grant. Without a grant the
         // server opens a claim request and holds this WS open until an admin decides (spec-gap 3).
@@ -346,15 +262,20 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // superseded, close it, evict it — rather than dead-ending on `claim_conflict`, so a relaunched
           // agent re-occupies its own seat without a manual leave. A **human**/observer seat fans out: a
           // second claim attaches an *additional* presence with no displacement (a person may act on a
-          // laptop while watching on a phone). Unlike hello, the claim frame carries no workspace, so
-          // there is no same-workspace flap-scoping (ADR 068) here — a follow-up if probes ever claim.
+          // laptop while watching on a phone). Displacement is **workspace-scoped** (ADR 068): a claim
+          // from the *same* workspace is the same seat reconnecting — a reload, or the ~90s health-check
+          // MCP probe — and must NOT supersede the live session, or the seat flaps. A client that sends no
+          // workspace falls back to displace-all.
           if (
             targetMember &&
             !('observe' in frame.target) &&
             targetMember.kind === 'agent' &&
             targetMember.observer === 0
           ) {
+            const sameWorkspace = (w?: string | null): boolean =>
+              w != null && frame.workspace != null && w === frame.workspace;
             for (const old of ctx.hub.connsForMember(targetMember.id)) {
+              if (sameWorkspace(old.workspace)) continue; // same seat reconnecting/probing — keep it
               old.send?.({
                 type: 'error',
                 code: 'superseded',
@@ -411,6 +332,10 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             }
             consumeGrant(ctx.db, gv.grant.id);
             // OCCUPY — fall through to the common occupy block below.
+          } else if (authenticatedAs && targetMember && authenticatedAs.id === targetMember.id) {
+            // Credential self-authorize (ADR 077): a human authenticated by their own mscr_ credential
+            // claiming their own seat is self-authorizing — no grant, no admin-approval request. Fall
+            // through to OCCUPY (symmetric with the POST /claim credential-occupy path).
           } else {
             // Step 6: no grant → open a claim request and hold the WS open.
             const encodedTarget = 'observe' in frame.target ? null : encodeTarget(frame.target);
@@ -479,22 +404,25 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
 
           // OCCUPY: attach presence and complete the handshake.
           if (!targetMember) {
-            // Observer attach: this path isn't fully built in P3.2 MVP; refuse gracefully.
+            // Anonymous observe-target ({ observe: true }) isn't built yet; a *named* observer seat is
+            // claimable via `target: { seat: <name> }`. Refuse gracefully and point at that.
             send(ws, {
               type: 'refused',
               code: 'forbidden',
-              message:
-                'observer observe-target via claim not yet supported — use hello with observer seat',
+              message: 'anonymous observe-target via claim not yet supported',
               claimable: [],
-              hint: 'use hello with an observer seat token',
+              hint: 'claim a named observer seat: target { seat: "<name>" }',
             });
             return;
           }
           const presence = attach(ctx.db, targetMember.id, frame.surface, state.connId, {
-            provenance: null,
-            workspace: null,
-            driver: null,
+            provenance: frame.provenance ?? null,
+            workspace: frame.workspace ?? null,
+            driver: frame.driver ?? null,
           });
+          // First occupancy stamps the durable *held* marker (ADR 058) — the claim path is the v0.3
+          // successor to the v0.2 first-token-touch that used to do this; keeps the ADR 070 derivation.
+          markBound(ctx.db, targetMember.id);
           const conn: Connection = {
             connId: state.connId,
             memberId: targetMember.id,
@@ -503,6 +431,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             presenceId: presence.id,
             observer: targetMember.observer === 1,
             isAdmin: resolveCapabilities(targetMember).is_admin,
+            workspace: frame.workspace ?? null,
             send: (f) => send(ws, f),
             close: () => ws.close(),
           };
@@ -535,7 +464,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
         }
 
         if (!state.authenticated || !state.conn) {
-          throw new MusterdError('unauthorized', 'send hello or claim first');
+          throw new MusterdError('unauthorized', 'send a claim frame first');
         }
         const conn = state.conn;
 

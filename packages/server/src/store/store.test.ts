@@ -56,11 +56,12 @@ describe('teams + members', () => {
     expect(stored?.token_hash).not.toContain(token);
   });
 
-  it('authMember resolves the right member and rejects bad tokens', () => {
+  it('rejects the removed v0.2 per-seat token (mskd_ cutover, ADR 069)', () => {
     const { db, team } = freshTeam();
     const { token } = addMember(db, team, { name: 'Ada', kind: 'agent' });
-    const ok = authMember(db, 'dawn', token);
-    expect(ok.member.name).toBe('Ada');
+    expect(token).toMatch(/^mskd_/); // addMember still mints the durable seat token_hash …
+    // … but it no longer authenticates — the team agent key + human credential are the only paths now.
+    expect(() => authMember(db, 'dawn', token)).toThrow(MusterdError);
     expect(() => authMember(db, 'dawn', 'mskd_wrong')).toThrow(MusterdError);
   });
 
@@ -98,9 +99,6 @@ describe('teams + members', () => {
     expect(revived.row.left_at).toBeNull();
     expect(revived.token).not.toBe(first.token); // deletion was a revocation — token re-minted
     expect(listMembers(db, team.id).map((m) => m.name)).toContain('Ada');
-    // The new token authenticates; the old one is dead.
-    expect(authMember(db, 'dawn', revived.token).member.id).toBe(first.row.id);
-    expect(() => authMember(db, 'dawn', first.token)).toThrow(MusterdError);
   });
 });
 
@@ -153,15 +151,6 @@ describe('authMember v0.3 prefix-dispatch (ADR 077)', () => {
     // A matching x-musterd-seat is accepted; a mismatching one is forbidden (the credential is authority).
     expect(authMember(db, 'dawn', credential, 'Nick').member.name).toBe('Nick');
     expect(() => authMember(db, 'dawn', credential, 'Ada')).toThrow(MusterdError);
-  });
-
-  it('the legacy per-seat token (mskd_) still authenticates and still flips bound_at', () => {
-    const { db, team } = freshTeam();
-    const { row, token } = addMember(db, team, { name: 'Ada', kind: 'agent' });
-    expect(row.bound_at).toBeNull();
-    const ok = authMember(db, 'dawn', token);
-    expect(ok.member.name).toBe('Ada');
-    expect(ok.member.bound_at).not.toBeNull(); // first-touch hold (ADR 058) preserved
   });
 });
 

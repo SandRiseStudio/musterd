@@ -5,7 +5,7 @@ import { GENERALIST_CAPABILITIES, parseSeatFile, parseTeamFile } from '@musterd/
 import type { Database } from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
-import { authMember, getMemberByName, isHeld, listMembers } from '../store/members.js';
+import { getMemberByName, isHeld, listMembers, markBound } from '../store/members.js';
 import { listRoleNames } from '../store/roles.js';
 import { toMember } from '../store/rows.js';
 import { getTeamBySlug } from '../store/teams.js';
@@ -74,11 +74,11 @@ describe('reconcile — match-by-name delta', () => {
 
   it('UPDATEs a role in place, preserving id + token_hash + bound_at', () => {
     writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
-    const minted = reconcile().minted['olive']!;
+    reconcile();
     const team = getTeamBySlug(db, 'alpha')!;
     const before = getMemberByName(db, team.id, 'olive')!;
-    // Hold the seat (first auth touch sets bound_at).
-    authMember(db, 'alpha', minted);
+    // Hold the seat (first occupancy stamps bound_at; ADR 058).
+    markBound(db, before.id);
     const held = getMemberByName(db, team.id, 'olive')!;
     expect(isHeld(held)).toBe(true);
 
@@ -87,11 +87,9 @@ describe('reconcile — match-by-name delta', () => {
     expect(r.updated).toEqual(['olive']);
     const after = getMemberByName(db, team.id, 'olive')!;
     expect(after.id).toBe(before.id); // id preserved → message log continuity
-    expect(after.token_hash).toBe(before.token_hash); // token preserved → live session unaffected
+    expect(after.token_hash).toBe(before.token_hash); // token_hash preserved → reconcile UPDATEs in place
     expect(after.bound_at).toBe(held.bound_at); // still held
     expect(after.role).toBe('approver');
-    // The held token still authenticates after the update.
-    expect(() => authMember(db, 'alpha', minted)).not.toThrow();
   });
 
   it('REMOVEs a seat whose file is deleted via soft-tombstone (left_at), never hard-delete', () => {
@@ -115,10 +113,12 @@ describe('reconcile — match-by-name delta', () => {
 
   it('REVIVEs a re-added seat with the same id but a fresh token (deletion = revocation)', () => {
     writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
-    const firstToken = reconcile().minted['olive']!;
+    reconcile();
     const team = getTeamBySlug(db, 'alpha')!;
-    const firstId = getMemberByName(db, team.id, 'olive')!.id;
-    authMember(db, 'alpha', firstToken); // hold it
+    const firstSeat = getMemberByName(db, team.id, 'olive')!;
+    const firstId = firstSeat.id;
+    const firstHash = firstSeat.token_hash;
+    markBound(db, firstId); // hold it
 
     // Delete then re-add the seat.
     rmSync(join(dir, '.musterd', 'seats', 'olive.toml'));
@@ -131,9 +131,8 @@ describe('reconcile — match-by-name delta', () => {
     expect(revived.id).toBe(firstId); // same identity → log continuity
     expect(revived.left_at).toBeNull();
     expect(isHeld(revived)).toBe(false); // back to declared
-    // The old token is revoked; the new one works.
-    expect(() => authMember(db, 'alpha', firstToken)).toThrow();
-    expect(() => authMember(db, 'alpha', r.minted['olive']!)).not.toThrow();
+    // Deletion = revocation: the seat got a fresh token_hash (the old one is gone).
+    expect(revived.token_hash).not.toBe(firstHash);
   });
 
   it('resolves an omitted seat lifecycle from the team default', () => {
@@ -204,9 +203,9 @@ describe('reconcile — governance projection (ADR 070, v0.3 P1)', () => {
 
   it('derives active once the seat has been held (authenticated)', () => {
     writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = ""\n' });
-    const r = reconcile();
-    const token = r.minted['olive']!;
-    authMember(db, 'alpha', token); // first auth stamps bound_at (ADR 058)
+    reconcile();
+    const team = getTeamBySlug(db, 'alpha')!;
+    markBound(db, getMemberByName(db, team.id, 'olive')!.id); // first occupancy stamps bound_at (ADR 058)
     expect(memberView('olive').account_status).toBe('active');
   });
 

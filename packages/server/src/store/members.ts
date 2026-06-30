@@ -183,18 +183,18 @@ export function listMembers(db: Database, teamId: string): MemberRow[] {
 /**
  * Authenticate a request to a specific member (seat) in a team. Throws unauthorized/forbidden.
  *
- * v0.3 P3 (ADR 077, SPEC A.7) **prefix-dispatch — additive, no path removed**:
+ * v0.3 P3 (ADR 077, SPEC A.7) **prefix-dispatch** — the hard cutover removed the v0.2 per-seat token
+ * (`mskd_`); the only credentials are:
  *  - `mskey_` (team agent key): authenticates the *harness*, not a seat — so the acting seat must be
  *    named by the caller (`actingSeat`: the Envelope `from` on a send, or the `x-musterd-seat` header on
  *    a read, per SPEC A.7 §253). Authorizes on a valid team key + an existing, active seat. Single-active
  *    occupancy is enforced at *claim* time (the handshake), not re-checked per request — and we
- *    deliberately do **not** gate on live presence / `isHeld`: the claim OCCUPY path never sets
- *    `bound_at`, and gating auth on presence would regress the ambient-presence ergonomics (ADR 057) the
- *    legacy token path never had (a bursty stateless agent past the presence TTL would lock itself out).
+ *    deliberately do **not** gate on live presence / `isHeld`: gating auth on presence would regress the
+ *    ambient-presence ergonomics (ADR 057) (a bursty stateless agent past the presence TTL would lock
+ *    itself out).
  *  - `mscr_` (human credential): self-identifying — resolves the human seat by `credential_hash`. The
  *    credential is the authority; if `actingSeat` is supplied it must match.
- *  - `mskd_` / unprefixed legacy: the v0.2 per-seat token path, **unchanged** (incl. the first-touch
- *    `bound_at` flip).
+ *  - anything else → `unauthorized` (the `mskd_` path is gone, ADR 069 decision 2).
  */
 export function authMember(
   db: Database,
@@ -211,30 +211,12 @@ export function authMember(
     return { team, member: authByCredential(db, team, token, actingSeat) };
   }
 
-  const hash = hashToken(token);
-  const member = db
-    .prepare<
-      [string, string],
-      MemberRow
-    >('SELECT * FROM members WHERE team_id = ? AND token_hash = ? AND left_at IS NULL')
-    .get(team.id, hash);
-  if (!member)
-    throw new MusterdError(
-      'unauthorized',
-      `invalid token for team "${teamSlug}" — this member may not exist on the database this daemon is serving ` +
-        `(a daemon started against a different MUSTERD_DB will not recognize tokens minted elsewhere)`,
-    );
-  // First authenticated touch flips a *declared* seat to *held* (ADR 058). Durable across the holder
-  // going offline — unlike presence — so a stray plain `claim` can't rotate a live token away.
-  if (member.bound_at === null) {
-    const now = Date.now();
-    db.prepare('UPDATE members SET bound_at = ? WHERE id = ? AND bound_at IS NULL').run(
-      now,
-      member.id,
-    );
-    member.bound_at = now;
-  }
-  return { team, member };
+  // v0.3 hard cutover (ADR 069 decision 2): the v0.2 per-seat token (`mskd_`) auth path is removed —
+  // the only credentials are the team agent key (`mskey_`) and a human credential (`mscr_`).
+  throw new MusterdError(
+    'unauthorized',
+    `unrecognized credential for team "${teamSlug}" — present a team agent key (mskey_) or a human credential (mscr_)`,
+  );
 }
 
 /**
@@ -337,6 +319,19 @@ export function reviveMember(db: Database, id: string, f: MemberIdentityFields):
 /** Force a held seat back to *declared* without deleting it (operator reclaim / unbind, ADR 058). */
 export function clearBound(db: Database, id: string): void {
   db.prepare('UPDATE members SET bound_at = NULL, updated_at = ? WHERE id = ?').run(Date.now(), id);
+}
+
+/**
+ * Mark a seat *held* (ADR 058): the first time it is occupied, stamp `bound_at`. Idempotent — only sets
+ * when still null, so a re-occupy never rotates the original hold time. In v0.2 the first authenticated
+ * token touch did this; post-cutover (ADR 069) the claim OCCUPY is the first-occupancy signal, so it
+ * calls this — keeping the durable "held" marker and the ADR 070 active derivation intact.
+ */
+export function markBound(db: Database, id: string): void {
+  db.prepare('UPDATE members SET bound_at = ? WHERE id = ? AND bound_at IS NULL').run(
+    Date.now(),
+    id,
+  );
 }
 
 /**
