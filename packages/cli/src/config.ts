@@ -1,7 +1,60 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { BINDING_DIR, BINDING_FILE, BindingSchema, type Binding } from '@musterd/protocol';
+import {
+  BINDING_DIR,
+  BINDING_FILE,
+  BindingSchema,
+  type Binding,
+  type ClaimTarget,
+} from '@musterd/protocol';
+import { parseClaimTarget } from './claim-client.js';
+
+/**
+ * A v0.3 claim credential resolved from env (ADR 075 Decision 1) — the P3 successor to {@link Identity}.
+ * The agent key (mskey_) is the team-level authenticator; `target` is the seat/role/observe to claim;
+ * `grant` (msgr_) is an optional pre-issued grant that skips the pending/admin-approval lane. The member
+ * name is NOT carried here — it is resolved by the server's `occupied` response (the seat it assigned).
+ */
+export interface ClaimCredential {
+  team: string;
+  agentKey: string;
+  target: ClaimTarget;
+  grant?: string;
+  surface: string;
+}
+
+/**
+ * Read the v0.3 claim credential from `MUSTERD_*` env (ADR 075 Decision 1): `MUSTERD_TEAM` +
+ * `MUSTERD_AGENT_KEY` + `MUSTERD_CLAIM` (+ optional `MUSTERD_GRANT`, + `MUSTERD_SURFACE`). Returns null
+ * if any required var is absent or `MUSTERD_CLAIM` doesn't parse to a claim target. Additive + unwired:
+ * the live `claim`/`join` token path stays until the atomic cutover wires this in.
+ */
+export function claimCredentialFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): { team: string; credential: ClaimCredential } | null {
+  const team = env['MUSTERD_TEAM'];
+  const agentKey = env['MUSTERD_AGENT_KEY'];
+  const claim = env['MUSTERD_CLAIM'];
+  if (!team || !agentKey || !claim) return null;
+  let target: ClaimTarget;
+  try {
+    target = parseClaimTarget(claim);
+  } catch {
+    return null;
+  }
+  const grant = env['MUSTERD_GRANT'];
+  return {
+    team,
+    credential: {
+      team,
+      agentKey,
+      target,
+      ...(grant !== undefined ? { grant } : {}),
+      surface: env['MUSTERD_SURFACE'] ?? 'cli',
+    },
+  };
+}
 
 export interface Identity {
   name: string;
