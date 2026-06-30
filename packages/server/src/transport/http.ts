@@ -442,7 +442,17 @@ export async function handleHttp(
             }
             token = rotateToken(ctx.db, row.id);
           }
-          return sendJson(res, 201, { member: toMember(row, team.slug), token });
+          return sendJson(res, 201, {
+            member: toMember(row, team.slug),
+            token,
+            // v0.3 (ADR 069): a human member needs a credential (mscr_) to authenticate — the creator gets
+            // one at team-create; this gives every *other* human seat the same, closing the "second human
+            // can't auth" gap the cutover surfaced. Agents stay credential-less (they claim with the team
+            // agent key + a grant).
+            ...(row.kind === 'human'
+              ? { human_credential: mintCredential(ctx.db, row.id).credential }
+              : {}),
+          });
         }
         const team = requireTeam(ctx.db, slug);
         const { row, token } = addMember(ctx.db, team, {
@@ -453,7 +463,17 @@ export async function handleHttp(
           lifecycleUntil: body.lifecycle_until ?? null,
           ...(body.observer ? { observer: true } : {}),
         });
-        return sendJson(res, 201, { member: toMember(row, team.slug), token });
+        return sendJson(res, 201, {
+          member: toMember(row, team.slug),
+          token,
+          // v0.3 (ADR 069): a human member needs a credential (mscr_) to authenticate — the creator gets
+          // one at team-create; this gives every *other* human seat the same, closing the "second human
+          // can't auth" gap the cutover surfaced. Agents stay credential-less (they claim with the team
+          // agent key + a grant).
+          ...(row.kind === 'human'
+            ? { human_credential: mintCredential(ctx.db, row.id).credential }
+            : {}),
+        });
       }
 
       if (method === 'GET' && rest === '/members') {

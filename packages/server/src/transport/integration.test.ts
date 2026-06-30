@@ -177,7 +177,7 @@ describe('HTTP API', () => {
   it('sends and reads an inbox over HTTP with unread accounting', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+    await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
     const boTok = { key: team.json.agent_key, seat: 'bo' };
 
     const env = {
@@ -198,6 +198,27 @@ describe('HTTP API', () => {
     await post('/teams/dawn/inbox/cursor', { last_read_message_id: 'mh1' }, boTok);
     const inbox2 = await get('/teams/dawn/inbox?unread=1', boTok);
     expect(inbox2.json.messages).toHaveLength(0);
+  });
+
+  it('a second human member is minted a credential that authenticates (ADR 069 cutover gap)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    // A non-creator human seat gets its own mscr_ credential, returned once (parallel to the creator).
+    const bo = await post(
+      '/teams/dawn/members',
+      { name: 'bo', kind: 'human' },
+      team.json.human_credential,
+    );
+    expect(bo.json.human_credential).toMatch(/^mscr_/);
+    // …and it authenticates as bo (the credential is self-identifying).
+    const inbox = await get('/teams/dawn/inbox', bo.json.human_credential);
+    expect(inbox.status).toBe(200);
+    // An agent member gets NO credential — it claims with the team agent key + a grant.
+    const ada = await post(
+      '/teams/dawn/members',
+      { name: 'Ada', kind: 'agent' },
+      team.json.human_credential,
+    );
+    expect(ada.json.human_credential).toBeUndefined();
   });
 
   it('rejects an invalid act with 422 validation', async () => {
@@ -226,7 +247,7 @@ describe('HTTP API', () => {
   it('ambient presence: a one-shot authenticated command flips the agent present (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     const adaTok = { key: team.json.agent_key, seat: 'Ada' };
 
     // Ada has never opened a socket → offline.
@@ -246,7 +267,7 @@ describe('HTTP API', () => {
   it('ambient presence: x-musterd-no-touch suppresses the touch (the notifier opt-out, ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // A read carrying the no-touch header (a background poller, e.g. notify) must NOT flip Ada present.
     await get(
@@ -261,7 +282,7 @@ describe('HTTP API', () => {
   it('ambient presence: a status_update reads working, and the surface header is honored (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     const res = await fetch(base + '/teams/dawn/messages', {
       method: 'POST',
       headers: {
@@ -296,7 +317,7 @@ describe('HTTP API', () => {
   it('ambient presence: a live watcher sees the offline→online transition event (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     const adaTok = { key: team.json.agent_key, seat: 'Ada' };
 
     // nick watches the team roster live.
@@ -369,11 +390,7 @@ describe('static web serving (ADR 062)', () => {
 describe('WebSocket', () => {
   it('/health connections reflects a live session (ADR 047)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const ada = await post(
-      '/teams/dawn/members',
-      { name: 'Ada', kind: 'agent' },
-      team.json.human_credential,
-    );
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
     expect((await get('/health')).json.connections).toBe(0);
 
     const a = new TestWs();
@@ -391,16 +408,8 @@ describe('WebSocket', () => {
 
   it('delivers live to a present recipient and acks the sender', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const ada = await post(
-      '/teams/dawn/members',
-      { name: 'Ada', kind: 'agent' },
-      team.json.human_credential,
-    );
-    const lin = await post(
-      '/teams/dawn/members',
-      { name: 'Lin', kind: 'agent' },
-      team.json.human_credential,
-    );
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, team.json.human_credential);
 
     const a = new TestWs();
     const l = new TestWs();
@@ -446,9 +455,9 @@ describe('WebSocket', () => {
   it('firehose (subscribe team-all): an observer sees a directed DM between two other members (ADR 061)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
-    const lin = await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
-    const obs = await post('/teams/dawn/members', { name: 'Obs', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Obs', kind: 'agent' }, tok);
 
     const a = new TestWs();
     const l = new TestWs();
@@ -515,8 +524,8 @@ describe('WebSocket', () => {
   it('GET /messages returns the whole team timeline incl. DMs between others, with since/limit (ADR 061)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
-    const lin = await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
 
     const mk = (id: string, from: string, to: any, body: string, ts: number) => ({
       id,
@@ -555,7 +564,7 @@ describe('WebSocket', () => {
   it('observer seat: watches the firehose but is hidden from roster/count and cannot send (ADR 063)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
     await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
     const obs = await post(
       '/teams/dawn/members',
@@ -633,7 +642,7 @@ describe('WebSocket', () => {
   it('a message to an offline member surfaces via inbox', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // nick present, Ada offline.
     const n = new TestWs();
@@ -666,7 +675,7 @@ describe('WebSocket', () => {
   it('roster activity reflects working from a status_update, online when present, offline otherwise', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, nickTok); // never connects → offline
 
     // nick present but idle; Ada present and working.
@@ -746,7 +755,7 @@ describe('WebSocket', () => {
   it('records provenance + workspace from the claim and surfaces them on the roster (ADR 014)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const a = new TestWs();
     await a.open();
@@ -774,7 +783,7 @@ describe('WebSocket', () => {
   it('records the driver from the claim and surfaces it on the roster (ADR 021)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const a = new TestWs();
     await a.open();
@@ -800,11 +809,7 @@ describe('WebSocket', () => {
 
   it('a second live session for the same member takes over; the first is superseded (ADR 017)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
-    const ada = await post(
-      '/teams/dawn/members',
-      { name: 'Ada', kind: 'agent' },
-      team.json.human_credential,
-    );
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
 
     const a1 = new TestWs();
     await a1.open();
@@ -955,7 +960,7 @@ describe('WebSocket', () => {
   it('delivers a directed message AND a @team broadcast to BOTH of a human’s sessions (ADR 042)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // nick holds two live sessions; Ada is the sender.
     const phone = new TestWs();
@@ -1019,7 +1024,7 @@ describe('WebSocket', () => {
   it('reclaim drops a member’s live session and frees the seat (ADR 017 follow-up)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const a = new TestWs();
     await a.open();
@@ -1052,7 +1057,7 @@ describe('WebSocket', () => {
   it('unbind releases the caller’s own seat: drops its session + presence, keeps it on the roster (ADR 058)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const a = new TestWs();
     await a.open();
@@ -1088,7 +1093,7 @@ describe('WebSocket', () => {
   it('remove soft-deletes a member, drops its live session, and is idempotent (ADR 019)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const a = new TestWs();
     await a.open();
@@ -1124,7 +1129,7 @@ describe('WebSocket', () => {
   it('lets the same member reclaim its presence after disconnecting (within grace)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // nick stays present so we can observe Ada's offline event after she drops.
     const n = new TestWs();
@@ -1224,7 +1229,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const nickTok = team.json.human_credential;
     // The creator-admin default (ADR 071) is on the returned member …
     expect(team.json.member.capabilities.is_admin).toBe(true);
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nickTok);
 
     // Ada (generalist, not admin) is refused governance now that nick is an admin.
@@ -1246,7 +1251,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
   it('empty-admin fallback: with no admin on the team, any member may reclaim (no flag day)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nickTok);
     // Strip the only admin → the team has zero admins → governance falls back to v0.2 open behaviour.
     setCaps('dawn', 'nick', { is_admin: false });
@@ -1264,7 +1269,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
   it('GET /audit is admin-only', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members/Ada/reclaim', {}, nickTok); // write one entry
 
     const adminView = await get('/teams/dawn/audit', nickTok);
@@ -1281,9 +1286,9 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
   it('can_flag_urgent: an allowed seat keeps urgent + is audited; a denied seat is downgraded, not rejected', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
     const bobTok = { key: team.json.agent_key, seat: 'Bob' };
-    const mut = await post('/teams/dawn/members', { name: 'Mut', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Mut', kind: 'agent' }, nickTok);
 
     // nick is generalist-ish (can_flag_urgent true) → urgent rides through.
     const allowed = await post(
@@ -1319,8 +1324,8 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
-    const dis = await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
-    const mute = await post('/teams/dawn/members', { name: 'Mute', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Mute', kind: 'agent' }, nickTok);
 
     setCaps('dawn', 'Dis', {}, 'disabled');
     setCaps('dawn', 'Mute', { can_message: 'none' });
@@ -1354,7 +1359,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
   it('visibility_level: a non-admin viewer sees its own caps but not other seats’ authority map', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // Admin sees every seat's caps.
     const adminView = await get('/teams/dawn/members', nickTok);
@@ -1376,7 +1381,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
   it('can_observe: a seat narrowed to can_observe:false is refused the firehose', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const watcher = await post('/teams/dawn/members', { name: 'Watcher', kind: 'human' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Watcher', kind: 'human' }, nickTok);
     setCaps('dawn', 'Watcher', { can_observe: false });
 
     const w = new TestWs();
@@ -1452,7 +1457,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
   it('the P3.1 admin endpoints are is_admin-only (a non-admin is 403)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    const ada = await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     const denied = await post(
       '/teams/dawn/grants',
