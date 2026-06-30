@@ -33,6 +33,8 @@ src/
     cursors.ts        // getCursor, setCursor, unreadCount
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
     audit.ts          // append-only governance audit log: appendAudit/listAudit (ADR 071, P2)
+    grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
+    requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)
     roles.ts          // roles table: role defaults (capabilities + charter), projected from roles/*.toml (ADR 070)
     rows.ts           // raw DB row shapes (TeamRow/MemberRow/PresenceRow/MessageRow) + toMember (resolves account_status + capabilities, ADR 070)
   protocol/

@@ -1,5 +1,10 @@
 import type { IncomingMessage } from 'node:http';
-import { WSClientFrame, PROTOCOL_VERSION, type WSServerFrame } from '@musterd/protocol';
+import {
+  WSClientFrame,
+  PROTOCOL_VERSION,
+  type WSServerFrame,
+  type ClaimTarget,
+} from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { checkUpgrade } from '../config.js';
@@ -9,7 +14,14 @@ import { log } from '../log.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope } from '../protocol/validate.js';
 import { appendAudit } from '../store/audit.js';
-import { authMember, getMemberById, touchSeen } from '../store/members.js';
+import { consumeGrant, validateGrant } from '../store/grants.js';
+import {
+  authMember,
+  getMemberById,
+  getMemberByName,
+  hashToken,
+  touchSeen,
+} from '../store/members.js';
 import {
   attach,
   clearOrphanPresence,
@@ -19,9 +31,28 @@ import {
   presenceById,
   release,
 } from '../store/presence.js';
-import { resolveCapabilities, toMember } from '../store/rows.js';
+import { createRequest } from '../store/requests.js';
+import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
+import { getAgentKeyHash, requireTeam } from '../store/teams.js';
 import { recordError, recordPresenceChurn } from '../telemetry.js';
 import type { Connection } from './hub.js';
+
+/** Encode a ClaimTarget to the requests table's single-string format. */
+function encodeTarget(t: ClaimTarget): string {
+  if ('seat' in t) return `seat:${t.seat}`;
+  if ('role' in t) return `role:${t.role}`;
+  return 'observe';
+}
+
+/** Return claimable seat names for the refused frame hint (ADR 055 no-dead-end rule). */
+function claimableSeats(ctx: Ctx, teamId: string): string[] {
+  return ctx.db
+    .prepare<[string], { name: string }>(
+      "SELECT name FROM members WHERE team_id = ? AND left_at IS NULL AND kind = 'agent' AND observer = 0 ORDER BY name",
+    )
+    .all(teamId)
+    .map((r) => r.name);
+}
 
 interface ConnState {
   connId: string;
@@ -176,8 +207,336 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           return;
         }
 
+        // P3.2 claim frame (ADR 077): governed successor to hello. Authenticates with the team agent
+        // key (harness) or a human credential, optionally with a pre-issued grant. Without a grant the
+        // server opens a claim request and holds this WS open until an admin decides (spec-gap 3).
+        if (frame.type === 'claim') {
+          if (frame.v !== PROTOCOL_VERSION) {
+            throw new MusterdError('version_mismatch', `server speaks ${PROTOCOL_VERSION}`);
+          }
+          const team = requireTeam(ctx.db, frame.team);
+
+          // Step 1: authenticate the key — agent key (mskey_) or human credential (mscr_).
+          let authenticatedAs: import('../store/rows.js').MemberRow | null = null;
+          const keyHash = getAgentKeyHash(ctx.db, team.id);
+          if (keyHash && hashToken(frame.key) === keyHash) {
+            // Agent harness: key validates against the team secret. No specific member identity yet.
+          } else {
+            // Human credential: look up by hash.
+            const credHash = hashToken(frame.key);
+            authenticatedAs =
+              ctx.db
+                .prepare<
+                  [string, string],
+                  import('../store/rows.js').MemberRow
+                >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind = 'human'")
+                .get(team.id, credHash) ?? null;
+            if (!authenticatedAs) {
+              const claimable = claimableSeats(ctx, team.id);
+              send(ws, {
+                type: 'refused',
+                code: 'forbidden',
+                message: 'invalid key — present a valid agent key or human credential',
+                claimable,
+                hint: `musterd claim <seat> --key <mskey_...>`,
+              });
+              appendAudit(ctx.db, team.id, {
+                actor: null,
+                action: 'claim.refused',
+                target: null,
+                result: 'deny',
+                detail: { code: 'forbidden', reason: 'invalid_key' },
+              });
+              return;
+            }
+          }
+
+          // Step 2: resolve the target member.
+          let targetMember: import('../store/rows.js').MemberRow | null = null;
+          if ('seat' in frame.target) {
+            targetMember = getMemberByName(ctx.db, team.id, frame.target.seat) ?? null;
+            if (!targetMember || targetMember.left_at !== null) {
+              const claimable = claimableSeats(ctx, team.id);
+              send(ws, {
+                type: 'refused',
+                code: 'not_found',
+                message: `no seat "${frame.target.seat}" in team "${team.slug}"`,
+                claimable,
+                hint: claimable.length
+                  ? `available: ${claimable.join(', ')}`
+                  : `musterd team add <seat> --team ${team.slug}`,
+              });
+              appendAudit(ctx.db, team.id, {
+                actor: null,
+                action: 'claim.refused',
+                target: frame.target.seat,
+                result: 'deny',
+                detail: { code: 'not_found' },
+              });
+              return;
+            }
+            // Human credential must match the target seat.
+            if (authenticatedAs && authenticatedAs.id !== targetMember.id) {
+              const claimable = [authenticatedAs.name];
+              send(ws, {
+                type: 'refused',
+                code: 'forbidden',
+                message: `credential identifies "${authenticatedAs.name}", not "${frame.target.seat}"`,
+                claimable,
+                hint: `musterd claim ${authenticatedAs.name} --key <mscr_...>`,
+              });
+              return;
+            }
+          } else if ('role' in frame.target) {
+            targetMember =
+              ctx.db
+                .prepare<
+                  [string, string],
+                  import('../store/rows.js').MemberRow
+                >('SELECT * FROM members WHERE team_id = ? AND role = ? AND left_at IS NULL LIMIT 1')
+                .get(team.id, frame.target.role) ?? null;
+            if (!targetMember) {
+              const claimable = claimableSeats(ctx, team.id);
+              send(ws, {
+                type: 'refused',
+                code: 'not_found',
+                message: `no seats with role "${frame.target.role}" in team "${team.slug}"`,
+                claimable,
+                hint: claimable.length
+                  ? `available seats: ${claimable.join(', ')}`
+                  : `musterd team add <seat> --role ${frame.target.role} --team ${team.slug}`,
+              });
+              appendAudit(ctx.db, team.id, {
+                actor: null,
+                action: 'claim.refused',
+                target: frame.target.role,
+                result: 'deny',
+                detail: { code: 'not_found', kind: 'role' },
+              });
+              return;
+            }
+          }
+          // observe: no target member — observer provisioned below in the OCCUPY path
+
+          // Step 3: account_status check on target member.
+          if (targetMember) {
+            const status = resolveAccountStatus(targetMember);
+            if (status === 'disabled' || status === 'banned') {
+              const claimable = claimableSeats(ctx, team.id);
+              send(ws, {
+                type: 'refused',
+                code: status,
+                message: `seat "${targetMember.name}" is ${status}`,
+                claimable,
+                hint: `contact a team admin to re-enable this seat`,
+              });
+              appendAudit(ctx.db, team.id, {
+                actor: null,
+                action: 'claim.refused',
+                target: targetMember.name,
+                result: 'deny',
+                detail: { code: status },
+              });
+              return;
+            }
+          }
+
+          // Step 4: single-active check for non-observer seats.
+          if (targetMember && !('observe' in frame.target)) {
+            const live = ctx.hub.connsForMember(targetMember.id);
+            if (live.length > 0) {
+              const claimable = claimableSeats(ctx, team.id).filter(
+                (n) => n !== targetMember!.name,
+              );
+              send(ws, {
+                type: 'refused',
+                code: 'claim_conflict',
+                message: `seat "${targetMember.name}" is already occupied`,
+                claimable,
+                hint: claimable.length
+                  ? `try: ${claimable.join(', ')}`
+                  : 'wait for the seat to be released or ask an admin to reclaim it',
+              });
+              appendAudit(ctx.db, team.id, {
+                actor: null,
+                action: 'claim.refused',
+                target: targetMember.name,
+                result: 'deny',
+                detail: { code: 'claim_conflict' },
+              });
+              return;
+            }
+          }
+
+          // Step 5: grant path — if frame.grant is present, validate it and OCCUPY immediately.
+          if (frame.grant) {
+            const gv = validateGrant(ctx.db, team.id, frame.grant);
+            if (!gv.ok) {
+              const code = gv.reason === 'expired' ? 'expired_grant' : 'forbidden';
+              const claimable = claimableSeats(ctx, team.id);
+              send(ws, {
+                type: 'refused',
+                code,
+                message: `grant ${gv.reason}`,
+                claimable,
+                hint: 'request a new grant from a team admin',
+              });
+              appendAudit(ctx.db, team.id, {
+                actor: null,
+                action: 'claim.refused',
+                target: targetMember?.name ?? null,
+                result: 'deny',
+                detail: { code, reason: gv.reason },
+              });
+              return;
+            }
+            // Validate grant target matches claim target.
+            const grantTarget = gv.grant.target;
+            const targetOk =
+              ('seat' in frame.target &&
+                gv.grant.scope === 'seat' &&
+                grantTarget === frame.target.seat) ||
+              ('role' in frame.target &&
+                gv.grant.scope === 'role' &&
+                grantTarget === frame.target.role);
+            if (!targetOk) {
+              const claimable = claimableSeats(ctx, team.id);
+              send(ws, {
+                type: 'refused',
+                code: 'forbidden',
+                message: `grant is for ${gv.grant.scope} "${grantTarget}", not "${encodeTarget(frame.target)}"`,
+                claimable,
+                hint: 'request a grant that matches your target seat/role',
+              });
+              return;
+            }
+            consumeGrant(ctx.db, gv.grant.id);
+            // OCCUPY — fall through to the common occupy block below.
+          } else {
+            // Step 6: no grant → open a claim request and hold the WS open.
+            const encodedTarget = 'observe' in frame.target ? null : encodeTarget(frame.target);
+            const req = createRequest(ctx.db, team.id, {
+              kind: 'claim',
+              from_session: state.connId,
+              target: encodedTarget,
+              surface: frame.surface,
+            });
+            // Add a provisional pending connection (not in byMember — no deliver routing).
+            const pendingConn: Connection = {
+              connId: state.connId,
+              memberId: targetMember?.id ?? '',
+              memberName: targetMember?.name ?? '',
+              teamId: team.id,
+              presenceId: '',
+              awaitingClaim: req.id,
+              isAdmin: false,
+              send: (f) => send(ws, f),
+              close: () => ws.close(),
+              _claimApproved: (presenceId) => {
+                state.authenticated = true;
+                state.conn = {
+                  connId: state.connId,
+                  memberId: targetMember?.id ?? '',
+                  memberName: targetMember?.name ?? '',
+                  teamId: team.id,
+                  presenceId,
+                  observer: targetMember?.observer === 1,
+                  send: (f) => send(ws, f),
+                  close: () => ws.close(),
+                };
+                // Promote from pending to full member slot in hub.
+                ctx.hub.remove(state.connId);
+                ctx.hub.add(state.conn);
+              },
+            };
+            ctx.hub.addPending(pendingConn);
+            send(ws, {
+              type: 'pending',
+              request_id: req.id,
+              message: `claim request ${req.id} opened — waiting for admin approval`,
+            });
+            // Notify admins.
+            ctx.hub.deliverToAdmins(team.id, {
+              type: 'pending',
+              request_id: req.id,
+              message: `seat claim request from ${frame.surface}: ${encodedTarget ?? 'teammate'}`,
+            });
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'claim.pending',
+              target: targetMember?.name ?? null,
+              result: 'allow',
+              detail: { request_id: req.id, surface: frame.surface },
+            });
+            log.info({
+              msg: 'ws_claim_pending',
+              team: team.slug,
+              target: encodedTarget,
+              request: req.id,
+              conn: state.connId,
+            });
+            return; // WS stays open — admin decision arrives via hub.deliverClaimDecision
+          }
+
+          // OCCUPY: attach presence and complete the handshake.
+          if (!targetMember) {
+            // Observer attach: this path isn't fully built in P3.2 MVP; refuse gracefully.
+            send(ws, {
+              type: 'refused',
+              code: 'forbidden',
+              message:
+                'observer observe-target via claim not yet supported — use hello with observer seat',
+              claimable: [],
+              hint: 'use hello with an observer seat token',
+            });
+            return;
+          }
+          const presence = attach(ctx.db, targetMember.id, frame.surface, state.connId, {
+            provenance: null,
+            workspace: null,
+            driver: null,
+          });
+          const conn: Connection = {
+            connId: state.connId,
+            memberId: targetMember.id,
+            memberName: targetMember.name,
+            teamId: team.id,
+            presenceId: presence.id,
+            observer: targetMember.observer === 1,
+            isAdmin: resolveCapabilities(targetMember).is_admin,
+            send: (f) => send(ws, f),
+            close: () => ws.close(),
+          };
+          state.authenticated = true;
+          state.conn = conn;
+          ctx.hub.add(conn);
+          recordPresenceChurn('attach', frame.surface);
+          send(ws, {
+            type: 'occupied',
+            seat: toMember(targetMember, team.slug),
+            presence_id: presence.id,
+            server_time: Date.now(),
+            memory: null,
+          });
+          if (!conn.observer) emitPresence(ctx, conn, 'online', frame.surface);
+          appendAudit(ctx.db, team.id, {
+            actor: targetMember.name,
+            action: 'claim.occupied',
+            target: targetMember.name,
+            result: 'allow',
+            detail: { surface: frame.surface },
+          });
+          log.info({
+            msg: 'ws_claim_occupied',
+            team: team.slug,
+            member: targetMember.name,
+            conn: state.connId,
+          });
+          return;
+        }
+
         if (!state.authenticated || !state.conn) {
-          throw new MusterdError('unauthorized', 'send hello first');
+          throw new MusterdError('unauthorized', 'send hello or claim first');
         }
         const conn = state.conn;
 

@@ -10,6 +10,7 @@ import {
   AvailabilityStatusSchema,
   PROTOCOL_VERSION,
   GENERALIST_CAPABILITIES,
+  DecideRequestSchema,
   IssueGrantSchema,
   PolicySchema,
   type MemberSummary,
@@ -25,7 +26,7 @@ import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import { appendAudit, listAudit } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
-import { issueGrant, listGrants, revokeGrant } from '../store/grants.js';
+import { consumeGrant, issueGrant, listGrants, revokeGrant } from '../store/grants.js';
 import {
   addMember,
   authMember,
@@ -52,8 +53,9 @@ import {
   listPresence,
   touchAmbientPresence,
 } from '../store/presence.js';
+import { decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
-import { resolveCapabilities, toMember } from '../store/rows.js';
+import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
 import { createTeam, requireTeam, rotateAgentKey, setPolicy } from '../store/teams.js';
 import { recordError } from '../telemetry.js';
 
@@ -442,6 +444,145 @@ export async function handleHttp(
             detail: r.detail ? JSON.parse(r.detail) : null,
           })),
         });
+      }
+
+      // P3.2 request lane (ADR 077) — claim requests + admin decide. Strict is_admin.
+      if (method === 'GET' && rest === '/requests') {
+        const { team } = authAdmin(ctx, slug, req);
+        const pendingOnly = url.searchParams.get('status') === 'pending';
+        const requests = listRequests(ctx.db, team.id, { pendingOnly });
+        return sendJson(res, 200, { requests });
+      }
+
+      const requestDecideMatch = rest.match(/^\/requests\/([^/]+)\/decide$/);
+      if (method === 'POST' && requestDecideMatch) {
+        const { team, member: admin } = authAdmin(ctx, slug, req);
+        const requestId = decodeURIComponent(requestDecideMatch[1]!);
+        const body = parseOrBadRequest(DecideRequestSchema, await readJson(req));
+        const existing = getRequest(ctx.db, team.id, requestId);
+        if (!existing) throw new MusterdError('not_found', `no request "${requestId}"`);
+        if (existing.status !== 'pending')
+          throw new MusterdError(
+            'conflict',
+            `request "${requestId}" is already ${existing.status}`,
+          );
+
+        if (body.decision === 'approve') {
+          // Resolve the target member from the encoded target string.
+          let targetMember: MemberRow | null = null;
+          if (existing.target) {
+            if (existing.target.startsWith('seat:')) {
+              const seatName = existing.target.slice(5);
+              targetMember = getMemberByName(ctx.db, team.id, seatName) ?? null;
+            } else if (existing.target.startsWith('role:')) {
+              const roleName = existing.target.slice(5);
+              targetMember =
+                ctx.db
+                  .prepare<
+                    [string, string],
+                    MemberRow
+                  >('SELECT * FROM members WHERE team_id = ? AND role = ? AND left_at IS NULL LIMIT 1')
+                  .get(team.id, roleName) ?? null;
+            }
+          }
+          if (!targetMember) {
+            throw new MusterdError(
+              'not_found',
+              `target member not found for request "${requestId}"`,
+            );
+          }
+
+          // Account-status check before approving.
+          const status = resolveAccountStatus(targetMember);
+          if (status === 'disabled' || status === 'banned') {
+            throw new MusterdError('forbidden', `seat "${targetMember.name}" is ${status}`);
+          }
+
+          // Issue a grant so the approved session can occupy the seat.
+          const mint = issueGrant(
+            ctx.db,
+            team.id,
+            {
+              scope: existing.target?.startsWith('role:') ? 'role' : 'seat',
+              target: targetMember.name,
+              lifetime: body.lifetime,
+              ...(body.lifetime === 'ttl' && body.ttl_hours != null
+                ? { ttl_hours: body.ttl_hours }
+                : {}),
+              single_use: body.lifetime === 'once',
+            },
+            admin.name,
+          );
+
+          // Attach presence for the approved session.
+          const presence = attach(
+            ctx.db,
+            targetMember.id,
+            existing.surface as import('@musterd/protocol').Surface,
+            existing.from_session,
+            { provenance: null, workspace: null, driver: null },
+          );
+
+          // Settle the request.
+          decideRequest(ctx.db, team.id, requestId, 'approved', admin.name);
+
+          // Flip the waiting WS: find the pending connection and call _claimApproved.
+          const pendingConn = ctx.hub.getConn(existing.from_session);
+          if (pendingConn?._claimApproved) {
+            pendingConn._claimApproved(presence.id);
+          }
+
+          // Push the terminal occupied frame to the waiting WS.
+          const delivered = ctx.hub.deliverClaimDecision(existing.from_session, {
+            type: 'occupied',
+            seat: toMember(targetMember, team.slug),
+            presence_id: presence.id,
+            server_time: Date.now(),
+            memory: null,
+          });
+
+          // Broadcast presence online for non-observers.
+          if (targetMember.observer !== 1) {
+            ctx.hub.broadcastTeam(
+              team.id,
+              { type: 'presence', member: targetMember.name, status: 'online' },
+              undefined,
+            );
+          }
+
+          appendAudit(ctx.db, team.id, {
+            actor: admin.name,
+            action: 'request.decide',
+            target: targetMember.name,
+            result: 'allow',
+            detail: { decision: 'approve', request_id: requestId, delivered },
+          });
+          // Also consume the grant if once (it was issued for the seat; the approve itself IS the use).
+          if (body.lifetime === 'once') consumeGrant(ctx.db, mint.grant.id);
+          return sendJson(res, 200, {
+            request_id: requestId,
+            decision: 'approve',
+            delivered,
+          });
+        } else {
+          // Deny: settle the request and push a refused frame to the waiting WS.
+          decideRequest(ctx.db, team.id, requestId, 'denied', admin.name);
+          const delivered = ctx.hub.deliverClaimDecision(existing.from_session, {
+            type: 'refused',
+            code: 'forbidden',
+            message: `your claim request was denied by ${admin.name}`,
+            claimable: [],
+            hint: `contact ${admin.name} for details`,
+          });
+          appendAudit(ctx.db, team.id, {
+            actor: admin.name,
+            action: 'request.decide',
+            target: existing.target,
+            result: 'deny',
+            detail: { decision: 'deny', request_id: requestId, delivered },
+          });
+          return sendJson(res, 200, { request_id: requestId, decision: 'deny', delivered });
+        }
       }
 
       // v0.3 P3.1 governance admin endpoints (ADR 076) — strict is_admin (authAdmin, no fallback),
