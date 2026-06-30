@@ -1,6 +1,6 @@
+import type { Request, RequestKind, RequestStatus } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import type { Request, RequestKind, RequestStatus } from '@musterd/protocol';
 
 /**
  * The request/approval-lane store (ADR 076, P3.1 of ADR 069). A request is a session asking to claim a

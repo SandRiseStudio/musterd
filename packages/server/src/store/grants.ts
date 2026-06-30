@@ -1,6 +1,6 @@
+import { type Grant, type GrantMint, type IssueGrant, TOKEN_PREFIXES } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { type Grant, type GrantMint, type IssueGrant, TOKEN_PREFIXES } from '@musterd/protocol';
 import { hashToken, newSecret } from './members.js';
 
 /**
