@@ -1,8 +1,8 @@
 import { resolveWorkspace } from '@musterd/mcp';
 import type { Envelope, MemberKind } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
-import { watch } from '../client.js';
-import { wsBase } from '../config.js';
+import { watchClaim } from '../client.js';
+import { wsBase, type Identity } from '../config.js';
 import { isActionNeeded, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { kindLookup, resolve } from './helpers.js';
@@ -105,7 +105,7 @@ async function watchInbox(
   http: ReturnType<typeof resolve>['http'],
   server: string,
   team: string,
-  identity: { name: string; token: string; surface: string },
+  identity: Identity,
   kindOf: (name: string) => MemberKind,
   all: boolean,
 ): Promise<number> {
@@ -132,11 +132,12 @@ async function watchInbox(
   }
 
   return new Promise((resolveP) => {
-    const session = watch({
+    const session = watchClaim({
       wsUrl: wsBase(server) + '/ws',
       team,
-      as: identity.name,
-      token: identity.token,
+      // v0.3 (ADR 075): a watch IS a claim — attach by claiming our own seat with the Bearer key.
+      key: identity.key,
+      target: { seat: identity.name },
       surface: identity.surface || 'cli',
       // A human running `inbox --watch` is explicitly here (the supervising posture) — `session`.
       provenance: 'session',
@@ -197,7 +198,7 @@ async function waitInbox(
   http: ReturnType<typeof resolve>['http'],
   server: string,
   team: string,
-  identity: { name: string; token: string; surface: string },
+  identity: Identity,
   kindOf: (name: string) => MemberKind,
 ): Promise<number> {
   const json = Boolean(parsed.flags['json']);
@@ -246,11 +247,12 @@ async function waitInbox(
           }, timeoutS * 1000)
         : undefined;
 
-    const session = watch({
+    const session = watchClaim({
       wsUrl: wsBase(server) + '/ws',
       team,
-      as: identity.name,
-      token: identity.token,
+      // v0.3 (ADR 075): attach by claiming our own seat with the Bearer key.
+      key: identity.key,
+      target: { seat: identity.name },
       surface: identity.surface || 'cli',
       // A waiting agent is genuinely here and reachable — a resident session, like `--watch`.
       provenance: 'session',

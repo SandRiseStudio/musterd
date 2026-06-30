@@ -46,3 +46,13 @@ export type Binding = z.infer<typeof BindingSchema>;
 export function autoClaims(binding: Binding): boolean {
   return Boolean(binding.agent_key && binding.claim && binding.claim.mode !== 'chat');
 }
+
+/**
+ * The fixed seat name a folder is bound to, or undefined. The v0.3 successor to reading
+ * `binding.member`: only a `seat`-policy binding has a persisted seat name (`claim.name`); a `role`
+ * pool resolves its seat server-side per session and `chat` has none. Use for display / the
+ * cross-folder name-reuse guard, never as proof of a live occupant (ask the server for that).
+ */
+export function bindingSeat(binding: Binding): string | undefined {
+  return binding.claim?.mode === 'seat' ? binding.claim.name : undefined;
+}

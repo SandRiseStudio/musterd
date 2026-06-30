@@ -19,7 +19,9 @@ import { CliError, exitForCode, isConnRefused } from './errors.js';
 
 export interface HttpClientOpts {
   server: string;
-  token?: string;
+  /** The Bearer secret (v0.3, ADR 075): a team agent key (`mskey_`) or human credential (`mscr_`).
+   *  The server dispatches on the prefix → live-presence occupancy; replaces the v0.2 seat token. */
+  key?: string;
   /** This client's surface, sent as `x-musterd-surface` so ambient presence labels it (ADR 057). */
   surface?: string;
   /**
@@ -47,7 +49,7 @@ export class HttpClient {
         method,
         headers: {
           'content-type': 'application/json',
-          ...(this.opts.token ? { authorization: `Bearer ${this.opts.token}` } : {}),
+          ...(this.opts.key ? { authorization: `Bearer ${this.opts.key}` } : {}),
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
           ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
         },

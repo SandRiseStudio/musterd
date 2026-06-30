@@ -5,6 +5,7 @@ import {
   BINDING_DIR,
   BINDING_FILE,
   BindingSchema,
+  bindingSeat,
   type Binding,
   type ClaimTarget,
 } from '@musterd/protocol';
@@ -58,7 +59,9 @@ export function claimCredentialFromEnv(
 
 export interface Identity {
   name: string;
-  token: string;
+  /** The Bearer secret this identity authenticates with (v0.3, ADR 075): a team agent key (`mskey_`)
+   *  for an agent seat, or a human credential (`mscr_`) for a person. Replaces the v0.2 seat `token`. */
+  key: string;
   surface: string;
 }
 
@@ -71,7 +74,8 @@ export interface Identity {
  */
 export interface BindingRef {
   team: string;
-  member: string;
+  /** The bound seat name (v0.3: the fixed seat of a `seat`-policy binding; role pools have none). */
+  seat: string;
   surface: string;
 }
 
@@ -105,14 +109,24 @@ function readBinding(path: string): Binding | null {
 }
 
 /** A fully-specified identity from `MUSTERD_*` env, aligned with the MCP adapter's binding env. */
+/**
+ * Resolve a ready {@link Identity} from the v0.3 env (ADR 075), reusing {@link claimCredentialFromEnv}.
+ * Only a **fixed-seat** target (`MUSTERD_CLAIM=seat:<name>`) yields a direct identity — the seat name is
+ * known up front, and `key` = the team agent key. A `role:` pool or `observe` target has no client-side
+ * seat name (it's learned from the `occupied` frame at claim time, ADR 075), so there is no direct env
+ * identity for those — the claim flow (`musterd claim`/`join`) resolves them and caches the result.
+ */
 export function identityFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): { team: string; identity: Identity } | null {
-  const team = env['MUSTERD_TEAM'];
-  const member = env['MUSTERD_MEMBER'];
-  const token = env['MUSTERD_TOKEN'];
-  if (!team || !member || !token) return null;
-  return { team, identity: { name: member, token, surface: env['MUSTERD_SURFACE'] ?? 'cli' } };
+  const cred = claimCredentialFromEnv(env);
+  if (!cred) return null;
+  const target = cred.credential.target;
+  if (!('seat' in target)) return null;
+  return {
+    team: cred.team,
+    identity: { name: target.seat, key: cred.credential.agentKey, surface: cred.credential.surface },
+  };
 }
 
 /** Persist a workspace binding (ADR 018). Holds a token → 0600, and init gitignores `.musterd/`. */
@@ -159,14 +173,15 @@ export function removeBinding(dir: string): boolean {
  * never defeat `saveBinding`.
  */
 function recordBinding(dir: string, binding: Binding): void {
-  // A policy-only (unclaimed) binding has no member name to register — the cross-folder name-reuse
-  // guard (ADR 020) only tracks concrete identities.
-  if (!binding.member) return;
+  // Only a fixed-seat binding has a name to register — the cross-folder name-reuse guard (ADR 020)
+  // tracks fixed seats; a role-pool / chat binding resolves its seat server-side and isn't tracked.
+  const seat = bindingSeat(binding);
+  if (!seat) return;
   try {
     const config = loadConfig();
     config.bindings[resolve(dir)] = {
       team: binding.team,
-      member: binding.member,
+      seat,
       surface: binding.surface,
     };
     saveConfig(config);
@@ -238,18 +253,30 @@ const DEFAULT: Config = {
   rosterHome: {},
 };
 
+/** Coerce a possibly-legacy stored identity to the v0.3 shape: a pre-cutover `token` maps to `key`
+ *  (it won't authenticate post-cutover — the daemon no longer accepts seat tokens — but stays
+ *  well-typed so the vault loads). */
+function coerceIdentity<T extends { name: string; surface: string }>(
+  raw: T & { key?: string; token?: string },
+): T & { key: string } {
+  const { token, ...rest } = raw;
+  return { ...rest, key: raw.key ?? token ?? '' } as T & { key: string };
+}
+
 export function loadConfig(): Config {
   try {
     const raw = readFileSync(configPath(), 'utf8');
     const parsed = JSON.parse(raw) as Partial<Config>;
-    const identities = parsed.identities ?? {};
+    const identities = Object.fromEntries(
+      Object.entries(parsed.identities ?? {}).map(([team, id]) => [team, coerceIdentity(id)]),
+    );
     return {
       server: process.env['MUSTERD_SERVER'] ?? parsed.server ?? DEFAULT.server,
       ...(parsed.current ? { current: parsed.current } : {}),
       identities,
       // ADR 059: an old config has no vault — backfill it from `identities` so a previously-cached
       // identity is immediately resolvable by `--as`, and stays so when another member joins.
-      knownIdentities: backfillVault(identities, parsed.knownIdentities ?? []),
+      knownIdentities: backfillVault(identities, (parsed.knownIdentities ?? []).map(coerceIdentity)),
       bindings: parsed.bindings ?? {},
       rosterHome: parsed.rosterHome ?? {},
     };
