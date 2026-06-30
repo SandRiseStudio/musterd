@@ -92,6 +92,9 @@ export class MusterdClient {
         // v0.3 (ADR 075): authenticate with the team agent key (Bearer); the server dispatches on the
         // prefix → the live-presence occupancy this session holds. Roster/health stay auth-optional.
         ...(this.config.agent_key ? { authorization: `Bearer ${this.config.agent_key}` } : {}),
+        // The agent key authenticates the harness, not a seat — reads carry the occupied seat so the
+        // server can assert occupancy (SPEC A.7 §253). A send conveys it via the envelope `from`.
+        ...(this.config.member ? { 'x-musterd-seat': this.config.member } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });

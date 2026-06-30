@@ -119,6 +119,7 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
     http: new HttpClient({
       server,
       key: match.identity.key,
+      seat: match.identity.name,
       surface: match.identity.surface,
     }),
   };
@@ -152,7 +153,9 @@ export function resolveRead(flags: Record<string, string | boolean>): ResolvedRe
     team,
     server,
     http: new HttpClient(
-      identity ? { server, key: identity.key, surface: identity.surface } : { server },
+      identity
+        ? { server, key: identity.key, seat: identity.name, surface: identity.surface }
+        : { server },
     ),
     explicit,
     ...(identity ? { identity } : {}),

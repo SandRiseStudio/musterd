@@ -22,6 +22,13 @@ export interface HttpClientOpts {
   /** The Bearer secret (v0.3, ADR 075): a team agent key (`mskey_`) or human credential (`mscr_`).
    *  The server dispatches on the prefix → live-presence occupancy; replaces the v0.2 seat token. */
   key?: string;
+  /**
+   * The seat this client acts as (v0.3, ADR 075 / SPEC A.7 §253). An agent key authenticates the
+   * *harness*, not a seat, so reads (inbox/availability/audit — no envelope `from`) carry the seat in
+   * `x-musterd-seat`; the server asserts that seat is occupied by this key. A `send` conveys it via the
+   * envelope `from` instead. Unused on the mskd_ token path (the token already is the seat).
+   */
+  seat?: string;
   /** This client's surface, sent as `x-musterd-surface` so ambient presence labels it (ADR 057). */
   surface?: string;
   /**
@@ -50,6 +57,7 @@ export class HttpClient {
         headers: {
           'content-type': 'application/json',
           ...(this.opts.key ? { authorization: `Bearer ${this.opts.key}` } : {}),
+          ...(this.opts.seat ? { 'x-musterd-seat': this.opts.seat } : {}),
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
           ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
         },
