@@ -36,13 +36,23 @@ beforeEach(async () => {
     creator: { name: 'nick', kind: 'human', role: 'lead' },
   });
   tokens['nick'] = team.json.token;
-  const ada = await api(
+  // v0.3 (ADR 075): agents claim with the team agent key from the composite mint (SPEC A.7).
+  tokens['agent_key'] = team.json.agent_key;
+  // Declare Ada's seat (no per-seat token in v0.3 — she claims it with the team agent key).
+  await api(
     'POST',
     '/teams/dawn/members',
     { name: 'Ada', kind: 'agent', role: 'backend' },
     tokens['nick'],
   );
-  tokens['Ada'] = ada.json.token;
+  // Issue a standing grant for Ada's seat so the claim occupies immediately (no admin-approval lane).
+  const grant = await api(
+    'POST',
+    '/teams/dawn/grants',
+    { scope: 'seat', target: 'Ada', lifetime: 'standing' },
+    tokens['nick'],
+  );
+  tokens['ada_grant'] = grant.json.token;
 });
 
 afterEach(async () => {
@@ -54,9 +64,14 @@ function adaConfig(): McpConfig {
   return {
     server: base,
     team: 'dawn',
-    member: 'Ada',
-    token: tokens['Ada']!,
+    agent_key: tokens['agent_key']!,
+    grant: tokens['ada_grant']!,
     surface: 'claude-code',
+    provenance: 'session',
+    workspace: 'repo',
+    claim: { mode: 'seat', name: 'Ada' },
+    connId: 'conn-ada',
+    claimCode: 'AD12',
   };
 }
 
@@ -104,8 +119,8 @@ describe('MCP adapter', () => {
   });
 
   it('an invalid token surfaces a db/member-mismatch hint on join failure', async () => {
-    const bad = new MusterdClient({ ...adaConfig(), token: 'mskd_not_a_real_token' });
-    await expect(bad.join()).rejects.toThrow(/invalid token/i);
+    const bad = new MusterdClient({ ...adaConfig(), agent_key: 'mskey_not_a_real_key' });
+    await expect(bad.join()).rejects.toThrow(/forbidden|unauthorized|refused|invalid|expired/i);
     expect(bad.lastJoinError).toMatch(/different MUSTERD_DB|may not exist/i);
     bad.close();
   });
