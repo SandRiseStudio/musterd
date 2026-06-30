@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  BindingSchema,
-  formatClaimPolicy,
-  isClaimed,
-  nextRoleHandle,
-  parseClaimPolicy,
-  ResolvedSessionSchema,
-} from './index.js';
+import { autoClaims, BindingSchema, formatClaimPolicy, nextRoleHandle, parseClaimPolicy, ResolvedSessionSchema } from './index.js';
 
 describe('parseClaimPolicy (MUSTERD_CLAIM grammar)', () => {
   it('treats unset / empty / "chat" as assign-in-chat', () => {
@@ -65,36 +58,58 @@ describe('ResolvedSessionSchema (ADR 034 live-claim channel)', () => {
   });
 });
 
-describe('BindingSchema with optional identity + claim policy (ADR 032)', () => {
-  it('accepts a fully-claimed binding (back-compat)', () => {
+describe('BindingSchema (P3 v0.3, ADR 075) — agent_key + claim policy, no member/token', () => {
+  it('auto-claims when agent_key + a seat policy are present', () => {
     const b = BindingSchema.parse({
       server: 'http://localhost:4849',
       team: 'dawn',
-      member: 'Ada',
-      token: 'mskd_x',
+      agent_key: 'mskey_x',
       surface: 'cli',
+      claim: { mode: 'seat', name: 'Ada' },
     });
-    expect(isClaimed(b)).toBe(true);
+    expect(autoClaims(b)).toBe(true);
   });
 
-  it('accepts a policy-only (unclaimed) binding', () => {
+  it('auto-claims a role-pool policy (role is non-chat)', () => {
     const b = BindingSchema.parse({
       server: 'http://localhost:4849',
       team: 'dawn',
+      agent_key: 'mskey_x',
       surface: 'claude-code',
       claim: { mode: 'role', role: 'backend' },
     });
-    expect(isClaimed(b)).toBe(false);
+    expect(autoClaims(b)).toBe(true);
     expect(b.claim).toEqual({ mode: 'role', role: 'backend' });
   });
 
-  it('treats member-without-token as unclaimed', () => {
+  it('does NOT auto-claim a chat policy (assign-in-chat)', () => {
     const b = BindingSchema.parse({
       server: 'http://localhost:4849',
       team: 'dawn',
-      member: 'Ada',
+      agent_key: 'mskey_x',
+      surface: 'cli',
+      claim: { mode: 'chat' },
+    });
+    expect(autoClaims(b)).toBe(false);
+  });
+
+  it('does NOT auto-claim without an agent_key (human/chat folder)', () => {
+    const b = BindingSchema.parse({
+      server: 'http://localhost:4849',
+      team: 'dawn',
+      surface: 'web',
+      claim: { mode: 'seat', name: 'Ada' },
+    });
+    expect(autoClaims(b)).toBe(false);
+  });
+
+  it('does NOT auto-claim without a claim policy', () => {
+    const b = BindingSchema.parse({
+      server: 'http://localhost:4849',
+      team: 'dawn',
+      agent_key: 'mskey_x',
       surface: 'cli',
     });
-    expect(isClaimed(b)).toBe(false);
+    expect(autoClaims(b)).toBe(false);
   });
 });
