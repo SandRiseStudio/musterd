@@ -10,11 +10,13 @@ import {
   AvailabilityStatusSchema,
   PROTOCOL_VERSION,
   GENERALIST_CAPABILITIES,
+  ClaimTargetSchema,
   DecideRequestSchema,
   IssueGrantSchema,
   PolicySchema,
   type MemberSummary,
 } from '@musterd/protocol';
+import { ulid } from 'ulid';
 import { z } from 'zod';
 import { resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
@@ -26,7 +28,13 @@ import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import { appendAudit, listAudit } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
-import { consumeGrant, issueGrant, listGrants, revokeGrant } from '../store/grants.js';
+import {
+  consumeGrant,
+  issueGrant,
+  listGrants,
+  revokeGrant,
+  validateGrant,
+} from '../store/grants.js';
 import {
   addMember,
   authMember,
@@ -34,6 +42,7 @@ import {
   getMemberById,
   getMemberByName,
   isHeld,
+  hashToken,
   leaveMember,
   mintCredential,
   rotateToken,
@@ -54,7 +63,7 @@ import {
   listPresence,
   touchAmbientPresence,
 } from '../store/presence.js';
-import { decideRequest, getRequest, listRequests } from '../store/requests.js';
+import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
 import {
@@ -669,6 +678,204 @@ export async function handleHttp(
           detail: policy,
         });
         return sendJson(res, 200, { policy });
+      }
+
+      // P3.2 stateless claim mirror (SPEC A.7, ADR 077) — unauthenticated (key in body, not Bearer).
+      // Response bodies ARE the WS frame shapes: 200=occupied, 202=pending, 4xx=refused.
+      if (method === 'POST' && rest === '/claim') {
+        const ClaimBody = z.object({
+          key: z.string(),
+          target: ClaimTargetSchema,
+          grant: z.string().optional(),
+          surface: SurfaceSchema,
+        });
+        const body = parseOrBadRequest(ClaimBody, await readJson(req));
+        const team = requireTeam(ctx.db, slug);
+
+        // Step 1: verify key (agent key or human credential).
+        let authenticatedMember: MemberRow | null = null;
+        const keyHash = getAgentKeyHash(ctx.db, team.id);
+        if (!keyHash || hashToken(body.key) !== keyHash) {
+          authenticatedMember =
+            ctx.db
+              .prepare<
+                [string, string],
+                MemberRow
+              >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind = 'human'")
+              .get(team.id, hashToken(body.key)) ?? null;
+          if (!authenticatedMember) {
+            return sendJson(res, 403, {
+              type: 'refused',
+              code: 'forbidden',
+              message: 'invalid key — present a valid agent key or human credential',
+              claimable: [],
+              hint: `POST /teams/${slug}/claim with a valid mskey_ or mscr_ key`,
+            });
+          }
+        }
+
+        // Step 2: resolve target member.
+        let targetMember: MemberRow | null = null;
+        if ('seat' in body.target) {
+          targetMember = getMemberByName(ctx.db, team.id, body.target.seat) ?? null;
+          if (!targetMember || targetMember.left_at !== null) {
+            return sendJson(res, 404, {
+              type: 'refused',
+              code: 'not_found',
+              message: `no seat "${body.target.seat}" in team "${slug}"`,
+              claimable: [],
+              hint: `musterd team members --team ${slug}`,
+            });
+          }
+          if (authenticatedMember && authenticatedMember.id !== targetMember.id) {
+            return sendJson(res, 403, {
+              type: 'refused',
+              code: 'forbidden',
+              message: `credential identifies "${authenticatedMember.name}", not "${body.target.seat}"`,
+              claimable: [authenticatedMember.name],
+              hint: `musterd claim ${authenticatedMember.name}`,
+            });
+          }
+        } else if ('role' in body.target) {
+          targetMember =
+            ctx.db
+              .prepare<
+                [string, string],
+                MemberRow
+              >('SELECT * FROM members WHERE team_id = ? AND role = ? AND left_at IS NULL LIMIT 1')
+              .get(team.id, body.target.role) ?? null;
+          if (!targetMember) {
+            return sendJson(res, 404, {
+              type: 'refused',
+              code: 'not_found',
+              message: `no seats with role "${body.target.role}" in team "${slug}"`,
+              claimable: [],
+              hint: `musterd team members --team ${slug}`,
+            });
+          }
+        } else {
+          // observe: not supported in stateless HTTP path (no session to push to later)
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: 'observe target not supported via HTTP claim — use WS claim',
+            claimable: [],
+            hint: 'open a WS connection and send a claim frame with { observe: true }',
+          });
+        }
+
+        // Step 3: account_status check.
+        const acctStatus = resolveAccountStatus(targetMember);
+        if (acctStatus === 'disabled' || acctStatus === 'banned') {
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: acctStatus,
+            message: `seat "${targetMember.name}" is ${acctStatus}`,
+            claimable: [],
+            hint: 'contact a team admin to re-enable this seat',
+          });
+        }
+
+        // Step 4: single-active check.
+        const liveConns = ctx.hub.connsForMember(targetMember.id);
+        if (liveConns.length > 0) {
+          return sendJson(res, 409, {
+            type: 'refused',
+            code: 'claim_conflict',
+            message: `seat "${targetMember.name}" is already occupied`,
+            claimable: [],
+            hint: 'wait for the seat to be released or ask an admin to reclaim it',
+          });
+        }
+
+        // Step 5: grant path — validate + consume, then occupy.
+        if (body.grant) {
+          const gv = validateGrant(ctx.db, team.id, body.grant);
+          if (!gv.ok) {
+            const code = gv.reason === 'expired' ? 'expired_grant' : 'forbidden';
+            return sendJson(res, 403, {
+              type: 'refused',
+              code,
+              message: `grant ${gv.reason}`,
+              claimable: [],
+              hint: 'request a new grant from a team admin',
+            });
+          }
+          const grantTarget = gv.grant.target;
+          const targetOk =
+            ('seat' in body.target &&
+              gv.grant.scope === 'seat' &&
+              grantTarget === body.target.seat) ||
+            ('role' in body.target &&
+              gv.grant.scope === 'role' &&
+              grantTarget === body.target.role);
+          if (!targetOk) {
+            return sendJson(res, 403, {
+              type: 'refused',
+              code: 'forbidden',
+              message: `grant is for ${gv.grant.scope} "${grantTarget}", not your target`,
+              claimable: [],
+              hint: 'request a grant that matches your target seat/role',
+            });
+          }
+          consumeGrant(ctx.db, gv.grant.id);
+          // OCCUPY: stateless — attach presence with null connId (no persistent socket).
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
+            provenance: null,
+            workspace: null,
+            driver: null,
+          });
+          appendAudit(ctx.db, team.id, {
+            actor: targetMember.name,
+            action: 'claim.occupied',
+            target: targetMember.name,
+            result: 'allow',
+            detail: { via: 'http', surface: body.surface },
+          });
+          ctx.hub.broadcastTeam(
+            team.id,
+            { type: 'presence', member: targetMember.name, status: 'online' },
+            undefined,
+          );
+          return sendJson(res, 200, {
+            type: 'occupied',
+            seat: toMember(targetMember, team.slug),
+            presence_id: presence.id,
+            server_time: Date.now(),
+            memory: null,
+          });
+        }
+
+        // Step 6: no grant → create request, return 202 pending.
+        const encodedTarget =
+          'seat' in body.target
+            ? `seat:${body.target.seat}`
+            : 'role' in body.target
+              ? `role:${body.target.role}`
+              : 'observe';
+        const claimReq = createRequest(ctx.db, team.id, {
+          kind: 'claim',
+          from_session: `http:${ulid()}`,
+          target: encodedTarget,
+          surface: body.surface,
+        });
+        appendAudit(ctx.db, team.id, {
+          actor: null,
+          action: 'claim.pending',
+          target: targetMember.name,
+          result: 'allow',
+          detail: { via: 'http', request_id: claimReq.id, surface: body.surface },
+        });
+        ctx.hub.deliverToAdmins(team.id, {
+          type: 'pending',
+          request_id: claimReq.id,
+          message: `HTTP seat claim from ${body.surface}: ${encodedTarget}`,
+        });
+        return sendJson(res, 202, {
+          type: 'pending',
+          request_id: claimReq.id,
+          message: `claim request opened — waiting for admin approval (poll GET /teams/${slug}/requests/${claimReq.id})`,
+        });
       }
 
       if (method === 'POST' && rest === '/messages') {
