@@ -13,12 +13,18 @@ export interface McpConfig {
   server: string;
   team: string;
   /**
-   * The claimed seat, once this session holds one. Claim-on-first-use (ADR 032): a session may start
-   * **unclaimed** (no identity) and fill these in when it first claims a seat (`team_join` / an
-   * external `musterd claim`). Undefined ⇒ pending presence: reachable, holding no seat.
+   * v0.3 (ADR 075): the team **agent key** (`mskey_`) or human credential this session authenticates
+   * with — the Bearer secret + what the `claim` frame presents. From `MUSTERD_AGENT_KEY` / the binding.
+   */
+  agent_key?: string | undefined;
+  /**
+   * The **resolved** seat, once this session has occupied one (set from the `occupied` frame). A session
+   * starts unclaimed (undefined ⇒ pending presence: reachable, holding no seat) and fills this in when it
+   * claims (`team_join` / an external `musterd claim`); a role pool resolves its `<role>-<n>` here.
    */
   member?: string | undefined;
-  token?: string | undefined;
+  /** Optional pre-issued grant (`msgr_`) that skips the pending/admin-approval lane (ADR 075). */
+  grant?: string | undefined;
   surface: Surface;
   /** Why this session attaches (provenance/where seed, ADR 014). Defaults to `session`. */
   provenance: Provenance;
@@ -52,8 +58,10 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   const binding = findBinding(process.cwd(), env);
   const server = env['MUSTERD_SERVER'] ?? binding?.server ?? 'http://localhost:4849';
   const team = env['MUSTERD_TEAM'] ?? binding?.team;
-  const member = env['MUSTERD_MEMBER'] ?? binding?.member;
-  const token = env['MUSTERD_TOKEN'] ?? binding?.token;
+  // v0.3 (ADR 075): the auth secret is the team agent key; the seat is resolved at claim time (the
+  // `occupied` frame), so `member` starts undefined — the target lives in the claim policy below.
+  const agentKey = env['MUSTERD_AGENT_KEY'] ?? binding?.agent_key;
+  const grant = env['MUSTERD_GRANT'] ?? binding?.grant;
   const surfaceRaw = env['MUSTERD_SURFACE'] ?? binding?.surface ?? 'other';
   if (!team) {
     throw new Error('musterd MCP: no team — set MUSTERD_TEAM or provide a .musterd/binding.json');
@@ -69,8 +77,8 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   return {
     server,
     team,
-    member,
-    token,
+    ...(agentKey !== undefined ? { agent_key: agentKey } : {}),
+    ...(grant !== undefined ? { grant } : {}),
     surface,
     provenance: resolveProvenance(env),
     workspace: resolveWorkspace(env),
@@ -81,7 +89,7 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   };
 }
 
-/** Does this session already hold a seat (a concrete member + token)? */
+/** Does this session already hold a seat (it has occupied one — the resolved `member` is set)? */
 export function isClaimedConfig(config: McpConfig): boolean {
-  return Boolean(config.member && config.token);
+  return Boolean(config.member);
 }

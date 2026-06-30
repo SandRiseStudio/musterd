@@ -11,7 +11,11 @@ const h = vi.hoisted(() => {
   const selectQueue: unknown[] = [];
   const textQueue: unknown[] = [];
   const http = {
-    createTeam: vi.fn(async () => ({ token: 'tok-creator' })),
+    createTeam: vi.fn(async () => ({
+      token: 'tok-creator',
+      human_credential: 'mscr_creator',
+      agent_key: 'mskey_team',
+    })),
     addMember: vi.fn(async () => ({ token: 'tok-ada' })),
     roster: vi.fn(async () => ({ members: [{ name: 'Ada', presence: 'online' }] })),
     inbox: vi.fn(async () => ({ messages: [] })),
@@ -35,15 +39,19 @@ const h = vi.hoisted(() => {
   const config: {
     server: string;
     current: string | undefined;
-    identities: Record<string, { name: string; token: string; surface: string }>;
-    knownIdentities: { team: string; name: string; token: string; surface: string }[];
-    bindings: Record<string, { team: string; member: string; surface: string }>;
+    identities: Record<string, { name: string; key: string; surface: string }>;
+    knownIdentities: { team: string; name: string; key: string; surface: string }[];
+    bindings: Record<string, { team: string; seat: string; surface: string }>;
+    agentKeys: Record<string, string>;
+    rosterHome: Record<string, string>;
   } = {
     server: 'http://localhost:4849',
     current: undefined,
     identities: {},
     knownIdentities: [],
     bindings: {},
+    agentKeys: {},
+    rosterHome: {},
   };
   return { confirmQueue, selectQueue, textQueue, http, harness, config };
 });
@@ -94,7 +102,11 @@ beforeEach(() => {
     identities: {},
     bindings: {},
   });
-  h.http.createTeam.mockResolvedValue({ token: 'tok-creator' });
+  h.http.createTeam.mockResolvedValue({
+    token: 'tok-creator',
+    human_credential: 'mscr_creator',
+    agent_key: 'mskey_team',
+  });
   h.http.addMember.mockResolvedValue({ token: 'tok-ada' });
   h.http.roster.mockResolvedValue({ members: [{ name: 'Ada', presence: 'online' }] });
   h.http.inbox.mockResolvedValue({ messages: [] });
@@ -176,7 +188,7 @@ describe('runInit — guards and exits', () => {
 describe('runInit — team selection', () => {
   it('reuses a cached team that is still live on this daemon', async () => {
     h.config.current = 'dawn';
-    h.config.identities['dawn'] = { name: 'nick', token: 'tok', surface: 'cli' };
+    h.config.identities['dawn'] = { name: 'nick', key: 'mscr_creator', surface: 'cli' };
     h.http.inbox.mockResolvedValue({ messages: [] }); // cachedTeamLive → true
     h.selectQueue.push('dawn'); // which team? → reuse
     h.selectQueue.push('watch'); // intent
@@ -186,7 +198,7 @@ describe('runInit — team selection', () => {
 
   it('falls back to create when the cached team is gone (stale token)', async () => {
     h.config.current = 'gone';
-    h.config.identities['gone'] = { name: 'nick', token: 'stale', surface: 'cli' };
+    h.config.identities['gone'] = { name: 'nick', key: 'mscr_stale', surface: 'cli' };
     h.http.inbox.mockRejectedValue(new Error('invalid token')); // cachedTeamLive → false
     h.textQueue.push('dawn', 'nick', ''); // createTeam
     h.selectQueue.push('watch'); // intent
@@ -196,7 +208,7 @@ describe('runInit — team selection', () => {
 
   it('cached-and-live, but the user chooses to create a new team', async () => {
     h.config.current = 'dawn';
-    h.config.identities['dawn'] = { name: 'nick', token: 'tok', surface: 'cli' };
+    h.config.identities['dawn'] = { name: 'nick', key: 'mscr_creator', surface: 'cli' };
     h.selectQueue.push('__new__'); // which team? → new
     h.textQueue.push('fresh', 'nick', ''); // createTeam
     h.selectQueue.push('watch'); // intent

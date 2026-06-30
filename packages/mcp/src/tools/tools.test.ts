@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join as pathJoin } from 'node:path';
-import { makeEnvelope, type Envelope, type MemberSummary } from '@musterd/protocol';
+import { makeEnvelope, nextRoleHandle, type Envelope, type MemberSummary } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
@@ -35,12 +35,12 @@ function capture(
 const config: McpConfig = {
   server: 'http://x',
   team: 'dawn',
+  agent_key: 'mskey_team',
   member: 'Ada',
-  token: 't',
   surface: 'claude-code',
   provenance: 'session',
   workspace: 'repo',
-  claim: { mode: 'chat' },
+  claim: { mode: 'seat', name: 'Ada' },
   connId: 'conn-1',
   claimCode: 'AB12',
 };
@@ -435,9 +435,17 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
     rmSync(tmpCwd, { recursive: true, force: true });
   });
 
-  /** A pending (unclaimed) client whose claim path is fully stubbed; identity is set on claim. */
-  function pendingClient(over: Partial<MusterdClient> = {}): Partial<MusterdClient> {
+  /**
+   * A pending (unclaimed) client whose v0.3 `join()` resolves the seat from the config's claim policy
+   * (seat → that name; role → next free `<role>-<n>` against the roster), mirroring an `occupied` frame.
+   * Pass the SAME config object that `capture()` gets, since `claimAndJoin` mutates `config.claim`.
+   */
+  function pendingClient(
+    cfg: McpConfig,
+    over: Partial<MusterdClient> = {},
+  ): Partial<MusterdClient> {
     let member: string | undefined;
+    const roster = (over.roster ?? (async () => ({ members: [] }))) as MusterdClient['roster'];
     return {
       joined: false,
       get claimed() {
@@ -446,13 +454,16 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
       get member() {
         return member;
       },
-      claimCode: 'AB12',
-      roster: (async () => ({ members: [] })) as any,
-      addMember: (async () => ({ token: 'mskd_minted' })) as any,
-      setIdentity: ((m: string) => {
-        member = m;
+      claimCode: cfg.claimCode,
+      roster,
+      join: (async () => {
+        const c = cfg.claim;
+        if (c.mode === 'seat') member = c.name;
+        else if (c.mode === 'role') {
+          const { members } = await roster();
+          member = nextRoleHandle(c.role, new Set(members.map((m) => m.name)));
+        }
       }) as any,
-      join: (async () => undefined) as any,
       ...over,
     };
   }
@@ -465,59 +476,42 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
   });
 
   it('claims a named seat with {as} and returns the stay-in-sync guidance', async () => {
-    const setIdentity = vi.fn();
-    const join = vi.fn(async () => undefined);
-    const handler = capture(
-      registerJoin,
-      pendingClient({ setIdentity: setIdentity as any, join: join as any }),
-      { ...config, member: undefined, token: undefined },
-    );
+    const cfg = { ...config, member: undefined };
+    const handler = capture(registerJoin, pendingClient(cfg), cfg);
     const out = text(await handler({ as: 'Ada' }));
-    expect(setIdentity).toHaveBeenCalledWith('Ada', 'mskd_minted');
-    expect(join).toHaveBeenCalled();
     expect(out).toContain('Joined dawn as Ada (claude-code)');
     expect(out).toContain('team_inbox_check');
   });
 
   it('claims the next open pool seat with {role}', async () => {
-    const setIdentity = vi.fn();
+    const cfg = { ...config, member: undefined, claim: { mode: 'chat' as const } };
     const handler = capture(
       registerJoin,
-      pendingClient({
+      pendingClient(cfg, {
         roster: (async () => ({ members: [{ name: 'backend-1' }] })) as any,
-        setIdentity: setIdentity as any,
       }),
-      { ...config, member: undefined, token: undefined, claim: { mode: 'chat' } },
+      cfg,
     );
     const out = text(await handler({ role: 'backend' }));
-    expect(setIdentity).toHaveBeenCalledWith('backend-2', 'mskd_minted');
     expect(out).toContain('Joined dawn as backend-2 (role backend)');
   });
 
-  it('re-occupies an already-bound identity on bare team_join {} (back-compat)', async () => {
-    // A claimed binding (init-minted seat) with no policy: {} should join the existing seat,
-    // not report "pending". claimSeat reuses the held token rather than re-minting.
-    const addMember = vi.fn();
-    const join = vi.fn(async () => undefined);
-    const handler = capture(
-      registerJoin,
-      pendingClient({ addMember: addMember as never, join: join as never }),
-      config, // member: 'Ada', token: 't', claim: chat
-    );
+  it('occupies the folder seat policy on bare team_join {} (back-compat)', async () => {
+    // A folder bound to seat:Ada → bare {} claims that policy seat (v0.3: no mint, no re-mint).
+    const cfg = { ...config, member: undefined }; // claim: { seat: 'Ada' }
+    const handler = capture(registerJoin, pendingClient(cfg), cfg);
     const out = text(await handler({}));
-    expect(addMember).not.toHaveBeenCalled();
-    expect(join).toHaveBeenCalled();
     expect(out).toContain('Joined dawn as Ada');
   });
 
   it('asks the session to name itself when policy is chat and no target is given', async () => {
-    const handler = capture(registerJoin, pendingClient(), {
+    const cfg = {
       ...config,
       member: undefined,
-      token: undefined,
-      claim: { mode: 'chat' },
+      claim: { mode: 'chat' as const },
       claimCode: 'ZZ99',
-    });
+    };
+    const handler = capture(registerJoin, pendingClient(cfg), cfg);
     const out = text(await handler({}));
     expect(out).toContain('pending presence');
     expect(out).toContain('ZZ99');
@@ -525,28 +519,23 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
   });
 
   it('follows the folder seat policy when no target is given', async () => {
-    const setIdentity = vi.fn();
-    const handler = capture(registerJoin, pendingClient({ setIdentity: setIdentity as any }), {
-      ...config,
-      member: undefined,
-      token: undefined,
-      claim: { mode: 'seat', name: 'Polly' },
-    });
+    const cfg = { ...config, member: undefined, claim: { mode: 'seat' as const, name: 'Polly' } };
+    const handler = capture(registerJoin, pendingClient(cfg), cfg);
     const out = text(await handler({}));
-    expect(setIdentity).toHaveBeenCalledWith('Polly', 'mskd_minted');
     expect(out).toContain('Joined dawn as Polly');
   });
 
-  it('refuses a name already taken by another session (claim_conflict)', async () => {
+  it('refuses a seat already occupied by another session (claim_conflict)', async () => {
+    const cfg = { ...config, member: undefined };
     const handler = capture(
       registerJoin,
-      pendingClient({
+      pendingClient(cfg, {
         roster: (async () => ({ members: [{ name: 'Ada' }, { name: 'Bo' }] })) as any,
-        addMember: (async () => {
-          throw new Error('member "Ada" already exists in "dawn"');
+        join: (async () => {
+          throw new Error('claim_conflict: seat "Ada" is occupied');
         }) as any,
       }),
-      { ...config, member: undefined, token: undefined },
+      cfg,
     );
     const out = text(await handler({ as: 'Ada' }));
     expect(out).toContain("Can't claim that seat");

@@ -46,19 +46,23 @@ async function teamCreate(parsed: Parsed): Promise<number> {
   const http = new HttpClient({ server });
   const res = await http.createTeam(slug, { name, ...(role ? { role } : {}) }, display);
 
+  // v0.3 (ADR 075): the creator is the team's first admin and authenticates with their **human
+  // credential** (mscr_) from the composite mint (SPEC A.7); the team **agent key** (mskey_) is what
+  // agents claim with, handed out separately. `res.agent_key`/`res.human_credential` are shown once.
+  const credential = res.human_credential as string;
   config.server = server;
   config.current = slug;
-  config.identities[slug] = { name, token: res.token, surface: 'cli' };
-  rememberIdentity(config, { team: slug, name, token: res.token, surface: 'cli' }); // ADR 059 vault
+  config.agentKeys[slug] = res.agent_key as string; // ADR 075: keep the team key for `musterd agent`
+  config.identities[slug] = { name, key: credential, surface: 'cli' };
+  rememberIdentity(config, { team: slug, name, key: credential, surface: 'cli' }); // ADR 059 vault
   saveConfig(config);
   // Auto-bind the creating folder so it's immediately *active* — you can act here without `--as`,
-  // while every other unbound folder stays read-only (ADR 036). The global config alone no longer
-  // authorizes acting; this binding does.
+  // while every other unbound folder stays read-only (ADR 036). The binding carries the folder's
+  // claim secret (here the creator's credential) so resolveIdentity yields the admin here.
   const binding: Binding = {
     server,
     team: slug,
-    member: name,
-    token: res.token,
+    agent_key: credential,
     surface: 'cli',
     claim: { mode: 'seat', name },
   };
@@ -106,28 +110,39 @@ async function teamAdd(parsed: Parsed): Promise<number> {
   });
 
   if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify({ member: res.member, token: res.token }) + '\n');
+    // v0.3 (ADR 069): a human gets an mscr_ credential (shown once); an agent is credential-less and
+    // claims with the team agent key. The vestigial `token` is no longer an authenticator.
+    process.stdout.write(
+      JSON.stringify({
+        member: res.member,
+        ...(res.human_credential ? { human_credential: res.human_credential } : {}),
+      }) + '\n',
+    );
     return 0;
   }
   process.stdout.write(
     `${theme.ok('✓')} added ${theme.memberName(name, kind)} (${kind}${role ? `, ${role}` : ''}) to ${team}\n`,
   );
   if (kind === 'agent') {
-    process.stdout.write(theme.meta('connect this agent via MCP with env:') + '\n');
+    // Agents authenticate with the team agent key (mskey_) + a seat claim (ADR 069/075) — not a per-seat
+    // token. The simplest hand-off is `musterd agent` in the agent's folder (isolated worktree + MCP).
+    const agentKey = loadConfig().agentKeys[team] ?? 'mskey_…';
+    process.stdout.write(theme.meta('connect this agent via MCP with the team agent key:') + '\n');
     process.stdout.write(
       theme.meta(
-        `  MUSTERD_TEAM=${team} MUSTERD_MEMBER=${name} MUSTERD_TOKEN=${res.token} MUSTERD_SURFACE=claude-code`,
+        `  MUSTERD_TEAM=${team} MUSTERD_AGENT_KEY=${agentKey} MUSTERD_CLAIM=seat:${name} MUSTERD_SURFACE=claude-code`,
       ) + '\n',
     );
-    // Hand-off path (ADR 055): the agent adopts the seat in its own folder with no global-config
-    // clobber — preferred over `join --token`, which overwrites this machine's cached identity.
     process.stdout.write(
-      theme.meta(`or adopt it in the agent's folder: musterd claim ${name} --token ${res.token}`) +
-        '\n',
+      theme.meta(`or in the agent's folder: musterd agent ${name} --team ${team}`) + '\n',
     );
   } else {
+    // Humans authenticate with their own credential (mscr_), shown once here.
     process.stdout.write(
-      theme.meta(`they join with: musterd join ${team} --as ${name} --token ${res.token}`) + '\n',
+      theme.meta(`they authenticate with their credential (shown once — store it now):`) + '\n',
+    );
+    process.stdout.write(
+      theme.meta(`  musterd join ${team} --as ${name} --key ${res.human_credential}`) + '\n',
     );
   }
   return 0;

@@ -37,21 +37,23 @@ beforeEach(async () => {
     slug: 'dawn',
     creator: { name: 'nick', kind: 'human', role: 'lead' },
   });
-  tok['nick'] = team.json.token;
-  const ada = await api(
-    'POST',
-    '/teams/dawn/members',
-    { name: 'Ada', kind: 'agent', role: 'backend' },
-    tok['nick'],
-  );
-  tok['Ada'] = ada.json.token;
-  const lin = await api(
-    'POST',
-    '/teams/dawn/members',
-    { name: 'Lin', kind: 'agent', role: 'frontend' },
-    tok['nick'],
-  );
-  tok['Lin'] = lin.json.token;
+  tok['nick'] = team.json.human_credential; // ADR 069: credential, not the removed mskd_ token
+  // v0.3 (ADR 075): agents claim with the team agent key from the composite mint; a standing grant
+  // per seat lets each occupy immediately (no admin-approval lane).
+  tok['agent_key'] = team.json.agent_key;
+  for (const [name, role] of [
+    ['Ada', 'backend'],
+    ['Lin', 'frontend'],
+  ]) {
+    await api('POST', '/teams/dawn/members', { name, kind: 'agent', role }, tok['nick']);
+    const g = await api(
+      'POST',
+      '/teams/dawn/grants',
+      { scope: 'seat', target: name, lifetime: 'standing' },
+      tok['nick'],
+    );
+    tok[`${name}_grant`] = g.json.token;
+  }
 });
 
 afterEach(async () => {
@@ -61,8 +63,20 @@ afterEach(async () => {
   tok = {};
 });
 
+let connSeq = 0;
 function cfg(member: string, surface: McpConfig['surface']): McpConfig {
-  return { server: base, team: 'dawn', member, token: tok[member]!, surface };
+  return {
+    server: base,
+    team: 'dawn',
+    agent_key: tok['agent_key']!,
+    grant: tok[`${member}_grant`]!,
+    surface,
+    claim: { mode: 'seat', name: member },
+    provenance: 'session',
+    workspace: 'repo',
+    connId: `conn-${member}-${++connSeq}`, // unique per session so two Ada clients can supersede
+    claimCode: `CC${String(++connSeq).padStart(2, '0')}`,
+  };
 }
 
 function client(member: string, surface: McpConfig['surface']): MusterdClient {
@@ -105,10 +119,12 @@ describe('Scenario C — flagship 3-pane', () => {
     await lin.join();
     await delay(150); // let both background sockets settle
 
-    // Newest-wins (ADR 017, supersedes ADR 010's refusal): a second session claiming Ada's seat
-    // *takes over*, and the original is superseded — one identity, one live occupant, and a reload
-    // can never lock a member out of its own seat. (This is the fix for the dogfood deadlock.)
-    const adaDup = client('Ada', 'claude-code');
+    // Newest-wins (ADR 017, supersedes ADR 010's refusal): a second session claiming Ada's seat from
+    // a DIFFERENT workspace (the genuine-relaunch case; a same-workspace probe would keep the
+    // incumbent, ADR 068) *takes over*, and the original is superseded — one identity, one live
+    // occupant, and a reload can never lock a member out of its own seat. (Fix for the dogfood deadlock.)
+    const adaDup = new MusterdClient({ ...cfg('Ada', 'claude-code'), workspace: 'repo-elsewhere' });
+    clients.push(adaDup);
     await adaDup.join();
     expect(adaDup.joined).toBe(true);
     await delay(150);

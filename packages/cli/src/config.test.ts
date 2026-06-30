@@ -19,23 +19,23 @@ describe('binding registry (ADR 020)', () => {
   const binding = {
     server: 'http://localhost:4849',
     team: 'dawn',
-    member: 'Ada',
-    token: 'mskd_secret',
+    agent_key: 'mskey_secret',
     surface: 'claude-code' as const,
+    claim: { mode: 'seat' as const, name: 'Ada' },
   };
 
-  it('records a tokenless ref keyed by absolute folder path', () => {
+  it('records a keyless seat ref keyed by absolute folder path', () => {
     saveBinding(dir, binding);
     const cfg = loadConfig();
     const ref = cfg.bindings[resolve(dir)];
-    expect(ref).toEqual({ team: 'dawn', member: 'Ada', surface: 'claude-code' });
-    // The registry must never carry the token — secrets live only in the 0600 binding file.
-    expect(JSON.stringify(cfg.bindings)).not.toContain('mskd_secret');
+    expect(ref).toEqual({ team: 'dawn', seat: 'Ada', surface: 'claude-code' });
+    // The registry must never carry the agent key — secrets live only in the 0600 binding file.
+    expect(JSON.stringify(cfg.bindings)).not.toContain('mskey_secret');
   });
 
-  it('the on-disk config never contains the token', () => {
+  it('the on-disk config never contains the agent key', () => {
     saveBinding(dir, binding);
-    expect(readFileSync(configPath, 'utf8')).not.toContain('mskd_secret');
+    expect(readFileSync(configPath, 'utf8')).not.toContain('mskey_secret');
   });
 
   it('loadConfig defaults bindings to {} for a config written before the registry existed', () => {
@@ -80,8 +80,9 @@ describe('multi-identity vault (ADR 059)', () => {
       }),
     );
     const cfg = loadConfig();
+    // Legacy `token` is coerced to `key` on load (v0.3, ADR 075).
     expect(cfg.knownIdentities).toEqual([
-      { team: 'alpha', name: 'David', token: 'mskd_d', surface: 'cli' },
+      { team: 'alpha', name: 'David', key: 'mskd_d', surface: 'cli' },
     ]);
   });
 
@@ -91,14 +92,16 @@ describe('multi-identity vault (ADR 059)', () => {
       identities: {},
       knownIdentities: [],
       bindings: {},
+      agentKeys: {},
+      rosterHome: {},
     };
-    rememberIdentity(cfg, { team: 'alpha', name: 'David', token: 'mskd_d', surface: 'cli' });
-    rememberIdentity(cfg, { team: 'alpha', name: 'Pim', token: 'mskd_p', surface: 'cli' });
-    // Joining as Pim must NOT evict David's token — both resolvable by --as.
+    rememberIdentity(cfg, { team: 'alpha', name: 'David', key: 'mskey_d', surface: 'cli' });
+    rememberIdentity(cfg, { team: 'alpha', name: 'Pim', key: 'mskey_p', surface: 'cli' });
+    // Joining as Pim must NOT evict David's key — both resolvable by --as.
     expect(cfg.knownIdentities.map((i) => i.name).sort()).toEqual(['David', 'Pim']);
     // Re-remembering the same (team, name) upserts in place rather than duplicating.
-    rememberIdentity(cfg, { team: 'alpha', name: 'David', token: 'mskd_d2', surface: 'cli' });
+    rememberIdentity(cfg, { team: 'alpha', name: 'David', key: 'mskey_d2', surface: 'cli' });
     const davids = cfg.knownIdentities.filter((i) => i.name === 'David');
-    expect(davids).toEqual([{ team: 'alpha', name: 'David', token: 'mskd_d2', surface: 'cli' }]);
+    expect(davids).toEqual([{ team: 'alpha', name: 'David', key: 'mskey_d2', surface: 'cli' }]);
   });
 });

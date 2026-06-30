@@ -35,14 +35,26 @@ beforeEach(async () => {
     slug: 'dawn',
     creator: { name: 'nick', kind: 'human', role: 'lead' },
   });
-  tokens['nick'] = team.json.token;
-  const ada = await api(
+  // Post-cutover (ADR 069): nick authenticates with his human credential (mscr_, self-identifying);
+  // the mskd_ creator token no longer authenticates.
+  tokens['nick'] = team.json.human_credential;
+  // v0.3 (ADR 075): agents claim with the team agent key from the composite mint (SPEC A.7).
+  tokens['agent_key'] = team.json.agent_key;
+  // Declare Ada's seat (no per-seat token in v0.3 — she claims it with the team agent key).
+  await api(
     'POST',
     '/teams/dawn/members',
     { name: 'Ada', kind: 'agent', role: 'backend' },
     tokens['nick'],
   );
-  tokens['Ada'] = ada.json.token;
+  // Issue a standing grant for Ada's seat so the claim occupies immediately (no admin-approval lane).
+  const grant = await api(
+    'POST',
+    '/teams/dawn/grants',
+    { scope: 'seat', target: 'Ada', lifetime: 'standing' },
+    tokens['nick'],
+  );
+  tokens['ada_grant'] = grant.json.token;
 });
 
 afterEach(async () => {
@@ -54,9 +66,14 @@ function adaConfig(): McpConfig {
   return {
     server: base,
     team: 'dawn',
-    member: 'Ada',
-    token: tokens['Ada']!,
+    agent_key: tokens['agent_key']!,
+    grant: tokens['ada_grant']!,
     surface: 'claude-code',
+    provenance: 'session',
+    workspace: 'repo',
+    claim: { mode: 'seat', name: 'Ada' },
+    connId: 'conn-ada',
+    claimCode: 'AD12',
   };
 }
 
@@ -88,8 +105,10 @@ describe('MCP adapter', () => {
     await a1.join();
     expect(a1.joined).toBe(true);
 
-    // Newest wins: the second session joins successfully (no member_busy lockout) ...
-    const a2 = new MusterdClient(adaConfig());
+    // Newest wins: a second session from a DIFFERENT workspace claims the same seat and takes over
+    // (no member_busy lockout). Different-workspace is the genuine-relaunch case ADR 017 displaces;
+    // a *same*-workspace re-claim (a health-check probe) would instead keep the incumbent (ADR 068).
+    const a2 = new MusterdClient({ ...adaConfig(), workspace: 'repo-elsewhere' });
     await a2.join();
     expect(a2.joined).toBe(true);
 
@@ -103,16 +122,16 @@ describe('MCP adapter', () => {
     a2.close();
   });
 
-  it('an invalid token surfaces a db/member-mismatch hint on join failure', async () => {
-    const bad = new MusterdClient({ ...adaConfig(), token: 'mskd_not_a_real_token' });
-    await expect(bad.join()).rejects.toThrow(/invalid token/i);
-    expect(bad.lastJoinError).toMatch(/different MUSTERD_DB|may not exist/i);
+  it('an invalid agent key is refused on claim (v0.3, ADR 075)', async () => {
+    const bad = new MusterdClient({ ...adaConfig(), agent_key: 'mskey_not_a_real_key' });
+    await expect(bad.join()).rejects.toThrow(/forbidden|unauthorized|refused|invalid|expired/i);
+    expect(bad.lastJoinError).toMatch(/invalid key|forbidden|refused/i);
     bad.close();
   });
 
   it('Ada sends a status_update that nick sees in his inbox', async () => {
     const client = new MusterdClient(adaConfig());
-    await bind(client);
+    await client.join();
     const { ulid } = await import('ulid');
     const { makeEnvelope } = await import('@musterd/protocol');
     const env = makeEnvelope({
@@ -132,7 +151,7 @@ describe('MCP adapter', () => {
 
   it('returns an inbound request_help once, then nothing (cursor advances)', async () => {
     const client = new MusterdClient(adaConfig());
-    await bind(client);
+    await client.join();
     await delay(150); // let the background WS connect
 
     // nick asks Ada for help (over HTTP)

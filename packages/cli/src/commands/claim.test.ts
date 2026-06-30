@@ -19,19 +19,31 @@ import { claimCommand } from './claim.js';
 let server: RunningServer;
 let dir: string;
 let cwd: string;
+let serverUrl: string;
+let agentKey: string; // team agent key (mskey_) from the composite mint
+let adminToken: string; // nick's creator seat token (mskd_, untouched authMember path → admin)
 
 beforeEach(async () => {
   server = createServer({ db: openDb(':memory:'), port: 0 });
   const { port } = await server.listen();
-  process.env['MUSTERD_SERVER'] = `http://127.0.0.1:${port}`;
+  serverUrl = `http://127.0.0.1:${port}`;
+  process.env['MUSTERD_SERVER'] = serverUrl;
   dir = mkdtempSync(join(tmpdir(), 'musterd-claim-'));
   process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
   cwd = mkdtempSync(join(tmpdir(), 'musterd-claim-cwd-'));
   vi.spyOn(process, 'cwd').mockReturnValue(cwd);
-  // Stand up the team the seats are claimed against.
-  await new HttpClient({ server: process.env['MUSTERD_SERVER']! }).createTeam('dawn', {
+  // Stand up the team; capture the v0.3 composite mint (SPEC A.7): the team agent key + the creator's
+  // human credential (mscr_). Post-cutover (ADR 069) nick authenticates with the credential; the mskd_
+  // creator token no longer authenticates, so the admin (grants/declare-seat) calls use the credential.
+  const team = (await new HttpClient({ server: serverUrl }).createTeam('dawn', {
     name: 'nick',
-  });
+  })) as {
+    agent_key: string;
+    human_credential: string;
+  };
+  agentKey = team.agent_key;
+  adminToken = team.human_credential;
+  process.env['MUSTERD_AGENT_KEY'] = agentKey; // claim presents this
 });
 
 afterEach(async () => {
@@ -42,6 +54,7 @@ afterEach(async () => {
   delete process.env['MUSTERD_SERVER'];
   delete process.env['MUSTERD_CONFIG'];
   delete process.env['MUSTERD_TEAM'];
+  delete process.env['MUSTERD_AGENT_KEY'];
 });
 
 async function run(argv: string[]) {
@@ -59,150 +72,116 @@ async function run(argv: string[]) {
 }
 
 function readBinding() {
-  const raw = readFileSync(join(cwd, BINDING_DIR, BINDING_FILE), 'utf8');
-  return BindingSchema.parse(JSON.parse(raw));
+  return BindingSchema.parse(
+    JSON.parse(readFileSync(join(cwd, BINDING_DIR, BINDING_FILE), 'utf8')),
+  );
 }
 
-describe('musterd claim (L2 floor, ADR 032)', () => {
-  it('claims a named seat by auto-minting it and binds the folder to it', async () => {
-    const { code, out } = await run(['Ada', '--team', 'dawn']);
+/** Admin (nick) declares a seat (so a named claim has a target) — auth via the creator mskd_ token. */
+async function declareSeat(name: string, role?: string): Promise<void> {
+  await new HttpClient({ server: serverUrl, key: adminToken, seat: 'nick' }).addMember('dawn', {
+    name,
+    kind: 'agent',
+    ...(role ? { role } : {}),
+  });
+}
+
+/** Admin (nick) issues a standing grant for a seat/role so a claim occupies immediately. */
+async function grant(target: string, scope: 'seat' | 'role' = 'seat'): Promise<string> {
+  const res = await fetch(`${serverUrl}/teams/dawn/grants`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ scope, target, lifetime: 'standing' }),
+  });
+  return ((await res.json()) as { token: string }).token;
+}
+
+describe('musterd claim (v0.3 handshake, ADR 075)', () => {
+  it('claims a named seat with a grant → occupies + binds the folder (agent_key, no token)', async () => {
+    await declareSeat('Ada');
+    const g = await grant('Ada');
+    const { code, out } = await run(['Ada', '--team', 'dawn', '--grant', g]);
     expect(code).toBe(0);
     expect(out).toContain('Ada');
     const b = readBinding();
-    expect(b.member).toBe('Ada');
-    expect(b.token).toMatch(/^mskd_/);
+    expect(b.agent_key).toBe(agentKey);
+    expect(b.member).toBeUndefined(); // v0.3: no member/token in the binding
+    expect(b.token).toBeUndefined();
     expect(b.claim).toEqual({ mode: 'seat', name: 'Ada' });
   });
 
-  it("re-occupies the folder's own already-bound seat without re-minting (reused)", async () => {
-    const first = await run(['Ada', '--team', 'dawn']);
-    const token = readBinding().token;
-    const again = await run(['Ada', '--team', 'dawn']);
-    expect(first.code).toBe(0);
-    expect(again.code).toBe(0);
-    expect(again.out).toContain('reclaimed your seat');
-    expect(readBinding().token).toBe(token); // same token: not a fresh mint
+  it('errors clearly when no agent key is available', async () => {
+    delete process.env['MUSTERD_AGENT_KEY'];
+    await expect(run(['Ada', '--team', 'dawn'])).rejects.toMatchObject({ exitCode: 4 });
   });
 
-  it('refuses a name already on the team this folder has no token for (claim_conflict)', async () => {
-    // Mint Ada from a *different* folder so this one doesn't hold the token.
-    await new HttpClient({ server: process.env['MUSTERD_SERVER']! }).addMember('dawn', {
-      name: 'Ada',
-      kind: 'agent',
-    });
-    await expect(run(['Ada', '--team', 'dawn'])).rejects.toMatchObject({ exitCode: 9 });
-  });
-
-  it('the name-conflict error names a runnable next step (ADR 055 no-dead-end)', async () => {
-    await new HttpClient({ server: process.env['MUSTERD_SERVER']! }).addMember('dawn', {
-      name: 'Ada',
-      kind: 'agent',
-    });
-    await expect(run(['Ada', '--team', 'dawn'])).rejects.toMatchObject({
-      message: expect.stringContaining('musterd claim Ada --token'),
-    });
-  });
-
-  it('adopts a teammate-created seat by its token, binding the folder with no clobber (ADR 055)', async () => {
-    // A teammate's `team add` minted Ada elsewhere and printed its token (the hand-off code).
-    const res = await new HttpClient({ server: process.env['MUSTERD_SERVER']! }).addMember('dawn', {
-      name: 'Ada',
-      kind: 'agent',
-    });
-    const token = res.token as string;
-    const { code, out } = await run(['Ada', '--team', 'dawn', '--token', token]);
+  it('without a grant, a claim opens a pending request (admin must approve)', async () => {
+    await declareSeat('Ada');
+    const { code, out } = await run(['Ada', '--team', 'dawn']);
     expect(code).toBe(0);
-    expect(out).toContain('adopted the seat');
-    const b = readBinding();
-    expect(b.member).toBe('Ada');
-    expect(b.token).toBe(token); // the handed-off token, not a fresh mint
+    expect(out).toMatch(/pending|approve/i);
+    // No binding is written for a pending claim (the seat isn't occupied yet).
+    expect(existsSync(join(cwd, BINDING_DIR, BINDING_FILE))).toBe(false);
   });
 
-  it('refuses an adopt token that does not authenticate (ADR 055)', async () => {
-    await new HttpClient({ server: process.env['MUSTERD_SERVER']! }).addMember('dawn', {
-      name: 'Ada',
-      kind: 'agent',
-    });
-    await expect(
-      run(['Ada', '--team', 'dawn', '--token', 'mskd_bogusbogusbogus']),
-    ).rejects.toMatchObject({ exitCode: 4 });
-  });
-
-  it('refuses an adopt token that belongs to a different seat (ADR 055)', async () => {
-    const http = new HttpClient({ server: process.env['MUSTERD_SERVER']! });
-    await http.addMember('dawn', { name: 'Ada', kind: 'agent' });
-    const bob = await http.addMember('dawn', { name: 'Bob', kind: 'agent' });
-    await expect(
-      run(['Ada', '--team', 'dawn', '--token', bob.token as string]),
-    ).rejects.toMatchObject({ exitCode: 4 });
-  });
-
-  it('claims the next open pool seat for a role', async () => {
-    const first = await run(['--role', 'backend', '--team', 'dawn']);
-    expect(first.code).toBe(0);
-    expect(readBinding().member).toBe('backend-1');
-    const second = await run(['--role', 'backend', '--team', 'dawn']);
-    expect(second.code).toBe(0);
-    expect(readBinding().member).toBe('backend-2');
+  it('claims the next open pool seat for a role (server-resolved)', async () => {
+    await declareSeat('backend-1', 'backend');
+    const g = await grant('backend', 'role');
+    const { code } = await run(['--role', 'backend', '--team', 'dawn', '--grant', g]);
+    expect(code).toBe(0);
+    // the resolved seat is recorded as the folder's standing seat policy
+    expect(readBinding().claim).toMatchObject({ mode: 'seat' });
   });
 
   it('uses the folder claim policy when no target is given', async () => {
+    await declareSeat('Polly');
+    const g = await grant('Polly');
     saveBinding(cwd, {
-      server: process.env['MUSTERD_SERVER']!,
+      server: serverUrl,
       team: 'dawn',
+      agent_key: agentKey,
       surface: 'claude-code',
       claim: { mode: 'seat', name: 'Polly' },
+      grant: g,
     });
     const { code } = await run([]);
     expect(code).toBe(0);
-    expect(readBinding().member).toBe('Polly');
+    expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Polly' });
   });
 
-  it('refuses to clobber a folder bound to a currently-live different member (ADR 066)', async () => {
-    // Bind this folder to Ada and make her live (a presence attachment on the roster).
-    await run(['Ada', '--team', 'dawn']);
-    const token = readBinding().token;
-    await new HttpClient({ server: process.env['MUSTERD_SERVER']!, token }).presence('dawn', 'cli');
-    // Claiming a *different* seat here would silently evict the live Ada — refuse (exit 2).
-    await expect(run(['Bob', '--team', 'dawn'])).rejects.toMatchObject({
+  it('refuses a claim presenting an invalid grant (ADR 075/078)', async () => {
+    await declareSeat('Ada');
+    // A bogus grant token can't authorize the claim → the server refuses it.
+    await expect(
+      run(['Ada', '--team', 'dawn', '--grant', 'msgr_bogusbogusbogus']),
+    ).rejects.toMatchObject({ exitCode: 4 });
+  });
+
+  it('refuses to clobber a folder bound to a currently-live different seat (ADR 066)', async () => {
+    await declareSeat('Ada');
+    await declareSeat('Bob');
+    const ga = await grant('Ada');
+    await run(['Ada', '--team', 'dawn', '--grant', ga]); // bind + occupy Ada (now live/active)
+    const gb = await grant('Bob');
+    await expect(run(['Bob', '--team', 'dawn', '--grant', gb])).rejects.toMatchObject({
       exitCode: 2,
       message: expect.stringContaining('musterd agent'),
     });
-    // The binding is untouched and no Bob seat was minted (guard runs before any mint).
-    expect(readBinding().member).toBe('Ada');
-    const { members } = await new HttpClient({ server: process.env['MUSTERD_SERVER']! }).roster(
-      'dawn',
-    );
-    expect(members.some((m) => m.name === 'Bob')).toBe(false);
+    expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Ada' }); // untouched
   });
 
-  it('--force repoints a folder bound to a live member anyway (ADR 066)', async () => {
-    await run(['Ada', '--team', 'dawn']);
-    const token = readBinding().token;
-    await new HttpClient({ server: process.env['MUSTERD_SERVER']!, token }).presence('dawn', 'cli');
-    const { code } = await run(['Bob', '--team', 'dawn', '--force']);
+  it('--force repoints a folder bound to a live seat anyway (ADR 066)', async () => {
+    await declareSeat('Ada');
+    await declareSeat('Bob');
+    await run(['Ada', '--team', 'dawn', '--grant', await grant('Ada')]);
+    const { code } = await run(['Bob', '--team', 'dawn', '--grant', await grant('Bob'), '--force']);
     expect(code).toBe(0);
-    expect(readBinding().member).toBe('Bob');
-  });
-
-  it('does not refuse when the bound member is offline (stale seat is reclaimable, ADR 066)', async () => {
-    // Bind to Ada but never register a presence — she is offline, so claiming elsewhere is benign.
-    await run(['Ada', '--team', 'dawn']);
-    const { code } = await run(['Bob', '--team', 'dawn']);
-    expect(code).toBe(0);
-    expect(readBinding().member).toBe('Bob');
-  });
-
-  it('re-occupying our own live seat is never a clobber (ADR 066)', async () => {
-    await run(['Ada', '--team', 'dawn']);
-    const token = readBinding().token;
-    await new HttpClient({ server: process.env['MUSTERD_SERVER']!, token }).presence('dawn', 'cli');
-    const { code, out } = await run(['Ada', '--team', 'dawn']);
-    expect(code).toBe(0);
-    expect(out).toContain('reclaimed your seat');
+    expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Bob' });
   });
 
   it('lists waiting sessions and requires --for when several are pending', async () => {
+    await declareSeat('Ada');
+    const g = await grant('Ada');
     writePending(cwd, {
       code: 'AB12',
       team: 'dawn',
@@ -219,12 +198,16 @@ describe('musterd claim (L2 floor, ADR 032)', () => {
       connId: 'c2',
       ts: 2,
     });
-    await expect(run(['Ada', '--team', 'dawn'])).rejects.toMatchObject({ exitCode: 2 });
-    const ok = await run(['Ada', '--team', 'dawn', '--for', 'AB12']);
+    await expect(run(['Ada', '--team', 'dawn', '--grant', g])).rejects.toMatchObject({
+      exitCode: 2,
+    });
+    const ok = await run(['Ada', '--team', 'dawn', '--grant', g, '--for', 'AB12']);
     expect(ok.code).toBe(0);
   });
 
-  it('hands the seat to a waiting session via a resolution sidecar, clearing the marker (ADR 034)', async () => {
+  it('hands the seat to a waiting session via a resolution sidecar carrying the seat (ADR 034)', async () => {
+    await declareSeat('Ada');
+    const g = await grant('Ada');
     writePending(cwd, {
       code: 'AB12',
       team: 'dawn',
@@ -233,14 +216,12 @@ describe('musterd claim (L2 floor, ADR 032)', () => {
       connId: 'c1',
       ts: 1,
     });
-    const { out } = await run(['Ada', '--team', 'dawn', '--for', 'AB12']);
+    const { out } = await run(['Ada', '--team', 'dawn', '--grant', g, '--for', 'AB12']);
     expect(out).toContain('going online as Ada now');
-    // marker consumed, resolution dropped with the token
     expect(existsSync(join(cwd, BINDING_DIR, PENDING_DIR, 'AB12.json'))).toBe(false);
     const resolved = JSON.parse(
       readFileSync(join(cwd, BINDING_DIR, PENDING_DIR, `AB12${RESOLVED_SUFFIX}`), 'utf8'),
     );
-    expect(resolved.member).toBe('Ada');
-    expect(resolved.token).toMatch(/^mskd_/);
+    expect(resolved.seat).toBe('Ada'); // v0.3: the resolution carries the seat, not member+token
   });
 });

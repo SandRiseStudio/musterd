@@ -1,6 +1,7 @@
 import {
   ErrorBodySchema,
   PROTOCOL_VERSION,
+  type ClaimTarget,
   type Envelope,
   type MemberSummary,
   type WSServerFrame,
@@ -40,9 +41,9 @@ export class MusterdClient {
     return this.joinedFlag;
   }
 
-  /** Whether this session has claimed a seat yet (holds a concrete member + token). */
+  /** Whether this session has claimed a seat yet (it has occupied one — the resolved seat is set). */
   get claimed(): boolean {
-    return Boolean(this.config.member && this.config.token);
+    return Boolean(this.config.member);
   }
 
   /** The claimed seat's member name, or undefined while pending (unclaimed). */
@@ -60,12 +61,11 @@ export class MusterdClient {
    * occupies it and the act tools can send as it. Refuses to silently swap a live seat — claim only
    * applies to a pending or already-matching session.
    */
-  setIdentity(member: string, token: string): void {
+  setIdentity(member: string): void {
     if (this.config.member && this.config.member !== member && this.joinedFlag) {
       throw new Error(`already live as ${this.config.member}; leave before claiming ${member}`);
     }
     this.config.member = member;
-    this.config.token = token;
   }
 
   /** Mint (or look up the roster of) seats with no identity — the unauthenticated local floor. */
@@ -89,8 +89,12 @@ export class MusterdClient {
       method,
       headers: {
         'content-type': 'application/json',
-        // No bearer while pending — minting/roster are unauthenticated; a claimed session adds it.
-        ...(this.config.token ? { authorization: `Bearer ${this.config.token}` } : {}),
+        // v0.3 (ADR 075): authenticate with the team agent key (Bearer); the server dispatches on the
+        // prefix → the live-presence occupancy this session holds. Roster/health stay auth-optional.
+        ...(this.config.agent_key ? { authorization: `Bearer ${this.config.agent_key}` } : {}),
+        // The agent key authenticates the harness, not a seat — reads carry the occupied seat so the
+        // server can assert occupancy (SPEC A.7 §253). A send conveys it via the envelope `from`.
+        ...(this.config.member ? { 'x-musterd-seat': this.config.member } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
@@ -135,9 +139,16 @@ export class MusterdClient {
    */
   join(): Promise<void> {
     if (this.joinedFlag) return Promise.resolve();
-    if (!this.config.member || !this.config.token) {
+    if (!this.config.agent_key) {
       return Promise.reject(
-        new Error('unclaimed — claim a seat first (team_join {as} or `musterd claim <name>`)'),
+        new Error('no agent key — set MUSTERD_AGENT_KEY (the team agent key) to claim a seat'),
+      );
+    }
+    if (!this.claimTarget()) {
+      return Promise.reject(
+        new Error(
+          'no seat to claim — name one with team_join {as} or set MUSTERD_CLAIM=seat:<name>',
+        ),
       );
     }
     this.wantPresence = true;
@@ -145,6 +156,15 @@ export class MusterdClient {
       this.pendingJoin = { resolve, reject };
       this.openSocket();
     });
+  }
+
+  /** The seat/role this session claims: a resolved seat re-occupies itself; else the claim policy. */
+  private claimTarget(): ClaimTarget | null {
+    if (this.config.member) return { seat: this.config.member };
+    const c = this.config.claim;
+    if (c.mode === 'seat') return { seat: c.name };
+    if (c.mode === 'role') return { role: c.role };
+    return null; // `chat` — assign-in-chat, no auto-claim target
   }
 
   /** Release the seat (back to dormant). The server keeps a 45s reclaim grace; tools stay registered. */
@@ -164,13 +184,15 @@ export class MusterdClient {
     this.ws = ws;
     ws.on('open', () => {
       this.backoff = 1000;
+      // v0.3 (ADR 075/078): present the team agent key + a claim target (replaces `hello {token}`).
       ws.send(
         JSON.stringify({
-          type: 'hello',
+          type: 'claim',
           v: PROTOCOL_VERSION,
           team: this.config.team,
-          as: this.config.member,
-          token: this.config.token,
+          key: this.config.agent_key,
+          target: this.claimTarget(),
+          ...(this.config.grant !== undefined ? { grant: this.config.grant } : {}),
           surface: this.config.surface,
           provenance: this.config.provenance,
           workspace: this.config.workspace,
@@ -185,9 +207,11 @@ export class MusterdClient {
       } catch {
         return;
       }
-      if (frame.type === 'welcome') {
+      if (frame.type === 'occupied') {
+        // Claim succeeded — the server resolved + assigned the seat (a role pool's `<role>-<n>` too).
         this.joinedFlag = true;
         this.lastJoinErrorMsg = null;
+        this.config.member = frame.seat.name;
         ws.send(JSON.stringify({ type: 'subscribe', scope: 'team' }));
         this.heartbeat = setInterval(() => {
           if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'heartbeat' }));
@@ -195,17 +219,33 @@ export class MusterdClient {
         this.heartbeat.unref?.();
         this.pendingJoin?.resolve();
         this.pendingJoin = null;
-      } else if (frame.type === 'error') {
-        // A refused hello, or being superseded by a newer same-identity session (ADR 017), is
-        // terminal — stop holding the seat and don't thrash reconnecting (a reconnect would just
-        // displace the session that displaced us — ping-pong).
+      } else if (frame.type === 'refused') {
+        // Terminal denial (seat occupied / not admin / expired grant, etc.) — stop holding the seat
+        // and don't thrash reconnecting (a reconnect would just be refused again).
         this.wantPresence = false;
-        const msg =
-          frame.code === 'member_busy' || frame.code === 'superseded'
-            ? `${frame.code}: ${frame.message}`
-            : frame.message;
+        const msg = `${frame.code}: ${frame.message}`;
         this.lastJoinErrorMsg = msg;
         this.pendingJoin?.reject(new Error(msg));
+        this.pendingJoin = null;
+        ws.close();
+      } else if (frame.type === 'pending') {
+        // No grant — the server opened a claim request (A.5). The MCP adapter surfaces it and stops
+        // holding; the agent re-joins once an admin approves. (Auto-resume on the pushed `occupied`
+        // is a follow-up — spec-gap 3.)
+        this.wantPresence = false;
+        const msg = `pending approval — request ${frame.request_id} (an admin must approve)`;
+        this.lastJoinErrorMsg = msg;
+        this.pendingJoin?.reject(new Error(msg));
+        this.pendingJoin = null;
+        ws.close();
+      } else if (frame.type === 'error' && frame.code === 'superseded') {
+        // Newest-wins (ADR 017): a newer session of this seat took it over. Stop holding and do **not**
+        // reconnect — otherwise two sessions of one identity ping-pong displacing each other forever
+        // (the claim-supersede war). Terminal, like refused/pending.
+        this.wantPresence = false;
+        this.joinedFlag = false;
+        this.lastJoinErrorMsg = `${frame.code}: ${frame.message}`;
+        this.pendingJoin?.reject(new Error(this.lastJoinErrorMsg));
         this.pendingJoin = null;
         ws.close();
       } else if (frame.type === 'deliver') {

@@ -1,4 +1,4 @@
-import { isClaimed, type MemberKind, type MemberSummary } from '@musterd/protocol';
+import { bindingSeat, type MemberKind, type MemberSummary } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, identityFromEnv, loadConfig, type Config, type Identity } from '../config.js';
@@ -51,12 +51,19 @@ function gather(flags: Record<string, string | boolean>) {
   // Candidate identities, highest precedence first, each tagged with its provenance.
   const sources: { team: string; identity: Identity; source: IdentitySource }[] = [];
   if (envId) sources.push({ team: envId.team, identity: envId.identity, source: 'env' });
-  // A policy-only (unclaimed) binding carries no identity yet — skip it as an identity source
-  // (the caller resolves identity by claiming; see `musterd claim`).
-  if (binding && isClaimed(binding)) {
+  // A binding yields a ready identity only when it pins a fixed seat (the name is known up front) AND
+  // carries the team agent key (v0.3, ADR 075). A role-pool / chat / keyless binding has no
+  // client-side seat — the claim flow (`musterd claim`/`join`) resolves it and caches the result.
+  const boundSeat = binding ? bindingSeat(binding) : undefined;
+  if (binding && boundSeat && binding.agent_key) {
     sources.push({
       team: binding.team,
-      identity: { name: binding.member, token: binding.token, surface: binding.surface },
+      identity: {
+        name: boundSeat,
+        key: binding.agent_key,
+        surface: binding.surface,
+        ...(binding.grant !== undefined ? { grant: binding.grant } : {}),
+      },
       source: 'binding',
     });
   }
@@ -69,7 +76,7 @@ function gather(flags: Record<string, string | boolean>) {
     if (config.identities[si.team]?.name === si.name) continue; // already added as the active one
     sources.push({
       team: si.team,
-      identity: { name: si.name, token: si.token, surface: si.surface },
+      identity: { name: si.name, key: si.key, surface: si.surface },
       source: 'config',
     });
   }
@@ -116,7 +123,8 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
     explicit: true,
     http: new HttpClient({
       server,
-      token: match.identity.token,
+      key: match.identity.key,
+      seat: match.identity.name,
       surface: match.identity.surface,
     }),
   };
@@ -150,7 +158,9 @@ export function resolveRead(flags: Record<string, string | boolean>): ResolvedRe
     team,
     server,
     http: new HttpClient(
-      identity ? { server, token: identity.token, surface: identity.surface } : { server },
+      identity
+        ? { server, key: identity.key, seat: identity.name, surface: identity.surface }
+        : { server },
     ),
     explicit,
     ...(identity ? { identity } : {}),

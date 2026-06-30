@@ -226,21 +226,23 @@ describe('notify against a live daemon', () => {
     }
   }
 
-  /** Stand up team `dawn` (nick = creator/admin) + agent `lin`; return their tokens. */
+  /**
+   * Stand up team `dawn` (nick = creator/admin) + agent `lin`. Post-cutover (ADR 069): nick auths with
+   * his human credential (mscr_); lin (agent) auths with the team agent key + `seat: 'lin'` — the mskd_
+   * `team add` token no longer authenticates.
+   */
   async function setup(): Promise<{ nickToken: string; linToken: string }> {
     await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
-    const added = await capture(() =>
-      teamCommand(parseArgs(['add', 'lin', '--kind', 'agent', '--json'])),
-    );
-    const linToken = JSON.parse(added.out).token as string;
-    const nickToken = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).identities.dawn
-      .token as string;
+    await capture(() => teamCommand(parseArgs(['add', 'lin', '--kind', 'agent', '--json'])));
+    const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
+    const linToken = cfg.agentKeys.dawn as string; // team agent key — lin sends as { key, seat: 'lin' }
+    const nickToken = cfg.identities.dawn.key as string; // nick's credential (mscr_)
     return { nickToken, linToken };
   }
 
   it('fires for a request_help to an away human, then self-clears once the inbox is read', async () => {
     const { nickToken, linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, token: linToken });
+    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
     await lin.send(
       'dawn',
       makeEnvelope({
@@ -255,7 +257,7 @@ describe('notify against a live daemon', () => {
       }),
     );
 
-    const nick = new HttpClient({ server: serverUrl, token: nickToken });
+    const nick = new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' });
     // The notifier polls on the human's behalf — presence-neutral, exactly as notifyCommand does
     // (ADR 057). Without this the poll's own inbox read would mark nick present and silence the
     // notification: isReachable would then see them online.
@@ -294,8 +296,8 @@ describe('notify against a live daemon', () => {
 
   it('away holds a normal request_help but an urgent ping breaks through (ADR 044)', async () => {
     const { nickToken, linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, token: linToken });
-    const nick = new HttpClient({ server: serverUrl, token: nickToken });
+    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
+    const nick = new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' });
 
     // nick goes away (explicit, never inferred).
     await nick.setAvailability('dawn', { status: 'away' });
@@ -342,7 +344,7 @@ describe('notify against a live daemon', () => {
 
   it('command --once wiring: resolves identity and fires via the injected sink', async () => {
     const { linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, token: linToken });
+    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
     await lin.send(
       'dawn',
       makeEnvelope({
@@ -367,7 +369,7 @@ describe('notify against a live daemon', () => {
 
   it('resident loop: fires on the immediate first poll, then stops on SIGINT', async () => {
     const { linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, token: linToken });
+    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
     await lin.send(
       'dawn',
       makeEnvelope({

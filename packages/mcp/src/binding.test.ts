@@ -15,9 +15,9 @@ beforeEach(() => {
     JSON.stringify({
       server: 'http://localhost:9999',
       team: 'lab',
-      member: 'Ui',
-      token: 'mskd_from_file',
+      agent_key: 'mskey_from_file',
       surface: 'claude-code',
+      claim: { mode: 'seat', name: 'Ui' },
     }),
   );
   // Isolate from the developer's real repo binding: findBinding() walks up from cwd, so without
@@ -32,11 +32,13 @@ afterEach(() => {
 });
 
 describe('loadMcpConfig identity alignment (ADR 018)', () => {
-  it('falls back to the workspace binding file when env carries no identity', () => {
+  it('falls back to the workspace binding file when env carries no agent key', () => {
     const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
-    expect(cfg.member).toBe('Ui');
+    // v0.3 (ADR 075): the binding carries the agent key + claim policy; the seat resolves at claim.
+    expect(cfg.agent_key).toBe('mskey_from_file');
+    expect(cfg.member).toBeUndefined();
     expect(cfg.team).toBe('lab');
-    expect(cfg.token).toBe('mskd_from_file');
+    expect(cfg.claim).toEqual({ mode: 'seat', name: 'Ui' });
     expect(cfg.server).toBe('http://localhost:9999');
   });
 
@@ -44,11 +46,11 @@ describe('loadMcpConfig identity alignment (ADR 018)', () => {
     const cfg = loadMcpConfig({
       MUSTERD_BINDING: bindingPath,
       MUSTERD_TEAM: 'lab',
-      MUSTERD_MEMBER: 'Api',
-      MUSTERD_TOKEN: 'mskd_from_env',
+      MUSTERD_AGENT_KEY: 'mskey_from_env',
+      MUSTERD_CLAIM: 'seat:Api',
     });
-    expect(cfg.member).toBe('Api');
-    expect(cfg.token).toBe('mskd_from_env');
+    expect(cfg.agent_key).toBe('mskey_from_env');
+    expect(cfg.claim).toEqual({ mode: 'seat', name: 'Api' });
   });
 
   it('errors clearly when neither env nor a binding provides a team', () => {
@@ -56,17 +58,16 @@ describe('loadMcpConfig identity alignment (ADR 018)', () => {
     expect(() => loadMcpConfig({})).toThrow(/no team/);
   });
 
-  it('loads as a pending presence (no identity) when only a team + claim policy is given', () => {
+  it('loads as a pending presence (no seat) when only a team + claim policy is given', () => {
     const cfg = loadMcpConfig({ MUSTERD_TEAM: 'lab', MUSTERD_CLAIM: 'role:backend' });
     expect(cfg.member).toBeUndefined();
-    expect(cfg.token).toBeUndefined();
+    expect(cfg.agent_key).toBeUndefined();
     expect(cfg.team).toBe('lab');
     expect(cfg.claim).toEqual({ mode: 'role', role: 'backend' });
   });
 
   it('reads the claim policy from the binding file when MUSTERD_CLAIM is unset', () => {
     const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
-    // The fixture binding has a concrete identity and no policy → defaults to chat.
-    expect(cfg.claim).toEqual({ mode: 'chat' });
+    expect(cfg.claim).toEqual({ mode: 'seat', name: 'Ui' });
   });
 });

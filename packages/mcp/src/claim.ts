@@ -1,4 +1,4 @@
-import { nextRoleHandle, type Binding, type MemberSummary } from '@musterd/protocol';
+import { type Binding } from '@musterd/protocol';
 import { saveBinding } from './binding.js';
 import type { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
@@ -8,9 +8,9 @@ import { clearPendingMarker } from './pending.js';
 export type ClaimTarget = { seat: string } | { role: string };
 
 export interface ClaimResult {
+  /** The resolved seat name (a role pool's `<role>-<n>` is resolved server-side). */
   member: string;
-  token: string;
-  /** True when we re-occupied this session's own already-bound seat rather than minting a new one. */
+  /** True when this session re-occupied a seat it already held rather than claiming a new one. */
   reused: boolean;
 }
 
@@ -24,118 +24,81 @@ export class ClaimConflictError extends Error {
   }
 }
 
-/** Does this error carry the server's unique-name `conflict`? (The mint refused a taken name.) */
-function isConflict(err: unknown): boolean {
-  return err instanceof Error && /conflict|already exists/i.test(err.message);
-}
-
 /**
- * Mint-or-reuse a seat for this session (claim-on-first-use, ADR 032). Local + frictionless:
- * minting is the unauthenticated `POST /members`, and a unique-name collision *is* the
- * `claim_conflict` signal — another session already holds that name and we don't have its token, so
- * we refuse rather than impersonate, offering the role pool / a fresh name. Does not occupy the seat
- * (the caller `join()`s after `setIdentity`).
- */
-export async function claimSeat(
-  client: MusterdClient,
-  config: McpConfig,
-  target: ClaimTarget,
-): Promise<ClaimResult> {
-  const { members } = await client.roster();
-  if ('seat' in target) {
-    const name = target.seat;
-    // Re-occupy our own seat (we already hold its token): own reload / explicit re-claim.
-    if (config.member === name && config.token) {
-      return { member: name, token: config.token, reused: true };
-    }
-    try {
-      const res = await client.addMember(name);
-      return { member: name, token: res.token, reused: false };
-    } catch (err) {
-      if (isConflict(err)) throw conflict(name, members);
-      throw err;
-    }
-  }
-  const role = target.role;
-  const taken = new Set(members.map((m) => m.name));
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const handle = nextRoleHandle(role, taken);
-    try {
-      const res = await client.addMember(handle, role);
-      return { member: handle, token: res.token, reused: false };
-    } catch (err) {
-      if (isConflict(err)) {
-        taken.add(handle);
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw new Error(`couldn't find a free seat in role "${role}" — try again`);
-}
-
-/**
- * Claim a seat *and* occupy it: mint-or-reuse, bind this session's identity, persist the seat into
- * the workspace binding (ADR 018) + clear the pending marker, then `join()`. Shared by the
- * `team_join` tool and launch-time autojoin so both follow one path. Throws `ClaimConflictError` (a
- * taken name we don't hold) or a plain error (mint/network failure); the caller formats.
+ * Claim a seat (or pool seat) via the v0.3 handshake (ADR 075) and occupy it. Points the session's
+ * claim policy at the target, `join()`s — which sends the `claim` frame (team agent key + target) and
+ * resolves on `occupied` (the server assigns a role pool's `<role>-<n>`) — then persists the resolved
+ * seat into the workspace binding (ADR 018) + clears the pending marker. Shared by the `team_join` tool
+ * and launch-time autojoin so both follow one path. Throws {@link ClaimConflictError} when the seat is
+ * already occupied, or a plain error (refusal / network failure); the caller formats.
  */
 export async function claimAndJoin(
   client: MusterdClient,
   config: McpConfig,
   target: ClaimTarget,
 ): Promise<ClaimResult> {
-  const result = await claimSeat(client, config, target);
-  await finishClaim(client, config, result.member, result.token);
-  return result;
+  const reused =
+    client.claimed && 'seat' in target && client.member === target.seat && client.joined;
+  if (reused) return { member: client.member!, reused: true };
+
+  // Point the claim at the target; `join()` presents the agent key + this target and resolves the seat.
+  config.claim =
+    'seat' in target ? { mode: 'seat', name: target.seat } : { mode: 'role', role: target.role };
+  try {
+    await client.join();
+  } catch (err) {
+    const msg = (err as Error).message;
+    if (/claim_conflict|conflict|occupied|busy/i.test(msg)) {
+      const { members } = await client.roster();
+      throw conflict('seat' in target ? target.seat : target.role, members);
+    }
+    throw err;
+  }
+  const member = client.member!;
+  persistBinding(config, member);
+  clearPendingMarker(config);
+  return { member, reused: false };
 }
 
 /**
- * Adopt a seat an external `musterd claim --for <code>` already minted for this running session (ADR
- * 034) and go online — the live-delivery counterpart of `claimAndJoin`. The seat exists; we just bind
- * identity, persist, and `join()`. No-op once already joined (an in-session `team_join` may have won
- * the race).
+ * Adopt the seat an external `musterd claim --for <code>` resolved for this running session (ADR 034)
+ * and go online — the live-delivery counterpart of {@link claimAndJoin}. This session holds the team
+ * agent key, so it claims the resolved seat itself and persists. No-op once already joined.
  */
 export async function adoptIdentity(
   client: MusterdClient,
   config: McpConfig,
-  member: string,
-  token: string,
+  seat: string,
 ): Promise<void> {
   if (client.joined) return;
-  await finishClaim(client, config, member, token);
+  config.claim = { mode: 'seat', name: seat };
+  await client.join();
+  persistBinding(config, client.member ?? seat);
+  clearPendingMarker(config);
 }
 
-/** Bind identity, persist the seat into the workspace binding, clear the marker, and occupy. */
-async function finishClaim(
-  client: MusterdClient,
-  config: McpConfig,
-  member: string,
-  token: string,
-): Promise<void> {
-  client.setIdentity(member, token);
+/** Persist the resolved seat as this folder's standing claim policy (so a re-launch re-occupies it). */
+function persistBinding(config: McpConfig, seat: string): void {
   const binding: Binding = {
     server: config.server,
     team: config.team,
-    member,
-    token,
+    ...(config.agent_key ? { agent_key: config.agent_key } : {}),
     surface: config.surface,
-    claim: { mode: 'seat', name: member },
+    claim: { mode: 'seat', name: seat },
+    ...(config.grant !== undefined ? { grant: config.grant } : {}),
   };
   try {
     saveBinding(process.cwd(), binding);
   } catch {
     // identity is held in memory for this session regardless of a binding write failure
   }
-  clearPendingMarker(config);
-  await client.join();
 }
 
-function conflict(name: string, members: MemberSummary[]): ClaimConflictError {
+function conflict(name: string, members: { name: string }[]): ClaimConflictError {
   const taken = members.map((m) => m.name);
   return new ClaimConflictError(
-    `"${name}" is already a seat on this team and this session doesn't hold its token — ` +
-      `pick another name (team_join {as:'<name>'}) or claim a pool seat (team_join {role:'<role>'}).`,
+    `"${name}" is already occupied and this session couldn't take it — ` +
+      `pick another seat (team_join {as:'<name>'}) or claim a pool seat (team_join {role:'<role>'}).`,
     taken,
   );
 }

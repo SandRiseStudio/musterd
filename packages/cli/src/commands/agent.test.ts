@@ -17,7 +17,7 @@ const h = vi.hoisted(() => ({
 vi.mock('./helpers.js', () => ({
   resolve: () => ({
     team: 'ritual',
-    config: { server: 'http://localhost:4849' },
+    config: { server: 'http://localhost:4849', agentKeys: { ritual: 'mskey_team' } },
     http: { addMember: h.addMember },
   }),
 }));
@@ -52,20 +52,20 @@ describe('musterd agent <name>', () => {
       kind: 'agent',
       role: 'engineer',
     });
-    // binding written into the workspace dir with the minted token
+    // binding written into the workspace dir with the team agent key + seat claim (v0.3, ADR 075)
     expect(h.saveBinding).toHaveBeenCalledWith(
       h.workspace.dir,
       expect.objectContaining({
         team: 'ritual',
-        member: 'June',
-        token: 'mskd_tok',
+        agent_key: 'mskey_team',
         surface: 'claude-code',
+        claim: { mode: 'seat', name: 'June' },
       }),
     );
-    // MCP registered with the autojoin env
+    // MCP registered with the v0.3 env triple + autojoin
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_MEMBER).toBe('June');
-    expect(entry.env.MUSTERD_TOKEN).toBe('mskd_tok');
+    expect(entry.env.MUSTERD_AGENT_KEY).toBe('mskey_team');
+    expect(entry.env.MUSTERD_CLAIM).toBe('seat:June');
     expect(entry.env.MUSTERD_AUTOJOIN).toBe('1');
   });
 

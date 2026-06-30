@@ -70,7 +70,10 @@ export function installShutdownHandlers(opts: {
  * told to `team_join` first. Pure, so it's unit-testable without standing up the server.
  */
 export function primerInstructions(config: McpConfig): string {
-  return renderPrimer({ team: config.team, ...(config.member ? { member: config.member } : {}) });
+  // Before claiming, name the seat the folder is bound to claim (the policy target); after, the
+  // resolved seat. v0.3 (ADR 075): the seat is server-resolved at claim, so a role pool stays unnamed.
+  const seat = config.member ?? (config.claim?.mode === 'seat' ? config.claim.name : undefined);
+  return renderPrimer({ team: config.team, ...(seat ? { member: seat } : {}) });
 }
 
 /** Build (but do not connect) the MCP server with the musterd tools registered. */
@@ -133,7 +136,7 @@ export function startResolutionWatcher(
     const resolved = readAndConsumeResolution(config);
     if (!resolved) return;
     try {
-      await adoptIdentity(client, config, resolved.member, resolved.token);
+      await adoptIdentity(client, config, resolved.seat);
     } catch (err) {
       process.stderr.write(`musterd claim adoption failed: ${(err as Error).message}\n`);
     }

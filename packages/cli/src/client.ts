@@ -5,8 +5,10 @@ import {
   type AuditResponse,
   type ClaimTarget,
   type Envelope,
+  type Member,
   type MemberKind,
   type MemberSummary,
+  type RefusedCode,
   type Surface,
   type WSServerFrame,
 } from '@musterd/protocol';
@@ -17,7 +19,16 @@ import { CliError, exitForCode, isConnRefused } from './errors.js';
 
 export interface HttpClientOpts {
   server: string;
-  token?: string;
+  /** The Bearer secret (v0.3, ADR 075): a team agent key (`mskey_`) or human credential (`mscr_`).
+   *  The server dispatches on the prefix → live-presence occupancy; replaces the v0.2 seat token. */
+  key?: string;
+  /**
+   * The seat this client acts as (v0.3, ADR 075 / SPEC A.7 §253). An agent key authenticates the
+   * *harness*, not a seat, so reads (inbox/availability/audit — no envelope `from`) carry the seat in
+   * `x-musterd-seat`; the server asserts that seat is occupied by this key. A `send` conveys it via the
+   * envelope `from` instead. Unused on the mskd_ token path (the token already is the seat).
+   */
+  seat?: string;
   /** This client's surface, sent as `x-musterd-surface` so ambient presence labels it (ADR 057). */
   surface?: string;
   /**
@@ -45,7 +56,8 @@ export class HttpClient {
         method,
         headers: {
           'content-type': 'application/json',
-          ...(this.opts.token ? { authorization: `Bearer ${this.opts.token}` } : {}),
+          ...(this.opts.key ? { authorization: `Bearer ${this.opts.key}` } : {}),
+          ...(this.opts.seat ? { 'x-musterd-seat': this.opts.seat } : {}),
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
           ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
         },
@@ -299,4 +311,120 @@ export function watch(opts: WatchOpts): { close: () => void } {
       ws.close();
     },
   };
+}
+
+/** Minimal socket surface `watchClaim` drives — the `ws` WebSocket shape it uses. Injectable for tests. */
+export interface ClaimSocket {
+  on(event: 'open' | 'message' | 'error', cb: (arg?: unknown) => void): void;
+  send(data: string): void;
+  close(): void;
+}
+
+export interface WatchClaimOpts {
+  wsUrl: string;
+  team: string;
+  /** Agent join key (mskey_) — the P3 authenticator, replaces `watch`'s `token`. */
+  key: string;
+  /** The seat/role/observe target (SPEC A.3). */
+  target: ClaimTarget;
+  /** Pre-issued grant (msgr_); omit to open a claim request (A.5, the pending path). */
+  grant?: string;
+  surface: string;
+  /** Attach-time context (ADR 014), sticky for the session — same as `watch`. */
+  provenance?: string;
+  workspace?: string;
+  /** `team` (default) = my inbox stream; `team-all` = the whole-team firehose (ADR 061). */
+  scope?: 'team' | 'team-all';
+  onDeliver: (env: Envelope) => void;
+  onPresence?: (member: string, status: string, surface?: string) => void;
+  /** Claim succeeded — the session holds the seat (replaces `watch`'s `onReady`). `seat` is the
+   *  occupied Member; `presenceId` the live presence id. Fires on the initial `occupied` AND on the
+   *  server-pushed `occupied` that resolves a `pending` (spec-gap 3). */
+  onOccupied?: (seat: Member, presenceId: string) => void;
+  /** No grant — the server opened a claim request (A.5); the socket stays open for the pushed terminal. */
+  onPending?: (requestId: string, message: string) => void;
+  /** Claim denied — terminal. `claimable` + `hint` carry the no-dead-end next step (ADR 055). */
+  onRefused?: (code: RefusedCode, message: string, claimable: string[], hint: string) => void;
+  onError?: (message: string) => void;
+  /** Injectable socket factory; defaults to a real `ws` WebSocket. */
+  createSocket?: (url: string) => ClaimSocket;
+}
+
+/**
+ * The v0.3 live claim session (SPEC A.3, ADR 075/078) — the P3 successor to `watch()`. Opens a WS,
+ * sends a `claim` frame (not `hello`), and drives the handshake state machine: `occupied` →
+ * subscribe + heartbeat (the live inbox stream, mirroring `watch`'s `welcome` path); `refused` →
+ * terminal denial; `pending` → the socket stays open and the server **pushes** the terminal
+ * `occupied`/`refused` when an admin decides (spec-gap 3, no client polling). Flip-territory: this
+ * is the live auth path; `claim`/`join` wire to it (replacing the hello/token `watch`) in the atomic
+ * cutover. Design call for review: post-`occupied` the client sends `subscribe` (mirroring `watch`) —
+ * if Cleo's claim handler auto-subscribes on `occupied`, this is a harmless redundancy.
+ */
+export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
+  const ws = (opts.createSocket ?? defaultClaimSocket)(opts.wsUrl);
+  let heartbeat: NodeJS.Timeout | undefined;
+  let subscribed = false;
+
+  const subscribe = () => {
+    if (subscribed) return;
+    ws.send(JSON.stringify({ type: 'subscribe', scope: opts.scope ?? 'team' }));
+    subscribed = true;
+    heartbeat = setInterval(() => ws.send(JSON.stringify({ type: 'heartbeat' })), 15_000);
+    heartbeat.unref?.();
+  };
+
+  ws.on('open', () => {
+    ws.send(
+      JSON.stringify(
+        buildClaimFrame({
+          team: opts.team,
+          key: opts.key,
+          target: opts.target,
+          surface: opts.surface as Surface,
+          ...(opts.grant !== undefined ? { grant: opts.grant } : {}),
+        }),
+      ),
+    );
+  });
+
+  ws.on('message', (data) => {
+    const raw = JSON.parse((data as { toString: () => string }).toString()) as { type?: string };
+    if (raw.type === 'occupied' || raw.type === 'refused' || raw.type === 'pending') {
+      const o = parseClaimResponse(raw);
+      if (o.state === 'occupied') {
+        opts.onOccupied?.(o.seat, o.presenceId);
+        subscribe();
+      } else if (o.state === 'refused') {
+        opts.onRefused?.(o.code, o.message, o.claimable, o.hint);
+      } else {
+        opts.onPending?.(o.requestId, o.message);
+      }
+      return;
+    }
+    const frame = raw as WSServerFrame;
+    switch (frame.type) {
+      case 'deliver':
+        opts.onDeliver(frame.envelope);
+        break;
+      case 'presence':
+        opts.onPresence?.(frame.member, frame.status, frame.surface);
+        break;
+      case 'error':
+        opts.onError?.(frame.message);
+        break;
+    }
+  });
+
+  ws.on('error', (err) => opts.onError?.((err as Error)?.message ?? String(err)));
+
+  return {
+    close: () => {
+      if (heartbeat) clearInterval(heartbeat);
+      ws.close();
+    },
+  };
+}
+
+function defaultClaimSocket(url: string): ClaimSocket {
+  return new WebSocket(url) as unknown as ClaimSocket;
 }

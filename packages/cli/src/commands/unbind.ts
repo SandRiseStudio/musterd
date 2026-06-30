@@ -1,4 +1,4 @@
-import { isClaimed } from '@musterd/protocol';
+import { autoClaims } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, removeBinding } from '../config.js';
@@ -14,10 +14,13 @@ import { theme } from '../render/theme.js';
  */
 export async function unbindCommand(parsed: Parsed): Promise<number> {
   const binding = findBinding();
-  if (!binding || !isClaimed(binding)) {
+  if (!binding || !autoClaims(binding)) {
     throw new CliError('this folder holds no seat — nothing to unbind', 2);
   }
-  const http = new HttpClient({ server: binding.server, token: binding.token });
+  const http = new HttpClient({
+    server: binding.server,
+    ...(binding.agent_key ? { key: binding.agent_key } : {}),
+  });
   const res = await http.unbind(binding.team);
   removeBinding(process.cwd());
 

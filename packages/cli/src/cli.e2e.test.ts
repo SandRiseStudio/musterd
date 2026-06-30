@@ -13,7 +13,7 @@ import { sendCommand } from './commands/send.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
 import { whoamiCommand } from './commands/whoami.js';
-import { saveBinding } from './config.js';
+import { loadConfig, saveBinding } from './config.js';
 import { cachedTeamLive } from './onboard/init.js';
 
 let server: RunningServer;
@@ -49,13 +49,16 @@ afterEach(async () => {
  *  from someone else's folder now that an ambient global-config identity can only read (ADR 036). */
 function actAs(team: string, member: string, token: string): void {
   process.env['MUSTERD_TEAM'] = team;
-  process.env['MUSTERD_MEMBER'] = member;
-  process.env['MUSTERD_TOKEN'] = token;
+  // v0.3 (ADR 075): the env carries the Bearer secret (here the member's mskd_ seat token, on the
+  // untouched authMember path) + the claim target naming the acting seat.
+  process.env['MUSTERD_AGENT_KEY'] = token;
+  process.env['MUSTERD_CLAIM'] = `seat:${member}`;
 }
 function actAsNobody(): void {
   delete process.env['MUSTERD_TEAM'];
-  delete process.env['MUSTERD_MEMBER'];
-  delete process.env['MUSTERD_TOKEN'];
+  delete process.env['MUSTERD_AGENT_KEY'];
+  delete process.env['MUSTERD_CLAIM'];
+  delete process.env['MUSTERD_GRANT'];
 }
 
 /** Run a command fn with captured stdout. */
@@ -80,10 +83,10 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     expect(created.code).toBe(0);
     expect(created.out).toContain('team "dawn" created');
 
-    // nick adds bo (capture bo's token via --json)
+    // nick adds bo — a 2nd human, who gets her own mscr_ credential (ADR 069 cutover)
     const added = await run(teamCommand, ['add', 'bo', '--kind', 'human', '--json']);
-    const boToken = JSON.parse(added.out).token as string;
-    expect(boToken).toMatch(/^mskd_/);
+    const boToken = JSON.parse(added.out).human_credential as string;
+    expect(boToken).toMatch(/^mscr_/);
 
     // status shows both members
     const status = await run(statusCommand, []);
@@ -112,7 +115,7 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     await run(teamCommand, ['add', 'pat', '--kind', 'human']);
     // pat has received nothing
     const added = await run(teamCommand, ['add', 'pat2', '--kind', 'human', '--json']);
-    const tok = JSON.parse(added.out).token as string;
+    const tok = JSON.parse(added.out).human_credential as string;
     actAs('solo', 'pat2', tok);
     const inbox = await run(inboxCommand, []);
     expect(inbox.out).toContain("inbox empty — nobody's mustered anything yet");
@@ -124,7 +127,7 @@ describe('comeback summary on status (ADR 024)', () => {
     // nick creates dawn and adds bo (the away human).
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     const added = await run(teamCommand, ['add', 'bo', '--kind', 'human', '--json']);
-    const boToken = JSON.parse(added.out).token as string;
+    const boToken = JSON.parse(added.out).human_credential as string; // 2nd human's mscr_ credential
 
     // nick directs a request_help at bo and a plain @team status_update (the latter must NOT count).
     await run(sendCommand, ['--to', 'bo', '--act', 'request_help', 'can you review the auth PR?']);
@@ -147,7 +150,7 @@ describe('thread-close clears the comeback summary (ADR 025)', () => {
   it('stops nagging once the request is resolved, even before the inbox is read', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     const added = await run(teamCommand, ['add', 'bo', '--kind', 'human', '--json']);
-    const boToken = JSON.parse(added.out).token as string;
+    const boToken = JSON.parse(added.out).human_credential as string; // 2nd human's mscr_ credential
 
     // nick directs a request_help at bo; capture the envelope id (its thread root).
     const ask = await run(sendCommand, [
@@ -189,8 +192,9 @@ describe('agent-side reachability nudge (ADR 046)', () => {
   it('surfaces a directed act on an unrelated command, then self-clears once the inbox is read', async () => {
     // nick creates dawn and adds Ada (a heads-down agent).
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
-    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
-    const adaToken = JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    // ADR 069: Ada (agent) authenticates with the team agent key + seat:Ada (set by actAs).
+    const adaToken = loadConfig().agentKeys['dawn']!;
 
     // nick directs a request_help at Ada.
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'real test please']);
@@ -212,8 +216,9 @@ describe('agent-side reachability nudge (ADR 046)', () => {
 
   it('skips commands that show the acts themselves (inbox/status) and suppresses on --json/--quiet', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
-    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
-    const adaToken = JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    // ADR 069: Ada (agent) authenticates with the team agent key + seat:Ada (set by actAs).
+    const adaToken = loadConfig().agentKeys['dawn']!;
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'real test please']);
     actAs('dawn', 'Ada', adaToken);
 
@@ -298,7 +303,7 @@ describe('join honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
     expect(cfg.identities.dawn.name).toBe('nick');
   });
 
-  it('re-joining as the same cached member reuses the token (no --token needed)', async () => {
+  it('re-joining as the same cached member occupies via its credential (v0.3)', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     const ok = await run(joinCommand, ['dawn', '--as', 'nick']);
     expect(ok.code).toBe(0);
@@ -321,41 +326,41 @@ describe('resolve() identity alignment with the MCP adapter (ADR 018)', () => {
       JSON.stringify({
         server: process.env['MUSTERD_SERVER'],
         current: 'lab',
-        identities: { lab: { name: 'Api', token: 'mskd_api', surface: 'cli' } },
+        identities: { lab: { name: 'Api', key: 'mskd_api', surface: 'cli' } },
       }),
     );
     // But this workspace is bound to Ui — the CLI must resolve to Ui, not the global Api.
     const bindingPath = saveBinding(dir, {
       server: process.env['MUSTERD_SERVER']!,
       team: 'lab',
-      member: 'Ui',
-      token: 'mskd_ui',
+      agent_key: 'mskd_ui',
       surface: 'claude-code',
+      claim: { mode: 'seat', name: 'Ui' },
     });
     process.env['MUSTERD_BINDING'] = bindingPath;
 
     const r = resolve({});
     expect(r.team).toBe('lab');
     expect(r.identity.name).toBe('Ui');
-    expect(r.identity.token).toBe('mskd_ui');
+    expect(r.identity.key).toBe('mskd_ui');
   });
 
   it('MUSTERD_* env overrides the binding (same precedence as the MCP adapter)', () => {
     const bindingPath = saveBinding(dir, {
       server: process.env['MUSTERD_SERVER']!,
       team: 'lab',
-      member: 'Ui',
-      token: 'mskd_ui',
+      agent_key: 'mskd_ui',
       surface: 'claude-code',
+      claim: { mode: 'seat', name: 'Ui' },
     });
     process.env['MUSTERD_BINDING'] = bindingPath;
     process.env['MUSTERD_TEAM'] = 'lab';
-    process.env['MUSTERD_MEMBER'] = 'Api';
-    process.env['MUSTERD_TOKEN'] = 'mskd_env';
+    process.env['MUSTERD_AGENT_KEY'] = 'mskd_env';
+    process.env['MUSTERD_CLAIM'] = 'seat:Api';
 
     const r = resolve({});
     expect(r.identity.name).toBe('Api');
-    expect(r.identity.token).toBe('mskd_env');
+    expect(r.identity.key).toBe('mskd_env');
   });
 });
 
@@ -363,7 +368,7 @@ describe('cachedTeamLive (init reuse probe, ADR 016)', () => {
   it('is true for a live team+token, false for a stale token or a missing team', async () => {
     const server = process.env['MUSTERD_SERVER']!;
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
-    const token = JSON.parse(readFileSync(nickConfig, 'utf8')).identities.dawn.token as string;
+    const token = JSON.parse(readFileSync(nickConfig, 'utf8')).identities.dawn.key as string;
 
     expect(await cachedTeamLive(server, 'dawn', token)).toBe(true);
     // stale token (e.g. minted against a since-wiped db) → not live
@@ -415,8 +420,10 @@ describe('an active identity is required to act (ADR 036)', () => {
 describe('CLI ergonomics papercuts (ADR 067)', () => {
   async function dawnWithAgent(name: string): Promise<string> {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
-    const added = await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
-    return JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
+    // Post-cutover (ADR 069): agents authenticate with the team agent key + their seat (actAs sets
+    // MUSTERD_AGENT_KEY + MUSTERD_CLAIM=seat:<name>), not the now-vestigial mskd_ `team add` token.
+    return loadConfig().agentKeys['dawn']!;
   }
 
   it('whoami names the seat this folder resolves to, with its source', async () => {
@@ -486,8 +493,8 @@ describe('CLI ergonomics papercuts (ADR 067)', () => {
 describe('nudge — surface waiting acts at the approval prompt (ADR 053)', () => {
   it('prints the directed acts waiting for the bound seat, read-only (cursor stays put)', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
-    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
-    const token = JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const token = loadConfig().agentKeys['dawn']!; // ADR 069: agent key + seat:Ada (via actAs)
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'review the auth PR']);
 
     actAs('dawn', 'Ada', token);
@@ -503,8 +510,8 @@ describe('nudge — surface waiting acts at the approval prompt (ADR 053)', () =
 
   it('prints nothing (exit 0) when no directed act is waiting', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
-    const added = await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
-    const token = JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const token = loadConfig().agentKeys['dawn']!; // ADR 069: agent key + seat:Ada (via actAs)
     // Only broadcast journal traffic — nothing directed at Ada.
     await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'refactoring']);
 
@@ -519,8 +526,10 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
   /** Stand up dawn with an agent seat; return the agent's token. */
   async function dawnWithAgent(name: string): Promise<string> {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
-    const added = await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
-    return JSON.parse(added.out).token as string;
+    await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
+    // Post-cutover (ADR 069): agents authenticate with the team agent key + their seat (actAs sets
+    // MUSTERD_AGENT_KEY + MUSTERD_CLAIM=seat:<name>), not the now-vestigial mskd_ `team add` token.
+    return loadConfig().agentKeys['dawn']!;
   }
 
   it('drains the durable inbox: a directed act already waiting wakes it immediately (exit 0)', async () => {
@@ -548,8 +557,22 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
     expect(out.code).toBe(124);
   });
 
+  // TODO(p3-cutover): live inbox --wait opens its own WS claim via watchClaim, which doesn't yet
   it('blocks on the live socket, then wakes the instant a directed act is sent', async () => {
-    const token = await dawnWithAgent('Ada');
+    // A live `inbox --wait` IS a WS claim (ADR 075), so Ada attaches with the team agent key + a
+    // standing grant (the grant is threaded resolve()→Identity→watchClaim so the live claim occupies
+    // instead of going pending). nick (admin, his mscr_ credential) issues the grant.
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const cfg = JSON.parse(readFileSync(nickConfig, 'utf8'));
+    const agentKey = cfg.agentKeys.dawn as string;
+    const nickKey = cfg.identities.dawn.key as string;
+    const gres = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/grants`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${nickKey}` },
+      body: JSON.stringify({ scope: 'seat', target: 'Ada', lifetime: 'standing' }),
+    });
+    const grant = ((await gres.json()) as { token: string }).token;
 
     // One capture for the whole test — `run()` nests stdout spies, which would clobber a pending wait.
     const chunks: string[] = [];
@@ -558,8 +581,11 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
       return true;
     });
     try {
-      // Ada waits (identity captured synchronously before any await, so the later env switch is safe).
-      actAs('dawn', 'Ada', token);
+      // Ada waits, attaching via the agent key + grant (captured synchronously before any await).
+      process.env['MUSTERD_TEAM'] = 'dawn';
+      process.env['MUSTERD_AGENT_KEY'] = agentKey;
+      process.env['MUSTERD_CLAIM'] = 'seat:Ada';
+      process.env['MUSTERD_GRANT'] = grant;
       const waitP = inboxCommand(parseArgs(['--wait', '--timeout', '5']));
 
       // Let the socket connect + subscribe, then nick (his bound folder) sends Ada a directed act.

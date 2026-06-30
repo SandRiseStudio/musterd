@@ -1,6 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { BINDING_DIR, BINDING_FILE, BindingSchema, type MemberSummary } from '@musterd/protocol';
+import {
+  BINDING_DIR,
+  BINDING_FILE,
+  BindingSchema,
+  bindingSeat,
+  type Binding,
+  type MemberSummary,
+} from '@musterd/protocol';
 import type { BindingRef } from '../config.js';
 
 /**
@@ -34,8 +41,8 @@ export function inspectInitTarget(cwd: string): InitTargetReport {
   const bound = readBindingAt(cwd);
   if (bound) {
     warnings.push(
-      `This folder is already bound to ${bound.member} on ${bound.team} — init will mint a new member and repoint the binding here. ` +
-        `If ${bound.member} is a live session, give the new agent its own workspace instead: ` +
+      `This folder is already bound to ${bound.seat} on ${bound.team} — init will mint a new member and repoint the binding here. ` +
+        `If ${bound.seat} is a live session, give the new agent its own workspace instead: ` +
         `musterd agent <name> (adds the seat + a git worktree + binding), or run from a separate worktree.`,
     );
   }
@@ -60,11 +67,11 @@ export function inspectInitTarget(cwd: string): InitTargetReport {
  * own seat (target === bound) is never a clobber.
  */
 export function liveBindingClobber(
-  binding: { member?: string | null | undefined } | null,
+  binding: Binding | null,
   members: MemberSummary[],
   target: string | null,
 ): { member: string; workspace?: string } | null {
-  const bound = binding?.member;
+  const bound = binding ? bindingSeat(binding) : undefined;
   if (!bound) return null;
   if (target !== null && bound === target) return null; // re-occupying our own seat
   const m = members.find((x) => x.name === bound);
@@ -95,14 +102,15 @@ function isMusterdSourceTree(cwd: string): boolean {
 }
 
 /** Read the binding *in this exact folder* (not a parent), via the shared protocol schema. */
-function readBindingAt(cwd: string): { member: string; team: string } | null {
+function readBindingAt(cwd: string): { seat: string; team: string } | null {
   try {
     const path = join(cwd, BINDING_DIR, BINDING_FILE);
     if (!existsSync(path)) return null;
     const b = BindingSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
-    // A policy-only (unclaimed) binding has no bound name to compare against.
-    if (!b.member) return null;
-    return { member: b.member, team: b.team };
+    // A role-pool / chat binding has no fixed seat name to compare against.
+    const seat = bindingSeat(b);
+    if (!seat) return null;
+    return { seat, team: b.team };
   } catch {
     return null;
   }
@@ -122,7 +130,7 @@ export function nameBoundElsewhere(
 ): { folder: string; team: string } | null {
   const here = resolve(cwd);
   for (const [folder, ref] of Object.entries(bindings)) {
-    if (ref.member === name && resolve(folder) !== here) {
+    if (ref.seat === name && resolve(folder) !== here) {
       return { folder, team: ref.team };
     }
   }
