@@ -147,6 +147,56 @@ export const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX idx_audit_team_ts ON audit(team_id, ts)');
     },
   },
+  {
+    // v0.3 P3.1 credential/grant substrate (ADR 076 / ADR 069). Additive: team-scoped secrets
+    // (agent_key_hash, policy JSON) on `teams`, per-human `credential_hash` on `members`, plus the
+    // `grants` + `requests` tables. Nothing is enforced until the P3 cutover wires it — existing
+    // token auth is untouched (a team with no agent key / no grants behaves exactly as v0.2). Only
+    // hashes are stored (SPEC A.2); plaintext is shown once at mint and never persisted. `scope`,
+    // `lifetime`, `kind`, `status` are open TEXT (no CHECK) so widening the vocabulary later needs no
+    // table rebuild (the v5 CHECK-rebuild trap). The one-shot reset stays the db-only fallback.
+    version: 10,
+    up: (db) => {
+      // Team-scoped: one rotatable agent key (hash) + governance policy JSON. NULL until an admin sets.
+      db.exec('ALTER TABLE teams ADD COLUMN agent_key_hash TEXT');
+      db.exec('ALTER TABLE teams ADD COLUMN policy TEXT');
+      // Per-human credential (hash); NULL for agent seats and pre-P3 rows.
+      db.exec('ALTER TABLE members ADD COLUMN credential_hash TEXT');
+      // Admin-issued authorizations to claim a seat/role. token_hash is the sha256 of the msgr_ secret.
+      db.exec(
+        `CREATE TABLE grants (
+           id         TEXT PRIMARY KEY,
+           team_id    TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+           scope      TEXT NOT NULL,
+           target     TEXT NOT NULL,
+           token_hash TEXT NOT NULL,
+           issued_by  TEXT,
+           lifetime   TEXT NOT NULL,
+           expires_at INTEGER,
+           single_use INTEGER NOT NULL DEFAULT 0,
+           revoked    INTEGER NOT NULL DEFAULT 0,
+           created_at INTEGER NOT NULL
+         )`,
+      );
+      db.exec('CREATE INDEX idx_grants_team ON grants(team_id)');
+      db.exec('CREATE INDEX idx_grants_token_hash ON grants(token_hash)');
+      // The request/approval lane. Dedup by (team, from_session, target) is enforced in the store.
+      db.exec(
+        `CREATE TABLE requests (
+           id           TEXT PRIMARY KEY,
+           team_id      TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+           kind         TEXT NOT NULL,
+           from_session TEXT NOT NULL,
+           target       TEXT,
+           status       TEXT NOT NULL,
+           decided_by   TEXT,
+           created_at   INTEGER NOT NULL
+         )`,
+      );
+      db.exec('CREATE INDEX idx_requests_team ON requests(team_id, created_at)');
+      db.exec('CREATE INDEX idx_requests_dedup ON requests(team_id, from_session, target)');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

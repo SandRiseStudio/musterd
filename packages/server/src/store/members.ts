@@ -46,8 +46,18 @@ export function reapStaleObservers(
   return stale;
 }
 
+/**
+ * Mint a fresh opaque secret with a typed prefix (`prefix_ + base64url(24 random bytes)`) — the shared
+ * scheme for seat tokens (`mskd_`) and the v0.3 P3 agent keys / grants / credentials (ADR 069 decision
+ * 1). Always stored as its `hashToken` (sha256-hex); the plaintext is returned once and never persisted
+ * or logged. Use the {@link TOKEN_PREFIXES} from `@musterd/protocol` for the prefix.
+ */
+export function newSecret(prefix: string): string {
+  return prefix + randomBytes(24).toString('base64url');
+}
+
 function newToken(): string {
-  return 'mskd_' + randomBytes(24).toString('base64url');
+  return newSecret('mskd_');
 }
 
 export interface AddMemberInput {

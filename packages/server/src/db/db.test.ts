@@ -8,9 +8,26 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('9');
+    expect(ver?.value).toBe('10');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
+    db.close();
+  });
+
+  it('v10 adds the P3.1 substrate: grants + requests tables, team/member secret columns', () => {
+    const db = openDb(':memory:');
+    // New tables exist and are queryable.
+    expect(() => db.prepare('SELECT id FROM grants LIMIT 0').all()).not.toThrow();
+    expect(() => db.prepare('SELECT id FROM requests LIMIT 0').all()).not.toThrow();
+    // New columns exist on teams + members.
+    const teamCols = (db.prepare('PRAGMA table_info(teams)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    expect(teamCols).toEqual(expect.arrayContaining(['agent_key_hash', 'policy']));
+    const memberCols = (db.prepare('PRAGMA table_info(members)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    expect(memberCols).toContain('credential_hash');
     db.close();
   });
 
