@@ -1356,6 +1356,22 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(audit.filter((r) => r.action === 'send.denied').length).toBe(2);
   });
 
+  it('banned = inert: a disabled/banned seat cannot READ the inbox or firehose either (defense-in-depth)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
+    const auth = { key: team.json.agent_key as string, seat: 'Dis' };
+
+    // Active, it reads fine...
+    expect((await get('/teams/dawn/inbox', auth)).status).toBe(200);
+    expect((await get('/teams/dawn/messages', auth)).status).toBe(200);
+
+    // ...then disabling it closes BOTH reads (the send gate already blocked its sends). Banned means out.
+    setCaps('dawn', 'Dis', {}, 'disabled');
+    expect((await get('/teams/dawn/inbox', auth)).status).toBe(403);
+    expect((await get('/teams/dawn/messages', auth)).status).toBe(403);
+  });
+
   it('visibility_level: a non-admin viewer sees its own caps but not other seats’ authority map', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
