@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import type { Surface } from '@musterd/protocol';
+import { formatClaimPolicy, type ClaimPolicy, type Surface } from '@musterd/protocol';
 
 /** A stdio MCP server entry: how a harness should launch the musterd adapter. */
 export interface McpServerEntry {
@@ -11,18 +11,23 @@ export interface McpServerEntry {
 export interface AgentBinding {
   server: string;
   team: string;
-  member: string;
-  token: string;
+  /** v0.3 (ADR 075): the team agent key (mskey_) the adapter claims with — replaces member+token. */
+  agent_key: string;
   surface: Surface;
+  /** The seat/role this folder claims on launch (→ `MUSTERD_CLAIM`). */
+  claim: ClaimPolicy;
+  /** Optional pre-issued grant (msgr_) → `MUSTERD_GRANT`, skips the approval lane. */
+  grant?: string;
 }
 
-/** The env that binds an MCP session to a Member (05-mcp.md). */
+/** The env that binds an MCP session to its claim (05-mcp.md; v0.3 ADR 075 — agent key + claim). */
 export function buildMcpEnv(b: AgentBinding): Record<string, string> {
   return {
     MUSTERD_SERVER: b.server,
     MUSTERD_TEAM: b.team,
-    MUSTERD_MEMBER: b.member,
-    MUSTERD_TOKEN: b.token,
+    MUSTERD_AGENT_KEY: b.agent_key,
+    MUSTERD_CLAIM: formatClaimPolicy(b.claim),
+    ...(b.grant !== undefined ? { MUSTERD_GRANT: b.grant } : {}),
     MUSTERD_SURFACE: b.surface,
   };
 }

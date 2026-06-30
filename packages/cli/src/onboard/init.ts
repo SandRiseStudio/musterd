@@ -32,9 +32,9 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function cachedTeamLive(
   server: string,
   team: string,
-  token: string,
+  key: string,
 ): Promise<boolean> {
-  return new HttpClient({ server, token })
+  return new HttpClient({ server, key })
     .inbox(team, { limit: 1 })
     .then(() => true)
     .catch(() => false);
@@ -130,7 +130,7 @@ export async function runInit(): Promise<number> {
   // or a different server makes the saved team+token stale; offering it would fail mid-flow (the
   // db-mismatch dogfood class). Probe with an authenticated call so init stays the single entry point.
   const cachedLive = existing
-    ? await cachedTeamLive(server, config.current!, config.identities[config.current!]!.token)
+    ? await cachedTeamLive(server, config.current!, config.identities[config.current!]!.key)
     : false;
   if (existing && cachedLive) {
     p.log.info(
@@ -155,7 +155,7 @@ export async function runInit(): Promise<number> {
       ({ team, creatorToken } = await createTeam(config, server));
     } else {
       team = config.current!;
-      creatorToken = config.identities[team]!.token;
+      creatorToken = config.identities[team]!.key;
     }
   } else {
     if (existing && !cachedLive) {
@@ -168,7 +168,7 @@ export async function runInit(): Promise<number> {
     ({ team, creatorToken } = await createTeam(config, server));
   }
   config = loadConfig();
-  const http = new HttpClient({ server, token: creatorToken });
+  const http = new HttpClient({ server, key: creatorToken });
 
   // 2b) Intent — what are you here to do? -----------------------------------
   // Lead with intent, not jargon: the three real first-run postures (dynamics §1–2).
@@ -308,11 +308,13 @@ export async function runInit(): Promise<number> {
   // Stamp the folder's claim policy alongside the minted identity (claim-on-first-use, ADR 032):
   // `init` mints the primary seat as before (back-compat), but also records `seat:<name>` so a
   // re-launched session re-occupies it and the claim-on-first-use path is available without re-init.
+  // v0.3 (ADR 075): the adapter env authenticates with the team agent key (captured at create) + the
+  // seat claim, not a per-seat token. `token` from the mint above is vestigial under the cutover.
+  const agentKey = config.agentKeys[team] ?? process.env['MUSTERD_AGENT_KEY'] ?? '';
   const binding = {
     server,
     team,
-    member: name,
-    token,
+    agent_key: agentKey,
     surface: chosen.surface,
     claim: { mode: 'seat' as const, name },
   };
@@ -474,9 +476,12 @@ async function createTeam(
     const res = await http.createTeam(slug, { name: you, ...(role ? { role } : {}) });
     config.server = server;
     config.current = slug;
-    const token = res.token as string;
-    config.identities[slug] = { name: you, token, surface: 'cli' };
-    rememberIdentity(config, { team: slug, name: you, token, surface: 'cli' }); // ADR 059 vault
+    // v0.3 (ADR 075): the creator authenticates with their human credential (mscr_); the team agent
+    // key (mskey_) is captured for provisioning agents. Both from the composite mint (SPEC A.7).
+    const credential = res.human_credential as string;
+    config.agentKeys[slug] = res.agent_key as string;
+    config.identities[slug] = { name: you, key: credential, surface: 'cli' };
+    rememberIdentity(config, { team: slug, name: you, key: credential, surface: 'cli' }); // ADR 059 vault
     saveConfig(config);
     sp.stop(`Team ${pc.bold(slug)} created — you joined as ${pc.magenta(you)}`);
     return { team: slug, creatorToken: res.token as string };

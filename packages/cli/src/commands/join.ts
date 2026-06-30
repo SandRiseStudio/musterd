@@ -1,60 +1,82 @@
-import type { Binding } from '@musterd/protocol';
+import { type Binding, type Surface } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig, rememberIdentity, saveBinding, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 
-/** Register a presence for an existing member and store the identity locally. */
+/**
+ * `musterd join <slug> --as <name>` — occupy the named seat via the v0.3 claim handshake (ADR 075),
+ * authenticated by the team agent key (or a human credential). Stores the resolved identity in the
+ * vault (ADR 059) and binds this folder so acts work here without `--as` (ADR 036). The v0.2
+ * `--token` per-seat credential is gone; the authenticator is `--key` (`MUSTERD_AGENT_KEY` / a cached
+ * key) and an optional `--grant` skips the approval lane.
+ */
 export async function joinCommand(parsed: Parsed): Promise<number> {
   const slug = parsed.positionals[0];
   const name = flagStr(parsed.flags, 'as');
   if (!slug || !name) {
-    throw new CliError('usage: musterd join <slug> --as <name> [--token <tok>] [--surface cli]', 2);
+    throw new CliError(
+      'usage: musterd join <slug> --as <name> [--key <mskey_|mscr_>] [--grant <msgr_>] [--surface cli]',
+      2,
+    );
   }
   const config = loadConfig();
   const server = flagStr(parsed.flags, 'server') ?? config.server;
-  const surface = flagStr(parsed.flags, 'surface') ?? 'cli';
+  const surface = (flagStr(parsed.flags, 'surface') ?? 'cli') as Surface;
 
-  // Only reuse the cached token when it belongs to the member we're joining as. Relabeling
-  // another member's token as `name` would "succeed" here, then fail every send with
-  // `from/team must match the authenticated member` (the token authenticates as someone else).
-  // The global config has one identity slot per team, so two agents on one machine collide here.
-  const explicitToken = flagStr(parsed.flags, 'token');
-  // ADR 059: reuse a cached token for *this* member from the vault, even if another member is the
-  // team's active identity — so re-joining as a previously-known member doesn't need --token again.
+  // v0.3: authenticate the claim with the team agent key (or a credential). Resolve it from --key /
+  // MUSTERD_AGENT_KEY / a previously-cached key for this member (ADR 059).
   const cached = config.knownIdentities.find((i) => i.team === slug && i.name === name);
-  const token = explicitToken ?? cached?.token;
-  if (!token) {
-    throw new CliError(`no token for "${name}" on "${slug}" — pass --token <tok>`, 4);
+  const key = flagStr(parsed.flags, 'key') ?? process.env['MUSTERD_AGENT_KEY'] ?? cached?.key;
+  if (!key) {
+    throw new CliError(
+      `no key for "${name}" on "${slug}" — pass --key <mskey_|mscr_> (the team agent key, or your credential)`,
+      4,
+    );
   }
+  const grant = flagStr(parsed.flags, 'grant') ?? process.env['MUSTERD_GRANT'];
 
-  const http = new HttpClient({ server, token });
-  await http.presence(slug, surface);
+  const http = new HttpClient({ server, surface });
+  const outcome = await http.claim(slug, {
+    key,
+    target: { seat: name },
+    surface,
+    ...(grant !== undefined ? { grant } : {}),
+  });
+  if (outcome.state === 'refused') {
+    const tail = outcome.hint ? ` — ${outcome.hint}` : '';
+    throw new CliError(`join refused (${outcome.code}): ${outcome.message}${tail}`, 4);
+  }
+  if (outcome.state === 'pending') {
+    process.stdout.write(
+      `${theme.meta('⧖')} ${outcome.message} (request ${outcome.requestId}) — approve to go online\n`,
+    );
+    return 0;
+  }
+  const seat = outcome.seat.name;
 
   config.server = server;
   config.current = slug;
-  config.identities[slug] = { name, token, surface };
-  rememberIdentity(config, { team: slug, name, token, surface }); // ADR 059 vault
+  config.identities[slug] = { name: seat, key, surface };
+  rememberIdentity(config, { team: slug, name: seat, key, surface }); // ADR 059 vault
   saveConfig(config);
-  // Auto-bind the joining folder so it's immediately *active* here (ADR 036): acts work without
-  // `--as`, while other unbound folders stay read-only. The credential is cached globally; the
-  // authority to act is this binding.
+  // Auto-bind the joining folder so it's immediately *active* here (ADR 036).
   const binding: Binding = {
     server,
     team: slug,
-    member: name,
-    token,
+    agent_key: key,
     surface: surface as Binding['surface'],
-    claim: { mode: 'seat', name },
+    claim: { mode: 'seat', name: seat },
+    ...(grant !== undefined ? { grant } : {}),
   };
   saveBinding(process.cwd(), binding);
 
   if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify({ team: slug, member: name, surface }) + '\n');
+    process.stdout.write(JSON.stringify({ team: slug, member: seat, surface }) + '\n');
     return 0;
   }
-  process.stdout.write(`${theme.ok('✓')} ${name} joined ${slug}\n`);
-  process.stdout.write(`${theme.presenceDot('online')} ${name} online via ${surface}\n`);
+  process.stdout.write(`${theme.ok('✓')} ${seat} joined ${slug}\n`);
+  process.stdout.write(`${theme.presenceDot('online')} ${seat} online via ${surface}\n`);
   return 0;
 }

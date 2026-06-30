@@ -76,6 +76,7 @@ export async function resetCommand(parsed: Parsed): Promise<number> {
     identities: {},
     knownIdentities: [],
     bindings: {},
+    agentKeys: {},
     rosterHome: {},
   });
 

@@ -32,8 +32,17 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   // db-only teams skip this and the daemon originates. addMember revives a soft-removed name (ADR 065).
   const home = loadConfig().rosterHome[team];
   if (home) writeSeatFile(home, name, { kind: 'agent', ...(role ? { role } : {}) });
-  const res = await http.addMember(team, { name, kind: 'agent', ...(role ? { role } : {}) });
-  const token = res.token as string;
+  // Declare the seat (v0.3: no per-seat token — the agent claims it with the team agent key on launch).
+  await http.addMember(team, { name, kind: 'agent', ...(role ? { role } : {}) });
+  // The agent workspace authenticates with the team agent key (ADR 075), captured at `team create`.
+  const agentKey = config.agentKeys[team] ?? process.env['MUSTERD_AGENT_KEY'];
+  if (!agentKey) {
+    throw new CliError(
+      `no team agent key for "${team}" — create the team here (\`musterd team create ${team}\`, which ` +
+        `captures it) or set MUSTERD_AGENT_KEY`,
+      4,
+    );
+  }
 
   const here = Boolean(parsed.flags['here']);
   const ws = provisionWorkspace(name, {
@@ -44,8 +53,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   const binding: Binding = {
     server: config.server,
     team,
-    member: name,
-    token,
+    agent_key: agentKey,
     surface: 'claude-code',
     claim: { mode: 'seat', name },
   };
@@ -56,9 +64,9 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   const agentBinding = {
     server: config.server,
     team,
-    member: name,
-    token,
+    agent_key: agentKey,
     surface: 'claude-code' as const,
+    claim: { mode: 'seat', name } as const,
   };
   const launch = resolveMcpLaunch();
   const entry = {
@@ -113,7 +121,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(
       `${theme.warn('⚠')} couldn't auto-register the MCP server (${mcpError}). Register it in ${ws.dir} with:\n` +
         theme.meta(
-          `  cd ${ws.dir} && claude mcp add musterd -s local -e MUSTERD_TEAM=${team} -e MUSTERD_MEMBER=${name} -e MUSTERD_TOKEN=${token} -e MUSTERD_SURFACE=claude-code -e MUSTERD_AUTOJOIN=1 -- ${entry.command} ${entry.args.join(' ')}`,
+          `  cd ${ws.dir} && claude mcp add musterd -s local -e MUSTERD_TEAM=${team} -e MUSTERD_AGENT_KEY=${agentKey} -e MUSTERD_CLAIM=seat:${name} -e MUSTERD_SURFACE=claude-code -e MUSTERD_AUTOJOIN=1 -- ${entry.command} ${entry.args.join(' ')}`,
         ) +
         '\n',
     );

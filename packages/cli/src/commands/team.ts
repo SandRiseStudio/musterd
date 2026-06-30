@@ -46,19 +46,23 @@ async function teamCreate(parsed: Parsed): Promise<number> {
   const http = new HttpClient({ server });
   const res = await http.createTeam(slug, { name, ...(role ? { role } : {}) }, display);
 
+  // v0.3 (ADR 075): the creator is the team's first admin and authenticates with their **human
+  // credential** (mscr_) from the composite mint (SPEC A.7); the team **agent key** (mskey_) is what
+  // agents claim with, handed out separately. `res.agent_key`/`res.human_credential` are shown once.
+  const credential = res.human_credential as string;
   config.server = server;
   config.current = slug;
-  config.identities[slug] = { name, token: res.token, surface: 'cli' };
-  rememberIdentity(config, { team: slug, name, token: res.token, surface: 'cli' }); // ADR 059 vault
+  config.agentKeys[slug] = res.agent_key as string; // ADR 075: keep the team key for `musterd agent`
+  config.identities[slug] = { name, key: credential, surface: 'cli' };
+  rememberIdentity(config, { team: slug, name, key: credential, surface: 'cli' }); // ADR 059 vault
   saveConfig(config);
   // Auto-bind the creating folder so it's immediately *active* — you can act here without `--as`,
-  // while every other unbound folder stays read-only (ADR 036). The global config alone no longer
-  // authorizes acting; this binding does.
+  // while every other unbound folder stays read-only (ADR 036). The binding carries the folder's
+  // claim secret (here the creator's credential) so resolveIdentity yields the admin here.
   const binding: Binding = {
     server,
     team: slug,
-    member: name,
-    token: res.token,
+    agent_key: credential,
     surface: 'cli',
     claim: { mode: 'seat', name },
   };

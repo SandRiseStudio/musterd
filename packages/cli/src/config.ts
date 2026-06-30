@@ -209,6 +209,12 @@ export interface Config {
   /** ADR 020: tokenless registry of where members are bound, keyed by absolute folder path. */
   bindings: Record<string, BindingRef>;
   /**
+   * v0.3 (ADR 075): the team **agent key** (`mskey_`) per team, captured at `team create` so the
+   * operator can provision agent workspaces (`musterd agent`) + write `MUSTERD_AGENT_KEY` without
+   * re-minting. A secret — like `Identity.key`, it lives only in this 0600 config.
+   */
+  agentKeys: Record<string, string>;
+  /**
    * ADR 058 (migration-bootstrap.md): the folder that owns each team's durable roster, keyed by slug.
    * Written by `musterd team export`; it is the **cutover signal** — a team is file-backed (the daemon
    * reconciles its `.musterd/` files) iff it has a `rosterHome`. The daemon reads this same registry to
@@ -250,6 +256,7 @@ const DEFAULT: Config = {
   identities: {},
   knownIdentities: [],
   bindings: {},
+  agentKeys: {},
   rosterHome: {},
 };
 
@@ -278,6 +285,7 @@ export function loadConfig(): Config {
       // identity is immediately resolvable by `--as`, and stays so when another member joins.
       knownIdentities: backfillVault(identities, (parsed.knownIdentities ?? []).map(coerceIdentity)),
       bindings: parsed.bindings ?? {},
+      agentKeys: parsed.agentKeys ?? {},
       rosterHome: parsed.rosterHome ?? {},
     };
   } catch {
@@ -287,6 +295,7 @@ export function loadConfig(): Config {
       identities: {},
       knownIdentities: [],
       bindings: {},
+      agentKeys: {},
       rosterHome: {},
     };
   }
