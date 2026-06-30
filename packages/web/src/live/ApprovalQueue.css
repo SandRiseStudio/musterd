@@ -1,0 +1,54 @@
+/*
+ * Approval queue — the list shell around ApprovalCard (ADR 072/073). Layout only; the card owns its
+ * own visual styling (ApprovalCard.css). Uses the Live.css dusk tokens (--lc-*) for chrome continuity.
+ */
+.aq {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--lc-ground);
+}
+.aq__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lc-5);
+  padding: var(--lc-5) var(--lc-8);
+  border-bottom: 1px solid var(--lc-border);
+}
+.aq__title {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--lc-dim);
+}
+.aq__count {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--lc-faint);
+}
+.aq__empty {
+  margin: auto;
+  max-width: 360px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-3);
+  color: var(--lc-muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.aq__empty strong {
+  color: var(--lc-dim);
+  font-size: 15px;
+}
+.aq__grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 360px));
+  gap: var(--lc-6);
+  align-content: start;
+  padding: var(--lc-7) var(--lc-8);
+}
