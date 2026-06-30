@@ -28,9 +28,9 @@ describe('audit command', () => {
     // `team create` mints nick as the creator-admin (ADR 071) and auto-binds this folder, so the
     // audit command resolves nick from the binding without an explicit --as.
     await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
-    nickToken = loadConfig().identities['dawn']!.token;
+    nickToken = loadConfig().identities['dawn']!.key;
     // Add an agent member to reclaim (the governed op that writes the first audit row).
-    await new HttpClient({ server: serverUrl, token: nickToken }).addMember('dawn', {
+    await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).addMember('dawn', {
       name: 'Ada',
       kind: 'agent',
     });
@@ -90,7 +90,7 @@ describe('audit command', () => {
     // Two governed ops → two rows, distinct ts (sleep guarantees ms separation for --before paging).
     await writeReclaimRow();
     await new Promise((r) => setTimeout(r, 5));
-    await new HttpClient({ server: serverUrl, token: nickToken }).addMember('dawn', {
+    await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).addMember('dawn', {
       name: 'Bo',
       kind: 'agent',
     });
@@ -108,14 +108,14 @@ describe('audit command', () => {
   it('pages older entries with --before <ts>', async () => {
     await writeReclaimRow(); // older row: Ada
     await new Promise((r) => setTimeout(r, 5));
-    await new HttpClient({ server: serverUrl, token: nickToken }).addMember('dawn', {
+    await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).addMember('dawn', {
       name: 'Bo',
       kind: 'agent',
     });
     await capture(() => reclaimCommand(parseArgs(['Bo']))); // newer row: Bo
 
     // Read the newest entry's ts, then page beneath it to surface only the older Ada row.
-    const head = await new HttpClient({ server: serverUrl, token: nickToken }).audit('dawn', {
+    const head = await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).audit('dawn', {
       limit: 1,
     });
     const newestTs = head.audit[0]!.ts;
@@ -142,11 +142,11 @@ describe('audit command', () => {
   });
 
   it('refuses a non-admin token with forbidden (exit 5)', async () => {
-    const ada = await new HttpClient({ server: serverUrl, token: nickToken }).addMember('dawn', {
+    const ada = await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).addMember('dawn', {
       name: 'Ada2',
       kind: 'agent',
     });
-    const client = new HttpClient({ server: serverUrl, token: ada.token });
+    const client = new HttpClient({ server: serverUrl, key: ada.token, seat: 'Ada2' });
     await expect(client.audit('dawn')).rejects.toMatchObject({ exitCode: 5 });
   });
 
