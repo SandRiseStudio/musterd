@@ -101,20 +101,20 @@ The WS `send` and HTTP `POST …/messages` share one validation+route path on th
 
 ## Error codes (shared by WS `error` frames and HTTP)
 
-| code               | HTTP | meaning                                                                                                                         |
-| ------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `bad_request`      | 400  | malformed frame/body/envelope                                                                                                   |
-| `validation`       | 422  | envelope failed schema (bad act, missing required meta, etc.)                                                                   |
-| `unauthorized`     | 401  | missing/invalid token                                                                                                           |
-| `forbidden`        | 403  | token valid but not a member of this team / not this member                                                                     |
-| `not_found`        | 404  | team/member not found                                                                                                           |
-| `conflict`         | 409  | duplicate (e.g. team slug taken, member name taken)                                                                             |
-| `member_busy`      | 409  | (v0.2, ADR 010) a Member was already live — _no longer thrown on hello since ADR 017's newest-wins; retained for compatibility_ |
-| `superseded`       | 409  | (v0.2, ADR 017) your session was taken over by a newer same-identity attach — terminal; don't reconnect                         |
-| `version_mismatch` | 426  | client `v` not compatible with server                                                                                           |
-| `server_error`     | 500  | unexpected                                                                                                                      |
-| `claim_conflict`   | 409  | (P3, ADR 078/SPEC A.8) the target seat is already occupied                                                                      |
-| `expired_grant`    | 410  | (P3, ADR 078/SPEC A.8) the presented grant is past its lifetime                                                                 |
+| code               | HTTP | meaning                                                                                                                          |
+| ------------------ | ---- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `bad_request`      | 400  | malformed frame/body/envelope                                                                                                    |
+| `validation`       | 422  | envelope failed schema (bad act, missing required meta, etc.)                                                                    |
+| `unauthorized`     | 401  | missing/invalid token                                                                                                            |
+| `forbidden`        | 403  | token valid but not a member of this team / not this member                                                                      |
+| `not_found`        | 404  | team/member not found                                                                                                            |
+| `conflict`         | 409  | duplicate (e.g. team slug taken, member name taken)                                                                              |
+| `member_busy`      | 409  | (v0.2, ADR 010) a Member was already live — _no longer thrown on hello since ADR 017's newest-wins; retained for compatibility_  |
+| `superseded`       | 409  | (v0.2, ADR 017) your session was taken over by a newer same-identity attach — terminal; don't reconnect                          |
+| `version_mismatch` | 426  | client `v` not compatible with server                                                                                            |
+| `server_error`     | 500  | unexpected                                                                                                                       |
+| `claim_conflict`   | 409  | (P3, ADR 078/SPEC A.8) the target seat is already occupied                                                                       |
+| `expired_grant`    | 403  | (P3, ADR 078/SPEC A.8) the presented grant is past its lifetime (403, aligned with June's P3.1 ADR 076; SPEC A.8 allows 410/403) |
 
 The CLI maps these to exit codes (`04-cli.md`).
 

@@ -31,9 +31,11 @@ export const ERROR_HTTP_STATUS: Record<ErrorCode, number> = {
   superseded: 409,
   version_mismatch: 426,
   server_error: 500,
-  // ADR 078 (SPEC A.8): a seat occupied at claim time is 409; an expired grant is 410 (Gone).
+  // ADR 078 (SPEC A.8): a seat occupied at claim time is 409; an expired grant is 403 — aligned with
+  // June's P3.1 substrate (ADR 076), which mints + rejects grants and emits this code. SPEC A.8 allows
+  // 410/403; 403 wins to keep the two protocol edits converging without conflict.
   claim_conflict: 409,
-  expired_grant: 410,
+  expired_grant: 403,
 };
 
 export const ErrorBodySchema = z.object({
