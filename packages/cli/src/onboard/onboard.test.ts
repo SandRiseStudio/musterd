@@ -12,18 +12,18 @@ import { classifyPrimerTarget, removePrimer, renderPrimer, upsertPrimer } from '
 const binding = {
   server: 'http://localhost:4849',
   team: 'dawn',
-  member: 'Ada',
-  token: 'mskd_secret',
+  agent_key: 'mskey_secret',
   surface: 'cursor' as const,
+  claim: { mode: 'seat' as const, name: 'Ada' },
 };
 
 describe('mcpEntry', () => {
-  it('builds the identity-binding env', () => {
+  it('builds the v0.3 claim-binding env (ADR 075)', () => {
     expect(buildMcpEnv(binding)).toEqual({
       MUSTERD_SERVER: 'http://localhost:4849',
       MUSTERD_TEAM: 'dawn',
-      MUSTERD_MEMBER: 'Ada',
-      MUSTERD_TOKEN: 'mskd_secret',
+      MUSTERD_AGENT_KEY: 'mskey_secret',
+      MUSTERD_CLAIM: 'seat:Ada',
       MUSTERD_SURFACE: 'cursor',
     });
   });
@@ -32,7 +32,7 @@ describe('mcpEntry', () => {
     const entry = buildEntry(binding);
     expect(entry.command).toBe(process.execPath);
     expect(entry.args[0]).toMatch(/index\.(js|ts)$/);
-    expect(entry.env['MUSTERD_MEMBER']).toBe('Ada');
+    expect(entry.env['MUSTERD_CLAIM']).toBe('seat:Ada');
   });
 });
 
@@ -295,8 +295,8 @@ describe('init target guard', () => {
 });
 
 describe('cross-folder name-reuse (nameBoundElsewhere)', () => {
-  const reg = (folder: string, member: string, team = 'dawn') => ({
-    [folder]: { team, member, surface: 'claude-code' },
+  const reg = (folder: string, seat: string, team = 'dawn') => ({
+    [folder]: { team, seat, surface: 'claude-code' },
   });
 
   it('flags a name bound in a different folder, returning that folder + team', () => {
