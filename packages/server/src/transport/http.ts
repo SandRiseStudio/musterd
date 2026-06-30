@@ -57,7 +57,14 @@ import {
 import { decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
-import { createTeam, getPolicy, requireTeam, rotateAgentKey, setPolicy } from '../store/teams.js';
+import {
+  createTeam,
+  getAgentKeyHash,
+  getPolicy,
+  requireTeam,
+  rotateAgentKey,
+  setPolicy,
+} from '../store/teams.js';
 import { recordError } from '../telemetry.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
