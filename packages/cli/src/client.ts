@@ -2,6 +2,7 @@ import {
   AuditResponseSchema,
   DecideResponseSchema,
   ErrorBodySchema,
+  GrantMintSchema,
   PROTOCOL_VERSION,
   RequestsResponseSchema,
   type AuditResponse,
@@ -9,6 +10,8 @@ import {
   type DecideRequest,
   type DecideResponse,
   type Envelope,
+  type GrantMint,
+  type IssueGrant,
   type Member,
   type MemberKind,
   type MemberSummary,
@@ -183,6 +186,20 @@ export class HttpClient {
     const parsed = AuditResponseSchema.safeParse(json);
     if (!parsed.success) {
       throw new CliError('audit response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /**
+   * Issue a grant (ADR 076/077) — `POST /teams/:slug/grants`, admin-only. Mints an `msgr_` token that
+   * authorizes claiming the given seat/role; returned **once**. A `standing` grant survives until
+   * revoked, so a persistent agent seat re-occupies on relaunch without an approval request.
+   */
+  async issueGrant(slug: string, body: IssueGrant): Promise<GrantMint> {
+    const json = await this.request('POST', `/teams/${slug}/grants`, body);
+    const parsed = GrantMintSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('grant response did not match the protocol schema', 1);
     }
     return parsed.data;
   }

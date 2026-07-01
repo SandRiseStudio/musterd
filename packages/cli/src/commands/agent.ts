@@ -44,6 +44,18 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     );
   }
 
+  // Mint a standing grant for the seat so the workspace's autojoin occupies immediately on launch
+  // instead of opening an admin-approval request every session (ADR 077). Best-effort: if it fails
+  // (e.g. the caller isn't admin), the agent still comes online — its first claim just routes through
+  // the approval lane. Issuing here is safe: `addMember` above already required an admin identity.
+  let grant: string | undefined;
+  try {
+    const mint = await http.issueGrant(team, { scope: 'seat', target: name, lifetime: 'standing' });
+    grant = mint.token;
+  } catch {
+    grant = undefined;
+  }
+
   const here = Boolean(parsed.flags['here']);
   const ws = provisionWorkspace(name, {
     here,
@@ -56,17 +68,20 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     agent_key: agentKey,
     surface: 'claude-code',
     claim: { mode: 'seat', name },
+    ...(grant !== undefined ? { grant } : {}),
   };
   saveBinding(ws.dir, binding);
 
   // Register the MCP server *for the workspace folder*: `claude mcp add -s local` keys off cwd, so we
   // run the adapter with cwd set to ws.dir. Autojoin so a session opened there comes online as `name`.
+  // The grant (if any) flows to MUSTERD_GRANT via buildMcpEnv so autojoin occupies without approval.
   const agentBinding = {
     server: config.server,
     team,
     agent_key: agentKey,
     surface: 'claude-code' as const,
     claim: { mode: 'seat', name } as const,
+    ...(grant !== undefined ? { grant } : {}),
   };
   const launch = resolveMcpLaunch();
   const entry = {
@@ -94,6 +109,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
         kind: ws.kind,
         branch: ws.branch ?? null,
         mcpRegistered: mcpError === null,
+        granted: grant !== undefined,
       }) + '\n',
     );
     return 0;
@@ -121,7 +137,9 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(
       `${theme.warn('⚠')} couldn't auto-register the MCP server (${mcpError}). Register it in ${ws.dir} with:\n` +
         theme.meta(
-          `  cd ${ws.dir} && claude mcp add musterd -s local -e MUSTERD_TEAM=${team} -e MUSTERD_AGENT_KEY=${agentKey} -e MUSTERD_CLAIM=seat:${name} -e MUSTERD_SURFACE=claude-code -e MUSTERD_AUTOJOIN=1 -- ${entry.command} ${entry.args.join(' ')}`,
+          `  cd ${ws.dir} && claude mcp add musterd -s local -e MUSTERD_TEAM=${team} -e MUSTERD_AGENT_KEY=${agentKey}` +
+            (grant !== undefined ? ` -e MUSTERD_GRANT=${grant}` : '') +
+            ` -e MUSTERD_CLAIM=seat:${name} -e MUSTERD_SURFACE=claude-code -e MUSTERD_AUTOJOIN=1 -- ${entry.command} ${entry.args.join(' ')}`,
         ) +
         '\n',
     );
