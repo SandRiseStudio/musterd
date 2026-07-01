@@ -66,7 +66,14 @@ The route path now emits first-party what finding 001 had to reconstruct:
 Not emittable server-side (needs harness/git data → slice 4): coordination-token ratio, wasted-work
 ratio, dup-rate.
 
+## HTTP request log (slice 2)
+
+Every HTTP request now logs a structured `http_request` line — `method` / `path` / `status` / `ms` —
+info on 2xx/3xx, **warn on 4xx, error on 5xx** (errors land in `daemon.err.log`, which finding 001
+found empty by design). Path only, never query/headers (no secrets); healthy `/health` polls are
+skipped so the CLI guard doesn't drown the log.
+
 ## Not yet closed (later slices, ADR 082)
 
-HTTP-layer structured logging on `daemon.log` (slice 2); per-agent token/cost + the git/harness-side
-coordination metrics and a cross-agent trace (slice 4).
+Per-agent token/cost + the git/harness-side coordination metrics (token ratio, wasted-work, dup-rate)
+and a cross-agent trace (slice 4).
