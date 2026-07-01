@@ -164,6 +164,10 @@ export const ClaimFrame = z.object({ type:'claim', v, team, key:string, target:C
 export const OccupiedFrame = z.object({ type:'occupied', seat:Member, presence_id, server_time:int, charter?:string, memory:null });
 export const RefusedFrame = z.object({ type:'refused', code:RefusedCode, message, claimable:string[], hint:string });
 export const PendingFrame = z.object({ type:'pending', request_id, message });
+
+// ADR 018/075/080 — the workspace binding files (binding.ts). Read by both the CLI and the MCP adapter.
+export const WorkspaceSpec = z.object({ server:string, team:string, surface:Surface, claim?:ClaimPolicy });  // the committed, secret-free `.musterd/workspace.json`
+export const Binding = WorkspaceSpec.extend({ agent_key?:string, grant?:string });                          // gitignored `.musterd/binding.json` = spec + the two secrets
 ```
 
 `actMetaRules` is the single place encoding the per-act `meta` requirements from the table above; both server and clients import it so validation is identical everywhere. **Changing any of these schemas requires an ADR** (`00-overview.md` hard rule).

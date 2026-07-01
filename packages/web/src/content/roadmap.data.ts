@@ -180,7 +180,7 @@ export const ROADMAP: RoadmapItem[] = [
     category: 'harness',
     blurb: 'musterd agent <name> adds an agent AND gives it its own isolated git worktree, binding, and MCP registration — so two actors never fight over one folder’s seat.',
     detail:
-      'Closes the identity-thrash dogfood: in Claude Code one folder = one MCP registration = one identity, so each agent needs its own workspace. The command provisions a worktree on an agent/<name> branch (sibling folder outside git), writes the binding there, and registers the server with autojoin. Re-adding a soft-removed name now revives it instead of dead-ending on a UNIQUE constraint.',
+      'Closes the identity-thrash dogfood: in Claude Code one folder = one MCP registration = one identity, so each agent needs its own workspace. The command provisions a worktree on an agent/<name> branch (sibling folder outside git), writes the binding there, and registers the server with autojoin. It also auto-issues a standing grant for the seat so the workspace occupies on launch without an admin-approval round-trip, and writes the committed launch spec (see committed-launch-spec). Re-adding a soft-removed name now revives it instead of dead-ending on a UNIQUE constraint.',
     refs: [adr(65, 'ADR 065'), adr(59, 'ADR 059')],
   },
   {
@@ -190,8 +190,19 @@ export const ROADMAP: RoadmapItem[] = [
     category: 'harness',
     blurb: 'The SessionStart hook checks the musterd server is actually registered before telling an agent it’s auto-joined; if not, it prints the fix instead of a false reassurance.',
     detail:
-      'Closes the gap between the committed AGENTS.md primer marker (travels with the repo) and the machine-local, token-bearing `claude mcp add -s local` registration (never committed). `musterd init --check` is the on-demand drift detector for the same "primer present, server unregistered" state — read-only, like the arch-tree / fmt --check guards.',
+      'Closes the gap between the committed AGENTS.md primer marker (travels with the repo) and the machine-local `claude mcp add -s local` registration. `musterd init`/`agent` now auto-install the verify hook globally + self-gating (it fires only in folders carrying the `musterd:start` primer, and absorbs a hand-pasted recipe so it never double-fires). `musterd init --check` is the on-demand drift detector for the same "primer present, server unregistered" state — read-only, like the arch-tree / fmt --check guards. The "server registration is never committable" limitation this once described is now lifted by the committed launch spec (see committed-launch-spec).',
     refs: [adr(60, 'ADR 060'), doc('docs/harness-hooks.md', 'harness-hooks.md')],
+  },
+  {
+    id: 'committed-launch-spec',
+    title: 'Committed launch spec — a clone self-wires',
+    status: 'shipped',
+    category: 'harness',
+    blurb: 'A secret-free .musterd/workspace.json rides the repo, so a fresh clone/worktree registers the musterd MCP server with one no-prompt `musterd wire` — no interactive init.',
+    detail:
+      'Resolves the ADR 060 non-goal ("auto-register the server from the committed marker needs a secret-free, env-referenced entry"). Splits the binding: WorkspaceSpecSchema (server/team/surface/claim) is committable (only binding.json is gitignored, ADR 058), while the secrets (agent_key/grant) stay local (env / the 0600 global config / the gitignored binding). `musterd wire` reads the committed spec, resolves the key locally, and registers the server idempotently — tools only by default (no seat claim unless --autojoin), so a repo cloned by many never has every clone grab one seat. init/agent write the spec; the adapter reads it as a base (env > binding > spec); the SessionStart hook points a fresh clone at `musterd wire`.',
+    refs: [adr(80, 'ADR 080'), adr(60, 'ADR 060'), doc('docs/design/provisioning-recipe.md', 'provisioning-recipe.md')],
+    dependsOn: ['verify-provisioning', 'agent-workspace'],
   },
   {
     id: 'claim-on-first-use',
@@ -397,8 +408,8 @@ export const ROADMAP: RoadmapItem[] = [
     category: 'platform',
     blurb: 'The breaking auth rework: team agent key + admin-issued grants + human credentials, the WS claim frame replacing hello, and the no-grant request/approval lane — cut over across every surface at once.',
     detail:
-      'Replaces token==member with agent key (authenticates a harness) + grant (authorizes a seat). The claim frame replaces hello (occupied/refused/pending); grants carry lifetime once|ttl|standing picked at live approval; the request lane routes a no-grant claim to admins (local-admin fast path + one-keystroke approval card); team policy allow_pre_issued_grants is the opt-in. Surface migration in one coordinated set: team add provisions a seat (no token), MUSTERD_TOKEN→MUSTERD_AGENT_KEY+MUSTERD_CLAIM (+ optional MUSTERD_GRANT), init/join move to the claim flow. The single isolated breaking moment (ADR 069 decision 2).',
-    refs: [adr(69, 'ADR 069'), doc('SPEC.md', 'SPEC A.2/A.3/A.5'), doc('docs/design/security.md', 'security.md')],
+      'Replaces token==member with agent key (authenticates a harness) + grant (authorizes a seat). The claim frame replaces hello (occupied/refused/pending); grants carry lifetime once|ttl|standing picked at live approval; the request lane routes a no-grant claim to admins (local-admin fast path + one-keystroke approval card); team policy allow_pre_issued_grants is the opt-in. Surface migration in one coordinated set: team add provisions a seat (no token), MUSTERD_TOKEN→MUSTERD_AGENT_KEY+MUSTERD_CLAIM (+ optional MUSTERD_GRANT), init/join move to the claim flow. The single isolated breaking moment (ADR 069 decision 2). The CLI surface for the request lane (ADR 077): `musterd claim <name>` on a held/declared seat now opens an admin-approval request and waits over the WS instead of dead-ending; `musterd requests [--pending]` + `musterd requests decide <id> --approve [--once|--standing|--ttl-hours <n>] | --deny` are the admin decide surface; and `musterd init`’s "activate an existing member" branch drives that same flow (no longer a v0.3 stub).',
+    refs: [adr(69, 'ADR 069'), adr(77, 'ADR 077'), doc('SPEC.md', 'SPEC A.2/A.3/A.5'), doc('docs/design/security.md', 'security.md')],
     dependsOn: ['v03-p1-seats'],
   },
   {

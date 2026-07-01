@@ -21,14 +21,14 @@ src/
   args.ts             // argv parser → { command, positionals, flags }
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API
-  claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078, unwired until the P3 cutover)
+  claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   errors.ts           // CliError(code) -> message + exit code
   render/
     theme.ts          // ANSI roles from brand.md (online dot, member colors, act badges)
     rows.ts           // renderMessageRow, renderStatusTable, renderBanner, renderPresence
-    credentials.ts    // v0.3 mint/env renderers: credentialEnv (SPEC A.9) + shown-once agent key / human credential / grant / team-create blocks (ADR 075/076, unwired until the P3 cutover)
+    credentials.ts    // v0.3 mint/env renderers: credentialEnv (SPEC A.9) + shown-once agent key / human credential / grant / team-create blocks (ADR 075/076; live post-P3 cutover)
   notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)
     os.ts             // OS push notification (macOS/Linux/Windows)
     select.ts         // pick which away human to nudge
@@ -56,7 +56,7 @@ src/
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report
     wire.ts           // musterd wire: headless MCP register from the committed .musterd/workspace.json (ADR 080)
-    agent.ts          // musterd agent <name>: add an agent + isolated worktree + binding + MCP register (ADR 065)
+    agent.ts          // musterd agent <name>: add an agent + isolated worktree + binding + MCP register + standing grant + committed workspace.json (ADR 065/080)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     serve.ts          // musterd serve [--port]
@@ -108,10 +108,20 @@ _last_ source, not the only one. `resolve()` picks the active team+identity in t
 path, else cwd walk-up) → this global config**. The env + binding paths key identity to the
 _workspace_, the same way the MCP adapter resolves it, so an agent that shells out to `musterd`
 in its folder acts as _that_ member — not whoever last wrote the global single-slot-per-team
-(the 2026-06-16/17 dogfood collision). `musterd init` writes the binding file (0600, gitignored).
-A binding may also be **policy-only** (claim-on-first-use, ADR 032): `member`/`token` absent, just a
-`claim` policy — `resolve()` skips such a binding as an identity source (`isClaimed`), and `musterd
-claim` fills the seat in. Relatedly, `join --as <name>` without `--token` now **refuses** when the cached identity belongs to
+(the 2026-06-16/17 dogfood collision). `musterd init` writes the binding file (0600, gitignored),
+which under v0.3 (ADR 075) carries the **team agent key** (`agent_key`, `mskey_`) + a `claim` policy
+(+ optional `grant`), not a per-seat token.
+
+**Committed launch spec `.musterd/workspace.json` (ADR 080).** Alongside the gitignored `binding.json`,
+`init`/`agent` also write a **secret-free** `.musterd/workspace.json` (`WorkspaceSpecSchema` =
+`{server, team, surface, claim}`) — the Binding minus its secrets. Only `binding.json` is gitignored
+(ADR 058 commits the rest of `.musterd/`), so this spec is **committable**: `git add`ing it lets a
+fresh clone/worktree self-wire the MCP server with `musterd wire` (key resolved locally, never
+committed). `saveWorkspaceSpec` parse-strips any secret so one can't leak into the committed file. The
+MCP adapter reads it as a base **under** `binding.json` (env → binding.json → workspace.json for the
+non-secret fields; secrets only from env/binding). A binding may also be **policy-only**
+(claim-on-first-use, ADR 032): no resolved seat, just a `claim` policy — `resolve()` skips such a
+binding as an identity source, and `musterd claim` fills the seat in. Relatedly, `join --as <name>` without `--token` now **refuses** when the cached identity belongs to
 a different member, rather than silently relabeling its token (which "succeeded" then failed every
 send with `from/team must match`).
 
@@ -145,7 +155,7 @@ Interactive first-run onboarding (requires a TTY; non-TTY prints guidance and ex
 3. **Team** — reuse the current team or create one. The cached team is offered for reuse **only if it's still live on this daemon** (`cachedTeamLive` probes with an authenticated inbox call; ADR 016): after a db reset or a switch to a different server, the saved team/token is stale, so init skips the dead "reuse" option, warns, and routes to creating a team — it stays the single entry point with no pre-`team create` step. A dim hint states the conceptual commitment: _"A team is a standing roster, not a project — reuse the same team across folders to keep agents talking."_ (See `00-overview.md` / `brand.md` §5.)
 4. **Intent** — _what are you here to do on `<team>`?_ Three real first-run postures (`human-agent-dynamics.md` §1–2):
    - **Add a new agent** — connect a coding agent as a teammate (the main path).
-   - **Activate an existing member** — reconnect a member that isn't currently live. **v0.2 stub:** reattaching a member needs the seat-claim model (creator-authorized token reissue), which is the v0.3 security surface — so this branch surfaces an honest _"coming in v0.3"_ note and offers to add a new agent instead. The framing is the v0.2 down-payment.
+   - **Activate an existing member** — reconnect a member that isn't currently live. **Shipped (ADR 077):** the branch prompts for the member name and drives `claimCommand` — the v0.3 claim/request lane — so the folder claims that seat with the team agent key, opening an admin-approval request and waiting if the seat is held/declared. No new member is minted (this reattaches an existing one), reusing `claim`'s clobber-guard, wait, and binding logic. (Previously a "coming in v0.3" stub; un-stubbed once the request lane landed.)
    - **Just me — watch the team live** — the supervising posture: the human is already a member (joined at team create), so nothing is minted; it routes to `inbox --watch` / `status`.
 5. **Where the agent runs** — detect run targets (`onboard/harnesses/`) and whether musterd is already configured in each. UI copy avoids "harness"/"tool" jargon: _"Where does this agent run?"_, _"detecting agent tools"_. Each option's hint distinguishes set-up state (_"not set up yet — will be configured"_ vs _"musterd already set up here — will be repointed"_). Selecting an **already-configured** target shows a **Heads up** note: re-running mints a _new_ member and repoints the target at it (a repeat name is refused by the conflict guard, so the warning is accurate); the previous member stays on the roster.
 6. **Name + mint** — name the agent (no spaces), optional role. Before minting, the **cross-folder name-reuse guard** (ADR 020) runs `nameBoundElsewhere(name, cwd, config.bindings)`: if the name is already bound in _another_ folder it warns (naming that folder + team) with a default-yes confirm — on the same team the mint would be refused anyway (names are unique per team), so this pre-empts the failure. Then `team add` mints it. (The registry it consults is the global config's tokenless `bindings` map, which `saveBinding` writes on every init — see Config file below.)
@@ -172,7 +182,7 @@ Runs the daemon as a background **service** so it survives a closed terminal/ses
 
 ### `musterd team remove <name>`
 
-`POST /teams/:slug/members/:name/remove`. **Soft-removes** a member from the roster (ADR 019) — the sanctioned way to clear a mistaken or stale member instead of editing the daemon's DB. Sets `left_at` via the existing `leaveMember`, so the member drops off every list/auth/route path (all filter `left_at IS NULL`) while its message history + provenance survive; any live session is dropped (same mechanism as reclaim) so the seat frees immediately. Idempotent — removing an already-removed member is a clean `not_found`, never an error stack. Any team member may remove any member (localhost/v0.2; the v0.3 seat model will gate it). No un-remove/reactivate flow — that's the v0.3 seat-claim model. Output: `✓ removed <member> from <team> — off the roster; message history is kept`. Errors: unknown/already-removed member → `not_found` (exit 6).
+`POST /teams/:slug/members/:name/remove`. **Soft-removes** a member from the roster (ADR 019) — the sanctioned way to clear a mistaken or stale member instead of editing the daemon's DB. Sets `left_at` via the existing `leaveMember`, so the member drops off every list/auth/route path (all filter `left_at IS NULL`) while its message history + provenance survive; any live session is dropped (same mechanism as reclaim) so the seat frees immediately. Idempotent — removing an already-removed member is a clean `not_found`, never an error stack. Removal is admin-gated (ADR 071 `is_admin`). Reactivating a removed/offline member is the claim/request lane (ADR 077): re-declare or claim the seat via `musterd init`'s "activate an existing member", `musterd claim <name>`, or `musterd agent`. Output: `✓ removed <member> from <team> — off the roster; message history is kept`. Errors: unknown/already-removed member → `not_found` (exit 6).
 
 ### `musterd team export <slug>`
 
@@ -226,9 +236,19 @@ Prints the seat this folder resolves to — `<member> on <team> (<surface> · <s
 
 `POST /teams/:slug/availability` (authed). Sets **your own** availability axis (SPEC A.6 Axis 2) — explicit and self-only, **never inferred**. `away --until <iso>` is the `away_until` encoding (stored as `{status:'away', until:<ms>}`); `--until` is rejected on any other status, and the server drops a stray `until` from `available`/`dnd` so the stored shape stays honest. The roster renders `away` as `off until <ts>` (or bare `away`) and `dnd` as `dnd`, **overriding** the live activity label (A.6 display resolution); `available` is the implicit default and never overrides. The notify loop reads this back to **tier** deliveries: `away` holds all but `urgent`; `dnd` passes directed pings + `urgent` (ADR 044). The localhost down-payment — the v0.3 governed superset (off*hours, schedule enforcement, `can*\*`gating) is the named seam. Output:`✓ availability set to <status>`. Needs an **active identity** like any act (ADR 036).
 
-### `musterd claim <name> | --role <role> [--for <code>] [--surface <s>]`
+### `musterd claim <name> | --role <role> [--for <code>] [--surface <s>] [--key mskey_…] [--grant msgr_…] [--force] [--timeout <s>]`
 
-The **L2 universal floor** of claim-on-first-use (ADR 032) — needs only the daemon, works in any harness. Resolves team+server from the binding/env/global config (no identity needed — it's _claiming_ one), then **mint-or-reuse** a seat and write it into this folder's `.musterd/binding.json` (member+token+`claim: seat:<name>`), so the CLI **and** a (re)launched adapter resolve to it. `<name>` claims a named seat (auto-minted via the unauthenticated `POST /members`); `--role <role>` claims the next open `<role>-<n>` pool handle; no target falls back to the folder policy. **Reuse vs mint:** if this folder already holds `<name>`'s token, it re-occupies without re-minting (`reclaimed your seat`); a name already on the team this folder has _no_ token for → exit 9 with the roster + a fresh-name/`--role` hint (the local `claim_conflict`). **Pending markers (ADR 033):** if unclaimed adapter sessions left `.musterd/pending/*.json` markers, claim lists them and requires `--for <code>` when several wait (the code shows in the session's first output), clearing the chosen one. **Live delivery (ADR 034):** when a marker is matched, claim drops a 0600 `<code>.resolved.json` sidecar the running session's resolution watcher adopts — so the waiting session goes online **without a relaunch** (`--json` reports `live: true`). Output: `✓ <name> — claimed a fresh seat on <team>`.
+The **L2 universal floor** of claim-on-first-use (ADR 032) — needs only the daemon, works in any harness. Resolves team+server from the binding/env/global config, then presents the **team agent key** (`mskey_`, from `--key`/`MUSTERD_AGENT_KEY`/the binding) and asks to occupy a seat over the v0.3 claim handshake (ADR 075/077) — **no per-seat token is minted**. `<name>` claims a named seat; `--role <role>` claims the next open `<role>-<n>` pool handle (resolved server-side); no target falls back to the folder policy. The outcome:
+
+- **occupied** — the seat was free (or a pre-issued `grant`/`--grant msgr_` authorized it): the resolved seat is written into `.musterd/binding.json` as `claim: seat:<name>` (+ `agent_key`, optional `grant`) so the CLI and a (re)launched adapter re-occupy it.
+- **pending** — the seat is held/declared and no grant applied: the CLI opens an **admin-approval request** and **holds the WS open** (`watchClaim`), printing the request id, until an admin decides (`musterd requests decide`); on approval it resolves to occupied and binds. `--timeout <s>` bounds the wait (default 300s; `0` = unbounded), exiting non-zero with a pointer to `musterd requests` on timeout.
+- **refused** — a no-dead-end hint (ADR 055).
+
+**Clobber guard (ADR 066):** claiming a _different_ seat into a folder already bound to a **live** member refuses (pointing at `musterd agent`/a separate worktree); `--force` repoints anyway. **Pending markers (ADR 033):** unclaimed adapter sessions leave `.musterd/pending/*.json` markers (scoped to this workspace); claim lists them and requires `--for <code>` when several wait, clearing the chosen one and dropping a 0600 `<code>.resolved.json` sidecar so a running session goes online **without a relaunch** (ADR 034, `--json` reports `live: true`). Output: `✓ <name> — occupied on <team>`.
+
+### `musterd wire [--autojoin] [--key mskey_…] [--server <url>] [--json]`
+
+The **headless, no-prompt counterpart to `init`** for a folder carrying a committed `.musterd/workspace.json` (the secret-free launch spec, ADR 080). Reads that spec (`server`/`team`/`surface`/`claim`), resolves the team agent key from **local** sources only (`--key` → `MUSTERD_AGENT_KEY` → the machine's global `config.agentKeys[team]` — never the committed file, which has no secret), and registers the musterd MCP server for this folder (idempotent — `configure` does `mcp remove` then `mcp add`). It also writes the gitignored `.musterd/binding.json` (spec + resolved secrets) so subsequent CLI acts resolve identity. **Registers tools only** by default (no `MUSTERD_AUTOJOIN`) so a repo cloned by many never has every clone auto-claim one seat; `--autojoin` opts a personal worktree into claim-on-launch. Keyless → registers anyway (tools available) and warns that claiming will need a key/approval. This is what lets a fresh clone self-wire without an interactive `init` (the ADR-060 non-goal, unblocked). Output: `✓ wired the musterd MCP server for this folder (team <team>)`; `--json` → `{ team, member, mcpRegistered, keyResolved, autojoin }`. Errors: no committed spec → `not_found` (exit 6).
 
 ### `musterd reclaim <member>`
 
@@ -237,6 +257,10 @@ The **L2 universal floor** of claim-on-first-use (ADR 032) — needs only the da
 ### `musterd audit [--limit <n>] [--before <ms-epoch>] [--json]`
 
 `GET /teams/:slug/audit` — the governance audit log reader (ADR 071), admin-only. Pretty-prints entries newest-first: `<HH:MM> <actor> [<action>] <allow|deny> → <target> <detail>`, `allow` green / `deny` red, `action` dim, the `detail` JSON blob in meta. `--limit` caps the page (integer 1..500; server default 100); `--before <ms-epoch>` pages entries older than a ts (the oldest row's ts is printed as the next `--before` cursor); `--json` passes the raw `AuditEntry[]` through. `action` is an **open string** (ADR 074) — unknown verbs render plainly instead of erroring, so P3's new governance actions (`grant.*`, `claim.*`, `account_status.change`, …) don't require a CLI release. Needs an **active admin identity** like any act (ADR 036); an ambient global-config read can't list who-did-what across the team. The response is parsed through `AuditResponseSchema` at the client boundary. Output: `cmd/audit`-style `audit — <team> (<n> entries)` + rows. Errors: non-admin → `forbidden` (exit 5); `--limit`/`--before` out of range → `bad_request` (exit 2).
+
+### `musterd requests [--pending] [--json]` / `musterd requests decide <id> --approve [--once | --standing | --ttl-hours <n>] | --deny`
+
+The admin surface for the **claim/teammate request lane** (ADR 077) — the other half of `musterd claim`'s pending path. `musterd requests` lists requests (`GET /teams/:slug/requests`), `--pending` filters to open ones, `--json` passes the raw `Request[]`; each row shows `<HH:MM> <id> [<kind>] <target> via <surface> — <status>`. `musterd requests decide <id>` settles a pending request (`POST /teams/:slug/requests/:id/decide`): `--deny` refuses it; `--approve` issues a grant and (if the requesting session still holds its WS) pushes it the terminal `occupied` frame — `delivered:false` means the requester disconnected and should re-run `musterd claim`. The grant **lifetime** is the admin's choice at decide-time: `--once` (default, least-privilege — one occupation), `--standing` (survives until revoked, so a persistent seat re-occupies without re-approval), or `--ttl-hours <n>` (windowed); the three are mutually exclusive. Admin-only (server-enforced `is_admin`, ADR 071); needs an **active admin identity** (ADR 036). Errors: non-admin → `forbidden` (exit 5); unknown/settled request → `not_found`/`conflict`.
 
 ### `musterd notify [--interval <seconds>] [--once]`
 
