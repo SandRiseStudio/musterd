@@ -22,6 +22,11 @@ export interface LiveConfig {
   team: string;
   /** The seat we authenticate as (an observer seat). */
   as: string;
+  /**
+   * The credential (mscr_) — the single v0.3 auth secret. It's the HTTP Bearer for the roster/history/
+   * audit reads AND the `key` the WS `claim` handshake authenticates with (ADR 077). The legacy per-seat
+   * token is no longer accepted by the daemon.
+   */
   token: string;
 }
 
@@ -195,9 +200,11 @@ export async function decideRequest(
 }
 
 /**
- * Provision a hidden read-only observer seat (ADR 063) and return its token. Lets the dashboard be
- * "enter a team and watch" — no pre-made seat. The endpoint is unauthenticated (localhost-trust, like
- * team creation); the seat is hidden from the roster and can't send.
+ * Provision a hidden read-only observer seat (ADR 063). Lets the dashboard be "enter a team and watch"
+ * — no pre-made seat. The endpoint is unauthenticated (localhost-trust, like team creation); the seat is
+ * hidden from the roster and can't send. Returns both secrets: the `token` (HTTP bearer for the roster/
+ * history reads) and the `key` — the human credential (mscr_) the v0.3 WS `claim` handshake authenticates
+ * with (ADR 077). The observer claims its **own** seat, which is self-authorizing (no grant/approval).
  */
 export async function provisionObserver(team: string, name: string): Promise<string> {
   const res = await fetch(`/teams/${encodeURIComponent(team)}/members`, {
@@ -211,7 +218,9 @@ export async function provisionObserver(team: string, name: string): Promise<str
     const msg = (json as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`;
     throw new Error(msg);
   }
-  return (json as { token: string }).token;
+  const cred = (json as { human_credential?: string }).human_credential;
+  if (!cred) throw new Error('observer provisioning did not return a credential (daemon too old?)');
+  return cred;
 }
 
 export interface LiveHandlers {
@@ -222,8 +231,9 @@ export interface LiveHandlers {
 }
 
 /**
- * A self-healing live socket: hello → subscribe `team-all` → stream `deliver`/`presence`, with a
- * 15s heartbeat and capped exponential-backoff reconnect. `close()` stops reconnecting.
+ * A self-healing live socket: `claim` (own observer seat, self-authorizing — ADR 077) → subscribe
+ * `team-all` → stream `deliver`/`presence`, with a 15s heartbeat and capped exponential-backoff
+ * reconnect. `close()` stops reconnecting. A `refused` (bad/stale credential) is terminal.
  */
 export class LiveClient {
   private ws: WebSocket | undefined;
@@ -257,11 +267,11 @@ export class LiveClient {
     ws.onopen = () => {
       ws.send(
         JSON.stringify({
-          type: 'hello',
+          type: 'claim',
           v: PROTOCOL_VERSION,
           team: this.cfg.team,
-          as: this.cfg.as,
-          token: this.cfg.token,
+          key: this.cfg.token,
+          target: { seat: this.cfg.as },
           surface: 'web',
           provenance: 'session',
         }),
@@ -276,7 +286,8 @@ export class LiveClient {
         return;
       }
       switch (frame.type) {
-        case 'welcome':
+        case 'occupied':
+          // The claim succeeded (own observer seat) — subscribe to the firehose + start heartbeating.
           ws.send(JSON.stringify({ type: 'subscribe', scope: 'team-all' }));
           this.hb = setInterval(() => {
             if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'heartbeat' }));
@@ -295,6 +306,21 @@ export class LiveClient {
             frame.status as string,
             frame.surface as string | undefined,
           );
+          break;
+        case 'refused': {
+          // A bad/stale credential (e.g. the observer seat was reclaimed). Terminal — surface the
+          // daemon's hint and stop; the route's reset re-provisions a fresh observer.
+          const hint = typeof frame.hint === 'string' && frame.hint ? ` — ${frame.hint}` : '';
+          this.h.onError?.(`${frame.message as string}${hint}`);
+          this.stopped = true;
+          this.h.onStatus('error');
+          ws.close();
+          break;
+        }
+        case 'pending':
+          // No grant → an admin must approve. Never happens for a self-claimed observer seat, but if it
+          // does, keep the socket open (the server pushes occupied/refused on decision) and say so.
+          this.h.onError?.(String(frame.message ?? 'claim pending — waiting for admin approval'));
           break;
         case 'error': {
           const code = frame.code as string;
