@@ -61,7 +61,7 @@ Isolate dogfood state from your real `~/.musterd` with env: `MUSTERD_CONFIG`, `M
 2. **CLI output must match the Figma terminal frames** (`figma-brief-terminal.md`). Snapshot tests enforce it; a divergence is resolved by fixing code or, with an ADR, the frame — never by silently letting them drift.
 3. **Docs and code never disagree at the end of a commit.** A behavior change updates its doc in the same commit.
 4. **Parse all external input** (frames, HTTP bodies, argv, MCP tool args) through `@musterd/protocol` zod schemas at the boundary. Never trust raw input.
-5. **Never log tokens.** Tokens are shown once at `team add` and stored only as `sha256` on the server / chmod-600 config on clients.
+5. **Never log secrets.** The team **agent key**, **grants**, and human **credentials** (`mskey_`/`msgr_`/`mscr_`) are shown once and stored only as `sha256` on the server / chmod-600 config on clients.
 6. **No new runtime dependency without an ADR** noting why and the alternative considered.
 7. **One Member is not one session.** Presence is where a Member is attached; the Member persists. Don't conflate them in schema, code, or naming.
 

@@ -89,8 +89,8 @@ In `onboard/init.ts`, after a successful `configure()` (right after the `scope` 
 
 The recording also died on identity collisions — member names reused across folders (two `Ada`s, one auto-joining), tokens minted against a since-replaced db, orphaned adapters, a stray `inbox --watch` as the wrong member. The primer doesn't fix that; a small **init-time collision guard** does, and belongs to the same finding:
 
-- **Name already bound elsewhere:** before minting, scan known binding locations (Claude `~/.claude.json` projects + discoverable `.cursor/mcp.json`) for a musterd server whose `MUSTERD_MEMBER` equals the proposed name on the same `MUSTERD_SERVER`/`MUSTERD_TEAM`. If found, warn: *"`<name>` is already wired into `<other folder>` — two folders sharing one member name is the 'N minds, one name' trap. Use a distinct name, or repoint that folder."*
-- **Stale token / replaced db:** when `init` reuses a saved identity, verify the token still authenticates (`GET` a cheap authed endpoint); if it 401s, the db was likely replaced — offer to re-mint rather than silently binding a dead token.
+- **Name already bound elsewhere:** before minting, scan known binding locations (Claude `~/.claude.json` projects + discoverable `.cursor/mcp.json`) for a musterd server whose seat (post-P3: `MUSTERD_CLAIM=seat:<name>`) equals the proposed name on the same `MUSTERD_SERVER`/`MUSTERD_TEAM`. If found, warn: *"`<name>` is already wired into `<other folder>` — two folders sharing one seat name is the 'N minds, one name' trap. Use a distinct name, or repoint that folder."*
+- **Stale key / replaced db:** when `init` reuses a saved identity, verify the agent key/credential still authenticates (`GET` a cheap authed endpoint); if it 401s, the db was likely replaced — offer to re-claim rather than silently binding a dead key.
 - These are warnings/offers, not hard blocks. Full identity enforcement is the v0.3 seat model; this is the cheap operational guard that would have prevented the recording mess.
 
 ## 8. Implementation sketch

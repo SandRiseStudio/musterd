@@ -139,11 +139,11 @@ function AuditPage() {
               />
             </label>
             <label className="lc-form__field">
-              <span>Token</span>
+              <span>Credential</span>
               <input
                 type="password"
                 value={token}
-                placeholder="mskd_…"
+                placeholder="mscr_… (admin credential)"
                 onChange={(e) => setToken(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && void connect()}
               />

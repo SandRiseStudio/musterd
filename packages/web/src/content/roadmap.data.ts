@@ -369,9 +369,8 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'v03-p1-seats',
-    wave: 2,
     title: 'v0.3 P1 — seats data model',
-    status: 'near-term',
+    status: 'shipped',
     category: 'platform',
     blurb: 'The substrate: account_status + capabilities on a seat, roles carrying default capabilities + charter, per-seat narrowing (never widening). Permissive defaults, no enforcement yet.',
     detail:
@@ -393,9 +392,8 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'v03-p3-credentials',
-    wave: 2,
     title: 'v0.3 P3 — credentials & the claim handshake',
-    status: 'near-term',
+    status: 'shipped',
     category: 'platform',
     blurb: 'The breaking auth rework: team agent key + admin-issued grants + human credentials, the WS claim frame replacing hello, and the no-grant request/approval lane — cut over across every surface at once.',
     detail:
@@ -411,20 +409,19 @@ export const ROADMAP: RoadmapItem[] = [
     category: 'transport',
     blurb: 'Plug the agent key + grant + human credential into the already-built secured off-loopback bind, so a teammate on another machine joins over wss with a real credential, not a locally-minted token.',
     detail:
-      'The credential layer ADR 039/040 named but did not build. The secured transport (TLS/wss refuse-plaintext bind, Origin/Host gate) is done and waiting; P4 is mostly integration — the cross-network claim flow over that channel + docs. Falls out of P3’s credential model once it exists.',
+      'The credential layer ADR 039/040 named but did not build. The secured transport (TLS/wss refuse-plaintext bind, Origin/Host gate) is done and waiting; P4 is mostly integration — the cross-network claim flow over that channel + docs. Now unblocked: P3’s agent-key + grant + human-credential model shipped (2026-06-30), so P4 is the remaining cross-network claim flow over the secured channel.',
     refs: [adr(69, 'ADR 069'), adr(39, 'ADR 039'), adr(40, 'ADR 040')],
     dependsOn: ['v03-p3-credentials', 'cross-network'],
   },
   {
     id: 'notification-tiers',
-    wave: 2,
     title: 'Notification tiers',
-    status: 'near-term',
+    status: 'shipped',
     category: 'human-loop',
     blurb: 'The full reachability set: route an agent’s request for help to a human by salience and availability, not only when they are watching.',
     detail:
-      'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is. The localhost availability + urgent down-payment shipped; the governed superset (can_flag_urgent, audit, wasnt_urgent) lands inside v0.3 P2 enforcement, with off_hours/schedule enforcement deferred to Wave 3.',
-    refs: [doc('docs/design/research-foundation.md', 'research-foundation.md')],
+      'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is. The localhost availability + urgent down-payment shipped, then the governed superset (can_flag_urgent gating, audit, wasnt_urgent feedback) shipped inside v0.3 P2 enforcement (ADR 071). Only off_hours/schedule enforcement remains, tracked separately (Wave 3).',
+    refs: [adr(71, 'ADR 071'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
     dependsOn: ['notify-nudge', 'availability-urgent', 'v03-p2-enforcement'],
   },
 

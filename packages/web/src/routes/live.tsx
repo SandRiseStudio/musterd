@@ -242,11 +242,11 @@ function ConnectForm({
               />
             </label>
             <label className="lc-form__field">
-              <span>Token</span>
+              <span>Credential</span>
               <input
                 type="password"
                 value={advanced.token}
-                placeholder="mskd_…"
+                placeholder="mscr_… or mskey_…"
                 onChange={(e) => onAdvanced({ ...advanced, token: e.target.value })}
               />
             </label>

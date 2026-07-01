@@ -72,7 +72,7 @@ Messages carry a typed **Act**, grounded in the [Co-Gym](https://arxiv.org/abs/2
 4. **Protocol over framework.** We don't run your agent — we connect it. Small core, adapters at the edge.
 5. **One member does the work; the team does the coordination.** Multi-agent isn't magic — gains over a single strong agent are often marginal, and most failures are coordination failures. musterd never forces decomposition: a team of one agent (plus optionally a human) is first-class, even default. Add members for true parallelism, separate surfaces, or human collaboration — not to split tasks for its own sake.
 6. **Local-first.** SQLite + a local daemon. No account, no cloud required to use it.
-7. **Secure by default.** Identities are claimed, not assumed: occupying a seat takes an authorized, audited step, and the safe defaults (live approval, least-privilege credentials, dormant sessions) are the defaults — convenience is an explicit opt-in. _(In design — the seat/grant model: [`membership-model.md`](./docs/design/membership-model.md), [`security.md`](./docs/design/security.md).)_
+7. **Secure by default.** Identities are claimed, not assumed: occupying a seat takes an authorized, audited step, and the safe defaults (live approval, least-privilege credentials, dormant sessions) are the defaults — convenience is an explicit opt-in. _(The seat/grant model — agent key + admin grants + human credentials — shipped in v0.3: [`membership-model.md`](./docs/design/membership-model.md), [`security.md`](./docs/design/security.md), [SPEC Appendix A](./SPEC.md).)_
 
 ## How it fits with MCP, A2A, Fleet, CrewAI
 
