@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@musterd/protocol": "workspace:*",
+    "@rive-app/canvas-advanced": "2.38.4",
     "@tanstack/react-router": "1.170.16",
     "@tanstack/react-start": "1.168.26",
     "animejs": "4.5.0",

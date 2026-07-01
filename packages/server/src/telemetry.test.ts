@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   recordError,
   recordLoopClosure,
+  recordTokenUsage,
   registerRuntimeGauges,
   resetTelemetryForTests,
   telemetryEnabled,
@@ -157,5 +158,28 @@ describe('envelope instrumentation', () => {
     expect(byAct['accept']!.count).toBe(1);
     expect(byAct['accept']!.sum).toBe(250);
     expect(byAct['resolve']!.sum).toBe(1_000);
+  });
+
+  it('records self-reported meta.usage tokens by member/direction; ignores junk (ADR 082 slice 4)', async () => {
+    recordTokenUsage(
+      env({
+        id: 'e5',
+        meta: { usage: { input_tokens: 100, output_tokens: 40, model: 'claude-opus-4-8' } },
+      }),
+    );
+    recordTokenUsage(env({ id: 'e6', meta: { usage: { input_tokens: 'lots' } } })); // ignored
+    recordTokenUsage(env({ id: 'e7' })); // no usage — ignored
+
+    const { resourceMetrics } = await reader.collect();
+    const all = resourceMetrics.scopeMetrics.flatMap((s) => s.metrics);
+    const tokens = all.find((m) => m.descriptor.name === 'musterd.agent.tokens')!;
+    expect(tokens).toBeTruthy();
+    const byDir = Object.fromEntries(
+      tokens.dataPoints.map((dp) => [dp.attributes['musterd.token.direction'], dp]),
+    );
+    expect(byDir['input']!.value).toBe(100);
+    expect(byDir['output']!.value).toBe(40);
+    expect(byDir['input']!.attributes['musterd.member']).toBe('Ada');
+    expect(byDir['input']!.attributes['musterd.model']).toBe('claude-opus-4-8');
   });
 });

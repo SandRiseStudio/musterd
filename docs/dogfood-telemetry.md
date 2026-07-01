@@ -73,7 +73,21 @@ info on 2xx/3xx, **warn on 4xx, error on 5xx** (errors land in `daemon.err.log`,
 found empty by design). Path only, never query/headers (no secrets); healthy `/health` polls are
 skipped so the CLI guard doesn't drown the log.
 
-## Not yet closed (later slices, ADR 082)
+## Per-agent token usage (slice 4 — the in-band half)
 
-Per-agent token/cost + the git/harness-side coordination metrics (token ratio, wasted-work, dup-rate)
-and a cross-agent trace (slice 4).
+Any sender can self-report its harness token usage by attaching **`meta.usage`** to any act:
+
+```jsonc
+{ "act": "status_update", "body": "…", "meta": { "usage": { "input_tokens": 12000, "output_tokens": 800, "model": "claude-opus-4-8" } } }
+```
+
+The route path emits it as **`musterd.agent.tokens`** (counter, by `musterd.member` /
+`musterd.token.direction` / `musterd.model`). Opt-in and harness-agnostic — in-band self-report is the
+only path that covers non-Claude harnesses (finding 001: a Cursor/GLM agent's transcript was
+unrecoverable). Numbers only; junk is ignored.
+
+## Not yet closed (ADR 082 follow-ups)
+
+An automatic usage emitter (hook/wrapper that reads harness transcripts and attaches `meta.usage`);
+the git-side metrics (wasted-work ratio, dup-rate — lanes territory); a cross-agent distributed trace
+over ADR 011 traceparent propagation.
