@@ -75,6 +75,7 @@ interface Instruments {
   errors: Counter;
   presenceChurn: Counter;
   loopLatency: Histogram;
+  agentTokens: Counter;
 }
 
 // Created lazily on first use (i.e. after startTelemetry has registered a provider) so the
@@ -101,6 +102,10 @@ function ix(): Instruments {
       description:
         'Time to close a coordination loop: accept/decline → the request_help/handoff it answers, resolve → its thread root (finding 001 "directed-act latency", ADR 082 slice 3)',
       unit: 'ms',
+    }),
+    agentTokens: meter.createCounter('musterd.agent.tokens', {
+      description:
+        'Self-reported harness token usage (meta.usage on any act), by member/direction/model (ADR 082 slice 4)',
     }),
   };
   return instruments;
@@ -163,6 +168,31 @@ export function recordError(errorClass: string): void {
  */
 export function recordLoopClosure(closingAct: string, latencyMs: number): void {
   ix().loopLatency.record(latencyMs, { 'musterd.act': closingAct });
+}
+
+/**
+ * Record self-reported token usage a sender attached as `meta.usage` (ADR 082 slice 4):
+ * `{ input_tokens?, output_tokens?, model? }`. Opt-in and harness-agnostic — any agent that knows
+ * its own usage can report it in-band, which is the only path that covers non-Claude harnesses
+ * (finding 001: riley's transcript was unrecoverable). Numbers only; nothing else is read.
+ */
+export function recordTokenUsage(env: Envelope): void {
+  const usage = (env.meta as { usage?: unknown } | null | undefined)?.usage;
+  if (typeof usage !== 'object' || usage === null) return;
+  const u = usage as { input_tokens?: unknown; output_tokens?: unknown; model?: unknown };
+  const model = typeof u.model === 'string' ? { 'musterd.model': u.model } : {};
+  for (const [dir, val] of [
+    ['input', u.input_tokens],
+    ['output', u.output_tokens],
+  ] as const) {
+    if (typeof val === 'number' && Number.isFinite(val) && val > 0) {
+      ix().agentTokens.add(val, {
+        'musterd.member': env.from,
+        'musterd.token.direction': dir,
+        ...model,
+      });
+    }
+  }
 }
 
 /** Count a presence attach/detach for churn (observability.md §4). */

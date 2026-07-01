@@ -7,7 +7,7 @@ import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
-import { recordLoopClosure, withEnvelopeSpan } from '../telemetry.js';
+import { recordLoopClosure, recordTokenUsage, withEnvelopeSpan } from '../telemetry.js';
 
 export interface RouteResult {
   message: MessageRow;
@@ -139,6 +139,8 @@ function routeEnvelopeInner(
     const rootTs = getMessageTs(ctx.db, team.id, env.thread);
     if (rootTs !== null && env.ts >= rootTs) recordLoopClosure('resolve', env.ts - rootTs);
   }
+  // Self-reported token usage (meta.usage — ADR 082 slice 4): opt-in, harness-agnostic.
+  recordTokenUsage(outgoingEnv);
 
   // Deliver live to whoever is present. Durability is the log; this is the push.
   let delivered = 0;
