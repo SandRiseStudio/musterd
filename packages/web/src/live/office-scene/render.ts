@@ -1,12 +1,14 @@
 import { depth, FLOOR, project, THICK, type Fit, type Pt } from './iso';
-import { DESK_SLOTS, ENTRANCE, NOOK, PLANTS, type DeskSlot } from './layout';
+import { DESK_SLOTS, ENTRANCE, HUDDLES, NOOK, PLANTS, type DeskSlot, type Huddle } from './layout';
 import type { Placement } from './seating';
 import type { Dir, OfficeNode } from './types';
 
 /**
- * Canvas-2D drawing for the office (M1). Everything is drawn back-to-front (painter's order by logical
- * depth) so seated members sit correctly behind their desks and nearer pods overlap farther ones. The
- * static scene is baked once per data/resize; transient act cues are drawn on top each frame.
+ * Canvas-2D drawing for the office. Everything is painter-ordered by logical depth (lx+ly) so seated
+ * members sit correctly behind their desks and nearer pods overlap farther ones. The static scene is
+ * baked once per data/resize; transient act cues are drawn on top each frame. Fidelity ported from the
+ * Figma "Floor Plan": legged desks + task chairs + oriented glowing monitors, a rich break nook
+ * (couch + armchairs + kitchenette), huddle spaces, and big floor plants.
  */
 
 const FWD: Record<Dir, [number, number]> = {
@@ -31,11 +33,15 @@ function mul(h: string, f: number): string {
   const c = (v: number) => Math.round(Math.min(255, v * f));
   return `rgb(${c(r)}, ${c(g)}, ${c(b)})`;
 }
-/** Darken/lighten an `hsl()` string by a lightness factor (avatars use member `hsl` colours). */
+/** Darken/lighten an `hsl()` string by a lightness factor. */
 function hslL(color: string, f: number): string {
   const m = /hsl\(\s*([-\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\s*\)/.exec(color);
   if (!m) return color;
   return `hsl(${m[1]}, ${m[2]}%, ${Math.max(0, Math.min(100, Number(m[3]) * f))}%)`;
+}
+/** Shade either an `hsl()` (member) or `#hex` (furniture) colour. */
+function dim(color: string, f: number): string {
+  return color.startsWith('hsl') ? hslL(color, f) : mul(color, f);
 }
 
 /** The office act-tone palette (mirrors Live.css `--lc-*`). */
@@ -116,9 +122,13 @@ function box(
   const lo = baseUp * fit.scale;
   const hi = (baseUp + hPx) * fit.scale;
   const dn = (p: Pt, u: number): Pt => ({ x: p.x, y: p.y - u });
-  quad(ctx, [dn(B, lo), dn(C, lo), dn(C, hi), dn(B, hi)], mul(base, 0.72));
-  quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], mul(base, 0.86));
+  quad(ctx, [dn(B, lo), dn(C, lo), dn(C, hi), dn(B, hi)], shade(base, 0.72));
+  quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], shade(base, 0.86));
   quad(ctx, [dn(A, hi), dn(B, hi), dn(C, hi), dn(D, hi)], base);
+}
+/** Face shading that also handles hsl bases (member-tinted furniture like chairs). */
+function shade(base: string, f: number): string {
+  return dim(base, f);
 }
 
 // ── furniture ─────────────────────────────────────────────────────────────
@@ -143,23 +153,64 @@ function rug(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, r:
   quad(ctx, [A, B, C, D], fill);
 }
 
+function couch(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, c: string, dir: Dir): void {
+  const f = FWD[dir];
+  const p: [number, number] = [-f[1], f[0]];
+  const sn = f[1] !== 0;
+  const L = 84;
+  const Dp = 38;
+  box(ctx, fit, lx - f[0] * (Dp / 2 - 3), ly - f[1] * (Dp / 2 - 3), sn ? L : 8, sn ? 8 : L, 26, dim(c, 0.9));
+  box(ctx, fit, lx, ly, sn ? L : Dp, sn ? Dp : L, 15, c);
+  box(ctx, fit, lx + p[0] * (L / 2 - 4), ly + p[1] * (L / 2 - 4), sn ? 8 : Dp, sn ? Dp : 8, 20, dim(c, 0.95));
+  box(ctx, fit, lx - p[0] * (L / 2 - 4), ly - p[1] * (L / 2 - 4), sn ? 8 : Dp, sn ? Dp : 8, 20, dim(c, 0.95));
+}
+
+function armchair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, c: string, dir: Dir): void {
+  const f = FWD[dir];
+  const sn = f[1] !== 0;
+  box(ctx, fit, lx - f[0] * 16, ly - f[1] * 16, sn ? 40 : 8, sn ? 8 : 40, 24, dim(c, 0.9));
+  box(ctx, fit, lx, ly, sn ? 40 : 42, sn ? 42 : 40, 15, c);
+}
+
+function ctable(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
+  const s = project(lx, ly, fit);
+  ellipse(ctx, { x: s.x, y: s.y }, 32 * fit.scale, 10 * fit.scale, 'rgba(0,0,0,0.12)');
+  box(ctx, fit, lx, ly, 46, 32, 12, WOOD_TOP);
+}
+
 function drawNook(ctx: CanvasRenderingContext2D, fit: Fit): void {
-  rug(ctx, fit, NOOK.lx, NOOK.ly, 120, '#ce9256');
-  box(ctx, fit, NOOK.lx, NOOK.ly - 44, 96, 30, 24, '#e3a72b'); // couch back+seat (chunky)
-  box(ctx, fit, NOOK.lx, NOOK.ly + 34, 54, 40, 12, WOOD_TOP); // coffee table
+  const { lx, ly } = NOOK;
+  rug(ctx, fit, lx, ly, 132, '#ce9256');
+  // kitchenette along the back
+  drawPlant(ctx, fit, lx + 104, ly - 34, 'fiddle');
+  box(ctx, fit, lx - 96, ly - 34, 32, 28, 48, '#edeff1'); // fridge
+  box(ctx, fit, lx - 40, ly - 42, 72, 26, 30, '#8a5a34'); // counter
+  box(ctx, fit, lx - 58, ly - 42, 14, 12, 5, '#33272b'); // coffee machine
+  couch(ctx, fit, lx + 24, ly - 4, '#e3a72b', 'S');
+  armchair(ctx, fit, lx - 44, ly + 52, '#c9744a', 'E');
+  ctable(ctx, fit, lx + 24, ly + 48);
+  armchair(ctx, fit, lx + 88, ly + 46, '#c9744a', 'W');
+}
+
+function drawHuddle(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): void {
+  rug(ctx, fit, h.lx, h.ly, 62, h.rug);
+  box(ctx, fit, h.lx, h.ly - 40, 26, 26, 18, h.poufs[0]);
+  box(ctx, fit, h.lx, h.ly, 40, 40, 12, WOOD_TOP);
+  box(ctx, fit, h.lx + 38, h.ly + 24, 26, 26, 18, h.poufs[1]);
+  box(ctx, fit, h.lx - 38, h.ly + 24, 26, 26, 18, h.poufs[2]);
 }
 
 function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
-  rug(ctx, fit, ENTRANCE.lx, ENTRANCE.ly, 66, '#7a4e2d');
-  // a simple glass doorway: two posts + a translucent panel
-  box(ctx, fit, ENTRANCE.lx - 42, ENTRANCE.ly - 40, 8, 8, 92, '#7e6042');
-  box(ctx, fit, ENTRANCE.lx + 42, ENTRANCE.ly - 40, 8, 8, 92, '#7e6042');
-  const a = project(ENTRANCE.lx - 42, ENTRANCE.ly - 40, fit);
-  const b = project(ENTRANCE.lx + 42, ENTRANCE.ly - 40, fit);
-  const up = 92 * fit.scale;
-  ctx.globalAlpha = 0.28;
+  rug(ctx, fit, ENTRANCE.lx, ENTRANCE.ly, 70, '#7a4e2d');
+  box(ctx, fit, ENTRANCE.lx - 44, ENTRANCE.ly - 42, 8, 8, 96, '#7e6042');
+  box(ctx, fit, ENTRANCE.lx + 44, ENTRANCE.ly - 42, 8, 8, 96, '#7e6042');
+  const a = project(ENTRANCE.lx - 44, ENTRANCE.ly - 42, fit);
+  const b = project(ENTRANCE.lx + 44, ENTRANCE.ly - 42, fit);
+  const up = 96 * fit.scale;
+  ctx.globalAlpha = 0.3;
   quad(ctx, [a, b, { x: b.x, y: b.y - up }, { x: a.x, y: a.y - up }], '#cfe7ee');
   ctx.globalAlpha = 1;
+  box(ctx, fit, ENTRANCE.lx - 44, ENTRANCE.ly - 42, 92, 6, 8, '#7e6042', 96);
 }
 
 function drawPlant(
@@ -171,29 +222,32 @@ function drawPlant(
 ): void {
   const base = project(lx, ly, fit);
   const s = fit.scale;
-  box(ctx, fit, lx, ly, 22, 22, 16, '#b9603a');
-  const top = { x: base.x, y: base.y - 16 * s };
+  ellipse(ctx, { x: base.x, y: base.y + 3 * s }, 20 * s, 6 * s, 'rgba(0,0,0,0.14)');
+  box(ctx, fit, lx, ly, 24, 24, 18, '#b9603a');
+  const top = { x: base.x, y: base.y - 18 * s };
   if (species === 'snake') {
     for (const [dx, h] of [
-      [-11, 40],
-      [-3, 50],
-      [6, 44],
-      [13, 34],
+      [-13, 46],
+      [-4, 56],
+      [6, 50],
+      [14, 38],
     ] as const) {
-      ellipse(ctx, { x: top.x + dx * s, y: top.y - (h / 2) * s }, 5 * s, (h / 2) * s, '#3e6b3a');
+      ellipse(ctx, { x: top.x + dx * s, y: top.y - (h / 2) * s }, 5.5 * s, (h / 2) * s, '#3e6b3a');
+      ellipse(ctx, { x: top.x + dx * s, y: top.y - h * s + 5 * s }, 4 * s, 6 * s, '#6fa35a');
     }
   } else {
-    for (const [dx, dy] of [
-      [-14, -40],
-      [7, -46],
-      [-2, -30],
+    for (const [dx, dy, r] of [
+      [-16, -46, 17],
+      [7, -52, 16],
+      [-2, -32, 14],
     ] as const) {
-      ellipse(ctx, { x: top.x + dx * s, y: top.y + dy * s }, 15 * s, 14 * s, '#6e9e52');
+      ellipse(ctx, { x: top.x + dx * s, y: top.y + dy * s }, r * s, (r - 2) * s, '#6e9e52');
+      ellipse(ctx, { x: top.x + (dx + 5) * s, y: top.y + (dy + 5) * s }, (r * 0.5) * s, (r * 0.4) * s, '#86b368');
     }
   }
 }
 
-// ── avatar (M1 placeholder — Rive replaces this in M2) ───────────────────────
+// ── avatar (placeholder — Rive replaces this in M2) ──────────────────────────
 function avatar(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -207,17 +261,12 @@ function avatar(
   const s = fit.scale * (small ? 0.72 : 1);
   const acc = node.color;
   const dk = hslL(acc, 0.7);
-  // shadow
-  ellipse(ctx, { x: p.x, y: p.y }, 24 * s, 6 * s, 'rgba(0,0,0,0.16)');
-  // body
+  ellipse(ctx, { x: p.x, y: p.y }, 24 * s, 6 * s, 'rgba(0,0,0,0.18)');
   roundRect(ctx, p.x - 19 * s, p.y - 44 * s, 38 * s, 32 * s, 12 * s, acc);
-  // arms
   roundRect(ctx, p.x - 25 * s, p.y - 42 * s, 8 * s, 22 * s, 4 * s, dk);
   roundRect(ctx, p.x + 17 * s, p.y - 42 * s, 8 * s, 22 * s, 4 * s, dk);
-  // head
   ellipse(ctx, { x: p.x, y: p.y - 56 * s }, 15 * s, 15 * s, SKIN);
   if (node.kind === 'agent') {
-    // antenna + always-on status LED (the agent tell)
     ctx.strokeStyle = acc;
     ctx.lineWidth = 2 * s;
     ctx.beginPath();
@@ -225,15 +274,10 @@ function avatar(
     ctx.lineTo(p.x, p.y - 78 * s);
     ctx.stroke();
     ellipse(ctx, { x: p.x, y: p.y - 80 * s }, 4 * s, 4 * s, '#74e08a');
-    if (dir === 'S') {
-      // visor
-      roundRect(ctx, p.x - 11 * s, p.y - 61 * s, 22 * s, 8 * s, 4 * s, '#2e3a38');
-    }
-    ellipse(ctx, { x: p.x, y: p.y - 34 * s }, 4 * s, 4 * s, '#74e08a'); // chest LED
+    if (dir === 'S') roundRect(ctx, p.x - 11 * s, p.y - 61 * s, 22 * s, 8 * s, 4 * s, '#2e3a38');
+    ellipse(ctx, { x: p.x, y: p.y - 34 * s }, 4 * s, 4 * s, '#74e08a');
   } else {
-    // hair (human tell)
-    const hair = hslL(node.color, 0.42);
-    ellipse(ctx, { x: p.x, y: p.y - 62 * s }, 16 * s, 8 * s, hair);
+    ellipse(ctx, { x: p.x, y: p.y - 62 * s }, 16 * s, 8 * s, hslL(node.color, 0.42));
     if (dir === 'S') {
       ellipse(ctx, { x: p.x - 6 * s, y: p.y - 55 * s }, 2.4 * s, 2.4 * s, '#2e2a26');
       ellipse(ctx, { x: p.x + 6 * s, y: p.y - 55 * s }, 2.4 * s, 2.4 * s, '#2e2a26');
@@ -241,7 +285,45 @@ function avatar(
   }
 }
 
-// ── a single workstation (desk + oriented monitor + seated member) ───────────
+// ── a workstation: legged desk + task chair + oriented glowing monitor + member ──
+function chair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, dir: Dir, color: string): void {
+  const f = FWD[dir];
+  const sn = f[1] !== 0;
+  box(ctx, fit, lx, ly, sn ? 34 : 30, sn ? 30 : 34, 14, color); // seat
+  box(ctx, fit, lx - f[0] * 14, ly - f[1] * 14, sn ? 34 : 7, sn ? 7 : 34, 30, dim(color, 0.85)); // backrest
+}
+
+function monitor(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  mx: number,
+  my: number,
+  dir: Dir,
+  working: boolean,
+  surfaceUp: number,
+): void {
+  const sn = dir === 'S' || dir === 'N';
+  const pw = sn ? 34 : 5;
+  const pd = sn ? 5 : 34;
+  box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
+  box(ctx, fit, mx, my, pw, pd, 22, '#2a2e33', surfaceUp + 8);
+  const scr = working ? '#7fe0ce' : '#4a6b66';
+  const lo = (surfaceUp + 8) * fit.scale;
+  const hi = (surfaceUp + 30) * fit.scale;
+  const dn = (p: Pt, u: number): Pt => ({ x: p.x, y: p.y - u });
+  if (dir === 'N') {
+    const D = project(mx - pw / 2, my + pd / 2, fit);
+    const C = project(mx + pw / 2, my + pd / 2, fit);
+    quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], scr);
+  } else if (dir === 'W') {
+    const B = project(mx + pw / 2, my - pd / 2, fit);
+    const C = project(mx + pw / 2, my + pd / 2, fit);
+    quad(ctx, [dn(B, lo), dn(C, lo), dn(C, hi), dn(B, hi)], scr);
+  }
+  const g = project(mx, my, fit);
+  ellipse(ctx, { x: g.x, y: g.y - (surfaceUp + 32) * fit.scale }, 12 * fit.scale, 4 * fit.scale, working ? '#59c3a3' : '#33504c');
+}
+
 function drawWorkstation(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -251,17 +333,19 @@ function drawWorkstation(
   const { lx, ly, dir } = slot;
   const f = FWD[dir];
   const sn = dir === 'S' || dir === 'N';
-  const W = 104;
-  const Df = 70;
-  const DH = 40;
+  const W = 100;
+  const Df = 68;
+  const DH = 38;
   const ST = 8;
   const wx = sn ? W : Df;
   const dy = sn ? Df : W;
   const memX = lx - f[0] * (Df / 2 + 6);
   const memY = ly - f[1] * (Df / 2 + 6);
+  const working = node?.activity === 'working';
+  const chairColor = node ? hslL(node.color, 0.5) : '#4a5560';
 
-  const drawDesk = () => {
-    // four legs
+  const drawChair = () => chair(ctx, fit, lx - f[0] * (Df / 2 + 17), ly - f[1] * (Df / 2 + 17), dir, chairColor);
+  const drawDeskMon = () => {
     for (const [sx, sy] of [
       [-1, -1],
       [1, -1],
@@ -270,45 +354,30 @@ function drawWorkstation(
     ] as const) {
       box(ctx, fit, lx + sx * (wx / 2 - 6), ly + sy * (dy / 2 - 6), 8, 8, DH, '#6e4726');
     }
-    box(ctx, fit, lx, ly, wx, dy, ST, WOOD, DH); // slab
-  };
-  const drawMonitor = () => {
-    const mx = lx + f[0] * (Df / 2 - 12);
-    const my = ly + f[1] * (Df / 2 - 12);
-    box(ctx, fit, mx, my, sn ? 40 : 6, sn ? 6 : 40, 20, '#2a2e33', DH + ST);
-    // screen glow — bright when working, dim when idle
-    const glow = node && node.activity === 'working' ? '#59c3a3' : '#3a5450';
-    const g = project(mx, my, fit);
-    const up = (DH + ST + 18) * fit.scale;
-    ellipse(ctx, { x: g.x, y: g.y - up }, 13 * fit.scale, 4 * fit.scale, glow);
+    box(ctx, fit, lx, ly, wx, dy, ST, WOOD, DH);
+    monitor(ctx, fit, lx + f[0] * (Df / 2 - 12), ly + f[1] * (Df / 2 - 12), dir, working, DH + ST);
   };
   const drawMember = () => {
     if (node) avatar(ctx, fit, memX, memY, node, dir);
   };
 
-  const behind = dir === 'S' || dir === 'E';
-  if (behind) {
+  if (dir === 'S' || dir === 'E') {
+    drawChair();
     drawMember();
-    drawDesk();
-    drawMonitor();
+    drawDeskMon();
   } else {
-    drawDesk();
-    drawMonitor();
+    drawDeskMon();
     drawMember();
+    drawChair();
   }
 }
 
 export interface SceneAnchors {
-  /** member name → head-top screen point (for HTML labels + act cues). */
   heads: Map<string, Pt>;
-  /** member name → desk/base screen point. */
   bases: Map<string, Pt>;
 }
 
-/**
- * Draw the whole static office to `ctx` in painter's order, returning per-member screen anchors so the
- * caller can place name labels and act cues. `placements` maps member → seat; `byName` supplies the node.
- */
+/** Draw the whole static office in painter's order, returning per-member screen anchors. */
 export function renderScene(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -317,7 +386,6 @@ export function renderScene(
 ): SceneAnchors {
   drawFloor(ctx, fit);
 
-  // seat index → member (for desks)
   const slotMember = new Map<number, string>();
   const nookMembers: string[] = [];
   const stripMembers: string[] = [];
@@ -343,6 +411,7 @@ export function renderScene(
     items.push({ d: depth(plant.lx, plant.ly), fn: () => drawPlant(ctx, fit, plant.lx, plant.ly, plant.species) });
   }
   items.push({ d: depth(NOOK.lx, NOOK.ly) - 1, fn: () => drawNook(ctx, fit) });
+  for (const h of HUDDLES) items.push({ d: depth(h.lx, h.ly), fn: () => drawHuddle(ctx, fit, h) });
   items.push({ d: depth(ENTRANCE.lx, ENTRANCE.ly), fn: () => drawEntrance(ctx, fit) });
 
   for (const slot of DESK_SLOTS) {
@@ -351,36 +420,32 @@ export function renderScene(
     items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node) });
     if (name && node) {
       const f = FWD[slot.dir];
-      const base = project(slot.lx - f[0] * 41, slot.ly - f[1] * 41, fit);
-      bases.set(name, base);
-      heads.set(name, { x: base.x, y: base.y - 74 * s });
+      const b = project(slot.lx - f[0] * 40, slot.ly - f[1] * 40, fit);
+      bases.set(name, b);
+      heads.set(name, { x: b.x, y: b.y - 74 * s });
     }
   }
 
-  // away members clustered on the nook rug
   nookMembers.forEach((name, i) => {
     const node = byName.get(name);
     if (!node) return;
-    const col = i % 3;
-    const row = Math.floor(i / 3);
-    const lx = NOOK.lx - 40 + col * 40;
-    const ly = NOOK.ly + 20 + row * 34;
+    const lx = NOOK.lx - 40 + (i % 3) * 40;
+    const ly = NOOK.ly + 44 + Math.floor(i / 3) * 34;
     items.push({ d: depth(lx, ly) + 0.5, fn: () => avatar(ctx, fit, lx, ly, node, 'S', true) });
-    const base = project(lx, ly, fit);
-    bases.set(name, base);
-    heads.set(name, { x: base.x, y: base.y - 54 * s });
+    const b = project(lx, ly, fit);
+    bases.set(name, b);
+    heads.set(name, { x: b.x, y: b.y - 54 * s });
   });
 
-  // overflow members queue near the entrance
   stripMembers.forEach((name, i) => {
     const node = byName.get(name);
     if (!node) return;
     const lx = ENTRANCE.lx - 70 + (i % 4) * 46;
-    const ly = ENTRANCE.ly - 90 - Math.floor(i / 4) * 40;
+    const ly = ENTRANCE.ly - 92 - Math.floor(i / 4) * 40;
     items.push({ d: depth(lx, ly), fn: () => avatar(ctx, fit, lx, ly, node, 'N', true) });
-    const base = project(lx, ly, fit);
-    bases.set(name, base);
-    heads.set(name, { x: base.x, y: base.y - 54 * s });
+    const b = project(lx, ly, fit);
+    bases.set(name, b);
+    heads.set(name, { x: b.x, y: b.y - 54 * s });
   });
 
   items.sort((a, b) => a.d - b.d);
@@ -389,12 +454,12 @@ export function renderScene(
   return { heads, bases };
 }
 
-/** A transient act cue (M1: a tinted ring + optional glyph over a desk). */
+/** A transient act cue (a tinted ring + optional glyph over a desk). */
 export interface Cue {
   at: Pt;
   color: string;
   glyph: '' | '?' | '!' | '📣' | '✓' | '↦';
-  t: number; // 0..1 progress
+  t: number;
   urgent: boolean;
 }
 

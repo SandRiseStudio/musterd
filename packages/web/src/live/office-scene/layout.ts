@@ -1,10 +1,10 @@
 import type { Dir } from './types';
 
 /**
- * The office floor plan (M1): 12 desk slots distributed across the interior and edges, mixed facings,
- * around a central break nook, with a glass entrance at the front. Anchors are logical floor coords
- * (see iso.ts, FLOOR=900). Ported from the Figma "Floor Plan" frame; kept as individual desks for M1
- * (shared benches/L-pods are an M3 fidelity pass).
+ * The office floor plan: 12 desk slots distributed across the interior + edges (mixed facings), a rich
+ * break nook (back-right), a glass entrance (front-left), two huddle spaces, and big floor plants —
+ * ported from the Figma "Floor Plan" frame. Anchors are logical floor coords (iso.ts, FLOOR=900).
+ * Zones (nook / entrance / huddles) are kept clear of desks so the room reads uncluttered.
  */
 
 export interface DeskSlot {
@@ -17,25 +17,37 @@ export interface DeskSlot {
 }
 
 export const DESK_SLOTS: DeskSlot[] = [
-  { id: 0, lx: 165, ly: 150, dir: 'S' },
-  { id: 1, lx: 340, ly: 150, dir: 'S' },
-  { id: 2, lx: 560, ly: 150, dir: 'E' },
-  { id: 3, lx: 740, ly: 175, dir: 'W' },
-  { id: 4, lx: 150, ly: 360, dir: 'E' },
-  { id: 5, lx: 335, ly: 385, dir: 'N' },
-  { id: 6, lx: 745, ly: 385, dir: 'W' },
-  { id: 7, lx: 150, ly: 585, dir: 'E' },
-  { id: 8, lx: 745, ly: 585, dir: 'W' },
-  { id: 9, lx: 320, ly: 720, dir: 'S' },
-  { id: 10, lx: 470, ly: 735, dir: 'N' },
-  { id: 11, lx: 640, ly: 720, dir: 'S' },
+  { id: 0, lx: 150, ly: 150, dir: 'S' },
+  { id: 1, lx: 330, ly: 150, dir: 'S' },
+  { id: 2, lx: 470, ly: 160, dir: 'E' },
+  { id: 3, lx: 150, ly: 330, dir: 'E' },
+  { id: 4, lx: 350, ly: 340, dir: 'N' },
+  { id: 5, lx: 620, ly: 440, dir: 'N' },
+  { id: 6, lx: 780, ly: 430, dir: 'W' },
+  { id: 7, lx: 150, ly: 610, dir: 'N' },
+  { id: 8, lx: 360, ly: 545, dir: 'N' },
+  { id: 9, lx: 780, ly: 630, dir: 'W' },
+  { id: 10, lx: 340, ly: 735, dir: 'S' },
+  { id: 11, lx: 650, ly: 760, dir: 'N' },
 ];
 
 /** The break nook — where `away` members drift; also the broadcast megaphone spot. */
-export const NOOK = { lx: 460, ly: 470 };
+export const NOOK = { lx: 700, ly: 190 };
 
-/** The glass entrance (front edge) — the enter/exit path endpoint and the overflow strip anchor. */
-export const ENTRANCE = { lx: 470, ly: 845 };
+/** The glass entrance (front-left edge) — the enter/exit path endpoint + overflow strip anchor. */
+export const ENTRANCE = { lx: 185, ly: 815 };
+
+export interface Huddle {
+  lx: number;
+  ly: number;
+  rug: string;
+  poufs: [string, string, string];
+}
+
+export const HUDDLES: Huddle[] = [
+  { lx: 255, ly: 470, rug: '#7fb4aa', poufs: ['#f06d5a', '#e3a72b', '#8b6fd6'] },
+  { lx: 525, ly: 625, rug: '#cc7a52', poufs: ['#59c3a3', '#e86a9a', '#4da3e0'] },
+];
 
 export interface Plant {
   lx: number;
@@ -44,9 +56,10 @@ export interface Plant {
 }
 
 export const PLANTS: Plant[] = [
-  { lx: 70, ly: 120, species: 'snake' },
-  { lx: 840, ly: 110, species: 'fiddle' },
-  { lx: 70, ly: 640, species: 'fiddle' },
-  { lx: 850, ly: 700, species: 'snake' },
-  { lx: 470, ly: 60, species: 'fiddle' },
+  { lx: 70, ly: 110, species: 'snake' },
+  { lx: 470, ly: 55, species: 'fiddle' },
+  { lx: 855, ly: 130, species: 'fiddle' },
+  { lx: 60, ly: 720, species: 'fiddle' },
+  { lx: 855, ly: 760, species: 'snake' },
+  { lx: 540, ly: 855, species: 'fiddle' },
 ];
