@@ -18,6 +18,9 @@ export const Route = createFileRoute('/live')({
 });
 
 const TEAM_KEY = 'musterd.live.team';
+const PANEL_KEY = 'musterd.live.panel';
+/** Office panel presentation: normal (in the split), collapsed (hidden), or companion (fills the window). */
+type PanelMode = 'normal' | 'collapsed' | 'companion';
 const observerKey = (team: string) => `musterd.live.observer.${team}`;
 
 interface ObserverCreds {
@@ -50,6 +53,16 @@ function LivePage() {
   const [cfg, setCfg] = useState<LiveConfig | null>(null);
   const [provisioning, setProvisioning] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [panel, setPanel] = useState<PanelMode>('normal');
+
+  const setPanelMode = (m: PanelMode) => {
+    setPanel(m);
+    try {
+      window.localStorage.setItem(PANEL_KEY, m);
+    } catch {
+      /* private mode — mode just won't persist */
+    }
+  };
 
   const { envelopes, roster, status, error, liveIds } = useLiveStream(cfg);
 
@@ -98,6 +111,13 @@ function LivePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Restore the saved office panel mode (SSR-safe; once on the client).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem(PANEL_KEY);
+    if (saved === 'collapsed' || saved === 'companion' || saved === 'normal') setPanel(saved);
+  }, []);
+
   // On a terminal connection error (e.g. a stale observer token after a daemon reset), drop the
   // stored observer so the next Watch re-provisions a fresh one.
   const reset = () => {
@@ -113,6 +133,7 @@ function LivePage() {
         <span className="lc__word">musterd</span>
         {connected && <span className="lc__team">/ {cfg!.team}</span>}
         <span className="lc__spacer" />
+        {connected && <PanelControls mode={panel} onMode={setPanelMode} />}
         {connected && <SoundToggle />}
         <StatusPill status={status} live={roster.filter((m) => m.presence !== 'offline').length} />
       </header>
@@ -134,7 +155,7 @@ function LivePage() {
               {error} <button onClick={reset}>reset &amp; reconnect</button>
             </div>
           )}
-          <div className="lc__canvas">
+          <div className={`lc__canvas lc__canvas--${panel}`}>
             <ConstellationGL roster={roster} envelopes={envelopes} liveIds={liveIds} />
             <RosterPanel roster={roster} />
             <Stream envelopes={envelopes} roster={roster} liveIds={liveIds} />
@@ -174,6 +195,47 @@ function SoundToggle() {
         )}
       </svg>
     </button>
+  );
+}
+
+/**
+ * Office panel controls: collapse/expand the office within the split, and a "companion" toggle that
+ * makes the office fill the browser window (not OS fullscreen) with the roster/stream tucked away.
+ */
+function PanelControls({ mode, onMode }: { mode: PanelMode; onMode: (m: PanelMode) => void }) {
+  const collapsed = mode === 'collapsed';
+  const companion = mode === 'companion';
+  return (
+    <>
+      <button
+        type="button"
+        className="lc__pbtn"
+        onClick={() => onMode(collapsed ? 'normal' : 'collapsed')}
+        aria-pressed={collapsed}
+        title={collapsed ? 'Show the office' : 'Collapse the office'}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="2" y="3" width="12" height="10" rx="1.6" />
+          <path d="M6.5 3v10" />
+          {collapsed ? <path d="M9 6.2 10.8 8 9 9.8" /> : <path d="M10.8 6.2 9 8l1.8 1.8" />}
+        </svg>
+      </button>
+      <button
+        type="button"
+        className={`lc__pbtn${companion ? ' lc__pbtn--on' : ''}`}
+        onClick={() => onMode(companion ? 'normal' : 'companion')}
+        aria-pressed={companion}
+        title={companion ? 'Exit companion mode' : 'Companion mode — fill the window'}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          {companion ? (
+            <path d="M6.5 3v3.5H3M9.5 3v3.5H13M6.5 13V9.5H3M9.5 13V9.5H13" />
+          ) : (
+            <path d="M3 6.5V3h3.5M13 6.5V3H9.5M3 9.5V13h3.5M13 9.5V13H9.5" />
+          )}
+        </svg>
+      </button>
+    </>
   );
 }
 
