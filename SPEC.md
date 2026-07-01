@@ -268,4 +268,4 @@ Add `claim_conflict` (seat occupied; 409), `expired_grant` (410/403). Reuse `for
 
 - `members` → `seats` (+ `role`, `account_status`; drop `token_hash`). Add `roles`, `grants`, `requests`, `audit`, and team `policy`/`agent_key_hash`, per-human `credential_hash`.
 - Schema migration; since musterd is pre-1.0 and local, a one-shot reset of existing local DBs is acceptable (documented), or a best-effort migration that mints an agent key, creates one role per distinct `members.role`, turns members into `active` seats, and marks the creator admin.
-- Surface changes: `team add` provisions a seat (no token); MCP env `MUSTERD_TOKEN` → `MUSTERD_AGENT_KEY` + `MUSTERD_CLAIM` (+ optional pre-issued `MUSTERD_GRANT`); `init` and CLI `join` move to the claim/request flow.
+- Surface changes: `team add` provisions a seat (no token); MCP env `MUSTERD_TOKEN` → `MUSTERD_AGENT_KEY` (+ optional pre-issued `MUSTERD_GRANT`) — the seat is resolved from `.musterd/binding.json` (`claim`), not baked into the env (`MUSTERD_CLAIM` survives only as a manual override for binding-less/CI folders, PR #58); `init` and CLI `join` move to the claim/request flow.
