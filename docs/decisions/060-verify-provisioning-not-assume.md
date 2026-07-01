@@ -44,10 +44,16 @@ registration and without a heavyweight provisioning daemon.
 - **`musterd init --check` is the on-demand drift detector** (`onboard/doctor.ts`,
   `inspectProvisioning(cwd)`). A **read-only checker, never a writer** — the `arch-trees:check` /
   `fmt --check` philosophy: it inspects each harness's `detect()` and the `AGENTS.md` primer class, then
-  reports and exits non-zero on drift. It flags both directions — primer present but no server registered
+  reports and exits non-zero on drift. It flags primer present but no server registered
   (the headline gap), and server registered but no primer (agents land unoriented) — and stays quiet on a
   coherently-provisioned or genuinely-unprovisioned folder. `--json` for scripts. This makes a re-run of
   `init` an _informed_ idempotent action and a stale setup self-diagnosable.
+  **(Extended by PR #58 — claim value-coherence:** `claudeCode.detect()` reads back any legacy baked
+  `MUSTERD_CLAIM` via `claude mcp get`, and the doctor now also flags a third kind of drift — a baked
+  `MUSTERD_CLAIM` that disagrees with `.musterd/binding.json`'s `claim` — i.e. the seat the MCP `team_*`
+  tools resolve ≠ the seat the CLI resolves in the same folder. Default provisioning no longer bakes the
+  claim, so this catches folders still carrying an old registration; the fix it points to is re-running
+  `init`.)**
 
 ## Consequences
 

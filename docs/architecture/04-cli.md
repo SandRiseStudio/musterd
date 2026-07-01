@@ -37,7 +37,7 @@ src/
     manage.ts         // install/uninstall/start/stop/restart/status + log tail (injectable launchctl runner)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
-    doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server drift detector, read-only (ADR 060)
+    doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server + claim value-coherence drift detector, read-only (ADR 060, PR #58)
     workspace.ts      // provisionWorkspace(name): git worktree / sibling folder for an isolated agent seat (ADR 065)
     guard.ts          // inspectInitTarget(cwd): pure folder-suitability heuristics → warnings (ADR 020)
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath

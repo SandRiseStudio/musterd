@@ -20,7 +20,7 @@ MUSTERD_TEAM     = dawn
 MUSTERD_AGENT_KEY = mskey_...      # the team agent key (ADR 075/076): authenticates the harness; the seat is claimed at run time (no per-seat token — mskd_ removed in the P3 cutover, ADR 077)
 MUSTERD_GRANT    = msgr_...        # optional; a pre-issued grant that skips the pending/admin-approval lane on claim (ADR 077)
 MUSTERD_SURFACE  = claude-code     # or codex; defaults to 'other'
-MUSTERD_CLAIM    = seat:Ada        # optional; folder claim policy (ADR 032): chat | seat:<name> | role:<role>. drives team_join {} + autojoin
+MUSTERD_CLAIM    = seat:Ada        # optional MANUAL OVERRIDE — NOT written by default provisioning (the seat resolves from binding.json, PR #58); folder claim policy (ADR 032): chat | seat:<name> | role:<role>. drives team_join {} + autojoin
 MUSTERD_AUTOJOIN = 1               # optional; opt-in auto-join/claim on launch (off by default)
 MUSTERD_PROVENANCE = session       # optional; why this session attaches (ADR 014): session|asked|hook|scheduled|daemon. defaults to 'session'
 MUSTERD_WORKSPACE  = auth-rewrite  # optional; declared 'where' label; overrides the auto folder@branch detection
@@ -39,7 +39,11 @@ workspace.json**, with the two secrets (`agent_key`, `grant`) coming _only_ from
 lets a fresh clone self-wire (see `musterd wire`, `04-cli.md`), while binding.json (0600, gitignored)
 carries the machine-local secrets — so the CLI and the adapter resolve to the **same** member in a given
 folder (no more colliding on the CLI's global `~/.musterd/config.json` single-slot-per-team, the
-2026-06-16/17 dogfood failure). Env is kept first-class for host-injection and hosted/no-filesystem
+2026-06-16/17 dogfood failure). To keep that guarantee under a **re-claim**, default provisioning
+deliberately does **not** bake the seat into the env: `buildMcpEnv` omits `MUSTERD_CLAIM` (PR #58), so
+`musterd claim <name>` — which rewrites `binding.json` — is followed by the adapter on its next launch
+rather than being shadowed by a frozen env copy that outranks the file. (`MUSTERD_CLAIM` still works as a
+manual override for binding-less/CI folders — it just isn't written by `init`/`agent`/`wire`.) Env is kept first-class for host-injection and hosted/no-filesystem
 setups. **Identity is optional** (claim-on-first-use, ADR 032): only the **team** is required to load —
 the `agent_key` may be absent, leaving the session a pending presence that claims a seat on first use
 (`team_join` / `musterd claim`, which writes the resolved seat back into binding.json).
