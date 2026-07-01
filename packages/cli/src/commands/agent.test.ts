@@ -6,6 +6,10 @@ import { parseArgs } from '../args.js';
 
 const h = vi.hoisted(() => ({
   addMember: vi.fn(async () => ({ member: { name: 'June' }, token: 'mskd_tok' })),
+  issueGrant: vi.fn(async () => ({
+    grant: { id: 'g1', target: 'June', scope: 'seat', lifetime: 'standing' },
+    token: 'msgr_standing',
+  })),
   saveBinding: vi.fn(),
   writeSeatFile: vi.fn(),
   configure: vi.fn(async () => ({ target: 'claude mcp', activation: '' })),
@@ -18,7 +22,7 @@ vi.mock('./helpers.js', () => ({
   resolve: () => ({
     team: 'ritual',
     config: { server: 'http://localhost:4849', agentKeys: { ritual: 'mskey_team' } },
-    http: { addMember: h.addMember },
+    http: { addMember: h.addMember, issueGrant: h.issueGrant },
   }),
 }));
 vi.mock('../config.js', () => ({
@@ -67,6 +71,36 @@ describe('musterd agent <name>', () => {
     expect(entry.env.MUSTERD_AGENT_KEY).toBe('mskey_team');
     expect(entry.env.MUSTERD_CLAIM).toBe('seat:June');
     expect(entry.env.MUSTERD_AUTOJOIN).toBe('1');
+  });
+
+  it('issues a standing grant and threads it into the binding + autojoin env (ADR 077)', async () => {
+    const code = await agentCommand(parseArgs(['June']));
+    expect(code).toBe(0);
+    // A standing seat grant is minted so autojoin occupies without an approval request.
+    expect(h.issueGrant).toHaveBeenCalledWith('ritual', {
+      scope: 'seat',
+      target: 'June',
+      lifetime: 'standing',
+    });
+    // The grant is persisted in the workspace binding...
+    expect(h.saveBinding).toHaveBeenCalledWith(
+      h.workspace.dir,
+      expect.objectContaining({ grant: 'msgr_standing' }),
+    );
+    // ...and flows to MUSTERD_GRANT so the launched adapter claims with it.
+    const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
+    expect(entry.env.MUSTERD_GRANT).toBe('msgr_standing');
+  });
+
+  it('still comes online if the grant mint fails (falls back to the approval lane)', async () => {
+    h.issueGrant.mockRejectedValueOnce(new Error('not admin'));
+    const code = await agentCommand(parseArgs(['June']));
+    expect(code).toBe(0);
+    // No grant in the binding; autojoin will route through the approval lane instead.
+    const binding = h.saveBinding.mock.calls[0]![1] as Record<string, unknown>;
+    expect(binding.grant).toBeUndefined();
+    const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
+    expect(entry.env.MUSTERD_GRANT).toBeUndefined();
   });
 
   it('writes a seat file first for a file-backed team', async () => {
