@@ -49,3 +49,19 @@ export const DecideRequestSchema = z.discriminatedUnion('decision', [
   z.object({ decision: z.literal('deny') }),
 ]);
 export type DecideRequest = z.infer<typeof DecideRequestSchema>;
+
+/** Response body of `GET /teams/:slug/requests` — requests, newest-first. */
+export const RequestsResponseSchema = z.object({
+  requests: z.array(RequestSchema),
+});
+export type RequestsResponse = z.infer<typeof RequestsResponseSchema>;
+
+/** Response body of `POST /teams/:slug/requests/:id/decide` (ADR 077). `delivered` is true when the
+ *  terminal frame reached a live waiting session (e.g. a WS `claim` hold) — false means the requester's
+ *  session already disconnected and must re-claim to pick up the decision. */
+export const DecideResponseSchema = z.object({
+  request_id: z.string(),
+  decision: z.enum(['approve', 'deny']),
+  delivered: z.boolean(),
+});
+export type DecideResponse = z.infer<typeof DecideResponseSchema>;

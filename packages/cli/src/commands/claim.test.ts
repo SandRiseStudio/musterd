@@ -15,6 +15,7 @@ import { HttpClient } from '../client.js';
 import { saveBinding } from '../config.js';
 import { writePending } from '../onboard/pending.js';
 import { claimCommand } from './claim.js';
+import { WAIT_TIMEOUT_EXIT } from './inbox.js';
 
 let server: RunningServer;
 let dir: string;
@@ -96,6 +97,31 @@ async function grant(target: string, scope: 'seat' | 'role' = 'seat'): Promise<s
   return ((await res.json()) as { token: string }).token;
 }
 
+/** Poll for the first pending request (admin view) — the CLI opens it asynchronously over WS. */
+async function firstPendingRequestId(): Promise<string> {
+  for (let i = 0; i < 50; i++) {
+    const res = await fetch(`${serverUrl}/teams/dawn/requests?status=pending`, {
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    const { requests } = (await res.json()) as { requests: { id: string }[] };
+    if (requests[0]) return requests[0].id;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error('no pending request appeared');
+}
+
+/** Admin (nick) decides a pending request. */
+async function decide(
+  requestId: string,
+  body: { decision: 'approve'; lifetime: 'once' | 'ttl' | 'standing' } | { decision: 'deny' },
+): Promise<void> {
+  await fetch(`${serverUrl}/teams/dawn/requests/${requestId}/decide`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify(body),
+  });
+}
+
 describe('musterd claim (v0.3 handshake, ADR 075)', () => {
   it('claims a named seat with a grant → occupies + binds the folder (agent_key, no token)', async () => {
     await declareSeat('Ada');
@@ -115,14 +141,34 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     await expect(run(['Ada', '--team', 'dawn'])).rejects.toMatchObject({ exitCode: 4 });
   });
 
-  it('without a grant, a claim opens a pending request (admin must approve)', async () => {
-    await declareSeat('Ada');
-    const { code, out } = await run(['Ada', '--team', 'dawn']);
-    expect(code).toBe(0);
-    expect(out).toMatch(/pending|approve/i);
-    // No binding is written for a pending claim (the seat isn't occupied yet).
-    expect(existsSync(join(cwd, BINDING_DIR, BINDING_FILE))).toBe(false);
-  });
+  it(
+    'without a grant, a claim opens a pending request and waits — times out if never approved',
+    async () => {
+      await declareSeat('Ada');
+      await expect(run(['Ada', '--team', 'dawn', '--timeout', '1'])).rejects.toMatchObject({
+        exitCode: WAIT_TIMEOUT_EXIT,
+      });
+      // No binding is written for a pending claim that was never approved.
+      expect(existsSync(join(cwd, BINDING_DIR, BINDING_FILE))).toBe(false);
+    },
+    10_000,
+  );
+
+  it(
+    'a pending claim resolves once an admin approves the request (ADR 077)',
+    async () => {
+      await declareSeat('Ada');
+      const claiming = run(['Ada', '--team', 'dawn', '--timeout', '5']);
+      const requestId = await firstPendingRequestId();
+      await decide(requestId, { decision: 'approve', lifetime: 'once' });
+
+      const { code, out } = await claiming;
+      expect(code).toBe(0);
+      expect(out).toContain('Ada');
+      expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Ada' });
+    },
+    10_000,
+  );
 
   it('claims the next open pool seat for a role (server-resolved)', async () => {
     await declareSeat('backend-1', 'backend');

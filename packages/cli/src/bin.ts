@@ -13,6 +13,7 @@ import { notifyCommand } from './commands/notify.js';
 import { nudgeCommand } from './commands/nudge.js';
 import { reclaimCommand } from './commands/reclaim.js';
 import { reloadCommand } from './commands/reload.js';
+import { requestsCommand } from './commands/requests.js';
 import { resetCommand } from './commands/reset.js';
 import { roleCommand } from './commands/role.js';
 import { sendCommand } from './commands/send.js';
@@ -50,7 +51,9 @@ usage:
   musterd audit [--limit <n>] [--before <ms-epoch>] [--json]   read the governance audit log (admin-only, ADR 071/074)
   musterd availability <available|away|dnd> [--until <iso>]   set your availability (away holds notifications; dnd passes directed + urgent)
   musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away
-  musterd claim <name> [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--force]   claim a seat (or adopt a teammate's seat with --token; --force repoints a folder bound to a live member)
+  musterd claim <name> [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--force]   claim a seat (or adopt a teammate's seat with --token; --force repoints a folder bound to a live member); claiming a held seat opens a request and waits for an admin to approve
+  musterd requests [--pending] [--json]         list claim/teammate requests (admin-only, ADR 077)
+  musterd requests decide <id> --approve [--ttl-hours <n> | --once] | --deny   approve or deny a pending request (admin-only)
   musterd unbind                                release this folder's seat — keeps it on the team, free to re-claim (ADR 058)
   musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
   musterd fmt [--check]                         canonicalize this folder's .musterd/ roster files (ADR 058)
@@ -143,6 +146,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return reloadCommand(rest);
     case 'reclaim':
       return reclaimCommand(rest);
+    case 'requests':
+      return requestsCommand(rest);
     case 'role':
       return roleCommand(rest);
     case 'reset':
