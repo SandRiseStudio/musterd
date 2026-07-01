@@ -440,6 +440,23 @@ export const ROADMAP: RoadmapItem[] = [
     ],
     dependsOn: ['v03-p1-seats'],
   },
+  {
+    id: 'telemetry-gaps',
+    wave: 3,
+    title: 'Close the dogfood telemetry gaps (instrument-by-default)',
+    status: 'near-term',
+    category: 'observability',
+    blurb:
+      'Turn the built-but-inert telemetry on and wire the missing surfaces — so the next multi-agent session is measurable live, not reconstructed forensically.',
+    detail:
+      'Placeholder from lab-notebook finding 001: the flagship P3 session was near-unobservable from musterd’s own telemetry. Concrete backlog — (1) OTel Layer-1 is built but off-by-default and was never booted (no exporter set) → instrument-by-default for dogfood daemons at minimum; (2) daemon.log is info-only with no HTTP layer (no request / latency / status); (3) the ADR-071 audit log records only governed decisions, so normal coordination leaves no trace; (4) no per-agent token/cost telemetry — reconstructed from harness transcripts, and non-Claude agents are unrecoverable; (5) no first-party emission of the coordination metrics we had to compute by hand (coordination-token ratio, wasted-work ratio, directed-act latency, resolve-rate, dup-rate). These are the concrete inputs to Telemetry L2 + batond. Wave provisional pending the next reprioritization.',
+    refs: [
+      doc('docs/research/001-telemetry-gaps-p3-dogfood.md', 'finding 001'),
+      doc('docs/design/observability.md', 'observability.md'),
+      adr(52, 'ADR 052'),
+    ],
+    dependsOn: ['telemetry-l1'],
+  },
 
   // ── reserved ──────────────────────────────────────────────────────────────
   {
