@@ -145,9 +145,14 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(
       `${theme.warn('⚠')} couldn't auto-register the MCP server (${mcpError}). Register it in ${ws.dir} with:\n` +
         theme.meta(
-          `  cd ${ws.dir} && claude mcp add musterd -s local -e MUSTERD_TEAM=${team} -e MUSTERD_AGENT_KEY=${agentKey}` +
-            (grant !== undefined ? ` -e MUSTERD_GRANT=${grant}` : '') +
-            ` -e MUSTERD_CLAIM=seat:${name} -e MUSTERD_SURFACE=claude-code -e MUSTERD_AUTOJOIN=1 -- ${entry.command} ${entry.args.join(' ')}`,
+          `  cd ${ws.dir} && claude mcp add musterd -s local ` +
+            // Rebuild from entry.env so the manual command matches auto-register exactly — notably it
+            // carries no MUSTERD_CLAIM (the seat lives in the binding.json this command already wrote,
+            // the single source of truth), so the fallback can't reintroduce the re-claim drift.
+            Object.entries(entry.env)
+              .map(([k, v]) => `-e ${k}=${v}`)
+              .join(' ') +
+            ` -- ${entry.command} ${entry.args.join(' ')}`,
         ) +
         '\n',
     );

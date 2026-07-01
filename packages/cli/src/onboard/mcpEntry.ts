@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { formatClaimPolicy, type ClaimPolicy, type Surface } from '@musterd/protocol';
+import { type ClaimPolicy, type Surface } from '@musterd/protocol';
 
 /** A stdio MCP server entry: how a harness should launch the musterd adapter. */
 export interface McpServerEntry {
@@ -16,19 +16,29 @@ export interface AgentBinding {
    *  yet) omits it — the tools are still registered; claiming then needs a key or admin approval. */
   agent_key?: string;
   surface: Surface;
-  /** The seat/role this folder claims on launch (→ `MUSTERD_CLAIM`). */
+  /** The seat/role this folder claims on launch. Persisted to `.musterd/binding.json` (the source of
+   *  truth the adapter reads) — deliberately NOT emitted as `MUSTERD_CLAIM`; see {@link buildMcpEnv}. */
   claim: ClaimPolicy;
   /** Optional pre-issued grant (msgr_) → `MUSTERD_GRANT`, skips the approval lane. */
   grant?: string;
 }
 
-/** The env that binds an MCP session to its claim (05-mcp.md; v0.3 ADR 075 — agent key + claim). */
+/** The env that binds an MCP session to its claim (05-mcp.md; v0.3 ADR 075 — agent key + claim).
+ *
+ * Deliberately does NOT emit `MUSTERD_CLAIM`. The seat/role a folder claims is the one field that
+ * changes after provisioning (a `musterd claim <name>` re-binds the folder to a different seat and
+ * rewrites `.musterd/binding.json`), and the adapter already resolves its claim from that same
+ * binding (`packages/mcp/src/config.ts` — `env > binding.json > workspace.json`). Baking the claim
+ * into a static `-e MUSTERD_CLAIM=` here froze a *copy* that outranks binding.json and can never be
+ * updated by a re-claim: the CLI would resolve the new seat while the MCP tools stayed pinned to the
+ * old one (the exact drift this omission removes). binding.json is the single source of truth; the
+ * `MUSTERD_CLAIM` env stays a supported *manual* override (headless/CI with no binding.json), it
+ * just isn't materialized by default provisioning. */
 export function buildMcpEnv(b: AgentBinding): Record<string, string> {
   return {
     MUSTERD_SERVER: b.server,
     MUSTERD_TEAM: b.team,
     ...(b.agent_key !== undefined ? { MUSTERD_AGENT_KEY: b.agent_key } : {}),
-    MUSTERD_CLAIM: formatClaimPolicy(b.claim),
     ...(b.grant !== undefined ? { MUSTERD_GRANT: b.grant } : {}),
     MUSTERD_SURFACE: b.surface,
   };

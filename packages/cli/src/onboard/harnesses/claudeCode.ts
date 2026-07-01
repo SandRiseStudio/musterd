@@ -309,10 +309,14 @@ export const claudeCode: Harness = {
     const ver = await has(bin, ['--version']);
     const got = await has(bin, ['mcp', 'get', 'musterd']);
     const where = bin === 'claude' ? '' : ` (${bin})`;
+    // Read back a legacy baked `MUSTERD_CLAIM` (older provisioning materialized it) so the doctor can
+    // catch it drifting from binding.json. `claude mcp get` prints env as `    MUSTERD_CLAIM=<value>`.
+    const claimMatch = got.ok ? /MUSTERD_CLAIM=(\S+)/.exec(got.out) : null;
     return {
       installed: true,
       configured: got.ok,
       detail: `claude ${ver.out.trim().split(' ')[0] ?? ''}${where}`.trim(),
+      ...(claimMatch ? { registeredClaim: claimMatch[1] } : {}),
     };
   },
 

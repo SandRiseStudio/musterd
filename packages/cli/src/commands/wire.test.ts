@@ -80,7 +80,8 @@ describe('musterd wire', () => {
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
     expect(entry.env.MUSTERD_TEAM).toBe('bravo');
     expect(entry.env.MUSTERD_AGENT_KEY).toBe('mskey_fromconfig');
-    expect(entry.env.MUSTERD_CLAIM).toBe('seat:Sonnet');
+    // claim is not baked into the MCP env — the adapter reads it from binding.json / workspace.json
+    expect(entry.env.MUSTERD_CLAIM).toBeUndefined();
     // tools only by default — no autojoin
     expect(entry.env.MUSTERD_AUTOJOIN).toBeUndefined();
     // binding.json materialized with the resolved key
