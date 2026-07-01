@@ -7,7 +7,14 @@ import pc from 'picocolors';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { claimCommand } from '../commands/claim.js';
-import { loadConfig, rememberIdentity, saveBinding, saveConfig, type Config } from '../config.js';
+import {
+  loadConfig,
+  rememberIdentity,
+  saveBinding,
+  saveConfig,
+  saveWorkspaceSpec,
+  type Config,
+} from '../config.js';
 import { renderBanner } from '../render/rows.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import type { Harness } from './harness.js';
@@ -232,9 +239,7 @@ export async function runInit(): Promise<number> {
           '90',
         ]),
       );
-      p.outro(
-        pc.yellow(`${target} is reactivated on ${team} — this folder is bound to it now.`),
-      );
+      p.outro(pc.yellow(`${target} is reactivated on ${team} — this folder is bound to it now.`));
     } catch (err) {
       p.log.error(pc.red(err instanceof Error ? err.message : String(err)));
       p.outro(pc.yellow(`Couldn't reactivate ${target} on ${team}.`));
@@ -351,6 +356,26 @@ export async function runInit(): Promise<number> {
     await warnSecretConfig(bindingPath);
   } catch (err) {
     p.log.warn(`Couldn't write .musterd/binding.json (${(err as Error).message}).`);
+  }
+
+  // Also write the secret-free committed launch spec (ADR: committed launch spec) — unlike the
+  // gitignored binding.json, `.musterd/workspace.json` is safe to commit, so `git add`ing it lets a
+  // fresh clone/worktree self-wire the MCP server with `musterd wire` (no interactive init). The key
+  // stays out of it; the machine supplies it.
+  try {
+    saveWorkspaceSpec(process.cwd(), {
+      server,
+      team,
+      surface: chosen.surface,
+      claim: { mode: 'seat', name },
+    });
+    p.log.info(
+      pc.dim(
+        `Wrote .musterd/workspace.json (no secrets) — ${pc.yellow('git add .musterd/workspace.json')} so a fresh clone can \`musterd wire\` itself.`,
+      ),
+    );
+  } catch (err) {
+    p.log.warn(`Couldn't write .musterd/workspace.json (${(err as Error).message}).`);
   }
 
   // Explicit activation (M3): the agent is dormant until it joins. Offer one-keystroke auto-join

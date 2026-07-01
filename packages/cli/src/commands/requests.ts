@@ -90,7 +90,7 @@ async function decideCommand(parsed: Parsed): Promise<number> {
   } else {
     process.stdout.write(
       theme.meta(
-        "the requesting session already disconnected — it should re-run `musterd claim <name>` now.",
+        'the requesting session already disconnected — it should re-run `musterd claim <name>` now.',
       ) + '\n',
     );
   }

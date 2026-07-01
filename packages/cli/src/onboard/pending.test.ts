@@ -62,7 +62,11 @@ describe('pending-marker dir resolution', () => {
     writePending(ws, marker({ code: 'OTHERTEAM', team: 'dusk', workspace: 'ws' }));
 
     // Team only → both dawn markers (workspace-blind).
-    expect(listPendingForWorkspace(ws, 'dawn').map((p) => p.code).sort()).toEqual(['MINE', 'THEIRS']);
+    expect(
+      listPendingForWorkspace(ws, 'dawn')
+        .map((p) => p.code)
+        .sort(),
+    ).toEqual(['MINE', 'THEIRS']);
     // Team + workspace → only this workspace's marker.
     expect(listPendingForWorkspace(ws, 'dawn', 'ws').map((p) => p.code)).toEqual(['MINE']);
     // Foreign team never matches.

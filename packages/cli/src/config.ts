@@ -6,8 +6,11 @@ import {
   BINDING_FILE,
   BindingSchema,
   bindingSeat,
+  WORKSPACE_SPEC_FILE,
+  WorkspaceSpecSchema,
   type Binding,
   type ClaimTarget,
+  type WorkspaceSpec,
 } from '@musterd/protocol';
 import { parseClaimTarget } from './claim-client.js';
 
@@ -150,6 +153,46 @@ export function saveBinding(dir: string, binding: Binding): string {
   }
   recordBinding(dir, binding);
   return p;
+}
+
+/**
+ * Persist the **secret-free** committable launch spec to `<dir>/.musterd/workspace.json` (ADR: the
+ * committed launch spec). Unlike {@link saveBinding} this holds NO secret — so it is written with
+ * normal perms (no 0600) and is deliberately NOT gitignored, so `git add`ing it makes a fresh
+ * clone/worktree self-wireable via `musterd wire`. Callers pass only the non-secret fields; if a full
+ * Binding is handed in, `WorkspaceSpecSchema.parse` drops `agent_key`/`grant` so a secret can never
+ * leak into the committed file.
+ */
+export function saveWorkspaceSpec(dir: string, spec: WorkspaceSpec): string {
+  const bindingDir = join(dir, BINDING_DIR);
+  mkdirSync(bindingDir, { recursive: true });
+  const p = join(bindingDir, WORKSPACE_SPEC_FILE);
+  // Parse-then-write so any stray secret field on the input object is stripped, never persisted.
+  const safe = WorkspaceSpecSchema.parse(spec);
+  writeFileSync(p, JSON.stringify(safe, null, 2) + '\n', 'utf8');
+  return p;
+}
+
+/**
+ * Locate + parse the committed workspace spec — the same `.musterd/workspace.json` the MCP adapter
+ * falls back to, so the two surfaces can't drift. Walks up from `startDir` like {@link findBinding};
+ * returns null if absent or unparseable.
+ */
+export function findWorkspaceSpec(startDir: string = process.cwd()): WorkspaceSpec | null {
+  let dir = startDir;
+  for (;;) {
+    const p = join(dir, BINDING_DIR, WORKSPACE_SPEC_FILE);
+    if (existsSync(p)) {
+      try {
+        return WorkspaceSpecSchema.parse(JSON.parse(readFileSync(p, 'utf8')));
+      } catch {
+        return null;
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
 }
 
 /**

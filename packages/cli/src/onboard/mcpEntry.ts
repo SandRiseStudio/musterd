@@ -11,8 +11,10 @@ export interface McpServerEntry {
 export interface AgentBinding {
   server: string;
   team: string;
-  /** v0.3 (ADR 075): the team agent key (mskey_) the adapter claims with — replaces member+token. */
-  agent_key: string;
+  /** v0.3 (ADR 075): the team agent key (mskey_) the adapter claims with — replaces member+token.
+   *  Optional: a keyless folder (a chat/human folder, or a `wire`d clone whose machine has no key
+   *  yet) omits it — the tools are still registered; claiming then needs a key or admin approval. */
+  agent_key?: string;
   surface: Surface;
   /** The seat/role this folder claims on launch (→ `MUSTERD_CLAIM`). */
   claim: ClaimPolicy;
@@ -25,7 +27,7 @@ export function buildMcpEnv(b: AgentBinding): Record<string, string> {
   return {
     MUSTERD_SERVER: b.server,
     MUSTERD_TEAM: b.team,
-    MUSTERD_AGENT_KEY: b.agent_key,
+    ...(b.agent_key !== undefined ? { MUSTERD_AGENT_KEY: b.agent_key } : {}),
     MUSTERD_CLAIM: formatClaimPolicy(b.claim),
     ...(b.grant !== undefined ? { MUSTERD_GRANT: b.grant } : {}),
     MUSTERD_SURFACE: b.surface,

@@ -201,6 +201,7 @@ const NUDGE_SKIP_COMMANDS = new Set([
   'serve',
   'service',
   'init',
+  'wire',
   'reset',
   'role',
   'uninstall',

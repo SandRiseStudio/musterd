@@ -47,19 +47,22 @@ registration and without a heavyweight provisioning daemon.
   reports and exits non-zero on drift. It flags both directions — primer present but no server registered
   (the headline gap), and server registered but no primer (agents land unoriented) — and stays quiet on a
   coherently-provisioned or genuinely-unprovisioned folder. `--json` for scripts. This makes a re-run of
-  `init` an *informed* idempotent action and a stale setup self-diagnosable.
+  `init` an _informed_ idempotent action and a stale setup self-diagnosable.
 
 ## Consequences
 
 - The silent mismatch becomes self-healing: an agent in a half-provisioned folder is told exactly what to
   run, and a human/CI can assert provisioning health with `musterd init --check`.
 - The token-out-of-tree posture (ADR 027 / `harness.ts`) is preserved — nothing here proposes committing
-  the registration; we close the gap by *verifying* instead.
+  the registration; we close the gap by _verifying_ instead.
 - Cost: `claude mcp get` adds ~1.3s at session start, but only in folders with the primer marker (the
   gate runs first), so non-musterd projects are unaffected.
 - Not solved here: auto-registering the server from the committed marker (would require a secret-free,
   env-referenced entry — a separate change to the binding model). The check surfaces the drift; the human
-  still runs `musterd init` to fix it.
+  still runs `musterd init` to fix it. **(Since solved by ADR 080 — the committed secret-free
+  `.musterd/workspace.json` launch spec + the headless `musterd wire`: a fresh clone self-wires with one
+  no-prompt command, and this hook's "server not registered" branch now points at `musterd wire` when a
+  committed spec is present.)**
 - Composes with ADR 012 (primer marker), ADR 020 (`guard.ts` folder heuristics — `doctor.ts` is its
   read-only sibling), ADR 027 (`-s local` scope), and the `docs/harness-hooks.md` recipe.
 
@@ -69,7 +72,7 @@ registration and without a heavyweight provisioning daemon.
 no team, so there are no new spans on the team-task timeline. The signal it produces is an exit code +
 structured `--json` report (`primerManaged`, per-harness `configured`, `drift[]`) — the natural span
 attributes if a future `musterd doctor` ever emits one. The hook's effect is upstream of traces: it
-governs whether an agent *reaches* the point of emitting `team_join` at all.
+governs whether an agent _reaches_ the point of emitting `team_join` at all.
 
 **Eval** — success metric: the rate of "marker present but server unregistered" sessions that an agent
 reaches without being warned — target **zero** false "auto-joined" claims. **Dataset**: onboarding runs

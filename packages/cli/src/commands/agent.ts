@@ -1,6 +1,6 @@
 import type { Binding } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
-import { loadConfig, saveBinding } from '../config.js';
+import { loadConfig, saveBinding, saveWorkspaceSpec } from '../config.js';
 import { CliError } from '../errors.js';
 import { claudeCode } from '../onboard/harnesses/claudeCode.js';
 import { buildMcpEnv, resolveMcpLaunch } from '../onboard/mcpEntry.js';
@@ -71,6 +71,14 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     ...(grant !== undefined ? { grant } : {}),
   };
   saveBinding(ws.dir, binding);
+  // Also write the secret-free committed launch spec (ADR: committed launch spec) so this worktree
+  // self-wires via `musterd wire` on a fresh clone/machine — the key stays out of the committed file.
+  saveWorkspaceSpec(ws.dir, {
+    server: config.server,
+    team,
+    surface: 'claude-code',
+    claim: { mode: 'seat', name },
+  });
 
   // Register the MCP server *for the workspace folder*: `claude mcp add -s local` keys off cwd, so we
   // run the adapter with cwd set to ws.dir. Autojoin so a session opened there comes online as `name`.

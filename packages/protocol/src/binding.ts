@@ -20,15 +20,32 @@ import { ClaimPolicySchema } from './claim.js';
  */
 export const BINDING_DIR = '.musterd';
 export const BINDING_FILE = 'binding.json';
+/** The committable, secret-free launch spec (see {@link WorkspaceSpecSchema}). */
+export const WORKSPACE_SPEC_FILE = 'workspace.json';
 
-export const BindingSchema = z.object({
+/**
+ * The **secret-free** half of a workspace binding — everything the MCP launch needs *except* secrets.
+ * Written to `<workspace>/.musterd/workspace.json`, which (unlike `binding.json`) is NOT gitignored, so
+ * it rides the repo: a fresh clone/worktree can self-wire the musterd MCP server from it via `musterd
+ * wire` without an interactive `musterd init` (the ADR-060 non-goal, unblocked by splitting the secret
+ * out). The two secrets — `agent_key` (mskey_) and `grant` (msgr_) — live only in the gitignored
+ * `binding.json` / env / the 0600 global config, never here. `claim` policy is the author's choice:
+ * `seat:<name>` for a personal agent worktree, `role`/`chat` for a shared repo cloned by many.
+ */
+export const WorkspaceSpecSchema = z.object({
   server: z.string(),
   team: z.string(),
-  /** Team agent join key (mskey_, ADR 075/076). Optional — absent for chat/human folders; enforced present at claim time for seat/role auto-claim. */
-  agent_key: z.string().optional(),
   surface: SurfaceSchema,
   /** Folder claim policy (ADR 018 ladder); absent ⇒ assign-in-chat. The claim-frame target derives from the policy (seat→{seat:name}, role→{role:role}). */
   claim: ClaimPolicySchema.optional(),
+});
+
+export type WorkspaceSpec = z.infer<typeof WorkspaceSpecSchema>;
+
+/** The full workspace binding — the secret-free {@link WorkspaceSpecSchema} plus the two secrets. */
+export const BindingSchema = WorkspaceSpecSchema.extend({
+  /** Team agent join key (mskey_, ADR 075/076). Optional — absent for chat/human folders; enforced present at claim time for seat/role auto-claim. */
+  agent_key: z.string().optional(),
   /** Optional pre-issued grant (msgr_) that skips the pending/admin-approval lane (ADR 075). */
   grant: z.string().optional(),
 });

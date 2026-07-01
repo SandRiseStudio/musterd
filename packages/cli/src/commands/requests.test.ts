@@ -28,10 +28,10 @@ describe('requests command', () => {
     // `requests` resolves nick from the binding without an explicit --as.
     await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
     agentKey = loadConfig().agentKeys['dawn']!;
-    await new HttpClient({ server: serverUrl, key: loadConfig().identities['dawn']!.key }).addMember(
-      'dawn',
-      { name: 'Ada', kind: 'agent' },
-    );
+    await new HttpClient({
+      server: serverUrl,
+      key: loadConfig().identities['dawn']!.key,
+    }).addMember('dawn', { name: 'Ada', kind: 'agent' });
   });
 
   afterEach(async () => {
@@ -138,9 +138,9 @@ describe('requests command', () => {
     await expect(requestsCommand(parseArgs(['decide', id]))).rejects.toThrow(
       /exactly one of --approve or --deny/,
     );
-    await expect(
-      requestsCommand(parseArgs(['decide', id, '--approve', '--deny'])),
-    ).rejects.toThrow(/exactly one of --approve or --deny/);
+    await expect(requestsCommand(parseArgs(['decide', id, '--approve', '--deny']))).rejects.toThrow(
+      /exactly one of --approve or --deny/,
+    );
   });
 
   it('rejects decide with no id', async () => {

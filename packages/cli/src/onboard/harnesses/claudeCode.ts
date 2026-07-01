@@ -129,14 +129,23 @@ function sessionStartHookCommand(): string {
   // Global self-gating verify-then-orient (ADR 060): exit silently unless this folder carries the
   // committed `musterd:start` primer; else cd in, and if `claude` is on PATH and `mcp get musterd`
   // fails, the server isn't wired here → print the fix; otherwise print the orientation. The
-  // `command -v claude` guard avoids crying wolf when it can't verify.
+  // `command -v claude` guard avoids crying wolf when it can't verify. When the server is missing, the
+  // fix depends on whether the repo carries a committed launch spec (`.musterd/workspace.json`): if it
+  // does, this is a fresh clone that can **self-wire** headlessly → point at `musterd wire` (no
+  // prompts, no seat claim); otherwise point at the interactive `musterd init`. The hook itself never
+  // runs a mutating command — it only tells the agent what to run, then to reload (registering an MCP
+  // server doesn't make it live until reload).
   return (
     'd="${CLAUDE_PROJECT_DIR:-.}"; test -f "$d/AGENTS.md" && grep -q musterd:start "$d/AGENTS.md" || exit 0; ' +
     'cd "$d" 2>/dev/null; ' +
     'if command -v claude >/dev/null 2>&1 && ! claude mcp get musterd >/dev/null 2>&1; then ' +
+    'if [ -f "$d/.musterd/workspace.json" ]; then ' +
+    "echo 'musterd: this repo has a committed musterd launch spec but the MCP server is NOT " +
+    'registered on this machine — run `musterd wire` in this folder (no prompts), then reload this ' +
+    "session to pick up the team_* tools.'; else " +
     "echo 'musterd: this folder has the musterd:start primer but the musterd MCP server is NOT " +
     'registered here — the team_* tools are unavailable. Run `musterd init` in this folder (or ' +
-    "`musterd init --check` to confirm), then reload this session.'; else " +
+    "`musterd init --check` to confirm), then reload this session.'; fi; else " +
     "echo 'You are on a musterd team (auto-joined on launch). Run team_inbox_check now to see " +
     "anything waiting. Only call team_join if a tool says you are not joined.'; fi " +
     `# ${SESSIONSTART_HOOK_MARKER}`
@@ -219,7 +228,12 @@ export function installMusterdHooks(): void {
     (m) => isMusterdHookFor(m, NOTIFICATION_HOOK_MARKER),
     notificationHookCommand(),
   );
-  upsertHook(globalSettingsPath(), 'SessionStart', isMusterdSessionStart, sessionStartHookCommand());
+  upsertHook(
+    globalSettingsPath(),
+    'SessionStart',
+    isMusterdSessionStart,
+    sessionStartHookCommand(),
+  );
 }
 
 /**
@@ -229,7 +243,9 @@ export function installMusterdHooks(): void {
  * gone, so uninstalling one folder does NOT remove it (manage it via Claude Code's `/hooks`).
  */
 export function removeMusterdHooks(): void {
-  dropHook(settingsLocalPath(), 'Notification', (m) => isMusterdHookFor(m, NOTIFICATION_HOOK_MARKER));
+  dropHook(settingsLocalPath(), 'Notification', (m) =>
+    isMusterdHookFor(m, NOTIFICATION_HOOK_MARKER),
+  );
   dropHook(settingsLocalPath(), 'SessionStart', (m) =>
     isMusterdHookFor(m, SESSIONSTART_HOOK_MARKER),
   );

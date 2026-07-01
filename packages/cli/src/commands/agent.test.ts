@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
     token: 'msgr_standing',
   })),
   saveBinding: vi.fn(),
+  saveWorkspaceSpec: vi.fn(),
   writeSeatFile: vi.fn(),
   configure: vi.fn(async () => ({ target: 'claude mcp', activation: '' })),
   // dir is set to a real temp dir per-test (the command chdir's into it to register MCP).
@@ -28,6 +29,7 @@ vi.mock('./helpers.js', () => ({
 vi.mock('../config.js', () => ({
   loadConfig: () => ({ rosterHome: h.rosterHome }),
   saveBinding: h.saveBinding,
+  saveWorkspaceSpec: h.saveWorkspaceSpec,
 }));
 vi.mock('../roster.js', () => ({ writeSeatFile: h.writeSeatFile }));
 vi.mock('../onboard/harnesses/claudeCode.js', () => ({ claudeCode: { configure: h.configure } }));
@@ -71,6 +73,19 @@ describe('musterd agent <name>', () => {
     expect(entry.env.MUSTERD_AGENT_KEY).toBe('mskey_team');
     expect(entry.env.MUSTERD_CLAIM).toBe('seat:June');
     expect(entry.env.MUSTERD_AUTOJOIN).toBe('1');
+
+    // The secret-free committed launch spec is written (no agent_key/grant fields).
+    expect(h.saveWorkspaceSpec).toHaveBeenCalledWith(
+      h.workspace.dir,
+      expect.objectContaining({
+        team: 'ritual',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'June' },
+      }),
+    );
+    const specArg = h.saveWorkspaceSpec.mock.calls[0]![1] as Record<string, unknown>;
+    expect(specArg.agent_key).toBeUndefined();
+    expect(specArg.grant).toBeUndefined();
   });
 
   it('issues a standing grant and threads it into the binding + autojoin env (ADR 077)', async () => {
