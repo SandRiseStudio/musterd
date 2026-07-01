@@ -21,10 +21,13 @@ const TEAM_KEY = 'musterd.live.team';
 const PANEL_KEY = 'musterd.live.panel';
 /** Office panel presentation: normal (in the split), collapsed (hidden), or companion (fills the window). */
 type PanelMode = 'normal' | 'collapsed' | 'companion';
-const observerKey = (team: string) => `musterd.live.observer.${team}`;
+// `.v2` = credential-based observer (ADR 077 claim handshake); bumping the key drops any legacy
+// token-based creds so the next Watch re-provisions with a credential.
+const observerKey = (team: string) => `musterd.live.observer.v2.${team}`;
 
 interface ObserverCreds {
   name: string;
+  /** The observer seat's credential (mscr_) — the single v0.3 auth secret (HTTP + WS claim). */
   token: string;
 }
 
@@ -32,7 +35,9 @@ function loadObserver(team: string): ObserverCreds | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(observerKey(team));
-    return raw ? (JSON.parse(raw) as ObserverCreds) : null;
+    if (!raw) return null;
+    const creds = JSON.parse(raw) as ObserverCreds;
+    return creds && creds.token ? creds : null;
   } catch {
     return null;
   }
@@ -73,7 +78,7 @@ function LivePage() {
     setTeam(slug);
     window.localStorage.setItem(TEAM_KEY, slug);
 
-    // Advanced: connect as a specific seat the operator supplied.
+    // Advanced: connect as a specific seat the operator supplied (a credential authenticates HTTP + WS).
     if (!explicit && advanced.open && advanced.as.trim() && advanced.token.trim()) {
       setCfg({ team: slug, as: advanced.as.trim(), token: advanced.token.trim() });
       return;
@@ -85,8 +90,8 @@ function LivePage() {
       setProvisioning(true);
       try {
         const name = genObserverName();
-        const token = await provisionObserver(slug, name);
-        creds = { name, token };
+        const credential = await provisionObserver(slug, name);
+        creds = { name, token: credential };
         saveObserver(slug, creds);
       } catch (e) {
         setFormError(e instanceof Error ? e.message : String(e));
