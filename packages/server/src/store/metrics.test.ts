@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { setCursor } from './cursors.js';
 import { addMember } from './members.js';
-import { insertMessage } from './messages.js';
+import { countOpenLoops, getMessageTs, insertMessage } from './messages.js';
 import { activePresenceBySurface, slowestInboxLagMs } from './metrics.js';
 import { attach } from './presence.js';
 import { createTeam } from './teams.js';
@@ -68,5 +68,46 @@ describe('slowestInboxLagMs', () => {
     // After Ada advances her cursor past it, the inbox is caught up → lag 0.
     setCursor(db, ada.id, 'm1', now - 30_000);
     expect(slowestInboxLagMs(db, now)).toBe(0);
+  });
+});
+
+describe('countOpenLoops / getMessageTs (ADR 082 slice 3)', () => {
+  it('counts directed acts without an answering accept/decline; getMessageTs resolves ts', () => {
+    const { db, team, nick, ada } = seed();
+    const send = (
+      id: string,
+      from: string,
+      fromId: string,
+      act: 'request_help' | 'handoff' | 'accept' | 'status_update',
+      meta?: Record<string, unknown>,
+    ) =>
+      insertMessage(
+        db,
+        team.id,
+        fromId,
+        null,
+        makeEnvelope({
+          id,
+          team: 'dawn',
+          from,
+          to: { kind: 'team' },
+          act,
+          body: 'x',
+          meta: meta ?? null,
+          ts: 500,
+        }),
+      );
+
+    send('r1', 'nick', nick.id, 'request_help');
+    send('h1', 'nick', nick.id, 'handoff');
+    send('s1', 'Ada', ada.id, 'status_update'); // not a loop
+    expect(countOpenLoops(db)).toBe(2);
+
+    // Ada accepts the request → one loop closes; the handoff stays open.
+    send('a1', 'Ada', ada.id, 'accept', { in_reply_to: 'r1' });
+    expect(countOpenLoops(db)).toBe(1);
+
+    expect(getMessageTs(db, team.id, 'r1')).toBe(500);
+    expect(getMessageTs(db, team.id, 'nope')).toBeNull();
   });
 });

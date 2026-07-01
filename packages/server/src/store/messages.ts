@@ -32,6 +32,37 @@ export function insertMessage(
   return row;
 }
 
+/** The `ts` of one message by id (loop-latency lookups, ADR 082 slice 3). Null when unknown. */
+export function getMessageTs(db: Database, teamId: string, id: string): number | null {
+  const row = db
+    .prepare<
+      [string, string],
+      { ts: number }
+    >('SELECT ts FROM messages WHERE team_id = ? AND id = ?')
+    .get(teamId, id);
+  return row?.ts ?? null;
+}
+
+/**
+ * Directed acts (request_help/handoff) not yet answered by an accept/decline whose
+ * `meta.in_reply_to` names them — the open-loops gauge (ADR 082 slice 3). Daemon-wide on purpose:
+ * a health signal sampled only when telemetry is on.
+ */
+export function countOpenLoops(db: Database): number {
+  const row = db
+    .prepare<[], { n: number }>(
+      `SELECT COUNT(*) AS n FROM messages m
+        WHERE m.act IN ('request_help','handoff')
+          AND NOT EXISTS (
+            SELECT 1 FROM messages r
+             WHERE r.team_id = m.team_id
+               AND r.act IN ('accept','decline')
+               AND json_extract(r.meta, '$.in_reply_to') = m.id)`,
+    )
+    .get();
+  return row?.n ?? 0;
+}
+
 export interface InboxOpts {
   since?: number;
   unreadOnly?: boolean;
