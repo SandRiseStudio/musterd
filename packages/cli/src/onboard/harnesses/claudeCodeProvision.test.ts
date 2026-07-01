@@ -28,14 +28,21 @@ const { claudeCode } = await import('./claudeCode.js');
 
 let cwd: string;
 let origCwd: string;
+let savedConfigDir: string | undefined;
 beforeEach(() => {
   origCwd = process.cwd();
   cwd = mkdtempSync(join(tmpdir(), 'musterd-ccprov-'));
   process.chdir(cwd);
+  // `configure` installs the GLOBAL SessionStart hook into $CLAUDE_CONFIG_DIR/settings.json — point it
+  // at the temp cwd so the suite never touches the real ~/.claude/settings.json.
+  savedConfigDir = process.env['CLAUDE_CONFIG_DIR'];
+  process.env['CLAUDE_CONFIG_DIR'] = join(cwd, '.claude-global');
   calls.length = 0;
 });
 afterEach(() => {
   process.chdir(origCwd);
+  if (savedConfigDir === undefined) delete process.env['CLAUDE_CONFIG_DIR'];
+  else process.env['CLAUDE_CONFIG_DIR'] = savedConfigDir;
 });
 
 const settingsPath = () => join(cwd, '.claude', 'settings.local.json');

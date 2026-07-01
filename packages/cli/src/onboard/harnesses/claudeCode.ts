@@ -90,24 +90,30 @@ function removePermissions(perms: ProvisionPermissions): void {
 }
 
 /**
- * The Claude Code hooks musterd installs into `.claude/settings.local.json`. Each carries a trailing
- * marker comment in its command so it is exactly identifiable for idempotent re-install and precise
- * removal (`musterd uninstall`), never touching the user's own hooks.
+ * The Claude Code hooks musterd installs. Each carries a trailing marker comment in its command so it
+ * is exactly identifiable for idempotent re-install and precise removal, never touching the user's own
+ * hooks. They live at two scopes on purpose:
  *
- * - `Notification` (ADR 053): fires when the agent parks awaiting input/approval — the one moment a
- *   frozen single-threaded loop can't run its own inbox check — and prints the directed acts waiting
- *   for this folder's bound seat into the terminal the human is already at.
- * - `SessionStart` (ADR 060): fires at session launch and **verifies before it orients** — it runs
- *   `claude mcp get musterd` and, if the server isn't registered for this folder, prints the fix
- *   (`musterd init`) instead of a false "you're auto-joined"; otherwise it tells the agent to check
- *   its inbox. Auto-installing it here (was a manual `~/.claude/settings.json` recipe) means every
- *   provisioned folder self-reports drift + orients on launch. NOTE: because it lives in this folder's
- *   local settings, it only covers folders `configure` has run in — it catches a *provisioned* folder
- *   whose server later went missing, not a fresh clone/worktree that was never provisioned here (that
- *   still needs the global self-gating recipe in docs/harness-hooks.md).
+ * - `Notification` (ADR 053) — **project-local** (`.claude/settings.local.json`). It's about *this*
+ *   folder's blocked-approval moment: it fires when the agent parks awaiting input and prints the
+ *   directed acts waiting for this folder's bound seat into the terminal the human is already at.
+ * - `SessionStart` (ADR 060) — **global + self-gating** (`~/.claude/settings.json`). One hook covers
+ *   *every* folder but its first act is `grep -q musterd:start AGENTS.md || exit 0`, so it's silent
+ *   outside musterd folders. That self-gate is what lets it cover a **fresh clone/worktree never
+ *   provisioned here**: the committed primer is present but the MCP server isn't, so it runs
+ *   `claude mcp get musterd` and prints the fix (`musterd init`) instead of a false "auto-joined".
+ *   A project-local SessionStart could only cover folders `configure` already ran in — and would
+ *   double-fire against the global one — so SessionStart is global-only.
  */
 export const NOTIFICATION_HOOK_MARKER = 'musterd-notify-hook';
 export const SESSIONSTART_HOOK_MARKER = 'musterd-sessionstart-hook';
+
+/** The user's GLOBAL Claude Code settings (read at session start for all folders). Honors
+ *  `CLAUDE_CONFIG_DIR` (which Claude Code itself respects) so the config home is overridable + testable. */
+function globalSettingsPath(): string {
+  const base = process.env['CLAUDE_CONFIG_DIR'] || join(homedir(), '.claude');
+  return join(base, 'settings.json');
+}
 
 function notificationHookCommand(): string {
   // Best-effort, never failing the approval it rides on: cd to the project dir so the bound seat
@@ -120,13 +126,15 @@ function notificationHookCommand(): string {
 }
 
 function sessionStartHookCommand(): string {
-  // Verify-then-orient (ADR 060): cd to the project dir so the `-s local` (cwd-keyed) lookup resolves;
-  // if `claude` is on PATH and `mcp get musterd` fails, the server isn't wired here → print the fix;
-  // else print the orientation. The `command -v claude` guard avoids crying wolf when it can't verify.
+  // Global self-gating verify-then-orient (ADR 060): exit silently unless this folder carries the
+  // committed `musterd:start` primer; else cd in, and if `claude` is on PATH and `mcp get musterd`
+  // fails, the server isn't wired here → print the fix; otherwise print the orientation. The
+  // `command -v claude` guard avoids crying wolf when it can't verify.
   return (
-    'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
+    'd="${CLAUDE_PROJECT_DIR:-.}"; test -f "$d/AGENTS.md" && grep -q musterd:start "$d/AGENTS.md" || exit 0; ' +
+    'cd "$d" 2>/dev/null; ' +
     'if command -v claude >/dev/null 2>&1 && ! claude mcp get musterd >/dev/null 2>&1; then ' +
-    "echo 'musterd: this folder is set up for a musterd team but the musterd MCP server is NOT " +
+    "echo 'musterd: this folder has the musterd:start primer but the musterd MCP server is NOT " +
     'registered here — the team_* tools are unavailable. Run `musterd init` in this folder (or ' +
     "`musterd init --check` to confirm), then reload this session.'; else " +
     "echo 'You are on a musterd team (auto-joined on launch). Run team_inbox_check now to see " +
@@ -135,35 +143,64 @@ function sessionStartHookCommand(): string {
   );
 }
 
-/** True if a hook entry is one musterd installed under this marker (carries it in its command). */
+/** True if a hook entry carries the given marker in its command. */
 function isMusterdHookFor(m: ClaudeHookMatcher, marker: string): boolean {
   return m.hooks.some((h) => h.command.includes(marker));
 }
 
 /**
- * Install a marker-tagged musterd hook for `event` into `.claude/settings.local.json`, idempotently
- * and additively: drop any prior entry carrying the same marker (re-install replaces in place) and
- * append the current one, leaving the user's own hooks — and musterd's *other* hook — untouched.
+ * True if a hook entry is musterd's SessionStart — by our marker OR by the hand-pasted recipe's
+ * signature (a `musterd:start` gate + a `team_inbox_check` orient). Matching the signature lets the
+ * auto-install **absorb** a manually-pasted global recipe instead of stacking a second hook beside it.
  */
-function installHook(event: string, marker: string, command: string): void {
-  const path = settingsLocalPath();
-  const settings = readSettings(path);
+function isMusterdSessionStart(m: ClaudeHookMatcher): boolean {
+  return m.hooks.some(
+    (h) =>
+      h.command.includes(SESSIONSTART_HOOK_MARKER) ||
+      (h.command.includes('musterd:start') && h.command.includes('team_inbox_check')),
+  );
+}
+
+/** Read Claude settings from `path`: `{}` if absent, or `null` if present-but-unparseable — so a
+ *  caller never overwrites a real config (e.g. the user's global settings.json) it couldn't parse. */
+function readSettingsSafe(path: string): ClaudeSettings | null {
+  if (!existsSync(path)) return {};
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as ClaudeSettings;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Install/replace musterd's hook entry for `event` in the settings file at `path`, idempotently: drop
+ * every entry `matches` selects (our prior install and/or an absorbed recipe) and append `command`,
+ * leaving all other hooks untouched. Best-effort + non-clobbering: silently skips if the file exists
+ * but won't parse. Preserves every other key in the settings object.
+ */
+function upsertHook(
+  path: string,
+  event: string,
+  matches: (m: ClaudeHookMatcher) => boolean,
+  command: string,
+): void {
+  const settings = readSettingsSafe(path);
+  if (settings === null) return; // present but unparseable — never clobber
   settings.hooks ??= {};
-  const existing = (settings.hooks[event] ?? []).filter((m) => !isMusterdHookFor(m, marker));
+  const existing = (settings.hooks[event] ?? []).filter((m) => !matches(m));
   existing.push({ hooks: [{ type: 'command', command }] });
   settings.hooks[event] = existing;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
 }
 
-/** Remove a marker-tagged musterd hook for `event` from `.claude/settings.local.json` (exact reversal). */
-function removeHook(event: string, marker: string): void {
-  const path = settingsLocalPath();
-  if (!existsSync(path)) return;
-  const settings = readSettings(path);
+/** Remove musterd's hook entry for `event` from the settings file at `path` (exact, non-clobbering). */
+function dropHook(path: string, event: string, matches: (m: ClaudeHookMatcher) => boolean): void {
+  const settings = readSettingsSafe(path);
+  if (!settings) return; // absent (nothing to do) or unparseable (never clobber)
   const list = settings.hooks?.[event];
   if (!list) return;
-  const kept = list.filter((m) => !isMusterdHookFor(m, marker));
+  const kept = list.filter((m) => !matches(m));
   if (kept.length === list.length) return; // nothing of ours
   if (kept.length > 0) settings.hooks![event] = kept;
   else delete settings.hooks![event];
@@ -171,16 +208,31 @@ function removeHook(event: string, marker: string): void {
   writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
 }
 
-/** Install both musterd Claude Code hooks (Notification + SessionStart) into this folder's settings. */
+/**
+ * Install musterd's Claude Code hooks: the project-local `Notification` hook, and the global
+ * self-gating `SessionStart` verify hook (absorbing any hand-pasted recipe). Best-effort per hook.
+ */
 export function installMusterdHooks(): void {
-  installHook('Notification', NOTIFICATION_HOOK_MARKER, notificationHookCommand());
-  installHook('SessionStart', SESSIONSTART_HOOK_MARKER, sessionStartHookCommand());
+  upsertHook(
+    settingsLocalPath(),
+    'Notification',
+    (m) => isMusterdHookFor(m, NOTIFICATION_HOOK_MARKER),
+    notificationHookCommand(),
+  );
+  upsertHook(globalSettingsPath(), 'SessionStart', isMusterdSessionStart, sessionStartHookCommand());
 }
 
-/** Remove both musterd Claude Code hooks (exact reversal, marker-matched). */
+/**
+ * Remove musterd's Claude Code hooks. Reverses the project-local `Notification` hook, plus any
+ * project-local `SessionStart` left by a pre-consolidation install. The **global** SessionStart hook
+ * is machine-shared across all musterd folders and self-gates to silence once a folder's primer is
+ * gone, so uninstalling one folder does NOT remove it (manage it via Claude Code's `/hooks`).
+ */
 export function removeMusterdHooks(): void {
-  removeHook('Notification', NOTIFICATION_HOOK_MARKER);
-  removeHook('SessionStart', SESSIONSTART_HOOK_MARKER);
+  dropHook(settingsLocalPath(), 'Notification', (m) => isMusterdHookFor(m, NOTIFICATION_HOOK_MARKER));
+  dropHook(settingsLocalPath(), 'SessionStart', (m) =>
+    isMusterdHookFor(m, SESSIONSTART_HOOK_MARKER),
+  );
 }
 
 async function has(cmd: string, args: string[]): Promise<{ ok: boolean; out: string }> {

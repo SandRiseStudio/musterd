@@ -10,62 +10,113 @@ import {
   SESSIONSTART_HOOK_MARKER,
 } from './claudeCode.js';
 
-/** The Claude Code local-settings shape the hooks land in. */
+/** The Claude Code settings shape the hooks land in. */
 interface Settings {
   hooks?: Record<string, { hooks: { type: string; command: string }[] }[]>;
   permissions?: unknown;
+  model?: string;
 }
 
-describe('musterd Claude Code hooks (Notification + SessionStart)', () => {
+/**
+ * Notification is project-local (`.claude/settings.local.json` in cwd); SessionStart is global
+ * (`settings.json` under CLAUDE_CONFIG_DIR — set to a temp dir so the real ~/.claude is never touched).
+ */
+describe('musterd Claude Code hooks (local Notification + global SessionStart)', () => {
   let cwd: string;
+  let globalDir: string;
 
   beforeEach(() => {
-    cwd = mkdtempSync(join(tmpdir(), 'musterd-hooks-'));
+    cwd = mkdtempSync(join(tmpdir(), 'musterd-hooks-cwd-'));
+    globalDir = mkdtempSync(join(tmpdir(), 'musterd-hooks-global-'));
     vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+    process.env['CLAUDE_CONFIG_DIR'] = globalDir;
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    delete process.env['CLAUDE_CONFIG_DIR'];
     rmSync(cwd, { recursive: true, force: true });
+    rmSync(globalDir, { recursive: true, force: true });
   });
 
-  function readSettings(): Settings {
-    return JSON.parse(readFileSync(join(cwd, '.claude', 'settings.local.json'), 'utf8'));
-  }
+  const localPath = () => join(cwd, '.claude', 'settings.local.json');
+  const globalPath = () => join(globalDir, 'settings.json');
+  const read = (p: string): Settings => JSON.parse(readFileSync(p, 'utf8'));
   const cmdFor = (s: Settings, event: string) => s.hooks?.[event]?.[0]?.hooks?.[0]?.command ?? '';
 
-  it('installs both hooks, marker-tagged, under the right events', () => {
+  it('installs Notification locally and SessionStart globally, marker-tagged', () => {
     installMusterdHooks();
-    const s = readSettings();
-    expect(cmdFor(s, 'Notification')).toContain(NOTIFICATION_HOOK_MARKER);
-    expect(cmdFor(s, 'Notification')).toContain('musterd nudge');
-    // SessionStart verifies `claude mcp get musterd` before orienting (ADR 060).
-    expect(cmdFor(s, 'SessionStart')).toContain(SESSIONSTART_HOOK_MARKER);
-    expect(cmdFor(s, 'SessionStart')).toContain('claude mcp get musterd');
-    expect(cmdFor(s, 'SessionStart')).toContain('team_inbox_check');
+    const local = read(localPath());
+    const global = read(globalPath());
+    expect(cmdFor(local, 'Notification')).toContain(NOTIFICATION_HOOK_MARKER);
+    expect(cmdFor(local, 'Notification')).toContain('musterd nudge');
+    expect(local.hooks?.['SessionStart']).toBeUndefined(); // SessionStart is NOT local
+
+    // The global SessionStart is self-gating (grep musterd:start) and verifies before orienting.
+    const ss = cmdFor(global, 'SessionStart');
+    expect(ss).toContain(SESSIONSTART_HOOK_MARKER);
+    expect(ss).toContain('grep -q musterd:start');
+    expect(ss).toContain('claude mcp get musterd');
+    expect(ss).toContain('team_inbox_check');
+    expect(global.hooks?.['Notification']).toBeUndefined(); // Notification is NOT global
   });
 
   it('is idempotent — re-installing replaces in place, never stacks', () => {
     installMusterdHooks();
     installMusterdHooks();
-    const s = readSettings();
-    expect(s.hooks?.['Notification']).toHaveLength(1);
-    expect(s.hooks?.['SessionStart']).toHaveLength(1);
+    expect(read(localPath()).hooks?.['Notification']).toHaveLength(1);
+    expect(read(globalPath()).hooks?.['SessionStart']).toHaveLength(1);
   });
 
-  it('preserves the user’s own hooks on install and removal', () => {
-    // A pre-existing user SessionStart hook must survive both install and uninstall.
-    const path = join(cwd, '.claude', 'settings.local.json');
-    installMusterdHooks(); // creates the file + dir
-    const s0 = readSettings();
-    s0.hooks!['SessionStart'].push({ hooks: [{ type: 'command', command: 'echo mine' }] });
-    writeFileSync(path, JSON.stringify(s0), 'utf8');
+  it('absorbs a hand-pasted global recipe instead of duplicating it', () => {
+    // Simulate the manual recipe already in the user's global settings (no marker, but the signature).
+    writeFileSync(
+      globalPath(),
+      JSON.stringify({
+        model: 'opus',
+        hooks: {
+          SessionStart: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command:
+                    'grep -q musterd:start AGENTS.md && echo "... team_inbox_check ..." || exit 0',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+    installMusterdHooks();
+    const global = read(globalPath());
+    // The recipe was absorbed → exactly one SessionStart entry, now marker-tagged.
+    expect(global.hooks?.['SessionStart']).toHaveLength(1);
+    expect(cmdFor(global, 'SessionStart')).toContain(SESSIONSTART_HOOK_MARKER);
+    // Unrelated global settings are preserved.
+    expect(global.model).toBe('opus');
+  });
+
+  it('never clobbers an unparseable global settings file', () => {
+    writeFileSync(globalPath(), '{ this is not valid json', 'utf8');
+    installMusterdHooks(); // must not throw, must not overwrite
+    expect(readFileSync(globalPath(), 'utf8')).toBe('{ this is not valid json');
+    // The local Notification hook still installs fine.
+    expect(cmdFor(read(localPath()), 'Notification')).toContain(NOTIFICATION_HOOK_MARKER);
+  });
+
+  it('removal reverses the local Notification hook and preserves the user’s own hooks', () => {
+    installMusterdHooks();
+    // Add a user-owned Notification hook alongside musterd's.
+    const local = read(localPath());
+    local.hooks!['Notification'].push({ hooks: [{ type: 'command', command: 'echo mine' }] });
+    writeFileSync(localPath(), JSON.stringify(local), 'utf8');
 
     removeMusterdHooks();
-    const s1 = readSettings();
-    // musterd's entries are gone; the user's survives.
-    const ss = s1.hooks?.['SessionStart'] ?? [];
-    expect(ss.some((m) => m.hooks[0]!.command.includes(SESSIONSTART_HOOK_MARKER))).toBe(false);
-    expect(ss.some((m) => m.hooks[0]!.command === 'echo mine')).toBe(true);
-    expect(s1.hooks?.['Notification']).toBeUndefined(); // musterd's only Notification entry removed
+    const after = read(localPath());
+    const notif = after.hooks?.['Notification'] ?? [];
+    expect(notif.some((m) => m.hooks[0]!.command.includes(NOTIFICATION_HOOK_MARKER))).toBe(false);
+    expect(notif.some((m) => m.hooks[0]!.command === 'echo mine')).toBe(true);
   });
 });
