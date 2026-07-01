@@ -52,9 +52,21 @@ Rejected as the primary sink (ADR 082): **Langfuse** (its LLM-trace/generation m
 coordination spans) and **PostHog** (event-analytics, not OTLP-native, and funneling our own coordination
 metrics into a generic analytics tool undercuts the batond thesis).
 
+## Coordination metrics (slice 3 — the server-derivable half)
+
+The route path now emits first-party what finding 001 had to reconstruct:
+
+- **`musterd.coordination.loop_latency`** (histogram, ms, by closing `musterd.act`) — accept/decline
+  measured against the request_help/handoff they answer (`meta.in_reply_to`); resolve against its
+  thread root. This is the "directed-act latency" + resolve-side of the finding.
+- **`musterd.coordination.open_loops`** (gauge) — request_help/handoff acts not yet answered by an
+  accept/decline, sampled on each metric collection.
+- Act mix / resolve-rate are already derivable from the per-act `musterd.envelopes` counter.
+
+Not emittable server-side (needs harness/git data → slice 4): coordination-token ratio, wasted-work
+ratio, dup-rate.
+
 ## Not yet closed (later slices, ADR 082)
 
-Slice 1 is emission-on. Still open from finding 001: HTTP-layer structured logging on `daemon.log`
-(slice 2); first-party emission of the derived coordination metrics — coordination-token ratio,
-wasted-work ratio, resolve-rate, dup-rate (slice 3); per-agent token/cost + a cross-agent coordination
-trace (slice 4).
+HTTP-layer structured logging on `daemon.log` (slice 2); per-agent token/cost + the git/harness-side
+coordination metrics and a cross-agent trace (slice 4).

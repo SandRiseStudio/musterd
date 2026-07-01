@@ -74,6 +74,7 @@ interface Instruments {
   deliveryLatency: Histogram;
   errors: Counter;
   presenceChurn: Counter;
+  loopLatency: Histogram;
 }
 
 // Created lazily on first use (i.e. after startTelemetry has registered a provider) so the
@@ -95,6 +96,11 @@ function ix(): Instruments {
     }),
     presenceChurn: meter.createCounter('musterd.presence.churn', {
       description: 'Presence attach/detach events, by surface',
+    }),
+    loopLatency: meter.createHistogram('musterd.coordination.loop_latency', {
+      description:
+        'Time to close a coordination loop: accept/decline → the request_help/handoff it answers, resolve → its thread root (finding 001 "directed-act latency", ADR 082 slice 3)',
+      unit: 'ms',
     }),
   };
   return instruments;
@@ -150,6 +156,15 @@ export function recordError(errorClass: string): void {
   ix().errors.add(1, { 'musterd.error.class': errorClass });
 }
 
+/**
+ * Record a closed coordination loop (ADR 082 slice 3): `closingAct` is accept/decline (answering a
+ * request_help/handoff via meta.in_reply_to) or resolve (closing its thread root). Emitted first-party
+ * instead of being reconstructed from the message DB (finding 001's "directed-act latency").
+ */
+export function recordLoopClosure(closingAct: string, latencyMs: number): void {
+  ix().loopLatency.record(latencyMs, { 'musterd.act': closingAct });
+}
+
 /** Count a presence attach/detach for churn (observability.md §4). */
 export function recordPresenceChurn(event: 'attach' | 'detach', surface?: string): void {
   ix().presenceChurn.add(1, {
@@ -162,6 +177,8 @@ export function recordPresenceChurn(event: 'attach' | 'detach', surface?: string
 export interface RuntimeSampler {
   presenceBySurface: () => { surface: string; count: number }[];
   inboxLagMs: () => number;
+  /** Directed acts (request_help/handoff) not yet answered by an accept/decline (ADR 082 slice 3). */
+  openLoops: () => number;
 }
 
 /**
@@ -179,13 +196,18 @@ export function registerRuntimeGauges(sampler: RuntimeSampler): void {
     description: 'Age of the slowest inbox (oldest unread message)',
     unit: 'ms',
   });
+  const openLoops = meter.createObservableGauge('musterd.coordination.open_loops', {
+    description:
+      'request_help/handoff acts not yet answered by an accept/decline (ADR 082 slice 3)',
+  });
   meter.addBatchObservableCallback(
     (obs) => {
       for (const row of sampler.presenceBySurface()) {
         obs.observe(active, row.count, { 'musterd.surface': row.surface });
       }
       obs.observe(lag, sampler.inboxLagMs());
+      obs.observe(openLoops, sampler.openLoops());
     },
-    [active, lag],
+    [active, lag, openLoops],
   );
 }

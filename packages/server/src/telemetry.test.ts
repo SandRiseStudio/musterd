@@ -14,6 +14,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   recordError,
+  recordLoopClosure,
   registerRuntimeGauges,
   resetTelemetryForTests,
   telemetryEnabled,
@@ -122,6 +123,7 @@ describe('envelope instrumentation', () => {
         { surface: 'claude-code', count: 2 },
       ],
       inboxLagMs: () => 12_000,
+      openLoops: () => 3,
     });
 
     const { resourceMetrics } = await reader.collect();
@@ -136,5 +138,24 @@ describe('envelope instrumentation', () => {
 
     const lag = all.find((m) => m.descriptor.name === 'musterd.inbox.lag')!;
     expect(lag.dataPoints[0]!.value).toBe(12_000);
+
+    const loops = all.find((m) => m.descriptor.name === 'musterd.coordination.open_loops')!;
+    expect(loops.dataPoints[0]!.value).toBe(3);
+  });
+
+  it('records coordination loop latency by closing act (ADR 082 slice 3)', async () => {
+    recordLoopClosure('accept', 250);
+    recordLoopClosure('resolve', 1_000);
+
+    const { resourceMetrics } = await reader.collect();
+    const all = resourceMetrics.scopeMetrics.flatMap((s) => s.metrics);
+    const hist = all.find((m) => m.descriptor.name === 'musterd.coordination.loop_latency')!;
+    expect(hist).toBeTruthy();
+    const byAct = Object.fromEntries(
+      hist.dataPoints.map((dp) => [dp.attributes['musterd.act'], dp.value]),
+    ) as Record<string, { count: number; sum: number }>;
+    expect(byAct['accept']!.count).toBe(1);
+    expect(byAct['accept']!.sum).toBe(250);
+    expect(byAct['resolve']!.sum).toBe(1_000);
   });
 });

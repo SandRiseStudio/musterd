@@ -4,10 +4,10 @@ import { MusterdError } from '../errors.js';
 import { log } from '../log.js';
 import { appendAudit } from '../store/audit.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
-import { insertMessage, rowToEnvelope } from '../store/messages.js';
+import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
-import { withEnvelopeSpan } from '../telemetry.js';
+import { recordLoopClosure, withEnvelopeSpan } from '../telemetry.js';
 
 export interface RouteResult {
   message: MessageRow;
@@ -127,6 +127,18 @@ function routeEnvelopeInner(
   // Persist (append-only log) — the urgent-downgraded envelope when applicable, so the stored meta and
   // every delivery (direct + firehose, all derived from the row) carry the corrected flags.
   const message = insertMessage(ctx.db, team.id, sender.id, toMemberId, outgoingEnv);
+
+  // Coordination loop latency (ADR 082 slice 3): accept/decline close the directed act they answer
+  // (meta.in_reply_to); resolve closes its thread root. Emitted first-party instead of reconstructed
+  // (finding 001). Best-effort — an unknown reference just records nothing.
+  if (env.act === 'accept' || env.act === 'decline') {
+    const ref = env.meta?.['in_reply_to'];
+    const refTs = typeof ref === 'string' ? getMessageTs(ctx.db, team.id, ref) : null;
+    if (refTs !== null && env.ts >= refTs) recordLoopClosure(env.act, env.ts - refTs);
+  } else if (env.act === 'resolve' && env.thread) {
+    const rootTs = getMessageTs(ctx.db, team.id, env.thread);
+    if (rootTs !== null && env.ts >= rootTs) recordLoopClosure('resolve', env.ts - rootTs);
+  }
 
   // Deliver live to whoever is present. Durability is the log; this is the push.
   let delivered = 0;
