@@ -103,12 +103,26 @@ function LivePage() {
     setCfg({ team: slug, as: creds.name, token: creds.token });
   };
 
-  // Hydrate from the URL (?team=… is a shareable watch link → auto-connect) or the last team
-  // (SSR-safe; runs once on the client).
+  // Hydrate from the URL or the last team (SSR-safe; runs once on the client). Two URL shapes:
+  //   /live?team=<slug>&as=<observer>#w=<credential>  — a shared, team-controlled watch link: connect
+  //     straight to that one read-only observer seat (fans out, no per-viewer seat). The credential
+  //     rides the URL *fragment* so it never reaches the server or its logs.
+  //   /live?team=<slug>                               — auto-provision this browser's own observer.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const urlTeam = new URLSearchParams(window.location.search).get('team');
-    if (urlTeam) {
+    const params = new URLSearchParams(window.location.search);
+    const urlTeam = params.get('team');
+    const urlAs = params.get('as');
+    const watchTok = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('w');
+    if (urlTeam && urlAs && watchTok) {
+      setTeam(urlTeam);
+      try {
+        window.localStorage.setItem(TEAM_KEY, urlTeam);
+      } catch {
+        /* private mode */
+      }
+      setCfg({ team: urlTeam, as: urlAs, token: watchTok });
+    } else if (urlTeam) {
       void watch(urlTeam);
     } else {
       setTeam(window.localStorage.getItem(TEAM_KEY) ?? '');
@@ -138,6 +152,7 @@ function LivePage() {
         <span className="lc__word">musterd</span>
         {connected && <span className="lc__team">/ {cfg!.team}</span>}
         <span className="lc__spacer" />
+        {connected && <WatchLinkButton cfg={cfg!} />}
         {connected && <PanelControls mode={panel} onMode={setPanelMode} />}
         {connected && <SoundToggle />}
         <StatusPill status={status} live={roster.filter((m) => m.presence !== 'offline').length} />
@@ -168,6 +183,47 @@ function LivePage() {
         </>
       )}
     </main>
+  );
+}
+
+/**
+ * Copy a shareable, read-only **watch link** — the current observer seat's credential in the URL
+ * fragment (`#w=…`, so it never hits the server). Anyone the team hands it to opens the office as this
+ * same observer: read-only by construction (ADR 063), fans out to any number of viewers, no account
+ * and no per-viewer seat. This is the "team-controlled" way to let non-musterd people watch.
+ */
+function WatchLinkButton({ cfg }: { cfg: LiveConfig }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    const { origin } = window.location;
+    const url =
+      `${origin}/live?team=${encodeURIComponent(cfg.team)}&as=${encodeURIComponent(cfg.as)}` +
+      `#w=${encodeURIComponent(cfg.token)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      window.prompt('Copy this read-only watch link:', url);
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+  return (
+    <button
+      type="button"
+      className={`lc__pbtn${copied ? ' lc__pbtn--on' : ''}`}
+      onClick={() => void copy()}
+      title="Copy a shareable read-only watch link (anyone can watch — no account)"
+    >
+      {copied ? (
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M3.5 8.5 6.5 11.5 12.5 5" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M6.5 9.5 9.5 6.5M7 4.5 8.4 3a2.6 2.6 0 0 1 3.7 3.7L10.6 8.2M9 11.5 7.6 13a2.6 2.6 0 0 1-3.7-3.7L5.4 7.8" />
+        </svg>
+      )}
+    </button>
   );
 }
 
