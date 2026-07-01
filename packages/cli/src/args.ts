@@ -20,6 +20,9 @@ const BOOLEAN_FLAGS = new Set([
   'follow',
   'force',
   'insecure-trust-proxy',
+  'pending',
+  'approve',
+  'deny',
 ]);
 
 export function parseArgs(argv: string[]): Parsed {

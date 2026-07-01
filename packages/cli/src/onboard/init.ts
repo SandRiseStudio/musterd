@@ -4,7 +4,9 @@ import { join, relative } from 'node:path';
 import * as p from '@clack/prompts';
 import type { MemberSummary } from '@musterd/protocol';
 import pc from 'picocolors';
+import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
+import { claimCommand } from '../commands/claim.js';
 import { loadConfig, rememberIdentity, saveBinding, saveConfig, type Config } from '../config.js';
 import { renderBanner } from '../render/rows.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
@@ -199,20 +201,45 @@ export async function runInit(): Promise<number> {
   }
 
   if (intent === 'existing') {
-    // v0.2 down-payment is the framing only; reattaching a member needs its token back, which
-    // means the v0.3 seat-claim model (creator-authorized reissue). Surface it honestly, don't fake it.
-    p.note(
-      `Reconnecting an existing member somewhere new needs the seat-claim model — that lands in ${pc.bold('v0.3')}.\n` +
-        `For now, add it as a new agent, or if you still hold its token, set it up manually.`,
-      'Coming in v0.3',
+    // The request/approval lane (ADR 077) is what "reconnect somewhere new" actually needs, and it's
+    // built: `musterd claim <name>` already opens a request when the seat is held elsewhere and waits
+    // for an admin to approve it (`musterd requests decide <id> --approve`) instead of dead-ending.
+    // This drives that same command rather than duplicating its clobber-guard / wait / binding logic.
+    const target = guard(
+      await p.text({
+        message: 'Which member do you want to reactivate?',
+        placeholder: 'Ada',
+        validate: (v) => (v && v.trim() ? undefined : 'name the member to reactivate'),
+      }),
+    ).trim();
+
+    p.log.info(
+      pc.dim(
+        `Asking ${team} for ${pc.cyan(target)}'s seat — if it's held elsewhere, an admin needs to ` +
+          `approve it (${pc.yellow('musterd requests decide <id> --approve')}) while this waits.`,
+      ),
     );
-    const addNew = guard(
-      await p.confirm({ message: 'Add a new agent instead?', initialValue: true }),
-    );
-    if (!addNew) {
-      p.outro(pc.yellow(`No changes made to ${team}.`));
-      return 0;
+    try {
+      await claimCommand(
+        parseArgs([
+          target,
+          '--team',
+          team,
+          '--server',
+          server,
+          ...(config.agentKeys[team] ? ['--key', config.agentKeys[team]!] : []),
+          '--timeout',
+          '90',
+        ]),
+      );
+      p.outro(
+        pc.yellow(`${target} is reactivated on ${team} — this folder is bound to it now.`),
+      );
+    } catch (err) {
+      p.log.error(pc.red(err instanceof Error ? err.message : String(err)));
+      p.outro(pc.yellow(`Couldn't reactivate ${target} on ${team}.`));
     }
+    return 0;
   }
 
   // 3) Pick where the agent runs --------------------------------------------

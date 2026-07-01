@@ -1,8 +1,8 @@
 import { type Binding, type ClaimPolicy, type Surface } from '@musterd/protocol';
 import pc from 'picocolors';
 import { flagStr, type Parsed } from '../args.js';
-import { HttpClient } from '../client.js';
-import { findBinding, loadConfig, saveBinding } from '../config.js';
+import { HttpClient, watchClaim } from '../client.js';
+import { findBinding, loadConfig, saveBinding, wsBase } from '../config.js';
 import { CliError } from '../errors.js';
 import { liveBindingClobber } from '../onboard/guard.js';
 import {
@@ -12,6 +12,12 @@ import {
   type PendingMarker,
 } from '../onboard/pending.js';
 import { theme } from '../render/theme.js';
+import { WAIT_TIMEOUT_EXIT } from './inbox.js';
+
+/** Default `musterd claim` pending-wait bound (seconds) — same window as `inbox --wait`
+ *  (ADR 054/077): long enough to give an admin a real chance to approve, short enough a dropped
+ *  socket can't hang a script forever. `--timeout 0` waits unbounded. */
+const DEFAULT_CLAIM_TIMEOUT_S = 300;
 
 /** What the caller asked to claim — a named seat, or the next open seat in a role pool. */
 export type ClaimSeatTarget = { seat: string } | { role: string };
@@ -91,70 +97,126 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     throw new CliError(`no pending session with code "${forCode}" in this folder`, 2);
   }
 
-  // The v0.3 claim handshake (the A.7 stateless mirror, one code path with the WS frames).
-  const outcome = await http.claim(team, {
-    key: agentKey,
-    target,
-    surface,
-    ...(grant !== undefined ? { grant } : {}),
-  });
-
-  if (outcome.state === 'refused') {
-    const tail = outcome.hint ? ` — ${outcome.hint}` : '';
-    throw new CliError(`claim refused (${outcome.code}): ${outcome.message}${tail}`, 4);
+  const timeoutRaw = flagStr(flags, 'timeout');
+  const timeoutS = timeoutRaw !== undefined ? Number(timeoutRaw) : DEFAULT_CLAIM_TIMEOUT_S;
+  if (Number.isNaN(timeoutS) || timeoutS < 0) {
+    throw new CliError('--timeout must be a non-negative number of seconds', 2);
   }
-  if (outcome.state === 'pending') {
-    if (flags['json']) {
-      process.stdout.write(
-        JSON.stringify({ team, pending: true, request: outcome.requestId }) + '\n',
+
+  // The v0.3 claim handshake (ADR 075/077) over a live WS: `occupied`/`refused` resolve immediately,
+  // same as the old one-shot HTTP mirror; `pending` (the seat is held elsewhere) now holds the socket
+  // open and waits for the server-pushed terminal frame once an admin decides (`musterd requests
+  // decide`) instead of dead-ending the process (the old `http.claim` one-shot mirror's fate).
+  return new Promise<number>((resolveP, rejectP) => {
+    let done = false;
+    let timer: NodeJS.Timeout | undefined;
+    const finish = (fn: () => void) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      process.off('SIGINT', onSigint);
+      session.close();
+      fn();
+    };
+    const onSigint = () => {
+      finish(() =>
+        rejectP(
+          new CliError(
+            'stopped waiting — the request is still open; approve it with ' +
+              '`musterd requests decide <id> --approve` and re-run `musterd claim` once it is',
+            130,
+          ),
+        ),
       );
-      return 0;
-    }
-    process.stdout.write(
-      `${theme.meta('⧖')} ${outcome.message}\n` +
-        pc.dim(
-          `waiting for an admin to approve (request ${outcome.requestId}); ` +
-            `this folder occupies the seat once approved.`,
-        ) +
-        '\n',
-    );
-    return 0;
-  }
+    };
+    process.on('SIGINT', onSigint);
 
-  // occupied — the server assigned/confirmed the seat (role pools resolve server-side).
-  const seat = outcome.seat.name;
-  const next: Binding = {
-    server,
-    team,
-    agent_key: agentKey,
-    surface: surface as Binding['surface'],
-    // Record the resolved seat as the folder's standing policy so re-launches re-occupy it.
-    claim: { mode: 'seat', name: seat },
-    ...(grant !== undefined ? { grant } : {}),
-  };
-  saveBinding(process.cwd(), next);
+    const session = watchClaim({
+      wsUrl: wsBase(server) + '/ws',
+      team,
+      key: agentKey,
+      target,
+      surface,
+      ...(grant !== undefined ? { grant } : {}),
+      onOccupied: (occupiedSeat) => {
+        const seat = occupiedSeat.name;
+        const next: Binding = {
+          server,
+          team,
+          agent_key: agentKey,
+          surface: surface as Binding['surface'],
+          // Record the resolved seat as the folder's standing policy so re-launches re-occupy it.
+          claim: { mode: 'seat', name: seat },
+          ...(grant !== undefined ? { grant } : {}),
+        };
+        saveBinding(process.cwd(), next);
 
-  // Bring a matched waiting session online now (ADR 034): hand it the resolved seat via a sidecar its
-  // watcher adopts (it already holds the team agent key), then drop the discovery marker.
-  let live = false;
-  if (marker) {
-    writeResolution(process.cwd(), marker.code, { seat });
-    consumePending(process.cwd(), marker.code);
-    live = true;
-  }
+        // Bring a matched waiting session online now (ADR 034): hand it the resolved seat via a
+        // sidecar its watcher adopts (it already holds the team agent key), then drop the marker.
+        let live = false;
+        if (marker) {
+          writeResolution(process.cwd(), marker.code, { seat });
+          consumePending(process.cwd(), marker.code);
+          live = true;
+        }
 
-  if (flags['json']) {
-    process.stdout.write(JSON.stringify({ team, member: seat, live }) + '\n');
-    return 0;
-  }
-  const tail = live
-    ? `the waiting ${marker!.surface} session is going online as ${seat} now.`
-    : `bound this folder to ${seat}; the agent here will occupy it on launch (or call team_join).`;
-  process.stdout.write(
-    `${theme.ok('✓')} ${theme.memberName(seat, 'agent')} — occupied on ${team}\n` +
-      `${pc.dim(tail)}\n`,
-  );
-  return 0;
+        finish(() => {
+          if (flags['json']) {
+            process.stdout.write(JSON.stringify({ team, member: seat, live }) + '\n');
+            resolveP(0);
+            return;
+          }
+          const tail = live
+            ? `the waiting ${marker!.surface} session is going online as ${seat} now.`
+            : `bound this folder to ${seat}; the agent here will occupy it on launch (or call team_join).`;
+          process.stdout.write(
+            `${theme.ok('✓')} ${theme.memberName(seat, 'agent')} — occupied on ${team}\n` +
+              `${pc.dim(tail)}\n`,
+          );
+          resolveP(0);
+        });
+      },
+      onRefused: (code, message, claimable, hint) => {
+        finish(() => {
+          const tail = hint ? ` — ${hint}` : '';
+          rejectP(new CliError(`claim refused (${code}): ${message}${tail}`, 4));
+        });
+      },
+      onPending: (requestId, message) => {
+        if (flags['json']) {
+          process.stdout.write(
+            JSON.stringify({ team, pending: true, request: requestId }) + '\n',
+          );
+        } else {
+          process.stdout.write(
+            `${theme.meta('⧖')} ${message}\n` +
+              pc.dim(
+                `waiting for an admin to approve (request ${requestId}) — have an admin run ` +
+                  `\`musterd requests decide ${requestId} --approve\`; ^C to stop waiting.`,
+              ) +
+              '\n',
+          );
+        }
+        if (timeoutS > 0) {
+          timer = setTimeout(() => {
+            finish(() =>
+              rejectP(
+                new CliError(
+                  `still waiting on request ${requestId} after ${timeoutS}s — check ` +
+                    '`musterd requests` and re-run `musterd claim` once it is approved',
+                  WAIT_TIMEOUT_EXIT,
+                ),
+              ),
+            );
+          }, timeoutS * 1000);
+        }
+      },
+      onDeliver: () => {},
+      onError: (msg) => {
+        finish(() => rejectP(new CliError(`claim failed: ${msg}`, 1)));
+      },
+    });
+  });
 }
 
 function resolveTarget(parsed: Parsed, binding: Binding | null): ClaimSeatTarget {

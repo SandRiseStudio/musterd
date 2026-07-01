@@ -1,14 +1,19 @@
 import {
   AuditResponseSchema,
+  DecideResponseSchema,
   ErrorBodySchema,
   PROTOCOL_VERSION,
+  RequestsResponseSchema,
   type AuditResponse,
   type ClaimTarget,
+  type DecideRequest,
+  type DecideResponse,
   type Envelope,
   type Member,
   type MemberKind,
   type MemberSummary,
   type RefusedCode,
+  type RequestsResponse,
   type Surface,
   type WSServerFrame,
 } from '@musterd/protocol';
@@ -178,6 +183,42 @@ export class HttpClient {
     const parsed = AuditResponseSchema.safeParse(json);
     if (!parsed.success) {
       throw new CliError('audit response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /**
+   * The P3.2 request lane (ADR 077) — `GET /teams/:slug/requests`, admin-only. `pendingOnly` maps to
+   * `?status=pending`. Parsed through `RequestsResponseSchema` (ADR 074).
+   */
+  async requests(
+    slug: string,
+    opts: { pendingOnly?: boolean } = {},
+  ): Promise<RequestsResponse> {
+    const qs = opts.pendingOnly ? '?status=pending' : '';
+    const json = await this.request('GET', `/teams/${slug}/requests${qs}`);
+    const parsed = RequestsResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('requests response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /**
+   * Decide a pending request (ADR 077) — `POST /teams/:slug/requests/:id/decide`, admin-only. An
+   * approve issues a grant of the given lifetime and, if the requesting session is still live (a WS
+   * claim hold), pushes it the terminal `occupied` frame directly — `delivered` tells the caller
+   * whether that happened or the requester will need to re-claim.
+   */
+  async decideRequest(slug: string, id: string, body: DecideRequest): Promise<DecideResponse> {
+    const json = await this.request(
+      'POST',
+      `/teams/${slug}/requests/${encodeURIComponent(id)}/decide`,
+      body,
+    );
+    const parsed = DecideResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('decide response did not match the protocol schema', 1);
     }
     return parsed.data;
   }

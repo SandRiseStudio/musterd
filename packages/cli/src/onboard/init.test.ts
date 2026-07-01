@@ -53,7 +53,13 @@ const h = vi.hoisted(() => {
     agentKeys: {},
     rosterHome: {},
   };
-  return { confirmQueue, selectQueue, textQueue, http, harness, config };
+  // Queue of outcomes for the `watchClaim` fake (`musterd claim`'s live WS handshake, driven by
+  // init.ts's "activate an existing member" branch, ADR 077) — one entry consumed per claim attempt.
+  const claimQueue: Array<
+    | { state: 'occupied' }
+    | { state: 'refused'; code: string; message: string }
+  > = [];
+  return { confirmQueue, selectQueue, textQueue, http, harness, config, claimQueue };
 });
 
 vi.mock('@clack/prompts', () => ({
@@ -69,7 +75,26 @@ vi.mock('@clack/prompts', () => ({
   text: vi.fn(async () => h.textQueue.shift()),
 }));
 
-vi.mock('../client.js', () => ({ HttpClient: vi.fn(() => h.http) }));
+vi.mock('../client.js', () => ({
+  HttpClient: vi.fn(() => h.http),
+  // Fakes `musterd claim`'s live WS handshake for init.ts's "existing member" branch: consumes one
+  // queued outcome and fires the matching callback on the next microtask (mirrors a real WS reply).
+  watchClaim: (opts: {
+    target: { seat?: string; role?: string };
+    onOccupied?: (seat: { name: string }, presenceId: string) => void;
+    onRefused?: (code: string, message: string, claimable: string[], hint: string) => void;
+  }) => {
+    const outcome = h.claimQueue.shift() ?? { state: 'occupied' as const };
+    queueMicrotask(() => {
+      if (outcome.state === 'occupied') {
+        opts.onOccupied?.({ name: opts.target.seat ?? 'Ada' }, 'presence-1');
+      } else {
+        opts.onRefused?.(outcome.code, outcome.message, [], '');
+      }
+    });
+    return { close: vi.fn() };
+  },
+}));
 
 vi.mock('./harnesses/index.js', () => ({ HARNESSES: [h.harness] }));
 
@@ -80,6 +105,8 @@ vi.mock('../config.js', () => ({
   rememberIdentity: vi.fn((cfg: { knownIdentities: unknown[] }, si: unknown) => {
     cfg.knownIdentities.push(si);
   }),
+  findBinding: vi.fn(() => null),
+  wsBase: vi.fn((server: string) => server.replace(/^http/, 'ws')),
 }));
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn(() => ({ unref: vi.fn() })) }));
@@ -96,6 +123,7 @@ beforeEach(() => {
   h.confirmQueue.length = 0;
   h.selectQueue.length = 0;
   h.textQueue.length = 0;
+  h.claimQueue.length = 0;
   Object.assign(h.config, {
     server: 'http://localhost:4849',
     current: undefined,
@@ -225,10 +253,22 @@ describe('runInit — intent branches', () => {
     expect(h.http.addMember).not.toHaveBeenCalled();
   });
 
-  it('"activate existing" + decline-add-new makes no changes', async () => {
-    h.textQueue.push('dawn', 'nick', '');
-    h.selectQueue.push('existing');
-    h.confirmQueue.push(false); // "add a new agent instead?" → no
+  it('"activate an existing member" drives the real claim flow and occupies the seat (ADR 077)', async () => {
+    h.textQueue.push('dawn', 'nick', ''); // createTeam
+    h.selectQueue.push('existing'); // intent
+    h.textQueue.push('Miley'); // which member to reactivate
+    h.claimQueue.push({ state: 'occupied' });
+    expect(await runInit()).toBe(0);
+    // No new member is minted — reactivating an existing one is a claim, not an add.
+    expect(h.http.addMember).not.toHaveBeenCalled();
+  });
+
+  it('"activate an existing member" surfaces a refusal instead of dead-ending', async () => {
+    h.textQueue.push('dawn', 'nick', ''); // createTeam
+    h.selectQueue.push('existing'); // intent
+    h.textQueue.push('Miley'); // which member to reactivate
+    h.claimQueue.push({ state: 'refused', code: 'not_found', message: 'no such seat' });
+    // The wizard catches the refusal and exits 0 (a guided no-op), not a thrown CliError.
     expect(await runInit()).toBe(0);
     expect(h.http.addMember).not.toHaveBeenCalled();
   });
