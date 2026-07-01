@@ -117,6 +117,15 @@ describe('requests command', () => {
     expect(res.out).toContain('approved request');
   });
 
+  it('decide --approve --standing mints a standing (survives-relaunch) grant', async () => {
+    const id = await openPendingClaim();
+    const res = await capture(() =>
+      requestsCommand(parseArgs(['decide', id, '--approve', '--standing'])),
+    );
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('approved request');
+  });
+
   it('decide --deny denies the request', async () => {
     const id = await openPendingClaim();
     const res = await capture(() => requestsCommand(parseArgs(['decide', id, '--deny'])));
@@ -138,11 +147,17 @@ describe('requests command', () => {
     await expect(requestsCommand(parseArgs(['decide']))).rejects.toThrow(/musterd requests decide/);
   });
 
-  it('rejects --once combined with --ttl-hours', async () => {
+  it('rejects combining two grant-lifetime flags', async () => {
     const id = await openPendingClaim();
     await expect(
       requestsCommand(parseArgs(['decide', id, '--approve', '--once', '--ttl-hours', '2'])),
-    ).rejects.toThrow(/not both/);
+    ).rejects.toThrow(/only one of --once, --standing, or --ttl-hours/);
+    await expect(
+      requestsCommand(parseArgs(['decide', id, '--approve', '--once', '--standing'])),
+    ).rejects.toThrow(/only one of --once, --standing, or --ttl-hours/);
+    await expect(
+      requestsCommand(parseArgs(['decide', id, '--approve', '--standing', '--ttl-hours', '2'])),
+    ).rejects.toThrow(/only one of --once, --standing, or --ttl-hours/);
   });
 
   it('refuses a non-admin credential with forbidden (exit 5)', async () => {

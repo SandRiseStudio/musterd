@@ -62,12 +62,15 @@ async function decideCommand(parsed: Parsed): Promise<number> {
 
   const ttlHours = parseTtlHours(flagStr(parsed.flags, 'ttl-hours'));
   const once = parsed.flags['once'] === true;
-  if (once && ttlHours !== undefined) {
-    throw new CliError('pass --once or --ttl-hours <n>, not both', 2);
+  const standing = parsed.flags['standing'] === true;
+  // The three grant lifetimes (GrantLifetimeSchema) are mutually exclusive — reject any two at once.
+  if ([once, standing, ttlHours !== undefined].filter(Boolean).length > 1) {
+    throw new CliError('pass only one of --once, --standing, or --ttl-hours <n>', 2);
   }
-  // Default to `once` — the least-privilege choice (let this one session in) unless the admin asks
-  // for a longer-lived grant.
-  const lifetime = ttlHours !== undefined ? 'ttl' : 'once';
+  // Default to `once` — the least-privilege choice (let this one session in). `--standing` mints a
+  // grant that survives until revoked, so the seat re-occupies on relaunch without re-approval;
+  // `--ttl-hours` bounds it to a window.
+  const lifetime = ttlHours !== undefined ? 'ttl' : standing ? 'standing' : 'once';
 
   const res = await http.decideRequest(team, id, {
     decision: 'approve',
