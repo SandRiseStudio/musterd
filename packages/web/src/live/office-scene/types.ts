@@ -40,6 +40,10 @@ export interface Pose {
   bubble: Bubble;
   /** Draw opacity — ramps 0→1 entering the office and 1→0 leaving (door staging); 1 otherwise. */
   alpha: number;
+  /** True while travelling along a walk leg (drives the Rive `walking` mode); false when seated/holding. */
+  moving: boolean;
+  /** True while the active walk is an urgent run (drives the Rive `run` modifier). */
+  run: boolean;
 }
 
 /** Motion intensity == notification tier (memory: travel-intensity == notification tiers). */

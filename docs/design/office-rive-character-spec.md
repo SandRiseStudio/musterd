@@ -3,6 +3,33 @@
 Status: draft (2026-07-01) · Owner: web/live · Relates to: ADR 079 (live isometric office), Figma
 `b6zXGHxG9CnCa8tFgpQWx2` frame **07 Character Rig**.
 
+> ## ✅ As-built (v1 — 2026-07-01)
+>
+> The rig below was **built through the Rive Editor MCP** (not by hand) into `character.riv`. A few
+> Rive-native choices diverge from the original draft — the authoritative code-side contract is now
+> **`packages/web/src/live/office-scene/rig.ts`** (`officeToRig(node, pose) → RigInputs`, unit-tested).
+> Reconciliation vs §3/§5:
+>
+> - **Artboard** `Character` (180×260, feet ≈ (90, 235)). One view model **`Character`** whose
+>   **instance values are the input channel** the runtime sets each frame (via the Rive runtime
+>   data-binding API), exactly as the MCP set them at authoring time.
+> - **Colour is real `color` properties, not a `hue` number:** `accentColor` (torso), `accentDark`
+>   (arms, ~0.72× lightness), `skinColor` (head, name-seeded swatch). The code sends `#aarrggbb`
+>   (`hslToArgb(memberColor(...))`). Rive's simple databind has no converter, so this is cleaner than
+>   hue→HSV in-rig.
+> - **`isHuman`/`carry` are not booleans in the rig** — they're **`agentVis` / `humanVis` / `carryVis`
+>   numbers (0|1)** bound to shape opacity. The code translates `kind`→agent/human vis and
+>   `carry`→carryVis (again, no boolean→opacity converter in databind).
+> - **State machine `State`**, driven by **`mode`** (Number): `0 idle · 1 working · 2 walking · 3 away ·
+4 help`, all keyframed (position-only, to avoid touching bound props). `facing`/`run` numbers exist
+>   but **v1 is front-only** (facing not yet visually distinct; ship S, add E/W-mirror + N later).
+> - **Critical runtime note:** data binding is **VM→object**, and VM instance values default to
+>   `0`/opaque-black — so the runtime **must set the colour + vis values on load** or the character
+>   renders black (learned the hard way in the editor). `rig.ts` supplies exactly those values.
+>
+> The narrative spec below (hue/isHuman/skinTone) remains the design intent and forward-looking target;
+> §3/§5 are superseded by `rig.ts` for what the code actually drives today.
+
 ## Purpose
 
 The live office (`packages/web/src/live/office-scene/`) currently draws each teammate with a **code-drawn

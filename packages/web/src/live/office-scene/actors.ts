@@ -47,6 +47,8 @@ export function homePoses(
         carry: false,
         bubble: null,
         alpha: 1,
+        moving: false,
+        run: false,
       });
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);
@@ -58,6 +60,8 @@ export function homePoses(
         carry: false,
         bubble: null,
         alpha: 1,
+        moving: false,
+        run: false,
       });
     } else if (pl.kind === 'strip') {
       out.set(name, {
@@ -68,6 +72,8 @@ export function homePoses(
         carry: false,
         bubble: null,
         alpha: 1,
+        moving: false,
+        run: false,
       });
     }
   }
@@ -91,6 +97,8 @@ interface Walk {
   small: boolean;
   /** Door staging: fade the avatar in while entering / out while leaving; absent for act-walks & drifts. */
   fade?: 'in' | 'out';
+  /** Urgent help walk — drives the `run` pose flag (Rive `run` modifier). */
+  run?: boolean;
 }
 type Req = { kind: 'help' | 'handoff'; to: string; urgent: boolean };
 
@@ -131,7 +139,7 @@ export function createActors(): Actors {
   let doorPulses = 0; // members that entered/left since the last takeDoorPulses()
 
   function entrancePose(ref: Pose): Pose {
-    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1 };
+    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1, moving: false, run: false };
   }
   function moved(a: Pose, b: Pose): boolean {
     return Math.hypot(a.lx - b.lx, a.ly - b.ly) > 8;
@@ -177,6 +185,9 @@ export function createActors(): Actors {
         carry: leg.carry,
         bubble: leg.bubble,
         alpha,
+        // Travelling (not the hold leg) → `walking`; urgent walks → `run`.
+        moving: leg.fx !== leg.tx || leg.fy !== leg.ty,
+        run: w.run ?? false,
       });
     }
     return out;
@@ -202,6 +213,7 @@ export function createActors(): Actors {
       i: 0,
       t: 0,
       small: home.small,
+      run: req.urgent,
     };
   }
 
