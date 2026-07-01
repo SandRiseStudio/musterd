@@ -18,21 +18,23 @@ const binding = {
 };
 
 describe('mcpEntry', () => {
-  it('builds the v0.3 claim-binding env (ADR 075)', () => {
+  it('builds the v0.3 claim-binding env (ADR 075) — no baked MUSTERD_CLAIM', () => {
+    // The claim is intentionally NOT emitted: it changes on re-claim and the adapter reads it from
+    // binding.json (the single source of truth). Baking it froze a copy that outranked binding.json.
     expect(buildMcpEnv(binding)).toEqual({
       MUSTERD_SERVER: 'http://localhost:4849',
       MUSTERD_TEAM: 'dawn',
       MUSTERD_AGENT_KEY: 'mskey_secret',
-      MUSTERD_CLAIM: 'seat:Ada',
       MUSTERD_SURFACE: 'cursor',
     });
+    expect(buildMcpEnv(binding)['MUSTERD_CLAIM']).toBeUndefined();
   });
 
   it('resolves a runnable launch command for the adapter', () => {
     const entry = buildEntry(binding);
     expect(entry.command).toBe(process.execPath);
     expect(entry.args[0]).toMatch(/index\.(js|ts)$/);
-    expect(entry.env['MUSTERD_CLAIM']).toBe('seat:Ada');
+    expect(entry.env['MUSTERD_CLAIM']).toBeUndefined();
   });
 });
 

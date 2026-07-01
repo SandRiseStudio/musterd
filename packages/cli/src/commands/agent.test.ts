@@ -71,7 +71,8 @@ describe('musterd agent <name>', () => {
     // MCP registered with the v0.3 env triple + autojoin
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
     expect(entry.env.MUSTERD_AGENT_KEY).toBe('mskey_team');
-    expect(entry.env.MUSTERD_CLAIM).toBe('seat:June');
+    // claim is carried by binding.json (asserted above via saveBinding), not baked into the MCP env
+    expect(entry.env.MUSTERD_CLAIM).toBeUndefined();
     expect(entry.env.MUSTERD_AUTOJOIN).toBe('1');
 
     // The secret-free committed launch spec is written (no agent_key/grant fields).

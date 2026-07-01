@@ -8,6 +8,14 @@ export interface DetectResult {
   configured: boolean;
   /** Human-readable detail (where it looked / what it found). */
   detail?: string;
+  /**
+   * The `MUSTERD_CLAIM` value baked into this harness's registered musterd server, if any and the
+   * harness can read it back (e.g. Claude Code via `claude mcp get`). Provisioning no longer emits
+   * this env (see {@link buildMcpEnv}), so a present value is a *legacy* baked claim — the doctor
+   * compares it against `.musterd/binding.json` and flags a mismatch (the drift that pinned the MCP
+   * tools to a stale seat after a re-claim). Undefined ⇒ not baked / not readable ⇒ nothing to check.
+   */
+  registeredClaim?: string;
 }
 
 export interface ConfigureResult {

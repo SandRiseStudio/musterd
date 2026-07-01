@@ -1,3 +1,5 @@
+import { formatClaimPolicy } from '@musterd/protocol';
+import { findBinding } from '../config.js';
 import { theme } from '../render/theme.js';
 import { HARNESSES } from './harnesses/index.js';
 import { classifyPrimerTarget } from './primer.js';
@@ -36,6 +38,12 @@ export interface DoctorReport {
 
 export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const primerManaged = classifyPrimerTarget(cwd) === 'managed';
+  // The folder's single source of truth for which seat it claims (ADR 018). A legacy MCP registration
+  // may still carry a baked `MUSTERD_CLAIM` that outranks it — the value-coherence check below.
+  const binding = findBinding(cwd);
+  const boundClaim = binding?.claim ? formatClaimPolicy(binding.claim) : undefined;
+  const drift: string[] = [];
+
   const harnesses: HarnessState[] = [];
   for (const h of HARNESSES) {
     const d = await h.detect();
@@ -45,11 +53,24 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       configured: d.configured,
       ...(d.detail !== undefined ? { detail: d.detail } : {}),
     });
+    // Value-coherence: a legacy baked MUSTERD_CLAIM that disagrees with binding.json pins this
+    // harness's team_* tools to a stale seat while the CLI claims the current one (the re-claim drift).
+    if (
+      d.registeredClaim !== undefined &&
+      boundClaim !== undefined &&
+      d.registeredClaim !== boundClaim
+    ) {
+      drift.push(
+        `${h.label}'s musterd server has a baked MUSTERD_CLAIM=${d.registeredClaim} but ` +
+          `.musterd/binding.json claims ${boundClaim} — the team_* tools will resolve a different ` +
+          `seat than the musterd CLI in this folder. Run \`musterd init\` to re-sync (it no longer ` +
+          `bakes the claim, so binding.json becomes the single source of truth).`,
+      );
+    }
   }
   const installed = harnesses.filter((h) => h.installed);
   const anyConfigured = installed.some((h) => h.configured);
 
-  const drift: string[] = [];
   // The headline gap: marker present (hook will claim "auto-joined") but no server registered.
   if (primerManaged && installed.length > 0 && !anyConfigured) {
     drift.push(
