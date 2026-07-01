@@ -424,6 +424,22 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [adr(71, 'ADR 071'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
     dependsOn: ['notify-nudge', 'availability-urgent', 'v03-p2-enforcement'],
   },
+  {
+    id: 'coordination-lanes',
+    wave: 3,
+    title: 'Coordination lanes — own the work, never dup a diff',
+    status: 'near-term',
+    category: 'platform',
+    blurb:
+      'A first-class lane = { work-item × owner × surface } so musterd advises before two agents (or humans) redo the same work — the anti-swarm primitive.',
+    detail:
+      'From the P3 dogfood post-mortem: coordination messages cost ~1% of tokens, but ~37% of the code produced never reached main (53% of that a single dependency-revert). A lane makes work-ownership contention-aware — unmet-dependency + surface-overlap warnings (advisory, never block; git-optional), a done-state that fixes the dead resolve act, and handoffs that carry the branch instead of a prose description. Phase 1 = the intent + dependency layer (catches the biggest waste, git-optional); Phase 2 = lightweight piggybacked observation (watcher, never gatekeeper). Design + spec live in docs/design/lanes-and-the-multi-agent-tax.md + lane-phase1-mvp-spec.md; no ADR yet. Wave is provisional pending the next reprioritization.',
+    refs: [
+      doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax'),
+      doc('docs/design/lane-phase1-mvp-spec.md', 'Phase-1 MVP spec'),
+    ],
+    dependsOn: ['v03-p1-seats'],
+  },
 
   // ── reserved ──────────────────────────────────────────────────────────────
   {

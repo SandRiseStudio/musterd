@@ -19,4 +19,6 @@ Operationalize MAST's multi-agent failure taxonomy ([arXiv 2503.13657](https://a
 
 One file per experiment/finding, `NNN-<slug>.md`: question · setup (the pinned experiment manifest) · baseline · result · honest-N caveat · what it changes (link any ADR/roadmap item it graduates to). Keep the Goodhart / human-vs-agent-measurement cautions (`../design/human-agent-dynamics.md` §4) in force — diagnostic instruments, never Member rankings.
 
-_No findings logged yet — this is the stub that opens the practice._
+## Findings
+
+- [001 — Telemetry gaps: the flagship session left almost no machine trace](./001-telemetry-gaps-p3-dogfood.md) (2026-06-30) — the P3 dogfood was near-unobservable from musterd's own telemetry (OTel inert, no PostHog project, Langfuse + audit-log empty, `daemon.log` info-only); the whole cost analysis was reconstructed forensically from the message DB + transcripts. Concrete gap-list + the candidate coordination evals.
