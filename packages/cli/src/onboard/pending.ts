@@ -10,6 +10,7 @@ import {
 import { dirname, join } from 'node:path';
 import {
   BINDING_DIR,
+  BINDING_FILE,
   PENDING_DIR,
   PendingSessionSchema,
   RESOLVED_SUFFIX,
@@ -27,12 +28,19 @@ export type PendingMarker = PendingSession;
  * `@musterd/protocol`; the fs reader is duplicated here and in the adapter (the ADR 018 precedent).
  */
 
-/** The nearest `.musterd` dir at/above `startDir`, or `startDir/.musterd` when none exists yet. */
+/**
+ * The `.musterd` dir this workspace's markers belong to: the nearest ancestor that holds a
+ * `binding.json` (a bound workspace root), else `startDir/.musterd`. Mirrors {@link findBinding}'s
+ * walk so markers land next to the binding — and, critically, matching on the **binding file** (not
+ * the bare dir) means an unbound folder never resolves up to the global `~/.musterd` config dir,
+ * which holds `config.json`, not a `binding.json`. Resolving there leaked markers into the global dir
+ * and made `musterd claim` see other workspaces' pending sessions (the 2026-07-01 dogfood bug).
+ */
 function nearestMusterdDir(startDir: string): string {
   let dir = startDir;
   for (;;) {
     const candidate = join(dir, BINDING_DIR);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(join(candidate, BINDING_FILE))) return candidate;
     const parent = dirname(dir);
     if (parent === dir) return join(startDir, BINDING_DIR);
     dir = parent;
@@ -52,8 +60,19 @@ export function writePending(startDir: string, session: PendingSession): string 
   return p;
 }
 
-/** All valid pending markers for a team in this folder (skips unparseable/foreign-team files). */
-export function listPendingForWorkspace(startDir: string, team: string): PendingMarker[] {
+/**
+ * All valid pending markers for a team in this folder (skips unparseable/foreign-team files). When
+ * `workspace` is given, markers for a *different* workspace are also skipped: a marker's `.musterd`
+ * dir can be shared across sibling launches (e.g. a subdir session and the workspace root resolve to
+ * the same bound root), so team alone doesn't prove a marker belongs to *this* session's workspace —
+ * without the filter, `musterd claim` would list (and demand `--for` on) another workspace's pending
+ * sessions (the 2026-07-01 dogfood bug).
+ */
+export function listPendingForWorkspace(
+  startDir: string,
+  team: string,
+  workspace?: string,
+): PendingMarker[] {
   const dir = pendingDir(startDir);
   if (!existsSync(dir)) return [];
   const out: PendingMarker[] = [];
@@ -61,7 +80,9 @@ export function listPendingForWorkspace(startDir: string, team: string): Pending
     if (!name.endsWith('.json') || name.endsWith(RESOLVED_SUFFIX)) continue;
     try {
       const parsed = PendingSessionSchema.parse(JSON.parse(readFileSync(join(dir, name), 'utf8')));
-      if (parsed.team === team) out.push(parsed);
+      if (parsed.team !== team) continue;
+      if (workspace !== undefined && parsed.workspace !== workspace) continue;
+      out.push(parsed);
     } catch {
       // a malformed/partial marker is advisory only — ignore it
     }

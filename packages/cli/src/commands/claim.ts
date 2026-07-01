@@ -1,3 +1,4 @@
+import { resolveWorkspace } from '@musterd/mcp';
 import { type Binding, type ClaimPolicy, type Surface } from '@musterd/protocol';
 import pc from 'picocolors';
 import { flagStr, type Parsed } from '../args.js';
@@ -80,7 +81,9 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
 
   // Disambiguate which pending session (if any) this claim is for. Informational + lets `--for`
   // scope the marker that gets cleared; the resolved seat is delivered via the resolution sidecar.
-  const pendings = listPendingForWorkspace(process.cwd(), team);
+  // Scope to *this* workspace so a marker written by a sibling launch sharing the same `.musterd`
+  // (or a pre-fix leaked global marker) can't trip the multi-pending guard on an unrelated claim.
+  const pendings = listPendingForWorkspace(process.cwd(), team, resolveWorkspace());
   const forCode = flagStr(flags, 'for');
   if (!forCode && pendings.length > 1) {
     const list = pendings

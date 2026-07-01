@@ -344,6 +344,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               from_session: state.connId,
               target: encodedTarget,
               surface: frame.surface,
+              // A specific-seat claim collapses to one pending request per seat, refreshing the waiter
+              // to this newest session — a reconnecting grant-less agent can't stack duplicates.
+              collapseByTarget: 'seat' in frame.target,
             });
             // Add a provisional pending connection (not in byMember — no deliver routing).
             const pendingConn: Connection = {

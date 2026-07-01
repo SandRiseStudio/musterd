@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import {
   BINDING_DIR,
+  BINDING_FILE,
   PENDING_DIR,
   RESOLVED_SUFFIX,
   ResolvedSessionSchema,
@@ -18,12 +19,19 @@ import type { McpConfig } from './config.js';
  * locks the shape (the ADR 018 duplicate-reader precedent).
  */
 
-/** The nearest `.musterd` dir at/above `startDir`, or `startDir/.musterd` when none exists yet. */
+/**
+ * The `.musterd` dir this workspace's markers belong to: the nearest ancestor holding a
+ * `binding.json` (a bound workspace root), else `startDir/.musterd`. Matching on the **binding file**
+ * (not the bare dir) keeps an unbound folder from resolving up to the global `~/.musterd` config dir
+ * (which holds `config.json`, not a binding) — resolving there leaked markers into the global dir and
+ * let `musterd claim` see other workspaces' pending sessions (the 2026-07-01 dogfood bug). Kept in
+ * lockstep with the CLI's copy (ADR 018 duplicate-reader precedent).
+ */
 function nearestMusterdDir(startDir: string): string {
   let dir = startDir;
   for (;;) {
     const candidate = join(dir, BINDING_DIR);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(join(candidate, BINDING_FILE))) return candidate;
     const parent = dirname(dir);
     if (parent === dir) return join(startDir, BINDING_DIR);
     dir = parent;

@@ -41,6 +41,45 @@ describe('requests store (ADR 076)', () => {
     expect(other.id).not.toBe(a.id);
   });
 
+  it('collapseByTarget collapses seat claims across sessions + refreshes the waiter to the newest', () => {
+    const { db, teamId } = setup();
+    const a = createRequest(db, teamId, {
+      kind: 'claim',
+      from_session: 's1',
+      target: 'seat:Ada',
+      surface: 'claude-code',
+      collapseByTarget: true,
+    });
+    // A different session reclaiming the same seat reuses the one open request (no pile-up)...
+    const b = createRequest(db, teamId, {
+      kind: 'claim',
+      from_session: 's2',
+      target: 'seat:Ada',
+      surface: 'cursor',
+      collapseByTarget: true,
+    });
+    expect(b.id).toBe(a.id);
+    expect(listRequests(db, teamId, { pendingOnly: true })).toHaveLength(1);
+    // ...and the waiter pointer is refreshed to the newest claimer so approve delivers to it.
+    expect(b.from_session).toBe('s2');
+    expect(b.surface).toBe('cursor');
+    // A different seat is still its own request.
+    const other = createRequest(db, teamId, {
+      kind: 'claim',
+      from_session: 's3',
+      target: 'seat:Lin',
+      collapseByTarget: true,
+    });
+    expect(other.id).not.toBe(a.id);
+  });
+
+  it('without collapseByTarget, distinct sessions stay distinct (role pools / teammate joins)', () => {
+    const { db, teamId } = setup();
+    const a = createRequest(db, teamId, { kind: 'claim', from_session: 's1', target: 'role:backend' });
+    const b = createRequest(db, teamId, { kind: 'claim', from_session: 's2', target: 'role:backend' });
+    expect(b.id).not.toBe(a.id); // two agents can both wait to join the pool
+  });
+
   it('decide settles a pending request once; a re-decide is a no-op (null)', () => {
     const { db, teamId } = setup();
     const r = createRequest(db, teamId, { kind: 'claim', from_session: 's1', target: 'Ada' });
