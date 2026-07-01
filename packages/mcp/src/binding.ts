@@ -1,6 +1,14 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { BINDING_DIR, BINDING_FILE, BindingSchema, type Binding } from '@musterd/protocol';
+import {
+  BINDING_DIR,
+  BINDING_FILE,
+  BindingSchema,
+  WORKSPACE_SPEC_FILE,
+  WorkspaceSpecSchema,
+  type Binding,
+  type WorkspaceSpec,
+} from '@musterd/protocol';
 
 /**
  * Locate + parse the workspace binding (ADR 018). Shares the `.musterd/binding.json` format and
@@ -27,6 +35,37 @@ export function findBinding(
 function readBinding(path: string): Binding | null {
   try {
     return BindingSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Locate + parse the committed, secret-free launch spec `.musterd/workspace.json` (ADR: committed
+ * launch spec). Walks up like {@link findBinding}. The adapter uses it as a base UNDER the gitignored
+ * binding.json and env — so a fresh clone whose only musterd file is the committed spec (plus an
+ * env-supplied key) still resolves server/team/surface/claim. Never carries a secret. Mirrors the CLI's
+ * `findWorkspaceSpec` (ADR 018 duplicate-reader precedent); the shared schema locks the shape.
+ */
+export function findWorkspaceSpec(
+  startDir: string = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+): WorkspaceSpec | null {
+  const explicit = env['MUSTERD_WORKSPACE_SPEC'];
+  if (explicit) return readWorkspaceSpec(explicit);
+  let dir = startDir;
+  for (;;) {
+    const p = join(dir, BINDING_DIR, WORKSPACE_SPEC_FILE);
+    if (existsSync(p)) return readWorkspaceSpec(p);
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+function readWorkspaceSpec(path: string): WorkspaceSpec | null {
+  try {
+    return WorkspaceSpecSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
   } catch {
     return null;
   }

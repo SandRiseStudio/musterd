@@ -75,8 +75,16 @@ describe('requests store (ADR 076)', () => {
 
   it('without collapseByTarget, distinct sessions stay distinct (role pools / teammate joins)', () => {
     const { db, teamId } = setup();
-    const a = createRequest(db, teamId, { kind: 'claim', from_session: 's1', target: 'role:backend' });
-    const b = createRequest(db, teamId, { kind: 'claim', from_session: 's2', target: 'role:backend' });
+    const a = createRequest(db, teamId, {
+      kind: 'claim',
+      from_session: 's1',
+      target: 'role:backend',
+    });
+    const b = createRequest(db, teamId, {
+      kind: 'claim',
+      from_session: 's2',
+      target: 'role:backend',
+    });
     expect(b.id).not.toBe(a.id); // two agents can both wait to join the pool
   });
 

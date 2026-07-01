@@ -187,9 +187,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
       },
       onPending: (requestId, message) => {
         if (flags['json']) {
-          process.stdout.write(
-            JSON.stringify({ team, pending: true, request: requestId }) + '\n',
-          );
+          process.stdout.write(JSON.stringify({ team, pending: true, request: requestId }) + '\n');
         } else {
           process.stdout.write(
             `${theme.meta('⧖')} ${message}\n` +

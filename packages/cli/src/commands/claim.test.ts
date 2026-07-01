@@ -145,34 +145,26 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     await expect(run(['Ada', '--team', 'dawn'])).rejects.toMatchObject({ exitCode: 4 });
   });
 
-  it(
-    'without a grant, a claim opens a pending request and waits — times out if never approved',
-    async () => {
-      await declareSeat('Ada');
-      await expect(run(['Ada', '--team', 'dawn', '--timeout', '1'])).rejects.toMatchObject({
-        exitCode: WAIT_TIMEOUT_EXIT,
-      });
-      // No binding is written for a pending claim that was never approved.
-      expect(existsSync(join(cwd, BINDING_DIR, BINDING_FILE))).toBe(false);
-    },
-    10_000,
-  );
+  it('without a grant, a claim opens a pending request and waits — times out if never approved', async () => {
+    await declareSeat('Ada');
+    await expect(run(['Ada', '--team', 'dawn', '--timeout', '1'])).rejects.toMatchObject({
+      exitCode: WAIT_TIMEOUT_EXIT,
+    });
+    // No binding is written for a pending claim that was never approved.
+    expect(existsSync(join(cwd, BINDING_DIR, BINDING_FILE))).toBe(false);
+  }, 10_000);
 
-  it(
-    'a pending claim resolves once an admin approves the request (ADR 077)',
-    async () => {
-      await declareSeat('Ada');
-      const claiming = run(['Ada', '--team', 'dawn', '--timeout', '5']);
-      const requestId = await firstPendingRequestId();
-      await decide(requestId, { decision: 'approve', lifetime: 'once' });
+  it('a pending claim resolves once an admin approves the request (ADR 077)', async () => {
+    await declareSeat('Ada');
+    const claiming = run(['Ada', '--team', 'dawn', '--timeout', '5']);
+    const requestId = await firstPendingRequestId();
+    await decide(requestId, { decision: 'approve', lifetime: 'once' });
 
-      const { code, out } = await claiming;
-      expect(code).toBe(0);
-      expect(out).toContain('Ada');
-      expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Ada' });
-    },
-    10_000,
-  );
+    const { code, out } = await claiming;
+    expect(code).toBe(0);
+    expect(out).toContain('Ada');
+    expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Ada' });
+  }, 10_000);
 
   it('claims the next open pool seat for a role (server-resolved)', async () => {
     await declareSeat('backend-1', 'backend');

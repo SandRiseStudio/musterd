@@ -208,10 +208,7 @@ export class HttpClient {
    * The P3.2 request lane (ADR 077) — `GET /teams/:slug/requests`, admin-only. `pendingOnly` maps to
    * `?status=pending`. Parsed through `RequestsResponseSchema` (ADR 074).
    */
-  async requests(
-    slug: string,
-    opts: { pendingOnly?: boolean } = {},
-  ): Promise<RequestsResponse> {
+  async requests(slug: string, opts: { pendingOnly?: boolean } = {}): Promise<RequestsResponse> {
     const qs = opts.pendingOnly ? '?status=pending' : '';
     const json = await this.request('GET', `/teams/${slug}/requests${qs}`);
     const parsed = RequestsResponseSchema.safeParse(json);

@@ -57,6 +57,10 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     expect(ss).toContain('grep -q musterd:start');
     expect(ss).toContain('claude mcp get musterd');
     expect(ss).toContain('team_inbox_check');
+    // A committed launch spec → point at the headless self-wire; else the interactive init.
+    expect(ss).toContain('.musterd/workspace.json');
+    expect(ss).toContain('musterd wire');
+    expect(ss).toContain('musterd init');
     expect(global.hooks?.['Notification']).toBeUndefined(); // Notification is NOT global
   });
 

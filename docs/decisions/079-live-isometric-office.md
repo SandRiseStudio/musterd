@@ -7,8 +7,8 @@
 
 The live dashboard (ADR 061) renders the team firehose as a split canvas: a decorative three.js
 **constellation** (members = glowing ring nodes, messages = arcs; `aria-hidden`) on the left, the roster rail
-(ADR 073), and the legible stream console on the right. The constellation reads as *ambient motion* but it
-doesn't convey **what a team is doing** — who's heads-down, who's idle, who's away, or the *shape* of an act
+(ADR 073), and the legible stream console on the right. The constellation reads as _ambient motion_ but it
+doesn't convey **what a team is doing** — who's heads-down, who's idle, who's away, or the _shape_ of an act
 (a request for help vs a handoff vs a broadcast). Over a long design pass we produced a full Figma vision
 (file `b6zXGHxG9CnCa8tFgpQWx2`) for a warmer, more legible metaphor: a **2D isometric co-work office** where
 every teammate sits at a desk, presence decides who's in the room, and coordination acts play as
@@ -41,7 +41,7 @@ The office is composited from two pixel-aligned layers inside the same panel (mi
    drawing, seating, and depth-sort.
 2. **Character layer — Rive (M2) / code-drawn placeholder (M1).** One avatar per member, driven by the
    parametric rig (`isHuman`, `accentColor`, `skinTone`, `accessory`, `hair`, `direction S·E·N·W`, `state
-   idle·working·walking·thinking·away·help`). The M1 placeholder is a code-drawn iso figure behind the same
+idle·working·walking·thinking·away·help`). The M1 placeholder is a code-drawn iso figure behind the same
    `Actor` seam, so M2 swaps placeholder→Rive without touching the data wiring.
 
 New module `packages/web/src/live/office-scene/` implements `mountOffice(host, labelHost, reduced)` returning
@@ -64,7 +64,7 @@ is reused verbatim as the signature `accentColor`.
 ### Panel modes
 
 The office keeps its split-panel slot but gains a **collapse/expand** toggle and a **companion** toggle (the
-office fills the browser window — roster/stream tuck away — *not* OS fullscreen), persisted in `localStorage`.
+office fills the browser window — roster/stream tuck away — _not_ OS fullscreen), persisted in `localStorage`.
 
 ### Milestones
 
@@ -92,3 +92,11 @@ office fills the browser window — roster/stream tuck away — *not* OS fullscr
   floor keeps anchors authoritative.
 - **Rive for the whole scene** — rejected: authoring a full floor + N walking characters in the Rive editor
   is a bottleneck; Rive for characters + code floor keeps engineering unblocked.
+
+## Observability & Evaluation
+
+n/a — a human-facing visualization of the existing firehose/roster/presence data (a `/live` dashboard
+re-skin), not an agent-facing coordination surface. It emits no new coordination acts, joins no team, and
+adds no spans to the team-task timeline — it only _renders_ signals other ADRs already emit. There is no
+agent behavior to eval or experiment on here; the underlying data's own observability lives with the
+firehose/presence ADRs it consumes.

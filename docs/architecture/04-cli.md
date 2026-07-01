@@ -55,8 +55,10 @@ src/
       codexToml.ts    // TOML read/merge helper for the codex adapter
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report
+    wire.ts           // musterd wire: headless MCP register from the committed .musterd/workspace.json (ADR 080)
     agent.ts          // musterd agent <name>: add an agent + isolated worktree + binding + MCP register (ADR 065)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074)
+    requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     serve.ts          // musterd serve [--port]
     service.ts        // musterd service install/uninstall/start/stop/restart/status/logs (ADR 045)
     team.ts           // team create / team add / team remove / team export (ADR 058 db→file migration)

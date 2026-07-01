@@ -56,8 +56,7 @@ const h = vi.hoisted(() => {
   // Queue of outcomes for the `watchClaim` fake (`musterd claim`'s live WS handshake, driven by
   // init.ts's "activate an existing member" branch, ADR 077) — one entry consumed per claim attempt.
   const claimQueue: Array<
-    | { state: 'occupied' }
-    | { state: 'refused'; code: string; message: string }
+    { state: 'occupied' } | { state: 'refused'; code: string; message: string }
   > = [];
   return { confirmQueue, selectQueue, textQueue, http, harness, config, claimQueue };
 });
@@ -102,6 +101,7 @@ vi.mock('../config.js', () => ({
   loadConfig: () => h.config,
   saveConfig: vi.fn(),
   saveBinding: vi.fn((cwd: string) => join(cwd, '.musterd', 'binding.json')),
+  saveWorkspaceSpec: vi.fn((cwd: string) => join(cwd, '.musterd', 'workspace.json')),
   rememberIdentity: vi.fn((cfg: { knownIdentities: unknown[] }, si: unknown) => {
     cfg.knownIdentities.push(si);
   }),

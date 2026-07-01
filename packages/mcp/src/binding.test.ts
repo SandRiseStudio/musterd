@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -69,5 +69,46 @@ describe('loadMcpConfig identity alignment (ADR 018)', () => {
   it('reads the claim policy from the binding file when MUSTERD_CLAIM is unset', () => {
     const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
     expect(cfg.claim).toEqual({ mode: 'seat', name: 'Ui' });
+  });
+});
+
+describe('loadMcpConfig committed launch-spec fallback (ADR: committed launch spec)', () => {
+  /** Write a committed .musterd/workspace.json under the mocked cwd (no secrets). */
+  function writeSpec() {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'workspace.json'),
+      JSON.stringify({
+        server: 'http://localhost:7777',
+        team: 'clonelab',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'Cloned' },
+      }),
+    );
+  }
+
+  it('resolves server/team/surface/claim from workspace.json + an env key (a fresh clone)', () => {
+    writeSpec();
+    // Only the key comes from env; everything else from the committed spec — the self-wire case.
+    const cfg = loadMcpConfig({ MUSTERD_AGENT_KEY: 'mskey_env' });
+    expect(cfg.team).toBe('clonelab');
+    expect(cfg.server).toBe('http://localhost:7777');
+    expect(cfg.surface).toBe('claude-code');
+    expect(cfg.claim).toEqual({ mode: 'seat', name: 'Cloned' });
+    expect(cfg.agent_key).toBe('mskey_env');
+  });
+
+  it('never reads a secret from the committed spec (only env/binding supply the key)', () => {
+    writeSpec();
+    const cfg = loadMcpConfig({ MUSTERD_TEAM: 'clonelab' }); // no key anywhere
+    expect(cfg.agent_key).toBeUndefined();
+  });
+
+  it('binding.json wins over the committed spec for the non-secret fields', () => {
+    writeSpec();
+    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    // The binding file (team 'lab') overrides the spec's team 'clonelab'.
+    expect(cfg.team).toBe('lab');
+    expect(cfg.server).toBe('http://localhost:9999');
   });
 });

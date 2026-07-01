@@ -24,6 +24,7 @@ import { teamCommand } from './commands/team.js';
 import { unbindCommand } from './commands/unbind.js';
 import { uninstallCommand } from './commands/uninstall.js';
 import { whoamiCommand } from './commands/whoami.js';
+import { wireCommand } from './commands/wire.js';
 import { CliError } from './errors.js';
 import { renderBanner } from './render/rows.js';
 import { theme } from './render/theme.js';
@@ -34,6 +35,7 @@ const HELP = `${'musterd'} — muster your agents and humans into persistent tea
 usage:
   musterd --version                             print the installed @musterd/cli version
   musterd init [--check]                        interactive first-run setup (recommended); --check reports provisioning drift without writing
+  musterd wire [--autojoin] [--key mskey_…]     headless: register the MCP server from this folder's committed .musterd/workspace.json (self-wire a fresh clone; no prompts, no seat claim unless --autojoin)
   musterd serve [--port 4849] [--host 127.0.0.1] [--tls-cert <pem> --tls-key <pem> | --insecure-trust-proxy]
   musterd service <install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow] [--force]   run the daemon as a background service (macOS LaunchAgent)
   musterd team create <slug> [--as <you>] [--role <role>] [--display <name>]
@@ -148,6 +150,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return reclaimCommand(rest);
     case 'requests':
       return requestsCommand(rest);
+    case 'wire':
+      return wireCommand(rest);
     case 'role':
       return roleCommand(rest);
     case 'reset':

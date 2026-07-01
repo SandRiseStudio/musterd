@@ -6,7 +6,7 @@ import {
   type Surface,
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
-import { findBinding } from './binding.js';
+import { findBinding, findWorkspaceSpec } from './binding.js';
 import { resolveDriver, resolveProvenance, resolveWorkspace } from './workspace.js';
 
 export interface McpConfig {
@@ -53,27 +53,36 @@ function shortCode(): string {
  * Claim-on-first-use (ADR 032): identity is now **optional**. A binding may carry only a claim
  * policy; the session then starts as a pending presence and claims a seat on first use. Only the
  * team (and server) are required to load.
+ *
+ * Committed launch spec (ADR: committed launch spec): for the **non-secret** fields (server, team,
+ * surface, claim) the ladder is `env > binding.json > workspace.json`. The committed `workspace.json`
+ * is the lowest-precedence base, so a fresh clone whose only musterd file is that spec (plus an
+ * env-supplied `MUSTERD_AGENT_KEY`) still resolves its identity. Secrets (`agent_key`, `grant`) are
+ * **never** read from the spec — only env or the gitignored binding.json.
  */
 export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   const binding = findBinding(process.cwd(), env);
-  const server = env['MUSTERD_SERVER'] ?? binding?.server ?? 'http://localhost:4849';
-  const team = env['MUSTERD_TEAM'] ?? binding?.team;
+  const spec = findWorkspaceSpec(process.cwd(), env);
+  const server =
+    env['MUSTERD_SERVER'] ?? binding?.server ?? spec?.server ?? 'http://localhost:4849';
+  const team = env['MUSTERD_TEAM'] ?? binding?.team ?? spec?.team;
   // v0.3 (ADR 075): the auth secret is the team agent key; the seat is resolved at claim time (the
   // `occupied` frame), so `member` starts undefined — the target lives in the claim policy below.
+  // agent_key/grant are secrets → env or binding.json only, NEVER the committed spec.
   const agentKey = env['MUSTERD_AGENT_KEY'] ?? binding?.agent_key;
   const grant = env['MUSTERD_GRANT'] ?? binding?.grant;
-  const surfaceRaw = env['MUSTERD_SURFACE'] ?? binding?.surface ?? 'other';
+  const surfaceRaw = env['MUSTERD_SURFACE'] ?? binding?.surface ?? spec?.surface ?? 'other';
   if (!team) {
     throw new Error('musterd MCP: no team — set MUSTERD_TEAM or provide a .musterd/binding.json');
   }
   const surface = (SURFACES as readonly string[]).includes(surfaceRaw)
     ? (surfaceRaw as Surface)
     : 'other';
-  // Claim policy: env wins (the ADR 018 ladder), else the binding's stored policy, else assign-in-chat.
+  // Claim policy: env wins (the ADR 018 ladder), else binding.json, else the committed spec, else chat.
   const claim: ClaimPolicy =
     env['MUSTERD_CLAIM'] !== undefined
       ? parseClaimPolicy(env['MUSTERD_CLAIM'])
-      : (binding?.claim ?? { mode: 'chat' });
+      : (binding?.claim ?? spec?.claim ?? { mode: 'chat' });
   return {
     server,
     team,
