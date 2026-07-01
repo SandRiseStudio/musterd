@@ -115,13 +115,15 @@ Schema and wire formats in v0.1 already reserve the fields these need, so adding
 
 ---
 
-# Appendix A — Unreleased: v0.3 shared-teams governance
+# Appendix A — v0.3 shared-teams governance (SHIPPED — the live auth model)
 
-> **Status: designed, NOT yet specified or built.** This is the **shared-teams** governance model — seats, agent key + grants, capabilities, approval lane, audit. It is **not** part of the conforming protocol above; it activates when the daemon stops being localhost-only and its threat model becomes real. The rationale and design review live in `docs/design/membership-model.md` + `docs/design/security.md`; the capability split (the *two universes* — what musterd enforces vs what it provisions/declares for the harness) is ADR 026. Until this ships into the normative body, the live protocol keeps v0.1's per-member tokens (single-active + grace, §4). The collaboration **Envelope/Acts (§2–§3) are unchanged** by this lane — governance is a distinct surface.
+> **Status: SHIPPED.** v0.3 P0–P3 landed on `main` (2026-06-30) — the hard auth cutover (ADR 069 build plan; ADRs 075–078; banned-inert read-gate follow-up PR #37). This **shared-teams** governance model — seats, agent key + grants, capabilities, approval lane, audit — **is now the live identity/auth model**: the per-member-token path (§4) and the `hello` frame are **removed**, replaced by the `claim` handshake + team **agent key** + admin-issued **grants** + human **credentials** described below. The collaboration **Envelope/Acts (§2–§3) are unchanged** — governance layered on without touching them. Rationale + design review: `docs/design/membership-model.md`, `docs/design/security.md`; the *two universes* capability split (what musterd enforces vs. provisions/declares for the harness) is ADR 026.
+>
+> *Spec-hygiene follow-up (tracked, not yet done): fold this appendix into the normative body (§1 identity, §4 auth) and retire the now-superseded `hello`/per-member-token prose in §1–§6, which describes the **pre-cutover (v0.2)** model. Until then: read §1–§6's join/auth text as **historical**, and this appendix as **current**.*
 
-## A.0 What changes from the live protocol (and why it's breaking)
+## A.0 What the cutover changed (v0.2 → v0.3, shipped in P3)
 
-| Area | Live (§1–§6) | v0.3 (this appendix) |
+| Area | v0.2 (former, §1–§6) | v0.3 (shipped) |
 |---|---|---|
 | Identity | flat Member (name, kind) | **Seat** in a **Role** (Member = named Seat) |
 | Auth unit | per-member token = one member | **agent key** (harness) **+ admin-issued Grant** (seat occupancy) |
@@ -132,7 +134,7 @@ Schema and wire formats in v0.1 already reserve the fields these need, so adding
 | Observers | none | **human-only** read-only watchers |
 | Governance | none | **own lane**: roles, seats, grants, requests, status — all **audited** |
 
-A new join/auth handshake is a MAJOR-of-MINOR change; it would land as a future `musterd/0.x` gated by its own ADR. (Note: `musterd/0.3` is already the *live* version — it shipped the `resolve` act, ADR 025. This governance work layers onto a later MINOR; it does not itself change the acts.)
+A new join/auth handshake is a MAJOR-of-MINOR change; it **landed as the isolated P3 cutover** (ADR 069 decision 2, 2026-06-30) — one coordinated breaking moment across every surface, with the acts (§2–§3) untouched. (Note: `musterd/0.3` also shipped the `resolve` act, ADR 025.)
 
 ## A.1 Roles, Seats & Capabilities
 
@@ -151,7 +153,7 @@ A new join/auth handshake is a MAJOR-of-MINOR change; it would land as a future 
 
 Servers MUST store only hashes of keys/credentials/grants. A `banned` seat's credential MUST be rejected.
 
-## A.3 Claim handshake (WS) — replaces the live `hello`
+## A.3 Claim handshake (WS) — replaced the `hello` frame (removed in P3)
 
 > **Note (local claim-on-first-use is already shipped *without* this frame — ADRs 032/033).** The
 > *local* claim experience from `provisioning-recipe.md` §5–§6 — the overloaded `team_join`,
@@ -159,10 +161,10 @@ Servers MUST store only hashes of keys/credentials/grants. A `banned` seat's cre
 > the **existing** `hello`/members primitives, not this handshake: locally a seat is a member + its
 > per-member token, auto-mint is the unauthenticated `POST /members`, occupy is `hello` (newest-wins
 > + grace, §74), and `claim_conflict` is the unique-name `conflict` on mint. This appendix's
-> `claim`/grant frame is the **governed, off-localhost** path (agent key + admin grant + the request
-> lane); it stays Unreleased until the daemon's threat model becomes real. Server-side pending
-> presence (a seatless session on the roster) is likewise reserved here — locally it is a client-side
-> state (ADR 033).
+> `claim`/grant frame is the **governed** path (agent key + admin grant + the request
+> lane); it **shipped in P3 (2026-06-30) and is now the sole claim path** — the local `hello`-based
+> occupy this note contrasts against is removed. (Server-side pending presence — a seatless session on
+> the roster — is the request lane's live-approval state, A.5.)
 
 State machine: `connecting → authenticated(key) → claim → (occupied | refused | pending) → [subscribed] → live`.
 
