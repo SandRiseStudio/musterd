@@ -77,6 +77,25 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
     req: import('node:http').IncomingMessage,
     res: import('node:http').ServerResponse,
   ) => {
+    // HTTP request log (ADR 082 slice 2): method/path/status/latency on every request — the layer
+    // finding 001 flagged as absent. Path only, never query/headers (no secrets); healthy /health
+    // polls are skipped (the CLI guard polls it — it would drown the log). warn on 4xx, error on 5xx.
+    const t0 = Date.now();
+    const path = (req.url ?? '/').split('?')[0]!;
+    res.on('finish', () => {
+      const status = res.statusCode;
+      if (path === '/health' && status < 400) return;
+      const fields = {
+        msg: 'http_request',
+        method: req.method ?? 'GET',
+        path,
+        status,
+        ms: Date.now() - t0,
+      };
+      if (status >= 500) log.error(fields);
+      else if (status >= 400) log.warn(fields);
+      else log.info(fields);
+    });
     void handleHttp(ctx, req, res);
   };
   const http: Server = config.tls
