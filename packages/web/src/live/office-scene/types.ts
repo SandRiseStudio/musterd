@@ -23,6 +23,23 @@ export interface OfficeData {
   nodes: OfficeNode[];
 }
 
+/** A thought/urgency bubble over an actor's head while it's mid-choreography. */
+export type Bubble = '?' | '!' | null;
+
+/**
+ * Where and how a member's avatar draws *this frame*. A member is always an actor: at their home seat
+ * when idle, or interpolated along a walk during choreography — so a walker depth-sorts against desks
+ * correctly and its label follows it. `carry` draws a handed box (handoff); `bubble` a raised-hand cue.
+ */
+export interface Pose {
+  lx: number;
+  ly: number;
+  dir: Dir;
+  small: boolean;
+  carry: boolean;
+  bubble: Bubble;
+}
+
 /** Motion intensity == notification tier (memory: travel-intensity == notification tiers). */
 export type Tier = 'ambient' | 'needs-attn' | 'urgent';
 

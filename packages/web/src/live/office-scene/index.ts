@@ -1,3 +1,4 @@
+import { createActors, type Actors } from './actors';
 import { fitFloor, type Fit, type Pt } from './iso';
 import { assignSeats, type Placement } from './seating';
 import { drawCue, renderScene, toneColor, type Cue } from './render';
@@ -9,10 +10,13 @@ const DPR_CAP = 2;
 const CUE_SECS = 1.5;
 
 /**
- * Mount the live isometric office. Same lifecycle + `{update, emit, dispose}` shape as the constellation
- * scene (a drop-in for ConstellationGL): the static office is baked to an offscreen buffer on data/resize
- * and blitted each frame; act cues animate on top; name labels are projected HTML in `labelHost`. M1 has
- * no Rive and no walking — a code-drawn office that reads live presence + act cues. Client-only.
+ * Mount the live isometric office. Same `{update, emit, dispose}` shape as the constellation scene (a
+ * drop-in for ConstellationGL). The office is a code-drawn Canvas2D scene; every member is an actor
+ * (see `actors.ts`) drawn at a live pose. When nothing moves, the scene is baked to an offscreen buffer
+ * and blitted (cheap); while acts play as choreography (walks/carry/hand-raise) the frame does a full
+ * depth-sorted redraw so walkers overlap desks correctly and their labels follow them. Transient cues
+ * (status pulse, note, resolve…) animate on top either way. Rive is a later swap behind `drawActor`.
+ * Client-only.
  */
 export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: boolean): OfficeHandle {
   const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
@@ -29,12 +33,16 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   let height = Math.max(1, host.clientHeight);
   let fit: Fit = fitFloor(width, height);
 
+  const actors: Actors = createActors();
   let placements = new Map<string, Placement>();
   let byName = new Map<string, OfficeNode>();
-  let heads = new Map<string, Pt>();
+  let heads = new Map<string, Pt>(); // home head anchors — where in-place cues sit
 
   const labels = new Map<string, HTMLDivElement>();
   const cues: Cue[] = [];
+
+  // Pause the RAF loop when the tab is backgrounded (no CPU on an unseen office).
+  const VISIBLE = () => document.visibilityState === 'visible';
 
   function sizeCanvases() {
     width = Math.max(1, host.clientWidth);
@@ -46,18 +54,19 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     fit = fitFloor(width, height);
   }
 
-  /** Redraw the static office into the offscreen buffer and refresh the name labels. */
+  /** Redraw the office at rest (everyone home) into the offscreen buffer and rebuild the name labels. */
   function bake() {
     bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     bctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(bctx, fit, placements, byName);
+    const anchors = renderScene(bctx, fit, placements, byName, actors.poses());
     heads = anchors.heads;
-    syncLabels();
+    syncLabels(anchors.heads);
   }
 
-  function syncLabels() {
+  /** Create/remove label elements + set their text, and position them from `headMap`. */
+  function syncLabels(headMap: Map<string, Pt>) {
     const seen = new Set<string>();
-    for (const [name, head] of heads) {
+    for (const [name, head] of headMap) {
       seen.add(name);
       const node = byName.get(name);
       if (!node) continue;
@@ -90,29 +99,59 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     }
   }
 
-  function paint() {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(buf, 0, 0);
-    if (cues.length) {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      for (const c of cues) drawCue(ctx, c, fit.scale);
+  /** Cheap per-frame reposition of existing labels (used while walking — no structural change). */
+  function positionLabels(headMap: Map<string, Pt>) {
+    for (const [name, el] of labels) {
+      const head = headMap.get(name);
+      if (head) el.style.transform = `translate(-50%, -100%) translate(${head.x}px, ${head.y}px)`;
     }
   }
 
-  // — the loop only runs while cues are in flight (the office is otherwise static in M1) —
+  function drawCues() {
+    if (!cues.length) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    for (const c of cues) drawCue(ctx, c, fit.scale);
+  }
+
+  /** Idle frame: blit the baked buffer, then any cues on top. */
+  function drawStatic() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(buf, 0, 0);
+    drawCues();
+  }
+
+  /** Active frame: full depth-sorted redraw with live poses, labels following, cues on top. */
+  function drawDynamic() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.clearRect(0, 0, width, height);
+    const anchors = renderScene(ctx, fit, placements, byName, actors.poses());
+    drawCues();
+    positionLabels(anchors.heads);
+  }
+
+  // — the loop runs while walks or cues are in flight; otherwise the office rests as a static blit —
   let raf = 0;
   let last = 0;
+  let wasActive = false;
   function tick(now: number) {
-    const dt = last ? (now - last) / 1000 : 0;
+    const dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
     last = now;
+    const walking = actors.step(dt);
     for (let i = cues.length - 1; i >= 0; i--) {
       const c = cues[i]!;
       c.t += dt / CUE_SECS;
       if (c.t >= 1) cues.splice(i, 1);
     }
-    paint();
-    if (cues.length && !reduced && document.visibilityState === 'visible') {
+    if (walking) {
+      drawDynamic();
+    } else {
+      if (wasActive) bake(); // walkers just re-seated — refresh the buffer + labels to home
+      drawStatic();
+    }
+    wasActive = walking;
+    if ((walking || cues.length) && !reduced && VISIBLE()) {
       raf = requestAnimationFrame(tick);
     } else {
       raf = 0;
@@ -120,7 +159,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     }
   }
   function ensureLoop() {
-    if (!raf && !reduced && document.visibilityState === 'visible') {
+    if (!raf && !reduced && VISIBLE()) {
       last = 0;
       raf = requestAnimationFrame(tick);
     }
@@ -129,8 +168,10 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   function update(next: OfficeData) {
     placements = assignSeats(next.nodes);
     byName = new Map(next.nodes.map((n) => [n.name, n]));
+    actors.setHomes(placements, byName);
     bake();
-    paint();
+    if (actors.active() || cues.length) ensureLoop();
+    else drawStatic();
   }
 
   function pushCue(name: string, color: string, glyph: Cue['glyph'], urgent = false) {
@@ -150,12 +191,15 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
         pushCue(ev.from, toneColor(ev.tone), '');
         break;
       case 'walk-help':
-        pushCue(ev.from, '#f4cf52', ev.tier === 'urgent' ? '!' : '', ev.tier === 'urgent');
-        pushCue(ev.to, '#f4cf52', '', ev.tier === 'urgent');
+        // A real walk-over; fall back to an in-place cue only if the walk can't play (target gone).
+        if (!actors.walk(ev.from, { kind: 'help', to: ev.to, urgent: ev.tier === 'urgent' })) {
+          pushCue(ev.from, '#f4cf52', ev.tier === 'urgent' ? '!' : '', ev.tier === 'urgent');
+        }
         break;
       case 'walk-handoff':
-        pushCue(ev.from, '#c6a3ff', '↦');
-        pushCue(ev.to, '#c6a3ff', '');
+        if (!actors.walk(ev.from, { kind: 'handoff', to: ev.to, urgent: false })) {
+          pushCue(ev.from, '#c6a3ff', '↦');
+        }
         break;
       case 'megaphone':
         pushCue(ev.from, '#f4cf52', '📣');
@@ -179,20 +223,20 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   const onResize = () => {
     sizeCanvases();
     bake();
-    paint();
+    if (!raf) drawStatic();
   };
   window.addEventListener('resize', onResize);
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
   ro?.observe(host);
 
   const onVisibility = () => {
-    if (document.visibilityState === 'visible' && cues.length) ensureLoop();
+    if (document.visibilityState === 'visible' && (actors.active() || cues.length)) ensureLoop();
   };
   document.addEventListener('visibilitychange', onVisibility);
 
   sizeCanvases();
   bake();
-  paint();
+  drawStatic();
 
   return {
     update,
