@@ -7,6 +7,17 @@ import type { Dir } from './types';
  * Zones (nook / entrance / huddles) are kept clear of desks so the room reads uncluttered.
  */
 
+/** Unit "forward" vector (logical dx,dy) for each facing — shared by drawing and the actor system. */
+export const FWD: Record<Dir, [number, number]> = {
+  S: [0, 1],
+  N: [0, -1],
+  E: [1, 0],
+  W: [-1, 0],
+};
+
+/** Logical offset from a desk centre to where its member sits/stands (opposite the facing). */
+export const SEAT_BACK = 40;
+
 export interface DeskSlot {
   id: number;
   /** Desk centre (logical). */

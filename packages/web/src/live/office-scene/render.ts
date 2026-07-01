@@ -1,7 +1,7 @@
 import { depth, FLOOR, project, THICK, type Fit, type Pt } from './iso';
-import { DESK_SLOTS, ENTRANCE, HUDDLES, NOOK, PLANTS, type DeskSlot, type Huddle } from './layout';
+import { DESK_SLOTS, ENTRANCE, FWD, HUDDLES, NOOK, PLANTS, type Huddle } from './layout';
 import type { Placement } from './seating';
-import type { Dir, OfficeNode } from './types';
+import type { Dir, OfficeNode, Pose } from './types';
 
 /**
  * Canvas-2D drawing for the office. Everything is painter-ordered by logical depth (lx+ly) so seated
@@ -10,13 +10,6 @@ import type { Dir, OfficeNode } from './types';
  * Figma "Floor Plan": legged desks + task chairs + oriented glowing monitors, a rich break nook
  * (couch + armchairs + kitchenette), huddle spaces, and big floor plants.
  */
-
-const FWD: Record<Dir, [number, number]> = {
-  S: [0, 1],
-  N: [0, -1],
-  E: [1, 0],
-  W: [-1, 0],
-};
 
 const SKIN = '#f0c9a0';
 const WOOD = '#7a4e2d';
@@ -285,7 +278,43 @@ function avatar(
   }
 }
 
-// ── a workstation: legged desk + task chair + oriented glowing monitor + member ──
+/** A speech/thought bubble over an actor's head (raised-hand `?`, urgent `!`). Screen-space. */
+function bubble(ctx: CanvasRenderingContext2D, x: number, y: number, glyph: '?' | '!', s: number): void {
+  const w = 22 * s;
+  const h = 18 * s;
+  roundRect(ctx, x - w / 2, y - h, w, h, 6 * s, '#20242b');
+  ctx.fillStyle = '#20242b';
+  ctx.beginPath();
+  ctx.moveTo(x - 4 * s, y - 2 * s);
+  ctx.lineTo(x + 4 * s, y - 2 * s);
+  ctx.lineTo(x, y + 5 * s);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = glyph === '!' ? '#f3776a' : '#f4cf52';
+  ctx.font = `${Math.round(13 * s)}px "Inter", system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(glyph, x, y - h / 2);
+}
+
+/**
+ * Draw a member as a free actor at a pose: the placeholder avatar, plus a carried box (handoff) and a
+ * head bubble (raised hand). Position drives depth-sort in `renderScene`, so a walker overlaps desks
+ * correctly. (Rive replaces the avatar body in a later cut, behind this same call.)
+ */
+export function drawActor(ctx: CanvasRenderingContext2D, fit: Fit, pose: Pose, node: OfficeNode): void {
+  avatar(ctx, fit, pose.lx, pose.ly, node, pose.dir, pose.small);
+  const p = project(pose.lx, pose.ly, fit);
+  const s = fit.scale * (pose.small ? 0.72 : 1);
+  if (pose.carry) {
+    // a labelled box held at chest height, tinted the handoff colour
+    roundRect(ctx, p.x - 11 * s, p.y - 34 * s, 22 * s, 17 * s, 3 * s, '#b592f0');
+    roundRect(ctx, p.x - 11 * s, p.y - 34 * s, 22 * s, 5 * s, 2 * s, '#8a5fd6');
+  }
+  if (pose.bubble) bubble(ctx, p.x, p.y - (pose.small ? 62 : 74) * fit.scale, pose.bubble, fit.scale);
+}
+
+// ── a workstation: legged desk + task chair + oriented glowing monitor ──
 function chair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, dir: Dir, color: string): void {
   const f = FWD[dir];
   const sn = f[1] !== 0;
@@ -324,10 +353,13 @@ function monitor(
   ellipse(ctx, { x: g.x, y: g.y - (surfaceUp + 32) * fit.scale }, 12 * fit.scale, 4 * fit.scale, working ? '#59c3a3' : '#33504c');
 }
 
+/** The furniture of a desk: legs + slab + task chair + oriented monitor (glowing if its owner works).
+ * The seated member is NOT drawn here — members are free actors drawn separately (see `drawActor`), so
+ * they depth-sort against desks whether seated or walking. */
 function drawWorkstation(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
-  slot: DeskSlot,
+  slot: { lx: number; ly: number; dir: Dir },
   node: OfficeNode | null,
 ): void {
   const { lx, ly, dir } = slot;
@@ -339,8 +371,6 @@ function drawWorkstation(
   const ST = 8;
   const wx = sn ? W : Df;
   const dy = sn ? Df : W;
-  const memX = lx - f[0] * (Df / 2 + 6);
-  const memY = ly - f[1] * (Df / 2 + 6);
   const working = node?.activity === 'working';
   const chairColor = node ? hslL(node.color, 0.5) : '#4a5560';
 
@@ -357,17 +387,13 @@ function drawWorkstation(
     box(ctx, fit, lx, ly, wx, dy, ST, WOOD, DH);
     monitor(ctx, fit, lx + f[0] * (Df / 2 - 12), ly + f[1] * (Df / 2 - 12), dir, working, DH + ST);
   };
-  const drawMember = () => {
-    if (node) avatar(ctx, fit, memX, memY, node, dir);
-  };
 
+  // Chair behind the desk for front/right facings; in front for back/left facings.
   if (dir === 'S' || dir === 'E') {
     drawChair();
-    drawMember();
     drawDeskMon();
   } else {
     drawDeskMon();
-    drawMember();
     drawChair();
   }
 }
@@ -377,29 +403,26 @@ export interface SceneAnchors {
   bases: Map<string, Pt>;
 }
 
-/** Draw the whole static office in painter's order, returning per-member screen anchors. */
+/**
+ * Draw the whole office in painter's order, returning per-member screen anchors. Desks are drawn empty;
+ * each present member is drawn as a free actor at its current `poses` entry (home seat when idle, or
+ * interpolated mid-walk), so seated and walking members depth-sort against desks the same way.
+ */
 export function renderScene(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   placements: Map<string, Placement>,
   byName: Map<string, OfficeNode>,
+  poses: Map<string, Pose>,
 ): SceneAnchors {
   drawFloor(ctx, fit);
 
+  // desk → seat owner (for the monitor's working glow); the owner may be walking but the seat stays lit.
   const slotMember = new Map<number, string>();
-  const nookMembers: string[] = [];
-  const stripMembers: string[] = [];
-  for (const [name, pl] of placements) {
-    if (pl.kind === 'desk') slotMember.set(pl.slot, name);
-    else if (pl.kind === 'nook') nookMembers.push(name);
-    else if (pl.kind === 'strip') stripMembers.push(name);
-  }
-  nookMembers.sort();
-  stripMembers.sort();
+  for (const [name, pl] of placements) if (pl.kind === 'desk') slotMember.set(pl.slot, name);
 
   const heads = new Map<string, Pt>();
   const bases = new Map<string, Pt>();
-  const s = fit.scale;
 
   interface Item {
     d: number;
@@ -418,35 +441,16 @@ export function renderScene(
     const name = slotMember.get(slot.id) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
     items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node) });
-    if (name && node) {
-      const f = FWD[slot.dir];
-      const b = project(slot.lx - f[0] * 40, slot.ly - f[1] * 40, fit);
-      bases.set(name, b);
-      heads.set(name, { x: b.x, y: b.y - 74 * s });
-    }
   }
 
-  nookMembers.forEach((name, i) => {
+  for (const [name, pose] of poses) {
     const node = byName.get(name);
-    if (!node) return;
-    const lx = NOOK.lx - 40 + (i % 3) * 40;
-    const ly = NOOK.ly + 44 + Math.floor(i / 3) * 34;
-    items.push({ d: depth(lx, ly) + 0.5, fn: () => avatar(ctx, fit, lx, ly, node, 'S', true) });
-    const b = project(lx, ly, fit);
+    if (!node) continue;
+    items.push({ d: depth(pose.lx, pose.ly) + 0.1, fn: () => drawActor(ctx, fit, pose, node) });
+    const b = project(pose.lx, pose.ly, fit);
     bases.set(name, b);
-    heads.set(name, { x: b.x, y: b.y - 54 * s });
-  });
-
-  stripMembers.forEach((name, i) => {
-    const node = byName.get(name);
-    if (!node) return;
-    const lx = ENTRANCE.lx - 70 + (i % 4) * 46;
-    const ly = ENTRANCE.ly - 92 - Math.floor(i / 4) * 40;
-    items.push({ d: depth(lx, ly), fn: () => avatar(ctx, fit, lx, ly, node, 'N', true) });
-    const b = project(lx, ly, fit);
-    bases.set(name, b);
-    heads.set(name, { x: b.x, y: b.y - 54 * s });
-  });
+    heads.set(name, { x: b.x, y: b.y - (pose.small ? 54 : 74) * fit.scale });
+  }
 
   items.sort((a, b) => a.d - b.d);
   for (const it of items) it.fn();
