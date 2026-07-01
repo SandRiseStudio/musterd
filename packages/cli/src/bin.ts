@@ -53,7 +53,7 @@ usage:
   musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away
   musterd claim <name> [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--force]   claim a seat (or adopt a teammate's seat with --token; --force repoints a folder bound to a live member); claiming a held seat opens a request and waits for an admin to approve
   musterd requests [--pending] [--json]         list claim/teammate requests (admin-only, ADR 077)
-  musterd requests decide <id> --approve [--ttl-hours <n> | --once] | --deny   approve or deny a pending request (admin-only)
+  musterd requests decide <id> --approve [--once | --standing | --ttl-hours <n>] | --deny   approve (grant lifetime: once=default, standing=until revoked, ttl=windowed) or deny a pending request (admin-only)
   musterd unbind                                release this folder's seat — keeps it on the team, free to re-claim (ADR 058)
   musterd reclaim <member>                      drop a member's stuck/stale live session so it can rejoin
   musterd fmt [--check]                         canonicalize this folder's .musterd/ roster files (ADR 058)

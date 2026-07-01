@@ -23,6 +23,7 @@ const BOOLEAN_FLAGS = new Set([
   'pending',
   'approve',
   'deny',
+  'standing',
 ]);
 
 export function parseArgs(argv: string[]): Parsed {
