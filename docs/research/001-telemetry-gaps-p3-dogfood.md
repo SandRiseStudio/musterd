@@ -49,3 +49,13 @@ proxies are order-of-magnitude. This is a qualitative inventory, not a benchmark
   `coordination-dataset`, the MAST-in-the-wild thesis). They should be *emitted*, not archaeology.
 - Meta: for a coordination-observability product, "our own flagship session was near-unobservable" is the
   sharpest argument for the batond line — captured so the reprioritization session weighs it.
+
+**Resolution (2026-07-01, ADR 082).** Acted on at the reprioritization — remote/P4 deferred, this pulled
+to the head of the build and shipped in four verified slices: **(1)** instrument-by-default (the dogfood
+daemon boots the SDK to a local OTLP sink — closes gap 1); **(2)** structured HTTP request log on
+`daemon.log`, warn 4xx / error 5xx (gap 2); **(3)** first-party coordination metrics
+`musterd.coordination.loop_latency` + `open_loops` — directed-act latency, no longer archaeology (gap 5,
+server-derivable half); **(4)** opt-in per-agent `meta.usage` → `musterd.agent.tokens`, harness-agnostic
+(gap 4). Still open: an automatic usage emitter, the git-side metrics (wasted-work ratio, dup-rate —
+lanes territory), a cross-agent trace, and normal-coordination audit trails (gap 3, partly covered now
+that every act carries a span + counters). Setup: `docs/dogfood-telemetry.md`.

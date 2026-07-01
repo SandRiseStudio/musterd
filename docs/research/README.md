@@ -21,4 +21,4 @@ One file per experiment/finding, `NNN-<slug>.md`: question · setup (the pinned 
 
 ## Findings
 
-- [001 — Telemetry gaps: the flagship session left almost no machine trace](./001-telemetry-gaps-p3-dogfood.md) (2026-06-30) — the P3 dogfood was near-unobservable from musterd's own telemetry (OTel inert, no PostHog project, Langfuse + audit-log empty, `daemon.log` info-only); the whole cost analysis was reconstructed forensically from the message DB + transcripts. Concrete gap-list + the candidate coordination evals.
+- [001 — Telemetry gaps: the flagship session left almost no machine trace](./001-telemetry-gaps-p3-dogfood.md) (2026-06-30) — the P3 dogfood was near-unobservable from musterd's own telemetry (OTel inert, no PostHog project, Langfuse + audit-log empty, `daemon.log` info-only); the whole cost analysis was reconstructed forensically from the message DB + transcripts. Concrete gap-list + the candidate coordination evals. **Resolved by ADR 082 (2026-07-01): instrument-by-default + HTTP request log + first-party coordination metrics + opt-in per-agent tokens.**
