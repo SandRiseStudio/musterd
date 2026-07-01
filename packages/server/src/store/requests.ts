@@ -41,10 +41,18 @@ export function toRequest(row: RequestRow): Request {
 }
 
 /**
- * Create a request, **deduped** by `(team, from_session, target)`: if an open (`pending`) request
- * already exists for that triple, it is returned unchanged rather than stacking a duplicate (a session
- * that re-claims after a dropped socket reuses its pending request). `target` is matched with NULL
- * equality so a bare teammate-join request dedups too.
+ * Create a request, **deduped** while `pending`. Two dedup modes:
+ *
+ * - `collapseByTarget` (a **specific-seat** claim): collapse by `(team, target)` across *all* sessions.
+ *   A named seat has exactly one holder, so at most one approval request should ever be open for it —
+ *   otherwise a grant-less agent that reconnects (e.g. an MCP adapter autojoining on every launch/probe)
+ *   stacks a fresh request every reconnect, since `from_session` (the connId) changes each time (the
+ *   2026-07-01 dogfood pile-up: 9 duplicate `seat:Sonnet` requests). On a hit the waiter pointer
+ *   (`from_session`/`surface`) is refreshed to the *latest* claimer so the admin's approve delivers to
+ *   the session actually waiting (newest-wins, matching agent single-active).
+ * - default (role claims, teammate joins): dedup by `(team, from_session, target)` — genuinely-distinct
+ *   sessions stay distinct (e.g. two agents both waiting to join a role pool). `target` matches with
+ *   NULL equality so a bare teammate-join request dedups too.
  */
 export function createRequest(
   db: Database,
@@ -54,16 +62,35 @@ export function createRequest(
     from_session: string;
     target: string | null;
     surface?: string;
+    collapseByTarget?: boolean;
   },
 ): Request {
-  const existing = db
-    .prepare<[string, string, string | null, string | null], RequestRow>(
-      `SELECT * FROM requests
+  if (input.collapseByTarget && input.target !== null) {
+    const existing = db
+      .prepare<
+        [string, string],
+        RequestRow
+      >("SELECT * FROM requests WHERE team_id = ? AND status = 'pending' AND target = ?")
+      .get(teamId, input.target);
+    if (existing) {
+      const surface = input.surface ?? existing.surface;
+      db.prepare('UPDATE requests SET from_session = ?, surface = ? WHERE id = ?').run(
+        input.from_session,
+        surface,
+        existing.id,
+      );
+      return toRequest({ ...existing, from_session: input.from_session, surface });
+    }
+  } else {
+    const existing = db
+      .prepare<[string, string, string | null, string | null], RequestRow>(
+        `SELECT * FROM requests
        WHERE team_id = ? AND status = 'pending' AND from_session = ?
          AND ((target IS NULL AND ? IS NULL) OR target = ?)`,
-    )
-    .get(teamId, input.from_session, input.target, input.target);
-  if (existing) return toRequest(existing);
+      )
+      .get(teamId, input.from_session, input.target, input.target);
+    if (existing) return toRequest(existing);
+  }
 
   const now = Date.now();
   const row: RequestRow = {

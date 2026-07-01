@@ -941,6 +941,8 @@ export async function handleHttp(
           from_session: `http:${ulid()}`,
           target: encodedTarget,
           surface: body.surface,
+          // A specific-seat claim collapses to one pending request per seat (no reconnect pile-up).
+          collapseByTarget: 'seat' in body.target,
         });
         appendAudit(ctx.db, team.id, {
           actor: null,

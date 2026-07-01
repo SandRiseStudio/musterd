@@ -33,6 +33,9 @@ beforeEach(async () => {
   process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
   cwd = mkdtempSync(join(tmpdir(), 'musterd-claim-cwd-'));
   vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+  // Pin the workspace label so it's deterministic (the temp cwd isn't a git repo) and markers can be
+  // written with a matching `workspace` for the claim's workspace-scoped pending filter.
+  process.env['MUSTERD_WORKSPACE'] = 'ws-here';
   // Stand up the team; capture the v0.3 composite mint (SPEC A.7): the team agent key + the creator's
   // human credential (mscr_). Post-cutover (ADR 069) nick authenticates with the credential; the mskd_
   // creator token no longer authenticates, so the admin (grants/declare-seat) calls use the credential.
@@ -56,6 +59,7 @@ afterEach(async () => {
   delete process.env['MUSTERD_CONFIG'];
   delete process.env['MUSTERD_TEAM'];
   delete process.env['MUSTERD_AGENT_KEY'];
+  delete process.env['MUSTERD_WORKSPACE'];
 });
 
 async function run(argv: string[]) {
@@ -231,7 +235,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     writePending(cwd, {
       code: 'AB12',
       team: 'dawn',
-      workspace: cwd,
+      workspace: 'ws-here',
       surface: 'claude-code',
       connId: 'c1',
       ts: 1,
@@ -239,7 +243,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     writePending(cwd, {
       code: 'CD34',
       team: 'dawn',
-      workspace: cwd,
+      workspace: 'ws-here',
       surface: 'cursor',
       connId: 'c2',
       ts: 2,
@@ -251,13 +255,40 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     expect(ok.code).toBe(0);
   });
 
+  it('ignores a pending marker from a different workspace (2026-07-01 dogfood bug)', async () => {
+    await declareSeat('Ada');
+    const g = await grant('Ada');
+    // One marker for *this* workspace, one for a foreign workspace sharing the same `.musterd` dir.
+    // Only the local one counts, so a single-target claim proceeds without demanding `--for`.
+    writePending(cwd, {
+      code: 'MINE',
+      team: 'dawn',
+      workspace: 'ws-here',
+      surface: 'claude-code',
+      connId: 'c1',
+      ts: 1,
+    });
+    writePending(cwd, {
+      code: 'THEIRS',
+      team: 'dawn',
+      workspace: 'someone-elses-ws',
+      surface: 'claude-code',
+      connId: 'c2',
+      ts: 2,
+    });
+    const ok = await run(['Ada', '--team', 'dawn', '--grant', g]);
+    expect(ok.code).toBe(0);
+    // The claim resolved this workspace's marker (going online), never the foreign one.
+    expect(ok.out).toContain('Ada');
+  });
+
   it('hands the seat to a waiting session via a resolution sidecar carrying the seat (ADR 034)', async () => {
     await declareSeat('Ada');
     const g = await grant('Ada');
     writePending(cwd, {
       code: 'AB12',
       team: 'dawn',
-      workspace: cwd,
+      workspace: 'ws-here',
       surface: 'claude-code',
       connId: 'c1',
       ts: 1,
