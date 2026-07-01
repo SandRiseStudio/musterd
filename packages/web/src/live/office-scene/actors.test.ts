@@ -51,7 +51,7 @@ describe('walk choreography', () => {
   it('walks a mover away from home and returns it, going idle when done', () => {
     const { placements, byName } = world([node('Ada'), node('Bo')]);
     const actors = createActors();
-    actors.setHomes(placements, byName);
+    actors.setHomes(placements, byName, true);
     const home = actors.poses().get('Ada')!;
 
     expect(actors.walk('Ada', { kind: 'help', to: 'Bo', urgent: false })).toBe(true);
@@ -77,7 +77,7 @@ describe('walk choreography', () => {
   it("won't play a walk when the target isn't present", () => {
     const { placements, byName } = world([node('Ada')]);
     const actors = createActors();
-    actors.setHomes(placements, byName);
+    actors.setHomes(placements, byName, true);
     expect(actors.walk('Ada', { kind: 'help', to: 'Ghost', urgent: false })).toBe(false);
     expect(actors.active()).toBe(false);
   });
@@ -85,9 +85,78 @@ describe('walk choreography', () => {
   it('carries a box on a handoff outbound leg', () => {
     const { placements, byName } = world([node('Ada'), node('Bo')]);
     const actors = createActors();
-    actors.setHomes(placements, byName);
+    actors.setHomes(placements, byName, true);
     actors.walk('Ada', { kind: 'handoff', to: 'Bo', urgent: false });
     actors.step(0.1);
     expect(actors.poses().get('Ada')!.carry).toBe(true);
+  });
+});
+
+describe('presence transitions', () => {
+  const settle = (a: ReturnType<typeof createActors>) => {
+    let g = 0;
+    while (a.active() && g++ < 2000) a.step(0.05);
+  };
+
+  it('walks an arrival in from the entrance to its seat', () => {
+    const actors = createActors();
+    const w1 = world([node('Ada')]);
+    actors.setHomes(w1.placements, w1.byName, true); // first call always snaps
+    const w2 = world([node('Ada'), node('Bo')]);
+    const home = homePoses(w2.placements, w2.byName).get('Bo')!;
+    actors.setHomes(w2.placements, w2.byName, true);
+
+    expect(actors.active()).toBe(true);
+    const start = actors.poses().get('Bo')!;
+    expect(Math.hypot(start.lx - home.lx, start.ly - home.ly)).toBeGreaterThan(50); // near the door
+    settle(actors);
+    const end = actors.poses().get('Bo')!;
+    expect(end.lx).toBeCloseTo(home.lx, 3);
+    expect(end.ly).toBeCloseTo(home.ly, 3);
+    expect(actors.nodes().has('Bo')).toBe(true);
+  });
+
+  it('walks a departure out to the door, then drops it', () => {
+    const actors = createActors();
+    const w1 = world([node('Ada'), node('Bo')]);
+    actors.setHomes(w1.placements, w1.byName, true);
+    const w2 = world([node('Ada')]);
+    actors.setHomes(w2.placements, w2.byName, true);
+
+    expect(actors.active()).toBe(true);
+    // still drawn (as a retained ghost) while walking out
+    expect(actors.nodes().has('Bo')).toBe(true);
+    expect(actors.poses().has('Bo')).toBe(true);
+    settle(actors);
+    // gone once it reaches the door
+    expect(actors.nodes().has('Bo')).toBe(false);
+    expect(actors.poses().has('Bo')).toBe(false);
+  });
+
+  it('drifts to the nook (small) when a member goes away', () => {
+    const actors = createActors();
+    const present = world([node('Ada'), node('Bo')]);
+    actors.setHomes(present.placements, present.byName, true);
+    const away = world([node('Ada'), node('Bo', 'away')]);
+    const nookHome = homePoses(away.placements, away.byName).get('Bo')!;
+    actors.setHomes(away.placements, away.byName, true);
+
+    expect(actors.active()).toBe(true);
+    settle(actors);
+    const end = actors.poses().get('Bo')!;
+    expect(end.lx).toBeCloseTo(nookHome.lx, 3);
+    expect(end.ly).toBeCloseTo(nookHome.ly, 3);
+    expect(end.small).toBe(true); // nook avatars are small
+  });
+
+  it('snaps without animating when animate=false (reduced motion)', () => {
+    const actors = createActors();
+    const w1 = world([node('Ada')]);
+    actors.setHomes(w1.placements, w1.byName, true);
+    const w2 = world([node('Ada'), node('Bo')]);
+    actors.setHomes(w2.placements, w2.byName, false);
+    expect(actors.active()).toBe(false);
+    const home = homePoses(w2.placements, w2.byName).get('Bo')!;
+    expect(actors.poses().get('Bo')!.lx).toBeCloseTo(home.lx, 3);
   });
 });

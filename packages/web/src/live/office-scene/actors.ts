@@ -5,9 +5,11 @@ import type { Bubble, Dir, OfficeNode, Pose } from './types';
 /**
  * The actor system: turns a live roster + acts into moving avatars. Every present member has a *home*
  * pose (their seat / nook / entrance-strip spot); acts that read as motion (`request_help`, `handoff`)
- * enqueue a **walk** — a short there-pause-back trip to a teammate's desk — that the scene interpolates
- * each frame. Purely positional (no Rive): distance sets duration, urgency runs it faster. Deterministic
- * home layout mirrors `renderScene`'s old seating maths so labels/anchors line up exactly.
+ * enqueue a **walk** — a short there-pause-back trip to a teammate's desk. Presence changes animate too:
+ * a member who comes online **walks in from the entrance**, one who goes offline **walks out** and is
+ * dropped at the door, and going away / coming back **drifts** between a desk and the break nook. Purely
+ * positional (no Rive): distance sets duration, urgency runs it faster. Deterministic home layout mirrors
+ * `renderScene`'s seating maths so labels/anchors line up exactly.
  */
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -97,20 +99,75 @@ function approach(target: Pose, mover: Pose): { lx: number; ly: number } {
 }
 
 export interface Actors {
-  setHomes(placements: Map<string, Placement>, byName: Map<string, OfficeNode>): void;
+  /** Reconcile to a new roster: seat everyone, and (when `animate`) walk arrivals in, departures out,
+   * and away/return drifts between desk and nook. The first call just snaps (no entrance stampede). */
+  setHomes(placements: Map<string, Placement>, byName: Map<string, OfficeNode>, animate: boolean): void;
   /** Enqueue a walk to a teammate. Returns false if it can't play (mover or target not present). */
   walk(from: string, req: Req): boolean;
-  /** Advance all walks by dt seconds; returns true while any walk is in flight. */
+  /** Advance all walks by dt seconds; returns true while any walk (act or transition) is in flight. */
   step(dt: number): boolean;
-  /** The current pose of every present member (home, or interpolated if walking). */
+  /** The current pose of every drawn member (home, or interpolated if walking — incl. those leaving). */
   poses(): Map<string, Pose>;
+  /** Nodes to draw this frame — the live roster plus any members currently walking out. */
+  nodes(): Map<string, OfficeNode>;
   active(): boolean;
 }
 
 export function createActors(): Actors {
   let homes = new Map<string, Pose>();
+  let live = new Map<string, OfficeNode>();
+  const ghosts = new Map<string, OfficeNode>(); // members walking out — dropped when they reach the door
   const walks = new Map<string, Walk>();
   const pending = new Map<string, Req[]>();
+  const exiting = new Set<string>();
+  let initialized = false;
+
+  function entrancePose(ref: Pose): Pose {
+    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null };
+  }
+  function moved(a: Pose, b: Pose): boolean {
+    return Math.hypot(a.lx - b.lx, a.ly - b.ly) > 8;
+  }
+  /** A one-leg point-to-point walk (entrance-in, drift, or leave). */
+  function straightWalk(from: Pose, to: Pose, exit: boolean): Walk {
+    const speed = 300;
+    const dur = clamp(Math.hypot(to.lx - from.lx, to.ly - from.ly) / speed, 0.4, 1.8);
+    return {
+      legs: [
+        {
+          fx: from.lx,
+          fy: from.ly,
+          tx: to.lx,
+          ty: to.ly,
+          dir: travelDir(from.lx, from.ly, to.lx, to.ly),
+          dur,
+          carry: false,
+          bubble: null,
+        },
+      ],
+      i: 0,
+      t: 0,
+      small: exit ? from.small : to.small,
+    };
+  }
+
+  function posesNow(): Map<string, Pose> {
+    const out = new Map<string, Pose>();
+    for (const [n, p] of homes) out.set(n, { ...p });
+    for (const [name, w] of walks) {
+      const leg = w.legs[w.i]!;
+      const e = easeInOut(clamp(w.t, 0, 1));
+      out.set(name, {
+        lx: leg.fx + (leg.tx - leg.fx) * e,
+        ly: leg.fy + (leg.ty - leg.fy) * e,
+        dir: leg.dir,
+        small: w.small,
+        carry: leg.carry,
+        bubble: leg.bubble,
+      });
+    }
+    return out;
+  }
 
   function build(from: string, req: Req): Walk | null {
     const home = homes.get(from);
@@ -136,6 +193,7 @@ export function createActors(): Actors {
   }
 
   function startNext(from: string): void {
+    if (exiting.has(from)) return;
     const q = pending.get(from);
     if (!q || q.length === 0) return;
     let w: Walk | null = null;
@@ -144,13 +202,48 @@ export function createActors(): Actors {
   }
 
   return {
-    setHomes(placements, byName) {
-      homes = homePoses(placements, byName);
-      for (const name of [...walks.keys()]) if (!homes.has(name)) walks.delete(name);
-      for (const name of [...pending.keys()]) if (!homes.has(name)) pending.delete(name);
+    setHomes(placements, byName, animate) {
+      const newHomes = homePoses(placements, byName);
+      const prevHomes = homes;
+      const prevLive = live;
+      const cur = posesNow(); // capture current positions before we swap homes
+      homes = newHomes;
+      live = byName;
+
+      if (!initialized || !animate) {
+        // First paint (or reduced-motion): snap — no entrance stampede, no frozen mid-walks.
+        initialized = true;
+        walks.clear();
+        pending.clear();
+        exiting.clear();
+        ghosts.clear();
+        return;
+      }
+
+      // Arrivals (walk in from the door) and drifts (desk ⇄ nook / reseat).
+      for (const [name, dest] of newHomes) {
+        if (!prevHomes.has(name)) {
+          exiting.delete(name);
+          ghosts.delete(name);
+          walks.set(name, straightWalk(entrancePose(dest), dest, false));
+        } else if (!exiting.has(name)) {
+          const from = cur.get(name) ?? prevHomes.get(name)!;
+          if (moved(from, dest)) walks.set(name, straightWalk(from, dest, false));
+        }
+      }
+      // Departures (walk out to the door, then vanish).
+      for (const [name, prevHome] of prevHomes) {
+        if (newHomes.has(name)) continue;
+        const from = cur.get(name) ?? prevHome;
+        const node = prevLive.get(name);
+        if (node) ghosts.set(name, node);
+        pending.delete(name);
+        exiting.add(name);
+        walks.set(name, straightWalk(from, entrancePose(from), true));
+      }
     },
     walk(from, req) {
-      if (!homes.has(from) || !homes.has(req.to) || from === req.to) return false;
+      if (!homes.has(from) || !homes.has(req.to) || from === req.to || exiting.has(from)) return false;
       const q = pending.get(from) ?? [];
       if (q.length >= 3) return false; // cap the backlog so a chatty pair doesn't march forever
       q.push(req);
@@ -167,27 +260,21 @@ export function createActors(): Actors {
           w.i++;
           if (w.i >= w.legs.length) {
             walks.delete(name);
-            startNext(name);
+            if (exiting.has(name)) {
+              exiting.delete(name);
+              ghosts.delete(name);
+            } else {
+              startNext(name);
+            }
           }
         }
       }
       return walks.size > 0;
     },
-    poses() {
-      const out = new Map<string, Pose>();
-      for (const [n, p] of homes) out.set(n, { ...p });
-      for (const [name, w] of walks) {
-        const leg = w.legs[w.i]!;
-        const e = easeInOut(clamp(w.t, 0, 1));
-        out.set(name, {
-          lx: leg.fx + (leg.tx - leg.fx) * e,
-          ly: leg.fy + (leg.ty - leg.fy) * e,
-          dir: leg.dir,
-          small: w.small,
-          carry: leg.carry,
-          bubble: leg.bubble,
-        });
-      }
+    poses: posesNow,
+    nodes() {
+      const out = new Map<string, OfficeNode>(ghosts);
+      for (const [n, node] of live) out.set(n, node);
       return out;
     },
     active() {

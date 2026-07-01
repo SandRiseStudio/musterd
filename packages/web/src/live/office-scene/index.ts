@@ -35,7 +35,6 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
 
   const actors: Actors = createActors();
   let placements = new Map<string, Placement>();
-  let byName = new Map<string, OfficeNode>();
   let heads = new Map<string, Pt>(); // home head anchors — where in-place cues sit
 
   const labels = new Map<string, HTMLDivElement>();
@@ -58,17 +57,18 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   function bake() {
     bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     bctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(bctx, fit, placements, byName, actors.poses());
+    const nodes = actors.nodes();
+    const anchors = renderScene(bctx, fit, placements, nodes, actors.poses());
     heads = anchors.heads;
-    syncLabels(anchors.heads);
+    syncLabels(anchors.heads, nodes);
   }
 
   /** Create/remove label elements + set their text, and position them from `headMap`. */
-  function syncLabels(headMap: Map<string, Pt>) {
+  function syncLabels(headMap: Map<string, Pt>, nodes: Map<string, OfficeNode>) {
     const seen = new Set<string>();
     for (const [name, head] of headMap) {
       seen.add(name);
-      const node = byName.get(name);
+      const node = nodes.get(name);
       if (!node) continue;
       let el = labels.get(name);
       if (!el) {
@@ -126,7 +126,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, byName, actors.poses());
+    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses());
     drawCues();
     positionLabels(anchors.heads);
   }
@@ -167,8 +167,9 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
 
   function update(next: OfficeData) {
     placements = assignSeats(next.nodes);
-    byName = new Map(next.nodes.map((n) => [n.name, n]));
-    actors.setHomes(placements, byName);
+    const byName = new Map(next.nodes.map((n) => [n.name, n]));
+    // Animate presence changes (walk in/out, drift) unless reduced-motion asked for stillness.
+    actors.setHomes(placements, byName, !reduced);
     bake();
     if (actors.active() || cues.length) ensureLoop();
     else drawStatic();

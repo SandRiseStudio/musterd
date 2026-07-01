@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import liveCss from '../live/Live.css?url';
 import { memberColor } from '../live/format';
 import type { OfficeData, OfficeEvent, OfficeHandle } from '../live/office-scene';
@@ -13,37 +13,24 @@ export const Route = createFileRoute('/office-preview')({
 });
 
 /* Synthetic fixture — no live daemon. Mounts the office scene directly and drives it with a looping
-   act script so the walk/handoff/megaphone choreography plays on its own (design fixture; also how the
-   motion is screenshot-verified). Buttons trigger acts on demand. */
+   act script so the walk/handoff/megaphone choreography plays on its own, plus roster controls (join /
+   leave / away) that exercise the presence transitions — arrivals walk in, departures walk out, away
+   drifts to the nook. Design fixture; also how the motion is verified in a real browser. */
 
 type Kind = 'agent' | 'human';
-type Mock = { name: string; kind: Kind; activity: OfficeData['nodes'][number]['activity']; state: string | null; away?: boolean };
+type Mock = { name: string; kind: Kind; activity: OfficeData['nodes'][number]['activity']; state: string | null };
 
-const MOCK: Mock[] = [
+const POOL: Mock[] = [
   { name: 'Ada', kind: 'human', activity: 'working', state: 'reviewing the isometric office' },
   { name: 'Bo', kind: 'agent', activity: 'working', state: 'porting the floor renderer' },
   { name: 'Cy', kind: 'human', activity: 'working', state: 'wiring the firehose subscribe' },
   { name: 'Dev', kind: 'agent', activity: 'online', state: null },
   { name: 'Eli', kind: 'human', activity: 'working', state: 'writing the seating tests' },
   { name: 'Fen', kind: 'agent', activity: 'working', state: 'watching the deploy' },
-  { name: 'Gus', kind: 'human', activity: 'online', state: null, away: true },
+  { name: 'Gus', kind: 'human', activity: 'online', state: null },
   { name: 'Hana', kind: 'agent', activity: 'working', state: 'profiling the render loop' },
   { name: 'Ivy', kind: 'human', activity: 'working', state: 'designing the character rig' },
 ];
-
-function toData(): OfficeData {
-  return {
-    nodes: MOCK.map((m) => ({
-      name: m.name,
-      kind: m.kind,
-      presence: m.away ? 'away' : 'online',
-      activity: m.activity,
-      state: m.state,
-      color: memberColor(m.name, m.kind),
-      role: '',
-    })),
-  };
-}
 
 // A looping choreography script (ms offset → event), so the room is always alive on the preview.
 const SCRIPT: { at: number; ev: OfficeEvent }[] = [
@@ -63,6 +50,29 @@ function OfficePreviewPage() {
   const labelRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<OfficeHandle | null>(null);
 
+  const [present, setPresent] = useState<Set<string>>(() => new Set(POOL.map((m) => m.name)));
+  const [away, setAway] = useState<Set<string>>(() => new Set(['Gus']));
+
+  const buildData = useCallback(
+    (): OfficeData => ({
+      nodes: POOL.filter((m) => present.has(m.name)).map((m) => {
+        const isAway = away.has(m.name);
+        return {
+          name: m.name,
+          kind: m.kind,
+          presence: isAway ? 'away' : 'online',
+          activity: isAway ? 'online' : m.activity,
+          state: m.state,
+          color: memberColor(m.name, m.kind),
+          role: '',
+        };
+      }),
+    }),
+    [present, away],
+  );
+  const dataRef = useRef(buildData);
+  dataRef.current = buildData;
+
   useEffect(() => {
     const host = hostRef.current;
     const labelHost = labelRef.current;
@@ -75,7 +85,7 @@ function OfficePreviewPage() {
       .then(({ mountOffice }) => {
         if (disposed || !host || !labelHost) return;
         const handle = mountOffice(host, labelHost, false);
-        handle.update(toData());
+        handle.update(dataRef.current());
         handleRef.current = handle;
         const run = () => {
           for (const step of SCRIPT) timers.push(setTimeout(() => handleRef.current?.emit(step.ev), step.at));
@@ -94,7 +104,20 @@ function OfficePreviewPage() {
     };
   }, []);
 
+  // Push roster changes into the scene → arrivals walk in, departures walk out, away drifts to the nook.
+  useEffect(() => {
+    handleRef.current?.update(buildData());
+  }, [buildData]);
+
   const fire = (ev: OfficeEvent) => handleRef.current?.emit(ev);
+  const toggle = (set: Set<string>, name: string): Set<string> => {
+    const next = new Set(set);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    return next;
+  };
+  const present2 = (n: string) => setPresent((s) => toggle(s, n));
+  const away2 = (n: string) => setAway((s) => toggle(s, n));
 
   return (
     <main className="lc">
@@ -106,6 +129,10 @@ function OfficePreviewPage() {
         <button className="lc__pbtn" title="urgent help (run)" onClick={() => fire({ kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' })}>!</button>
         <button className="lc__pbtn" title="handoff (carry box)" onClick={() => fire({ kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' })}>↦</button>
         <button className="lc__pbtn" title="broadcast (megaphone)" onClick={() => fire({ kind: 'megaphone', from: 'Ivy' })}>📣</button>
+        <span className="lc__pbtn-sep" />
+        <button className="lc__pbtn" title="Dev join / leave (walk in / out)" onClick={() => present2('Dev')}>D</button>
+        <button className="lc__pbtn" title="Hana join / leave (walk in / out)" onClick={() => present2('Hana')}>H</button>
+        <button className="lc__pbtn" title="Ivy away / back (drift to nook)" onClick={() => away2('Ivy')}>z</button>
         <span className="lc__status lc__status--live">design preview</span>
       </header>
       <div className="lc__canvas lc__canvas--companion">
