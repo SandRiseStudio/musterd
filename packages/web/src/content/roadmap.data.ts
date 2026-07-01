@@ -391,7 +391,6 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'v03-p2-enforcement',
-    wave: 2,
     title: 'v0.3 P2 — in-band enforcement & audit',
     status: 'shipped',
     category: 'platform',
@@ -414,13 +413,13 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'v03-p4-remote-join',
-    wave: 2,
+    wave: 'later',
     title: 'v0.3 P4 — credentialed remote join',
     status: 'near-term',
     category: 'transport',
     blurb: 'Plug the agent key + grant + human credential into the already-built secured off-loopback bind, so a teammate on another machine joins over wss with a real credential, not a locally-minted token.',
     detail:
-      'The credential layer ADR 039/040 named but did not build. The secured transport (TLS/wss refuse-plaintext bind, Origin/Host gate) is done and waiting; P4 is mostly integration — the cross-network claim flow over that channel + docs. Now unblocked: P3’s agent-key + grant + human-credential model shipped (2026-06-30), so P4 is the remaining cross-network claim flow over the secured channel.',
+      'The credential layer ADR 039/040 named but did not build. The secured transport (TLS/wss refuse-plaintext bind, Origin/Host gate) is done and waiting; P4 is mostly integration — the cross-network claim flow over that channel + docs. Now unblocked: P3’s agent-key + grant + human-credential model shipped (2026-06-30), so P4 is the remaining cross-network claim flow over the secured channel. Deferred at the 2026-07-01 reprioritization: the wedge is local coordination + human partnership and there is no near-term pull for cross-network, so remote join waits behind the telemetry + lanes work.',
     refs: [adr(69, 'ADR 069'), adr(39, 'ADR 039'), adr(40, 'ADR 040')],
     dependsOn: ['v03-p3-credentials', 'cross-network'],
   },
@@ -444,7 +443,7 @@ export const ROADMAP: RoadmapItem[] = [
     blurb:
       'A first-class lane = { work-item × owner × surface } so musterd advises before two agents (or humans) redo the same work — the anti-swarm primitive.',
     detail:
-      'From the P3 dogfood post-mortem: coordination messages cost ~1% of tokens, but ~37% of the code produced never reached main (53% of that a single dependency-revert). A lane makes work-ownership contention-aware — unmet-dependency + surface-overlap warnings (advisory, never block; git-optional), a done-state that fixes the dead resolve act, and handoffs that carry the branch instead of a prose description. Phase 1 = the intent + dependency layer (catches the biggest waste, git-optional); Phase 2 = lightweight piggybacked observation (watcher, never gatekeeper). Design + spec live in docs/design/lanes-and-the-multi-agent-tax.md + lane-phase1-mvp-spec.md; no ADR yet. Wave is provisional pending the next reprioritization.',
+      'From the P3 dogfood post-mortem: coordination messages cost ~1% of tokens, but ~37% of the code produced never reached main (53% of that a single dependency-revert). A lane makes work-ownership contention-aware — unmet-dependency + surface-overlap warnings (advisory, never block; git-optional), a done-state that fixes the dead resolve act, and handoffs that carry the branch instead of a prose description. Phase 1 = the intent + dependency layer (catches the biggest waste, git-optional); Phase 2 = lightweight piggybacked observation (watcher, never gatekeeper). Design + spec live in docs/design/lanes-and-the-multi-agent-tax.md + lane-phase1-mvp-spec.md; no ADR yet. Sequenced after the telemetry-gaps work at the 2026-07-01 reprioritization, so its wasted-work win is measurable when it lands.',
     refs: [
       doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax'),
       doc('docs/design/lane-phase1-mvp-spec.md', 'Phase-1 MVP spec'),
@@ -453,14 +452,14 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'telemetry-gaps',
-    wave: 3,
+    wave: 2,
     title: 'Close the dogfood telemetry gaps (instrument-by-default)',
     status: 'near-term',
     category: 'observability',
     blurb:
       'Turn the built-but-inert telemetry on and wire the missing surfaces — so the next multi-agent session is measurable live, not reconstructed forensically.',
     detail:
-      'Placeholder from lab-notebook finding 001: the flagship P3 session was near-unobservable from musterd’s own telemetry. Concrete backlog — (1) OTel Layer-1 is built but off-by-default and was never booted (no exporter set) → instrument-by-default for dogfood daemons at minimum; (2) daemon.log is info-only with no HTTP layer (no request / latency / status); (3) the ADR-071 audit log records only governed decisions, so normal coordination leaves no trace; (4) no per-agent token/cost telemetry — reconstructed from harness transcripts, and non-Claude agents are unrecoverable; (5) no first-party emission of the coordination metrics we had to compute by hand (coordination-token ratio, wasted-work ratio, directed-act latency, resolve-rate, dup-rate). These are the concrete inputs to Telemetry L2 + batond. Wave provisional pending the next reprioritization.',
+      'Placeholder from lab-notebook finding 001: the flagship P3 session was near-unobservable from musterd’s own telemetry. Concrete backlog — (1) OTel Layer-1 is built but off-by-default and was never booted (no exporter set) → instrument-by-default for dogfood daemons at minimum; (2) daemon.log is info-only with no HTTP layer (no request / latency / status); (3) the ADR-071 audit log records only governed decisions, so normal coordination leaves no trace; (4) no per-agent token/cost telemetry — reconstructed from harness transcripts, and non-Claude agents are unrecoverable; (5) no first-party emission of the coordination metrics we had to compute by hand (coordination-token ratio, wasted-work ratio, directed-act latency, resolve-rate, dup-rate). These are the concrete inputs to Telemetry L2 + batond. Pulled to the head of the build at the 2026-07-01 reprioritization — instrument-by-default first (a local OTLP collector as an interim stand-in for batond), so lanes and everything after are measurable live rather than reconstructed forensically.',
     refs: [
       doc('docs/research/001-telemetry-gaps-p3-dogfood.md', 'finding 001'),
       doc('docs/design/observability.md', 'observability.md'),
