@@ -303,6 +303,8 @@ function bubble(ctx: CanvasRenderingContext2D, x: number, y: number, glyph: '?' 
  * correctly. (Rive replaces the avatar body in a later cut, behind this same call.)
  */
 export function drawActor(ctx: CanvasRenderingContext2D, fit: Fit, pose: Pose, node: OfficeNode): void {
+  const fade = pose.alpha < 1;
+  if (fade) ctx.globalAlpha = Math.max(0, pose.alpha);
   avatar(ctx, fit, pose.lx, pose.ly, node, pose.dir, pose.small);
   const p = project(pose.lx, pose.ly, fit);
   const s = fit.scale * (pose.small ? 0.72 : 1);
@@ -311,6 +313,7 @@ export function drawActor(ctx: CanvasRenderingContext2D, fit: Fit, pose: Pose, n
     roundRect(ctx, p.x - 11 * s, p.y - 34 * s, 22 * s, 17 * s, 3 * s, '#b592f0');
     roundRect(ctx, p.x - 11 * s, p.y - 34 * s, 22 * s, 5 * s, 2 * s, '#8a5fd6');
   }
+  if (fade) ctx.globalAlpha = 1;
   if (pose.bubble) bubble(ctx, p.x, p.y - (pose.small ? 62 : 74) * fit.scale, pose.bubble, fit.scale);
 }
 
@@ -458,17 +461,45 @@ export function renderScene(
   return { heads, bases };
 }
 
-/** A transient act cue (a tinted ring + optional glyph over a desk). */
+/** A transient act cue: a tinted ring + optional glyph (`ring`), a broadcast sweep (`wave`), or a glow
+ * at the entrance when someone comes or goes (`door`). */
 export interface Cue {
   at: Pt;
   color: string;
   glyph: '' | '?' | '!' | '📣' | '✓' | '↦';
   t: number;
   urgent: boolean;
+  kind?: 'ring' | 'wave' | 'door';
 }
 
 export function drawCue(ctx: CanvasRenderingContext2D, cue: Cue, scale: number): void {
   const { at, color, t } = cue;
+
+  if (cue.kind === 'wave') {
+    // A broadcast sweep: a big, diffuse ring rolling out from the announcer across the room.
+    const grow = 1 - Math.pow(1 - t, 2);
+    const r = (24 + grow * 300) * scale;
+    ctx.globalAlpha = (1 - t) * (1 - t) * 0.5;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3 * scale;
+    ctx.beginPath();
+    ctx.ellipse(at.x, at.y, r, r * 0.6, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  if (cue.kind === 'door') {
+    // The entrance "opens" — a glass-tall glow that brightens then fades as someone passes through.
+    const w = 58 * scale;
+    const h = 96 * scale;
+    ctx.globalAlpha = Math.sin(Math.min(1, t) * Math.PI) * 0.5;
+    ctx.fillStyle = color;
+    roundRect(ctx, at.x - w / 2, at.y - h, w, h, 6 * scale, color);
+    ctx.globalAlpha = 1;
+    return;
+  }
+
   const grow = 1 - Math.pow(1 - t, 3);
   const r = (8 + grow * 34) * scale;
   ctx.globalAlpha = (1 - t) * (1 - t) * 0.9;

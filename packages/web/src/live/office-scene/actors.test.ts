@@ -160,3 +160,33 @@ describe('presence transitions', () => {
     expect(actors.poses().get('Bo')!.lx).toBeCloseTo(home.lx, 3);
   });
 });
+
+describe('door staging', () => {
+  it('counts a door pulse per arrival/departure and clears on read (none on first snap)', () => {
+    const actors = createActors();
+    const one = world([node('Ada')]);
+    actors.setHomes(one.placements, one.byName, true); // first call snaps
+    expect(actors.takeDoorPulses()).toBe(0);
+
+    const two = world([node('Ada'), node('Bo')]);
+    actors.setHomes(two.placements, two.byName, true); // Bo arrives
+    expect(actors.takeDoorPulses()).toBe(1);
+    expect(actors.takeDoorPulses()).toBe(0); // cleared
+
+    actors.setHomes(one.placements, one.byName, true); // Bo departs
+    expect(actors.takeDoorPulses()).toBe(1);
+  });
+
+  it('fades an arrival in from transparent to opaque', () => {
+    const actors = createActors();
+    const one = world([node('Ada')]);
+    actors.setHomes(one.placements, one.byName, true);
+    const two = world([node('Ada'), node('Bo')]);
+    actors.setHomes(two.placements, two.byName, true);
+
+    expect(actors.poses().get('Bo')!.alpha).toBeLessThan(0.2); // just emerged from the door
+    let g = 0;
+    while (actors.active() && g++ < 2000) actors.step(0.05);
+    expect(actors.poses().get('Bo')!.alpha).toBe(1); // seated, fully opaque
+  });
+});

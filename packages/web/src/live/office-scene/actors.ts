@@ -46,6 +46,7 @@ export function homePoses(
         small: false,
         carry: false,
         bubble: null,
+        alpha: 1,
       });
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);
@@ -56,6 +57,7 @@ export function homePoses(
         small: true,
         carry: false,
         bubble: null,
+        alpha: 1,
       });
     } else if (pl.kind === 'strip') {
       out.set(name, {
@@ -65,6 +67,7 @@ export function homePoses(
         small: true,
         carry: false,
         bubble: null,
+        alpha: 1,
       });
     }
   }
@@ -86,6 +89,8 @@ interface Walk {
   i: number;
   t: number;
   small: boolean;
+  /** Door staging: fade the avatar in while entering / out while leaving; absent for act-walks & drifts. */
+  fade?: 'in' | 'out';
 }
 type Req = { kind: 'help' | 'handoff'; to: string; urgent: boolean };
 
@@ -110,6 +115,8 @@ export interface Actors {
   poses(): Map<string, Pose>;
   /** Nodes to draw this frame — the live roster plus any members currently walking out. */
   nodes(): Map<string, OfficeNode>;
+  /** How many members entered or left since the last call (clears) — drives the door-open glow. */
+  takeDoorPulses(): number;
   active(): boolean;
 }
 
@@ -121,15 +128,16 @@ export function createActors(): Actors {
   const pending = new Map<string, Req[]>();
   const exiting = new Set<string>();
   let initialized = false;
+  let doorPulses = 0; // members that entered/left since the last takeDoorPulses()
 
   function entrancePose(ref: Pose): Pose {
-    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null };
+    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1 };
   }
   function moved(a: Pose, b: Pose): boolean {
     return Math.hypot(a.lx - b.lx, a.ly - b.ly) > 8;
   }
-  /** A one-leg point-to-point walk (entrance-in, drift, or leave). */
-  function straightWalk(from: Pose, to: Pose, exit: boolean): Walk {
+  /** A one-leg point-to-point walk (entrance-in, drift, or leave), optionally fading at the door. */
+  function straightWalk(from: Pose, to: Pose, exit: boolean, fade?: 'in' | 'out'): Walk {
     const speed = 300;
     const dur = clamp(Math.hypot(to.lx - from.lx, to.ly - from.ly) / speed, 0.4, 1.8);
     return {
@@ -148,6 +156,7 @@ export function createActors(): Actors {
       i: 0,
       t: 0,
       small: exit ? from.small : to.small,
+      ...(fade ? { fade } : {}),
     };
   }
 
@@ -157,6 +166,9 @@ export function createActors(): Actors {
     for (const [name, w] of walks) {
       const leg = w.legs[w.i]!;
       const e = easeInOut(clamp(w.t, 0, 1));
+      // Door fade: emerge over the first third entering, dissolve over the last third leaving.
+      const alpha =
+        w.fade === 'in' ? clamp(w.t / 0.35, 0, 1) : w.fade === 'out' ? clamp((1 - w.t) / 0.35, 0, 1) : 1;
       out.set(name, {
         lx: leg.fx + (leg.tx - leg.fx) * e,
         ly: leg.fy + (leg.ty - leg.fy) * e,
@@ -164,6 +176,7 @@ export function createActors(): Actors {
         small: w.small,
         carry: leg.carry,
         bubble: leg.bubble,
+        alpha,
       });
     }
     return out;
@@ -220,18 +233,19 @@ export function createActors(): Actors {
         return;
       }
 
-      // Arrivals (walk in from the door) and drifts (desk ⇄ nook / reseat).
+      // Arrivals (walk in from the door, fading in) and drifts (desk ⇄ nook / reseat).
       for (const [name, dest] of newHomes) {
         if (!prevHomes.has(name)) {
           exiting.delete(name);
           ghosts.delete(name);
-          walks.set(name, straightWalk(entrancePose(dest), dest, false));
+          walks.set(name, straightWalk(entrancePose(dest), dest, false, 'in'));
+          doorPulses++;
         } else if (!exiting.has(name)) {
           const from = cur.get(name) ?? prevHomes.get(name)!;
           if (moved(from, dest)) walks.set(name, straightWalk(from, dest, false));
         }
       }
-      // Departures (walk out to the door, then vanish).
+      // Departures (walk out to the door, fading out, then vanish).
       for (const [name, prevHome] of prevHomes) {
         if (newHomes.has(name)) continue;
         const from = cur.get(name) ?? prevHome;
@@ -239,7 +253,8 @@ export function createActors(): Actors {
         if (node) ghosts.set(name, node);
         pending.delete(name);
         exiting.add(name);
-        walks.set(name, straightWalk(from, entrancePose(from), true));
+        walks.set(name, straightWalk(from, entrancePose(from), true, 'out'));
+        doorPulses++;
       }
     },
     walk(from, req) {
@@ -276,6 +291,11 @@ export function createActors(): Actors {
       const out = new Map<string, OfficeNode>(ghosts);
       for (const [n, node] of live) out.set(n, node);
       return out;
+    },
+    takeDoorPulses() {
+      const n = doorPulses;
+      doorPulses = 0;
+      return n;
     },
     active() {
       return walks.size > 0;

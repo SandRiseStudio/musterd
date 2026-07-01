@@ -1,5 +1,6 @@
 import { createActors, type Actors } from './actors';
-import { fitFloor, type Fit, type Pt } from './iso';
+import { fitFloor, project, type Fit, type Pt } from './iso';
+import { ENTRANCE } from './layout';
 import { assignSeats, type Placement } from './seating';
 import { drawCue, renderScene, toneColor, type Cue } from './render';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode } from './types';
@@ -170,6 +171,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     const byName = new Map(next.nodes.map((n) => [n.name, n]));
     // Animate presence changes (walk in/out, drift) unless reduced-motion asked for stillness.
     actors.setHomes(placements, byName, !reduced);
+    if (!reduced && actors.takeDoorPulses() > 0) pushDoorCue(); // the entrance "opens" as someone comes/goes
     bake();
     if (actors.active() || cues.length) ensureLoop();
     else drawStatic();
@@ -179,6 +181,19 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     const at = heads.get(name);
     if (!at) return;
     cues.push({ at: { x: at.x, y: at.y + 20 }, color, glyph, t: 0, urgent });
+  }
+
+  /** A broadcast sweep rolling out from the announcer. */
+  function pushWave(name: string, color: string) {
+    const at = heads.get(name);
+    if (!at) return;
+    cues.push({ at: { x: at.x, y: at.y + 20 }, color, glyph: '', t: 0, urgent: false, kind: 'wave' });
+  }
+
+  /** The entrance glows as a member walks in or out. */
+  function pushDoorCue() {
+    const p = project(ENTRANCE.lx, ENTRANCE.ly, fit);
+    cues.push({ at: { x: p.x, y: p.y }, color: '#cfe7ee', glyph: '', t: 0, urgent: false, kind: 'door' });
   }
 
   function emit(ev: OfficeEvent) {
@@ -203,7 +218,11 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
         }
         break;
       case 'megaphone':
+        // Broadcast staging: the announcer raises a megaphone, a wave sweeps the room, and every other
+        // present member gets a brief "heard it" pulse.
         pushCue(ev.from, '#f4cf52', '📣');
+        pushWave(ev.from, '#f4cf52');
+        for (const name of heads.keys()) if (name !== ev.from) pushCue(name, '#f4cf52', '');
         break;
       case 'accept':
         pushCue(ev.who, '#5cd49a', '✓');
