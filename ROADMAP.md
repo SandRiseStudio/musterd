@@ -46,6 +46,7 @@ _Built and in the product today._
 _Next up — designed, evidence-backed, not yet built._
 
 - **v0.3 P4 — credentialed remote join** · Transport & topology — Plug the agent key + grant + human credential into the already-built secured off-loopback bind, so a teammate on another machine joins over wss with a real credential, not a locally-minted token. The credential layer ADR 039/040 named but did not build. The secured transport (TLS/wss refuse-plaintext bind, Origin/Host gate) is done and waiting; P4 is mostly integration — the cross-network claim flow over that channel + docs. Now unblocked: P3’s agent-key + grant + human-credential model shipped (2026-06-30), so P4 is the remaining cross-network claim flow over the secured channel. _Builds on v0.3 P3 — credentials & the claim handshake, Cross-network teams._ ([ADR 069](https://github.com/SandRiseStudio/musterd/blob/main/docs/decisions), [ADR 039](https://github.com/SandRiseStudio/musterd/blob/main/docs/decisions), [ADR 040](https://github.com/SandRiseStudio/musterd/blob/main/docs/decisions))
+- **Coordination lanes — own the work, never dup a diff** · Platform — A first-class lane = { work-item × owner × surface } so musterd advises before two agents (or humans) redo the same work — the anti-swarm primitive. From the P3 dogfood post-mortem: coordination messages cost ~1% of tokens, but ~37% of the code produced never reached main (53% of that a single dependency-revert). A lane makes work-ownership contention-aware — unmet-dependency + surface-overlap warnings (advisory, never block; git-optional), a done-state that fixes the dead resolve act, and handoffs that carry the branch instead of a prose description. Phase 1 = the intent + dependency layer (catches the biggest waste, git-optional); Phase 2 = lightweight piggybacked observation (watcher, never gatekeeper). Design + spec live in docs/design/lanes-and-the-multi-agent-tax.md + lane-phase1-mvp-spec.md; no ADR yet. Wave is provisional pending the next reprioritization. _Builds on v0.3 P1 — seats data model._ ([lanes / multi-agent-tax](https://github.com/SandRiseStudio/musterd/blob/main/docs/design/lanes-and-the-multi-agent-tax.md), [Phase-1 MVP spec](https://github.com/SandRiseStudio/musterd/blob/main/docs/design/lane-phase1-mvp-spec.md))
 
 ## Reserved (in v0.1, built later)
 
@@ -87,6 +88,7 @@ _Priority order across all unshipped work — the coarse status grouping above, 
 
 ### Wave 3 — Reach + the second-product seed.
 
+- **Coordination lanes — own the work, never dup a diff** · Platform
 - **Telemetry — Layer 2 + SDK** · Telemetry & observability
 - **Web dashboard** · Surfaces
 - **iOS & Slack surfaces** · Surfaces
