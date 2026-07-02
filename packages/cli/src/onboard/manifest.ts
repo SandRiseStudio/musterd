@@ -25,6 +25,13 @@ const PermissionsSchema = z
   })
   .default({ allow: [], ask: [], deny: [] });
 
+/** The guidance surface written into this folder (ADR 085): the skill + slash-command file paths and
+ * the content version they were rendered at (the doctor compares it against the current template). */
+const GuidanceRecordSchema = z.object({
+  files: z.array(z.string()),
+  contentVersion: z.number(),
+});
+
 export const ProvisionManifestSchema = z.object({
   version: z.literal(1),
   role: z.string(),
@@ -33,6 +40,8 @@ export const ProvisionManifestSchema = z.object({
   mcpServers: z.array(z.string()),
   /** Permission entries musterd added to the harness's allow/ask/deny (removable exactly). */
   permissions: PermissionsSchema,
+  /** Guidance files written (ADR 085). Optional so pre-085 manifests keep parsing (no migration). */
+  guidance: GuidanceRecordSchema.optional(),
   /** ISO timestamp of the most recent provision. */
   provisionedAt: z.string(),
 });
@@ -65,6 +74,8 @@ export function writeProvisionManifest(
     harness: string;
     mcpServers: string[];
     permissions?: { allow: string[]; ask: string[]; deny: string[] };
+    /** Guidance surface written this run (ADR 085); preserved from the prior manifest when omitted. */
+    guidance?: { files: string[]; contentVersion: number };
   },
 ): string {
   const prior = readProvisionManifest(dir);
@@ -73,12 +84,14 @@ export function writeProvisionManifest(
     [
       ...new Set([...(prior?.permissions[list] ?? []), ...(entry.permissions?.[list] ?? [])]),
     ].sort();
+  const guidance = entry.guidance ?? prior?.guidance;
   const manifest: ProvisionManifest = {
     version: 1,
     role: entry.role,
     harness: entry.harness,
     mcpServers: [...merged].sort(),
     permissions: { allow: mergePerm('allow'), ask: mergePerm('ask'), deny: mergePerm('deny') },
+    ...(guidance ? { guidance } : {}),
     provisionedAt: new Date().toISOString(),
   };
   const bindingDir = join(dir, BINDING_DIR);

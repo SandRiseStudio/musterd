@@ -72,6 +72,27 @@ describe('provision manifest', () => {
     expect(m.role).toBe('frontend'); // latest provision
   });
 
+  it('records the guidance surface and preserves it across a role-only re-provision (ADR 085)', () => {
+    const dir = tmp();
+    writeProvisionManifest(dir, {
+      role: 'backend',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: ['.musterd/skill/SKILL.md'], contentVersion: 1 },
+    });
+    expect(readProvisionManifest(dir)!.guidance).toEqual({
+      files: ['.musterd/skill/SKILL.md'],
+      contentVersion: 1,
+    });
+    // A later provision that doesn't touch guidance must not drop it.
+    writeProvisionManifest(dir, {
+      role: 'frontend',
+      harness: 'claude-code',
+      mcpServers: ['figma'],
+    });
+    expect(readProvisionManifest(dir)!.guidance?.files).toEqual(['.musterd/skill/SKILL.md']);
+  });
+
   it('returns null when there is no manifest', () => {
     expect(readProvisionManifest(tmp())).toBeNull();
   });

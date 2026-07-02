@@ -78,6 +78,10 @@ export function primerInstructions(config: McpConfig): string {
   return renderPrimer({ team: config.team, ...(seat ? { member: seat } : {}) });
 }
 
+/** The canonical registered-tool names (ADR 085) — kept in a dependency-free module so the guidance
+ * drift check can import it without the MCP SDK; re-exported here for normal consumers. */
+export { TOOL_NAMES } from './toolNames.js';
+
 /** Build (but do not connect) the MCP server with the musterd tools registered. */
 export function buildMcpServer(
   client: MusterdClient,

@@ -38,6 +38,13 @@ export const cursor: Harness = {
   id: 'cursor',
   label: 'Cursor',
   surface: 'cursor',
+  // ADR 085: Cursor's closest skill equivalent is a description-gated ("Agent Requested") rule; slash
+  // commands land as project commands. Same body as the canonical skill, different frontmatter shell.
+  guidance: {
+    skillPath: '.cursor/rules/musterd.mdc',
+    frontmatter: 'cursor',
+    commandsDir: '.cursor/commands',
+  },
 
   async detect() {
     const installed = existsSync(join(homedir(), '.cursor'));

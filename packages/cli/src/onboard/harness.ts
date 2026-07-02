@@ -71,12 +71,30 @@ export interface ProvisionResult {
   activation?: string;
 }
 
+/**
+ * Where a harness carries the on-demand **skill** and slash-command prompts (ADR 085). Declarative
+ * *data*, not behavior — the shared `writeGuidance`/`removeGuidance` (onboard/guidance.ts) render the
+ * one canonical body into these per-harness shells, so adapters stay thin. A harness with no skill
+ * mechanism (Codex) simply omits this and relies on the primer's pointer to `.musterd/skill/SKILL.md`.
+ */
+export interface HarnessGuidance {
+  /** Skill file path, relative to the binding folder (e.g. `.claude/skills/musterd/SKILL.md`). */
+  skillPath: string;
+  /** Frontmatter flavor for the skill file — how this harness gates the skill on a description. */
+  frontmatter: 'claude-code' | 'cursor';
+  /** Dir for slash-command prompt files (one `.md` per command), relative to the binding folder.
+   * Omit when the harness has no project-level slash-command support. */
+  commandsDir?: string;
+}
+
 /** A pluggable onboarding adapter for one agent harness. */
 export interface Harness {
   id: string;
   label: string;
   /** The Presence surface a member in this harness attaches with. */
   surface: Surface;
+  /** Where this harness carries the skill + slash commands (ADR 085); omitted ⇒ canonical file only. */
+  guidance?: HarnessGuidance;
   detect: () => Promise<DetectResult>;
   /** Write the musterd MCP server into this harness's config. */
   configure: (entry: McpServerEntry, binding: AgentBinding) => Promise<ConfigureResult>;

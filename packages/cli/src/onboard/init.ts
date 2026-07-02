@@ -19,6 +19,7 @@ import { renderBanner } from '../render/rows.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
+import { writeGuidance } from './guidance.js';
 import { writeProvisionManifest } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
 import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
@@ -456,6 +457,39 @@ export async function runInit(): Promise<number> {
         `Couldn't write AGENTS.md (${(err as Error).message}) — paste the primer from \`musterd init\`'s manual output if you want it.`,
       );
     }
+  }
+
+  // 5c) Write the on-demand skill + slash commands (ADR 085) -----------------
+  // The primer is the loop kernel; the depth (seat claiming, handoff-with-branch, recovery) lives in a
+  // skill the model opens on demand. Write the harness-neutral canonical skill plus the chosen harness's
+  // native skill/commands, and record them in the manifest so uninstall removes exactly these.
+  // Best-effort — never fails init.
+  try {
+    const g = writeGuidance(process.cwd(), [chosen], { team });
+    if (g.files.length) {
+      p.log.success(
+        `Wrote the musterd skill${chosen.guidance?.commandsDir ? ' + slash commands' : ''} ${pc.dim(`(${g.files.length} file${g.files.length === 1 ? '' : 's'})`)} — ${pc.cyan(name)} can open the playbooks on demand.`,
+      );
+      try {
+        writeProvisionManifest(process.cwd(), {
+          role,
+          harness: chosen.id,
+          mcpServers: [],
+          guidance: { files: g.files, contentVersion: g.contentVersion },
+        });
+      } catch {
+        /* manifest is advisory for guidance — the files themselves are stamp-gated for uninstall */
+      }
+    }
+    if (g.skipped.length) {
+      p.log.info(
+        pc.dim(
+          `Kept your own file(s): ${g.skipped.join(', ')} (re-run with --force to overwrite).`,
+        ),
+      );
+    }
+  } catch (err) {
+    p.log.warn(`Couldn't write the musterd skill (${(err as Error).message}).`);
   }
 
   // 6) Wait for the agent to actually join ----------------------------------

@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DetectResult } from './harness.js';
 
@@ -18,6 +21,8 @@ vi.mock('./primer.js', () => ({ classifyPrimerTarget: () => h.primer }));
 vi.mock('../config.js', () => ({ findBinding: () => h.binding }));
 
 const { inspectProvisioning } = await import('./doctor.js');
+const { writeGuidance, CANONICAL_SKILL_PATH } = await import('./guidance.js');
+const { writeProvisionManifest } = await import('./manifest.js');
 
 function harness(label: string, installed: boolean, configured: boolean, registeredClaim?: string) {
   return {
@@ -112,5 +117,76 @@ describe('inspectProvisioning', () => {
     h.harnesses = [harness('Claude Code', true, true)]; // no registeredClaim
     const r = await inspectProvisioning('/x');
     expect(r.drift).toEqual([]);
+  });
+});
+
+describe('inspectProvisioning — guidance drift (ADR 085)', () => {
+  beforeEach(() => {
+    h.harnesses = [];
+    h.primer = 'none';
+    h.binding = null;
+  });
+
+  function tmp(): string {
+    return mkdtempSync(join(tmpdir(), 'musterd-doctor-'));
+  }
+
+  it('is quiet for a freshly written, unedited guidance surface', async () => {
+    const dir = tmp();
+    const g = writeGuidance(dir, [], { team: 'dawn' }); // canonical file only
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: g.files, contentVersion: g.contentVersion },
+    });
+    const r = await inspectProvisioning(dir);
+    expect(r.drift).toEqual([]);
+    expect(r.notes).toEqual([]);
+  });
+
+  it('flags a stale-version skill as drift (exit-1)', async () => {
+    const dir = tmp();
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: [CANONICAL_SKILL_PATH], contentVersion: 0 },
+    });
+    // A file stamped at an older content version than the current template.
+    const abs = join(dir, CANONICAL_SKILL_PATH);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('v0') && d.includes('musterd init'))).toBe(true);
+  });
+
+  it('flags a recorded-but-missing skill file as drift', async () => {
+    const dir = tmp();
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: [CANONICAL_SKILL_PATH], contentVersion: 1 },
+    });
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('is gone'))).toBe(true);
+  });
+
+  it('reports a hand-edited skill as a warn-only note, not drift', async () => {
+    const dir = tmp();
+    const g = writeGuidance(dir, [], { team: 'dawn' });
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: g.files, contentVersion: g.contentVersion },
+    });
+    // Break the body so it no longer hashes to its own stamp.
+    const abs = join(dir, CANONICAL_SKILL_PATH);
+    writeFileSync(abs, readFileSync(abs, 'utf8').replace('Using musterd', 'MY EDIT'));
+    const r = await inspectProvisioning(dir);
+    expect(r.drift).toEqual([]);
+    expect(r.notes.some((n) => n.includes('local edits'))).toBe(true);
   });
 });

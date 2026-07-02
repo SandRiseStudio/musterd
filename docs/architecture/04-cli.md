@@ -18,6 +18,7 @@ The human surface. `npx`-installable, bin name `musterd`. Talks to the server ov
 ```
 src/
   bin.ts              // shebang entry; parse argv; dispatch; map errors -> exit codes
+  help.ts             // the `musterd help` usage text (extracted from bin.ts so guidance:check can import it; ADR 085)
   args.ts             // argv parser → { command, positionals, flags }
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API
@@ -43,6 +44,7 @@ src/
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
     mcpEntry.ts       // resolve how to launch @musterd/mcp + build the binding env
     manifest.ts       // provision manifest read/write (ADR 030) — records what init wrote, for uninstall
+    guidance.ts       // writeGuidance/removeGuidance: skill + slash-command files per harness, content-stamped (ADR 085)
     pending.ts        // client-side pending-presence markers (ADR 033)
     primer.ts         // renderPrimer + idempotent upsertPrimer → AGENTS.md agent primer (ADR 012)
     role.ts           // Role = harness-agnostic provisioning template; resolve/apply (ADR 026/029/038)

@@ -14,5 +14,6 @@ export * from './seatfile.js';
 export * from './errors.js';
 export * from './frames.js';
 export * from './primer.js';
+export * from './guidance.js';
 export * from './goals.js';
 export * from './lanes.js';

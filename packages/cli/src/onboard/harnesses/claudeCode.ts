@@ -296,6 +296,12 @@ export const claudeCode: Harness = {
   id: 'claude-code',
   label: 'Claude Code',
   surface: 'claude-code',
+  // ADR 085: the skill lands as a native Claude Code skill; slash commands as project commands.
+  guidance: {
+    skillPath: '.claude/skills/musterd/SKILL.md',
+    frontmatter: 'claude-code',
+    commandsDir: '.claude/commands',
+  },
 
   async detect() {
     const bin = await resolveClaudeBin();

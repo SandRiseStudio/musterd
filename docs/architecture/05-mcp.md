@@ -220,6 +220,7 @@ src/
                   //   installShutdownHandlers (drop presence + exit on host teardown);
                   //   autojoin(): claim+join on launch when a default claim exists (ADR 032);
                   //   when unclaimed: writes a pending marker (ADR 033) + startResolutionWatcher (ADR 034)
+  toolNames.ts    // TOOL_NAMES: the registered-tool name list (dependency-free so guidance:check can import it; ADR 085)
   config.ts       // env > binding.json > workspace.json -> { server, team, agent_key?, grant?, surface, claim, connId, claimCode }; validates
   client.ts       // HTTP + background WS client; join()/leave()/close(); `joined`/`claimed`;
                   //   setIdentity() (late claim); addMember() (tokenless mint); buffers live while joined
