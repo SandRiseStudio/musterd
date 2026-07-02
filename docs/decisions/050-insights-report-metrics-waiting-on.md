@@ -2,6 +2,8 @@
 
 - Status: proposed
 - Date: 2026-06-24
+- Amended by: ADR 084 (lanes join the Plan — flow metrics read lane timestamps first; thread
+  `open → resolve` is the fallback; projections are computed server-side, surfaces render)
 
 ## Context
 
