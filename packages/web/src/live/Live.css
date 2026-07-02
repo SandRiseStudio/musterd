@@ -437,7 +437,7 @@
   }
 }
 
-/* ─── Tier-A ambient overlay (ADR 085): GPU-composited life over the baked floor ──────────────── */
+/* ─── Tier-A ambient overlay (ADR 086): GPU-composited life over the baked floor ──────────────── */
 .lc-gl-ambient {
   position: absolute;
   inset: 0;

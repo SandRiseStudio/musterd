@@ -17,7 +17,7 @@ const SPEECH_OUT_MS = 560;
 /** How far above the head anchor the bubble sits (clears the name label). */
 const SPEECH_LIFT = 26;
 /** After a real act, keep the loop alive this long so the Rive character settles into idle rather than
- * freezing mid-gesture (ADR 085 #5 afterglow) — a brief, bounded post-act tail, not a continuous loop. */
+ * freezing mid-gesture (ADR 086 #5 afterglow) — a brief, bounded post-act tail, not a continuous loop. */
 const AFTERGLOW_MS = 2600;
 
 /** An in-flight speech bubble over a member's head — its DOM root plus the timers/frames to cancel when
@@ -60,7 +60,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   const speeches = new Map<string, Speech>(); // one live speech bubble per member (name → bubble)
   const cues: Cue[] = [];
 
-  // ── Tier-A ambient overlay (ADR 085): GPU-composited CSS life over the baked floor — a slow day-cycle
+  // ── Tier-A ambient overlay (ADR 086): GPU-composited CSS life over the baked floor — a slow day-cycle
   // wash, coffee-nook steam, and breathing monitor glows on working desks. Pure CSS, no canvas/RAF cost;
   // off entirely under reduced-motion. Lives in its own layer between the canvas and the label overlay.
   const ambientHost = document.createElement('div');

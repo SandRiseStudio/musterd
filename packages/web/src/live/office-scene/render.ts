@@ -536,7 +536,7 @@ export function renderScene(
 }
 
 /**
- * Screen positions of the **monitors of working members** — where the Tier-A ambient glow sits (ADR 085).
+ * Screen positions of the **monitors of working members** — where the Tier-A ambient glow sits (ADR 086).
  * Matches `drawWorkstation`/`monitor`'s placement so the DOM glow lands on the screen, not floating. Only
  * desk-seated `working` members get one; the returned point is the screen face centre in panel px.
  */
@@ -559,7 +559,7 @@ export function monitorAnchors(
   return out;
 }
 
-/** Screen position of the break-nook coffee machine (the ambient steam source, ADR 085). */
+/** Screen position of the break-nook coffee machine (the ambient steam source, ADR 086). */
 export function coffeeAnchor(fit: Fit): Pt {
   const s = project(NOOK.lx - 58, NOOK.ly - 42, fit);
   return { x: s.x, y: s.y - 8 * fit.scale };
