@@ -146,8 +146,8 @@ export function createActors(): Actors {
   }
   /** A one-leg point-to-point walk (entrance-in, drift, or leave), optionally fading at the door. */
   function straightWalk(from: Pose, to: Pose, exit: boolean, fade?: 'in' | 'out'): Walk {
-    const speed = 165; // logical units/sec — a gentle stroll across the floor
-    const dur = clamp(Math.hypot(to.lx - from.lx, to.ly - from.ly) / speed, 0.9, 3.2);
+    const speed = 100; // logical units/sec — an unhurried stroll across the floor
+    const dur = clamp(Math.hypot(to.lx - from.lx, to.ly - from.ly) / speed, 1.4, 5);
     return {
       legs: [
         {
@@ -198,9 +198,9 @@ export function createActors(): Actors {
     const target = homes.get(req.to);
     if (!home || !target) return null;
     const a = approach(target, home);
-    const speed = req.urgent ? 330 : 200; // logical units / sec — walk over, or hurry when urgent
+    const speed = req.urgent ? 210 : 125; // logical units / sec — amble over, or hurry when urgent
     const dur = (fx: number, fy: number, tx: number, ty: number): number =>
-      clamp(Math.hypot(tx - fx, ty - fy) / speed, 0.6, 2.6);
+      clamp(Math.hypot(tx - fx, ty - fy) / speed, 1.1, 3.8);
     const carry = req.kind === 'handoff';
     const hold = req.kind === 'help' ? (req.urgent ? 0.5 : 0.75) : 0.6;
     const holdBubble: Bubble = req.kind === 'help' ? (req.urgent ? '!' : '?') : null;
