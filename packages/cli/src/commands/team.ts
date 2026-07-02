@@ -134,7 +134,10 @@ async function teamAdd(parsed: Parsed): Promise<number> {
       ) + '\n',
     );
     process.stdout.write(
-      theme.meta(`or in the agent's folder: musterd agent ${name} --team ${team}`) + '\n',
+      theme.meta('— or skip the wiring: ') +
+        theme.accent(`musterd agent ${name} --team ${team}`) +
+        theme.meta(` builds an isolated worktree + MCP for it (safe to run now).`) +
+        '\n',
     );
   } else {
     // Humans authenticate with their own credential (mscr_), shown once here.

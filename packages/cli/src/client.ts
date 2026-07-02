@@ -91,7 +91,11 @@ export class HttpClient {
     if (!res.ok) {
       const parsed = ErrorBodySchema.safeParse(json);
       if (parsed.success) {
-        throw new CliError(parsed.data.error.message, exitForCode(parsed.data.error.code));
+        throw new CliError(
+          parsed.data.error.message,
+          exitForCode(parsed.data.error.code),
+          parsed.data.error.code,
+        );
       }
       throw new CliError(`server error (${res.status})`, 1);
     }

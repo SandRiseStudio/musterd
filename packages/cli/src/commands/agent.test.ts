@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
+import { CliError } from '../errors.js';
 
 const h = vi.hoisted(() => ({
   addMember: vi.fn(async () => ({ member: { name: 'June' }, token: 'mskd_tok' })),
+  roster: vi.fn(async () => ({ members: [] as Array<{ name: string; kind: string }> })),
   issueGrant: vi.fn(async () => ({
     grant: { id: 'g1', target: 'June', scope: 'seat', lifetime: 'standing' },
     token: 'msgr_standing',
@@ -23,7 +25,7 @@ vi.mock('./helpers.js', () => ({
   resolve: () => ({
     team: 'ritual',
     config: { server: 'http://localhost:4849', agentKeys: { ritual: 'mskey_team' } },
-    http: { addMember: h.addMember, issueGrant: h.issueGrant },
+    http: { addMember: h.addMember, roster: h.roster, issueGrant: h.issueGrant },
   }),
 }));
 vi.mock('../config.js', () => ({
@@ -132,6 +134,27 @@ describe('musterd agent <name>', () => {
     const code = await agentCommand(parseArgs(['June']));
     expect(code).toBe(0);
     expect(h.saveBinding).toHaveBeenCalled(); // workspace was still provisioned
+  });
+
+  it('is idempotent: reuses an already-declared agent seat and still (re)builds the workspace', async () => {
+    // e.g. the seat was already created via `team add June` — addMember conflicts.
+    h.addMember.mockRejectedValueOnce(
+      new CliError('member "June" already exists in "ritual"', 9, 'conflict'),
+    );
+    h.roster.mockResolvedValueOnce({ members: [{ name: 'June', kind: 'agent' }] });
+    const code = await agentCommand(parseArgs(['June']));
+    expect(code).toBe(0);
+    expect(h.saveBinding).toHaveBeenCalled(); // workspace still provisioned
+    expect(h.configure).toHaveBeenCalled(); // MCP still wired
+  });
+
+  it('refuses to reuse a seat that already exists as a human', async () => {
+    h.addMember.mockRejectedValueOnce(
+      new CliError('member "June" already exists in "ritual"', 9, 'conflict'),
+    );
+    h.roster.mockResolvedValueOnce({ members: [{ name: 'June', kind: 'human' }] });
+    await expect(agentCommand(parseArgs(['June']))).rejects.toThrow(/as a human, not an agent/);
+    expect(h.saveBinding).not.toHaveBeenCalled();
   });
 
   it('rejects a name with whitespace', async () => {
