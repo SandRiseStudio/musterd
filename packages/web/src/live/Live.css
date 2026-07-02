@@ -336,16 +336,16 @@
   transition: opacity var(--lc-med) var(--lc-ease);
 }
 .lc-gl-label__name {
-  padding: 2px 8px;
-  border-radius: 7px;
-  background: rgba(13, 9, 6, 0.62);
-  border: 1px solid rgba(255, 238, 210, 0.12);
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(13, 9, 6, 0.58);
+  border: 1px solid rgba(255, 238, 210, 0.1);
   font-family: var(--font-mono, monospace);
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: #fff;
-  box-shadow: 0 2px 10px -3px rgba(0, 0, 0, 0.6);
+  font-size: 10.5px;
+  font-weight: 550;
+  letter-spacing: -0.015em;
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 7px -3px rgba(0, 0, 0, 0.55);
 }
 .lc-gl-label.is-offline .lc-gl-label__name {
   color: var(--lc-dim);
