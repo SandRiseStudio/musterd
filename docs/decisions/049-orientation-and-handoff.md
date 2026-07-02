@@ -2,6 +2,9 @@
 
 - Status: proposed
 - Date: 2026-06-24
+- Amended by: ADR 084 (lanes join the Plan — `musterd done` closes the **lane** when one carries the
+  work; thread `resolve` is the lane-less fallback. The load-bearing terminal is lane-`done`, not the
+  thread `resolve` act, which is dead in practice, 2/21.)
 
 ## Context
 
@@ -25,14 +28,18 @@ skip the ritual**.
   human-authored *why*), appended when present, never required.
 - **`handoff` carries `--meta goal_id=<id>`** — the structured pointer `next` reads back (the conceptual
   rename of `roadmap_id`). The body stays the free-text *why*.
-- **`musterd done`** = `resolve` the thread (+ optionally post the `handoff` for the next Goal, computed
-  via the same derivation as `next`). **No status-tick step** — status is derived (ADR 048), so there is
-  nothing to forget.
+- **`musterd done`** — closes the unit of work (+ optionally post the `handoff` for the next Goal,
+  computed via the same derivation as `next`). *(Amended by ADR 084:)* when a **lane** carries the work
+  it marks the lane `done` (the reliable terminal that drives derived Goal status); with no lane it falls
+  back to `resolve` on the thread. **No status-tick step** — Goal status is derived (ADR 048), so there
+  is nothing to forget.
 - **Enforcement ladder (day-one rungs):** (1) the derived floor; (2) a **SessionStart hook auto-injects
   `musterd next`** (extends the existing inbox-check hook) — orientation with zero agent compliance;
-  (3) an **ADR-046-style nudge** when the agent holds an *accepted-but-unresolved* thread
-  (`⚑ open thread → musterd done`), self-clearing on `resolve`. The **load-bearing act is `resolve`** (it
-  drives derived status); orientation is auto-injected; `handoff` is enrichment, never enforced.
+  (3) an **ADR-046-style nudge** when the agent holds a live, unclosed unit of work
+  (`⚑ open lane → musterd done`), self-clearing when it closes. The **load-bearing terminal is a lane
+  reaching `done`** *(amended by ADR 084 — originally the thread `resolve` act, but it is dead in
+  practice, 2/21; `done`/`resolve` is what `musterd done` emits)*; orientation is auto-injected;
+  `handoff` is enrichment, never enforced.
 - **Principle on hooks:** they **remind / inject context, never auto-act as the agent.** Auto-posting a
   `resolve`/`handoff` the agent didn't choose would *assert a fact it didn't intend* — against "record
   facts, don't assert" and "one member does the work, the team coordinates." Auto-injecting the *brief*
@@ -46,5 +53,5 @@ skip the ritual**.
   on `handoff`.
 - **Robust to non-compliance:** the floor works with zero handoffs; the `handoff` act only *enriches* the
   brief. Mirrors ADR 046 exactly — the cursor/derivation is the real mechanism, the act is best-effort.
-- Depends on **ADR 048** (Goals + derived status). Composes with **ADR 050** (the same derivations feed
-  `musterd report`).
+- Depends on **ADR 048** (Goals + derived status) and **ADR 084** (lanes carry the work below a Goal;
+  `musterd done` closes the lane). Composes with **ADR 050** (the same derivations feed `musterd report`).
