@@ -489,7 +489,7 @@ export const ROADMAP: RoadmapItem[] = [
     detail:
       'Emit in musterd, engine in batond (ADR 051). OTel wire + Langfuse semantics for scores/datasets/experiments, plus the coordination-native additions no single-agent vendor can do: evals scored against a Goal’s definition-of-done (ADR 048/050), experiments that vary the team itself, judge calibration as meta-evals, and the harness-decay measurement that says when to delete complexity models have absorbed.',
     refs: [adr(51, 'ADR 051'), doc('docs/design/observability.md', 'observability.md')],
-    dependsOn: ['telemetry-l2', 'board-insights'],
+    dependsOn: ['telemetry-l2', 'insight-engine'],
   },
   {
     id: 'coordination-dataset',
@@ -574,16 +574,51 @@ export const ROADMAP: RoadmapItem[] = [
     dependsOn: ['web-dashboard'],
   },
   {
-    id: 'board-insights',
+    id: 'orientation-spine',
     wave: 3,
-    title: 'Work items, board & insight layer',
+    title: 'Plan/Goal model + `musterd next`/`done`',
     status: 'reserved',
     category: 'insights',
-    blurb: 'A kanban-style board and team analytics — derived as views over the message log, never stored beside it.',
+    blurb: 'The orientation + handoff spine that kills the copy-paste toil: a declared Plan→Goal skeleton — the backlog noun — with derived status, and one-command next/done.',
     detail:
-      'Time-to-unblock, cycle time, load distribution, bottlenecks — plus a declared backlog noun for planned work. The natural home is the web dashboard.',
+      'From planning-and-insights-brainstorm.md (ADRs 048/049 as amended by ADR 084): the declared skeleton (Goal existence, intent, wave, dependsOn) owns the backlog noun; below a Goal the work items are lanes (ownership/contention, joined by an optional goal_id on the lane) and threads (the conversational fabric + zero-compliance fallback). Goal status is *derived* — lanes-first, threads-fallback — never stored; handoff carries a goal_id; `musterd next` / `musterd done`; SessionStart auto-injects orientation. This is the toil-killing spine the brainstorm sequences first; the insight engine projects over it.',
+    refs: [adr(48, 'ADR 048'), adr(49, 'ADR 049'), adr(84, 'ADR 084'), doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights')],
+  },
+  {
+    id: 'insight-engine',
+    wave: 3,
+    title: 'Insight engine — server-side projections',
+    status: 'reserved',
+    category: 'insights',
+    blurb: 'One projection engine in the daemon — Goal status, the board view, flow metrics, waiting-on — computed over Goals × lanes × threads, never stored, exposed as an HTTP API.',
+    detail:
+      'The single engine every insight surface renders (ADR 050 as amended by ADR 084): derived Goal status (lanes-first, threads-fallback), the board projection (the IC altitude — every work item, its latest-state column), flow metrics from lane timestamps (cycle time, WIP, age, throughput), and the waiting-on view (openActionNeeded aggregated by recipient). Distinct from the shipped lanes contention board (ADR 083), which warns about overlap/dependency — this layer derives meaning from the same substrate. Goodhart guard: outcomes and queues, never message volume; v0.3 need-to-know governs derived human metrics.',
+    refs: [adr(50, 'ADR 050'), adr(84, 'ADR 084'), doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+    dependsOn: ['orientation-spine', 'resolve-act', 'coordination-lanes'],
+  },
+  {
+    id: 'insight-cli-mcp',
+    wave: 3,
+    title: 'Reporting altitudes + waiting-on view (CLI + MCP)',
+    status: 'reserved',
+    category: 'insights',
+    blurb: '`musterd report` at IC/team/exec altitudes and the "N threads waiting on <human>" bottleneck view — the first surfaces of the insight engine, with MCP parity.',
+    detail:
+      'From planning-and-insights-brainstorm.md Parts 4–6 (ADR 050 as amended by ADR 084): the CLI report with altitude flags (ic|team|exec) and the waiting-on-human view (oldest-first), plus the matching team_* MCP tools — agents use one channel only, so a CLI-only report would be invisible to MCP-wired teammates. Thin renderers over the insight engine, which owns the metric definitions; cost-per-shipped-work-item stays deferred to the batond cost-ingestion seam.',
+    refs: [adr(50, 'ADR 050'), adr(84, 'ADR 084'), doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights')],
+    dependsOn: ['insight-engine'],
+  },
+  {
+    id: 'insight-dashboard',
+    wave: 3,
+    title: 'Work items, board & insight layer (web)',
+    status: 'reserved',
+    category: 'insights',
+    blurb: 'The kanban-style board and team analytics rendered in the web dashboard — a thin surface over the insight engine, never a second store.',
+    detail:
+      'Time-to-unblock, cycle time, load distribution, bottlenecks — the insight-engine projections drawn as the board and analytics views in the web console. No board CRUD, no stored columns: the dashboard renders what the engine derives.',
     refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
-    dependsOn: ['resolve-act', 'web-dashboard'],
+    dependsOn: ['insight-engine', 'web-dashboard'],
   },
   {
     id: 'coordination-density',
@@ -595,7 +630,7 @@ export const ROADMAP: RoadmapItem[] = [
     detail:
       'A dogfood finding: status_updates posted into a channel where no one shares the work degrade into a journal. A signal only musterd’s act-typed log can compute — a candidate metric for the standalone coordination-observability product.',
     refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
-    dependsOn: ['board-insights'],
+    dependsOn: ['insight-engine'],
   },
   {
     id: 'own-harness',
@@ -637,29 +672,6 @@ export const ROADMAP: RoadmapItem[] = [
       'Phase-1 (ADR 083) shipped the declared intent+dependency layer. Phase 2: observed surface (fs-watch / git-diff sampling instead of only declared globs), the symbol/hunk-level merge-funnel, lane_ack to silence a warning, role-pool auto-assignment of open lanes, and auto-done when a lane\'s branch merges. Watcher, never gatekeeper.',
     refs: [adr(83, 'ADR 083'), doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax')],
     dependsOn: ['coordination-lanes'],
-  },
-  {
-    id: 'orientation-spine',
-    wave: 3,
-    title: 'Plan/Goal model + `musterd next`/`done`',
-    status: 'reserved',
-    category: 'insights',
-    blurb: 'The orientation + handoff spine that kills the copy-paste toil: a Plan→Goal→feature→task skeleton with derived status, and one-command next/done.',
-    detail:
-      'From planning-and-insights-brainstorm.md (ADR 048/049, proposed): a declared Plan→Goal→feature→task skeleton; Goal status is *derived* from the act log (not stored); handoff carries a goal_id; `musterd next` / `musterd done`; SessionStart auto-injects orientation and nudges resolve. Distinct from board-insights (the analytics/kanban view) — this is the toil-killing spine the brainstorm sequences first.',
-    refs: [adr(48, 'ADR 048'), adr(49, 'ADR 049'), doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights')],
-  },
-  {
-    id: 'leadership-report',
-    wave: 3,
-    title: 'Reporting altitudes + waiting-on view',
-    status: 'reserved',
-    category: 'insights',
-    blurb: '`musterd report` at IC/team/exec altitudes, the "N threads waiting on <human>" bottleneck view, and cost-per-shipped-work-item.',
-    detail:
-      'From planning-and-insights-brainstorm.md Parts 4–6 (ADR 050, proposed): a CLI report surface with altitude flags (ic|team|exec), the waiting-on-human view (oldest-first), Kanban flow metrics, and agent-native cost-per-shipped-work-item in $. Complements board-insights; the CLI report + waiting-on + cost are the distinct pieces.',
-    refs: [adr(50, 'ADR 050'), doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights')],
-    dependsOn: ['board-insights'],
   },
   {
     id: 'team-hardening',

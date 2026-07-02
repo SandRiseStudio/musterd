@@ -1,5 +1,12 @@
 # Planning, work-items & the insight layer — open brainstorm
 
+> **Addendum (2026-07-02): the design below predates coordination lanes (ADR 083).** ADR 084
+> ("lanes join the Plan") reconciles the two work-item nouns: below a Goal, the lane is the declared
+> work item when ownership/contention matters (threads stay the conversational fabric + fallback);
+> Goal status and flow metrics derive lanes-first over `Goals × lanes × threads` — the join is an
+> optional `goal_id` on the lane. Read ADRs 048/050 **as amended by 084**. The frozen record below
+> is otherwise unchanged.
+>
 > **Status: SESSION COMPLETE — decisions frozen (2026-06-24).** All six Parts are LOCKED; see **"Live session — 2026-06-24"** at the bottom (Session decisions + Synthesis). Net design: `Plan → Goal → feature → task`, declared skeleton + derived flesh, zero stored execution state. **Proposed ADRs 048–050** + a build sequence are in the Synthesis. Next step is implementation (write the ADRs when building); this doc is now the frozen design record. The original agenda below is preserved for provenance.
 >
 > **Status (original): OPEN BRAINSTORM, not spec, not scheduled.** Parked for a *dedicated* session. This is the agenda + everything decided so far, written so a fresh session can pick it up cold without re-reading the originating conversation (2026-06-11/12 dogfooding). Roadmap-level — none of this is v0.2. Parents: `human-agent-dynamics.md` §4 (the philosophy this extends), `../../ROADMAP.md` (the one-line roadmap entry), `../architecture/01-data-model.md` (acts/threads/envelopes this builds on).
