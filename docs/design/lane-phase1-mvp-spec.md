@@ -1,8 +1,12 @@
 # Lane Phase-1 MVP — the intent + dependency layer (spec, DRAFT for review)
 
-**Status:** DRAFT spec, written fresh 2026-06-30 off the [lanes / multi-agent-tax design
-arc](./lanes-and-the-multi-agent-tax.md). **Not yet ADR'd, not yet implemented — to be reviewed by a
-fresh agent before implementation.** This is the smallest thing that captures the biggest measured win.
+**Status:** ACCEPTED + IMPLEMENTED (2026-07-01) — reviewed and ADR'd as
+[ADR 083](../decisions/083-lanes-phase1-intent-dependency.md) (which resolves §9's open questions), built
+end-to-end (protocol + `lanes` table/migration v11 + store checks + HTTP routes + `lane_*` MCP tools +
+`musterd lane`/`lanes` CLI + primer habit), and live-verified on the bravo dogfood team: the §8 scenario-1
+replay produced both inline warnings and the directed wakes. Originally written fresh 2026-06-30 off the
+[lanes / multi-agent-tax design arc](./lanes-and-the-multi-agent-tax.md). This is the smallest thing that
+captures the biggest measured win.
 
 **Why Phase 1 is this and only this:** the post-mortem measured ~37% of code produced as *wasted*, and
 **53% of that waste was a single dependency failure** (`d08cf43`: a handshake built against a schema that

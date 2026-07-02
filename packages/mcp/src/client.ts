@@ -3,6 +3,8 @@ import {
   PROTOCOL_VERSION,
   type ClaimTarget,
   type Envelope,
+  type Lane,
+  type LaneWarning,
   type MemberSummary,
   type WSServerFrame,
 } from '@musterd/protocol';
@@ -130,6 +132,34 @@ export class MusterdClient {
     return this.request('POST', `/teams/${this.config.team}/inbox/cursor`, {
       last_read_message_id: messageId,
     });
+  }
+
+  // ── Coordination lanes, Phase 1 (ADR 083). Every mutation returns { lane, warnings } — warn-only.
+  openLane(body: unknown): Promise<{ lane: Lane; warnings: LaneWarning[] }> {
+    return this.request('POST', `/teams/${this.config.team}/lanes`, body);
+  }
+
+  updateLane(id: string, patch: unknown): Promise<{ lane: Lane; warnings: LaneWarning[] }> {
+    return this.request(
+      'PATCH',
+      `/teams/${this.config.team}/lanes/${encodeURIComponent(id)}`,
+      patch,
+    );
+  }
+
+  laneBoard(
+    q: {
+      project?: string | undefined;
+      mine?: boolean | undefined;
+      open?: boolean | undefined;
+    } = {},
+  ): Promise<{ lanes: Lane[]; warnings: LaneWarning[] }> {
+    const params = new URLSearchParams();
+    if (q.project) params.set('project', q.project);
+    if (q.mine) params.set('mine', '1');
+    if (q.open) params.set('open', '1');
+    const qs = params.toString();
+    return this.request('GET', `/teams/${this.config.team}/lanes${qs ? `?${qs}` : ''}`);
   }
 
   /**

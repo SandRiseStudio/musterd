@@ -203,6 +203,38 @@ export const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX idx_requests_dedup ON requests(team_id, from_session, target)');
     },
   },
+  {
+    // v11 — coordination lanes, Phase 1 (ADR 083): the { work-item × owner × surface } unit. Additive
+    // (one new table, no drops/alters). `surface_globs`/`depends_on` are JSON arrays; `state` is open
+    // TEXT (no CHECK — the v5 rebuild trap); `owner_seat` stores the seat *name* (lanes survive a seat
+    // being reclaimed; the durable identity is the name, ADR 058). Contention is scoped by
+    // (team_id, project) — never across projects.
+    version: 11,
+    up: (db) => {
+      db.exec(
+        `CREATE TABLE lanes (
+           id            TEXT PRIMARY KEY,
+           team_id       TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+           project       TEXT NOT NULL,
+           title         TEXT NOT NULL,
+           detail        TEXT,
+           owner_seat    TEXT,
+           role          TEXT,
+           surface_globs TEXT NOT NULL DEFAULT '[]',
+           depends_on    TEXT NOT NULL DEFAULT '[]',
+           branch        TEXT,
+           state         TEXT NOT NULL,
+           created_by    TEXT NOT NULL,
+           created_at    INTEGER NOT NULL,
+           claimed_at    INTEGER,
+           resolved_at   INTEGER,
+           updated_at    INTEGER NOT NULL
+         )`,
+      );
+      db.exec('CREATE INDEX idx_lanes_team_project ON lanes(team_id, project)');
+      db.exec('CREATE INDEX idx_lanes_state ON lanes(team_id, state)');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

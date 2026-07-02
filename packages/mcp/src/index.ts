@@ -10,6 +10,7 @@ import { readAndConsumeResolution, writePendingMarker } from './pending.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
 import { registerJoin } from './tools/join.js';
 import { registerLeave } from './tools/leave.js';
+import { registerLanes } from './tools/lanes.js';
 import { registerMembers } from './tools/members.js';
 import { registerSend } from './tools/send.js';
 import { registerStatus } from './tools/status.js';
@@ -91,6 +92,7 @@ export function buildMcpServer(
   registerInboxCheck(server, client);
   registerStatus(server, client);
   registerMembers(server, client);
+  registerLanes(server, client);
   return server;
 }
 

@@ -16,6 +16,7 @@ import { reloadCommand } from './commands/reload.js';
 import { requestsCommand } from './commands/requests.js';
 import { resetCommand } from './commands/reset.js';
 import { roleCommand } from './commands/role.js';
+import { laneCommand, lanesCommand } from './commands/lane.js';
 import { sendCommand } from './commands/send.js';
 import { serveCommand } from './commands/serve.js';
 import { serviceCommand } from './commands/service.js';
@@ -45,6 +46,9 @@ usage:
   musterd team export <slug>                     move a team's roster onto git-tracked .musterd/ files (ADR 058)
   musterd join <slug> --as <name> [--token <tok>] [--surface cli]
   musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] <body...>
+  musterd lane open "<title>" [--surface <glob>,…] [--depends <id>,…] [--project p] [--branch b] [--claim]   declare a unit of work; warn-only contention checks (ADR 083)
+  musterd lane <claim|handoff|update|resolve> <id> [--to <seat>] [--branch <ref>] [--state <s>]   own / transfer-with-branch / edit / close a lane
+  musterd lanes [--project p] [--mine] [--open] [--json]   the lane board — who owns what, with live warnings
   musterd inbox [--watch] [--all] [--unread] [--peek] [--limit <n>] [--from <name>] [--act <act>]
   musterd inbox --wait [--timeout <seconds>] [--from <name>] [--act <act>] [--json]   block until the next directed act, then exit (pairs with /loop)
   musterd nudge                                 print directed acts waiting for this seat (read-only; the approval-prompt hook target)
@@ -126,6 +130,10 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return joinCommand(rest);
     case 'send':
       return sendCommand(rest);
+    case 'lane':
+      return laneCommand(rest);
+    case 'lanes':
+      return lanesCommand(rest);
     case 'inbox':
       return inboxCommand(rest);
     case 'nudge':
