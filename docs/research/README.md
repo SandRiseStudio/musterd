@@ -8,6 +8,7 @@ Research is the publishable output of the trace → eval → experiment flywheel
 
 - **Produce** — dataset-first. The HuggingFace artifact ladder, in order: **dataset → benchmark + leaderboard → paper (arXiv → HF Papers) → fine-tuned coordination-judge model**.
 - **Ingest** — the research radar feeds `../design/research-foundation.md`; findings that change a decision graduate to an ADR. Implementation plan (not built): `../design/research-radar-plan.md`.
+- **Model as a variable** — early to each frontier model (run the manifest as one lands) + own models end-to-end (the tiny-model fixture → a fine-tuned coordination-judge): `../design/model-experimentation.md`.
 
 ## First thesis — MAST in the wild
 

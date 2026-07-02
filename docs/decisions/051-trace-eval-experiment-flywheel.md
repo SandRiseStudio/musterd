@@ -52,7 +52,9 @@ the "integrate, don't build" default.
     a scoring layer over planning primitives we already designed, not a new primitive.
   - **Experiment:** vary not just `model × prompt × agent-config × harness × eval`, but **team topology**
     (1 agent autonomous vs 2 agents + 1 human reviewer vs 3 agents). No incumbent models the team, so
-    no incumbent can run that experiment.
+    no incumbent can run that experiment. The **model** term is its own standing thread — early to each
+    frontier model + owning models end-to-end (the tiny-model fixture → a coordination-judge): see
+    `docs/design/model-experimentation.md`.
 - **Prompts in traces are opt-in and versioned.** Capture the prompt as a versioned artifact (hash +
   version, span references it — Langfuse semantics), never inlined per span. Content/prompt capture is
   **opt-in with redaction + retention policy** (extends observability.md §4's "never the body" stance and
