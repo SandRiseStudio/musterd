@@ -35,6 +35,8 @@ export const LaneSchema = z.object({
   depends_on: z.array(z.string()),
   /** The git branch/artifact carrying the work — what `lane_handoff` transfers. */
   branch: z.string().nullable(),
+  /** Optional link up to a declared Goal (ADR 084). null = ungrouped; the join is flat, never a tree. */
+  goal_id: z.string().nullable(),
   state: LaneStateSchema,
   created_by: z.string(),
   created_at: z.number().int(),
@@ -66,6 +68,8 @@ export const OpenLaneSchema = z.object({
   surface_globs: z.array(z.string()).optional(),
   depends_on: z.array(z.string()).optional(),
   branch: z.string().optional(),
+  /** Link this lane to a Goal at open (ADR 084) — the id `musterd next` groups + derives status by. */
+  goal_id: z.string().optional(),
   claim: z.boolean().optional(),
 });
 export type OpenLane = z.infer<typeof OpenLaneSchema>;
@@ -77,6 +81,8 @@ export const UpdateLaneSchema = z.object({
   surface_globs: z.array(z.string()).optional(),
   depends_on: z.array(z.string()).optional(),
   branch: z.string().optional(),
+  /** Re-link (or clear, with null) this lane's Goal (ADR 084). */
+  goal_id: z.string().nullable().optional(),
   /** Transfer ownership to this seat (lane_handoff / lane_claim sets it to the caller). */
   owner_seat: z.string().optional(),
 });
@@ -95,3 +101,37 @@ export const LaneBoardSchema = z.object({
   warnings: z.array(LaneWarningSchema),
 });
 export type LaneBoard = z.infer<typeof LaneBoardSchema>;
+
+/**
+ * Derived Goal status (ADR 048 as amended by ADR 084) — a projection, never stored. Live and
+ * flap-tolerant: reopening work returns a Goal to `in-flight`. `shipped` is conjunctive over lanes
+ * (all terminal, ≥1 `done`); a permanent milestone latch is a deferred, separate declared marker.
+ */
+export const GoalStatusSchema = z.enum(['planned', 'in-flight', 'shipped']);
+export type GoalStatus = z.infer<typeof GoalStatusSchema>;
+
+/**
+ * `GET /teams/:slug/next` — the orientation brief (ADR 049), computed server-side so CLI + MCP render
+ * one projection. The derived floor works at zero compliance: it reads the daemon's own lane/act
+ * state. (The roadmap-Goal-by-wave enrichment is deferred with the Goal-source seam, ADR 048.)
+ */
+export const NextBriefSchema = z.object({
+  /** Whose brief this is. */
+  member: z.string(),
+  /** Lanes you own that are live (claimed/active/blocked) — what you're carrying. */
+  in_flight: z.array(LaneSchema),
+  /** Your most recently shipped lanes (done), newest first — what just landed. */
+  shipped: z.array(LaneSchema),
+  /** Unowned lanes you could pick up, oldest first — what to start next. */
+  up_next: z.array(LaneSchema),
+  /** The latest `handoff` act to you or @team — the human-authored *why*, enrichment when present. */
+  why: z
+    .object({
+      from: z.string(),
+      body: z.string(),
+      ts: z.number().int(),
+      goal_id: z.string().nullable(),
+    })
+    .nullable(),
+});
+export type NextBrief = z.infer<typeof NextBriefSchema>;

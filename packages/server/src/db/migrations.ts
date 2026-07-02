@@ -235,6 +235,17 @@ export const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX idx_lanes_state ON lanes(team_id, state)');
     },
   },
+  {
+    // v12 — lanes join the Plan (ADR 084): an optional goal_id links a lane up to a declared Goal, so
+    // Goal status derives lanes-first over that grouping (ADR 048 as amended). Additive + nullable — no
+    // backfill; pre-084 lanes and lane-less teams simply read null. The join is deliberately flat
+    // (Goal → lane), never a recursive parent tree (amprealize's parent_id rot).
+    version: 12,
+    up: (db) => {
+      db.exec('ALTER TABLE lanes ADD COLUMN goal_id TEXT');
+      db.exec('CREATE INDEX idx_lanes_goal ON lanes(team_id, goal_id)');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

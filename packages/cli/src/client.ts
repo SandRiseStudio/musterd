@@ -5,6 +5,7 @@ import {
   GrantMintSchema,
   LaneBoardSchema,
   LaneResultSchema,
+  NextBriefSchema,
   PROTOCOL_VERSION,
   RequestsResponseSchema,
   type AuditResponse,
@@ -19,6 +20,7 @@ import {
   type Member,
   type MemberKind,
   type MemberSummary,
+  type NextBrief,
   type OpenLane,
   type RefusedCode,
   type RequestsResponse,
@@ -235,16 +237,25 @@ export class HttpClient {
 
   async laneBoard(
     slug: string,
-    q: { project?: string; mine?: boolean; open?: boolean } = {},
+    q: { project?: string; mine?: boolean; open?: boolean; goal?: string } = {},
   ): Promise<LaneBoard> {
     const params = new URLSearchParams();
     if (q.project) params.set('project', q.project);
     if (q.mine) params.set('mine', '1');
     if (q.open) params.set('open', '1');
+    if (q.goal) params.set('goal', q.goal);
     const qs = params.toString();
     const json = await this.request('GET', `/teams/${slug}/lanes${qs ? `?${qs}` : ''}`);
     const parsed = LaneBoardSchema.safeParse(json);
     if (!parsed.success) throw new CliError('lanes response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  /** The orientation brief (ADR 049/084) — `GET /teams/:slug/next`, one server-side projection. */
+  async next(slug: string): Promise<NextBrief> {
+    const json = await this.request('GET', `/teams/${slug}/next`);
+    const parsed = NextBriefSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('next response did not match the protocol schema', 1);
     return parsed.data;
   }
 

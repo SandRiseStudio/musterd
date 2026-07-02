@@ -12,7 +12,7 @@ import { resolve } from './helpers.js';
 
 const USAGE =
   'usage:\n' +
-  '  musterd lane open "<title>" [--surface <glob>[,<glob>…]] [--depends <id>[,<id>…]] [--project p] [--role r] [--branch b] [--detail d] [--claim]\n' +
+  '  musterd lane open "<title>" [--surface <glob>[,<glob>…]] [--depends <id>[,<id>…]] [--goal <id>] [--project p] [--role r] [--branch b] [--detail d] [--claim]\n' +
   '  musterd lane claim <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>]\n' +
   '  musterd lane update <id> [--state open|claimed|active|blocked|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d]\n' +
@@ -36,7 +36,8 @@ function renderLane(l: Lane): string {
   const surface = l.surface_globs.length ? theme.meta(` [${l.surface_globs.join(', ')}]`) : '';
   const deps = l.depends_on.length ? theme.meta(` deps:${l.depends_on.length}`) : '';
   const branch = l.branch ? theme.meta(` ⎇ ${l.branch}`) : '';
-  return `${theme.meta(l.id)} ${state} "${l.title}" — ${owner} · ${l.project}${surface}${deps}${branch}`;
+  const goal = l.goal_id ? theme.meta(` ◆ ${l.goal_id}`) : '';
+  return `${theme.meta(l.id)} ${state} "${l.title}" — ${owner} · ${l.project}${goal}${surface}${deps}${branch}`;
 }
 
 function renderWarnings(warnings: LaneWarning[]): void {
@@ -70,6 +71,9 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         : {}),
       ...(flagStr(parsed.flags, 'branch') !== undefined
         ? { branch: flagStr(parsed.flags, 'branch')! }
+        : {}),
+      ...(flagStr(parsed.flags, 'goal') !== undefined
+        ? { goal_id: flagStr(parsed.flags, 'goal')! }
         : {}),
       ...(list(parsed.flags, 'surface') !== undefined
         ? { surface_globs: list(parsed.flags, 'surface')! }

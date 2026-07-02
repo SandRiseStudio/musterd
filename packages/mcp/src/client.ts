@@ -6,6 +6,7 @@ import {
   type Lane,
   type LaneWarning,
   type MemberSummary,
+  type NextBrief,
   type WSServerFrame,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
@@ -152,14 +153,21 @@ export class MusterdClient {
       project?: string | undefined;
       mine?: boolean | undefined;
       open?: boolean | undefined;
+      goal?: string | undefined;
     } = {},
   ): Promise<{ lanes: Lane[]; warnings: LaneWarning[] }> {
     const params = new URLSearchParams();
     if (q.project) params.set('project', q.project);
     if (q.mine) params.set('mine', '1');
     if (q.open) params.set('open', '1');
+    if (q.goal) params.set('goal', q.goal);
     const qs = params.toString();
     return this.request('GET', `/teams/${this.config.team}/lanes${qs ? `?${qs}` : ''}`);
+  }
+
+  /** The orientation brief (ADR 049/084) — one server-side projection, rendered by CLI + MCP alike. */
+  next(): Promise<NextBrief> {
+    return this.request('GET', `/teams/${this.config.team}/next`);
   }
 
   /**

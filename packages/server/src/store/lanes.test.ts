@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import {
   boardWarnings,
+  deriveGoalStatus,
   globsOverlap,
   laneWarnings,
+  lanesForGoal,
   listLanes,
   openLane,
   updateLane,
 } from './lanes.js';
+import type { Lane } from '@musterd/protocol';
 import { createTeam } from './teams.js';
 
 function seed() {
@@ -154,5 +157,54 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
     expect(claimed.state).toBe('claimed');
     expect(claimed.owner_seat).toBe('Cleo');
     expect(claimed.claimed_at).not.toBeNull();
+  });
+});
+
+describe('goal_id join (ADR 084)', () => {
+  it('round-trips goal_id through open + update, and lanesForGoal filters by it', () => {
+    const { db, team } = seed();
+    const a = openLane(db, team.id, 'bravo', 'June', {
+      title: 'spine migration',
+      goal_id: 'orientation-spine',
+      claim: true,
+    });
+    expect(a.goal_id).toBe('orientation-spine');
+    // A lane opened without a goal is ungrouped; update can link it later.
+    const b = openLane(db, team.id, 'bravo', 'Cleo', { title: 'unlinked', claim: true });
+    expect(b.goal_id).toBeNull();
+    const linked = updateLane(db, team.id, b.id, 'bravo', { goal_id: 'orientation-spine' })!;
+    expect(linked.goal_id).toBe('orientation-spine');
+    // update can clear it back to null.
+    const cleared = updateLane(db, team.id, b.id, 'bravo', { goal_id: null })!;
+    expect(cleared.goal_id).toBeNull();
+
+    const forGoal = lanesForGoal(db, team.id, 'bravo', 'orientation-spine');
+    expect(forGoal.map((l) => l.id)).toEqual([a.id]);
+  });
+});
+
+describe('deriveGoalStatus (the pinned rule, ADR 048 as amended by 084)', () => {
+  const lane = (state: string): Lane =>
+    ({ state, id: state, title: '', goal_id: 'g' }) as unknown as Lane;
+
+  it('planned when the Goal has no lanes', () => {
+    expect(deriveGoalStatus([])).toBe('planned');
+  });
+  it('in-flight when any lane is live', () => {
+    expect(deriveGoalStatus([lane('done'), lane('active')])).toBe('in-flight');
+    expect(deriveGoalStatus([lane('open')])).toBe('in-flight');
+    expect(deriveGoalStatus([lane('blocked')])).toBe('in-flight');
+  });
+  it('shipped only when all lanes are terminal AND at least one is done', () => {
+    expect(deriveGoalStatus([lane('done')])).toBe('shipped');
+    expect(deriveGoalStatus([lane('done'), lane('abandoned')])).toBe('shipped');
+  });
+  it('not shipped when every lane is abandoned (no done)', () => {
+    expect(deriveGoalStatus([lane('abandoned'), lane('abandoned')])).toBe('in-flight');
+  });
+  it('flap-tolerant: a new open lane returns a shipped Goal to in-flight', () => {
+    const shipped = [lane('done'), lane('done')];
+    expect(deriveGoalStatus(shipped)).toBe('shipped');
+    expect(deriveGoalStatus([...shipped, lane('open')])).toBe('in-flight');
   });
 });
