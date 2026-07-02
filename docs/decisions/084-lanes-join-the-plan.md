@@ -35,19 +35,33 @@ reopening amprealize's stored-execution-state wound or breaking the zero-complia
 ## Decision
 
 1. **The work-item noun below a Goal is the lane when ownership or contention matters; threads remain
-   the conversational fabric.** ADR 048's "feature → task are depth-labels on *threads*" is amended to
-   "depth-labels on *lanes and threads*". The zero-compliance floor survives: a team that never opens
-   a lane still gets thread-derived status; a lane simply gives the projection a stronger signal.
+   the conversational fabric.** The shape is **two levels — `Goal → work-item` — not a recursive tree**
+   (ADR 048's imagined `parent` pointer never ships; containment is the flat `goal_id` join). A
+   work-item is a lane or, for a team that never opens a lane, a thread — the zero-compliance floor.
 
 2. **The join is an optional `goal_id` on the lane** (additive migration; nullable column, no
    backfill). `lane_open --goal <id>` / the MCP `lane_open` param declare it at task start. This
    mirrors ADR 049's `goal_id` handoff-meta for threads — one stable id, two carriers.
 
-3. **Goal status derivation becomes lanes-first, threads-fallback**, projected over
-   `Goals × lanes × threads` (amends ADR 048's rules):
-   - `shipped` ← a representative lane `done` (or a resolved representative thread);
-   - `in-flight` ← any `claimed`/`active` lane (or an accepted-but-unresolved thread);
-   - `planned` ← neither.
+3. **Goal status derivation — lanes-authoritative, threads fallback-only, flap-tolerant** (this is the
+   pinned rule; amends ADR 048's ambiguous "representative thread"). Projected over
+   `Goals × lanes × threads`:
+   - **If the Goal has ≥1 lane, threads do not affect its status** (they are conversation; mixing dead
+     thread-`resolve` into work-status is the failure this avoids):
+     - `shipped` ⟺ every lane joined to the Goal is terminal (`done`/`abandoned`) **and** ≥1 is `done`;
+     - `in-flight` ⟺ any joined lane is live (`open`/`claimed`/`active`/`blocked`);
+     - (`planned` cannot occur here — having a lane means work exists.)
+   - **If the Goal has no lanes** (fallback): an accepted-but-unresolved thread → `in-flight`; else
+     `planned`.
+   - **The projection is live, not a latch.** Reopening work (a new lane on a `shipped` Goal) honestly
+     returns it to `in-flight`. This is harmless for `musterd next` (an in-flight Goal is skipped either
+     way) and correct for the live dashboard. A **permanent milestone latch** for the *public roadmap*
+     badge — a declared `landed` marker, a creating-declaration allowed by ADR 048's model, never a
+     stored `status` column — is **deferred until the `ROADMAP.md` generator actually needs it** (nothing
+     consumes live status until `next`/the dashboard exist).
+   - **Quantifier chosen deliberately:** `shipped` is *conjunctive* over lanes (all terminal), not "any
+     done," so a multi-lane Goal isn't marked shipped while lanes are still open. `abandoned`-only Goals
+     do not count as shipped (the ≥1-`done` clause).
 
 4. **Flow metrics read lane timestamps first** (amends ADR 050): cycle time =
    `claimed_at → resolved_at`; WIP = CONTENDING lanes; age = `now − created_at`; throughput = lanes
@@ -90,11 +104,28 @@ projection per surface would rot.
 - Standing cautions carry through unchanged: Goodhart (outcomes/queues, never message volume),
   surveillance asymmetry (v0.3 need-to-know governs derived *human* metrics; never rank Members),
   warn-never-block.
+- **Trust & visibility of the projection** (recorded so the insight build inherits it consciously):
+  the derived Goal status is only as trustworthy as the declarations feeding it, and **those are
+  unauthenticated by design** — any team member may set a lane's `goal_id`/`owner_seat` with no
+  authorization gate (roster-governance-not-work-approval; "admin actions never sit in the path of an
+  agent doing its work"). That is the platform's chosen posture, not a gap to close here. Separately,
+  the projection **inherits the visibility of the acts it reads** — team-wide today (no message-content
+  need-to-know is enforced yet; the "acts addressed to them" scoping in `security.md`/`membership-model.md`
+  is still aspirational). A derived report is *more legible* than the raw log, so the surveillance-asymmetry
+  caution binds it **more** tightly: the insight layer must not ship a human-bottleneck view with wider
+  reach than the raw acts already have, and derived-human-metric governance stays a **hard prerequisite**
+  for anything past localhost.
 
 ## Observability & Evaluation
 
-The lane-native evals promised in ADR 083 (% closed via resolve/auto-merge vs abandoned, handoffs
-carrying a branch vs prose) become *per-Goal* slices once `goal_id` lands — the first honest answer
-to "what did this Goal cost in waste?" short of the deferred cost-per-item metric. The A/B posture is
-unchanged: the P3 session is the baseline; the first lanes+goals dogfood measures whether derived
-Goal status matches reality without a single hand-flipped status field.
+**Traces.** No new spans — this ADR threads `goal_id` through the existing lane/handoff acts (ADR 083),
+so the coordination traces it rides on are already emitted; a Goal is just a new grouping key over them.
+
+**Eval.** The lane-native evals promised in ADR 083 (% closed via resolve/auto-merge vs abandoned,
+handoffs carrying a branch vs prose) become *per-Goal* slices once `goal_id` lands — the first honest
+answer to "what did this Goal cost in waste?" short of the deferred cost-per-item metric. Dataset: the
+lanes+goals dogfood act log; baseline: the P3 session.
+
+**Experiment.** The A/B posture is unchanged — the P3 session is the baseline, and the first lanes+goals
+dogfood is the experiment: it measures whether derived Goal status matches reality without a single
+hand-flipped status field.

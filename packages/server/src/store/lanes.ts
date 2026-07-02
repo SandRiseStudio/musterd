@@ -20,6 +20,7 @@ interface LaneRow {
   surface_globs: string;
   depends_on: string;
   branch: string | null;
+  goal_id: string | null;
   state: string;
   created_by: string;
   created_at: number;
@@ -40,6 +41,7 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
     surface_globs: JSON.parse(row.surface_globs) as string[],
     depends_on: JSON.parse(row.depends_on) as string[],
     branch: row.branch,
+    goal_id: row.goal_id,
     state: row.state as LaneState,
     created_by: row.created_by,
     created_at: row.created_at,
@@ -72,6 +74,7 @@ export function openLane(
     surface_globs: JSON.stringify(input.surface_globs ?? []),
     depends_on: JSON.stringify(input.depends_on ?? []),
     branch: input.branch ?? null,
+    goal_id: input.goal_id ?? null,
     state: claim ? 'claimed' : 'open',
     created_by: createdBy,
     created_at: now,
@@ -81,9 +84,9 @@ export function openLane(
   };
   db.prepare(
     `INSERT INTO lanes (id, team_id, project, title, detail, owner_seat, role, surface_globs,
-                        depends_on, branch, state, created_by, created_at, claimed_at, resolved_at, updated_at)
+                        depends_on, branch, goal_id, state, created_by, created_at, claimed_at, resolved_at, updated_at)
      VALUES (@id, @team_id, @project, @title, @detail, @owner_seat, @role, @surface_globs,
-             @depends_on, @branch, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
+             @depends_on, @branch, @goal_id, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
   ).run(row);
   return rowToLane(row, teamSlug);
 }
@@ -122,6 +125,7 @@ export function updateLane(
     surface_globs: JSON.stringify(patch.surface_globs ?? existing.surface_globs),
     depends_on: JSON.stringify(patch.depends_on ?? existing.depends_on),
     branch: patch.branch !== undefined ? patch.branch : existing.branch,
+    goal_id: patch.goal_id !== undefined ? patch.goal_id : existing.goal_id,
     state,
     claimed_at: existing.claimed_at ?? (ownerSeat !== null ? now : null),
     resolved_at: state === 'done' || state === 'abandoned' ? (existing.resolved_at ?? now) : null,
@@ -129,7 +133,7 @@ export function updateLane(
   };
   db.prepare(
     `UPDATE lanes SET detail=@detail, owner_seat=@owner_seat, surface_globs=@surface_globs,
-       depends_on=@depends_on, branch=@branch, state=@state, claimed_at=@claimed_at,
+       depends_on=@depends_on, branch=@branch, goal_id=@goal_id, state=@state, claimed_at=@claimed_at,
        resolved_at=@resolved_at, updated_at=@updated_at
      WHERE team_id=@team_id AND id=@id`,
   ).run(next);
@@ -140,6 +144,7 @@ export interface LaneFilter {
   project?: string;
   owner?: string;
   openOnly?: boolean;
+  goalId?: string;
 }
 
 export function listLanes(
@@ -155,7 +160,39 @@ export function listLanes(
     .map((r) => rowToLane(r, teamSlug))
     .filter((l) => (filter.project ? l.project === filter.project : true))
     .filter((l) => (filter.owner ? l.owner_seat === filter.owner : true))
-    .filter((l) => (filter.openOnly ? l.state === 'open' : true));
+    .filter((l) => (filter.openOnly ? l.state === 'open' : true))
+    .filter((l) => (filter.goalId ? l.goal_id === filter.goalId : true));
+}
+
+/** Lanes joined to a Goal (ADR 084) — the input to {@link deriveGoalStatus}. */
+export function lanesForGoal(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  goalId: string,
+): Lane[] {
+  return listLanes(db, teamId, teamSlug, { goalId });
+}
+
+/** Lane states that are terminal — a lane no longer being worked. */
+const TERMINAL: ReadonlySet<string> = new Set(['done', 'abandoned']);
+
+/**
+ * The pinned derived-Goal-status rule (ADR 048 as amended by ADR 084): **lanes-authoritative,
+ * conjunctive, flap-tolerant.** Given the lanes joined to a Goal:
+ *   - `shipped`   ⟺ ≥1 lane, all terminal, and ≥1 reached `done` (not all `abandoned`);
+ *   - `in-flight` ⟺ any lane is live (open/claimed/active/blocked);
+ *   - `planned`   ⟺ no lanes.
+ * Threads never enter here — they are the fallback the caller uses only when a Goal has zero lanes,
+ * so a dead thread-`resolve` (2/21 in practice) can never pin a Goal's status. Live, not a latch:
+ * a new lane on a shipped Goal honestly returns it to `in-flight`.
+ */
+export function deriveGoalStatus(lanes: Lane[]): 'planned' | 'in-flight' | 'shipped' {
+  if (lanes.length === 0) return 'planned';
+  const allTerminal = lanes.every((l) => TERMINAL.has(l.state));
+  const anyDone = lanes.some((l) => l.state === 'done');
+  if (allTerminal && anyDone) return 'shipped';
+  return 'in-flight';
 }
 
 /**
