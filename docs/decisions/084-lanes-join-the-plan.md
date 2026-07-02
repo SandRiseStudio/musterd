@@ -93,8 +93,14 @@ projection per surface would rot.
 
 ## Observability & Evaluation
 
-The lane-native evals promised in ADR 083 (% closed via resolve/auto-merge vs abandoned, handoffs
-carrying a branch vs prose) become *per-Goal* slices once `goal_id` lands — the first honest answer
-to "what did this Goal cost in waste?" short of the deferred cost-per-item metric. The A/B posture is
-unchanged: the P3 session is the baseline; the first lanes+goals dogfood measures whether derived
-Goal status matches reality without a single hand-flipped status field.
+**Traces.** No new spans — this ADR threads `goal_id` through the existing lane/handoff acts (ADR 083),
+so the coordination traces it rides on are already emitted; a Goal is just a new grouping key over them.
+
+**Eval.** The lane-native evals promised in ADR 083 (% closed via resolve/auto-merge vs abandoned,
+handoffs carrying a branch vs prose) become *per-Goal* slices once `goal_id` lands — the first honest
+answer to "what did this Goal cost in waste?" short of the deferred cost-per-item metric. Dataset: the
+lanes+goals dogfood act log; baseline: the P3 session.
+
+**Experiment.** The A/B posture is unchanged — the P3 session is the baseline, and the first lanes+goals
+dogfood is the experiment: it measures whether derived Goal status matches reality without a single
+hand-flipped status field.
