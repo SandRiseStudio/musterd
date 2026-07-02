@@ -45,10 +45,10 @@ execution state), and (c) adds **no new execution-state storage** and minimal ne
   `goal_id` — **lanes-authoritative, threads fallback-only.** The exact rule (quantifier, thread handling,
   flap-tolerance) is pinned in **ADR 084**; in one line: `shipped` once the Goal has lanes and they are
   all terminal with ≥1 `done`, `in-flight` while any lane is live, `planned` with no lanes. **Live status
-  is flap-tolerant** — reopening work honestly returns a Goal to `in-flight`; a permanent milestone latch,
-  if ever needed for the public roadmap, is a *declared* `landed` marker (a creating-declaration, allowed
-  by this model), **deferred until the generator needs it.** **`roadmap.data.ts` drops its `status`
-  field**; the web map and `ROADMAP.md` generator (ADR 041) read the derived status.
+  is flap-tolerant** — reopening work honestly returns a Goal to `in-flight`. This derived status drives
+  `musterd next` and the live dashboard. The **public `ROADMAP.md` badge keeps its declared status**
+  (curated is a latch, and a milestone shouldn't un-ship on a follow-up lane) — see the generator bullet
+  below; wiring the generator to live derived status is deliberately *not* done.
 - **Terminal-done signal:** the load-bearing terminal is a **lane reaching `done`** (ADR 083); thread
   `resolve` (ADR 025) is the fallback for lane-less teams. *(Amended by ADR 084 — the original text made
   thread `resolve` load-bearing, but it is dead in practice, 2/21.)*
@@ -58,17 +58,30 @@ execution state), and (c) adds **no new execution-state storage** and minimal ne
   than the raw acts it summarizes, so the surveillance-asymmetry caution binds it **more** tightly, not
   less. The projection is only as trustworthy as the declarations feeding it, which are unauthenticated by
   design (any member may set `goal_id`/lane ownership — warn-never-block, roster-governance-not-work-approval).
-- **Open seam (deferred):** where *declared* Goals live for a **general** (non-musterd) team — leaning
-  toward a thread declared to `@team` carrying goal metadata (the parked doc's *intended-but-unoffered*),
-  **no new act, no new table**. `roadmap.data.ts` stays musterd's dogfood source. Derived status is
-  agnostic to this — it needs only a stable `goal_id`.
+- **Open seam (BUILT 2026-07-02):** where *declared* Goals live for a **general** (non-musterd) team —
+  a `message` act to `@team` carrying `meta.goal` (`{id, title, wave?, depends_on?}`), **no new act, no
+  new table**, latest-declaration-per-id wins. `POST/GET /teams/:slug/goals`, `musterd goal
+  declare|list` + `team_goals`/`team_goal_declare`, and `musterd next` picks the next `planned` Goal by
+  `wave` minus `dependsOn`-blocked. `roadmap.data.ts` stays musterd's own dogfood source, untouched.
+  Derived status is agnostic to the source — it needs only a stable `goal_id`.
+- **The `ROADMAP.md` generator keeps *declared* status, not derived — a deliberate reversal of the
+  bullet above (2026-07-02).** ADR 084's flap-tolerance decision settles it: live derived status
+  *flaps* (a follow-up lane returns a shipped Goal to `in-flight`), which is right for `musterd
+  next`/the dashboard but wrong for a **public roadmap milestone badge**, which wants a curated latch.
+  So the curated roadmap keeps its declared status (a creating-declaration, "curated is a feature");
+  the derived projection serves orientation. Wiring the generator to the daemon's live status is
+  explicitly **not** wanted.
 
 ## Consequences
 
-- A real planning layer with **zero stored execution state**; the manual `roadmap.data.ts` status-tick
-  (done by hand for ADR 046 this session) is **eliminated**.
-- New work: the derived-status projection, and reading it in the web map + the `ROADMAP.md` generator (a
-  real change to ADR 041's generator, which currently reads the hand-declared `status`).
+- A real planning layer with **zero stored execution state**. For a **general team** the manual
+  status-tick never exists — Goal status is derived from lanes. For musterd's **own dogfood roadmap** the
+  curated `status` stays by deliberate choice (the public-badge latch, above), so ADR 041's generator is
+  **unchanged** — no daemon coupling, no flap in the public artifact.
+- New work (all shipped 2026-07-02, ADR 084 increment 2): the declared-Goal mechanism (`meta.goal`
+  messages), the derived-status projection (`deriveGoalStatus` + `listGoals`/`nextGoal`), and the
+  `next`/`goal` surfaces. The web map + `ROADMAP.md` generator were intentionally left reading declared
+  status.
 - "Epic/feature/task" reuse amprealize's vocabulary, but as **informal depth-labels over a flat
   `Goal → work-item` join** — its rot was architectural (stored, dual-written state; a mutable `parent_id`
   tree), not lexical. We keep the words, not the tree.

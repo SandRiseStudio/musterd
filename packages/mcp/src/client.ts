@@ -3,6 +3,7 @@ import {
   PROTOCOL_VERSION,
   type ClaimTarget,
   type Envelope,
+  type Goal,
   type Lane,
   type LaneWarning,
   type MemberSummary,
@@ -168,6 +169,15 @@ export class MusterdClient {
   /** The orientation brief (ADR 049/084) — one server-side projection, rendered by CLI + MCP alike. */
   next(): Promise<NextBrief> {
     return this.request('GET', `/teams/${this.config.team}/next`);
+  }
+
+  /** Declared Goals (ADR 048's general-team seam, resolved by ADR 084). */
+  goals(): Promise<{ goals: Goal[] }> {
+    return this.request('GET', `/teams/${this.config.team}/goals`);
+  }
+
+  declareGoal(body: unknown): Promise<{ goal: Goal }> {
+    return this.request('POST', `/teams/${this.config.team}/goals`, body);
   }
 
   /**

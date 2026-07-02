@@ -2,6 +2,8 @@ import {
   AuditResponseSchema,
   DecideResponseSchema,
   ErrorBodySchema,
+  GoalListSchema,
+  GoalSchema,
   GrantMintSchema,
   LaneBoardSchema,
   LaneResultSchema,
@@ -10,9 +12,12 @@ import {
   RequestsResponseSchema,
   type AuditResponse,
   type ClaimTarget,
+  type DeclareGoal,
   type DecideRequest,
   type DecideResponse,
   type Envelope,
+  type Goal,
+  type GoalList,
   type GrantMint,
   type IssueGrant,
   type LaneBoard,
@@ -256,6 +261,21 @@ export class HttpClient {
     const json = await this.request('GET', `/teams/${slug}/next`);
     const parsed = NextBriefSchema.safeParse(json);
     if (!parsed.success) throw new CliError('next response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  /** Declared Goals (ADR 048's general-team seam, resolved by ADR 084) — a `message` to `@team`. */
+  async declareGoal(slug: string, body: DeclareGoal): Promise<Goal> {
+    const json = await this.request('POST', `/teams/${slug}/goals`, body);
+    const parsed = GoalSchema.safeParse((json as { goal: unknown }).goal);
+    if (!parsed.success) throw new CliError('goal response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  async goals(slug: string): Promise<GoalList> {
+    const json = await this.request('GET', `/teams/${slug}/goals`);
+    const parsed = GoalListSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('goals response did not match the protocol schema', 1);
     return parsed.data;
   }
 

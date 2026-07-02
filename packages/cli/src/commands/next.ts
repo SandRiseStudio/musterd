@@ -32,6 +32,12 @@ function render(brief: NextBrief): void {
     for (const l of brief.shipped)
       w(`  ${theme.ok('✓')} "${l.title}"${l.goal_id ? theme.meta(` ◆ ${l.goal_id}`) : ''}\n`);
   }
+  if (brief.next_goal) {
+    const g = brief.next_goal;
+    const wave = g.wave !== null ? theme.meta(` wave:${g.wave}`) : '';
+    w(`\n${theme.accent('next goal')} — ${theme.meta(g.id)} "${g.title}"${wave}\n`);
+    w(theme.meta(`  claim a lane on it: \`musterd lane open "…" --goal ${g.id} --claim\``) + '\n');
+  }
   if (brief.why) {
     const when = new Date(brief.why.ts).toISOString().slice(0, 10);
     const goal = brief.why.goal_id ? theme.meta(` ◆ ${brief.why.goal_id}`) : '';
@@ -45,6 +51,7 @@ function render(brief: NextBrief): void {
     brief.in_flight.length === 0 &&
     brief.up_next.length === 0 &&
     brief.shipped.length === 0 &&
+    !brief.next_goal &&
     !brief.why
   ) {
     w(

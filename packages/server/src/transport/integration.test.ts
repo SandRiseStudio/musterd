@@ -1661,3 +1661,53 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(brief.json.why.goal_id).toBe('orientation-spine');
   });
 });
+
+describe('declared Goals + next_goal (ADR 048/084)', () => {
+  it('declares Goals over HTTP, derives status from lanes, and surfaces the next one in the brief', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // Two Goals: 'engine' (wave 1) and 'surface' (wave 2, depends on engine).
+    const g1 = await post(
+      '/teams/dawn/goals',
+      { id: 'engine', title: 'Insight engine', wave: 1 },
+      nickTok,
+    );
+    expect(g1.status).toBe(201);
+    expect(g1.json.goal.status).toBe('planned');
+    await post(
+      '/teams/dawn/goals',
+      { id: 'surface', title: 'CLI surface', wave: 2, depends_on: ['engine'] },
+      nickTok,
+    );
+
+    // GET /goals lists both, newest-declaration-per-id, with derived status.
+    const goals = await get('/teams/dawn/goals', ada);
+    expect(goals.json.goals.map((g: { id: string }) => g.id).sort()).toEqual(['engine', 'surface']);
+
+    // next_goal = first planned by wave = engine (surface is blocked on engine).
+    let brief = await get('/teams/dawn/next', ada);
+    expect(brief.json.next_goal.id).toBe('engine');
+
+    // Ada opens + resolves a lane on 'engine' → engine ships → next_goal advances to 'surface'.
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'build engine', goal_id: 'engine', claim: true },
+      ada,
+    );
+    await fetch(base + `/teams/dawn/lanes/${lane.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({ state: 'done' }),
+    });
+
+    const engineNow = (await get('/teams/dawn/goals', ada)).json.goals.find(
+      (g: { id: string }) => g.id === 'engine',
+    );
+    expect(engineNow.status).toBe('shipped');
+    brief = await get('/teams/dawn/next', ada);
+    expect(brief.json.next_goal.id).toBe('surface');
+  });
+});

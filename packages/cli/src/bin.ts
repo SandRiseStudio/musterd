@@ -5,6 +5,7 @@ import { auditCommand } from './commands/audit.js';
 import { availabilityCommand } from './commands/availability.js';
 import { claimCommand } from './commands/claim.js';
 import { fmtCommand } from './commands/fmt.js';
+import { goalCommand } from './commands/goal.js';
 import { reachabilityNudge } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
@@ -51,8 +52,10 @@ usage:
   musterd lane open "<title>" [--surface <glob>,…] [--depends <id>,…] [--goal <id>] [--project p] [--branch b] [--claim]   declare a unit of work; warn-only contention checks (ADR 083); --goal links it to a Goal (ADR 084)
   musterd lane <claim|handoff|update|resolve> <id> [--to <seat>] [--branch <ref>] [--state <s>]   own / transfer-with-branch / edit / close a lane
   musterd lanes [--project p] [--mine] [--open] [--json]   the lane board — who owns what, with live warnings
-  musterd next [--json]                         the orientation brief: what you're carrying, what to pick up, the latest handoff why (ADR 049/084)
+  musterd next [--json]                         the orientation brief: what you're carrying, what to pick up, the next Goal, the latest handoff why (ADR 049/084)
   musterd done [<lane-id>] [--json]             close your work — mark the lane done (auto-targets your single live lane), then show what's next
+  musterd goal declare "<title>" --goal-id <id> [--wave <n|later>] [--depends <id>,…]   declare a team Goal (lanes join it via --goal; status is derived) (ADR 048/084)
+  musterd goal list [--json]                    the declared Goals with derived status (planned/in-flight/shipped)
   musterd inbox [--watch] [--all] [--unread] [--peek] [--limit <n>] [--from <name>] [--act <act>]
   musterd inbox --wait [--timeout <seconds>] [--from <name>] [--act <act>] [--json]   block until the next directed act, then exit (pairs with /loop)
   musterd nudge                                 print directed acts waiting for this seat (read-only; the approval-prompt hook target)
@@ -142,6 +145,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return nextCommand(rest);
     case 'done':
       return doneCommand(rest);
+    case 'goal':
+      return goalCommand(rest);
     case 'inbox':
       return inboxCommand(rest);
     case 'nudge':

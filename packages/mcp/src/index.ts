@@ -7,6 +7,7 @@ import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
 import { MusterdClient } from './client.js';
 import { isClaimedConfig, loadMcpConfig, type McpConfig } from './config.js';
 import { readAndConsumeResolution, writePendingMarker } from './pending.js';
+import { registerGoals } from './tools/goals.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
 import { registerJoin } from './tools/join.js';
 import { registerLeave } from './tools/leave.js';
@@ -93,6 +94,7 @@ export function buildMcpServer(
   registerStatus(server, client);
   registerMembers(server, client);
   registerLanes(server, client);
+  registerGoals(server, client);
   return server;
 }
 
