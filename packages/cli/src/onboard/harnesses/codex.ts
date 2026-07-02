@@ -42,6 +42,8 @@ export const codex: Harness = {
   id: 'codex',
   label: 'Codex',
   surface: 'codex',
+  // No `guidance` (ADR 085): Codex has no project-level skill/rule or slash-command mechanism, so it
+  // relies on the harness-neutral `.musterd/skill/SKILL.md` (always written) that the primer points at.
 
   async detect() {
     const installed = existsSync(join(homedir(), '.codex'));

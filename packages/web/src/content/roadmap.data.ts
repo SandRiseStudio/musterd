@@ -194,6 +194,17 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [adr(60, 'ADR 060'), doc('docs/harness-hooks.md', 'harness-hooks.md')],
   },
   {
+    id: 'layered-guidance-surface',
+    title: 'Layered guidance surface — primer, skill, help, hooks',
+    status: 'shipped',
+    category: 'harness',
+    blurb: 'musterd init writes an on-demand skill (seat claiming, handoff-with-branch, recovery) and slash commands alongside the primer, slimming the always-loaded primer to a loop kernel — with drift checks so the generated guidance can’t silently rot as the platform evolves.',
+    detail:
+      'One doctrine: each fact lives in one layer — primer = the always-loaded loop kernel, skill = on-demand playbooks, `musterd help` = flag-level reference, hooks = enforcement, MCP = capability. No fact is duplicated across layers except command/tool *names*, which is exactly what CI verifies. Templates are pure renderers in @musterd/protocol (single-sourced with the primer), stamped with a monotonic content version; init writes one canonical body into thin per-harness shells (.claude/skills/musterd/SKILL.md, .cursor/rules/musterd.mdc, and the harness-neutral .musterd/skill/SKILL.md the primer points at — covering Codex). `musterd init --check` flags a stale/edited skill (stamp version + body hash); `pnpm guidance:check` breaks the build if the skill names a command/tool that no longer exists (asserted against the CLI HELP and the live MCP tool registry); a snapshot test forces a version bump on any prose change. Uninstall removes exactly the stamped files it wrote.',
+    refs: [adr(85, 'ADR 085'), doc('docs/design/agent-primer.md', 'agent-primer.md'), doc('docs/harness-hooks.md', 'harness-hooks.md')],
+    dependsOn: ['verify-provisioning'],
+  },
+  {
     id: 'committed-launch-spec',
     title: 'Committed launch spec — a clone self-wires',
     status: 'shipped',

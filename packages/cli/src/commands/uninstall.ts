@@ -5,6 +5,7 @@ import { BINDING_DIR, BINDING_FILE } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { findBinding, loadConfig, saveConfig } from '../config.js';
 import type { Harness } from '../onboard/harness.js';
+import { removeGuidance } from '../onboard/guidance.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { PROVISION_MANIFEST_FILE, readProvisionManifest } from '../onboard/manifest.js';
 import { classifyPrimerTarget, removePrimer } from '../onboard/primer.js';
@@ -63,6 +64,7 @@ export async function uninstallCommand(parsed: Parsed): Promise<number> {
           ? `  • ${countPerms(permissions)} provisioned permission(s)\n`
           : '') +
         `  • the AGENTS.md musterd primer block (your own content is kept)\n` +
+        `  • the musterd skill + slash commands this folder carries\n` +
         `  • local .musterd state (binding + manifest)\n` +
         `  ${theme.meta('the member stays on the team roster (offline) — removing it is server-side, v0.3')}\n`,
     );
@@ -90,6 +92,10 @@ export async function uninstallCommand(parsed: Parsed): Promise<number> {
   // 2) Strip the managed primer block, keeping the user's prose.
   const primer = removePrimer(dir);
 
+  // 2b) Remove the skill + slash commands musterd wrote (ADR 085). Stamp-gated inside removeGuidance,
+  // so a user-authored file at the same path is never deleted.
+  const guidance = removeGuidance(dir, HARNESSES);
+
   // 3) Remove local state + this folder's registry entry.
   rmSync(manifestPath, { force: true });
   rmSync(bindingPath, { force: true });
@@ -107,6 +113,7 @@ export async function uninstallCommand(parsed: Parsed): Promise<number> {
     `${theme.ok('✓')} uninstalled musterd from ${theme.meta(dir)}` +
       (harness ? ` — removed ${servers.length} server(s) from ${harness.label}` : '') +
       (primer.action === 'removed' ? `; stripped the AGENTS.md primer` : '') +
+      (guidance.removed.length ? `; removed ${guidance.removed.length} guidance file(s)` : '') +
       `.\n  Re-add any time with ${theme.accent('musterd init')}.\n`,
   );
   return 0;

@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bind } from './bind.js';
 import { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
-import { buildMcpServer, installShutdownHandlers, primerInstructions } from './index.js';
+import {
+  buildMcpServer,
+  installShutdownHandlers,
+  primerInstructions,
+  TOOL_NAMES,
+} from './index.js';
 
 let server: RunningServer;
 let base: string;
@@ -249,6 +254,18 @@ describe('MCP adapter', () => {
     const mcp = buildMcpServer(client, adaConfig());
     expect(mcp).toBeTruthy();
     // McpServer exposes registered tools on its internal registry; smoke check construction only.
+    client.close();
+  });
+
+  it('TOOL_NAMES equals the server registry (ADR 085 — the guidance:check source of truth)', async () => {
+    const client = new MusterdClient(adaConfig());
+    const mcp = buildMcpServer(client, adaConfig());
+    // The SDK keys its registry by tool name; assert our exported list is exactly what got registered
+    // so a tool renamed/added/removed without updating TOOL_NAMES fails here (and thus fails CI).
+    const registered = Object.keys(
+      (mcp as unknown as { _registeredTools: Record<string, unknown> })._registeredTools,
+    ).sort();
+    expect(registered).toEqual([...TOOL_NAMES].sort());
     client.close();
   });
 

@@ -1,7 +1,11 @@
-import { formatClaimPolicy } from '@musterd/protocol';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { GUIDANCE_CONTENT_VERSION, formatClaimPolicy, parseContentStamp } from '@musterd/protocol';
 import { findBinding } from '../config.js';
 import { theme } from '../render/theme.js';
+import { contentHash, strippedBody } from './guidance.js';
 import { HARNESSES } from './harnesses/index.js';
+import { readProvisionManifest } from './manifest.js';
 import { classifyPrimerTarget } from './primer.js';
 
 /**
@@ -30,10 +34,56 @@ export interface DoctorReport {
   /** Does AGENTS.md carry the managed musterd primer (the hook's trigger)? */
   primerManaged: boolean;
   harnesses: HarnessState[];
-  /** Actionable drift lines (empty ⇒ healthy). */
+  /** Actionable drift lines (empty ⇒ healthy). Exit-1. */
   drift: string[];
+  /** Warn-only notes (locally-edited guidance) — surfaced but never exit-1 (ADR 085). */
+  notes: string[];
   /** True when at least one installed harness has the musterd server registered. */
   anyConfigured: boolean;
+}
+
+/**
+ * Guidance-file drift (ADR 085): compare each skill/command file the manifest recorded against the
+ * current template. A file whose stamped version trails `GUIDANCE_CONTENT_VERSION`, or that has gone
+ * missing, is actionable **drift** (re-run init). A file hand-edited since musterd wrote it (its body
+ * no longer hashes to its own stamp) is a warn-only **note** — musterd won't silently clobber it.
+ */
+function inspectGuidance(cwd: string): { drift: string[]; notes: string[] } {
+  const drift: string[] = [];
+  const notes: string[] = [];
+  const recorded = readProvisionManifest(cwd)?.guidance;
+  if (!recorded) return { drift, notes }; // pre-085 / never written — nothing claimed, nothing to check
+  for (const rel of recorded.files) {
+    const abs = join(cwd, rel);
+    if (!existsSync(abs)) {
+      drift.push(`the musterd skill file ${rel} is gone — run \`musterd init\` to restore it.`);
+      continue;
+    }
+    let text: string;
+    try {
+      text = readFileSync(abs, 'utf8');
+    } catch {
+      continue; // unreadable — don't turn a transient read error into false drift
+    }
+    const stamp = parseContentStamp(text);
+    if (!stamp) {
+      notes.push(
+        `${rel} no longer carries a musterd stamp — treating it as yours (will not overwrite).`,
+      );
+      continue;
+    }
+    if (stamp.version < GUIDANCE_CONTENT_VERSION) {
+      drift.push(
+        `the musterd skill in ${rel} is v${stamp.version}, current is v${GUIDANCE_CONTENT_VERSION} — ` +
+          `run \`musterd init\` to refresh it.`,
+      );
+    } else if (contentHash(strippedBody(text)) !== stamp.hash) {
+      notes.push(
+        `${rel} has local edits — musterd won't overwrite it; re-run \`musterd init --force\` to reset.`,
+      );
+    }
+  }
+  return { drift, notes };
 }
 
 export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
@@ -87,7 +137,9 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
         'to add the primer.',
     );
   }
-  return { primerManaged, harnesses, drift, anyConfigured };
+  const guidance = inspectGuidance(cwd);
+  drift.push(...guidance.drift);
+  return { primerManaged, harnesses, drift, notes: guidance.notes, anyConfigured };
 }
 
 /** Render + exit-code for `musterd init --check`. Exit 1 on drift, 0 when healthy or unprovisioned. */
@@ -112,6 +164,8 @@ export async function runInitDoctor(json: boolean, cwd: string = process.cwd()):
     ? `${theme.ok('✓')} AGENTS.md: musterd primer present\n`
     : `${theme.warn('•')} AGENTS.md: no musterd primer\n`;
   process.stdout.write(primer);
+
+  for (const n of report.notes) process.stdout.write(`${theme.warn('•')} ${n}\n`);
 
   if (report.drift.length > 0) {
     process.stdout.write('\n');

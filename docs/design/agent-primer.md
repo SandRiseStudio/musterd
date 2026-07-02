@@ -16,7 +16,9 @@ The harness-native fix for "give an agent standing context every session" is the
 
 After a successful `configure()` (and in the manual-setup path), `musterd init` **writes or updates an `AGENTS.md` in the binding folder** (`process.cwd()` — the same folder Claude Code's `-s local` scope and Cursor's `.cursor/mcp.json` are keyed to) with a marker-delimited **musterd primer block** that teaches the agent its identity and the team working-loop. Idempotent, never clobbers the user's own content, gated behind a confirm (default yes).
 
-Non-goals: we do **not** try to make the agent autonomous or script its behavior. The primer gives context; the agent still decides. We do **not** write per-harness rule files (`.cursor/rules/*.mdc`, etc.) in v1 — `AGENTS.md` covers both supported harnesses; a `Harness.primerPath()` hook is the extension point if that changes.
+Non-goals: we do **not** try to make the agent autonomous or script its behavior. The primer gives context; the agent still decides.
+
+**Update (ADR 085): the primer is now the loop _kernel_, not the whole manual.** The always-loaded block was carrying playbook depth (seat claiming, handoff-with-branch, lane contention, the wait loop, recovery) that taxes every session. That depth moved into an on-demand **skill** (`renderSkillBody` in `@musterd/protocol`, written by `musterd init` to `.claude/skills/musterd/SKILL.md` / `.cursor/rules/musterd.mdc` / the canonical `.musterd/skill/SKILL.md`); the primer shrank to identity + channel rule + the join/inbox/status/handoff one-liners + a pointer to the skill. So the original "we do not write per-harness rule files" non-goal no longer holds — the *skill* deliberately does, single-sourced and content-stamped for drift detection. The primer's own single-source (`renderPrimer`, AGENTS.md + MCP `instructions`) is unchanged. See ADR 085 for the layering doctrine (one fact per layer; names verified by `pnpm guidance:check`).
 
 ## 3. Where it's written / delivered
 
