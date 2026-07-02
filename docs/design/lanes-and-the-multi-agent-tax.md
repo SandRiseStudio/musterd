@@ -1,8 +1,10 @@
 # Lanes & the multi-agent tax — the P3 dogfood post-mortem → design arc
 
-**Status:** design direction (not yet ADR'd). Captured 2026-06-30 from a live brainstorm off the
-P3 cutover dogfood. The empirical sections are measured; the design sections are decided-in-principle.
-The Phase-1 MVP is spec'd in **[lane-phase1-mvp-spec.md](./lane-phase1-mvp-spec.md)** (draft, for review).
+**Status:** design direction. Captured 2026-06-30 from a live brainstorm off the P3 cutover dogfood; the
+empirical sections are measured, the design sections decided-in-principle. **Phase 1 is now built and
+shipped** ([ADR 083](../decisions/083-lanes-phase1-intent-dependency.md); spec:
+**[lane-phase1-mvp-spec.md](./lane-phase1-mvp-spec.md)**). Phase 2 (observed surface, merge-funnel,
+lane_ack, role-pool assignment) remains this doc's forward direction.
 
 **One line:** *Talk is cheap; wasted work is the tax. musterd's job is to turn a swarm into a team so
 the same diff never gets produced twice — by making work-ownership a first-class, contention-aware
