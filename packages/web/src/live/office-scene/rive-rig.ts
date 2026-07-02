@@ -11,6 +11,11 @@ import type { OfficeNode, Pose } from './types';
  * it loads client-only and degrades to the code-drawn avatar (`drawActor`) if anything fails.
  *
  * Artboard is 180×260 with the character's feet at (90, 235) — see `FEET_*` below.
+ *
+ * Note on the WASM console line "No WebGL support. Image mesh will not be drawn.": it appears only when
+ * the browser has no WebGL and refers to Rive *image meshes* — which `character.riv` does not use (it is
+ * flat vector shapes). Verified identical rendering with WebGL on vs off, so it is benign; the offscreen
+ * 2D canvas renderer draws the whole character regardless. Nothing to gate on it.
  */
 
 const ARTBOARD_W = 180;
@@ -27,7 +32,32 @@ function argbUint(hex: string): number {
 interface Member {
   artboard: { advance(s: number): boolean; draw(r: unknown): void; bindViewModelInstance(v: unknown): void };
   sm: { advance(s: number): boolean };
-  vmi: { number(p: string): { value: number }; color(p: string): { value: number } };
+  vmi: {
+    number(p: string): { value: number } | null | undefined;
+    color(p: string): { value: number } | null | undefined;
+  };
+}
+
+/** Set a VM colour only if the asset exposes it — so a property added to a newer `.riv` (e.g. `hairColor`)
+ * lights up automatically, while an older asset that lacks it is a silent no-op instead of a crash. */
+function setColorIfPresent(vmi: Member['vmi'], prop: string, argb: number): void {
+  try {
+    const c = vmi.color(prop);
+    if (c) c.value = argb;
+  } catch {
+    /* property absent on this asset — ignore */
+  }
+}
+
+/** Number counterpart of {@link setColorIfPresent} — for optional inputs a newer `.riv` may add (e.g.
+ * `hairStyle`). No-op (and never throws) when the asset lacks the input. */
+function setNumberIfPresent(vmi: Member['vmi'], prop: string, value: number): void {
+  try {
+    const n = vmi.number(prop);
+    if (n) n.value = value;
+  } catch {
+    /* input absent on this asset — ignore */
+  }
 }
 
 export interface RiveRig {
@@ -74,15 +104,20 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
         for (const [name, { node, pose }] of present) {
           const m = ensure(name);
           const r = officeToRig(node, pose);
-          m.vmi.color('accentColor').value = argbUint(r.accentColor);
-          m.vmi.color('accentDark').value = argbUint(r.accentDark);
-          m.vmi.color('skinColor').value = argbUint(r.skinColor);
-          m.vmi.number('agentVis').value = r.agentVis;
-          m.vmi.number('humanVis').value = r.humanVis;
-          m.vmi.number('carryVis').value = r.carryVis;
-          m.vmi.number('mode').value = r.mode;
-          m.vmi.number('facing').value = r.facing;
-          m.vmi.number('run').value = r.run;
+          m.vmi.color('accentColor')!.value = argbUint(r.accentColor);
+          m.vmi.color('accentDark')!.value = argbUint(r.accentDark);
+          m.vmi.color('skinColor')!.value = argbUint(r.skinColor);
+          // Human-hair tint + style — present only once the .riv adds a `hairColor` bind / `hairStyle`
+          // input (see rig.ts); guarded so they are no-ops against the current asset and activate
+          // automatically when the properties land.
+          setColorIfPresent(m.vmi, 'hairColor', argbUint(r.hairColor));
+          setNumberIfPresent(m.vmi, 'hairStyle', r.hairStyle);
+          m.vmi.number('agentVis')!.value = r.agentVis;
+          m.vmi.number('humanVis')!.value = r.humanVis;
+          m.vmi.number('carryVis')!.value = r.carryVis;
+          m.vmi.number('mode')!.value = r.mode;
+          m.vmi.number('facing')!.value = r.facing;
+          m.vmi.number('run')!.value = r.run;
           // An urgent (running) walk plays its cycle faster — visibly hurried legs/bob.
           const step = dt * (r.run ? 1.8 : 1);
           m.sm.advance(step);

@@ -45,6 +45,11 @@ export const DESK_SLOTS: DeskSlot[] = [
 /** The break nook — where `away` members drift; also the broadcast megaphone spot. */
 export const NOOK = { lx: 700, ly: 190 };
 
+/** How many overflow-queue / nook avatars render individually before the rest collapse into a "+N" pill,
+ * so a very large roster stays bounded instead of marching avatars off the floor. */
+export const STRIP_CAP = 6;
+export const NOOK_CAP = 6;
+
 /** The glass entrance (front-left edge) — the enter/exit path endpoint + overflow strip anchor. */
 export const ENTRANCE = { lx: 185, ly: 815 };
 

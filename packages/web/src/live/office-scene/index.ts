@@ -4,12 +4,25 @@ import { ENTRANCE } from './layout';
 import { assignSeats, type Placement } from './seating';
 import { drawCue, renderScene, toneColor, type Cue } from './render';
 import { loadRiveRig, type RiveRig } from './rive-rig';
+import { truncateSpeech, typeCadence } from './speech';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
 export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode } from './types';
 
 const DPR_CAP = 2;
 const CUE_SECS = 1.5;
+// Speech-bubble lifecycle (ms): hold after the text finishes typing, then the exit transition length.
+const SPEECH_HOLD_MS = 1900;
+const SPEECH_OUT_MS = 560;
+/** How far above the head anchor the bubble sits (clears the name label). */
+const SPEECH_LIFT = 26;
+
+/** An in-flight speech bubble over a member's head — its DOM root plus the timers/frames to cancel when
+ * it's superseded (a newer act from the same member) or the office is disposed. */
+interface Speech {
+  outer: HTMLDivElement;
+  cancels: Array<() => void>;
+}
 
 /**
  * Mount the live isometric office. Same `{update, emit, dispose}` shape as the constellation scene (a
@@ -41,6 +54,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   let heads = new Map<string, Pt>(); // home head anchors — where in-place cues sit
 
   const labels = new Map<string, HTMLDivElement>();
+  const speeches = new Map<string, Speech>(); // one live speech bubble per member (name → bubble)
   const cues: Cue[] = [];
 
   // Pause the RAF loop when the tab is backgrounded (no CPU on an unseen office).
@@ -61,18 +75,22 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
-    const anchors = renderScene(bctx, fit, placements, nodes, actors.poses());
+    const poses = actors.poses();
+    const anchors = renderScene(bctx, fit, placements, nodes, poses);
     heads = anchors.heads;
-    syncLabels(anchors.heads, nodes);
+    syncLabels(anchors.heads, nodes, poses);
+    repositionSpeeches(anchors.heads);
   }
 
-  /** Create/remove label elements + set their text, and position them from `headMap`. */
-  function syncLabels(headMap: Map<string, Pt>, nodes: Map<string, OfficeNode>) {
+  /** Create/remove label elements + set their text, and position them from `headMap`. Small (nook/strip)
+   * actors are left unlabelled — their names bunch at a glance and the roster panel is the name source of
+   * truth; the "+N" pills and location carry the secondary read. */
+  function syncLabels(headMap: Map<string, Pt>, nodes: Map<string, OfficeNode>, poses: Map<string, Pose>) {
     const seen = new Set<string>();
     for (const [name, head] of headMap) {
-      seen.add(name);
       const node = nodes.get(name);
-      if (!node) continue;
+      if (!node || poses.get(name)?.small) continue;
+      seen.add(name);
       let el = labels.get(name);
       if (!el) {
         el = document.createElement('div');
@@ -85,12 +103,9 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       nameEl.className = 'lc-gl-label__name';
       nameEl.textContent = name;
       el.appendChild(nameEl);
-      if (node.activity === 'working' && node.state) {
-        const st = document.createElement('span');
-        st.className = 'lc-gl-label__state';
-        st.textContent = node.state;
-        el.appendChild(st);
-      }
+      // The member's status/activity is no longer a persistent caption here (it used to render as one
+      // ultra-wide, never-fading line). It now surfaces as an ephemeral speech bubble on each act (below);
+      // the roster panel remains the always-on source of truth for who's doing what.
       el.classList.toggle('is-offline', node.presence !== 'online');
       el.style.transform = `translate(-50%, -100%) translate(${head.x}px, ${head.y}px)`;
     }
@@ -108,6 +123,91 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       const head = headMap.get(name);
       if (head) el.style.transform = `translate(-50%, -100%) translate(${head.x}px, ${head.y}px)`;
     }
+    repositionSpeeches(headMap);
+  }
+
+  // ── ephemeral speech: an act's body types out over the sender's head, then fades ───────────────────
+  function positionSpeech(outer: HTMLDivElement, head: Pt) {
+    outer.style.transform = `translate(-50%, -100%) translate(${head.x}px, ${head.y - SPEECH_LIFT}px)`;
+  }
+
+  /** Keep every live bubble anchored over its member (follows a walker; snaps after a reseat). */
+  function repositionSpeeches(headMap: Map<string, Pt>) {
+    for (const [name, s] of speeches) {
+      const head = headMap.get(name);
+      if (head) positionSpeech(s.outer, head);
+    }
+  }
+
+  function clearSpeech(who: string, s: Speech) {
+    for (const c of s.cancels) c();
+    s.outer.remove();
+    if (speeches.get(who) === s) speeches.delete(who);
+  }
+
+  /** Show a member's act body as a typed-out bubble that holds, then drifts up and fades. One bubble per
+   * member — a newer act supersedes the previous. Driven by timers/CSS (not the RAF loop), so it animates
+   * even while the office rests; reduced-motion shows the text at once with no typewriter. */
+  function showSpeech(who: string, raw: string, tone: string) {
+    const text = truncateSpeech(raw);
+    const head = heads.get(who);
+    if (!text || !head) return; // nothing to say, or the sender isn't on the floor (offline / capped)
+
+    const prev = speeches.get(who);
+    if (prev) clearSpeech(who, prev);
+
+    const outer = document.createElement('div');
+    outer.className = 'lc-speech';
+    const inner = document.createElement('div');
+    inner.className = 'lc-speech__inner';
+    inner.style.setProperty('--lc-speech-tone', toneColor(tone));
+    const textEl = document.createElement('span');
+    textEl.className = 'lc-speech__text';
+    const textNode = document.createTextNode('');
+    textEl.appendChild(textNode);
+    inner.appendChild(textEl);
+    outer.appendChild(inner);
+    labelHost.appendChild(outer);
+
+    const s: Speech = { outer, cancels: [] };
+    speeches.set(who, s);
+    positionSpeech(outer, head);
+
+    // enter on the next frame so the hidden initial state paints first → the CSS transition actually runs
+    const raf = requestAnimationFrame(() => outer.classList.add('is-in'));
+    s.cancels.push(() => cancelAnimationFrame(raf));
+
+    const leave = () => {
+      const hold = setTimeout(() => {
+        outer.classList.remove('is-in');
+        outer.classList.add('is-out');
+        const rm = setTimeout(() => clearSpeech(who, s), SPEECH_OUT_MS);
+        s.cancels.push(() => clearTimeout(rm));
+      }, SPEECH_HOLD_MS);
+      s.cancels.push(() => clearTimeout(hold));
+    };
+
+    if (reduced) {
+      textNode.nodeValue = text; // no typewriter under reduced-motion — the whole line at once
+      leave();
+      return;
+    }
+
+    // typewriter: reveal one char at a time with a trailing caret, then hold + leave
+    const caret = document.createElement('span');
+    caret.className = 'lc-caret';
+    textEl.appendChild(caret);
+    let i = 0;
+    const iv = setInterval(() => {
+      i += 1;
+      textNode.nodeValue = text.slice(0, i);
+      if (i >= text.length) {
+        clearInterval(iv);
+        caret.remove();
+        leave();
+      }
+    }, typeCadence(text.length));
+    s.cancels.push(() => clearInterval(iv));
   }
 
   function drawCues() {
@@ -146,12 +246,26 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     rig.advance(dt, present);
   }
 
-  // — the loop runs while walks or cues are in flight; otherwise the office rests as a static blit —
+  /** Paint one resting frame with no loop running: settle the Rive characters into their idle pose (a
+   * small nominal advance), else blit the code-drawn buffer. Used when nothing is animating so the office
+   * holds a still frame instead of burning rAF — Rive's own idle motion is intentionally frozen at rest. */
+  function paintResting() {
+    if (rig) {
+      advanceRig(1 / 60);
+      drawDynamic();
+    } else {
+      drawStatic();
+    }
+  }
+
+  // — the loop runs while walks or cues are in flight; otherwise the office rests on a still frame —
   let raf = 0;
   let last = 0;
   let wasActive = false;
   function tick(now: number) {
-    const dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
+    // Seed the first frame with a nominal step (not 0) so a single settling frame still advances the
+    // Rive state machine into its idle pose before the loop parks.
+    const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;
     last = now;
     const walking = actors.step(dt);
     for (let i = cues.length - 1; i >= 0; i--) {
@@ -160,7 +274,6 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       if (c.t >= 1) cues.splice(i, 1);
     }
     if (rig) {
-      // Rive characters animate continuously → always a live redraw.
       advanceRig(dt);
       drawDynamic();
     } else if (walking) {
@@ -170,7 +283,11 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       drawStatic();
     }
     wasActive = walking;
-    if ((rig || walking || cues.length) && !reduced && VISIBLE()) {
+    // Keep animating only while something actually moves. With the Rive rig loaded this is what lets the
+    // office *rest*: Rive characters animate continuously, so gating the loop on `rig` (as before) meant it
+    // never stopped and redrew every frame forever. Now, when the last walk/cue clears we draw one final
+    // settled frame (above) and park — the frame stays on-canvas until the next act or presence change.
+    if ((walking || cues.length) && !reduced && VISIBLE()) {
       raf = requestAnimationFrame(tick);
     } else {
       raf = 0;
@@ -192,7 +309,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     if (!reduced && actors.takeDoorPulses() > 0) pushDoorCue(); // the entrance "opens" as someone comes/goes
     bake();
     if (actors.active() || cues.length) ensureLoop();
-    else drawStatic();
+    else paintResting(); // no motion → hold a still frame (Rive-aware; not the code-drawn buffer)
   }
 
   function pushCue(name: string, color: string, glyph: Cue['glyph'], urgent = false) {
@@ -215,6 +332,11 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   }
 
   function emit(ev: OfficeEvent) {
+    // Speech is legible content, not motion — it plays even under reduced-motion (typewriter off there).
+    if (ev.kind === 'speech') {
+      showSpeech(ev.who, ev.text, ev.tone);
+      return;
+    }
     if (reduced) return;
     switch (ev.kind) {
       case 'screen-pulse':
@@ -261,7 +383,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   const onResize = () => {
     sizeCanvases();
     bake();
-    if (!raf) drawStatic();
+    if (!raf) paintResting(); // repaint the resting frame at the new size (Rive-aware)
   };
   window.addEventListener('resize', onResize);
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
@@ -305,6 +427,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       document.removeEventListener('visibilitychange', onVisibility);
       rig?.dispose();
       rig = null;
+      for (const [who, s] of [...speeches]) clearSpeech(who, s); // cancel timers + remove bubbles
       for (const el of labels.values()) el.remove();
       labels.clear();
       canvas.remove();

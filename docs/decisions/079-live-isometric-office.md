@@ -1,6 +1,6 @@
 # 079 — Live isometric office (replaces the constellation on `/live`)
 
-- Status: accepted — 2026-07-01 (M1 landed: office scene + presence/act wiring + panel modes)
+- Status: accepted — 2026-07-01 (M1–M3 landed: office scene + presence/act wiring + panel modes, Rive character rig from `public/office/character.riv`, walking choreography, urgent run, presence walk in/out; polish/perf ongoing)
 - Date: 2026-07-01
 
 ## Context
@@ -80,9 +80,10 @@ office fills the browser window — roster/stream tuck away — _not_ OS fullscr
   in-tree (dead) until the office ships, then removed.
 - M2 introduces the first Rive dependency and a manually-authored `.riv` asset (design task, tracked
   separately). M1 does not depend on it.
-- Out of scope / noted: the web **observer** connection now fails against a v0.3 P3.2 daemon with "send a
-  claim frame first" — the claim-handshake (ADR 077/078) the observer client hasn't adopted. Pre-existing in
-  `client.ts`/`provisionObserver`; unrelated to this visualization, but it gates seeing live data end-to-end.
+- Out of scope / noted: the web **observer** connection previously failed against a v0.3 P3.2 daemon with
+  "send a claim frame first" — the claim-handshake (ADR 077/078) the observer client hadn't adopted. Since
+  resolved (`client.ts` now sends the `claim` frame + `provisionObserver` returns the `mscr_` credential), so
+  the office (and the whole dashboard) now sees live data end-to-end against a P3 daemon.
 
 ## Alternatives considered
 

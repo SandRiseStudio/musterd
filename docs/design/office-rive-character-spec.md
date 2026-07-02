@@ -29,6 +29,24 @@ Status: draft (2026-07-01) · Owner: web/live · Relates to: ADR 079 (live isome
 >
 > The narrative spec below (hue/isHuman/skinTone) remains the design intent and forward-looking target;
 > §3/§5 are superseded by `rig.ts` for what the code actually drives today.
+>
+> ### Hair variety — code side ready (2026-07-02), `.riv` side pending
+>
+> **Both hair-colour and hair-style are now code-ready** — each a guarded, drop-in write in `rive-rig.ts`
+> that no-ops against the current asset and lights up automatically once the `.riv` exposes the property:
+>
+> - **Hair colour** — `rig.ts` emits a name-seeded **`hairColor`** (`hairFor(name)`, a 6-swatch palette
+>   salted so it doesn't correlate with `skinColor`); `rive-rig.ts` sets it via `setColorIfPresent(...)`.
+>   `.riv` step: add a `color` property named exactly **`hairColor`** to the `Character` view model and
+>   data-bind it to the `hair` shape's fill (same pattern as `skinColor`→`head · skin`).
+> - **Hair style** — `rig.ts` emits a name-seeded **`hairStyle`** number in `0..HAIR_STYLE_COUNT-1`
+>   (`hairStyleFor(name)`, currently **`HAIR_STYLE_COUNT = 5`**, salted independently of colour/skin);
+>   `rive-rig.ts` sets it via `setNumberIfPresent(...)`. `.riv` step: author `HAIR_STYLE_COUNT` distinct
+>   hair shapes soloed on a Number input named exactly **`hairStyle`** (values `0..4`). Keep the count in
+>   sync with `HAIR_STYLE_COUNT` in `rig.ts` if the artist adds/removes styles.
+>
+> Only the two `.riv` authoring steps + a re-export to `public/office/character.riv` remain; no further
+> code change is needed once the properties exist.
 
 ## Purpose
 

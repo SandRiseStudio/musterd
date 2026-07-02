@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hslToArgb, modeFor, officeToRig, skinFor } from './rig';
+import { HAIR_STYLE_COUNT, hairFor, hairStyleFor, hslToArgb, modeFor, officeToRig, skinFor } from './rig';
 import type { OfficeNode, Pose } from './types';
 
 function node(p: Partial<OfficeNode> = {}): OfficeNode {
@@ -34,6 +34,43 @@ describe('skinFor', () => {
   it('is stable per name and within the swatch set', () => {
     expect(skinFor('Ada')).toBe(skinFor('Ada'));
     expect(skinFor('Ada')).toMatch(/^#ff[0-9a-f]{6}$/);
+  });
+});
+
+describe('hairFor', () => {
+  it('is stable per name and within the swatch set', () => {
+    expect(hairFor('Ada')).toBe(hairFor('Ada'));
+    expect(hairFor('Ada')).toMatch(/^#ff[0-9a-f]{6}$/);
+  });
+  it('is decorrelated from skin (salted hash) — not every name maps skin↔hair to the same index', () => {
+    const names = ['Ada', 'Bo', 'Cy', 'Dev', 'Eli', 'Fen', 'Gus', 'Hana', 'Ivy', 'Jo'];
+    const differ = names.filter((n) => skinFor(n) !== hairFor(n));
+    expect(differ.length).toBeGreaterThan(0);
+  });
+});
+
+describe('hairStyleFor', () => {
+  it('is stable per name and within [0, HAIR_STYLE_COUNT)', () => {
+    for (const n of ['Ada', 'Bo', 'Cyrus', 'Devi', 'Eli', 'Fen', 'Gus', 'Hana']) {
+      const s = hairStyleFor(n);
+      expect(s).toBe(hairStyleFor(n));
+      expect(Number.isInteger(s)).toBe(true);
+      expect(s).toBeGreaterThanOrEqual(0);
+      expect(s).toBeLessThan(HAIR_STYLE_COUNT);
+    }
+  });
+  it('spreads across more than one style over a set of names', () => {
+    const styles = new Set(['Ada', 'Bo', 'Cy', 'Dev', 'Eli', 'Fen', 'Gus', 'Hana', 'Ivy', 'Jo'].map(hairStyleFor));
+    expect(styles.size).toBeGreaterThan(1);
+  });
+});
+
+describe('officeToRig hairColor + hairStyle', () => {
+  it('emits a stable name-seeded hair tint and style index', () => {
+    const r = officeToRig(node({ name: 'Ada' }), pose());
+    expect(r.hairColor).toBe(hairFor('Ada'));
+    expect(r.hairColor).toMatch(/^#ff[0-9a-f]{6}$/);
+    expect(r.hairStyle).toBe(hairStyleFor('Ada'));
   });
 });
 

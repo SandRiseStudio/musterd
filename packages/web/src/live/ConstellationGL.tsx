@@ -1,6 +1,6 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
 import { useEffect, useMemo, useRef } from 'react';
-import { memberColor } from './format';
+import { actTone, memberColor } from './format';
 import type { OfficeData, OfficeHandle } from './office-scene';
 import { actToEvent } from './office-scene/mapping';
 
@@ -83,6 +83,9 @@ export function ConstellationGL({
       emittedRef.current.add(e.id);
       const ev = actToEvent(e);
       if (ev) h.emit(ev);
+      // Any act with a body also speaks it over the sender's head (typed out, then fades) — the office's
+      // legible counterpart to the stream. Independent of the choreography cue; both can play for one act.
+      if (e.body && e.body.trim()) h.emit({ kind: 'speech', who: e.from, text: e.body, tone: actTone(e.act) });
     }
   }, [envelopes, liveIds]);
 

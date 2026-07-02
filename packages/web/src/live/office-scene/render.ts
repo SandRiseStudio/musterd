@@ -193,6 +193,26 @@ function drawHuddle(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): void {
   box(ctx, fit, h.lx - 38, h.ly + 24, 26, 26, 18, h.poufs[2]);
 }
 
+/** A faint floor pad marking one spot in the entrance waiting queue (drawn under an overflow member). */
+function drawQueuePad(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
+  const p = project(lx, ly, fit);
+  ctx.globalAlpha = 0.45;
+  ellipse(ctx, { x: p.x, y: p.y + 3 * fit.scale }, 21 * fit.scale, 7 * fit.scale, '#7a4e2d');
+  ctx.globalAlpha = 1;
+}
+
+/** A small screen-space "+N …" pill — collapses the members past the queue/nook cap into one count. */
+function drawCountPill(ctx: CanvasRenderingContext2D, at: Pt, text: string, scale: number): void {
+  ctx.font = `${Math.round(12 * scale)}px "Inter", system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const w = ctx.measureText(text).width + 18 * scale;
+  const h = 20 * scale;
+  roundRect(ctx, at.x - w / 2, at.y - h / 2, w, h, h / 2, 'rgba(20, 24, 31, 0.82)');
+  ctx.fillStyle = '#cfe7ee';
+  ctx.fillText(text, at.x, at.y);
+}
+
 function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
   rug(ctx, fit, ENTRANCE.lx, ENTRANCE.ly, 70, '#7a4e2d');
   box(ctx, fit, ENTRANCE.lx - 44, ENTRANCE.ly - 42, 8, 8, 96, '#7e6042');
@@ -453,6 +473,15 @@ export function renderScene(
     items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node) });
   }
 
+  // Queue lane: a faint pad under each overflow (strip) member so the entrance line reads as a designated
+  // waiting area. Positions come from the live poses, so drawing never re-derives the seating maths.
+  for (const [name, pl] of placements) {
+    if (pl.kind !== 'strip') continue;
+    const pose = poses.get(name);
+    if (!pose) continue;
+    items.push({ d: depth(pose.lx, pose.ly) - 0.2, fn: () => drawQueuePad(ctx, fit, pose.lx, pose.ly) });
+  }
+
   for (const [name, pose] of poses) {
     const node = byName.get(name);
     if (!node) continue;
@@ -478,6 +507,30 @@ export function renderScene(
 
   items.sort((a, b) => a.d - b.d);
   for (const it of items) it.fn();
+
+  // Collapse any queue/nook members past the render cap into a single "+N" pill, so a very large roster
+  // stays bounded. Hidden count = placed-but-not-drawn (capped members get no pose in homePoses).
+  let stripTotal = 0;
+  let nookTotal = 0;
+  let stripDrawn = 0;
+  let nookDrawn = 0;
+  for (const [name, pl] of placements) {
+    if (pl.kind === 'strip') {
+      stripTotal++;
+      if (poses.has(name)) stripDrawn++;
+    } else if (pl.kind === 'nook') {
+      nookTotal++;
+      if (poses.has(name)) nookDrawn++;
+    }
+  }
+  if (stripTotal - stripDrawn > 0) {
+    const a = project(ENTRANCE.lx - 34, ENTRANCE.ly - 56, fit);
+    drawCountPill(ctx, { x: a.x, y: a.y - 66 * fit.scale }, `+${stripTotal - stripDrawn} waiting`, fit.scale);
+  }
+  if (nookTotal - nookDrawn > 0) {
+    const a = project(NOOK.lx, NOOK.ly, fit);
+    drawCountPill(ctx, { x: a.x, y: a.y - 52 * fit.scale }, `+${nookTotal - nookDrawn} away`, fit.scale);
+  }
 
   return { heads, bases };
 }
