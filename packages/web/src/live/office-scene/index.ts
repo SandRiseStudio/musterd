@@ -61,18 +61,21 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
-    const anchors = renderScene(bctx, fit, placements, nodes, actors.poses());
+    const poses = actors.poses();
+    const anchors = renderScene(bctx, fit, placements, nodes, poses);
     heads = anchors.heads;
-    syncLabels(anchors.heads, nodes);
+    syncLabels(anchors.heads, nodes, poses);
   }
 
-  /** Create/remove label elements + set their text, and position them from `headMap`. */
-  function syncLabels(headMap: Map<string, Pt>, nodes: Map<string, OfficeNode>) {
+  /** Create/remove label elements + set their text, and position them from `headMap`. Small (nook/strip)
+   * actors are left unlabelled — their names bunch at a glance and the roster panel is the name source of
+   * truth; the "+N" pills and location carry the secondary read. */
+  function syncLabels(headMap: Map<string, Pt>, nodes: Map<string, OfficeNode>, poses: Map<string, Pose>) {
     const seen = new Set<string>();
     for (const [name, head] of headMap) {
-      seen.add(name);
       const node = nodes.get(name);
-      if (!node) continue;
+      if (!node || poses.get(name)?.small) continue;
+      seen.add(name);
       let el = labels.get(name);
       if (!el) {
         el = document.createElement('div');

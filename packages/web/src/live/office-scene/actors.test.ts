@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createActors, homePoses, travelDir } from './actors';
-import { ENTRANCE, NOOK } from './layout';
+import { ENTRANCE, NOOK, NOOK_CAP, STRIP_CAP } from './layout';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
 
@@ -66,6 +66,25 @@ describe('homePoses', () => {
     // the head of the queue waits right by the entrance
     const head = strip[0]!.pose;
     expect(Math.hypot(head.lx - ENTRANCE.lx, head.ly - ENTRANCE.ly)).toBeLessThan(120);
+  });
+
+  it('caps the queue avatars past STRIP_CAP (rest collapse into the "+N" pill)', () => {
+    // 12 desks + a big overflow → only STRIP_CAP queued avatars get a pose; the rest are placed but undrawn.
+    const nodes = Array.from({ length: 12 + STRIP_CAP + 4 }, (_, i) => node('Q' + String(i).padStart(2, '0')));
+    const { placements, byName } = world(nodes);
+    const poses = homePoses(placements, byName);
+    const strip = [...placements.entries()].filter(([, p]) => p.kind === 'strip');
+    const stripDrawn = strip.filter(([name]) => poses.has(name));
+    expect(strip.length).toBe(STRIP_CAP + 4); // 4 over the cap
+    expect(stripDrawn.length).toBe(STRIP_CAP); // only the cap is drawn
+  });
+
+  it('caps the nook avatars past NOOK_CAP', () => {
+    const nodes = Array.from({ length: NOOK_CAP + 3 }, (_, i) => node('A' + String(i).padStart(2, '0'), 'away'));
+    const { placements, byName } = world(nodes);
+    const poses = homePoses(placements, byName);
+    const drawn = nodes.filter((n) => poses.has(n.name));
+    expect(drawn.length).toBe(NOOK_CAP);
   });
 
   it('clusters away members compactly on the nook rug', () => {

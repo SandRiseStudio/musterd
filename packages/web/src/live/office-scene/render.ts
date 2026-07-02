@@ -201,6 +201,18 @@ function drawQueuePad(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: n
   ctx.globalAlpha = 1;
 }
 
+/** A small screen-space "+N …" pill — collapses the members past the queue/nook cap into one count. */
+function drawCountPill(ctx: CanvasRenderingContext2D, at: Pt, text: string, scale: number): void {
+  ctx.font = `${Math.round(12 * scale)}px "Inter", system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const w = ctx.measureText(text).width + 18 * scale;
+  const h = 20 * scale;
+  roundRect(ctx, at.x - w / 2, at.y - h / 2, w, h, h / 2, 'rgba(20, 24, 31, 0.82)');
+  ctx.fillStyle = '#cfe7ee';
+  ctx.fillText(text, at.x, at.y);
+}
+
 function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
   rug(ctx, fit, ENTRANCE.lx, ENTRANCE.ly, 70, '#7a4e2d');
   box(ctx, fit, ENTRANCE.lx - 44, ENTRANCE.ly - 42, 8, 8, 96, '#7e6042');
@@ -495,6 +507,30 @@ export function renderScene(
 
   items.sort((a, b) => a.d - b.d);
   for (const it of items) it.fn();
+
+  // Collapse any queue/nook members past the render cap into a single "+N" pill, so a very large roster
+  // stays bounded. Hidden count = placed-but-not-drawn (capped members get no pose in homePoses).
+  let stripTotal = 0;
+  let nookTotal = 0;
+  let stripDrawn = 0;
+  let nookDrawn = 0;
+  for (const [name, pl] of placements) {
+    if (pl.kind === 'strip') {
+      stripTotal++;
+      if (poses.has(name)) stripDrawn++;
+    } else if (pl.kind === 'nook') {
+      nookTotal++;
+      if (poses.has(name)) nookDrawn++;
+    }
+  }
+  if (stripTotal - stripDrawn > 0) {
+    const a = project(ENTRANCE.lx - 34, ENTRANCE.ly - 56, fit);
+    drawCountPill(ctx, { x: a.x, y: a.y - 66 * fit.scale }, `+${stripTotal - stripDrawn} waiting`, fit.scale);
+  }
+  if (nookTotal - nookDrawn > 0) {
+    const a = project(NOOK.lx, NOOK.ly, fit);
+    drawCountPill(ctx, { x: a.x, y: a.y - 52 * fit.scale }, `+${nookTotal - nookDrawn} away`, fit.scale);
+  }
 
   return { heads, bases };
 }

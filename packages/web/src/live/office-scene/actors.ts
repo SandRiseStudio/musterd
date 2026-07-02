@@ -1,4 +1,4 @@
-import { DESK_SLOTS, ENTRANCE, FWD, NOOK, SEAT_BACK } from './layout';
+import { DESK_SLOTS, ENTRANCE, FWD, NOOK, NOOK_CAP, SEAT_BACK, STRIP_CAP } from './layout';
 import type { Placement } from './seating';
 import type { Bubble, Dir, OfficeNode, Pose } from './types';
 
@@ -52,6 +52,7 @@ export function homePoses(
       });
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);
+      if (i >= NOOK_CAP) continue; // past the cap: represented by the "+N away" pill, not an avatar
       // A lounge cluster around the coffee table: a compact 3-wide grid, each row nudged sideways so it
       // reads as people gathered rather than a rigid line, and kept tight so it stays on the nook rug.
       const col = i % 3;
@@ -68,6 +69,7 @@ export function homePoses(
         run: false,
       });
     } else if (pl.kind === 'strip') {
+      if (pl.index >= STRIP_CAP) continue; // past the cap: represented by the "+N waiting" pill
       // Overflow past the 12 desks: a single-file queue receding from the entrance into the room, facing
       // the desks — reads as "waiting to be seated" rather than a floating grid stacked off the edge.
       out.set(name, {

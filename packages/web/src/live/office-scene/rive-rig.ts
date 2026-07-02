@@ -11,6 +11,11 @@ import type { OfficeNode, Pose } from './types';
  * it loads client-only and degrades to the code-drawn avatar (`drawActor`) if anything fails.
  *
  * Artboard is 180×260 with the character's feet at (90, 235) — see `FEET_*` below.
+ *
+ * Note on the WASM console line "No WebGL support. Image mesh will not be drawn.": it appears only when
+ * the browser has no WebGL and refers to Rive *image meshes* — which `character.riv` does not use (it is
+ * flat vector shapes). Verified identical rendering with WebGL on vs off, so it is benign; the offscreen
+ * 2D canvas renderer draws the whole character regardless. Nothing to gate on it.
  */
 
 const ARTBOARD_W = 180;
