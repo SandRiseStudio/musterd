@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { Lane, LaneWarning } from '@musterd/protocol';
+import type { Lane, LaneWarning, NextBrief } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { textResult } from './format.js';
@@ -16,7 +16,8 @@ function fmtLane(l: Lane): string {
   const surface = l.surface_globs.length ? ` surface=[${l.surface_globs.join(', ')}]` : '';
   const deps = l.depends_on.length ? ` deps=[${l.depends_on.join(', ')}]` : '';
   const branch = l.branch ? ` branch=${l.branch}` : '';
-  return `${l.id} [${l.state}] "${l.title}" — owner=${owner} project=${l.project}${surface}${deps}${branch}`;
+  const goal = l.goal_id ? ` goal=${l.goal_id}` : '';
+  return `${l.id} [${l.state}] "${l.title}" — owner=${owner} project=${l.project}${goal}${surface}${deps}${branch}`;
 }
 
 function fmtWarnings(warnings: LaneWarning[]): string {
@@ -50,6 +51,12 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           .describe('declared paths, e.g. ["packages/server/src/store/**"]'),
         depends_on: z.array(z.string()).optional().describe('lane ids this lane builds on'),
         branch: z.string().optional().describe('git branch carrying the work'),
+        goal_id: z
+          .string()
+          .optional()
+          .describe(
+            'link this lane to a Goal (ADR 084) — the id `team_next` groups + derives status by',
+          ),
         role: z.string().optional().describe('assignment hint (advisory)'),
         claim: z.boolean().optional().describe('own it yourself now (recommended at task start)'),
       },
@@ -180,4 +187,49 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
       }
     },
   );
+
+  server.registerTool(
+    'team_next',
+    {
+      description:
+        'Your orientation brief (ADR 049/084) — self-orient at the start of a session without a ' +
+        'human-authored prompt: what you are carrying, what just shipped, open lanes to pick up, and ' +
+        "the latest handoff *why*. Derived from the team's own lane/act state; call it at task start.",
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        return textResult(fmtNext(await client.next()));
+      } catch (err) {
+        return textResult(`error: ${(err as Error).message}`);
+      }
+    },
+  );
+}
+
+function fmtNext(b: NextBrief): string {
+  const lines: string[] = [`next — as ${b.member}`];
+  if (b.in_flight.length) {
+    lines.push(`\ncarrying (${b.in_flight.length}):`);
+    for (const l of b.in_flight) lines.push('  ' + fmtLane(l));
+  }
+  if (b.up_next.length) {
+    lines.push('\nup next — open lanes you could pick up:');
+    for (const l of b.up_next) lines.push('  ' + fmtLane(l));
+  }
+  if (b.shipped.length) {
+    lines.push('\nrecently shipped:');
+    for (const l of b.shipped)
+      lines.push(`  ✓ "${l.title}"${l.goal_id ? ` goal=${l.goal_id}` : ''}`);
+  }
+  if (b.why) {
+    lines.push(
+      `\nwhy — handoff from ${b.why.from}${b.why.goal_id ? ` goal=${b.why.goal_id}` : ''}:`,
+    );
+    lines.push('  ' + b.why.body);
+  }
+  if (!b.in_flight.length && !b.up_next.length && !b.shipped.length && !b.why) {
+    lines.push('nothing in flight — lane_open {title, claim:true} to declare your work');
+  }
+  return lines.join('\n');
 }

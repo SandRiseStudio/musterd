@@ -1595,4 +1595,69 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(msg.body).toContain('agent/riley');
     expect(msg.meta.lane_handoff.branch).toBe('agent/riley');
   });
+
+  it('goal_id join + GET /next: the orientation brief over lanes + the handoff why (ADR 049/084)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // Ada opens two lanes on one Goal — one active (carrying), one done (shipped).
+    const carrying = await post(
+      '/teams/dawn/lanes',
+      { title: 'spine command', goal_id: 'orientation-spine', claim: true },
+      ada,
+    );
+    expect(carrying.status).toBe(201);
+    expect(carrying.json.lane.goal_id).toBe('orientation-spine');
+    await fetch(base + `/teams/dawn/lanes/${carrying.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({ state: 'active' }),
+    });
+    const shipped = await post(
+      '/teams/dawn/lanes',
+      { title: 'spine migration', goal_id: 'orientation-spine', claim: true },
+      ada,
+    );
+    await fetch(base + `/teams/dawn/lanes/${shipped.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({ state: 'done' }),
+    });
+    // An unowned lane anyone could pick up.
+    await post('/teams/dawn/lanes', { title: 'backlog item' }, nickTok);
+
+    // The goal filter returns only the two joined lanes.
+    const byGoal = await get('/teams/dawn/lanes?goal=orientation-spine', ada);
+    expect(byGoal.json.lanes).toHaveLength(2);
+
+    // nick hands off to the team with a goal pointer — the brief's why.
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          id: 'ho1',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'team' },
+          act: 'handoff',
+          body: 'pick up the orientation spine',
+          meta: { goal_id: 'orientation-spine' },
+          ts: Date.now(),
+        },
+      },
+      nickTok,
+    );
+
+    const brief = await get('/teams/dawn/next', ada);
+    expect(brief.status).toBe(200);
+    expect(brief.json.member).toBe('Ada');
+    expect(brief.json.in_flight.map((l: { id: string }) => l.id)).toEqual([carrying.json.lane.id]);
+    expect(brief.json.shipped.map((l: { id: string }) => l.id)).toEqual([shipped.json.lane.id]);
+    expect(brief.json.up_next).toHaveLength(1);
+    expect(brief.json.why.from).toBe('nick');
+    expect(brief.json.why.goal_id).toBe('orientation-spine');
+  });
 });

@@ -9,6 +9,8 @@ import { reachabilityNudge } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
+import { doneCommand } from './commands/done.js';
+import { nextCommand } from './commands/next.js';
 import { notifyCommand } from './commands/notify.js';
 import { nudgeCommand } from './commands/nudge.js';
 import { reclaimCommand } from './commands/reclaim.js';
@@ -46,9 +48,11 @@ usage:
   musterd team export <slug>                     move a team's roster onto git-tracked .musterd/ files (ADR 058)
   musterd join <slug> --as <name> [--token <tok>] [--surface cli]
   musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] <body...>
-  musterd lane open "<title>" [--surface <glob>,…] [--depends <id>,…] [--project p] [--branch b] [--claim]   declare a unit of work; warn-only contention checks (ADR 083)
+  musterd lane open "<title>" [--surface <glob>,…] [--depends <id>,…] [--goal <id>] [--project p] [--branch b] [--claim]   declare a unit of work; warn-only contention checks (ADR 083); --goal links it to a Goal (ADR 084)
   musterd lane <claim|handoff|update|resolve> <id> [--to <seat>] [--branch <ref>] [--state <s>]   own / transfer-with-branch / edit / close a lane
   musterd lanes [--project p] [--mine] [--open] [--json]   the lane board — who owns what, with live warnings
+  musterd next [--json]                         the orientation brief: what you're carrying, what to pick up, the latest handoff why (ADR 049/084)
+  musterd done [<lane-id>] [--json]             close your work — mark the lane done (auto-targets your single live lane), then show what's next
   musterd inbox [--watch] [--all] [--unread] [--peek] [--limit <n>] [--from <name>] [--act <act>]
   musterd inbox --wait [--timeout <seconds>] [--from <name>] [--act <act>] [--json]   block until the next directed act, then exit (pairs with /loop)
   musterd nudge                                 print directed acts waiting for this seat (read-only; the approval-prompt hook target)
@@ -134,6 +138,10 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return laneCommand(rest);
     case 'lanes':
       return lanesCommand(rest);
+    case 'next':
+      return nextCommand(rest);
+    case 'done':
+      return doneCommand(rest);
     case 'inbox':
       return inboxCommand(rest);
     case 'nudge':

@@ -76,6 +76,7 @@ import {
   openLane,
   updateLane,
 } from '../store/lanes.js';
+import { deriveNext } from '../store/orientation.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
@@ -1052,9 +1053,18 @@ export async function handleHttp(
             : {}),
           ...(url.searchParams.get('mine') === '1' ? { owner: member.name } : {}),
           ...(url.searchParams.get('open') === '1' ? { openOnly: true } : {}),
+          ...(url.searchParams.get('goal') !== null
+            ? { goalId: url.searchParams.get('goal')! }
+            : {}),
         });
         const warnings = boardWarnings(ctx.db, team.id, team.slug, lanes);
         return sendJson(res, 200, { lanes, warnings });
+      }
+
+      // The orientation brief (ADR 049/084) — derived floor over the daemon's own lane/act state.
+      if (method === 'GET' && rest === '/next') {
+        const { team, member } = authTouch(ctx, slug, req);
+        return sendJson(res, 200, deriveNext(ctx.db, team.id, team.slug, member.name));
       }
 
       if (method === 'POST' && rest === '/lanes') {

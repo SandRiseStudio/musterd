@@ -8,9 +8,18 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('11');
+    expect(ver?.value).toBe('12');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
+    db.close();
+  });
+
+  it('v12 adds the goal_id join column on lanes (ADR 084)', () => {
+    const db = openDb(':memory:');
+    const laneCols = (db.prepare('PRAGMA table_info(lanes)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    expect(laneCols).toContain('goal_id');
     db.close();
   });
 
