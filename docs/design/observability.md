@@ -53,6 +53,8 @@ The day-to-day discipline that keeps this real — every agent-facing feature sh
 ## 4. Layer 1 — instrumenting musterd (v0.x, minimal)
 
 > **Status: ✅ shipped for `@musterd/server` (2026-06-15, ADR 015).** The envelope span and the **full metric set below** — including the two observable gauges (`musterd.presence.active`, `musterd.inbox.lag`, DB-sampled on collection) — are implemented and off-by-default. The adapter's `meta.otel` emit/honor (§6 step 2) is also done. Still to come: a full CLI/MCP telemetry SDK (so the adapter emit fires in production, not just under a host-provided context).
+>
+> **Instrument-by-default for dogfood (ADR 082, 2026-07-01).** The dogfood daemon now boots this SDK to a local OTLP sink so the next session is measurable live (finding 001), emission staying pure-OTLP (a local collector is an interim stand-in for batond). The product default stays off / no-phone-home. The metric set grew (below), plus a structured HTTP request log on `daemon.log`. Setup: `docs/dogfood-telemetry.md`.
 
 Scope: `@musterd/server` first; CLI and MCP adapter only get error/diagnostic logging until there's a reason for more.
 
@@ -70,6 +72,9 @@ One span per Envelope on the single validate→persist→route path (`musterd.en
 - `musterd.inbox.lag` (gauge/histogram; per-member cursor age — how stale the slowest inbox is)
 - `musterd.presence.active` (gauge; by surface), `musterd.presence.churn` (counter; attach/detach)
 - `musterd.errors` (counter; by class: validation, version_mismatch, auth)
+- `musterd.coordination.loop_latency` (histogram; accept/decline/resolve → the act they close — the §5b time-to-unblock, emitted first-party) — ADR 082
+- `musterd.coordination.open_loops` (gauge; request_help/handoff not yet answered — the §5b "shouting into the void" detector, emitted first-party) — ADR 082
+- `musterd.agent.tokens` (counter; opt-in self-reported `meta.usage`, by member/direction/model — harness-agnostic, covers non-Claude agents) — ADR 082
 
 ### Configuration
 
@@ -111,6 +116,7 @@ This layer should ship as its **own product** (working name **batond**, reversib
 
 1. ~~**Now (v0.2/M-next):** Layer 1 server instrumentation (§4). ADR 011 accepted as a recommended convention.~~ ✅ **done (ADR 015)** — server envelope span + counters/histogram, off by default; ADR 011 accepted, server records `traceparent`. (Deferred within §4: the two observable gauges.)
 2. ~~**With first SDK/adapters that own an OTel context:** emit/honor `meta.otel` in `@musterd/mcp` and examples.~~ ✅ **done** — the adapter emits its active trace context as `meta.otel` on `team_send` and links incoming `meta.otel` on `team_inbox_check` (ADR 011; `packages/mcp/src/otel.ts`). Convention plumbing only — inert until the adapter runs under a trace context (adapter telemetry SDK is still deferred per §4).
+2b. ~~**Instrument-by-default + the finding-001 gaps:**~~ ✅ **done (ADR 082, 2026-07-01)** — the dogfood daemon boots the SDK to a local sink; a structured HTTP request log; first-party coordination metrics (`loop_latency`, `open_loops`) + opt-in per-agent tokens (`meta.usage`). Two §5b views (time-to-unblock, the void-detector) landed early as *emitted metrics* rather than waiting for derived views over the log.
 3. **With the web dashboard:** first derived coordination views (time-to-unblock, waiting-on), per the roadmap's insight-layer entry.
 4. **Later, by explicit decision:** the standalone product (§5), once dogfooding proves which views matter.
 

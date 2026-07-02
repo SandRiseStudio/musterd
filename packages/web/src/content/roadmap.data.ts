@@ -452,18 +452,17 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'telemetry-gaps',
-    wave: 2,
     title: 'Close the dogfood telemetry gaps (instrument-by-default)',
-    status: 'near-term',
+    status: 'shipped',
     category: 'observability',
     blurb:
-      'Turn the built-but-inert telemetry on and wire the missing surfaces — so the next multi-agent session is measurable live, not reconstructed forensically.',
+      'Turned the built-but-inert telemetry on and wired the missing surfaces — so the next multi-agent session is measurable live, not reconstructed forensically.',
     detail:
-      'Placeholder from lab-notebook finding 001: the flagship P3 session was near-unobservable from musterd’s own telemetry. Concrete backlog — (1) OTel Layer-1 is built but off-by-default and was never booted (no exporter set) → instrument-by-default for dogfood daemons at minimum; (2) daemon.log is info-only with no HTTP layer (no request / latency / status); (3) the ADR-071 audit log records only governed decisions, so normal coordination leaves no trace; (4) no per-agent token/cost telemetry — reconstructed from harness transcripts, and non-Claude agents are unrecoverable; (5) no first-party emission of the coordination metrics we had to compute by hand (coordination-token ratio, wasted-work ratio, directed-act latency, resolve-rate, dup-rate). These are the concrete inputs to Telemetry L2 + batond. Pulled to the head of the build at the 2026-07-01 reprioritization — instrument-by-default first (a local OTLP collector as an interim stand-in for batond), so lanes and everything after are measurable live rather than reconstructed forensically.',
+      'From lab-notebook finding 001: the flagship P3 session was near-unobservable from musterd’s own telemetry (the message DB was the only live trace). Shipped as ADR 082 in four slices, each verified live on the dogfood daemon: (1) instrument-by-default — the daemon boots the built-but-inert OTel Layer 1 (ADR 015) to a local OTLP sink, emission staying pure-OTLP so batond replaces the endpoint not the instrumentation (the sink is an interim stand-in); (2) structured HTTP request logging on daemon.log (method/path/status/latency, warn 4xx / error 5xx); (3) first-party coordination metrics — musterd.coordination.loop_latency (accept/decline/resolve vs the act they close) + open_loops gauge, the directed-act latency we had been reconstructing; (4) opt-in per-agent token usage via meta.usage → musterd.agent.tokens (harness-agnostic in-band self-report, the only path that covers non-Claude agents). Deferred follow-ups: an automatic usage emitter (transcript hook), the git-side wasted-work/dup-rate metrics (lanes territory), and a cross-agent distributed trace over the ADR 011 traceparent.',
     refs: [
+      adr(82, 'ADR 082'),
+      doc('docs/dogfood-telemetry.md', 'dogfood-telemetry.md'),
       doc('docs/research/001-telemetry-gaps-p3-dogfood.md', 'finding 001'),
-      doc('docs/design/observability.md', 'observability.md'),
-      adr(52, 'ADR 052'),
     ],
     dependsOn: ['telemetry-l1'],
   },

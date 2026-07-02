@@ -23,4 +23,6 @@ This touches ADR 002's dependency discipline; the OTel SDK is the one justified 
 - Acceptance met: with `OTEL_EXPORTER_OTLP_ENDPOINT` pointed at any OTLP backend, a sent message produces the envelope span (correct `act`/`team`) and moves the counters. Verified by an in-memory-exporter test (span attributes, no body, traceparent, error status, counters) and a live SDK-boot smoke.
 - ADR 011 promoted **proposed → accepted**: the server now records `traceparent` as a span attribute, its first implementation. `@musterd/mcp` emitting/honoring `meta.otel` remains the next step (observability.md §6 step 2).
 - The Layer 2 coordination-observability views (`observability.md` §5, the **batond** thesis) are unchanged and unblocked by this. The §4 metric set is now complete (gauges included); the next observability step is a full CLI/MCP telemetry SDK.
+
+> **Extended by ADR 082 (2026-07-01).** This SDK is now booted by default on the *dogfood* daemon (to a local OTLP sink), and the metric set grew beyond §4: coordination `loop_latency` + `open_loops`, the opt-in `agent.tokens` counter, and a structured HTTP request log. The product default stays off / no-phone-home.
 - One server per process is assumed for the global SDK provider; `startTelemetry` is idempotent across multiple `createServer` calls in a process (returns the first start).
