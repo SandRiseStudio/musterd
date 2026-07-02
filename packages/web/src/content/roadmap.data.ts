@@ -544,11 +544,25 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'web-dashboard',
     wave: 3,
-    title: 'Web dashboard',
-    status: 'reserved',
+    title: 'Web dashboard — live team console',
+    status: 'near-term',
     category: 'surfaces',
-    blurb: 'A web surface for the same Members — designed now, built later. This page is the first foundation of it.',
-    detail: 'The Surface enum already includes web, ios, slack. Same Member, more Presences.',
+    blurb: 'A browser console for the team: the firehose observer stream, the live roster, and the governance/approval web views — a read-only window onto the same Members.',
+    detail:
+      'Substantially built: the team firehose (ADR 061, subscribe scope team-all + GET /teams/:slug/messages), the daemon static-serve (ADR 062), the read-only observer seat (ADR 063/064), the approval card (ADR 072), and the governance web views (ADR 073) all landed; the /live dashboard has had a polish pass. Remaining: the web observer client must adopt the v0.3 P3.2 claim handshake (ADR 079 follow-up — it currently fails against the live P3 daemon), plus general hardening. The Surface enum already includes web/ios/slack — same Member, more Presences.',
+    refs: [adr(61, 'ADR 061'), adr(63, 'ADR 063'), adr(72, 'ADR 072'), adr(73, 'ADR 073')],
+  },
+  {
+    id: 'live-office',
+    wave: 3,
+    title: 'Live isometric office (Rive)',
+    status: 'near-term',
+    category: 'surfaces',
+    blurb: 'Replace the /live constellation with a 2D isometric animated co-work office — presence→placement, act→choreography, travel-intensity == notification tier.',
+    detail:
+      'A living, human-vs-agent-neutral office view of the team (ADR 079, office-rive-character-spec.md). M1 (art direction + floor plan) landed; still ahead: M2 the Rive character rig + furniture kit, and M3 choreography storyboards + polish. Shares the firehose/observer substrate with the web dashboard.',
+    refs: [adr(79, 'ADR 079'), doc('docs/design/office-rive-character-spec.md', 'office-rive-character-spec.md')],
+    dependsOn: ['web-dashboard'],
   },
   {
     id: 'more-surfaces',
@@ -609,6 +623,88 @@ export const ROADMAP: RoadmapItem[] = [
     status: 'reserved',
     category: 'platform',
     blurb: 'A fast follow after launch. The protocol is language-neutral; the TypeScript client is the reference, not the only one.',
+  },
+
+  // ── captured from design docs / ADRs (roadmap-completeness pass, 2026-07-01) ──
+  {
+    id: 'lanes-phase2',
+    wave: 3,
+    title: 'Coordination lanes — Phase 2 (observed surface + merge-funnel)',
+    status: 'reserved',
+    category: 'platform',
+    blurb: 'The observed-surface + merge-funnel layer on top of the Phase-1 lane primitive — tighter contention signal, less reliance on declarations.',
+    detail:
+      'Phase-1 (ADR 083) shipped the declared intent+dependency layer. Phase 2: observed surface (fs-watch / git-diff sampling instead of only declared globs), the symbol/hunk-level merge-funnel, lane_ack to silence a warning, role-pool auto-assignment of open lanes, and auto-done when a lane\'s branch merges. Watcher, never gatekeeper.',
+    refs: [adr(83, 'ADR 083'), doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax')],
+    dependsOn: ['coordination-lanes'],
+  },
+  {
+    id: 'orientation-spine',
+    wave: 3,
+    title: 'Plan/Goal model + `musterd next`/`done`',
+    status: 'reserved',
+    category: 'insights',
+    blurb: 'The orientation + handoff spine that kills the copy-paste toil: a Plan→Goal→feature→task skeleton with derived status, and one-command next/done.',
+    detail:
+      'From planning-and-insights-brainstorm.md (ADR 048/049, proposed): a declared Plan→Goal→feature→task skeleton; Goal status is *derived* from the act log (not stored); handoff carries a goal_id; `musterd next` / `musterd done`; SessionStart auto-injects orientation and nudges resolve. Distinct from board-insights (the analytics/kanban view) — this is the toil-killing spine the brainstorm sequences first.',
+    refs: [adr(48, 'ADR 048'), adr(49, 'ADR 049'), doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights')],
+  },
+  {
+    id: 'leadership-report',
+    wave: 3,
+    title: 'Reporting altitudes + waiting-on view',
+    status: 'reserved',
+    category: 'insights',
+    blurb: '`musterd report` at IC/team/exec altitudes, the "N threads waiting on <human>" bottleneck view, and cost-per-shipped-work-item.',
+    detail:
+      'From planning-and-insights-brainstorm.md Parts 4–6 (ADR 050, proposed): a CLI report surface with altitude flags (ic|team|exec), the waiting-on-human view (oldest-first), Kanban flow metrics, and agent-native cost-per-shipped-work-item in $. Complements board-insights; the CLI report + waiting-on + cost are the distinct pieces.',
+    refs: [adr(50, 'ADR 050'), doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights')],
+    dependsOn: ['board-insights'],
+  },
+  {
+    id: 'team-hardening',
+    wave: 'later',
+    title: 'Shared/remote-team security hardening',
+    status: 'reserved',
+    category: 'platform',
+    blurb: 'The security cluster that follows the v0.3 governance work once teams span machines: multi-admin delegation, rotating/per-seat keys, a signed audit log, and abuse limits.',
+    detail:
+      'Named as "roadmap" in security.md + membership-model.md, no item yet: multi-admin delegation & policy, per-seat / rotating agent keys, a tamper-evident (signed) audit log, claim rate-limiting / anomaly detection + per-sender urgent rate-limit, OS-keychain secret storage, and DB encryption-at-rest. Follows directly from the shipped v0.3 governance substrate.',
+    refs: [doc('docs/design/security.md', 'security.md'), doc('docs/design/membership-model.md', 'membership-model.md')],
+  },
+  {
+    id: 'seat-memory',
+    wave: 'later',
+    title: 'Persistent seat memory',
+    status: 'reserved',
+    category: 'platform',
+    blurb: 'A persistent identity wants persistent memory — the claim response could carry a memory/context blob alongside the charter.',
+    detail:
+      'A reserved seam (membership-model.md §"Memory — reserved seam, not built"): a durable per-seat memory/context blob delivered on claim, parked for a dedicated future brainstorm. Placeholder so the direction is visible on the roadmap.',
+    refs: [doc('docs/design/membership-model.md', 'membership-model.md')],
+  },
+  {
+    id: 'model-experimentation',
+    wave: 'later',
+    title: 'Model experimentation — frontier cadence + own models',
+    status: 'reserved',
+    category: 'observability',
+    blurb: 'Treat the model itself as a first-class experimental variable: be early to each frontier model, and own models end-to-end.',
+    detail:
+      'From model-experimentation.md. Track A (bleeding edge): run the coordination experiment manifest as each new frontier model lands, diffing the emitted coordination metrics (loop_latency, dup-rate, wasted-work) vs the prior baseline → a per-model coordination leaderboard. Track B (own models): the tiny-model dogfood fixture (Stage 1 local instruct agent → Stage 2 train-from-scratch with MLX), culminating in a fine-tuned coordination-judge model over the traces dataset. Research spine, not a near-term build.',
+    refs: [doc('docs/design/model-experimentation.md', 'model-experimentation'), adr(51, 'ADR 051'), adr(56, 'ADR 056')],
+  },
+  {
+    id: 'hosted-relay',
+    wave: 'later',
+    title: 'Hosted rendezvous relay (Topology C)',
+    status: 'reserved',
+    category: 'transport',
+    blurb: 'A musterd-operated hosted relay members dial out to — the "just works" path for teams that won\'t run a Tailscale/WireGuard overlay.',
+    detail:
+      'From deployment-topology.md §Topology C: the largest transport build and the "just works" future — a hosted rendezvous relay so cross-network teams need no self-run overlay. Extends cross-network teams (the loopback + secured-bind + overlay topologies already shipped).',
+    refs: [doc('docs/design/deployment-topology.md', 'deployment-topology'), adr(40, 'ADR 040')],
+    dependsOn: ['cross-network'],
   },
 
   // ── out of scope ──────────────────────────────────────────────────────────
