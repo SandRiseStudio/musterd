@@ -12,6 +12,7 @@ import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
 import { doneCommand } from './commands/done.js';
 import { nextCommand } from './commands/next.js';
+import { reportCommand } from './commands/report.js';
 import { notifyCommand } from './commands/notify.js';
 import { nudgeCommand } from './commands/nudge.js';
 import { reclaimCommand } from './commands/reclaim.js';
@@ -103,6 +104,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return doneCommand(rest);
     case 'goal':
       return goalCommand(rest);
+    case 'report':
+      return reportCommand(rest);
     case 'inbox':
       return inboxCommand(rest);
     case 'nudge':

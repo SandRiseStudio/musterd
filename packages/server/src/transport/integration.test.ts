@@ -1711,3 +1711,62 @@ describe('declared Goals + next_goal (ADR 048/084)', () => {
     expect(brief.json.next_goal.id).toBe('surface');
   });
 });
+
+describe('insight report (ADR 050/084)', () => {
+  it('GET /report projects flow metrics, waiting-on, goals, and blocked lanes', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // A shipped lane (throughput + goal status) and a blocked lane (the exception).
+    await post('/teams/dawn/goals', { id: 'engine', title: 'Engine', wave: 1 }, nickTok);
+    const shipped = await post(
+      '/teams/dawn/lanes',
+      { title: 'built', goal_id: 'engine', claim: true },
+      ada,
+    );
+    await fetch(base + `/teams/dawn/lanes/${shipped.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({ state: 'done' }),
+    });
+    const stuck = await post('/teams/dawn/lanes', { title: 'stuck work', claim: true }, ada);
+    await fetch(base + `/teams/dawn/lanes/${stuck.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({ state: 'blocked' }),
+    });
+
+    // nick directs a request_help at Ada → Ada owes → waiting-on Ada.
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          id: 'rh1',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'Ada' },
+          act: 'request_help',
+          body: 'need a hand',
+          ts: Date.now() - 60_000,
+        },
+      },
+      nickTok,
+    );
+
+    const report = await get('/teams/dawn/report', ada);
+    expect(report.status).toBe(200);
+    expect(report.json.team).toBe('dawn');
+    expect(report.json.flow.throughput_7d).toBe(1);
+    expect(report.json.flow.wip).toBe(1); // the blocked lane contends
+    expect(report.json.goals.find((g: { id: string }) => g.id === 'engine').status).toBe('shipped');
+    expect(report.json.blocked.map((b: { id: string }) => b.id)).toEqual([stuck.json.lane.id]);
+    expect(report.json.waiting_on).toEqual([
+      expect.objectContaining({ member: 'Ada', threads: 1 }),
+    ]);
+    // Coordination-density is present; a tiny sample never flags.
+    expect(report.json.coordination).toMatchObject({ window_days: 7, flag: false });
+  });
+});

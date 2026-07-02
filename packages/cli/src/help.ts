@@ -26,6 +26,7 @@ usage:
   musterd done [<lane-id>] [--json]             close your work — mark the lane done (auto-targets your single live lane), then show what's next
   musterd goal declare "<title>" --goal-id <id> [--wave <n|later>] [--depends <id>,…]   declare a team Goal (lanes join it via --goal; status is derived) (ADR 048/084)
   musterd goal list [--json]                    the declared Goals with derived status (planned/in-flight/shipped)
+  musterd report [--altitude ic|team|exec] [--json]   the insight report: flow metrics, waiting-on, Goal board — one derived projection (ADR 050/084)
   musterd inbox [--watch] [--all] [--unread] [--peek] [--limit <n>] [--from <name>] [--act <act>]
   musterd inbox --wait [--timeout <seconds>] [--from <name>] [--act <act>] [--json]   block until the next directed act, then exit (pairs with /loop)
   musterd nudge                                 print directed acts waiting for this seat (read-only; the approval-prompt hook target)

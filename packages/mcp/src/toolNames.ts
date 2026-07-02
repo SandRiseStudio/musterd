@@ -21,4 +21,5 @@ export const TOOL_NAMES = [
   'team_next',
   'team_goal_declare',
   'team_goals',
+  'team_report',
 ] as const;

@@ -35,6 +35,7 @@ src/
     lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084)
     orientation.ts    // deriveNext: the `musterd next` orientation brief over lanes + the latest handoff (ADR 049/084)
     goals.ts          // declared-Goal seam: listGoals (meta.goal messages, status derived) + nextGoal (ADR 048/084)
+    insights.ts       // the insight engine: flowMetrics + waitingOn + deriveReport, projected over lanes + acts (ADR 050/084)
     audit.ts          // append-only governance audit log: appendAudit/listAudit (ADR 071, P2)
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)

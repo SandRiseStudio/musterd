@@ -9,6 +9,7 @@ import {
   LaneResultSchema,
   NextBriefSchema,
   PROTOCOL_VERSION,
+  ReportSchema,
   RequestsResponseSchema,
   type AuditResponse,
   type ClaimTarget,
@@ -28,6 +29,7 @@ import {
   type NextBrief,
   type OpenLane,
   type RefusedCode,
+  type Report,
   type RequestsResponse,
   type Surface,
   type UpdateLane,
@@ -276,6 +278,14 @@ export class HttpClient {
     const json = await this.request('GET', `/teams/${slug}/goals`);
     const parsed = GoalListSchema.safeParse(json);
     if (!parsed.success) throw new CliError('goals response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  /** The insight report (ADR 050/084) — `GET /teams/:slug/report`, one server-side projection. */
+  async report(slug: string): Promise<Report> {
+    const json = await this.request('GET', `/teams/${slug}/report`);
+    const parsed = ReportSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('report response did not match the protocol schema', 1);
     return parsed.data;
   }
 
