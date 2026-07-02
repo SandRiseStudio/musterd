@@ -42,7 +42,7 @@ export interface RiveRig {
 export async function loadRiveRig(): Promise<RiveRig | null> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rive: any = await RiveCanvas({ locateFile: (f: string) => (f.endsWith('.wasm') ? riveWasmUrl : f) });
+    const rive: any = await RiveCanvas({ locateFile: () => riveWasmUrl });
     const bytes = new Uint8Array(await (await fetch('/office/character.riv')).arrayBuffer());
     const file = await rive.load(bytes);
 
@@ -97,6 +97,9 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
         m.artboard.draw(renderer);
         renderer.restore();
         renderer.flush();
+        // canvas-advanced batches its 2D commands until its frame handler runs; since the office drives
+        // its own rAF, resolve Rive's frame explicitly or the offscreen stays blank.
+        rive.resolveAnimationFrame?.();
         const scale = spriteH / ARTBOARD_H;
         const w = ARTBOARD_W * scale;
         const h = ARTBOARD_H * scale;
@@ -106,7 +109,8 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
         members.clear();
       },
     };
-  } catch {
+  } catch (e) {
+    console.info('[office] rive rig failed to load — using the code-drawn avatar', e);
     return null; // WASM/asset/API failure → office keeps the code-drawn avatar
   }
 }
