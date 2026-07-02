@@ -1,0 +1,91 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { Report } from '@musterd/protocol';
+import { z } from 'zod';
+import type { MusterdClient } from '../client.js';
+import { textResult } from './format.js';
+
+/**
+ * The insight report (ADR 050, server-side per ADR 084) — leadership projections over lanes + the act
+ * log, computed once and rendered here. Same data at three altitudes: ic = the board, team = the flow
+ * digest, exec = milestones + exceptions. Goodhart-safe: outcomes and queues, never message volume.
+ */
+
+function ago(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s >= 86400) return `${Math.floor(s / 86400)}d`;
+  if (s >= 3600) return `${Math.floor(s / 3600)}h`;
+  if (s >= 60) return `${Math.floor(s / 60)}m`;
+  return `${s}s`;
+}
+
+function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
+  const shipped = r.goals.filter((g) => g.status === 'shipped').length;
+  const inFlight = r.goals.filter((g) => g.status === 'in-flight').length;
+  const planned = r.goals.filter((g) => g.status === 'planned').length;
+  const lines: string[] = [
+    `report — ${r.team} · ${altitude} · ${shipped} shipped / ${inFlight} in-flight / ${planned} planned`,
+  ];
+
+  const waitingLines = () =>
+    r.waiting_on.length === 0
+      ? ['  nobody is waiting — no unresolved directed asks']
+      : r.waiting_on.map(
+          (e) =>
+            `  waiting on ${e.member} — ${e.threads} thread${e.threads === 1 ? '' : 's'}, oldest ${ago(e.oldest_age_ms)}`,
+        );
+
+  if (altitude === 'ic') {
+    lines.push('\ngoals:');
+    if (r.goals.length === 0) lines.push('  no declared goals');
+    for (const g of r.goals) lines.push(`  [${g.status}] "${g.title}"`);
+    if (r.blocked.length) {
+      lines.push('\nblocked:');
+      for (const b of r.blocked)
+        lines.push(`  ${b.id} "${b.title}" — ${b.owner_seat ?? 'unowned'}`);
+    }
+  } else if (altitude === 'exec') {
+    lines.push('\nmilestones:');
+    const active = r.goals.filter((g) => g.status !== 'planned');
+    if (active.length === 0) lines.push('  nothing in flight yet');
+    for (const g of active) lines.push(`  [${g.status}] "${g.title}"`);
+    lines.push('\nexceptions:');
+    if (!r.blocked.length && !r.waiting_on.length) lines.push('  none — on track');
+    for (const b of r.blocked) lines.push(`  blocked "${b.title}"`);
+    if (r.waiting_on.length) lines.push(...waitingLines());
+  } else {
+    const f = r.flow;
+    lines.push('\nflow:');
+    lines.push(
+      `  throughput ${f.throughput_7d}/wk · cycle ${f.cycle_time_ms === null ? '—' : ago(f.cycle_time_ms)} · WIP ${f.wip} · oldest ${f.oldest_wip_age_ms === null ? '—' : ago(f.oldest_wip_age_ms)}`,
+    );
+    lines.push('\nwaiting on:');
+    lines.push(...waitingLines());
+  }
+  return lines.join('\n');
+}
+
+export function registerInsights(server: McpServer, client: MusterdClient): void {
+  server.registerTool(
+    'team_report',
+    {
+      description:
+        "The insight report (ADR 050) — leadership projections over the team's lanes + act log, one " +
+        'derived truth at three altitudes: ic (the Goal board), team (flow metrics: throughput, cycle ' +
+        'time, WIP + the waiting-on view), exec (milestones + exceptions). Nothing stored; measures ' +
+        'outcomes and queues, never message volume.',
+      inputSchema: {
+        altitude: z
+          .enum(['ic', 'team', 'exec'])
+          .optional()
+          .describe('ic = board, team = flow digest (default), exec = milestones + exceptions'),
+      },
+    },
+    async (args) => {
+      try {
+        return textResult(fmtReport(await client.report(), args.altitude ?? 'team'));
+      } catch (err) {
+        return textResult(`error: ${(err as Error).message}`);
+      }
+    },
+  );
+}

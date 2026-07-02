@@ -237,6 +237,7 @@ src/
     members.ts    // works while dormant/pending
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next orientation brief (ADR 083/084)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
+    insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084)
     format.ts     // compact text rendering of a message for an agent to read
   bind.ts         // reachability check only (GET /health) — claims no presence
 ```

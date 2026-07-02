@@ -8,6 +8,7 @@ import {
   type LaneWarning,
   type MemberSummary,
   type NextBrief,
+  type Report,
   type WSServerFrame,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
@@ -178,6 +179,11 @@ export class MusterdClient {
 
   declareGoal(body: unknown): Promise<{ goal: Goal }> {
     return this.request('POST', `/teams/${this.config.team}/goals`, body);
+  }
+
+  /** The insight report (ADR 050/084) — one server-side projection. */
+  report(): Promise<Report> {
+    return this.request('GET', `/teams/${this.config.team}/report`);
   }
 
   /**

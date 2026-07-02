@@ -78,6 +78,7 @@ import {
   updateLane,
 } from '../store/lanes.js';
 import { listGoals } from '../store/goals.js';
+import { deriveReport } from '../store/insights.js';
 import { deriveNext } from '../store/orientation.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
@@ -1067,6 +1068,14 @@ export async function handleHttp(
       if (method === 'GET' && rest === '/next') {
         const { team, member } = authTouch(ctx, slug, req);
         return sendJson(res, 200, deriveNext(ctx.db, team.id, team.slug, member.name));
+      }
+
+      // The insight report (ADR 050/084) — one server-side projection: flow metrics, the waiting-on
+      // view, declared Goals with derived status, and blocked-lane exceptions. Altitude framing is a
+      // rendering concern for the surfaces; the engine computes everything once.
+      if (method === 'GET' && rest === '/report') {
+        const { team, member: _member } = authTouch(ctx, slug, req);
+        return sendJson(res, 200, deriveReport(ctx.db, team.id, team.slug));
       }
 
       // Declared Goals (ADR 048's general-team seam, resolved by ADR 084) — a Goal is an ordinary
