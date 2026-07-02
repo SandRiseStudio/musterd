@@ -436,17 +436,17 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'coordination-lanes',
-    wave: 3,
-    title: 'Coordination lanes — own the work, never dup a diff',
-    status: 'near-term',
+    title: 'Coordination lanes (Phase 1) — own the work, never dup a diff',
+    status: 'shipped',
     category: 'platform',
     blurb:
       'A first-class lane = { work-item × owner × surface } so musterd advises before two agents (or humans) redo the same work — the anti-swarm primitive.',
     detail:
-      'From the P3 dogfood post-mortem: coordination messages cost ~1% of tokens, but ~37% of the code produced never reached main (53% of that a single dependency-revert). A lane makes work-ownership contention-aware — unmet-dependency + surface-overlap warnings (advisory, never block; git-optional), a done-state that fixes the dead resolve act, and handoffs that carry the branch instead of a prose description. Phase 1 = the intent + dependency layer (catches the biggest waste, git-optional); Phase 2 = lightweight piggybacked observation (watcher, never gatekeeper). Design + spec live in docs/design/lanes-and-the-multi-agent-tax.md + lane-phase1-mvp-spec.md; no ADR yet. Sequenced after the telemetry-gaps work at the 2026-07-01 reprioritization, so its wasted-work win is measurable when it lands.',
+      'From the P3 dogfood post-mortem: coordination messages cost ~1% of tokens, but ~37% of the code produced never reached main (53% of that a single dependency-revert). Phase 1 (ADR 083) shipped the intent + dependency layer — git-optional, warn-only: the lanes table (migration v11), the two contention checks (unmet-dependency + surface-overlap, scoped per project), warning delivery inline to the actor + one directed wake to the affected owner (meta.lane_warning — no new act, no SPEC bump), handoff that carries the branch instead of a prose description (the redone-lane fix), lane_* MCP tools + musterd lane/lanes CLI, and a primer habit. Sequenced after telemetry-gaps at the 2026-07-01 reprioritization so its wasted-work win is measurable; live-verified on bravo (the dependency-revert replay caught both warnings). Phase 2 (deferred): observed surface (fs/git-diff), the symbol-level merge-funnel, lane_ack, role-pool assignment, auto-done on branch-merge.',
     refs: [
-      doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax'),
+      adr(83, 'ADR 083'),
       doc('docs/design/lane-phase1-mvp-spec.md', 'Phase-1 MVP spec'),
+      doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax'),
     ],
     dependsOn: ['v03-p1-seats'],
   },
