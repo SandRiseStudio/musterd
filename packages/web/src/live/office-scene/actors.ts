@@ -52,9 +52,13 @@ export function homePoses(
       });
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);
+      // A lounge cluster around the coffee table: a compact 3-wide grid, each row nudged sideways so it
+      // reads as people gathered rather than a rigid line, and kept tight so it stays on the nook rug.
+      const col = i % 3;
+      const row = Math.floor(i / 3);
       out.set(name, {
-        lx: NOOK.lx - 40 + (i % 3) * 40,
-        ly: NOOK.ly + 44 + Math.floor(i / 3) * 34,
+        lx: NOOK.lx - 42 + col * 42 + row * 16,
+        ly: NOOK.ly + 40 + row * 28,
         dir: 'S',
         small: true,
         carry: false,
@@ -64,9 +68,11 @@ export function homePoses(
         run: false,
       });
     } else if (pl.kind === 'strip') {
+      // Overflow past the 12 desks: a single-file queue receding from the entrance into the room, facing
+      // the desks — reads as "waiting to be seated" rather than a floating grid stacked off the edge.
       out.set(name, {
-        lx: ENTRANCE.lx - 70 + (pl.index % 4) * 46,
-        ly: ENTRANCE.ly - 92 - Math.floor(pl.index / 4) * 40,
+        lx: ENTRANCE.lx - 34 + pl.index * 30,
+        ly: ENTRANCE.ly - 56 - pl.index * 28,
         dir: 'N',
         small: true,
         carry: false,

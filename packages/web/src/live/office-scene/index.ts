@@ -146,12 +146,26 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     rig.advance(dt, present);
   }
 
-  // — the loop runs while walks or cues are in flight; otherwise the office rests as a static blit —
+  /** Paint one resting frame with no loop running: settle the Rive characters into their idle pose (a
+   * small nominal advance), else blit the code-drawn buffer. Used when nothing is animating so the office
+   * holds a still frame instead of burning rAF — Rive's own idle motion is intentionally frozen at rest. */
+  function paintResting() {
+    if (rig) {
+      advanceRig(1 / 60);
+      drawDynamic();
+    } else {
+      drawStatic();
+    }
+  }
+
+  // — the loop runs while walks or cues are in flight; otherwise the office rests on a still frame —
   let raf = 0;
   let last = 0;
   let wasActive = false;
   function tick(now: number) {
-    const dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
+    // Seed the first frame with a nominal step (not 0) so a single settling frame still advances the
+    // Rive state machine into its idle pose before the loop parks.
+    const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;
     last = now;
     const walking = actors.step(dt);
     for (let i = cues.length - 1; i >= 0; i--) {
@@ -160,7 +174,6 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       if (c.t >= 1) cues.splice(i, 1);
     }
     if (rig) {
-      // Rive characters animate continuously → always a live redraw.
       advanceRig(dt);
       drawDynamic();
     } else if (walking) {
@@ -170,7 +183,11 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       drawStatic();
     }
     wasActive = walking;
-    if ((rig || walking || cues.length) && !reduced && VISIBLE()) {
+    // Keep animating only while something actually moves. With the Rive rig loaded this is what lets the
+    // office *rest*: Rive characters animate continuously, so gating the loop on `rig` (as before) meant it
+    // never stopped and redrew every frame forever. Now, when the last walk/cue clears we draw one final
+    // settled frame (above) and park — the frame stays on-canvas until the next act or presence change.
+    if ((walking || cues.length) && !reduced && VISIBLE()) {
       raf = requestAnimationFrame(tick);
     } else {
       raf = 0;
@@ -192,7 +209,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     if (!reduced && actors.takeDoorPulses() > 0) pushDoorCue(); // the entrance "opens" as someone comes/goes
     bake();
     if (actors.active() || cues.length) ensureLoop();
-    else drawStatic();
+    else paintResting(); // no motion → hold a still frame (Rive-aware; not the code-drawn buffer)
   }
 
   function pushCue(name: string, color: string, glyph: Cue['glyph'], urgent = false) {
@@ -261,7 +278,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   const onResize = () => {
     sizeCanvases();
     bake();
-    if (!raf) drawStatic();
+    if (!raf) paintResting(); // repaint the resting frame at the new size (Rive-aware)
   };
   window.addEventListener('resize', onResize);
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;

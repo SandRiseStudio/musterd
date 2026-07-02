@@ -193,6 +193,14 @@ function drawHuddle(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): void {
   box(ctx, fit, h.lx - 38, h.ly + 24, 26, 26, 18, h.poufs[2]);
 }
 
+/** A faint floor pad marking one spot in the entrance waiting queue (drawn under an overflow member). */
+function drawQueuePad(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
+  const p = project(lx, ly, fit);
+  ctx.globalAlpha = 0.45;
+  ellipse(ctx, { x: p.x, y: p.y + 3 * fit.scale }, 21 * fit.scale, 7 * fit.scale, '#7a4e2d');
+  ctx.globalAlpha = 1;
+}
+
 function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
   rug(ctx, fit, ENTRANCE.lx, ENTRANCE.ly, 70, '#7a4e2d');
   box(ctx, fit, ENTRANCE.lx - 44, ENTRANCE.ly - 42, 8, 8, 96, '#7e6042');
@@ -451,6 +459,15 @@ export function renderScene(
     const name = slotMember.get(slot.id) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
     items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node) });
+  }
+
+  // Queue lane: a faint pad under each overflow (strip) member so the entrance line reads as a designated
+  // waiting area. Positions come from the live poses, so drawing never re-derives the seating maths.
+  for (const [name, pl] of placements) {
+    if (pl.kind !== 'strip') continue;
+    const pose = poses.get(name);
+    if (!pose) continue;
+    items.push({ d: depth(pose.lx, pose.ly) - 0.2, fn: () => drawQueuePad(ctx, fit, pose.lx, pose.ly) });
   }
 
   for (const [name, pose] of poses) {

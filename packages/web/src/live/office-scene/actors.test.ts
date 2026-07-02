@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createActors, homePoses, travelDir } from './actors';
+import { ENTRANCE, NOOK } from './layout';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
 
@@ -44,6 +45,39 @@ describe('homePoses', () => {
     const poses = homePoses(placements, byName);
     expect(poses.has('Ada')).toBe(true);
     expect(poses.has('Gone')).toBe(false);
+  });
+
+  it('queues overflow (past the 12 desks) single-file receding from the entrance', () => {
+    // 15 present-and-working members → 3 spill past the 12 desks onto the entrance queue.
+    const nodes = Array.from({ length: 15 }, (_, i) => node(`M${String(i).padStart(2, '0')}`));
+    const { placements, byName } = world(nodes);
+    const poses = homePoses(placements, byName);
+    const strip = [...placements.entries()]
+      .flatMap(([name, p]) => (p.kind === 'strip' ? [{ name, index: p.index, pose: poses.get(name)! }] : []))
+      .sort((a, b) => a.index - b.index);
+
+    expect(strip.length).toBeGreaterThanOrEqual(2);
+    for (const s of strip) expect(s.pose.small).toBe(true); // queued avatars render small
+    // single file: each spot steps further into the room (x up, logical y up toward the desks)
+    for (let i = 1; i < strip.length; i++) {
+      expect(strip[i]!.pose.lx).toBeGreaterThan(strip[i - 1]!.pose.lx);
+      expect(strip[i]!.pose.ly).toBeLessThan(strip[i - 1]!.pose.ly);
+    }
+    // the head of the queue waits right by the entrance
+    const head = strip[0]!.pose;
+    expect(Math.hypot(head.lx - ENTRANCE.lx, head.ly - ENTRANCE.ly)).toBeLessThan(120);
+  });
+
+  it('clusters away members compactly on the nook rug', () => {
+    const nodes = ['A', 'B', 'C', 'D', 'E'].map((n) => node(n, 'away'));
+    const { placements, byName } = world(nodes);
+    const poses = homePoses(placements, byName);
+    for (const n of nodes) {
+      const p = poses.get(n.name)!;
+      expect(p.small).toBe(true);
+      // inside the nook rug (an iso diamond of "radius" 132 about the nook anchor)
+      expect(Math.abs(p.lx - NOOK.lx) + Math.abs(p.ly - NOOK.ly)).toBeLessThan(132);
+    }
   });
 });
 
