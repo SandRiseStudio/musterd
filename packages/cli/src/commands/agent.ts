@@ -33,7 +33,25 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   const home = loadConfig().rosterHome[team];
   if (home) writeSeatFile(home, name, { kind: 'agent', ...(role ? { role } : {}) });
   // Declare the seat (v0.3: no per-seat token — the agent claims it with the team agent key on launch).
-  await http.addMember(team, { name, kind: 'agent', ...(role ? { role } : {}) });
+  // Idempotent: if the seat is already declared (e.g. you ran `team add <name>` first, or re-ran this
+  // command), reuse it and just (re)build the workspace instead of dead-ending on a conflict — a
+  // ready-to-run workspace is the whole point of this command. Guard against reusing a *human* seat.
+  let reused = false;
+  try {
+    await http.addMember(team, { name, kind: 'agent', ...(role ? { role } : {}) });
+  } catch (err) {
+    if (!(err instanceof CliError) || err.code !== 'conflict') throw err;
+    const { members } = await http.roster(team);
+    const existing = members.find((m) => m.name === name);
+    if (existing && existing.kind !== 'agent') {
+      throw new CliError(
+        `"${name}" already exists in "${team}" as a ${existing.kind}, not an agent — ` +
+          `pick a different name for the agent workspace`,
+        err.exitCode,
+      );
+    }
+    reused = true;
+  }
   // The agent workspace authenticates with the team agent key (ADR 075), captured at `team create`.
   const agentKey = config.agentKeys[team] ?? process.env['MUSTERD_AGENT_KEY'];
   if (!agentKey) {
@@ -124,7 +142,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   }
 
   process.stdout.write(
-    `${theme.ok('✓')} added ${theme.memberName(name, 'agent')} (agent${role ? `, ${role}` : ''}) to ${team}\n`,
+    `${theme.ok('✓')} ${reused ? 'reused' : 'added'} ${theme.memberName(name, 'agent')} (agent${role ? `, ${role}` : ''}) ${reused ? 'on' : 'to'} ${team}\n`,
   );
   const where =
     ws.kind === 'worktree'

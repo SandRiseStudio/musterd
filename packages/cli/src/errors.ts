@@ -3,10 +3,14 @@ import type { ErrorCode } from '@musterd/protocol';
 /** CLI error carrying a process exit code. Maps protocol error codes per 04-cli.md. */
 export class CliError extends Error {
   readonly exitCode: number;
-  constructor(message: string, exitCode: number) {
+  /** The originating protocol error code, when this wraps a server error — lets callers branch on the
+   * failure kind (e.g. treat `conflict` as idempotent) instead of matching the message or exit code. */
+  readonly code: ErrorCode | undefined;
+  constructor(message: string, exitCode: number, code?: ErrorCode) {
     super(message);
     this.name = 'CliError';
     this.exitCode = exitCode;
+    this.code = code;
   }
 }
 
