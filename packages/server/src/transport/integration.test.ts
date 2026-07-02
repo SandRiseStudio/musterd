@@ -1490,3 +1490,109 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(key.status).toBe(403);
   });
 });
+
+describe('coordination lanes, Phase 1 (ADR 083)', () => {
+  it('warns inline + wakes the affected owner exactly once; board reflects live state', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+    const boTok = bo.json.human_credential;
+
+    // nick opens + activates a schema lane.
+    const l1 = await post(
+      '/teams/dawn/lanes',
+      {
+        title: 'P3.1 schema',
+        project: 'musterd',
+        surface_globs: ['packages/server/src/store/**'],
+        claim: true,
+      },
+      nickTok,
+    );
+    expect(l1.status).toBe(201);
+    expect(l1.json.warnings).toHaveLength(0);
+    await fetch(base + `/teams/dawn/lanes/${l1.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },
+      body: JSON.stringify({ state: 'active' }),
+    });
+
+    // bo opens a lane that depends on nick's AND overlaps its surface → two inline warnings.
+    const l2 = await post(
+      '/teams/dawn/lanes',
+      {
+        title: 'P3.2 handshake',
+        project: 'musterd',
+        surface_globs: ['packages/server/**'],
+        depends_on: [l1.json.lane.id],
+        claim: true,
+      },
+      boTok,
+    );
+    expect(l2.status).toBe(201);
+    const kinds = l2.json.warnings.map((w: { kind: string }) => w.kind).sort();
+    expect(kinds).toEqual(['surface_overlap', 'unmet_dependency']);
+
+    // nick (the affected owner) got directed [lane] wakes — never the team.
+    const inbox = await get('/teams/dawn/inbox?unread=1', nickTok);
+    const laneMsgs = inbox.json.messages.filter((m: { body: string }) =>
+      m.body.startsWith('[lane]'),
+    );
+    expect(laneMsgs).toHaveLength(2);
+    expect(laneMsgs[0].meta.lane_warning ?? laneMsgs[0].meta.lane_handoff).toBeTruthy();
+
+    // Dedup: an unrelated update to bo's lane does NOT re-send the standing warnings.
+    await fetch(base + `/teams/dawn/lanes/${l2.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(boTok) },
+      body: JSON.stringify({ detail: 'progress note' }),
+    });
+    const inbox2 = await get('/teams/dawn/inbox?unread=1', nickTok);
+    expect(
+      inbox2.json.messages.filter((m: { body: string }) => m.body.startsWith('[lane]')),
+    ).toHaveLength(2);
+
+    // Board: both lanes, the pair of warnings annotated (overlap deduped to one).
+    const board = await get('/teams/dawn/lanes?project=musterd', boTok);
+    expect(board.json.lanes).toHaveLength(2);
+    expect(board.json.warnings.length).toBe(2);
+
+    // nick resolves his lane → bo's dependency warning clears from the board.
+    await fetch(base + `/teams/dawn/lanes/${l1.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },
+      body: JSON.stringify({ state: 'done' }),
+    });
+    const board2 = await get('/teams/dawn/lanes', boTok);
+    expect(
+      board2.json.warnings.filter((w: { kind: string }) => w.kind === 'unmet_dependency'),
+    ).toHaveLength(0);
+  });
+
+  it('handoff carries the branch to the recipient as a directed act', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+    const boTok = bo.json.human_credential;
+
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'BindingSchema', branch: 'agent/riley', claim: true },
+      nickTok,
+    );
+    const handed = await fetch(base + `/teams/dawn/lanes/${lane.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },
+      body: JSON.stringify({ owner_seat: 'bo' }),
+    });
+    const handedJson = (await handed.json()) as { lane: { owner_seat: string; branch: string } };
+    expect(handedJson.lane.owner_seat).toBe('bo');
+    expect(handedJson.lane.branch).toBe('agent/riley');
+
+    const inbox = await get('/teams/dawn/inbox?unread=1', boTok);
+    const msg = inbox.json.messages.find((m: { body: string }) => m.body.startsWith('[lane]'));
+    expect(msg.body).toContain('handed to you');
+    expect(msg.body).toContain('agent/riley');
+    expect(msg.meta.lane_handoff.branch).toBe('agent/riley');
+  });
+});

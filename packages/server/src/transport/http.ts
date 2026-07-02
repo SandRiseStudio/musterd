@@ -14,6 +14,10 @@ import {
   DecideRequestSchema,
   IssueGrantSchema,
   PolicySchema,
+  OpenLaneSchema,
+  UpdateLaneSchema,
+  makeEnvelope,
+  type LaneWarning,
   type MemberSummary,
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
@@ -64,6 +68,14 @@ import {
   listPresence,
   touchAmbientPresence,
 } from '../store/presence.js';
+import {
+  boardWarnings,
+  getLane,
+  laneWarnings,
+  listLanes,
+  openLane,
+  updateLane,
+} from '../store/lanes.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
@@ -259,6 +271,59 @@ function authTouch(
     });
   }
   return auth;
+}
+
+/** Order-independent key for a lane warning — the (subject, with, kind) dedup identity (ADR 083 §4). */
+function laneWarningKey(w: LaneWarning): string {
+  return w.kind === 'surface_overlap'
+    ? `${w.kind}:${[w.subject, w.with].sort().join(':')}`
+    : `${w.kind}:${w.subject}:${w.with}`;
+}
+
+/**
+ * Send one directed lane act from the acting member to another seat — an ordinary `message` envelope
+ * with structured meta, so it rides the whole existing wake path (inbox, ADR 053/054 hooks, ADR 024/035
+ * notify) with no new act and no SPEC bump (ADR 083 §4). Best-effort: a missing target never fails the
+ * lane verb.
+ */
+function deliverLaneAct(
+  ctx: Ctx,
+  team: TeamRow,
+  from: MemberRow,
+  to: string,
+  body: string,
+  meta: Record<string, unknown>,
+): void {
+  try {
+    const env = makeEnvelope({
+      id: ulid(),
+      team: team.slug,
+      from: from.name,
+      to: { kind: 'member', name: to },
+      act: 'message',
+      body,
+      meta,
+    });
+    routeEnvelope(ctx, team, from, env);
+  } catch {
+    /* advisory only — the lane verb already succeeded */
+  }
+}
+
+/**
+ * Directed wakes for fresh lane warnings (ADR 083 §4): the *affected* owner gets one targeted act —
+ * never the team, never the firehose. The actor already saw the warning inline in the verb response.
+ */
+function deliverLaneWarnings(
+  ctx: Ctx,
+  team: TeamRow,
+  actor: MemberRow,
+  warnings: LaneWarning[],
+): void {
+  for (const w of warnings) {
+    if (!w.owner || w.owner === actor.name) continue;
+    deliverLaneAct(ctx, team, actor, w.owner, `[lane] ${w.detail}`, { lane_warning: w });
+  }
 }
 
 /**
@@ -975,6 +1040,69 @@ export async function handleHttp(
           env.to.kind === 'member' ? env.to.name : null,
         );
         return sendJson(res, 201, { ack });
+      }
+
+      // ── Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } board. All
+      // member-authed; every mutation returns { lane, warnings } (warn-only, never a rejection).
+      if (method === 'GET' && rest === '/lanes') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const lanes = listLanes(ctx.db, team.id, team.slug, {
+          ...(url.searchParams.get('project') !== null
+            ? { project: url.searchParams.get('project')! }
+            : {}),
+          ...(url.searchParams.get('mine') === '1' ? { owner: member.name } : {}),
+          ...(url.searchParams.get('open') === '1' ? { openOnly: true } : {}),
+        });
+        const warnings = boardWarnings(ctx.db, team.id, team.slug, lanes);
+        return sendJson(res, 200, { lanes, warnings });
+      }
+
+      if (method === 'POST' && rest === '/lanes') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(OpenLaneSchema, await readJson(req));
+        const lane = openLane(ctx.db, team.id, team.slug, member.name, body);
+        const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
+        deliverLaneWarnings(ctx, team, member, warnings); // all warnings are fresh at open
+        return sendJson(res, 201, { lane, warnings });
+      }
+
+      const laneMatch = rest.match(/^\/lanes\/([^/]+)$/);
+      if (method === 'PATCH' && laneMatch) {
+        const { team, member } = authTouch(ctx, slug, req);
+        const laneId = decodeURIComponent(laneMatch[1]!);
+        const body = parseOrBadRequest(UpdateLaneSchema, await readJson(req));
+        const before = getLane(ctx.db, team.id, laneId, team.slug);
+        if (!before) throw new MusterdError('not_found', `no lane "${laneId}" on ${slug}`);
+        const beforeKeys = new Set(
+          laneWarnings(ctx.db, team.id, team.slug, before).map(laneWarningKey),
+        );
+        const lane = updateLane(ctx.db, team.id, laneId, team.slug, body)!;
+        const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
+        // Directed-wake dedup (ADR 083 §4): only warnings the mutation *introduced* wake the other
+        // owner — re-surfacing unchanged conditions is the board's job, not the inbox's.
+        deliverLaneWarnings(
+          ctx,
+          team,
+          member,
+          warnings.filter((w) => !beforeKeys.has(laneWarningKey(w))),
+        );
+        // A handoff (ownership moved to someone else) tells the recipient — with the branch, which is
+        // the whole point (the redone-lane fix): the work arrives as an artifact, not a description.
+        if (
+          body.owner_seat !== undefined &&
+          body.owner_seat !== before.owner_seat &&
+          body.owner_seat !== member.name
+        ) {
+          deliverLaneAct(
+            ctx,
+            team,
+            member,
+            body.owner_seat,
+            `[lane] "${lane.title}" handed to you${lane.branch ? ` — branch ${lane.branch}` : ''}`,
+            { lane_handoff: { lane: lane.id, branch: lane.branch } },
+          );
+        }
+        return sendJson(res, 200, { lane, warnings });
       }
 
       if (method === 'GET' && rest === '/inbox') {

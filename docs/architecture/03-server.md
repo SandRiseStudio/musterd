@@ -32,6 +32,7 @@ src/
     activity.ts       // resolveActivity: the two-clocks rule → offline/online/working (v0.2 M2)
     cursors.ts        // getCursor, setCursor, unreadCount
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
+    lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks (unmet dependency, surface overlap) (ADR 083)
     audit.ts          // append-only governance audit log: appendAudit/listAudit (ADR 071, P2)
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)

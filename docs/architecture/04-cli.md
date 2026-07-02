@@ -71,6 +71,7 @@ src/
     status.ts         // status
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036)
+    lane.ts           // lane open/claim/handoff/update/resolve + the lanes board (ADR 083)
     unbind.ts         // release this folder's own seat — clears bound_at + presence, keeps it declared (ADR 058)
     reload.ts         // SIGHUP the service daemon to re-resolve roster roots + reconcile (ADR 058)
     reclaim.ts        // operator force-drop of a member's stuck live session (ADR 017 follow-up)

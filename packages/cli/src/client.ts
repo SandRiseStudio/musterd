@@ -3,6 +3,8 @@ import {
   DecideResponseSchema,
   ErrorBodySchema,
   GrantMintSchema,
+  LaneBoardSchema,
+  LaneResultSchema,
   PROTOCOL_VERSION,
   RequestsResponseSchema,
   type AuditResponse,
@@ -12,12 +14,16 @@ import {
   type Envelope,
   type GrantMint,
   type IssueGrant,
+  type LaneBoard,
+  type LaneResult,
   type Member,
   type MemberKind,
   type MemberSummary,
+  type OpenLane,
   type RefusedCode,
   type RequestsResponse,
   type Surface,
+  type UpdateLane,
   type WSServerFrame,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
@@ -201,6 +207,40 @@ export class HttpClient {
     if (!parsed.success) {
       throw new CliError('grant response did not match the protocol schema', 1);
     }
+    return parsed.data;
+  }
+
+  // ── Coordination lanes, Phase 1 (ADR 083). Mutations return { lane, warnings } — warn-only.
+  async openLane(slug: string, body: OpenLane): Promise<LaneResult> {
+    const json = await this.request('POST', `/teams/${slug}/lanes`, body);
+    const parsed = LaneResultSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('lane response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  async updateLane(slug: string, id: string, patch: UpdateLane): Promise<LaneResult> {
+    const json = await this.request(
+      'PATCH',
+      `/teams/${slug}/lanes/${encodeURIComponent(id)}`,
+      patch,
+    );
+    const parsed = LaneResultSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('lane response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  async laneBoard(
+    slug: string,
+    q: { project?: string; mine?: boolean; open?: boolean } = {},
+  ): Promise<LaneBoard> {
+    const params = new URLSearchParams();
+    if (q.project) params.set('project', q.project);
+    if (q.mine) params.set('mine', '1');
+    if (q.open) params.set('open', '1');
+    const qs = params.toString();
+    const json = await this.request('GET', `/teams/${slug}/lanes${qs ? `?${qs}` : ''}`);
+    const parsed = LaneBoardSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('lanes response did not match the protocol schema', 1);
     return parsed.data;
   }
 
