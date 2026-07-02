@@ -83,8 +83,10 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
           m.vmi.number('mode').value = r.mode;
           m.vmi.number('facing').value = r.facing;
           m.vmi.number('run').value = r.run;
-          m.sm.advance(dt);
-          m.artboard.advance(dt);
+          // An urgent (running) walk plays its cycle faster — visibly hurried legs/bob.
+          const step = dt * (r.run ? 1.8 : 1);
+          m.sm.advance(step);
+          m.artboard.advance(step);
         }
       },
       has: (name) => members.has(name),
