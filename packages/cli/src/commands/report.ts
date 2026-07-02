@@ -60,6 +60,20 @@ function renderFlow(r: Report, w: (s: string) => void): void {
   );
 }
 
+const pct = (r: number) => `${Math.round(r * 100)}%`;
+
+/** The coordination-density line — exchange vs broadcast-journal, with the warn when it's all journal. */
+function renderCoordination(r: Report, w: (s: string) => void): void {
+  const c = r.coordination;
+  w(
+    `  ${pct(c.exchange_ratio)} exchange · ${pct(c.journal_ratio)} broadcast journal ${theme.meta(`(${c.acts} acts / ${c.window_days}d)`)}\n`,
+  );
+  if (c.flag)
+    w(
+      `  ${theme.warn('⚠ coordination that only looks collaborative')} — mostly broadcast status_updates, little directed or threaded exchange\n`,
+    );
+}
+
 function render(r: Report, altitude: Altitude): void {
   const w = process.stdout.write.bind(process.stdout);
   const c = goalCounts(r.goals);
@@ -87,9 +101,11 @@ function render(r: Report, altitude: Altitude): void {
     if (r.goals.every((g) => g.status === 'planned'))
       w(theme.meta('  nothing in flight yet') + '\n');
     w(`\n${theme.accent('exceptions')}:\n`);
-    const hasExceptions = r.blocked.length > 0 || r.waiting_on.length > 0;
+    const hasExceptions = r.blocked.length > 0 || r.waiting_on.length > 0 || r.coordination.flag;
     for (const b of r.blocked) w(`  ${theme.warn('blocked')} "${b.title}"\n`);
-    renderWaitingOn(r, w);
+    if (r.waiting_on.length > 0) renderWaitingOn(r, w);
+    if (r.coordination.flag)
+      w(`  ${theme.warn('coordination-density')} — mostly broadcast journal, little exchange\n`);
     if (!hasExceptions) w(theme.meta('  none — on track') + '\n');
     return;
   }
@@ -97,6 +113,8 @@ function render(r: Report, altitude: Altitude): void {
   // team (default): the digest.
   w(`\n${theme.accent('flow')}:\n`);
   renderFlow(r, w);
+  w(`\n${theme.accent('coordination')}:\n`);
+  renderCoordination(r, w);
   w(`\n${theme.accent('waiting on')}:\n`);
   renderWaitingOn(r, w);
 }

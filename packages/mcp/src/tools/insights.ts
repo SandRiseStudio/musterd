@@ -49,15 +49,28 @@ function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
     if (active.length === 0) lines.push('  nothing in flight yet');
     for (const g of active) lines.push(`  [${g.status}] "${g.title}"`);
     lines.push('\nexceptions:');
-    if (!r.blocked.length && !r.waiting_on.length) lines.push('  none — on track');
+    if (!r.blocked.length && !r.waiting_on.length && !r.coordination.flag)
+      lines.push('  none — on track');
     for (const b of r.blocked) lines.push(`  blocked "${b.title}"`);
     if (r.waiting_on.length) lines.push(...waitingLines());
+    if (r.coordination.flag)
+      lines.push('  coordination-density — mostly broadcast journal, little exchange');
   } else {
     const f = r.flow;
+    const c = r.coordination;
+    const pct = (x: number) => `${Math.round(x * 100)}%`;
     lines.push('\nflow:');
     lines.push(
       `  throughput ${f.throughput_7d}/wk · cycle ${f.cycle_time_ms === null ? '—' : ago(f.cycle_time_ms)} · WIP ${f.wip} · oldest ${f.oldest_wip_age_ms === null ? '—' : ago(f.oldest_wip_age_ms)}`,
     );
+    lines.push('\ncoordination:');
+    lines.push(
+      `  ${pct(c.exchange_ratio)} exchange · ${pct(c.journal_ratio)} broadcast journal (${c.acts} acts / ${c.window_days}d)`,
+    );
+    if (c.flag)
+      lines.push(
+        '  ⚠ coordination that only looks collaborative — mostly broadcast status_updates, little directed/threaded exchange',
+      );
     lines.push('\nwaiting on:');
     lines.push(...waitingLines());
   }

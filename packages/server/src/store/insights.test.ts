@@ -1,7 +1,7 @@
-import { makeEnvelope } from '@musterd/protocol';
+import { makeEnvelope, type Act } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
-import { flowMetrics, waitingOn } from './insights.js';
+import { coordinationDensity, flowMetrics, waitingOn } from './insights.js';
 import { openLane, updateLane } from './lanes.js';
 import { addMember } from './members.js';
 import { insertMessage } from './messages.js';
@@ -143,5 +143,72 @@ describe('waitingOn (ADR 050 Part 6 — the bottleneck view)', () => {
     ask(db, team.id, nick.id, 'ada', ada.id, 'followup', now - 1 * 86_400_000, 'root');
     const w = waitingOn(db, team.id, now);
     expect(w).toEqual([{ member: 'ada', threads: 1, oldest_age_ms: 2 * 86_400_000 }]);
+  });
+});
+
+describe('coordinationDensity (the P3 broadcast-journal signal)', () => {
+  const NOW = 40 * 86_400_000;
+  let n = 0;
+  const post = (
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    fromId: string,
+    act: Act,
+    to: { kind: 'team' } | { kind: 'member'; name: string; id: string },
+    thread?: string,
+  ) =>
+    insertMessage(
+      db,
+      teamId,
+      fromId,
+      to.kind === 'member' ? to.id : null,
+      makeEnvelope({
+        id: `c${n++}`,
+        team: 'revive',
+        from: 'nick',
+        to: to.kind === 'member' ? { kind: 'member', name: to.name } : { kind: 'team' },
+        act,
+        body: 'x',
+        ts: NOW - 1000,
+        ...(thread ? { thread } : {}),
+      }),
+    );
+
+  it('flags a journal-heavy, exchange-light window', () => {
+    const { db, team, nick } = seed();
+    // 12 broadcast status_updates, no directed/threaded exchange → journal 100%, exchange 0%.
+    for (let i = 0; i < 12; i++) post(db, team.id, nick.id, 'status_update', { kind: 'team' });
+    const c = coordinationDensity(db, team.id, NOW);
+    expect(c.acts).toBe(12);
+    expect(c.journal).toBe(12);
+    expect(c.journal_ratio).toBe(1);
+    expect(c.exchange_ratio).toBe(0);
+    expect(c.flag).toBe(true);
+  });
+
+  it('does not flag when there is healthy directed + threaded exchange', () => {
+    const { db, team, nick, ada } = seed();
+    for (let i = 0; i < 6; i++) post(db, team.id, nick.id, 'status_update', { kind: 'team' });
+    // 6 directed request_help → exchange 50%.
+    for (let i = 0; i < 6; i++)
+      post(db, team.id, nick.id, 'request_help', { kind: 'member', name: 'ada', id: ada.id });
+    const c = coordinationDensity(db, team.id, NOW);
+    expect(c.directed).toBe(6);
+    expect(c.exchange_ratio).toBe(0.5);
+    expect(c.flag).toBe(false);
+  });
+
+  it('does not flag a tiny sample below the minimum, even if all journal', () => {
+    const { db, team, nick } = seed();
+    for (let i = 0; i < 3; i++) post(db, team.id, nick.id, 'status_update', { kind: 'team' });
+    const c = coordinationDensity(db, team.id, NOW);
+    expect(c.journal_ratio).toBe(1);
+    expect(c.flag).toBe(false); // 3 < COORD_MIN_ACTS
+  });
+
+  it('is empty-safe: zero ratios, no flag, no NaN', () => {
+    const { db, team } = seed();
+    const c = coordinationDensity(db, team.id, NOW);
+    expect(c).toMatchObject({ acts: 0, journal_ratio: 0, exchange_ratio: 0, flag: false });
   });
 });
