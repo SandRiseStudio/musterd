@@ -549,8 +549,8 @@ export const ROADMAP: RoadmapItem[] = [
     category: 'surfaces',
     blurb: 'A browser console for the team: the firehose observer stream, the live roster, and the governance/approval web views — a read-only window onto the same Members.',
     detail:
-      'Substantially built: the team firehose (ADR 061, subscribe scope team-all + GET /teams/:slug/messages), the daemon static-serve (ADR 062), the read-only observer seat (ADR 063/064), the approval card (ADR 072), and the governance web views (ADR 073) all landed; the /live dashboard has had a polish pass. Remaining: the web observer client must adopt the v0.3 P3.2 claim handshake (ADR 079 follow-up — it currently fails against the live P3 daemon), plus general hardening. The Surface enum already includes web/ios/slack — same Member, more Presences.',
-    refs: [adr(61, 'ADR 061'), adr(63, 'ADR 063'), adr(72, 'ADR 072'), adr(73, 'ADR 073')],
+      'Substantially built: the team firehose (ADR 061, subscribe scope team-all + GET /teams/:slug/messages), the daemon static-serve (ADR 062), the read-only observer seat (ADR 063/064), the approval card (ADR 072), and the governance web views (ADR 073) all landed; the /live dashboard has had a polish pass. The web observer now connects via the v0.3 P3.2 claim handshake (ADR 077) and the shared read-only watch link (ADR 063) shipped — so the console works end-to-end against a live P3 daemon (the claim-handshake gap this item once tracked is closed). Remaining: general hardening. The Surface enum already includes web/ios/slack — same Member, more Presences.',
+    refs: [adr(61, 'ADR 061'), adr(63, 'ADR 063'), adr(72, 'ADR 072'), adr(73, 'ADR 073'), adr(77, 'ADR 077')],
   },
   {
     id: 'live-office',
@@ -560,7 +560,7 @@ export const ROADMAP: RoadmapItem[] = [
     category: 'surfaces',
     blurb: 'Replace the /live constellation with a 2D isometric animated co-work office — presence→placement, act→choreography, travel-intensity == notification tier.',
     detail:
-      'A living, human-vs-agent-neutral office view of the team (ADR 079, office-rive-character-spec.md). M1 (art direction + floor plan) landed; still ahead: M2 the Rive character rig + furniture kit, and M3 choreography storyboards + polish. Shares the firehose/observer substrate with the web dashboard.',
+      'A living, human-vs-agent-neutral office view of the team (ADR 079, office-rive-character-spec.md). Built out well past M1: M1 (code-drawn isometric floor + act cues + panel modes), M2 (per-member Rive characters from public/office/character.riv driven by the officeToRig contract, plus acts as walking choreography — walk-over, carry-box handoff, megaphone broadcast), and M3 (presence changes walk in/out, door-open staging, urgent walks run at a faster cadence, reduced-motion parity) have all landed; the office renders live and degrades to the code-drawn avatar if the Rive WASM/asset fails. Remaining: overflow/nook polish, perf passes, and richer authored .riv character fidelity. Shares the firehose/observer substrate with the web dashboard.',
     refs: [adr(79, 'ADR 079'), doc('docs/design/office-rive-character-spec.md', 'office-rive-character-spec.md')],
     dependsOn: ['web-dashboard'],
   },
