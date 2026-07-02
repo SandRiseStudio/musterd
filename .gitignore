@@ -7,6 +7,8 @@ coverage/
 # ADR 058: the durable seat roster (.musterd/team.toml + seats/) is committed; only the
 # secret-bearing binding token is ignored — in any folder (** covers root + nested).
 **/.musterd/binding.json
+# ADR 033: client-side pending-presence markers are transient local state, never committed.
+**/.musterd/pending/
 *.db
 *.db-wal
 *.db-shm
