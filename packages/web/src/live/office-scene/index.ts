@@ -2,7 +2,7 @@ import { createActors, type Actors } from './actors';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { ENTRANCE } from './layout';
 import { assignSeats, type Placement } from './seating';
-import { drawCue, renderScene, toneColor, type Cue } from './render';
+import { coffeeAnchor, drawCue, monitorAnchors, renderScene, toneColor, type Cue } from './render';
 import { loadRiveRig, type RiveRig } from './rive-rig';
 import { truncateSpeech, typeCadence } from './speech';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
@@ -16,6 +16,9 @@ const SPEECH_HOLD_MS = 1900;
 const SPEECH_OUT_MS = 560;
 /** How far above the head anchor the bubble sits (clears the name label). */
 const SPEECH_LIFT = 26;
+/** After a real act, keep the loop alive this long so the Rive character settles into idle rather than
+ * freezing mid-gesture (ADR 085 #5 afterglow) — a brief, bounded post-act tail, not a continuous loop. */
+const AFTERGLOW_MS = 2600;
 
 /** An in-flight speech bubble over a member's head — its DOM root plus the timers/frames to cancel when
  * it's superseded (a newer act from the same member) or the office is disposed. */
@@ -57,6 +60,25 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   const speeches = new Map<string, Speech>(); // one live speech bubble per member (name → bubble)
   const cues: Cue[] = [];
 
+  // ── Tier-A ambient overlay (ADR 085): GPU-composited CSS life over the baked floor — a slow day-cycle
+  // wash, coffee-nook steam, and breathing monitor glows on working desks. Pure CSS, no canvas/RAF cost;
+  // off entirely under reduced-motion. Lives in its own layer between the canvas and the label overlay.
+  const ambientHost = document.createElement('div');
+  ambientHost.className = 'lc-gl-ambient';
+  const glows = new Map<string, HTMLDivElement>(); // per working-member monitor glow
+  let steamEl: HTMLDivElement | null = null;
+  if (!reduced) {
+    host.appendChild(ambientHost);
+    const daylight = document.createElement('div');
+    daylight.className = 'lc-amb-daylight';
+    ambientHost.appendChild(daylight);
+    steamEl = document.createElement('div');
+    steamEl.className = 'lc-amb-steam';
+    steamEl.innerHTML = '<i></i><i></i><i></i>';
+    ambientHost.appendChild(steamEl);
+  }
+  let lastActive = 0; // ms timestamp of the last real act/cue — drives the afterglow tail (#5)
+
   // Pause the RAF loop when the tab is backgrounded (no CPU on an unseen office).
   const VISIBLE = () => document.visibilityState === 'visible';
 
@@ -80,6 +102,38 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
+    if (!reduced) {
+      syncGlows(monitorAnchors(placements, nodes, fit));
+      positionSteam();
+    }
+  }
+
+  /** Create/remove/position a breathing glow over each working member's monitor (Tier-A, CSS-animated). */
+  function syncGlows(anchors: Map<string, Pt>) {
+    const seen = new Set<string>();
+    for (const [name, at] of anchors) {
+      seen.add(name);
+      let el = glows.get(name);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'lc-amb-glow';
+        ambientHost.appendChild(el);
+        glows.set(name, el);
+      }
+      el.style.transform = `translate(-50%, -50%) translate(${at.x}px, ${at.y}px)`;
+    }
+    for (const [name, el] of glows) {
+      if (!seen.has(name)) {
+        el.remove();
+        glows.delete(name);
+      }
+    }
+  }
+
+  function positionSteam() {
+    if (!steamEl) return;
+    const p = coffeeAnchor(fit);
+    steamEl.style.transform = `translate(-50%, -100%) translate(${p.x}px, ${p.y}px)`;
   }
 
   /** Create/remove label elements + set their text, and position them from `headMap`. Small (nook/strip)
@@ -287,7 +341,10 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     // office *rest*: Rive characters animate continuously, so gating the loop on `rig` (as before) meant it
     // never stopped and redrew every frame forever. Now, when the last walk/cue clears we draw one final
     // settled frame (above) and park — the frame stays on-canvas until the next act or presence change.
-    if ((walking || cues.length) && !reduced && VISIBLE()) {
+    // Afterglow (#5): for a brief window after the last act, keep advancing so the Rive character settles
+    // into idle instead of freezing mid-gesture — a bounded post-act tail, not a continuous loop.
+    const settling = rig != null && lastActive > 0 && now - lastActive < AFTERGLOW_MS;
+    if ((walking || cues.length || settling) && !reduced && VISIBLE()) {
       raf = requestAnimationFrame(tick);
     } else {
       raf = 0;
@@ -377,6 +434,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
         pushCue(ev.who, '#5cd49a', '✓');
         break;
     }
+    lastActive = performance.now(); // arm the afterglow tail (#5) off this real act
     ensureLoop();
   }
 
@@ -430,6 +488,8 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       for (const [who, s] of [...speeches]) clearSpeech(who, s); // cancel timers + remove bubbles
       for (const el of labels.values()) el.remove();
       labels.clear();
+      glows.clear();
+      ambientHost.remove(); // removes the day-cycle wash, steam, and any monitor glows
       canvas.remove();
     },
   };

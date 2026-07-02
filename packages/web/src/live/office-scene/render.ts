@@ -535,6 +535,36 @@ export function renderScene(
   return { heads, bases };
 }
 
+/**
+ * Screen positions of the **monitors of working members** — where the Tier-A ambient glow sits (ADR 085).
+ * Matches `drawWorkstation`/`monitor`'s placement so the DOM glow lands on the screen, not floating. Only
+ * desk-seated `working` members get one; the returned point is the screen face centre in panel px.
+ */
+export function monitorAnchors(
+  placements: Map<string, Placement>,
+  byName: Map<string, OfficeNode>,
+  fit: Fit,
+): Map<string, Pt> {
+  const out = new Map<string, Pt>();
+  for (const [name, pl] of placements) {
+    if (pl.kind !== 'desk') continue;
+    if (byName.get(name)?.activity !== 'working') continue;
+    const slot = DESK_SLOTS[pl.slot];
+    if (!slot) continue;
+    const f = FWD[slot.dir];
+    // monitor sits at (Df/2 - 12) toward the facing (see drawWorkstation), screen face ~78px up at scale 1
+    const s = project(slot.lx + f[0] * 22, slot.ly + f[1] * 22, fit);
+    out.set(name, { x: s.x, y: s.y - 78 * fit.scale });
+  }
+  return out;
+}
+
+/** Screen position of the break-nook coffee machine (the ambient steam source, ADR 085). */
+export function coffeeAnchor(fit: Fit): Pt {
+  const s = project(NOOK.lx - 58, NOOK.ly - 42, fit);
+  return { x: s.x, y: s.y - 8 * fit.scale };
+}
+
 /** A transient act cue: a tinted ring + optional glyph (`ring`), a broadcast sweep (`wave`), or a glow
  * at the entrance when someone comes or goes (`door`). */
 export interface Cue {
