@@ -49,6 +49,35 @@ export const BlockedLaneSchema = z.object({
 export type BlockedLane = z.infer<typeof BlockedLaneSchema>;
 
 /**
+ * Coordination-density (the P3 dogfood signal): does the team's recent traffic *coordinate*, or just
+ * broadcast? A `status_update` fired at `@team` that no one threads or answers is a journal entry, not
+ * coordination — 51% of the P3 session was exactly that. Over a recent window: how much traffic is
+ * broadcast journal vs directed/threaded exchange. `flag` trips when it's journal-heavy and
+ * exchange-light — "coordination that only looks collaborative." A signal only the act-typed log can
+ * compute; a candidate metric for the standalone coordination-observability product. Goodhart-safe: it
+ * measures the *shape* of coordination, never volume as a reward.
+ */
+export const CoordinationDensitySchema = z.object({
+  /** The window this is computed over, in days. */
+  window_days: z.number().int(),
+  /** Total message acts in the window. */
+  acts: z.number().int(),
+  /** `status_update`s broadcast to `@team`/`@broadcast` — the journal. */
+  journal: z.number().int(),
+  /** Acts directed at a specific member — directed exchange. */
+  directed: z.number().int(),
+  /** Acts that are part of a thread (a reply) — threaded exchange. */
+  threaded: z.number().int(),
+  /** journal / acts (0 when no acts). */
+  journal_ratio: z.number(),
+  /** (directed ∪ threaded) / acts — real exchange (0 when no acts). */
+  exchange_ratio: z.number(),
+  /** True when journal-heavy and exchange-light over a non-trivial sample. */
+  flag: z.boolean(),
+});
+export type CoordinationDensity = z.infer<typeof CoordinationDensitySchema>;
+
+/**
  * `GET /teams/:slug/report` — the whole projection, altitude-agnostic. The surfaces (CLI/MCP/dashboard)
  * pick what to emphasise per altitude (ic = the board, team = the digest, exec = milestones+exceptions);
  * the engine computes everything once. `generated_ts` stamps when the projection was taken.
@@ -62,5 +91,7 @@ export const ReportSchema = z.object({
   goals: z.array(GoalSchema),
   /** Live lanes in `blocked` state — the exceptions worth surfacing. */
   blocked: z.array(BlockedLaneSchema),
+  /** Coordination-density: is recent traffic real exchange, or broadcast journal? */
+  coordination: CoordinationDensitySchema,
 });
 export type Report = z.infer<typeof ReportSchema>;

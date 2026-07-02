@@ -1,4 +1,10 @@
-import type { BlockedLane, FlowMetrics, Report, WaitingOnEntry } from '@musterd/protocol';
+import type {
+  BlockedLane,
+  CoordinationDensity,
+  FlowMetrics,
+  Report,
+  WaitingOnEntry,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { listGoals } from './goals.js';
 import { listLanes } from './lanes.js';
@@ -100,6 +106,60 @@ export function waitingOn(
     .sort((a, b) => b.oldest_age_ms - a.oldest_age_ms);
 }
 
+const COORD_WINDOW_DAYS = 7;
+/** Flag only on a non-trivial sample, so a quiet team isn't scolded for three messages. */
+const COORD_MIN_ACTS = 10;
+
+/**
+ * Coordination-density (the P3 dogfood signal) — over the last {@link COORD_WINDOW_DAYS} days, how much
+ * of the team's traffic is broadcast `status_update` journal vs directed/threaded exchange. Flags
+ * "coordination that only looks collaborative" when journal-heavy (≥50%) and exchange-light (<20%) over
+ * a real sample. One grouped pass over the message log. Goodhart-safe: measures the shape, not volume.
+ */
+export function coordinationDensity(
+  db: Database,
+  teamId: string,
+  now: number = Date.now(),
+): CoordinationDensity {
+  const since = now - COORD_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const row = db
+    .prepare<
+      [string, number],
+      { acts: number; journal: number; directed: number; threaded: number }
+    >(
+      `SELECT COUNT(*) AS acts,
+              SUM(CASE WHEN act = 'status_update' AND to_kind IN ('team','broadcast') THEN 1 ELSE 0 END) AS journal,
+              SUM(CASE WHEN to_kind = 'member' THEN 1 ELSE 0 END) AS directed,
+              SUM(CASE WHEN thread_id IS NOT NULL THEN 1 ELSE 0 END) AS threaded
+         FROM messages
+        WHERE team_id = ? AND ts > ?`,
+    )
+    .get(teamId, since)!;
+
+  const acts = row.acts;
+  const journal = row.journal ?? 0;
+  // directed ∪ threaded — a message counts as exchange if it's either (avoid double-counting).
+  const exchange = db
+    .prepare<
+      [string, number],
+      { n: number }
+    >(`SELECT COUNT(*) AS n FROM messages WHERE team_id = ? AND ts > ? AND (to_kind = 'member' OR thread_id IS NOT NULL)`)
+    .get(teamId, since)!.n;
+
+  const journal_ratio = acts === 0 ? 0 : journal / acts;
+  const exchange_ratio = acts === 0 ? 0 : exchange / acts;
+  return {
+    window_days: COORD_WINDOW_DAYS,
+    acts,
+    journal,
+    directed: row.directed ?? 0,
+    threaded: row.threaded ?? 0,
+    journal_ratio,
+    exchange_ratio,
+    flag: acts >= COORD_MIN_ACTS && journal_ratio >= 0.5 && exchange_ratio < 0.2,
+  };
+}
+
 /** The whole report projection (ADR 050) — altitude-agnostic; the surfaces frame it per altitude. */
 export function deriveReport(
   db: Database,
@@ -118,5 +178,6 @@ export function deriveReport(
     waiting_on: waitingOn(db, teamId, now),
     goals: listGoals(db, teamId, teamSlug),
     blocked,
+    coordination: coordinationDensity(db, teamId, now),
   };
 }

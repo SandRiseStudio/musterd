@@ -1766,5 +1766,7 @@ describe('insight report (ADR 050/084)', () => {
     expect(report.json.waiting_on).toEqual([
       expect.objectContaining({ member: 'Ada', threads: 1 }),
     ]);
+    // Coordination-density is present; a tiny sample never flags.
+    expect(report.json.coordination).toMatchObject({ window_days: 7, flag: false });
   });
 });
