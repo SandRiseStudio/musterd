@@ -406,6 +406,12 @@ export interface SceneAnchors {
   bases: Map<string, Pt>;
 }
 
+/** Minimal Rive drawer seam (real impl in rive-rig.ts) — kept WASM-free so render.ts stays pure. */
+export interface RigDrawer {
+  has(name: string): boolean;
+  draw(ctx: CanvasRenderingContext2D, name: string, feetX: number, feetY: number, spriteH: number): void;
+}
+
 /**
  * Draw the whole office in painter's order, returning per-member screen anchors. Desks are drawn empty;
  * each present member is drawn as a free actor at its current `poses` entry (home seat when idle, or
@@ -417,6 +423,7 @@ export function renderScene(
   placements: Map<string, Placement>,
   byName: Map<string, OfficeNode>,
   poses: Map<string, Pose>,
+  rig?: RigDrawer,
 ): SceneAnchors {
   drawFloor(ctx, fit);
 
@@ -449,8 +456,22 @@ export function renderScene(
   for (const [name, pose] of poses) {
     const node = byName.get(name);
     if (!node) continue;
-    items.push({ d: depth(pose.lx, pose.ly) + 0.1, fn: () => drawActor(ctx, fit, pose, node) });
     const b = project(pose.lx, pose.ly, fit);
+    if (rig?.has(name)) {
+      // Rive character: draw its current frame at the feet, sized to match the code-drawn avatar.
+      const spriteH = fit.scale * 96 * (pose.small ? 0.72 : 1);
+      const alpha = pose.alpha;
+      items.push({
+        d: depth(pose.lx, pose.ly) + 0.1,
+        fn: () => {
+          if (alpha < 1) ctx.globalAlpha = Math.max(0, alpha);
+          rig.draw(ctx, name, b.x, b.y, spriteH);
+          if (alpha < 1) ctx.globalAlpha = 1;
+        },
+      });
+    } else {
+      items.push({ d: depth(pose.lx, pose.ly) + 0.1, fn: () => drawActor(ctx, fit, pose, node) });
+    }
     bases.set(name, b);
     heads.set(name, { x: b.x, y: b.y - (pose.small ? 54 : 74) * fit.scale });
   }
