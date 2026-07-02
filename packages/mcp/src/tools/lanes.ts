@@ -222,13 +222,18 @@ function fmtNext(b: NextBrief): string {
     for (const l of b.shipped)
       lines.push(`  ✓ "${l.title}"${l.goal_id ? ` goal=${l.goal_id}` : ''}`);
   }
+  if (b.next_goal) {
+    const g = b.next_goal;
+    lines.push(`\nnext goal — ${g.id} "${g.title}"${g.wave !== null ? ` wave=${g.wave}` : ''}`);
+    lines.push(`  claim a lane on it: lane_open {title, goal_id:"${g.id}", claim:true}`);
+  }
   if (b.why) {
     lines.push(
       `\nwhy — handoff from ${b.why.from}${b.why.goal_id ? ` goal=${b.why.goal_id}` : ''}:`,
     );
     lines.push('  ' + b.why.body);
   }
-  if (!b.in_flight.length && !b.up_next.length && !b.shipped.length && !b.why) {
+  if (!b.in_flight.length && !b.up_next.length && !b.shipped.length && !b.next_goal && !b.why) {
     lines.push('nothing in flight — lane_open {title, claim:true} to declare your work');
   }
   return lines.join('\n');

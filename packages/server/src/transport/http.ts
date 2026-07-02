@@ -16,6 +16,7 @@ import {
   PolicySchema,
   OpenLaneSchema,
   UpdateLaneSchema,
+  DeclareGoalSchema,
   makeEnvelope,
   type LaneWarning,
   type MemberSummary,
@@ -76,6 +77,7 @@ import {
   openLane,
   updateLane,
 } from '../store/lanes.js';
+import { listGoals } from '../store/goals.js';
 import { deriveNext } from '../store/orientation.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
@@ -1065,6 +1067,33 @@ export async function handleHttp(
       if (method === 'GET' && rest === '/next') {
         const { team, member } = authTouch(ctx, slug, req);
         return sendJson(res, 200, deriveNext(ctx.db, team.id, team.slug, member.name));
+      }
+
+      // Declared Goals (ADR 048's general-team seam, resolved by ADR 084) — a Goal is an ordinary
+      // `message` act to `@team` carrying `meta.goal`; no new act, no new table. Status is derived,
+      // never stored, same as everything else in the orientation spine.
+      if (method === 'GET' && rest === '/goals') {
+        const { team, member: _member } = authTouch(ctx, slug, req);
+        return sendJson(res, 200, { goals: listGoals(ctx.db, team.id, team.slug) });
+      }
+
+      if (method === 'POST' && rest === '/goals') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(DeclareGoalSchema, await readJson(req));
+        const env = makeEnvelope({
+          id: ulid(),
+          team: team.slug,
+          from: member.name,
+          to: { kind: 'team' },
+          act: 'message',
+          body: `[goal] declared "${body.title}"`,
+          meta: {
+            goal: { id: body.id, title: body.title, wave: body.wave, depends_on: body.depends_on },
+          },
+        });
+        routeEnvelope(ctx, team, member, env);
+        const goal = listGoals(ctx.db, team.id, team.slug).find((g) => g.id === body.id)!;
+        return sendJson(res, 201, { goal });
       }
 
       if (method === 'POST' && rest === '/lanes') {

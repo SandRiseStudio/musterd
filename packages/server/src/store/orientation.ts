@@ -1,16 +1,15 @@
 import type { Lane, NextBrief } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { listGoals, nextGoal } from './goals.js';
 import { listLanes } from './lanes.js';
 
 /**
  * The orientation brief (ADR 049), computed server-side so CLI + MCP render one projection (ADR 084 —
  * never duplicate the derivation per surface). This is the **derived floor**: it reads the daemon's
  * own lane/act state and works at zero agent compliance — no handoff ritual required. The latest
- * `handoff` act only *enriches* the brief with the human-authored *why*.
- *
- * Deferred (the ADR 048 Goal-source seam): the roadmap "next Goal by wave" enrichment. That needs a
- * daemon-readable Goal source; until it lands, `next` orients from lanes + the handoff, which is
- * already a real self-orient. `goal_id` on lanes is the join that enrichment will read.
+ * `handoff` act only *enriches* the brief with the human-authored *why*; `next_goal` (the ADR 048
+ * Goal-source seam, resolved by ADR 084 — see `./goals.js`) enriches it further when a team opts into
+ * declared Goals. Neither is required for the floor to work.
  */
 
 /** Owned + live = what you're carrying right now. */
@@ -73,5 +72,9 @@ export function deriveNext(
       }
     : null;
 
-  return { member, in_flight, shipped, up_next, why };
+  // The Goal-source seam (ADR 048/084): general-team declared Goals, if any exist. musterd's own
+  // dogfood uses roadmap.data.ts instead, so this is null there — not every team opts into it.
+  const next_goal = nextGoal(listGoals(db, teamId, teamSlug));
+
+  return { member, in_flight, shipped, up_next, why, next_goal };
 }

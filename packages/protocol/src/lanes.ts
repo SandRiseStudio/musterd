@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GoalSchema } from './goals.js';
 
 /**
  * Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } unit that makes
@@ -103,14 +104,6 @@ export const LaneBoardSchema = z.object({
 export type LaneBoard = z.infer<typeof LaneBoardSchema>;
 
 /**
- * Derived Goal status (ADR 048 as amended by ADR 084) — a projection, never stored. Live and
- * flap-tolerant: reopening work returns a Goal to `in-flight`. `shipped` is conjunctive over lanes
- * (all terminal, ≥1 `done`); a permanent milestone latch is a deferred, separate declared marker.
- */
-export const GoalStatusSchema = z.enum(['planned', 'in-flight', 'shipped']);
-export type GoalStatus = z.infer<typeof GoalStatusSchema>;
-
-/**
  * `GET /teams/:slug/next` — the orientation brief (ADR 049), computed server-side so CLI + MCP render
  * one projection. The derived floor works at zero compliance: it reads the daemon's own lane/act
  * state. (The roadmap-Goal-by-wave enrichment is deferred with the Goal-source seam, ADR 048.)
@@ -133,5 +126,11 @@ export const NextBriefSchema = z.object({
       goal_id: z.string().nullable(),
     })
     .nullable(),
+  /**
+   * The next Goal to pick up (ADR 049/084): the first `planned` declared Goal by `wave`, skipping any
+   * still blocked by an unshipped `depends_on`. `null` when nothing is declared (the seam is opt-in —
+   * musterd's own dogfood uses `roadmap.data.ts` instead, so this is null there) or nothing qualifies.
+   */
+  next_goal: GoalSchema.nullable(),
 });
 export type NextBrief = z.infer<typeof NextBriefSchema>;
