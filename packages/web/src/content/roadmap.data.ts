@@ -679,9 +679,9 @@ export const ROADMAP: RoadmapItem[] = [
     title: 'Shared/remote-team security hardening',
     status: 'reserved',
     category: 'platform',
-    blurb: 'The security cluster that follows the v0.3 governance work once teams span machines: multi-admin delegation, rotating/per-seat keys, a signed audit log, and abuse limits.',
+    blurb: 'The security cluster that follows the v0.3 governance work once teams span machines: recipient-scoped message reads, multi-admin delegation, rotating/per-seat keys, a signed audit log, and abuse limits.',
     detail:
-      'Named as "roadmap" in security.md + membership-model.md, no item yet: multi-admin delegation & policy, per-seat / rotating agent keys, a tamper-evident (signed) audit log, claim rate-limiting / anomaly detection + per-sender urgent rate-limit, OS-keychain secret storage, and DB encryption-at-rest. Follows directly from the shipped v0.3 governance substrate.',
+      'Named as "roadmap" in security.md + membership-model.md, no item yet: **recipient-scoped message reads** (close the 2026-07-02 known gap — `GET /messages` + the `team-all` firehose currently return every envelope incl. others\' DMs, gated only on can_observe; the "acts addressed to them" need-to-know is enforced for roster/capabilities but not message content, and it gates the derived insight layer), multi-admin delegation & policy, per-seat / rotating agent keys, a tamper-evident (signed) audit log, claim rate-limiting / anomaly detection + per-sender urgent rate-limit, OS-keychain secret storage, and DB encryption-at-rest. Follows directly from the shipped v0.3 governance substrate.',
     refs: [doc('docs/design/security.md', 'security.md'), doc('docs/design/membership-model.md', 'membership-model.md')],
   },
   {
