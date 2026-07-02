@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hslToArgb, modeFor, officeToRig, skinFor } from './rig';
+import { hairFor, hslToArgb, modeFor, officeToRig, skinFor } from './rig';
 import type { OfficeNode, Pose } from './types';
 
 function node(p: Partial<OfficeNode> = {}): OfficeNode {
@@ -34,6 +34,26 @@ describe('skinFor', () => {
   it('is stable per name and within the swatch set', () => {
     expect(skinFor('Ada')).toBe(skinFor('Ada'));
     expect(skinFor('Ada')).toMatch(/^#ff[0-9a-f]{6}$/);
+  });
+});
+
+describe('hairFor', () => {
+  it('is stable per name and within the swatch set', () => {
+    expect(hairFor('Ada')).toBe(hairFor('Ada'));
+    expect(hairFor('Ada')).toMatch(/^#ff[0-9a-f]{6}$/);
+  });
+  it('is decorrelated from skin (salted hash) — not every name maps skin↔hair to the same index', () => {
+    const names = ['Ada', 'Bo', 'Cy', 'Dev', 'Eli', 'Fen', 'Gus', 'Hana', 'Ivy', 'Jo'];
+    const differ = names.filter((n) => skinFor(n) !== hairFor(n));
+    expect(differ.length).toBeGreaterThan(0);
+  });
+});
+
+describe('officeToRig hairColor', () => {
+  it('emits a stable name-seeded hair tint', () => {
+    const r = officeToRig(node({ name: 'Ada' }), pose());
+    expect(r.hairColor).toBe(hairFor('Ada'));
+    expect(r.hairColor).toMatch(/^#ff[0-9a-f]{6}$/);
   });
 });
 

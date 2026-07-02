@@ -32,7 +32,18 @@ function argbUint(hex: string): number {
 interface Member {
   artboard: { advance(s: number): boolean; draw(r: unknown): void; bindViewModelInstance(v: unknown): void };
   sm: { advance(s: number): boolean };
-  vmi: { number(p: string): { value: number }; color(p: string): { value: number } };
+  vmi: { number(p: string): { value: number }; color(p: string): { value: number } | null | undefined };
+}
+
+/** Set a VM colour only if the asset exposes it — so a property added to a newer `.riv` (e.g. `hairColor`)
+ * lights up automatically, while an older asset that lacks it is a silent no-op instead of a crash. */
+function setColorIfPresent(vmi: Member['vmi'], prop: string, argb: number): void {
+  try {
+    const c = vmi.color(prop);
+    if (c) c.value = argb;
+  } catch {
+    /* property absent on this asset — ignore */
+  }
 }
 
 export interface RiveRig {
@@ -79,9 +90,12 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
         for (const [name, { node, pose }] of present) {
           const m = ensure(name);
           const r = officeToRig(node, pose);
-          m.vmi.color('accentColor').value = argbUint(r.accentColor);
-          m.vmi.color('accentDark').value = argbUint(r.accentDark);
-          m.vmi.color('skinColor').value = argbUint(r.skinColor);
+          m.vmi.color('accentColor')!.value = argbUint(r.accentColor);
+          m.vmi.color('accentDark')!.value = argbUint(r.accentDark);
+          m.vmi.color('skinColor')!.value = argbUint(r.skinColor);
+          // Human-hair tint — present only once the .riv adds a `hairColor` bind (see rig.ts); guarded so
+          // it is a no-op against the current asset and activates automatically when the property lands.
+          setColorIfPresent(m.vmi, 'hairColor', argbUint(r.hairColor));
           m.vmi.number('agentVis').value = r.agentVis;
           m.vmi.number('humanVis').value = r.humanVis;
           m.vmi.number('carryVis').value = r.carryVis;

@@ -19,6 +19,9 @@ export interface RigInputs {
   accentDark: string;
   /** head tint — a skin/casing swatch seeded from the name. */
   skinColor: string;
+  /** human-hair tint — a hair swatch seeded from the name (decorrelated from skin). Only visible for
+   * humans (agents hide the hair region via `humanVis`); ignored by an asset without a `hairColor` bind. */
+  hairColor: string;
   /** agent-tell opacity (antenna/LED/visor): 1 for agents, 0 for humans. */
   agentVis: number;
   /** human-tell opacity (hair/eyes): 1 for humans, 0 for agents. */
@@ -62,6 +65,13 @@ export function skinFor(name: string): string {
   return SKINS[hash(name) % SKINS.length]!;
 }
 
+/** Human-hair swatch set (seeded by name) — naturals plus a couple of dyed tones. Seeded off a salted
+ * hash so hair choice is independent of skin choice (else `%` on the same hash would correlate them). */
+const HAIRS = ['#ff2b2622', '#ff4a3324', '#ff6b4a2a', '#ffb07d3e', '#ffc9a24b', '#ff6b4f7a'];
+export function hairFor(name: string): string {
+  return HAIRS[hash('hair:' + name) % HAIRS.length]!;
+}
+
 /** Primary state selector. Priority: away > help > walking > working > idle (spec §5). */
 export function modeFor(node: OfficeNode, pose: Pose): number {
   if (node.presence === 'away') return 3;
@@ -80,6 +90,7 @@ export function officeToRig(node: OfficeNode, pose: Pose): RigInputs {
     accentColor: hslToArgb(node.color),
     accentDark: hslToArgb(node.color, 0.72),
     skinColor: skinFor(node.name),
+    hairColor: hairFor(node.name),
     agentVis: human ? 0 : 1,
     humanVis: human ? 1 : 0,
     carryVis: pose.carry ? 1 : 0,

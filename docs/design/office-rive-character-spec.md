@@ -29,6 +29,17 @@ Status: draft (2026-07-01) · Owner: web/live · Relates to: ADR 079 (live isome
 >
 > The narrative spec below (hue/isHuman/skinTone) remains the design intent and forward-looking target;
 > §3/§5 are superseded by `rig.ts` for what the code actually drives today.
+>
+> ### Hair variety — code side ready (2026-07-02), `.riv` side pending
+>
+> The code now emits a name-seeded **`hairColor`** (`rig.ts` `hairFor(name)`, a 6-swatch palette salted so
+> it does not correlate with `skinColor`), and `rive-rig.ts` sets it via `setColorIfPresent(...)` — a
+> **guarded** write that is a silent no-op against the current asset and lights up automatically once the
+> `.riv` exposes the property. To finish hair-**colour** variety, the only `.riv` change is: add a `color`
+> property named exactly **`hairColor`** to the `Character` view model and data-bind it to the `hair`
+> shape's fill (same pattern as `skinColor`→`head · skin`). Hair-**style** variety (multiple hair shapes
+> chosen by a `hair` *index*, spec §3) is a further, separate step — it needs a Number input + solo/visibility
+> wiring in the rig and a matching index output in `rig.ts`; not built.
 
 ## Purpose
 
