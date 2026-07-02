@@ -35,15 +35,19 @@ const POOL: Mock[] = [
 // A looping choreography script (ms offset → event), so the room is always alive on the preview.
 const SCRIPT: { at: number; ev: OfficeEvent }[] = [
   { at: 200, ev: { kind: 'walk-help', from: 'Ada', to: 'Bo', tier: 'needs-attn' } },
+  { at: 300, ev: { kind: 'speech', who: 'Cy', text: 'anyone seen the flaky seating test? it fails ~1 in 5 for me', tone: 'accent' } },
   { at: 500, ev: { kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' } },
   { at: 1100, ev: { kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' } },
   { at: 1800, ev: { kind: 'megaphone', from: 'Ivy' } },
+  { at: 2000, ev: { kind: 'speech', who: 'Ivy', text: 'shipping the character rig — hair variety is in review', tone: 'status' } },
   { at: 2400, ev: { kind: 'screen-pulse', who: 'Hana', tone: 'status' } },
+  { at: 2500, ev: { kind: 'speech', who: 'Hana', text: 'profiling the render loop', tone: 'status' } },
   { at: 3000, ev: { kind: 'walk-handoff', from: 'Bo', to: 'Ivy', label: 'render.ts' } },
   { at: 3600, ev: { kind: 'resolve', who: 'Fen' } },
+  { at: 3700, ev: { kind: 'speech', who: 'Fen', text: 'fixed — resolving the thread', tone: 'success' } },
   { at: 4200, ev: { kind: 'note', from: 'Ada', to: 'Cy', tone: 'info' } },
 ];
-const LOOP = 5200;
+const LOOP = 5600;
 
 function OfficePreviewPage() {
   const hostRef = useRef<HTMLDivElement>(null);

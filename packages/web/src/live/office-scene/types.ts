@@ -62,7 +62,10 @@ export type OfficeEvent =
   | { kind: 'accept'; who: string }
   | { kind: 'decline'; who: string }
   | { kind: 'wait'; who: string }
-  | { kind: 'resolve'; who: string };
+  | { kind: 'resolve'; who: string }
+  // An act's body, typed out over the sender's head then faded — any act with a body (message, status,
+  // handoff, lane, …). Independent of the choreography cue above; both can fire for one act.
+  | { kind: 'speech'; who: string; text: string; tone: ActTone };
 
 /** Identical shape to the constellation's `ConstellationHandle` — a drop-in for `ConstellationGL`. */
 export interface OfficeHandle {

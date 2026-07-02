@@ -362,6 +362,81 @@
     0 1px 2px rgba(0, 0, 0, 0.9),
     0 0 8px rgba(0, 0, 0, 0.6);
 }
+/* ─── ephemeral speech bubble (act body typed over the sender's head, then fades) ─────────────── */
+.lc-speech {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3; /* above the name labels */
+  pointer-events: none;
+  will-change: transform;
+}
+.lc-speech__inner {
+  --lc-speech-tone: var(--lc-accent-bright);
+  position: relative;
+  max-width: 210px;
+  padding: 7px 11px 8px;
+  border-radius: 13px;
+  background: rgba(30, 22, 17, 0.92);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  box-shadow:
+    0 8px 22px -8px rgba(0, 0, 0, 0.72),
+    0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 34%, transparent),
+    0 3px 18px -5px color-mix(in srgb, var(--lc-speech-tone) 48%, transparent);
+  /* hidden initial state — the JS toggles .is-in on the next frame so this paints first */
+  opacity: 0;
+  transform: translateY(7px) scale(0.9);
+  transform-origin: 50% 100%;
+  transition:
+    opacity 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1); /* gentle overshoot — a warm little pop */
+}
+/* the downward tail, matching the bubble body */
+.lc-speech__inner::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid rgba(30, 22, 17, 0.92);
+}
+.lc-speech.is-in .lc-speech__inner {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.lc-speech.is-out .lc-speech__inner {
+  opacity: 0;
+  transform: translateY(-12px) scale(0.97); /* drifts up as it fades — like a spoken word rising away */
+  transition:
+    opacity 520ms ease,
+    transform 560ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.lc-speech__text {
+  display: block;
+  font-family: var(--font-sans, sans-serif);
+  font-size: 11px;
+  line-height: 1.36;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: #f4ead9;
+  overflow-wrap: anywhere;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  /* no spring/drift — just a soft cross-fade (opacity is safe under reduced-motion) */
+  .lc-speech__inner {
+    transform: none;
+    transition: opacity 160ms linear;
+  }
+  .lc-speech.is-out .lc-speech__inner {
+    transform: none;
+    transition: opacity 200ms linear;
+  }
+}
+
 .lc-constellation__caption {
   position: absolute;
   left: var(--lc-8);
