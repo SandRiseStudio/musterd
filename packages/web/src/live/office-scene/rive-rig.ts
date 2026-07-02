@@ -32,7 +32,10 @@ function argbUint(hex: string): number {
 interface Member {
   artboard: { advance(s: number): boolean; draw(r: unknown): void; bindViewModelInstance(v: unknown): void };
   sm: { advance(s: number): boolean };
-  vmi: { number(p: string): { value: number }; color(p: string): { value: number } | null | undefined };
+  vmi: {
+    number(p: string): { value: number } | null | undefined;
+    color(p: string): { value: number } | null | undefined;
+  };
 }
 
 /** Set a VM colour only if the asset exposes it — so a property added to a newer `.riv` (e.g. `hairColor`)
@@ -43,6 +46,17 @@ function setColorIfPresent(vmi: Member['vmi'], prop: string, argb: number): void
     if (c) c.value = argb;
   } catch {
     /* property absent on this asset — ignore */
+  }
+}
+
+/** Number counterpart of {@link setColorIfPresent} — for optional inputs a newer `.riv` may add (e.g.
+ * `hairStyle`). No-op (and never throws) when the asset lacks the input. */
+function setNumberIfPresent(vmi: Member['vmi'], prop: string, value: number): void {
+  try {
+    const n = vmi.number(prop);
+    if (n) n.value = value;
+  } catch {
+    /* input absent on this asset — ignore */
   }
 }
 
@@ -93,15 +107,17 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
           m.vmi.color('accentColor')!.value = argbUint(r.accentColor);
           m.vmi.color('accentDark')!.value = argbUint(r.accentDark);
           m.vmi.color('skinColor')!.value = argbUint(r.skinColor);
-          // Human-hair tint — present only once the .riv adds a `hairColor` bind (see rig.ts); guarded so
-          // it is a no-op against the current asset and activates automatically when the property lands.
+          // Human-hair tint + style — present only once the .riv adds a `hairColor` bind / `hairStyle`
+          // input (see rig.ts); guarded so they are no-ops against the current asset and activate
+          // automatically when the properties land.
           setColorIfPresent(m.vmi, 'hairColor', argbUint(r.hairColor));
-          m.vmi.number('agentVis').value = r.agentVis;
-          m.vmi.number('humanVis').value = r.humanVis;
-          m.vmi.number('carryVis').value = r.carryVis;
-          m.vmi.number('mode').value = r.mode;
-          m.vmi.number('facing').value = r.facing;
-          m.vmi.number('run').value = r.run;
+          setNumberIfPresent(m.vmi, 'hairStyle', r.hairStyle);
+          m.vmi.number('agentVis')!.value = r.agentVis;
+          m.vmi.number('humanVis')!.value = r.humanVis;
+          m.vmi.number('carryVis')!.value = r.carryVis;
+          m.vmi.number('mode')!.value = r.mode;
+          m.vmi.number('facing')!.value = r.facing;
+          m.vmi.number('run')!.value = r.run;
           // An urgent (running) walk plays its cycle faster — visibly hurried legs/bob.
           const step = dt * (r.run ? 1.8 : 1);
           m.sm.advance(step);
