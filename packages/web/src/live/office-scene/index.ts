@@ -3,7 +3,8 @@ import { fitFloor, project, type Fit, type Pt } from './iso';
 import { ENTRANCE } from './layout';
 import { assignSeats, type Placement } from './seating';
 import { drawCue, renderScene, toneColor, type Cue } from './render';
-import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode } from './types';
+import { loadRiveRig, type RiveRig } from './rive-rig';
+import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
 export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode } from './types';
 
@@ -35,6 +36,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   let fit: Fit = fitFloor(width, height);
 
   const actors: Actors = createActors();
+  let rig: RiveRig | null = null; // the Rive character rig, once its WASM + .riv load (else code-drawn)
   let placements = new Map<string, Placement>();
   let heads = new Map<string, Pt>(); // home head anchors — where in-place cues sit
 
@@ -127,9 +129,21 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses());
+    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), rig ?? undefined);
     drawCues();
     positionLabels(anchors.heads);
+  }
+
+  /** Feed the Rive rig this frame's live (node, pose) for every drawn member. */
+  function advanceRig(dt: number) {
+    if (!rig) return;
+    const nodes = actors.nodes();
+    const present = new Map<string, { node: OfficeNode; pose: Pose }>();
+    for (const [name, pose] of actors.poses()) {
+      const node = nodes.get(name);
+      if (node) present.set(name, { node, pose });
+    }
+    rig.advance(dt, present);
   }
 
   // — the loop runs while walks or cues are in flight; otherwise the office rests as a static blit —
@@ -145,14 +159,18 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       c.t += dt / CUE_SECS;
       if (c.t >= 1) cues.splice(i, 1);
     }
-    if (walking) {
+    if (rig) {
+      // Rive characters animate continuously → always a live redraw.
+      advanceRig(dt);
+      drawDynamic();
+    } else if (walking) {
       drawDynamic();
     } else {
       if (wasActive) bake(); // walkers just re-seated — refresh the buffer + labels to home
       drawStatic();
     }
     wasActive = walking;
-    if ((walking || cues.length) && !reduced && VISIBLE()) {
+    if ((rig || walking || cues.length) && !reduced && VISIBLE()) {
       raf = requestAnimationFrame(tick);
     } else {
       raf = 0;
@@ -250,7 +268,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   ro?.observe(host);
 
   const onVisibility = () => {
-    if (document.visibilityState === 'visible' && (actors.active() || cues.length)) ensureLoop();
+    if (document.visibilityState === 'visible' && (rig || actors.active() || cues.length)) ensureLoop();
   };
   document.addEventListener('visibilitychange', onVisibility);
 
@@ -258,14 +276,35 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   bake();
   drawStatic();
 
+  // Load the Rive character rig (client-only WASM). On success the office switches to a continuous
+  // Rive redraw; on any failure `rig` stays null and the code-drawn avatar is used unchanged.
+  let disposed = false;
+  void loadRiveRig().then((r) => {
+    if (disposed) {
+      r?.dispose();
+      return;
+    }
+    rig = r;
+    if (!rig) return;
+    if (reduced) {
+      advanceRig(0.016); // reduced-motion: one settled frame, no loop
+      drawDynamic();
+    } else {
+      ensureLoop();
+    }
+  });
+
   return {
     update,
     emit,
     dispose: () => {
+      disposed = true;
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onResize);
       ro?.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
+      rig?.dispose();
+      rig = null;
       for (const el of labels.values()) el.remove();
       labels.clear();
       canvas.remove();
