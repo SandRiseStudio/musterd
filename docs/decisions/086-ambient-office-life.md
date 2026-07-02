@@ -1,4 +1,4 @@
-# 085 — Ambient office life: a two-tier render architecture for a live-at-rest office
+# 086 — Ambient office life: a two-tier render architecture for a live-at-rest office
 
 - Status: proposed — 2026-07-02
 - Date: 2026-07-02
