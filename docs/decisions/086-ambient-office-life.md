@@ -40,11 +40,12 @@ same thing. Separate them.
   Rive advance.** This carries the *feeling* of continuous life at ~zero main-thread cost.
 - **Tier B — expensive, on-demand.** The existing canvas path (`renderScene` + Rive advance in `tick()`).
   It exists to do **occlusion** — a body walking behind/in front of desks — and nothing else needs that. It
-  stays parked (idle-park fix intact) and only wakes for actual walking: a real act, or an ambient
-  micro-choreography beat. Rare, brief, preemptable.
+  stays parked (idle-park fix intact) and wakes for movement: a real act's walk, an ambient
+  micro-choreography beat, or the brief **afterglow tail** (#5) that lets a just-acted member settle into
+  idle before re-parking. Rare, brief, preemptable.
 
 The key realization: **most ambient life needs no occlusion**, so it belongs in Tier A and is nearly free.
-Tier B only wakes for genuine movement, which is inherently sparse.
+Tier B wakes only for genuine movement and the short settle after it — inherently sparse.
 
 ### The five behaviours, mapped to the cheapest tier
 
@@ -53,7 +54,7 @@ Tier B only wakes for genuine movement, which is inherently sparse.
 | 3 | **Environmental drift** — plant sway, coffee-machine steam, a slow day-cycle light | **A** | CSS-animated overlay sprites positioned at projected floor coords (rebuilt on `bake`/resize, like labels). Plants sway via `transform: rotate`; steam is a CSS particle loop; the day-cycle is one full-panel gradient overlay lerped every ~30s (not per frame). |
 | 2 | **Working-desk pulse** — a monitor glow that breathes | **A** | A soft radial-glow element over each `working` member's monitor, CSS `opacity`/`filter` breathe. Added/removed at `bake` time on activity change. (A "typing" burst is an optional Tier-B accent, not required.) |
 | 5 | **Afterglow** | **B (extended)** | After a real act, delay the park by a few seconds so the member settles rather than hard-cutting to a freeze. Reuses the existing loop; near-free. |
-| 1 | **Ambient micro-choreography** — coffee runs, stretches, glances, plant-watering, desk-to-desk drift | **B (rare bursts)** | An idle *scheduler* (timer-based, not RAF) injects a gentle beat every ~15–25s when the room is quiet, via the existing `actors.walk()` / cue system. 60fps only *while* the beat plays, then re-park. |
+| 1 | **Ambient micro-choreography** — coffee runs, stretches, glances, plant-watering, desk-to-desk drift | **B (rare bursts)** | An idle *scheduler* (timer-based, not RAF) injects a gentle beat every ~15–25s when the room is quiet, via the existing `actors.walk()` / cue system. The loop runs only *while* the beat plays and at the ~20fps idle cap (mechanism 1 below), then re-parks — real-act choreography keeps 60fps. |
 | 4 | **Audio bed** — low room tone + occasional distant keys | — | Event-driven via the existing `sound.ts`; negligible cost, gated by the existing sound toggle. |
 
 On a quiet room this means: Tier A gives swaying plants, breathing monitor glows, drifting light, and the
