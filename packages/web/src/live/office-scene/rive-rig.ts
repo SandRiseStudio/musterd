@@ -1,6 +1,6 @@
 import RiveCanvas from '@rive-app/canvas-advanced';
 import riveWasmUrl from '@rive-app/canvas-advanced/rive.wasm?url';
-import { officeToRig } from './rig';
+import { officeToRig, spriteKey } from './rig';
 import type { OfficeNode, Pose } from './types';
 
 /**
@@ -23,6 +23,12 @@ const ARTBOARD_H = 260;
 const FEET_X = 90 / ARTBOARD_W; // 0.5
 const FEET_Y = 235 / ARTBOARD_H;
 const SS = 2; // supersample the offscreen for crisp downscaled blits
+/** After an input change (e.g. a member settling from a gesture back to idle), keep advancing + rendering
+ * this many frames so the Rive state-machine transition plays out, *then* freeze into the sprite-cache.
+ * Long enough to cover the idle-transition (preserving the afterglow ease, ADR 086 #5), short enough that a
+ * settled seat still stops costing a Rive advance. Sized in frames, so it's a touch longer under the 20fps
+ * ambient cap — harmless. */
+const SETTLE_FRAMES = 30;
 
 /** `#aarrggbb` → uint32 ARGB (Rive colour value). */
 function argbUint(hex: string): number {
@@ -36,6 +42,21 @@ interface Member {
     number(p: string): { value: number } | null | undefined;
     color(p: string): { value: number } | null | undefined;
   };
+  // ── Idle sprite-cache (ADR 086 Phase 3) ──────────────────────────────────────────────────────────
+  /** Last rendered appearance signature (from `spriteKey`); a change (or a move) marks the member dirty. */
+  key: string;
+  /** This member needs a live Rive advance + re-render this frame; set in `advance`, cleared in `draw`. */
+  dirty: boolean;
+  /** True while the member's pose is moving — never cached (its animation phase changes every frame) and
+   * blitted sub-pixel for smooth travel; a still member is integer-aligned to avoid subpixel blur. */
+  moving: boolean;
+  /** Frames left to keep re-rendering after the last input change so a state transition settles on-screen
+   * before the frame freezes into the cache. */
+  settle: number;
+  /** The member's last rendered frame, held so an unchanged idle seat blits a bitmap instead of re-running
+   * Rive. Null until the first render; dropped with the member when they leave. */
+  cache: HTMLCanvasElement | null;
+  cctx: CanvasRenderingContext2D | null;
 }
 
 /** Set a VM colour only if the asset exposes it — so a property added to a newer `.riv` (e.g. `hairColor`)
@@ -91,7 +112,7 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
         const vm = file.viewModelByName('Character');
         const vmi = vm.instanceByName('Instance') ?? vm.defaultInstance();
         artboard.bindViewModelInstance(vmi);
-        m = { artboard, sm, vmi };
+        m = { artboard, sm, vmi, key: '', dirty: true, moving: false, settle: 0, cache: null, cctx: null };
         members.set(name, m);
       }
       return m;
@@ -99,11 +120,22 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
 
     return {
       advance(dt, present) {
-        // drop instances for members who left
+        // drop instances for members who left (their cache canvas goes with them)
         for (const name of [...members.keys()]) if (!present.has(name)) members.delete(name);
         for (const [name, { node, pose }] of present) {
           const m = ensure(name);
           const r = officeToRig(node, pose);
+          const key = spriteKey(r);
+          if (key !== m.key) m.settle = SETTLE_FRAMES; // an input flipped — let the transition play out
+          m.key = key;
+          m.moving = pose.moving;
+          // A member is dirty (needs a live Rive advance + re-render) while moving, while settling after a
+          // change, or before it has ever been cached. Otherwise it's a stable seat — skip Rive entirely
+          // and blit its cached frame in `draw`. This is the single largest Rive cost saver (ADR 086 #2):
+          // during a walk only the 0–1 movers (+ any settling member) run the state machine; the rest hold.
+          m.dirty = pose.moving || m.settle > 0 || m.cache === null;
+          if (!m.dirty) continue;
+          if (m.settle > 0) m.settle--;
           m.vmi.color('accentColor')!.value = argbUint(r.accentColor);
           m.vmi.color('accentDark')!.value = argbUint(r.accentDark);
           m.vmi.color('skinColor')!.value = argbUint(r.skinColor);
@@ -128,19 +160,43 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
       draw(ctx, name, feetX, feetY, spriteH) {
         const m = members.get(name);
         if (!m) return;
-        renderer.clear();
-        renderer.save();
-        renderer.scale(SS, SS);
-        m.artboard.draw(renderer);
-        renderer.restore();
-        renderer.flush();
-        // canvas-advanced batches its 2D commands until its frame handler runs; since the office drives
-        // its own rAF, resolve Rive's frame explicitly or the offscreen stays blank.
-        rive.resolveAnimationFrame?.();
         const scale = spriteH / ARTBOARD_H;
         const w = ARTBOARD_W * scale;
         const h = ARTBOARD_H * scale;
-        ctx.drawImage(offscreen, 0, 0, offscreen.width, offscreen.height, feetX - FEET_X * w, feetY - FEET_Y * h, w, h);
+        // A still member is integer-aligned to kill subpixel blur (ADR 086); a mover keeps sub-pixel
+        // placement so its travel stays smooth rather than shimmering frame to frame.
+        const ox = feetX - FEET_X * w;
+        const oy = feetY - FEET_Y * h;
+        const dx = m.moving ? ox : Math.round(ox);
+        const dy = m.moving ? oy : Math.round(oy);
+        if (m.dirty || !m.cache) {
+          // Live render: draw the artboard to the shared offscreen, blit it, and snapshot it into the
+          // member's cache so subsequent idle frames can reuse it without touching Rive.
+          renderer.clear();
+          renderer.save();
+          renderer.scale(SS, SS);
+          m.artboard.draw(renderer);
+          renderer.restore();
+          renderer.flush();
+          // canvas-advanced batches its 2D commands until its frame handler runs; since the office drives
+          // its own rAF, resolve Rive's frame explicitly or the offscreen stays blank.
+          rive.resolveAnimationFrame?.();
+          if (!m.cache) {
+            m.cache = document.createElement('canvas');
+            m.cache.width = offscreen.width;
+            m.cache.height = offscreen.height;
+            m.cctx = m.cache.getContext('2d');
+          }
+          if (m.cctx) {
+            m.cctx.clearRect(0, 0, m.cache.width, m.cache.height);
+            m.cctx.drawImage(offscreen, 0, 0);
+          }
+          m.dirty = false;
+          ctx.drawImage(offscreen, 0, 0, offscreen.width, offscreen.height, dx, dy, w, h);
+        } else {
+          // Stable seat: blit the cached frame — no Rive advance, no re-render.
+          ctx.drawImage(m.cache, 0, 0, m.cache.width, m.cache.height, dx, dy, w, h);
+        }
       },
       dispose() {
         members.clear();
