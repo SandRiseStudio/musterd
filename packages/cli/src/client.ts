@@ -523,6 +523,7 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
           target: opts.target,
           surface: opts.surface as Surface,
           ...(opts.grant !== undefined ? { grant: opts.grant } : {}),
+          ...(opts.workspace !== undefined ? { workspace: opts.workspace } : {}),
         }),
       ),
     );

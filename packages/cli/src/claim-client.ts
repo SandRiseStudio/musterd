@@ -48,6 +48,7 @@ export function buildClaimFrame(input: {
   target: ClaimTarget;
   surface: Surface;
   grant?: string;
+  workspace?: string;
 }): ClaimFrame {
   return ClaimFrame.parse({
     type: 'claim',
@@ -56,6 +57,10 @@ export function buildClaimFrame(input: {
     key: input.key,
     target: input.target,
     ...(input.grant !== undefined ? { grant: input.grant } : {}),
+    // The claiming workspace (ADR 068) — scopes single-active and labels the presence's "where", so a
+    // CLI-claimed seat reads with a real workspace instead of null (also lets a bare re-claim tell
+    // "already live *here*" from "live elsewhere", ADR 087).
+    ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
     surface: input.surface,
   });
 }

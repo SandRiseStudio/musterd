@@ -1,5 +1,5 @@
 import { resolveWorkspace } from '@musterd/mcp';
-import { type Binding, type ClaimPolicy, type Surface } from '@musterd/protocol';
+import { bindingSeat, type Binding, type ClaimPolicy, type Surface } from '@musterd/protocol';
 import pc from 'picocolors';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient, watchClaim } from '../client.js';
@@ -61,6 +61,32 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
 
   const http = new HttpClient({ server, surface });
   const { members } = await http.roster(team);
+  const workspace = resolveWorkspace();
+
+  // Consolidated self-service (ADR 087): a bare `musterd claim` (no seat/role given) in a folder whose
+  // bound seat is already live *in this workspace* is a "who am I" confirmation, not a re-claim — print
+  // the identity and stop, folding whoami into the one verb an agent reaches for. An explicit target, or
+  // a seat that's offline or live in another workspace, still runs the claim handshake below.
+  const boundSeat = binding ? bindingSeat(binding) : undefined;
+  const bareClaim = !parsed.positionals[0] && flagStr(flags, 'role') === undefined;
+  if (bareClaim && boundSeat) {
+    const liveHere = members
+      .find((m) => m.name === boundSeat)
+      ?.presences.some((p) => p.status !== 'offline' && p.workspace === workspace);
+    if (liveHere) {
+      if (flags['json']) {
+        process.stdout.write(
+          JSON.stringify({ team, member: boundSeat, live: true, already: true }) + '\n',
+        );
+      } else {
+        process.stdout.write(
+          `${theme.ok('✓')} ${theme.memberName(boundSeat, 'agent')} — already live on ${theme.accent(team)} ` +
+            `in this folder ${pc.dim(`(${surface})`)}\n`,
+        );
+      }
+      return 0;
+    }
+  }
 
   // ADR 066 clobber guard. Claiming a *different* seat into a folder silently repoints its binding —
   // fine for a stale/offline seat, a collision when the bound member is live. Refuse and point at the
@@ -83,7 +109,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
   // scope the marker that gets cleared; the resolved seat is delivered via the resolution sidecar.
   // Scope to *this* workspace so a marker written by a sibling launch sharing the same `.musterd`
   // (or a pre-fix leaked global marker) can't trip the multi-pending guard on an unrelated claim.
-  const pendings = listPendingForWorkspace(process.cwd(), team, resolveWorkspace());
+  const pendings = listPendingForWorkspace(process.cwd(), team, workspace);
   const forCode = flagStr(flags, 'for');
   if (!forCode && pendings.length > 1) {
     const list = pendings
@@ -140,6 +166,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
       key: agentKey,
       target,
       surface,
+      workspace,
       ...(grant !== undefined ? { grant } : {}),
       onOccupied: (occupiedSeat, _presenceId, resumeGrant) => {
         const seat = occupiedSeat.name;
