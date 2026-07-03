@@ -173,6 +173,22 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     expect(r.drift.some((d) => d.includes('is gone'))).toBe(true);
   });
 
+  it('does not flag a freshly-written, untouched skill as edited', async () => {
+    // Regression guard: the stamp hashes the newline-normalized body, so an unedited file round-trips
+    // and the doctor stays quiet. (Hashing the raw renderable falsely flagged every fresh file, since
+    // the renderers `join('\n')` with no trailing newline.)
+    const dir = tmp();
+    const g = writeGuidance(dir, [], { team: 'dawn' });
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: g.files, contentVersion: g.contentVersion },
+    });
+    const r = await inspectProvisioning(dir);
+    expect(r.notes.some((n) => n.includes('local edits'))).toBe(false);
+  });
+
   it('reports a hand-edited skill as a warn-only note, not drift', async () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });

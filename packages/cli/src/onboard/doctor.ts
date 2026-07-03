@@ -79,7 +79,8 @@ function inspectGuidance(cwd: string): { drift: string[]; notes: string[] } {
       );
     } else if (contentHash(strippedBody(text)) !== stamp.hash) {
       notes.push(
-        `${rel} has local edits — musterd won't overwrite it; re-run \`musterd init --force\` to reset.`,
+        `${rel} has local edits — this is a musterd-managed file, so \`musterd init\` will replace them ` +
+          `on the next run. Put your own guidance in AGENTS.md (around the markers) to keep it.`,
       );
     }
   }
