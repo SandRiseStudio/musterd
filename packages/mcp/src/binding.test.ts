@@ -112,3 +112,33 @@ describe('loadMcpConfig committed launch-spec fallback (ADR: committed launch sp
     expect(cfg.server).toBe('http://localhost:9999');
   });
 });
+
+describe('claimCode stability (ADR 087 — a reconnect must not orphan --for <code>)', () => {
+  const seatEnv = {
+    MUSTERD_TEAM: 'lab',
+    MUSTERD_CLAIM: 'seat:Ada',
+    MUSTERD_WORKSPACE: 'ws-fixed',
+    MUSTERD_SURFACE: 'claude-code',
+  };
+
+  it('a seat-mode session gets the SAME code across process loads (stable, hash-derived)', () => {
+    const a = loadMcpConfig(seatEnv);
+    const b = loadMcpConfig(seatEnv);
+    expect(a.claimCode).toBe(b.claimCode);
+    expect(a.claimCode).toMatch(/^[A-Z0-9]{4}$/);
+    // connId stays unique per process (transport/hub identity) even when the code is stable.
+    expect(a.connId).not.toBe(b.connId);
+  });
+
+  it('the stable code varies by seat, workspace, and surface (the identity of "same seat")', () => {
+    const base = loadMcpConfig(seatEnv).claimCode;
+    expect(loadMcpConfig({ ...seatEnv, MUSTERD_CLAIM: 'seat:Bob' }).claimCode).not.toBe(base);
+    expect(loadMcpConfig({ ...seatEnv, MUSTERD_WORKSPACE: 'ws-other' }).claimCode).not.toBe(base);
+    expect(loadMcpConfig({ ...seatEnv, MUSTERD_SURFACE: 'cursor' }).claimCode).not.toBe(base);
+  });
+
+  it('role/chat sessions keep a fresh per-process code (several may share one folder)', () => {
+    const roleEnv = { MUSTERD_TEAM: 'lab', MUSTERD_CLAIM: 'role:backend', MUSTERD_WORKSPACE: 'ws' };
+    expect(loadMcpConfig(roleEnv).claimCode).not.toBe(loadMcpConfig(roleEnv).claimCode);
+  });
+});
