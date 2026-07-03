@@ -36,16 +36,19 @@ export async function claimAndJoin(
   client: MusterdClient,
   config: McpConfig,
   target: ClaimTarget,
+  waitMs?: number,
 ): Promise<ClaimResult> {
   const reused =
     client.claimed && 'seat' in target && client.member === target.seat && client.joined;
   if (reused) return { member: client.member!, reused: true };
 
   // Point the claim at the target; `join()` presents the agent key + this target and resolves the seat.
+  // When no grant is present the server opens an approval request; `join()` parks on it up to `waitMs`
+  // (ADR 087 — one blocking call through the single approval).
   config.claim =
     'seat' in target ? { mode: 'seat', name: target.seat } : { mode: 'role', role: target.role };
   try {
-    await client.join();
+    await client.join(waitMs);
   } catch (err) {
     const msg = (err as Error).message;
     if (/claim_conflict|conflict|occupied|busy/i.test(msg)) {

@@ -10,8 +10,13 @@ const DESCRIPTION =
   'Claim a seat on your team and go online — call this once when you start working. ' +
   'Overloaded (claim-on-first-use): {as:"Ada"} claims a named seat (auto-minted if new); ' +
   '{role:"backend"} claims the next open seat in a role pool (e.g. backend-2); {} uses this ' +
-  "folder's claim policy. The result tells you who you are. Until you claim you are a pending " +
-  'presence — reachable, but you cannot send or check your inbox. After joining, check your inbox.';
+  "folder's claim policy. The result tells you who you are. If the seat needs admin approval this " +
+  'blocks until an admin approves (then occupies), so a single call gets you seated. After joining, ' +
+  'check your inbox.';
+
+/** How long team_join blocks waiting for an admin to approve a claim before returning (ADR 087). A
+ *  later approval still occupies in the background — a follow-up team_join then reports already-joined. */
+const JOIN_WAIT_MS = 120_000;
 
 /**
  * Resolve what to claim: explicit `as`/`role` win; else an already-bound identity (back-compat — an
@@ -55,9 +60,9 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
         );
       }
 
-      // Claim the seat (mint-or-reuse, local auto-mint), then occupy it.
+      // Claim the seat (mint-or-reuse, local auto-mint), then occupy it — blocking through one approval.
       try {
-        const result = await claimAndJoin(client, config, target);
+        const result = await claimAndJoin(client, config, target, JOIN_WAIT_MS);
         const role = 'role' in target ? ` (role ${target.role})` : '';
         return textResult(
           `Joined ${config.team} as ${result.member}${role} (${config.surface}). ` +
@@ -71,6 +76,16 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
         if (err instanceof ClaimConflictError) {
           const free = err.claimable.length ? ` On the team: ${err.claimable.join(', ')}.` : '';
           return textResult(`Can't claim that seat — ${err.message}${free}`);
+        }
+        // Still parked on an approval request when the wait elapsed (ADR 087): the claim is open and the
+        // seat occupies automatically once an admin approves — no need to re-open a request.
+        const reqId = client.awaitingRequestId;
+        if (reqId) {
+          return textResult(
+            `Waiting on admin approval to claim your seat on ${config.team} — request ${reqId}. ` +
+              `Ask an admin to run \`musterd requests decide ${reqId} --approve\`. You'll occupy the ` +
+              `seat automatically the moment they do; call team_join again to confirm you're live.`,
+          );
         }
         return textResult(`Could not join ${config.team}: ${(err as Error).message}`);
       }

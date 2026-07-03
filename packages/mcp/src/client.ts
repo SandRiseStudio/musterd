@@ -35,6 +35,13 @@ export class MusterdClient {
   private joinedFlag = false;
   /** Resolves/rejects the in-flight join() on the first welcome / error frame. */
   private pendingJoin: { resolve: () => void; reject: (e: Error) => void } | null = null;
+  /** Bounds a parked join() waiting on admin approval (ADR 087) — cleared on any terminal frame. */
+  private joinTimer: NodeJS.Timeout | null = null;
+  /** True for a blocking join() (team_join): a `pending` frame parks (waits for the pushed decision)
+   *  instead of rejecting. False for best-effort autojoin, which stays a pending presence on `pending`. */
+  private waitOnPending = false;
+  /** The open claim request id while parked on `pending` (surfaced by team_join on a wait timeout). */
+  private pendingRequestId: string | null = null;
   /** Why the last join attempt failed — surfaced by the dormant tool guards so a silent autojoin
    * failure (e.g. wrong-db token rejection) is visible to the agent, not just "call team_join". */
   private lastJoinErrorMsg: string | null = null;
@@ -191,7 +198,7 @@ export class MusterdClient {
    * Rejects if the seat is already live in another session (`member_busy`) or the hello is refused.
    * Idempotent while already joined. Explicit activation — nothing claims presence before this (M3).
    */
-  join(): Promise<void> {
+  join(timeoutMs?: number): Promise<void> {
     if (this.joinedFlag) return Promise.resolve();
     if (!this.config.agent_key) {
       return Promise.reject(
@@ -206,10 +213,49 @@ export class MusterdClient {
       );
     }
     this.wantPresence = true;
+    this.waitOnPending = (timeoutMs ?? 0) > 0;
     return new Promise<void>((resolve, reject) => {
-      this.pendingJoin = { resolve, reject };
+      let settled = false;
+      const clearTimer = () => {
+        if (this.joinTimer) clearTimeout(this.joinTimer);
+        this.joinTimer = null;
+      };
+      // One blocking call (ADR 087): resolve on `occupied`, reject on a terminal refusal — and, when a
+      // claim parks on `pending`, keep waiting for the admin's pushed decision instead of returning.
+      this.pendingJoin = {
+        resolve: () => {
+          if (settled) return;
+          settled = true;
+          clearTimer();
+          resolve();
+        },
+        reject: (e: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimer();
+          reject(e);
+        },
+      };
+      if (timeoutMs && timeoutMs > 0) {
+        this.joinTimer = setTimeout(() => {
+          // Timed out waiting for approval. Detach this call but leave the socket OPEN so a later
+          // approval still occupies in the background (the pushed `occupied` sets joined + persists the
+          // resume token); a follow-up team_join then reports "already joined".
+          this.pendingJoin = null;
+          if (settled) return;
+          settled = true;
+          this.joinTimer = null;
+          reject(new Error(this.lastJoinErrorMsg ?? 'timed out waiting for admin approval'));
+        }, timeoutMs);
+        this.joinTimer.unref?.();
+      }
       this.openSocket();
     });
+  }
+
+  /** The open claim request id while this session is parked awaiting approval (ADR 087), or null. */
+  get awaitingRequestId(): string | null {
+    return this.pendingRequestId;
   }
 
   /** The seat/role this session claims: a resolved seat re-occupies itself; else the claim policy. */
@@ -265,6 +311,8 @@ export class MusterdClient {
         // Claim succeeded — the server resolved + assigned the seat (a role pool's `<role>-<n>` too).
         this.joinedFlag = true;
         this.lastJoinErrorMsg = null;
+        this.pendingRequestId = null;
+        this.waitOnPending = false;
         this.config.member = frame.seat.name;
         // Resume token (ADR 087): the first approval delivers a reusable grant here — keep it so
         // `persistBinding` writes it into `binding.grant` and reconnects re-occupy without approval.
@@ -280,27 +328,37 @@ export class MusterdClient {
         // Terminal denial (seat occupied / not admin / expired grant, etc.) — stop holding the seat
         // and don't thrash reconnecting (a reconnect would just be refused again).
         this.wantPresence = false;
+        this.pendingRequestId = null;
+        this.waitOnPending = false;
         const msg = `${frame.code}: ${frame.message}`;
         this.lastJoinErrorMsg = msg;
         this.pendingJoin?.reject(new Error(msg));
         this.pendingJoin = null;
         ws.close();
       } else if (frame.type === 'pending') {
-        // No grant — the server opened a claim request (A.5). The MCP adapter surfaces it and stops
-        // holding; the agent re-joins once an admin approves. (Auto-resume on the pushed `occupied`
-        // is a follow-up — spec-gap 3.)
-        this.wantPresence = false;
-        const msg = `pending approval — request ${frame.request_id} (an admin must approve)`;
-        this.lastJoinErrorMsg = msg;
-        this.pendingJoin?.reject(new Error(msg));
-        this.pendingJoin = null;
-        ws.close();
+        // No grant — the server opened a claim request (A.5) and holds this socket open.
+        this.pendingRequestId = frame.request_id;
+        this.lastJoinErrorMsg = `pending approval — request ${frame.request_id} (an admin must approve)`;
+        if (this.waitOnPending) {
+          // Blocking team_join (ADR 087, spec-gap 3): park — keep the socket + pendingJoin so the
+          // admin's pushed terminal `occupied`/`refused` resolves this same call. No reject, no close,
+          // no reconnect thrash. join()'s timeout bounds the wait; a later push still occupies silently.
+        } else {
+          // Best-effort autojoin: stay a pending presence (the marker + resolution-watcher path handle
+          // the eventual claim). Reject so startup doesn't hang, and don't hold the socket.
+          this.wantPresence = false;
+          this.pendingJoin?.reject(new Error(this.lastJoinErrorMsg));
+          this.pendingJoin = null;
+          ws.close();
+        }
       } else if (frame.type === 'error' && frame.code === 'superseded') {
         // Newest-wins (ADR 017): a newer session of this seat took it over. Stop holding and do **not**
         // reconnect — otherwise two sessions of one identity ping-pong displacing each other forever
         // (the claim-supersede war). Terminal, like refused/pending.
         this.wantPresence = false;
         this.joinedFlag = false;
+        this.pendingRequestId = null;
+        this.waitOnPending = false;
         this.lastJoinErrorMsg = `${frame.code}: ${frame.message}`;
         this.pendingJoin?.reject(new Error(this.lastJoinErrorMsg));
         this.pendingJoin = null;
@@ -311,6 +369,8 @@ export class MusterdClient {
     });
     ws.on('close', () => {
       this.joinedFlag = false;
+      this.pendingRequestId = null;
+      this.waitOnPending = false;
       if (this.heartbeat) clearInterval(this.heartbeat);
       this.heartbeat = null;
       if (this.pendingJoin) {
