@@ -11,8 +11,8 @@ import {
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
-import { HttpClient } from '../client.js';
-import { saveBinding } from '../config.js';
+import { HttpClient, watchClaim } from '../client.js';
+import { saveBinding, wsBase } from '../config.js';
 import { writePending } from '../onboard/pending.js';
 import { claimCommand } from './claim.js';
 import { WAIT_TIMEOUT_EXIT } from './inbox.js';
@@ -179,6 +179,46 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     expect(b.claim).toEqual({ mode: 'seat', name: 'Ada' });
     // The resume token is persisted so a reconnect re-occupies without another approval.
     expect(b.grant).toMatch(/^msgr_/);
+  }, 10_000);
+
+  it('a bare claim reports identity (no re-claim) when the seat is already live in this workspace (ADR 087)', async () => {
+    await declareSeat('Ada');
+    const g = await grant('Ada');
+    // Hold Ada live from THIS workspace via a persistent session (stands in for the folder's adapter).
+    const held = watchClaim({
+      wsUrl: wsBase(serverUrl) + '/ws',
+      team: 'dawn',
+      key: agentKey,
+      target: { seat: 'Ada' },
+      surface: 'claude-code',
+      workspace: 'ws-here',
+      grant: g,
+      onDeliver: () => {},
+    });
+    try {
+      // Wait until Ada shows online in ws-here.
+      for (let i = 0; i < 50; i++) {
+        const { members } = await new HttpClient({ server: serverUrl }).roster('dawn');
+        const ada = members.find((m) => m.name === 'Ada');
+        if (ada?.presences.some((p) => p.status !== 'offline' && p.workspace === 'ws-here')) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      // Bind this folder to Ada, then a bare `claim` should just confirm — not re-run the handshake.
+      saveBinding(cwd, {
+        server: serverUrl,
+        team: 'dawn',
+        agent_key: agentKey,
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'Ada' },
+        grant: g,
+      });
+      const { code, out } = await run([]);
+      expect(code).toBe(0);
+      expect(out).toMatch(/already live/i);
+      expect(out).toContain('Ada');
+    } finally {
+      held.close();
+    }
   }, 10_000);
 
   it('claims the next open pool seat for a role (server-resolved)', async () => {

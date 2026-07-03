@@ -8,7 +8,7 @@ export const HELP = `${'musterd'} — muster your agents and humans into persist
 
 usage:
   musterd --version                             print the installed @musterd/cli version
-  musterd init [--check]                        interactive first-run setup (recommended); --check reports provisioning drift without writing
+  musterd init [--check [--fix]]                interactive first-run setup (recommended); --check reports provisioning drift without writing; add --fix to repair it by re-running init
   musterd wire [--autojoin] [--key mskey_…]     headless: register the MCP server from this folder's committed .musterd/workspace.json (self-wire a fresh clone; no prompts, no seat claim unless --autojoin)
   musterd serve [--port 4849] [--host 127.0.0.1] [--tls-cert <pem> --tls-key <pem> | --insecure-trust-proxy]
   musterd service <install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow] [--force]   run the daemon as a background service (macOS LaunchAgent)
