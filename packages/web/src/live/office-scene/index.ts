@@ -20,9 +20,11 @@ const SPEECH_LIFT = 26;
  * freezing mid-gesture (ADR 086 #5 afterglow) — a brief, bounded post-act tail, not a continuous loop. */
 const AFTERGLOW_MS = 2600;
 /** Ambient micro-choreography (ADR 086 Phase 2): when the room is quiet, inject a gentle coffee-stroll
- * every ~15–25s. Timer-based (not RAF), one beat at a time, always preempted by a real act. */
-const AMBIENT_MIN_MS = 15000;
-const AMBIENT_MAX_MS = 25000;
+ * every ~90–180s. Timer-based (not RAF), one beat at a time, always preempted by a real act. This is the
+ * whole-room cadence — on a small present roster it divides down to each person, so it must read as an
+ * *occasional* break, not a constant water-cooler parade (the original 15–25s looked absurd on 2 people). */
+const AMBIENT_MIN_MS = 90000;
+const AMBIENT_MAX_MS = 180000;
 /** While Tier B is awake for an *ambient-only* beat, coalesce toward ~20fps: only advance+redraw once
  * this much wall time has built up. A coffee stroll is visually identical at 20fps and ~3× cheaper; real
  * acts keep 60fps because their motion is not `ambientOnly`. */
