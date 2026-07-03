@@ -166,6 +166,21 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Ada' });
   }, 10_000);
 
+  it('a ttl approval delivers a resume token that lands in binding.grant (ADR 087)', async () => {
+    await declareSeat('Ada');
+    const claiming = run(['Ada', '--team', 'dawn', '--timeout', '5']);
+    const requestId = await firstPendingRequestId();
+    // A ttl approval is the resume-friendly default — it mints a reusable grant + delivers its token.
+    await decide(requestId, { decision: 'approve', lifetime: 'ttl' });
+
+    const { code } = await claiming;
+    expect(code).toBe(0);
+    const b = readBinding();
+    expect(b.claim).toEqual({ mode: 'seat', name: 'Ada' });
+    // The resume token is persisted so a reconnect re-occupies without another approval.
+    expect(b.grant).toMatch(/^msgr_/);
+  }, 10_000);
+
   it('claims the next open pool seat for a role (server-resolved)', async () => {
     await declareSeat('backend-1', 'backend');
     const g = await grant('backend', 'role');

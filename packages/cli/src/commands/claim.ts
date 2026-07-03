@@ -141,8 +141,11 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
       target,
       surface,
       ...(grant !== undefined ? { grant } : {}),
-      onOccupied: (occupiedSeat) => {
+      onOccupied: (occupiedSeat, _presenceId, resumeGrant) => {
         const seat = occupiedSeat.name;
+        // Prefer a freshly-delivered resume token (ADR 087, first approval) over any grant we claimed
+        // with, so `binding.grant` carries the reusable token that re-occupies this seat silently.
+        const effectiveGrant = resumeGrant ?? grant;
         const next: Binding = {
           server,
           team,
@@ -150,7 +153,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
           surface: surface as Binding['surface'],
           // Record the resolved seat as the folder's standing policy so re-launches re-occupy it.
           claim: { mode: 'seat', name: seat },
-          ...(grant !== undefined ? { grant } : {}),
+          ...(effectiveGrant !== undefined ? { grant: effectiveGrant } : {}),
         };
         saveBinding(process.cwd(), next);
 
