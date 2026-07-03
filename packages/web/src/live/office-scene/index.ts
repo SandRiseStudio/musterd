@@ -328,11 +328,11 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   let acc = 0; // wall time accrued since the last drawn frame — coalesced under the ambient FPS cap
   let wasActive = false;
   function tick(now: number) {
-    const settling = rig != null && lastActive > 0 && now - lastActive < AFTERGLOW_MS;
     // Idle-FPS cap (ADR 086 Phase 2): when the only motion is an ambient beat, don't advance/redraw every
     // frame — accrue wall time and coalesce toward ~20fps. Real acts (not `ambientOnly`) and the afterglow
     // settle keep the full frame rate. Accumulate `dt` so the walk maths stay correct with fewer samples.
-    const capped = actors.ambientOnly() && cues.length === 0 && !settling;
+    const inAfterglow = rig != null && lastActive > 0 && now - lastActive < AFTERGLOW_MS;
+    const capped = actors.ambientOnly() && cues.length === 0 && !inAfterglow;
     acc += last ? now - last : 1000 / 60;
     last = now;
     if (capped && acc < AMBIENT_FRAME_MS) {
@@ -347,6 +347,11 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       c.t += dt / CUE_SECS;
       if (c.t >= 1) cues.splice(i, 1);
     }
+    // Anchor the afterglow window to the *end* of motion, not to emit-time: a walk-help/handoff often
+    // outlasts AFTERGLOW_MS, so keep `lastActive` fresh while anything is moving. Then the settle tail
+    // measures from the frame the last walk/cue clears — the Rive character eases into idle rather than
+    // freezing the instant a long walk ends (#5).
+    if (walking || cues.length) lastActive = now;
     if (rig) {
       advanceRig(dt);
       drawDynamic();
@@ -361,8 +366,9 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     // office *rest*: Rive characters animate continuously, so gating the loop on `rig` (as before) meant it
     // never stopped and redrew every frame forever. Now, when the last walk/cue clears we draw one final
     // settled frame (above) and park — the frame stays on-canvas until the next act or presence change.
-    // Afterglow (#5): for a brief window after the last act, keep advancing so the Rive character settles
+    // Afterglow (#5): for a brief window after the last motion, keep advancing so the Rive character settles
     // into idle instead of freezing mid-gesture — a bounded post-act tail, not a continuous loop.
+    const settling = rig != null && lastActive > 0 && now - lastActive < AFTERGLOW_MS;
     if ((walking || cues.length || settling) && !reduced && VISIBLE()) {
       raf = requestAnimationFrame(tick);
     } else {

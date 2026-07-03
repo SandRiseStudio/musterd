@@ -110,11 +110,14 @@ interface Walk {
   /** A self-generated ambient beat (coffee-stroll), not a real act — runs at a capped idle FPS and
    * yields the instant a real act arrives (ADR 086 Phase 2). Carries no act semantics. */
   ambient?: boolean;
+  /** The low-priority walk-home that `cancelAmbient` leaves behind when a stroll yields. Like `ambient`,
+   * a real act for this member preempts it instantly rather than queuing behind it. */
+  yield?: boolean;
 }
 type Req = { kind: 'help' | 'handoff'; to: string; urgent: boolean };
 
 /** A point ~offset in front of `target`, on the side facing `mover` — where a visitor stands. */
-function approach(target: Pose, mover: Pose): { lx: number; ly: number } {
+function approach(target: { lx: number; ly: number }, mover: { lx: number; ly: number }): { lx: number; ly: number } {
   const dx = mover.lx - target.lx;
   const dy = mover.ly - target.ly;
   const d = Math.hypot(dx, dy) || 1;
@@ -215,11 +218,14 @@ export function createActors(): Actors {
     return out;
   }
 
-  function build(from: string, req: Req): Walk | null {
+  function build(from: string, req: Req, origin?: { lx: number; ly: number }): Walk | null {
     const home = homes.get(from);
     const target = homes.get(req.to);
     if (!home || !target) return null;
-    const a = approach(target, home);
+    // A preempted stroll starts from where the avatar currently stands (not a snap back to the seat);
+    // the return leg still homes to the seat. Normal act-walks start (and return) at the seat.
+    const start = origin ?? home;
+    const a = approach(target, start);
     const speed = req.urgent ? 165 : 100; // logical units / sec — amble over, or hurry when urgent
     const dur = (fx: number, fy: number, tx: number, ty: number): number =>
       clamp(Math.hypot(tx - fx, ty - fy) / speed, 1.4, 4.5);
@@ -228,7 +234,7 @@ export function createActors(): Actors {
     const holdBubble: Bubble = req.kind === 'help' ? (req.urgent ? '!' : '?') : null;
     return {
       legs: [
-        { fx: home.lx, fy: home.ly, tx: a.lx, ty: a.ly, dir: travelDir(home.lx, home.ly, a.lx, a.ly), dur: dur(home.lx, home.ly, a.lx, a.ly), carry, bubble: null },
+        { fx: start.lx, fy: start.ly, tx: a.lx, ty: a.ly, dir: travelDir(start.lx, start.ly, a.lx, a.ly), dur: dur(start.lx, start.ly, a.lx, a.ly), carry, bubble: null },
         { fx: a.lx, fy: a.ly, tx: a.lx, ty: a.ly, dir: travelDir(a.lx, a.ly, target.lx, target.ly), dur: hold, carry, bubble: holdBubble },
         { fx: a.lx, fy: a.ly, tx: home.lx, ty: home.ly, dir: travelDir(a.lx, a.ly, home.lx, home.ly), dur: dur(a.lx, a.ly, home.lx, home.ly), carry: false, bubble: null },
       ],
@@ -303,6 +309,20 @@ export function createActors(): Actors {
     },
     walk(from, req) {
       if (!homes.has(from) || !homes.has(req.to) || from === req.to || exiting.has(from)) return false;
+      const inflight = walks.get(from);
+      if (inflight && (inflight.ambient || inflight.yield)) {
+        // A real act preempts a low-priority stroll (or its yield-home) *instantly* — it must never queue
+        // behind ambient filler (ADR 086: ambient never delays real choreography). Start the real trip
+        // from where the avatar currently stands so it doesn't snap back to the seat first.
+        const at = posesNow().get(from);
+        const w = build(from, req, at);
+        pending.delete(from);
+        if (w) {
+          walks.set(from, w);
+          return true;
+        }
+        walks.delete(from); // target vanished mid-swap — clear the stroll so nothing blocks
+      }
       const q = pending.get(from) ?? [];
       if (q.length >= 3) return false; // cap the backlog so a chatty pair doesn't march forever
       q.push(req);
@@ -354,8 +374,13 @@ export function createActors(): Actors {
         const at = cur.get(name);
         // Yield gracefully: if the walker has left home, walk them straight back (a plain non-ambient
         // walk — full-fps, not itself preemptable); if they're essentially home already, just drop it.
-        if (home && at && moved(at, home)) walks.set(name, straightWalk(at, home, false));
-        else walks.delete(name);
+        if (home && at && moved(at, home)) {
+          const back = straightWalk(at, home, false);
+          back.yield = true; // low-priority: a real act for this member preempts it instantly (see `walk`)
+          walks.set(name, back);
+        } else {
+          walks.delete(name);
+        }
       }
     },
     step(dt) {
