@@ -101,40 +101,30 @@ The three automated scenarios in `06-testing.md` pass: (A) two humans on one tea
 <!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
 ## Your musterd team
 
-You are a member of the **alpha** team — **claim your seat first** (`team_join`, or `musterd claim <name>` then `musterd status`) so teammates can see and reach you. musterd is your coordination layer: your teammates — other agents *and* humans — are
+You are a member of the **revive** team — **claim your seat first** (`team_join`, or `musterd claim <name>` then `musterd status`; a seat is claimed with the team **agent key** — set `MUSTERD_AGENT_KEY` or pass `--key mskey_…`, and an admin approves if no grant was pre-issued) so teammates can see and reach you. musterd is your coordination layer: your teammates — other agents *and* humans — are
 reachable through it, and humans on the team are peers, not approvers.
 
 **Your channel.** If this session has the `team_*` tools (the musterd MCP server), they are your
-channel — use them. If it does not, coordinate with the `musterd` CLI instead (`musterd help`): the
-same team and the same acts. Use one channel only — with the `team_*` tools, do not also drive the
-CLI (it can resolve to a different identity and your sends will fail).
+channel — use them. If it does not, coordinate with the `musterd` CLI instead. Use one channel only
+— with the `team_*` tools, do not also drive the CLI (it can resolve to a different identity and your
+sends will fail).
 
-Work as a teammate, not in isolation — `team_*` tool form / `musterd` CLI form:
+The loop — `team_*` tool form / `musterd` CLI form:
 
-- **Get on the team when you start.** `team_join` / `musterd claim <name>` then `musterd status` —
-  so teammates can see you and reach you.
-- **Check your inbox at every task boundary.** `team_inbox_check` / `musterd inbox` — when you
-  start, when you finish a unit of work, and after being heads-down. Messages addressed to you wait
-  there and teammates expect a reply.
+- **Get on the team when you start.** `team_join` / `musterd claim <name>` then `musterd status`, so
+  teammates can see and reach you.
+- **Check your inbox at every task boundary.** `team_inbox_check` / `musterd inbox` — on start, when
+  you finish a unit of work, and after being heads-down. Directed acts wait there for a reply.
 - **Report status as you work.** `team_send {act:'status_update'}` / `musterd send --act
-  status_update '<one line>'` — when you start a task and when you finish. This is what flips you to
-  `working` on the roster; without it teammates just see you as idle.
-- **Ask when you are blocked.** `team_send {act:'request_help'}` / `musterd send --act request_help
-  …` — instead of guessing; it is visible to the whole team.
-- **Hand off cleanly.** `team_send {act:'handoff'}` / `musterd send --act handoff …` passes a unit
-  of work (name the artifact); answer a `request_help`/`handoff` with `accept`/`decline` (set
-  `reply_to` / `--reply-to`).
-- **Close the loop when it is done.** `team_send {act:'resolve', thread:<id>}` / `musterd send --act
-  resolve --thread <id>` — accepting is not finishing; it clears the request from the team pending
-  view.
-- **See who is around.** `team_status` / `team_members` / `musterd status` — before you ask or hand
-  off.
-- **Wait for the next message without polling.** When you are idle and want to resume the moment a
-  teammate addresses you, run `musterd inbox --wait` — it blocks until the next directed act, then
-  exits. Under a harness re-invoker, pair it with `/loop`: `musterd inbox --wait && <do the work>` —
-  the cheap, no-poll wake loop (do not bolt inbox-polling onto a timer).
+  status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
+- **Own your work in a lane** and **hand off cleanly.** `lane_open` / `musterd lane open` when you
+  start; `team_send {act:'handoff'}` / `musterd send --act handoff` to pass work; close with `resolve`.
 
 Invoke the tools/commands for real and use what they return — never write down an imagined inbox or
-reply; if you did not call it, you do not know what is there. Keep messages short and purposeful:
-the acts are how the team coordinates — use them instead of narrating in free text.
+reply. Keep messages short: use the acts, do not narrate in free text.
+
+**Going past the basics?** Claiming or adopting a seat, handing off with a branch, lane contention,
+waiting on the inbox without polling, or recovering from an error — read the **musterd skill**
+(`.claude/skills/musterd/SKILL.md`, `.cursor/rules/musterd.mdc`, or `.musterd/skill/SKILL.md`) or run
+`musterd help` for the full command reference.
 <!-- musterd:end -->
