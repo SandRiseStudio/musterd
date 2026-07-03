@@ -14,7 +14,7 @@ export type Status = 'shipped' | 'near-term' | 'reserved' | 'out-of-scope';
  * "how imminent/designed" grouping; `wave` is the linear order we actually build in. Every unshipped,
  * in-scope item carries one; shipped/out-of-scope items omit it.
  */
-export type Wave = 1 | 2 | 3 | 'later';
+export type Wave = 1 | 2 | 3 | 4 | 'later';
 
 export type Category =
   | 'human-loop'
@@ -94,12 +94,16 @@ export const CATEGORY_ORDER: Category[] = [
 
 export const STATUS_ORDER: Status[] = ['shipped', 'near-term', 'reserved', 'out-of-scope'];
 
-export const WAVE_ORDER: Wave[] = [1, 2, 3, 'later'];
+export const WAVE_ORDER: Wave[] = [1, 2, 3, 4, 'later'];
 
 export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
   1: { label: 'Wave 1', tone: 'Harden the coordination loop — small, additive, evidence-backed.' },
   2: { label: 'Wave 2', tone: 'The v0.3 governance rock, then the full governed tiers it unlocks.' },
   3: { label: 'Wave 3', tone: 'Reach + the second-product seed.' },
+  4: {
+    label: 'Wave 4',
+    tone: 'The steerable team — mid-loop reachability + anti-staleness, so steering reaches a busy agent before it builds on a stale assumption.',
+  },
   later: { label: 'Later', tone: 'No near-term pull; opportunistic.' },
 };
 
@@ -430,8 +434,8 @@ export const ROADMAP: RoadmapItem[] = [
     category: 'transport',
     blurb: 'Plug the agent key + grant + human credential into the already-built secured off-loopback bind, so a teammate on another machine joins over wss with a real credential, not a locally-minted token.',
     detail:
-      'The credential layer ADR 039/040 named but did not build. The secured transport (TLS/wss refuse-plaintext bind, Origin/Host gate) is done and waiting; P4 is mostly integration — the cross-network claim flow over that channel + docs. Now unblocked: P3’s agent-key + grant + human-credential model shipped (2026-06-30), so P4 is the remaining cross-network claim flow over the secured channel. Deferred at the 2026-07-01 reprioritization: the wedge is local coordination + human partnership and there is no near-term pull for cross-network, so remote join waits behind the telemetry + lanes work.',
-    refs: [adr(69, 'ADR 069'), adr(39, 'ADR 039'), adr(40, 'ADR 040')],
+      'The credential layer ADR 039/040 named but did not build. The secured transport (TLS/wss refuse-plaintext bind, Origin/Host gate) is done and waiting; P4 is mostly integration — the cross-network claim flow over that channel + docs. Now unblocked: P3’s agent-key + grant + human-credential model shipped (2026-06-30), so P4 is the remaining cross-network claim flow over the secured channel. Deferred at the 2026-07-01 reprioritization: the wedge is local coordination + human partnership and there is no near-term pull for cross-network, so remote join waits behind the telemetry + lanes work. Cross-org reach also wants a bilateral cross-boundary *consent* flow (who may add whom across an org line): band.ai has productized exactly this as "contacts" (request → approval → mutual access) — a reference design worth borrowing when this lands (landscape.md §5).',
+    refs: [adr(69, 'ADR 069'), adr(39, 'ADR 039'), adr(40, 'ADR 040'), doc('docs/design/landscape.md', 'landscape.md')],
     dependsOn: ['v03-p3-credentials', 'cross-network'],
   },
   {
@@ -486,8 +490,9 @@ export const ROADMAP: RoadmapItem[] = [
     status: 'reserved',
     category: 'observability',
     blurb: 'A full CLI/MCP telemetry SDK, then MAST-aware views over the act-typed log that agent-observability tools cannot see.',
-    detail: 'The seed of a standalone coordination-observability product.',
-    refs: [doc('docs/design/observability.md', 'observability.md')],
+    detail:
+      'The seed of a standalone coordination-observability product. Borrow worth folding in: per-recipient delivery status on each act (delivered / processing / processed / failed, with attempt history) — band.ai ships this as first-class routing telemetry (landscape.md §5), and it generalizes the ADR 088 raised→read delivery-confirmation signal into a per-recipient act lifecycle.',
+    refs: [doc('docs/design/observability.md', 'observability.md'), doc('docs/design/landscape.md', 'landscape.md')],
     dependsOn: ['telemetry-l1'],
   },
   {
@@ -586,32 +591,29 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'orientation-spine',
-    wave: 3,
     title: 'Plan/Goal model + `musterd next`/`done`',
-    status: 'reserved',
+    status: 'shipped',
     category: 'insights',
     blurb: 'The orientation + handoff spine that kills the copy-paste toil: a declared Plan→Goal skeleton — the backlog noun — with derived status, and one-command next/done.',
     detail:
-      'From planning-and-insights-brainstorm.md (ADRs 048/049 as amended by ADR 084): the declared skeleton (Goal existence, intent, wave, dependsOn) owns the backlog noun; below a Goal the work items are lanes (ownership/contention, joined by an optional goal_id on the lane) and threads (the conversational fabric + zero-compliance fallback). Goal status is *derived* — lanes-first, threads-fallback — never stored; handoff carries a goal_id; `musterd next` / `musterd done`; SessionStart auto-injects orientation. This is the toil-killing spine the brainstorm sequences first; the insight engine projects over it.',
+      'From planning-and-insights-brainstorm.md (ADRs 048/049 as amended by ADR 084). Shipped in two increments: the goal_id lane join + deriveGoalStatus + `musterd next`/`done` + team_next (PR #79), then the declared-Goal seam — `musterd goal declare/list` + next_goal (PR #81). The declared skeleton (Goal existence, intent, wave, dependsOn) owns the backlog noun; below a Goal the work items are lanes (ownership/contention, joined by an optional goal_id on the lane) and threads (the conversational fabric + zero-compliance fallback). Goal status is *derived* — lanes-first, threads-fallback — never stored; handoff carries a goal_id; SessionStart auto-injects orientation. The toil-killing spine the brainstorm sequenced first; the insight engine projects over it.',
     refs: [adr(48, 'ADR 048'), adr(49, 'ADR 049'), adr(84, 'ADR 084'), doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights')],
   },
   {
     id: 'insight-engine',
-    wave: 3,
     title: 'Insight engine — server-side projections',
-    status: 'reserved',
+    status: 'shipped',
     category: 'insights',
     blurb: 'One projection engine in the daemon — Goal status, the board view, flow metrics, waiting-on — computed over Goals × lanes × threads, never stored, exposed as an HTTP API.',
     detail:
-      'The single engine every insight surface renders (ADR 050 as amended by ADR 084): derived Goal status (lanes-first, threads-fallback), the board projection (the IC altitude — every work item, its latest-state column), flow metrics from lane timestamps (cycle time, WIP, age, throughput), and the waiting-on view (openActionNeeded aggregated by recipient). Distinct from the shipped lanes contention board (ADR 083), which warns about overlap/dependency — this layer derives meaning from the same substrate. Goodhart guard: outcomes and queues, never message volume; v0.3 need-to-know governs derived human metrics.',
+      'The single engine every insight surface renders (ADR 050 as amended by ADR 084), shipped as the report engine — flow metrics + waiting-on + GET /report (PR #82): derived Goal status (lanes-first, threads-fallback), the board projection (the IC altitude — every work item, its latest-state column), flow metrics from lane timestamps (cycle time, WIP, age, throughput), and the waiting-on view (openActionNeeded aggregated by recipient). Distinct from the shipped lanes contention board (ADR 083), which warns about overlap/dependency — this layer derives meaning from the same substrate. Goodhart guard: outcomes and queues, never message volume; v0.3 need-to-know governs derived human metrics.',
     refs: [adr(50, 'ADR 050'), adr(84, 'ADR 084'), doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
     dependsOn: ['orientation-spine', 'resolve-act', 'coordination-lanes'],
   },
   {
     id: 'insight-cli-mcp',
-    wave: 3,
     title: 'Reporting altitudes + waiting-on view (CLI + MCP)',
-    status: 'reserved',
+    status: 'shipped',
     category: 'insights',
     blurb: '`musterd report` at IC/team/exec altitudes and the "N threads waiting on <human>" bottleneck view — the first surfaces of the insight engine, with MCP parity.',
     detail:
@@ -633,9 +635,8 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'coordination-density',
-    wave: 3,
     title: 'Coordination-density insight',
-    status: 'reserved',
+    status: 'shipped',
     category: 'insights',
     blurb: 'An insight that flags when a team’s traffic is all broadcast-journal and no directed or threaded exchange — coordination that only looks collaborative.',
     detail:
@@ -643,6 +644,81 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
     dependsOn: ['insight-engine'],
   },
+
+  // ── Wave 4 — the steerable team: mid-loop reachability (2026-07-03 brainstorm) ──
+  // The reachability ladder (046 heads-down / 053 blocked / 054 idle) has one rung left: a loop
+  // busy on its own work. ADR 088 + the agent-ontology + interrupt-line design docs freeze the arc;
+  // increment 1 is elevated to near-term (design already frozen, small, demo-able).
+  {
+    id: 'interrupt-line',
+    wave: 4,
+    title: 'The interrupt line — reach a busy agent mid-loop',
+    status: 'near-term',
+    category: 'human-loop',
+    blurb:
+      'A directed steer reaches an agent busy mid-task at its next tool-call boundary — the missing reachability rung for a loop that is neither idle nor blocked, but heads-down on its own work.',
+    detail:
+      'The frontier the Qoder demo failure named and our own P3 dogfood measured (~37% wasted work, the largest item a steer that arrived too late). ADR 088 freezes increment 1: `musterd inbox --interrupt-check` — a one-shot, local, sub-50ms query that exits silent when nothing waits and prints one daemon-composed line when an interrupt-class directed act does, provisioned by `musterd init` as a PostToolUse hook (verified by `init --check`, degrading to the ADR 046 per-command nudge where hooks are thin). Interrupt-class is scarce by construction (urgent tier gated by can_flag_urgent, ADR 044/071). Injection-surface mitigations are launch requirements: the line is daemon-composed (never the raw body), sender always shown, capability-gated. Its headline eval is *steering latency* (steer sent → recipient acknowledges) — the number the launch demo (hook on vs off) is built around. Resident harnesses (OpenClaw/Hermes) need the same policy at their gateway; the ladder is indexed by harness residency class (agent-ontology.md §4).',
+    refs: [
+      adr(88, 'ADR 088'),
+      doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line'),
+      doc('docs/design/agent-ontology.md', 'agent-ontology.md'),
+    ],
+    dependsOn: ['agent-reachability', 'wake-on-message'],
+  },
+  {
+    id: 'steer-challenge-acts',
+    wave: 4,
+    title: 'Steer & challenge acts (+ plan-mutation verbs)',
+    status: 'reserved',
+    category: 'human-loop',
+    blurb:
+      'Give steering first-class semantics: a directive `steer` that supersedes prior direction, an epistemic `challenge` that forces revalidation, and defer/reprioritize verbs on the plan.',
+    detail:
+      'Increment 2 of the interrupt-line arc (design §4.2–4.3). Today a change of direction is free-text `message`; this splits the vocabulary into **reorder/defer** (plan mutation on the Goal spine), **steer** (directive, interrupt-class, supersedes prior direction via ADR 017 so a late-waking agent sees only current direction — never a contradictory stack), and **challenge** (epistemic: "justify this assumption or reconsider it," answered with evidence — the Co-Gym humans-as-peers finding operationalized to steer *thinking*, not just tasks). Rides the interrupt line for delivery.',
+    refs: [adr(88, 'ADR 088'), adr(17, 'ADR 017'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
+    dependsOn: ['interrupt-line', 'orientation-spine'],
+  },
+  {
+    id: 'stale-plan-detection',
+    wave: 4,
+    title: 'Plan epochs & dependency-targeted invalidation',
+    status: 'reserved',
+    category: 'insights',
+    blurb:
+      'Catch stale work even when an interrupt misses: stamp a monotonic epoch on a goal, warn agents building against a superseded one, and invalidate only the lanes that actually depend on what changed.',
+    detail:
+      'Increment 3 of the arc (design §5), the semantic backstop for the deaf window the interrupt line cannot close (mid-generation, long single commands, approval-parked). **Plan epochs** = bounded staleness from async distributed training (workers on stale weights ≙ agents on superseded plans): a steer bumps the goal epoch, commands carry the epoch they build under, the daemon warns beyond a tolerance. **Targeted invalidation** = directory-based cache coherence (not broadcast/snooping): a lane that declares a dependency on another is flagged specifically when that dependency is steered or breaks — the P3 dependency-revert (53% of that session\'s waste) is exactly the miss this closes. Warn-never-block, watcher-not-gatekeeper.',
+    refs: [adr(88, 'ADR 088'), adr(84, 'ADR 084'), adr(83, 'ADR 083')],
+    dependsOn: ['interrupt-line', 'orientation-spine', 'coordination-lanes'],
+  },
+  {
+    id: 'harness-residency',
+    wave: 'later',
+    title: 'musterd gives any harness residency (resume the offline)',
+    status: 'reserved',
+    category: 'harness',
+    blurb:
+      'The offline rung: a seat binding holds the harness session id, so the daemon can resurrect an exited session on a directed act — turning a turn-scoped harness into an always-on one.',
+    detail:
+      'From agent-ontology.md §4 (residency classes). Turn-scoped harnesses (Claude Code, Cursor) die between turns; the strategic claim is that musterd, holding the session id, can resurrect them on a directed act (`claude --resume <id> -p …`). Nobody has built the multi-agent, multi-human, one-team residency layer — the always-on gateways (OpenClaw, Hermes) are single-agent, single-human. Bigger lift (session-id capture, harness-specific resume), no near-term pull, so it waits — but it is the top of the reachability ladder and the "musterd makes any harness always-on" position.',
+    refs: [doc('docs/design/agent-ontology.md', 'agent-ontology.md'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
+    dependsOn: ['wake-on-message'],
+  },
+  {
+    id: 'model-diversity',
+    wave: 'later',
+    title: 'Model diversity as a team-composition feature',
+    status: 'reserved',
+    category: 'observability',
+    blurb:
+      'Same-model agents agree in correlated ways, so their consensus is weak evidence. Record the model per seat and flag same-model review/approval chains — making model diversity a first-class team property.',
+    detail:
+      'From agent-ontology.md §5 (the monoculture problem). musterd is the model-agnostic layer, so heterogeneity is ours to make first-class: store the model on the seat/roster, and let the insight/report layer flag a review or approval chain that was single-model end-to-end ("treat agreement as weak evidence"). Feeds the research track (ADR 056): measure agreement correlation between same-model vs cross-model reviewer pairs on real coordination traces — a dataset nobody else has. Sibling to model-experimentation.',
+    refs: [doc('docs/design/agent-ontology.md', 'agent-ontology.md'), adr(56, 'ADR 056'), doc('docs/design/model-experimentation.md', 'model-experimentation')],
+    dependsOn: ['model-experimentation'],
+  },
+
   {
     id: 'own-harness',
     wave: 'later',
