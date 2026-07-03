@@ -1,4 +1,4 @@
-import { DESK_SLOTS, ENTRANCE, FWD, NOOK, NOOK_CAP, SEAT_BACK, STRIP_CAP } from './layout';
+import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, NOOK, NOOK_CAP, SEAT_BACK, STRIP_CAP } from './layout';
 import type { Placement } from './seating';
 import type { Bubble, Dir, OfficeNode, Pose } from './types';
 
@@ -107,6 +107,9 @@ interface Walk {
   fade?: 'in' | 'out';
   /** Urgent help walk — drives the `run` pose flag (Rive `run` modifier). */
   run?: boolean;
+  /** A self-generated ambient beat (coffee-stroll), not a real act — runs at a capped idle FPS and
+   * yields the instant a real act arrives (ADR 086 Phase 2). Carries no act semantics. */
+  ambient?: boolean;
 }
 type Req = { kind: 'help' | 'handoff'; to: string; urgent: boolean };
 
@@ -125,6 +128,17 @@ export interface Actors {
   setHomes(placements: Map<string, Placement>, byName: Map<string, OfficeNode>, animate: boolean): void;
   /** Enqueue a walk to a teammate. Returns false if it can't play (mover or target not present). */
   walk(from: string, req: Req): boolean;
+  /** Enqueue an ambient coffee-stroll for a seated desk member (home → nook machine → pause → home).
+   * Self-generated filler, not a real act; returns false if the member can't stroll (absent, in the
+   * nook/queue, exiting, or already busy). See ADR 086 Phase 2. */
+  ambientWalk(from: string): boolean;
+  /** Seated desk members eligible to be sent on an ambient stroll right now (present, not small, idle). */
+  idleDeskMembers(): string[];
+  /** True when motion is in flight and *all* of it is ambient — drives the idle-FPS cap in the loop. */
+  ambientOnly(): boolean;
+  /** Preempt any in-flight ambient stroll, gracefully returning the walker home. Called the instant a
+   * real act arrives so ambient never delays real choreography. */
+  cancelAmbient(): void;
   /** Advance all walks by dt seconds; returns true while any walk (act or transition) is in flight. */
   step(dt: number): boolean;
   /** The current pose of every drawn member (home, or interpolated if walking — incl. those leaving). */
@@ -261,8 +275,18 @@ export function createActors(): Actors {
           walks.set(name, straightWalk(entrancePose(dest), dest, false, 'in'));
           doorPulses++;
         } else if (!exiting.has(name)) {
-          const from = cur.get(name) ?? prevHomes.get(name)!;
-          if (moved(from, dest)) walks.set(name, straightWalk(from, dest, false));
+          const existing = walks.get(name);
+          if (existing?.ambient) {
+            // A coffee-stroll is in flight: a no-op roster refresh shouldn't yank the walker back
+            // mid-stride. Only interrupt it when this member's *home* actually moved (a real reseat),
+            // and then send them straight to the new seat from wherever they currently are.
+            if (moved(prevHomes.get(name) ?? dest, dest)) {
+              walks.set(name, straightWalk(cur.get(name) ?? dest, dest, false));
+            }
+          } else {
+            const from = cur.get(name) ?? prevHomes.get(name)!;
+            if (moved(from, dest)) walks.set(name, straightWalk(from, dest, false));
+          }
         }
       }
       // Departures (walk out to the door, fading out, then vanish).
@@ -285,6 +309,54 @@ export function createActors(): Actors {
       pending.set(from, q);
       if (!walks.has(from)) startNext(from);
       return true;
+    },
+    ambientWalk(from) {
+      const home = homes.get(from);
+      // Only a seated desk member (not nook/queue `small`), present and idle, strolls for coffee.
+      if (!home || home.small || exiting.has(from) || walks.has(from) || pending.get(from)?.length) {
+        return false;
+      }
+      const dest = COFFEE_STAND;
+      const speed = 68; // logical units/sec — a slow, unhurried amble (cheaper-reading than a real errand)
+      const dur = (fx: number, fy: number, tx: number, ty: number): number =>
+        clamp(Math.hypot(tx - fx, ty - fy) / speed, 1.8, 5);
+      walks.set(from, {
+        legs: [
+          { fx: home.lx, fy: home.ly, tx: dest.lx, ty: dest.ly, dir: travelDir(home.lx, home.ly, dest.lx, dest.ly), dur: dur(home.lx, home.ly, dest.lx, dest.ly), carry: false, bubble: null },
+          { fx: dest.lx, fy: dest.ly, tx: dest.lx, ty: dest.ly, dir: 'N', dur: 1.6, carry: false, bubble: null }, // pause facing the machine
+          { fx: dest.lx, fy: dest.ly, tx: home.lx, ty: home.ly, dir: travelDir(dest.lx, dest.ly, home.lx, home.ly), dur: dur(dest.lx, dest.ly, home.lx, home.ly), carry: false, bubble: null },
+        ],
+        i: 0,
+        t: 0,
+        small: false,
+        ambient: true,
+      });
+      return true;
+    },
+    idleDeskMembers() {
+      const out: string[] = [];
+      for (const [name, pose] of homes) {
+        if (pose.small || walks.has(name) || exiting.has(name) || pending.get(name)?.length) continue;
+        out.push(name);
+      }
+      return out;
+    },
+    ambientOnly() {
+      if (walks.size === 0) return false;
+      for (const w of walks.values()) if (!w.ambient) return false;
+      return true;
+    },
+    cancelAmbient() {
+      const cur = posesNow();
+      for (const [name, w] of [...walks]) {
+        if (!w.ambient) continue;
+        const home = homes.get(name);
+        const at = cur.get(name);
+        // Yield gracefully: if the walker has left home, walk them straight back (a plain non-ambient
+        // walk — full-fps, not itself preemptable); if they're essentially home already, just drop it.
+        if (home && at && moved(at, home)) walks.set(name, straightWalk(at, home, false));
+        else walks.delete(name);
+      }
     },
     step(dt) {
       for (const [name, w] of [...walks.entries()]) {
