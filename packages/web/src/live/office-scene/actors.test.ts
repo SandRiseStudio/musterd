@@ -219,6 +219,54 @@ describe('ambient micro-choreography', () => {
     expect(back.ly).toBeCloseTo(home.ly, 3);
   });
 
+  it('a real act preempts an in-flight stroll instantly — the trip starts now, not after ambling home', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const bo = homePoses(placements, byName).get('Bo')!;
+
+    actors.ambientWalk('Ada');
+    actors.step(0.6); // Ada is out on the floor mid-stroll
+    expect(actors.ambientOnly()).toBe(true);
+
+    // a real help walk must replace the stroll immediately (not queue behind a yield-home leg)
+    expect(actors.walk('Ada', { kind: 'help', to: 'Bo', urgent: false })).toBe(true);
+    expect(actors.ambientOnly()).toBe(false); // the stroll was replaced by the real walk
+
+    // and the real trip actually plays: Ada reaches Bo's desk, proving she didn't amble home first
+    let nearBo = Infinity;
+    let g = 0;
+    while (actors.active() && g++ < 4000) {
+      actors.step(0.05);
+      const p = actors.poses().get('Ada')!;
+      nearBo = Math.min(nearBo, Math.hypot(p.lx - bo.lx, p.ly - bo.ly));
+    }
+    expect(nearBo).toBeLessThan(80);
+  });
+
+  it('a real act also preempts the yield-home return left by cancelAmbient', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const bo = homePoses(placements, byName).get('Bo')!;
+
+    actors.ambientWalk('Ada');
+    actors.step(0.6);
+    actors.cancelAmbient(); // stroll → low-priority yield-home walk
+    expect(actors.ambientOnly()).toBe(false);
+    expect(actors.active()).toBe(true);
+
+    expect(actors.walk('Ada', { kind: 'help', to: 'Bo', urgent: false })).toBe(true);
+    let nearBo = Infinity;
+    let g = 0;
+    while (actors.active() && g++ < 4000) {
+      actors.step(0.05);
+      const p = actors.poses().get('Ada')!;
+      nearBo = Math.min(nearBo, Math.hypot(p.lx - bo.lx, p.ly - bo.ly));
+    }
+    expect(nearBo).toBeLessThan(80); // the help trip ran despite the pending yield-home
+  });
+
   it('a no-op roster refresh does not interrupt an in-flight stroll', () => {
     const { placements, byName } = world([node('Ada'), node('Bo')]);
     const actors = createActors();
