@@ -478,9 +478,10 @@ export interface WatchClaimOpts {
   onDeliver: (env: Envelope) => void;
   onPresence?: (member: string, status: string, surface?: string) => void;
   /** Claim succeeded — the session holds the seat (replaces `watch`'s `onReady`). `seat` is the
-   *  occupied Member; `presenceId` the live presence id. Fires on the initial `occupied` AND on the
+   *  occupied Member; `presenceId` the live presence id; `grant` is the ADR 087 resume token delivered
+   *  on first approval (persist into `binding.grant`). Fires on the initial `occupied` AND on the
    *  server-pushed `occupied` that resolves a `pending` (spec-gap 3). */
-  onOccupied?: (seat: Member, presenceId: string) => void;
+  onOccupied?: (seat: Member, presenceId: string, grant?: string) => void;
   /** No grant — the server opened a claim request (A.5); the socket stays open for the pushed terminal. */
   onPending?: (requestId: string, message: string) => void;
   /** Claim denied — terminal. `claimable` + `hint` carry the no-dead-end next step (ADR 055). */
@@ -532,7 +533,7 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
     if (raw.type === 'occupied' || raw.type === 'refused' || raw.type === 'pending') {
       const o = parseClaimResponse(raw);
       if (o.state === 'occupied') {
-        opts.onOccupied?.(o.seat, o.presenceId);
+        opts.onOccupied?.(o.seat, o.presenceId, o.grant);
         subscribe();
       } else if (o.state === 'refused') {
         opts.onRefused?.(o.code, o.message, o.claimable, o.hint);

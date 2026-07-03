@@ -83,6 +83,10 @@ export const OccupiedFrame = z.object({
   presence_id: z.string(),
   server_time: z.number().int(),
   charter: z.string().optional(),
+  // A reusable `msgr_` resume token delivered when a seat is first approved (ADR 087). The session
+  // persists it into `binding.grant` and re-presents it on reconnect to occupy without an approval —
+  // the server refreshes its TTL on each clean occupy. Only set on the first-issue (approve) path.
+  grant: z.string().optional(),
   memory: z.null(),
 });
 export type OccupiedFrame = z.infer<typeof OccupiedFrame>;

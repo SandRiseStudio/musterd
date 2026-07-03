@@ -266,6 +266,9 @@ export class MusterdClient {
         this.joinedFlag = true;
         this.lastJoinErrorMsg = null;
         this.config.member = frame.seat.name;
+        // Resume token (ADR 087): the first approval delivers a reusable grant here — keep it so
+        // `persistBinding` writes it into `binding.grant` and reconnects re-occupy without approval.
+        if (frame.grant) this.config.grant = frame.grant;
         ws.send(JSON.stringify({ type: 'subscribe', scope: 'team' }));
         this.heartbeat = setInterval(() => {
           if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'heartbeat' }));

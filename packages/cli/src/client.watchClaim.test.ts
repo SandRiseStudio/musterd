@@ -75,10 +75,32 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
     expect(opts.onOccupied).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'm1', name: 'Ada' }),
       '01J',
+      undefined,
     );
     // next frame after the claim is the subscribe
     const frames = sock.sent.map((s) => JSON.parse(s));
     expect(frames.some((f) => f.type === 'subscribe' && f.scope === 'team')).toBe(true);
+  });
+
+  it('occupied carrying a resume grant (ADR 087) threads the token to onOccupied', () => {
+    const { sock, opts } = harness();
+    sock.emit('open');
+    sock.emit(
+      'message',
+      JSON.stringify({
+        type: 'occupied',
+        seat,
+        presence_id: '01J',
+        server_time: 7,
+        grant: 'msgr_resume123',
+        memory: null,
+      }),
+    );
+    expect(opts.onOccupied).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'm1', name: 'Ada' }),
+      '01J',
+      'msgr_resume123',
+    );
   });
 
   it('refused → onRefused (terminal, no subscribe)', () => {
@@ -124,6 +146,7 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
     expect(opts.onOccupied).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'm1', name: 'Ada' }),
       '01J',
+      undefined,
     );
     expect(sock.sent.map((s) => JSON.parse(s))).toContainEqual(
       expect.objectContaining({ type: 'subscribe' }),

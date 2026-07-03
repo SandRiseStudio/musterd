@@ -18,6 +18,8 @@ export interface ResolvedConfig {
   presenceTimeoutMs: number;
   reaperIntervalMs: number;
   reclaimGraceMs: number;
+  /** TTL (ms) of a seat resume grant issued on approval + refreshed on each clean occupy (ADR 087). */
+  resumeTtlMs: number;
   /** Idle TTL after which an unused observer seat is reaped (ADR 064). */
   observerTtlMs: number;
   /** Native TLS material, or null to serve plaintext (ADR 040). */
@@ -41,6 +43,8 @@ export const REAPER_INTERVAL_MS = 15_000;
 export const RECLAIM_GRACE_MS = 45_000;
 /** Idle observer seats (ADR 063) are reaped after this long with no connection (ADR 064). */
 export const OBSERVER_TTL_MS = 86_400_000; // 24h
+/** A seat resume grant (ADR 087) is valid for this long, refreshed on every clean occupy. */
+export const RESUME_TTL_MS = 86_400_000; // 24h
 export const DEFAULT_PORT = 4849;
 export const DEFAULT_HOST = '127.0.0.1';
 
@@ -142,6 +146,7 @@ export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
     presenceTimeoutMs: envMs('MUSTERD_PRESENCE_TIMEOUT_MS', PRESENCE_TIMEOUT_MS),
     reaperIntervalMs: envMs('MUSTERD_REAPER_INTERVAL_MS', REAPER_INTERVAL_MS),
     reclaimGraceMs: envMs('MUSTERD_RECLAIM_GRACE_MS', RECLAIM_GRACE_MS),
+    resumeTtlMs: envMs('MUSTERD_RESUME_TTL_MS', RESUME_TTL_MS),
     observerTtlMs: envMs('MUSTERD_OBSERVER_TTL_MS', OBSERVER_TTL_MS),
     tls,
     trustProxy: opts?.trustProxy ?? envBool('MUSTERD_INSECURE_TRUST_PROXY'),

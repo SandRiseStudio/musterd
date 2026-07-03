@@ -69,6 +69,8 @@ export type ClaimOutcome =
       presenceId: string;
       serverTime: number;
       charter?: string;
+      /** A resume token (ADR 087) delivered on first approval — persisted into `binding.grant`. */
+      grant?: string;
     }
   | { state: 'refused'; code: RefusedCode; message: string; claimable: string[]; hint: string }
   | { state: 'pending'; requestId: string; message: string };
@@ -90,6 +92,7 @@ export function parseClaimResponse(raw: unknown): ClaimOutcome {
       presenceId: f.presence_id,
       serverTime: f.server_time,
       ...(f.charter !== undefined ? { charter: f.charter } : {}),
+      ...(f.grant !== undefined ? { grant: f.grant } : {}),
     };
   }
   if (type === 'refused') {

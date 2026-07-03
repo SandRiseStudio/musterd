@@ -110,6 +110,18 @@ export function consumeGrant(db: Database, id: string): void {
   db.prepare('UPDATE grants SET revoked = 1 WHERE id = ? AND single_use = 1').run(id);
 }
 
+/**
+ * Refresh a reusable grant's TTL on a successful occupy (ADR 087 resume token): bumps `expires_at` to
+ * `now + ttlMs` so an actively-used seat never expires — only genuine idleness past the window does.
+ * Guarded to non-single-use, non-revoked, TTL-bearing grants (a `standing` grant has `expires_at NULL`
+ * and is left untouched; a `once` grant is never refreshed). No-op if none match.
+ */
+export function refreshGrant(db: Database, id: string, ttlMs: number): void {
+  db.prepare(
+    'UPDATE grants SET expires_at = ? WHERE id = ? AND single_use = 0 AND revoked = 0 AND expires_at IS NOT NULL',
+  ).run(Date.now() + ttlMs, id);
+}
+
 /** Admin revoke. Returns true if a matching, not-already-revoked grant was revoked. */
 export function revokeGrant(db: Database, teamId: string, id: string): boolean {
   const res = db

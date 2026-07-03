@@ -37,6 +37,7 @@ import {
   consumeGrant,
   issueGrant,
   listGrants,
+  refreshGrant,
   revokeGrant,
   validateGrant,
 } from '../store/grants.js';
@@ -639,7 +640,14 @@ export async function handleHttp(
             throw new MusterdError('forbidden', `seat "${targetMember.name}" is ${status}`);
           }
 
-          // Issue a grant so the approved session can occupy the seat.
+          // Issue a grant so the approved session can occupy the seat. A `ttl` grant is the ADR 087
+          // resume token: reusable (single_use:false) and refreshed on each occupy — when no explicit
+          // `ttl_hours` is given, fall back to the server's resume window so the token is always bounded
+          // (never accidentally standing). `once`/`standing` are honored as the admin passed them.
+          const ttlHours =
+            body.lifetime === 'ttl'
+              ? (body.ttl_hours ?? ctx.config.resumeTtlMs / 3_600_000)
+              : undefined;
           const mint = issueGrant(
             ctx.db,
             team.id,
@@ -647,13 +655,14 @@ export async function handleHttp(
               scope: existing.target?.startsWith('role:') ? 'role' : 'seat',
               target: targetMember.name,
               lifetime: body.lifetime,
-              ...(body.lifetime === 'ttl' && body.ttl_hours != null
-                ? { ttl_hours: body.ttl_hours }
-                : {}),
+              ...(ttlHours != null ? { ttl_hours: ttlHours } : {}),
               single_use: body.lifetime === 'once',
             },
             admin.name,
           );
+          // Deliver the token to the occupying session for a reusable grant (ADR 087) so it lands in
+          // `binding.grant` and silently resumes on reconnect. A `once` grant is not a resume token.
+          const resumeToken = body.lifetime === 'once' ? undefined : mint.token;
 
           // Attach presence for the approved session.
           const presence = attach(
@@ -673,12 +682,13 @@ export async function handleHttp(
             pendingConn._claimApproved(presence.id);
           }
 
-          // Push the terminal occupied frame to the waiting WS.
+          // Push the terminal occupied frame to the waiting WS, carrying the resume token (ADR 087).
           const delivered = ctx.hub.deliverClaimDecision(existing.from_session, {
             type: 'occupied',
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
+            ...(resumeToken ? { grant: resumeToken } : {}),
             memory: null,
           });
 
@@ -704,6 +714,8 @@ export async function handleHttp(
             request_id: requestId,
             decision: 'approve',
             delivered,
+            // The resume token, echoed for a stateless/HTTP claimer that can't receive the pushed frame.
+            ...(resumeToken ? { grant: resumeToken } : {}),
           });
         } else {
           // Deny: settle the request and push a refused frame to the waiting WS.
@@ -938,6 +950,8 @@ export async function handleHttp(
             });
           }
           consumeGrant(ctx.db, gv.grant.id);
+          // Resume token (ADR 087): refresh a reusable grant's TTL on occupy (no-op for single_use).
+          refreshGrant(ctx.db, gv.grant.id, ctx.config.resumeTtlMs);
           // OCCUPY: stateless — attach presence with null connId (no persistent socket).
           const presence = attach(ctx.db, targetMember.id, body.surface, null, {
             provenance: null,

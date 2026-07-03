@@ -67,10 +67,11 @@ async function decideCommand(parsed: Parsed): Promise<number> {
   if ([once, standing, ttlHours !== undefined].filter(Boolean).length > 1) {
     throw new CliError('pass only one of --once, --standing, or --ttl-hours <n>', 2);
   }
-  // Default to `once` — the least-privilege choice (let this one session in). `--standing` mints a
-  // grant that survives until revoked, so the seat re-occupies on relaunch without re-approval;
-  // `--ttl-hours` bounds it to a window.
-  const lifetime = ttlHours !== undefined ? 'ttl' : standing ? 'standing' : 'once';
+  // Default to `ttl` — the ADR 087 resume token: a reusable, server-bounded grant that lands in the
+  // approved session's `binding.grant`, so reconnects/reloads re-occupy silently (refreshed on each
+  // occupy) but a long idle past the window re-gates on approval. `--once` is the old single-use
+  // least-privilege choice; `--standing` never expires; `--ttl-hours <n>` sets an explicit window.
+  const lifetime = ttlHours !== undefined ? 'ttl' : once ? 'once' : standing ? 'standing' : 'ttl';
 
   const res = await http.decideRequest(team, id, {
     decision: 'approve',

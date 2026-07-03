@@ -14,7 +14,7 @@ import { log } from '../log.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope } from '../protocol/validate.js';
 import { appendAudit } from '../store/audit.js';
-import { consumeGrant, validateGrant } from '../store/grants.js';
+import { consumeGrant, refreshGrant, validateGrant } from '../store/grants.js';
 import { getMemberById, getMemberByName, hashToken, markBound } from '../store/members.js';
 import {
   attach,
@@ -331,6 +331,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               return;
             }
             consumeGrant(ctx.db, gv.grant.id);
+            // Resume token (ADR 087): a reusable grant survives consumeGrant — refresh its TTL so an
+            // actively-reconnecting seat never expires. No-op for single_use/standing grants.
+            refreshGrant(ctx.db, gv.grant.id, ctx.config.resumeTtlMs);
             // OCCUPY — fall through to the common occupy block below.
           } else if (authenticatedAs && targetMember && authenticatedAs.id === targetMember.id) {
             // Credential self-authorize (ADR 077): a human authenticated by their own mscr_ credential

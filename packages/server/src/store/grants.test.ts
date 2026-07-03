@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { seedDawn } from '../db/seed.js';
-import { consumeGrant, issueGrant, listGrants, revokeGrant, validateGrant } from './grants.js';
+import {
+  consumeGrant,
+  issueGrant,
+  listGrants,
+  refreshGrant,
+  revokeGrant,
+  validateGrant,
+} from './grants.js';
 
 function setup() {
   const db = openDb(':memory:');
@@ -77,5 +84,51 @@ describe('grants store (ADR 076)', () => {
     expect(grants).toHaveLength(2);
     expect(grants[0]).not.toHaveProperty('token_hash'); // public shape, no secret
     expect(grants.map((g) => g.target).sort()).toEqual(['Ada', 'Lin']);
+  });
+
+  // ADR 087: a resume token is a ttl grant refreshed on each occupy so an active seat never expires.
+  it('refreshGrant bumps a ttl grant expires_at forward', () => {
+    const { db, teamId } = setup();
+    const { grant } = issueGrant(
+      db,
+      teamId,
+      { scope: 'seat', target: 'Ada', lifetime: 'ttl', ttl_hours: 1 },
+      'nick',
+    );
+    const before = grant.expires_at!;
+    expect(before).toBeGreaterThan(Date.now());
+    refreshGrant(db, grant.id, 24 * 3_600_000); // 24h window
+    const after = db
+      .prepare<[string], { expires_at: number }>('SELECT expires_at FROM grants WHERE id = ?')
+      .get(grant.id);
+    expect(after!.expires_at).toBeGreaterThan(before);
+  });
+
+  it('refreshGrant is a no-op for a single_use (once) grant and a revoked grant', () => {
+    const { db, teamId } = setup();
+    const once = issueGrant(db, teamId, { scope: 'seat', target: 'Ada', lifetime: 'once' }, 'nick');
+    // once grants have no expires_at; refresh must not create one (they aren't resume tokens)
+    refreshGrant(db, once.grant.id, 24 * 3_600_000);
+    const onceRow = db
+      .prepare<
+        [string],
+        { expires_at: number | null }
+      >('SELECT expires_at FROM grants WHERE id = ?')
+      .get(once.grant.id);
+    expect(onceRow!.expires_at).toBeNull();
+
+    const ttl = issueGrant(
+      db,
+      teamId,
+      { scope: 'seat', target: 'Lin', lifetime: 'ttl', ttl_hours: 1 },
+      'nick',
+    );
+    revokeGrant(db, teamId, ttl.grant.id);
+    const before = ttl.grant.expires_at!;
+    refreshGrant(db, ttl.grant.id, 999 * 3_600_000);
+    const revoked = db
+      .prepare<[string], { expires_at: number }>('SELECT expires_at FROM grants WHERE id = ?')
+      .get(ttl.grant.id);
+    expect(revoked!.expires_at).toBe(before); // untouched — a revoked grant can't be resurrected
   });
 });
