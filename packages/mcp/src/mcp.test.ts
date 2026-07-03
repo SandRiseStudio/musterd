@@ -105,6 +105,47 @@ describe('MCP adapter', () => {
     client.close();
   });
 
+  // ADR 087: a blocking team_join with no grant parks on the approval request and resolves — with the
+  // delivered resume token captured — the moment an admin approves, instead of rejecting and looping.
+  it('a grant-less blocking join parks on pending, then occupies + captures the resume token on approve', async () => {
+    const client = new MusterdClient({ ...adaConfig(), grant: undefined });
+    const joining = client.join(5_000); // blocking — parks on the pending request
+
+    // The claim opens a request; approve it as the admin with a ttl (resume) lifetime.
+    let requestId: string | undefined;
+    for (let i = 0; i < 50 && !requestId; i++) {
+      const r = await api('GET', '/teams/dawn/requests?status=pending', undefined, tokens['nick']);
+      requestId = r.json.requests[0]?.id;
+      if (!requestId) await delay(50);
+    }
+    expect(requestId).toBeTruthy();
+    expect(client.awaitingRequestId).toBe(requestId);
+    await api(
+      'POST',
+      `/teams/dawn/requests/${requestId}/decide`,
+      { decision: 'approve', lifetime: 'ttl', ttl_hours: 24 },
+      tokens['nick'],
+    );
+
+    await joining; // the same call resolves on the pushed occupied — no re-join needed
+    expect(client.joined).toBe(true);
+    expect(client.member).toBe('Ada');
+    // The resume token was delivered on the occupied frame and captured for persistBinding.
+    const captured = (client as unknown as { config: McpConfig }).config.grant;
+    expect(captured).toMatch(/^msgr_/);
+    expect(client.awaitingRequestId).toBeNull();
+    client.close();
+  }, 10_000);
+
+  // ADR 087: a non-blocking join (autojoin, no wait) must still reject on pending so startup never
+  // hangs — only the explicit, timed team_join parks. Preserves the pending-marker/resolution path.
+  it('a grant-less non-blocking join rejects on pending (autojoin stays best-effort)', async () => {
+    const client = new MusterdClient({ ...adaConfig(), grant: undefined });
+    await expect(client.join()).rejects.toThrow(/pending approval/i);
+    expect(client.joined).toBe(false);
+    client.close();
+  }, 10_000);
+
   it('a second session for the same member takes over; the first is superseded (ADR 017)', async () => {
     const a1 = new MusterdClient(adaConfig());
     await a1.join();
