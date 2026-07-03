@@ -430,7 +430,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'v03-p4-remote-join',
     wave: 'later',
     title: 'v0.3 P4 — credentialed remote join',
-    status: 'near-term',
+    status: 'reserved',
     category: 'transport',
     blurb: 'Plug the agent key + grant + human credential into the already-built secured off-loopback bind, so a teammate on another machine joins over wss with a real credential, not a locally-minted token.',
     detail:
@@ -532,11 +532,13 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'schedule-enforcement',
-    wave: 2,
+    wave: 'later',
     title: 'Schedule & lifecycle enforcement',
     status: 'reserved',
     category: 'platform',
     blurb: 'availability and lifecycle: until are stored today but not enforced. Later: honor windows for routing and auto-expire members.',
+    detail:
+      'The one governance-completion piece that did not ship with the Wave 2 rock (v0.3 P2): availability windows and lifecycle: until are stored but not yet enforced for routing/expiry. Moved out of the now-complete Wave 2 to later — a follow-on to the shipped P2 enforcement with no near-term pull.',
     dependsOn: ['v03-p2-enforcement'],
   },
   {
@@ -570,14 +572,13 @@ export const ROADMAP: RoadmapItem[] = [
   },
   {
     id: 'live-office',
-    wave: 3,
     title: 'Live isometric office (Rive)',
-    status: 'near-term',
+    status: 'shipped',
     category: 'surfaces',
     blurb: 'Replace the /live constellation with a 2D isometric animated co-work office — presence→placement, act→choreography, travel-intensity == notification tier.',
     detail:
-      'A living, human-vs-agent-neutral office view of the team (ADR 079, office-rive-character-spec.md). Built out well past M1: M1 (code-drawn isometric floor + act cues + panel modes), M2 (per-member Rive characters from public/office/character.riv driven by the officeToRig contract, plus acts as walking choreography — walk-over, carry-box handoff, megaphone broadcast), and M3 (presence changes walk in/out, door-open staging, urgent walks run at a faster cadence, reduced-motion parity) have all landed; the office renders live and degrades to the code-drawn avatar if the Rive WASM/asset fails. Remaining: overflow/nook polish, perf passes, and richer authored .riv character fidelity. Shares the firehose/observer substrate with the web dashboard.',
-    refs: [adr(79, 'ADR 079'), doc('docs/design/office-rive-character-spec.md', 'office-rive-character-spec.md')],
+      'A living, human-vs-agent-neutral office view of the team (ADR 079 + office-rive-character-spec.md). ADR 079 shipped M1–M3: M1 (code-drawn isometric floor + act cues + panel modes), M2 (per-member Rive characters from public/office/character.riv driven by the officeToRig contract, plus acts as walking choreography — walk-over, carry-box handoff, megaphone broadcast), M3 (presence changes walk in/out, door-open staging, urgent walks at faster cadence, reduced-motion parity). The office renders live and degrades to the code-drawn avatar if the Rive WASM/asset fails. Then ADR 086 (ambient office life) added the calm-at-rest layer: Phase 1 GPU-composited ambient overlay + afterglow (idle-park invariant intact, rAF 0/sec at rest), Phase 2 idle micro-choreography (coffee strolls + idle-FPS cap + real-act preemption), Phase 3 render optimisation (Rive idle sprite-cache). Remaining: overflow/nook polish, perf passes, richer authored .riv fidelity, and the ambient in-place gesture poses (Phase 2 tail, PR #104 — code shipped, pending a manual Rive re-export). Shares the firehose/observer substrate with the web dashboard.',
+    refs: [adr(79, 'ADR 079'), adr(86, 'ADR 086'), doc('docs/design/office-rive-character-spec.md', 'office-rive-character-spec.md')],
     dependsOn: ['web-dashboard'],
   },
   {
@@ -770,6 +771,18 @@ export const ROADMAP: RoadmapItem[] = [
     detail:
       'Named as "roadmap" in security.md + membership-model.md, no item yet: **recipient-scoped message reads** (close the 2026-07-02 known gap — `GET /messages` + the `team-all` firehose currently return every envelope incl. others\' DMs, gated only on can_observe; the "acts addressed to them" need-to-know is enforced for roster/capabilities but not message content, and it gates the derived insight layer), multi-admin delegation & policy, per-seat / rotating agent keys, a tamper-evident (signed) audit log, claim rate-limiting / anomaly detection + per-sender urgent rate-limit, OS-keychain secret storage, and DB encryption-at-rest. Follows directly from the shipped v0.3 governance substrate.',
     refs: [doc('docs/design/security.md', 'security.md'), doc('docs/design/membership-model.md', 'membership-model.md')],
+  },
+  {
+    id: 'authorization-provenance',
+    wave: 'later',
+    title: 'Authorization provenance (who approved it)',
+    status: 'reserved',
+    category: 'platform',
+    blurb: 'For audit: when a decision, escalation, or merge routes to a human for authorization, record which human authorized it — a first-class, attestable link from an approved action back to the approver.',
+    detail:
+      'A placeholder for a thread parked for its own design pass (raised 2026-07-03): as agents take consequential actions gated on human sign-off, the audit trail must name the authorizing human, not just that "a human approved." Seeds already in place — the P2 append-only audit log (ADR 071), the request-lane recorded decider (ADR 077), and human credentials (P3) to bind an attestation to. Not yet designed; captured so it is not lost. Relates to the shared/remote-team hardening cluster.',
+    refs: [adr(71, 'ADR 071'), adr(77, 'ADR 077'), doc('docs/design/security.md', 'security.md')],
+    dependsOn: ['v03-p2-enforcement'],
   },
   {
     id: 'seat-memory',
