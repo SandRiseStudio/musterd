@@ -94,6 +94,26 @@ export function modeFor(node: OfficeNode, pose: Pose): number {
 
 const FACING: Record<Pose['dir'], number> = { S: 0, E: 1, N: 2, W: 3 };
 
+/** A signature of every appearance-affecting rig input (everything except the state-machine's animation
+ * *phase*, which only advances for a moving character). The idle sprite-cache (rive-rig.ts) blits a
+ * member's cached frame while this key is unchanged, re-rendering only when it flips — so a seated,
+ * unchanged member costs a bitmap blit instead of a Rive advance+draw every frame. */
+export function spriteKey(r: RigInputs): string {
+  return [
+    r.accentColor,
+    r.accentDark,
+    r.skinColor,
+    r.hairColor,
+    r.hairStyle,
+    r.agentVis,
+    r.humanVis,
+    r.carryVis,
+    r.mode,
+    r.facing,
+    r.run,
+  ].join('|');
+}
+
 /** Map a member's live data + pose to the Rive `Character` view-model values. */
 export function officeToRig(node: OfficeNode, pose: Pose): RigInputs {
   const human = node.kind === 'human';
