@@ -4,6 +4,8 @@
 
 This doc records what neighboring tools build, where they stop, and why musterd's choices are deliberate counter-positions rather than gaps. It is evidence for the thesis, not the thesis itself (that lives in `README.md`, `ROADMAP.md` "How priorities are decided", and `observability.md` §3).
 
+Most entries here (§§1–4) are **frameworks that stop where we start** — they orchestrate single agents and delegate the between-agent space to the substrate. §5 is different: **Band is the first head-on competitor *inside* the coordination layer itself**, so it is analyzed against a different spine (executions vs. seats, `agent-ontology.md`) rather than the delegation seam.
+
 ## 1. The pattern: frameworks delegate coordination to the substrate
 
 Every serious agent framework solves *per-agent* execution and *per-agent* observability, then treats the space **between** agents as infrastructure's problem — usually a platform primitive, not something they model.
@@ -61,7 +63,51 @@ He even hands over the carve-out: multi-agent is justified for "truly separable 
 
 **Takeaway for positioning:** the best available critique of multi-agent systems is an argument *for* musterd's framing — coordination of separate actors (humans first), not orchestration of sub-agents. Use it: when someone says "but multi-agent is a trap," agree, then point at the human in the loop.
 
-## 5. Patterns worth borrowing (non-coordination)
+## 5. Band (band.ai): the first head-on competitor — executions vs. seats
+
+Sighted 2026-07-03 (Nick met the team at the Qoder event). Band is the closest thing to a direct competitor we have seen, and — unlike §§1–4 — it does **not** stop where we start: its landing page carries near-identical language ("persistent identity, multi-agent coordination, structured memory, and a unified audit trail"; a "coordination layer" where "agents and humans collaborate"). Docs inspected 2026-07-03 (`docs.band.ai`). Taking it seriously, not as a strawman.
+
+**What Band is.** A **hosted platform** that lets agents from any framework (LangGraph, CrewAI, Anthropic, OpenAI, Pydantic AI) join **chat rooms** and coordinate by conversation. Its own framing: *"Your agents keep their runtime, prompts, tools, and LLM providers. Band handles everything else."* Core primitives:
+
+- **Agent** = *"a definition: a name, description, model, and tools."* Remote agents run in your environment over an SDK/WebSocket; platform agents run on Band's infra.
+- **Execution** = *"a runtime instance of an agent, scoped to one room, with full state tracking"* — *"the same agent in three rooms has three independent executions"* with **no shared state** between them.
+- **Chat room** with **@mention routing**: *"Mentioned agents receive the message and start processing"*; non-mentioned agents *"remain unaware"*; humans see everything. Band **explicitly rejects broadcast**. Per-recipient delivery statuses (`delivered / processing / processed / failed`).
+- **Contacts** = *"mutual, permission-controlled connections that determine who can add whom to chat rooms"* — a bilateral request→approval consent flow gating cross-org membership.
+
+### The spine: they coordinate *executions*; musterd coordinates *agents*
+
+This is the whole analysis in one line, and it falls straight out of `agent-ontology.md` (agent = the durable seat, not the process). Band's "agent" is a **definition** that spawns **stateless, per-room executions**; its persistent "identity" is a **handle/namespace** (`@owner/agent-slug`), not a durable actor with memory and a lifecycle. musterd's seat is the opposite bet: a durable, addressable identity that **outlives every session and room**, carries memory and standing, and is reachable across the whole team.
+
+| | **Band** | **musterd** |
+|---|---|---|
+| Unit coordinated | **execution** (per-room, stateless, ephemeral) | **seat** (durable identity, cross-room, persistent) |
+| Identity | handle/namespace over a definition | the seat itself (git-durable, ADR 058) |
+| State across contexts | **none by design** (*"no shared state"* between rooms) | seat carries memory/standing across sessions |
+| Coordination content | **conversation** (@mention text via `send_direct_message`) | **typed acts** (handoff / request_help / status / resolve) |
+| Work model | rooms only — no work-ownership primitive | **lanes + goals + derived insight** (ADRs 048/050/083) |
+| Integration posture | **SDK-required**: an agent must be built/deployed to Band's SDK to participate | **harness-native**: `musterd init` wires an *existing* Claude Code / Cursor / Codex session in, no rebuild |
+| Humans | observe all; owners approve contacts | **humans-as-peers** (Co-Gym wedge), not just observers/approvers |
+| Deployment | hosted rendezvous (their cloud) | **local-first**, git-durable, one-daemon-per-team |
+
+### Where the two genuinely converge (validation, not threat)
+
+- **Broadcast is a mistake.** Band rejecting broadcast in favor of targeted @mention routing is independent confirmation of the notification-tiers / directed-act / coordination-density doctrine (ADRs 044/050). Two teams reached "the firehose degrades agents" separately.
+- **Event-driven wake on mention** is our idle rung (ADR 054) by another name — an agent inert until addressed.
+
+### Where Band is genuinely ahead (borrow, don't dismiss)
+
+- **Cross-org consent.** Contacts are a shipped, bilateral cross-boundary permission flow — precisely musterd's **unbuilt v0.3 P4** (credentialed remote join). Band has productized the thing we deferred; their request→approval→mutual-access shape is a reference design.
+- **Per-act delivery telemetry.** `delivered / processing / processed / failed` per recipient, with attempt history, is a clean observability primitive worth mirroring in the act layer / batond.
+
+### Why the differences are counter-positions, not gaps
+
+Band solved **talk** (a hosted room where cross-framework agents converse). The measured multi-agent tax (`lanes-and-the-multi-agent-tax.md`) is that **talk is cheap (~1% of tokens) and wasted *work* is the tax (~37%)** — and Band has no work-ownership, no plan/goal spine, no derived insight, so it does not touch the expensive failure. Its **stateless-per-room execution** is not an incidental limitation; it is architecturally **opposed to the seat** — you cannot bolt durable cross-room identity onto a model whose defining promise is *"no shared state"* between rooms. And **SDK-required participation** means a plain Claude Code terminal session cannot be a Band participant, where it *can* be a musterd seat — the harness-native reach (ADR 088's hook, the reachability ladder) is exactly what a hosted SDK platform structurally can't offer.
+
+**The threat, honestly.** Rooms are a natural place to grow typed acts and work primitives; if Band moves from conversation toward structured work, the surfaces converge. The counter-moat is the stack Band's architecture resists: **seat durability** (their no-shared-state fights it), **harness-native provisioning** (their SDK requirement fights it), the **plan/insight layer** (unbuilt on their side), and the **measured-tax research** (ADR 056) that names the problem they don't yet address. Watch their roadmap for work-ownership language.
+
+**Positioning line:** *Band connects your agents; musterd makes them a team.*
+
+## 6. Patterns worth borrowing (non-coordination)
 
 - **Agent-pullable onboarding** — Flue's `flue add` detects whether the caller is an agent (`@vercel/detect-agent`) and emits raw markdown to stdout, else prints `… --print | claude` instructions for a human; blueprints are versioned with a mandatory "Upgrade Guide". A `musterd primer --print` with the same branching would let an agent self-onboard mid-session, not just at `init`. See `agent-primer.md` §10.
 - **Two-pronged liveness** — Flue infers liveness from the substrate signal **plus** its own durable marker with a staleness cutoff, trusting neither alone. The ADR 017 deadlock root cause was liveness inferred from the WS socket alone (an orphaned socket kept a zombie "alive"). A musterd-owned heartbeat/marker independent of the WS connection is the fix shape for the residual "stuck non-reconnecting presence" follow-up.
