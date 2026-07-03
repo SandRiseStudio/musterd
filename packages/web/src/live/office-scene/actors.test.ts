@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createActors, homePoses, travelDir } from './actors';
-import { ENTRANCE, NOOK, NOOK_CAP, STRIP_CAP } from './layout';
+import { COFFEE_STAND, ENTRANCE, NOOK, NOOK_CAP, STRIP_CAP } from './layout';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
 
@@ -142,6 +142,94 @@ describe('walk choreography', () => {
     actors.walk('Ada', { kind: 'handoff', to: 'Bo', urgent: false });
     actors.step(0.1);
     expect(actors.poses().get('Ada')!.carry).toBe(true);
+  });
+});
+
+describe('ambient micro-choreography', () => {
+  const settle = (a: ReturnType<typeof createActors>) => {
+    let g = 0;
+    while (a.active() && g++ < 2000) a.step(0.05);
+  };
+
+  it('strolls a desk member out to the coffee stand and back home, going idle when done', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const home = actors.poses().get('Ada')!;
+
+    expect(actors.ambientWalk('Ada')).toBe(true);
+    expect(actors.ambientOnly()).toBe(true);
+
+    // it wanders toward the break-nook machine at some point in the trip
+    let nearest = Infinity;
+    let guard = 0;
+    while (actors.active() && guard++ < 2000) {
+      actors.step(0.05);
+      const p = actors.poses().get('Ada');
+      if (p) nearest = Math.min(nearest, Math.hypot(p.lx - COFFEE_STAND.lx, p.ly - COFFEE_STAND.ly));
+    }
+    expect(nearest).toBeLessThan(10); // paused at the coffee stand mid-trip
+
+    const back = actors.poses().get('Ada')!;
+    expect(back.lx).toBeCloseTo(home.lx, 3);
+    expect(back.ly).toBeCloseTo(home.ly, 3);
+    expect(actors.ambientOnly()).toBe(false); // no walks left
+    expect(actors.active()).toBe(false);
+  });
+
+  it('ambientOnly reflects only self-generated motion (false at rest and during a real walk)', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.ambientOnly()).toBe(false); // at rest
+
+    actors.walk('Ada', { kind: 'help', to: 'Bo', urgent: false });
+    actors.step(0.1);
+    expect(actors.ambientOnly()).toBe(false); // a real walk is in flight
+  });
+
+  it('only offers idle desk members (excludes away/nook and the already-strolling)', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo'), node('Zoe', 'away')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.idleDeskMembers().sort()).toEqual(['Ada', 'Bo']); // Zoe is in the nook (small)
+
+    expect(actors.ambientWalk('Ada')).toBe(true);
+    expect(actors.idleDeskMembers()).toEqual(['Bo']); // Ada is now busy
+    expect(actors.ambientWalk('Zoe')).toBe(false); // nook members don't stroll
+    expect(actors.ambientWalk('Ada')).toBe(false); // already strolling
+  });
+
+  it('cancelAmbient yields: drops the beat and walks the stroller straight home', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const home = actors.poses().get('Ada')!;
+
+    actors.ambientWalk('Ada');
+    actors.step(0.6); // out on the floor
+    expect(actors.ambientOnly()).toBe(true);
+
+    actors.cancelAmbient();
+    expect(actors.ambientOnly()).toBe(false); // no longer an ambient walk…
+    expect(actors.active()).toBe(true); // …but a return-home walk is in flight
+    settle(actors);
+    const back = actors.poses().get('Ada')!;
+    expect(back.lx).toBeCloseTo(home.lx, 3);
+    expect(back.ly).toBeCloseTo(home.ly, 3);
+  });
+
+  it('a no-op roster refresh does not interrupt an in-flight stroll', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+
+    actors.ambientWalk('Ada');
+    actors.step(0.6);
+    expect(actors.ambientOnly()).toBe(true);
+
+    actors.setHomes(placements, byName, true); // identical roster (a poll) — must not yank Ada back
+    expect(actors.ambientOnly()).toBe(true);
   });
 });
 

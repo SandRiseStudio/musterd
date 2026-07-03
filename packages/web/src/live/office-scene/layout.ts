@@ -45,6 +45,10 @@ export const DESK_SLOTS: DeskSlot[] = [
 /** The break nook — where `away` members drift; also the broadcast megaphone spot. */
 export const NOOK = { lx: 700, ly: 190 };
 
+/** Where an ambient coffee-stroll pauses: standing just in front of the break-nook machine, facing it
+ * (ADR 086 Phase 2). Clear of the seated nook cluster so a passer-through doesn't overlap `away` members. */
+export const COFFEE_STAND = { lx: NOOK.lx - 58, ly: NOOK.ly + 18 };
+
 /** How many overflow-queue / nook avatars render individually before the rest collapse into a "+N" pill,
  * so a very large roster stays bounded instead of marching avatars off the floor. */
 export const STRIP_CAP = 6;

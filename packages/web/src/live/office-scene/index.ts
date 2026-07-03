@@ -19,6 +19,14 @@ const SPEECH_LIFT = 26;
 /** After a real act, keep the loop alive this long so the Rive character settles into idle rather than
  * freezing mid-gesture (ADR 086 #5 afterglow) — a brief, bounded post-act tail, not a continuous loop. */
 const AFTERGLOW_MS = 2600;
+/** Ambient micro-choreography (ADR 086 Phase 2): when the room is quiet, inject a gentle coffee-stroll
+ * every ~15–25s. Timer-based (not RAF), one beat at a time, always preempted by a real act. */
+const AMBIENT_MIN_MS = 15000;
+const AMBIENT_MAX_MS = 25000;
+/** While Tier B is awake for an *ambient-only* beat, coalesce toward ~20fps: only advance+redraw once
+ * this much wall time has built up. A coffee stroll is visually identical at 20fps and ~3× cheaper; real
+ * acts keep 60fps because their motion is not `ambientOnly`. */
+const AMBIENT_FRAME_MS = 50;
 
 /** An in-flight speech bubble over a member's head — its DOM root plus the timers/frames to cancel when
  * it's superseded (a newer act from the same member) or the office is disposed. */
@@ -312,15 +320,27 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     }
   }
 
+  let disposed = false; // set in dispose(); gates the async Rive load and the ambient scheduler's re-arm
+
   // — the loop runs while walks or cues are in flight; otherwise the office rests on a still frame —
   let raf = 0;
   let last = 0;
+  let acc = 0; // wall time accrued since the last drawn frame — coalesced under the ambient FPS cap
   let wasActive = false;
   function tick(now: number) {
-    // Seed the first frame with a nominal step (not 0) so a single settling frame still advances the
-    // Rive state machine into its idle pose before the loop parks.
-    const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;
+    const settling = rig != null && lastActive > 0 && now - lastActive < AFTERGLOW_MS;
+    // Idle-FPS cap (ADR 086 Phase 2): when the only motion is an ambient beat, don't advance/redraw every
+    // frame — accrue wall time and coalesce toward ~20fps. Real acts (not `ambientOnly`) and the afterglow
+    // settle keep the full frame rate. Accumulate `dt` so the walk maths stay correct with fewer samples.
+    const capped = actors.ambientOnly() && cues.length === 0 && !settling;
+    acc += last ? now - last : 1000 / 60;
     last = now;
+    if (capped && acc < AMBIENT_FRAME_MS) {
+      raf = requestAnimationFrame(tick); // too soon for the next ambient frame — keep the loop, skip the draw
+      return;
+    }
+    const dt = Math.min(0.05, acc / 1000);
+    acc = 0;
     const walking = actors.step(dt);
     for (let i = cues.length - 1; i >= 0; i--) {
       const c = cues[i]!;
@@ -343,19 +363,48 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     // settled frame (above) and park — the frame stays on-canvas until the next act or presence change.
     // Afterglow (#5): for a brief window after the last act, keep advancing so the Rive character settles
     // into idle instead of freezing mid-gesture — a bounded post-act tail, not a continuous loop.
-    const settling = rig != null && lastActive > 0 && now - lastActive < AFTERGLOW_MS;
     if ((walking || cues.length || settling) && !reduced && VISIBLE()) {
       raf = requestAnimationFrame(tick);
     } else {
       raf = 0;
       last = 0;
+      acc = 0;
     }
   }
   function ensureLoop() {
     if (!raf && !reduced && VISIBLE()) {
       last = 0;
+      acc = 0;
       raf = requestAnimationFrame(tick);
     }
+  }
+
+  // ── Ambient micro-choreography scheduler (ADR 086 Phase 2) ──────────────────────────────────────────
+  // A timer (not the RAF loop) that, in a genuinely quiet room, sends one idle desk member on a slow
+  // coffee-stroll every ~15–25s. Self-generated visual filler: it emits no acts, and any real act cancels
+  // it and pushes the next slot out. Off entirely under reduced-motion / hidden tab.
+  let ambientTimer: ReturnType<typeof setTimeout> | null = null;
+  /** No real motion in flight (no walks, no cues, past the afterglow tail) — safe to inject a beat. */
+  function quiet(): boolean {
+    return !actors.active() && cues.length === 0 && !(lastActive > 0 && performance.now() - lastActive < AFTERGLOW_MS);
+  }
+  function scheduleAmbient() {
+    if (reduced || disposed) return;
+    if (ambientTimer) clearTimeout(ambientTimer);
+    const delay = AMBIENT_MIN_MS + Math.random() * (AMBIENT_MAX_MS - AMBIENT_MIN_MS);
+    ambientTimer = setTimeout(fireAmbient, delay);
+  }
+  function fireAmbient() {
+    ambientTimer = null;
+    if (disposed) return; // office torn down between the timer arming and firing — don't re-arm or wake
+
+    // Only stir a calm, visible room; otherwise let this slot pass and wait for the next one.
+    if (!reduced && VISIBLE() && quiet()) {
+      const idle = actors.idleDeskMembers();
+      const who = idle.length ? idle[Math.floor(Math.random() * idle.length)]! : null;
+      if (who && actors.ambientWalk(who)) ensureLoop();
+    }
+    scheduleAmbient();
   }
 
   function update(next: OfficeData) {
@@ -389,6 +438,12 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   }
 
   function emit(ev: OfficeEvent) {
+    // A real act always preempts ambient filler: cancel any in-flight coffee-stroll and push the next
+    // ambient slot out past this act, so ambient never delays real choreography or a speech bubble.
+    if (!reduced) {
+      actors.cancelAmbient();
+      scheduleAmbient();
+    }
     // Speech is legible content, not motion — it plays even under reduced-motion (typewriter off there).
     if (ev.kind === 'speech') {
       showSpeech(ev.who, ev.text, ev.tone);
@@ -455,10 +510,10 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   sizeCanvases();
   bake();
   drawStatic();
+  scheduleAmbient(); // start the idle coffee-stroll timer (no-op under reduced-motion)
 
   // Load the Rive character rig (client-only WASM). On success the office switches to a continuous
   // Rive redraw; on any failure `rig` stays null and the code-drawn avatar is used unchanged.
-  let disposed = false;
   void loadRiveRig().then((r) => {
     if (disposed) {
       r?.dispose();
@@ -480,6 +535,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     dispose: () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      if (ambientTimer) clearTimeout(ambientTimer); // stop the idle-beat scheduler
       window.removeEventListener('resize', onResize);
       ro?.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
