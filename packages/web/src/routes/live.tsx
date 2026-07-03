@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import liveCss from '../live/Live.css?url';
 import { ConstellationGL } from '../live/ConstellationGL';
 import { RosterPanel } from '../live/RosterPanel';
@@ -69,7 +69,47 @@ function LivePage() {
     }
   };
 
-  const { envelopes, roster, status, error, liveIds } = useLiveStream(cfg);
+  // Auto-recovery for a stale observer credential (a wiped DB or an expired 24h observer TTL, ADR 064):
+  // instead of dead-ending on "invalid … credential", drop the cached credential and provision a fresh
+  // observer, then reconnect. `recoveredToken` dedupes the HTTP-401 + WS-refused double-signal for one
+  // credential; `attempts` is a backstop so a persistently-failing provision falls back to the form
+  // rather than looping. `onConnected` re-arms both once a fresh credential works.
+  const recoveredToken = useRef<string | null>(null);
+  const recoverAttempts = useRef(0);
+  const recoverObserver = useCallback(() => {
+    const team = cfg?.team;
+    const staleToken = cfg?.token;
+    if (!team || !staleToken) return;
+    if (recoveredToken.current === staleToken) return; // already handling this exact credential
+    if (recoverAttempts.current >= 2) {
+      forgetObserver(team);
+      setFormError('the live observer keeps being rejected — reconnect or check the daemon');
+      setCfg(null);
+      return;
+    }
+    recoveredToken.current = staleToken;
+    recoverAttempts.current += 1;
+    forgetObserver(team);
+    void (async () => {
+      try {
+        const name = genObserverName();
+        const credential = await provisionObserver(team, name);
+        saveObserver(team, { name, token: credential });
+        setCfg({ team, as: name, token: credential }); // reconnect with the fresh observer
+      } catch (e) {
+        setFormError(e instanceof Error ? e.message : String(e));
+        setCfg(null);
+      }
+    })();
+  }, [cfg?.team, cfg?.token]);
+  const armRecovery = useCallback(() => {
+    recoverAttempts.current = 0;
+  }, []);
+
+  const { envelopes, roster, status, error, liveIds } = useLiveStream(cfg, {
+    onCredentialInvalid: recoverObserver,
+    onConnected: armRecovery,
+  });
 
   const watch = async (explicit?: string) => {
     setFormError(null);

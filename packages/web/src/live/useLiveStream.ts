@@ -4,10 +4,19 @@ import {
   LiveClient,
   fetchHistory,
   fetchRoster,
+  isStaleCredential,
   type ConnStatus,
   type LiveConfig,
 } from './client';
 import { firehoseSound } from './sound';
+
+export interface LiveStreamHooks {
+  /** Fired when the observer credential is stale/invalid (a 401 backfill or a WS `refused`) — the route
+   * drops it and re-provisions instead of dead-ending. */
+  onCredentialInvalid?: () => void;
+  /** Fired once the backfill succeeds — lets the route re-arm its one-shot recovery guard. */
+  onConnected?: () => void;
+}
 
 export interface LiveState {
   envelopes: Envelope[];
@@ -23,7 +32,11 @@ export interface LiveState {
  * at-least-once, and a backfilled message can also arrive live) and kept in `ts,id` order. Pass `null`
  * to stay disconnected (before the operator has entered credentials).
  */
-export function useLiveStream(cfg: LiveConfig | null): LiveState {
+export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {}): LiveState {
+  // Keep the latest callbacks in a ref so the connect effect doesn't re-run (and re-provision) when the
+  // route re-renders with fresh closures — only cfg identity should drive reconnects.
+  const hooksRef = useRef(hooks);
+  hooksRef.current = hooks;
   const [envelopes, setEnvelopes] = useState<Envelope[]>([]);
   const [roster, setRoster] = useState<MemberSummary[]>([]);
   const [status, setStatus] = useState<ConnStatus>('idle');
@@ -61,9 +74,17 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
         if (!alive) return;
         setRoster(r);
         add(h);
+        hooksRef.current.onConnected?.(); // backfill worked → re-arm the route's recovery guard
       })
       .catch((e: unknown) => {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
+        if (!alive) return;
+        // A stale observer credential (wiped DB / expired TTL) → let the route re-provision instead of
+        // dead-ending on an error banner the user can't clear.
+        if (isStaleCredential(e)) {
+          hooksRef.current.onCredentialInvalid?.();
+          return;
+        }
+        setError(e instanceof Error ? e.message : String(e));
       });
 
     const client = new LiveClient(cfg, {
@@ -90,6 +111,7 @@ export function useLiveStream(cfg: LiveConfig | null): LiveState {
       },
       onStatus: (s) => alive && setStatus(s),
       onError: (msg) => alive && setError(msg),
+      onCredentialInvalid: () => alive && hooksRef.current.onCredentialInvalid?.(),
     });
     client.connect();
 
