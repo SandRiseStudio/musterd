@@ -58,8 +58,14 @@ async function apiGet<T>(cfg: LiveConfig, path: string): Promise<T> {
   const text = await res.text();
   const json = text ? JSON.parse(text) : {};
   if (!res.ok) {
-    const msg = (json as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`;
-    throw new Error(msg);
+    // Carry the daemon's status + code so callers can distinguish a stale-observer 401 (self-heal) from
+    // a real failure — a plain Error would erase the signal the route needs to auto-reprovision.
+    const err = (json as { error?: { code?: string; message?: string } })?.error;
+    throw new LiveFetchError(
+      err?.message ?? `HTTP ${res.status}`,
+      err?.code ?? `http_${res.status}`,
+      res.status,
+    );
   }
   return json as T;
 }
@@ -89,16 +95,33 @@ export async function fetchHistory(
   return r.messages;
 }
 
-/** A fetch error that carries the daemon's error code so the view can tailor copy (401 vs 403). */
-export class AuditFetchError extends Error {
+/** A fetch error that carries the daemon's HTTP status + error code, so a caller can tell a stale-observer
+ * 401 from a real failure (and self-heal) and the view can tailor copy (401 vs 403). */
+export class LiveFetchError extends Error {
   constructor(
     message: string,
     readonly code: string,
     readonly status: number,
   ) {
     super(message);
+    this.name = 'LiveFetchError';
+  }
+}
+
+/** The admin audit/requests reads throw this subclass so their `instanceof AuditFetchError` checks keep
+ * working; it IS a {@link LiveFetchError} (carries `code` + `status`). */
+export class AuditFetchError extends LiveFetchError {
+  constructor(message: string, code: string, status: number) {
+    super(message, code, status);
     this.name = 'AuditFetchError';
   }
+}
+
+/** True for the 401 the daemon returns when an observer credential is stale/invalid — a wiped DB or an
+ * expired 24h observer TTL (ADR 064) leaves the cached `mscr_` unrecognised (`unauthorized`). Recoverable
+ * by dropping it and provisioning a fresh observer, so `/live` self-heals instead of dead-ending. */
+export function isStaleCredential(e: unknown): boolean {
+  return e instanceof LiveFetchError && e.status === 401;
 }
 
 /**
@@ -228,6 +251,10 @@ export interface LiveHandlers {
   onPresence: (member: string, status: string, surface?: string) => void;
   onStatus: (status: ConnStatus) => void;
   onError?: (message: string) => void;
+  /** The WS `claim` was refused for a stale/invalid credential — recoverable by re-provisioning a fresh
+   * observer (the route drops the cached credential and reconnects). When set, it's called *instead* of
+   * `onError` for that case, so the view auto-heals rather than showing a dead-end. */
+  onCredentialInvalid?: () => void;
 }
 
 /**
@@ -308,13 +335,18 @@ export class LiveClient {
           );
           break;
         case 'refused': {
-          // A bad/stale credential (e.g. the observer seat was reclaimed). Terminal — surface the
-          // daemon's hint and stop; the route's reset re-provisions a fresh observer.
-          const hint = typeof frame.hint === 'string' && frame.hint ? ` — ${frame.hint}` : '';
-          this.h.onError?.(`${frame.message as string}${hint}`);
+          // A bad/stale credential (e.g. a wiped DB, an expired observer TTL, or the seat reclaimed).
+          // Terminal for this socket — stop, then let the route re-provision a fresh observer and
+          // reconnect (onCredentialInvalid) instead of dead-ending on the daemon's hint.
           this.stopped = true;
           this.h.onStatus('error');
           ws.close();
+          if (this.h.onCredentialInvalid) {
+            this.h.onCredentialInvalid();
+          } else {
+            const hint = typeof frame.hint === 'string' && frame.hint ? ` — ${frame.hint}` : '';
+            this.h.onError?.(`${frame.message as string}${hint}`);
+          }
           break;
         }
         case 'pending':
