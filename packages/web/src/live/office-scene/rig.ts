@@ -37,6 +37,9 @@ export interface RigInputs {
   facing: number;
   /** run modifier (urgent walk): 0|1. */
   run: number;
+  /** in-place ambient gesture overlay: `0` none · `1` stretch · `2` glance. Drives the Rive `gesture`
+   * layer; ignored by an asset without a `gesture` input (guarded write in rive-rig.ts). */
+  gesture: number;
 }
 
 /** FNV-ish name hash — same idiom as seating/memberColor, so skin choice is stable per person. */
@@ -111,6 +114,7 @@ export function spriteKey(r: RigInputs): string {
     r.mode,
     r.facing,
     r.run,
+    r.gesture,
   ].join('|');
 }
 
@@ -129,5 +133,6 @@ export function officeToRig(node: OfficeNode, pose: Pose): RigInputs {
     mode: modeFor(node, pose),
     facing: FACING[pose.dir],
     run: pose.run ? 1 : 0,
+    gesture: pose.gesture,
   };
 }

@@ -49,6 +49,7 @@ export function homePoses(
         alpha: 1,
         moving: false,
         run: false,
+        gesture: 0,
       });
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);
@@ -67,6 +68,7 @@ export function homePoses(
         alpha: 1,
         moving: false,
         run: false,
+        gesture: 0,
       });
     } else if (pl.kind === 'strip') {
       if (pl.index >= STRIP_CAP) continue; // past the cap: represented by the "+N waiting" pill
@@ -82,6 +84,7 @@ export function homePoses(
         alpha: 1,
         moving: false,
         run: false,
+        gesture: 0,
       });
     }
   }
@@ -135,6 +138,10 @@ export interface Actors {
    * Self-generated filler, not a real act; returns false if the member can't stroll (absent, in the
    * nook/queue, exiting, or already busy). See ADR 086 Phase 2. */
   ambientWalk(from: string): boolean;
+  /** Play an in-place ambient gesture (`1` stretch · `2` glance) on a seated desk member for a short
+   * window. Stationary filler, not a real act; returns false if the member can't gesture (absent, small,
+   * exiting, walking, or already busy). See ADR 086 Phase 2 tail. */
+  gestureBeat(from: string, kind: number): boolean;
   /** Seated desk members eligible to be sent on an ambient stroll right now (present, not small, idle). */
   idleDeskMembers(): string[];
   /** True when motion is in flight and *all* of it is ambient — drives the idle-FPS cap in the loop. */
@@ -159,12 +166,16 @@ export function createActors(): Actors {
   const ghosts = new Map<string, OfficeNode>(); // members walking out — dropped when they reach the door
   const walks = new Map<string, Walk>();
   const pending = new Map<string, Req[]>();
+  // In-place ambient gestures (ADR 086 Phase 2 tail): a stationary beat (stretch/glance) overlaid on a
+  // seated member's idle pose for a short window, then cleared. Parallel to `walks` — no movement, so it
+  // keeps the loop alive (advance the Rive gesture layer) without a walk. `t` counts up to `dur` seconds.
+  const gestures = new Map<string, { kind: number; t: number; dur: number }>();
   const exiting = new Set<string>();
   let initialized = false;
   let doorPulses = 0; // members that entered/left since the last takeDoorPulses()
 
   function entrancePose(ref: Pose): Pose {
-    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1, moving: false, run: false };
+    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1, moving: false, run: false, gesture: 0 };
   }
   function moved(a: Pose, b: Pose): boolean {
     return Math.hypot(a.lx - b.lx, a.ly - b.ly) > 8;
@@ -195,7 +206,8 @@ export function createActors(): Actors {
 
   function posesNow(): Map<string, Pose> {
     const out = new Map<string, Pose>();
-    for (const [n, p] of homes) out.set(n, { ...p });
+    // At-home members carry any active in-place gesture (a stationary ambient beat overlaid on idle).
+    for (const [n, p] of homes) out.set(n, { ...p, gesture: gestures.get(n)?.kind ?? p.gesture });
     for (const [name, w] of walks) {
       const leg = w.legs[w.i]!;
       const e = easeInOut(clamp(w.t, 0, 1));
@@ -213,6 +225,7 @@ export function createActors(): Actors {
         // Travelling (not the hold leg) → `walking`; urgent walks → `run`.
         moving: leg.fx !== leg.tx || leg.fy !== leg.ty,
         run: w.run ?? false,
+        gesture: 0, // a walker never gestures — gestures are stationary idle beats
       });
     }
     return out;
@@ -270,6 +283,7 @@ export function createActors(): Actors {
         pending.clear();
         exiting.clear();
         ghosts.clear();
+        gestures.clear();
         return;
       }
 
@@ -302,6 +316,7 @@ export function createActors(): Actors {
         const node = prevLive.get(name);
         if (node) ghosts.set(name, node);
         pending.delete(name);
+        gestures.delete(name); // a departing member stops gesturing
         exiting.add(name);
         walks.set(name, straightWalk(from, entrancePose(from), true, 'out'));
         doorPulses++;
@@ -353,18 +368,36 @@ export function createActors(): Actors {
       });
       return true;
     },
+    gestureBeat(from, kind) {
+      const home = homes.get(from);
+      // Only a seated desk member, present and idle (not walking/queued/already gesturing), gestures.
+      if (
+        !home ||
+        home.small ||
+        exiting.has(from) ||
+        walks.has(from) ||
+        pending.get(from)?.length ||
+        gestures.has(from)
+      ) {
+        return false;
+      }
+      gestures.set(from, { kind, t: 0, dur: 2.4 }); // ~2.4s window — a full stretch/glance loop, then clear
+      return true;
+    },
     idleDeskMembers() {
       const out: string[] = [];
       for (const [name, pose] of homes) {
-        if (pose.small || walks.has(name) || exiting.has(name) || pending.get(name)?.length) continue;
+        if (pose.small || walks.has(name) || exiting.has(name) || pending.get(name)?.length || gestures.has(name)) {
+          continue;
+        }
         out.push(name);
       }
       return out;
     },
     ambientOnly() {
-      if (walks.size === 0) return false;
+      if (walks.size === 0 && gestures.size === 0) return false;
       for (const w of walks.values()) if (!w.ambient) return false;
-      return true;
+      return true; // only ambient strolls and/or in-place gestures in flight
     },
     cancelAmbient() {
       const cur = posesNow();
@@ -382,6 +415,7 @@ export function createActors(): Actors {
           walks.delete(name);
         }
       }
+      gestures.clear(); // a real act preempts in-place gestures too — they carry no motion to yield home
     },
     step(dt) {
       for (const [name, w] of [...walks.entries()]) {
@@ -401,7 +435,12 @@ export function createActors(): Actors {
           }
         }
       }
-      return walks.size > 0;
+      // Age in-place gestures; drop each when its window elapses (returns the member to a plain idle pose).
+      for (const [name, g] of [...gestures.entries()]) {
+        g.t += dt;
+        if (g.t >= g.dur) gestures.delete(name);
+      }
+      return walks.size > 0 || gestures.size > 0;
     },
     poses: posesNow,
     nodes() {
@@ -415,7 +454,7 @@ export function createActors(): Actors {
       return n;
     },
     active() {
-      return walks.size > 0;
+      return walks.size > 0 || gestures.size > 0;
     },
   };
 }

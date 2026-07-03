@@ -410,7 +410,16 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     if (!reduced && VISIBLE() && quiet()) {
       const idle = actors.idleDeskMembers();
       const who = idle.length ? idle[Math.floor(Math.random() * idle.length)]! : null;
-      if (who && actors.ambientWalk(who)) ensureLoop();
+      if (who) {
+        // Most beats are a cheap in-place gesture (stretch/glance); occasionally a coffee-stroll. The
+        // gesture path no-ops visually until the `.riv` exposes the `gesture` layer, then lights up.
+        const beat = Math.random();
+        const played =
+          beat < 0.7
+            ? actors.gestureBeat(who, beat < 0.35 ? 1 : 2) // 1 stretch · 2 glance
+            : actors.ambientWalk(who);
+        if (played) ensureLoop();
+      }
     }
     scheduleAmbient();
   }

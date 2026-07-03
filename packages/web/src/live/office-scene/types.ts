@@ -44,6 +44,10 @@ export interface Pose {
   moving: boolean;
   /** True while the active walk is an urgent run (drives the Rive `run` modifier). */
   run: boolean;
+  /** An in-place ambient gesture playing this frame (ADR 086 Phase 2 tail): `0` none · `1` stretch ·
+   * `2` glance. Drives the Rive `gesture` overlay layer; self-generated filler, cleared by a real act.
+   * No-op against a `.riv` without the `gesture` input (the guarded write in rive-rig.ts). */
+  gesture: number;
 }
 
 /** Motion intensity == notification tier (memory: travel-intensity == notification tiers). */

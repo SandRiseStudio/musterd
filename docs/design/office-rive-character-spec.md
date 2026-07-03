@@ -47,6 +47,27 @@ Status: draft (2026-07-01) · Owner: web/live · Relates to: ADR 079 (live isome
 >
 > Only the two `.riv` authoring steps + a re-export to `public/office/character.riv` remain; no further
 > code change is needed once the properties exist.
+>
+> ### Ambient gesture poses — code side ready (2026-07-03), `.riv` side scaffolded
+>
+> **In-place ambient gestures (stretch/glance) are code-ready** (ADR 086 Phase 2 tail). When the room is
+> quiet, the office scheduler occasionally plays a stationary beat on a seated member (`actors.gestureBeat`),
+> which flows through `pose.gesture` → `officeToRig` → a **guarded `setNumberIfPresent(vmi, 'gesture', …)`**
+> in `rive-rig.ts` — a no-op against the current asset, lighting up automatically once the `.riv` exposes it.
+> The value is `0` none · `1` stretch · `2` glance; it's included in the sprite-cache `spriteKey`, and a
+> gesturing member is kept `dirty` (advancing) for the gesture window.
+>
+> **`.riv` scaffold already authored via the MCP** (needs finishing + export, all with live preview):
+>
+> - **Input** — a `number` property named exactly **`gesture`** was added to the `Character` view model.
+> - **Layer** — a separate **`Gesture`** state-machine layer was added (overlays on `Main`, so the `mode`
+>   states are untouched) with states **`none`** (empty), **`stretch`**, and **`glance`**, plus empty
+>   `stretch` / `glance` linear animations.
+> - **Remaining in-editor steps:** (1) wire the `Gesture` layer's Any-State → `none`/`stretch`/`glance`
+>   transitions with conditions **`gesture == 0 / 1 / 2`** (the MCP transition-condition write didn't
+>   persist cleanly — do this in the editor); (2) keyframe the two short animations (the character is flat
+>   ungrouped shapes — `arm-L`/`arm-R`, `head · skin`, `torso · accent`, etc. — so preview as you go);
+>   (3) re-export to `public/office/character.riv`. The code then activates with no further change.
 
 ## Purpose
 
