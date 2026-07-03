@@ -22,7 +22,10 @@ import type { Harness } from './harness.js';
  * Unlike AGENTS.md (where the user's prose lives *around* our markers), guidance files are *wholly*
  * musterd's — so we overwrite in full. The safety rail is the **stamp**: a file we wrote carries a
  * `<!-- musterd:content vN sha256:… -->` line; a file the user hand-created does not. We overwrite only
- * stamped files (or any file with `--force`), never a stampless one we didn't write.
+ * stamped files (or any file with `--force`), never a stampless one we didn't write. The stamp's hash is
+ * for **drift detection** (the doctor notes a hand-edit), *not* edit protection: a stamped file is
+ * musterd-managed and a plain `musterd init` re-writes it, edits and all. To keep your own guidance,
+ * author it in AGENTS.md (around the markers) or at a stampless path.
  */
 
 /** The harness-neutral skill, always written and pointed at by the primer (covers Codex + any harness
@@ -47,10 +50,14 @@ export function contentHash(renderable: string): string {
 }
 
 /** Assemble a written file: renderable content + a trailing stamp line. The stamp is its own last line
- * so drift-checkers can strip it cleanly to recover the body for hashing. */
+ * so drift-checkers can strip it cleanly to recover the body for hashing. The hash is taken over the
+ * newline-normalized `body` (the exact bytes written above the stamp), so it round-trips with
+ * {@link strippedBody} — which also normalizes to a trailing newline. Hashing the raw `renderable`
+ * instead would false-flag an untouched file whenever the renderable lacked a final newline (the
+ * `join('\n')` renderers in `@musterd/protocol` do). */
 function stamped(renderable: string): string {
   const body = renderable.endsWith('\n') ? renderable : renderable + '\n';
-  return `${body}${renderContentStamp(GUIDANCE_CONTENT_VERSION, contentHash(renderable))}\n`;
+  return `${body}${renderContentStamp(GUIDANCE_CONTENT_VERSION, contentHash(body))}\n`;
 }
 
 /** Recover the renderable content (what {@link contentHash} was computed over) from a written file by

@@ -5,6 +5,7 @@ import { GUIDANCE_CONTENT_VERSION, parseContentStamp } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   CANONICAL_SKILL_PATH,
+  contentHash,
   guidanceTargets,
   removeGuidance,
   strippedBody,
@@ -98,6 +99,18 @@ describe('strippedBody', () => {
     // (hash algorithm lives in guidance.ts contentHash; here we just assert the stamp round-trips)
     expect(strippedBody(text)).not.toContain('musterd:content');
     expect(stamp.hash).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('stamp round-trips exactly, so an untouched file is never flagged as edited', () => {
+    // The renderers `join('\n')` with no trailing newline; the stamp must hash the *normalized* body
+    // (what gets written) so `contentHash(strippedBody(text))` — the doctor's drift check — matches.
+    const dir = tmp();
+    const res = writeGuidance(dir, [claudeCode, cursor], { team: 'dawn' });
+    for (const rel of res.files) {
+      const text = readFileSync(join(dir, rel), 'utf8');
+      const stamp = parseContentStamp(text)!;
+      expect(contentHash(strippedBody(text))).toBe(stamp.hash); // no false "local edits"
+    }
   });
 });
 
