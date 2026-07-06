@@ -117,6 +117,8 @@ Derived **views over the message log — never stored beside it** (same principl
 
 All Goodhart and human-vs-agent measurement cautions in `docs/design/human-agent-dynamics.md` §4 apply with full force here — these are diagnostic instruments, not performance scores.
 
+The substrate for these views is the **per-recipient delivery ledger** (ADR 090, L2 increment 2 — design frozen 2026-07-06): per (act, recipient), `logged → seen → answered` (+ a derived `stale` label), **derived from the log + inbox cursors + the interrupt audit, never a delivery table**, with attempt history (live-push outcome, interrupt raises) living in telemetry. It adds `musterd.coordination.seen_latency` — the read-side twin of `loop_latency`, generalizing ADR 088's raised→read pair to every directed act — and surfaces as `GET …/messages/:id/delivery`, `musterd report delivery`, and a ledger block on `team_report`.
+
 ### Standalone ambition
 
 This layer should ship as its **own product** (working name **batond**, reversible — see `docs/design/brand-coordination-observability.md` §5): it ingests musterd logs natively but also plain OTel GenAI/agent spans, so teams not running musterd can still use the coordination lens. batond is also the **home of the eval + experiment engine** (ADR 051) — Langfuse-shaped scores/datasets/experiments plus the coordination-native additions (team-outcome evals, team-topology experiments) — built on a bought backend, never a from-scratch store. The protocol stays MIT and self-sufficient; the insight product must never become a requirement for using musterd.
