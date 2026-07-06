@@ -12,8 +12,8 @@ import { registerGoals } from './tools/goals.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
 import { registerInsights } from './tools/insights.js';
 import { registerJoin } from './tools/join.js';
-import { registerLeave } from './tools/leave.js';
 import { registerLanes } from './tools/lanes.js';
+import { registerLeave } from './tools/leave.js';
 import { registerMembers } from './tools/members.js';
 import { registerSend } from './tools/send.js';
 import { registerStatus } from './tools/status.js';
@@ -183,17 +183,24 @@ async function main(): Promise<void> {
   const server = buildMcpServer(client, config);
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // The one graceful teardown, shared by every exit path: stop the resolution watcher, drop presence,
+  // and flush the telemetry tail with a hard cap so a dead collector never hangs the exit.
+  const teardown = (): Promise<void> => {
+    stopWatcher?.();
+    client.close();
+    return telemetry.shutdown({ timeoutMs: 1000 });
+  };
+  // ADR 092: when the server tells us a same-workspace successor replaced us (a reload orphaned this
+  // process), exit cleanly instead of lingering dormant-but-alive — the host is gone. `installShutdown`
+  // handles the host-driven exits (stdin close / signals); this handles the server-driven one.
+  client.onReplaced = () => {
+    void teardown().finally(() => process.exit(0));
+  };
+
   await autojoin(client, config);
 
-  installShutdownHandlers({
-    close: () => {
-      stopWatcher?.();
-      client.close();
-      // Flush the telemetry tail with a hard cap: never hang the exit on a dead collector.
-      return telemetry.shutdown({ timeoutMs: 1000 });
-    },
-    transport,
-  });
+  installShutdownHandlers({ close: teardown, transport });
 }
 
 // Run only when invoked directly (not when imported by tests).

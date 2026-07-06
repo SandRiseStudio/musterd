@@ -922,9 +922,91 @@ describe('WebSocket', () => {
 
     const superseded = await first.waitFor('error');
     expect((superseded as any).code).toBe('superseded');
+    // Cross-workspace supersession is NOT flagged same_workspace (ADR 092) — the displaced session is a
+    // genuinely different one (another machine / branch) and stays dormant rather than self-exiting.
+    expect((superseded as any).same_workspace).toBeFalsy();
 
     first.close();
     second.close();
+  });
+
+  describe('durability-gated same-workspace eviction (ADR 092)', () => {
+    // A short grace so the reap fires within a test's patience; the outer beforeEach already stood up a
+    // default-grace server, so close it and stand up a short-grace one for these cases.
+    beforeEach(async () => {
+      await server.close();
+      process.env['MUSTERD_SUPERSEDE_GRACE_MS'] = '120';
+      server = createServer({ db: openDb(':memory:'), port: 0 });
+      const { port } = await server.listen();
+      base = `http://127.0.0.1:${port}`;
+      wsUrl = `ws://127.0.0.1:${port}/ws`;
+    });
+    afterEach(() => {
+      delete process.env['MUSTERD_SUPERSEDE_GRACE_MS'];
+    });
+
+    async function occupyAda(ws: TestWs, agentKey: string, grant: string, workspace: string) {
+      ws.send({
+        type: 'claim',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        key: agentKey,
+        target: { seat: 'Ada' },
+        grant,
+        surface: 'claude-code',
+        workspace,
+      });
+      expect((await ws.waitFor('occupied')).type).toBe('occupied');
+    }
+
+    it('a durable same-workspace successor reaps its predecessor with same_workspace:true', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+      const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+      const orphan = new TestWs();
+      await orphan.open();
+      await occupyAda(orphan, team.json.agent_key, grant, 'repo@main');
+
+      // The reload successor: same workspace, and it STAYS connected past the grace.
+      const successor = new TestWs();
+      await successor.open();
+      await occupyAda(successor, team.json.agent_key, grant, 'repo@main');
+
+      // The orphan is reaped after the grace, and told same_workspace so its adapter exits.
+      const superseded = await orphan.waitFor('error', 1000);
+      expect((superseded as any).code).toBe('superseded');
+      expect((superseded as any).same_workspace).toBe(true);
+
+      // The duplicate was audited when the reap was armed (ADR 092 §C drift signal).
+      const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+      expect(
+        listAudit(server.db, teamId).some((r) => r.action === 'claim.duplicate_workspace'),
+      ).toBe(true);
+
+      successor.close();
+      orphan.close();
+    });
+
+    it('a transient same-workspace probe that disconnects within the grace does NOT reap the incumbent', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+      const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+      const live = new TestWs();
+      await live.open();
+      await occupyAda(live, team.json.agent_key, grant, 'repo@main');
+
+      const probe = new TestWs();
+      await probe.open();
+      await occupyAda(probe, team.json.agent_key, grant, 'repo@main');
+      probe.close(); // disconnects immediately, before the grace elapses — as a health check does
+
+      // The live session is never superseded: the successor is gone before the reap fires (ADR 068 held).
+      await expect(live.waitFor('error', 400)).rejects.toThrow(/timeout/);
+
+      live.close();
+    });
   });
 
   it('a human seat fans out: two concurrent sessions both stay live, neither superseded (ADR 042)', async () => {

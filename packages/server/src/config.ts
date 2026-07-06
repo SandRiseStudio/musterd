@@ -22,6 +22,10 @@ export interface ResolvedConfig {
   resumeTtlMs: number;
   /** Idle TTL after which an unused observer seat is reaped (ADR 064). */
   observerTtlMs: number;
+  /** Grace a same-workspace successor must stay attached before it reaps its predecessor (ADR 092):
+   * long enough that a transient health-check probe disconnects first (so it never evicts the live
+   * seat), short enough that a real reload orphan is reaped promptly. */
+  supersedeGraceMs: number;
   /** Native TLS material, or null to serve plaintext (ADR 040). */
   tls: TlsConfig | null;
   /** Operator acknowledges a TLS-terminating proxy/overlay in front (ADR 040). */
@@ -45,6 +49,9 @@ export const RECLAIM_GRACE_MS = 45_000;
 export const OBSERVER_TTL_MS = 86_400_000; // 24h
 /** A seat resume grant (ADR 087) is valid for this long, refreshed on every clean occupy. */
 export const RESUME_TTL_MS = 86_400_000; // 24h
+/** A same-workspace successor waits this long, still attached, before reaping its predecessor (ADR
+ * 092). Above the ~ms lifetime of a Claude Code health-check probe, below a human-noticeable stall. */
+export const SUPERSEDE_GRACE_MS = 5_000;
 export const DEFAULT_PORT = 4849;
 export const DEFAULT_HOST = '127.0.0.1';
 
@@ -148,6 +155,7 @@ export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
     reclaimGraceMs: envMs('MUSTERD_RECLAIM_GRACE_MS', RECLAIM_GRACE_MS),
     resumeTtlMs: envMs('MUSTERD_RESUME_TTL_MS', RESUME_TTL_MS),
     observerTtlMs: envMs('MUSTERD_OBSERVER_TTL_MS', OBSERVER_TTL_MS),
+    supersedeGraceMs: envMs('MUSTERD_SUPERSEDE_GRACE_MS', SUPERSEDE_GRACE_MS),
     tls,
     trustProxy: opts?.trustProxy ?? envBool('MUSTERD_INSECURE_TRUST_PROXY'),
     scheme: tls ? 'wss' : 'ws',

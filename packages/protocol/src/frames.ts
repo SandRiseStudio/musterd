@@ -92,6 +92,11 @@ export const ErrorFrame = z.object({
   type: z.literal('error'),
   code: ErrorCodeSchema,
   message: z.string(),
+  // Set on a `superseded` error when the displacing claim came from the *same* workspace (ADR 092):
+  // the session was replaced by a reload successor in its own workspace, so the adapter should exit
+  // cleanly rather than linger dormant. Absent/false ⇒ a cross-workspace takeover (ADR 017), which
+  // stays dormant. Additive + optional: older adapters ignore it and keep the dormant behavior.
+  same_workspace: z.boolean().optional(),
 });
 
 export const WSServerFrame = z.discriminatedUnion('type', [

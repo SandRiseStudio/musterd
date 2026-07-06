@@ -17,9 +17,9 @@ import {
 } from '../config.js';
 import { renderBanner } from '../render/rows.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
+import { writeGuidance } from './guidance.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
-import { writeGuidance } from './guidance.js';
 import { writeProvisionManifest } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
 import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';

@@ -148,6 +148,12 @@ describe('MCP adapter', () => {
 
   it('a second session for the same member takes over; the first is superseded (ADR 017)', async () => {
     const a1 = new MusterdClient(adaConfig());
+    // A cross-workspace takeover must NOT trigger the self-exit (ADR 092): it's a genuinely different
+    // session (another machine/branch), so a1 stays dormant, not exited.
+    let replaced = false;
+    a1.onReplaced = () => {
+      replaced = true;
+    };
     await a1.join();
     expect(a1.joined).toBe(true);
 
@@ -163,10 +169,60 @@ describe('MCP adapter', () => {
       expect(a1.joined).toBe(false);
       expect(a1.lastJoinError).toMatch(/superseded/i);
     });
+    // Terminal (ADR 017): no reconnect / re-claim after supersession, and no cross-workspace self-exit.
+    await delay(200);
+    expect(a1.joined).toBe(false);
+    expect(replaced).toBe(false);
 
     a1.close();
     a2.close();
   });
+
+  it('a same-workspace successor replaces the session: onReplaced fires, terminal (ADR 092)', async () => {
+    // Recreate the server with a short reap grace, reusing the same injected db (an injected db is not
+    // closed on server.close, so the team/seat/grant set up in beforeEach survive).
+    const db = server.db;
+    await server.close();
+    process.env['MUSTERD_SUPERSEDE_GRACE_MS'] = '120';
+    try {
+      server = createServer({ db, port: 0 });
+      const { port } = await server.listen();
+      base = `http://127.0.0.1:${port}`;
+
+      const a1 = new MusterdClient(adaConfig()); // workspace 'repo'
+      let replaced = 0;
+      a1.onReplaced = () => {
+        replaced++;
+      };
+      await a1.join();
+      expect(a1.joined).toBe(true);
+
+      // A reload successor in the SAME workspace claims and stays connected — proving durable, it reaps
+      // the orphaned predecessor after the grace (ADR 092).
+      const a2 = new MusterdClient(adaConfig()); // same workspace 'repo'
+      await a2.join();
+      expect(a2.joined).toBe(true);
+
+      await vi.waitFor(
+        () => {
+          expect(a1.joined).toBe(false);
+          expect(a1.lastJoinError).toMatch(/superseded/i);
+          expect(replaced).toBe(1);
+        },
+        { timeout: 2000 },
+      );
+      // Terminal: no reconnect, and onReplaced fires exactly once (the successor stays live).
+      await delay(200);
+      expect(a1.joined).toBe(false);
+      expect(a2.joined).toBe(true);
+      expect(replaced).toBe(1);
+
+      a1.close();
+      a2.close();
+    } finally {
+      delete process.env['MUSTERD_SUPERSEDE_GRACE_MS'];
+    }
+  }, 10_000);
 
   it('an invalid agent key is refused on claim (v0.3, ADR 075)', async () => {
     const bad = new MusterdClient({ ...adaConfig(), agent_key: 'mskey_not_a_real_key' });

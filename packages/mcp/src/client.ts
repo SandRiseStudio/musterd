@@ -45,6 +45,10 @@ export class MusterdClient {
   /** Why the last join attempt failed — surfaced by the dormant tool guards so a silent autojoin
    * failure (e.g. wrong-db token rejection) is visible to the agent, not just "call team_join". */
   private lastJoinErrorMsg: string | null = null;
+  /** Invoked when this session is superseded by a successor **in its own workspace** (ADR 092): the
+   * adapter has been replaced by a reload and should exit cleanly rather than linger dormant. Wired by
+   * the MCP entrypoint to the graceful-shutdown-then-exit path; unset in tests / library use. */
+  onReplaced?: () => void;
 
   constructor(private config: McpConfig) {}
 
@@ -363,6 +367,11 @@ export class MusterdClient {
         this.pendingJoin?.reject(new Error(this.lastJoinErrorMsg));
         this.pendingJoin = null;
         ws.close();
+        // ADR 092: a *same-workspace* takeover means this process is a reload orphan — its host is gone
+        // and a dormant adapter has no purpose. Signal the entrypoint to exit cleanly (drop presence,
+        // flush telemetry, exit 0). A cross-workspace takeover stays dormant (a genuinely different
+        // session on another machine/branch) — unchanged.
+        if (frame.same_workspace) this.onReplaced?.();
       } else if (frame.type === 'deliver') {
         this.push(frame.envelope);
       }
