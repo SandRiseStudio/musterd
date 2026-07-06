@@ -1,7 +1,6 @@
 import viteReact from '@vitejs/plugin-react';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import { defineConfig } from 'vite';
-import glsl from 'vite-plugin-glsl';
 
 // In dev, the /live dashboard talks to the daemon same-origin and Vite proxies the daemon paths
 // (/teams, /ws, /health) to it — set MUSTERD_DAEMON to point at a daemon (default :4849). We strip
@@ -23,7 +22,7 @@ const proxyEntry = { target: daemon, changeOrigin: true, configure: stripOrigin 
 // build output can be served by any static host (and, later, by @musterd/server).
 // TanStack Start stays underneath so the future stateful dashboard adds routes without a
 // framework change. This Start version doesn't inject a React plugin, so we add @vitejs/plugin-react
-// ourselves (required for the dev-mode React Refresh runtime); vite-plugin-glsl composes cleanly.
+// ourselves (required for the dev-mode React Refresh runtime).
 export default defineConfig({
   server: {
     proxy: {
@@ -33,7 +32,6 @@ export default defineConfig({
     },
   },
   plugins: [
-    glsl(),
     tanstackStart({
       prerender: { enabled: true, crawlLinks: true },
       pages: [{ path: '/' }],

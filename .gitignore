@@ -16,4 +16,7 @@ coverage/
 # secret-bearing harness configs (security.md operational guidance)
 .cursor/mcp.json
 
+# Qoder editor workspace state — local tooling, never committed
+.qoder/
+
 .env
