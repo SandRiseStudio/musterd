@@ -74,9 +74,22 @@ export const ClaimFrame = z.object({
 });
 export type ClaimFrame = z.infer<typeof ClaimFrame>;
 
+/** The memory envelope delivered on occupy (ADR 093): headline + age + size, never the body — the
+ *  body travels only over an explicit read (GET /teams/:slug/memory). `.strict()` so a body can
+ *  never silently ride the occupied frame. */
+export const MemoryEnvelopeSchema = z
+  .object({
+    headline: z.string().min(1).max(120),
+    saved_at: z.number().int(),
+    size_bytes: z.number().int().nonnegative(),
+  })
+  .strict();
+export type MemoryEnvelope = z.infer<typeof MemoryEnvelopeSchema>;
+
 /** `occupied` (server → client) — the claim succeeded; this session holds the seat. `charter` is
- *  identity metadata the server serves but never enforces; `memory` is a reserved seam, always null
- *  in v0.3 (SPEC A.3). */
+ *  identity metadata the server serves but never enforces; `memory` is the seat-scoped continuity
+ *  envelope (ADR 093) — headline + age, or null when the seat has saved nothing. The body is fetched
+ *  on demand (GET /teams/:slug/memory); it never rides this frame. */
 export const OccupiedFrame = z.object({
   type: z.literal('occupied'),
   seat: MemberSchema,
@@ -87,7 +100,7 @@ export const OccupiedFrame = z.object({
   // persists it into `binding.grant` and re-presents it on reconnect to occupy without an approval —
   // the server refreshes its TTL on each clean occupy. Only set on the first-issue (approve) path.
   grant: z.string().optional(),
-  memory: z.null(),
+  memory: MemoryEnvelopeSchema.nullable(),
 });
 export type OccupiedFrame = z.infer<typeof OccupiedFrame>;
 

@@ -308,6 +308,32 @@ describe('MCP adapter', () => {
     client.close();
   });
 
+  // ADR 093: memory saved in one session is delivered as the envelope on the next occupy — the
+  // continuity loop end-to-end: save → leave → re-join → envelope (headline, never the body) → read.
+  it('seat memory survives the session gap: save, re-occupy delivers the envelope, read the body', async () => {
+    const s1 = new MusterdClient(adaConfig());
+    await s1.join();
+    expect(s1.memory).toBeNull(); // fresh seat — nothing saved yet
+    await s1.saveMemory({
+      headline: 'mid-refactor, tests red',
+      body: 'left off at ws.ts eviction',
+    });
+    s1.leave();
+    s1.close();
+
+    const s2 = new MusterdClient(adaConfig());
+    await s2.join();
+    expect(s2.memory).toEqual({
+      headline: 'mid-refactor, tests red',
+      saved_at: expect.any(Number),
+      size_bytes: Buffer.byteLength('left off at ws.ts eviction', 'utf8'),
+    });
+    const mem = await s2.readMemory();
+    expect(mem.headline).toBe('mid-refactor, tests red');
+    expect(mem.body).toBe('left off at ws.ts eviction');
+    s2.close();
+  });
+
   it('drops presence and exits when the host closes stdin (no orphaned adapter)', () => {
     const close = vi.fn();
     const exit = vi.fn();

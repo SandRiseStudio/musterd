@@ -76,6 +76,7 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
       expect.objectContaining({ id: 'm1', name: 'Ada' }),
       '01J',
       undefined,
+      null,
     );
     // next frame after the claim is the subscribe
     const frames = sock.sent.map((s) => JSON.parse(s));
@@ -100,6 +101,23 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
       expect.objectContaining({ id: 'm1', name: 'Ada' }),
       '01J',
       'msgr_resume123',
+      null,
+    );
+  });
+
+  it('occupied carrying a memory envelope (ADR 093) threads it to onOccupied — never the body', () => {
+    const { sock, opts } = harness();
+    sock.emit('open');
+    const memory = { headline: 'mid-refactor, tests red', saved_at: 5, size_bytes: 512 };
+    sock.emit(
+      'message',
+      JSON.stringify({ type: 'occupied', seat, presence_id: '01J', server_time: 7, memory }),
+    );
+    expect(opts.onOccupied).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Ada' }),
+      '01J',
+      undefined,
+      memory,
     );
   });
 
@@ -147,6 +165,7 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
       expect.objectContaining({ id: 'm1', name: 'Ada' }),
       '01J',
       undefined,
+      null,
     );
     expect(sock.sent.map((s) => JSON.parse(s))).toContainEqual(
       expect.objectContaining({ type: 'subscribe' }),

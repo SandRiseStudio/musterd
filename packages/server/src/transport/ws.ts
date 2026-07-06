@@ -16,6 +16,7 @@ import { parseEnvelope } from '../protocol/validate.js';
 import { appendAudit } from '../store/audit.js';
 import { consumeGrant, refreshGrant, validateGrant } from '../store/grants.js';
 import { getMemberById, getMemberByName, hashToken, markBound } from '../store/members.js';
+import { memoryEnvelope } from '../store/memory.js';
 import {
   attach,
   clearOrphanPresence,
@@ -517,7 +518,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
-            memory: null,
+            memory: memoryEnvelope(ctx.db, targetMember.id),
           });
           if (!conn.observer) emitPresence(ctx, conn, 'online', frame.surface);
           // ADR 092: now that this successor is occupied, arm the grace-gated reap of any same-workspace

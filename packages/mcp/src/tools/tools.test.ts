@@ -10,6 +10,7 @@ import { registerInboxCheck } from './inboxCheck.js';
 import { registerJoin } from './join.js';
 import { registerLeave } from './leave.js';
 import { registerMembers } from './members.js';
+import { memoryLine, registerMemory } from './memory.js';
 import { registerSend } from './send.js';
 import { registerStatus } from './status.js';
 
@@ -30,6 +31,21 @@ function capture(
   register(server, client, config ?? {});
   if (!handler) throw new Error('no handler registered');
   return handler;
+}
+
+/** Like `capture`, for a register* function that installs several tools — keyed by tool name. */
+function captureAll(
+  register: (server: any, client: any, config?: any) => void,
+  client: Partial<MusterdClient>,
+): Record<string, Handler> {
+  const handlers: Record<string, Handler> = {};
+  const server = {
+    registerTool: (name: string, _schema: unknown, h: Handler) => {
+      handlers[name] = h;
+    },
+  };
+  register(server, client);
+  return handlers;
 }
 
 const config: McpConfig = {
@@ -423,6 +439,79 @@ describe('team_status handler', () => {
   });
 });
 
+describe('team_memory handlers (ADR 093)', () => {
+  it('memoryLine renders headline + age + the read pointer, never the body', () => {
+    const line = memoryLine(
+      { headline: 'mid-refactor of ws.ts eviction, tests red', saved_at: 1000, size_bytes: 2048 },
+      1000 + 2 * 3600_000,
+    );
+    expect(line).toBe(
+      'Saved memory from 2h ago: "mid-refactor of ws.ts eviction, tests red" — ' +
+        'team_memory_read to load it (2048 bytes).',
+    );
+  });
+
+  it('save and read refuse while not joined (dormant guard)', async () => {
+    const handlers = captureAll(registerMemory, {
+      joined: false,
+      claimed: true,
+      lastJoinError: null,
+      claimCode: 'AB12',
+    });
+    expect(text(await handlers['team_memory_save']!({ headline: 'h' }))).toContain(
+      'call team_join first',
+    );
+    expect(text(await handlers['team_memory_read']!({}))).toContain('call team_join first');
+  });
+
+  it('save forwards headline + body and echoes the headline back', async () => {
+    const saveMemory = vi.fn(async () => undefined);
+    const handlers = captureAll(registerMemory, { joined: true, saveMemory: saveMemory as any });
+    const out = text(
+      await handlers['team_memory_save']!({ headline: 'wrapping up', body: 'left off at X' }),
+    );
+    expect(saveMemory).toHaveBeenCalledWith({ headline: 'wrapping up', body: 'left off at X' });
+    expect(out).toContain('memory saved');
+    expect(out).toContain('"wrapping up"');
+  });
+
+  it('save surfaces the server cap error (limit named, not swallowed)', async () => {
+    const handlers = captureAll(registerMemory, {
+      joined: true,
+      saveMemory: (async () => {
+        throw new Error('memory body is 9000 bytes; the limit is 8192');
+      }) as any,
+    });
+    expect(text(await handlers['team_memory_save']!({ headline: 'h', body: 'big' }))).toContain(
+      'the limit is 8192',
+    );
+  });
+
+  it('read renders headline + age, then the body', async () => {
+    const handlers = captureAll(registerMemory, {
+      joined: true,
+      readMemory: (async () => ({
+        headline: 'mid-refactor',
+        body: 'tests red in ws.test.ts',
+        saved_at: Date.now() - 90_000,
+      })) as any,
+    });
+    const out = text(await handlers['team_memory_read']!({}));
+    expect(out).toContain('memory (saved 1m ago): mid-refactor');
+    expect(out).toContain('tests red in ws.test.ts');
+  });
+
+  it('read reports a seat with nothing saved via the server not_found', async () => {
+    const handlers = captureAll(registerMemory, {
+      joined: true,
+      readMemory: (async () => {
+        throw new Error('no memory saved for this seat');
+      }) as any,
+    });
+    expect(text(await handlers['team_memory_read']!({}))).toContain('no memory saved');
+  });
+});
+
 describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
   // claimAndJoin persists the claimed seat to <cwd>/.musterd — keep that off the real tree.
   let tmpCwd: string;
@@ -448,6 +537,7 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
     const roster = (over.roster ?? (async () => ({ members: [] }))) as MusterdClient['roster'];
     return {
       joined: false,
+      memory: null,
       get claimed() {
         return Boolean(member);
       },
@@ -481,6 +571,30 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
     const out = text(await handler({ as: 'Ada' }));
     expect(out).toContain('Joined dawn as Ada (claude-code)');
     expect(out).toContain('team_inbox_check');
+  });
+
+  it('renders the saved-memory one-liner when the occupy delivered an envelope (ADR 093)', async () => {
+    const cfg = { ...config, member: undefined };
+    const handler = capture(
+      registerJoin,
+      pendingClient(cfg, {
+        memory: {
+          headline: 'mid-refactor, tests red',
+          saved_at: Date.now() - 3600_000,
+          size_bytes: 512,
+        },
+      }),
+      cfg,
+    );
+    const out = text(await handler({ as: 'Ada' }));
+    expect(out).toContain('Saved memory from 1h ago: "mid-refactor, tests red"');
+    expect(out).toContain('team_memory_read');
+  });
+
+  it('omits the memory line when the seat has nothing saved', async () => {
+    const cfg = { ...config, member: undefined };
+    const handler = capture(registerJoin, pendingClient(cfg), cfg);
+    expect(text(await handler({ as: 'Ada' }))).not.toContain('Saved memory');
   });
 
   it('claims the next open pool seat with {role}', async () => {

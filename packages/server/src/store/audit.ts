@@ -37,7 +37,11 @@ export type AuditAction =
   // send — `urgent.flagged` audits the send). One row per (recipient, act): who grabbed the mic, when,
   // at whom. The raised→read pair (this row, then the recipient's inbox read of `detail.act`) is the
   // delivery-confirmation signal.
-  | 'interrupt.raised';
+  | 'interrupt.raised'
+  // ADR 093: a seat wrote or cleared its private memory blob. `detail` carries sizes only
+  // (`size_bytes`, `headline_len`) — never the headline or body text (the no-secrets hard rule 5).
+  | 'memory.save'
+  | 'memory.clear';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

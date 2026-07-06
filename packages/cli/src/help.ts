@@ -37,6 +37,7 @@ usage:
   musterd status
   musterd audit [--limit <n>] [--before <ms-epoch>] [--json]   read the governance audit log (admin-only, ADR 071/074)
   musterd availability <available|away|dnd> [--until <iso>]   set your availability (away holds notifications; dnd passes directed + urgent)
+  musterd memory [show] | save --headline "<subject>" [body...] | clear   this seat's private continuity note (ADR 093): save before handing off / wrapping up; claim/status show the one-line pointer
   musterd notify [--interval <seconds>] [--once]   background nudge: OS notification when a directed act lands while you're away
   musterd claim [<name>] [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--force]   get onto the team from this folder: bare \`claim\` occupies your bound seat (or confirms it if already live here), a name/role claims that seat, --token adopts a teammate's seat, --force repoints a folder bound to a live member; a held seat opens a request and blocks until an admin approves (then occupies — ADR 087)
   musterd requests [--pending] [--json]         list claim/teammate requests (admin-only, ADR 077)

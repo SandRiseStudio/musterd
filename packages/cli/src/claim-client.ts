@@ -76,6 +76,9 @@ export type ClaimOutcome =
       charter?: string;
       /** A resume token (ADR 087) delivered on first approval — persisted into `binding.grant`. */
       grant?: string;
+      /** The seat's memory envelope (ADR 093) — headline + age + size, never the body; null when the
+       *  seat has saved nothing. Rendered by `musterd claim` as the one-line continuity pointer. */
+      memory: OccupiedFrame['memory'];
     }
   | { state: 'refused'; code: RefusedCode; message: string; claimable: string[]; hint: string }
   | { state: 'pending'; requestId: string; message: string };
@@ -98,6 +101,7 @@ export function parseClaimResponse(raw: unknown): ClaimOutcome {
       serverTime: f.server_time,
       ...(f.charter !== undefined ? { charter: f.charter } : {}),
       ...(f.grant !== undefined ? { grant: f.grant } : {}),
+      memory: f.memory,
     };
   }
   if (type === 'refused') {

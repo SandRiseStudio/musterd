@@ -5,6 +5,7 @@ import { ClaimConflictError, claimAndJoin, type ClaimTarget } from '../claim.js'
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
 import { textResult } from './format.js';
+import { memoryLine } from './memory.js';
 
 const DESCRIPTION =
   'Claim a seat on your team and go online — call this once when you start working. ' +
@@ -64,10 +65,12 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
       try {
         const result = await claimAndJoin(client, config, target, JOIN_WAIT_MS);
         const role = 'role' in target ? ` (role ${target.role})` : '';
+        // The continuity one-liner (ADR 093 §3): at most one line — headline + age, never the body.
+        const memory = client.memory ? `\n\n${memoryLine(client.memory)}` : '';
         return textResult(
           `Joined ${config.team} as ${result.member}${role} (${config.surface}). ` +
             `You are now the live occupant of this seat — that's who you are on this team. ` +
-            `Your charter + the team working-loop are in AGENTS.md in this folder.\n\n` +
+            `Your charter + the team working-loop are in AGENTS.md in this folder.${memory}\n\n` +
             `IMPORTANT — stay in sync: call team_inbox_check now, then again whenever you finish a ` +
             `task or a reply. Report progress with team_send {act:'status_update'}; hand work off ` +
             `with {act:'handoff'}.`,
