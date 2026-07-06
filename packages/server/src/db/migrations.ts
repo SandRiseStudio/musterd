@@ -246,6 +246,21 @@ export const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX idx_lanes_goal ON lanes(team_id, goal_id)');
     },
   },
+  {
+    // v13 — seat memory (ADR 093): a daemon-private continuity blob, one row per member,
+    // last-write-wins. Deliberately NOT in the git seat-file — this is live working state
+    // (presence's side of the ADR 058 durable/live line), never repo history. FK ON DELETE CASCADE
+    // so a removed seat's note is reaped with it.
+    version: 13,
+    up: (db) => {
+      db.exec(`CREATE TABLE seat_memory (
+        member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        headline  TEXT NOT NULL,
+        body      TEXT NOT NULL,
+        saved_at  INTEGER NOT NULL
+      )`);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {
