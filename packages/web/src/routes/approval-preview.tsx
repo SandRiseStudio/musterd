@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import liveCss from '../live/Live.css?url';
 import { ApprovalCard } from '../live/ApprovalCard';
+import { ReceptionScene } from '../live/ReceptionScene';
 import type { ApprovalState, GrantLifetime } from '../live/ApprovalCard';
 
 export const Route = createFileRoute('/approval-preview')({
@@ -106,6 +107,10 @@ function ApprovalPreviewPage() {
         <span className="lc__spacer" />
         <span className="lc__status lc__status--live">design preview</span>
       </header>
+
+      <div style={{ maxWidth: 1200, margin: '24px auto 0', width: '100%', padding: '0 24px' }}>
+        <ReceptionScene count={states.filter((s) => s.kind === 'pending').length} />
+      </div>
 
       <div
         style={{

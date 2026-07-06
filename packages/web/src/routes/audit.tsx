@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import liveCss from '../live/Live.css?url';
 import { AuditLog } from '../live/AuditLog';
+import { RecordShelf } from '../live/RecordShelf';
 import { AuditFetchError, fetchAudit, type AuditEntry, type LiveConfig } from '../live/client';
 
 export const Route = createFileRoute('/audit')({
@@ -115,6 +116,7 @@ function AuditPage() {
       {!connected ? (
         <div className="lc-form">
           <div className="lc-form__card">
+            <RecordShelf />
             <h1 className="lc-form__title">Governance audit log</h1>
             <p className="lc-form__sub">
               The append-only record of governance decisions on a team (ADR 071). Admin-only — connect
@@ -160,7 +162,8 @@ function AuditPage() {
           </div>
         </div>
       ) : (
-        <div className="lc__canvas">
+        <div className="lc__canvas lc__canvas--companion">
+          <RecordShelf />
           <AuditLog
             entries={entries}
             onLoadOlder={loadOlder}
