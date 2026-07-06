@@ -162,8 +162,53 @@ async function deliveryReport(parsed: Parsed, id: string | undefined): Promise<n
   return 0;
 }
 
+/**
+ * `musterd report coordination` (ADR 091): the coordination-health page — the density line (ADR
+ * 050) plus the MAST detectors (time-to-unblock, ignored request_help, stalled threads, circular
+ * handoffs). Finding 002's grep session as one command; diagnostics, never scores.
+ */
+async function coordinationReport(parsed: Parsed): Promise<number> {
+  const { team, http } = resolve(parsed.flags);
+  const report = await http.report(team);
+  const w = process.stdout.write.bind(process.stdout);
+  const m = report.mast;
+  if (parsed.flags['json'])
+    return (w(JSON.stringify({ coordination: report.coordination, mast: m }) + '\n'), 0);
+
+  w(`${theme.accent('coordination')} — ${team} ${theme.meta(`· last ${m.window_days}d`)}\n\n`);
+  renderCoordination(report, w);
+
+  const t = m.time_to_unblock;
+  w(`\n${theme.accent('time to unblock')}:\n`);
+  w(
+    t.closed === 0
+      ? theme.meta('  no loops closed in the window') + '\n'
+      : `  ${t.closed} loop${t.closed === 1 ? '' : 's'} closed · median ${ago(t.median_ms!)} · p95 ${ago(t.p95_ms!)}\n`,
+  );
+
+  w(`\n${theme.accent('ignored help')} ${theme.meta('(request_help unanswered > 1h)')}:\n`);
+  if (m.ignored_help.length === 0) w(theme.meta('  none') + '\n');
+  for (const d of m.ignored_help) renderActDelivery(d, w);
+
+  w(`\n${theme.accent('stalled threads')} ${theme.meta('(quiet > 24h, no resolve)')}:\n`);
+  if (m.stalled_threads.length === 0) w(theme.meta('  none') + '\n');
+  for (const s of m.stalled_threads)
+    w(
+      `  ${theme.meta(s.thread)} — ${s.acts} acts, ${s.participants} participant${s.participants === 1 ? '' : 's'}, last ${s.last_act}, quiet ${theme.warn(ago(s.quiet_ms))}\n`,
+    );
+
+  w(`\n${theme.accent('circular handoffs')}:\n`);
+  if (m.circular_handoffs.length === 0) w(theme.meta('  none') + '\n');
+  for (const c of m.circular_handoffs)
+    w(
+      `  ${theme.warn('↻')} thread ${theme.meta(c.thread)} — handoff returned to a prior participant after ${c.hops} hop${c.hops === 1 ? '' : 's'}\n`,
+    );
+  return 0;
+}
+
 export async function reportCommand(parsed: Parsed): Promise<number> {
   if (parsed.positionals[0] === 'delivery') return deliveryReport(parsed, parsed.positionals[1]);
+  if (parsed.positionals[0] === 'coordination') return coordinationReport(parsed);
   const { team, http } = resolve(parsed.flags);
   const report = await http.report(team);
   if (parsed.flags['json']) {
