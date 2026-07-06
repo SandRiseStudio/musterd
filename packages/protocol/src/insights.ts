@@ -115,6 +115,52 @@ export const ActDeliverySchema = z.object({
 export type ActDelivery = z.infer<typeof ActDeliverySchema>;
 
 /**
+ * Time-to-unblock (ADR 091): over loops closed in the window (accept/decline naming a
+ * request_help/handoff, or a resolve on its thread), the distribution of open→close latency.
+ * A team distribution, never a per-member score.
+ */
+export const TimeToUnblockSchema = z.object({
+  closed: z.number().int(),
+  median_ms: z.number().nullable(),
+  p95_ms: z.number().nullable(),
+});
+export type TimeToUnblock = z.infer<typeof TimeToUnblockSchema>;
+
+/** A thread that went quiet without a resolve (MAST coordination breakdown; ADR 091). */
+export const StalledThreadSchema = z.object({
+  thread: z.string(),
+  acts: z.number().int(),
+  last_act: z.string(),
+  participants: z.number().int(),
+  quiet_ms: z.number().int(),
+});
+export type StalledThread = z.infer<typeof StalledThreadSchema>;
+
+/** A handoff chain that returned to a prior participant (MAST step repetition; ADR 091). */
+export const CircularHandoffSchema = z.object({
+  thread: z.string(),
+  /** Handoffs seen on the thread up to and including the circular one. */
+  hops: z.number().int(),
+  /** When the chain closed the circle. */
+  ts: z.number().int(),
+});
+export type CircularHandoff = z.infer<typeof CircularHandoffSchema>;
+
+/**
+ * The MAST block (ADR 091): the §5b failure detectors as one derived projection — time-to-unblock,
+ * ignored request_help (the ADR 090 ledger filtered by age), stalled threads, circular handoffs.
+ * Act-mix/broadcast-share stays in `coordination` (ADR 050). Diagnostic instruments, not scores.
+ */
+export const MastBlockSchema = z.object({
+  window_days: z.number().int(),
+  time_to_unblock: TimeToUnblockSchema,
+  ignored_help: z.array(ActDeliverySchema),
+  stalled_threads: z.array(StalledThreadSchema),
+  circular_handoffs: z.array(CircularHandoffSchema),
+});
+export type MastBlock = z.infer<typeof MastBlockSchema>;
+
+/**
  * `GET /teams/:slug/report` — the whole projection, altitude-agnostic. The surfaces (CLI/MCP/dashboard)
  * pick what to emphasise per altitude (ic = the board, team = the digest, exec = milestones+exceptions);
  * the engine computes everything once. `generated_ts` stamps when the projection was taken.
@@ -136,5 +182,7 @@ export const ReportSchema = z.object({
    * (which act, whose inbox, seen or ignored).
    */
   open_directed: z.array(ActDeliverySchema),
+  /** The MAST-aware failure detectors (ADR 091) — the thread-shaped views over the same log. */
+  mast: MastBlockSchema,
 });
 export type Report = z.infer<typeof ReportSchema>;

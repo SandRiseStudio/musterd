@@ -75,6 +75,21 @@ function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
     lines.push(...waitingLines());
   }
 
+  // The MAST detectors (ADR 091) — rendered only when something is unhealthy, so the common
+  // (healthy) case costs the agent no context.
+  const m = r.mast;
+  if (m.ignored_help.length > 0 || m.stalled_threads.length > 0 || m.circular_handoffs.length > 0) {
+    lines.push('\ncoordination health (MAST):');
+    for (const d of m.ignored_help)
+      lines.push(`  ⚠ ignored request_help ${d.id} from ${d.from} — unanswered ${ago(d.age_ms)}`);
+    for (const s of m.stalled_threads)
+      lines.push(
+        `  ⚠ stalled thread ${s.thread} — ${s.acts} acts, quiet ${ago(s.quiet_ms)}, no resolve`,
+      );
+    for (const c of m.circular_handoffs)
+      lines.push(`  ⚠ circular handoff on thread ${c.thread} (${c.hops} hops)`);
+  }
+
   // The open directed ledger (ADR 090): loop-opening acts not yet answered, with per-recipient
   // seen/unseen state — so silence is legible (ignored vs unread) before anyone assumes consent.
   if (r.open_directed.length > 0) {

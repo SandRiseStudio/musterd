@@ -28,6 +28,7 @@ usage:
   musterd goal list [--json]                    the declared Goals with derived status (planned/in-flight/shipped)
   musterd report [--altitude ic|team|exec] [--json]   the insight report: flow metrics, waiting-on, Goal board — one derived projection (ADR 050/084)
   musterd report delivery [<id>]                       the delivery ledger (ADR 090): open directed acts and who has seen/answered them; with <id>, one act's per-recipient journey
+  musterd report coordination                          coordination health (ADR 091): density, time-to-unblock, ignored help, stalled threads, circular handoffs
   musterd inbox [--watch] [--all] [--unread] [--peek] [--limit <n>] [--from <name>] [--act <act>]
   musterd inbox --wait [--timeout <seconds>] [--from <name>] [--act <act>] [--json]   block until the next directed act, then exit (pairs with /loop)
   musterd inbox --interrupt-check               silent unless an urgent directed act waits; then one daemon-composed line (the PostToolUse interrupt hook, ADR 088)

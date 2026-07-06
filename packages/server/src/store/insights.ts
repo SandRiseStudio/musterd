@@ -9,6 +9,7 @@ import type { Database } from 'better-sqlite3';
 import { openDirectedLedger } from './delivery.js';
 import { listGoals } from './goals.js';
 import { listLanes } from './lanes.js';
+import { deriveMast } from './mast.js';
 
 /**
  * The insight engine (ADR 050, server-side per ADR 084) — leadership projections over lanes + the act
@@ -181,5 +182,6 @@ export function deriveReport(
     blocked,
     coordination: coordinationDensity(db, teamId, now),
     open_directed: openDirectedLedger(db, teamId, now),
+    mast: deriveMast(db, teamId, now),
   };
 }

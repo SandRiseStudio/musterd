@@ -37,6 +37,7 @@ src/
     goals.ts          // declared-Goal seam: listGoals (meta.goal messages, status derived) + nextGoal (ADR 048/084)
     insights.ts       // the insight engine: flowMetrics + waitingOn + deriveReport, projected over lanes + acts (ADR 050/084)
     delivery.ts       // the per-recipient delivery ledger, derived from log + cursors + audit: actDelivery + openDirectedLedger (ADR 090)
+    mast.ts           // the MAST failure detectors: timeToUnblock + stalledThreads + circularHandoffs → deriveMast (ADR 091)
     audit.ts          // append-only governance audit log: appendAudit/listAudit (ADR 071, P2)
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)
