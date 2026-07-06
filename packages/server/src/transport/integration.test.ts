@@ -1371,6 +1371,55 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(auditRows('dawn').filter((r) => r.action === 'interrupt.raised')).toHaveLength(1);
   });
 
+  it('delivery ledger (ADR 090): logged → seen (cursor) → answered, on the endpoint and the report', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+
+    // nick hands off to Bob.
+    const env = { ...urgentEnv('nick', 'Bob', 'h-1'), act: 'handoff' };
+    await post('/teams/dawn/messages', { envelope: env }, nickTok);
+
+    // Unseen: the ledger shows logged, and the act sits on the report's open directed ledger.
+    let ledger = await get('/teams/dawn/messages/h-1/delivery', bobTok);
+    expect(ledger.status).toBe(200);
+    expect(ledger.json).toMatchObject({ id: 'h-1', act: 'handoff', urgent: true });
+    expect(ledger.json.recipients).toEqual([
+      expect.objectContaining({ seat: 'Bob', seat_id: 'bob', state: 'logged', seen_by: null }),
+    ]);
+    let report = await get('/teams/dawn/report', nickTok);
+    expect(report.json.open_directed.map((d: { id: string }) => d.id)).toContain('h-1');
+
+    // Bob's cursor crosses the act → seen (watermark timestamp, not a receipt).
+    await post('/teams/dawn/inbox/cursor', { last_read_message_id: 'h-1' }, bobTok);
+    ledger = await get('/teams/dawn/messages/h-1/delivery', bobTok);
+    expect(ledger.json.recipients[0]).toMatchObject({ state: 'seen' });
+    expect(ledger.json.recipients[0].seen_by).not.toBeNull();
+
+    // Bob accepts → answered, and the open directed ledger empties.
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          ...urgentEnv('Bob', 'nick', 'a-1'),
+          act: 'accept',
+          meta: { in_reply_to: 'h-1' },
+        },
+      },
+      bobTok,
+    );
+    ledger = await get('/teams/dawn/messages/h-1/delivery', bobTok);
+    expect(ledger.json.recipients[0]).toMatchObject({ state: 'answered' });
+    expect(ledger.json.recipients[0].answered).toMatchObject({ act: 'accept', id: 'a-1' });
+    report = await get('/teams/dawn/report', nickTok);
+    expect(report.json.open_directed).toHaveLength(0);
+
+    // Unknown act id → 404.
+    const missing = await get('/teams/dawn/messages/nope/delivery', bobTok);
+    expect(missing.status).toBe(404);
+  });
+
   it('account_status + can_message gate sends', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

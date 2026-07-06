@@ -49,6 +49,7 @@ interface Instruments {
   errors: Counter;
   presenceChurn: Counter;
   loopLatency: Histogram;
+  seenLatency: Histogram;
   agentTokens: Counter;
   interruptCheck: Counter;
 }
@@ -76,6 +77,11 @@ function ix(): Instruments {
     loopLatency: meter.createHistogram('musterd.coordination.loop_latency', {
       description:
         'Time to close a coordination loop: accept/decline → the request_help/handoff it answers, resolve → its thread root (finding 001 "directed-act latency", ADR 082 slice 3)',
+      unit: 'ms',
+    }),
+    seenLatency: meter.createHistogram('musterd.coordination.seen_latency', {
+      description:
+        'Time from a directed act being sent to the cursor advance that covered it — the read-side twin of loop_latency, generalizing the ADR 088 raised→read pair to every directed act (ADR 090)',
       unit: 'ms',
     }),
     agentTokens: meter.createCounter('musterd.agent.tokens', {
@@ -151,6 +157,38 @@ export function recordError(errorClass: string): void {
  */
 export function recordLoopClosure(closingAct: string, latencyMs: number): void {
   ix().loopLatency.record(latencyMs, { 'musterd.act': closingAct });
+}
+
+/**
+ * Record how long a directed act sat unread (ADR 090): emitted at the mark-read path for each
+ * directed act the cursor advance crossed. Watermark semantics — one advance covering N acts emits
+ * N observations with the same "seen" instant. Keys on the normalized seat id (issue #107).
+ */
+export function recordSeenLatency(
+  seat: string,
+  act: string,
+  urgent: boolean,
+  latencyMs: number,
+): void {
+  ix().seenLatency.record(latencyMs, {
+    'musterd.act': act,
+    'musterd.urgent': urgent,
+    'musterd.member.id': normalizeSeatName(seat),
+    'musterd.member': seat,
+  });
+}
+
+/**
+ * Record one recipient's live-push outcome as an event on the active envelope span (ADR 090):
+ * `delivery.live` (pushed to a resident session) or `delivery.inboxed` (no session — landed in the
+ * durable inbox, the normal case, not a failure). Attempt history lives in telemetry; the DB stays
+ * a message log. No-op without an active span (telemetry off).
+ */
+export function recordDeliveryOutcome(seat: string, live: boolean): void {
+  trace.getActiveSpan()?.addEvent(live ? 'delivery.live' : 'delivery.inboxed', {
+    'musterd.member.id': normalizeSeatName(seat),
+    'musterd.member': seat,
+  });
 }
 
 /**

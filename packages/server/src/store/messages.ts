@@ -45,8 +45,10 @@ export function getMessageTs(db: Database, teamId: string, id: string): number |
 
 /**
  * Directed acts (request_help/handoff) not yet answered by an accept/decline whose
- * `meta.in_reply_to` names them — the open-loops gauge (ADR 082 slice 3). Daemon-wide on purpose:
- * a health signal sampled only when telemetry is on.
+ * `meta.in_reply_to` names them **or closed by a resolve on their thread** — the open-loops gauge
+ * (ADR 082 slice 3; resolve-exclusion added with ADR 090 so the gauge and the delivery ledger are
+ * two derivations of one truth). Daemon-wide on purpose: a health signal sampled only when
+ * telemetry is on.
  */
 export function countOpenLoops(db: Database): number {
   const row = db
@@ -57,7 +59,12 @@ export function countOpenLoops(db: Database): number {
             SELECT 1 FROM messages r
              WHERE r.team_id = m.team_id
                AND r.act IN ('accept','decline')
-               AND json_extract(r.meta, '$.in_reply_to') = m.id)`,
+               AND json_extract(r.meta, '$.in_reply_to') = m.id)
+          AND NOT EXISTS (
+            SELECT 1 FROM messages v
+             WHERE v.team_id = m.team_id
+               AND v.act = 'resolve'
+               AND v.thread_id = COALESCE(m.thread_id, m.id))`,
     )
     .get();
   return row?.n ?? 0;

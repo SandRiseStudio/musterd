@@ -1,6 +1,6 @@
 # 090 — Telemetry Layer 2, increment 2: per-recipient delivery status, derived not stored
 
-- Status: proposed — design frozen 2026-07-06; not yet built
+- Status: accepted — built 2026-07-06 (`store/delivery.ts` read model, `seen_latency` + delivery span events, the `/messages/:id/delivery` endpoint, `report.open_directed`, `musterd report delivery`, the `team_report` ledger block; `countOpenLoops` gained the resolve-exclusion so the gauge and the ledger reconcile)
 - Date: 2026-07-06
 
 ## Context

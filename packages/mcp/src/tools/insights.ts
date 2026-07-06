@@ -74,6 +74,23 @@ function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
     lines.push('\nwaiting on:');
     lines.push(...waitingLines());
   }
+
+  // The open directed ledger (ADR 090): loop-opening acts not yet answered, with per-recipient
+  // seen/unseen state — so silence is legible (ignored vs unread) before anyone assumes consent.
+  if (r.open_directed.length > 0) {
+    lines.push('\nopen directed acts:');
+    for (const d of r.open_directed) {
+      const to = d.to_kind === 'member' ? (d.recipients[0]?.seat ?? '?') : `@${d.to_kind}`;
+      lines.push(
+        `  ${d.id} ${d.act}${d.urgent ? ' [urgent]' : ''} from ${d.from} → ${to} · ${ago(d.age_ms)} ago`,
+      );
+      for (const rec of d.recipients) {
+        const state = rec.answered ? `answered (${rec.answered.act})` : rec.state;
+        const raises = rec.interrupt_raises > 0 ? ` · ${rec.interrupt_raises} raise(s)` : '';
+        lines.push(`    ${rec.seat}: ${state}${raises}`);
+      }
+    }
+  }
   return lines.join('\n');
 }
 
