@@ -1,4 +1,4 @@
-import type { Envelope } from '@musterd/protocol';
+import { normalizeSeatName, type Envelope } from '@musterd/protocol';
 import { type Counter, type Histogram, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 import { log } from './log.js';
 
@@ -106,7 +106,7 @@ function ix(): Instruments {
     }),
     agentTokens: meter.createCounter('musterd.agent.tokens', {
       description:
-        'Self-reported harness token usage (meta.usage on any act), by member/direction/model (ADR 082 slice 4)',
+        'Self-reported harness token usage (meta.usage on any act), by normalized seat id (musterd.member.id, issue #107) / direction / model — musterd.member carries the raw display name (ADR 082 slice 4)',
     }),
     interruptCheck: meter.createCounter('musterd.interrupt.check', {
       description:
@@ -134,7 +134,11 @@ export function withEnvelopeSpan<T>(env: Envelope, fn: () => T): T {
   return tracer.startActiveSpan('musterd.envelope.process', (span) => {
     span.setAttribute('musterd.team', env.team);
     span.setAttribute('musterd.act', env.act);
+    // Identity: key aggregation on the normalized seat name (issue #107), never the raw display name —
+    // `Miley`/`miley` across teams/resets is one actor, and the raw name double-counts. The raw name
+    // stays as a secondary, human-readable label.
     span.setAttribute('musterd.from', env.from);
+    span.setAttribute('musterd.from.id', normalizeSeatName(env.from));
     span.setAttribute('musterd.to.kind', env.to.kind);
     span.setAttribute('musterd.envelope.id', env.id);
     if (env.thread) span.setAttribute('musterd.thread', env.thread);
@@ -192,6 +196,9 @@ export function recordTokenUsage(env: Envelope): void {
   ] as const) {
     if (typeof val === 'number' && Number.isFinite(val) && val > 0) {
       ix().agentTokens.add(val, {
+        // Key on the normalized seat id so per-agent token totals don't fragment across teams/resets
+        // (issue #107); keep the raw name as a secondary label.
+        'musterd.member.id': normalizeSeatName(env.from),
         'musterd.member': env.from,
         'musterd.token.direction': dir,
         ...model,

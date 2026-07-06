@@ -80,6 +80,9 @@ describe('envelope instrumentation', () => {
     expect(span!.attributes['musterd.act']).toBe('status_update');
     expect(span!.attributes['musterd.to.kind']).toBe('team');
     expect(span!.attributes['musterd.thread']).toBe('t1');
+    // Identity attribution (issue #107): raw display name as a label, normalized seat id as the key.
+    expect(span!.attributes['musterd.from']).toBe('Ada');
+    expect(span!.attributes['musterd.from.id']).toBe('ada');
     // Content is the operator's data, not telemetry — it must never become a span attribute.
     expect(JSON.stringify(span!.attributes)).not.toContain('secret content');
   });
@@ -179,6 +182,8 @@ describe('envelope instrumentation', () => {
     );
     expect(byDir['input']!.value).toBe(100);
     expect(byDir['output']!.value).toBe(40);
+    // Identity attribution (issue #107): keyed on the normalized seat id, raw name kept as a label.
+    expect(byDir['input']!.attributes['musterd.member.id']).toBe('ada');
     expect(byDir['input']!.attributes['musterd.member']).toBe('Ada');
     expect(byDir['input']!.attributes['musterd.model']).toBe('claude-opus-4-8');
   });
