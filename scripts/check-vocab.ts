@@ -1,5 +1,5 @@
 /*
- * Check that new docs use the canonical work-item vocabulary (ADR 096).
+ * Check that new docs use the canonical work-item vocabulary (ADR 098).
  *
  *   pnpm vocab:check   — fail (exit 1) on any banned structural noun in a gated doc
  *
@@ -11,7 +11,7 @@
  * plan docs).
  *
  * Mention vs. use: a banned word in backticks or a fenced code block is a mention — always legal
- * (that is how ADR 096 and the conventions table name the words). A deliberate prose use is
+ * (that is how ADR 098 and the conventions table name the words). A deliberate prose use is
  * suppressed line-level with `<!-- vocab:ok -->`.
  *
  * Grandfathering (pragmatic, per the obs-evals GATE_FROM pattern): existing docs are history and
@@ -31,8 +31,8 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 
-/** First ADR number the gate enforces (ADR 096 self-hosts). Below this is pre-gate history. */
-const GATE_FROM = 96;
+/** First ADR number the gate enforces (ADR 098 self-hosts). Below this is pre-gate history. */
+const GATE_FROM = 98;
 /** First plan-doc date the gate enforces (ISO date-prefix string compare). */
 const PLANS_GATE_FROM = '2026-07-06';
 /** Plan docs at the gate date that predate the gate itself. */
@@ -69,7 +69,7 @@ const DESIGN_BASELINE = new Set([
   'spec-v0.3-draft.md',
 ]);
 
-/** Banned structural nouns (ADR 096 §1). Applied per masked line. */
+/** Banned structural nouns (ADR 098 §1). Applied per masked line. */
 const BANNED: { re: RegExp; word: string }[] = [
   { re: /\bepics?\b/i, word: 'epic' },
   { re: /\bmilestones?\b/i, word: 'milestone' },
@@ -135,7 +135,7 @@ for (const file of gatedDocs()) {
         failed = true;
         clean = false;
         process.stderr.write(
-          `✗ ${rel}:${i + 1} — "${word}" is a banned structural noun (ADR 096)\n`,
+          `✗ ${rel}:${i + 1} — "${word}" is a banned structural noun (ADR 098)\n`,
         );
       }
     }
@@ -145,7 +145,7 @@ for (const file of gatedDocs()) {
 
 if (failed) {
   process.stderr.write(
-    `\nNew docs use the canonical work-item vocabulary (ADR 096): Goal / Lane are the entities, ` +
+    `\nNew docs use the canonical work-item vocabulary (ADR 098): Goal / Lane are the entities, ` +
       `"work item" the generic, Phase/P-N the release arc, "increment N" the per-ADR cut. ` +
       `epic/milestone/sprint/story-points name structure musterd doesn't have. ` +
       `Mentioning (not using) a banned word? backtick it or append ${SUPPRESS} to the line.\n`,

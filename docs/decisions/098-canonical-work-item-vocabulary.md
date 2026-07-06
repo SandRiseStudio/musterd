@@ -1,4 +1,4 @@
-# 096 — Canonical work-item vocabulary: the words for work, gated
+# 098 — Canonical work-item vocabulary: the words for work, gated
 
 - Status: proposed
 - Date: 2026-07-06
@@ -61,7 +61,7 @@ line-level with `<!-- vocab:ok -->`. Prefer backticks; the comment is the fallba
 then flags `/\bepics?\b/i`, `/\bmilestones?\b/i`, `/\bsprints?\b/i`, `/\bstory\s+points?\b/i` per
 line. Scope and grandfathering (no retrofit — pragmatic, like obs-evals' `GATE_FROM`):
 
-- `docs/decisions/` — ADRs **from 096 onward** (this ADR is in scope and self-hosts via §2).
+- `docs/decisions/` — ADRs **from 098 onward** (this ADR is in scope and self-hosts via §2).
 - `docs/superpowers/plans/` — plans dated **2026-07-06 onward** (date-prefix compare), minus a
   small named-grandfather list if a same-day plan predates the gate.
 - `docs/design/` — files **not on a frozen baseline list** of the docs existing at gate time (no

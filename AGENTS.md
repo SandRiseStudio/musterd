@@ -88,7 +88,7 @@ Every doc has **one job and one lifecycle**, and **one fact has one home** — l
 - **`ROADMAP.md`** — what's next (reserved-but-unbuilt, out-of-scope-by-principle). Forward-looking; replaced, not accreted. **Its item list is generated** from `packages/web/src/content/roadmap.data.ts` — the single source of truth the web roadmap map also reads — via `pnpm roadmap:gen` (ADR 041). Edit the typed data module and regenerate; never hand-edit between the `<!-- GENERATED ROADMAP -->` markers (`format:check` runs `roadmap:check` to block drift).
 - **`docs/implementation-plan.md`** — where we are _now_: a short, mostly-derived status snapshot + how we deviated (pointers to ADRs). Touch only when the milestone state changes.
 
-New docs use the **canonical work-item vocabulary** (ADR 096): Goal / Lane are the entities, Phase / increment N the prose units — table in `07-conventions.md` §Naming, enforced by `pnpm vocab:check` (mention a banned word by backticking it).
+New docs use the **canonical work-item vocabulary** (ADR 098): Goal / Lane are the entities, Phase / increment N the prose units — table in `07-conventions.md` §Naming, enforced by `pnpm vocab:check` (mention a banned word by backticking it).
 
 **The four anti-patterns that made docs stale before — avoid all of them:** (1) a doc doing several jobs at once (status + findings-log + roadmap + index) — its parts have different lifecycles, so it accretes strikethroughs instead of being rewritten; (2) hand-narrating status that's derivable from ADRs / git tags / the test count; (3) re-narrating a decision a doc/plan when an ADR already records it; (4) two specs (a "live" and a "draft") hand-synced — there is one `SPEC.md`, and unreleased work is its Appendix A.
 
