@@ -2,7 +2,17 @@ import { createActors, type Actors } from './actors';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { ENTRANCE } from './layout';
 import { assignSeats, type Placement } from './seating';
-import { coffeeAnchor, drawCue, monitorAnchors, renderScene, toneColor, type Cue } from './render';
+import {
+  coffeeAnchor,
+  DARK_PALETTE,
+  drawCue,
+  monitorAnchors,
+  renderScene,
+  setScenePalette,
+  toneColor,
+  type Cue,
+  type ScenePalette,
+} from './render';
 import { loadRiveRig, type RiveRig } from './rive-rig';
 import { truncateSpeech, typeCadence } from './speech';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
@@ -117,8 +127,23 @@ export function mountOffice(
     fit = fitFloor(width, height);
   }
 
+  /** Read the office surface tokens (`--floor`, `--floor-2`, `--wood`, `--couch`) the active theme
+   * cascades to the canvas host, so the scene paints daylight on a light page and dusk inside the `.lc`
+   * stage. Any token that can't be read falls back to the dusk palette. */
+  function resolveScenePalette(): ScenePalette {
+    const cs = getComputedStyle(host);
+    const read = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
+    return {
+      floor: read('--floor', DARK_PALETTE.floor),
+      floor2: read('--floor-2', DARK_PALETTE.floor2),
+      wood: read('--wood', DARK_PALETTE.wood),
+      couch: read('--couch', DARK_PALETTE.couch),
+    };
+  }
+
   /** Redraw the office at rest (everyone home) into the offscreen buffer and rebuild the name labels. */
   function bake() {
+    setScenePalette(resolveScenePalette()); // follow the theme cascaded to the host before painting
     bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
