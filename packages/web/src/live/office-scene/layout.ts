@@ -52,39 +52,45 @@ export const DESK_SLOTS: DeskSlot[] = [
 /** The break nook — where `away` members drift; also the broadcast megaphone spot. */
 export const NOOK = { lx: 700, ly: 190 };
 
-/** The nook rug's iso radius — furniture and the away cluster stay inside it. */
-export const NOOK_RUG_R = 165;
+/** The nook rug's iso radius — furniture and the away cluster stay inside it. Roomy enough that the
+ * lounge set + kitchenette can breathe with real gaps between pieces. */
+export const NOOK_RUG_R = 192;
 
 /**
  * The lounge set, as *data* (offsets from NOOK, logical sizes) shared by drawing (render.ts) and
  * navigation (nav.ts) — so walkers route around exactly what is drawn. Sized to read proportionate to
  * the 100×68 desks: a real three-seat couch, full armchairs, a coffee table you could reach from them.
+ * A conversation set (couch north · table centre · a chair to each side) sits in the front of the rug;
+ * the kitchenette (fridge · counter+machine · water cooler) lines the back, well clear of the seating.
  */
 export const LOUNGE = {
-  fridge: { dx: -96, dy: -34, w: 34, d: 30, h: 52 },
-  counter: { dx: -40, dy: -42, w: 92, d: 28, h: 32 },
-  machine: { dx: -58, dy: -42 },
-  plant: { dx: 104, dy: -34 },
-  couch: { dx: 34, dy: -2, len: 116, dep: 48 },
-  table: { dx: 30, dy: 60, w: 60, d: 42 },
-  chairW: { dx: 104, dy: 54, size: 54 }, // right of the table, facing it
-  chairE: { dx: -40, dy: 54, size: 54 }, // left of the table, facing it
+  // kitchenette across the back, spaced apart
+  fridge: { dx: -110, dy: -48, w: 32, d: 28, h: 54 },
+  counter: { dx: -54, dy: -76, w: 78, d: 24, h: 32 },
+  machine: { dx: -74, dy: -76 },
+  cooler: { dx: 42, dy: -82, w: 22, d: 22, h: 48 }, // water cooler
+  plant: { dx: 112, dy: -46 },
+  // conversation set in the front, with breathing room between each piece
+  couch: { dx: 6, dy: 2, len: 108, dep: 44 }, // faces S (toward the room)
+  table: { dx: 6, dy: 66, w: 56, d: 40 },
+  chairE: { dx: -62, dy: 64, size: 52 }, // left of the table, facing it
+  chairW: { dx: 72, dy: 64, size: 52 }, // right of the table, facing it
 } as const;
 
-/** Where the six visible `away` members stand — an arc on the rug around the lounge set's open side.
- * Hand-placed (offsets from NOOK) so nobody stands inside the couch/armchairs/table. */
+/** Where the six visible `away` members stand — an arc on the rug around the lounge set's open (front)
+ * side. Hand-placed (offsets from NOOK) so nobody stands inside the couch/armchairs/table/kitchenette. */
 export const NOOK_SPOTS: ReadonlyArray<{ dx: number; dy: number }> = [
-  { dx: -92, dy: 30 },
-  { dx: -96, dy: 66 },
-  { dx: -64, dy: 98 },
-  { dx: -22, dy: 106 },
-  { dx: 22, dy: 112 },
-  { dx: 58, dy: 100 },
+  { dx: -116, dy: 40 }, // west flank, beside the fridge
+  { dx: -70, dy: 112 }, // front arc, south of the seating cluster
+  { dx: -34, dy: 122 },
+  { dx: 2, dy: 126 },
+  { dx: 40, dy: 118 },
+  { dx: 74, dy: 110 },
 ];
 
 /** Where an ambient coffee-stroll pauses: standing just in front of the break-nook machine, facing it
  * (ADR 086 Phase 2). Clear of the lounge furniture and the seated nook cluster. */
-export const COFFEE_STAND = { lx: NOOK.lx - 58, ly: NOOK.ly - 6 };
+export const COFFEE_STAND = { lx: NOOK.lx - 74, ly: NOOK.ly - 46 };
 
 /** How many overflow-queue / nook avatars render individually before the rest collapse into a "+N" pill,
  * so a very large roster stays bounded instead of marching avatars off the floor. */
@@ -119,4 +125,23 @@ export const PLANTS: Plant[] = [
   { lx: 60, ly: 720, species: 'fiddle' },
   { lx: 855, ly: 760, species: 'snake' },
   { lx: 540, ly: 855, species: 'fiddle' },
+];
+
+export interface Bookshelf {
+  lx: number;
+  ly: number;
+  /** Which way the shelf's open (book) face points — set so it faces into the room. */
+  dir: Dir;
+}
+
+/** Bookshelf footprint (logical): a slim unit that lines a wall — wide along the wall, shallow, tall. */
+export const SHELF_LONG = 58;
+export const SHELF_DEEP = 20;
+export const SHELF_H = 66;
+
+/** Freestanding bookshelves lining the open wall stretches between desks — warm decor, block nav. */
+export const BOOKSHELVES: Bookshelf[] = [
+  { lx: 250, ly: 58, dir: 'S' }, // back-left wall, between the top-row desks and the corner
+  { lx: 858, ly: 320, dir: 'W' }, // right wall, above the lounge
+  { lx: 56, ly: 470, dir: 'E' }, // left wall, beside the huddle
 ];

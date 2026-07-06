@@ -1,5 +1,6 @@
 import { FLOOR } from './iso';
 import {
+  BOOKSHELVES,
   CHAIR_OFF,
   CHAIR_SIZE,
   DESK_D,
@@ -11,6 +12,8 @@ import {
   LOUNGE,
   NOOK,
   PLANTS,
+  SHELF_DEEP,
+  SHELF_LONG,
 } from './layout';
 
 /**
@@ -58,18 +61,23 @@ function solidRects(): Rect[] {
   const L = LOUNGE;
   out.push(rect(NOOK.lx + L.fridge.dx, NOOK.ly + L.fridge.dy, L.fridge.w, L.fridge.d));
   out.push(rect(NOOK.lx + L.counter.dx, NOOK.ly + L.counter.dy, L.counter.w, L.counter.d));
+  out.push(rect(NOOK.lx + L.cooler.dx, NOOK.ly + L.cooler.dy, L.cooler.w, L.cooler.d));
   out.push(rect(NOOK.lx + L.plant.dx, NOOK.ly + L.plant.dy, 26, 26));
   out.push(rect(NOOK.lx + L.couch.dx, NOOK.ly + L.couch.dy, L.couch.len, L.couch.dep));
   out.push(rect(NOOK.lx + L.table.dx, NOOK.ly + L.table.dy, L.table.w, L.table.d));
   out.push(rect(NOOK.lx + L.chairW.dx, NOOK.ly + L.chairW.dy, L.chairW.size, L.chairW.size));
   out.push(rect(NOOK.lx + L.chairE.dx, NOOK.ly + L.chairE.dy, L.chairE.size, L.chairE.size));
   for (const h of HUDDLES) {
-    out.push(rect(h.lx, h.ly - 44, 34, 34)); // poufs (see drawHuddle)
-    out.push(rect(h.lx + 42, h.ly + 26, 34, 34));
-    out.push(rect(h.lx - 42, h.ly + 26, 34, 34));
-    out.push(rect(h.lx, h.ly, 52, 52)); // low table
+    out.push(rect(h.lx, h.ly - 54, 44, 44)); // poufs (see huddleItems)
+    out.push(rect(h.lx + 52, h.ly + 32, 44, 44));
+    out.push(rect(h.lx - 52, h.ly + 32, 44, 44));
+    out.push(rect(h.lx, h.ly, 66, 66)); // low table
   }
   for (const p of PLANTS) out.push(rect(p.lx, p.ly, 26, 26));
+  for (const s of BOOKSHELVES) {
+    const sn = s.dir === 'S' || s.dir === 'N';
+    out.push(rect(s.lx, s.ly, sn ? SHELF_LONG : SHELF_DEEP, sn ? SHELF_DEEP : SHELF_LONG));
+  }
   // entrance door posts (the doorway between them stays open)
   out.push(rect(ENTRANCE.lx - 44, ENTRANCE.ly - 42, 10, 10, 6));
   out.push(rect(ENTRANCE.lx + 44, ENTRANCE.ly - 42, 10, 10, 6));
