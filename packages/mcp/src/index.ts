@@ -15,6 +15,7 @@ import { registerJoin } from './tools/join.js';
 import { registerLanes } from './tools/lanes.js';
 import { registerLeave } from './tools/leave.js';
 import { registerMembers } from './tools/members.js';
+import { registerMemory } from './tools/memory.js';
 import { registerSend } from './tools/send.js';
 import { registerStatus } from './tools/status.js';
 
@@ -106,6 +107,7 @@ export function buildMcpServer(
   registerInboxCheck(server, client);
   registerStatus(server, client);
   registerMembers(server, client);
+  registerMemory(server, client);
   registerLanes(server, client);
   registerGoals(server, client);
   registerInsights(server, client);

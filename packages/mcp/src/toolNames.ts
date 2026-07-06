@@ -12,6 +12,8 @@ export const TOOL_NAMES = [
   'team_inbox_check',
   'team_status',
   'team_members',
+  'team_memory_save',
+  'team_memory_read',
   'lane_open',
   'lane_claim',
   'lane_handoff',

@@ -7,6 +7,7 @@ import {
   type Lane,
   type LaneWarning,
   type MemberSummary,
+  type MemoryEnvelope,
   type NextBrief,
   type Report,
   type WSServerFrame,
@@ -42,6 +43,9 @@ export class MusterdClient {
   private waitOnPending = false;
   /** The open claim request id while parked on `pending` (surfaced by team_join on a wait timeout). */
   private pendingRequestId: string | null = null;
+  /** The seat's memory envelope delivered on the occupied frame (ADR 093) — headline + age + size,
+   * never the body. Rendered by team_join as the one-line pointer; null when nothing is saved. */
+  private memoryEnvelope: MemoryEnvelope | null = null;
   /** Why the last join attempt failed — surfaced by the dormant tool guards so a silent autojoin
    * failure (e.g. wrong-db token rejection) is visible to the agent, not just "call team_join". */
   private lastJoinErrorMsg: string | null = null;
@@ -70,6 +74,11 @@ export class MusterdClient {
   /** This session's pending-presence disambiguation code (ADR 033). */
   get claimCode(): string {
     return this.config.claimCode;
+  }
+
+  /** The memory envelope the last occupy delivered (ADR 093), or null when the seat has no note. */
+  get memory(): MemoryEnvelope | null {
+    return this.memoryEnvelope;
   }
 
   /**
@@ -197,6 +206,17 @@ export class MusterdClient {
     return this.request('GET', `/teams/${this.config.team}/report`);
   }
 
+  // ── Seat memory (ADR 093): the seat's private continuity blob, seat-authenticated — the server
+  // resolves the seat from the token + x-musterd-seat header, so these operate on the caller's OWN
+  // seat only. Save is last-write-wins; the body travels only over the explicit read.
+  saveMemory(input: { headline: string; body?: string }): Promise<void> {
+    return this.request('PUT', `/teams/${this.config.team}/memory`, input);
+  }
+
+  readMemory(): Promise<{ headline: string; body: string; saved_at: number }> {
+    return this.request('GET', `/teams/${this.config.team}/memory`);
+  }
+
   /**
    * Claim the member's seat: open the WS, `hello`, and resolve once the server sends `welcome`.
    * Rejects if the seat is already live in another session (`member_busy`) or the hello is refused.
@@ -318,6 +338,9 @@ export class MusterdClient {
         this.pendingRequestId = null;
         this.waitOnPending = false;
         this.config.member = frame.seat.name;
+        // The continuity envelope (ADR 093): headline + age, never the body — team_join renders it
+        // as the one-line pointer; the body is fetched only by an explicit team_memory_read.
+        this.memoryEnvelope = frame.memory ?? null;
         // Resume token (ADR 087): the first approval delivers a reusable grant here — keep it so
         // `persistBinding` writes it into `binding.grant` and reconnects re-occupy without approval.
         if (frame.grant) this.config.grant = frame.grant;

@@ -212,6 +212,16 @@ Drains the in-memory buffer + `GET /inbox?unread=1`, advances the cursor, return
 
 Same data source as `team_status`, filtered/detailed. (`team_status` = quick roster; `team_members` = detail. Kept separate per the plan's 4-tool list.)
 
+### `team_memory_save` / `team_memory_read` (ADR 093)
+
+The seat's private **cross-session continuity blob** — the working state a returning occupant needs, written explicitly by the occupant at natural boundaries (before a handoff, at a wrap-up, when told to wind down). One note per seat, last-write-wins; headline ≤120 chars, body ≤8KB (the server rejects over-cap with the limit named). Seat-scoped: readable by this seat only — no cross-seat path, team admins included.
+
+Delivery is **envelope-on-occupy / body-on-demand**: the `occupied` frame carries `{ headline, saved_at, size_bytes }` (never the body), which `team_join` renders as one line —
+
+> Saved memory from 2h ago: "mid-refactor of ws.ts eviction, tests red" — `team_memory_read` to load it (512 bytes).
+
+— so a fresh session pays ~30 tokens and makes an informed fetch decision. Both tools require a live join (the seat is resolved from the session's occupancy). HTTP surface: `PUT`/`GET` `/teams/:slug/memory`.
+
 ## File tree `packages/mcp/src/`
 
 ```
@@ -237,6 +247,7 @@ src/
     inboxCheck.ts // refuses until ready (pending → claim; dormant → join)
     status.ts     // works while dormant/pending
     members.ts    // works while dormant/pending
+    memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next orientation brief (ADR 083/084)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084)

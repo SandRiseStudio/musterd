@@ -1,0 +1,88 @@
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { MemoryEnvelope } from '@musterd/protocol';
+import { z } from 'zod';
+import type { MusterdClient } from '../client.js';
+import { notReadyMessage, textResult } from './format.js';
+
+/**
+ * Seat memory (ADR 093): the seat's private cross-session continuity blob — the working state a
+ * returning occupant needs (what it was doing, decisions mid-flight, where it left off). One small
+ * note, last-write-wins, seat-scoped (readable by this seat only — no cross-seat path, admins
+ * included). Delivery is envelope-on-occupy / body-on-demand: team_join renders {@link memoryLine}
+ * (headline + age, ~30 tokens); the body travels only over team_memory_read.
+ */
+
+const SAVE_DESCRIPTION =
+  "Save this seat's memory — the working state your next session (or a successor occupant) needs: " +
+  'what you were doing, decisions mid-flight, where you left off. Call at natural boundaries: before ' +
+  'a handoff, at a wrap-up status_update, when told to wind down. One note per seat, last-write-wins ' +
+  '(this replaces the previous note). Headline ≤120 chars (the commit-subject discipline — it is the ' +
+  'one line the next occupy shows); body ≤8KB. Private to this seat; never put secrets in it.';
+
+const READ_DESCRIPTION =
+  "Load this seat's saved memory — the full note behind the one-line pointer team_join showed. " +
+  'Call it when the headline looks relevant to what you are about to do; the age is shown so you ' +
+  'can judge staleness yourself.';
+
+function ago(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s >= 86400) return `${Math.floor(s / 86400)}d`;
+  if (s >= 3600) return `${Math.floor(s / 3600)}h`;
+  if (s >= 60) return `${Math.floor(s / 60)}m`;
+  return `${s}s`;
+}
+
+/**
+ * The one-line pointer the join result carries (ADR 093 §3) — headline + age, never the body, so a
+ * fresh session pays ~30 tokens and makes an informed fetch decision.
+ */
+export function memoryLine(env: MemoryEnvelope, now = Date.now()): string {
+  return (
+    `Saved memory from ${ago(now - env.saved_at)} ago: "${env.headline}" — ` +
+    `team_memory_read to load it (${env.size_bytes} bytes).`
+  );
+}
+
+export function registerMemory(server: McpServer, client: MusterdClient): void {
+  server.registerTool(
+    'team_memory_save',
+    {
+      description: SAVE_DESCRIPTION,
+      inputSchema: {
+        headline: z
+          .string()
+          .describe('one-line subject (≤120 chars) — what the next session sees on occupy'),
+        body: z.string().optional().describe('the full note (≤8KB); omit for a headline-only note'),
+      },
+    },
+    async (args) => {
+      if (!client.joined) return textResult(notReadyMessage(client, 'save memory'));
+      try {
+        await client.saveMemory({
+          headline: args.headline,
+          ...(args.body ? { body: args.body } : {}),
+        });
+        return textResult(
+          `memory saved — your next occupy of this seat will show: "${args.headline}"`,
+        );
+      } catch (err) {
+        return textResult(`error: ${(err as Error).message}`);
+      }
+    },
+  );
+
+  server.registerTool(
+    'team_memory_read',
+    { description: READ_DESCRIPTION, inputSchema: {} },
+    async () => {
+      if (!client.joined) return textResult(notReadyMessage(client, 'read memory'));
+      try {
+        const mem = await client.readMemory();
+        const header = `memory (saved ${ago(Date.now() - mem.saved_at)} ago): ${mem.headline}`;
+        return textResult(mem.body ? `${header}\n\n${mem.body}` : header);
+      } catch (err) {
+        return textResult(`error: ${(err as Error).message}`);
+      }
+    },
+  );
+}
