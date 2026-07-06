@@ -1345,6 +1345,7 @@ export async function handleHttp(
       // the presented token; a mismatched/absent token is its own 401/403.
       if (method === 'PUT' && rest === '/memory') {
         const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        assertSeatCanRead(member); // inert seats (disabled/banned/archived) can't touch memory either
         const parsed = parseOrBadRequest(MemorySaveBody, await readJson(req));
         const input = { headline: parsed.headline, body: parsed.body ?? '' };
         saveMemory(ctx.db, member.id, input); // enforces the caps, throws bad_request with the limit named
@@ -1362,8 +1363,17 @@ export async function handleHttp(
         return sendNoContent(res);
       }
 
+      // `?envelope=1` returns the headline-only envelope (headline + age + size, never the body) —
+      // the ADR 093 §3 delivery shape for surfaces that render the one-line pointer without occupying
+      // (`musterd status`). The bare GET stays the explicit full-body read.
       if (method === 'GET' && rest === '/memory') {
         const { member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        assertSeatCanRead(member);
+        if (url.searchParams.get('envelope') === '1') {
+          const env = memoryEnvelope(ctx.db, member.id);
+          if (!env) throw new MusterdError('not_found', 'no memory saved for this seat');
+          return sendJson(res, 200, env);
+        }
         const mem = getMemory(ctx.db, member.id);
         if (!mem) throw new MusterdError('not_found', 'no memory saved for this seat');
         return sendJson(res, 200, mem);
@@ -1371,6 +1381,7 @@ export async function handleHttp(
 
       if (method === 'DELETE' && rest === '/memory') {
         const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        assertSeatCanRead(member);
         const existed = clearMemory(ctx.db, member.id);
         // Idempotent: DELETE always 204s. Only audit an actual clear (nothing happened otherwise).
         if (existed) {

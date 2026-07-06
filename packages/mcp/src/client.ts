@@ -295,6 +295,7 @@ export class MusterdClient {
   leave(): void {
     this.wantPresence = false;
     this.joinedFlag = false;
+    this.memoryEnvelope = null; // occupy-scoped: stale once the seat is released
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
     this.ws?.close();

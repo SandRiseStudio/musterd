@@ -331,6 +331,9 @@ describe('MCP adapter', () => {
     const mem = await s2.readMemory();
     expect(mem.headline).toBe('mid-refactor, tests red');
     expect(mem.body).toBe('left off at ws.ts eviction');
+    // The envelope is occupy-scoped: releasing the seat clears it (no stale getter while dormant).
+    s2.leave();
+    expect(s2.memory).toBeNull();
     s2.close();
   });
 

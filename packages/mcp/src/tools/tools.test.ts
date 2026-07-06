@@ -560,9 +560,27 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
 
   it('is idempotent when already joined', async () => {
     const join = vi.fn(async () => undefined);
-    const handler = capture(registerJoin, { joined: true, join: join as any }, config);
+    const handler = capture(
+      registerJoin,
+      { joined: true, join: join as any, memory: null },
+      config,
+    );
     expect(text(await handler({}))).toContain('Already joined dawn as Ada');
     expect(join).not.toHaveBeenCalled();
+  });
+
+  it('already-joined still shows the memory one-liner (a background approval may have occupied silently)', async () => {
+    const handler = capture(
+      registerJoin,
+      {
+        joined: true,
+        memory: { headline: 'mid-refactor', saved_at: Date.now() - 60_000, size_bytes: 7 },
+      },
+      config,
+    );
+    const out = text(await handler({}));
+    expect(out).toContain('Already joined dawn as Ada');
+    expect(out).toContain('Saved memory from 1m ago: "mid-refactor"');
   });
 
   it('claims a named seat with {as} and returns the stay-in-sync guidance', async () => {

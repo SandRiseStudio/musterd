@@ -2008,6 +2008,42 @@ describe('seat memory endpoints + occupy envelope (ADR 093)', () => {
     expect((await get('/teams/dawn/memory', ada)).json.body).toBe('secret');
   });
 
+  it('GET ?envelope=1 returns headline + age + size, never the body (the status one-liner read)', async () => {
+    const { ada } = await dawn();
+    // Nothing saved → same 404 as the body read.
+    expect((await get('/teams/dawn/memory?envelope=1', ada)).status).toBe(404);
+
+    await req('PUT', '/teams/dawn/memory', { headline: 'mid-refactor', body: '€€' }, ada);
+    const env = await get('/teams/dawn/memory?envelope=1', ada);
+    expect(env.status).toBe(200);
+    expect(env.json).toEqual({
+      headline: 'mid-refactor',
+      saved_at: expect.any(Number),
+      size_bytes: 6, // '€€' = 6 UTF-8 bytes
+    });
+    expect(env.json.body).toBeUndefined();
+  });
+
+  it('banned = inert: a disabled seat cannot read, write, or clear its memory (defense-in-depth)', async () => {
+    const { ada } = await dawn();
+    await req('PUT', '/teams/dawn/memory', { headline: 'before', body: 'note' }, ada);
+
+    const setStatus = (status: string | null) => {
+      const teamRow = getTeamBySlug(server.db, 'dawn')!;
+      const m = getMemberByName(server.db, teamRow.id, 'Ada')!;
+      setMemberGovernance(server.db, m.id, status, JSON.stringify(GENERALIST_CAPABILITIES));
+    };
+    setStatus('disabled');
+    expect((await get('/teams/dawn/memory', ada)).status).toBe(403);
+    expect((await get('/teams/dawn/memory?envelope=1', ada)).status).toBe(403);
+    expect((await req('PUT', '/teams/dawn/memory', { headline: 'after' }, ada)).status).toBe(403);
+    expect((await req('DELETE', '/teams/dawn/memory', undefined, ada)).status).toBe(403);
+
+    // Re-enabling restores access and the note survived untouched.
+    setStatus('active');
+    expect((await get('/teams/dawn/memory', ada)).json.headline).toBe('before');
+  });
+
   it('an occupied frame (WS claim) carries the envelope when memory exists, null when not', async () => {
     const { team, nickTok, ada } = await dawn();
 
