@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DESK_SLOTS, HUDDLES, NOOK } from './layout';
+import { DESK_SLOTS, HUDDLES, NOOK, NOOK_RUG_R, NOOK_SPOTS } from './layout';
 import { findPath, walkable } from './nav';
 
 describe('walkability grid', () => {
@@ -13,6 +13,15 @@ describe('walkability grid', () => {
     // the nook couch is solid; the open rug in front of the away arc is floor
     expect(walkable(NOOK.lx + 34, NOOK.ly - 2)).toBe(false);
     expect(walkable(NOOK.lx - 40, NOOK.ly + 130)).toBe(true);
+  });
+
+  it('stands every away member on open rug — clear of the lounge furniture', () => {
+    for (const s of NOOK_SPOTS) {
+      const lx = NOOK.lx + s.dx;
+      const ly = NOOK.ly + s.dy;
+      expect(walkable(lx, ly)).toBe(true); // not inside couch/chairs/table/kitchenette
+      expect(Math.abs(s.dx) + Math.abs(s.dy)).toBeLessThan(NOOK_RUG_R); // on the rug
+    }
   });
 
   it('routes around a desk instead of through it', () => {

@@ -1,5 +1,6 @@
 import { depth, FLOOR, project, THICK, type Fit, type Pt } from './iso';
 import {
+  BOOKSHELVES,
   CHAIR_OFF,
   DESK_D,
   DESK_SLOTS,
@@ -11,6 +12,10 @@ import {
   NOOK,
   NOOK_RUG_R,
   PLANTS,
+  SHELF_DEEP,
+  SHELF_H,
+  SHELF_LONG,
+  type Bookshelf,
   type Huddle,
 } from './layout';
 import type { Placement } from './seating';
@@ -207,6 +212,7 @@ function nookItems(ctx: CanvasRenderingContext2D, fit: Fit): { rug: () => void; 
         box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy, L.counter.w, L.counter.d, L.counter.h, '#8a5a34');
         box(ctx, fit, lx + L.machine.dx, ly + L.machine.dy, 16, 13, 10, '#33272b', L.counter.h); // machine on top
       }),
+      at(L.cooler.dx, L.cooler.dy, () => watercooler(ctx, fit, lx + L.cooler.dx, ly + L.cooler.dy)),
       at(L.couch.dx, L.couch.dy, () => couch(ctx, fit, lx + L.couch.dx, ly + L.couch.dy, '#e3a72b', 'S')),
       at(L.chairE.dx, L.chairE.dy, () => armchair(ctx, fit, lx + L.chairE.dx, ly + L.chairE.dy, '#c9744a', 'E')),
       at(L.table.dx, L.table.dy, () => ctable(ctx, fit, lx + L.table.dx, ly + L.table.dy)),
@@ -215,16 +221,47 @@ function nookItems(ctx: CanvasRenderingContext2D, fit: Fit): { rug: () => void; 
   };
 }
 
-/** A huddle, as depth items (same reasoning as the nook). */
+/** A water cooler: a slim base + a tinted bottle on top (a distinct kitchenette piece). */
+function watercooler(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
+  const c = LOUNGE.cooler;
+  box(ctx, fit, lx, ly, c.w, c.d, c.h, '#dfe7ea'); // white body
+  box(ctx, fit, lx, ly, c.w - 6, c.d - 6, 16, '#8fd0e6', c.h); // blue bottle on top
+}
+
+/** A bookshelf: a wood carcass with three shelves of colourful book spines facing into the room. */
+function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf): void {
+  const f = FWD[s.dir];
+  const sn = f[1] !== 0; // S/N run along x; E/W run along y
+  const wx = sn ? SHELF_LONG : SHELF_DEEP;
+  const dy = sn ? SHELF_DEEP : SHELF_LONG;
+  box(ctx, fit, s.lx, s.ly, wx, dy, SHELF_H, WOOD); // carcass
+  // book rows on the front (room-facing) face — three bands of little spines up the height
+  const BOOKS = ['#c95c4a', '#e0a72b', '#5aa0c9', '#6aa86a', '#b06fc9', '#d98b4a'];
+  const face = 0.5; // fraction of the long side the books span
+  for (let row = 0; row < 3; row++) {
+    const baseUp = 8 + row * 18;
+    const n = 5;
+    for (let i = 0; i < n; i++) {
+      const t = (i - (n - 1) / 2) / n; // -.4..+.4 along the shelf
+      const bx = s.lx + (sn ? t * SHELF_LONG * face : f[0] * (SHELF_DEEP / 2 - 2));
+      const by = s.ly + (sn ? f[1] * (SHELF_DEEP / 2 - 2) : t * SHELF_LONG * face);
+      const col = BOOKS[(row * 2 + i) % BOOKS.length]!;
+      box(ctx, fit, bx, by, sn ? 8 : 3, sn ? 3 : 8, 13, col, baseUp);
+    }
+  }
+}
+
+/** A huddle, as depth items (same reasoning as the nook). Sized up to read proportionate to the desks:
+ * roomier poufs and a bigger low table on a wider rug. */
 function huddleItems(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): { rug: () => void; items: DepthItem[] } {
   const at = (dx: number, dy: number, fn: () => void): DepthItem => ({ d: depth(h.lx + dx, h.ly + dy), fn });
   return {
-    rug: () => rug(ctx, fit, h.lx, h.ly, 78, h.rug),
+    rug: () => rug(ctx, fit, h.lx, h.ly, 96, h.rug),
     items: [
-      at(0, -44, () => box(ctx, fit, h.lx, h.ly - 44, 34, 34, 22, h.poufs[0])),
-      at(0, 0, () => box(ctx, fit, h.lx, h.ly, 52, 52, 14, WOOD_TOP)),
-      at(42, 26, () => box(ctx, fit, h.lx + 42, h.ly + 26, 34, 34, 22, h.poufs[1])),
-      at(-42, 26, () => box(ctx, fit, h.lx - 42, h.ly + 26, 34, 34, 22, h.poufs[2])),
+      at(0, -54, () => box(ctx, fit, h.lx, h.ly - 54, 44, 44, 28, h.poufs[0])),
+      at(0, 0, () => box(ctx, fit, h.lx, h.ly, 66, 66, 18, WOOD_TOP)),
+      at(52, 32, () => box(ctx, fit, h.lx + 52, h.ly + 32, 44, 44, 28, h.poufs[1])),
+      at(-52, 32, () => box(ctx, fit, h.lx - 52, h.ly + 32, 44, 44, 28, h.poufs[2])),
     ],
   };
 }
@@ -559,6 +596,9 @@ export function renderScene(
 
   for (const plant of PLANTS) {
     items.push({ d: depth(plant.lx, plant.ly), fn: () => drawPlant(ctx, fit, plant.lx, plant.ly, plant.species) });
+  }
+  for (const s of BOOKSHELVES) {
+    items.push({ d: depth(s.lx, s.ly), fn: () => bookshelf(ctx, fit, s) });
   }
   // Rugs are flat floor paint — draw them right after the floor (before every solid/actor), so a member
   // standing anywhere on a rug is never over-painted by it. Solid pieces self-sort at their footprints.
