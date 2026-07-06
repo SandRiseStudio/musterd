@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import liveCss from '../live/Live.css?url';
 import { ApprovalQueue } from '../live/ApprovalQueue';
+import { ReceptionScene } from '../live/ReceptionScene';
 import type { ApprovalRequest, GrantLifetime } from '../live/ApprovalCard';
 import { AuditFetchError, decideRequest, fetchRequests, type LiveConfig, type Request } from '../live/client';
 
@@ -49,6 +50,7 @@ function ApprovalsPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const loginForm = login ?? { team: '', seat: '', token: '' };
+  const canConnect = !!(loginForm.team.trim() && loginForm.seat.trim() && loginForm.token.trim());
 
   const load = async (liveCfg: LiveConfig) => {
     try {
@@ -108,33 +110,54 @@ function ApprovalsPage() {
           {cfg ? 'live' : 'preview'}
         </span>
       </header>
-      <div className="lc__canvas">
-        {!cfg ? (
-          <div className="lc__connect">
-            <div className="lc__connect-card">
-              <h2>approvals</h2>
-              <p>Connect as an admin seat to review claim requests.</p>
-              {(['team', 'seat', 'token'] as const).map((field) => (
-                <input
-                  key={field}
-                  type={field === 'token' ? 'password' : 'text'}
-                  placeholder={field}
-                  value={loginForm[field]}
-                  onChange={(e) =>
-                    setLogin({ ...loginForm, [field]: e.target.value })
-                  }
-                />
-              ))}
-              <button onClick={handleConnect}>connect</button>
-            </div>
+      {!cfg ? (
+        <div className="lc-form">
+          <div className="lc-form__card">
+            <h1 className="lc-form__title">Sign in at the front desk</h1>
+            <p className="lc-form__sub">
+              Connect as an admin seat to see who's asking in — and let them through, or turn them away.
+            </p>
+            <label className="lc-form__field">
+              <span>Team</span>
+              <input
+                type="text"
+                value={loginForm.team}
+                placeholder="alpha"
+                onChange={(e) => setLogin({ ...loginForm, team: e.target.value })}
+              />
+            </label>
+            <label className="lc-form__field">
+              <span>Admin seat</span>
+              <input
+                type="text"
+                value={loginForm.seat}
+                placeholder="your seat name"
+                onChange={(e) => setLogin({ ...loginForm, seat: e.target.value })}
+              />
+            </label>
+            <label className="lc-form__field">
+              <span>Credential</span>
+              <input
+                type="password"
+                value={loginForm.token}
+                placeholder="mscr_… (admin credential)"
+                onChange={(e) => setLogin({ ...loginForm, token: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+              />
+            </label>
+            {error && <p className="lc-form__error">{error}</p>}
+            <button className="lc-form__connect" disabled={!canConnect} onClick={handleConnect}>
+              Open the door
+            </button>
           </div>
-        ) : (
-          <>
-            {error && <div className="lc__error">{error}</div>}
-            <ApprovalQueue requests={requests} onApprove={onApprove} onDeny={onDeny} />
-          </>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="lc__canvas lc__canvas--companion">
+          {error && <div className="lc__error">{error}</div>}
+          <ReceptionScene count={requests.length} />
+          <ApprovalQueue requests={requests} onApprove={onApprove} onDeny={onDeny} />
+        </div>
+      )}
     </main>
   );
 }
