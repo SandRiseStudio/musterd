@@ -14,7 +14,7 @@ export type Status = 'shipped' | 'near-term' | 'reserved' | 'out-of-scope';
  * "how imminent/designed" grouping; `wave` is the linear order we actually build in. Every unshipped,
  * in-scope item carries one; shipped/out-of-scope items omit it.
  */
-export type Wave = 1 | 2 | 3 | 4 | 'later';
+export type Wave = 1 | 2 | 3 | 4 | 5 | 'later';
 
 export type Category =
   | 'human-loop'
@@ -94,7 +94,7 @@ export const CATEGORY_ORDER: Category[] = [
 
 export const STATUS_ORDER: Status[] = ['shipped', 'near-term', 'reserved', 'out-of-scope'];
 
-export const WAVE_ORDER: Wave[] = [1, 2, 3, 4, 'later'];
+export const WAVE_ORDER: Wave[] = [1, 2, 3, 4, 5, 'later'];
 
 export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
   1: { label: 'Wave 1', tone: 'Harden the coordination loop — small, additive, evidence-backed.' },
@@ -103,6 +103,10 @@ export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
   4: {
     label: 'Wave 4',
     tone: 'The steerable team — mid-loop reachability + anti-staleness, so steering reaches a busy agent before it builds on a stale assumption.',
+  },
+  5: {
+    label: 'Wave 5',
+    tone: 'Depth — turn the telemetry we already emit into a real observability layer, then per-seat memory, model as a variable, observed-surface contention, and the insight board; closing with the presence-gap fix.',
   },
   later: { label: 'Later', tone: 'No near-term pull; opportunistic.' },
 };
@@ -484,18 +488,6 @@ export const ROADMAP: RoadmapItem[] = [
 
   // ── reserved ──────────────────────────────────────────────────────────────
   {
-    id: 'telemetry-l2',
-    wave: 3,
-    title: 'Telemetry — Layer 2 + SDK',
-    status: 'reserved',
-    category: 'observability',
-    blurb: 'A full CLI/MCP telemetry SDK, then MAST-aware views over the act-typed log that agent-observability tools cannot see.',
-    detail:
-      'The seed of a standalone coordination-observability product. Borrow worth folding in: per-recipient delivery status on each act (delivered / processing / processed / failed, with attempt history) — band.ai ships this as first-class routing telemetry (landscape.md §5), and it generalizes the ADR 088 raised→read delivery-confirmation signal into a per-recipient act lifecycle.',
-    refs: [doc('docs/design/observability.md', 'observability.md'), doc('docs/design/landscape.md', 'landscape.md')],
-    dependsOn: ['telemetry-l1'],
-  },
-  {
     id: 'eval-experiment-engine',
     wave: 'later',
     title: 'Eval & experiment engine (batond)',
@@ -623,18 +615,6 @@ export const ROADMAP: RoadmapItem[] = [
     dependsOn: ['insight-engine'],
   },
   {
-    id: 'insight-dashboard',
-    wave: 3,
-    title: 'Work items, board & insight layer (web)',
-    status: 'reserved',
-    category: 'insights',
-    blurb: 'The kanban-style board and team analytics rendered in the web dashboard — a thin surface over the insight engine, never a second store.',
-    detail:
-      'Time-to-unblock, cycle time, load distribution, bottlenecks — the insight-engine projections drawn as the board and analytics views in the web console. No board CRUD, no stored columns: the dashboard renders what the engine derives.',
-    refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
-    dependsOn: ['insight-engine', 'web-dashboard'],
-  },
-  {
     id: 'coordination-density',
     title: 'Coordination-density insight',
     status: 'shipped',
@@ -706,18 +686,98 @@ export const ROADMAP: RoadmapItem[] = [
     refs: [doc('docs/design/agent-ontology.md', 'agent-ontology.md'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
     dependsOn: ['wake-on-message'],
   },
+
+  // ── Wave 5 — depth (priority order set 2026-07-04) ──
+  // Interrupt line (Wave 4) stays #1; this is the ordered batch after it. Telemetry L2 leads because
+  // L1 is verified emitting (finding 002) — the data is already useful, L2 makes it first-class.
+  {
+    id: 'telemetry-l2',
+    wave: 5,
+    title: 'Telemetry — Layer 2 + SDK',
+    status: 'near-term',
+    category: 'observability',
+    blurb: 'A full CLI/MCP telemetry SDK, then MAST-aware views over the act-typed log that agent-observability tools cannot see.',
+    detail:
+      'The seed of a standalone coordination-observability product, and the head of the depth wave. Pulled up 2026-07-04: Layer 1 is verified emitting live (finding 002 mined ~53 h from the local sink and caught the broadcast-journal anti-pattern by hand) — so the data is already useful; L2 is what turns "grep a text log" into first-class MAST-aware views (ignored request_help, circular handoffs, stalled threads, broadcast-only journaling) + the report surfaces. Borrow worth folding in: per-recipient delivery status on each act (delivered / processing / processed / failed, with attempt history) — band.ai ships this as first-class routing telemetry (landscape.md §5), generalizing the ADR 088 raised→read delivery-confirmation signal. Also fix identity attribution first (issue #107): key on a stable seat id, not the display name, or every aggregated per-agent metric mis-counts.',
+    refs: [
+      doc('docs/design/observability.md', 'observability.md'),
+      doc('docs/research/002-telemetry-caught-broadcast-journal.md', 'finding 002'),
+      doc('docs/design/landscape.md', 'landscape.md'),
+    ],
+    dependsOn: ['telemetry-l1'],
+  },
+  {
+    id: 'seat-memory',
+    wave: 5,
+    title: 'Persistent seat memory',
+    status: 'reserved',
+    category: 'platform',
+    blurb: 'A persistent identity wants persistent memory — the claim response could carry a memory/context blob alongside the charter.',
+    detail:
+      'A reserved seam (membership-model.md §"Memory — reserved seam, not built"): a durable per-seat memory/context blob delivered on claim. **Needs its own design session before build** (2026-07-04) — open questions: what the blob holds (facts, preferences, prior-work index), who writes it and when, size/staleness bounds, and how it composes with the agent=seat ontology (agent-ontology.md). Prioritized into the depth wave as the next design pass after telemetry L2.',
+    refs: [doc('docs/design/membership-model.md', 'membership-model.md'), doc('docs/design/agent-ontology.md', 'agent-ontology.md')],
+    dependsOn: ['durable-roster'],
+  },
+  {
+    id: 'model-experimentation',
+    wave: 5,
+    title: 'Model experimentation — frontier cadence + own models',
+    status: 'reserved',
+    category: 'observability',
+    blurb: 'Treat the model itself as a first-class experimental variable: be early to each frontier model, and own models end-to-end.',
+    detail:
+      'From model-experimentation.md. Track A (bleeding edge): run the coordination experiment manifest as each new frontier model lands, diffing the emitted coordination metrics (loop_latency, dup-rate, wasted-work) vs the prior baseline → a per-model coordination leaderboard. Track B (own models): the tiny-model dogfood fixture (Stage 1 local instruct agent → Stage 2 train-from-scratch with MLX), culminating in a fine-tuned coordination-judge model over the traces dataset. **Shares a design session with model-diversity (2026-07-04)** — together they are "model as a variable". Depends on the telemetry L2 substrate to diff metrics across models.',
+    refs: [doc('docs/design/model-experimentation.md', 'model-experimentation'), adr(51, 'ADR 051'), adr(56, 'ADR 056')],
+    dependsOn: ['telemetry-l2'],
+  },
   {
     id: 'model-diversity',
-    wave: 'later',
+    wave: 5,
     title: 'Model diversity as a team-composition feature',
     status: 'reserved',
     category: 'observability',
     blurb:
       'Same-model agents agree in correlated ways, so their consensus is weak evidence. Record the model per seat and flag same-model review/approval chains — making model diversity a first-class team property.',
     detail:
-      'From agent-ontology.md §5 (the monoculture problem). musterd is the model-agnostic layer, so heterogeneity is ours to make first-class: store the model on the seat/roster, and let the insight/report layer flag a review or approval chain that was single-model end-to-end ("treat agreement as weak evidence"). Feeds the research track (ADR 056): measure agreement correlation between same-model vs cross-model reviewer pairs on real coordination traces — a dataset nobody else has. Sibling to model-experimentation.',
+      'From agent-ontology.md §5 (the monoculture problem). musterd is the model-agnostic layer, so heterogeneity is ours to make first-class: store the model on the seat/roster, and let the insight/report layer flag a review or approval chain that was single-model end-to-end ("treat agreement as weak evidence"). Feeds the research track (ADR 056): agreement correlation between same-model vs cross-model reviewer pairs on real coordination traces. **Shares the model-as-a-variable design session with model-experimentation (2026-07-04).**',
     refs: [doc('docs/design/agent-ontology.md', 'agent-ontology.md'), adr(56, 'ADR 056'), doc('docs/design/model-experimentation.md', 'model-experimentation')],
     dependsOn: ['model-experimentation'],
+  },
+  {
+    id: 'lanes-phase2',
+    wave: 5,
+    title: 'Coordination lanes — Phase 2 (observed surface + merge-funnel)',
+    status: 'reserved',
+    category: 'platform',
+    blurb: 'The observed-surface + merge-funnel layer on top of the Phase-1 lane primitive — tighter contention signal, less reliance on declarations.',
+    detail:
+      'Phase-1 (ADR 083) shipped the declared intent+dependency layer. Phase 2: observed surface (fs-watch / git-diff sampling instead of only declared globs), the symbol/hunk-level merge-funnel, lane_ack to silence a warning, role-pool auto-assignment of open lanes, and auto-done when a lane\'s branch merges. Watcher, never gatekeeper.',
+    refs: [adr(83, 'ADR 083'), doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax')],
+    dependsOn: ['coordination-lanes'],
+  },
+  {
+    id: 'insight-dashboard',
+    wave: 5,
+    title: 'Work items, board & insight layer (web)',
+    status: 'reserved',
+    category: 'insights',
+    blurb: 'The kanban-style board and team analytics rendered in the web dashboard — a thin surface over the insight engine, never a second store.',
+    detail:
+      'The web surface for the already-shipped insight engine (server projections + GET /report + the report CLI/MCP all landed; this is the browser board they never got). Time-to-unblock, cycle time, load distribution, bottlenecks — the insight-engine projections drawn as the board and analytics views in the web console. No board CRUD, no stored columns: the dashboard renders what the engine derives.',
+    refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+    dependsOn: ['insight-engine', 'web-dashboard'],
+  },
+  {
+    id: 'driver-copresence-gap',
+    wave: 5,
+    title: 'Driver co-presence gap — make steering light up the human',
+    status: 'reserved',
+    category: 'human-loop',
+    blurb: 'Driver co-presence shipped (ADR 021) but is dormant: it only annotates the agent row ("· driven by nick") and only when MUSTERD_DRIVER is set — which provisioning never writes — so a human steering an agent still reads offline.',
+    detail:
+      'Diagnosed 2026-07-04 from the live roster (nick shows offline while actively steering) + the code: (1) `init`/`agent` never write MUSTERD_DRIVER, so the "driven by" annotation never fires; (2) even when set, ADR 021 annotates the *agent* row, it does not give the human seat its own presence — so it does not match the expectation "I steer, therefore I am online". Fix has two parts: provision the driver link (opt-in, per workspace) so the annotation works, and decide whether steering should also mark the human seat present (closer to the driver-co-presence intent + the humans-as-peers thesis). Small, but it touches the presence model (ADR 010/042/057), so it is scoped as its own item at the tail of the depth wave.',
+    refs: [adr(21, 'ADR 021'), adr(57, 'ADR 057'), adr(42, 'ADR 042')],
+    dependsOn: ['agent-presence-touch'],
   },
 
   {
@@ -750,18 +810,6 @@ export const ROADMAP: RoadmapItem[] = [
 
   // ── captured from design docs / ADRs (roadmap-completeness pass, 2026-07-01) ──
   {
-    id: 'lanes-phase2',
-    wave: 3,
-    title: 'Coordination lanes — Phase 2 (observed surface + merge-funnel)',
-    status: 'reserved',
-    category: 'platform',
-    blurb: 'The observed-surface + merge-funnel layer on top of the Phase-1 lane primitive — tighter contention signal, less reliance on declarations.',
-    detail:
-      'Phase-1 (ADR 083) shipped the declared intent+dependency layer. Phase 2: observed surface (fs-watch / git-diff sampling instead of only declared globs), the symbol/hunk-level merge-funnel, lane_ack to silence a warning, role-pool auto-assignment of open lanes, and auto-done when a lane\'s branch merges. Watcher, never gatekeeper.',
-    refs: [adr(83, 'ADR 083'), doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax')],
-    dependsOn: ['coordination-lanes'],
-  },
-  {
     id: 'team-hardening',
     wave: 'later',
     title: 'Shared/remote-team security hardening',
@@ -783,28 +831,6 @@ export const ROADMAP: RoadmapItem[] = [
       'A placeholder for a thread parked for its own design pass (raised 2026-07-03): as agents take consequential actions gated on human sign-off, the audit trail must name the authorizing human, not just that "a human approved." Seeds already in place — the P2 append-only audit log (ADR 071), the request-lane recorded decider (ADR 077), and human credentials (P3) to bind an attestation to. Not yet designed; captured so it is not lost. Relates to the shared/remote-team hardening cluster.',
     refs: [adr(71, 'ADR 071'), adr(77, 'ADR 077'), doc('docs/design/security.md', 'security.md')],
     dependsOn: ['v03-p2-enforcement'],
-  },
-  {
-    id: 'seat-memory',
-    wave: 'later',
-    title: 'Persistent seat memory',
-    status: 'reserved',
-    category: 'platform',
-    blurb: 'A persistent identity wants persistent memory — the claim response could carry a memory/context blob alongside the charter.',
-    detail:
-      'A reserved seam (membership-model.md §"Memory — reserved seam, not built"): a durable per-seat memory/context blob delivered on claim, parked for a dedicated future brainstorm. Placeholder so the direction is visible on the roadmap.',
-    refs: [doc('docs/design/membership-model.md', 'membership-model.md')],
-  },
-  {
-    id: 'model-experimentation',
-    wave: 'later',
-    title: 'Model experimentation — frontier cadence + own models',
-    status: 'reserved',
-    category: 'observability',
-    blurb: 'Treat the model itself as a first-class experimental variable: be early to each frontier model, and own models end-to-end.',
-    detail:
-      'From model-experimentation.md. Track A (bleeding edge): run the coordination experiment manifest as each new frontier model lands, diffing the emitted coordination metrics (loop_latency, dup-rate, wasted-work) vs the prior baseline → a per-model coordination leaderboard. Track B (own models): the tiny-model dogfood fixture (Stage 1 local instruct agent → Stage 2 train-from-scratch with MLX), culminating in a fine-tuned coordination-judge model over the traces dataset. Research spine, not a near-term build.',
-    refs: [doc('docs/design/model-experimentation.md', 'model-experimentation'), adr(51, 'ADR 051'), adr(56, 'ADR 056')],
   },
   {
     id: 'hosted-relay',
