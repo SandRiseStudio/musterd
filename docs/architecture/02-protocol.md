@@ -101,20 +101,20 @@ The WS `send` and HTTP `POST …/messages` share one validation+route path on th
 
 ## Error codes (shared by WS `error` frames and HTTP)
 
-| code               | HTTP | meaning                                                                                                                          |
-| ------------------ | ---- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `bad_request`      | 400  | malformed frame/body/envelope                                                                                                    |
-| `validation`       | 422  | envelope failed schema (bad act, missing required meta, etc.)                                                                    |
-| `unauthorized`     | 401  | missing/invalid token                                                                                                            |
-| `forbidden`        | 403  | token valid but not a member of this team / not this member                                                                      |
-| `not_found`        | 404  | team/member not found                                                                                                            |
-| `conflict`         | 409  | duplicate (e.g. team slug taken, member name taken)                                                                              |
-| `member_busy`      | 409  | (v0.2, ADR 010) a Member was already live — _no longer thrown on hello since ADR 017's newest-wins; retained for compatibility_  |
-| `superseded`       | 409  | (v0.2, ADR 017) your session was taken over by a newer same-identity attach — terminal; don't reconnect. Carries `same_workspace:true` when the successor is in your own workspace (ADR 092 — reload successor; the adapter exits)  |
-| `version_mismatch` | 426  | client `v` not compatible with server                                                                                            |
-| `server_error`     | 500  | unexpected                                                                                                                       |
-| `claim_conflict`   | 409  | (P3, ADR 078/SPEC A.8) the target seat is already occupied                                                                       |
-| `expired_grant`    | 403  | (P3, ADR 078/SPEC A.8) the presented grant is past its lifetime (403, aligned with June's P3.1 ADR 076; SPEC A.8 allows 410/403) |
+| code               | HTTP | meaning                                                                                                                                                                                                                            |
+| ------------------ | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bad_request`      | 400  | malformed frame/body/envelope                                                                                                                                                                                                      |
+| `validation`       | 422  | envelope failed schema (bad act, missing required meta, etc.)                                                                                                                                                                      |
+| `unauthorized`     | 401  | missing/invalid token                                                                                                                                                                                                              |
+| `forbidden`        | 403  | token valid but not a member of this team / not this member                                                                                                                                                                        |
+| `not_found`        | 404  | team/member not found                                                                                                                                                                                                              |
+| `conflict`         | 409  | duplicate (e.g. team slug taken, member name taken)                                                                                                                                                                                |
+| `member_busy`      | 409  | (v0.2, ADR 010) a Member was already live — _no longer thrown on hello since ADR 017's newest-wins; retained for compatibility_                                                                                                    |
+| `superseded`       | 409  | (v0.2, ADR 017) your session was taken over by a newer same-identity attach — terminal; don't reconnect. Carries `same_workspace:true` when the successor is in your own workspace (ADR 092 — reload successor; the adapter exits) |
+| `version_mismatch` | 426  | client `v` not compatible with server                                                                                                                                                                                              |
+| `server_error`     | 500  | unexpected                                                                                                                                                                                                                         |
+| `claim_conflict`   | 409  | (P3, ADR 078/SPEC A.8) the target seat is already occupied                                                                                                                                                                         |
+| `expired_grant`    | 403  | (P3, ADR 078/SPEC A.8) the presented grant is past its lifetime (403, aligned with June's P3.1 ADR 076; SPEC A.8 allows 410/403)                                                                                                   |
 
 The CLI maps these to exit codes (`04-cli.md`).
 
@@ -123,7 +123,7 @@ The CLI maps these to exit codes (`04-cli.md`).
 The governed successor to `hello` — **additive schemas, not yet wired into `WSClientFrame`/`WSServerFrame`** (that wiring is Cleo's P3.2 cutover step, part of the one atomic merge; ADR 069 decision 2). Landing the frame shapes first lets June's P3.1 substrate + Cleo's P3.2 handshake import a stable contract.
 
 - `ClaimFrame` (client→server) — `{ type:'claim', v, team, key, target:{seat}|{role}|{observe:true}, grant?, surface }`. `key` = agent key (harness) or human credential; `grant` present → occupy, omitted → open a claim request (A.5).
-- `OccupiedFrame` (server→client) — `{ type:'occupied', seat:Member, presence_id, server_time, charter?, memory:null }`. `memory` is a reserved seam, always null in v0.3.
+- `OccupiedFrame` (server→client) — `{ type:'occupied', seat:Member, presence_id, server_time, charter?, memory:MemoryEnvelope|null }`. `memory` is the seat-scoped continuity envelope (ADR 093) — `MemoryEnvelope = { headline (≤120), saved_at, size_bytes }` (`.strict()`, so the body never rides the frame) — or `null` when nothing is saved; the body is fetched on demand via `GET /teams/:slug/memory`.
 - `RefusedFrame` (server→client) — `{ type:'refused', code:RefusedCode, message, claimable:[…], hint }`. `RefusedCode` = `claim_conflict|forbidden|not_found|disabled|banned|expired_grant` (A.8; `disabled`/`banned` surface the seat's account state — HTTP maps those to `forbidden` 403).
 - `PendingFrame` (server→client) — `{ type:'pending', request_id, message }`. The WS stays open; the server pushes the terminal `occupied`/`refused` when an admin decides (spec-gap 3, no client polling).
 - `P3_AUDIT_ACTIONS` — a reference tuple naming the P3 audit verbs (`grant.issue/use/revoke`, `claim.occupy/refused`, `request.decide`, `key.rotate`, `policy.change`, `account_status.change`) for naming consistency; `AuditEntry.action` stays an **open string** (ADR 074).
@@ -161,7 +161,8 @@ export const P3_AUDIT_ACTIONS = ['grant.issue','grant.use','grant.revoke','claim
 export const ClaimTarget = z.union([ z.object({seat:string}), z.object({role:string}), z.object({observe:z.literal(true)}) ]);
 export const RefusedCode = z.enum(['claim_conflict','forbidden','not_found','disabled','banned','expired_grant']);
 export const ClaimFrame = z.object({ type:'claim', v, team, key:string, target:ClaimTarget, grant?:string, surface:Surface });
-export const OccupiedFrame = z.object({ type:'occupied', seat:Member, presence_id, server_time:int, charter?:string, memory:null });
+export const MemoryEnvelopeSchema = z.object({ headline:string(1..120), saved_at:int, size_bytes:int>=0 }).strict();
+export const OccupiedFrame = z.object({ type:'occupied', seat:Member, presence_id, server_time:int, charter?:string, memory:MemoryEnvelopeSchema.nullable() });
 export const RefusedFrame = z.object({ type:'refused', code:RefusedCode, message, claimable:string[], hint:string });
 export const PendingFrame = z.object({ type:'pending', request_id, message });
 

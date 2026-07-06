@@ -92,7 +92,7 @@ Both bindings MUST funnel sends through one validate→persist→route path so s
 
 ## 6. Versioning & compatibility
 
-- The version string is `musterd/MAJOR.MINOR`. `v0.1` was the first; `v0.2` added single-active newest-wins + reclaim grace, roster activity, attach provenance/workspace, driver co-presence (new error codes `member_busy`/`superseded`); **`v0.3`** is current — it adds the terminal `resolve` act (ADR 025). All MINOR additions are additive (a new act and new optional fields, no change to existing required fields).
+- The version string is `musterd/MAJOR.MINOR`. `v0.1` was the first; `v0.2` added single-active newest-wins + reclaim grace, roster activity, attach provenance/workspace, driver co-presence (new error codes `member_busy`/`superseded`); **`v0.3`** is current — it adds the terminal `resolve` act (ADR 025) and un-stubs the reserved `memory` seam on the `occupied` frame into a seat-scoped continuity envelope (A.3, ADR 093). All MINOR additions are additive (a new act and new optional fields, no change to existing required fields): a client that ignores `memory` is unaffected.
 - Within a MAJOR, MINOR additions MUST be backward-compatible (new optional `meta`, new optional fields, new endpoints, new error codes). New **acts** or any change to envelope-required fields are a MINOR-or-greater, spec-versioned change requiring an ADR.
 - A server MUST reject a client whose declared `v` it does not support, with a `version_mismatch` error.
 
@@ -143,7 +143,7 @@ A new join/auth handshake is a MAJOR-of-MINOR change; it **landed as the isolate
 - A **Role** is admin-defined (`backend`, `frontend`, `reviewer`, `lead`…). It groups seats (capacity = its seats) **and carries default capabilities + an optional charter**.
 - A **Seat** is the identity record: `{ id, team, role, name?, kind: agent|human, account_status, occupied_by?, availability?, activity?, capabilities, charter? }`. `name` is optional for agent seats (handle `<role>-<n>` if absent), conventional for humans. A seat's `capabilities` start from its role's defaults and may be **narrowed per seat, never widened**.
 - **Capabilities (fixed set):** `can_message` (scope), `visibility_level`, `tool_allowlist`, `declared_resource_scopes`, `can_flag_urgent`, `can_observe`, `is_admin`. Servers MUST enforce them on every in-band operation; external scopes (repo/dir/tool) are **declared** here and enforced by the harness/sandbox (Principle 4). ADR 026 frames this as the **two universes** — in-band acts musterd enforces vs harness tools it _provisions + declares_ — and makes the Role a harness-agnostic provisioning template. Custom RBAC is roadmap.
-- **Charter** is identity metadata (what the seat is _for_ + instructions); musterd stores and serves it, never enforces behavior. A **memory/context blob** is a **reserved seam** on the claim response (A.3) — not built in v0.3.
+- **Charter** is identity metadata (what the seat is _for_ + instructions); musterd stores and serves it, never enforces behavior. A **memory/context blob** rides the claim response (A.3) as a seat-scoped continuity envelope (ADR 093): `memory` carries `{ headline, saved_at, size_bytes }` or `null`, with the body fetched on demand — an additive MINOR that un-stubs the seam once reserved here.
 - An **agent** seat has **at most one** live occupant (single-active); a **human** seat may have multiple concurrent occupant Presences (kind-scoped, ADR 042). Humans claim their own named seat; agent seats may be claimed by name or by an open seat in a role.
 
 ## A.2 Credentials
@@ -182,7 +182,10 @@ State machine: `connecting → authenticated(key) → claim → (occupied | refu
 // server → client
 { "type":"occupied", "seat": <Seat>, "presence_id":"01J…", "server_time": <ms>,
   "charter": "<role/seat charter + instructions>"?,   // identity metadata, served not enforced
-  "memory": null }                                     // RESERVED SEAM — always null in v0.3
+  "memory": { "headline":"<≤120 chars>", "saved_at": <ms>, "size_bytes": <int> } | null }
+                                                       // seat-scoped continuity envelope (ADR 093);
+                                                       // null when nothing saved. The body is NEVER
+                                                       // here — fetch via GET /teams/:slug/memory.
 { "type":"refused", "code":"claim_conflict"|"forbidden"|"not_found"|"disabled"|"banned"|"expired_grant",
   "message":"…", "claimable":["…"], "hint":"musterd team add <name> --kind agent --role backend" }
 { "type":"pending", "request_id":"01J…", "message":"asked admins to authorize this claim" }
@@ -195,6 +198,7 @@ Rules:
 - **No grant** → `pending`: the server opens a **claim request** (A.5) routed to admins. On approval the server emits `occupied` (or `refused` on deny/timeout). If an admin is co-present in the same session, approval MAY be immediate.
 - `observe: true` requires a **human credential** whose seat role permits observing; agents MUST be refused (`forbidden`).
 - An **agent** seat MUST have at most one live occupant; a **human** seat MAY have multiple concurrent occupant Presences (kind-scoped single-active, ADR 042).
+- **`memory`** carries the seat's continuity envelope (ADR 093) — `{ headline (≤120 chars), saved_at, size_bytes }` — or `null` when the seat has saved nothing. It is the seat-scoped working note an occupant saved before wrapping up; the body is fetched **on demand** over `GET /teams/:slug/memory` (seat-authenticated), never delivered on this frame. Additive and back-compat: a client that ignores `memory` loses nothing.
 
 ## A.4 Release & grace
 
