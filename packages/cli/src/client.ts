@@ -40,6 +40,17 @@ import { buildClaimFrame, parseClaimResponse } from './claim-client.js';
 import type { ClaimOutcome } from './claim-client.js';
 import { CliError, exitForCode, isConnRefused } from './errors.js';
 
+/** The `/inbox/interrupt-check` response (ADR 088). `raised: false` is the silent common path. */
+export interface InterruptCheck {
+  raised: boolean;
+  /** The daemon-composed one-line notice (never the raw message body). Present iff `raised`. */
+  line?: string;
+  /** How many interrupt-class acts are waiting. Present iff `raised`. */
+  count?: number;
+  /** The most-recent interrupt act's structured header. Present iff `raised`. */
+  act?: { id: string; from: string; act: string };
+}
+
 export interface HttpClientOpts {
   server: string;
   /** The Bearer secret (v0.3, ADR 075): a team agent key (`mskey_`) or human credential (`mscr_`).
@@ -145,6 +156,14 @@ export class HttpClient {
     if (opts.limit) q.set('limit', String(opts.limit));
     const qs = q.toString();
     return this.request('GET', `/teams/${slug}/inbox${qs ? `?${qs}` : ''}`);
+  }
+  /**
+   * The mid-loop interrupt-line probe (ADR 088): is an interrupt-class (urgent, directed) act waiting
+   * for this seat? Sub-50ms, read-only, cursor-untouched. Returns `{ raised: false }` on the common
+   * silent path, or the **daemon-composed** one-line notice + the act's structured header when raised.
+   */
+  interruptCheck(slug: string): Promise<InterruptCheck> {
+    return this.request('GET', `/teams/${slug}/inbox/interrupt-check`);
   }
   /** Whole-team timeline (the firehose's history side, ADR 061) — every envelope, not just my inbox. */
   messages(

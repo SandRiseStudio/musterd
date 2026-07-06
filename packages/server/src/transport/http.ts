@@ -18,6 +18,7 @@ import {
   UpdateLaneSchema,
   DeclareGoalSchema,
   makeEnvelope,
+  type Envelope,
   type LaneWarning,
   type MemberSummary,
 } from '@musterd/protocol';
@@ -31,7 +32,7 @@ import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
-import { appendAudit, listAudit } from '../store/audit.js';
+import { appendAudit, hasInterruptRaised, listAudit } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import {
   consumeGrant,
@@ -61,6 +62,7 @@ import {
   latestStatusUpdate,
   listInbox,
   listTeamMessages,
+  pendingInterrupts,
   rowToEnvelope,
 } from '../store/messages.js';
 import {
@@ -92,7 +94,7 @@ import {
   rotateAgentKey,
   setPolicy,
 } from '../store/teams.js';
-import { recordError } from '../telemetry.js';
+import { recordError, recordInterruptCheck } from '../telemetry.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -200,6 +202,20 @@ function assertSeatCanRead(member: MemberRow): void {
   const status = resolveAccountStatus(member);
   if (status === 'disabled' || status === 'banned' || status === 'archived')
     throw new MusterdError('forbidden', `seat "${member.name}" is ${status} and cannot read`);
+}
+
+/**
+ * The one-line interrupt notice for `/inbox/interrupt-check` (ADR 088 §4): **daemon-composed from
+ * structured fields only** — sender + act + count — never the raw `env.body`, so a teammate's message
+ * text can't be injected into a busy agent's context mid-turn. Sender identity is always present so the
+ * model can weigh the source. Points at the explicit follow-up (`musterd inbox`) rather than dumping
+ * the content.
+ */
+function composeInterruptLine(latest: Envelope, count: number): string {
+  const head = `${latest.from} (${latest.act})`;
+  return count > 1
+    ? `⚡ musterd: ${count} urgent acts waiting (latest from ${head}) — run 'musterd inbox' to read them.`
+    : `⚡ musterd: urgent from ${head} — run 'musterd inbox' to read it.`;
 }
 
 const CreateTeamBody = z.object({
@@ -1165,6 +1181,43 @@ export async function handleHttp(
           );
         }
         return sendJson(res, 200, { lane, warnings });
+      }
+
+      // The mid-loop interrupt line (ADR 088): a silent-or-one-line probe a PostToolUse hook runs at
+      // every tool boundary. Sub-50ms and side-effect-light — one unread-inbox read, the interrupt
+      // predicate, and (only when raised) a deduped audit row. Never advances the read cursor: reading
+      // is the agent's explicit follow-up (`musterd inbox`). The line is **daemon-composed** from the
+      // envelope's structured fields (sender, act, count) — never `env.body` (§4 injection surface).
+      if (method === 'GET' && rest === '/inbox/interrupt-check') {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        const cursor = getCursor(ctx.db, member.id);
+        const rows = listInbox(ctx.db, member, { unreadOnly: true, cursorTs: cursor.last_read_ts });
+        const messages = rows.map((r) => {
+          const from = getMemberById(ctx.db, r.from_member);
+          const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
+          return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
+        });
+        const pending = pendingInterrupts(messages, member.name);
+        recordInterruptCheck(pending.length > 0 ? 'raised' : 'silent');
+        if (pending.length === 0) return sendJson(res, 200, { raised: false });
+        const latest = pending[0]!;
+        // Audit the delivery once per (recipient, act) — who grabbed the mic, when, at whom (§Obs).
+        if (!hasInterruptRaised(ctx.db, team.id, member.name, latest.id)) {
+          appendAudit(ctx.db, team.id, {
+            actor: latest.from,
+            action: 'interrupt.raised',
+            target: member.name,
+            result: 'allow',
+            detail: { act: latest.id, act_kind: latest.act, tier: 'urgent', count: pending.length },
+          });
+        }
+        return sendJson(res, 200, {
+          raised: true,
+          line: composeInterruptLine(latest, pending.length),
+          count: pending.length,
+          act: { id: latest.id, from: latest.from, act: latest.act },
+        });
       }
 
       if (method === 'GET' && rest === '/inbox') {

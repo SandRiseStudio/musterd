@@ -104,9 +104,16 @@ function removePermissions(perms: ProvisionPermissions): void {
  *   `claude mcp get musterd` and prints the fix (`musterd init`) instead of a false "auto-joined".
  *   A project-local SessionStart could only cover folders `configure` already ran in — and would
  *   double-fire against the global one — so SessionStart is global-only.
+ * - `PostToolUse` (ADR 088) — **project-local** (`.claude/settings.local.json`). The interrupt line:
+ *   it fires at *every tool boundary*, running `musterd inbox --interrupt-check` — a silent no-op
+ *   unless an interrupt-class (urgent) directed act is waiting for this folder's bound seat, in which
+ *   case it prints one daemon-composed line the model sees mid-turn. This is what makes a busy agent
+ *   reachable in seconds instead of at its next task boundary; it degrades to the ADR 046 per-command
+ *   nudge where a harness lacks a tool-boundary hook.
  */
 export const NOTIFICATION_HOOK_MARKER = 'musterd-notify-hook';
 export const SESSIONSTART_HOOK_MARKER = 'musterd-sessionstart-hook';
+export const POSTTOOLUSE_HOOK_MARKER = 'musterd-interrupt-hook';
 
 /** The user's GLOBAL Claude Code settings (read at session start for all folders). Honors
  *  `CLAUDE_CONFIG_DIR` (which Claude Code itself respects) so the config home is overridable + testable. */
@@ -122,6 +129,19 @@ function notificationHookCommand(): string {
     'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
     'command -v musterd >/dev/null 2>&1 && musterd nudge 2>/dev/null || true ' +
     `# ${NOTIFICATION_HOOK_MARKER}`
+  );
+}
+
+function postToolUseHookCommand(): string {
+  // The mid-loop interrupt line (ADR 088): after every tool call, cd to the project dir so the bound
+  // seat resolves, run `musterd inbox --interrupt-check` only if the CLI is on PATH. It exits silent
+  // (no output) unless an interrupt-class act is waiting, so the common path adds zero context and
+  // zero tokens. Best-effort + never-failing: swallow all noise on error so a probe can't break a tool
+  // call. No matcher, so it runs on every tool. Mirrors the Notification hook's shape.
+  return (
+    'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd inbox --interrupt-check 2>/dev/null || true ' +
+    `# ${POSTTOOLUSE_HOOK_MARKER}`
   );
 }
 
@@ -229,11 +249,41 @@ export function installMusterdHooks(): void {
     notificationHookCommand(),
   );
   upsertHook(
+    settingsLocalPath(),
+    'PostToolUse',
+    (m) => isMusterdHookFor(m, POSTTOOLUSE_HOOK_MARKER),
+    postToolUseHookCommand(),
+  );
+  upsertHook(
     globalSettingsPath(),
     'SessionStart',
     isMusterdSessionStart,
     sessionStartHookCommand(),
   );
+}
+
+/**
+ * Drift lines for musterd's **project-local** Claude Code hooks that should be present once the server
+ * is wired here but aren't — a `musterd init --check` guard so a renamed flag or a hand-deleted entry
+ * can't silently kill reachability (ADR 088). The reachability-critical one is `PostToolUse` (the
+ * interrupt line): without it, a busy agent won't see urgent steering mid-loop. Returns [] when the
+ * settings file is absent/unparseable (the "no server registered" drift already covers a bare folder)
+ * or when the hook is present. The global self-gating SessionStart is machine-shared, so it is not
+ * checked per-folder.
+ */
+export function inspectClaudeHookDrift(cwd: string): string[] {
+  const path = join(cwd, '.claude', 'settings.local.json');
+  if (!existsSync(path)) return []; // no local settings yet — the bare-folder drift already covers it
+  const settings = readSettingsSafe(path);
+  if (!settings) return []; // present but unparseable — never invent drift from a file we can't read
+  const present = (settings.hooks?.['PostToolUse'] ?? []).some((m) =>
+    isMusterdHookFor(m, POSTTOOLUSE_HOOK_MARKER),
+  );
+  if (present) return [];
+  return [
+    'the Claude Code PostToolUse interrupt hook is missing from .claude/settings.local.json — a busy ' +
+      'agent will not see urgent steering mid-loop (ADR 088). Run `musterd init` to wire it.',
+  ];
 }
 
 /**
@@ -246,6 +296,7 @@ export function removeMusterdHooks(): void {
   dropHook(settingsLocalPath(), 'Notification', (m) =>
     isMusterdHookFor(m, NOTIFICATION_HOOK_MARKER),
   );
+  dropHook(settingsLocalPath(), 'PostToolUse', (m) => isMusterdHookFor(m, POSTTOOLUSE_HOOK_MARKER));
   dropHook(settingsLocalPath(), 'SessionStart', (m) =>
     isMusterdHookFor(m, SESSIONSTART_HOOK_MARKER),
   );

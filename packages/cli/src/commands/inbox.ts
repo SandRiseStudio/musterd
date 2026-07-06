@@ -5,7 +5,7 @@ import { watchClaim } from '../client.js';
 import { wsBase, type Identity } from '../config.js';
 import { isActionNeeded, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
-import { kindLookup, resolve } from './helpers.js';
+import { kindLookup, resolve, resolveRead } from './helpers.js';
 
 /** Block-until-message exit code on timeout — mirrors coreutils `timeout(1)` so shell loops can tell
  *  "no message yet" from a real failure. Zero is reserved for "a directed act woke me". */
@@ -15,6 +15,11 @@ export const WAIT_TIMEOUT_EXIT = 124;
 const DEFAULT_WAIT_TIMEOUT_S = 300;
 
 export async function inboxCommand(parsed: Parsed): Promise<number> {
+  // --interrupt-check (ADR 088): the mid-loop interrupt line. A PostToolUse hook runs this at every
+  // tool boundary, so it must be resolved *before* the acting `resolve()` below (which throws on an
+  // ambient/unbound folder) and must be silent-or-one-line, best-effort, and never fail a tool call.
+  if (parsed.flags['interrupt-check']) return interruptCheck(parsed);
+
   const { config, team, identity, http } = resolve(parsed.flags);
   const roster = await http.roster(team).catch(() => ({ members: [] }));
   const kindOf = kindLookup(roster.members);
@@ -83,6 +88,32 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
     await http.markRead(team, last.id).catch(() => undefined);
   }
   process.stdout.write(theme.meta('musterd inbox --watch to follow live') + '\n');
+  return 0;
+}
+
+/**
+ * `musterd inbox --interrupt-check` (ADR 088) — the mid-loop interrupt line. A one-shot probe wired as
+ * a PostToolUse hook: at every tool boundary it asks the daemon whether an interrupt-class (urgent,
+ * directed) act is waiting, and prints **one daemon-composed line** if so, nothing otherwise. The
+ * scarce, injection-safe extension of the ADR 046 per-command nudge from "musterd commands only" to
+ * "every tool call the agent makes."
+ *
+ * Read-only and best-effort by construction, exactly like {@link nudgeCommand}: it never advances the
+ * read cursor (reading is the agent's explicit follow-up `musterd inbox`), any failure is swallowed and
+ * exits 0 (a probe on every tool call must never disrupt the loop), it needs an explicit bound seat
+ * (an ambient folder has no inbox to interrupt), and it honours `MUSTERD_NO_NUDGE=1`. The daemon owns
+ * the predicate, the capability gate, the composed line, and the audit/telemetry — the CLI just prints.
+ */
+async function interruptCheck(parsed: Parsed): Promise<number> {
+  if (process.env['MUSTERD_NO_NUDGE'] === '1') return 0;
+  try {
+    const { http, team, identity, explicit } = resolveRead(parsed.flags);
+    if (!explicit || !identity) return 0;
+    const res = await http.interruptCheck(team);
+    if (res.raised && res.line) process.stdout.write(res.line + '\n');
+  } catch {
+    // Best-effort: the interrupt probe must never fail the tool call it rides on.
+  }
   return 0;
 }
 

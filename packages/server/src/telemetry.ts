@@ -76,6 +76,7 @@ interface Instruments {
   presenceChurn: Counter;
   loopLatency: Histogram;
   agentTokens: Counter;
+  interruptCheck: Counter;
 }
 
 // Created lazily on first use (i.e. after startTelemetry has registered a provider) so the
@@ -106,6 +107,10 @@ function ix(): Instruments {
     agentTokens: meter.createCounter('musterd.agent.tokens', {
       description:
         'Self-reported harness token usage (meta.usage on any act), by member/direction/model (ADR 082 slice 4)',
+    }),
+    interruptCheck: meter.createCounter('musterd.interrupt.check', {
+      description:
+        'Tool-boundary interrupt-line probes, by result (silent | raised) — the mid-loop reachability primitive (ADR 088). result=raised is the delivery half of the steering-latency eval.',
     }),
   };
   return instruments;
@@ -193,6 +198,15 @@ export function recordTokenUsage(env: Envelope): void {
       });
     }
   }
+}
+
+/**
+ * Count one tool-boundary interrupt-line probe by outcome (ADR 088): `silent` (nothing waiting — the
+ * common, free path) or `raised` (an interrupt-class act was surfaced). The `raised` rate over sent
+ * urgent acts is the delivery half of the steering-latency headline eval.
+ */
+export function recordInterruptCheck(result: 'silent' | 'raised'): void {
+  ix().interruptCheck.add(1, { 'musterd.interrupt.result': result });
 }
 
 /** Count a presence attach/detach for churn (observability.md §4). */

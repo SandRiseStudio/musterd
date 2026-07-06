@@ -249,6 +249,88 @@ describe('agent-side reachability nudge (ADR 046)', () => {
   });
 });
 
+describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', () => {
+  it('raises one daemon-composed line for a waiting urgent directed act, silent for a plain one', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
+    const adaToken = loadConfig().agentKeys['dawn']!;
+
+    // nick (his bound folder) sends Ada a NON-urgent directed act first.
+    await run(sendCommand, ['--to', 'Ada', '--act', 'message', 'fyi, minor thing']);
+
+    // As Ada: a non-urgent act is NOT interrupt-class → silent, exit 0, zero output (the free path).
+    actAs('dawn', 'Ada', adaToken);
+    const silent = await run(inboxCommand, ['--interrupt-check']);
+    expect(silent.code).toBe(0);
+    expect(silent.out).toBe('');
+
+    // nick escalates with an urgent request_help.
+    actAsNobody();
+    await run(sendCommand, [
+      '--to',
+      'Ada',
+      '--act',
+      'request_help',
+      '--urgent',
+      '--urgent-reason',
+      'prod is down',
+      'drop everything and look at deploy',
+    ]);
+
+    // As Ada: the interrupt line fires — daemon-composed, names sender + act, NEVER the raw body.
+    actAs('dawn', 'Ada', adaToken);
+    const raised = await run(inboxCommand, ['--interrupt-check']);
+    expect(raised.code).toBe(0);
+    expect(raised.out).toContain('⚡ musterd:');
+    expect(raised.out).toContain('nick');
+    expect(raised.out).toContain('request_help');
+    expect(raised.out).not.toContain('drop everything'); // §4: never the message body
+
+    // The probe never advances the cursor — it keeps raising until the agent explicitly reads.
+    const again = await run(inboxCommand, ['--interrupt-check']);
+    expect(again.out).toContain('⚡ musterd:');
+    await run(inboxCommand, []); // Ada reads her inbox → cursor advances
+    const cleared = await run(inboxCommand, ['--interrupt-check']);
+    expect(cleared.out).toBe('');
+  });
+
+  it('is silent for an unbound folder and honours MUSTERD_NO_NUDGE=1', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
+    const adaToken = loadConfig().agentKeys['dawn']!;
+    await run(sendCommand, [
+      '--to',
+      'Ada',
+      '--act',
+      'request_help',
+      '--urgent',
+      '--urgent-reason',
+      'prod',
+      'help',
+    ]);
+
+    // Unbound folder, ambient-only identity → no seat to interrupt → silent, exit 0 (never throws).
+    const elsewhere = mkdtempSync(join(tmpdir(), 'musterd-unbound-'));
+    cwdSpy.mockReturnValue(elsewhere);
+    actAsNobody();
+    const amb = await run(inboxCommand, ['--interrupt-check']);
+    expect(amb.code).toBe(0);
+    expect(amb.out).toBe('');
+    rmSync(elsewhere, { recursive: true, force: true });
+
+    // Explicit as Ada, but the kill-switch silences the probe entirely.
+    actAs('dawn', 'Ada', adaToken);
+    process.env['MUSTERD_NO_NUDGE'] = '1';
+    const off = await run(inboxCommand, ['--interrupt-check']);
+    expect(off.out).toBe('');
+    delete process.env['MUSTERD_NO_NUDGE'];
+
+    // Kill-switch cleared → the urgent act raises.
+    const on = await run(inboxCommand, ['--interrupt-check']);
+    expect(on.out).toContain('⚡ musterd:');
+  });
+});
+
 describe('reclaim command (ADR 017 follow-up)', () => {
   it('reclaims a member (idempotent with no live session) and 404s an unknown one', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);

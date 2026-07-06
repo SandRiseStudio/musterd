@@ -27,7 +27,12 @@ export type AuditAction =
   | 'claim.refused'
   | 'claim.pending'
   | 'request.decide'
-  | 'request.expired';
+  | 'request.expired'
+  // ADR 088: an interrupt-class act was surfaced to a busy agent at a tool boundary (delivery, not
+  // send — `urgent.flagged` audits the send). One row per (recipient, act): who grabbed the mic, when,
+  // at whom. The raised→read pair (this row, then the recipient's inbox read of `detail.act`) is the
+  // delivery-confirmation signal.
+  | 'interrupt.raised';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */
@@ -77,6 +82,33 @@ export function appendAudit(db: Database, teamId: string, entry: AuditEntry): vo
     ).run(row);
   } catch (err) {
     log.warn({ msg: 'audit_append_failed', action: entry.action, err: String(err) });
+  }
+}
+
+/**
+ * Has an `interrupt.raised` row already been written for this (recipient, act)? The interrupt line is
+ * re-probed at *every* tool boundary, so an urgent act sits raised across many checks until read —
+ * this dedup keeps the governance log to one legible row per delivered act (ADR 088) instead of one
+ * per tool call. DB-backed (not in-memory) so it survives a daemon restart. Best-effort: a read error
+ * degrades to "not yet raised" (at worst one extra row), never a gate on the probe.
+ */
+export function hasInterruptRaised(
+  db: Database,
+  teamId: string,
+  target: string,
+  actId: string,
+): boolean {
+  try {
+    const row = db
+      .prepare<[string, string, string], { one: number }>(
+        `SELECT 1 AS one FROM audit
+          WHERE team_id = ? AND action = 'interrupt.raised' AND target = ?
+            AND json_extract(detail, '$.act') = ? LIMIT 1`,
+      )
+      .get(teamId, target, actId);
+    return row != null;
+  } catch {
+    return false;
   }
 }
 

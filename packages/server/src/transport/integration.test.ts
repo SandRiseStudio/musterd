@@ -1320,6 +1320,57 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(audit.some((r) => r.action === 'urgent.denied' && r.actor === 'Mut')).toBe(true);
   });
 
+  it('interrupt line (ADR 088): raises only for a waiting urgent directed act, composes without the body, audits once', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+
+    // Nothing waiting → silent (raised:false), the free common path.
+    const quiet = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(quiet.status).toBe(200);
+    expect(quiet.json).toEqual({ raised: false });
+
+    // A NON-urgent directed act does not clear the interrupt bar.
+    await post(
+      '/teams/dawn/messages',
+      { envelope: { ...urgentEnv('nick', 'Bob', 'plain'), meta: undefined, body: 'just fyi' } },
+      nickTok,
+    );
+    const stillQuiet = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(stillQuiet.json).toEqual({ raised: false });
+
+    // An urgent directed act raises: the line is daemon-composed from structured fields, never the body.
+    await post('/teams/dawn/messages', { envelope: urgentEnv('nick', 'Bob', 'u-1') }, nickTok);
+    const raised = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(raised.status).toBe(200);
+    expect(raised.json.raised).toBe(true);
+    expect(raised.json.count).toBe(1);
+    expect(raised.json.act).toMatchObject({ id: 'u-1', from: 'nick', act: 'message' });
+    expect(raised.json.line).toContain('⚡ musterd:');
+    expect(raised.json.line).toContain('nick');
+    expect(raised.json.line).not.toContain('ping'); // §4: never the raw message body
+
+    // Delivery is audited once per (recipient, act) — who grabbed the mic, when, at whom.
+    const afterFirst = auditRows('dawn').filter((r) => r.action === 'interrupt.raised');
+    expect(afterFirst).toHaveLength(1);
+    expect(afterFirst[0]).toMatchObject({ actor: 'nick', target: 'Bob', result: 'allow' });
+    expect(afterFirst[0]!.detail).toContain('u-1');
+
+    // The probe re-fires at every tool boundary (cursor untouched), but the audit stays deduped to one.
+    const again = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(again.json.raised).toBe(true);
+    expect(auditRows('dawn').filter((r) => r.action === 'interrupt.raised')).toHaveLength(1);
+  });
+
   it('account_status + can_message gate sends', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
