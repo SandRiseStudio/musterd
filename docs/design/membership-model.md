@@ -161,7 +161,7 @@ A Role is more than a label: it carries **capabilities** (what a seat may do) at
 ## Scope boundaries: charter, memory, behavior
 
 - **Charter / instructions — in scope, as data.** A role/seat may carry a **charter** (what this seat is _for_) + instructions. musterd **stores and serves** them — a claiming agent receives its role's charter at claim time — but never _enforces behavior_. Identity metadata, not an execution model.
-- **Memory — reserved seam, not built.** A persistent identity wants persistent memory, but musterd is a coordination layer, not a memory store. We **reserve the seam** (the claim response can later carry a memory/context blob alongside the charter) and integrate/build memory **later**. Parked for a dedicated future brainstorm.
+- **Memory — seam built (ADR 093, 2026-07-06).** A persistent identity wants persistent memory, but musterd is a coordination layer, not a memory store — so the built v1 is **cross-session continuity only**: one small occupant-written note per seat (headline ≤120 chars + body ≤8KB, last-write-wins), delivered as a headline-only envelope on the claim response with the body fetched on demand. Daemon-private and seat-scoped (no cross-seat read, admins included). Durable knowledge stays in docs; the prior-work index stays derived. See `docs/decisions/093-persistent-seat-memory.md`.
 - **Behavior enforcement — out.** Principle 4: we connect agents, we don't run them.
 
 ## Onboarding (`musterd init`) impact

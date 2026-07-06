@@ -1,6 +1,6 @@
 # 093 — Persistent seat memory: a continuity blob, headline-first
 
-- Status: proposed (design accepted 2026-07-06; not yet built)
+- Status: accepted (built + merged 2026-07-06 — PRs #129/#130: protocol envelope, server store/routes, MCP tools + join one-liner, CLI `memory` + claim/status pointer, skill playbook)
 - Date: 2026-07-06
 
 ## Context
@@ -24,7 +24,7 @@ every fresh session burns its first turns re-orienting.
 Give a seat memory that survives the session gap, without violating what musterd already is:
 
 - **Not a second home for facts.** Domain knowledge belongs in docs; the charter already carries
-  "what this seat is for"; prior work is *derivable* from threads/lanes/acts (the ADR 050/090
+  "what this seat is for"; prior work is _derivable_ from threads/lanes/acts (the ADR 050/090
   derive-don't-store principle). Memory must not become a drifting duplicate of any of these.
 - **Not a context tax.** Whatever is delivered at claim time lands in every fresh session's context
   window; an 8KB dump on every occupy would cost ~2K tokens whether or not it is relevant.
@@ -56,7 +56,7 @@ composition can be layered later without a schema change.
 - **Headline required** (≤120 chars) + **body ≤8KB**, rejected above the caps with the limit named.
   The headline/body split is the commit-subject convention agents already know — and it is what
   keeps the per-session cost low.
-- **`saved_at` stamped; no server expiry.** Stale working state is the *reader's* call: the age is
+- **`saved_at` stamped; no server expiry.** Stale working state is the _reader's_ call: the age is
   shown, the server never silently drops.
 
 ### 3. Delivery: envelope on occupy, body on demand
@@ -92,7 +92,7 @@ the context tax above.
   (clear) — all seat-authenticated.
 - **MCP:** `team_memory_save`, `team_memory_read`; the `team_join` one-liner.
 - **CLI:** `musterd memory save|show|clear`; `musterd claim`/`status` print the same one-liner.
-- **Guidance:** the *skill* (not the primer kernel) gains the "save your memory before handing
+- **Guidance:** the _skill_ (not the primer kernel) gains the "save your memory before handing
   off / wrapping up" playbook line — the primer stays the lean loop kernel (ADR 085).
 - **Audit:** `memory.save` / `memory.clear` record **sizes only, never content** (the no-secrets
   hard rule).
