@@ -318,7 +318,11 @@ describe('MCP adapter', () => {
       headline: 'mid-refactor, tests red',
       body: 'left off at ws.ts eviction',
     });
+    // The save refreshes the client-side envelope, so an already-joined team_join shows the new note.
+    expect(s1.memory?.headline).toBe('mid-refactor, tests red');
     s1.leave();
+    expect(s1.memory).toBeNull(); // occupy-scoped: released with the seat
+
     s1.close();
 
     const s2 = new MusterdClient(adaConfig());
