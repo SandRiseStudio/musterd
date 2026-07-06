@@ -74,8 +74,11 @@ export function WindingRoad() {
     let node = 0;
     return stops.map((s) => {
       if (s.kind === 'head') return 0.5;
-      // offset phase so the very first node isn't centered under the station
-      const x = 0.5 + amp * Math.sin(node * STEP + 0.9);
+      // offset phase so the very first node isn't centered under the station.
+      // Round to fixed precision: Math.sin's last ULP differs between the Node
+      // SSR runtime and the browser, so an unrounded value serializes to a
+      // slightly different --x string on each side and trips a hydration mismatch.
+      const x = Math.round((0.5 + amp * Math.sin(node * STEP + 0.9)) * 1e4) / 1e4;
       node += 1;
       return x;
     });
