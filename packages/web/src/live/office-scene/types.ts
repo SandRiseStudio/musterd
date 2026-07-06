@@ -48,10 +48,6 @@ export interface Pose {
    * `2` glance. Drives the Rive `gesture` overlay layer; self-generated filler, cleared by a real act.
    * No-op against a `.riv` without the `gesture` input (the guarded write in rive-rig.ts). */
   gesture: number;
-  /** Progress `0→1` through the active gesture's window (`0` when none). The office render turns this
-   * into a scale-aware bob/sway at the sprite's feet (render.ts) so the ambient beat reads at office
-   * zoom, where the in-Rive pose shift alone is only ~1px on screen. Eases in and out over the window. */
-  gestureT: number;
 }
 
 /** Motion intensity == notification tier (memory: travel-intensity == notification tiers). */

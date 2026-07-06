@@ -15,7 +15,7 @@ function node(p: Partial<OfficeNode> = {}): OfficeNode {
   };
 }
 function pose(p: Partial<Pose> = {}): Pose {
-  return { lx: 0, ly: 0, dir: 'S', small: false, carry: false, bubble: null, alpha: 1, moving: false, run: false, gesture: 0, gestureT: 0, ...p };
+  return { lx: 0, ly: 0, dir: 'S', small: false, carry: false, bubble: null, alpha: 1, moving: false, run: false, gesture: 0, ...p };
 }
 
 describe('hslToArgb', () => {

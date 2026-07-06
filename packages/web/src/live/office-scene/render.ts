@@ -490,18 +490,11 @@ export function renderScene(
       // Rive character: draw its current frame at the feet, sized to match the code-drawn avatar.
       const spriteH = fit.scale * 96 * (pose.small ? 0.72 : 1);
       const alpha = pose.alpha;
-      // Ambient gesture bob: the in-Rive stretch/glance pose shift is only ~1px at office zoom, so lift
-      // (stretch) or lean (glance) the whole sprite by a fraction of its on-screen height, eased in and
-      // out over the beat (`sin(π·t)`: 0 at the ends, peak mid-window). Feet-anchored, so the shadow
-      // stays put and it reads as a hop/lean. Only seated members gesture (walkers carry gesture 0).
-      const env = pose.gesture ? Math.sin(Math.PI * pose.gestureT) : 0;
-      const gy = b.y - (pose.gesture === 1 ? env * spriteH * 0.34 : 0); // stretch: hop up
-      const gx = b.x + (pose.gesture === 2 ? env * spriteH * 0.24 : 0); // glance: lean aside
       items.push({
         d: depth(pose.lx, pose.ly) + 0.1,
         fn: () => {
           if (alpha < 1) ctx.globalAlpha = Math.max(0, alpha);
-          rig.draw(ctx, name, gx, gy, spriteH);
+          rig.draw(ctx, name, b.x, b.y, spriteH);
           if (alpha < 1) ctx.globalAlpha = 1;
         },
       });
