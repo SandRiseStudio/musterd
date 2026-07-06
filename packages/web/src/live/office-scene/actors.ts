@@ -50,6 +50,7 @@ export function homePoses(
         moving: false,
         run: false,
         gesture: 0,
+        gestureT: 0,
       });
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);
@@ -69,6 +70,7 @@ export function homePoses(
         moving: false,
         run: false,
         gesture: 0,
+        gestureT: 0,
       });
     } else if (pl.kind === 'strip') {
       if (pl.index >= STRIP_CAP) continue; // past the cap: represented by the "+N waiting" pill
@@ -85,6 +87,7 @@ export function homePoses(
         moving: false,
         run: false,
         gesture: 0,
+        gestureT: 0,
       });
     }
   }
@@ -175,7 +178,7 @@ export function createActors(): Actors {
   let doorPulses = 0; // members that entered/left since the last takeDoorPulses()
 
   function entrancePose(ref: Pose): Pose {
-    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1, moving: false, run: false, gesture: 0 };
+    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1, moving: false, run: false, gesture: 0, gestureT: 0 };
   }
   function moved(a: Pose, b: Pose): boolean {
     return Math.hypot(a.lx - b.lx, a.ly - b.ly) > 8;
@@ -206,8 +209,12 @@ export function createActors(): Actors {
 
   function posesNow(): Map<string, Pose> {
     const out = new Map<string, Pose>();
-    // At-home members carry any active in-place gesture (a stationary ambient beat overlaid on idle).
-    for (const [n, p] of homes) out.set(n, { ...p, gesture: gestures.get(n)?.kind ?? p.gesture });
+    // At-home members carry any active in-place gesture (a stationary ambient beat overlaid on idle),
+    // plus its `0→1` window progress so the render can bob/sway the sprite in step with the beat.
+    for (const [n, p] of homes) {
+      const g = gestures.get(n);
+      out.set(n, { ...p, gesture: g?.kind ?? p.gesture, gestureT: g ? clamp(g.t / g.dur, 0, 1) : 0 });
+    }
     for (const [name, w] of walks) {
       const leg = w.legs[w.i]!;
       const e = easeInOut(clamp(w.t, 0, 1));
@@ -226,6 +233,7 @@ export function createActors(): Actors {
         moving: leg.fx !== leg.tx || leg.fy !== leg.ty,
         run: w.run ?? false,
         gesture: 0, // a walker never gestures — gestures are stationary idle beats
+        gestureT: 0,
       });
     }
     return out;
