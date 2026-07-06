@@ -30,8 +30,38 @@ import type { Dir, OfficeNode, Pose } from './types';
  */
 
 const SKIN = '#f0c9a0';
-const WOOD = '#7a4e2d';
-const WOOD_TOP = '#8a5a34';
+
+/**
+ * Theme-varying scene surfaces — the floor and the wooden/upholstered furniture. Furniture-*intrinsic*
+ * colours (books, monitors, plants, skin, glass, the entrance door) are identity, not theme, and stay
+ * fixed. index.ts resolves these from the office tokens (`--floor`, `--floor-2`, `--wood`, `--couch`)
+ * that the active theme cascades to the canvas host, then calls `setScenePalette` before each bake — so
+ * the same scene paints daylight on a light page and dusk inside the `.lc` stage.
+ */
+export interface ScenePalette {
+  floor: string;
+  floor2: string;
+  wood: string;
+  couch: string;
+}
+
+/** Dusk office (the historical hard-coded values) — also the fallback when a token can't be read. */
+export const DARK_PALETTE: ScenePalette = {
+  floor: '#e4a96b',
+  floor2: '#c6863f',
+  wood: '#7a4e2d',
+  couch: '#e3a72b',
+};
+
+let PAL: ScenePalette = DARK_PALETTE;
+export function setScenePalette(p: ScenePalette): void {
+  PAL = p;
+}
+
+/** The lighter desk/counter surface — derived from the wood base so it tracks the theme in one place. */
+function woodTop(): string {
+  return mul(PAL.wood, 1.12);
+}
 
 // ── colour utils ──────────────────────────────────────────────────────────
 function hexRgb(h: string): [number, number, number] {
@@ -150,9 +180,9 @@ function drawFloor(ctx: CanvasRenderingContext2D, fit: Fit): void {
   const c01 = project(0, FLOOR, fit);
   const th = THICK * fit.scale;
   const dn = (p: Pt): Pt => ({ x: p.x, y: p.y + th });
-  quad(ctx, [c10, c11, dn(c11), dn(c10)], '#c6863f');
-  quad(ctx, [c01, c11, dn(c11), dn(c01)], '#be7e38');
-  quad(ctx, [c00, c10, c11, c01], '#e4a96b');
+  quad(ctx, [c10, c11, dn(c11), dn(c10)], PAL.floor2);
+  quad(ctx, [c01, c11, dn(c11), dn(c01)], mul(PAL.floor2, 0.955));
+  quad(ctx, [c00, c10, c11, c01], PAL.floor);
 }
 
 /** A round-ish iso rug (a filled iso square). */
@@ -187,7 +217,7 @@ function armchair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: numbe
 function ctable(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
   const s = project(lx, ly, fit);
   ellipse(ctx, { x: s.x, y: s.y }, 42 * fit.scale, 13 * fit.scale, 'rgba(0,0,0,0.12)');
-  box(ctx, fit, lx, ly, LOUNGE.table.w, LOUNGE.table.d, 16, WOOD_TOP);
+  box(ctx, fit, lx, ly, LOUNGE.table.w, LOUNGE.table.d, 16, woodTop());
 }
 
 /** One depth-sortable draw call. The nook/huddle used to paint as single blobs anchored at their
@@ -209,11 +239,11 @@ function nookItems(ctx: CanvasRenderingContext2D, fit: Fit): { rug: () => void; 
       at(L.plant.dx, L.plant.dy, () => drawPlant(ctx, fit, lx + L.plant.dx, ly + L.plant.dy, 'fiddle')),
       at(L.fridge.dx, L.fridge.dy, () => box(ctx, fit, lx + L.fridge.dx, ly + L.fridge.dy, L.fridge.w, L.fridge.d, L.fridge.h, '#edeff1')),
       at(L.counter.dx, L.counter.dy, () => {
-        box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy, L.counter.w, L.counter.d, L.counter.h, '#8a5a34');
+        box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy, L.counter.w, L.counter.d, L.counter.h, woodTop());
         box(ctx, fit, lx + L.machine.dx, ly + L.machine.dy, 16, 13, 10, '#33272b', L.counter.h); // machine on top
       }),
       at(L.cooler.dx, L.cooler.dy, () => watercooler(ctx, fit, lx + L.cooler.dx, ly + L.cooler.dy)),
-      at(L.couch.dx, L.couch.dy, () => couch(ctx, fit, lx + L.couch.dx, ly + L.couch.dy, '#e3a72b', 'S')),
+      at(L.couch.dx, L.couch.dy, () => couch(ctx, fit, lx + L.couch.dx, ly + L.couch.dy, PAL.couch, 'S')),
       at(L.chairE.dx, L.chairE.dy, () => armchair(ctx, fit, lx + L.chairE.dx, ly + L.chairE.dy, '#c9744a', 'E')),
       at(L.table.dx, L.table.dy, () => ctable(ctx, fit, lx + L.table.dx, ly + L.table.dy)),
       at(L.chairW.dx, L.chairW.dy, () => armchair(ctx, fit, lx + L.chairW.dx, ly + L.chairW.dy, '#c9744a', 'W')),
@@ -234,7 +264,7 @@ function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf): void 
   const sn = f[1] !== 0; // S/N run along x; E/W run along y
   const wx = sn ? SHELF_LONG : SHELF_DEEP;
   const dy = sn ? SHELF_DEEP : SHELF_LONG;
-  box(ctx, fit, s.lx, s.ly, wx, dy, SHELF_H, WOOD); // carcass
+  box(ctx, fit, s.lx, s.ly, wx, dy, SHELF_H, PAL.wood); // carcass
   // book rows on the front (room-facing) face — three bands of little spines up the height
   const BOOKS = ['#c95c4a', '#e0a72b', '#5aa0c9', '#6aa86a', '#b06fc9', '#d98b4a'];
   const face = 0.5; // fraction of the long side the books span
@@ -259,7 +289,7 @@ function huddleItems(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): { rug:
     rug: () => rug(ctx, fit, h.lx, h.ly, 96, h.rug),
     items: [
       at(0, -54, () => box(ctx, fit, h.lx, h.ly - 54, 44, 44, 28, h.poufs[0])),
-      at(0, 0, () => box(ctx, fit, h.lx, h.ly, 66, 66, 18, WOOD_TOP)),
+      at(0, 0, () => box(ctx, fit, h.lx, h.ly, 66, 66, 18, woodTop())),
       at(52, 32, () => box(ctx, fit, h.lx + 52, h.ly + 32, 44, 44, 28, h.poufs[1])),
       at(-52, 32, () => box(ctx, fit, h.lx - 52, h.ly + 32, 44, 44, 28, h.poufs[2])),
     ],
@@ -549,9 +579,9 @@ function drawWorkstation(
     [1, 1],
     [-1, 1],
   ] as const) {
-    box(ctx, fit, lx + sx * (wx / 2 - 6), ly + sy * (dy / 2 - 6), 8, 8, DH, '#6e4726');
+    box(ctx, fit, lx + sx * (wx / 2 - 6), ly + sy * (dy / 2 - 6), 8, 8, DH, dim(PAL.wood, 0.9));
   }
-  box(ctx, fit, lx, ly, wx, dy, ST, WOOD, DH);
+  box(ctx, fit, lx, ly, wx, dy, ST, PAL.wood, DH);
   monitor(ctx, fit, lx + f[0] * (Df / 2 - 12), ly + f[1] * (Df / 2 - 12), dir, working, DH + ST);
 }
 

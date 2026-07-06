@@ -48,6 +48,15 @@
   --lc-z-rail: 1;
   --lc-z-overlay: 5;
 
+  /* The office canvas reads --floor/--wood/--couch from its host (see office-scene/index.ts). The
+     live stage keeps the DUSK office palette regardless of the page theme, so the scene stays coherent
+     with the dusk chrome below. The /live page chrome itself is light-moded in PR 4; until then the
+     global light default (PR 3b) stops at this container. */
+  --floor: #e4a96b;
+  --floor-2: #c6863f;
+  --wood: #7a4e2d;
+  --couch: #e3a72b;
+
   display: flex;
   flex-direction: column;
   height: 100vh;

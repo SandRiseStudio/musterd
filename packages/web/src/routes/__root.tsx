@@ -12,8 +12,8 @@ export const Route = createRootRoute({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { name: 'color-scheme', content: 'dark' },
-      { name: 'theme-color', content: '#060608' },
+      { name: 'color-scheme', content: 'light' },
+      { name: 'theme-color', content: '#f7efe2' },
       { title: TITLE },
       { name: 'description', content: DESCRIPTION },
       { property: 'og:title', content: TITLE },
@@ -28,7 +28,7 @@ export const Route = createRootRoute({
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="light">
       <head>
         <HeadContent />
       </head>

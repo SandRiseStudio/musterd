@@ -5,15 +5,17 @@
  * Mono) and DELIBERATELY EXPANDS it for the immersive web surface. See DESIGN.md for the
  * office visual system and docs/decisions/036-web-surface-aesthetic.md.
  *
- * THEMES. The office system targets TWO themes — a warm daylight office (intended default)
+ * THEMES. The office system targets TWO themes — a warm daylight office (the default)
  * and a dusk office (dark). Both are defined below as SEMANTIC tokens (--floor, --wall,
  * --ink, --sky, …) so a theme swap is a token swap. Components/canvas should read the
  * semantic tokens, never raw hex.
  *
- * ACTIVE DEFAULT: dark. Light is opt-in via :root[data-theme="light"] for now. Dark stays
- * the active default until the office scene + landing hero are light-mode-ready (DESIGN.md
- * "Status"); at that point light becomes the default. Keeping dark active here means this
- * token change is visually a no-op for every existing surface.
+ * ACTIVE DEFAULT: light (PR 3b). The document sets data-theme="light" on <html> (see __root.tsx),
+ * which selects the :root[data-theme="light"] block below. The office scene reads these tokens per
+ * host (office-scene/index.ts), so the landing hero now paints the daylight office. The bare :root
+ * values remain the dusk palette — reachable by setting data-theme to anything but "light" (a future
+ * toggle) and still scoped onto the /live stage via `.lc` (Live.css) until that surface is
+ * light-moded in PR 4.
  */
 
 :root {
