@@ -98,15 +98,49 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
     expect(f.charter).toBe('you ship the CLI');
   });
 
-  it('requires memory to be null (the reserved seam is not yet wired)', () => {
-    const r = OccupiedFrame.safeParse({
+  it('parses an occupied frame carrying a memory envelope (ADR 093)', () => {
+    const f = OccupiedFrame.parse({
       type: 'occupied',
       seat,
       presence_id: '01J',
       server_time: 7,
-      memory: { anything: true },
+      memory: {
+        headline: 'mid-refactor of ws.ts eviction, tests red',
+        saved_at: 1751830000000,
+        size_bytes: 512,
+      },
     });
-    expect(r.success).toBe(false);
+    expect(f.memory?.headline).toContain('mid-refactor');
+  });
+
+  it('still accepts memory: null (no saved memory) and rejects a body on the envelope', () => {
+    const f = OccupiedFrame.parse({
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    expect(f.memory).toBeNull();
+    const bad = OccupiedFrame.safeParse({
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: { headline: 'x', saved_at: 1, size_bytes: 1, body: 'nope' },
+    });
+    expect(bad.success).toBe(false); // envelope is strict: the body never rides occupy
+  });
+
+  it('rejects a headline over 120 chars', () => {
+    const bad = OccupiedFrame.safeParse({
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: { headline: 'x'.repeat(121), saved_at: 1, size_bytes: 1 },
+    });
+    expect(bad.success).toBe(false);
   });
 
   it('parses a refused frame for each refusal code incl. account states', () => {
