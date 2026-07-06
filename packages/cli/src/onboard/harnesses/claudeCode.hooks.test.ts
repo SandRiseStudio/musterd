@@ -1,11 +1,13 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Real fs here (unlike claudeCode.test.ts, which mocks node:fs) so the hook writer round-trips to disk.
 import {
+  inspectClaudeHookDrift,
   installMusterdHooks,
   NOTIFICATION_HOOK_MARKER,
+  POSTTOOLUSE_HOOK_MARKER,
   removeMusterdHooks,
   SESSIONSTART_HOOK_MARKER,
 } from './claudeCode.js';
@@ -62,13 +64,47 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     expect(ss).toContain('musterd wire');
     expect(ss).toContain('musterd init');
     expect(global.hooks?.['Notification']).toBeUndefined(); // Notification is NOT global
+
+    // The PostToolUse interrupt line (ADR 088) is project-local, marker-tagged, runs the probe.
+    const pt = cmdFor(local, 'PostToolUse');
+    expect(pt).toContain(POSTTOOLUSE_HOOK_MARKER);
+    expect(pt).toContain('musterd inbox --interrupt-check');
+    expect(local.hooks?.['PostToolUse']?.[0]?.matcher).toBeUndefined(); // fires on every tool
+    expect(global.hooks?.['PostToolUse']).toBeUndefined(); // PostToolUse is NOT global
   });
 
   it('is idempotent — re-installing replaces in place, never stacks', () => {
     installMusterdHooks();
     installMusterdHooks();
     expect(read(localPath()).hooks?.['Notification']).toHaveLength(1);
+    expect(read(localPath()).hooks?.['PostToolUse']).toHaveLength(1);
     expect(read(globalPath()).hooks?.['SessionStart']).toHaveLength(1);
+  });
+
+  it('init --check drift: flags a missing PostToolUse interrupt hook, clears once installed', () => {
+    // A folder with a settings file but no interrupt hook (e.g. hand-deleted, or a renamed flag) —
+    // reachability would silently die, so the doctor must surface it (ADR 088).
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(localPath(), JSON.stringify({ hooks: { Notification: [] } }), 'utf8');
+    const drift = inspectClaudeHookDrift(cwd);
+    expect(drift).toHaveLength(1);
+    expect(drift[0]).toContain('PostToolUse interrupt hook is missing');
+
+    // Once init wires it, the drift clears.
+    installMusterdHooks();
+    expect(inspectClaudeHookDrift(cwd)).toEqual([]);
+
+    // No settings file at all → not this check's concern (the "no server registered" drift covers it).
+    rmSync(join(cwd, '.claude'), { recursive: true, force: true });
+    expect(inspectClaudeHookDrift(cwd)).toEqual([]);
+  });
+
+  it('removal reverses the local PostToolUse interrupt hook', () => {
+    installMusterdHooks();
+    expect(cmdFor(read(localPath()), 'PostToolUse')).toContain(POSTTOOLUSE_HOOK_MARKER);
+    removeMusterdHooks();
+    const after = read(localPath());
+    expect(after.hooks?.['PostToolUse']).toBeUndefined();
   });
 
   it('absorbs a hand-pasted global recipe instead of duplicating it', () => {

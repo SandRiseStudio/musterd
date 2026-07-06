@@ -29,6 +29,7 @@ usage:
   musterd report [--altitude ic|team|exec] [--json]   the insight report: flow metrics, waiting-on, Goal board — one derived projection (ADR 050/084)
   musterd inbox [--watch] [--all] [--unread] [--peek] [--limit <n>] [--from <name>] [--act <act>]
   musterd inbox --wait [--timeout <seconds>] [--from <name>] [--act <act>] [--json]   block until the next directed act, then exit (pairs with /loop)
+  musterd inbox --interrupt-check               silent unless an urgent directed act waits; then one daemon-composed line (the PostToolUse interrupt hook, ADR 088)
   musterd nudge                                 print directed acts waiting for this seat (read-only; the approval-prompt hook target)
   musterd whoami                                show the seat this folder resolves to (member, team, surface, source) — a bare \`musterd claim\` also confirms it when you're already seated
   musterd status

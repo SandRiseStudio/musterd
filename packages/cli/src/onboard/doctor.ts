@@ -4,6 +4,7 @@ import { GUIDANCE_CONTENT_VERSION, formatClaimPolicy, parseContentStamp } from '
 import { findBinding } from '../config.js';
 import { theme } from '../render/theme.js';
 import { contentHash, strippedBody } from './guidance.js';
+import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
 import { HARNESSES } from './harnesses/index.js';
 import { readProvisionManifest } from './manifest.js';
 import { classifyPrimerTarget } from './primer.js';
@@ -96,8 +97,10 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const drift: string[] = [];
 
   const harnesses: HarnessState[] = [];
+  let claudeConfigured = false;
   for (const h of HARNESSES) {
     const d = await h.detect();
+    if (h.id === 'claude-code' && d.configured) claudeConfigured = true;
     harnesses.push({
       label: h.label,
       installed: d.installed,
@@ -138,6 +141,10 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
         'to add the primer.',
     );
   }
+  // ADR 088: the interrupt hook is reachability-critical and lives in machine-local settings (never
+  // committed), so a provisioned folder can silently lose it. Check it only when Claude Code has the
+  // server wired here — the only harness with a PostToolUse hook today.
+  if (claudeConfigured) drift.push(...inspectClaudeHookDrift(cwd));
   const guidance = inspectGuidance(cwd);
   drift.push(...guidance.drift);
   return { primerManaged, harnesses, drift, notes: guidance.notes, anyConfigured };

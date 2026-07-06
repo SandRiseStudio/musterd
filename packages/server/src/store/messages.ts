@@ -100,6 +100,31 @@ export function listInbox(
 }
 
 /**
+ * The interrupt-class acts still waiting for `me` in `messages` (ADR 088 §3) — the predicate the
+ * `inbox --interrupt-check` probe runs at every tool boundary. Interrupt-class = **directed at me
+ * or a `request_help` anyone can answer**, **flagged urgent** (`meta.urgent === true`, which the send
+ * path only ever leaves set when the sender's `can_flag_urgent` passed the ADR 071 gate — so the
+ * capability check is already enforced upstream), and **not closed** by a `resolve` on its thread
+ * (ADR 025). A terminal `resolve` never interrupts. Newest first, so the caller names the most recent
+ * steer. Pure — reads envelopes, never the DB — so it is trivially testable and the "daemon-composed,
+ * never the raw body" line (§4) is built from its structured fields, not from `env.body`.
+ */
+export function pendingInterrupts(messages: Envelope[], me: string): Envelope[] {
+  const resolved = new Set<string>();
+  for (const m of messages) if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
+  const isUrgent = (m: Envelope) =>
+    (m.meta as { urgent?: unknown } | null | undefined)?.['urgent'] === true;
+  const actionNeeded = (m: Envelope) =>
+    m.act !== 'resolve' &&
+    (m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me));
+  return messages
+    .filter(
+      (m) => m.from !== me && actionNeeded(m) && isUrgent(m) && !resolved.has(m.thread ?? m.id),
+    )
+    .sort((a, b) => b.ts - a.ts);
+}
+
+/**
  * The member's most recent `status_update` reduced to a roster label + when it was set.
  * The label is `meta.state` (the SPEC field) or, if absent, the message body. Returns null
  * if the member has never posted a status_update with any label text.
