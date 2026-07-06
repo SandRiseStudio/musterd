@@ -44,6 +44,10 @@ export interface Pose {
   moving: boolean;
   /** True while the active walk is an urgent run (drives the Rive `run` modifier). */
   run: boolean;
+  /** An in-place ambient gesture playing this frame (ADR 086 Phase 2 tail): `0` none · `1` stretch ·
+   * `2` glance. Drives the Rive `gesture` overlay layer; self-generated filler, cleared by a real act.
+   * No-op against a `.riv` without the `gesture` input (the guarded write in rive-rig.ts). */
+  gesture: number;
 }
 
 /** Motion intensity == notification tier (memory: travel-intensity == notification tiers). */
@@ -63,13 +67,18 @@ export type OfficeEvent =
   | { kind: 'decline'; who: string }
   | { kind: 'wait'; who: string }
   | { kind: 'resolve'; who: string }
-  // An act's body, typed out over the sender's head then faded — any act with a body (message, status,
-  // handoff, lane, …). Independent of the choreography cue above; both can fire for one act.
-  | { kind: 'speech'; who: string; text: string; tone: ActTone };
+  // An act, typed out over the sender's head then faded — the body when it has one, else the act label.
+  // Independent of the choreography cue above; both can fire for one act. `id` (the envelope id) makes
+  // the bubble a click-through to the same act in the stream panel.
+  | { kind: 'speech'; who: string; text: string; tone: ActTone; id?: string };
 
 /** Identical shape to the constellation's `ConstellationHandle` — a drop-in for `ConstellationGL`. */
 export interface OfficeHandle {
   update: (data: OfficeData) => void;
   emit: (ev: OfficeEvent) => void;
   dispose: () => void;
+  /** Fire an in-place ambient gesture now on an idle desk member (`1` stretch · `2` glance), bypassing
+   * the 90–180s ambient scheduler. Returns the member it played on, or null if none was eligible.
+   * A design-preview / verification affordance (see office-preview); the live office uses the scheduler. */
+  pokeGesture: (kind?: number) => string | null;
 }

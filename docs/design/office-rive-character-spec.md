@@ -47,6 +47,28 @@ Status: draft (2026-07-01) · Owner: web/live · Relates to: ADR 079 (live isome
 >
 > Only the two `.riv` authoring steps + a re-export to `public/office/character.riv` remain; no further
 > code change is needed once the properties exist.
+>
+> ### Ambient gesture poses — code side ready (2026-07-03), `.riv` side scaffolded
+>
+> **In-place ambient gestures (stretch/glance) are code-ready** (ADR 086 Phase 2 tail). When the room is
+> quiet, the office scheduler occasionally plays a stationary beat on a seated member (`actors.gestureBeat`),
+> which flows through `pose.gesture` → `officeToRig` → a **guarded `setNumberIfPresent(vmi, 'gesture', …)`**
+> in `rive-rig.ts` — a no-op against the current asset, lighting up automatically once the `.riv` exposes it.
+> The value is `0` none · `1` stretch · `2` glance; it's included in the sprite-cache `spriteKey`, and a
+> gesturing member is kept `dirty` (advancing) for the gesture window.
+>
+> **`.riv` fully authored via the MCP** — only a runtime **export** remains:
+>
+> - **Input** — a `number` property **`gesture`** on the `Character` view model.
+> - **Layer** — a separate **`Gesture`** state-machine layer (overlays `Main`, so the `mode` states are
+>   untouched): Any-State → **`none`** / **`stretch`** / **`glance`** on conditions `gesture == 0 / 1 / 2`,
+>   entry → `none`.
+> - **Animations** — `stretch` = a uniform upper-body reach-up bob (all head/torso/arm shapes rise ~8px
+>   together and settle, frame 0 == frame 45 == rest so entry/exit is seamless); `glance` = a subtle
+>   head-cluster sideways sway (~5px). Both authored as whole-cluster translations so nothing detaches on
+>   the flat ungrouped rig. Subtle by design (a few screen px).
+> - **Remaining:** export a runtime `.riv` from the editor over `packages/web/public/office/character.riv`
+>   (the MCP can't export). The code then activates with no further change. Verify visually after export.
 
 ## Purpose
 

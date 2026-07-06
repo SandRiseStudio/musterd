@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createActors, homePoses, travelDir } from './actors';
-import { COFFEE_STAND, ENTRANCE, NOOK, NOOK_CAP, STRIP_CAP } from './layout';
+import { COFFEE_STAND, ENTRANCE, NOOK, NOOK_CAP, NOOK_RUG_R, STRIP_CAP } from './layout';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
 
@@ -94,8 +94,8 @@ describe('homePoses', () => {
     for (const n of nodes) {
       const p = poses.get(n.name)!;
       expect(p.small).toBe(true);
-      // inside the nook rug (an iso diamond of "radius" 132 about the nook anchor)
-      expect(Math.abs(p.lx - NOOK.lx) + Math.abs(p.ly - NOOK.ly)).toBeLessThan(132);
+      // inside the nook rug (an iso diamond about the nook anchor)
+      expect(Math.abs(p.lx - NOOK.lx) + Math.abs(p.ly - NOOK.ly)).toBeLessThan(NOOK_RUG_R);
     }
   });
 });
@@ -265,6 +265,53 @@ describe('ambient micro-choreography', () => {
       nearBo = Math.min(nearBo, Math.hypot(p.lx - bo.lx, p.ly - bo.ly));
     }
     expect(nearBo).toBeLessThan(80); // the help trip ran despite the pending yield-home
+  });
+
+  it('plays an in-place gesture on an idle desk member, then clears it (no movement)', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const home = actors.poses().get('Ada')!;
+
+    expect(actors.gestureBeat('Ada', 1)).toBe(true);
+    expect(actors.active()).toBe(true);
+    expect(actors.ambientOnly()).toBe(true); // a gesture is ambient filler
+
+    // the pose carries the gesture but the member does NOT move (stationary beat)
+    actors.step(0.3);
+    const mid = actors.poses().get('Ada')!;
+    expect(mid.gesture).toBe(1);
+    expect(mid.lx).toBeCloseTo(home.lx, 5);
+    expect(mid.ly).toBeCloseTo(home.ly, 5);
+    expect(mid.moving).toBe(false);
+
+    // it ends on its own; the member returns to a plain idle pose (gesture 0)
+    let g = 0;
+    while (actors.active() && g++ < 2000) actors.step(0.05);
+    expect(actors.poses().get('Ada')!.gesture).toBe(0);
+    expect(actors.active()).toBe(false);
+  });
+
+  it('only gestures eligible idle desk members, and excludes a gesturing one from the idle pool', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo'), node('Zoe', 'away')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+
+    expect(actors.gestureBeat('Zoe', 1)).toBe(false); // nook (small) members don't gesture
+    expect(actors.gestureBeat('Ada', 1)).toBe(true);
+    expect(actors.gestureBeat('Ada', 2)).toBe(false); // already gesturing
+    expect(actors.idleDeskMembers()).toEqual(['Bo']); // Ada is busy gesturing
+  });
+
+  it('a real act preempts an in-place gesture', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    actors.gestureBeat('Ada', 1);
+    expect(actors.ambientOnly()).toBe(true);
+    actors.cancelAmbient();
+    expect(actors.active()).toBe(false); // the gesture was dropped
+    expect(actors.poses().get('Ada')!.gesture).toBe(0);
   });
 
   it('a no-op roster refresh does not interrupt an in-flight stroll', () => {

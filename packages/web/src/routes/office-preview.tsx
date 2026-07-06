@@ -91,11 +91,17 @@ function OfficePreviewPage() {
         const handle = mountOffice(host, labelHost, false);
         handle.update(dataRef.current());
         handleRef.current = handle;
-        const run = () => {
-          for (const step of SCRIPT) timers.push(setTimeout(() => handleRef.current?.emit(step.ev), step.at));
-        };
-        run();
-        loop = setInterval(run, LOOP);
+        (window as unknown as { __office?: OfficeHandle }).__office = handle; // dev-fixture debug handle
+        // `?quiet` skips the looping choreography — a still room of seated members, so an on-demand
+        // gesture (pokeGesture / the 🙆👀 buttons) is the only motion. Used to verify gestures in isolation.
+        const quiet = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('quiet');
+        if (!quiet) {
+          const run = () => {
+            for (const step of SCRIPT) timers.push(setTimeout(() => handleRef.current?.emit(step.ev), step.at));
+          };
+          run();
+          loop = setInterval(run, LOOP);
+        }
       })
       .catch(() => {});
 
@@ -133,6 +139,9 @@ function OfficePreviewPage() {
         <button className="lc__pbtn" title="urgent help (run)" onClick={() => fire({ kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' })}>!</button>
         <button className="lc__pbtn" title="handoff (carry box)" onClick={() => fire({ kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' })}>↦</button>
         <button className="lc__pbtn" title="broadcast (megaphone)" onClick={() => fire({ kind: 'megaphone', from: 'Ivy' })}>📣</button>
+        <span className="lc__pbtn-sep" />
+        <button className="lc__pbtn" title="ambient gesture: stretch" onClick={() => handleRef.current?.pokeGesture(1)}>🙆</button>
+        <button className="lc__pbtn" title="ambient gesture: glance" onClick={() => handleRef.current?.pokeGesture(2)}>👀</button>
         <span className="lc__pbtn-sep" />
         <button className="lc__pbtn" title="Dev join / leave (walk in / out)" onClick={() => present2('Dev')}>D</button>
         <button className="lc__pbtn" title="Hana join / leave (walk in / out)" onClick={() => present2('Hana')}>H</button>

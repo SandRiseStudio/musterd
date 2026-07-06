@@ -13,6 +13,7 @@ import {
   recipientScope,
   rosterIndex,
 } from './format';
+import { CollapseButton, PanelRail } from './PanelChrome';
 
 /**
  * The legible half of the split-canvas: the team's act stream. Rows arrive newest-last; the last row
@@ -23,10 +24,14 @@ export function Stream({
   envelopes,
   roster,
   liveIds,
+  collapsed = false,
+  onCollapse,
 }: {
   envelopes: Envelope[];
   roster: MemberSummary[];
   liveIds: Set<string>;
+  collapsed?: boolean;
+  onCollapse?: () => void;
 }) {
   const idx = rosterIndex(roster);
   const lastId = envelopes.length ? envelopes[envelopes.length - 1]!.id : null;
@@ -56,10 +61,24 @@ export function Stream({
   };
 
   return (
-    <section className="lc-stream" ref={scrollRef} onScroll={onScroll}>
+    <section
+      className={`lc-stream${collapsed ? ' is-collapsed' : ''}`}
+      ref={scrollRef}
+      onScroll={onScroll}
+    >
+      {collapsed && onCollapse && (
+        <PanelRail
+          side="right"
+          label="Stream"
+          hint={envelopes.length ? String(envelopes.length) : undefined}
+          onExpand={onCollapse}
+        />
+      )}
       <header className="lc-stream__head">
         <span className="lc-stream__title">TEAM STREAM</span>
         <span className="lc-stream__live">· live</span>
+        <span className="lc-stream__spacer" />
+        {onCollapse && <CollapseButton side="right" label="the stream" onClick={onCollapse} />}
       </header>
       <div className="lc-stream__rows" ref={rowsRef}>
         {envelopes.length === 0 && (
@@ -97,8 +116,9 @@ export function Stream({
   );
 }
 
-/** Scroll the original message into view (and flash it) when a reply's quote is clicked. */
-function scrollToMessage(id: string) {
+/** Scroll a message into view (and flash it) — used by reply quotes here and by the office's
+ * speech-bubble click-through (an act bubble over a character's head navigates to its stream row). */
+export function scrollToMessage(id: string) {
   if (typeof document === 'undefined') return;
   const el = document.getElementById(`lc-msg-${id}`);
   if (!el) return;

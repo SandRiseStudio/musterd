@@ -15,7 +15,7 @@ function node(p: Partial<OfficeNode> = {}): OfficeNode {
   };
 }
 function pose(p: Partial<Pose> = {}): Pose {
-  return { lx: 0, ly: 0, dir: 'S', small: false, carry: false, bubble: null, alpha: 1, moving: false, run: false, ...p };
+  return { lx: 0, ly: 0, dir: 'S', small: false, carry: false, bubble: null, alpha: 1, moving: false, run: false, gesture: 0, ...p };
 }
 
 describe('hslToArgb', () => {
@@ -105,6 +105,22 @@ describe('spriteKey (idle sprite-cache invalidation)', () => {
     const other = officeToRig(node({ name: 'Zed', kind: 'human' }), pose());
     expect(spriteKey(agent)).not.toBe(spriteKey(human)); // agentVis/humanVis differ
     expect(spriteKey(other)).not.toBe(spriteKey(human)); // name-seeded skin/hair differ
+  });
+
+  it('flips when an in-place gesture starts (so the cache re-renders while it plays)', () => {
+    const idle = officeToRig(node({ name: 'Ada' }), pose({ gesture: 0 }));
+    const stretch = officeToRig(node({ name: 'Ada' }), pose({ gesture: 1 }));
+    const glance = officeToRig(node({ name: 'Ada' }), pose({ gesture: 2 }));
+    expect(spriteKey(stretch)).not.toBe(spriteKey(idle));
+    expect(spriteKey(glance)).not.toBe(spriteKey(stretch));
+  });
+});
+
+describe('officeToRig gesture', () => {
+  it('passes the pose gesture through to the rig input', () => {
+    expect(officeToRig(node(), pose({ gesture: 0 })).gesture).toBe(0);
+    expect(officeToRig(node(), pose({ gesture: 1 })).gesture).toBe(1);
+    expect(officeToRig(node(), pose({ gesture: 2 })).gesture).toBe(2);
   });
 });
 

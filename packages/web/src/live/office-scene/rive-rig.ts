@@ -112,6 +112,11 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
         const vm = file.viewModelByName('Character');
         const vmi = vm.instanceByName('Instance') ?? vm.defaultInstance();
         artboard.bindViewModelInstance(vmi);
+        // Bind the *state machine* to the same instance too — its transitions are viewModel comparisons
+        // (mode/gesture), and without this the SM can't read those properties, so only the unconditional
+        // default states play (idle / gesture "none"). This is what makes the Gesture layer (stretch/
+        // glance) and mode-driven states actually fire in the office.
+        sm.bindViewModelInstance(vmi);
         m = { artboard, sm, vmi, key: '', dirty: true, moving: false, settle: 0, cache: null, cctx: null };
         members.set(name, m);
       }
@@ -133,7 +138,9 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
           // change, or before it has ever been cached. Otherwise it's a stable seat — skip Rive entirely
           // and blit its cached frame in `draw`. This is the single largest Rive cost saver (ADR 086 #2):
           // during a walk only the 0–1 movers (+ any settling member) run the state machine; the rest hold.
-          m.dirty = pose.moving || m.settle > 0 || m.cache === null;
+          // An in-place gesture (stretch/glance) is stationary but must keep advancing while it plays, so
+          // it's dirty for its whole window — not just the SETTLE_FRAMES after the key flip.
+          m.dirty = pose.moving || pose.gesture !== 0 || m.settle > 0 || m.cache === null;
           if (!m.dirty) continue;
           if (m.settle > 0) m.settle--;
           m.vmi.color('accentColor')!.value = argbUint(r.accentColor);
@@ -150,6 +157,9 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
           m.vmi.number('mode')!.value = r.mode;
           m.vmi.number('facing')!.value = r.facing;
           m.vmi.number('run')!.value = r.run;
+          // In-place gesture overlay — guarded, so it no-ops until the `.riv` exposes a `gesture` input +
+          // Gesture layer (ADR 086 Phase 2 tail) and lights up automatically on the next asset export.
+          setNumberIfPresent(m.vmi, 'gesture', r.gesture);
           // An urgent (running) walk plays its cycle faster — visibly hurried legs/bob.
           const step = dt * (r.run ? 1.8 : 1);
           m.sm.advance(step);

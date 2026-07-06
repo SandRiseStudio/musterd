@@ -257,12 +257,21 @@
   outline-offset: 2px;
 }
 
-/* ─── split canvas ────────────────────────────────────────────────────── */
+/* ─── split canvas (an animated three-column grid) ────────────────────────
+   Each panel is one grid track. Collapsing a panel swaps its column to a slim rail width; because we
+   animate `grid-template-columns`, the neighbours flow into the freed space in one smooth slide — the
+   "magical" part. Track widths live in CSS vars so the collapse classes just retune a single value. */
 .lc__canvas {
-  display: flex;
+  --rail-w: 46px;
+  --col-office: minmax(0, 1.55fr);
+  --col-roster: 234px;
+  --col-stream: minmax(0, 2fr);
+  display: grid;
+  grid-template-columns: var(--col-office) var(--col-roster) var(--col-stream);
   flex: 1;
   min-height: 0;
   animation: lc-fade var(--lc-med) var(--lc-ease) both;
+  transition: grid-template-columns 380ms var(--lc-ease);
 }
 @keyframes lc-fade {
   from {
@@ -273,26 +282,261 @@
   }
 }
 
-/* ─── office panel modes ──────────────────────────────────────────────── */
-/* collapsed: fold the office away, letting the roster + stream reclaim the width */
-.lc__canvas--collapsed .lc-constellation {
-  flex: 0 0 0;
-  width: 0;
-  min-width: 0;
-  border-right: 0;
-  overflow: hidden;
-  pointer-events: none;
+/* ─── per-panel collapse (each panel folds into its own rail) ──────────── */
+.lc__canvas.is-office-collapsed {
+  --col-office: var(--rail-w);
 }
+.lc__canvas.is-roster-collapsed {
+  --col-roster: var(--rail-w);
+}
+.lc__canvas.is-stream-collapsed {
+  --col-stream: var(--rail-w);
+}
+/* office + stream (the two flexible panels) both folded → the roster is the only thing left to read,
+   so let it grow into all the freed space instead of stranding an empty gutter. */
+.lc__canvas.is-office-collapsed.is-stream-collapsed {
+  --col-roster: minmax(234px, 1fr);
+}
+
 /* companion: the office fills the whole window (topbar stays; side panels tuck away). Not OS
-   fullscreen — just the browser viewport. The two-class selector also overrides the width breakpoints. */
+   fullscreen — just the browser viewport. Overrides any per-panel collapse while it's on. */
+.lc__canvas--companion {
+  grid-template-columns: 1fr;
+}
 .lc__canvas--companion .lc-constellation {
-  display: block;
-  flex: 1 1 100%;
   border-right: 0;
 }
 .lc__canvas--companion .lc-roster,
 .lc__canvas--companion .lc-stream {
   display: none;
+}
+
+/* ─── collapse pill (in each panel header) ────────────────────────────── */
+.lc-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex: 0 0 auto;
+  border: 1px solid var(--lc-border-2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--lc-dim);
+  cursor: pointer;
+  transition:
+    color var(--lc-fast) var(--lc-ease),
+    border-color var(--lc-fast) var(--lc-ease),
+    background var(--lc-fast) var(--lc-ease),
+    transform var(--lc-fast) var(--lc-ease);
+}
+.lc-collapse:hover {
+  color: var(--lc-accent-bright);
+  border-color: color-mix(in srgb, var(--lc-accent) 46%, transparent);
+  background: color-mix(in srgb, var(--lc-accent) 14%, transparent);
+}
+.lc-collapse:active {
+  transform: scale(0.92);
+}
+.lc-collapse:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: 2px;
+}
+.lc-collapse svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* the office pill floats top-right of the scene (the office has no header bar) — always visible so the
+   office is as obviously collapsible as the other two, over a blurred chip so it reads on any floor tile */
+.lc-constellation__collapse {
+  position: absolute;
+  top: var(--lc-5);
+  right: var(--lc-5);
+  z-index: var(--lc-z-overlay);
+}
+.lc-constellation__collapse .lc-collapse {
+  background: rgba(20, 15, 12, 0.55);
+  border-color: rgba(255, 233, 208, 0.22);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.lc-constellation__collapse .lc-collapse:hover {
+  background: color-mix(in srgb, var(--lc-accent) 22%, rgba(20, 15, 12, 0.55));
+}
+
+.lc-roster__spacer,
+.lc-stream__spacer {
+  flex: 1;
+}
+
+/* ─── the collapsed rail (a slim, clickable spine) ────────────────────── */
+/* When a panel is collapsed its normal content is hidden and the rail takes over the whole track. The
+   office/roster panels don't scroll, so a soft opacity fade is enough there. */
+.lc-constellation.is-collapsed .lc-gl-canvas,
+.lc-constellation.is-collapsed .lc-gl-labels,
+.lc-constellation.is-collapsed .lc-constellation__caption,
+.lc-constellation.is-collapsed .lc-constellation__collapse,
+.lc-roster.is-collapsed .lc-roster__head,
+.lc-roster.is-collapsed .lc-roster__rows {
+  opacity: 0;
+  pointer-events: none;
+}
+/* The stream IS the scroll container, so opacity alone leaves its tall content in place and the
+   absolutely-positioned rail scrolls off with it (you'd see only its edge). `display:none` collapses
+   that content to zero height so the panel stops scrolling and the rail fills the visible track. */
+.lc-stream.is-collapsed {
+  overflow: hidden;
+}
+.lc-stream.is-collapsed .lc-stream__head,
+.lc-stream.is-collapsed .lc-stream__rows,
+.lc-stream.is-collapsed .lc-empty {
+  display: none;
+}
+
+.lc-rail {
+  position: absolute;
+  inset: 0;
+  z-index: calc(var(--lc-z-overlay) + 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lc-5);
+  padding: var(--lc-6) 0;
+  border: 0;
+  border-inline-end: 1px solid var(--lc-border);
+  background: linear-gradient(180deg, var(--lc-ground-2), var(--lc-ground));
+  color: var(--lc-muted);
+  cursor: pointer;
+  font: inherit;
+  overflow: hidden;
+  animation: lc-rail-in 320ms var(--lc-ease) both;
+  transition:
+    color var(--lc-fast) var(--lc-ease),
+    background var(--lc-fast) var(--lc-ease);
+}
+.lc-rail--right {
+  border-inline-end: 0;
+  border-inline-start: 1px solid var(--lc-border);
+}
+.lc-rail:hover {
+  color: var(--lc-text);
+  background: linear-gradient(180deg, var(--lc-surface), var(--lc-ground-2));
+}
+.lc-rail:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: -3px;
+}
+/* a soft accent seam runs the height of the rail — brightens on hover, the "expand me" invitation */
+.lc-rail::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--lc-accent) 55%, transparent),
+    transparent
+  );
+  opacity: 0.75;
+  transition: opacity var(--lc-med) var(--lc-ease);
+}
+.lc-rail--right::before {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+}
+.lc-rail:hover::before {
+  opacity: 1;
+}
+@keyframes lc-rail-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.lc-rail__chevron {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--lc-border);
+  background: rgba(255, 255, 255, 0.04);
+  transition:
+    transform var(--lc-med) var(--lc-ease),
+    border-color var(--lc-fast) var(--lc-ease);
+}
+.lc-rail__chevron svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* the chevron nudges outward on hover — toward where the panel is about to unfold */
+.lc-rail:hover .lc-rail__chevron {
+  border-color: color-mix(in srgb, var(--lc-accent) 42%, transparent);
+  transform: translateX(2px);
+}
+.lc-rail--right:hover .lc-rail__chevron {
+  transform: translateX(-2px);
+}
+.lc-rail__label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--lc-muted);
+  user-select: none;
+}
+.lc-rail:hover .lc-rail__label {
+  color: var(--lc-dim);
+}
+.lc-rail__hint {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--lc-border);
+  background: rgba(255, 255, 255, 0.04);
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--lc-dim);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc__canvas {
+    transition: none;
+  }
+  .lc-rail {
+    animation: none;
+  }
+  .lc-rail__chevron,
+  .lc-rail:hover .lc-rail__chevron,
+  .lc-rail--right:hover .lc-rail__chevron {
+    transform: none;
+  }
 }
 
 /* ─── constellation (the office scene lives in this slot) ─────────────── */
@@ -351,6 +595,23 @@
   color: var(--lc-dim);
   background: rgba(13, 9, 6, 0.46);
   font-weight: 500;
+}
+/* the roster panel's presence dot, miniaturised, leading the floating name */
+.lc-gl-label__dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  margin-bottom: 1px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.lc-gl-label__dot--on {
+  background: var(--lc-success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--lc-success) 70%, transparent);
+}
+.lc-gl-label__dot--off {
+  background: var(--lc-faint);
 }
 .lc-gl-label__state {
   margin-top: 3px;
@@ -413,6 +674,42 @@
   transition:
     opacity 520ms ease,
     transform 560ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* a bubble that carries an act id is a click-through to the stream row — quiet until hovered */
+.lc-speech.is-clickable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.lc-speech.is-clickable .lc-speech__inner {
+  transition:
+    opacity 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 220ms ease;
+}
+.lc-speech.is-clickable:hover .lc-speech__inner {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow:
+    0 10px 26px -8px rgba(0, 0, 0, 0.78),
+    0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 60%, transparent),
+    0 3px 22px -4px color-mix(in srgb, var(--lc-speech-tone) 62%, transparent);
+}
+/* the soft acknowledge pulse the moment a bubble is clicked (focus hands off to the stream flash) */
+.lc-speech.is-picked .lc-speech__inner {
+  animation: lc-speech-picked 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes lc-speech-picked {
+  0% {
+    box-shadow:
+      0 8px 22px -8px rgba(0, 0, 0, 0.72),
+      0 0 0 2px var(--lc-speech-tone),
+      0 0 30px -2px var(--lc-speech-tone);
+  }
+  100% {
+    box-shadow:
+      0 8px 22px -8px rgba(0, 0, 0, 0.72),
+      0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 34%, transparent),
+      0 3px 18px -5px color-mix(in srgb, var(--lc-speech-tone) 48%, transparent);
+  }
 }
 .lc-speech__text {
   display: block;
@@ -554,6 +851,7 @@
 
 /* ─── roster rail (governance surface — ADR 070 capability/account-status) ─ */
 .lc-roster {
+  position: relative;
   flex: 0 0 234px;
   min-width: 0;
   display: flex;
@@ -564,8 +862,7 @@
 }
 .lc-roster__head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   gap: var(--lc-4);
   padding: var(--lc-5) var(--lc-6);
   border-bottom: 1px solid var(--lc-border);
@@ -737,6 +1034,7 @@
 
 /* ─── stream (the legible console) ────────────────────────────────────── */
 .lc-stream {
+  position: relative;
   flex: 1;
   min-width: 0;
   overflow-y: auto;
@@ -1526,11 +1824,17 @@
 
 /* ─── responsive (shed the ambient panels as width tightens) ──────────── */
 @media (max-width: 1080px) {
+  .lc__canvas {
+    --col-roster: 0px;
+  }
   .lc-roster {
     display: none;
   }
 }
 @media (max-width: 880px) {
+  .lc__canvas {
+    --col-office: 0px;
+  }
   .lc-constellation {
     display: none;
   }

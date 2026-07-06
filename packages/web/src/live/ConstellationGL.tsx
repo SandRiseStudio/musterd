@@ -1,8 +1,9 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
 import { useEffect, useMemo, useRef } from 'react';
-import { actTone, memberColor } from './format';
+import { actLabel, actTone, memberColor } from './format';
 import type { OfficeData, OfficeHandle } from './office-scene';
 import { actToEvent } from './office-scene/mapping';
+import { CollapseButton, PanelRail } from './PanelChrome';
 
 /** Roster → the office's node data (presence/activity drives who's in the room + their state). */
 function computeData(roster: MemberSummary[]): OfficeData {
@@ -32,10 +33,17 @@ export function ConstellationGL({
   roster,
   envelopes,
   liveIds,
+  collapsed = false,
+  onCollapse,
+  onActClick,
 }: {
   roster: MemberSummary[];
   envelopes: Envelope[];
   liveIds: Set<string>;
+  collapsed?: boolean;
+  onCollapse?: () => void;
+  /** Speech-bubble click-through: called with the act's envelope id (the route scrolls the stream). */
+  onActClick?: (id: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
@@ -45,6 +53,8 @@ export function ConstellationGL({
   const data = useMemo(() => computeData(roster), [roster]);
   const dataRef = useRef(data);
   dataRef.current = data;
+  const onActClickRef = useRef(onActClick);
+  onActClickRef.current = onActClick;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -55,7 +65,9 @@ export function ConstellationGL({
     import('./office-scene')
       .then(({ mountOffice }) => {
         if (disposed || !host || !labelHost) return;
-        const handle = mountOffice(host, labelHost, reduced);
+        const handle = mountOffice(host, labelHost, reduced, {
+          onActClick: (id) => onActClickRef.current?.(id),
+        });
         handle.update(dataRef.current);
         handleRef.current = handle;
       })
@@ -83,9 +95,12 @@ export function ConstellationGL({
       emittedRef.current.add(e.id);
       const ev = actToEvent(e);
       if (ev) h.emit(ev);
-      // Any act with a body also speaks it over the sender's head (typed out, then fades) — the office's
-      // legible counterpart to the stream. Independent of the choreography cue; both can play for one act.
-      if (e.body && e.body.trim()) h.emit({ kind: 'speech', who: e.from, text: e.body, tone: actTone(e.act) });
+      // EVERY act also speaks over the sender's head (typed out, lingers, then fades) — the office's
+      // legible counterpart to the stream. Body-less acts (accept/decline/wait/resolve…) speak their act
+      // label so nothing on the team passes invisibly. The envelope id makes the bubble a click-through
+      // to the same act in the stream panel.
+      const text = e.body && e.body.trim() ? e.body : actLabel(e.act);
+      h.emit({ kind: 'speech', who: e.from, text, tone: actTone(e.act), id: e.id });
     }
   }, [envelopes, liveIds]);
 
@@ -93,12 +108,26 @@ export function ConstellationGL({
   const humans = roster.filter((m) => m.kind === 'human').length;
 
   return (
-    <section className="lc-constellation">
+    <section className={`lc-constellation${collapsed ? ' is-collapsed' : ''}`}>
+      {/* Canvas stays mounted while collapsed so WebGL keeps running and re-expanding is instant. */}
       <div className="lc-gl-canvas" ref={hostRef} aria-hidden="true" />
       <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
       <p className="lc-constellation__caption">
         {agents} agent{agents === 1 ? '' : 's'} · {humans} human{humans === 1 ? '' : 's'}
       </p>
+      {onCollapse && (
+        <div className="lc-constellation__collapse">
+          <CollapseButton side="left" label="the office" onClick={onCollapse} />
+        </div>
+      )}
+      {collapsed && onCollapse && (
+        <PanelRail
+          side="left"
+          label="Office"
+          hint={String(agents + humans)}
+          onExpand={onCollapse}
+        />
+      )}
     </section>
   );
 }
