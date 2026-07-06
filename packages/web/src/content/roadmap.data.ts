@@ -711,12 +711,12 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'seat-memory',
     wave: 5,
     title: 'Persistent seat memory',
-    status: 'reserved',
+    status: 'shipped',
     category: 'platform',
-    blurb: 'A persistent identity wants persistent memory — the claim response could carry a memory/context blob alongside the charter.',
+    blurb: 'A persistent identity wants persistent memory — the seat carries a continuity note across the session gap, headline-first.',
     detail:
-      'A reserved seam (membership-model.md §"Memory — reserved seam, not built"): a durable per-seat memory/context blob delivered on claim. **Needs its own design session before build** (2026-07-04) — open questions: what the blob holds (facts, preferences, prior-work index), who writes it and when, size/staleness bounds, and how it composes with the agent=seat ontology (agent-ontology.md). Prioritized into the depth wave as the next design pass after telemetry L2.',
-    refs: [doc('docs/design/membership-model.md', 'membership-model.md'), doc('docs/design/agent-ontology.md', 'agent-ontology.md')],
+      'The membership-model reserved seam, designed (ADR 093, 2026-07-06) and SHIPPED the same day (PRs #129/#130). The v1 job is **cross-session continuity only**: one small occupant-written note per seat (headline ≤120 chars + body ≤8KB, last-write-wins, `saved_at` stamped, no server expiry), saved explicitly at natural boundaries — before a handoff, at wrap-up, when told to wind down. Delivery is **envelope-on-occupy / body-on-demand**: `OccupiedFrame.memory` un-stubbed into `{ headline, saved_at, size_bytes }` (SPEC A.3 minor), the join/claim result renders one ~30-token pointer line, and the body travels only over an explicit read. Daemon-private `seat_memory` table, seat-scoped with **no cross-seat read path** (team admins included — deliberately narrowing ADR 071); banned = inert applies; audit records sizes only, never content. Surfaces: `team_memory_save`/`team_memory_read` + the `team_join` one-liner (MCP), `musterd memory save|show|clear` + the claim/status pointer (CLI), and the skill\'s save-before-handoff playbook (guidance v2). Memory belongs to the seat, not the occupant — a successor inherits the note (agent=seat). Named follow-up seam: harness-hook auto-save (SessionEnd/PreCompact) if dogfood shows agents forget to save; eval = read-after-occupy rate.',
+    refs: [adr(93, 'ADR 093'), doc('docs/design/membership-model.md', 'membership-model.md'), doc('docs/design/agent-ontology.md', 'agent-ontology.md')],
     dependsOn: ['durable-roster'],
   },
   {
