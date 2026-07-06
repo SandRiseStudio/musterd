@@ -52,6 +52,67 @@ interface ConnState {
   connId: string;
   authenticated: boolean;
   conn?: Connection;
+  /** Pending same-workspace-predecessor reap this (successor) connection scheduled (ADR 092). Cleared
+   * on close so a successor that drops within the grace never reaps on behalf of a dead session. */
+  evictionTimer?: NodeJS.Timeout;
+}
+
+/**
+ * ADR 092: a same-workspace successor does not supersede at claim time (ADR 068 keeps the seat from
+ * flapping under transient health-check probes), but once it proves **durable** — still attached
+ * after a grace window — it reaps the same-workspace predecessor(s) it found, i.e. the orphaned
+ * pre-reload sessions the issue #118 war was between. A transient probe disconnects before the grace,
+ * so the gate finds the successor gone and keeps the incumbent untouched. Returns the timer so the
+ * successor's own close can cancel it. No-op when there were no same-workspace predecessors.
+ */
+function scheduleSameWorkspaceEviction(
+  ctx: Ctx,
+  teamId: string,
+  successorConnId: string,
+  memberName: string,
+  predecessorConnIds: string[],
+): NodeJS.Timeout | undefined {
+  if (predecessorConnIds.length === 0) return undefined;
+  // Drift signal (ADR 092 §C): the duplicate same-workspace adapter is observable in the audit log
+  // now, even before — or if — the eviction fires.
+  appendAudit(ctx.db, teamId, {
+    actor: memberName,
+    action: 'claim.duplicate_workspace',
+    target: memberName,
+    result: 'allow',
+    detail: { predecessors: predecessorConnIds.length, grace_ms: ctx.config.supersedeGraceMs },
+  });
+  const timer = setTimeout(() => {
+    // Reap only if the successor is still attached — a probe that disconnected within the grace never
+    // reaches here (its conn is gone), so the incumbent is preserved (ADR 068's anti-flap intact).
+    if (!ctx.hub.getConn(successorConnId)) return;
+    let evicted = 0;
+    for (const connId of predecessorConnIds) {
+      const old = ctx.hub.getConn(connId);
+      if (!old) continue; // predecessor already left on its own
+      old.send?.({
+        type: 'error',
+        code: 'superseded',
+        message: `your session as "${memberName}" was replaced by a newer one in the same workspace`,
+        same_workspace: true,
+      });
+      old.close?.();
+      ctx.hub.remove(old.connId);
+      clearPresenceById(ctx.db, old.presenceId);
+      evicted++;
+    }
+    if (evicted > 0) {
+      appendAudit(ctx.db, teamId, {
+        actor: memberName,
+        action: 'claim.superseded',
+        target: memberName,
+        result: 'allow',
+        detail: { same_workspace: true, evicted },
+      });
+    }
+  }, ctx.config.supersedeGraceMs);
+  timer.unref?.();
+  return timer;
 }
 
 function send(ws: WebSocket, frame: WSServerFrame): void {
@@ -265,7 +326,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // laptop while watching on a phone). Displacement is **workspace-scoped** (ADR 068): a claim
           // from the *same* workspace is the same seat reconnecting — a reload, or the ~90s health-check
           // MCP probe — and must NOT supersede the live session, or the seat flaps. A client that sends no
-          // workspace falls back to displace-all.
+          // workspace falls back to displace-all. A same-workspace predecessor is kept here (anti-flap)
+          // but reaped after this successor proves durable — see scheduleSameWorkspaceEviction (ADR 092).
+          const sameWorkspacePredecessors: string[] = [];
           if (
             targetMember &&
             !('observe' in frame.target) &&
@@ -275,7 +338,11 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             const sameWorkspace = (w?: string | null): boolean =>
               w != null && frame.workspace != null && w === frame.workspace;
             for (const old of ctx.hub.connsForMember(targetMember.id)) {
-              if (sameWorkspace(old.workspace)) continue; // same seat reconnecting/probing — keep it
+              if (sameWorkspace(old.workspace)) {
+                // Same seat reconnecting/probing — keep it now; a durable successor reaps it (ADR 092).
+                sameWorkspacePredecessors.push(old.connId);
+                continue;
+              }
               old.send?.({
                 type: 'error',
                 code: 'superseded',
@@ -453,6 +520,16 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             memory: null,
           });
           if (!conn.observer) emitPresence(ctx, conn, 'online', frame.surface);
+          // ADR 092: now that this successor is occupied, arm the grace-gated reap of any same-workspace
+          // predecessor it displaced (the orphaned pre-reload sessions). Cancelled if it closes first.
+          const evictionTimer = scheduleSameWorkspaceEviction(
+            ctx,
+            team.id,
+            state.connId,
+            targetMember.name,
+            sameWorkspacePredecessors,
+          );
+          if (evictionTimer) state.evictionTimer = evictionTimer;
           appendAudit(ctx.db, team.id, {
             actor: targetMember.name,
             action: 'claim.occupied',
@@ -537,6 +614,13 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
     });
 
     const cleanup = () => {
+      // Cancel any pending same-workspace reap this connection armed (ADR 092): a successor that drops
+      // within the grace must not evict on behalf of a now-dead session (the getConn gate also guards
+      // this, but clearing the timer is tidier and stops the audit row).
+      if (state.evictionTimer) {
+        clearTimeout(state.evictionTimer);
+        delete state.evictionTimer;
+      }
       const conn = state.conn;
       if (!conn) return;
       ctx.hub.remove(conn.connId);

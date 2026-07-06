@@ -14,9 +14,9 @@
  * Hermetic (the `check-arch-trees.ts` / `check-obs-evals.ts` pattern): imports the names straight from
  * dependency-light source modules, runs on Node's native TypeScript, no build step, no extra deps.
  */
-import { SKILL_CLI_COMMANDS, SKILL_MCP_TOOLS } from '../packages/protocol/src/guidance.ts';
 import { HELP } from '../packages/cli/src/help.ts';
 import { TOOL_NAMES } from '../packages/mcp/src/toolNames.ts';
+import { SKILL_CLI_COMMANDS, SKILL_MCP_TOOLS } from '../packages/protocol/src/guidance.ts';
 
 const problems: string[] = [];
 

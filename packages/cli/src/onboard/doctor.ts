@@ -1,6 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { GUIDANCE_CONTENT_VERSION, formatClaimPolicy, parseContentStamp } from '@musterd/protocol';
+import { resolveWorkspace } from '@musterd/mcp';
+import {
+  GUIDANCE_CONTENT_VERSION,
+  bindingSeat,
+  formatClaimPolicy,
+  parseContentStamp,
+  type Binding,
+} from '@musterd/protocol';
+import { HttpClient } from '../client.js';
 import { findBinding } from '../config.js';
 import { theme } from '../render/theme.js';
 import { contentHash, strippedBody } from './guidance.js';
@@ -88,6 +96,36 @@ function inspectGuidance(cwd: string): { drift: string[]; notes: string[] } {
   return { drift, notes };
 }
 
+/**
+ * Duplicate-adapter drift (ADR 092 §C): a host reload can orphan the previous MCP adapter, leaving two
+ * processes bound to this folder's seat fighting over it. ADR 092's durability-gated reap self-heals
+ * this, but the warn is cheap belt-and-suspenders — and it catches a stuck orphan before A/B would.
+ * Best-effort + read-only: asks the server for this seat's live presences and warns (a **note**, never
+ * exit-1 drift — the reap resolves it) when more than one shares this workspace. Silent if the folder
+ * has no seat binding or the server is unreachable.
+ */
+async function inspectDuplicateAdapters(binding: Binding | null): Promise<string[]> {
+  if (!binding?.server || !binding.team) return [];
+  const seat = bindingSeat(binding);
+  if (!seat) return []; // role/chat folder — no fixed seat to check
+  let members;
+  try {
+    ({ members } = await new HttpClient({ server: binding.server }).roster(binding.team));
+  } catch {
+    return []; // server down / unreachable — a health check never invents drift
+  }
+  const workspace = resolveWorkspace();
+  const live = (members.find((m) => m.name === seat)?.presences ?? []).filter(
+    (p) => p.status !== 'offline' && p.workspace === workspace,
+  );
+  if (live.length <= 1) return [];
+  return [
+    `seat "${seat}" has ${live.length} live adapters in this workspace (${workspace}) — a host reload ` +
+      `likely orphaned an earlier MCP process. This should self-resolve (ADR 092); if it persists, find ` +
+      `the extra process (\`ps aux | grep packages/mcp/dist/index.js\`) and end it.`,
+  ];
+}
+
 export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const primerManaged = classifyPrimerTarget(cwd) === 'managed';
   // The folder's single source of truth for which seat it claims (ADR 018). A legacy MCP registration
@@ -147,7 +185,14 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   if (claudeConfigured) drift.push(...inspectClaudeHookDrift(cwd));
   const guidance = inspectGuidance(cwd);
   drift.push(...guidance.drift);
-  return { primerManaged, harnesses, drift, notes: guidance.notes, anyConfigured };
+  const duplicateAdapters = await inspectDuplicateAdapters(binding);
+  return {
+    primerManaged,
+    harnesses,
+    drift,
+    notes: [...guidance.notes, ...duplicateAdapters],
+    anyConfigured,
+  };
 }
 
 /** Render + exit-code for `musterd init --check`. Exit 1 on drift, 0 when healthy or unprovisioned. */

@@ -26,6 +26,11 @@ export type AuditAction =
   | 'claim.occupied'
   | 'claim.refused'
   | 'claim.pending'
+  // ADR 092: a same-workspace successor found a live predecessor (drift signal), then reaped it once
+  // it proved durable (the orphaned-adapter reap; `detail.same_workspace` distinguishes it from the
+  // cross-workspace newest-wins path, which does not audit).
+  | 'claim.duplicate_workspace'
+  | 'claim.superseded'
   | 'request.decide'
   | 'request.expired'
   // ADR 088: an interrupt-class act was surfaced to a busy agent at a tool boundary (delivery, not

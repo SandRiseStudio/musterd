@@ -8,11 +8,11 @@
 // dogfood daemon is measurable live with zero external dependencies.
 //
 // Usage: node scripts/dev-otel-sink.mjs [--port 4318] [--log ~/.musterd/otel-sink.log]
-import { createServer } from 'node:http';
 import { appendFileSync } from 'node:fs';
-import { gunzipSync } from 'node:zlib';
+import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 
 const args = process.argv.slice(2);
 const opt = (flag, def) => {

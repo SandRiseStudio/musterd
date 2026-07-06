@@ -69,7 +69,7 @@ Handshake state machine: `connecting → hello → authenticated → subscribed 
    - Server → `deliver`: `{ "type":"deliver", "envelope": <Envelope> }` for each message routed to this member's presence — or, for a `team-all` subscriber, every envelope on the team (deduped against recipients + sender, so a normal recipient never gets it twice).
    - Client → `heartbeat`: `{ "type":"heartbeat" }` every **15s**; server updates `last_seen_at`. (Server may also treat any inbound frame as a heartbeat.)
    - Server → `presence`: `{ "type":"presence", "member":"Lin", "status":"online", "surface":"codex" }` on roster presence changes.
-   - Either → `error`: `{ "type":"error", "code":"...", "message":"..." }`.
+   - Either → `error`: `{ "type":"error", "code":"...", "message":"..." }`. A `superseded` error MAY carry `"same_workspace": true` (ADR 092) — the displacing claim came from the client's own workspace (a reload successor), signalling the replaced adapter to **exit** rather than linger dormant; absent ⇒ a cross-workspace takeover (stay dormant).
 5. **Close:** server removes the presence row (or marks offline) and emits a `presence` offline event to the team.
 
 Heartbeat/timeout values are defined in `03-server.md` (heartbeat 15s, offline after 45s missed = 3 intervals).
@@ -110,7 +110,7 @@ The WS `send` and HTTP `POST …/messages` share one validation+route path on th
 | `not_found`        | 404  | team/member not found                                                                                                            |
 | `conflict`         | 409  | duplicate (e.g. team slug taken, member name taken)                                                                              |
 | `member_busy`      | 409  | (v0.2, ADR 010) a Member was already live — _no longer thrown on hello since ADR 017's newest-wins; retained for compatibility_  |
-| `superseded`       | 409  | (v0.2, ADR 017) your session was taken over by a newer same-identity attach — terminal; don't reconnect                          |
+| `superseded`       | 409  | (v0.2, ADR 017) your session was taken over by a newer same-identity attach — terminal; don't reconnect. Carries `same_workspace:true` when the successor is in your own workspace (ADR 092 — reload successor; the adapter exits)  |
 | `version_mismatch` | 426  | client `v` not compatible with server                                                                                            |
 | `server_error`     | 500  | unexpected                                                                                                                       |
 | `claim_conflict`   | 409  | (P3, ADR 078/SPEC A.8) the target seat is already occupied                                                                       |

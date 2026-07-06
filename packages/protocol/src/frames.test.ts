@@ -104,4 +104,17 @@ describe('WS frames', () => {
     const e = WSServerFrame.parse({ type: 'error', code: 'forbidden', message: 'nope' });
     expect(e.type).toBe('error');
   });
+
+  it('round-trips same_workspace on a superseded error frame (ADR 092)', () => {
+    const e = WSServerFrame.parse({
+      type: 'error',
+      code: 'superseded',
+      message: 'taken over',
+      same_workspace: true,
+    });
+    expect(e.type === 'error' && e.same_workspace).toBe(true);
+    // Absent stays undefined (cross-workspace / legacy) — never coerced to false.
+    const legacy = WSServerFrame.parse({ type: 'error', code: 'superseded', message: 'x' });
+    expect(legacy.type === 'error' && legacy.same_workspace).toBeUndefined();
+  });
 });

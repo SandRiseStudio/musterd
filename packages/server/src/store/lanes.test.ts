@@ -1,3 +1,4 @@
+import type { Lane } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import {
@@ -10,7 +11,6 @@ import {
   openLane,
   updateLane,
 } from './lanes.js';
-import type { Lane } from '@musterd/protocol';
 import { createTeam } from './teams.js';
 
 function seed() {

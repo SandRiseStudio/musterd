@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DetectResult } from './harness.js';
 
 // Hoisted mock state: the harnesses the doctor inspects + the primer classification + the folder
@@ -9,7 +9,9 @@ import type { DetectResult } from './harness.js';
 const h = vi.hoisted(() => ({
   harnesses: [] as { label: string; detect: () => Promise<DetectResult> }[],
   primer: 'managed' as 'none' | 'unmarked' | 'managed',
-  binding: null as { claim?: unknown } | null,
+  binding: null as Record<string, unknown> | null,
+  roster: { members: [] as any[] },
+  rosterThrows: false,
 }));
 
 vi.mock('./harnesses/index.js', () => ({
@@ -19,6 +21,14 @@ vi.mock('./harnesses/index.js', () => ({
 }));
 vi.mock('./primer.js', () => ({ classifyPrimerTarget: () => h.primer }));
 vi.mock('../config.js', () => ({ findBinding: () => h.binding }));
+vi.mock('../client.js', () => ({
+  HttpClient: class {
+    async roster() {
+      if (h.rosterThrows) throw new Error('unreachable');
+      return h.roster;
+    }
+  },
+}));
 
 const { inspectProvisioning } = await import('./doctor.js');
 const { writeGuidance, CANONICAL_SKILL_PATH } = await import('./guidance.js');
@@ -117,6 +127,78 @@ describe('inspectProvisioning', () => {
     h.harnesses = [harness('Claude Code', true, true)]; // no registeredClaim
     const r = await inspectProvisioning('/x');
     expect(r.drift).toEqual([]);
+  });
+});
+
+describe('inspectProvisioning — duplicate adapters (ADR 092)', () => {
+  beforeEach(() => {
+    h.harnesses = [];
+    h.primer = 'none';
+    h.binding = {
+      server: 'http://x',
+      team: 'dawn',
+      surface: 'cli',
+      claim: { mode: 'seat', name: 'Ada' },
+    };
+    h.roster = { members: [] };
+    h.rosterThrows = false;
+    process.env['MUSTERD_WORKSPACE'] = 'repo@main';
+  });
+  afterEach(() => {
+    delete process.env['MUSTERD_WORKSPACE'];
+  });
+
+  function ada(...presences: { status: string; workspace: string }[]) {
+    h.roster = {
+      members: [
+        { name: 'Ada', presences: presences.map((p) => ({ surface: 'claude-code', ...p })) },
+      ],
+    };
+  }
+
+  it('warns (note, not drift) when the seat has >1 live adapter in this workspace', async () => {
+    ada({ status: 'online', workspace: 'repo@main' }, { status: 'online', workspace: 'repo@main' });
+    const r = await inspectProvisioning('/x');
+    expect(r.drift).toEqual([]);
+    expect(r.notes.some((n) => n.includes('2 live adapters'))).toBe(true);
+  });
+
+  it('is quiet with a single live adapter in this workspace', async () => {
+    ada({ status: 'online', workspace: 'repo@main' });
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('live adapters'))).toBe(false);
+  });
+
+  it('ignores duplicates that live in a different workspace', async () => {
+    ada(
+      { status: 'online', workspace: 'repo@main' },
+      { status: 'online', workspace: 'other@branch' },
+    );
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('live adapters'))).toBe(false);
+  });
+
+  it('does not count offline presences as live adapters', async () => {
+    ada(
+      { status: 'online', workspace: 'repo@main' },
+      { status: 'offline', workspace: 'repo@main' },
+    );
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('live adapters'))).toBe(false);
+  });
+
+  it('stays silent when the server is unreachable (best-effort, never invents drift)', async () => {
+    h.rosterThrows = true;
+    const r = await inspectProvisioning('/x');
+    expect(r.notes).toEqual([]);
+    expect(r.drift).toEqual([]);
+  });
+
+  it('is silent for a role/chat folder with no fixed seat', async () => {
+    h.binding = { server: 'http://x', team: 'dawn', surface: 'cli', claim: { mode: 'chat' } };
+    ada({ status: 'online', workspace: 'repo@main' }, { status: 'online', workspace: 'repo@main' });
+    const r = await inspectProvisioning('/x');
+    expect(r.notes).toEqual([]);
   });
 });
 
