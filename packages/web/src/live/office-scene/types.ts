@@ -76,4 +76,8 @@ export interface OfficeHandle {
   update: (data: OfficeData) => void;
   emit: (ev: OfficeEvent) => void;
   dispose: () => void;
+  /** Fire an in-place ambient gesture now on an idle desk member (`1` stretch · `2` glance), bypassing
+   * the 90–180s ambient scheduler. Returns the member it played on, or null if none was eligible.
+   * A design-preview / verification affordance (see office-preview); the live office uses the scheduler. */
+  pokeGesture: (kind?: number) => string | null;
 }

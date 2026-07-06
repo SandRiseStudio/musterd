@@ -549,6 +549,17 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
   return {
     update,
     emit,
+    pokeGesture: (kind = 1) => {
+      // Same path as the ambient scheduler's gesture beat, but on demand — try idle desk members until
+      // one accepts (gestureBeat rejects a small/walking/already-gesturing member).
+      for (const who of actors.idleDeskMembers()) {
+        if (actors.gestureBeat(who, kind)) {
+          ensureLoop();
+          return who;
+        }
+      }
+      return null;
+    },
     dispose: () => {
       disposed = true;
       cancelAnimationFrame(raf);
