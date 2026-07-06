@@ -72,6 +72,7 @@ src/
     whoami.ts         // print the seat this folder resolves to: member/team/surface/source (ADR 067)
     status.ts         // status
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
+    memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036)
     lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal join (ADR 083/084)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
@@ -242,6 +243,10 @@ Prints the seat this folder resolves to — `<member> on <team> (<surface> · <s
 ### `musterd availability <available|away|dnd> [--until <iso>]`
 
 `POST /teams/:slug/availability` (authed). Sets **your own** availability axis (SPEC A.6 Axis 2) — explicit and self-only, **never inferred**. `away --until <iso>` is the `away_until` encoding (stored as `{status:'away', until:<ms>}`); `--until` is rejected on any other status, and the server drops a stray `until` from `available`/`dnd` so the stored shape stays honest. The roster renders `away` as `off until <ts>` (or bare `away`) and `dnd` as `dnd`, **overriding** the live activity label (A.6 display resolution); `available` is the implicit default and never overrides. The notify loop reads this back to **tier** deliveries: `away` holds all but `urgent`; `dnd` passes directed pings + `urgent` (ADR 044). The localhost down-payment — the v0.3 governed superset (off*hours, schedule enforcement, `can*\*`gating) is the named seam. Output:`✓ availability set to <status>`. Needs an **active identity** like any act (ADR 036).
+
+### `musterd memory [show] | save --headline "<subject>" [body...] | clear`
+
+The seat's private **cross-session continuity note** (ADR 093) over `PUT`/`GET`/`DELETE /teams/:slug/memory` — all seat-authenticated, operating on the caller's **own** seat only (no cross-seat path, admins included). `save` is last-write-wins with the headline-first discipline (headline ≤120 chars, body ≤8KB — over-cap is rejected with the limit named); the playbook is **save before handing off / wrapping up**. `show` (the default) is the explicit body read — a seat with nothing saved is a normal exit-0 message, not an error. Delivery is envelope-on-occupy / body-on-demand: `musterd claim` prints the one-liner off the `occupied` frame's envelope, and `musterd status` prints the same line (best-effort, silent for an ambient identity or an empty seat) — `saved memory from <age> ago: "<headline>" — \`musterd memory\` to load it` — never the body. Needs an **active identity** like any act (ADR 036).
 
 ### `musterd claim <name> | --role <role> [--for <code>] [--surface <s>] [--key mskey_…] [--grant msgr_…] [--force] [--timeout <s>]`
 

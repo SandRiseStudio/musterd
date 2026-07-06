@@ -1,6 +1,7 @@
 import type { Parsed } from '../args.js';
 import { renderPendingSummary, renderStatusHeader, renderStatusTable } from '../render/rows.js';
 import { pendingActionSummary, resolveRead } from './helpers.js';
+import { renderMemoryLine } from './memory.js';
 
 export async function statusCommand(parsed: Parsed): Promise<number> {
   // `status` is a read: it shows the (auth-free) roster anywhere, even from an unbound folder with
@@ -21,6 +22,21 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
       : undefined;
   if (pending) {
     process.stdout.write(renderPendingSummary(pending.count, pending.since) + '\n');
+  }
+  // The continuity one-liner (ADR 093 §3): headline + age, never the body — same line `claim`
+  // prints on occupy. Seat-authed and best-effort: an ambient identity, a seat with nothing saved
+  // (not_found), or any read failure all stay silent.
+  if (explicit && identity) {
+    const mem = await http.getMemory(team).catch(() => undefined);
+    if (mem) {
+      process.stdout.write(
+        renderMemoryLine({
+          headline: mem.headline,
+          saved_at: mem.saved_at,
+          size_bytes: Buffer.byteLength(mem.body, 'utf8'),
+        }) + '\n',
+      );
+    }
   }
   // Surface which daemon + db we're reading, so a wrong-db ("everyone offline") is obvious.
   const health = await http.health().catch(() => undefined);

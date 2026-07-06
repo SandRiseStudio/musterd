@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 1;
+export const GUIDANCE_CONTENT_VERSION = 2;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -28,6 +28,8 @@ export const SKILL_MCP_TOOLS = [
   'team_send',
   'team_status',
   'team_members',
+  'team_memory_save',
+  'team_memory_read',
   'team_next',
   'lane_open',
   'lane_claim',
@@ -49,6 +51,7 @@ export const SKILL_CLI_COMMANDS = [
   'lanes',
   'next',
   'done',
+  'memory',
   'requests',
   'availability',
   'notify',
@@ -131,6 +134,17 @@ export function renderSkillBody(opts: { team: string }): string {
     "not re-derive it. Pair it with `team_send {act:'handoff'}` / `musterd send --act handoff` naming the",
     'artifact. The receiver answers with `accept`/`decline` (set `reply_to`), and — importantly — accepting',
     'is not finishing: close the thread with `resolve` when the work actually lands.',
+    '',
+    '## Saving your memory (cross-session continuity, ADR 093)',
+    '',
+    'Your seat can carry one small continuity note across the session gap — what you were doing,',
+    'decisions mid-flight, where you left off. **Save it before handing off or wrapping up** (and when',
+    'told to wind down): `team_memory_save` / `musterd memory save --headline "<subject>" [body]` —',
+    'headline first, like a commit subject; it is the one line the next occupy shows. Last-write-wins,',
+    'private to the seat, never put secrets in it. On your next join the result carries the one-line',
+    'pointer; load the note with `team_memory_read` / `musterd memory` when the headline looks relevant.',
+    'Durable knowledge still belongs in docs and prior work in lanes/threads — the note is working',
+    'state, not a second home for facts.',
     '',
     '## Waiting without polling',
     '',

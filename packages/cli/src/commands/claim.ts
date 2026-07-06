@@ -14,6 +14,7 @@ import {
 } from '../onboard/pending.js';
 import { theme } from '../render/theme.js';
 import { WAIT_TIMEOUT_EXIT } from './inbox.js';
+import { renderMemoryLine } from './memory.js';
 
 /** Default `musterd claim` pending-wait bound (seconds) — same window as `inbox --wait`
  *  (ADR 054/077): long enough to give an admin a real chance to approve, short enough a dropped
@@ -168,7 +169,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
       surface,
       workspace,
       ...(grant !== undefined ? { grant } : {}),
-      onOccupied: (occupiedSeat, _presenceId, resumeGrant) => {
+      onOccupied: (occupiedSeat, _presenceId, resumeGrant, memory) => {
         const seat = occupiedSeat.name;
         // Prefer a freshly-delivered resume token (ADR 087, first approval) over any grant we claimed
         // with, so `binding.grant` carries the reusable token that re-occupies this seat silently.
@@ -202,9 +203,12 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
           const tail = live
             ? `the waiting ${marker!.surface} session is going online as ${seat} now.`
             : `bound this folder to ${seat}; the agent here will occupy it on launch (or call team_join).`;
+          // The continuity one-liner (ADR 093 §3): headline + age, never the body.
+          const memLine = memory ? `${renderMemoryLine(memory)}\n` : '';
           process.stdout.write(
             `${theme.ok('✓')} ${theme.memberName(seat, 'agent')} — occupied on ${team}\n` +
-              `${pc.dim(tail)}\n`,
+              `${pc.dim(tail)}\n` +
+              memLine,
           );
           resolveP(0);
         });

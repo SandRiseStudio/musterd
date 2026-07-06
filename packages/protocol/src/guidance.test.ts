@@ -73,6 +73,7 @@ describe('version-bump discipline (ADR 085)', () => {
   // stale-version drift check meaningful: a content change always moves the version stamp.
   const SNAPSHOTS: Record<number, string> = {
     1: 'e305d9d43a9f75bb',
+    2: 'c580f2a750a4c012', // + seat-memory playbook (ADR 093): save-before-handoff + memory names
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
