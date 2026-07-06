@@ -2,13 +2,23 @@
  * musterd web surface — design tokens.
  *
  * Derives from docs/design/brand.md (mustard accent on zinc neutrals, Inter + JetBrains
- * Mono) but DELIBERATELY EXPANDS it for the immersive web surface: deep-black ground,
- * mustard glows, and spectacle gradients that brand.md §6 reserves for an explicit
- * decision. See docs/decisions/036-web-surface-aesthetic.md. The CLI/product chrome
- * stays minimal; only this surface goes maximal.
+ * Mono) and DELIBERATELY EXPANDS it for the immersive web surface. See DESIGN.md for the
+ * office visual system and docs/decisions/036-web-surface-aesthetic.md.
+ *
+ * THEMES. The office system targets TWO themes — a warm daylight office (intended default)
+ * and a dusk office (dark). Both are defined below as SEMANTIC tokens (--floor, --wall,
+ * --ink, --sky, …) so a theme swap is a token swap. Components/canvas should read the
+ * semantic tokens, never raw hex.
+ *
+ * ACTIVE DEFAULT: dark. Light is opt-in via :root[data-theme="light"] for now. Dark stays
+ * the active default until the office scene + landing hero are light-mode-ready (DESIGN.md
+ * "Status"); at that point light becomes the default. Keeping dark active here means this
+ * token change is visually a no-op for every existing surface.
  */
 
 :root {
+  /* ---- Shared, theme-independent ---- */
+
   /* Accent — mustard ramp (brand.md §2) */
   --mustard-50: #fbf3d5;
   --mustard-100: #f6e4a8;
@@ -29,16 +39,29 @@
   --zinc-900: #18181b;
   --zinc-950: #09090b;
 
-  /* Semantic — dark-mode column (brand.md §2) */
+  /* Type (brand.md §3) */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Layout */
+  --maxw: 920px;
+  --gutter: clamp(20px, 5vw, 56px);
+
+  /* ---- Semantic — DARK (active default) ---- */
+
+  /* Semantic status (brand.md §2, dark column) */
   --success: #22c55e;
   --warning: #f59e0b;
   --danger: #ef4444;
   --info: #60a5fa;
 
-  /* Surface (web-only expansion). The hero keeps a dark ground for the night-sky
-     particles; the rest of the page is markedly brighter. */
+  /* Surfaces */
   --hero-ground: #0a0a10; /* immersive dark, just for the hero */
-  --ground: #2b2b37; /* page / content ground — lifted again */
+  --ground: #2b2b37; /* page / content ground */
   --ground-2: #353541; /* lighter, for gradients */
   --surface: rgba(72, 70, 88, 0.4);
   --surface-solid: #383744; /* cards */
@@ -61,15 +84,65 @@
   --status-reserved: var(--zinc-400);
   --status-out: var(--zinc-500);
 
-  /* Type (brand.md §3) */
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+  /* ---- Office semantic tokens — DARK (dusk office) ---- */
+  --sky: linear-gradient(180deg, #2a2044 0%, #392842 52%, #432a1f 100%);
+  --floor: #e4a96b;
+  --floor-2: #c6863f;
+  --wall: #2a2030;
+  --wood: #7a4e2d;
+  --couch: #e3a72b;
+  --ink: #f8efe1; /* cream text on the scene */
+  --muted: #ab9684;
 
-  /* Motion */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Identity — carried on every page (hue holds across themes) */
+  --agent-jade: #2ad6bb;
+  --human-rose: #ff86a8;
+}
 
-  /* Layout */
-  --maxw: 920px;
-  --gutter: clamp(20px, 5vw, 56px);
+/*
+ * LIGHT (opt-in via data-theme="light"). Warm daylight office. Values are provisional —
+ * tune for ≥4.5:1 text contrast when the scene + pages adopt it (PR 3b / PR 4). This block
+ * will become the default once light-mode is coherent end-to-end.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --success: #2f9e6a;
+  --warning: #b8860b;
+  --danger: #d1503f;
+  --info: #5b7fa6;
+
+  --hero-ground: #f3e7d4;
+  --ground: #f7efe2;
+  --ground-2: #fbf3e6;
+  --surface: rgba(255, 250, 241, 0.7);
+  --surface-solid: #fffaf1;
+  --surface-raised: #f3e9da;
+  --hairline: rgba(60, 40, 20, 0.14);
+  --hairline-strong: rgba(60, 40, 20, 0.28);
+
+  --text: #2a2118;
+  --text-dim: #4a3f30;
+  --text-faint: #7a6a56;
+
+  --accent: var(--mustard-700);
+  --accent-bright: var(--mustard-500);
+  --glow-mustard: rgba(184, 134, 11, 0.28);
+  --glow-mustard-soft: rgba(184, 134, 11, 0.12);
+
+  --status-shipped: var(--mustard-700);
+  --status-near-term: var(--mustard-500);
+
+  /* Office — daylight */
+  --sky: linear-gradient(180deg, #e9d9c3 0%, #f3e7d4 52%, #ffe9c8 100%);
+  --floor: #f0c188;
+  --floor-2: #dca35f;
+  --wall: #fbf3e6;
+  --wood: #9a6a42;
+  --couch: #e8b23d;
+  --ink: #2a2118;
+  --muted: #7a6a56;
+
+  --agent-jade: #1a9e88;
+  --human-rose: #d9557d;
 }
