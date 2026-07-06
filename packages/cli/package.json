@@ -7,7 +7,9 @@
   "bin": {
     "musterd": "./dist/bin.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -20,6 +22,8 @@
     "@musterd/mcp": "workspace:*",
     "@musterd/protocol": "workspace:*",
     "@musterd/server": "workspace:*",
+    "@musterd/telemetry": "workspace:*",
+    "@opentelemetry/api": "^1.9.1",
     "picocolors": "^1.1.1",
     "ulid": "^2.3.0",
     "ws": "^8.18.0",

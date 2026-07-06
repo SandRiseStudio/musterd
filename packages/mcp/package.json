@@ -22,6 +22,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@musterd/protocol": "workspace:*",
+    "@musterd/telemetry": "workspace:*",
     "@opentelemetry/api": "^1.9.1",
     "ulid": "^2.3.0",
     "ws": "^8.18.0",

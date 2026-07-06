@@ -1,3 +1,4 @@
+import { withTraceContext } from '@musterd/mcp';
 import { type Act, type Envelope, makeEnvelope, type Recipient } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { flagStr, parseMeta, type Parsed } from '../args.js';
@@ -82,7 +83,9 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
       act,
       body,
       thread: thread ?? null,
-      meta: Object.keys(meta).length ? meta : null,
+      // Attach the active trace context as meta.otel (ADR 011 sender SHOULD) — live whenever the
+      // CLI telemetry SDK wrapped this command in a span (ADR 089), inert otherwise.
+      meta: withTraceContext(Object.keys(meta).length ? meta : null),
     });
   } catch (err) {
     throw new CliError(`invalid message: ${(err as Error).message}`, 3);

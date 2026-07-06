@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { startTelemetry, telemetryEnabled } from '@musterd/telemetry';
+import { SpanStatusCode, trace } from '@opentelemetry/api';
 import { parseArgs } from './args.js';
 import { agentCommand } from './commands/agent.js';
 import { auditCommand } from './commands/audit.js';
@@ -67,13 +69,52 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  const code = await dispatch(command, rest);
+  const code = await instrumentedDispatch(command, rest);
   // Agent-side reachability (ADR 046): append a one-line nudge to stderr when a directed act is
   // waiting for the acting member, so a heads-down agent that never runs `inbox` still sees it.
   // Best-effort — never fails the command, never touches stdout (keeps --json/pipes clean).
   const nudge = await reachabilityNudge(command, rest);
   if (nudge) process.stderr.write(nudge + '\n');
   return code;
+}
+
+/**
+ * CLI telemetry (ADR 089): boot the shared SDK and run the command inside a `musterd.cli.command`
+ * span — the command word only, never argv (bodies, tokens and paths live there). Off by default
+ * (no OTLP endpoint → plain dispatch). Two carve-outs: `serve` (the daemon owns that process's
+ * telemetry and its service name) and `inbox --interrupt-check` (the ADR 088 tool-boundary probe
+ * has a sub-50ms budget an SDK boot would blow). Shutdown force-flushes with a hard cap — a
+ * short-lived process must never hold its exit hostage to a dead collector.
+ */
+async function instrumentedDispatch(
+  command: string,
+  rest: ReturnType<typeof parseArgs>,
+): Promise<number> {
+  const skip =
+    command === 'serve' || (command === 'inbox' && rest.flags['interrupt-check'] === true);
+  if (skip || !telemetryEnabled()) return dispatch(command, rest);
+  const telemetry = await startTelemetry({ serviceName: 'musterd-cli' });
+  try {
+    return await trace
+      .getTracer('musterd-cli')
+      .startActiveSpan('musterd.cli.command', async (span) => {
+        span.setAttribute('musterd.command', command);
+        try {
+          const code = await dispatch(command, rest);
+          span.setAttribute('musterd.exit_code', code);
+          span.setStatus({ code: code === 0 ? SpanStatusCode.OK : SpanStatusCode.ERROR });
+          return code;
+        } catch (err) {
+          span.recordException(err as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR, message: (err as Error).message });
+          throw err;
+        } finally {
+          span.end();
+        }
+      });
+  } finally {
+    await telemetry.shutdown({ timeoutMs: 1000 });
+  }
 }
 
 async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Promise<number> {

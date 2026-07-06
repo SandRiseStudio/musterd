@@ -7,6 +7,7 @@ import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
 import { MusterdClient } from './client.js';
 import { isClaimedConfig, loadMcpConfig, type McpConfig } from './config.js';
 import { readAndConsumeResolution, writePendingMarker } from './pending.js';
+import { instrumentTools, startMcpTelemetry } from './telemetry.js';
 import { registerGoals } from './tools/goals.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
 import { registerInsights } from './tools/insights.js';
@@ -21,6 +22,7 @@ export { MusterdClient } from './client.js';
 export { loadMcpConfig, type McpConfig } from './config.js';
 export { bind } from './bind.js';
 export { resolveWorkspace, resolveProvenance } from './workspace.js';
+export { withTraceContext } from './otel.js';
 
 /**
  * Drop presence and exit on every way the host can go away. The WS socket keeps Node's event loop
@@ -31,7 +33,7 @@ export { resolveWorkspace, resolveProvenance } from './workspace.js';
  * Returns a cleanup that removes the listeners (used by tests; the real process just exits).
  */
 export function installShutdownHandlers(opts: {
-  close: () => void;
+  close: () => void | Promise<void>;
   transport: { onclose?: (() => void) | undefined };
   exit?: (code: number) => void;
   signals?: NodeJS.Process;
@@ -47,8 +49,11 @@ export function installShutdownHandlers(opts: {
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    opts.close();
-    exit(0);
+    // An async close (e.g. a bounded telemetry flush, ADR 089) delays exit until it settles; a
+    // sync close keeps the historical exit-immediately behavior.
+    const result = opts.close();
+    if (result instanceof Promise) void result.finally(() => exit(0));
+    else exit(0);
   };
   const sigs = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
   for (const sig of sigs) proc.on(sig, shutdown);
@@ -92,6 +97,9 @@ export function buildMcpServer(
     { name: 'musterd', version: '0.2.0' },
     { instructions: primerInstructions(config) },
   );
+  // Patch registerTool before any tool registers, so every handler runs inside a
+  // `musterd.tool.call` span (ADR 089) — the active span the ADR 011 meta.otel plumbing needs.
+  instrumentTools(server, client, config.team);
   registerJoin(server, client, config);
   registerLeave(server, client, config);
   registerSend(server, client, config);
@@ -161,6 +169,8 @@ export function startResolutionWatcher(
 
 async function main(): Promise<void> {
   const config = loadMcpConfig();
+  // Off by default: a no-op unless the operator set an OTLP endpoint (ADR 089 / ADR 015 posture).
+  const telemetry = await startMcpTelemetry(config);
   const client = new MusterdClient(config);
   await bind(client); // dormant: reachability only, no presence claimed
   // A session that starts unclaimed is a pending presence — drop a marker so `musterd claim` can
@@ -179,6 +189,8 @@ async function main(): Promise<void> {
     close: () => {
       stopWatcher?.();
       client.close();
+      // Flush the telemetry tail with a hard cap: never hang the exit on a dead collector.
+      return telemetry.shutdown({ timeoutMs: 1000 });
     },
     transport,
   });

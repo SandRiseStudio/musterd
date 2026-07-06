@@ -1,71 +1,45 @@
 import { normalizeSeatName, type Envelope } from '@musterd/protocol';
+import {
+  resetTelemetryForTests as resetSdkForTests,
+  startTelemetry as startSdk,
+} from '@musterd/telemetry';
 import { type Counter, type Histogram, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 import { log } from './log.js';
 
 /**
  * OpenTelemetry Layer 1 — minimal, native instrumentation of the server (observability.md §4; ADR
  * 015). One span per Envelope on the validate→persist→route path plus a small, standards-aligned
- * metric set. **Off by default**: it only starts when a standard OTLP endpoint env var is present,
- * and emits only to operator-configured endpoints (no phone-home). When off, the `@opentelemetry/api`
+ * metric set. The bootstrap itself lives in `@musterd/telemetry` (ADR 089) — shared with the MCP
+ * adapter and the CLI — and keeps the ADR 015 posture: **off by default** (starts only when a
+ * standard OTLP endpoint env var is present), no phone-home. When off, the `@opentelemetry/api`
  * calls below are cheap no-ops, so the hot path pays effectively nothing.
  */
 
 const SCOPE = 'musterd';
 
-/** Telemetry is on iff the operator points us at an OTLP endpoint (and hasn't disabled the SDK). */
-export function telemetryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env['OTEL_SDK_DISABLED'] === 'true') return false;
-  return Boolean(
-    env['OTEL_EXPORTER_OTLP_ENDPOINT'] ||
-    env['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'] ||
-    env['OTEL_EXPORTER_OTLP_METRICS_ENDPOINT'],
-  );
-}
-
-let started: Promise<() => Promise<void>> | null = null;
+export { telemetryEnabled } from '@musterd/telemetry';
 
 /**
- * Start the OTel NodeSDK if enabled, returning a shutdown hook (flushes exporters). No-op + instant
- * resolve when disabled. The heavy SDK is dynamically imported so a server with telemetry off never
- * loads it. Idempotent across multiple servers in one process (returns the same start).
+ * Start the shared telemetry SDK as `musterd-server`, returning a shutdown hook (flushes
+ * exporters). No-op + instant resolve when disabled; idempotent across multiple servers in one
+ * process (the shared bootstrap starts once per process).
  */
-export function startTelemetry(env: NodeJS.ProcessEnv = process.env): Promise<() => Promise<void>> {
-  if (started) return started;
-  if (!telemetryEnabled(env)) {
-    started = Promise.resolve(async () => {});
-    return started;
+export async function startTelemetry(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<() => Promise<void>> {
+  const handle = await startSdk({ serviceName: 'musterd-server', env });
+  if (handle.active && !startLogged) {
+    startLogged = true;
+    log.info({ msg: 'telemetry_on', endpoint: handle.endpoint });
   }
-  started = (async () => {
-    const { NodeSDK } = await import('@opentelemetry/sdk-node');
-    const { OTLPTraceExporter } = await import('@opentelemetry/exporter-trace-otlp-http');
-    const { OTLPMetricExporter } = await import('@opentelemetry/exporter-metrics-otlp-http');
-    const { PeriodicExportingMetricReader } = await import('@opentelemetry/sdk-metrics');
-    const { resourceFromAttributes } = await import('@opentelemetry/resources');
-    const { ATTR_SERVICE_NAME } = await import('@opentelemetry/semantic-conventions');
-
-    const sdk = new NodeSDK({
-      resource: resourceFromAttributes({ [ATTR_SERVICE_NAME]: 'musterd-server' }),
-      traceExporter: new OTLPTraceExporter(),
-      metricReader: new PeriodicExportingMetricReader({ exporter: new OTLPMetricExporter() }),
-    });
-    sdk.start();
-    log.info({
-      msg: 'telemetry_on',
-      endpoint:
-        env['OTEL_EXPORTER_OTLP_ENDPOINT'] ??
-        env['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'] ??
-        env['OTEL_EXPORTER_OTLP_METRICS_ENDPOINT'],
-    });
-    return async () => {
-      await sdk.shutdown();
-    };
-  })();
-  return started;
+  return () => handle.shutdown();
 }
+let startLogged = false;
 
 /** Reset the start guard. Tests only — lets a suite register a fresh in-memory provider. */
 export function resetTelemetryForTests(): void {
-  started = null;
+  resetSdkForTests();
+  startLogged = false;
   instruments = null;
 }
 

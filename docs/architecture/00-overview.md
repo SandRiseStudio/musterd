@@ -8,7 +8,7 @@
 
 The load-bearing architectural idea is the **identity / presence / transport split**:
 
-- **Team** = a standing roster, not a project. It outlives any one repo: reuse the same Team across folders to keep the same agents talking. The folder only decides *where* a Member runs (the folder→agent binding); the Team is the durable, cross-project roster. (Surfaced in `musterd init` copy and `docs/design/human-agent-dynamics.md` §2.)
+- **Team** = a standing roster, not a project. It outlives any one repo: reuse the same Team across folders to keep the same agents talking. The folder only decides _where_ a Member runs (the folder→agent binding); the Team is the durable, cross-project roster. (Surfaced in `musterd init` copy and `docs/design/human-agent-dynamics.md` §2.)
 - **Member** = durable identity (name, kind, role, lifecycle, availability). Not a session.
 - **Presence** = where a Member is currently attached (a Surface: cli, claude-code, codex, …). One Member, many possible Presences.
 - **Transport** = the Team Server routes each message to wherever the recipient is present; if nobody is present, it lands in the recipient's durable **Inbox**.
@@ -29,7 +29,9 @@ The load-bearing architectural idea is the **identity / presence / transport spl
 - `@musterd/cli` (the CLI package; installs the `musterd` bin — unscoped `musterd` is blocked on npm, see ADR 009) depends on `@musterd/protocol` (and talks to the server over WS/HTTP — it does **not** import `@musterd/server`).
 - `@musterd/mcp` depends on `@musterd/protocol` (and talks to the server over WS/HTTP — it does **not** import `@musterd/server`).
 
-Only the protocol package is imported across boundaries. Everything else communicates over the wire protocol. This keeps the server replaceable (a Python server could speak the same protocol).
+- `@musterd/telemetry` (ADR 089) is the one other cross-package import: the shared OTLP bootstrap that `@musterd/server`, the CLI and `@musterd/mcp` all boot (off by default, no phone-home). It carries no protocol or wire logic — service name + resource attributes in, a bounded shutdown/flush out.
+
+Only the protocol package (and the telemetry bootstrap above) is imported across boundaries. Everything else communicates over the wire protocol. This keeps the server replaceable (a Python server could speak the same protocol).
 
 ## Build order (strict)
 
