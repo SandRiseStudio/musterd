@@ -1,30 +1,35 @@
 /*
- * musterd — Live Comms. Split-canvas: a three.js constellation (left) over a dusk sky + a legible
- * stream console (right). Theme: warm **dusk/dawn** mid-tone — twilight violet up top melting to an
- * amber horizon, cream ink, mustard accent. "Calm at rest, energetic in motion."
+ * musterd — Live Comms. Split-canvas: an isometric office (left) over a daylight sky + a legible
+ * stream console (right). Theme: warm **daylight office** mid-tone — soft morning cream up top
+ * melting to a gold horizon, dark ink text, mustard accent. "Calm at rest, energetic in motion."
+ *
+ * PR 4 retheme: this was the dusk/dawn palette (twilight violet → amber, cream ink); the office
+ * canvas's own daylight palette (PR 3b, office-scene/index.ts) is no longer pinned to dusk here
+ * (removed the --floor/--wood/--couch override) so the scene now reads the same light tokens
+ * :root[data-theme="light"] gives everything else — the chrome and the canvas stay one theme.
  */
 
 .lc {
-  /* — palette: dusk/dawn warm mid-tone — */
-  --lc-ground: #1d1622; /* warm dusk base (solid areas / stream console) */
-  --lc-ground-2: #251c2c;
-  --lc-surface: #2a2030; /* rows */
-  --lc-surface-2: #362a3d; /* raised: live row, badges, inputs */
-  --lc-surface-3: #42344a;
-  --lc-text: #f8efe1; /* warm cream */
-  --lc-dim: #dccbb9;
-  --lc-muted: #ab9684;
-  --lc-faint: #786358;
-  --lc-border: rgba(255, 233, 208, 0.1);
-  --lc-border-2: rgba(255, 233, 208, 0.18);
-  --lc-accent: var(--mustard-500, #e1ad01);
-  --lc-accent-bright: #f4cf52;
-  --lc-success: #5cd49a;
-  --lc-danger: #f3776a;
-  --lc-info: #88a9cf;
-  --lc-handoff: #c6a3ff; /* violet — handoff (a distinct, dusk-friendly act tone) */
-  --lc-agent: #2ad6bb;
-  --lc-human: #ff86a8;
+  /* — palette: daylight office mid-tone — */
+  --lc-ground: #f3e7d4; /* warm daylight base (solid areas / stream console) */
+  --lc-ground-2: #fbf3e6;
+  --lc-surface: #f7efe2; /* rows */
+  --lc-surface-2: #f0e2c8; /* raised: live row, badges, inputs */
+  --lc-surface-3: #e8d7b4;
+  --lc-text: #2a2118; /* dark ink */
+  --lc-dim: #4a3f30;
+  --lc-muted: #7a6a56;
+  --lc-faint: #9a8a72;
+  --lc-border: rgba(60, 40, 20, 0.14);
+  --lc-border-2: rgba(60, 40, 20, 0.26);
+  --lc-accent: var(--mustard-700, #b8860b);
+  --lc-accent-bright: var(--mustard-500, #e1ad01);
+  --lc-success: #2f9e6a;
+  --lc-danger: #d1503f;
+  --lc-info: #5b7fa6;
+  --lc-handoff: #8a5fd6; /* violet — handoff (a distinct act tone, dark enough for cream) */
+  --lc-agent: #1a9e88;
+  --lc-human: #d9557d;
 
   /* — spacing (4-based) — */
   --lc-1: 2px;
@@ -48,15 +53,6 @@
   --lc-z-rail: 1;
   --lc-z-overlay: 5;
 
-  /* The office canvas reads --floor/--wood/--couch from its host (see office-scene/index.ts). The
-     live stage keeps the DUSK office palette regardless of the page theme, so the scene stays coherent
-     with the dusk chrome below. The /live page chrome itself is light-moded in PR 4; until then the
-     global light default (PR 3b) stops at this container. */
-  --floor: #e4a96b;
-  --floor-2: #c6863f;
-  --wood: #7a4e2d;
-  --couch: #e3a72b;
-
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -66,8 +62,8 @@
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;
-  /* dusk horizon: twilight violet → warm mauve → amber */
-  background: linear-gradient(178deg, #2a2044 0%, #392842 44%, #432a1f 100%);
+  /* daylight horizon: soft morning cream → warm gold (matches --sky, tokens.css light) */
+  background: linear-gradient(178deg, #e9d9c3 0%, #f3e7d4 44%, #ffe9c8 100%);
 }
 .lc ::selection {
   background: color-mix(in srgb, var(--lc-accent) 34%, transparent);
@@ -82,7 +78,7 @@
   height: 52px;
   padding: 0 var(--lc-7);
   border-bottom: 1px solid var(--lc-border);
-  background: rgba(29, 22, 34, 0.5);
+  background: rgba(255, 250, 240, 0.6);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   flex: 0 0 auto;
@@ -555,10 +551,10 @@
   min-width: 0;
   border-right: 1px solid var(--lc-border);
   overflow: hidden;
-  /* amber horizon glow at the base, a cool violet wash up top */
+  /* amber horizon glow at the base, a soft sunlit highlight up top */
   background:
     radial-gradient(130% 78% at 50% 116%, rgba(255, 168, 92, 0.22), transparent 58%),
-    radial-gradient(110% 80% at 50% -8%, rgba(150, 122, 224, 0.16), transparent 60%);
+    radial-gradient(110% 80% at 50% -8%, rgba(255, 244, 214, 0.4), transparent 60%);
 }
 .lc-gl-canvas {
   position: absolute;
@@ -1543,7 +1539,7 @@
   color: var(--lc-muted);
 }
 .lc-form__field input {
-  background: rgba(0, 0, 0, 0.22);
+  background: rgba(0, 0, 0, 0.045);
   border: 1px solid var(--lc-border-2);
   border-radius: var(--lc-r-sm);
   padding: 10px 12px;
