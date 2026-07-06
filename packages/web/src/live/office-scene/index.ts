@@ -12,7 +12,11 @@ export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode } from './types'
 const DPR_CAP = 2;
 const CUE_SECS = 1.5;
 // Speech-bubble lifecycle (ms): hold after the text finishes typing, then the exit transition length.
-const SPEECH_HOLD_MS = 1900;
+// The hold is deliberately generous (plus a per-character allowance, capped) so a bubble lingers long
+// enough to actually read — and to click through to the stream — before it drifts away.
+const SPEECH_HOLD_MS = 4200;
+const SPEECH_HOLD_PER_CHAR_MS = 30;
+const SPEECH_HOLD_MAX_MS = 7000;
 const SPEECH_OUT_MS = 560;
 /** How far above the head anchor the bubble sits (clears the name label). */
 const SPEECH_LIFT = 26;
@@ -46,7 +50,18 @@ interface Speech {
  * (status pulse, note, resolve…) animate on top either way. Rive is a later swap behind `drawActor`.
  * Client-only.
  */
-export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: boolean): OfficeHandle {
+export interface OfficeOptions {
+  /** Called with the act's envelope id when a speech bubble is clicked — the route uses it to scroll
+   * to / highlight that act in the stream panel. Bubbles without an id (or no handler) aren't clickable. */
+  onActClick?: (id: string) => void;
+}
+
+export function mountOffice(
+  host: HTMLElement,
+  labelHost: HTMLElement,
+  reduced: boolean,
+  options: OfficeOptions = {},
+): OfficeHandle {
   const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
 
   const canvas = document.createElement('canvas');
@@ -165,7 +180,11 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
       el.textContent = '';
       const nameEl = document.createElement('span');
       nameEl.className = 'lc-gl-label__name';
-      nameEl.textContent = name;
+      // the same presence dot the roster panel leads with — green when online, dim otherwise
+      const dot = document.createElement('span');
+      dot.className = `lc-gl-label__dot lc-gl-label__dot--${node.presence === 'online' ? 'on' : 'off'}`;
+      nameEl.appendChild(dot);
+      nameEl.appendChild(document.createTextNode(name));
       el.appendChild(nameEl);
       // The member's status/activity is no longer a persistent caption here (it used to render as one
       // ultra-wide, never-fading line). It now surfaces as an ephemeral speech bubble on each act (below);
@@ -211,8 +230,10 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
 
   /** Show a member's act body as a typed-out bubble that holds, then drifts up and fades. One bubble per
    * member — a newer act supersedes the previous. Driven by timers/CSS (not the RAF loop), so it animates
-   * even while the office rests; reduced-motion shows the text at once with no typewriter. */
-  function showSpeech(who: string, raw: string, tone: string) {
+   * even while the office rests; reduced-motion shows the text at once with no typewriter. When the act's
+   * envelope `id` is known (and the host wired `onActClick`), the bubble is a click-through to that act
+   * in the stream panel. */
+  function showSpeech(who: string, raw: string, tone: string, id?: string) {
     const text = truncateSpeech(raw);
     const head = heads.get(who);
     if (!text || !head) return; // nothing to say, or the sender isn't on the floor (offline / capped)
@@ -224,6 +245,14 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     outer.className = 'lc-speech';
     const inner = document.createElement('div');
     inner.className = 'lc-speech__inner';
+    if (id && options.onActClick) {
+      outer.classList.add('is-clickable');
+      outer.title = 'Show this in the stream';
+      outer.addEventListener('click', () => {
+        outer.classList.add('is-picked'); // a soft acknowledge pulse as focus hands off to the stream
+        options.onActClick!(id);
+      });
+    }
     inner.style.setProperty('--lc-speech-tone', toneColor(tone));
     const textEl = document.createElement('span');
     textEl.className = 'lc-speech__text';
@@ -241,13 +270,22 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     const raf = requestAnimationFrame(() => outer.classList.add('is-in'));
     s.cancels.push(() => cancelAnimationFrame(raf));
 
+    // Linger scaled to length (longer text earns a longer read), then drift away. Hovering the bubble
+    // pauses the countdown so a reader (or a click) is never raced by the fade.
+    const holdMs = Math.min(SPEECH_HOLD_MAX_MS, SPEECH_HOLD_MS + text.length * SPEECH_HOLD_PER_CHAR_MS);
     const leave = () => {
-      const hold = setTimeout(() => {
-        outer.classList.remove('is-in');
-        outer.classList.add('is-out');
-        const rm = setTimeout(() => clearSpeech(who, s), SPEECH_OUT_MS);
-        s.cancels.push(() => clearTimeout(rm));
-      }, SPEECH_HOLD_MS);
+      let hold: ReturnType<typeof setTimeout>;
+      const begin = () => {
+        hold = setTimeout(() => {
+          outer.classList.remove('is-in');
+          outer.classList.add('is-out');
+          const rm = setTimeout(() => clearSpeech(who, s), SPEECH_OUT_MS);
+          s.cancels.push(() => clearTimeout(rm));
+        }, holdMs);
+      };
+      begin();
+      outer.addEventListener('mouseenter', () => clearTimeout(hold));
+      outer.addEventListener('mouseleave', begin);
       s.cancels.push(() => clearTimeout(hold));
     };
 
@@ -463,7 +501,7 @@ export function mountOffice(host: HTMLElement, labelHost: HTMLElement, reduced: 
     }
     // Speech is legible content, not motion — it plays even under reduced-motion (typewriter off there).
     if (ev.kind === 'speech') {
-      showSpeech(ev.who, ev.text, ev.tone);
+      showSpeech(ev.who, ev.text, ev.tone, ev.id);
       return;
     }
     if (reduced) return;

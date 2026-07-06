@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import liveCss from '../live/Live.css?url';
 import { ConstellationGL } from '../live/ConstellationGL';
 import { RosterPanel } from '../live/RosterPanel';
-import { Stream } from '../live/Stream';
+import { scrollToMessage, Stream } from '../live/Stream';
 import type { LiveConfig, ConnStatus } from '../live/client';
 import { provisionObserver } from '../live/client';
 import { firehoseSound } from '../live/sound';
@@ -18,9 +18,13 @@ export const Route = createFileRoute('/live')({
 });
 
 const TEAM_KEY = 'musterd.live.team';
-const PANEL_KEY = 'musterd.live.panel';
-/** Office panel presentation: normal (in the split), collapsed (hidden), or companion (fills the window). */
-type PanelMode = 'normal' | 'collapsed' | 'companion';
+const COLLAPSE_KEY = 'musterd.live.collapsed';
+const COMPANION_KEY = 'musterd.live.companion';
+
+/** The three live panels, each independently collapsible into a slim rail. */
+type PanelId = 'office' | 'roster' | 'stream';
+type Collapsed = Record<PanelId, boolean>;
+const NO_COLLAPSE: Collapsed = { office: false, roster: false, stream: false };
 // `.v2` = credential-based observer (ADR 077 claim handshake); bumping the key drops any legacy
 // token-based creds so the next Watch re-provisions with a credential.
 const observerKey = (team: string) => `musterd.live.observer.v2.${team}`;
@@ -58,15 +62,31 @@ function LivePage() {
   const [cfg, setCfg] = useState<LiveConfig | null>(null);
   const [provisioning, setProvisioning] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [panel, setPanel] = useState<PanelMode>('normal');
+  const [collapsed, setCollapsed] = useState<Collapsed>(NO_COLLAPSE);
+  const [companion, setCompanion] = useState(false);
 
-  const setPanelMode = (m: PanelMode) => {
-    setPanel(m);
-    try {
-      window.localStorage.setItem(PANEL_KEY, m);
-    } catch {
-      /* private mode — mode just won't persist */
-    }
+  const toggleCollapse = (id: PanelId) => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try {
+        window.localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next));
+      } catch {
+        /* private mode — collapse state just won't persist */
+      }
+      return next;
+    });
+  };
+
+  const toggleCompanion = () => {
+    setCompanion((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(COMPANION_KEY, next ? '1' : '');
+      } catch {
+        /* private mode */
+      }
+      return next;
+    });
   };
 
   // Auto-recovery for a stale observer credential (a wiped DB or an expired 24h observer TTL, ADR 064):
@@ -170,12 +190,38 @@ function LivePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Restore the saved office panel mode (SSR-safe; once on the client).
+  // Restore saved panel collapse + companion state (SSR-safe; once on the client).
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const saved = window.localStorage.getItem(PANEL_KEY);
-    if (saved === 'collapsed' || saved === 'companion' || saved === 'normal') setPanel(saved);
+    try {
+      const raw = window.localStorage.getItem(COLLAPSE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as Partial<Collapsed>;
+        setCollapsed({
+          office: !!saved.office,
+          roster: !!saved.roster,
+          stream: !!saved.stream,
+        });
+      }
+    } catch {
+      /* ignore malformed persisted state */
+    }
+    setCompanion(window.localStorage.getItem(COMPANION_KEY) === '1');
   }, []);
+
+  // A clicked office speech bubble navigates to its act in the stream. If the stream rail is collapsed,
+  // expand it first and let the expand transition land before scrolling — one smooth motion, no jump cut.
+  const onActClick = useCallback(
+    (id: string) => {
+      if (collapsed.stream) {
+        toggleCollapse('stream');
+        window.setTimeout(() => scrollToMessage(id), 380);
+      } else {
+        scrollToMessage(id);
+      }
+    },
+    [collapsed.stream],
+  );
 
   // On a terminal connection error (e.g. a stale observer token after a daemon reset), drop the
   // stored observer so the next Watch re-provisions a fresh one.
@@ -193,7 +239,7 @@ function LivePage() {
         {connected && <span className="lc__team">/ {cfg!.team}</span>}
         <span className="lc__spacer" />
         {connected && <WatchLinkButton cfg={cfg!} />}
-        {connected && <PanelControls mode={panel} onMode={setPanelMode} />}
+        {connected && <CompanionToggle on={companion} onToggle={toggleCompanion} />}
         {connected && <SoundToggle />}
         <StatusPill status={status} live={roster.filter((m) => m.presence !== 'offline').length} />
       </header>
@@ -215,10 +261,34 @@ function LivePage() {
               {error} <button onClick={reset}>reset &amp; reconnect</button>
             </div>
           )}
-          <div className={`lc__canvas lc__canvas--${panel}`}>
-            <ConstellationGL roster={roster} envelopes={envelopes} liveIds={liveIds} />
-            <RosterPanel roster={roster} />
-            <Stream envelopes={envelopes} roster={roster} liveIds={liveIds} />
+          <div
+            className={
+              `lc__canvas${companion ? ' lc__canvas--companion' : ''}` +
+              `${collapsed.office ? ' is-office-collapsed' : ''}` +
+              `${collapsed.roster ? ' is-roster-collapsed' : ''}` +
+              `${collapsed.stream ? ' is-stream-collapsed' : ''}`
+            }
+          >
+            <ConstellationGL
+              roster={roster}
+              envelopes={envelopes}
+              liveIds={liveIds}
+              collapsed={collapsed.office}
+              onCollapse={() => toggleCollapse('office')}
+              onActClick={onActClick}
+            />
+            <RosterPanel
+              roster={roster}
+              collapsed={collapsed.roster}
+              onCollapse={() => toggleCollapse('roster')}
+            />
+            <Stream
+              envelopes={envelopes}
+              roster={roster}
+              liveIds={liveIds}
+              collapsed={collapsed.stream}
+              onCollapse={() => toggleCollapse('stream')}
+            />
           </div>
         </>
       )}
@@ -300,43 +370,26 @@ function SoundToggle() {
 }
 
 /**
- * Office panel controls: collapse/expand the office within the split, and a "companion" toggle that
- * makes the office fill the browser window (not OS fullscreen) with the roster/stream tucked away.
+ * Companion toggle: make the office fill the browser window (not OS fullscreen) with the roster/stream
+ * tucked away. Per-panel collapse now lives inside each panel's own header (see PanelChrome).
  */
-function PanelControls({ mode, onMode }: { mode: PanelMode; onMode: (m: PanelMode) => void }) {
-  const collapsed = mode === 'collapsed';
-  const companion = mode === 'companion';
+function CompanionToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
-    <>
-      <button
-        type="button"
-        className="lc__pbtn"
-        onClick={() => onMode(collapsed ? 'normal' : 'collapsed')}
-        aria-pressed={collapsed}
-        title={collapsed ? 'Show the office' : 'Collapse the office'}
-      >
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <rect x="2" y="3" width="12" height="10" rx="1.6" />
-          <path d="M6.5 3v10" />
-          {collapsed ? <path d="M9 6.2 10.8 8 9 9.8" /> : <path d="M10.8 6.2 9 8l1.8 1.8" />}
-        </svg>
-      </button>
-      <button
-        type="button"
-        className={`lc__pbtn${companion ? ' lc__pbtn--on' : ''}`}
-        onClick={() => onMode(companion ? 'normal' : 'companion')}
-        aria-pressed={companion}
-        title={companion ? 'Exit companion mode' : 'Companion mode — fill the window'}
-      >
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          {companion ? (
-            <path d="M6.5 3v3.5H3M9.5 3v3.5H13M6.5 13V9.5H3M9.5 13V9.5H13" />
-          ) : (
-            <path d="M3 6.5V3h3.5M13 6.5V3H9.5M3 9.5V13h3.5M13 9.5V13H9.5" />
-          )}
-        </svg>
-      </button>
-    </>
+    <button
+      type="button"
+      className={`lc__pbtn${on ? ' lc__pbtn--on' : ''}`}
+      onClick={onToggle}
+      aria-pressed={on}
+      title={on ? 'Exit companion mode' : 'Companion mode — office fills the window'}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        {on ? (
+          <path d="M6.5 3v3.5H3M9.5 3v3.5H13M6.5 13V9.5H3M9.5 13V9.5H13" />
+        ) : (
+          <path d="M3 6.5V3h3.5M13 6.5V3H9.5M3 9.5V13h3.5M13 9.5V13H9.5" />
+        )}
+      </svg>
+    </button>
   );
 }
 

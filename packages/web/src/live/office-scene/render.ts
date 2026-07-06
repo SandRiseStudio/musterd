@@ -1,5 +1,18 @@
 import { depth, FLOOR, project, THICK, type Fit, type Pt } from './iso';
-import { DESK_SLOTS, ENTRANCE, FWD, HUDDLES, NOOK, PLANTS, type Huddle } from './layout';
+import {
+  CHAIR_OFF,
+  DESK_D,
+  DESK_SLOTS,
+  DESK_W,
+  ENTRANCE,
+  FWD,
+  HUDDLES,
+  LOUNGE,
+  NOOK,
+  NOOK_RUG_R,
+  PLANTS,
+  type Huddle,
+} from './layout';
 import type { Placement } from './seating';
 import type { Dir, OfficeNode, Pose } from './types';
 
@@ -150,47 +163,70 @@ function couch(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, 
   const f = FWD[dir];
   const p: [number, number] = [-f[1], f[0]];
   const sn = f[1] !== 0;
-  const L = 84;
-  const Dp = 38;
-  box(ctx, fit, lx - f[0] * (Dp / 2 - 3), ly - f[1] * (Dp / 2 - 3), sn ? L : 8, sn ? 8 : L, 26, dim(c, 0.9));
-  box(ctx, fit, lx, ly, sn ? L : Dp, sn ? Dp : L, 15, c);
-  box(ctx, fit, lx + p[0] * (L / 2 - 4), ly + p[1] * (L / 2 - 4), sn ? 8 : Dp, sn ? Dp : 8, 20, dim(c, 0.95));
-  box(ctx, fit, lx - p[0] * (L / 2 - 4), ly - p[1] * (L / 2 - 4), sn ? 8 : Dp, sn ? Dp : 8, 20, dim(c, 0.95));
+  const L = LOUNGE.couch.len;
+  const Dp = LOUNGE.couch.dep;
+  box(ctx, fit, lx - f[0] * (Dp / 2 - 4), ly - f[1] * (Dp / 2 - 4), sn ? L : 10, sn ? 10 : L, 34, dim(c, 0.9));
+  box(ctx, fit, lx, ly, sn ? L : Dp, sn ? Dp : L, 20, c);
+  box(ctx, fit, lx + p[0] * (L / 2 - 5), ly + p[1] * (L / 2 - 5), sn ? 10 : Dp, sn ? Dp : 10, 27, dim(c, 0.95));
+  box(ctx, fit, lx - p[0] * (L / 2 - 5), ly - p[1] * (L / 2 - 5), sn ? 10 : Dp, sn ? Dp : 10, 27, dim(c, 0.95));
 }
 
 function armchair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, c: string, dir: Dir): void {
   const f = FWD[dir];
   const sn = f[1] !== 0;
-  box(ctx, fit, lx - f[0] * 16, ly - f[1] * 16, sn ? 40 : 8, sn ? 8 : 40, 24, dim(c, 0.9));
-  box(ctx, fit, lx, ly, sn ? 40 : 42, sn ? 42 : 40, 15, c);
+  const S = LOUNGE.chairW.size;
+  box(ctx, fit, lx - f[0] * (S / 2 - 6), ly - f[1] * (S / 2 - 6), sn ? S - 2 : 10, sn ? 10 : S - 2, 32, dim(c, 0.9));
+  box(ctx, fit, lx, ly, sn ? S - 2 : S, sn ? S : S - 2, 20, c);
 }
 
 function ctable(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
   const s = project(lx, ly, fit);
-  ellipse(ctx, { x: s.x, y: s.y }, 32 * fit.scale, 10 * fit.scale, 'rgba(0,0,0,0.12)');
-  box(ctx, fit, lx, ly, 46, 32, 12, WOOD_TOP);
+  ellipse(ctx, { x: s.x, y: s.y }, 42 * fit.scale, 13 * fit.scale, 'rgba(0,0,0,0.12)');
+  box(ctx, fit, lx, ly, LOUNGE.table.w, LOUNGE.table.d, 16, WOOD_TOP);
 }
 
-function drawNook(ctx: CanvasRenderingContext2D, fit: Fit): void {
+/** One depth-sortable draw call. The nook/huddle used to paint as single blobs anchored at their
+ * centre, which over-painted any member standing on the north half of their rugs — each solid piece is
+ * now its own item at its own footprint depth, and flat rugs paint with the floor (see renderScene). */
+interface DepthItem {
+  d: number;
+  fn: () => void;
+}
+
+/** The break-nook lounge, as depth items: the rug flat on the floor, every solid piece self-sorted. */
+function nookItems(ctx: CanvasRenderingContext2D, fit: Fit): { rug: () => void; items: DepthItem[] } {
   const { lx, ly } = NOOK;
-  rug(ctx, fit, lx, ly, 132, '#ce9256');
-  // kitchenette along the back
-  drawPlant(ctx, fit, lx + 104, ly - 34, 'fiddle');
-  box(ctx, fit, lx - 96, ly - 34, 32, 28, 48, '#edeff1'); // fridge
-  box(ctx, fit, lx - 40, ly - 42, 72, 26, 30, '#8a5a34'); // counter
-  box(ctx, fit, lx - 58, ly - 42, 14, 12, 5, '#33272b'); // coffee machine
-  couch(ctx, fit, lx + 24, ly - 4, '#e3a72b', 'S');
-  armchair(ctx, fit, lx - 44, ly + 52, '#c9744a', 'E');
-  ctable(ctx, fit, lx + 24, ly + 48);
-  armchair(ctx, fit, lx + 88, ly + 46, '#c9744a', 'W');
+  const L = LOUNGE;
+  const at = (dx: number, dy: number, fn: () => void): DepthItem => ({ d: depth(lx + dx, ly + dy), fn });
+  return {
+    rug: () => rug(ctx, fit, lx, ly, NOOK_RUG_R, '#ce9256'),
+    items: [
+      at(L.plant.dx, L.plant.dy, () => drawPlant(ctx, fit, lx + L.plant.dx, ly + L.plant.dy, 'fiddle')),
+      at(L.fridge.dx, L.fridge.dy, () => box(ctx, fit, lx + L.fridge.dx, ly + L.fridge.dy, L.fridge.w, L.fridge.d, L.fridge.h, '#edeff1')),
+      at(L.counter.dx, L.counter.dy, () => {
+        box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy, L.counter.w, L.counter.d, L.counter.h, '#8a5a34');
+        box(ctx, fit, lx + L.machine.dx, ly + L.machine.dy, 16, 13, 10, '#33272b', L.counter.h); // machine on top
+      }),
+      at(L.couch.dx, L.couch.dy, () => couch(ctx, fit, lx + L.couch.dx, ly + L.couch.dy, '#e3a72b', 'S')),
+      at(L.chairE.dx, L.chairE.dy, () => armchair(ctx, fit, lx + L.chairE.dx, ly + L.chairE.dy, '#c9744a', 'E')),
+      at(L.table.dx, L.table.dy, () => ctable(ctx, fit, lx + L.table.dx, ly + L.table.dy)),
+      at(L.chairW.dx, L.chairW.dy, () => armchair(ctx, fit, lx + L.chairW.dx, ly + L.chairW.dy, '#c9744a', 'W')),
+    ],
+  };
 }
 
-function drawHuddle(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): void {
-  rug(ctx, fit, h.lx, h.ly, 62, h.rug);
-  box(ctx, fit, h.lx, h.ly - 40, 26, 26, 18, h.poufs[0]);
-  box(ctx, fit, h.lx, h.ly, 40, 40, 12, WOOD_TOP);
-  box(ctx, fit, h.lx + 38, h.ly + 24, 26, 26, 18, h.poufs[1]);
-  box(ctx, fit, h.lx - 38, h.ly + 24, 26, 26, 18, h.poufs[2]);
+/** A huddle, as depth items (same reasoning as the nook). */
+function huddleItems(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): { rug: () => void; items: DepthItem[] } {
+  const at = (dx: number, dy: number, fn: () => void): DepthItem => ({ d: depth(h.lx + dx, h.ly + dy), fn });
+  return {
+    rug: () => rug(ctx, fit, h.lx, h.ly, 78, h.rug),
+    items: [
+      at(0, -44, () => box(ctx, fit, h.lx, h.ly - 44, 34, 34, 22, h.poufs[0])),
+      at(0, 0, () => box(ctx, fit, h.lx, h.ly, 52, 52, 14, WOOD_TOP)),
+      at(42, 26, () => box(ctx, fit, h.lx + 42, h.ly + 26, 34, 34, 22, h.poufs[1])),
+      at(-42, 26, () => box(ctx, fit, h.lx - 42, h.ly + 26, 34, 34, 22, h.poufs[2])),
+    ],
+  };
 }
 
 /** A faint floor pad marking one spot in the entrance waiting queue (drawn under an overflow member). */
@@ -214,16 +250,70 @@ function drawCountPill(ctx: CanvasRenderingContext2D, at: Pt, text: string, scal
 }
 
 function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
-  rug(ctx, fit, ENTRANCE.lx, ENTRANCE.ly, 70, '#7a4e2d');
-  box(ctx, fit, ENTRANCE.lx - 44, ENTRANCE.ly - 42, 8, 8, 96, '#7e6042');
-  box(ctx, fit, ENTRANCE.lx + 44, ENTRANCE.ly - 42, 8, 8, 96, '#7e6042');
-  const a = project(ENTRANCE.lx - 44, ENTRANCE.ly - 42, fit);
-  const b = project(ENTRANCE.lx + 44, ENTRANCE.ly - 42, fit);
-  const up = 96 * fit.scale;
-  ctx.globalAlpha = 0.3;
-  quad(ctx, [a, b, { x: b.x, y: b.y - up }, { x: a.x, y: a.y - up }], '#cfe7ee');
+  const { lx, ly } = ENTRANCE;
+  const s = fit.scale;
+  const H = 96;
+  // welcome mat: a bordered two-tone mat instead of the old flat brown patch
+  rug(ctx, fit, lx, ly, 70, '#6b4326');
+  rug(ctx, fit, lx, ly, 58, '#8f5c33');
+  // threshold strip under the doorway
+  box(ctx, fit, lx, ly - 42, 94, 6, 3, '#4e3a24');
+  // door posts
+  box(ctx, fit, lx - 44, ly - 42, 10, 10, H, '#5c452c');
+  box(ctx, fit, lx + 44, ly - 42, 10, 10, H, '#5c452c');
+  const a = project(lx - 44, ly - 42, fit);
+  const b = project(lx + 44, ly - 42, fit);
+  const up = H * s;
+  // glass: a vertical sky-tint gradient (brighter at the top) instead of one flat wash
+  const glass = ctx.createLinearGradient(0, Math.min(a.y, b.y) - up, 0, Math.max(a.y, b.y));
+  glass.addColorStop(0, 'rgba(207, 231, 238, 0.42)');
+  glass.addColorStop(0.6, 'rgba(207, 231, 238, 0.18)');
+  glass.addColorStop(1, 'rgba(207, 231, 238, 0.3)');
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.lineTo(b.x, b.y - up);
+  ctx.lineTo(a.x, a.y - up);
+  ctx.closePath();
+  ctx.fillStyle = glass;
+  ctx.fill();
+  // a soft diagonal sheen across the panes
+  ctx.clip();
+  ctx.globalAlpha = 0.14;
+  ctx.fillStyle = '#ffffff';
+  const shx = (b.x - a.x) * 0.22;
+  ctx.beginPath();
+  ctx.moveTo(a.x + shx, a.y);
+  ctx.lineTo(a.x + shx * 1.8, a.y - up);
+  ctx.lineTo(a.x + shx * 2.4, a.y - up);
+  ctx.lineTo(a.x + shx * 1.6, a.y);
+  ctx.closePath();
+  ctx.fill();
   ctx.globalAlpha = 1;
-  box(ctx, fit, ENTRANCE.lx - 44, ENTRANCE.ly - 42, 92, 6, 8, '#7e6042', 96);
+  ctx.restore();
+  // double-door mullion + slim frame rails + handles
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  ctx.strokeStyle = 'rgba(94, 70, 44, 0.9)';
+  ctx.lineWidth = Math.max(1, 2.2 * s);
+  ctx.beginPath();
+  ctx.moveTo(mid.x, mid.y);
+  ctx.lineTo(mid.x, mid.y - up);
+  ctx.stroke();
+  ctx.lineWidth = Math.max(1, 1.2 * s);
+  ctx.strokeStyle = 'rgba(94, 70, 44, 0.55)';
+  for (const t of [0.32, 0.78]) {
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y - up * t + (mid.y - a.y) * 0);
+    ctx.lineTo(b.x, b.y - up * t);
+    ctx.stroke();
+  }
+  const hy = mid.y - up * 0.44;
+  ctx.fillStyle = '#3c2e1e';
+  roundRect(ctx, mid.x - 5.5 * s, hy - 7 * s, 2.6 * s, 14 * s, 1.3 * s, '#3c2e1e');
+  roundRect(ctx, mid.x + 2.9 * s, hy - 7 * s, 2.6 * s, 14 * s, 1.3 * s, '#3c2e1e');
+  // header beam over the doorway
+  box(ctx, fit, lx, ly - 42, 98, 8, 10, '#6b4a2a', H);
 }
 
 function drawPlant(
@@ -269,15 +359,24 @@ function avatar(
   node: OfficeNode,
   dir: Dir,
   small = false,
+  moving = false,
+  run = false,
 ): void {
   const p = project(lx, ly, fit);
   const s = fit.scale * (small ? 0.72 : 1);
   const acc = node.color;
   const dk = hslL(acc, 0.7);
+  // Walk cycle (code-drawn fallback only — the Rive rig animates its own limbs): feet alternate and the
+  // arms counter-swing on a time-based phase, so a mover strides instead of gliding.
+  const ph = moving ? Math.sin(performance.now() / (run ? 55 : 90)) : 0;
   ellipse(ctx, { x: p.x, y: p.y }, 24 * s, 6 * s, 'rgba(0,0,0,0.18)');
+  if (moving) {
+    ellipse(ctx, { x: p.x - 8 * s + ph * 5 * s, y: p.y - 3 * s - Math.max(0, ph) * 4 * s }, 5.5 * s, 3.5 * s, dk);
+    ellipse(ctx, { x: p.x + 8 * s - ph * 5 * s, y: p.y - 3 * s - Math.max(0, -ph) * 4 * s }, 5.5 * s, 3.5 * s, dk);
+  }
   roundRect(ctx, p.x - 19 * s, p.y - 44 * s, 38 * s, 32 * s, 12 * s, acc);
-  roundRect(ctx, p.x - 25 * s, p.y - 42 * s, 8 * s, 22 * s, 4 * s, dk);
-  roundRect(ctx, p.x + 17 * s, p.y - 42 * s, 8 * s, 22 * s, 4 * s, dk);
+  roundRect(ctx, p.x - 25 * s, p.y - (42 - ph * 5) * s, 8 * s, 22 * s, 4 * s, dk);
+  roundRect(ctx, p.x + 17 * s, p.y - (42 + ph * 5) * s, 8 * s, 22 * s, 4 * s, dk);
   ellipse(ctx, { x: p.x, y: p.y - 56 * s }, 15 * s, 15 * s, SKIN);
   if (node.kind === 'agent') {
     ctx.strokeStyle = acc;
@@ -325,7 +424,7 @@ function bubble(ctx: CanvasRenderingContext2D, x: number, y: number, glyph: '?' 
 export function drawActor(ctx: CanvasRenderingContext2D, fit: Fit, pose: Pose, node: OfficeNode): void {
   const fade = pose.alpha < 1;
   if (fade) ctx.globalAlpha = Math.max(0, pose.alpha);
-  avatar(ctx, fit, pose.lx, pose.ly, node, pose.dir, pose.small);
+  avatar(ctx, fit, pose.lx, pose.ly, node, pose.dir, pose.small, pose.moving, pose.run);
   const p = project(pose.lx, pose.ly, fit);
   const s = fit.scale * (pose.small ? 0.72 : 1);
   if (pose.carry) {
@@ -341,8 +440,18 @@ export function drawActor(ctx: CanvasRenderingContext2D, fit: Fit, pose: Pose, n
 function chair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, dir: Dir, color: string): void {
   const f = FWD[dir];
   const sn = f[1] !== 0;
-  box(ctx, fit, lx, ly, sn ? 34 : 30, sn ? 30 : 34, 14, color); // seat
-  box(ctx, fit, lx - f[0] * 14, ly - f[1] * 14, sn ? 34 : 7, sn ? 7 : 34, 30, dim(color, 0.85)); // backrest
+  const lift = 10; // seat height off the floor — the legs' reach
+  // four splayed legs under the seat (chairs used to sit legless on the floor)
+  for (const [sx, sy] of [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ] as const) {
+    box(ctx, fit, lx + sx * 10, ly + sy * 10, 4, 4, lift, dim(color, 0.6));
+  }
+  box(ctx, fit, lx, ly, sn ? 34 : 30, sn ? 30 : 34, 12, color, lift); // seat
+  box(ctx, fit, lx - f[0] * 14, ly - f[1] * 14, sn ? 34 : 7, sn ? 7 : 34, 26, dim(color, 0.85), lift + 4); // backrest
 }
 
 function monitor(
@@ -376,9 +485,10 @@ function monitor(
   ellipse(ctx, { x: g.x, y: g.y - (surfaceUp + 32) * fit.scale }, 12 * fit.scale, 4 * fit.scale, working ? '#59c3a3' : '#33504c');
 }
 
-/** The furniture of a desk: legs + slab + task chair + oriented monitor (glowing if its owner works).
- * The seated member is NOT drawn here — members are free actors drawn separately (see `drawActor`), so
- * they depth-sort against desks whether seated or walking. */
+/** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works). The task
+ * chair and the seated member are NOT drawn here — the chair is its own depth item at its own footprint
+ * (see renderScene) and members are free actors (see `drawActor`), so chair < sitter < desk (or the
+ * mirror of it, by facing) paint in true painter's order instead of the desk blob swallowing both. */
 function drawWorkstation(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -388,37 +498,24 @@ function drawWorkstation(
   const { lx, ly, dir } = slot;
   const f = FWD[dir];
   const sn = dir === 'S' || dir === 'N';
-  const W = 100;
-  const Df = 68;
+  const W = DESK_W;
+  const Df = DESK_D;
   const DH = 38;
   const ST = 8;
   const wx = sn ? W : Df;
   const dy = sn ? Df : W;
   const working = node?.activity === 'working';
-  const chairColor = node ? hslL(node.color, 0.5) : '#4a5560';
 
-  const drawChair = () => chair(ctx, fit, lx - f[0] * (Df / 2 + 17), ly - f[1] * (Df / 2 + 17), dir, chairColor);
-  const drawDeskMon = () => {
-    for (const [sx, sy] of [
-      [-1, -1],
-      [1, -1],
-      [1, 1],
-      [-1, 1],
-    ] as const) {
-      box(ctx, fit, lx + sx * (wx / 2 - 6), ly + sy * (dy / 2 - 6), 8, 8, DH, '#6e4726');
-    }
-    box(ctx, fit, lx, ly, wx, dy, ST, WOOD, DH);
-    monitor(ctx, fit, lx + f[0] * (Df / 2 - 12), ly + f[1] * (Df / 2 - 12), dir, working, DH + ST);
-  };
-
-  // Chair behind the desk for front/right facings; in front for back/left facings.
-  if (dir === 'S' || dir === 'E') {
-    drawChair();
-    drawDeskMon();
-  } else {
-    drawDeskMon();
-    drawChair();
+  for (const [sx, sy] of [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ] as const) {
+    box(ctx, fit, lx + sx * (wx / 2 - 6), ly + sy * (dy / 2 - 6), 8, 8, DH, '#6e4726');
   }
+  box(ctx, fit, lx, ly, wx, dy, ST, WOOD, DH);
+  monitor(ctx, fit, lx + f[0] * (Df / 2 - 12), ly + f[1] * (Df / 2 - 12), dir, working, DH + ST);
 }
 
 export interface SceneAnchors {
@@ -463,14 +560,29 @@ export function renderScene(
   for (const plant of PLANTS) {
     items.push({ d: depth(plant.lx, plant.ly), fn: () => drawPlant(ctx, fit, plant.lx, plant.ly, plant.species) });
   }
-  items.push({ d: depth(NOOK.lx, NOOK.ly) - 1, fn: () => drawNook(ctx, fit) });
-  for (const h of HUDDLES) items.push({ d: depth(h.lx, h.ly), fn: () => drawHuddle(ctx, fit, h) });
+  // Rugs are flat floor paint — draw them right after the floor (before every solid/actor), so a member
+  // standing anywhere on a rug is never over-painted by it. Solid pieces self-sort at their footprints.
+  const nook = nookItems(ctx, fit);
+  nook.rug();
+  items.push(...nook.items);
+  for (const h of HUDDLES) {
+    const hud = huddleItems(ctx, fit, h);
+    hud.rug();
+    items.push(...hud.items);
+  }
   items.push({ d: depth(ENTRANCE.lx, ENTRANCE.ly), fn: () => drawEntrance(ctx, fit) });
 
   for (const slot of DESK_SLOTS) {
     const name = slotMember.get(slot.id) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
     items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node) });
+    // The task chair sorts at its own spot behind/in front of the desk, so a seated member paints
+    // between chair and desk (or desk and chair, by facing) instead of being swallowed by either.
+    const f = FWD[slot.dir];
+    const cx = slot.lx - f[0] * CHAIR_OFF;
+    const cy = slot.ly - f[1] * CHAIR_OFF;
+    const chairColor = node ? hslL(node.color, 0.5) : '#4a5560';
+    items.push({ d: depth(cx, cy), fn: () => chair(ctx, fit, cx, cy, slot.dir, chairColor) });
   }
 
   // Queue lane: a faint pad under each overflow (strip) member so the entrance line reads as a designated
@@ -561,8 +673,8 @@ export function monitorAnchors(
 
 /** Screen position of the break-nook coffee machine (the ambient steam source, ADR 086). */
 export function coffeeAnchor(fit: Fit): Pt {
-  const s = project(NOOK.lx - 58, NOOK.ly - 42, fit);
-  return { x: s.x, y: s.y - 8 * fit.scale };
+  const s = project(NOOK.lx + LOUNGE.machine.dx, NOOK.ly + LOUNGE.machine.dy, fit);
+  return { x: s.x, y: s.y - (LOUNGE.counter.h + 12) * fit.scale };
 }
 
 /** A transient act cue: a tinted ring + optional glyph (`ring`), a broadcast sweep (`wave`), or a glow

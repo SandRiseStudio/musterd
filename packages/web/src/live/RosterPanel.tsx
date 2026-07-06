@@ -6,6 +6,7 @@ import {
   memberColor,
   rosterOrder,
 } from './format';
+import { CollapseButton, PanelRail } from './PanelChrome';
 
 /**
  * The governance roster rail — the accessible, semantic counterpart to the (decorative, aria-hidden)
@@ -13,18 +14,34 @@ import {
  * account_status and effective capabilities. Read-only: this is the *observable* surface; enforcement
  * lives server-side (P2). A fully-generalist team reads calm — only governance deviations draw a badge.
  */
-export function RosterPanel({ roster }: { roster: MemberSummary[] }) {
+export function RosterPanel({
+  roster,
+  collapsed = false,
+  onCollapse,
+}: {
+  roster: MemberSummary[];
+  collapsed?: boolean;
+  onCollapse?: () => void;
+}) {
   const members = [...roster].sort(rosterOrder);
   const admins = members.filter((m) => m.capabilities?.is_admin).length;
 
   return (
-    <aside className="lc-roster" aria-label="Team roster and governance">
+    <aside
+      className={`lc-roster${collapsed ? ' is-collapsed' : ''}`}
+      aria-label="Team roster and governance"
+    >
+      {collapsed && onCollapse && (
+        <PanelRail side="mid" label="Roster" hint={String(members.length)} onExpand={onCollapse} />
+      )}
       <header className="lc-roster__head">
         <span className="lc-roster__title">ROSTER</span>
         <span className="lc-roster__count">
           {members.length} seat{members.length === 1 ? '' : 's'}
           {admins > 0 && ` · ${admins} admin`}
         </span>
+        <span className="lc-roster__spacer" />
+        {onCollapse && <CollapseButton side="mid" label="the roster" onClick={onCollapse} />}
       </header>
       <div className="lc-roster__rows">
         {members.length === 0 && (

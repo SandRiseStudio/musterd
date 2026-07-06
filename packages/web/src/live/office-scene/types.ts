@@ -67,9 +67,10 @@ export type OfficeEvent =
   | { kind: 'decline'; who: string }
   | { kind: 'wait'; who: string }
   | { kind: 'resolve'; who: string }
-  // An act's body, typed out over the sender's head then faded — any act with a body (message, status,
-  // handoff, lane, …). Independent of the choreography cue above; both can fire for one act.
-  | { kind: 'speech'; who: string; text: string; tone: ActTone };
+  // An act, typed out over the sender's head then faded — the body when it has one, else the act label.
+  // Independent of the choreography cue above; both can fire for one act. `id` (the envelope id) makes
+  // the bubble a click-through to the same act in the stream panel.
+  | { kind: 'speech'; who: string; text: string; tone: ActTone; id?: string };
 
 /** Identical shape to the constellation's `ConstellationHandle` — a drop-in for `ConstellationGL`. */
 export interface OfficeHandle {

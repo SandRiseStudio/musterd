@@ -1,4 +1,5 @@
-import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, NOOK, NOOK_CAP, SEAT_BACK, STRIP_CAP } from './layout';
+import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, NOOK, NOOK_CAP, NOOK_SPOTS, SEAT_BACK, STRIP_CAP } from './layout';
+import { findPath, type P } from './nav';
 import type { Placement } from './seating';
 import type { Bubble, Dir, OfficeNode, Pose } from './types';
 
@@ -54,13 +55,12 @@ export function homePoses(
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);
       if (i >= NOOK_CAP) continue; // past the cap: represented by the "+N away" pill, not an avatar
-      // A lounge cluster around the coffee table: a compact 3-wide grid, each row nudged sideways so it
-      // reads as people gathered rather than a rigid line, and kept tight so it stays on the nook rug.
-      const col = i % 3;
-      const row = Math.floor(i / 3);
+      // The away cluster stands in a loose arc on the rug around the lounge set's open side —
+      // hand-placed spots (layout.NOOK_SPOTS) so nobody stands inside the couch/armchairs/table.
+      const spot = NOOK_SPOTS[i]!;
       out.set(name, {
-        lx: NOOK.lx - 42 + col * 42 + row * 16,
-        ly: NOOK.ly + 40 + row * 28,
+        lx: NOOK.lx + spot.dx,
+        ly: NOOK.ly + spot.dy,
         dir: 'S',
         small: true,
         carry: false,
@@ -128,6 +128,36 @@ function approach(target: { lx: number; ly: number }, mover: { lx: number; ly: n
   return { lx: target.lx + (dx / d) * off, ly: target.ly + (dy / d) * off };
 }
 
+/** Travel legs along a routed polyline: total duration = clamp(pathLength/speed), split per segment
+ * so the walker holds one speed through waypoints instead of resetting at each turn. */
+function legsAlong(pts: P[], speed: number, minDur: number, maxDur: number, carry: boolean): Leg[] {
+  const segs: Array<{ a: P; b: P; len: number }> = [];
+  let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i]!;
+    const b = pts[i + 1]!;
+    const len = Math.hypot(b.lx - a.lx, b.ly - a.ly);
+    if (len < 1) continue;
+    segs.push({ a, b, len });
+    total += len;
+  }
+  if (segs.length === 0) {
+    const a = pts[0]!;
+    return [{ fx: a.lx, fy: a.ly, tx: a.lx, ty: a.ly, dir: 'S', dur: 0.1, carry, bubble: null }];
+  }
+  const dur = clamp(total / speed, minDur, maxDur);
+  return segs.map(({ a, b, len }) => ({
+    fx: a.lx,
+    fy: a.ly,
+    tx: b.lx,
+    ty: b.ly,
+    dir: travelDir(a.lx, a.ly, b.lx, b.ly),
+    dur: Math.max(0.08, dur * (len / total)),
+    carry,
+    bubble: null,
+  }));
+}
+
 export interface Actors {
   /** Reconcile to a new roster: seat everyone, and (when `animate`) walk arrivals in, departures out,
    * and away/return drifts between desk and nook. The first call just snaps (no entrance stampede). */
@@ -180,23 +210,19 @@ export function createActors(): Actors {
   function moved(a: Pose, b: Pose): boolean {
     return Math.hypot(a.lx - b.lx, a.ly - b.ly) > 8;
   }
-  /** A one-leg point-to-point walk (entrance-in, drift, or leave), optionally fading at the door. */
-  function straightWalk(from: Pose, to: Pose, exit: boolean, fade?: 'in' | 'out'): Walk {
+  /** Everyone else's current standing spot — walkers route around them, not through them. */
+  function othersAt(except: string): P[] {
+    const out: P[] = [];
+    for (const [name, p] of posesNow()) if (name !== except) out.push({ lx: p.lx, ly: p.ly });
+    return out;
+  }
+
+  /** A routed point-to-point walk (entrance-in, drift, or leave), optionally fading at the door. */
+  function straightWalk(who: string, from: Pose, to: Pose, exit: boolean, fade?: 'in' | 'out'): Walk {
     const speed = 78; // logical units/sec — an unhurried stroll across the floor
-    const dur = clamp(Math.hypot(to.lx - from.lx, to.ly - from.ly) / speed, 1.8, 6);
+    const path = findPath({ lx: from.lx, ly: from.ly }, { lx: to.lx, ly: to.ly }, othersAt(who));
     return {
-      legs: [
-        {
-          fx: from.lx,
-          fy: from.ly,
-          tx: to.lx,
-          ty: to.ly,
-          dir: travelDir(from.lx, from.ly, to.lx, to.ly),
-          dur,
-          carry: false,
-          bubble: null,
-        },
-      ],
+      legs: legsAlong(path, speed, 1.8, 6, false),
       i: 0,
       t: 0,
       small: exit ? from.small : to.small,
@@ -212,8 +238,10 @@ export function createActors(): Actors {
       const leg = w.legs[w.i]!;
       const e = easeInOut(clamp(w.t, 0, 1));
       // Door fade: emerge over the first third entering, dissolve over the last third leaving.
+      // Progress is whole-walk (a routed walk has several legs) so the fade never restarts mid-trip.
+      const prog = (w.i + clamp(w.t, 0, 1)) / w.legs.length;
       const alpha =
-        w.fade === 'in' ? clamp(w.t / 0.35, 0, 1) : w.fade === 'out' ? clamp((1 - w.t) / 0.35, 0, 1) : 1;
+        w.fade === 'in' ? clamp(prog / 0.35, 0, 1) : w.fade === 'out' ? clamp((1 - prog) / 0.35, 0, 1) : 1;
       out.set(name, {
         lx: leg.fx + (leg.tx - leg.fx) * e,
         ly: leg.fy + (leg.ty - leg.fy) * e,
@@ -240,16 +268,20 @@ export function createActors(): Actors {
     const start = origin ?? home;
     const a = approach(target, start);
     const speed = req.urgent ? 165 : 100; // logical units / sec — amble over, or hurry when urgent
-    const dur = (fx: number, fy: number, tx: number, ty: number): number =>
-      clamp(Math.hypot(tx - fx, ty - fy) / speed, 1.4, 4.5);
     const carry = req.kind === 'handoff';
     const hold = req.kind === 'help' ? (req.urgent ? 0.5 : 0.75) : 0.6;
     const holdBubble: Bubble = req.kind === 'help' ? (req.urgent ? '!' : '?') : null;
+    // Route both trips around furniture and standing teammates; the visitor's stand spot is wherever
+    // the outbound route actually ends (the approach point may get nudged off a blocked cell).
+    const avoid = othersAt(from);
+    const out = legsAlong(findPath({ lx: start.lx, ly: start.ly }, a, avoid), speed, 1.4, 4.5, carry);
+    const stand = { lx: out[out.length - 1]!.tx, ly: out[out.length - 1]!.ty };
+    const back = legsAlong(findPath(stand, { lx: home.lx, ly: home.ly }, avoid), speed, 1.4, 4.5, false);
     return {
       legs: [
-        { fx: start.lx, fy: start.ly, tx: a.lx, ty: a.ly, dir: travelDir(start.lx, start.ly, a.lx, a.ly), dur: dur(start.lx, start.ly, a.lx, a.ly), carry, bubble: null },
-        { fx: a.lx, fy: a.ly, tx: a.lx, ty: a.ly, dir: travelDir(a.lx, a.ly, target.lx, target.ly), dur: hold, carry, bubble: holdBubble },
-        { fx: a.lx, fy: a.ly, tx: home.lx, ty: home.ly, dir: travelDir(a.lx, a.ly, home.lx, home.ly), dur: dur(a.lx, a.ly, home.lx, home.ly), carry: false, bubble: null },
+        ...out,
+        { fx: stand.lx, fy: stand.ly, tx: stand.lx, ty: stand.ly, dir: travelDir(stand.lx, stand.ly, target.lx, target.ly), dur: hold, carry, bubble: holdBubble },
+        ...back,
       ],
       i: 0,
       t: 0,
@@ -292,7 +324,7 @@ export function createActors(): Actors {
         if (!prevHomes.has(name)) {
           exiting.delete(name);
           ghosts.delete(name);
-          walks.set(name, straightWalk(entrancePose(dest), dest, false, 'in'));
+          walks.set(name, straightWalk(name, entrancePose(dest), dest, false, 'in'));
           doorPulses++;
         } else if (!exiting.has(name)) {
           const existing = walks.get(name);
@@ -301,11 +333,11 @@ export function createActors(): Actors {
             // mid-stride. Only interrupt it when this member's *home* actually moved (a real reseat),
             // and then send them straight to the new seat from wherever they currently are.
             if (moved(prevHomes.get(name) ?? dest, dest)) {
-              walks.set(name, straightWalk(cur.get(name) ?? dest, dest, false));
+              walks.set(name, straightWalk(name, cur.get(name) ?? dest, dest, false));
             }
           } else {
             const from = cur.get(name) ?? prevHomes.get(name)!;
-            if (moved(from, dest)) walks.set(name, straightWalk(from, dest, false));
+            if (moved(from, dest)) walks.set(name, straightWalk(name, from, dest, false));
           }
         }
       }
@@ -318,7 +350,7 @@ export function createActors(): Actors {
         pending.delete(name);
         gestures.delete(name); // a departing member stops gesturing
         exiting.add(name);
-        walks.set(name, straightWalk(from, entrancePose(from), true, 'out'));
+        walks.set(name, straightWalk(name, from, entrancePose(from), true, 'out'));
         doorPulses++;
       }
     },
@@ -353,13 +385,14 @@ export function createActors(): Actors {
       }
       const dest = COFFEE_STAND;
       const speed = 68; // logical units/sec — a slow, unhurried amble (cheaper-reading than a real errand)
-      const dur = (fx: number, fy: number, tx: number, ty: number): number =>
-        clamp(Math.hypot(tx - fx, ty - fy) / speed, 1.8, 5);
+      const avoid = othersAt(from);
+      const out = legsAlong(findPath({ lx: home.lx, ly: home.ly }, dest, avoid), speed, 1.8, 5, false);
+      const back = legsAlong(findPath(dest, { lx: home.lx, ly: home.ly }, avoid), speed, 1.8, 5, false);
       walks.set(from, {
         legs: [
-          { fx: home.lx, fy: home.ly, tx: dest.lx, ty: dest.ly, dir: travelDir(home.lx, home.ly, dest.lx, dest.ly), dur: dur(home.lx, home.ly, dest.lx, dest.ly), carry: false, bubble: null },
+          ...out,
           { fx: dest.lx, fy: dest.ly, tx: dest.lx, ty: dest.ly, dir: 'N', dur: 1.6, carry: false, bubble: null }, // pause facing the machine
-          { fx: dest.lx, fy: dest.ly, tx: home.lx, ty: home.ly, dir: travelDir(dest.lx, dest.ly, home.lx, home.ly), dur: dur(dest.lx, dest.ly, home.lx, home.ly), carry: false, bubble: null },
+          ...back,
         ],
         i: 0,
         t: 0,
@@ -408,7 +441,7 @@ export function createActors(): Actors {
         // Yield gracefully: if the walker has left home, walk them straight back (a plain non-ambient
         // walk — full-fps, not itself preemptable); if they're essentially home already, just drop it.
         if (home && at && moved(at, home)) {
-          const back = straightWalk(at, home, false);
+          const back = straightWalk(name, at, home, false);
           back.yield = true; // low-priority: a real act for this member preempts it instantly (see `walk`)
           walks.set(name, back);
         } else {

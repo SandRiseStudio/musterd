@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createActors, homePoses, travelDir } from './actors';
-import { COFFEE_STAND, ENTRANCE, NOOK, NOOK_CAP, STRIP_CAP } from './layout';
+import { COFFEE_STAND, ENTRANCE, NOOK, NOOK_CAP, NOOK_RUG_R, STRIP_CAP } from './layout';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
 
@@ -94,8 +94,8 @@ describe('homePoses', () => {
     for (const n of nodes) {
       const p = poses.get(n.name)!;
       expect(p.small).toBe(true);
-      // inside the nook rug (an iso diamond of "radius" 132 about the nook anchor)
-      expect(Math.abs(p.lx - NOOK.lx) + Math.abs(p.ly - NOOK.ly)).toBeLessThan(132);
+      // inside the nook rug (an iso diamond about the nook anchor)
+      expect(Math.abs(p.lx - NOOK.lx) + Math.abs(p.ly - NOOK.ly)).toBeLessThan(NOOK_RUG_R);
     }
   });
 });
