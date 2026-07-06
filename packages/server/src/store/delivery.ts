@@ -126,6 +126,32 @@ function actDeliveryOf(db: Database, msg: MessageRow, now: number): ActDelivery 
   };
 }
 
+/**
+ * The acts a cursor advance from `fromTs` (exclusive) to `toTs` (inclusive) newly marks seen, for
+ * the `musterd.coordination.seen_latency` emission (ADR 090). Scope matches the ledger, not the
+ * whole team firehose: acts directed at me, plus team/broadcast **loop-opening** acts
+ * (request_help/handoff — their `to_member` is NULL, so a `to_member = me` filter alone silently
+ * skips them; bugbot on #114). Never my own sends.
+ */
+export function crossedBySeen(
+  db: Database,
+  teamId: string,
+  memberId: string,
+  fromTs: number,
+  toTs: number,
+): { act: string; urgent: boolean; ts: number }[] {
+  const rows = db
+    .prepare<[string, number, number, string, string], MessageRow>(
+      `SELECT * FROM messages
+        WHERE team_id = ? AND ts > ? AND ts <= ?
+          AND (to_member = ?
+               OR (to_kind IN ('team','broadcast') AND act IN ('request_help','handoff')))
+          AND from_member != ?`,
+    )
+    .all(teamId, fromTs, toTs, memberId, memberId);
+  return rows.map((m) => ({ act: m.act, urgent: isUrgent(m), ts: m.ts }));
+}
+
 /** The per-act ledger: one act's journey across every recipient. Null for an unknown id. */
 export function actDelivery(
   db: Database,

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { appendAudit } from './audit.js';
 import { setCursor } from './cursors.js';
-import { actDelivery, openDirectedLedger } from './delivery.js';
+import { actDelivery, crossedBySeen, openDirectedLedger } from './delivery.js';
 import { addMember } from './members.js';
 import { countOpenLoops, insertMessage } from './messages.js';
 import type { MemberRow, TeamRow } from './rows.js';
@@ -109,6 +109,26 @@ describe('actDelivery (ADR 090: the per-act ledger, derived)', () => {
   it('returns null for an unknown id', () => {
     const { db, team } = seed();
     expect(actDelivery(db, team.id, 'nope')).toBeNull();
+  });
+});
+
+describe('crossedBySeen (ADR 090: the seen_latency scope)', () => {
+  it('covers directed acts AND team/broadcast loop-opening acts, never my own sends or chatter', () => {
+    const { db, team, nick, ada } = seed();
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000); // directed at ada → counts
+    msg(db, team, nick, null, 'request_help', 'r1', 2_000); // team loop-opening (to_member NULL) → counts
+    msg(db, team, nick, null, 'status_update', 's1', 3_000); // team chatter → not the firehose
+    msg(db, team, ada, null, 'request_help', 'r2', 4_000); // ada's own send → excluded
+
+    const crossed = crossedBySeen(db, team.id, ada.id, 0, 10_000);
+    expect(crossed.map((c) => c.act).sort()).toEqual(['handoff', 'request_help']);
+  });
+
+  it('is bounded by the cursor window (fromTs exclusive, toTs inclusive)', () => {
+    const { db, team, nick, ada } = seed();
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    msg(db, team, nick, ada, 'handoff', 'h2', 2_000);
+    expect(crossedBySeen(db, team.id, ada.id, 1_000, 2_000).map((c) => c.ts)).toEqual([2_000]);
   });
 });
 

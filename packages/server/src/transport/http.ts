@@ -34,7 +34,7 @@ import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import { appendAudit, hasInterruptRaised, listAudit } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
-import { actDelivery } from '../store/delivery.js';
+import { actDelivery, crossedBySeen } from '../store/delivery.js';
 import { listGoals } from '../store/goals.js';
 import {
   consumeGrant,
@@ -1271,23 +1271,11 @@ export async function handleHttp(
         if (!row) throw new MusterdError('not_found', 'unknown message id');
         const prev = getCursor(ctx.db, member.id);
         const cursor = setCursor(ctx.db, member.id, body.last_read_message_id, row.ts);
-        // seen_latency (ADR 090): each directed act this advance crossed was just "seen" — emit the
+        // seen_latency (ADR 090): each act this advance crossed was just "seen" — emit the
         // send→seen histogram, the read-side twin of loop_latency. Watermark semantics: every act
-        // covered by one advance shares this instant. Cheap no-op when telemetry is off.
-        const crossed = ctx.db
-          .prepare<
-            [string, string, number, number],
-            { act: string; meta: string | null; ts: number }
-          >(
-            `SELECT act, meta, ts FROM messages
-              WHERE team_id = ? AND to_member = ? AND ts > ? AND ts <= ?`,
-          )
-          .all(team.id, member.id, prev.last_read_ts, row.ts);
-        for (const m of crossed) {
-          const urgent = m.meta
-            ? (JSON.parse(m.meta) as Record<string, unknown>)['urgent'] === true
-            : false;
-          recordSeenLatency(member.name, m.act, urgent, Math.max(0, cursor.updated_at - m.ts));
+        // covered by one advance shares this instant. Scope lives in crossedBySeen (store).
+        for (const m of crossedBySeen(ctx.db, team.id, member.id, prev.last_read_ts, row.ts)) {
+          recordSeenLatency(member.name, m.act, m.urgent, Math.max(0, cursor.updated_at - m.ts));
         }
         return sendJson(res, 200, { cursor });
       }
