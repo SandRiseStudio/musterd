@@ -23,20 +23,12 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
   if (pending) {
     process.stdout.write(renderPendingSummary(pending.count, pending.since) + '\n');
   }
-  // The continuity one-liner (ADR 093 §3): headline + age, never the body — same line `claim`
-  // prints on occupy. Seat-authed and best-effort: an ambient identity, a seat with nothing saved
-  // (not_found), or any read failure all stay silent.
+  // The continuity one-liner (ADR 093 §3): the envelope read — headline + age, never the body —
+  // same line `claim` prints on occupy. Seat-authed and best-effort: an ambient identity, a seat
+  // with nothing saved (not_found), or any read failure all stay silent.
   if (explicit && identity) {
-    const mem = await http.getMemory(team).catch(() => undefined);
-    if (mem) {
-      process.stdout.write(
-        renderMemoryLine({
-          headline: mem.headline,
-          saved_at: mem.saved_at,
-          size_bytes: Buffer.byteLength(mem.body, 'utf8'),
-        }) + '\n',
-      );
-    }
+    const env = await http.getMemoryEnvelope(team).catch(() => undefined);
+    if (env) process.stdout.write(renderMemoryLine(env) + '\n');
   }
   // Surface which daemon + db we're reading, so a wrong-db ("everyone offline") is obvious.
   const health = await http.health().catch(() => undefined);

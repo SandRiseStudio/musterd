@@ -205,6 +205,10 @@ export class HttpClient {
   getMemory(slug: string): Promise<{ headline: string; body: string; saved_at: number }> {
     return this.request('GET', `/teams/${slug}/memory`);
   }
+  /** Envelope only (headline + age + size, never the body) — for the status/claim one-liner. */
+  getMemoryEnvelope(slug: string): Promise<MemoryEnvelope> {
+    return this.request('GET', `/teams/${slug}/memory?envelope=1`);
+  }
   clearMemory(slug: string): Promise<void> {
     return this.request('DELETE', `/teams/${slug}/memory`);
   }

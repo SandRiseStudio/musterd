@@ -209,8 +209,15 @@ export class MusterdClient {
   // ── Seat memory (ADR 093): the seat's private continuity blob, seat-authenticated — the server
   // resolves the seat from the token + x-musterd-seat header, so these operate on the caller's OWN
   // seat only. Save is last-write-wins; the body travels only over the explicit read.
-  saveMemory(input: { headline: string; body?: string }): Promise<void> {
-    return this.request('PUT', `/teams/${this.config.team}/memory`, input);
+  async saveMemory(input: { headline: string; body?: string }): Promise<void> {
+    await this.request('PUT', `/teams/${this.config.team}/memory`, input);
+    // Keep the occupy-delivered envelope current so an already-joined team_join shows the note just
+    // saved, not the one from occupy time (last-write-wins mirrors the server row).
+    this.memoryEnvelope = {
+      headline: input.headline,
+      saved_at: Date.now(),
+      size_bytes: Buffer.byteLength(input.body ?? '', 'utf8'),
+    };
   }
 
   readMemory(): Promise<{ headline: string; body: string; saved_at: number }> {
@@ -295,6 +302,7 @@ export class MusterdClient {
   leave(): void {
     this.wantPresence = false;
     this.joinedFlag = false;
+    this.memoryEnvelope = null; // occupy-scoped: stale once the seat is released
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
     this.ws?.close();

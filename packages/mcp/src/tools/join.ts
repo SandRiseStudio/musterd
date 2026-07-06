@@ -48,7 +48,11 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
     },
     async (args) => {
       if (client.joined) {
-        return textResult(`Already joined ${config.team} as ${config.member}.`);
+        // Still show the continuity pointer (ADR 093): the occupy that delivered it may have happened
+        // silently in the background (an admin approval after a team_join timeout, ADR 087), making
+        // this confirm call the first place the agent can see it.
+        const memory = client.memory ? ` ${memoryLine(client.memory)}` : '';
+        return textResult(`Already joined ${config.team} as ${config.member}.${memory}`);
       }
 
       const target = resolveTarget(args, config.claim, config.member);

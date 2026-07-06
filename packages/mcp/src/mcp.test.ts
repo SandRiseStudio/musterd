@@ -318,7 +318,11 @@ describe('MCP adapter', () => {
       headline: 'mid-refactor, tests red',
       body: 'left off at ws.ts eviction',
     });
+    // The save refreshes the client-side envelope, so an already-joined team_join shows the new note.
+    expect(s1.memory?.headline).toBe('mid-refactor, tests red');
     s1.leave();
+    expect(s1.memory).toBeNull(); // occupy-scoped: released with the seat
+
     s1.close();
 
     const s2 = new MusterdClient(adaConfig());
@@ -331,6 +335,9 @@ describe('MCP adapter', () => {
     const mem = await s2.readMemory();
     expect(mem.headline).toBe('mid-refactor, tests red');
     expect(mem.body).toBe('left off at ws.ts eviction');
+    // The envelope is occupy-scoped: releasing the seat clears it (no stale getter while dormant).
+    s2.leave();
+    expect(s2.memory).toBeNull();
     s2.close();
   });
 
