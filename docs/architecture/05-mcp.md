@@ -229,6 +229,7 @@ src/
   binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI)
   workspace.ts    // the gracefully-degrading "where" label captured at join (ADR 014)
   otel.ts         // cross-runtime trace-context propagation through the envelope (ADR 011)
+  telemetry.ts    // boots the shared SDK as musterd-mcp + wraps every tool in a musterd.tool.call span (ADR 089)
   tools/
     join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)
@@ -252,7 +253,7 @@ src/
 ## Trace-context propagation (ADR 011 — `otel.ts`)
 
 - **Emit:** `team_send` attaches the adapter's active OTel trace context to the envelope as `meta.otel` (`{ traceparent, tracestate? }`) when one exists and the caller didn't set it. **Honor:** `team_inbox_check` records a `musterd.inbox.received` span **linked** to each incoming message's `meta.otel` — causality without claiming ownership (the sender's trace lives in a different backend).
-- The adapter formats/parses the W3C `traceparent` directly (only `@opentelemetry/api`; no `@opentelemetry/core`). This is **convention plumbing**: inert when there's no active context / no registered provider (adapter telemetry SDK is deferred — observability.md §4). The server records the same `traceparent` on its envelope span (ADR 015), so the handoff is one causal chain across runtimes.
+- The adapter formats/parses the W3C `traceparent` directly (only `@opentelemetry/api`; no `@opentelemetry/core`). Since ADR 089 this fires **in production**: `telemetry.ts` boots the shared `@musterd/telemetry` SDK (off by default — standard OTLP env vars only, no phone-home) and wraps every registered tool in a `musterd.tool.call` span, so `team_send` always has an active context to emit. The server records the same `traceparent` on its envelope span (ADR 015), so the handoff is one causal chain across runtimes.
 
 ## Acceptance tests (`06-testing.md`)
 

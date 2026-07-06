@@ -276,6 +276,30 @@ describe('MCP adapter', () => {
     expect(exit).toHaveBeenCalledTimes(1);
   });
 
+  it('defers exit until an async close (the bounded telemetry flush, ADR 089) settles', async () => {
+    let settle!: () => void;
+    const close = vi.fn(() => new Promise<void>((resolve) => (settle = resolve)));
+    const exit = vi.fn();
+    const stdin = new EventEmitter() as unknown as Parameters<
+      typeof installShutdownHandlers
+    >[0]['stdin'];
+    installShutdownHandlers({
+      close,
+      exit,
+      stdin,
+      signals: new EventEmitter() as unknown as NodeJS.Process,
+      transport: {},
+    });
+
+    (stdin as unknown as EventEmitter).emit('end');
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(exit).not.toHaveBeenCalled(); // still flushing
+    settle();
+    await Promise.resolve(); // let the .finally run
+    await Promise.resolve();
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
   it('chains an existing transport.onclose rather than clobbering it', () => {
     const prior = vi.fn();
     const transport: { onclose?: () => void } = { onclose: prior };

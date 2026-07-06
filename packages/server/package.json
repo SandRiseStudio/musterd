@@ -24,13 +24,8 @@
   },
   "dependencies": {
     "@musterd/protocol": "workspace:*",
+    "@musterd/telemetry": "workspace:*",
     "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/exporter-metrics-otlp-http": "^0.219.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.219.0",
-    "@opentelemetry/resources": "^2.8.0",
-    "@opentelemetry/sdk-metrics": "^2.8.0",
-    "@opentelemetry/sdk-node": "^0.219.0",
-    "@opentelemetry/semantic-conventions": "^1.41.1",
     "better-sqlite3": "^11.7.0",
     "ulid": "^2.3.0",
     "ws": "^8.18.0",
@@ -39,6 +34,7 @@
   "devDependencies": {
     "@opentelemetry/sdk-trace-base": "^2.8.0",
     "@types/better-sqlite3": "^7.6.12",
-    "@types/ws": "^8.5.13"
+    "@types/ws": "^8.5.13",
+    "@opentelemetry/sdk-metrics": "^2.8.0"
   }
 }
