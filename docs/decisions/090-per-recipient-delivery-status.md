@@ -122,9 +122,13 @@ single trace now shows route → per-recipient outcome; the ADR 089 cross-agent 
 the recipient's eventual read on the same timeline.
 
 **Eval** — headline: **seen-latency** distribution for directed acts (median and p95), with the
-finding-002 window as the retroactive baseline (one act pinned at ~70 h unseen). Guard: the open
-directed ledger's count must reconcile with the existing `open_loops` gauge on the same DB — two
-derivations of one truth agreeing is the no-drift check for the read model.
+finding-002 window as the retroactive baseline (one act pinned at ~70 h unseen). Guard: on the
+`request_help`/`handoff` subset (the acts both derivations cover — the ledger additionally lists
+urgent directed acts; the gauge is daemon-wide, the ledger per-team), the ledger count must
+reconcile with the `open_loops` gauge — two derivations of one truth agreeing is the no-drift
+check. Making them agree required giving `countOpenLoops` the same resolve-exclusion the ledger's
+`answered` rung has (a resolved thread is not an open loop) — a strictly-more-truthful gauge,
+applied with this ADR's build (bugbot on #113 caught the pre-fix mismatch).
 
 **Experiment** — the ADR 088 steering A/B gains a measured middle: with the ledger, "hook on"
 sessions should show seen-latency collapsing to one tool-call duration while "hook off" shows the
