@@ -69,6 +69,17 @@ async function get(path: string, auth?: Auth, extraHeaders?: Record<string, stri
   return { status: res.status, json: (await res.json()) as any };
 }
 
+/** Like `post` but for a JSON-bodied request of any method; parses JSON only when a body is returned. */
+async function req(method: string, path: string, body: unknown, auth?: Auth) {
+  const res = await fetch(base + path, {
+    method,
+    headers: { 'content-type': 'application/json', ...authHeaders(auth) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
+}
+
 /** Mint a standing seat grant (admin-authed) so an agent WS-claim occupies immediately, not pending. */
 async function standingGrant(adminAuth: Auth, seat: string): Promise<string> {
   const r = await post(
@@ -1950,5 +1961,124 @@ describe('insight report (ADR 050/084)', () => {
     ]);
     // Coordination-density is present; a tiny sample never flags.
     expect(report.json.coordination).toMatchObject({ window_days: 7, flag: false });
+  });
+});
+
+describe('seat memory endpoints + occupy envelope (ADR 093)', () => {
+  async function dawn() {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential as string;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const ada: Auth = { key: team.json.agent_key as string, seat: 'Ada' };
+    return { team, nickTok, ada };
+  }
+
+  it('PUT saves for the authenticated seat; GET returns the body; DELETE clears', async () => {
+    const { ada } = await dawn();
+    const put = await req(
+      'PUT',
+      '/teams/dawn/memory',
+      { headline: 'mid-refactor', body: 'ws.ts' },
+      ada,
+    );
+    expect(put.status).toBe(204);
+
+    const got = await get('/teams/dawn/memory', ada);
+    expect(got.status).toBe(200);
+    expect(got.json).toMatchObject({ headline: 'mid-refactor', body: 'ws.ts' });
+    expect(typeof got.json.saved_at).toBe('number');
+
+    const del = await req('DELETE', '/teams/dawn/memory', undefined, ada);
+    expect(del.status).toBe(204);
+    expect((await get('/teams/dawn/memory', ada)).status).toBe(404);
+    // idempotent — a second DELETE still 204s
+    expect((await req('DELETE', '/teams/dawn/memory', undefined, ada)).status).toBe(204);
+  });
+
+  it('memory is self-scoped: a seat only ever reads/writes its own — no cross-seat path, admin included', async () => {
+    const { nickTok, ada } = await dawn();
+    await req('PUT', '/teams/dawn/memory', { headline: "ada's note", body: 'secret' }, ada);
+
+    // nick (an admin/human) hitting /memory reads NICK's own memory (none) — never Ada's. There is no
+    // URL that names another seat, so the note cannot leak across seats (ADR 093 §4).
+    const asAdmin = await get('/teams/dawn/memory', nickTok);
+    expect(asAdmin.status).toBe(404);
+
+    // and Ada still sees her own
+    expect((await get('/teams/dawn/memory', ada)).json.body).toBe('secret');
+  });
+
+  it('an occupied frame (WS claim) carries the envelope when memory exists, null when not', async () => {
+    const { team, nickTok, ada } = await dawn();
+
+    // First claim with no saved memory → occupied.memory is null.
+    const w1 = new TestWs();
+    await w1.open();
+    const occ1 = (await w1.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'cli',
+      await standingGrant(nickTok, 'Ada'),
+    )) as any;
+    expect(occ1.memory).toBeNull();
+    w1.close();
+
+    // Save a note, then a fresh claim carries the envelope (headline + size, never a body).
+    await req('PUT', '/teams/dawn/memory', { headline: 'left off at eviction', body: '€€' }, ada);
+    const w2 = new TestWs();
+    await w2.open();
+    const occ2 = (await w2.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'cli',
+      await standingGrant(nickTok, 'Ada'),
+    )) as any;
+    expect(occ2.memory).toEqual({
+      headline: 'left off at eviction',
+      saved_at: expect.any(Number),
+      size_bytes: 6, // '€€' = 6 UTF-8 bytes
+    });
+    expect(occ2.memory.body).toBeUndefined();
+    w2.close();
+  });
+
+  it('oversize body → 400 naming the 8192 limit; missing headline → 400', async () => {
+    const { ada } = await dawn();
+    const big = await req(
+      'PUT',
+      '/teams/dawn/memory',
+      { headline: 'h', body: 'x'.repeat(8193) },
+      ada,
+    );
+    expect(big.status).toBe(400);
+    expect(big.json.error.message).toContain('8192');
+
+    const noHeadline = await req('PUT', '/teams/dawn/memory', { body: 'x' }, ada);
+    expect(noHeadline.status).toBe(400);
+  });
+
+  it('audit rows for memory.save carry sizes only — never the headline or body text', async () => {
+    const { ada } = await dawn();
+    await req(
+      'PUT',
+      '/teams/dawn/memory',
+      { headline: 'sensitive subject', body: 'PASSWORD=hunter2' },
+      ada,
+    );
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const rows = listAudit(server.db, teamId).filter((r) => r.action === 'memory.save');
+    expect(rows).toHaveLength(1);
+    const detail = JSON.parse(rows[0]!.detail!);
+    expect(detail).toEqual({ size_bytes: 16, headline_len: 17 });
+    // the content itself never appears in the audit row
+    expect(rows[0]!.detail).not.toContain('hunter2');
+    expect(rows[0]!.detail).not.toContain('sensitive subject');
+
+    await req('DELETE', '/teams/dawn/memory', undefined, ada);
+    const clears = listAudit(server.db, teamId).filter((r) => r.action === 'memory.clear');
+    expect(clears).toHaveLength(1);
   });
 });

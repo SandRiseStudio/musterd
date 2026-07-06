@@ -69,6 +69,7 @@ import {
   setMemberGovernance,
   teamHasAdmin,
 } from '../store/members.js';
+import { clearMemory, getMemory, memoryEnvelope, saveMemory } from '../store/memory.js';
 import {
   latestStatusUpdate,
   listInbox,
@@ -101,6 +102,11 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(payload);
+}
+
+function sendNoContent(res: ServerResponse): void {
+  res.writeHead(204);
+  res.end();
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -256,6 +262,17 @@ const PresenceBody = z.object({
   provenance: ProvenanceSchema.optional(),
   workspace: z.string().max(120).optional(),
   driver: z.string().max(80).optional(),
+});
+
+/**
+ * Save-memory request body (ADR 093). Deliberately only shapes types here — the caps (headline ≤120
+ * chars, body ≤8192 UTF-8 bytes) are enforced in `saveMemory` so the 400 names the exact limit
+ * (`.max()` in zod would reject first with a generic message). Body defaults to empty for a
+ * headline-only note.
+ */
+const MemorySaveBody = z.object({
+  headline: z.string(),
+  body: z.string().optional(),
 });
 
 /**
@@ -706,7 +723,7 @@ export async function handleHttp(
             presence_id: presence.id,
             server_time: Date.now(),
             ...(resumeToken ? { grant: resumeToken } : {}),
-            memory: null,
+            memory: memoryEnvelope(ctx.db, targetMember.id),
           });
 
           // Broadcast presence online for non-observers.
@@ -993,7 +1010,7 @@ export async function handleHttp(
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
-            memory: null,
+            memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
 
@@ -1025,7 +1042,7 @@ export async function handleHttp(
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
-            memory: null,
+            memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
 
@@ -1320,6 +1337,51 @@ export async function handleHttp(
         setAvailability(ctx.db, member.id, availability);
         const me = summarize(ctx, team.slug, team.id, member).find((m) => m.name === member.name);
         return sendJson(res, 200, { member: me });
+      }
+
+      // Seat memory (ADR 093): a seat's private continuity blob. All three are seat-authenticated and
+      // operate on the caller's OWN seat only — the URL carries no member name, and there is no
+      // cross-seat read path (team admins included, ADR 093 §4). `authMember` resolves the seat from
+      // the presented token; a mismatched/absent token is its own 401/403.
+      if (method === 'PUT' && rest === '/memory') {
+        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const parsed = parseOrBadRequest(MemorySaveBody, await readJson(req));
+        const input = { headline: parsed.headline, body: parsed.body ?? '' };
+        saveMemory(ctx.db, member.id, input); // enforces the caps, throws bad_request with the limit named
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'memory.save',
+          target: member.name,
+          result: 'allow',
+          // Sizes only, never the content (hard rule 5): the audit log is not a copy of the note.
+          detail: {
+            size_bytes: Buffer.byteLength(input.body, 'utf8'),
+            headline_len: input.headline.length,
+          },
+        });
+        return sendNoContent(res);
+      }
+
+      if (method === 'GET' && rest === '/memory') {
+        const { member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const mem = getMemory(ctx.db, member.id);
+        if (!mem) throw new MusterdError('not_found', 'no memory saved for this seat');
+        return sendJson(res, 200, mem);
+      }
+
+      if (method === 'DELETE' && rest === '/memory') {
+        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const existed = clearMemory(ctx.db, member.id);
+        // Idempotent: DELETE always 204s. Only audit an actual clear (nothing happened otherwise).
+        if (existed) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'memory.clear',
+            target: member.name,
+            result: 'allow',
+          });
+        }
+        return sendNoContent(res);
       }
 
       // Operator escape hatch (ADR 017 follow-up): forcibly drop a member's live session so it can
