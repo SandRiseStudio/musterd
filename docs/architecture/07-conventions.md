@@ -26,8 +26,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": "src"
-  }
+    "rootDir": "src",
+  },
 }
 ```
 
@@ -42,7 +42,7 @@
 
 - One error type per package surface: server `MusterdError(code: ErrorCode, message)`; CLI `CliError(code, message)`. Both carry a code from the `02-protocol` error-code enum (CLI maps code → exit per `04-cli.md`).
 - Throw `MusterdError` at the point of detection; transports catch at the boundary and serialize (`toHttp()` / `toFrame()` / CLI `→ stderr + exit`). Never `console.log` an error and continue.
-- Validation errors always reference *what* failed (field + reason), surfaced from zod's issues.
+- Validation errors always reference _what_ failed (field + reason), surfaced from zod's issues.
 
 ## Logging format
 
@@ -66,13 +66,19 @@ Sequential, never renumbered. Template:
 
 ```md
 # NNN — <title>
+
 - Status: accepted
 - Date: YYYY-MM-DD
+
 ## Context
+
 ## Problem
+
 ## Decision
+
 ## Consequences
-## Observability & Evaluation   # required for agent-facing features; "n/a — <reason>" otherwise (ADR 052)
+
+## Observability & Evaluation # required for agent-facing features; "n/a — <reason>" otherwise (ADR 052)
 ```
 
 The **Observability & Evaluation** section (ADR 052) answers, for any agent-facing feature: **Traces** —
@@ -89,6 +95,7 @@ Known ADRs to write while implementing (because the docs already flagged simplif
 ## Definition of done (per task)
 
 A task/milestone is done only when **all** are true:
+
 1. Code compiles (`pnpm -r build`) with no TS errors.
 2. Strict typecheck clean (`pnpm -r exec tsc --noEmit`); `pnpm lint` and `pnpm format:check` clean (ESLint + Prettier, ADR 013).
 3. `pnpm test` green, including the relevant acceptance scenario(s); `pnpm coverage` meets the gates (`06-testing.md`).
@@ -102,3 +109,4 @@ A task/milestone is done only when **all** are true:
 - Terminology: only the glossary terms (`brand.md` §5) — Team, Member, Presence, Surface, Act — for the concepts they name, in identifiers and prose. No synonyms (`room`, `user`, `session`-for-member, `event`-for-act).
 - Files: kebab-case. Types/interfaces: PascalCase. Functions/vars: camelCase. Constants: SCREAMING_SNAKE for true constants (`HEARTBEAT_INTERVAL_MS`).
 - Package names: `@musterd/protocol`, `@musterd/server`, `@musterd/mcp`, `@musterd/cli`. The CLI keeps the bin name `musterd`; its package is scoped because unscoped `musterd` is blocked on npm (ADR 009).
+- **Work-item vocabulary (ADR 098).** Entities: **Goal**, **Lane** (the only code-backed work-item nouns). Field: `wave` (a Goal's build-order rank — a value, not a theme-noun). Generic: **work item** (lane-or-thread), **thread**. Sanctioned prose units: **Phase / P-N** (release arc), **increment N** (per-ADR cut, numbered within a named arc), **Task N** (plan-doc step headings only). Banned as structural tiers: `epic`, `milestone`, `sprint`, `story points`, and feature/task-as-tiers. Enforced on new docs (ADRs ≥ 098, plans ≥ 2026-07-06, new design docs) by `pnpm vocab:check` in the `format:check` chain; mention-not-use via backticks, deliberate use via `<!-- vocab:ok -->`.
