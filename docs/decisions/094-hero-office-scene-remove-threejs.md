@@ -1,4 +1,4 @@
-# 093 — The marketing hero is the office scene; three.js/WebGL is removed
+# 094 — The marketing hero is the office scene; three.js/WebGL is removed
 
 - Status: accepted — built 2026-07-06 (`Hero.tsx` mounts `mountOffice()` with a 5-member fixture + 10s choreography loop; `scene.ts`/`effect.ts`/`anime-three.ts` + GLSL shaders deleted; `three`, `animejs`, `@types/three`, `vite-plugin-glsl` dropped from `packages/web`)
 - Date: 2026-07-06
