@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  normalizeSeatName,
   parseRoleFile,
   parseSeatFile,
   parseTeamFile,
@@ -209,5 +210,21 @@ describe('role file — roles/<name>.toml (ADR 070)', () => {
     for (const body of bodies) {
       expect(parseRoleFile(serializeRole(body))).toEqual(body);
     }
+  });
+});
+
+describe('normalizeSeatName — the stable identity key (issue #107)', () => {
+  it('collapses the casing/whitespace drift that fragments the same actor across teams/resets', () => {
+    // The finding-002 evidence: `Miley` (one team) vs `miley` (another) is one actor, double-counted.
+    expect(normalizeSeatName('Miley')).toBe('miley');
+    expect(normalizeSeatName('miley')).toBe('miley');
+    expect(normalizeSeatName('Miley')).toBe(normalizeSeatName('miley'));
+    expect(normalizeSeatName('Nick')).toBe(normalizeSeatName('nick'));
+    expect(normalizeSeatName('  Ada  ')).toBe('ada'); // stray whitespace
+  });
+
+  it('is idempotent and stable for an already-canonical name', () => {
+    expect(normalizeSeatName('june')).toBe('june');
+    expect(normalizeSeatName(normalizeSeatName('June'))).toBe('june');
   });
 });

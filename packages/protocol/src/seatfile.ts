@@ -103,6 +103,20 @@ export function seatNameFromPath(path: string): string {
   return base.replace(/\.toml$/i, '');
 }
 
+/**
+ * The canonical, casing-invariant form of a seat name — the **stable identity key for aggregation**
+ * (issue #107). A seat's durable identity is its name (ADR 058: the `seats/<name>.toml` filename stem
+ * is the one source of truth; there is no rename and no cross-daemon uuid — the member row id re-mints
+ * on reset), so any per-agent analytic that keys on the raw display name fragments the moment it
+ * aggregates across teams, resets, or naming-convention drift (`Miley` on one team vs `miley` on
+ * another — the same actor, double-counted). Normalizing to NFC + trimmed + lower-case collapses that
+ * fragmentation. Used as the identity dimension on telemetry (`musterd.from.id` / `musterd.member.id`)
+ * while the raw name stays a secondary human label. Not the display form — never render this to a user.
+ */
+export function normalizeSeatName(name: string): string {
+  return name.normalize('NFC').trim().toLowerCase();
+}
+
 /** Parse a `roles/<name>.toml`. The name is the filename stem (not in the body), like seat files. */
 export function parseRoleFile(text: string): RoleFile {
   return RoleFileSchema.parse(parseToml(text));
