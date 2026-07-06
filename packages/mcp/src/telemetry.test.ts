@@ -83,6 +83,19 @@ describe('instrumentTools (ADR 089: the musterd.tool.call span)', () => {
     expect(otel.traceparent).toContain(span.spanContext().traceId);
   });
 
+  it("marks the span errored when a tool *returns* textResult('error: …') — in-band failure, fulfilled promise", async () => {
+    const { server, handlers } = stubServer();
+    instrumentTools(server, stubClient('Ada'), 'dawn');
+    server.registerTool('team_send', {}, async () => ({
+      content: [{ type: 'text', text: 'error: no member "zoe" in dawn' }],
+    }));
+
+    await handlers.get('team_send')!({});
+    const span = spans.getFinishedSpans().find((s) => s.name === 'musterd.tool.call')!;
+    expect(span.status.code).toBe(2); // SpanStatusCode.ERROR
+    expect(span.status.message).toContain('no member "zoe"');
+  });
+
   it('marks the span errored and rethrows when the handler rejects', async () => {
     const { server, handlers } = stubServer();
     instrumentTools(server, stubClient(), 'dawn');

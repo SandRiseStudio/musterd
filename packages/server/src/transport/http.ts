@@ -34,6 +34,8 @@ import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import { appendAudit, hasInterruptRaised, listAudit } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
+import { actDelivery, crossedBySeen } from '../store/delivery.js';
+import { listGoals } from '../store/goals.js';
 import {
   consumeGrant,
   issueGrant,
@@ -42,6 +44,15 @@ import {
   revokeGrant,
   validateGrant,
 } from '../store/grants.js';
+import { deriveReport } from '../store/insights.js';
+import {
+  boardWarnings,
+  getLane,
+  laneWarnings,
+  listLanes,
+  openLane,
+  updateLane,
+} from '../store/lanes.js';
 import {
   addMember,
   authMember,
@@ -65,6 +76,7 @@ import {
   pendingInterrupts,
   rowToEnvelope,
 } from '../store/messages.js';
+import { deriveNext } from '../store/orientation.js';
 import {
   attach,
   clearMemberPresence,
@@ -72,17 +84,6 @@ import {
   listPresence,
   touchAmbientPresence,
 } from '../store/presence.js';
-import {
-  boardWarnings,
-  getLane,
-  laneWarnings,
-  listLanes,
-  openLane,
-  updateLane,
-} from '../store/lanes.js';
-import { listGoals } from '../store/goals.js';
-import { deriveReport } from '../store/insights.js';
-import { deriveNext } from '../store/orientation.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
@@ -94,7 +95,7 @@ import {
   rotateAgentKey,
   setPolicy,
 } from '../store/teams.js';
-import { recordError, recordInterruptCheck } from '../telemetry.js';
+import { recordError, recordInterruptCheck, recordSeenLatency } from '../telemetry.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -1260,7 +1261,7 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/inbox/cursor') {
-        const { member } = authTouch(ctx, slug, req);
+        const { team, member } = authTouch(ctx, slug, req);
         const body = (await readJson(req)) as { last_read_message_id?: string };
         if (!body.last_read_message_id)
           throw new MusterdError('bad_request', 'last_read_message_id required');
@@ -1268,8 +1269,26 @@ export async function handleHttp(
           .prepare<[string], { ts: number }>('SELECT ts FROM messages WHERE id = ?')
           .get(body.last_read_message_id);
         if (!row) throw new MusterdError('not_found', 'unknown message id');
+        const prev = getCursor(ctx.db, member.id);
         const cursor = setCursor(ctx.db, member.id, body.last_read_message_id, row.ts);
+        // seen_latency (ADR 090): each act this advance crossed was just "seen" — emit the
+        // send→seen histogram, the read-side twin of loop_latency. Watermark semantics: every act
+        // covered by one advance shares this instant. Scope lives in crossedBySeen (store).
+        for (const m of crossedBySeen(ctx.db, team.id, member.id, prev.last_read_ts, row.ts)) {
+          recordSeenLatency(member.name, m.act, m.urgent, Math.max(0, cursor.updated_at - m.ts));
+        }
         return sendJson(res, 200, { cursor });
+      }
+
+      // The per-act delivery ledger (ADR 090): where in logged→seen→answered each recipient sits,
+      // derived from the log + cursors + the interrupt audit — never stored.
+      if (method === 'GET' && rest.startsWith('/messages/') && rest.endsWith('/delivery')) {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        const id = rest.slice('/messages/'.length, -'/delivery'.length);
+        const ledger = actDelivery(ctx.db, team.id, id);
+        if (!ledger) throw new MusterdError('not_found', 'unknown message id');
+        return sendJson(res, 200, ledger);
       }
 
       if (method === 'POST' && rest === '/presence') {

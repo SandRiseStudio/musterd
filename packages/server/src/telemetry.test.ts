@@ -1,6 +1,7 @@
 import type { Envelope } from '@musterd/protocol';
 import { PROTOCOL_VERSION } from '@musterd/protocol';
-import { metrics, trace } from '@opentelemetry/api';
+import { context, metrics, trace } from '@opentelemetry/api';
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import {
   InMemoryMetricExporter,
   MeterProvider,
@@ -13,8 +14,10 @@ import {
 } from '@opentelemetry/sdk-trace-base';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  recordDeliveryOutcome,
   recordError,
   recordLoopClosure,
+  recordSeenLatency,
   recordTokenUsage,
   registerRuntimeGauges,
   resetTelemetryForTests,
@@ -57,6 +60,9 @@ describe('envelope instrumentation', () => {
   const reader = new PeriodicExportingMetricReader({ exporter: metricExporter });
 
   beforeAll(() => {
+    // A context manager so startActiveSpan really activates (the NodeSDK registers one in prod) —
+    // the ADR 090 delivery events attach to the *active* span and need it.
+    context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
     trace.setGlobalTracerProvider(
       new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(spans)] }),
     );
@@ -65,6 +71,7 @@ describe('envelope instrumentation', () => {
     resetTelemetryForTests();
   });
   afterAll(() => {
+    context.disable();
     trace.disable();
     metrics.disable();
   });
@@ -161,6 +168,34 @@ describe('envelope instrumentation', () => {
     expect(byAct['accept']!.count).toBe(1);
     expect(byAct['accept']!.sum).toBe(250);
     expect(byAct['resolve']!.sum).toBe(1_000);
+  });
+
+  it('records seen latency by act/urgency, keyed on the normalized seat id (ADR 090)', async () => {
+    recordSeenLatency('Ada', 'handoff', true, 5_000);
+
+    const { resourceMetrics } = await reader.collect();
+    const all = resourceMetrics.scopeMetrics.flatMap((s) => s.metrics);
+    const hist = all.find((m) => m.descriptor.name === 'musterd.coordination.seen_latency')!;
+    expect(hist).toBeTruthy();
+    const dp = hist.dataPoints[0]!;
+    expect((dp.value as { sum: number }).sum).toBe(5_000);
+    expect(dp.attributes['musterd.act']).toBe('handoff');
+    expect(dp.attributes['musterd.urgent']).toBe(true);
+    expect(dp.attributes['musterd.member.id']).toBe('ada');
+    expect(dp.attributes['musterd.member']).toBe('Ada');
+  });
+
+  it('records per-recipient live-push outcome as events on the active span (ADR 090)', () => {
+    withEnvelopeSpan(env({ id: 'e8' }), () => {
+      recordDeliveryOutcome('Ada', true);
+      recordDeliveryOutcome('bob', false);
+    });
+    const span = spans
+      .getFinishedSpans()
+      .find((s) => s.attributes['musterd.envelope.id'] === 'e8')!;
+    expect(span.events.map((e) => e.name)).toEqual(['delivery.live', 'delivery.inboxed']);
+    expect(span.events[0]!.attributes!['musterd.member.id']).toBe('ada');
+    expect(span.events[1]!.attributes!['musterd.member.id']).toBe('bob');
   });
 
   it('records self-reported meta.usage tokens by member/direction; ignores junk (ADR 082 slice 4)', async () => {

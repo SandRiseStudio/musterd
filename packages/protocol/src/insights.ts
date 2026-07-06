@@ -78,6 +78,43 @@ export const CoordinationDensitySchema = z.object({
 export type CoordinationDensity = z.infer<typeof CoordinationDensitySchema>;
 
 /**
+ * One recipient's rung on the delivery ladder (ADR 090): `logged` (persisted to the inbox — in
+ * musterd durability IS delivery, so there is no local `failed`) → `seen` (their read cursor crossed
+ * the act) → `answered` (their accept/decline named it, or a resolve closed its thread). Derived from
+ * the log + cursors + the interrupt audit — never stored.
+ */
+export const DeliveryRecipientSchema = z.object({
+  seat: z.string(),
+  /** Normalized seat id (issue #107) — the keying identity; `seat` is the display label. */
+  seat_id: z.string(),
+  state: z.enum(['logged', 'seen', 'answered']),
+  /**
+   * When their cursor crossed the act — watermark semantics (the cursor update's timestamp, shared
+   * by every act that update crossed), NOT a per-message receipt. Null while unseen.
+   */
+  seen_by: z.number().int().nullable(),
+  /** The closing act, when the loop closed. */
+  answered: z.object({ act: z.string(), id: z.string(), ts: z.number().int() }).nullable(),
+  /** ADR 088 interrupt raises recorded for this (act, recipient) — the attempt history. */
+  interrupt_raises: z.number().int(),
+});
+export type DeliveryRecipient = z.infer<typeof DeliveryRecipientSchema>;
+
+/** The per-act delivery ledger (ADR 090): one act's journey across every recipient. */
+export const ActDeliverySchema = z.object({
+  id: z.string(),
+  act: z.string(),
+  from: z.string(),
+  to_kind: z.enum(['member', 'team', 'broadcast']),
+  thread: z.string().nullable(),
+  ts: z.number().int(),
+  age_ms: z.number().int(),
+  urgent: z.boolean(),
+  recipients: z.array(DeliveryRecipientSchema),
+});
+export type ActDelivery = z.infer<typeof ActDeliverySchema>;
+
+/**
  * `GET /teams/:slug/report` — the whole projection, altitude-agnostic. The surfaces (CLI/MCP/dashboard)
  * pick what to emphasise per altitude (ic = the board, team = the digest, exec = milestones+exceptions);
  * the engine computes everything once. `generated_ts` stamps when the projection was taken.
@@ -93,5 +130,11 @@ export const ReportSchema = z.object({
   blocked: z.array(BlockedLaneSchema),
   /** Coordination-density: is recent traffic real exchange, or broadcast journal? */
   coordination: CoordinationDensitySchema,
+  /**
+   * The open directed ledger (ADR 090): loop-opening acts (request_help/handoff, plus urgent
+   * directed acts) not yet answered — finding 002's "open_loops=1 for ~70 h" made answerable
+   * (which act, whose inbox, seen or ignored).
+   */
+  open_directed: z.array(ActDeliverySchema),
 });
 export type Report = z.infer<typeof ReportSchema>;

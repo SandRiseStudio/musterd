@@ -7,7 +7,12 @@ import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
-import { recordLoopClosure, recordTokenUsage, withEnvelopeSpan } from '../telemetry.js';
+import {
+  recordDeliveryOutcome,
+  recordLoopClosure,
+  recordTokenUsage,
+  withEnvelopeSpan,
+} from '../telemetry.js';
 
 export interface RouteResult {
   message: MessageRow;
@@ -142,13 +147,16 @@ function routeEnvelopeInner(
   // Self-reported token usage (meta.usage — ADR 082 slice 4): opt-in, harness-agnostic.
   recordTokenUsage(outgoingEnv);
 
-  // Deliver live to whoever is present. Durability is the log; this is the push.
+  // Deliver live to whoever is present. Durability is the log; this is the push — its outcome per
+  // recipient (live vs inboxed) is attempt history, recorded as span events (ADR 090), never rows.
   let delivered = 0;
   for (const recipientId of recipients) {
     const recipient = getMemberById(ctx.db, recipientId);
     const toName = env.to.kind === 'member' && recipient ? recipient.name : null;
     const outgoing = rowToEnvelope(message, team.slug, sender.name, toName);
-    delivered += ctx.hub.deliver(recipientId, { type: 'deliver', envelope: outgoing });
+    const pushed = ctx.hub.deliver(recipientId, { type: 'deliver', envelope: outgoing });
+    delivered += pushed;
+    if (recipient) recordDeliveryOutcome(recipient.name, pushed > 0);
   }
 
   // Fan out to firehose observers (ADR 061): every envelope on the team, for read-only watchers like

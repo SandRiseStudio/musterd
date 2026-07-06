@@ -2,6 +2,7 @@ import {
   AuditResponseSchema,
   DecideResponseSchema,
   ErrorBodySchema,
+  ActDeliverySchema,
   GoalListSchema,
   GoalSchema,
   GrantMintSchema,
@@ -11,6 +12,7 @@ import {
   PROTOCOL_VERSION,
   ReportSchema,
   RequestsResponseSchema,
+  type ActDelivery,
   type AuditResponse,
   type ClaimTarget,
   type DeclareGoal,
@@ -297,6 +299,15 @@ export class HttpClient {
     const json = await this.request('GET', `/teams/${slug}/goals`);
     const parsed = GoalListSchema.safeParse(json);
     if (!parsed.success) throw new CliError('goals response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  /** The per-act delivery ledger (ADR 090) — `GET /teams/:slug/messages/:id/delivery`. */
+  async delivery(slug: string, messageId: string): Promise<ActDelivery> {
+    const json = await this.request('GET', `/teams/${slug}/messages/${messageId}/delivery`);
+    const parsed = ActDeliverySchema.safeParse(json);
+    if (!parsed.success)
+      throw new CliError('delivery response did not match the protocol schema', 1);
     return parsed.data;
   }
 

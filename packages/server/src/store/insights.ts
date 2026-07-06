@@ -6,6 +6,7 @@ import type {
   WaitingOnEntry,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { openDirectedLedger } from './delivery.js';
 import { listGoals } from './goals.js';
 import { listLanes } from './lanes.js';
 
@@ -179,5 +180,6 @@ export function deriveReport(
     goals: listGoals(db, teamId, teamSlug),
     blocked,
     coordination: coordinationDensity(db, teamId, now),
+    open_directed: openDirectedLedger(db, teamId, now),
   };
 }

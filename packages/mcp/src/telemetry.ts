@@ -39,6 +39,20 @@ export function startMcpTelemetry(config: McpConfig): Promise<TelemetryHandle> {
 type ToolCallback = (...args: unknown[]) => unknown;
 
 /**
+ * The error text of a fulfilled-but-failed tool result, or null for success. Matches the two ways
+ * a musterd tool signals failure in-band: the MCP `isError` flag, and the `textResult('error: …')`
+ * convention every tool handler uses for caught daemon errors. Truncated — it labels the span, the
+ * full text still reaches the agent.
+ */
+function toolErrorText(result: unknown): string | null {
+  if (typeof result !== 'object' || result === null) return null;
+  const r = result as { isError?: unknown; content?: { type?: string; text?: unknown }[] };
+  const text = r.content?.[0]?.type === 'text' ? String(r.content[0].text ?? '') : '';
+  if (r.isError === true) return text.slice(0, 200) || 'tool error';
+  return text.startsWith('error:') ? text.slice(0, 200) : null;
+}
+
+/**
  * Patch `server.registerTool` so every tool handler runs inside a `musterd.tool.call` span — one
  * choke point instead of nine tool modules. Attributes are structural only (tool name, team, the
  * live seat id per issue #107): never tool arguments or message bodies — content is the
@@ -64,8 +78,17 @@ export function instrumentTools(server: McpServer, client: MusterdClient, team: 
           span.setAttribute('musterd.member.id', normalizeSeatName(member));
           span.setAttribute('musterd.member', member);
         }
-        const done = (): void => {
-          span.setStatus({ code: SpanStatusCode.OK });
+        // Tools report failures by *returning* textResult('error: …') rather than rejecting (the
+        // agent must read the error, so it can't be a protocol-level throw) — a fulfilled promise
+        // is not success. Inspect the result so those calls export as errored spans too, or the
+        // ADR 089 tool-call error rate under-reports real failures (bugbot on #111).
+        const done = (result: unknown): void => {
+          const errText = toolErrorText(result);
+          if (errText !== null) {
+            span.setStatus({ code: SpanStatusCode.ERROR, message: errText });
+          } else {
+            span.setStatus({ code: SpanStatusCode.OK });
+          }
           span.end();
         };
         const failed = (err: unknown): void => {
@@ -77,11 +100,11 @@ export function instrumentTools(server: McpServer, client: MusterdClient, team: 
           const result = cb(...args);
           if (result instanceof Promise) {
             return result.then(
-              (v) => (done(), v),
+              (v) => (done(v), v),
               (err) => (failed(err), Promise.reject(err)),
             );
           }
-          done();
+          done(result);
           return result;
         } catch (err) {
           failed(err);
