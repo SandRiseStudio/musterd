@@ -628,18 +628,18 @@ export const ROADMAP: RoadmapItem[] = [
 
   // ── Wave 4 — the steerable team: mid-loop reachability (2026-07-03 brainstorm) ──
   // The reachability ladder (046 heads-down / 053 blocked / 054 idle) has one rung left: a loop
-  // busy on its own work. ADR 088 + the agent-ontology + interrupt-line design docs freeze the arc;
-  // increment 1 is elevated to near-term (design already frozen, small, demo-able).
+  // busy on its own work. ADR 088 + the agent-ontology + interrupt-line design docs freeze the arc.
+  // Increment 1 (the interrupt line) SHIPPED 2026-07-05 (PR #109); steer/challenge acts and plan
+  // epochs are the remaining increments, next in build order.
   {
     id: 'interrupt-line',
-    wave: 4,
     title: 'The interrupt line — reach a busy agent mid-loop',
-    status: 'near-term',
+    status: 'shipped',
     category: 'human-loop',
     blurb:
       'A directed steer reaches an agent busy mid-task at its next tool-call boundary — the missing reachability rung for a loop that is neither idle nor blocked, but heads-down on its own work.',
     detail:
-      'The frontier the Qoder demo failure named and our own P3 dogfood measured (~37% wasted work, the largest item a steer that arrived too late). ADR 088 freezes increment 1: `musterd inbox --interrupt-check` — a one-shot, local, sub-50ms query that exits silent when nothing waits and prints one daemon-composed line when an interrupt-class directed act does, provisioned by `musterd init` as a PostToolUse hook (verified by `init --check`, degrading to the ADR 046 per-command nudge where hooks are thin). Interrupt-class is scarce by construction (urgent tier gated by can_flag_urgent, ADR 044/071). Injection-surface mitigations are launch requirements: the line is daemon-composed (never the raw body), sender always shown, capability-gated. Its headline eval is *steering latency* (steer sent → recipient acknowledges) — the number the launch demo (hook on vs off) is built around. Resident harnesses (OpenClaw/Hermes) need the same policy at their gateway; the ladder is indexed by harness residency class (agent-ontology.md §4).',
+      'The frontier the Qoder demo failure named and our own P3 dogfood measured (~37% wasted work, the largest item a steer that arrived too late). ADR 088 increment 1 SHIPPED 2026-07-05 (PR #109): `musterd inbox --interrupt-check` — a one-shot, local, sub-50ms query that exits silent when nothing waits and prints one daemon-composed line when an interrupt-class directed act does, provisioned by `musterd init` as a PostToolUse hook (verified by `init --check`, degrading to the ADR 046 per-command nudge where hooks are thin). The daemon owns the predicate (a short-lived CLI can\'t flush telemetry, and the composed line is a security requirement): `pendingInterrupts` in the server store gates on action-needed + urgent tier + unresolved thread, a new `GET /inbox/interrupt-check` route composes the line from structured fields, and a `musterd.interrupt.check` counter + `interrupt.raised` audit verb (DB-deduped per recipient+act) make every raised line auditable. Interrupt-class is scarce by construction (urgent tier gated by can_flag_urgent, ADR 044/071). Injection-surface mitigations shipped as launch requirements: the line is daemon-composed (never the raw body), sender always shown, capability-gated. Its headline eval is *steering latency* (steer sent → recipient acknowledges) — the number the launch demo (hook on vs off) is built around. Increments 2–3 (steer/challenge acts, plan epochs) carry the arc forward as their own items. Resident harnesses (OpenClaw/Hermes) need the same policy at their gateway; the ladder is indexed by harness residency class (agent-ontology.md §4).',
     refs: [
       adr(88, 'ADR 088'),
       doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line'),
@@ -688,7 +688,8 @@ export const ROADMAP: RoadmapItem[] = [
   },
 
   // ── Wave 5 — depth (priority order set 2026-07-04) ──
-  // Interrupt line (Wave 4) stays #1; this is the ordered batch after it. Telemetry L2 leads because
+  // Interrupt line inc1 (Wave 4) shipped; steer/challenge acts lead Wave 4. This is the ordered batch
+  // after it. Telemetry L2 leads because
   // L1 is verified emitting (finding 002) — the data is already useful, L2 makes it first-class.
   {
     id: 'telemetry-l2',
