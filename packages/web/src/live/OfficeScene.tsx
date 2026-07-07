@@ -108,15 +108,15 @@ export function OfficeScene({
   const humans = roster.filter((m) => m.kind === 'human').length;
 
   return (
-    <section className={`lc-constellation${collapsed ? ' is-collapsed' : ''}`}>
+    <section className={`lc-office${collapsed ? ' is-collapsed' : ''}`}>
       {/* Canvas stays mounted while collapsed so WebGL keeps running and re-expanding is instant. */}
       <div className="lc-gl-canvas" ref={hostRef} aria-hidden="true" />
       <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
-      <p className="lc-constellation__caption">
+      <p className="lc-office__caption">
         {agents} agent{agents === 1 ? '' : 's'} · {humans} human{humans === 1 ? '' : 's'}
       </p>
       {onCollapse && (
-        <div className="lc-constellation__collapse">
+        <div className="lc-office__collapse">
           <CollapseButton side="left" label="the office" onClick={onCollapse} />
         </div>
       )}

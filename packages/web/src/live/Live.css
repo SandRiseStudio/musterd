@@ -310,7 +310,7 @@
 .lc__canvas--companion {
   grid-template-columns: 1fr;
 }
-.lc__canvas--companion .lc-constellation {
+.lc__canvas--companion .lc-office {
   border-right: 0;
 }
 .lc__canvas--companion .lc-roster,
@@ -362,19 +362,19 @@
 
 /* the office pill floats top-right of the scene (the office has no header bar) — always visible so the
    office is as obviously collapsible as the other two, over a blurred chip so it reads on any floor tile */
-.lc-constellation__collapse {
+.lc-office__collapse {
   position: absolute;
   top: var(--lc-5);
   right: var(--lc-5);
   z-index: var(--lc-z-overlay);
 }
-.lc-constellation__collapse .lc-collapse {
+.lc-office__collapse .lc-collapse {
   background: rgba(20, 15, 12, 0.55);
   border-color: rgba(255, 233, 208, 0.22);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
-.lc-constellation__collapse .lc-collapse:hover {
+.lc-office__collapse .lc-collapse:hover {
   background: color-mix(in srgb, var(--lc-accent) 22%, rgba(20, 15, 12, 0.55));
 }
 
@@ -386,10 +386,10 @@
 /* ─── the collapsed rail (a slim, clickable spine) ────────────────────── */
 /* When a panel is collapsed its normal content is hidden and the rail takes over the whole track. The
    office/roster panels don't scroll, so a soft opacity fade is enough there. */
-.lc-constellation.is-collapsed .lc-gl-canvas,
-.lc-constellation.is-collapsed .lc-gl-labels,
-.lc-constellation.is-collapsed .lc-constellation__caption,
-.lc-constellation.is-collapsed .lc-constellation__collapse,
+.lc-office.is-collapsed .lc-gl-canvas,
+.lc-office.is-collapsed .lc-gl-labels,
+.lc-office.is-collapsed .lc-office__caption,
+.lc-office.is-collapsed .lc-office__collapse,
 .lc-roster.is-collapsed .lc-roster__head,
 .lc-roster.is-collapsed .lc-roster__rows {
   opacity: 0;
@@ -546,8 +546,8 @@
   }
 }
 
-/* ─── constellation (the office scene lives in this slot) ─────────────── */
-.lc-constellation {
+/* ─── the office scene lives in this slot ─────────────────────────────── */
+.lc-office {
   position: relative;
   flex: 0 0 38%;
   min-width: 0;
@@ -843,7 +843,7 @@
   }
 }
 
-.lc-constellation__caption {
+.lc-office__caption {
   position: absolute;
   left: var(--lc-8);
   bottom: var(--lc-7);
@@ -1842,7 +1842,7 @@
   .lc__canvas {
     --col-office: 0px;
   }
-  .lc-constellation {
+  .lc-office {
     display: none;
   }
 }
