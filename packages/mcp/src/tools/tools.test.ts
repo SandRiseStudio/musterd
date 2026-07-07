@@ -255,7 +255,7 @@ describe('team_send handler', () => {
     expect(sent[0]!.thread).toBe('root2'); // inherited the request's thread
   });
 
-  it('sends a steer (the ADR 102 steering vocabulary is selectable from MCP)', async () => {
+  it('sends a steer (the ADR 103 steering vocabulary is selectable from MCP)', async () => {
     const { client, sent } = sendClient();
     const handler = capture(registerSend, client, config);
     const r = await handler({ to: 'Ada', act: 'steer', body: 'switch to v2' });
@@ -263,7 +263,7 @@ describe('team_send handler', () => {
     expect(text(r)).toContain('sent steer to Ada');
   });
 
-  it('accept auto-targets an open challenge (challenge is answered with an accept, ADR 102)', async () => {
+  it('accept auto-targets an open challenge (challenge is answered with an accept, ADR 103)', async () => {
     const { client, sent } = sendClient({
       fetchInbox: (async () => ({
         messages: [req({ id: 'ch1', ts: 7, act: 'challenge', thread: 'root-ch' })],

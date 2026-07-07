@@ -14,7 +14,7 @@ describe('db', () => {
     db.close();
   });
 
-  it('v14 widens messages.act beyond the frozen v5 CHECK (steering acts persist, ADR 102)', () => {
+  it('v14 widens messages.act beyond the frozen v5 CHECK (steering acts persist, ADR 103)', () => {
     const db = openDb(':memory:');
     seedDawn(db);
     const team = db.prepare<[], { id: string }>('SELECT id FROM teams LIMIT 1').get();
