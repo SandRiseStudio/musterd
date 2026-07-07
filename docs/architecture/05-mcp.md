@@ -123,7 +123,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
 ```json
 {
   "name": "team_send",
-  "description": "Send a message to a teammate, the whole team, or broadcast. Use the right act: status_update to report progress, request_help when blocked, handoff to pass work, accept/decline to answer a request_help/handoff (auto-targets the latest open one — set reply_to to override), wait to signal you're paused, resolve to close a thread when the work is done (set thread to the thread/root id).",
+  "description": "Send a message to a teammate, the whole team, or broadcast. Use the right act: status_update to report progress, request_help when blocked, handoff to pass work, accept/decline to answer a request_help/handoff/challenge (auto-targets the latest open one — set reply_to to override), wait to signal you're paused, resolve to close a thread when the work is done (set thread to the thread/root id). Steering (ADR 103): steer to change direction (always interrupts; the newest steer supersedes prior direction), challenge to make a teammate justify a task/assumption or reconsider (answer it with an accept carrying evidence), defer to reorder/defer a Goal on the plan (set meta.goal_id, optional meta.wave — a number reorders, \"later\" defers).",
   "inputSchema": {
     "type": "object",
     "required": ["act", "body"],
@@ -142,7 +142,10 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
           "accept",
           "decline",
           "wait",
-          "resolve"
+          "resolve",
+          "steer",
+          "challenge",
+          "defer"
         ]
       },
       "body": { "type": "string" },
