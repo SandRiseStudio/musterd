@@ -126,6 +126,40 @@ async function inspectDuplicateAdapters(binding: Binding | null): Promise<string
   ];
 }
 
+/**
+ * Model-attestation drift (ADR 101): an adapter that stops attesting degrades to `unknown`
+ * *silently* — every act it sends stops carrying a model and diversity conclusions on its chains
+ * become unverifiable. Warn-only (a **note**, never exit-1): `unknown` is legal by design
+ * (warn-never-block), but it should be a choice, not rot. Best-effort + read-only like the
+ * duplicate-adapter check: silent when the folder has no seat or the server is unreachable.
+ */
+async function inspectModelAttestation(binding: Binding | null): Promise<string[]> {
+  if (!binding?.server || !binding.team) return [];
+  const seat = bindingSeat(binding);
+  if (!seat) return [];
+  let members;
+  try {
+    ({ members } = await new HttpClient({ server: binding.server }).roster(binding.team));
+  } catch {
+    return []; // server down / unreachable — a health check never invents drift
+  }
+  const workspace = resolveWorkspace();
+  // This folder's live session(s). A stateless HTTP claim (SPEC A.7) attaches with a null workspace,
+  // so a null-workspace live presence on this seat is also "here" — include it, or the note would
+  // silently skip exactly the sessions most likely to under-attest.
+  const liveHere = (members.find((m) => m.name === seat)?.presences ?? []).filter(
+    (p) => p.status !== 'offline' && (p.workspace === workspace || p.workspace == null),
+  );
+  // Warn only when the seat is live here yet **no** session attests — one attested session means the
+  // seat's acts carry a model, so an idle/ambient sibling row without one isn't drift.
+  if (liveHere.length === 0 || liveHere.some((p) => p.model)) return [];
+  return [
+    `seat "${seat}"'s live session here attests no model — its acts read as model: unknown and ` +
+      `diversity conclusions on its chains become unverifiable (ADR 101). Set MUSTERD_MODEL (or ` +
+      `let the harness env carry ANTHROPIC_MODEL) and reconnect to attest.`,
+  ];
+}
+
 export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const primerManaged = classifyPrimerTarget(cwd) === 'managed';
   // The folder's single source of truth for which seat it claims (ADR 018). A legacy MCP registration
@@ -186,11 +220,12 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const guidance = inspectGuidance(cwd);
   drift.push(...guidance.drift);
   const duplicateAdapters = await inspectDuplicateAdapters(binding);
+  const modelAttestation = await inspectModelAttestation(binding);
   return {
     primerManaged,
     harnesses,
     drift,
-    notes: [...guidance.notes, ...duplicateAdapters],
+    notes: [...guidance.notes, ...duplicateAdapters, ...modelAttestation],
     anyConfigured,
   };
 }

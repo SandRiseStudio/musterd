@@ -23,6 +23,8 @@ export interface RequestRow {
   decided_by: string | null;
   created_at: number;
   expires_at: number;
+  /** The claimant's harness-attested model (ADR 101), carried across the approval gap. */
+  model: string | null;
 }
 
 export function toRequest(row: RequestRow): Request {
@@ -37,6 +39,7 @@ export function toRequest(row: RequestRow): Request {
     decided_by: row.decided_by,
     ts: row.created_at,
     expires_at: row.expires_at,
+    model: row.model ?? null,
   };
 }
 
@@ -63,6 +66,8 @@ export function createRequest(
     target: string | null;
     surface?: string;
     collapseByTarget?: boolean;
+    /** The claimant's attested model (ADR 101), stored so the approved occupancy is attested. */
+    model?: string | null;
   },
 ): Request {
   if (input.collapseByTarget && input.target !== null) {
@@ -74,12 +79,17 @@ export function createRequest(
       .get(teamId, input.target);
     if (existing) {
       const surface = input.surface ?? existing.surface;
-      db.prepare('UPDATE requests SET from_session = ?, surface = ? WHERE id = ?').run(
+      // Refresh to the latest claimer's attestation too — the newest session's model is what occupies.
+      // Distinguish "model not supplied" (keep existing) from an explicit `null` (the new claimer is
+      // unattested — it must override, not silently inherit the prior claimer's model).
+      const model = input.model !== undefined ? input.model : (existing.model ?? null);
+      db.prepare('UPDATE requests SET from_session = ?, surface = ?, model = ? WHERE id = ?').run(
         input.from_session,
         surface,
+        model,
         existing.id,
       );
-      return toRequest({ ...existing, from_session: input.from_session, surface });
+      return toRequest({ ...existing, from_session: input.from_session, surface, model });
     }
   } else {
     const existing = db
@@ -104,10 +114,11 @@ export function createRequest(
     decided_by: null,
     created_at: now,
     expires_at: now + REQUEST_TTL_MS,
+    model: input.model ?? null,
   };
   db.prepare(
-    `INSERT INTO requests (id, team_id, kind, from_session, target, surface, status, decided_by, created_at, expires_at)
-     VALUES (@id, @team_id, @kind, @from_session, @target, @surface, @status, @decided_by, @created_at, @expires_at)`,
+    `INSERT INTO requests (id, team_id, kind, from_session, target, surface, status, decided_by, created_at, expires_at, model)
+     VALUES (@id, @team_id, @kind, @from_session, @target, @surface, @status, @decided_by, @created_at, @expires_at, @model)`,
   ).run(row);
   return toRequest(row);
 }

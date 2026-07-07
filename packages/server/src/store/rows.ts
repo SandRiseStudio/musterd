@@ -65,6 +65,9 @@ export interface PresenceRow {
   workspace: string | null;
   /** The human driving this session, captured at attach (musterd/0.2, ADR 021). Null when none. */
   driver: string | null;
+  /** Harness-attested model id for this occupancy (ADR 101). Attested, never verified; null when
+   *  the adapter doesn't attest — rendered as `unknown`, never blocks. Re-attestable mid-occupancy. */
+  model: string | null;
   created_at: number;
 }
 

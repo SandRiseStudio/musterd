@@ -181,7 +181,10 @@ State machine: `connecting → authenticated(key) → claim → (occupied | refu
   "key":"<agent key | human credential>",
   "target": { "seat":"Ada" } | { "role":"backend" } | { "observe": true },
   "grant":"<grant token>"?,            // omitted → triggers a request (default path)
-  "surface":"claude-code" }
+  "surface":"claude-code",
+  "model":"claude-opus-4-8"? }         // harness-attested model id (ADR 101) — attested, never
+                                       // verified; per-occupancy (the durable seat stays
+                                       // model-agnostic, ADR 087); omitted → "unknown", never blocks
 
 // server → client
 { "type":"occupied", "seat": <Seat>, "presence_id":"01J…", "server_time": <ms>,

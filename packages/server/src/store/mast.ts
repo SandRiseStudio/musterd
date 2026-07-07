@@ -1,4 +1,12 @@
-import type { CircularHandoff, MastBlock, StalledThread, TimeToUnblock } from '@musterd/protocol';
+import {
+  MODEL_UNKNOWN,
+  modelFamily,
+  type CircularHandoff,
+  type DiversityFlag,
+  type MastBlock,
+  type StalledThread,
+  type TimeToUnblock,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { openDirectedLedger } from './delivery.js';
 
@@ -122,6 +130,103 @@ export function circularHandoffs(db: Database, teamId: string, now: number): Cir
   return out.slice(0, MAX_ENTRIES);
 }
 
+/**
+ * Model-diversity flags over review/approval chains (ADR 101): an accept/decline answering a
+ * request_help/handoff/challenge (ADR 103) from a *different* seat is an agreement — and same-model agents agree in
+ * correlated ways, so single-family agreement is weak evidence. Granularity is the model FAMILY
+ * (the `claude-*` vs `gpt-*` prefix, derived server-side from the per-act stamp) — intra-family
+ * variants are presumed correlated until the ADR 056 correlation research says otherwise. A chain
+ * with an un-stamped act is `unverifiable` — honestly poisoned, never presumed diverse; a chain
+ * whose known families all match is `flagged`; a cross-family chain is silent (the flag stays
+ * scarce). Warn-never-block, watcher-not-gatekeeper.
+ */
+export function diversityFlags(db: Database, teamId: string, now: number): DiversityFlag[] {
+  const pairs = db
+    .prepare<
+      [string, number],
+      {
+        thread: string;
+        kind: string;
+        ts: number;
+        opener: string;
+        closer: string;
+        opener_model: string | null;
+        closer_model: string | null;
+      }
+    >(
+      `SELECT COALESCE(o.thread_id, o.id) AS thread,
+              o.act AS kind,
+              c.ts AS ts,
+              o.from_member AS opener,
+              c.from_member AS closer,
+              json_extract(o.meta, '$.model') AS opener_model,
+              json_extract(c.meta, '$.model') AS closer_model
+         FROM messages c
+         JOIN messages o
+           ON o.team_id = c.team_id
+          AND o.act IN ('request_help','handoff','challenge')
+          AND o.id = json_extract(c.meta, '$.in_reply_to')
+        WHERE c.team_id = ? AND c.ts > ? AND c.act IN ('accept','decline')
+          AND c.from_member != o.from_member
+        ORDER BY c.ts ASC`,
+    )
+    .all(teamId, now - WINDOW_MS);
+
+  // Aggregate per thread: one verdict per chain, over every answered pair on it.
+  const chains = new Map<
+    string,
+    { kind: string; ts: number; members: Set<string>; families: Set<string>; unknown: boolean }
+  >();
+  for (const p of pairs) {
+    const chain = chains.get(p.thread) ?? {
+      kind: p.kind,
+      ts: p.ts,
+      members: new Set<string>(),
+      families: new Set<string>(),
+      unknown: false,
+    };
+    chain.ts = Math.max(chain.ts, p.ts);
+    chain.members.add(p.opener).add(p.closer);
+    for (const model of [p.opener_model, p.closer_model]) {
+      const family = modelFamily(model);
+      if (family === MODEL_UNKNOWN) chain.unknown = true;
+      else chain.families.add(family);
+    }
+    chains.set(p.thread, chain);
+  }
+
+  const out: DiversityFlag[] = [];
+  for (const [thread, chain] of chains) {
+    const verdict = chain.unknown
+      ? ('unverifiable' as const)
+      : chain.families.size === 1
+        ? ('flagged' as const)
+        : null;
+    if (verdict === null) continue; // cross-family agreement — diverse, silent
+    const families = [...chain.families].sort();
+    out.push({
+      thread,
+      kind: chain.kind,
+      participants: chain.members.size,
+      families,
+      verdict,
+      ts: chain.ts,
+    });
+  }
+  return out.sort((a, b) => b.ts - a.ts).slice(0, MAX_ENTRIES);
+}
+
+/**
+ * Cross-team count of live diversity flags — the point-in-time value the `musterd.insight.diversity_flags`
+ * gauge samples (ADR 101). A derived quantity, so it is *sampled* (a gauge), never accumulated per
+ * report-derive (which would conflate scarcity with poll frequency). Cheap: teams are few and each
+ * `diversityFlags` scan is windowed + capped.
+ */
+export function countDiversityFlags(db: Database, now: number = Date.now()): number {
+  const teams = db.prepare<[], { id: string }>('SELECT id FROM teams').all();
+  return teams.reduce((n, t) => n + diversityFlags(db, t.id, now).length, 0);
+}
+
 /** The whole mast block for the report (ADR 091). */
 export function deriveMast(db: Database, teamId: string, now: number = Date.now()): MastBlock {
   return {
@@ -133,5 +238,7 @@ export function deriveMast(db: Database, teamId: string, now: number = Date.now(
     ),
     stalled_threads: stalledThreads(db, teamId, now),
     circular_handoffs: circularHandoffs(db, teamId, now),
+    // ADR 101: single-family / unverifiable review-approval chains — agreement as weak evidence.
+    diversity: diversityFlags(db, teamId, now),
   };
 }

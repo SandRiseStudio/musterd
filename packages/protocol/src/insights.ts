@@ -147,8 +147,30 @@ export const CircularHandoffSchema = z.object({
 export type CircularHandoff = z.infer<typeof CircularHandoffSchema>;
 
 /**
+ * A review/approval chain whose model diversity is worth the human's attention (ADR 101):
+ * `flagged` = single-model-family end-to-end (all `claude-*`) — treat agreement as weak evidence;
+ * `unverifiable` = a link in the chain carried no attested model, so diversity can't be judged
+ * (honestly poisoned, never presumed diverse). Scoped to answered request_help/handoff chains only —
+ * scarce by construction, matching the claim it makes. Warn-never-block: it informs the human's
+ * weighting of the evidence, it never gates anything.
+ */
+export const DiversityFlagSchema = z.object({
+  thread: z.string(),
+  /** The chain's opening act (request_help | handoff | challenge) — the kind of agreement reached. */
+  kind: z.string(),
+  participants: z.number().int(),
+  /** The distinct model families seen on the chain's acts (server-derived from attested ids). */
+  families: z.array(z.string()),
+  verdict: z.enum(['flagged', 'unverifiable']),
+  /** When the chain closed (the answering act). */
+  ts: z.number().int(),
+});
+export type DiversityFlag = z.infer<typeof DiversityFlagSchema>;
+
+/**
  * The MAST block (ADR 091): the §5b failure detectors as one derived projection — time-to-unblock,
- * ignored request_help (the ADR 090 ledger filtered by age), stalled threads, circular handoffs.
+ * ignored request_help (the ADR 090 ledger filtered by age), stalled threads, circular handoffs,
+ * plus the ADR 101 model-diversity flag over review/approval chains.
  * Act-mix/broadcast-share stays in `coordination` (ADR 050). Diagnostic instruments, not scores.
  */
 export const MastBlockSchema = z.object({
@@ -157,6 +179,7 @@ export const MastBlockSchema = z.object({
   ignored_help: z.array(ActDeliverySchema),
   stalled_threads: z.array(StalledThreadSchema),
   circular_handoffs: z.array(CircularHandoffSchema),
+  diversity: z.array(DiversityFlagSchema),
 });
 export type MastBlock = z.infer<typeof MastBlockSchema>;
 

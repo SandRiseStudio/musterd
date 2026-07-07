@@ -737,14 +737,29 @@ export async function handleHttp(
           // `binding.grant` and silently resumes on reconnect. A `once` grant is not a resume token.
           const resumeToken = body.lifetime === 'once' ? undefined : mint.token;
 
-          // Attach presence for the approved session.
+          // Attach presence for the approved session — carrying the claimant's attestation (ADR 101)
+          // so the approved occupancy isn't born `unknown`.
           const presence = attach(
             ctx.db,
             targetMember.id,
             existing.surface as import('@musterd/protocol').Surface,
             existing.from_session,
-            { provenance: null, workspace: null, driver: null },
+            { provenance: null, workspace: null, driver: null, model: existing.model ?? null },
           );
+          if (existing.model) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: {
+                occupancy: presence.id,
+                old: null,
+                new: existing.model,
+                source: 'claim',
+              },
+            });
+          }
 
           // Settle the request.
           decideRequest(ctx.db, team.id, requestId, 'approved', admin.name);
@@ -886,6 +901,8 @@ export async function handleHttp(
           target: ClaimTargetSchema,
           grant: z.string().optional(),
           surface: SurfaceSchema,
+          // Model attestation (ADR 101), mirroring the WS claim frame — attested, never verified.
+          model: z.string().max(120).optional(),
         });
         const body = parseOrBadRequest(ClaimBody, await readJson(req));
         const team = requireTeam(ctx.db, slug);
@@ -1030,6 +1047,7 @@ export async function handleHttp(
             provenance: null,
             workspace: null,
             driver: null,
+            model: body.model ?? null,
           });
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
@@ -1039,6 +1057,15 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface },
           });
+          if (body.model) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presence.id, old: null, new: body.model, source: 'claim' },
+            });
+          }
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
@@ -1062,6 +1089,7 @@ export async function handleHttp(
             provenance: null,
             workspace: null,
             driver: null,
+            model: body.model ?? null,
           });
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
@@ -1071,6 +1099,15 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface, auth: 'credential' },
           });
+          if (body.model) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presence.id, old: null, new: body.model, source: 'claim' },
+            });
+          }
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
@@ -1097,6 +1134,8 @@ export async function handleHttp(
           from_session: `http:${ulid()}`,
           target: encodedTarget,
           surface: body.surface,
+          // Carry the attestation across the approval gap (ADR 101).
+          model: body.model ?? null,
           // A specific-seat claim collapses to one pending request per seat (no reconnect pile-up).
           collapseByTarget: 'seat' in body.target,
         });
@@ -1123,6 +1162,12 @@ export async function handleHttp(
         const { team, member } = authTouch(ctx, slug, req);
         const body = (await readJson(req)) as { envelope?: unknown };
         const env = parseEnvelope(body.envelope);
+        // No sender occupancy id here by design (ADR 101): a POST is stateless — it authenticates a
+        // *seat* (agent key + acting seat), not a live session, so there is no per-request occupancy
+        // to key the model stamp on. routeEnvelope falls back to the member's newest *attested*
+        // presence — which for a single-active agent is exactly its live claim, the right source.
+        // (A human fanned out over several attested sessions on different models is the one ambiguous
+        // case; the stateless request carries nothing to disambiguate it.)
         const result = routeEnvelope(ctx, team, member, env);
         const ack = rowToEnvelope(
           result.message,

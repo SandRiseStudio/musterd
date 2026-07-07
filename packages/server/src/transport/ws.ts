@@ -24,6 +24,7 @@ import {
   hasLivePresence,
   heartbeat,
   presenceById,
+  reattestModel,
   release,
 } from '../store/presence.js';
 import { createRequest } from '../store/requests.js';
@@ -415,6 +416,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               from_session: state.connId,
               target: encodedTarget,
               surface: frame.surface,
+              // Carry the attestation across the approval gap (ADR 101) so the approved occupancy
+              // isn't born `unknown`.
+              model: frame.model ?? null,
               // A specific-seat claim collapses to one pending request per seat, refreshing the waiter
               // to this newest session — a reconnecting grant-less agent can't stack duplicates.
               collapseByTarget: 'seat' in frame.target,
@@ -493,6 +497,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             provenance: frame.provenance ?? null,
             workspace: frame.workspace ?? null,
             driver: frame.driver ?? null,
+            model: frame.model ?? null,
           });
           // First occupancy stamps the durable *held* marker (ADR 058) — the claim path is the v0.3
           // successor to the v0.2 first-token-touch that used to do this; keeps the ADR 070 derivation.
@@ -538,6 +543,17 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             result: 'allow',
             detail: { surface: frame.surface },
           });
+          // ADR 101: the initial attestation is the first entry in the occupancy's model history —
+          // the audit log IS the switch history (old → new, source), never a table.
+          if (frame.model) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presence.id, old: null, new: frame.model, source: 'claim' },
+            });
+          }
           log.info({
             msg: 'ws_claim_occupied',
             team: team.slug,
@@ -580,6 +596,25 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           case 'heartbeat': {
             if (presenceById(ctx.db, conn.presenceId)) {
               heartbeat(ctx.db, conn.presenceId, frame.status);
+              // ADR 101 re-attestation: a mid-occupancy model switch rides the heartbeat. Only a
+              // real change writes + audits (occupancy.model_attested, old → new).
+              if (frame.model) {
+                const changed = reattestModel(ctx.db, conn.presenceId, frame.model);
+                if (changed) {
+                  appendAudit(ctx.db, conn.teamId, {
+                    actor: conn.memberName,
+                    action: 'occupancy.model_attested',
+                    target: conn.memberName,
+                    result: 'allow',
+                    detail: {
+                      occupancy: conn.presenceId,
+                      old: changed.previous,
+                      new: frame.model,
+                      source: 'heartbeat',
+                    },
+                  });
+                }
+              }
             }
             break;
           }
@@ -602,7 +637,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
                 import('../store/rows.js').TeamRow
               >('SELECT * FROM teams WHERE id = ?')
               .get(conn.teamId)!;
-            const result = routeEnvelope(ctx, teamRow, member, env);
+            // Pass this connection's occupancy id so the per-act model stamp reads *this* session's
+            // attestation, not the member's newest presence (ADR 101).
+            const result = routeEnvelope(ctx, teamRow, member, env, conn.presenceId);
             send(ws, { type: 'ack', id: result.message.id });
             break;
           }

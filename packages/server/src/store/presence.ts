@@ -13,14 +13,17 @@ export interface PresenceSummary {
     provenance: Provenance | null;
     workspace: string | null;
     driver: string | null;
+    model: string | null;
   }[];
 }
 
-/** Attach-time context the client may supply (musterd/0.2, ADR 014 + ADR 021). */
+/** Attach-time context the client may supply (musterd/0.2, ADR 014 + ADR 021 + ADR 101). */
 export interface AttachContext {
   provenance?: Provenance | null;
   workspace?: string | null;
   driver?: string | null;
+  /** Harness-attested model id (ADR 101). Attested, never verified; absent → null (`unknown`). */
+  model?: string | null;
 }
 
 /**
@@ -47,11 +50,12 @@ export function attach(
     provenance: ctx.provenance ?? null,
     workspace: ctx.workspace ?? null,
     driver: ctx.driver ?? null,
+    model: ctx.model ?? null,
     created_at: now,
   };
   db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @created_at)`,
+    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, created_at)
+     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @created_at)`,
   ).run(row);
   return row;
 }
@@ -154,8 +158,12 @@ export function touchAmbientPresence(
     >('SELECT id FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
     .get(memberId);
   if (existing) {
+    // Model attestation is **sticky** across ambient touches (ADR 101): an authenticated HTTP request
+    // carries no model, so `COALESCE(?, model)` preserves the value attested at claim instead of
+    // clearing it (attestation only moves forward — a real switch comes via a claim/heartbeat that
+    // *does* carry a model). provenance/workspace/driver stay per-session seed and re-write normally.
     db.prepare(
-      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ? WHERE id = ?',
+      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, model = COALESCE(?, model) WHERE id = ?',
     ).run(
       Date.now(),
       'online',
@@ -163,6 +171,7 @@ export function touchAmbientPresence(
       provenance,
       ctx.workspace ?? null,
       ctx.driver ?? null,
+      ctx.model ?? null,
       existing.id,
     );
   } else {
@@ -234,6 +243,7 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         provenance: (p.provenance as Provenance | null) ?? null,
         workspace: p.workspace ?? null,
         driver: p.driver ?? null,
+        model: p.model ?? null,
       })),
     };
   });
@@ -262,4 +272,53 @@ export function reapStale(db: Database, timeoutMs: number): PresenceRow[] {
 
 export function presenceById(db: Database, id: string): PresenceRow | undefined {
   return db.prepare<[string], PresenceRow>('SELECT * FROM presence WHERE id = ?').get(id);
+}
+
+/**
+ * Re-attest the model on a live occupancy (ADR 101): a mid-occupancy model switch (a `/model`
+ * command, a fast-mode toggle) is real, so the adapter may update the attested value. Returns the
+ * previous value when it actually changed (the caller audits `occupancy.model_attested` with
+ * old → new), undefined when the row is missing or the value is unchanged (no audit noise).
+ */
+export function reattestModel(
+  db: Database,
+  presenceId: string,
+  model: string | null,
+): { previous: string | null } | undefined {
+  const row = presenceById(db, presenceId);
+  if (!row) return undefined;
+  const next = model ?? null;
+  if ((row.model ?? null) === next) return undefined;
+  db.prepare('UPDATE presence SET model = ? WHERE id = ?').run(next, presenceId);
+  return { previous: row.model ?? null };
+}
+
+/**
+ * The current attested model to stamp on an act (ADR 101). When the sending occupancy is known
+ * (`presenceId`, the WS path) the stamp reads **exactly that occupancy's** attestation — a member
+ * fanned out over two sessions on different models never cross-attributes (ADR 042). When it isn't
+ * (the stateless HTTP message paths, which hold no live occupancy) it falls back to the member's
+ * freshest presence that attests a model. Null when nothing attests (`unknown`).
+ */
+export function currentAttestedModel(
+  db: Database,
+  memberId: string,
+  presenceId?: string,
+): string | null {
+  if (presenceId) {
+    const row = db
+      .prepare<
+        [string, string],
+        { model: string | null }
+      >('SELECT model FROM presence WHERE id = ? AND member_id = ?')
+      .get(presenceId, memberId);
+    return row?.model ?? null;
+  }
+  const row = db
+    .prepare<
+      [string],
+      { model: string | null }
+    >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1')
+    .get(memberId);
+  return row?.model ?? null;
 }

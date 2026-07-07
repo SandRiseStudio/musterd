@@ -11,6 +11,7 @@ import {
   NextBriefSchema,
   PROTOCOL_VERSION,
   ReportSchema,
+  resolveAttestedModel,
   RequestsResponseSchema,
   type ActDelivery,
   type AuditResponse,
@@ -383,18 +384,22 @@ export class HttpClient {
   ): Promise<ClaimOutcome> {
     // Validate the frame shape against the protocol schema (ADR 078); send the HTTP body Cleo's
     // endpoint expects ({ key, target, grant?, surface } — no WS type/v).
+    // Model attestation (ADR 101): resolved from the env; absent reads as `unknown`.
+    const model = resolveAttestedModel(process.env);
     const frame = buildClaimFrame({
       team: slug,
       key: input.key,
       target: input.target,
       surface: input.surface,
       ...(input.grant !== undefined ? { grant: input.grant } : {}),
+      ...(model !== undefined ? { model } : {}),
     });
     const body = {
       key: frame.key,
       target: frame.target,
       ...(frame.grant !== undefined ? { grant: frame.grant } : {}),
       surface: frame.surface,
+      ...(frame.model !== undefined ? { model: frame.model } : {}),
     };
     let res: Response;
     try {
@@ -519,6 +524,9 @@ export interface WatchClaimOpts {
   /** Attach-time context (ADR 014), sticky for the session — same as `watch`. */
   provenance?: string;
   workspace?: string;
+  /** Harness-attested model id (ADR 101). Defaults to the env resolution (`MUSTERD_MODEL` /
+   *  `ANTHROPIC_MODEL`); absent reads as `unknown` server-side, never blocks. */
+  model?: string;
   /** `team` (default) = my inbox stream; `team-all` = the whole-team firehose (ADR 061). */
   scope?: 'team' | 'team-all';
   onDeliver: (env: Envelope) => void;
@@ -554,6 +562,9 @@ export interface WatchClaimOpts {
  */
 export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
   const ws = (opts.createSocket ?? defaultClaimSocket)(opts.wsUrl);
+  // Model attestation (ADR 101): explicit opt wins, else the shared env resolution — resolved once
+  // so a reconnecting frame attests the same value.
+  const attestedModel = opts.model ?? resolveAttestedModel(process.env);
   let heartbeat: NodeJS.Timeout | undefined;
   let subscribed = false;
 
@@ -561,7 +572,17 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
     if (subscribed) return;
     ws.send(JSON.stringify({ type: 'subscribe', scope: opts.scope ?? 'team' }));
     subscribed = true;
-    heartbeat = setInterval(() => ws.send(JSON.stringify({ type: 'heartbeat' })), 15_000);
+    heartbeat = setInterval(
+      () =>
+        ws.send(
+          JSON.stringify({
+            type: 'heartbeat',
+            // Re-affirm the attested model each heartbeat (ADR 101); the server no-ops when unchanged.
+            ...(attestedModel !== undefined ? { model: attestedModel } : {}),
+          }),
+        ),
+      15_000,
+    );
     heartbeat.unref?.();
   };
 
@@ -575,6 +596,8 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
           surface: opts.surface as Surface,
           ...(opts.grant !== undefined ? { grant: opts.grant } : {}),
           ...(opts.workspace !== undefined ? { workspace: opts.workspace } : {}),
+          // Model attestation (ADR 101): explicit opt wins, else the shared env resolution.
+          ...(attestedModel !== undefined ? { model: attestedModel } : {}),
         }),
       ),
     );

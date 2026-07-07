@@ -1,4 +1,4 @@
-import { normalizeSeatName, type Envelope } from '@musterd/protocol';
+import { modelFamily, normalizeSeatName, type Envelope } from '@musterd/protocol';
 import {
   resetTelemetryForTests as resetSdkForTests,
   startTelemetry as startSdk,
@@ -145,6 +145,19 @@ export function withEnvelopeSpan<T>(env: Envelope, fn: () => T): T {
   });
 }
 
+/**
+ * Attach the sender's attested model to the active envelope span (ADR 101): `musterd.model` (the
+ * attested id) + `musterd.model.family` (the server-derived decorrelation boundary), beside the
+ * `musterd.from.id` identity dimension (issue #107) — the per-act stamp that turns the act log into
+ * a model-attributed coordination dataset. No-op without an active span (telemetry off).
+ */
+export function recordActModel(model: string): void {
+  const span = trace.getActiveSpan();
+  if (!span) return;
+  span.setAttribute('musterd.model', model);
+  span.setAttribute('musterd.model.family', modelFamily(model));
+}
+
 /** Count one error by protocol class (validation, version_mismatch, auth, …). Transport-boundary. */
 export function recordError(errorClass: string): void {
   ix().errors.add(1, { 'musterd.error.class': errorClass });
@@ -242,6 +255,10 @@ export interface RuntimeSampler {
   inboxLagMs: () => number;
   /** Directed acts (request_help/handoff) not yet answered by an accept/decline (ADR 082 slice 3). */
   openLoops: () => number;
+  /** Live model-diversity flags on review/approval chains (ADR 101) — flagged + unverifiable. A
+   *  point-in-time count of *derived* state, so a gauge (sampled each cycle), never a counter that
+   *  would conflate flag scarcity with report-poll frequency. */
+  diversityFlags: () => number;
 }
 
 /**
@@ -263,6 +280,10 @@ export function registerRuntimeGauges(sampler: RuntimeSampler): void {
     description:
       'request_help/handoff acts not yet answered by an accept/decline (ADR 082 slice 3)',
   });
+  const diversityFlags = meter.createObservableGauge('musterd.insight.diversity_flags', {
+    description:
+      'Live model-diversity flags on review/approval chains (ADR 101): single-family (flagged) or unattested-link (unverifiable). Derived state sampled each cycle — scarcity is the guard signal',
+  });
   meter.addBatchObservableCallback(
     (obs) => {
       for (const row of sampler.presenceBySurface()) {
@@ -270,7 +291,8 @@ export function registerRuntimeGauges(sampler: RuntimeSampler): void {
       }
       obs.observe(lag, sampler.inboxLagMs());
       obs.observe(openLoops, sampler.openLoops());
+      obs.observe(diversityFlags, sampler.diversityFlags());
     },
-    [active, lag, openLoops],
+    [active, lag, openLoops, diversityFlags],
   );
 }

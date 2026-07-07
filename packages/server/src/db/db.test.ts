@@ -8,7 +8,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('14');
+    expect(ver?.value).toBe('15');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -37,6 +37,15 @@ describe('db', () => {
       (c) => c.name,
     );
     expect(laneCols).toContain('goal_id');
+    db.close();
+  });
+
+  it('v15 adds the model attestation column on presence (ADR 101)', () => {
+    const db = openDb(':memory:');
+    const presenceCols = (
+      db.prepare('PRAGMA table_info(presence)').all() as { name: string }[]
+    ).map((c) => c.name);
+    expect(presenceCols).toContain('model');
     db.close();
   });
 

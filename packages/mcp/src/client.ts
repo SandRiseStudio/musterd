@@ -329,6 +329,8 @@ export class MusterdClient {
           provenance: this.config.provenance,
           workspace: this.config.workspace,
           ...(this.config.driver ? { driver: this.config.driver } : {}),
+          // Model attestation (ADR 101): attested, never verified — absent reads as `unknown`.
+          ...(this.config.model ? { model: this.config.model } : {}),
         }),
       );
     });
@@ -354,7 +356,16 @@ export class MusterdClient {
         if (frame.grant) this.config.grant = frame.grant;
         ws.send(JSON.stringify({ type: 'subscribe', scope: 'team' }));
         this.heartbeat = setInterval(() => {
-          if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'heartbeat' }));
+          if (ws.readyState === ws.OPEN)
+            ws.send(
+              JSON.stringify({
+                type: 'heartbeat',
+                // Re-affirm the attested model each heartbeat (ADR 101) so a mid-occupancy switch
+                // or an attestation the claim missed lands without a reconnect; the server no-ops
+                // when unchanged.
+                ...(this.config.model ? { model: this.config.model } : {}),
+              }),
+            );
         }, 15_000);
         this.heartbeat.unref?.();
         this.pendingJoin?.resolve();

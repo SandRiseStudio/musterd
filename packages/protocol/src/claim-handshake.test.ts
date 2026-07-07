@@ -43,6 +43,40 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
     expect(f.target).toEqual({ role: 'backend' });
   });
 
+  it('parses a claim carrying a model attestation (ADR 101) — optional, capped', () => {
+    const f = ClaimFrame.parse({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'claude-code',
+      model: 'claude-opus-4-8',
+    });
+    expect(f.model).toBe('claude-opus-4-8');
+    // Absent is legal (thin harness) — never blocks.
+    const bare = ClaimFrame.parse({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'claude-code',
+    });
+    expect(bare.model).toBeUndefined();
+    // Over the 120-char wire cap → rejected.
+    const over = ClaimFrame.safeParse({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'claude-code',
+      model: 'x'.repeat(121),
+    });
+    expect(over.success).toBe(false);
+  });
+
   it('parses a claim with an observe target (human credential)', () => {
     const f = ClaimFrame.parse({
       type: 'claim',

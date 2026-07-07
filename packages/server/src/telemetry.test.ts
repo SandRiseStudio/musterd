@@ -135,6 +135,7 @@ describe('envelope instrumentation', () => {
       ],
       inboxLagMs: () => 12_000,
       openLoops: () => 3,
+      diversityFlags: () => 2,
     });
 
     const { resourceMetrics } = await reader.collect();
@@ -152,6 +153,9 @@ describe('envelope instrumentation', () => {
 
     const loops = all.find((m) => m.descriptor.name === 'musterd.coordination.open_loops')!;
     expect(loops.dataPoints[0]!.value).toBe(3);
+
+    const diversity = all.find((m) => m.descriptor.name === 'musterd.insight.diversity_flags')!;
+    expect(diversity.dataPoints[0]!.value).toBe(2);
   });
 
   it('records coordination loop latency by closing act (ADR 082 slice 3)', async () => {

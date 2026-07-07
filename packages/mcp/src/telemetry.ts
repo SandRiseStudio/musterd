@@ -32,6 +32,9 @@ export function startMcpTelemetry(config: McpConfig): Promise<TelemetryHandle> {
       ...(member
         ? { 'musterd.member.id': normalizeSeatName(member), 'musterd.member': member }
         : {}),
+      // The attested model rides as a resource attribute beside the identity (ADR 101) — every
+      // adapter span carries which model sat in the seat, resolved once at boot like the identity.
+      ...(config.model ? { 'musterd.model': config.model } : {}),
     },
   });
 }

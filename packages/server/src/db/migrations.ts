@@ -296,6 +296,20 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // v15 — model attestation (ADR 101): the harness-attested model id rides the occupancy record
+    // (the presence row), never the durable seat — a different harness can occupy the same chair
+    // tomorrow with a different model (ADR 087). Additive + nullable, like the v3/v4 provenance/
+    // workspace/driver columns: pre-101 rows and non-attesting adapters read null and render as
+    // `unknown` (warn-never-block). Switch history lives in the audit log (occupancy.model_attested),
+    // not here. `requests.model` carries a grant-less claimant's attestation across the admin-approval
+    // gap so the approved occupancy is attested (else every approved session would start `unknown`).
+    version: 15,
+    up: (db) => {
+      db.exec('ALTER TABLE presence ADD COLUMN model TEXT');
+      db.exec('ALTER TABLE requests ADD COLUMN model TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

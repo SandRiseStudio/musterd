@@ -15,6 +15,7 @@ import { log } from './log.js';
 import { startReaper } from './presence/reaper.js';
 import { reconcileAll } from './projection/reconcile.js';
 import { startRosterWatcher } from './projection/watcher.js';
+import { countDiversityFlags } from './store/mast.js';
 import { countOpenLoops } from './store/messages.js';
 import { activePresenceBySurface, slowestInboxLagMs } from './store/metrics.js';
 import { registerRuntimeGauges, startTelemetry, telemetryEnabled } from './telemetry.js';
@@ -141,6 +142,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
           presenceBySurface: () => activePresenceBySurface(db, config.presenceTimeoutMs),
           inboxLagMs: () => slowestInboxLagMs(db),
           openLoops: () => countOpenLoops(db),
+          diversityFlags: () => countDiversityFlags(db),
         });
       }
       // Boot floor (ADR 058): project the durable files into the db before serving, so the roster the

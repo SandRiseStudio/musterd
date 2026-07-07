@@ -41,7 +41,11 @@ export type AuditAction =
   // ADR 093: a seat wrote or cleared its private memory blob. `detail` carries sizes only
   // (`size_bytes`, `headline_len`) — never the headline or body text (the no-secrets hard rule 5).
   | 'memory.save'
-  | 'memory.clear';
+  | 'memory.clear'
+  // ADR 101: a harness attested (or re-attested) the model on an occupancy. `detail` carries
+  // `{ occupancy, old, new, source: 'claim'|'heartbeat' }` — this append-only trail IS the
+  // occupancy's model-switch history (the ADR keeps no history column).
+  | 'occupancy.model_attested';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

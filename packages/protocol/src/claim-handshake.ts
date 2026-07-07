@@ -71,6 +71,14 @@ export const ClaimFrame = z.object({
    *  the live `hello` carried; surfaced on the roster. The client already sends both; recorded at OCCUPY. */
   provenance: ProvenanceSchema.optional(),
   driver: z.string().optional(),
+  /**
+   * Harness-attested model id for this occupancy (ADR 101). Attested, never verified — only the
+   * harness knows which model sits in the seat; the durable seat stays model-agnostic (ADR 087), the
+   * *occupancy* carries the model. Omitted → `unknown` (thin harnesses / old adapters; legal, never
+   * blocks). Re-attestation rides a fresh claim/heartbeat from the same workspace (a `/model`
+   * switch is real); the audit log keeps the switch history (`occupancy.model_attested`).
+   */
+  model: z.string().max(120).optional(),
 });
 export type ClaimFrame = z.infer<typeof ClaimFrame>;
 
