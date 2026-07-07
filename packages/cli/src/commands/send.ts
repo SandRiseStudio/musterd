@@ -22,7 +22,7 @@ async function latestOpenRequest(
   try {
     const res = await http.inbox(team, { unread: false });
     const open = openActionNeeded(res.messages, me).filter(
-      (m) => m.act === 'request_help' || m.act === 'handoff',
+      (m) => m.act === 'request_help' || m.act === 'handoff' || m.act === 'challenge',
     );
     return open.sort((a, b) => b.ts - a.ts)[0];
   } catch {

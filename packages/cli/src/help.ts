@@ -19,6 +19,7 @@ usage:
   musterd team export <slug>                     move a team's roster onto git-tracked .musterd/ files (ADR 058)
   musterd join <slug> --as <name> [--token <tok>] [--surface cli]
   musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] <body...>
+                                                act = message|status_update|request_help|handoff|accept|decline|wait|resolve, or steering (ADR 102): steer (change direction, always interrupts, supersedes prior), challenge (justify-or-reconsider), defer (--meta goal_id=<id> [--meta wave=<n|later>] to reorder/defer a Goal)
   musterd lane open "<title>" [--surface <glob>,…] [--depends <id>,…] [--goal <id>] [--project p] [--branch b] [--claim]   declare a unit of work; warn-only contention checks (ADR 083); --goal links it to a Goal (ADR 084)
   musterd lane <claim|handoff|update|resolve> <id> [--to <seat>] [--branch <ref>] [--state <s>]   own / transfer-with-branch / edit / close a lane
   musterd lanes [--project p] [--mine] [--open] [--json]   the lane board — who owns what, with live warnings

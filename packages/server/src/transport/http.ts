@@ -212,17 +212,28 @@ function assertSeatCanRead(member: MemberRow): void {
 }
 
 /**
+ * The class of raise that put a line up (ADR 102): a `steer` is interrupt-class by definition, so it
+ * can raise the line without the `urgent` flag; everything else that raises is `urgent`. Named on the
+ * line and in the audit so "who grabbed the mic, and by what right" stays legible.
+ */
+function raiseClass(latest: Envelope): 'steer' | 'urgent' {
+  return latest.act === 'steer' ? 'steer' : 'urgent';
+}
+
+/**
  * The one-line interrupt notice for `/inbox/interrupt-check` (ADR 088 §4): **daemon-composed from
  * structured fields only** — sender + act + count — never the raw `env.body`, so a teammate's message
  * text can't be injected into a busy agent's context mid-turn. Sender identity is always present so the
  * model can weigh the source. Points at the explicit follow-up (`musterd inbox`) rather than dumping
- * the content.
+ * the content. The class noun (`steer` vs `urgent`, ADR 102) describes only `latest`, so a mixed queue
+ * isn't mislabeled: the plural line uses the neutral "acts" and names the latest's class inline.
  */
 function composeInterruptLine(latest: Envelope, count: number): string {
   const head = `${latest.from} (${latest.act})`;
+  const noun = raiseClass(latest);
   return count > 1
-    ? `⚡ musterd: ${count} urgent acts waiting (latest from ${head}) — run 'musterd inbox' to read them.`
-    : `⚡ musterd: urgent from ${head} — run 'musterd inbox' to read it.`;
+    ? `⚡ musterd: ${count} acts waiting (latest: ${noun} from ${head}) — run 'musterd inbox' to read them.`
+    : `⚡ musterd: ${noun} from ${head} — run 'musterd inbox' to read it.`;
 }
 
 const CreateTeamBody = z.object({
@@ -1265,7 +1276,12 @@ export async function handleHttp(
             action: 'interrupt.raised',
             target: member.name,
             result: 'allow',
-            detail: { act: latest.id, act_kind: latest.act, tier: 'urgent', count: pending.length },
+            detail: {
+              act: latest.id,
+              act_kind: latest.act,
+              tier: raiseClass(latest),
+              count: pending.length,
+            },
           });
         }
         return sendJson(res, 200, {

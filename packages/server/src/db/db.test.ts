@@ -8,9 +8,26 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('13');
+    expect(ver?.value).toBe('14');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
+    db.close();
+  });
+
+  it('v14 widens messages.act beyond the frozen v5 CHECK (steering acts persist, ADR 102)', () => {
+    const db = openDb(':memory:');
+    seedDawn(db);
+    const team = db.prepare<[], { id: string }>('SELECT id FROM teams LIMIT 1').get();
+    const member = db.prepare<[], { id: string }>('SELECT id FROM members LIMIT 1').get();
+    // Inserting a `steer` (unknown to the v5 CHECK vocabulary) must not throw at the DB layer.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO messages (id, team_id, from_member, to_kind, act, body, ts, created_at)
+           VALUES (?, ?, ?, 'team', 'steer', '', 1, 1)`,
+        )
+        .run('m-steer', team!.id, member!.id),
+    ).not.toThrow();
     db.close();
   });
 

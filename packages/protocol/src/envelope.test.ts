@@ -80,6 +80,25 @@ describe('EnvelopeSchema', () => {
     expect(makeEnvelope({ ...base, act: 'message' }).meta).toBeNull();
   });
 
+  it('round-trips the steering acts steer/challenge (ADR 102)', () => {
+    expect(makeEnvelope({ ...base, act: 'steer', body: 'use v2' }).act).toBe('steer');
+    expect(makeEnvelope({ ...base, act: 'challenge', body: 'why this task?' }).act).toBe(
+      'challenge',
+    );
+  });
+
+  it('requires a non-empty meta.goal_id on defer (the Goal it reorders/defers, ADR 102)', () => {
+    expect(() => makeEnvelope({ ...base, act: 'defer' })).toThrow();
+    expect(() => makeEnvelope({ ...base, act: 'defer', meta: { goal_id: '   ' } })).toThrow();
+    const ok = makeEnvelope({
+      ...base,
+      act: 'defer',
+      meta: { goal_id: 'insight-engine', wave: 'later' },
+    });
+    expect(ok.act).toBe('defer');
+    expect(ok.meta).toMatchObject({ goal_id: 'insight-engine', wave: 'later' });
+  });
+
   it('rejects a wrong protocol version', () => {
     const bad = { ...makeEnvelope({ ...base, act: 'message' }), v: 'musterd/9.9' };
     expect(EnvelopeSchema.safeParse(bad).success).toBe(false);

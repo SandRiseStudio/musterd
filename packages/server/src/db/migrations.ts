@@ -261,6 +261,41 @@ export const MIGRATIONS: Migration[] = [
       )`);
     },
   },
+  {
+    // v14 — the steering acts (ADR 102: steer/challenge/defer, increment 2 of the interrupt line).
+    // The `act` CHECK last froze at v5 ('…','resolve'), so persisting a new act fails at the DB even
+    // when envelope validation (ActSchema) passed. Rather than re-freeze a wider CHECK and pay this
+    // rebuild again on the next act, we drop the CHECK entirely — `act` becomes open TEXT, exactly the
+    // lesson v10 recorded ("no CHECK so widening the vocabulary later needs no table rebuild — the v5
+    // CHECK-rebuild trap"). `ActSchema` at the send boundary is the real gate; the DB CHECK was
+    // redundant defense that has now cost two rebuilds. Same rebuild-and-copy dance as v5 (SQLite can't
+    // drop a CHECK in place); indexes recreated identically. Safe with foreign_keys ON — no table
+    // references `messages`, and copied rows still reference live teams/members.
+    version: 14,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE messages_new (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          from_member TEXT NOT NULL REFERENCES members(id),
+          to_kind     TEXT NOT NULL CHECK (to_kind IN ('member','team','broadcast')),
+          to_member   TEXT REFERENCES members(id),
+          act         TEXT NOT NULL,
+          body        TEXT NOT NULL DEFAULT '',
+          thread_id   TEXT,
+          meta        TEXT,
+          ts          INTEGER NOT NULL,
+          created_at  INTEGER NOT NULL
+        );
+        INSERT INTO messages_new SELECT * FROM messages;
+        DROP TABLE messages;
+        ALTER TABLE messages_new RENAME TO messages;
+        CREATE INDEX idx_messages_team_ts ON messages(team_id, ts);
+        CREATE INDEX idx_messages_thread ON messages(thread_id);
+        CREATE INDEX idx_messages_to_member ON messages(to_member);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

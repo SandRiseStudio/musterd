@@ -68,6 +68,19 @@ export function actMetaRules(
       });
     }
   }
+  // `defer` (ADR 102) is a plan mutation on the Goal spine: it MUST name the Goal it moves via a
+  // non-empty `meta.goal_id`. The optional `meta.wave` carries the target position — absent or
+  // "later" defers (sorts last), a number reorders — mirroring the Goal `wave` field `nextGoal` reads.
+  if (env.act === 'defer') {
+    const goalId = meta['goal_id'];
+    if (typeof goalId !== 'string' || goalId.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'goal_id'],
+        message: 'act "defer" requires meta.goal_id (the Goal it reorders/defers)',
+      });
+    }
+  }
   // `resolve` is thread-terminal: it MUST name the thread it closes (ADR 025). The thread id is the
   // root message's id — a no-thread root is closed by passing its own id as `thread`.
   if (env.act === 'resolve') {
