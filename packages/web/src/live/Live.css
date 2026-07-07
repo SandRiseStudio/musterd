@@ -67,7 +67,9 @@
 }
 .lc ::selection {
   background: color-mix(in srgb, var(--lc-accent) 34%, transparent);
-  color: #fff;
+  /* theme ink, not hardcoded white — the daylight/cream theme (ADR 097) would otherwise
+     render light-on-light, unreadable selected text on /live + /office-preview */
+  color: var(--lc-text);
 }
 
 /* ─── top bar (glass over the dusk) ───────────────────────────────────── */

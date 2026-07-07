@@ -1,5 +1,4 @@
 import './ApprovalQueue.css';
-import { useEffect, useState } from 'react';
 import { ApprovalCard, type ApprovalRequest, type GrantLifetime } from './ApprovalCard';
 
 /**
@@ -11,18 +10,32 @@ import { ApprovalCard, type ApprovalRequest, type GrantLifetime } from './Approv
  * a thin adapter changes when `GET /requests` + `POST /requests/:id/decide` land (ADR 069 P3).
  */
 
-/** What the admin decided for a request — the queue tracks this so a card settles in place. */
-type Decision =
+/** What the admin decided for a request — tracked so a card settles in place. Owned by the parent
+ * (ADR 072) so the reception banner and this queue derive "pending" from one source and never disagree. */
+export type Decision =
   | { kind: 'approved'; lifetime: GrantLifetime; at: number }
   | { kind: 'denied'; at: number };
 
+/** Whether a request still counts as pending: not decided this session and not past its window.
+ * Shared by the queue header and the reception banner so their counts always match. */
+export function isPendingRequest(
+  r: ApprovalRequest,
+  decided: Map<string, Decision>,
+  now: number,
+): boolean {
+  return !decided.has(r.id) && r.expiresAt > now;
+}
+
 export function ApprovalQueue({
   requests,
+  decided,
   onApprove,
   onDeny,
   now = Date.now,
 }: {
   requests: ApprovalRequest[];
+  /** Session decisions keyed by request id — owned by the parent so the banner count stays in sync. */
+  decided: Map<string, Decision>;
   /** Fired when the admin approves — wire to POST /requests/:id/decide once P3.1 lands. */
   onApprove: (id: string, lifetime: GrantLifetime) => void;
   /** Fired when the admin denies — wire to POST /requests/:id/decide (deny) once P3.1 lands. */
@@ -30,35 +43,15 @@ export function ApprovalQueue({
   /** Injectable clock — lets tests/fixtures pin "now"; defaults to the real wall clock. */
   now?: () => number;
 }) {
-  // Decisions made this session, keyed by request id — drives the in-place pending → settled flip.
-  const [decided, setDecided] = useState<Map<string, Decision>>(new Map());
-  // A coarse tick so a still-pending request flips to `expired` the moment its window passes.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  const approve = (id: string, lifetime: GrantLifetime) => {
-    setDecided((prev) => new Map(prev).set(id, { kind: 'approved', lifetime, at: now() }));
-    onApprove(id, lifetime);
-  };
-  const deny = (id: string) => {
-    setDecided((prev) => new Map(prev).set(id, { kind: 'denied', at: now() }));
-    onDeny(id);
-  };
-
   // Pending (unsettled, not expired) first — most urgent (soonest expiry) on top; settled sink below.
   const ordered = [...requests].sort((a, b) => {
-    const pa = decided.has(a.id) || a.expiresAt <= now() ? 1 : 0;
-    const pb = decided.has(b.id) || b.expiresAt <= now() ? 1 : 0;
+    const pa = isPendingRequest(a, decided, now()) ? 0 : 1;
+    const pb = isPendingRequest(b, decided, now()) ? 0 : 1;
     if (pa !== pb) return pa - pb;
     return a.expiresAt - b.expiresAt;
   });
 
-  const pendingCount = requests.filter(
-    (r) => !decided.has(r.id) && r.expiresAt > now(),
-  ).length;
+  const pendingCount = requests.filter((r) => isPendingRequest(r, decided, now())).length;
 
   return (
     <section className="aq" aria-label="Approval queue">
@@ -100,8 +93,8 @@ export function ApprovalQueue({
                 key={req.id}
                 kind="pending"
                 request={req}
-                onApprove={(lifetime) => approve(req.id, lifetime)}
-                onDeny={() => deny(req.id)}
+                onApprove={(lifetime) => onApprove(req.id, lifetime)}
+                onDeny={() => onDeny(req.id)}
               />
             );
           })}
