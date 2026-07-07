@@ -761,12 +761,12 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'insight-dashboard',
     wave: 5,
     title: 'Work items, board & insight layer (web)',
-    status: 'reserved',
+    status: 'near-term',
     category: 'insights',
     blurb: 'The kanban-style board and team analytics rendered in the web dashboard — a thin surface over the insight engine, never a second store.',
     detail:
-      'The web surface for the already-shipped insight engine (server projections + GET /report + the report CLI/MCP all landed; this is the browser board they never got). Time-to-unblock, cycle time, load distribution, bottlenecks — the insight-engine projections drawn as the board and analytics views in the web console. No board CRUD, no stored columns: the dashboard renders what the engine derives.',
-    refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+      'The web surface for the already-shipped insight engine (server projections + GET /report + the report CLI/MCP all landed; this is the browser board they never got). ADR 104 frames it as three increments over the two existing endpoints — no board CRUD, no stored columns, the dashboard renders what the engine derives. Increment 1 shipped (PR #151): a read-only /board kanban over GET /lanes — one column per lane state (backlog/claimed/in-progress/blocked/done), cards carrying owner, Goal, branch, age, and the advisory lane-warning flag, auto-provisioning the same hidden observer seat /live uses. Remaining: increment 2 — the insight rail (throughput, cycle time, WIP, waiting-on, MAST exceptions) + Goal swimlanes over GET /report; increment 3 — live-tail so the board moves cards on the ADR 102 lane events instead of on refresh.',
+    refs: [adr(104, 'ADR 104'), doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
     dependsOn: ['insight-engine', 'web-dashboard'],
   },
   {
