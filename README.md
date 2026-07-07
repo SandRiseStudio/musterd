@@ -109,6 +109,8 @@ pnpm test:scenarios  # the flagship 3-pane scenario (Scenario C)
 
 Contributors and implementing agents: start with [`AGENTS.md`](./AGENTS.md) and [`docs/architecture/00-overview.md`](./docs/architecture/00-overview.md). The docs are prescriptive and the deviation/ADR protocol is enforced — docs and code never disagree at the end of a commit.
 
+Changes land through **one enforced git workflow** ([ADR 104](./docs/decisions/104-unified-git-workflow.md)): branch from `main`, open a PR, and squash-merge once the `gates` CI (build → typecheck → test → format:check) and Cursor Bugbot are green — `main` is protected (PR-only, linear history). The playbook is in [`AGENTS.md`](./AGENTS.md).
+
 ## License
 
 [MIT](./LICENSE).
