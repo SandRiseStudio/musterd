@@ -52,19 +52,19 @@ Validation: an Envelope with an unknown `act` MUST be rejected. Unknown `meta` k
 
 Acts are the typed intents of coordination, grounded in the **Co-Gym** collaboration-act taxonomy (Shao et al., _Collaborative Gym_, arXiv 2412.15701). v0.1 defined seven; **v0.3 adds `resolve`** (ADR 025) and the **steering trio `steer`/`challenge`/`defer`** (ADR 103) for eleven:
 
-| Act             | Meaning                                           | Required `meta`/fields    | Optional `meta`                         |
-| --------------- | ------------------------------------------------- | ------------------------- | --------------------------------------- |
-| `message`       | plain communication, no protocol semantics        | —                         | —                                       |
-| `status_update` | report what you are doing / have done             | —                         | `progress` (0..1), `state` (string)     |
-| `request_help`  | ask a Member or the Team to assist / unblock you  | —                         | `blocking` (bool), `topic` (string)     |
-| `handoff`       | transfer a unit of work to someone                | —                         | `artifact` (string), `summary` (string) |
-| `accept`        | accept a prior `request_help`/`handoff`/`challenge`| `meta.in_reply_to` (ULID) | —                                       |
-| `decline`       | decline a prior `request_help`/`handoff`/`challenge`| `meta.in_reply_to` (ULID) | `reason` (string)                       |
-| `wait`          | signal you are paused / blocked                   | —                         | `until` (epoch ms), `reason` (string)   |
-| `resolve`       | close a thread — mark the work it tracks **done** | `thread` (ULID)           | `reason` (string)                       |
-| `steer`         | change direction — a directive that supersedes prior direction | —            | `urgent`+`urgent_reason`                 |
-| `challenge`     | ask a Member to justify a task/assumption or reconsider | —                   | `urgent`+`urgent_reason`                 |
-| `defer`         | reorder/defer a Goal on the plan                  | `meta.goal_id` (string)   | `meta.wave` (int \| `"later"`)          |
+| Act             | Meaning                                                        | Required `meta`/fields    | Optional `meta`                         |
+| --------------- | -------------------------------------------------------------- | ------------------------- | --------------------------------------- |
+| `message`       | plain communication, no protocol semantics                     | —                         | —                                       |
+| `status_update` | report what you are doing / have done                          | —                         | `progress` (0..1), `state` (string)     |
+| `request_help`  | ask a Member or the Team to assist / unblock you               | —                         | `blocking` (bool), `topic` (string)     |
+| `handoff`       | transfer a unit of work to someone                             | —                         | `artifact` (string), `summary` (string) |
+| `accept`        | accept a prior `request_help`/`handoff`/`challenge`            | `meta.in_reply_to` (ULID) | —                                       |
+| `decline`       | decline a prior `request_help`/`handoff`/`challenge`           | `meta.in_reply_to` (ULID) | `reason` (string)                       |
+| `wait`          | signal you are paused / blocked                                | —                         | `until` (epoch ms), `reason` (string)   |
+| `resolve`       | close a thread — mark the work it tracks **done**              | `thread` (ULID)           | `reason` (string)                       |
+| `steer`         | change direction — a directive that supersedes prior direction | —                         | `urgent`+`urgent_reason`                |
+| `challenge`     | ask a Member to justify a task/assumption or reconsider        | —                         | `urgent`+`urgent_reason`                |
+| `defer`         | reorder/defer a Goal on the plan                               | `meta.goal_id` (string)   | `meta.wave` (int \| `"later"`)          |
 
 Rules:
 
@@ -96,7 +96,7 @@ Both bindings MUST funnel sends through one validate→persist→route path so s
 
 ## 6. Versioning & compatibility
 
-- The version string is `musterd/MAJOR.MINOR`. `v0.1` was the first; `v0.2` added single-active newest-wins + reclaim grace, roster activity, attach provenance/workspace, driver co-presence (new error codes `member_busy`/`superseded`); **`v0.3`** is current — it adds the terminal `resolve` act (ADR 025), the steering trio `steer`/`challenge`/`defer` (ADR 103), and un-stubs the reserved `memory` seam on the `occupied` frame into a seat-scoped continuity envelope (A.3, ADR 093). All MINOR additions are additive (new acts and new optional fields, no change to existing required fields): a client that ignores `memory` or does not recognize a new act is unaffected.
+- The version string is `musterd/MAJOR.MINOR`. `v0.1` was the first; `v0.2` added single-active newest-wins + reclaim grace, roster activity, attach provenance/workspace, driver co-presence (new error codes `member_busy`/`superseded`); **`v0.3`** is current — it adds the terminal `resolve` act (ADR 025), the steering trio `steer`/`challenge`/`defer` (ADR 103), un-stubs the reserved `memory` seam on the `occupied` frame into a seat-scoped continuity envelope (A.3, ADR 093), and adds the optional harness-attested `model` field on the `claim` frame + heartbeat (A.3, ADR 101 — per-occupancy, `unknown` when omitted). All MINOR additions are additive (new acts and new optional fields, no change to existing required fields): a client that ignores `memory`/`model` or does not recognize a new act is unaffected.
 - Within a MAJOR, MINOR additions MUST be backward-compatible (new optional `meta`, new optional fields, new endpoints, new error codes). New **acts** or any change to envelope-required fields are a MINOR-or-greater, spec-versioned change requiring an ADR.
 - A server MUST reject a client whose declared `v` it does not support, with a `version_mismatch` error.
 

@@ -92,10 +92,12 @@ export function routeEnvelope(ctx: Ctx, team: TeamRow, sender: Member, env: Enve
 //         -> return RouteResult
 
 // store/presence.ts
-export function attach(db, memberId, surface, connId, ctx?): Presence;    // creates row, status online; ctx = { provenance, workspace } (ADR 014) + { driver } (ADR 021)
+export function attach(db, memberId, surface, connId, ctx?): Presence;    // creates row, status online; ctx = { provenance, workspace } (ADR 014) + { driver } (ADR 021) + { model } (ADR 101)
 export function heartbeat(db, presenceId): void;                          // bumps last_seen_at
+export function reattestModel(db, presenceId, model): {previous}|void;    // ADR 101: mid-occupancy model switch; writes + returns previous only on a real change
+export function currentAttestedModel(db, memberId, presenceId?): string|null; // ADR 101: the per-act model stamp source — the sending occupancy's attestation (presenceId), else newest-attested
 export function detach(db, presenceId): void;                             // removes row
-export function listPresence(db, teamId): PresenceSummary[];              // for status/roster (incl. provenance/workspace/driver)
+export function listPresence(db, teamId): PresenceSummary[];              // for status/roster (incl. provenance/workspace/driver/model)
 export function reapStale(db, timeoutMs): { offlined: string[] };         // presence ids removed
 
 // store/messages.ts
@@ -147,7 +149,7 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 
 ## Telemetry (v0.2 — ADR 015, off by default)
 
-- `telemetry.ts` adds minimal OpenTelemetry (observability.md §4). `routeEnvelope` is wrapped in a `musterd.envelope.process` span with `musterd.*` attributes (team/act/from/to.kind/envelope.id/thread + `otel.traceparent` from `meta.otel`, ADR 011) — **never the body**. Metrics: `musterd.envelopes` (counter), `musterd.delivery.latency` (histogram), `musterd.errors` (counter; recorded at the transport boundary in `http.ts`/`ws.ts`), `musterd.presence.churn` (counter), and two observable gauges sampled on collection — `musterd.presence.active` (live presences by surface) and `musterd.inbox.lag` (age of the slowest unread inbox), backed by `store/metrics.ts` and registered via `registerRuntimeGauges` in `listen()` (only when telemetry is enabled). ADR 082 added the coordination metrics `musterd.coordination.loop_latency` (accept/decline/resolve vs the act they close) + `musterd.coordination.open_loops` (unanswered request_help/handoff, sampled via `countOpenLoops` in `store/messages.ts`), and the opt-in `musterd.agent.tokens` counter (self-reported `meta.usage`, by member/direction/model).
+- `telemetry.ts` adds minimal OpenTelemetry (observability.md §4). `routeEnvelope` is wrapped in a `musterd.envelope.process` span with `musterd.*` attributes (team/act/from/to.kind/envelope.id/thread + `otel.traceparent` from `meta.otel`, ADR 011; ADR 101 adds `musterd.model` + `musterd.model.family` from the sender's attested occupancy, beside the `musterd.from.id` normalized-seat dimension) — **never the body**. Metrics: `musterd.envelopes` (counter), `musterd.delivery.latency` (histogram), `musterd.errors` (counter; recorded at the transport boundary in `http.ts`/`ws.ts`), `musterd.presence.churn` (counter), and the observable gauges sampled on collection — `musterd.presence.active` (live presences by surface), `musterd.inbox.lag` (age of the slowest unread inbox), and `musterd.insight.diversity_flags` (live model-diversity flags across teams, ADR 101), backed by `store/metrics.ts`/`store/mast.ts` and registered via `registerRuntimeGauges` in `listen()` (only when telemetry is enabled). ADR 082 added the coordination metrics `musterd.coordination.loop_latency` (accept/decline/resolve vs the act they close) + `musterd.coordination.open_loops` (unanswered request_help/handoff, sampled via `countOpenLoops` in `store/messages.ts`), and the opt-in `musterd.agent.tokens` counter (self-reported `meta.usage`, by member/direction/model).
 - **HTTP request log (ADR 082):** the `createServer` handler emits a structured `http_request` line per request — `method`/`path`/`status`/`ms`, info 2xx/3xx, warn 4xx, error 5xx — path only (no query/headers), `/health` polls skipped. This is the HTTP layer `daemon.log` previously lacked (finding 001).
 - **Off unless** a standard OTLP endpoint env is set (`OTEL_EXPORTER_OTLP_ENDPOINT` etc.); never when `OTEL_SDK_DISABLED=true`. No phone-home. `createServer().listen()` calls `startTelemetry()` (dynamic-imports the SDK only when enabled); `close()` flushes it. When off, the `@opentelemetry/api` calls are no-ops.
 
