@@ -149,10 +149,10 @@ function OfficePreviewPage() {
         <span className="lc__status lc__status--live">design preview</span>
       </header>
       <div className="lc__canvas lc__canvas--companion">
-        <section className="lc-constellation">
+        <section className="lc-office">
           <div className="lc-gl-canvas" ref={hostRef} aria-hidden="true" />
           <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
-          <p className="lc-constellation__caption">office choreography preview</p>
+          <p className="lc-office__caption">office choreography preview</p>
         </section>
       </div>
     </main>
