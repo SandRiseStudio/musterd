@@ -80,7 +80,9 @@ export function createRequest(
     if (existing) {
       const surface = input.surface ?? existing.surface;
       // Refresh to the latest claimer's attestation too — the newest session's model is what occupies.
-      const model = input.model ?? existing.model ?? null;
+      // Distinguish "model not supplied" (keep existing) from an explicit `null` (the new claimer is
+      // unattested — it must override, not silently inherit the prior claimer's model).
+      const model = input.model !== undefined ? input.model : (existing.model ?? null);
       db.prepare('UPDATE requests SET from_session = ?, surface = ?, model = ? WHERE id = ?').run(
         input.from_session,
         surface,

@@ -55,6 +55,16 @@ describe('requests store (ADR 076)', () => {
     });
     expect(collapsed.id).toBe(r.id);
     expect(collapsed.model).toBe('gpt-5.2');
+    // An explicit null from a newer unattested claimer must OVERRIDE, not inherit the stale model.
+    const cleared = createRequest(db, teamId, {
+      kind: 'claim',
+      from_session: 's3',
+      target: 'seat:Ada',
+      model: null,
+      collapseByTarget: true,
+    });
+    expect(cleared.id).toBe(r.id);
+    expect(cleared.model).toBeNull();
   });
 
   it('dedups by (team, from_session, target) while open — incl. null target', () => {

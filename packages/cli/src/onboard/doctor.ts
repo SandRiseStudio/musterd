@@ -144,13 +144,15 @@ async function inspectModelAttestation(binding: Binding | null): Promise<string[
     return []; // server down / unreachable — a health check never invents drift
   }
   const workspace = resolveWorkspace();
-  // Match this folder's live session(s). A stateless HTTP claim (SPEC A.7) attaches with a null
-  // workspace, so a null-workspace live presence on this seat is also "here" — include it, or the
-  // note would silently skip exactly the sessions most likely to under-attest.
-  const unattested = (members.find((m) => m.name === seat)?.presences ?? []).filter(
-    (p) => p.status !== 'offline' && (p.workspace === workspace || p.workspace == null) && !p.model,
+  // This folder's live session(s). A stateless HTTP claim (SPEC A.7) attaches with a null workspace,
+  // so a null-workspace live presence on this seat is also "here" — include it, or the note would
+  // silently skip exactly the sessions most likely to under-attest.
+  const liveHere = (members.find((m) => m.name === seat)?.presences ?? []).filter(
+    (p) => p.status !== 'offline' && (p.workspace === workspace || p.workspace == null),
   );
-  if (unattested.length === 0) return [];
+  // Warn only when the seat is live here yet **no** session attests — one attested session means the
+  // seat's acts carry a model, so an idle/ambient sibling row without one isn't drift.
+  if (liveHere.length === 0 || liveHere.some((p) => p.model)) return [];
   return [
     `seat "${seat}"'s live session here attests no model — its acts read as model: unknown and ` +
       `diversity conclusions on its chains become unverifiable (ADR 101). Set MUSTERD_MODEL (or ` +

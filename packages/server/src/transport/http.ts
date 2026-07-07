@@ -1162,6 +1162,12 @@ export async function handleHttp(
         const { team, member } = authTouch(ctx, slug, req);
         const body = (await readJson(req)) as { envelope?: unknown };
         const env = parseEnvelope(body.envelope);
+        // No sender occupancy id here by design (ADR 101): a POST is stateless — it authenticates a
+        // *seat* (agent key + acting seat), not a live session, so there is no per-request occupancy
+        // to key the model stamp on. routeEnvelope falls back to the member's newest *attested*
+        // presence — which for a single-active agent is exactly its live claim, the right source.
+        // (A human fanned out over several attested sessions on different models is the one ambiguous
+        // case; the stateless request carries nothing to disambiguate it.)
         const result = routeEnvelope(ctx, team, member, env);
         const ack = rowToEnvelope(
           result.message,
