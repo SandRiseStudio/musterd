@@ -724,25 +724,25 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'model-experimentation',
     wave: 5,
     title: 'Model experimentation — frontier cadence + own models',
-    status: 'reserved',
+    status: 'near-term',
     category: 'observability',
     blurb: 'Treat the model itself as a first-class experimental variable: be early to each frontier model, and own models end-to-end.',
     detail:
-      'From model-experimentation.md. Track A (bleeding edge): run the coordination experiment manifest as each new frontier model lands, diffing the emitted coordination metrics (loop_latency, dup-rate, wasted-work) vs the prior baseline → a per-model coordination leaderboard. Track B (own models): the tiny-model dogfood fixture (Stage 1 local instruct agent → Stage 2 train-from-scratch with MLX), culminating in a fine-tuned coordination-judge model over the traces dataset. **Shares a design session with model-diversity (2026-07-04)** — together they are "model as a variable". Depends on the telemetry L2 substrate to diff metrics across models.',
-    refs: [doc('docs/design/model-experimentation.md', 'model-experimentation'), adr(51, 'ADR 051'), adr(56, 'ADR 056')],
+      'From model-experimentation.md; design frozen 2026-07-06 in the "model as a variable" session with model-diversity (ADR 101 — the two share one kernel: `model` as a first-class attribute musterd captures). Track A (bleeding edge): run the coordination experiment manifest as each new frontier model lands, diffing the emitted coordination metrics (loop_latency, dup-rate, wasted-work) vs the prior baseline → a per-model coordination leaderboard that accretes from research findings, not a platform. ADR 101 increment 1 carries the foundation Track A rides: per-occupancy harness-attested model (re-attestable, `unknown` legal, never blocks — the durable seat stays model-agnostic per ADR 087), the per-act model stamp as the dataset, and the issue #107 stable-seat-id fix on the same seam. Track B (own models) stays the reserved research tail in the separate lab repo: the tiny-model dogfood fixture (Stage 1 local instruct agent probing the guardrail floor → Stage 2 train-from-scratch with MLX), culminating in a fine-tuned coordination-judge model over the traces dataset.',
+    refs: [adr(101, 'ADR 101'), doc('docs/design/model-experimentation.md', 'model-experimentation'), adr(51, 'ADR 051'), adr(56, 'ADR 056')],
     dependsOn: ['telemetry-l2'],
   },
   {
     id: 'model-diversity',
     wave: 5,
     title: 'Model diversity as a team-composition feature',
-    status: 'reserved',
+    status: 'near-term',
     category: 'observability',
     blurb:
-      'Same-model agents agree in correlated ways, so their consensus is weak evidence. Record the model per seat and flag same-model review/approval chains — making model diversity a first-class team property.',
+      'Same-model agents agree in correlated ways, so their consensus is weak evidence. Record the model per occupancy and flag same-family review/approval chains — making model diversity a first-class team property.',
     detail:
-      'From agent-ontology.md §5 (the monoculture problem). musterd is the model-agnostic layer, so heterogeneity is ours to make first-class: store the model on the seat/roster, and let the insight/report layer flag a review or approval chain that was single-model end-to-end ("treat agreement as weak evidence"). Feeds the research track (ADR 056): agreement correlation between same-model vs cross-model reviewer pairs on real coordination traces. **Shares the model-as-a-variable design session with model-experimentation (2026-07-04).**',
-    refs: [doc('docs/design/agent-ontology.md', 'agent-ontology.md'), adr(56, 'ADR 056'), doc('docs/design/model-experimentation.md', 'model-experimentation')],
+      'From agent-ontology.md §5 (the monoculture problem); design frozen 2026-07-06 in the "model as a variable" session (ADR 101). musterd is the model-agnostic layer, so heterogeneity is ours to make first-class: the model attaches per-occupancy on the binding (harness-attested — attested, never verified; `unknown` legal and honestly poisons conclusions as "unverifiable", never "diverse"), and the insight/report layer flags a review/approval/challenge chain that was single-model-FAMILY end-to-end ("treat agreement as weak evidence") — family (`claude-*` vs `gpt-*`) is the decorrelation boundary, review/approval scope keeps the flag scarce, warn-never-block keeps it a watcher. Feeds the research track (ADR 056): agreement correlation between same-family vs cross-family reviewer pairs on real coordination traces is the evidence that upgrades or confirms the family boundary.',
+    refs: [adr(101, 'ADR 101'), doc('docs/design/agent-ontology.md', 'agent-ontology.md'), adr(56, 'ADR 056'), doc('docs/design/model-experimentation.md', 'model-experimentation')],
     dependsOn: ['model-experimentation'],
   },
   {
