@@ -13,14 +13,17 @@ export interface PresenceSummary {
     provenance: Provenance | null;
     workspace: string | null;
     driver: string | null;
+    model: string | null;
   }[];
 }
 
-/** Attach-time context the client may supply (musterd/0.2, ADR 014 + ADR 021). */
+/** Attach-time context the client may supply (musterd/0.2, ADR 014 + ADR 021 + ADR 101). */
 export interface AttachContext {
   provenance?: Provenance | null;
   workspace?: string | null;
   driver?: string | null;
+  /** Harness-attested model id (ADR 101). Attested, never verified; absent → null (`unknown`). */
+  model?: string | null;
 }
 
 /**
@@ -47,11 +50,12 @@ export function attach(
     provenance: ctx.provenance ?? null,
     workspace: ctx.workspace ?? null,
     driver: ctx.driver ?? null,
+    model: ctx.model ?? null,
     created_at: now,
   };
   db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @created_at)`,
+    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, created_at)
+     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @created_at)`,
   ).run(row);
   return row;
 }
@@ -155,7 +159,7 @@ export function touchAmbientPresence(
     .get(memberId);
   if (existing) {
     db.prepare(
-      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ? WHERE id = ?',
+      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, model = ? WHERE id = ?',
     ).run(
       Date.now(),
       'online',
@@ -163,6 +167,7 @@ export function touchAmbientPresence(
       provenance,
       ctx.workspace ?? null,
       ctx.driver ?? null,
+      ctx.model ?? null,
       existing.id,
     );
   } else {
@@ -234,6 +239,7 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         provenance: (p.provenance as Provenance | null) ?? null,
         workspace: p.workspace ?? null,
         driver: p.driver ?? null,
+        model: p.model ?? null,
       })),
     };
   });
@@ -262,4 +268,38 @@ export function reapStale(db: Database, timeoutMs: number): PresenceRow[] {
 
 export function presenceById(db: Database, id: string): PresenceRow | undefined {
   return db.prepare<[string], PresenceRow>('SELECT * FROM presence WHERE id = ?').get(id);
+}
+
+/**
+ * Re-attest the model on a live occupancy (ADR 101): a mid-occupancy model switch (a `/model`
+ * command, a fast-mode toggle) is real, so the adapter may update the attested value. Returns the
+ * previous value when it actually changed (the caller audits `occupancy.model_attested` with
+ * old → new), undefined when the row is missing or the value is unchanged (no audit noise).
+ */
+export function reattestModel(
+  db: Database,
+  presenceId: string,
+  model: string | null,
+): { previous: string | null } | undefined {
+  const row = presenceById(db, presenceId);
+  if (!row) return undefined;
+  const next = model ?? null;
+  if ((row.model ?? null) === next) return undefined;
+  db.prepare('UPDATE presence SET model = ? WHERE id = ?').run(next, presenceId);
+  return { previous: row.model ?? null };
+}
+
+/**
+ * The current attested model for a member — read off the freshest presence row that attests one
+ * (ADR 101). This is what the per-act stamp reads at send time: the *source* is the occupancy
+ * attestation, the *dataset* is the stamp on each act. Null when nothing attests (`unknown`).
+ */
+export function currentAttestedModel(db: Database, memberId: string): string | null {
+  const row = db
+    .prepare<
+      [string],
+      { model: string | null }
+    >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC LIMIT 1')
+    .get(memberId);
+  return row?.model ?? null;
 }

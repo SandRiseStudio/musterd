@@ -886,6 +886,8 @@ export async function handleHttp(
           target: ClaimTargetSchema,
           grant: z.string().optional(),
           surface: SurfaceSchema,
+          // Model attestation (ADR 101), mirroring the WS claim frame — attested, never verified.
+          model: z.string().max(120).optional(),
         });
         const body = parseOrBadRequest(ClaimBody, await readJson(req));
         const team = requireTeam(ctx.db, slug);
@@ -1030,6 +1032,7 @@ export async function handleHttp(
             provenance: null,
             workspace: null,
             driver: null,
+            model: body.model ?? null,
           });
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
@@ -1039,6 +1042,15 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface },
           });
+          if (body.model) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presence.id, old: null, new: body.model, source: 'claim' },
+            });
+          }
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
@@ -1062,6 +1074,7 @@ export async function handleHttp(
             provenance: null,
             workspace: null,
             driver: null,
+            model: body.model ?? null,
           });
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
@@ -1071,6 +1084,15 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface, auth: 'credential' },
           });
+          if (body.model) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presence.id, old: null, new: body.model, source: 'claim' },
+            });
+          }
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },

@@ -2,7 +2,13 @@ import { makeEnvelope, type Act } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
-import { circularHandoffs, deriveMast, stalledThreads, timeToUnblock } from './mast.js';
+import {
+  circularHandoffs,
+  deriveMast,
+  diversityFlags,
+  stalledThreads,
+  timeToUnblock,
+} from './mast.js';
 import { addMember } from './members.js';
 import { insertMessage } from './messages.js';
 import type { MemberRow, TeamRow } from './rows.js';
@@ -125,6 +131,82 @@ describe('circularHandoffs (ADR 091)', () => {
   });
 });
 
+describe('diversityFlags (ADR 101)', () => {
+  it('flags a single-family approval chain; a cross-family chain stays silent', () => {
+    const { db, team, nick, ada, bob } = seed();
+    // Single-family: both acts stamped claude-* → flagged.
+    msg(db, team, ada, bob, 'handoff', 'h1', NOW - 2 * HOUR, {
+      thread: 'same',
+      meta: { model: 'claude-sonnet-5' },
+    });
+    msg(db, team, bob, ada, 'accept', 'a1', NOW - HOUR, {
+      thread: 'same',
+      meta: { in_reply_to: 'h1', model: 'claude-opus-4-8' },
+    });
+    // Cross-family: claude vs gpt → diverse, silent.
+    msg(db, team, ada, bob, 'request_help', 'r1', NOW - 2 * HOUR, {
+      thread: 'cross',
+      meta: { model: 'claude-opus-4-8' },
+    });
+    msg(db, team, bob, ada, 'accept', 'a2', NOW - HOUR, {
+      thread: 'cross',
+      meta: { in_reply_to: 'r1', model: 'gpt-5.2-codex' },
+    });
+
+    const flags = diversityFlags(db, team.id, NOW);
+    expect(flags).toHaveLength(1);
+    expect(flags[0]).toMatchObject({
+      thread: 'same',
+      kind: 'handoff',
+      participants: 2,
+      families: ['claude'],
+      verdict: 'flagged',
+    });
+    // nick unused in this test — keep the seed signature.
+    void nick;
+  });
+
+  it('marks a chain with an unattested link unverifiable — never presumed diverse', () => {
+    const { db, team, ada, bob } = seed();
+    msg(db, team, ada, bob, 'handoff', 'h1', NOW - 2 * HOUR, {
+      thread: 't',
+      meta: { model: 'claude-opus-4-8' },
+    });
+    msg(db, team, bob, ada, 'accept', 'a1', NOW - HOUR, {
+      thread: 't',
+      meta: { in_reply_to: 'h1' },
+    });
+
+    const flags = diversityFlags(db, team.id, NOW);
+    expect(flags).toHaveLength(1);
+    expect(flags[0]).toMatchObject({ thread: 't', verdict: 'unverifiable' });
+  });
+
+  it('ignores self-answered chains and closures outside the window', () => {
+    const { db, team, ada, bob } = seed();
+    // Self-answer: same seat opens and closes — not an agreement between actors.
+    msg(db, team, ada, bob, 'handoff', 'h1', NOW - 2 * HOUR, {
+      thread: 'self',
+      meta: { model: 'claude-opus-4-8' },
+    });
+    msg(db, team, ada, bob, 'accept', 'a1', NOW - HOUR, {
+      thread: 'self',
+      meta: { in_reply_to: 'h1', model: 'claude-opus-4-8' },
+    });
+    // Out of window.
+    msg(db, team, ada, bob, 'handoff', 'h2', NOW - 20 * DAY, {
+      thread: 'old',
+      meta: { model: 'claude-opus-4-8' },
+    });
+    msg(db, team, bob, ada, 'accept', 'a2', NOW - 19 * DAY, {
+      thread: 'old',
+      meta: { in_reply_to: 'h2', model: 'claude-opus-4-8' },
+    });
+
+    expect(diversityFlags(db, team.id, NOW)).toEqual([]);
+  });
+});
+
 describe('deriveMast (the report block)', () => {
   it('composes the views and filters ignored_help off the ADR 090 ledger by age', () => {
     const { db, team, nick } = seed();
@@ -136,5 +218,6 @@ describe('deriveMast (the report block)', () => {
     expect(m.ignored_help.map((d) => d.id)).toEqual(['old']);
     expect(m.stalled_threads).toEqual([]);
     expect(m.circular_handoffs).toEqual([]);
+    expect(m.diversity).toEqual([]);
   });
 });

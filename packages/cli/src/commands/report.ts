@@ -203,6 +203,16 @@ async function coordinationReport(parsed: Parsed): Promise<number> {
     w(
       `  ${theme.warn('↻')} thread ${theme.meta(c.thread)} — handoff returned to a prior participant after ${c.hops} hop${c.hops === 1 ? '' : 's'}\n`,
     );
+
+  w(`\n${theme.accent('model diversity')} ${theme.meta('(review/approval chains, ADR 101)')}:\n`);
+  if (m.diversity.length === 0)
+    w(theme.meta('  none — no single-family or unverifiable chains') + '\n');
+  for (const d of m.diversity)
+    w(
+      d.verdict === 'flagged'
+        ? `  ${theme.warn('⚑')} thread ${theme.meta(d.thread)} — ${d.kind} chain single-model-family end-to-end (all ${d.families[0]}-*) · treat agreement as weak evidence\n`
+        : `  ${theme.meta('?')} thread ${theme.meta(d.thread)} — ${d.kind} chain has an unattested link · diversity unverifiable\n`,
+    );
   return 0;
 }
 

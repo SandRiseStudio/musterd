@@ -5,9 +5,11 @@ import { log } from '../log.js';
 import { appendAudit } from '../store/audit.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
+import { currentAttestedModel } from '../store/presence.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
 import {
+  recordActModel,
   recordDeliveryOutcome,
   recordLoopClosure,
   recordTokenUsage,
@@ -106,6 +108,16 @@ function routeEnvelopeInner(
         detail,
       });
     }
+  }
+
+  // Per-act model stamp (ADR 101): the occupancy attestation is the *source*, the stamp on each act
+  // is the *dataset*. Stamped server-side from the sender's current attested occupancy value — never
+  // client-supplied per act, so a single act can't claim a model its session didn't attest. Absent
+  // attestation stamps nothing (reads as `unknown` downstream, warn-never-block).
+  const attestedModel = currentAttestedModel(ctx.db, sender.id);
+  if (attestedModel) {
+    outgoingEnv = { ...outgoingEnv, meta: { ...outgoingEnv.meta, model: attestedModel } };
+    recordActModel(attestedModel);
   }
 
   // Resolve recipients.

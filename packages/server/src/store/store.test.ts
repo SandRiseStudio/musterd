@@ -19,6 +19,8 @@ import {
   attach,
   clearMemberPresence,
   countLivePresences,
+  currentAttestedModel,
+  reattestModel,
   hasActivePresence,
   hasLivePresence,
   listPresence,
@@ -434,6 +436,35 @@ describe('presence', () => {
     expect(rows?.presences[0]?.surface).toBe('cli');
     expect(presenceById(db, second.id)).toBeDefined();
     expect(presenceById(db, first.id)).toBeUndefined();
+  });
+});
+
+describe('model attestation (ADR 101)', () => {
+  it('attach records the attested model; absent attestation reads null (unknown)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    attach(db, ada.row.id, 'claude-code', 'c1', { model: 'claude-opus-4-8' });
+    const summary = listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada');
+    expect(summary?.presences[0]?.model).toBe('claude-opus-4-8');
+    expect(currentAttestedModel(db, ada.row.id)).toBe('claude-opus-4-8');
+
+    const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
+    attach(db, bo.row.id, 'cli', 'c2'); // no attestation — legal, never blocks
+    expect(currentAttestedModel(db, bo.row.id)).toBeNull();
+  });
+
+  it('reattestModel updates on a real change, no-ops on same value / missing row', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const p = attach(db, ada.row.id, 'claude-code', 'c1', { model: 'claude-sonnet-5' });
+
+    // Same value — no write, no audit noise.
+    expect(reattestModel(db, p.id, 'claude-sonnet-5')).toBeUndefined();
+    // A real switch — returns the previous value for the audit trail.
+    expect(reattestModel(db, p.id, 'claude-opus-4-8')).toEqual({ previous: 'claude-sonnet-5' });
+    expect(currentAttestedModel(db, ada.row.id)).toBe('claude-opus-4-8');
+    // Missing row — undefined, never throws.
+    expect(reattestModel(db, 'nope', 'claude-opus-4-8')).toBeUndefined();
   });
 });
 

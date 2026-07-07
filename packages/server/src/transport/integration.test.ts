@@ -134,7 +134,7 @@ class TestWs {
    * an agent seat needs a `grant` to occupy immediately (else the server opens a pending request). The
    * success frame is `occupied` (the governed successor to `welcome`).
    */
-  claim(team: string, key: string, seat: string, surface = 'cli', grant?: string) {
+  claim(team: string, key: string, seat: string, surface = 'cli', grant?: string, model?: string) {
     this.send({
       type: 'claim',
       v: PROTOCOL_VERSION,
@@ -142,6 +142,7 @@ class TestWs {
       key,
       target: { seat },
       ...(grant ? { grant } : {}),
+      ...(model ? { model } : {}),
       surface,
     });
     return this.waitFor('occupied');
@@ -1280,6 +1281,89 @@ describe('WebSocket', () => {
     const err = await w.waitFor('refused');
     expect((err as any).code).toBe('forbidden');
     w.close();
+  });
+});
+
+describe('model attestation (ADR 101)', () => {
+  it('claim attests, acts carry the server-side meta.model stamp, heartbeat re-attests + audits', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+
+    const a = new TestWs();
+    const l = new TestWs();
+    await Promise.all([a.open(), l.open()]);
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(tok, 'Ada'),
+      'claude-opus-4-8',
+    );
+    // Lin attests nothing — legal, never blocks.
+    await l.claim('dawn', team.json.agent_key, 'Lin', 'codex', await standingGrant(tok, 'Lin'));
+
+    // Ada's act carries the stamp from her occupancy — server-side, not client meta.
+    a.send({
+      type: 'send',
+      envelope: {
+        id: 'am1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'member', name: 'Lin' },
+        act: 'handoff',
+        body: 'take this',
+        ts: Date.now(),
+      },
+    });
+    const deliver = (await l.waitFor('deliver')) as any;
+    expect(deliver.envelope.meta.model).toBe('claude-opus-4-8');
+
+    // Lin's act carries no stamp (unknown).
+    l.send({
+      type: 'send',
+      envelope: {
+        id: 'lm1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Lin',
+        to: { kind: 'member', name: 'Ada' },
+        act: 'accept',
+        body: 'ok',
+        meta: { in_reply_to: 'am1' },
+        ts: Date.now(),
+      },
+    });
+    const back = (await a.waitFor('deliver')) as any;
+    expect(back.envelope.meta.model).toBeUndefined();
+
+    // Re-attestation rides the heartbeat; only a real change audits (old → new).
+    a.send({ type: 'heartbeat', model: 'claude-fable-5' });
+    await new Promise((r) => setTimeout(r, 50));
+    const teamRow = getTeamBySlug(server.db, 'dawn')!;
+    const attests = listAudit(server.db, teamRow.id).filter(
+      (r) => r.action === 'occupancy.model_attested',
+    );
+    expect(attests.length).toBe(2); // claim-time initial + the heartbeat switch
+    const details = attests.map(
+      (r) => JSON.parse(r.detail!) as { old: string | null; new: string; source: string },
+    );
+    expect(details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ old: null, new: 'claude-opus-4-8', source: 'claim' }),
+        expect.objectContaining({
+          old: 'claude-opus-4-8',
+          new: 'claude-fable-5',
+          source: 'heartbeat',
+        }),
+      ]),
+    );
+
+    a.close();
+    l.close();
   });
 });
 

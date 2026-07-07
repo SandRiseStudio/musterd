@@ -78,7 +78,12 @@ function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
   // The MAST detectors (ADR 091) — rendered only when something is unhealthy, so the common
   // (healthy) case costs the agent no context.
   const m = r.mast;
-  if (m.ignored_help.length > 0 || m.stalled_threads.length > 0 || m.circular_handoffs.length > 0) {
+  if (
+    m.ignored_help.length > 0 ||
+    m.stalled_threads.length > 0 ||
+    m.circular_handoffs.length > 0 ||
+    m.diversity.length > 0
+  ) {
     lines.push('\ncoordination health (MAST):');
     for (const d of m.ignored_help)
       lines.push(`  ⚠ ignored request_help ${d.id} from ${d.from} — unanswered ${ago(d.age_ms)}`);
@@ -88,6 +93,13 @@ function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
       );
     for (const c of m.circular_handoffs)
       lines.push(`  ⚠ circular handoff on thread ${c.thread} (${c.hops} hops)`);
+    // ADR 101: single-model-family (or unverifiable) review/approval chains — agreement is weak evidence.
+    for (const d of m.diversity)
+      lines.push(
+        d.verdict === 'flagged'
+          ? `  ⚑ thread ${d.thread} — ${d.kind} chain single-model-family end-to-end (all ${d.families[0]}-*): treat agreement as weak evidence`
+          : `  ? thread ${d.thread} — ${d.kind} chain has an unattested link: model diversity unverifiable`,
+      );
   }
 
   // The open directed ledger (ADR 090): loop-opening acts not yet answered, with per-recipient

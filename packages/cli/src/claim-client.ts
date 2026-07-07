@@ -49,6 +49,7 @@ export function buildClaimFrame(input: {
   surface: Surface;
   grant?: string;
   workspace?: string;
+  model?: string;
 }): ClaimFrame {
   return ClaimFrame.parse({
     type: 'claim',
@@ -61,6 +62,8 @@ export function buildClaimFrame(input: {
     // CLI-claimed seat reads with a real workspace instead of null (also lets a bare re-claim tell
     // "already live *here*" from "live elsewhere", ADR 087).
     ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
+    // Model attestation (ADR 101) — harness-attested per-occupancy; absent reads as `unknown`.
+    ...(input.model !== undefined ? { model: input.model } : {}),
     surface: input.surface,
   });
 }

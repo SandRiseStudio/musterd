@@ -46,6 +46,12 @@ export const SendFrame = z.object({
 export const HeartbeatFrame = z.object({
   type: z.literal('heartbeat'),
   status: PresenceStatusSchema.optional(),
+  // Model re-attestation (ADR 101, additive): a mid-occupancy model switch (a `/model` command, a
+  // fast-mode toggle) is real, so the adapter may carry the current attested model on a heartbeat.
+  // The server updates the occupancy record and audits the switch (`occupancy.model_attested`).
+  // Absent ⇒ no change (never a clear — attestation only moves forward, `unknown` comes from
+  // never attesting, not from omitting the field on one frame).
+  model: z.string().max(120).optional(),
 });
 
 export const WSClientFrame = z.discriminatedUnion('type', [

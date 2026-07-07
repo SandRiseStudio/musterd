@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { basename, relative } from 'node:path';
-import { PROVENANCES, type Provenance } from '@musterd/protocol';
+import { PROVENANCES, resolveAttestedModel, type Provenance } from '@musterd/protocol';
 
 /**
  * The "where"-on-attach seed (human-agent-dynamics §2; ADR 014). A gracefully-degrading workspace
@@ -43,6 +43,17 @@ export function resolveProvenance(env: NodeJS.ProcessEnv = process.env): Provena
 export function resolveDriver(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const raw = env['MUSTERD_DRIVER']?.trim();
   return raw ? raw.slice(0, 80) : undefined;
+}
+
+/**
+ * Model attestation (ADR 101): the model id this harness session runs, resolved from the env
+ * (`MUSTERD_MODEL`, else `ANTHROPIC_MODEL`) via the shared protocol helper. Attested, never
+ * verified — only the harness knows; the value attaches to the *occupancy* (the durable seat stays
+ * model-agnostic, ADR 087). Undefined when nothing declares it — the server renders that as
+ * `unknown` and never blocks (a thin harness is legal).
+ */
+export function resolveModel(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return resolveAttestedModel(env);
 }
 
 interface GitContext {

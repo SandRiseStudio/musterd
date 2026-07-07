@@ -1,4 +1,4 @@
-import { normalizeSeatName, type Envelope } from '@musterd/protocol';
+import { modelFamily, normalizeSeatName, type Envelope } from '@musterd/protocol';
 import {
   resetTelemetryForTests as resetSdkForTests,
   startTelemetry as startSdk,
@@ -52,6 +52,7 @@ interface Instruments {
   seenLatency: Histogram;
   agentTokens: Counter;
   interruptCheck: Counter;
+  diversityFlag: Counter;
 }
 
 // Created lazily on first use (i.e. after startTelemetry has registered a provider) so the
@@ -91,6 +92,10 @@ function ix(): Instruments {
     interruptCheck: meter.createCounter('musterd.interrupt.check', {
       description:
         'Tool-boundary interrupt-line probes, by result (silent | raised) — the mid-loop reachability primitive (ADR 088). result=raised is the delivery half of the steering-latency eval.',
+    }),
+    diversityFlag: meter.createCounter('musterd.insight.diversity_flag', {
+      description:
+        'Model-diversity flags raised on review/approval chains (ADR 101), by chain kind / family / verdict (flagged = single-family end-to-end, unverifiable = an unknown link) — flag scarcity is the guard metric',
     }),
   };
   return instruments;
@@ -142,6 +147,36 @@ export function withEnvelopeSpan<T>(env: Envelope, fn: () => T): T {
     } finally {
       span.end();
     }
+  });
+}
+
+/**
+ * Attach the sender's attested model to the active envelope span (ADR 101): `musterd.model` (the
+ * attested id) + `musterd.model.family` (the server-derived decorrelation boundary), beside the
+ * `musterd.from.id` identity dimension (issue #107) — the per-act stamp that turns the act log into
+ * a model-attributed coordination dataset. No-op without an active span (telemetry off).
+ */
+export function recordActModel(model: string): void {
+  const span = trace.getActiveSpan();
+  if (!span) return;
+  span.setAttribute('musterd.model', model);
+  span.setAttribute('musterd.model.family', modelFamily(model));
+}
+
+/**
+ * Count one raised model-diversity flag (ADR 101): a review/approval chain that was single-model-
+ * family end-to-end (`flagged`) or carried an unknown link (`unverifiable`). Scarcity is the guard
+ * metric — a noisy flag gets muted, and a muted flag is worse than none.
+ */
+export function recordDiversityFlag(
+  chainKind: string,
+  family: string,
+  verdict: 'flagged' | 'unverifiable',
+): void {
+  ix().diversityFlag.add(1, {
+    'musterd.chain.kind': chainKind,
+    'musterd.model.family': family,
+    'musterd.diversity.verdict': verdict,
   });
 }
 

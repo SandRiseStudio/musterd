@@ -329,6 +329,8 @@ export class MusterdClient {
           provenance: this.config.provenance,
           workspace: this.config.workspace,
           ...(this.config.driver ? { driver: this.config.driver } : {}),
+          // Model attestation (ADR 101): attested, never verified — absent reads as `unknown`.
+          ...(this.config.model ? { model: this.config.model } : {}),
         }),
       );
     });

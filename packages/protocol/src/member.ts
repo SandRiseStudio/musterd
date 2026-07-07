@@ -54,6 +54,9 @@ export const PresenceSchema = z.object({
   /** Driver co-presence (musterd/0.2; ADR 021): the human steering this agent's session, when one
    * is. Lets the roster name the co-present human instead of showing them offline; null otherwise. */
   driver: z.string().nullish(),
+  /** Harness-attested model id for this occupancy (ADR 101). Attested, never verified; null/absent
+   *  when the adapter doesn't attest — rendered as `unknown`, never blocks. */
+  model: z.string().nullish(),
 });
 export type Presence = z.infer<typeof PresenceSchema>;
 
