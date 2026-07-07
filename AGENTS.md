@@ -100,6 +100,19 @@ Sandbox runtime, schedule **enforcement** (availability is stored, not enforced)
 
 The three automated scenarios in `06-testing.md` pass: (A) two humans on one team, (B) agent + human request_help→accept loop, (C) the flagship 3-pane scenario across CLI + two MCP surfaces. Scenario C is both the final acceptance test and the script for the recorded README demo.
 
+## Git workflow (one enforced way — see [ADR 104](docs/decisions/104-unified-git-workflow.md))
+
+There is exactly one way to land a change. GitHub enforces it (squash-only, `main` protected, required
+checks), so don't improvise a merge method or a catch-up strategy.
+
+1. **Branch from fresh `main`, in your worktree.** `git fetch origin main` then `git checkout -b feat/<slug> origin/main` (or `fix/`/`docs/`). One branch per lane.
+2. **Work and commit normally.** Intermediate commits don't matter — the PR is **squash-merged** to one commit.
+3. **Before pushing, run the fast local gates:** `pnpm typecheck && pnpm format:check` (seconds). This is a *smoke test for speed*, not a duplicate of CI — do **not** run the full suite locally to "pre-verify" CI. CI is the authority.
+4. **Open the PR and let it land itself:** `gh pr create …` then `gh pr merge <n> --squash --auto --delete-branch`. Auto-merge waits for the required checks (`gates` CI + `Cursor Bugbot`) and squash-merges when green. **Don't poll or babysit** — walk away; you'll be notified.
+5. **Fell behind `main`? Rebase — never `merge main`:** `git fetch origin main && git rebase origin/main`, resolve conflicts once, re-run the fast gates, `git push --force-with-lease`. Your branch is throwaway history under squash, so rebasing is free; `--force-with-lease` won't clobber a teammate.
+
+**Hard rules:** never merge with a merge-commit or rebase-merge (disabled anyway); never `git push --force` (use `--force-with-lease`); never merge past a red `gates` run or an unresolved Bugbot finding; never hand-delete a merged branch (auto-delete does it). The `gates` check runs `build → typecheck → test → format:check`; Bugbot is the Cursor GitHub App (configured at cursor.com/dashboard/bugbot, **not** in-repo).
+
 <!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
 
 ## Your musterd team

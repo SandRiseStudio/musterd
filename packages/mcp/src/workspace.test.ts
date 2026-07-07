@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveDriver, resolveProvenance, resolveWorkspace } from './workspace.js';
 
@@ -17,11 +21,24 @@ describe('resolveWorkspace (where-on-attach seed, ADR 014)', () => {
     expect(label.length).toBeGreaterThan(0);
   });
 
-  it('qualifies the folder with the git branch when run inside this repo', () => {
-    // This test file lives inside the musterd git repo, so the branch qualifier is available.
-    const label = resolveWorkspace({}, process.cwd());
-    // folder@branch form (degrades to bare folder only outside git) — assert the @qualifier shape.
-    expect(label).toMatch(/.+@.+/);
+  it('qualifies the folder with the git branch (folder@branch) on a named branch', () => {
+    // A controlled temp repo on a known branch — deterministic regardless of the ambient checkout.
+    // (The suite's own checkout is a detached HEAD in CI, where the qualifier is *correctly* empty;
+    // asserting against `process.cwd()` was the source of a CI-only flake — see ADR 104.)
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-ws-'));
+    try {
+      const g = (...args: string[]) =>
+        execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+          cwd: dir,
+          stdio: 'ignore',
+        });
+      g('init');
+      g('checkout', '-b', 'my-branch');
+      g('commit', '--allow-empty', '-m', 'seed'); // a branch is only "informative" once it has a HEAD
+      expect(resolveWorkspace({}, dir)).toBe(`${basename(dir)}@my-branch`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
