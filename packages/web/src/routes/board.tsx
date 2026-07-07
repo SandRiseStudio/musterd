@@ -34,13 +34,6 @@ function BoardPage() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  // SSR-safe hydrate of the last team (never a token — the observer credential stays in localStorage,
-  // fetched lazily by acquireObserver).
-  useState(() => {
-    if (typeof window === 'undefined') return;
-    setTeam(window.localStorage.getItem(TEAM_KEY) ?? '');
-  });
-
   const load = async (c: LiveConfig): Promise<void> => {
     const board = await fetchLaneBoard(c);
     setLanes(board.lanes);
@@ -84,11 +77,14 @@ function BoardPage() {
     }
   };
 
-  // Hydrate from the URL (`/board?team=<slug>`) or fall back to the connect form (SSR-safe, once).
+  // Hydrate from the URL (`/board?team=<slug>`), else restore the last team into the form field. A
+  // client-only effect (not a useState initializer) so it never runs during SSR/prerender and reliably
+  // fires on hydration — mirrors `/live`.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const urlTeam = new URLSearchParams(window.location.search).get('team');
     if (urlTeam) void connect(urlTeam);
+    else setTeam(window.localStorage.getItem(TEAM_KEY) ?? '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
