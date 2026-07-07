@@ -303,6 +303,8 @@ const ACT_GLYPH: Record<string, ReactElement> = {
   resolve: <path d="m1.6 6.3 2 2 3.4-4M6 8.3l3.4-4" />,
   end: <rect x="3.3" y="3.3" width="5.4" height="5.4" rx="1" />,
   lane_open: <path d="M2 2.6h5.2v6.8H2zM8.5 4 10.5 6l-2 2" />,
+  lane_claim: <path d="M2 2.6h5.2v6.8H2zM10 3v4M8 5l2 2 2-2" />,
+  lane_state: <path d="M2 2.6h5.2v6.8H2zM9 2.4v7M9 2.6h2.4l-.9 1.3.9 1.3H9" />,
   lane_resolve: <path d="M2 2.6h5.2v6.8H2zm1.1 4 1.6 1.6L7.3 5" />,
   lane_handoff: <path d="M2 6h5M5.5 3.5 8 6l-2.5 2.5M8.6 2.5h1.4v7H8.6" />,
 };

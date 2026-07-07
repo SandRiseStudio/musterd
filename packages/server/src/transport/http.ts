@@ -1240,6 +1240,29 @@ export async function handleHttp(
             { lane_handoff: { lane: lane.id, branch: lane.branch } },
           );
         }
+        // A self-claim (the actor took ownership of a lane that wasn't theirs) — the "who took it" the
+        // board shows, now on the stream too: a noteless structural transition (ADR 102), unowned→owned
+        // in the visible record. The foreign-owner case is the handoff above; this is the complement.
+        if (
+          body.owner_seat !== undefined &&
+          body.owner_seat === member.name &&
+          before.owner_seat !== member.name
+        ) {
+          deliverLaneTeamAct(ctx, team, member, `[lane] claimed "${lane.title}"`, {
+            lane_claim: { lane: lane.id, title: lane.title },
+          });
+        }
+        // A non-terminal state move (e.g. active↔blocked) — the "it's blocked / unblocked" transition,
+        // noteless and daemon-composed (ADR 102). Terminal moves fall to the resolve emit below instead.
+        if (
+          body.state !== undefined &&
+          body.state !== before.state &&
+          !LANE_TERMINAL_STATES.has(lane.state)
+        ) {
+          deliverLaneTeamAct(ctx, team, member, `[lane] "${lane.title}" → ${lane.state}`, {
+            lane_state: { lane: lane.id, title: lane.title, state: lane.state },
+          });
+        }
         // A resolve/abandon is a board-shape change — worth a team-visible note, same as an open.
         if (LANE_TERMINAL_STATES.has(lane.state) && !LANE_TERMINAL_STATES.has(before.state)) {
           const verb = lane.state === 'abandoned' ? 'abandoned' : 'resolved';
