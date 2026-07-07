@@ -155,6 +155,18 @@ async function waitLive(name: string): Promise<void> {
   throw new Error(`${name} never became live on the roster`);
 }
 
+/** Poll until `name` reads offline BUT reclaimable — i.e. held within its ADR 010 grace (ADR 105). */
+async function waitReclaimable(name: string): Promise<void> {
+  const client = new HttpClient({ server: serverUrl, key: adminToken, seat: 'nick' });
+  for (let i = 0; i < 200; i++) {
+    const { members } = await client.roster('dawn');
+    const m = members.find((x) => x.name === name);
+    if (m && m.presence === 'offline' && m.reclaimable === true) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(`${name} never entered the reclaim-grace window`);
+}
+
 /** Poll for the first pending request (admin view) — the CLI opens it asynchronously over WS. */
 async function firstPendingRequestId(): Promise<string> {
   for (let i = 0; i < 50; i++) {
@@ -331,6 +343,34 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     await declareSeat('Ada');
     await declareSeat('Bob');
     await run(['Ada', '--team', 'dawn', '--grant', await grant('Ada')]);
+    const { code } = await run(['Bob', '--team', 'dawn', '--grant', await grant('Bob'), '--force']);
+    expect(code).toBe(0);
+    expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Bob' });
+  });
+
+  it('refuses to clobber a folder bound to a seat held within its reclaim grace (ADR 105)', async () => {
+    await declareSeat('Ada');
+    await declareSeat('Bob');
+    // Occupy + bind Ada with an open session, then drop it: a clean disconnect leaves Ada *held* within
+    // her 45s reclaim grace (reads offline, but a reservation that may be reconnecting).
+    const ada = await holdSeatLive('Ada', await grant('Ada'));
+    ada.close();
+    await waitReclaimable('Ada');
+    // A different seat's claim in the folder is refused — the grace window is honored (was: silent clobber).
+    const gb = await grant('Bob');
+    await expect(run(['Bob', '--team', 'dawn', '--grant', gb])).rejects.toMatchObject({
+      exitCode: 2,
+      message: expect.stringContaining('reclaim grace'),
+    });
+    expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Ada' }); // untouched
+  });
+
+  it('--force repoints past a reclaim-grace hold (ADR 105)', async () => {
+    await declareSeat('Ada');
+    await declareSeat('Bob');
+    const ada = await holdSeatLive('Ada', await grant('Ada'));
+    ada.close();
+    await waitReclaimable('Ada');
     const { code } = await run(['Bob', '--team', 'dawn', '--grant', await grant('Bob'), '--force']);
     expect(code).toBe(0);
     expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Bob' });

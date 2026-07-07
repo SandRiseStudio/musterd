@@ -89,15 +89,18 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     }
   }
 
-  // ADR 066 clobber guard. Claiming a *different* seat into a folder silently repoints its binding —
-  // fine for a stale/offline seat, a collision when the bound member is live. Refuse and point at the
+  // ADR 066 clobber guard (amended by ADR 105). Claiming a *different* seat into a folder silently
+  // repoints its binding — fine for a stale/offline seat, a collision when the bound member is live *or
+  // held within its reclaim grace* (a reservation that may be reconnecting). Refuse and point at the
   // isolated-workspace path; --force repoints anyway. Checked before the claim, so a refusal is clean.
   const guardTarget = 'seat' in target ? target.seat : null;
   const clobber = liveBindingClobber(binding, members, guardTarget);
   if (clobber && !flags['force']) {
-    const where = clobber.workspace ? ` (live in ${clobber.workspace})` : '';
+    const status = clobber.reclaimable
+      ? `disconnected moments ago and may be reconnecting (within its reclaim grace)`
+      : `live right now${clobber.workspace ? ` (live in ${clobber.workspace})` : ''}`;
     throw new CliError(
-      `this folder is already bound to ${clobber.member}, who is live right now${where} — ` +
+      `this folder is already bound to ${clobber.member}, who is ${status} — ` +
         `claiming here would evict them and point both sessions at one working tree. ` +
         `Give the new agent its own workspace instead: musterd agent <name> ` +
         `(adds the seat + a git worktree + binding), or run this claim from a separate worktree. ` +

@@ -55,22 +55,25 @@ export function inspectInitTarget(cwd: string): InitTargetReport {
 }
 
 /**
- * Live-binding clobber guard (ADR 066). A `claim`/`init` in a folder already bound to a *different*
- * member silently repoints `.musterd/binding.json`, evicting that member from the folder. That is
- * benign when the bound member is offline (a stale seat to reclaim), but a real collision when it is
- * *currently live* — two sessions would then drive one working tree, the exact risk ADR 065's
- * one-command worktrees exist to avoid (and the one this very dogfood session hit sharing a tree).
+ * Live-binding clobber guard (ADR 066, amended by ADR 105). A `claim`/`init` in a folder already bound
+ * to a *different* member silently repoints `.musterd/binding.json`, evicting that member from the
+ * folder. That is benign when the bound member is offline (a stale seat to reclaim), but a real
+ * collision when it is *currently live* — two sessions would then drive one working tree, the exact risk
+ * ADR 065's one-command worktrees exist to avoid (and the one this very dogfood session hit sharing a
+ * tree). A seat that is **held within its ADR 010 reclaim grace** (`reclaimable`) counts as occupied
+ * too: it reads `offline` on the roster but is a reservation that may be reconnecting, so clobbering it
+ * is the same collision a moment deferred (ADR 105 / issue #153).
  *
  * Pure + roster-driven, so it is unit-testable without a daemon: the caller passes the folder's
- * current binding and the roster. Returns the live bound member to warn about (with where it is
- * live, when known), or null when there is nothing to clobber. A claim that re-occupies the folder's
- * own seat (target === bound) is never a clobber.
+ * current binding and the roster. Returns the bound member to warn about (with where it is live, when
+ * known, and whether the block is a reclaim-grace reservation), or null when there is nothing to
+ * clobber. A claim that re-occupies the folder's own seat (target === bound) is never a clobber.
  */
 export function liveBindingClobber(
   binding: Binding | null,
   members: MemberSummary[],
   target: string | null,
-): { member: string; workspace?: string } | null {
+): { member: string; workspace?: string; reclaimable?: boolean } | null {
   const bound = binding ? bindingSeat(binding) : undefined;
   if (!bound) return null;
   if (target !== null && bound === target) return null; // re-occupying our own seat
@@ -78,7 +81,11 @@ export function liveBindingClobber(
   if (!m) return null; // bound name not on this team's roster — nothing live to evict
   const livePresence = m.presences.find((p) => p.status !== 'offline');
   const live = m.presence !== 'offline' || (m.activity != null && m.activity !== 'offline');
-  if (!live) return null;
+  // A held-within-grace seat (ADR 010 reservation) is occupied for the guard's purposes even though it
+  // reads `offline` — but a genuinely-live presence takes precedence when we describe *where* it is.
+  const reclaimableOnly = !live && m.reclaimable === true;
+  if (!live && !reclaimableOnly) return null;
+  if (reclaimableOnly) return { member: bound, reclaimable: true };
   return livePresence?.workspace
     ? { member: bound, workspace: livePresence.workspace }
     : { member: bound };
