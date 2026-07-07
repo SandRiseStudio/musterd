@@ -8,9 +8,11 @@
 //      then live-tails — the canonical "GET history, then subscribe, dedupe by id" pattern.
 import {
   AuditResponseSchema,
+  LaneBoardSchema,
   PROTOCOL_VERSION,
   type AuditEntry,
   type Envelope,
+  type LaneBoard,
   type MemberSummary,
   type Request,
 } from '@musterd/protocol';
@@ -157,6 +159,74 @@ export async function fetchAudit(
 
 /** Re-export for routes that import the Request type from this client module. */
 export type { Request };
+
+/**
+ * The lane board (`GET /teams/:slug/lanes`, ADR 083) — the full set of lanes with live warnings
+ * (ADR 084). Member-authed (any seat, not admin), so the read-only observer credential the dashboard
+ * already holds is sufficient. Validates the wire against the shared schema at the boundary, and throws
+ * a {@link LiveFetchError} on failure so a stale-observer 401 can self-heal (`isStaleCredential`).
+ */
+export async function fetchLaneBoard(
+  cfg: LiveConfig,
+  opts: { project?: string; open?: boolean; goal?: string } = {},
+): Promise<LaneBoard> {
+  const q = new URLSearchParams();
+  if (opts.project) q.set('project', opts.project);
+  if (opts.open) q.set('open', '1');
+  if (opts.goal) q.set('goal', opts.goal);
+  const qs = q.toString();
+  const json = await apiGet<unknown>(
+    cfg,
+    `/teams/${encodeURIComponent(cfg.team)}/lanes${qs ? `?${qs}` : ''}`,
+  );
+  return LaneBoardSchema.parse(json);
+}
+
+/* ─── shared read-only observer seat ──────────────────────────────────────────────────────────────
+ * A hidden, self-authorizing read-only seat (ADR 063/077) the browser caches per team, so any read-only
+ * surface — /live, /board — is "enter a team and watch" with no pre-made seat. Keyed the same across
+ * surfaces so they reuse ONE observer per team rather than minting a seat each. `.v2` = credential-based
+ * (ADR 077 claim handshake); bumping it drops legacy token creds. */
+export interface ObserverCreds {
+  name: string;
+  /** The observer seat's credential (mscr_) — the single v0.3 auth secret (HTTP + WS claim). */
+  token: string;
+}
+const observerKey = (team: string) => `musterd.live.observer.v2.${team}`;
+
+export function loadObserver(team: string): ObserverCreds | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(observerKey(team));
+    if (!raw) return null;
+    const creds = JSON.parse(raw) as ObserverCreds;
+    return creds && creds.token ? creds : null;
+  } catch {
+    return null;
+  }
+}
+export function saveObserver(team: string, creds: ObserverCreds) {
+  window.localStorage.setItem(observerKey(team), JSON.stringify(creds));
+}
+export function forgetObserver(team: string) {
+  window.localStorage.removeItem(observerKey(team));
+}
+export function genObserverName(): string {
+  return 'web-' + Math.random().toString(36).slice(2, 8);
+}
+
+/** Load this browser's cached observer for the team, or provision a fresh one and cache it. Returns the
+ * {@link LiveConfig} a read-only surface connects with. */
+export async function acquireObserver(team: string): Promise<LiveConfig> {
+  let creds = loadObserver(team);
+  if (!creds) {
+    const name = genObserverName();
+    const token = await provisionObserver(team, name);
+    creds = { name, token };
+    saveObserver(team, creds);
+  }
+  return { team, as: creds.name, token: creds.token };
+}
 
 /**
  * List pending (or all) claim requests for the team — admin-only (ADR 077).
