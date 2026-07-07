@@ -101,6 +101,60 @@ async function grant(target: string, scope: 'seat' | 'role' = 'seat'): Promise<s
   return ((await res.json()) as { token: string }).token;
 }
 
+/**
+ * Hold a seat durably live via an open `watchClaim` session (heartbeating WS) — as a *real* live agent
+ * does. A one-shot `claimCommand` closes its socket the instant it resolves, so the seat is live for
+ * <50ms; relying on that window is the race that flaked the clobber-guard test under CI timing (ADR
+ * 104). The returned session both occupies+binds the folder (its `onOccupied` saves the binding) and
+ * keeps the seat online until closed. Resolves once the roster reads the seat live.
+ */
+async function holdSeatLive(name: string, grant: string): Promise<{ close: () => void }> {
+  let onBound!: () => void;
+  const bound = new Promise<void>((r) => (onBound = r));
+  const session = watchClaim({
+    wsUrl: wsBase(serverUrl) + '/ws',
+    team: 'dawn',
+    key: agentKey,
+    target: { seat: name },
+    surface: 'cli',
+    workspace: 'ws-here',
+    grant,
+    // Write the folder binding ourselves (as claimCommand would) so this is the *only* session that
+    // occupies the seat — a second occupy from a one-shot `run()` would race its own close() against
+    // this hold and drop the presence.
+    onOccupied: (seat) => {
+      saveBinding(process.cwd(), {
+        server: serverUrl,
+        team: 'dawn',
+        agent_key: agentKey,
+        surface: 'cli',
+        claim: { mode: 'seat', name: seat.name },
+        grant,
+      });
+      onBound();
+    },
+  });
+  try {
+    await Promise.all([bound, waitLive(name)]); // occupied+bound AND visibly live before we proceed
+  } catch (e) {
+    session.close();
+    throw e;
+  }
+  return session;
+}
+
+/** Poll the roster until `name` reads live (mirrors the guard's own liveness predicate). */
+async function waitLive(name: string): Promise<void> {
+  const client = new HttpClient({ server: serverUrl, key: adminToken, seat: 'nick' });
+  for (let i = 0; i < 200; i++) {
+    const { members } = await client.roster('dawn');
+    const m = members.find((x) => x.name === name);
+    if (m && (m.presence !== 'offline' || (m.activity != null && m.activity !== 'offline'))) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(`${name} never became live on the roster`);
+}
+
 /** Poll for the first pending request (admin view) — the CLI opens it asynchronously over WS. */
 async function firstPendingRequestId(): Promise<string> {
   for (let i = 0; i < 50; i++) {
@@ -257,14 +311,20 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
   it('refuses to clobber a folder bound to a currently-live different seat (ADR 066)', async () => {
     await declareSeat('Ada');
     await declareSeat('Bob');
-    const ga = await grant('Ada');
-    await run(['Ada', '--team', 'dawn', '--grant', ga]); // bind + occupy Ada (now live/active)
-    const gb = await grant('Bob');
-    await expect(run(['Bob', '--team', 'dawn', '--grant', gb])).rejects.toMatchObject({
-      exitCode: 2,
-      message: expect.stringContaining('musterd agent'),
-    });
-    expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Ada' }); // untouched
+    // Hold Ada live with an open session (a real live seat holds an open WS) — this occupies the seat,
+    // binds the folder to Ada, and keeps her online, so the guard sees a genuinely-live incumbent
+    // rather than the <50ms flicker a one-shot claim leaves behind.
+    const ada = await holdSeatLive('Ada', await grant('Ada'));
+    try {
+      const gb = await grant('Bob');
+      await expect(run(['Bob', '--team', 'dawn', '--grant', gb])).rejects.toMatchObject({
+        exitCode: 2,
+        message: expect.stringContaining('musterd agent'),
+      });
+      expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Ada' }); // untouched
+    } finally {
+      ada.close();
+    }
   });
 
   it('--force repoints a folder bound to a live seat anyway (ADR 066)', async () => {
