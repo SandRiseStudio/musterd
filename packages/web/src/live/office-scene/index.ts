@@ -52,8 +52,8 @@ interface Speech {
 }
 
 /**
- * Mount the live isometric office. Same `{update, emit, dispose}` shape as the constellation scene (a
- * drop-in for ConstellationGL). The office is a code-drawn Canvas2D scene; every member is an actor
+ * Mount the live isometric office. Exposes a `{update, emit, dispose}` handle the `OfficeScene`
+ * component drives. The office is a code-drawn Canvas2D scene; every member is an actor
  * (see `actors.ts`) drawn at a live pose. When nothing moves, the scene is baked to an offscreen buffer
  * and blitted (cheap); while acts play as choreography (walks/carry/hand-raise) the frame does a full
  * depth-sorted redraw so walkers overlap desks correctly and their labels follow them. Transient cues

@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import liveCss from '../live/Live.css?url';
-import { ConstellationGL } from '../live/ConstellationGL';
+import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
 import type { LiveConfig, ConnStatus } from '../live/client';
@@ -269,7 +269,7 @@ function LivePage() {
               `${collapsed.stream ? ' is-stream-collapsed' : ''}`
             }
           >
-            <ConstellationGL
+            <OfficeScene
               roster={roster}
               envelopes={envelopes}
               liveIds={liveIds}

@@ -72,7 +72,7 @@ export type OfficeEvent =
   // the bubble a click-through to the same act in the stream panel.
   | { kind: 'speech'; who: string; text: string; tone: ActTone; id?: string };
 
-/** Identical shape to the constellation's `ConstellationHandle` — a drop-in for `ConstellationGL`. */
+/** The imperative handle the `OfficeScene` component drives the mounted scene through. */
 export interface OfficeHandle {
   update: (data: OfficeData) => void;
   emit: (ev: OfficeEvent) => void;
