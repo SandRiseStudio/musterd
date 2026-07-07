@@ -1874,3 +1874,166 @@
     transition: none;
   }
 }
+
+/* ─── work board (ADR 104) — lanes as a read-only kanban ─────────────────── */
+.lc__canvas--board {
+  display: block;
+  overflow: auto;
+  padding: var(--lc-6);
+}
+.lc-board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(230px, 1fr);
+  gap: var(--lc-5);
+  align-items: start;
+  min-height: 100%;
+}
+.lc-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-r-lg);
+  background: color-mix(in srgb, var(--lc-ground) 55%, transparent);
+}
+.lc-col__head {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-4);
+  padding: var(--lc-4) var(--lc-5);
+  border-bottom: 1px solid var(--lc-border);
+  /* a thin state-coloured cap so the columns read as a spectrum, not five identical trays */
+  border-top: 2px solid var(--col-accent, var(--lc-border-2));
+  border-radius: var(--lc-r-lg) var(--lc-r-lg) 0 0;
+}
+.lc-col--lane {
+  --col-accent: var(--lc-lane);
+}
+.lc-col--danger {
+  --col-accent: var(--lc-danger);
+}
+.lc-col--success {
+  --col-accent: var(--lc-success);
+}
+.lc-col--neutral {
+  --col-accent: var(--lc-border-2);
+}
+.lc-col__label {
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--lc-dim);
+}
+.lc-col__count {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--col-accent, var(--lc-muted)) 16%, transparent);
+  color: var(--lc-dim);
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  text-align: center;
+}
+.lc-col__cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-4);
+  padding: var(--lc-4);
+  overflow-y: auto;
+}
+.lc-col__empty {
+  margin: 0;
+  padding: var(--lc-6) 0;
+  text-align: center;
+  color: var(--lc-faint);
+  font-size: 18px;
+}
+
+/* a card = one lane */
+.lc-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-3);
+  padding: var(--lc-4);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-r-md);
+  background: var(--lc-surface);
+  transition:
+    border-color var(--lc-fast) var(--lc-ease),
+    transform var(--lc-fast) var(--lc-ease);
+}
+.lc-card:hover {
+  border-color: var(--lc-border-2);
+  transform: translateY(-1px);
+}
+.lc-card--warned {
+  border-color: color-mix(in srgb, var(--lc-danger) 45%, var(--lc-border));
+}
+.lc-card__title {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--lc-text);
+}
+.lc-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.lc-card__owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--lc-muted);
+}
+.lc-card__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+}
+.lc-card__chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--lc-border);
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  letter-spacing: -0.01em;
+  color: var(--lc-muted);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lc-card__chip--goal {
+  color: var(--lc-lane);
+  border-color: color-mix(in srgb, var(--lc-lane) 34%, transparent);
+  background: color-mix(in srgb, var(--lc-lane) 10%, transparent);
+}
+.lc-card__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-4);
+  margin-top: 1px;
+}
+.lc-card__warn {
+  font-size: 10.5px;
+  color: var(--lc-danger);
+}
+.lc-card__age {
+  margin-left: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--lc-faint);
+}

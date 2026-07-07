@@ -5,7 +5,13 @@ import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
 import type { LiveConfig, ConnStatus } from '../live/client';
-import { provisionObserver } from '../live/client';
+import {
+  provisionObserver,
+  loadObserver,
+  saveObserver,
+  forgetObserver,
+  genObserverName,
+} from '../live/client';
 import { firehoseSound } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
 
@@ -25,36 +31,6 @@ const COMPANION_KEY = 'musterd.live.companion';
 type PanelId = 'office' | 'roster' | 'stream';
 type Collapsed = Record<PanelId, boolean>;
 const NO_COLLAPSE: Collapsed = { office: false, roster: false, stream: false };
-// `.v2` = credential-based observer (ADR 077 claim handshake); bumping the key drops any legacy
-// token-based creds so the next Watch re-provisions with a credential.
-const observerKey = (team: string) => `musterd.live.observer.v2.${team}`;
-
-interface ObserverCreds {
-  name: string;
-  /** The observer seat's credential (mscr_) — the single v0.3 auth secret (HTTP + WS claim). */
-  token: string;
-}
-
-function loadObserver(team: string): ObserverCreds | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(observerKey(team));
-    if (!raw) return null;
-    const creds = JSON.parse(raw) as ObserverCreds;
-    return creds && creds.token ? creds : null;
-  } catch {
-    return null;
-  }
-}
-function saveObserver(team: string, creds: ObserverCreds) {
-  window.localStorage.setItem(observerKey(team), JSON.stringify(creds));
-}
-function forgetObserver(team: string) {
-  window.localStorage.removeItem(observerKey(team));
-}
-function genObserverName(): string {
-  return 'web-' + Math.random().toString(36).slice(2, 8);
-}
 
 function LivePage() {
   const [team, setTeam] = useState('');
