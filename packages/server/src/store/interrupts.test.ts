@@ -138,6 +138,16 @@ describe('pendingInterrupts (ADR 088)', () => {
     expect(pendingInterrupts(msgs, 'me')).toEqual([]);
   });
 
+  it('two steers with the SAME ts collapse to exactly one (id tiebreak — Bugbot: equal-ts bug)', () => {
+    const msgs = [
+      env({ id: 'st-aaa', from: 'nick', to: toMe, act: 'steer', ts: 20 }),
+      env({ id: 'st-bbb', from: 'jo', to: toMe, act: 'steer', ts: 20 }),
+    ];
+    const out = pendingInterrupts(msgs, 'me');
+    expect(out).toHaveLength(1); // never a contradictory pair
+    expect(out[0]!.id).toBe('st-bbb'); // deterministic: greatest id wins the tie
+  });
+
   it('the newest steer still fires when an OLDER steer thread was resolved', () => {
     const msgs = [
       env({ id: 's1', from: 'nick', to: toMe, act: 'steer', thread: 's1', ts: 10 }),

@@ -135,15 +135,21 @@ export function pendingInterrupts(messages: Envelope[], me: string): Envelope[] 
   const actionNeeded = (m: Envelope) =>
     m.act !== 'resolve' &&
     (m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me));
-  // The superseding bar: the newest steer directed at me across the WHOLE set — resolved or not — so a
-  // resolved current steer can't revive an older one it already superseded, and so the bar doesn't
+  // The single winning steer: the newest steer directed at me across the WHOLE set — resolved or not —
+  // so a resolved current steer can't revive an older one it already superseded, and the bar can't
   // collapse onto a stale steer just because the newest was filtered out. (With a ts-based read cursor,
   // an older steer can't be unread while a newer one is read, so unread-only input carries the true
-  // newest steer here.)
-  const steerBar = messages.reduce(
-    (max, m) => (m.from !== me && m.act === 'steer' && actionNeeded(m) && m.ts > max ? m.ts : max),
-    Number.NEGATIVE_INFINITY,
-  );
+  // newest steer here.) Ties on `ts` (two steers in the same millisecond) break on `id` — ULIDs sort
+  // deterministically — so it is always *exactly one* steer, never a contradictory pair.
+  let winningSteerId: string | undefined;
+  let winningTs = Number.NEGATIVE_INFINITY;
+  for (const m of messages) {
+    if (m.from === me || m.act !== 'steer' || !actionNeeded(m)) continue;
+    if (m.ts > winningTs || (m.ts === winningTs && (winningSteerId ?? '') < m.id)) {
+      winningTs = m.ts;
+      winningSteerId = m.id;
+    }
+  }
   return messages
     .filter(
       (m) =>
@@ -151,8 +157,9 @@ export function pendingInterrupts(messages: Envelope[], me: string): Envelope[] 
         actionNeeded(m) &&
         (isUrgent(m) || m.act === 'steer') &&
         !resolved.has(m.thread ?? m.id) &&
-        // Newest steer wins: a steer older than the bar is superseded and neither interrupts nor counts.
-        (m.act !== 'steer' || m.ts >= steerBar),
+        // Newest steer wins: any steer that isn't the single winner is superseded — it neither
+        // interrupts nor counts (a ts tie is broken by id, so no two steers survive together).
+        (m.act !== 'steer' || m.id === winningSteerId),
     )
     .sort((a, b) => b.ts - a.ts);
 }
