@@ -50,7 +50,7 @@ Validation: an Envelope with an unknown `act` MUST be rejected. Unknown `meta` k
 
 ## 3. Collaboration acts
 
-Acts are the typed intents of coordination, grounded in the **Co-Gym** collaboration-act taxonomy (Shao et al., _Collaborative Gym_, arXiv 2412.15701). v0.1 defined seven; **v0.3 adds `resolve`** (ADR 025) for eight:
+Acts are the typed intents of coordination, grounded in the **Co-Gym** collaboration-act taxonomy (Shao et al., _Collaborative Gym_, arXiv 2412.15701). v0.1 defined seven; **v0.3 adds `resolve`** (ADR 025) and the **steering trio `steer`/`challenge`/`defer`** (ADR 103) for eleven:
 
 | Act             | Meaning                                           | Required `meta`/fields    | Optional `meta`                         |
 | --------------- | ------------------------------------------------- | ------------------------- | --------------------------------------- |
@@ -58,15 +58,19 @@ Acts are the typed intents of coordination, grounded in the **Co-Gym** collabora
 | `status_update` | report what you are doing / have done             | —                         | `progress` (0..1), `state` (string)     |
 | `request_help`  | ask a Member or the Team to assist / unblock you  | —                         | `blocking` (bool), `topic` (string)     |
 | `handoff`       | transfer a unit of work to someone                | —                         | `artifact` (string), `summary` (string) |
-| `accept`        | accept a prior `request_help`/`handoff`           | `meta.in_reply_to` (ULID) | —                                       |
-| `decline`       | decline a prior `request_help`/`handoff`          | `meta.in_reply_to` (ULID) | `reason` (string)                       |
+| `accept`        | accept a prior `request_help`/`handoff`/`challenge`| `meta.in_reply_to` (ULID) | —                                       |
+| `decline`       | decline a prior `request_help`/`handoff`/`challenge`| `meta.in_reply_to` (ULID) | `reason` (string)                       |
 | `wait`          | signal you are paused / blocked                   | —                         | `until` (epoch ms), `reason` (string)   |
 | `resolve`       | close a thread — mark the work it tracks **done** | `thread` (ULID)           | `reason` (string)                       |
+| `steer`         | change direction — a directive that supersedes prior direction | —            | `urgent`+`urgent_reason`                 |
+| `challenge`     | ask a Member to justify a task/assumption or reconsider | —                   | `urgent`+`urgent_reason`                 |
+| `defer`         | reorder/defer a Goal on the plan                  | `meta.goal_id` (string)   | `meta.wave` (int \| `"later"`)          |
 
 Rules:
 
 - `accept` and `decline` MUST carry `meta.in_reply_to` referencing the Envelope they answer, and SHOULD set `thread` to that Envelope's thread (or its `id` if it was a root).
 - `resolve` is **thread-terminal**: it MUST carry a non-empty `thread` naming the thread it closes (a no-thread root is closed by passing its own `id`). It marks the thread — the proto-work-item — **done**, supplying the open-vs-done axis the other acts lack (`accept` ≠ finished). It MAY follow an `accept` or close a thread directly without one. **Authority:** any Member of the Team MAY `resolve` a thread; v0.3 does not enforce a closer (the norm is the opener or the assignee). Conforming UIs SHOULD treat a thread carrying a `resolve` as closed and stop surfacing its open `request_help`/directed asks as pending.
+- **The steering acts (ADR 103)** give a "change of direction" first-class semantics on the interrupt line (ADR 088), and ride it for delivery — no new delivery machinery. `steer` is a directive that is **interrupt-class by definition** (it reaches a busy Member even when not flagged `urgent`); the **newest `steer` directed at a Member supersedes** all prior steers to it ([ADR 017](docs/decisions/017-newest-session-wins.md) newest-wins applied to direction), so a late-waking Member sees only the current direction, never a contradictory stack. `challenge` is epistemic (warn-never-block) and **tier-configurable** — it interrupts only when its sender flags it `urgent`; it is answered with evidence (an `accept` carrying justification, or a plan change). `defer` MUST carry `meta.goal_id` naming the Goal it moves and MAY carry `meta.wave` (a number **reorders**, `"later"` **defers**); it records/surfaces the plan mutation as a first-class act (automatic re-sequencing of the Goal spine is a later increment).
 - Acts are the stable contract; `meta` is the extension point. New acts are a versioned change to this spec.
 
 ## 4. Identity, Presence, Lifecycle
@@ -92,7 +96,7 @@ Both bindings MUST funnel sends through one validate→persist→route path so s
 
 ## 6. Versioning & compatibility
 
-- The version string is `musterd/MAJOR.MINOR`. `v0.1` was the first; `v0.2` added single-active newest-wins + reclaim grace, roster activity, attach provenance/workspace, driver co-presence (new error codes `member_busy`/`superseded`); **`v0.3`** is current — it adds the terminal `resolve` act (ADR 025) and un-stubs the reserved `memory` seam on the `occupied` frame into a seat-scoped continuity envelope (A.3, ADR 093). All MINOR additions are additive (a new act and new optional fields, no change to existing required fields): a client that ignores `memory` is unaffected.
+- The version string is `musterd/MAJOR.MINOR`. `v0.1` was the first; `v0.2` added single-active newest-wins + reclaim grace, roster activity, attach provenance/workspace, driver co-presence (new error codes `member_busy`/`superseded`); **`v0.3`** is current — it adds the terminal `resolve` act (ADR 025), the steering trio `steer`/`challenge`/`defer` (ADR 103), and un-stubs the reserved `memory` seam on the `occupied` frame into a seat-scoped continuity envelope (A.3, ADR 093). All MINOR additions are additive (new acts and new optional fields, no change to existing required fields): a client that ignores `memory` or does not recognize a new act is unaffected.
 - Within a MAJOR, MINOR additions MUST be backward-compatible (new optional `meta`, new optional fields, new endpoints, new error codes). New **acts** or any change to envelope-required fields are a MINOR-or-greater, spec-versioned change requiring an ADR.
 - A server MUST reject a client whose declared `v` it does not support, with a `version_mismatch` error.
 

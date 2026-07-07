@@ -132,7 +132,7 @@ The governed successor to `hello` — **additive schemas, not yet wired into `WS
 
 ```ts
 export const PROTOCOL_VERSION = 'musterd/0.3';
-export const ACTS = ['message','status_update','request_help','handoff','accept','decline','wait','resolve'] as const;
+export const ACTS = ['message','status_update','request_help','handoff','accept','decline','wait','resolve','steer','challenge','defer'] as const; // steer/challenge/defer: the steering trio, ADR 103
 export const SURFACES = ['cli','claude-code','codex','cursor','web','ios','slack','other'] as const;
 
 export const Act = z.enum(ACTS);
@@ -147,7 +147,7 @@ export const Envelope = z.object({
   from: z.string(), to: Recipient, act: Act,
   body: z.string().default(''), thread: z.string().nullish(),
   meta: z.record(z.unknown()).nullish(), ts: z.number().int(),
-}).superRefine(actMetaRules);   // enforces accept/decline -> meta.in_reply_to; resolve -> thread
+}).superRefine(actMetaRules);   // enforces accept/decline -> meta.in_reply_to; resolve -> thread; defer -> meta.goal_id (ADR 103)
 
 export type Envelope = z.infer<typeof Envelope>;
 export const Member = z.object({ /* mirrors members table, no token_hash */ });
