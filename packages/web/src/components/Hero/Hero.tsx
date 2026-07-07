@@ -54,7 +54,7 @@ export function Hero() {
   const [ready, setReady] = useState(false);
 
   // Stable reference to the latest data builder (no roster changes on the landing hero, but the
-  // pattern is consistent with office-preview and ConstellationGL).
+  // pattern is consistent with office-preview and OfficeScene).
   const dataRef = useRef(buildData);
   dataRef.current = buildData;
 

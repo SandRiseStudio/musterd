@@ -25,11 +25,11 @@ function computeData(roster: MemberSummary[]): OfficeData {
 
 /**
  * The live isometric office: every teammate sits at a desk (presence decides who's in the room and
- * whether they're working / idle / away), and each act plays as a cue over the floor. A drop-in for the
- * old three.js constellation — same panel, same props, same mount/dispose seam. The scene is dynamically
- * imported (kept out of SSR); prefers-reduced-motion draws a static frame. Name labels are HTML overlay.
+ * whether they're working / idle / away), and each act plays as a cue over the floor. The scene is
+ * dynamically imported (kept out of SSR); prefers-reduced-motion draws a static frame. Name labels are
+ * HTML overlay.
  */
-export function ConstellationGL({
+export function OfficeScene({
   roster,
   envelopes,
   liveIds,
