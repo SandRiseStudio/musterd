@@ -250,6 +250,24 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
 }
 
 /**
+ * Member ids on this team that are *held within their reclaim grace* right now (ADR 010) — a release
+ * hold (`held_until` still in the future) the same member can reclaim. Distinct from live presence:
+ * these read `offline` on the roster ({@link listPresence} excludes held rows), but the seat is a
+ * **reservation**, not a vacancy — surfaced as `MemberSummary.reclaimable` so the clobber guard (ADR
+ * 066/105) treats it as occupied. This is the one *positive* read of held rows; every other query
+ * filters them out. `now` is passed in so the caller aligns it with its other clocks.
+ */
+export function listReclaimableMemberIds(db: Database, teamId: string, now: number): Set<string> {
+  const rows = db
+    .prepare<
+      [string, number],
+      { id: string }
+    >('SELECT DISTINCT p.member_id AS id FROM presence p JOIN members m ON m.id = p.member_id WHERE m.team_id = ? AND m.left_at IS NULL AND p.held_until IS NOT NULL AND p.held_until > ?')
+    .all(teamId, now);
+  return new Set(rows.map((r) => r.id));
+}
+
+/**
  * Remove dead presence rows — stale live ones (no heartbeat past the timeout) and release holds
  * whose reclaim grace has expired. Returns the removed rows (for offline events).
  */

@@ -1,6 +1,6 @@
 # 066 — A clobber guard on `claim`/`init` for live-bound folders
 
-- Status: accepted
+- Status: accepted — amended by [ADR 105](105-clobber-guard-honors-reclaim-grace.md) (the guard also honors the ADR 010 reclaim-grace window)
 - Date: 2026-06-29
 
 ## Context

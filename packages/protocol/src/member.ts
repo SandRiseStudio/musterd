@@ -70,5 +70,12 @@ export const MemberSummarySchema = MemberSchema.extend({
   state: z.string().nullish(),
   /** When `state` was last refreshed (ms epoch); drives staleness in the roster. */
   last_status_at: z.number().int().nullish(),
+  /**
+   * True when the seat is *held within its reclaim-grace window* (ADR 010) — a **reservation**, not
+   * live presence. The seat still reads `presence: 'offline'` (grace is hidden from display, ADR 010),
+   * but it may be reconnecting, so the clobber guard (ADR 066/105) treats it as occupied. Optional for
+   * back-compat; the server always sets it.
+   */
+  reclaimable: z.boolean().optional(),
 });
 export type MemberSummary = z.infer<typeof MemberSummarySchema>;

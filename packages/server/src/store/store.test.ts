@@ -24,6 +24,7 @@ import {
   hasActivePresence,
   hasLivePresence,
   listPresence,
+  listReclaimableMemberIds,
   presenceById,
   reapStale,
   release,
@@ -405,6 +406,30 @@ describe('presence', () => {
     expect(listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')?.status).toBe(
       'offline',
     );
+  });
+
+  it('listReclaimableMemberIds: a held-within-grace seat is reclaimable though it reads offline (ADR 105)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
+    const pa = attach(db, ada.row.id, 'claude-code', 'c1');
+    attach(db, bo.row.id, 'cli', 'c2'); // Bo stays live
+
+    // Nothing held while both are live.
+    expect(listReclaimableMemberIds(db, team.id, Date.now())).toEqual(new Set());
+
+    // Ada releases → held within grace: a reservation, reads offline on the roster but IS reclaimable.
+    release(db, pa.id, 45_000);
+    const set = listReclaimableMemberIds(db, team.id, Date.now());
+    expect(set.has(ada.row.id)).toBe(true); // held within grace
+    expect(set.has(bo.row.id)).toBe(false); // live, not a hold
+    expect(listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')?.status).toBe(
+      'offline',
+    );
+
+    // Past grace (held_until in the past): no longer a reservation.
+    release(db, pa.id, -1);
+    expect(listReclaimableMemberIds(db, team.id, Date.now()).has(ada.row.id)).toBe(false);
   });
 
   it('a reclaim hold survives the grace window, then the reaper frees it', () => {

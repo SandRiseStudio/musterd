@@ -83,6 +83,7 @@ import {
   clearMemberPresence,
   countLivePresences,
   listPresence,
+  listReclaimableMemberIds,
   touchAmbientPresence,
 } from '../store/presence.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
@@ -461,6 +462,9 @@ function summarize(
   viewer: MemberRow | null = null,
 ): MemberSummary[] {
   const viewerIsAdmin = viewer ? resolveCapabilities(viewer).is_admin : false;
+  // Seats held within their ADR 010 reclaim grace — read `offline` above, but a reservation the clobber
+  // guard (ADR 066/105) must treat as occupied. Computed once for the team, not per-member.
+  const reclaimable = listReclaimableMemberIds(ctx.db, teamId, Date.now());
   return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => {
     // Two-clocks rule (M2): liveness from presence, working-label from the latest status_update.
     const activity = resolveActivity(
@@ -475,6 +479,7 @@ function summarize(
       presence: s.status,
       presences: s.presences,
       ...activity,
+      reclaimable: reclaimable.has(s.member.id),
     };
   });
 }
