@@ -1,9 +1,15 @@
 import { z } from 'zod';
 
 /**
- * The eight collaboration acts (Co-Gym-grounded). Order is stable; new acts append.
+ * The collaboration acts (Co-Gym-grounded). Order is stable; new acts append.
  * `resolve` (musterd/0.3, ADR 025) is the terminal act — it closes a thread (the proto-work-item),
  * supplying the open-vs-done axis the prior seven lacked (`accept` ≠ finished).
+ *
+ * The steering trio (musterd/0.3, ADR 102 — increment 2 of the interrupt line, ADR 088) gives a
+ * "change of direction" first-class semantics on the existing interrupt line: `steer` (a directive —
+ * always interrupt-class, and the newest steer supersedes prior direction per ADR 017), `challenge`
+ * (epistemic — "justify this or reconsider", warn-never-block, interrupts only when flagged urgent),
+ * and `defer` (plan mutation on the Goal spine — names `meta.goal_id`, optional `meta.wave` target).
  */
 export const ACTS = [
   'message',
@@ -14,6 +20,9 @@ export const ACTS = [
   'decline',
   'wait',
   'resolve',
+  'steer',
+  'challenge',
+  'defer',
 ] as const;
 export type Act = (typeof ACTS)[number];
 export const ActSchema = z.enum(ACTS);

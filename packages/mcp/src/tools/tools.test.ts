@@ -255,6 +255,27 @@ describe('team_send handler', () => {
     expect(sent[0]!.thread).toBe('root2'); // inherited the request's thread
   });
 
+  it('sends a steer (the ADR 102 steering vocabulary is selectable from MCP)', async () => {
+    const { client, sent } = sendClient();
+    const handler = capture(registerSend, client, config);
+    const r = await handler({ to: 'Ada', act: 'steer', body: 'switch to v2' });
+    expect(sent[0]!.act).toBe('steer');
+    expect(text(r)).toContain('sent steer to Ada');
+  });
+
+  it('accept auto-targets an open challenge (challenge is answered with an accept, ADR 102)', async () => {
+    const { client, sent } = sendClient({
+      fetchInbox: (async () => ({
+        messages: [req({ id: 'ch1', ts: 7, act: 'challenge', thread: 'root-ch' })],
+        cursor: null,
+      })) as any,
+    });
+    const handler = capture(registerSend, client, config);
+    await handler({ to: 'nick', act: 'accept', body: 'here is why' });
+    expect(sent[0]!.meta?.['in_reply_to']).toBe('ch1');
+    expect(sent[0]!.thread).toBe('root-ch');
+  });
+
   it('an explicit reply_to wins over auto-targeting (no inbox read)', async () => {
     const fetchInbox = vi.fn();
     const { client, sent } = sendClient({ fetchInbox: fetchInbox as any });

@@ -109,12 +109,22 @@ export function listInbox(
 /**
  * The interrupt-class acts still waiting for `me` in `messages` (ADR 088 §3) — the predicate the
  * `inbox --interrupt-check` probe runs at every tool boundary. Interrupt-class = **directed at me
- * or a `request_help` anyone can answer**, **flagged urgent** (`meta.urgent === true`, which the send
- * path only ever leaves set when the sender's `can_flag_urgent` passed the ADR 071 gate — so the
- * capability check is already enforced upstream), and **not closed** by a `resolve` on its thread
- * (ADR 025). A terminal `resolve` never interrupts. Newest first, so the caller names the most recent
- * steer. Pure — reads envelopes, never the DB — so it is trivially testable and the "daemon-composed,
- * never the raw body" line (§4) is built from its structured fields, not from `env.body`.
+ * or a `request_help` anyone can answer**, **not closed** by a `resolve` on its thread (ADR 025), and
+ * either **flagged urgent** (`meta.urgent === true`, which the send path only ever leaves set when the
+ * sender's `can_flag_urgent` passed the ADR 071 gate — so the capability check is already enforced
+ * upstream) **or a `steer`** (ADR 102: a directive is interrupt-class by definition, so it raises the
+ * line whether or not it is flagged urgent; `challenge`/`defer` stay behind the urgent tier). A
+ * terminal `resolve` never interrupts.
+ *
+ * Steer supersession (ADR 102, borrowing ADR 017's newest-wins primitive applied to *direction*):
+ * among the steers still waiting for me, only the newest survives — older steers are superseded so a
+ * late-waking agent sees only the current direction, never a contradictory stack. This is a pure
+ * read-side collapse, the mirror of how `resolve` closes a thread above; no supersede column, no
+ * write-path side-effect.
+ *
+ * Newest first, so the caller names the most recent steer. Pure — reads envelopes, never the DB — so
+ * it is trivially testable and the "daemon-composed, never the raw body" line (§4) is built from its
+ * structured fields, not from `env.body`.
  */
 export function pendingInterrupts(messages: Envelope[], me: string): Envelope[] {
   const resolved = new Set<string>();
@@ -124,11 +134,20 @@ export function pendingInterrupts(messages: Envelope[], me: string): Envelope[] 
   const actionNeeded = (m: Envelope) =>
     m.act !== 'resolve' &&
     (m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me));
-  return messages
+  const pending = messages
     .filter(
-      (m) => m.from !== me && actionNeeded(m) && isUrgent(m) && !resolved.has(m.thread ?? m.id),
+      (m) =>
+        m.from !== me &&
+        actionNeeded(m) &&
+        (isUrgent(m) || m.act === 'steer') &&
+        !resolved.has(m.thread ?? m.id),
     )
     .sort((a, b) => b.ts - a.ts);
+  // Newest steer wins: drop every steer but the most recent (the list is already newest-first).
+  const newestSteerTs = pending.find((m) => m.act === 'steer')?.ts;
+  return newestSteerTs === undefined
+    ? pending
+    : pending.filter((m) => m.act !== 'steer' || m.ts === newestSteerTs);
 }
 
 /**

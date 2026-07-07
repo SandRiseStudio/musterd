@@ -1,5 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { type Act, type Envelope, makeEnvelope, type Recipient } from '@musterd/protocol';
+import {
+  type Act,
+  ActSchema,
+  type Envelope,
+  makeEnvelope,
+  type Recipient,
+} from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
@@ -10,8 +16,11 @@ import { notReadyMessage, textResult } from './format.js';
 const DESCRIPTION =
   'Send a message to a teammate, the whole team, or broadcast. Use the right act: ' +
   'status_update to report progress, request_help when blocked, handoff to pass work, ' +
-  'accept/decline to answer a request_help/handoff (auto-targets the latest open one — set reply_to to override), ' +
-  'wait to signal you are paused, resolve to close a thread when the work is done (set thread to the thread/root id).';
+  'accept/decline to answer a request_help/handoff/challenge (auto-targets the latest open one — set reply_to to override), ' +
+  'wait to signal you are paused, resolve to close a thread when the work is done (set thread to the thread/root id). ' +
+  'Steering (ADR 102): steer to change direction (always interrupts; the newest steer supersedes prior direction), ' +
+  'challenge to make a teammate justify a task/assumption or reconsider (answer it with an accept carrying evidence), ' +
+  'defer to reorder/defer a Goal on the plan (set meta.goal_id, optional meta.wave — a number reorders, "later" defers).';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };
@@ -19,11 +28,14 @@ function recipient(to: string): Recipient {
   return { kind: 'member', name: to };
 }
 
+/** Acts an `accept`/`decline` can answer: a call for help, a handoff, or a `challenge` (ADR 102). */
+const ANSWERABLE = new Set<Act>(['request_help', 'handoff', 'challenge']);
+
 /**
- * The latest still-open request_help/handoff waiting for `me` — the act an `accept`/`decline` answers
- * when the caller didn't name one (ADR 067, parity with the CLI's `send`). Mirrors the CLI's
- * `openActionNeeded`: a `request_help` (to anyone) or an act directed at `me`, whose thread carries no
- * `resolve`, newest first. Returns undefined if nothing is open. Best-effort: a read failure → undefined.
+ * The latest still-open request_help/handoff/challenge waiting for `me` — the act an `accept`/`decline`
+ * answers when the caller didn't name one (ADR 067, parity with the CLI's `send`). A `request_help`
+ * (anyone can answer) or an act directed at `me`, whose thread carries no `resolve`, newest first.
+ * Returns undefined if nothing is open. Best-effort: a read failure → undefined.
  */
 async function latestOpenRequest(client: MusterdClient, me: string): Promise<Envelope | undefined> {
   try {
@@ -31,7 +43,7 @@ async function latestOpenRequest(client: MusterdClient, me: string): Promise<Env
     const resolved = new Set<string>();
     for (const m of messages) if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
     const open = messages.filter((m) => {
-      if (m.act !== 'request_help' && m.act !== 'handoff') return false;
+      if (!ANSWERABLE.has(m.act)) return false;
       const directed = m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me);
       return directed && !resolved.has(m.thread ?? m.id);
     });
@@ -48,16 +60,9 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
       description: DESCRIPTION,
       inputSchema: {
         to: z.string().default('@team').describe("member name, or '@team', or '@broadcast'"),
-        act: z.enum([
-          'message',
-          'status_update',
-          'request_help',
-          'handoff',
-          'accept',
-          'decline',
-          'wait',
-          'resolve',
-        ]),
+        // Derived from ACTS (the protocol's single source of truth) so the MCP surface can never drift
+        // from the enum — a new act lands here the moment it's appended (ADR 102).
+        act: ActSchema,
         body: z.string(),
         thread: z.string().optional().describe('thread id to reply within'),
         reply_to: z
