@@ -80,14 +80,14 @@ describe('EnvelopeSchema', () => {
     expect(makeEnvelope({ ...base, act: 'message' }).meta).toBeNull();
   });
 
-  it('round-trips the steering acts steer/challenge (ADR 102)', () => {
+  it('round-trips the steering acts steer/challenge (ADR 103)', () => {
     expect(makeEnvelope({ ...base, act: 'steer', body: 'use v2' }).act).toBe('steer');
     expect(makeEnvelope({ ...base, act: 'challenge', body: 'why this task?' }).act).toBe(
       'challenge',
     );
   });
 
-  it('requires a non-empty meta.goal_id on defer (the Goal it reorders/defers, ADR 102)', () => {
+  it('requires a non-empty meta.goal_id on defer (the Goal it reorders/defers, ADR 103)', () => {
     expect(() => makeEnvelope({ ...base, act: 'defer' })).toThrow();
     expect(() => makeEnvelope({ ...base, act: 'defer', meta: { goal_id: '   ' } })).toThrow();
     const ok = makeEnvelope({

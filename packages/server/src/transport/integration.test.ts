@@ -1464,7 +1464,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(auditRows('dawn').filter((r) => r.action === 'interrupt.raised')).toHaveLength(1);
   });
 
-  it('steer act (ADR 102): persists through the DB and raises the interrupt line without an urgent flag', async () => {
+  it('steer act (ADR 103): persists through the DB and raises the interrupt line without an urgent flag', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
     const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);

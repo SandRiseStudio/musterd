@@ -4,7 +4,7 @@ import { pendingInterrupts } from './messages.js';
 
 /**
  * The pure interrupt-class predicate behind `inbox --interrupt-check` (ADR 088). Interrupt-class =
- * directed-at-me-or-request_help + not-resolved + (urgent OR a `steer`) — ADR 102 makes a `steer`
+ * directed-at-me-or-request_help + not-resolved + (urgent OR a `steer`) — ADR 103 makes a `steer`
  * interrupt-class by definition (it raises the line without the urgent flag), while `challenge`/`defer`
  * stay behind the urgent gate. The newest steer supersedes prior steers so a late agent sees one
  * direction. Newest first. Tested in isolation because the whole "scarce by construction" property
@@ -76,7 +76,7 @@ describe('pendingInterrupts (ADR 088)', () => {
     expect(pendingInterrupts(msgs, 'me').map((m) => m.id)).toEqual(['new', 'old']);
   });
 
-  // ADR 102 — the steering acts.
+  // ADR 103 — the steering acts.
   it('raises a steer even when it is not flagged urgent (steer is interrupt-class by definition)', () => {
     const msgs = [env({ id: 's', from: 'nick', to: toMe, act: 'steer', body: 'use v2' })];
     expect(pendingInterrupts(msgs, 'me').map((m) => m.id)).toEqual(['s']);

@@ -112,11 +112,11 @@ export function listInbox(
  * or a `request_help` anyone can answer**, **not closed** by a `resolve` on its thread (ADR 025), and
  * either **flagged urgent** (`meta.urgent === true`, which the send path only ever leaves set when the
  * sender's `can_flag_urgent` passed the ADR 071 gate — so the capability check is already enforced
- * upstream) **or a `steer`** (ADR 102: a directive is interrupt-class by definition, so it raises the
+ * upstream) **or a `steer`** (ADR 103: a directive is interrupt-class by definition, so it raises the
  * line whether or not it is flagged urgent; `challenge`/`defer` stay behind the urgent tier). A
  * terminal `resolve` never interrupts.
  *
- * Steer supersession (ADR 102, borrowing ADR 017's newest-wins primitive applied to *direction*): only
+ * Steer supersession (ADR 103, borrowing ADR 017's newest-wins primitive applied to *direction*): only
  * the newest steer directed at me survives — older steers are superseded so a late-waking agent sees
  * only the current direction, never a contradictory stack. The winning-steer bar is taken over the
  * whole set (resolved or not) so resolving the current steer can't revive an older one, and the bar

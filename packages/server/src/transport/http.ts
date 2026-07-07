@@ -212,7 +212,7 @@ function assertSeatCanRead(member: MemberRow): void {
 }
 
 /**
- * The class of raise that put a line up (ADR 102): a `steer` is interrupt-class by definition, so it
+ * The class of raise that put a line up (ADR 103): a `steer` is interrupt-class by definition, so it
  * can raise the line without the `urgent` flag; everything else that raises is `urgent`. Named on the
  * line and in the audit so "who grabbed the mic, and by what right" stays legible.
  */
@@ -225,7 +225,7 @@ function raiseClass(latest: Envelope): 'steer' | 'urgent' {
  * structured fields only** — sender + act + count — never the raw `env.body`, so a teammate's message
  * text can't be injected into a busy agent's context mid-turn. Sender identity is always present so the
  * model can weigh the source. Points at the explicit follow-up (`musterd inbox`) rather than dumping
- * the content. The class noun (`steer` vs `urgent`, ADR 102) describes only `latest`, so a mixed queue
+ * the content. The class noun (`steer` vs `urgent`, ADR 103) describes only `latest`, so a mixed queue
  * isn't mislabeled: the plural line uses the neutral "acts" and names the latest's class inline.
  */
 function composeInterruptLine(latest: Envelope, count: number): string {

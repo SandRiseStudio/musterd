@@ -1,4 +1,4 @@
-# 102 — Steer, challenge, defer: first-class steering acts on the interrupt line (ADR 088 increment 2)
+# 103 — Steer, challenge, defer: first-class steering acts on the interrupt line (ADR 088 increment 2)
 
 - Status: proposed — freezes increment 2 of the interrupt-line arc; implemented on `feat/steer-challenge-acts`
 - Date: 2026-07-06

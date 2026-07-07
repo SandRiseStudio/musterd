@@ -262,7 +262,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    // v14 — the steering acts (ADR 102: steer/challenge/defer, increment 2 of the interrupt line).
+    // v14 — the steering acts (ADR 103: steer/challenge/defer, increment 2 of the interrupt line).
     // The `act` CHECK last froze at v5 ('…','resolve'), so persisting a new act fails at the DB even
     // when envelope validation (ActSchema) passed. Rather than re-freeze a wider CHECK and pay this
     // rebuild again on the next act, we drop the CHECK entirely — `act` becomes open TEXT, exactly the

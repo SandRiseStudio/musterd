@@ -68,7 +68,7 @@ export function actMetaRules(
       });
     }
   }
-  // `defer` (ADR 102) is a plan mutation on the Goal spine: it MUST name the Goal it moves via a
+  // `defer` (ADR 103) is a plan mutation on the Goal spine: it MUST name the Goal it moves via a
   // non-empty `meta.goal_id`. The optional `meta.wave` carries the target position — absent or
   // "later" defers (sorts last), a number reorders — mirroring the Goal `wave` field `nextGoal` reads.
   if (env.act === 'defer') {

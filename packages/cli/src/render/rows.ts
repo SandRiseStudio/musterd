@@ -172,7 +172,7 @@ function ageLabel(since: number, now: number): string {
 /**
  * Does this delivered act need the human's attention now? `request_help` (a call for help anyone on
  * the team can answer) or anything addressed specifically to me (`handoff`/`message`/`wait` → me,
- * and the ADR 102 steering acts `steer`/`challenge`/`defer` → me).
+ * and the ADR 103 steering acts `steer`/`challenge`/`defer` → me).
  * `resolve` is terminal — a thread-close is good news, never an action — so it never flags, even
  * when addressed to me. Drives the watch-stream ⚑ salience per delivery and (via {@link openActionNeeded})
  * the comeback "N requests waiting" summary, so a real ask can't slip past buried in a stream of team
