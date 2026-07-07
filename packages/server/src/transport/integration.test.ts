@@ -1855,8 +1855,16 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
       m.body.startsWith('[lane]'),
     );
     expect(laneMsgs).toHaveLength(3);
-    expect(laneMsgs[0].meta.lane_warning ?? laneMsgs[0].meta.lane_handoff).toBeTruthy();
-    expect(laneMsgs[2].meta.lane_open).toBeTruthy();
+    // Order-independent: the three [lane] messages are emitted in one request and can share a
+    // millisecond `ts`, so their inbox order falls to the ulid-`id` tiebreak (non-deterministic under
+    // load — this assertion was flaky by fixed index). Assert the multiset instead: two directed
+    // warnings to nick + one lane-open broadcast.
+    expect(
+      laneMsgs.filter((m: { meta: Record<string, unknown> }) => m.meta.lane_warning),
+    ).toHaveLength(2);
+    expect(
+      laneMsgs.filter((m: { meta: Record<string, unknown> }) => m.meta.lane_open),
+    ).toHaveLength(1);
 
     // Dedup: an unrelated update to bo's lane does NOT re-send the standing warnings (or a fresh
     // open broadcast — that's a one-time event).
