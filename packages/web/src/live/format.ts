@@ -16,12 +16,15 @@ export function actTone(act: string): ActTone {
       return 'accent';
     case 'accept':
     case 'resolve':
+    case 'lane_resolve':
       return 'success';
     case 'decline':
       return 'danger';
     case 'wait':
+    case 'lane_open':
       return 'info';
     case 'handoff':
+    case 'lane_handoff':
       return 'handoff';
     case 'status_update':
       return 'status';
@@ -40,9 +43,30 @@ export function actLabel(act: string): string {
       return 'status';
     case 'request_help':
       return 'help';
+    case 'lane_open':
+      return 'lane open';
+    case 'lane_resolve':
+      return 'lane done';
+    case 'lane_handoff':
+      return 'lane handoff';
     default:
       return act;
   }
+}
+
+/**
+ * A lane lifecycle event (open/resolve/handoff) rides as an ordinary `message` envelope with
+ * structured meta (ADR 083 §4: no new act token, no SPEC bump) — this recovers the intended
+ * sub-type from `meta` so the stream badge, glyph, and office choreography can key on it distinctly
+ * from a plain message instead of all three collapsing into a generic "message".
+ */
+export type LaneEventKind = 'lane_open' | 'lane_resolve' | 'lane_handoff';
+export function laneEvent(env: Pick<Envelope, 'act' | 'meta'>): LaneEventKind | null {
+  if (env.act !== 'message' || !env.meta) return null;
+  if (env.meta['lane_open']) return 'lane_open';
+  if (env.meta['lane_resolve']) return 'lane_resolve';
+  if (env.meta['lane_handoff']) return 'lane_handoff';
+  return null;
 }
 
 /** Where a message went, distilled to the three audiences a reader cares about (ADR 061 firehose). */

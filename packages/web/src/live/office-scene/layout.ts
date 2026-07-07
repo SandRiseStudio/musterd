@@ -43,7 +43,7 @@ export const DESK_SLOTS: DeskSlot[] = [
   { id: 5, lx: 620, ly: 440, dir: 'N' },
   { id: 6, lx: 780, ly: 430, dir: 'W' },
   { id: 7, lx: 150, ly: 610, dir: 'N' },
-  { id: 8, lx: 360, ly: 545, dir: 'N' },
+  { id: 8, lx: 520, ly: 560, dir: 'N' },
   { id: 9, lx: 780, ly: 630, dir: 'W' },
   { id: 10, lx: 340, ly: 735, dir: 'S' },
   { id: 11, lx: 650, ly: 760, dir: 'N' },

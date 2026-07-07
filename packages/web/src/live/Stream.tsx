@@ -8,6 +8,7 @@ import {
   dayLabel,
   initial,
   kindOf,
+  laneEvent,
   memberColor,
   recipientName,
   recipientScope,
@@ -148,7 +149,11 @@ function Row({
   // A resolve that arrives live "settles": a one-time green brighten → calm, synchronized with the
   // constellation's resolve pulse + ripple. Frozen at mount so it fires once.
   const [settle] = useState(animate && env.act === 'resolve');
-  const tone = actTone(env.act);
+  // A lane open/resolve/handoff rides as `act: 'message'` + structured meta (ADR 083 §4) — recover the
+  // sub-type so the badge/glyph read as "lane open" etc. instead of a generic "message".
+  const lane = laneEvent(env);
+  const effAct = lane ?? env.act;
+  const tone = actTone(effAct);
   const kind = kindOf(env.from, idx);
   const scope = recipientScope(env.to);
   const toName = recipientName(env.to);
@@ -172,8 +177,8 @@ function Row({
           <span className="lc-chip__name">{env.from}</span>
         </span>
         <span className={`lc-badge lc-badge--${tone}`}>
-          <ActIcon act={env.act} />
-          {actLabel(env.act)}
+          <ActIcon act={effAct} />
+          {actLabel(effAct)}
         </span>
         <Recipient scope={scope} name={toName} idx={idx} />
       </div>
@@ -297,6 +302,9 @@ const ACT_GLYPH: Record<string, ReactElement> = {
   wait: <path d="M4.3 3v6M7.7 3v6" />,
   resolve: <path d="m1.6 6.3 2 2 3.4-4M6 8.3l3.4-4" />,
   end: <rect x="3.3" y="3.3" width="5.4" height="5.4" rx="1" />,
+  lane_open: <path d="M2 2.6h5.2v6.8H2zM8.5 4 10.5 6l-2 2" />,
+  lane_resolve: <path d="M2 2.6h5.2v6.8H2zm1.1 4 1.6 1.6L7.3 5" />,
+  lane_handoff: <path d="M2 6h5M5.5 3.5 8 6l-2.5 2.5M8.6 2.5h1.4v7H8.6" />,
 };
 
 /**

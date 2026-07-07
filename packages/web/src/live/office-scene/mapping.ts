@@ -1,5 +1,5 @@
 import type { Envelope } from '@musterd/protocol';
-import { actTone } from '../format';
+import { actTone, laneEvent } from '../format';
 import type { OfficeEvent } from './types';
 
 /**
@@ -10,8 +10,19 @@ import type { OfficeEvent } from './types';
 export function actToEvent(env: Envelope): OfficeEvent | null {
   const from = env.from;
   const to = env.to;
-  const tone = actTone(env.act);
+  const lane = laneEvent(env);
+  const tone = actTone(lane ?? env.act);
   const urgent = env.meta?.['urgent'] === true;
+
+  // Lane open/resolve/handoff (ADR 083 §4: an ordinary `message` + meta, no new act) get their own
+  // choreography instead of collapsing into the generic team megaphone or 1:1 note.
+  if (lane === 'lane_open') return { kind: 'screen-pulse', who: from, tone };
+  if (lane === 'lane_resolve') return { kind: 'resolve', who: from };
+  if (lane === 'lane_handoff') {
+    return to.kind === 'member'
+      ? { kind: 'walk-handoff', from, to: to.name, label: env.body.slice(0, 24) }
+      : { kind: 'megaphone', from };
+  }
 
   switch (env.act) {
     case 'status_update':

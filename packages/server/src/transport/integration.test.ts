@@ -1726,15 +1726,19 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     const kinds = l2.json.warnings.map((w: { kind: string }) => w.kind).sort();
     expect(kinds).toEqual(['surface_overlap', 'unmet_dependency']);
 
-    // nick (the affected owner) got directed [lane] wakes — never the team.
+    // nick (the affected owner) got directed [lane] wakes — plus bo's lane-open broadcast to the
+    // team (ADR 083 §4 extended: open/resolve are board-shape changes, unlike warnings which stay
+    // directed). nick's own l1 open never appears here — the inbox excludes the sender's own acts.
     const inbox = await get('/teams/dawn/inbox?unread=1', nickTok);
     const laneMsgs = inbox.json.messages.filter((m: { body: string }) =>
       m.body.startsWith('[lane]'),
     );
-    expect(laneMsgs).toHaveLength(2);
+    expect(laneMsgs).toHaveLength(3);
     expect(laneMsgs[0].meta.lane_warning ?? laneMsgs[0].meta.lane_handoff).toBeTruthy();
+    expect(laneMsgs[2].meta.lane_open).toBeTruthy();
 
-    // Dedup: an unrelated update to bo's lane does NOT re-send the standing warnings.
+    // Dedup: an unrelated update to bo's lane does NOT re-send the standing warnings (or a fresh
+    // open broadcast — that's a one-time event).
     await fetch(base + `/teams/dawn/lanes/${l2.json.lane.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json', ...authHeaders(boTok) },
@@ -1743,7 +1747,7 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     const inbox2 = await get('/teams/dawn/inbox?unread=1', nickTok);
     expect(
       inbox2.json.messages.filter((m: { body: string }) => m.body.startsWith('[lane]')),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
 
     // Board: both lanes, the pair of warnings annotated (overlap deduped to one).
     const board = await get('/teams/dawn/lanes?project=musterd', boTok);
@@ -1782,8 +1786,12 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(handedJson.lane.owner_seat).toBe('bo');
     expect(handedJson.lane.branch).toBe('agent/riley');
 
+    // bo's inbox also has nick's lane-open broadcast ahead of the handoff — pick the handoff
+    // specifically by its meta rather than the first `[lane]`-prefixed body.
     const inbox = await get('/teams/dawn/inbox?unread=1', boTok);
-    const msg = inbox.json.messages.find((m: { body: string }) => m.body.startsWith('[lane]'));
+    const msg = inbox.json.messages.find(
+      (m: { meta?: { lane_handoff?: unknown } }) => m.meta?.lane_handoff,
+    );
     expect(msg.body).toContain('handed to you');
     expect(msg.body).toContain('agent/riley');
     expect(msg.meta.lane_handoff.branch).toBe('agent/riley');
