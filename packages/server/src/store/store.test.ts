@@ -466,6 +466,34 @@ describe('model attestation (ADR 101)', () => {
     // Missing row — undefined, never throws.
     expect(reattestModel(db, 'nope', 'claude-opus-4-8')).toBeUndefined();
   });
+
+  it('currentAttestedModel keyed on a presence id reads that occupancy only (no cross-session bleed)', () => {
+    const { db, team } = freshTeam();
+    // A human fans out (ADR 042): two live sessions, different attested models.
+    const nick = addMember(db, team, { name: 'nick', kind: 'human' });
+    const older = attach(db, nick.row.id, 'cli', 'c1', { model: 'gpt-5.2' });
+    const newer = attach(db, nick.row.id, 'web', 'c2', { model: 'claude-opus-4-8' });
+    // Keyed on the specific occupancy — each stamps its own model, not the newest.
+    expect(currentAttestedModel(db, nick.row.id, older.id)).toBe('gpt-5.2');
+    expect(currentAttestedModel(db, nick.row.id, newer.id)).toBe('claude-opus-4-8');
+    // An unattested occupancy stamps nothing even if a sibling session attests.
+    const bare = attach(db, nick.row.id, 'ios', 'c3');
+    expect(currentAttestedModel(db, nick.row.id, bare.id)).toBeNull();
+    // No presence id → best-effort newest-*attested* fallback (the stateless HTTP path): it never
+    // returns the unattested session's null, only one of the attested models.
+    expect(['gpt-5.2', 'claude-opus-4-8']).toContain(currentAttestedModel(db, nick.row.id));
+  });
+
+  it('ambient touch preserves the attested model (sticky across authed HTTP requests)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    // An HTTP claim attaches a connectionless presence that attested a model.
+    attach(db, ada.row.id, 'cli', null, { model: 'claude-opus-4-8' });
+    // A later authed request touches ambient presence with no model in context.
+    touchAmbientPresence(db, ada.row.id, 'cli', 45_000, {});
+    // The attestation must survive — COALESCE keeps it, so per-act stamping still works.
+    expect(currentAttestedModel(db, ada.row.id)).toBe('claude-opus-4-8');
+  });
 });
 
 describe('ambient presence (ADR 057)', () => {

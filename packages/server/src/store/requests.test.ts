@@ -28,6 +28,35 @@ describe('requests store (ADR 076)', () => {
     expect(d.surface).toBe('cli');
   });
 
+  it('carries the claimant model (ADR 101) and refreshes it to the newest collapsed claimer', () => {
+    const { db, teamId } = setup();
+    // A grant-less claim stores its attestation so the approved occupancy isn't born unknown.
+    const r = createRequest(db, teamId, {
+      kind: 'claim',
+      from_session: 's1',
+      target: 'seat:Ada',
+      model: 'claude-opus-4-8',
+    });
+    expect(r.model).toBe('claude-opus-4-8');
+    // An un-attested claim stores null (legal).
+    const bare = createRequest(db, teamId, {
+      kind: 'claim',
+      from_session: 's9',
+      target: 'seat:Bo',
+    });
+    expect(bare.model ?? null).toBeNull();
+    // collapseByTarget refreshes the model to the newest claimer (whose session will occupy).
+    const collapsed = createRequest(db, teamId, {
+      kind: 'claim',
+      from_session: 's2',
+      target: 'seat:Ada',
+      model: 'gpt-5.2',
+      collapseByTarget: true,
+    });
+    expect(collapsed.id).toBe(r.id);
+    expect(collapsed.model).toBe('gpt-5.2');
+  });
+
   it('dedups by (team, from_session, target) while open — incl. null target', () => {
     const { db, teamId } = setup();
     const a = createRequest(db, teamId, { kind: 'claim', from_session: 's1', target: 'Ada' });

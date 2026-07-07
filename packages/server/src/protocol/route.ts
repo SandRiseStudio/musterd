@@ -31,8 +31,12 @@ export function routeEnvelope(
   team: TeamRow,
   sender: MemberRow,
   env: Envelope,
+  /** The sending connection's presence/occupancy id (ADR 101) — so the per-act model stamp reads
+   *  *this* session's attestation, not the member's newest presence. Omitted on the stateless HTTP
+   *  message paths (no live occupancy), which fall back to the member's freshest attested presence. */
+  senderPresenceId?: string,
 ): RouteResult {
-  return withEnvelopeSpan(env, () => routeEnvelopeInner(ctx, team, sender, env));
+  return withEnvelopeSpan(env, () => routeEnvelopeInner(ctx, team, sender, env, senderPresenceId));
 }
 
 function routeEnvelopeInner(
@@ -40,6 +44,7 @@ function routeEnvelopeInner(
   team: TeamRow,
   sender: MemberRow,
   env: Envelope,
+  senderPresenceId?: string,
 ): RouteResult {
   if (env.from !== sender.name || env.team !== team.slug) {
     throw new MusterdError('forbidden', 'envelope from/team must match the authenticated member');
@@ -111,10 +116,17 @@ function routeEnvelopeInner(
   }
 
   // Per-act model stamp (ADR 101): the occupancy attestation is the *source*, the stamp on each act
-  // is the *dataset*. Stamped server-side from the sender's current attested occupancy value — never
-  // client-supplied per act, so a single act can't claim a model its session didn't attest. Absent
-  // attestation stamps nothing (reads as `unknown` downstream, warn-never-block).
-  const attestedModel = currentAttestedModel(ctx.db, sender.id);
+  // is the *dataset*. Model is **entirely server-controlled** — any client-supplied `meta.model` is
+  // stripped first (a session can't stamp an act with a model its occupancy didn't attest — the
+  // integrity claim the diversity flag rests on), then the sender's current attested occupancy value
+  // is stamped when present. Unattested → no stamp at all (reads as `unknown` downstream,
+  // warn-never-block). Keyed on the *sending* occupancy (senderPresenceId) so a fanned-out member's
+  // two sessions on different models don't cross-attribute (ADR 042 human fan-out).
+  const attestedModel = currentAttestedModel(ctx.db, sender.id, senderPresenceId);
+  if (outgoingEnv.meta && 'model' in outgoingEnv.meta) {
+    const { model: _clientModel, ...restMeta } = outgoingEnv.meta;
+    outgoingEnv = { ...outgoingEnv, meta: restMeta };
+  }
   if (attestedModel) {
     outgoingEnv = { ...outgoingEnv, meta: { ...outgoingEnv.meta, model: attestedModel } };
     recordActModel(attestedModel);

@@ -1322,7 +1322,8 @@ describe('model attestation (ADR 101)', () => {
     const deliver = (await l.waitFor('deliver')) as any;
     expect(deliver.envelope.meta.model).toBe('claude-opus-4-8');
 
-    // Lin's act carries no stamp (unknown).
+    // Lin is unattested AND tries to spoof a model in client meta — the server strips it, so the
+    // act carries no stamp (the integrity claim the diversity flag rests on).
     l.send({
       type: 'send',
       envelope: {
@@ -1333,7 +1334,7 @@ describe('model attestation (ADR 101)', () => {
         to: { kind: 'member', name: 'Ada' },
         act: 'accept',
         body: 'ok',
-        meta: { in_reply_to: 'am1' },
+        meta: { in_reply_to: 'am1', model: 'claude-opus-4-8' },
         ts: Date.now(),
       },
     });

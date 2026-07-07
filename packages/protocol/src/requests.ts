@@ -32,6 +32,9 @@ export const RequestSchema = z.object({
   /** Absolute expiry (ms epoch) = created_at + the 1h default (ADR 069 decision 2); drives the
    *  approval-card countdown + the reaper. */
   expires_at: z.number().int(),
+  /** The claimant's harness-attested model (ADR 101), carried across the approval gap so the
+   *  approved occupancy is attested; null/absent when the claimant didn't attest. */
+  model: z.string().nullish(),
 });
 export type Request = z.infer<typeof RequestSchema>;
 

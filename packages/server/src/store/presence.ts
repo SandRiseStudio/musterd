@@ -158,8 +158,12 @@ export function touchAmbientPresence(
     >('SELECT id FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
     .get(memberId);
   if (existing) {
+    // Model attestation is **sticky** across ambient touches (ADR 101): an authenticated HTTP request
+    // carries no model, so `COALESCE(?, model)` preserves the value attested at claim instead of
+    // clearing it (attestation only moves forward — a real switch comes via a claim/heartbeat that
+    // *does* carry a model). provenance/workspace/driver stay per-session seed and re-write normally.
     db.prepare(
-      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, model = ? WHERE id = ?',
+      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, model = COALESCE(?, model) WHERE id = ?',
     ).run(
       Date.now(),
       'online',
@@ -290,16 +294,31 @@ export function reattestModel(
 }
 
 /**
- * The current attested model for a member — read off the freshest presence row that attests one
- * (ADR 101). This is what the per-act stamp reads at send time: the *source* is the occupancy
- * attestation, the *dataset* is the stamp on each act. Null when nothing attests (`unknown`).
+ * The current attested model to stamp on an act (ADR 101). When the sending occupancy is known
+ * (`presenceId`, the WS path) the stamp reads **exactly that occupancy's** attestation — a member
+ * fanned out over two sessions on different models never cross-attributes (ADR 042). When it isn't
+ * (the stateless HTTP message paths, which hold no live occupancy) it falls back to the member's
+ * freshest presence that attests a model. Null when nothing attests (`unknown`).
  */
-export function currentAttestedModel(db: Database, memberId: string): string | null {
+export function currentAttestedModel(
+  db: Database,
+  memberId: string,
+  presenceId?: string,
+): string | null {
+  if (presenceId) {
+    const row = db
+      .prepare<
+        [string, string],
+        { model: string | null }
+      >('SELECT model FROM presence WHERE id = ? AND member_id = ?')
+      .get(presenceId, memberId);
+    return row?.model ?? null;
+  }
   const row = db
     .prepare<
       [string],
       { model: string | null }
-    >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC LIMIT 1')
+    >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1')
     .get(memberId);
   return row?.model ?? null;
 }

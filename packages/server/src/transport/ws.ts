@@ -416,6 +416,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               from_session: state.connId,
               target: encodedTarget,
               surface: frame.surface,
+              // Carry the attestation across the approval gap (ADR 101) so the approved occupancy
+              // isn't born `unknown`.
+              model: frame.model ?? null,
               // A specific-seat claim collapses to one pending request per seat, refreshing the waiter
               // to this newest session — a reconnecting grant-less agent can't stack duplicates.
               collapseByTarget: 'seat' in frame.target,
@@ -634,7 +637,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
                 import('../store/rows.js').TeamRow
               >('SELECT * FROM teams WHERE id = ?')
               .get(conn.teamId)!;
-            const result = routeEnvelope(ctx, teamRow, member, env);
+            // Pass this connection's occupancy id so the per-act model stamp reads *this* session's
+            // attestation, not the member's newest presence (ADR 101).
+            const result = routeEnvelope(ctx, teamRow, member, env, conn.presenceId);
             send(ws, { type: 'ack', id: result.message.id });
             break;
           }

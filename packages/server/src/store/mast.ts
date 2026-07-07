@@ -8,7 +8,6 @@ import {
   type TimeToUnblock,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { recordDiversityFlag } from '../telemetry.js';
 import { openDirectedLedger } from './delivery.js';
 
 /**
@@ -213,9 +212,19 @@ export function diversityFlags(db: Database, teamId: string, now: number): Diver
       verdict,
       ts: chain.ts,
     });
-    recordDiversityFlag(chain.kind, families[0] ?? MODEL_UNKNOWN, verdict);
   }
   return out.sort((a, b) => b.ts - a.ts).slice(0, MAX_ENTRIES);
+}
+
+/**
+ * Cross-team count of live diversity flags — the point-in-time value the `musterd.insight.diversity_flags`
+ * gauge samples (ADR 101). A derived quantity, so it is *sampled* (a gauge), never accumulated per
+ * report-derive (which would conflate scarcity with poll frequency). Cheap: teams are few and each
+ * `diversityFlags` scan is windowed + capped.
+ */
+export function countDiversityFlags(db: Database, now: number = Date.now()): number {
+  const teams = db.prepare<[], { id: string }>('SELECT id FROM teams').all();
+  return teams.reduce((n, t) => n + diversityFlags(db, t.id, now).length, 0);
 }
 
 /** The whole mast block for the report (ADR 091). */

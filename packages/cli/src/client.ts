@@ -572,7 +572,17 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
     if (subscribed) return;
     ws.send(JSON.stringify({ type: 'subscribe', scope: opts.scope ?? 'team' }));
     subscribed = true;
-    heartbeat = setInterval(() => ws.send(JSON.stringify({ type: 'heartbeat' })), 15_000);
+    heartbeat = setInterval(
+      () =>
+        ws.send(
+          JSON.stringify({
+            type: 'heartbeat',
+            // Re-affirm the attested model each heartbeat (ADR 101); the server no-ops when unchanged.
+            ...(attestedModel !== undefined ? { model: attestedModel } : {}),
+          }),
+        ),
+      15_000,
+    );
     heartbeat.unref?.();
   };
 

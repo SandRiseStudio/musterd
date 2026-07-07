@@ -144,8 +144,11 @@ async function inspectModelAttestation(binding: Binding | null): Promise<string[
     return []; // server down / unreachable — a health check never invents drift
   }
   const workspace = resolveWorkspace();
+  // Match this folder's live session(s). A stateless HTTP claim (SPEC A.7) attaches with a null
+  // workspace, so a null-workspace live presence on this seat is also "here" — include it, or the
+  // note would silently skip exactly the sessions most likely to under-attest.
   const unattested = (members.find((m) => m.name === seat)?.presences ?? []).filter(
-    (p) => p.status !== 'offline' && p.workspace === workspace && !p.model,
+    (p) => p.status !== 'offline' && (p.workspace === workspace || p.workspace == null) && !p.model,
   );
   if (unattested.length === 0) return [];
   return [

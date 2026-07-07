@@ -52,7 +52,6 @@ interface Instruments {
   seenLatency: Histogram;
   agentTokens: Counter;
   interruptCheck: Counter;
-  diversityFlag: Counter;
 }
 
 // Created lazily on first use (i.e. after startTelemetry has registered a provider) so the
@@ -92,10 +91,6 @@ function ix(): Instruments {
     interruptCheck: meter.createCounter('musterd.interrupt.check', {
       description:
         'Tool-boundary interrupt-line probes, by result (silent | raised) — the mid-loop reachability primitive (ADR 088). result=raised is the delivery half of the steering-latency eval.',
-    }),
-    diversityFlag: meter.createCounter('musterd.insight.diversity_flag', {
-      description:
-        'Model-diversity flags raised on review/approval chains (ADR 101), by chain kind / family / verdict (flagged = single-family end-to-end, unverifiable = an unknown link) — flag scarcity is the guard metric',
     }),
   };
   return instruments;
@@ -161,23 +156,6 @@ export function recordActModel(model: string): void {
   if (!span) return;
   span.setAttribute('musterd.model', model);
   span.setAttribute('musterd.model.family', modelFamily(model));
-}
-
-/**
- * Count one raised model-diversity flag (ADR 101): a review/approval chain that was single-model-
- * family end-to-end (`flagged`) or carried an unknown link (`unverifiable`). Scarcity is the guard
- * metric — a noisy flag gets muted, and a muted flag is worse than none.
- */
-export function recordDiversityFlag(
-  chainKind: string,
-  family: string,
-  verdict: 'flagged' | 'unverifiable',
-): void {
-  ix().diversityFlag.add(1, {
-    'musterd.chain.kind': chainKind,
-    'musterd.model.family': family,
-    'musterd.diversity.verdict': verdict,
-  });
 }
 
 /** Count one error by protocol class (validation, version_mismatch, auth, …). Transport-boundary. */
@@ -277,6 +255,10 @@ export interface RuntimeSampler {
   inboxLagMs: () => number;
   /** Directed acts (request_help/handoff) not yet answered by an accept/decline (ADR 082 slice 3). */
   openLoops: () => number;
+  /** Live model-diversity flags on review/approval chains (ADR 101) — flagged + unverifiable. A
+   *  point-in-time count of *derived* state, so a gauge (sampled each cycle), never a counter that
+   *  would conflate flag scarcity with report-poll frequency. */
+  diversityFlags: () => number;
 }
 
 /**
@@ -298,6 +280,10 @@ export function registerRuntimeGauges(sampler: RuntimeSampler): void {
     description:
       'request_help/handoff acts not yet answered by an accept/decline (ADR 082 slice 3)',
   });
+  const diversityFlags = meter.createObservableGauge('musterd.insight.diversity_flags', {
+    description:
+      'Live model-diversity flags on review/approval chains (ADR 101): single-family (flagged) or unattested-link (unverifiable). Derived state sampled each cycle — scarcity is the guard signal',
+  });
   meter.addBatchObservableCallback(
     (obs) => {
       for (const row of sampler.presenceBySurface()) {
@@ -305,7 +291,8 @@ export function registerRuntimeGauges(sampler: RuntimeSampler): void {
       }
       obs.observe(lag, sampler.inboxLagMs());
       obs.observe(openLoops, sampler.openLoops());
+      obs.observe(diversityFlags, sampler.diversityFlags());
     },
-    [active, lag, openLoops],
+    [active, lag, openLoops, diversityFlags],
   );
 }
