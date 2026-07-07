@@ -332,6 +332,34 @@ function deliverLaneAct(
   }
 }
 
+/** Lane states that end the lane's active life — mirrors the private TERMINAL set in store/lanes.ts. */
+const LANE_TERMINAL_STATES: ReadonlySet<string> = new Set(['done', 'abandoned']);
+
+/**
+ * Broadcast a lane lifecycle event (open/resolve) to the whole team — same ordinary `message` envelope
+ * + structured meta pattern as `deliverLaneAct` (ADR 083 §4: no new act, no SPEC bump), but `to: team`
+ * since open/resolve are board-shape changes every member benefits from seeing on the shared feed and
+ * office view, unlike warnings and handoffs which stay directed.
+ */
+function deliverLaneTeamAct(
+  ctx: Ctx,
+  team: TeamRow,
+  from: MemberRow,
+  body: string,
+  meta: Record<string, unknown>,
+): void {
+  const env = makeEnvelope({
+    id: ulid(),
+    team: team.slug,
+    from: from.name,
+    to: { kind: 'team' },
+    act: 'message',
+    body,
+    meta,
+  });
+  routeEnvelope(ctx, team, from, env);
+}
+
 /**
  * Directed wakes for fresh lane warnings (ADR 083 §4): the *affected* owner gets one targeted act —
  * never the team, never the firehose. The actor already saw the warning inline in the verb response.
@@ -1142,6 +1170,9 @@ export async function handleHttp(
         const lane = openLane(ctx.db, team.id, team.slug, member.name, body);
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
         deliverLaneWarnings(ctx, team, member, warnings); // all warnings are fresh at open
+        deliverLaneTeamAct(ctx, team, member, `[lane] opened "${lane.title}"`, {
+          lane_open: { lane: lane.id, title: lane.title, project: lane.project },
+        });
         return sendJson(res, 201, { lane, warnings });
       }
 
@@ -1180,6 +1211,13 @@ export async function handleHttp(
             `[lane] "${lane.title}" handed to you${lane.branch ? ` — branch ${lane.branch}` : ''}`,
             { lane_handoff: { lane: lane.id, branch: lane.branch } },
           );
+        }
+        // A resolve/abandon is a board-shape change — worth a team-visible note, same as an open.
+        if (LANE_TERMINAL_STATES.has(lane.state) && !LANE_TERMINAL_STATES.has(before.state)) {
+          const verb = lane.state === 'abandoned' ? 'abandoned' : 'resolved';
+          deliverLaneTeamAct(ctx, team, member, `[lane] ${verb} "${lane.title}"`, {
+            lane_resolve: { lane: lane.id, title: lane.title, state: lane.state },
+          });
         }
         return sendJson(res, 200, { lane, warnings });
       }
