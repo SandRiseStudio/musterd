@@ -6,6 +6,7 @@ export type ActTone =
   | 'danger'
   | 'info'
   | 'handoff'
+  | 'lane'
   | 'status'
   | 'neutral';
 
@@ -21,8 +22,14 @@ export function actTone(act: string): ActTone {
     case 'decline':
       return 'danger';
     case 'wait':
-    case 'lane_open':
       return 'info';
+    // Lane transitions in flight (ADR 102) share a distinct lane accent so they read as one "work
+    // moving" family, above status chatter. Resolve keeps success (done is green); handoff keeps its
+    // violet — same family, so the cluster still reads together.
+    case 'lane_open':
+    case 'lane_claim':
+    case 'lane_state':
+      return 'lane';
     case 'handoff':
     case 'lane_handoff':
       return 'handoff';
@@ -45,6 +52,10 @@ export function actLabel(act: string): string {
       return 'help';
     case 'lane_open':
       return 'lane open';
+    case 'lane_claim':
+      return 'lane claim';
+    case 'lane_state':
+      return 'lane state';
     case 'lane_resolve':
       return 'lane done';
     case 'lane_handoff':
@@ -60,10 +71,17 @@ export function actLabel(act: string): string {
  * sub-type from `meta` so the stream badge, glyph, and office choreography can key on it distinctly
  * from a plain message instead of all three collapsing into a generic "message".
  */
-export type LaneEventKind = 'lane_open' | 'lane_resolve' | 'lane_handoff';
+export type LaneEventKind =
+  | 'lane_open'
+  | 'lane_claim'
+  | 'lane_state'
+  | 'lane_resolve'
+  | 'lane_handoff';
 export function laneEvent(env: Pick<Envelope, 'act' | 'meta'>): LaneEventKind | null {
   if (env.act !== 'message' || !env.meta) return null;
   if (env.meta['lane_open']) return 'lane_open';
+  if (env.meta['lane_claim']) return 'lane_claim';
+  if (env.meta['lane_state']) return 'lane_state';
   if (env.meta['lane_resolve']) return 'lane_resolve';
   if (env.meta['lane_handoff']) return 'lane_handoff';
   return null;

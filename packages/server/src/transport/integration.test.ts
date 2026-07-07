@@ -1797,6 +1797,47 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(msg.meta.lane_handoff.branch).toBe('agent/riley');
   });
 
+  it('surfaces noteless lane transitions: self-claim + non-terminal state move (ADR 102)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const ada = { key: team.json.agent_key, seat: 'ada' };
+    await post('/teams/dawn/members', { name: 'ada', kind: 'agent' }, nickTok);
+
+    // Open unowned (no claim), then ada claims it — the self-claim is a team-visible transition.
+    const lane = await post('/teams/dawn/lanes', { title: 'eviction fix' }, nickTok);
+    const laneId = lane.json.lane.id;
+    await fetch(base + `/teams/dawn/lanes/${laneId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({ owner_seat: 'ada' }),
+    });
+    // A non-terminal move (active → blocked) is a transition; a terminal move (→ done) is a resolve.
+    await fetch(base + `/teams/dawn/lanes/${laneId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({ state: 'blocked' }),
+    });
+    await fetch(base + `/teams/dawn/lanes/${laneId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({ state: 'done' }),
+    });
+
+    const stream = await get('/teams/dawn/messages', nickTok);
+    const metas = stream.json.messages.map((m: { meta?: Record<string, unknown> }) => m.meta ?? {});
+    const claim = metas.find((m: Record<string, unknown>) => m['lane_claim']) as
+      | { lane_claim: { lane: string; title: string } }
+      | undefined;
+    const stateMove = metas.find((m: Record<string, unknown>) => m['lane_state']) as
+      | { lane_state: { state: string } }
+      | undefined;
+    expect(claim?.lane_claim.title).toBe('eviction fix');
+    // Only the non-terminal move emits lane_state; the → done move rides lane_resolve, not lane_state.
+    expect(stateMove?.lane_state.state).toBe('blocked');
+    expect(metas.filter((m: Record<string, unknown>) => m['lane_state']).length).toBe(1);
+    expect(metas.some((m: Record<string, unknown>) => m['lane_resolve'])).toBe(true);
+  });
+
   it('goal_id join + GET /next: the orientation brief over lanes + the handoff why (ADR 049/084)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

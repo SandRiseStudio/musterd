@@ -28,6 +28,7 @@
   --lc-danger: #d1503f;
   --lc-info: #5b7fa6;
   --lc-handoff: #8a5fd6; /* violet — handoff (a distinct act tone, dark enough for cream) */
+  --lc-lane: #5a52c9; /* indigo — lane transitions (ADR 102), handoff's family so the cluster reads as one */
   --lc-agent: #1a9e88;
   --lc-human: #d9557d;
 
@@ -1237,6 +1238,11 @@
   color: var(--lc-handoff);
   border-color: color-mix(in srgb, var(--lc-handoff) 44%, transparent);
   background: color-mix(in srgb, var(--lc-handoff) 14%, transparent);
+}
+.lc-badge--lane {
+  color: var(--lc-lane);
+  border-color: color-mix(in srgb, var(--lc-lane) 44%, transparent);
+  background: color-mix(in srgb, var(--lc-lane) 14%, transparent);
 }
 .lc-badge--status {
   color: var(--lc-agent);
