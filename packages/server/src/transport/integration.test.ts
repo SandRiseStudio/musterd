@@ -1464,6 +1464,42 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(auditRows('dawn').filter((r) => r.action === 'interrupt.raised')).toHaveLength(1);
   });
 
+  it('steer act (ADR 102): persists through the DB and raises the interrupt line without an urgent flag', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+
+    // A non-urgent steer — no meta.urgent. It must persist (the v14 migration widened messages.act
+    // beyond the frozen v5 CHECK) and, being interrupt-class by definition, raise the line anyway.
+    const steer = {
+      id: 'st-1',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'member', name: 'Bob' },
+      act: 'steer',
+      body: 'switch to the v2 schema',
+      meta: undefined,
+      ts: Date.now(),
+    };
+    const sent = await post('/teams/dawn/messages', { envelope: steer }, nickTok);
+    expect(sent.status).toBe(201); // did not fail at the DB CHECK layer
+
+    const raised = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(raised.json.raised).toBe(true);
+    expect(raised.json.act).toMatchObject({ id: 'st-1', act: 'steer' });
+    expect(raised.json.line).toContain('steer'); // raise class named on the line
+    expect(raised.json.line).not.toContain('v2 schema'); // §4: never the raw body
+
+    // Audited with the steer raise class, not a hardcoded 'urgent'.
+    const audit = auditRows('dawn').filter((r) => r.action === 'interrupt.raised');
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.detail).toContain('steer');
+  });
+
   it('delivery ledger (ADR 090): logged → seen (cursor) → answered, on the endpoint and the report', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

@@ -116,11 +116,12 @@ export function listInbox(
  * line whether or not it is flagged urgent; `challenge`/`defer` stay behind the urgent tier). A
  * terminal `resolve` never interrupts.
  *
- * Steer supersession (ADR 102, borrowing ADR 017's newest-wins primitive applied to *direction*):
- * among the steers still waiting for me, only the newest survives — older steers are superseded so a
- * late-waking agent sees only the current direction, never a contradictory stack. This is a pure
- * read-side collapse, the mirror of how `resolve` closes a thread above; no supersede column, no
- * write-path side-effect.
+ * Steer supersession (ADR 102, borrowing ADR 017's newest-wins primitive applied to *direction*): only
+ * the newest steer directed at me survives — older steers are superseded so a late-waking agent sees
+ * only the current direction, never a contradictory stack. The winning-steer bar is taken over the
+ * whole set (resolved or not) so resolving the current steer can't revive an older one, and the bar
+ * can't collapse onto a stale steer. This is a pure read-side collapse, the mirror of how `resolve`
+ * closes a thread above; no supersede column, no write-path side-effect.
  *
  * Newest first, so the caller names the most recent steer. Pure — reads envelopes, never the DB — so
  * it is trivially testable and the "daemon-composed, never the raw body" line (§4) is built from its
@@ -134,20 +135,26 @@ export function pendingInterrupts(messages: Envelope[], me: string): Envelope[] 
   const actionNeeded = (m: Envelope) =>
     m.act !== 'resolve' &&
     (m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me));
-  const pending = messages
+  // The superseding bar: the newest steer directed at me across the WHOLE set — resolved or not — so a
+  // resolved current steer can't revive an older one it already superseded, and so the bar doesn't
+  // collapse onto a stale steer just because the newest was filtered out. (With a ts-based read cursor,
+  // an older steer can't be unread while a newer one is read, so unread-only input carries the true
+  // newest steer here.)
+  const steerBar = messages.reduce(
+    (max, m) => (m.from !== me && m.act === 'steer' && actionNeeded(m) && m.ts > max ? m.ts : max),
+    Number.NEGATIVE_INFINITY,
+  );
+  return messages
     .filter(
       (m) =>
         m.from !== me &&
         actionNeeded(m) &&
         (isUrgent(m) || m.act === 'steer') &&
-        !resolved.has(m.thread ?? m.id),
+        !resolved.has(m.thread ?? m.id) &&
+        // Newest steer wins: a steer older than the bar is superseded and neither interrupts nor counts.
+        (m.act !== 'steer' || m.ts >= steerBar),
     )
     .sort((a, b) => b.ts - a.ts);
-  // Newest steer wins: drop every steer but the most recent (the list is already newest-first).
-  const newestSteerTs = pending.find((m) => m.act === 'steer')?.ts;
-  return newestSteerTs === undefined
-    ? pending
-    : pending.filter((m) => m.act !== 'steer' || m.ts === newestSteerTs);
 }
 
 /**

@@ -127,4 +127,23 @@ describe('pendingInterrupts (ADR 088)', () => {
     ];
     expect(pendingInterrupts(msgs, 'me')).toEqual([]);
   });
+
+  it('resolving the current steer does NOT revive an older superseded steer (Bugbot: revive bug)', () => {
+    const msgs = [
+      env({ id: 's1', from: 'nick', to: toMe, act: 'steer', thread: 's1', ts: 10 }),
+      env({ id: 's2', from: 'jo', to: toMe, act: 'steer', thread: 's2', ts: 20 }),
+      env({ id: 'done', from: 'me', to: { kind: 'team' }, act: 'resolve', thread: 's2', ts: 30 }),
+    ];
+    // s2 (newest) supersedes s1 and is then resolved — nothing should interrupt (s1 stays dead).
+    expect(pendingInterrupts(msgs, 'me')).toEqual([]);
+  });
+
+  it('the newest steer still fires when an OLDER steer thread was resolved', () => {
+    const msgs = [
+      env({ id: 's1', from: 'nick', to: toMe, act: 'steer', thread: 's1', ts: 10 }),
+      env({ id: 'done', from: 'me', to: { kind: 'team' }, act: 'resolve', thread: 's1', ts: 15 }),
+      env({ id: 's2', from: 'jo', to: toMe, act: 'steer', thread: 's2', ts: 20 }),
+    ];
+    expect(pendingInterrupts(msgs, 'me').map((m) => m.id)).toEqual(['s2']);
+  });
 });

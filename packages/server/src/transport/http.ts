@@ -225,13 +225,14 @@ function raiseClass(latest: Envelope): 'steer' | 'urgent' {
  * structured fields only** — sender + act + count — never the raw `env.body`, so a teammate's message
  * text can't be injected into a busy agent's context mid-turn. Sender identity is always present so the
  * model can weigh the source. Points at the explicit follow-up (`musterd inbox`) rather than dumping
- * the content. The noun tracks the raise class (`steer` vs `urgent`, ADR 102).
+ * the content. The class noun (`steer` vs `urgent`, ADR 102) describes only `latest`, so a mixed queue
+ * isn't mislabeled: the plural line uses the neutral "acts" and names the latest's class inline.
  */
 function composeInterruptLine(latest: Envelope, count: number): string {
   const head = `${latest.from} (${latest.act})`;
   const noun = raiseClass(latest);
   return count > 1
-    ? `⚡ musterd: ${count} ${noun} acts waiting (latest from ${head}) — run 'musterd inbox' to read them.`
+    ? `⚡ musterd: ${count} acts waiting (latest: ${noun} from ${head}) — run 'musterd inbox' to read them.`
     : `⚡ musterd: ${noun} from ${head} — run 'musterd inbox' to read it.`;
 }
 
