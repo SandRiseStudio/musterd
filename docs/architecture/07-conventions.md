@@ -60,7 +60,7 @@
 
 Each commit keeps **docs and code in agreement** (the living-doc rule). A commit that changes behavior described in a doc must update that doc in the same commit. A commit that deviates from a doc must include/reference the ADR.
 
-## Git workflow (one enforced way — [ADR 104](../decisions/104-unified-git-workflow.md))
+## Git workflow (one enforced way — [ADR 106](../decisions/106-unified-git-workflow.md))
 
 There is exactly one way to land a change; GitHub enforces it, so don't improvise a merge method or a
 catch-up strategy. The full playbook lives in [`AGENTS.md`](../../AGENTS.md); the essentials:
@@ -116,7 +116,7 @@ A task/milestone is done only when **all** are true:
 5. Any deviation from these docs has an ADR.
 6. For CLI changes: output still matches the Figma terminal frames (snapshot tests pass).
 7. For agent-facing changes: emitted traces and an eval (or an explicit, reasoned `n/a`) are present and described in the same commit — peer to tests and docs (ADR 052).
-8. Landed via the git workflow above (ADR 104): a **squash-merged PR** with the `gates` CI + `Cursor Bugbot` green — never a direct push to `main`. Locally, items 1–3 run as the fast pre-push smoke; CI is the authoritative gate.
+8. Landed via the git workflow above (ADR 106): a **squash-merged PR** with the `gates` CI + `Cursor Bugbot` green — never a direct push to `main`. Locally, items 1–3 run as the fast pre-push smoke; CI is the authoritative gate.
 
 ## Naming
 

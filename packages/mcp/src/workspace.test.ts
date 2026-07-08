@@ -24,7 +24,7 @@ describe('resolveWorkspace (where-on-attach seed, ADR 014)', () => {
   it('qualifies the folder with the git branch (folder@branch) on a named branch', () => {
     // A controlled temp repo on a known branch — deterministic regardless of the ambient checkout.
     // (The suite's own checkout is a detached HEAD in CI, where the qualifier is *correctly* empty;
-    // asserting against `process.cwd()` was the source of a CI-only flake — see ADR 104.)
+    // asserting against `process.cwd()` was the source of a CI-only flake — see ADR 106.)
     const dir = mkdtempSync(join(tmpdir(), 'musterd-ws-'));
     try {
       const g = (...args: string[]) =>
