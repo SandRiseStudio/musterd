@@ -45,7 +45,11 @@ export type AuditAction =
   // ADR 101: a harness attested (or re-attested) the model on an occupancy. `detail` carries
   // `{ occupancy, old, new, source: 'claim'|'heartbeat' }` — this append-only trail IS the
   // occupancy's model-switch history (the ADR keeps no history column).
-  | 'occupancy.model_attested';
+  | 'occupancy.model_attested'
+  // ADR 109: a lane carrying a branch reached a terminal state — the seat attests the landed merge.
+  // actor = the resolving seat, target = the branch, `detail` carries the attested (never verified)
+  // `{ pr, sha, authorized_by }` — the join table between seats, main SHAs, and authorizing humans.
+  | 'git.pr_merged';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

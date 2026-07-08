@@ -34,6 +34,8 @@ another way. Two halves: what GitHub **enforces**, and the **playbook** agents f
 1. **One branch per lane, in a worktree.** `feat/<slug>` / `fix/<slug>` / `docs/<slug>`, branched from
    **current `origin/main`** (`git fetch` first). Worktree isolation is already the norm (ADR 065).
 2. **Work, committing normally.** Intermediate commit hygiene does not matter — they are squashed away.
+   Commits are seat-attributed: the worktree's provisioned git identity plus the seat
+   `Co-authored-by` trailer that survives the squash (ADR 109).
 3. **Run the fast local gates before pushing** — `pnpm typecheck && pnpm format:check` (seconds). This
    is an **optional speed optimization**, not a required duplicate of CI (see §3): it catches the cheap
    failures before a push→CI round-trip. Agents do **not** reproduce the full CI locally.

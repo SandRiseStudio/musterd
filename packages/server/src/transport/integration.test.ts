@@ -1928,6 +1928,52 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(msg.meta.lane_handoff.branch).toBe('agent/riley');
   });
 
+  it('resolving a branch-carrying lane audits git.pr_merged with the attested merge detail (ADR 109)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'ada', kind: 'agent' }, nickTok);
+    const ada = { key: team.json.agent_key, seat: 'ada' };
+
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'seat attribution', branch: 'feat/seat-git-attribution', claim: true },
+      ada,
+    );
+    await fetch(base + `/teams/dawn/lanes/${lane.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({
+        state: 'done',
+        merged: { pr: 167, sha: 'abc1234', authorized_by: 'nick', extra: 'stripped-by-schema' },
+      }),
+    });
+
+    const audit = await get('/teams/dawn/audit', nickTok);
+    const row = audit.json.audit.find((r: { action: string }) => r.action === 'git.pr_merged');
+    expect(row).toBeDefined();
+    expect(row.actor).toBe('ada');
+    expect(row.target).toBe('feat/seat-git-attribution');
+    const detail = row.detail; // GET /audit returns detail already parsed
+    expect(detail).toMatchObject({ pr: 167, sha: 'abc1234', authorized_by: 'nick' });
+    expect(detail.extra).toBeUndefined();
+
+    // An abandoned branch-carrying lane does NOT attest a merge.
+    const lane2 = await post(
+      '/teams/dawn/lanes',
+      { title: 'dead end', branch: 'feat/dead-end', claim: true },
+      ada,
+    );
+    await fetch(base + `/teams/dawn/lanes/${lane2.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({ state: 'abandoned' }),
+    });
+    const audit2 = await get('/teams/dawn/audit', nickTok);
+    expect(
+      audit2.json.audit.filter((r: { action: string }) => r.action === 'git.pr_merged'),
+    ).toHaveLength(1);
+  });
+
   it('surfaces noteless lane transitions: self-claim + non-terminal state move (ADR 102)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

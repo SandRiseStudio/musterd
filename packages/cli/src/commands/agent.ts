@@ -77,6 +77,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   const here = Boolean(parsed.flags['here']);
   const ws = provisionWorkspace(name, {
     here,
+    team,
     ...(flagStr(parsed.flags, 'path') ? { path: flagStr(parsed.flags, 'path')! } : {}),
   });
 
