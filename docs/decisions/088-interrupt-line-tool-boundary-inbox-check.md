@@ -1,6 +1,6 @@
 # 088 — The interrupt line: a tool-boundary inbox check reaches a busy agent
 
-- Status: proposed — design frozen 2026-07-03; not yet built
+- Status: accepted — increment 1 shipped 2026-07-05 (PR #109); the arc continued in ADR 103 (inc2) + ADR 111 (inc3)
 - Date: 2026-07-03
 
 ## Context

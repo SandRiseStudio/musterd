@@ -10,6 +10,23 @@
 export type Status = 'shipped' | 'near-term' | 'reserved' | 'out-of-scope';
 
 /**
+ * The curated gradation for an item that has **not yet shipped** — a "how imminent/designed" judgment
+ * that no signal can derive. Declared by hand. (`shipped` is the fourth Status value, but it is never
+ * declared — it is *derived* from a {@link ShippedAnchor}; see the declared/derived split below.)
+ */
+export type PlanStatus = 'near-term' | 'reserved' | 'out-of-scope';
+
+/**
+ * The proof an item **shipped** — the roadmap dogfooding musterd's own ADR 048/084/111 posture: a
+ * declared skeleton with a *derived* status. An item is `shipped` iff it carries this anchor, and
+ * `scripts/check-roadmap-truth.ts` verifies it against reality so the data can't silently overclaim:
+ * `{ prs }` names the merged PR number(s) that landed it (each checked against git history), and
+ * `{ legacy: true }` grandfathers items that shipped before this convention (recorded, not verified).
+ * Marking an item shipped is thus a one-field, machine-checkable act — never a hand-set status.
+ */
+export type ShippedAnchor = { prs: number[] } | { legacy: true };
+
+/**
  * Build-order lane — priority/sequence, orthogonal to {@link Status}. Status is the coarse
  * "how imminent/designed" grouping; `wave` is the linear order we actually build in. Every unshipped,
  * in-scope item carries one; shipped/out-of-scope items omit it.
@@ -33,6 +50,7 @@ export interface Ref {
 export interface RoadmapItem {
   id: string;
   title: string;
+  /** Derived, never authored — computed by {@link resolveItem} from `shipped` (present ⟹ 'shipped') or `plan`. */
   status: Status;
   category: Category;
   blurb: string;
@@ -42,6 +60,54 @@ export interface RoadmapItem {
   dependsOn?: string[];
   /** Build-order lane (priority/sequence). Unset on shipped + out-of-scope items. */
   wave?: Wave;
+  /** The shipped anchor (carried through for the truth check); present ⟺ status === 'shipped'. */
+  shipped?: ShippedAnchor;
+  /** The ADR that *is* this item — the reverse anchor for the truth check (see {@link RawItem}). */
+  frozenBy?: number;
+}
+
+/**
+ * The **authored** shape (declared skeleton). An item declares exactly one of `shipped` / `plan`;
+ * {@link resolveItem} derives the `status` the rest of the app reads. This is the ADR 084 Goal-status
+ * pattern applied to the roadmap itself: order, wave, prose, and grouping stay curated; whether it has
+ * *shipped* is anchored to reality, not a hand-set flag.
+ */
+export interface RawItem {
+  id: string;
+  title: string;
+  category: Category;
+  blurb: string;
+  detail?: string;
+  refs?: Ref[];
+  dependsOn?: string[];
+  wave?: Wave;
+  /** Present ⟺ shipped — the proof it landed. Mutually exclusive with `plan`. */
+  shipped?: ShippedAnchor;
+  /** Present ⟺ not yet shipped — the curated gradation. Mutually exclusive with `shipped`. */
+  plan?: PlanStatus;
+  /**
+   * The ADR that *is* this item — its own freezing ADR, distinct from the `refs` it merely builds on.
+   * The truth check reads that ADR's `Status:` line as a second, bidirectional anchor: a shipped item's
+   * frozenBy ADR must be accepted, and — the drift that motivated this — an *unshipped* item whose
+   * frozenBy ADR is already accepted is flagged as a stale roadmap. Optional: only items with a
+   * dedicated freezing ADR set it.
+   */
+  frozenBy?: number;
+}
+
+/** Derive the read-model item (with its `status`) from an authored declaration; enforce shipped-xor-plan. */
+function resolveItem(r: RawItem): RoadmapItem {
+  const isShipped = r.shipped !== undefined;
+  const isPlanned = r.plan !== undefined;
+  if (isShipped === isPlanned) {
+    throw new Error(
+      `roadmap item "${r.id}" must declare exactly one of \`shipped\` or \`plan\` (found ${
+        isShipped ? 'both' : 'neither'
+      })`,
+    );
+  }
+  const { plan: _plan, ...rest } = r;
+  return { ...rest, status: r.shipped ? 'shipped' : r.plan! };
 }
 
 const REPO = 'https://github.com/SandRiseStudio/musterd/blob/main';
@@ -120,12 +186,12 @@ export function waveRank(item: RoadmapItem): number {
   return item.wave === undefined ? Number.POSITIVE_INFINITY : WAVE_ORDER.indexOf(item.wave);
 }
 
-export const ROADMAP: RoadmapItem[] = [
+const RAW: RawItem[] = [
   // ── shipped ───────────────────────────────────────────────────────────────
   {
     id: 'driver-co-presence',
     title: 'Driver co-presence',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'human-loop',
     blurb: 'When a human steers an agent inside its session, the roster shows the human present — not offline.',
     detail:
@@ -135,7 +201,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'resolve-act',
     title: 'The resolve act',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'human-loop',
     blurb: 'A terminal "done" signal for a thread. accept is not finished; resolve closes the loop.',
     detail: 'A new collaboration act and a SPEC bump — it serves both progress-awareness and the future board layer.',
@@ -144,7 +210,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'notify-nudge',
     title: 'Reachability nudge',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'human-loop',
     blurb: 'musterd notify pushes a localhost OS notification so an away human learns an agent needs them.',
     detail:
@@ -154,7 +220,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'telemetry-l1',
     title: 'Telemetry — Layer 1',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'observability',
     blurb: 'One OTLP span per Envelope on the validate → persist → route path, plus act and team metrics. Off by default, no phone-home.',
     detail:
@@ -164,7 +230,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'harness-adapters',
     title: 'Harness adapters',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'harness',
     blurb: 'Claude Code, Cursor, and Codex each get a rendered role MCP server. Codex writes a project-local .codex/config.toml.',
     detail:
@@ -174,7 +240,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'workspace-scoped-presence',
     title: 'Seat stops flapping on health-check probes',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb: 'Agent single-active displacement is scoped by workspace: a same-seat reconnect (a reload, or Claude Code’s periodic MCP health-check spawn) no longer supersedes the live session — only a genuinely different session does.',
     detail:
@@ -184,7 +250,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'agent-workspace',
     title: 'One-command agent workspaces',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'harness',
     blurb: 'musterd agent <name> adds an agent AND gives it its own isolated git worktree, binding, and MCP registration — so two actors never fight over one folder’s seat.',
     detail:
@@ -194,7 +260,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'verify-provisioning',
     title: 'Verify provisioning, don’t assume',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'harness',
     blurb: 'The SessionStart hook checks the musterd server is actually registered before telling an agent it’s auto-joined; if not, it prints the fix instead of a false reassurance.',
     detail:
@@ -204,7 +270,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'layered-guidance-surface',
     title: 'Layered guidance surface — primer, skill, help, hooks',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'harness',
     blurb: 'musterd init writes an on-demand skill (seat claiming, handoff-with-branch, recovery) and slash commands alongside the primer, slimming the always-loaded primer to a loop kernel — with drift checks so the generated guidance can’t silently rot as the platform evolves.',
     detail:
@@ -215,7 +281,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'committed-launch-spec',
     title: 'Committed launch spec — a clone self-wires',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'harness',
     blurb: 'A secret-free .musterd/workspace.json rides the repo, so a fresh clone/worktree registers the musterd MCP server with one no-prompt `musterd wire` — no interactive init.',
     detail:
@@ -226,7 +292,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'claim-on-first-use',
     title: 'Claim on first use',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'harness',
     blurb: 'A folder claim policy and live claim bring a running pending session online — no relaunch, no wire change.',
     detail:
@@ -236,7 +302,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'cross-network',
     title: 'Cross-network teams',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'transport',
     blurb: 'Two people on two machines can share a team today — run the daemon on a Tailscale/WireGuard overlay and point each member’s MUSTERD_SERVER at its overlay address.',
     detail:
@@ -251,7 +317,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'availability-urgent',
     title: 'Availability axis + urgent breakthrough',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'human-loop',
     blurb: 'A human sets their own availability (available/away/dnd, away_until); an urgent flag with a required reason breaks through an away/dnd hold, and the notify loop tiers delivery by it.',
     detail:
@@ -262,7 +328,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'service-lifecycle',
     title: 'Daemon service lifecycle',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb: 'musterd service runs the daemon as a background service that survives a closed terminal, restarts on crash, and starts at login — without raw launchctl.',
     detail:
@@ -272,7 +338,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'agent-reachability',
     title: 'Agent-side reachability',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'human-loop',
     blurb: 'The agent half of the reachability loop: a directed act waiting for an agent surfaces on every command it runs, so a heads-down agent can’t miss a request_help addressed to it.',
     detail:
@@ -283,7 +349,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'service-roster-guard',
     title: 'Service guardrails',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb: 'musterd service stop/restart refuses when other members hold live sessions, so bouncing a shared daemon doesn’t silently drop a teammate.',
     detail:
@@ -301,7 +367,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'seat-binding-ergonomics',
     title: 'Hand off & claim a seat without leaving the tool',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'harness',
     blurb: 'A teammate issues a ready seat to another agent in one command, the receiver adopts it in one command, and a claim conflict no longer dead-ends — it names the runnable next command.',
     detail:
@@ -311,7 +377,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'agent-presence-touch',
     title: 'Ambient agent presence',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'human-loop',
     blurb: 'An agent doing bursty one-shot CLI work shows present on the roster instead of offline — liveness from real actions, not just a resident watch socket.',
     detail:
@@ -321,7 +387,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'durable-roster',
     title: 'Durable seat roster on git',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb: 'A team’s seat roster lives as committed .musterd/ files; the daemon is a projection of them, so the git history of seats/ is the membership audit log — while live state (presence, tokens) stays daemon-only.',
     detail:
@@ -332,7 +398,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'multi-identity-vault',
     title: 'Multi-identity vault',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'harness',
     blurb: 'A second agent joining a team on the same machine can no longer clobber the first’s cached token — every claimed identity is kept, keyed by (team, member).',
     detail:
@@ -345,7 +411,7 @@ export const ROADMAP: RoadmapItem[] = [
     // traces+evals by default — so the dogfood-loop + governance work below never needs retrofit.
     id: 'obs-evals-gate',
     title: 'Traces & evals first-class gate',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'observability',
     blurb: 'Every agent-facing feature ships with its traces and an eval, the way it ships with tests — an ADR-template section and a format:check guard enforce it. Cheap and compounding, so later features inherit it.',
     detail:
@@ -355,7 +421,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'inbox-reaches-blocked-agent',
     title: 'Inbox reaches a blocked agent',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'human-loop',
     blurb: 'A teammate’s message reaches an agent parked on an approval prompt — surfaced into the terminal the human is already at — instead of waiting until the human hand-relays it.',
     detail:
@@ -366,7 +432,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'wake-on-message',
     title: 'Wake on message',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'human-loop',
     blurb: 'An idle agent blocks until its next directed act arrives and resumes immediately — instead of polling on a timer or missing the message in the gap.',
     detail:
@@ -377,7 +443,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'cli-ergonomics',
     title: 'CLI ergonomics',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb: 'The papercuts a fresh agent hits in its first five minutes — identity, version, inbox filters, one-command replies.',
     detail:
@@ -389,7 +455,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'v03-p0-plan',
     title: 'v0.3 governance — build plan & spec reconciliation',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb: 'The phased decomposition of the v0.3 governance rock, the four directional decisions, and the spec-gap resolutions — so the breaking auth change lands as one isolated, reviewed moment.',
     detail:
@@ -400,7 +466,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'v03-p1-seats',
     title: 'v0.3 P1 — seats data model',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb: 'The substrate: account_status + capabilities on a seat, roles carrying default capabilities + charter, per-seat narrowing (never widening). Permissive defaults, no enforcement yet.',
     detail:
@@ -411,7 +477,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'v03-p2-enforcement',
     title: 'v0.3 P2 — in-band enforcement & audit',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb: 'The first real governance value, on the existing token auth: gate urgent on can_flag_urgent, admin-only governance routes, viewer-scoped visibility, account-status enforcement, and an append-only audit log.',
     detail:
@@ -422,7 +488,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'v03-p3-credentials',
     title: 'v0.3 P3 — credentials & the claim handshake',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb: 'The breaking auth rework: team agent key + admin-issued grants + human credentials, the WS claim frame replacing hello, and the no-grant request/approval lane — cut over across every surface at once.',
     detail:
@@ -434,7 +500,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'v03-p4-remote-join',
     wave: 'later',
     title: 'v0.3 P4 — credentialed remote join',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'transport',
     blurb: 'Plug the agent key + grant + human credential into the already-built secured off-loopback bind, so a teammate on another machine joins over wss with a real credential, not a locally-minted token.',
     detail:
@@ -445,7 +511,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'notification-tiers',
     title: 'Notification tiers',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'human-loop',
     blurb: 'The full reachability set: route an agent’s request for help to a human by salience and availability, not only when they are watching.',
     detail:
@@ -456,7 +522,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'coordination-lanes',
     title: 'Coordination lanes (Phase 1) — own the work, never dup a diff',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb:
       'A first-class lane = { work-item × owner × surface } so musterd advises before two agents (or humans) redo the same work — the anti-swarm primitive.',
@@ -472,7 +538,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'telemetry-gaps',
     title: 'Close the dogfood telemetry gaps (instrument-by-default)',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'observability',
     blurb:
       'Turned the built-but-inert telemetry on and wired the missing surfaces — so the next multi-agent session is measurable live, not reconstructed forensically.',
@@ -491,7 +557,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'eval-experiment-engine',
     wave: 'later',
     title: 'Eval & experiment engine (batond)',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'observability',
     blurb: 'The batond half of the flywheel: team-outcome evals and side-by-side experiments over model × prompt × harness × team topology — built on a bought, Langfuse-shaped backend, never a from-scratch store.',
     detail:
@@ -503,7 +569,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'coordination-dataset',
     wave: 'later',
     title: 'Coordination-traces dataset & MAST-in-the-wild',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'observability',
     blurb: 'The first research artifact: an open, redacted dataset of real human+agent coordination traces on HuggingFace, plus MAST failure detectors over the act-typed log — the data no single-agent vendor can produce.',
     detail:
@@ -515,7 +581,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'research-intake',
     wave: 'later',
     title: 'Research radar (ingest)',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'observability',
     blurb: 'A standing scan/triage of new multi-agent-coordination research, funneled into research-foundation.md — findings that change a decision graduate to an ADR.',
     detail:
@@ -526,7 +592,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'schedule-enforcement',
     wave: 'later',
     title: 'Schedule & lifecycle enforcement',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'platform',
     blurb: 'availability and lifecycle: until are stored today but not enforced. Later: honor windows for routing and auto-expire members.',
     detail:
@@ -537,7 +603,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'step-streaming',
     wave: 'later',
     title: 'Step-level streaming transport',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'transport',
     blurb: 'v0.1 sends whole Envelopes. A v2 transport adds step-level streaming, which beats wait-for-complete for collaborating agents.',
     detail: 'The broadcast recipient kind is already distinct on the wire to anticipate richer delivery semantics.',
@@ -546,7 +612,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'federation',
     wave: 'later',
     title: 'Team-to-team federation',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'transport',
     blurb: 'A Member belongs to one Team today. Teams that address one another, and identities recognized across Teams, come later.',
     dependsOn: ['cross-network'],
@@ -555,7 +621,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'web-dashboard',
     wave: 3,
     title: 'Web dashboard — live team console',
-    status: 'near-term',
+    plan: 'near-term',
     category: 'surfaces',
     blurb: 'A browser console for the team: the firehose observer stream, the live roster, and the governance/approval web views — a read-only window onto the same Members.',
     detail:
@@ -565,7 +631,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'live-office',
     title: 'Live isometric office (Rive)',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'surfaces',
     blurb: 'Replace the /live constellation with a 2D isometric animated co-work office — presence→placement, act→choreography, travel-intensity == notification tier.',
     detail:
@@ -577,7 +643,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'more-surfaces',
     wave: 3,
     title: 'iOS & Slack surfaces',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'surfaces',
     blurb: 'An iOS app and a Slack surface, so a Member is reachable wherever its human or agent already lives.',
     dependsOn: ['web-dashboard'],
@@ -585,7 +651,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'orientation-spine',
     title: 'Plan/Goal model + `musterd next`/`done`',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'insights',
     blurb: 'The orientation + handoff spine that kills the copy-paste toil: a declared Plan→Goal skeleton — the backlog noun — with derived status, and one-command next/done.',
     detail:
@@ -595,7 +661,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'insight-engine',
     title: 'Insight engine — server-side projections',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'insights',
     blurb: 'One projection engine in the daemon — Goal status, the board view, flow metrics, waiting-on — computed over Goals × lanes × threads, never stored, exposed as an HTTP API.',
     detail:
@@ -606,7 +672,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'insight-cli-mcp',
     title: 'Reporting altitudes + waiting-on view (CLI + MCP)',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'insights',
     blurb: '`musterd report` at IC/team/exec altitudes and the "N threads waiting on <human>" bottleneck view — the first surfaces of the insight engine, with MCP parity.',
     detail:
@@ -617,7 +683,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'coordination-density',
     title: 'Coordination-density insight',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'insights',
     blurb: 'An insight that flags when a team’s traffic is all broadcast-journal and no directed or threaded exchange — coordination that only looks collaborative.',
     detail:
@@ -635,7 +701,8 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'interrupt-line',
     title: 'The interrupt line — reach a busy agent mid-loop',
-    status: 'shipped',
+    shipped: { prs: [109] },
+    frozenBy: 88,
     category: 'human-loop',
     blurb:
       'A directed steer reaches an agent busy mid-task at its next tool-call boundary — the missing reachability rung for a loop that is neither idle nor blocked, but heads-down on its own work.',
@@ -652,7 +719,8 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'steer-challenge-acts',
     wave: 4,
     title: 'Steer & challenge acts (+ plan-mutation verbs)',
-    status: 'shipped',
+    shipped: { prs: [138, 143, 158] },
+    frozenBy: 103,
     category: 'human-loop',
     blurb:
       'Give steering first-class semantics: a directive `steer` that supersedes prior direction, an epistemic `challenge` that forces revalidation, and a `defer` verb that reorders/defers a Goal on the plan.',
@@ -665,7 +733,8 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'stale-plan-detection',
     wave: 4,
     title: 'Plan epochs & dependency-targeted invalidation',
-    status: 'shipped',
+    shipped: { prs: [169, 171] },
+    frozenBy: 111,
     category: 'insights',
     blurb:
       'Catch stale work even when an interrupt misses: a goal carries a plan epoch, `defer` re-sequences it and bumps it, and only the lanes actually building against the moved plan get a targeted warning.',
@@ -678,7 +747,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'steering-latency-metric',
     wave: 4,
     title: 'Steering-latency & stale-work-caught metrics',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'insights',
     blurb:
       'The number the launch demo is built around: measure how fast steering reaches a busy agent, and how much stale work the anti-staleness layer actually catches.',
@@ -691,7 +760,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'harness-residency',
     wave: 'later',
     title: 'musterd gives any harness residency (resume the offline)',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'harness',
     blurb:
       'The offline rung: a seat binding holds the harness session id, so the daemon can resurrect an exited session on a directed act — turning a turn-scoped harness into an always-on one.',
@@ -709,7 +778,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'telemetry-l2',
     wave: 5,
     title: 'Telemetry — Layer 2 + SDK',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'observability',
     blurb: 'A full CLI/MCP telemetry SDK, then MAST-aware views over the act-typed log that agent-observability tools cannot see.',
     detail:
@@ -726,7 +795,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'seat-memory',
     wave: 5,
     title: 'Persistent seat memory',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'platform',
     blurb: 'A persistent identity wants persistent memory — the seat carries a continuity note across the session gap, headline-first.',
     detail:
@@ -738,7 +807,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'model-experimentation',
     wave: 5,
     title: 'Model experimentation — frontier cadence + own models',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'observability',
     blurb: 'Treat the model itself as a first-class experimental variable: be early to each frontier model, and own models end-to-end.',
     detail:
@@ -750,7 +819,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'model-diversity',
     wave: 5,
     title: 'Model diversity as a team-composition feature',
-    status: 'shipped',
+    shipped: { legacy: true },
     category: 'observability',
     blurb:
       'Same-model agents agree in correlated ways, so their consensus is weak evidence. Record the model per occupancy and flag same-family review/approval chains — making model diversity a first-class team property.',
@@ -763,7 +832,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'lanes-phase2',
     wave: 5,
     title: 'Coordination lanes — Phase 2 (observed surface + merge-funnel)',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'platform',
     blurb: 'The observed-surface + merge-funnel layer on top of the Phase-1 lane primitive — tighter contention signal, less reliance on declarations.',
     detail:
@@ -775,7 +844,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'insight-dashboard',
     wave: 5,
     title: 'Work items, board & insight layer (web)',
-    status: 'near-term',
+    plan: 'near-term',
     category: 'insights',
     blurb: 'The kanban-style board and team analytics rendered in the web dashboard — a thin surface over the insight engine, never a second store.',
     detail:
@@ -787,7 +856,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'driver-copresence-gap',
     wave: 5,
     title: 'Driver co-presence gap — make steering light up the human',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'human-loop',
     blurb: 'Driver co-presence shipped (ADR 021) but is dormant: it only annotates the agent row ("· driven by nick") and only when MUSTERD_DRIVER is set — which provisioning never writes — so a human steering an agent still reads offline.',
     detail:
@@ -800,7 +869,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'resolve-state-gate',
     wave: 'later',
     title: 'Verified thread close (resolve as a state gate)',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'human-loop',
     blurb:
       'An open question, not a commitment: should closing a thread ever require a separate actor’s signal — so resolve is a verified state transition, not a self-asserted recap?',
@@ -817,7 +886,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'own-harness',
     wave: 'later',
     title: 'Role templates & mixed-harness teams',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'harness',
     blurb: 'A Role becomes a harness-agnostic provisioning template, rendered per-harness — then musterd’s own harness, then mixed-harness teams.',
     detail: 'Provisioning is a starting point, not a security boundary. It stays additive, reversible, and non-obligating.',
@@ -828,7 +897,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'sandboxed-runtime',
     wave: 'later',
     title: 'Sandboxed runtime',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'platform',
     blurb: 'musterd connects agents; it does not run them. A later, optional sandbox could host members with nowhere else to live.',
   },
@@ -836,7 +905,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'python-sdk',
     wave: 'later',
     title: 'Python client SDK',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'platform',
     blurb: 'A fast follow after launch. The protocol is language-neutral; the TypeScript client is the reference, not the only one.',
   },
@@ -846,7 +915,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'team-hardening',
     wave: 'later',
     title: 'Shared/remote-team security hardening',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'platform',
     blurb: 'The security cluster that follows the v0.3 governance work once teams span machines: recipient-scoped message reads, multi-admin delegation, rotating/per-seat keys, a signed audit log, and abuse limits.',
     detail:
@@ -857,7 +926,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'authorization-provenance',
     wave: 'later',
     title: 'Authorization provenance (who approved it)',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'platform',
     blurb: 'For audit: when a decision, escalation, or merge routes to a human for authorization, record which human authorized it — a first-class, attestable link from an approved action back to the approver.',
     detail:
@@ -869,7 +938,7 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'hosted-relay',
     wave: 'later',
     title: 'Hosted rendezvous relay (Topology C)',
-    status: 'reserved',
+    plan: 'reserved',
     category: 'transport',
     blurb: 'A musterd-operated hosted relay members dial out to — the "just works" path for teams that won\'t run a Tailscale/WireGuard overlay.',
     detail:
@@ -882,7 +951,7 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'no-orchestrator',
     title: 'A planner / orchestrator role',
-    status: 'out-of-scope',
+    plan: 'out-of-scope',
     category: 'platform',
     blurb: 'One member does the work; the team does the coordination. musterd never forces decomposition.',
     detail: 'A team of one agent, plus optionally a human, is a first-class — even default — configuration.',
@@ -890,11 +959,17 @@ export const ROADMAP: RoadmapItem[] = [
   {
     id: 'no-runtime',
     title: 'Running your agent',
-    status: 'out-of-scope',
+    plan: 'out-of-scope',
     category: 'platform',
     blurb: 'Protocol over framework. We connect agents; we don’t own their execution loop.',
   },
 ];
+
+/** The read-model: authored declarations with their `status` derived + shipped-xor-plan enforced. */
+export const ROADMAP: RoadmapItem[] = RAW.map(resolveItem);
+
+/** The authored declarations, unresolved — what `scripts/check-roadmap-truth.ts` verifies against reality. */
+export const ROADMAP_RAW: RawItem[] = RAW;
 
 export const WEDGE = {
   heading: 'How priorities are decided',

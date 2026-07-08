@@ -22,6 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        # Full history so roadmap-truth:check can verify shipped items against merged-PR commits
+        # (`git log --grep "(#N)"`); the default shallow depth-1 checkout would hide them.
+        with:
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
