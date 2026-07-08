@@ -5,6 +5,7 @@ import {
   BINDING_DIR,
   BINDING_FILE,
   BindingSchema,
+  type MemberSummary,
   PENDING_DIR,
   RESOLVED_SUFFIX,
 } from '@musterd/protocol';
@@ -143,28 +144,46 @@ async function holdSeatLive(name: string, grant: string): Promise<{ close: () =>
   return session;
 }
 
-/** Poll the roster until `name` reads live (mirrors the guard's own liveness predicate). */
-async function waitLive(name: string): Promise<void> {
+/**
+ * Poll `predicate` until it's true or the wall-clock deadline passes. Deadline-based on purpose (not a
+ * fixed iteration count): these tests run the daemon in-process, so under full-suite parallel load the
+ * server, the client socket, and this poll all share one saturated event loop. A `ws.close()` →
+ * server `close` → `release` (the transition into reclaim grace) then propagates slowly, and a fixed
+ * 200-iteration budget (~5s) could exhaust before the genuinely-eventual state lands — the flake. A
+ * deadline waits the intended wall-clock regardless of how slow each iteration runs.
+ */
+async function pollRoster(
+  ok: (m: MemberSummary | undefined) => boolean,
+  name: string,
+  failure: string,
+  timeoutMs = 15_000,
+): Promise<void> {
   const client = new HttpClient({ server: serverUrl, key: adminToken, seat: 'nick' });
-  for (let i = 0; i < 200; i++) {
+  const deadline = Date.now() + timeoutMs;
+  do {
     const { members } = await client.roster('dawn');
-    const m = members.find((x) => x.name === name);
-    if (m && (m.presence !== 'offline' || (m.activity != null && m.activity !== 'offline'))) return;
+    if (ok(members.find((x) => x.name === name))) return;
     await new Promise((r) => setTimeout(r, 20));
-  }
-  throw new Error(`${name} never became live on the roster`);
+  } while (Date.now() < deadline);
+  throw new Error(failure);
+}
+
+/** Poll the roster until `name` reads live (mirrors the guard's own liveness predicate). */
+function waitLive(name: string): Promise<void> {
+  return pollRoster(
+    (m) => !!m && (m.presence !== 'offline' || (m.activity != null && m.activity !== 'offline')),
+    name,
+    `${name} never became live on the roster`,
+  );
 }
 
 /** Poll until `name` reads offline BUT reclaimable — i.e. held within its ADR 010 grace (ADR 105). */
-async function waitReclaimable(name: string): Promise<void> {
-  const client = new HttpClient({ server: serverUrl, key: adminToken, seat: 'nick' });
-  for (let i = 0; i < 200; i++) {
-    const { members } = await client.roster('dawn');
-    const m = members.find((x) => x.name === name);
-    if (m && m.presence === 'offline' && m.reclaimable === true) return;
-    await new Promise((r) => setTimeout(r, 20));
-  }
-  throw new Error(`${name} never entered the reclaim-grace window`);
+function waitReclaimable(name: string): Promise<void> {
+  return pollRoster(
+    (m) => !!m && m.presence === 'offline' && m.reclaimable === true,
+    name,
+    `${name} never entered the reclaim-grace window`,
+  );
 }
 
 /** Poll for the first pending request (admin view) — the CLI opens it asynchronously over WS. */
@@ -363,7 +382,10 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       message: expect.stringContaining('reclaim grace'),
     });
     expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Ada' }); // untouched
-  });
+    // Generous timeout: this drives a real live hold + a clean disconnect + the async release into
+    // reclaim grace, all against an in-process daemon — under full-suite parallel load those steps run
+    // slow, so the default 5s ceiling can trip before the (deadline-bounded) waits legitimately land.
+  }, 30_000);
 
   it('--force repoints past a reclaim-grace hold (ADR 105)', async () => {
     await declareSeat('Ada');
@@ -374,7 +396,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     const { code } = await run(['Bob', '--team', 'dawn', '--grant', await grant('Bob'), '--force']);
     expect(code).toBe(0);
     expect(readBinding().claim).toEqual({ mode: 'seat', name: 'Bob' });
-  });
+  }, 30_000);
 
   it('lists waiting sessions and requires --for when several are pending', async () => {
     await declareSeat('Ada');
