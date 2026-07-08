@@ -1,7 +1,7 @@
 # Model experimentation — frontier cadence + our own models
 
 > **Design direction, not built.** Captures a standing thread (prior sessions, Nick's priority): musterd
-> should treat *the model itself* as a first-class experimental variable — both by being **early to each
+> should treat _the model itself_ as a first-class experimental variable — both by being **early to each
 > new frontier model** and by **owning models end-to-end**. Extends the flywheel (ADR 051) and the
 > research practice (ADR 056); the substrate is the coordination telemetry (ADR 082) already shipped.
 > Corrections via ADR + update this doc.
@@ -10,7 +10,7 @@
 
 The flywheel's experiment axis (ADR 051) is `model × prompt × agent-config × harness × eval × **team
 topology**`. Model is the first term, and it's the one the whole field re-rolls every few weeks. musterd's
-edge is that it can measure what *actually* changes when the model changes — not on a benchmark, but on
+edge is that it can measure what _actually_ changes when the model changes — not on a benchmark, but on
 **real human+agent coordination** (the rarest data, ADR 056): does a new model shout into the void less,
 close loops more, dup work less? Those are the emitted coordination metrics (`loop_latency`,
 `open_loops`, wasted-work), so a model swap is a clean A/B on the exact numbers we care about.
@@ -24,21 +24,27 @@ a finding.
   a fixed dogfood scenario, diffed against the prior model's baseline (ADR 052 baseline requirement). One
   `docs/research/NNN-*.md` finding per model, per the lab-notebook practice (ADR 056).
 - **What we measure:** the coordination evals (directed-act latency, resolve-rate, dup-rate, wasted-work
-  ratio) + task outcome — model as the only varied term. The point is the *delta between models on
-  coordination*, which nobody else publishes.
+  ratio) + task outcome — model as the only varied term. The point is the _delta between models on
+  coordination_, which nobody else publishes.
 - **Feeds:** the "MAST in the wild" thesis and the dataset ladder (ADR 056) — a per-model coordination
   leaderboard is a natural artifact.
-- **Ingest side:** the research radar (`research-radar-plan.md`) already sweeps new *research*; the model
-  cadence is the sibling for new *models* — a new frontier release is a trigger to run the manifest.
+- **Ingest side:** the research radar (`research-radar-plan.md`) already sweeps new _research_; the model
+  cadence is the sibling for new _models_ — a new frontier release is a trigger to run the manifest.
 
 ## Track B — own the models end-to-end (the tiny-model fixture)
+
+> **Re-evaluated 2026-07-08 — ADR 110.** The stages were split and decided independently: Stage 1 is
+> green-lit as a revive of the existing `musterd-lab` scaffold, pointed at the shipped ADR 101
+> attestation substrate; Stage 2 stays gated until the coordination-traces dataset ships. The model
+> ids named below are historical — per ADR 110 the exact model is a pinned experiment-manifest term
+> (ADR 051), not doctrine here.
 
 Two staged goals, on Apple Silicon, kept in a separate lab repo (`musterd-lab`), never the product repos —
 it's a fixture + a research asset, not a shipped dependency.
 
 - **Stage 1 — run a tiny local model as a dogfood agent.** A small instruct model (Ollama,
   `qwen2.5:3b-instruct` / `llama3.2:3b-instruct`) in a thin harness that reads the `AGENTS.md` primer,
-  claims a seat (honest join), runs a work loop, and streams coordination telemetry. A *weak* agent
+  claims a seat (honest join), runs a work loop, and streams coordination telemetry. A _weak_ agent
   stresses the guardrails (primer comprehension, identity binding, `superseded` revocation halting
   mid-task) in ways a frontier model papers over — the sharpest test that the primer + protocol work for
   non-frontier agents.
@@ -50,11 +56,11 @@ it's a fixture + a research asset, not a shipped dependency.
 
 ## How the two tracks connect
 
-Track A tells us *how the best available models coordinate*; Track B gives us *models we fully control* to
+Track A tells us _how the best available models coordinate_; Track B gives us _models we fully control_ to
 probe the floor (weak agents) and eventually to **build the judge** that scores everyone. Both write into
 the same lab notebook and the same dataset ladder, and both are measured on the coordination telemetry
 that already ships by default (ADR 082). Neither is a near-term build item — they're the research spine
-the roadmap's *Later* observability items (`eval-experiment-engine`, `coordination-dataset`,
+the roadmap's _Later_ observability items (`eval-experiment-engine`, `coordination-dataset`,
 `research-radar`) hang from.
 
 ## Related
