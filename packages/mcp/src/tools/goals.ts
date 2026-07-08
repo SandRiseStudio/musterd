@@ -14,7 +14,9 @@ import { textResult } from './format.js';
 function fmtGoal(g: Goal): string {
   const wave = g.wave !== null ? ` wave=${g.wave}` : '';
   const deps = g.depends_on.length ? ` deps=[${g.depends_on.join(', ')}]` : '';
-  return `${g.id} [${g.status}] "${g.title}"${wave}${deps} — declared by ${g.declared_by}`;
+  // The plan epoch (ADR 109) — how many times this Goal has been steered/deferred; shown only when > 0.
+  const epoch = g.epoch > 0 ? ` epoch=${g.epoch}` : '';
+  return `${g.id} [${g.status}] "${g.title}"${wave}${deps}${epoch} — declared by ${g.declared_by}`;
 }
 
 export function registerGoals(server: McpServer, client: MusterdClient): void {

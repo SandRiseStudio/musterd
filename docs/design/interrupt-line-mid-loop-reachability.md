@@ -240,6 +240,7 @@ One design arc, four increments — the first is small, self-contained, and demo
 2. **`steer` act + supersede semantics, plus the `challenge` act and plan-mutation verbs (§4.3)** —
    first-class steering, always interrupt-class, supersedes prior direction via ADR 017.
 3. **Goal epochs + dependency-aware invalidation** — riding the Goal spine (048/084) and lanes Phase-1.
+   _Frozen as [ADR 109](../decisions/109-stale-plan-detection.md); `defer` becomes an actuator here._
 4. **Steering-latency metric** in the report engine (050) — the number the launch demo is built around.
 
 ---

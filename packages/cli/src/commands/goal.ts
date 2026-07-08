@@ -25,7 +25,9 @@ function renderGoal(g: Goal): string {
         : g.status;
   const wave = g.wave !== null ? theme.meta(` wave:${g.wave}`) : '';
   const deps = g.depends_on.length ? theme.meta(` deps:${g.depends_on.length}`) : '';
-  return `${theme.meta(g.id)} ${status} "${g.title}"${wave}${deps} — declared by ${g.declared_by}`;
+  // The plan epoch (ADR 109) — shown only once direction has changed, so a steady Goal stays quiet.
+  const epoch = g.epoch > 0 ? theme.warn(` epoch:${g.epoch}`) : '';
+  return `${theme.meta(g.id)} ${status} "${g.title}"${wave}${deps}${epoch} — declared by ${g.declared_by}`;
 }
 
 export async function goalCommand(parsed: Parsed): Promise<number> {

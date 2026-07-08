@@ -18,9 +18,11 @@ const DESCRIPTION =
   'status_update to report progress, request_help when blocked, handoff to pass work, ' +
   'accept/decline to answer a request_help/handoff/challenge (auto-targets the latest open one — set reply_to to override), ' +
   'wait to signal you are paused, resolve to close a thread when the work is done (set thread to the thread/root id). ' +
-  'Steering (ADR 103): steer to change direction (always interrupts; the newest steer supersedes prior direction), ' +
+  'Steering (ADR 103): steer to change direction (always interrupts; the newest steer supersedes prior direction — ' +
+  "add meta.goal_id to scope it to a Goal, which bumps that Goal's plan epoch), " +
   'challenge to make a teammate justify a task/assumption or reconsider (answer it with an accept carrying evidence), ' +
-  'defer to reorder/defer a Goal on the plan (set meta.goal_id, optional meta.wave — a number reorders, "later" defers).';
+  'defer to reorder/defer a Goal on the plan (set meta.goal_id, optional meta.wave — a number reorders, "later" defers). ' +
+  'defer/steer on a Goal actually re-sequence it and flag lanes left building against the older plan (ADR 109).';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };

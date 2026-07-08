@@ -37,6 +37,16 @@ export const GoalSchema = z.object({
   declared_by: z.string(),
   declared_at: z.number().int(),
   status: GoalStatusSchema,
+  /**
+   * The Goal's **plan epoch** (ADR 109, ADR 088 increment 3) — a monotonic count of the direction-
+   * changing acts that have landed on this Goal: every `defer` naming it (a re-sequence) and every
+   * `steer` that names it via `meta.goal_id`. Derived from the durable act log, never stored (the
+   * ADR 048 maxim) — the mirror of how `status` is a projection over lanes. `0` means nobody has
+   * steered or deferred the Goal since it was declared. A lane opened when the Goal was on epoch N,
+   * read back while the Goal is on epoch M > N, is building against a superseded plan — the staleness
+   * §5 makes detectable when the interrupt line missed.
+   */
+  epoch: z.number().int().nonnegative(),
 });
 export type Goal = z.infer<typeof GoalSchema>;
 
