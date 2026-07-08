@@ -44,7 +44,7 @@ Do not start a package before the one above it passes its acceptance tests (`06-
 
 ## Reading order for the implementing agent
 
-`00 → 01 → 02 → 03 → 04 → 05 → 06 → 07`, then `AGENTS.md`, then `SPEC.md`. Read all of it before writing code; the docs are designed so that an agent without deep judgment can execute without guessing. When you must guess, stop and write an ADR instead.
+`00 → 01 → 02 → 03 → 04 → 05 → 06 → 07`, then `AGENTS.md`, then `SPEC.md`. Read all of it before writing code; the docs are designed so that an agent without deep judgment can execute without guessing. When you must guess, stop and write an ADR instead. `08-web.md` is the browser-surface chapter — read it before touching `@musterd/web` (the `/live` office/stream, the board, and the act→render vocabulary); it is not on the core build path.
 
 ## The living-doc / deviation protocol (read this twice)
 
