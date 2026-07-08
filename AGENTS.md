@@ -100,7 +100,7 @@ Sandbox runtime, schedule **enforcement** (availability is stored, not enforced)
 
 The three automated scenarios in `06-testing.md` pass: (A) two humans on one team, (B) agent + human request_help→accept loop, (C) the flagship 3-pane scenario across CLI + two MCP surfaces. Scenario C is both the final acceptance test and the script for the recorded README demo.
 
-## Git workflow (one enforced way — see [ADR 104](docs/decisions/104-unified-git-workflow.md))
+## Git workflow (one enforced way — see [ADR 106](docs/decisions/106-unified-git-workflow.md))
 
 There is exactly one way to land a change. GitHub enforces it (squash-only, `main` protected, required
 checks), so don't improvise a merge method or a catch-up strategy.

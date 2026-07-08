@@ -1,4 +1,4 @@
-# CI — the authoritative merge gate (ADR 104). Runs the same gates agents run locally, on every PR.
+# CI — the authoritative merge gate (ADR 106). Runs the same gates agents run locally, on every PR.
 # Local runs are an optional fast smoke-test; THIS is the source of truth that branch protection
 # requires green before a squash-merge. Keep the job name `gates` stable — it's the required check.
 name: CI

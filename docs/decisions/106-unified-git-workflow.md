@@ -1,4 +1,4 @@
-# 104 — One git workflow for every musterd agent (enforced, not conventional)
+# 106 — One git workflow for every musterd agent (enforced, not conventional)
 
 - Status: accepted — settings applied 2026-07-07; CI + protection land with this ADR
 - Date: 2026-07-07

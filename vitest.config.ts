@@ -7,7 +7,7 @@ export default defineConfig({
     pool: 'forks',
     // NO_COLOR pins picocolors OFF in tests so render assertions (plain `▌`/lengths) are deterministic
     // regardless of the runner — CI sets `CI=1`, which otherwise makes picocolors emit ANSI and breaks
-    // the row/clip render tests. Production color is unaffected (test-env only). See ADR 104.
+    // the row/clip render tests. Production color is unaffected (test-env only). See ADR 106.
     env: { MUSTERD_SILENT: '1', NO_COLOR: '1' },
     coverage: {
       provider: 'v8',
