@@ -51,6 +51,25 @@ function renderWarnings(warnings: LaneWarning[]): void {
   }
 }
 
+/**
+ * On lane closure, remind the agent to clear the lane's *local* branch (ADR 106). GitHub auto-deletes
+ * the remote branch on merge; the local one lingers in the worktree, and the naive cleanup fails —
+ * you can't `git checkout main` (a sibling worktree owns it) and `git branch -d` refuses a
+ * squash-merged branch. The worktree-safe move detaches to fresh `origin/main` (the next lane's start
+ * state) and force-deletes. No-op when the lane carries no branch.
+ */
+function renderBranchCleanup(branch: string | null): void {
+  if (!branch) return;
+  process.stdout.write(
+    theme.meta('landed? clear the local branch (the remote auto-deleted on merge):') + '\n',
+  );
+  process.stdout.write(
+    theme.meta(
+      `  git fetch origin main --prune && git switch --detach origin/main && git branch -D ${branch}`,
+    ) + '\n',
+  );
+}
+
 export async function laneCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
   const { team, identity, http } = resolve(parsed.flags);
@@ -100,6 +119,7 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
       `${theme.ok('✓')} lane ${sub === 'claim' ? 'claimed' : 'done'}\n${renderLane(res.lane)}\n`,
     );
     renderWarnings(res.warnings);
+    if (sub === 'resolve') renderBranchCleanup(res.lane.branch);
     return 0;
   }
 

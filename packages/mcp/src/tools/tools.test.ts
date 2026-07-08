@@ -1,13 +1,20 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join as pathJoin } from 'node:path';
-import { makeEnvelope, nextRoleHandle, type Envelope, type MemberSummary } from '@musterd/protocol';
+import {
+  makeEnvelope,
+  nextRoleHandle,
+  type Envelope,
+  type Lane,
+  type MemberSummary,
+} from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
 import { formatMessage, notJoinedMessage, textResult } from './format.js';
 import { registerInboxCheck } from './inboxCheck.js';
 import { registerJoin } from './join.js';
+import { registerLanes } from './lanes.js';
 import { registerLeave } from './leave.js';
 import { registerMembers } from './members.js';
 import { memoryLine, registerMemory } from './memory.js';
@@ -709,5 +716,48 @@ describe('team_leave handler', () => {
     const handler = capture(registerLeave, { joined: true, leave }, config);
     expect(text(await handler({}))).toContain('Left dawn');
     expect(leave).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
+  function lane(over: Partial<Lane> = {}): Lane {
+    return {
+      id: 'lane1',
+      team: 'dawn',
+      project: 'default',
+      title: 'the work',
+      detail: null,
+      owner_seat: 'Ada',
+      role: null,
+      surface_globs: [],
+      depends_on: [],
+      branch: null,
+      goal_id: null,
+      state: 'done',
+      created_by: 'Ada',
+      created_at: 0,
+      claimed_at: null,
+      resolved_at: null,
+      updated_at: 0,
+      ...over,
+    };
+  }
+
+  it('prints the local-branch cleanup command when the resolved lane carries a branch', async () => {
+    const updateLane = vi.fn(async () => ({ lane: lane({ branch: 'feat/x' }), warnings: [] }));
+    const handlers = captureAll(registerLanes, { updateLane } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).toContain('lane done');
+    expect(out).toContain('git branch -D feat/x');
+    expect(out).toContain('git switch --detach origin/main');
+    expect(updateLane).toHaveBeenCalledWith('lane1', { state: 'done' });
+  });
+
+  it('omits the hint for a branchless lane', async () => {
+    const updateLane = vi.fn(async () => ({ lane: lane({ branch: null }), warnings: [] }));
+    const handlers = captureAll(registerLanes, { updateLane } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).toContain('lane done');
+    expect(out).not.toContain('git branch -D');
   });
 });
