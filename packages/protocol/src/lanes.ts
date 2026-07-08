@@ -49,7 +49,7 @@ export type Lane = z.infer<typeof LaneSchema>;
 
 /**
  * The lane contention + staleness signals. Advisory always — a warning never fails a verb.
- * Phase-1 (ADR 083): `unmet_dependency`, `surface_overlap`. Increment 3 (ADR 109 / ADR 088 §5) adds the
+ * Phase-1 (ADR 083): `unmet_dependency`, `surface_overlap`. Increment 3 (ADR 111 / ADR 088 §5) adds the
  * two staleness signals the interrupt line can't catch: `stale_plan` (the lane's own Goal moved epoch
  * since it was claimed) and `stale_dependency` (a lane it builds on had its Goal move). Both are
  * owner-directed, never broadcast — directory-based invalidation over the goal_id join + depends_on edge.

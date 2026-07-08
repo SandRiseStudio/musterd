@@ -22,7 +22,7 @@ const DESCRIPTION =
   "add meta.goal_id to scope it to a Goal, which bumps that Goal's plan epoch), " +
   'challenge to make a teammate justify a task/assumption or reconsider (answer it with an accept carrying evidence), ' +
   'defer to reorder/defer a Goal on the plan (set meta.goal_id, optional meta.wave — a number reorders, "later" defers). ' +
-  'defer/steer on a Goal actually re-sequence it and flag lanes left building against the older plan (ADR 109).';
+  'defer/steer on a Goal actually re-sequence it and flag lanes left building against the older plan (ADR 111).';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };

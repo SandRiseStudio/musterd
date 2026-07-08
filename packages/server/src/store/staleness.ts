@@ -4,7 +4,7 @@ import { goalEpochBumps } from './goals.js';
 import { listLanes } from './lanes.js';
 
 /**
- * Stale-plan detection (ADR 109 — ADR 088 increment 3, design §5): catch work built against a
+ * Stale-plan detection (ADR 111 — ADR 088 increment 3, design §5): catch work built against a
  * superseded plan **when the interrupt line missed** (mid-generation, a long command, an approval-parked
  * agent). The interrupt line shrinks the deaf window; it never closes it. This is the semantic backstop.
  *
@@ -38,7 +38,7 @@ function epochAt(bumps: number[] | undefined, ts: number): number {
 }
 
 /**
- * The current stale-lane warnings for the team (the two ADR 109 kinds). `onlyGoal` scopes the scan to a
+ * The current stale-lane warnings for the team (the two ADR 111 kinds). `onlyGoal` scopes the scan to a
  * single Goal — the just-deferred/steered one — for the directed push a `defer`/`steer` fires; omitted,
  * it returns the whole current stale set (the board read, and `team_next` enrichment).
  */

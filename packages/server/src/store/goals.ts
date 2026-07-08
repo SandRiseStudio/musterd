@@ -41,7 +41,7 @@ interface GoalAccumulator {
 
 /**
  * Ascending timestamps of every **plan-epoch bump** per Goal id — one per `defer`, and per `steer`
- * that names a Goal via `meta.goal_id`. The count is the Goal's epoch; the staleness layer (ADR 109
+ * that names a Goal via `meta.goal_id`. The count is the Goal's epoch; the staleness layer (ADR 111
  * §5) counts how many landed after a lane was claimed to tell a fresh lane from one building against a
  * superseded plan. Same derivation rule as {@link listGoals}'s epoch, so the two never disagree.
  */
@@ -87,7 +87,7 @@ function deferWave(meta: unknown): Wave {
  * Every declared Goal for the team, status + **plan epoch** attached (both derived, never stored).
  *
  * The declared skeleton is the latest `message`-to-`@team` carrying `meta.goal` per id (ADR 048/084).
- * On top of it, increment 3 (ADR 109) folds the direction-changing acts read out of the same log:
+ * On top of it, increment 3 (ADR 111) folds the direction-changing acts read out of the same log:
  *   - a **`defer`** naming the Goal asserts a new `wave` (the plan mutation ADR 103 stubbed) — latest
  *     wave-setting signal by `ts` wins, so a `defer` re-sequences `nextGoal` exactly as a re-declaration
  *     would, with no stored column and no write-path mutation;

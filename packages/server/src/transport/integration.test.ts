@@ -1587,7 +1587,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(audit[0]!.detail).toContain('steer');
   });
 
-  it('defer act (ADR 109, inc3): re-sequences the Goal, bumps its epoch, and wakes the stale lane owner', async () => {
+  it('defer act (ADR 111, inc3): re-sequences the Goal, bumps its epoch, and wakes the stale lane owner', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
     const stan = await post('/teams/dawn/members', { name: 'stan', kind: 'human' }, nickTok);
