@@ -1,0 +1,92 @@
+# Steward seat (ADR 112) — a standing agent teammate that keeps the declared record honest.
+#
+# v1 loop: DISCOVER record drift the static checks can't (scripts/steward/scan.ts) → PROPOSE it as a
+# single, self-updating tracking issue assigned to a human → the issue is the shepherding surface (it
+# doesn't rot: it persists, updates each run, and closes itself when the drift clears). No secret needed
+# — the default GITHUB_TOKEN opens the issue. The draft-PR / auto-merge / agent-drafting modes the ADR
+# describes are the next increment (they need a PAT + the session key — see scripts/steward/README.md);
+# every task here is `propose`, because the mechanical drift an `auto-merge` task would fix is already
+# prevented from reaching main by the static checks.
+name: steward
+
+on:
+  schedule:
+    - cron: '0 8 * * 1' # Mondays 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'PR-merge window for the unmarked-feature finder (git --since expr)'
+        required: false
+        default: '10 days ago'
+
+concurrency:
+  group: steward
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  steward:
+    name: steward
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # Full history so the unmarked-feature finder can read merged-PR commits.
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Scan for record drift
+        id: scan
+        env:
+          SINCE: ${{ github.event.inputs.since || '10 days ago' }}
+        run: |
+          pnpm steward:scan --since "$SINCE" | tee -a "$GITHUB_STEP_SUMMARY"
+          pnpm steward:scan --since "$SINCE" --json > steward-findings.json
+          pnpm steward:scan --since "$SINCE" --md > steward-issue.md
+          count=$(node -e "process.stdout.write(String(require('./steward-findings.json').findings.length))")
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Propose — upsert the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COUNT: ${{ steps.scan.outputs.count }}
+          TITLE: 'steward: record drift needs attention'
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            --jq "[.[] | select(.title == \"$TITLE\")][0].number // empty")
+          if [ "$COUNT" -gt 0 ]; then
+            if [ -n "$existing" ]; then
+              gh issue edit "$existing" --body-file steward-issue.md
+              echo "updated issue #$existing ($COUNT finding(s))"
+            else
+              gh issue create --title "$TITLE" --body-file steward-issue.md \
+                --assignee "$OWNER" --label steward 2>/dev/null \
+                || gh issue create --title "$TITLE" --body-file steward-issue.md --assignee "$OWNER"
+              echo "opened tracking issue ($COUNT finding(s))"
+            fi
+          else
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --body "✓ record drift cleared — the roadmap matches reality. Closing."
+              gh issue close "$existing"
+              echo "drift cleared — closed issue #$existing"
+            else
+              echo "no drift, no open issue — nothing to do"
+            fi
+          fi
