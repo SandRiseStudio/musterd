@@ -1,12 +1,17 @@
 # Steward seat (ADR 112) — a standing agent teammate that keeps the declared record honest.
 #
-# v1 loop: DISCOVER record drift the static checks can't (scripts/steward/scan.ts) → PROPOSE it as a
-# single, self-updating tracking issue assigned to a human → the issue is the shepherding surface (it
-# doesn't rot: it persists, updates each run, and closes itself when the drift clears). No secret needed
-# — the default GITHUB_TOKEN opens the issue. The draft-PR / auto-merge / agent-drafting modes the ADR
-# describes are the next increment (they need a PAT + the session key — see scripts/steward/README.md);
-# every task here is `propose`, because the mechanical drift an `auto-merge` task would fix is already
-# prevented from reaching main by the static checks.
+# Two jobs:
+#   scan  — always runs. Deterministic drift discovery (scripts/steward/scan.ts). When the agent is NOT
+#           enabled (no secrets), it upserts a self-updating tracking issue — the secretless baseline.
+#   agent — runs only on drift AND when both secrets are configured. A CI-launched Claude session drafts
+#           the fixes per scripts/steward/CHARTER.md and opens DRAFT PRs via the PAT, through the same
+#           protected-main gates. Never merges; roadmap-truth:check is the seatbelt. Watch the first run.
+#
+# Secrets (repo → Settings → Secrets and variables → Actions), needed only for the agent:
+#   ANTHROPIC_API_KEY — the model key for the CI session.
+#   STEWARD_TOKEN     — a fine-grained PAT / App token (contents + pull-requests write). A PAT is required
+#                       (not the default GITHUB_TOKEN) so the steward's PRs trigger the required `gates`
+#                       check — GITHUB_TOKEN-authored PRs don't, and auto-merge would stall.
 name: steward
 
 on:
@@ -28,14 +33,16 @@ permissions:
   issues: write
 
 jobs:
-  steward:
-    name: steward
+  scan:
+    name: scan
     runs-on: ubuntu-latest
+    outputs:
+      count: ${{ steps.scan.outputs.count }}
+      enabled: ${{ steps.flags.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
-        # Full history so the unmarked-feature finder can read merged-PR commits.
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # full history so the unmarked-feature finder can read merged-PR commits
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -62,7 +69,22 @@ jobs:
           count=$(node -e "process.stdout.write(String(require('./steward-findings.json').findings.length))")
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
-      - name: Propose — upsert the tracking issue
+      - name: Is the agent enabled? (both secrets present)
+        id: flags
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_PAT: ${{ secrets.STEWARD_TOKEN != '' }}
+        run: |
+          if [ "$HAS_KEY" = "true" ] && [ "$HAS_PAT" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Baseline (no agent): keep one self-updating tracking issue assigned to the owner. Uses the default
+      # GITHUB_TOKEN — no secret needed. Skipped when the agent will open PRs instead.
+      - name: Upsert tracking issue
+        if: steps.flags.outputs.enabled != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           COUNT: ${{ steps.scan.outputs.count }}
@@ -90,3 +112,61 @@ jobs:
               echo "no drift, no open issue — nothing to do"
             fi
           fi
+
+  # The agent path (ADR 112 §2 `propose` via draft PR). Runs only on drift AND when both secrets exist.
+  # DRAFT PRs only — it never merges, and main's branch protection (gates + Bugbot, PR-only) means it
+  # can't, PAT or not. Recommend triggering the FIRST run by hand (workflow_dispatch) and watching it.
+  agent:
+    name: agent
+    needs: scan
+    if: needs.scan.outputs.count > 0 && needs.scan.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.STEWARD_TOKEN }} # so pushed branches + PRs are PAT-authored → trigger `gates`
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Recompute findings for the session
+        env:
+          SINCE: ${{ github.event.inputs.since || '10 days ago' }}
+        run: pnpm steward:scan --since "$SINCE" --json > steward-findings.json
+
+      - name: Steward drafts fixes as draft PRs
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are the steward seat. Follow the instructions in scripts/steward/CHARTER.md EXACTLY.
+            Your work list is ./steward-findings.json (JSON: { since, findings: [...] }).
+            Set your git identity first: `git config user.name steward` and
+            `git config user.email steward@musterd`.
+            Open DRAFT PRs only — never run `gh pr merge`, never enable auto-merge, never push to main.
+            Before opening each PR, run `pnpm roadmap-truth:check`; it must stay green (if it can't, open
+            the draft anyway with a clear "needs human" note — never disable the check).
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 40
+            --allowedTools Bash Edit Write Read Glob Grep
+        env:
+          GH_TOKEN: ${{ secrets.STEWARD_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.STEWARD_TOKEN }}
