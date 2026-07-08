@@ -629,8 +629,9 @@ export const ROADMAP: RoadmapItem[] = [
   // ── Wave 4 — the steerable team: mid-loop reachability (2026-07-03 brainstorm) ──
   // The reachability ladder (046 heads-down / 053 blocked / 054 idle) has one rung left: a loop
   // busy on its own work. ADR 088 + the agent-ontology + interrupt-line design docs freeze the arc.
-  // Increment 1 (the interrupt line) SHIPPED 2026-07-05 (PR #109); steer/challenge acts and plan
-  // epochs are the remaining increments, next in build order.
+  // Increments 1–3 SHIPPED: the interrupt line (ADR 088, 2026-07-05), steer/challenge/defer acts
+  // (ADR 103, 2026-07-06), and plan epochs + stale-plan detection (ADR 111, 2026-07-08). The last
+  // rung is increment 4 — the steering-latency & stale-work-caught metrics — next in build order.
   {
     id: 'interrupt-line',
     title: 'The interrupt line — reach a busy agent mid-loop',
@@ -664,14 +665,27 @@ export const ROADMAP: RoadmapItem[] = [
     id: 'stale-plan-detection',
     wave: 4,
     title: 'Plan epochs & dependency-targeted invalidation',
+    status: 'shipped',
+    category: 'insights',
+    blurb:
+      'Catch stale work even when an interrupt misses: a goal carries a plan epoch, `defer` re-sequences it and bumps it, and only the lanes actually building against the moved plan get a targeted warning.',
+    detail:
+      'Increment 3 of the arc (design §5) — SHIPPED 2026-07-08 (ADR 111), the semantic backstop for the deaf window the interrupt line cannot close (mid-generation, long single commands, approval-parked). It also gives `defer` the teeth ADR 103 withheld ("a signal, not yet an actuator"). Everything is **derived, nothing stored** — faithful to the ADR 048 maxim and the mirror of steer-supersession\'s read-side collapse: no migration, no wire-version bump. **Plan epochs** = bounded staleness from async distributed training (workers on stale weights ≙ agents on superseded plans): a Goal\'s epoch is the count of direction-changing acts naming it (every `defer`, plus a `steer` carrying `meta.goal_id`), projected out of the log beside the Goal\'s derived status. **`defer` actuates** by folding into that derivation — the newest wave assertion (declaration or `defer`) wins, so `nextGoal` actually re-sequences. **Targeted invalidation** = directory-based cache coherence (not broadcast/snooping): two owner-directed, warn-never-block lane signals — `stale_plan` (a lane whose own Goal moved epoch since it was claimed) and `stale_dependency` (a lane building on another whose Goal moved) — routed by the goal_id join + depends_on edges to exactly the affected owners, pushed on the defer/steer send path and annotated live on the board. The P3 dependency-revert (53% of that session\'s waste) is exactly the miss this closes. Watcher-not-gatekeeper.',
+    refs: [adr(111, 'ADR 111'), adr(103, 'ADR 103'), adr(88, 'ADR 088'), adr(84, 'ADR 084'), adr(83, 'ADR 083')],
+    dependsOn: ['interrupt-line', 'orientation-spine', 'coordination-lanes'],
+  },
+  {
+    id: 'steering-latency-metric',
+    wave: 4,
+    title: 'Steering-latency & stale-work-caught metrics',
     status: 'reserved',
     category: 'insights',
     blurb:
-      'Catch stale work even when an interrupt misses: stamp a monotonic epoch on a goal, warn agents building against a superseded one, and invalidate only the lanes that actually depend on what changed.',
+      'The number the launch demo is built around: measure how fast steering reaches a busy agent, and how much stale work the anti-staleness layer actually catches.',
     detail:
-      'Increment 3 of the arc (design §5), the semantic backstop for the deaf window the interrupt line cannot close (mid-generation, long single commands, approval-parked). **Plan epochs** = bounded staleness from async distributed training (workers on stale weights ≙ agents on superseded plans): a steer bumps the goal epoch, commands carry the epoch they build under, the daemon warns beyond a tolerance. **Targeted invalidation** = directory-based cache coherence (not broadcast/snooping): a lane that declares a dependency on another is flagged specifically when that dependency is steered or breaks — the P3 dependency-revert (53% of that session\'s waste) is exactly the miss this closes. Warn-never-block, watcher-not-gatekeeper.',
-    refs: [adr(88, 'ADR 088'), adr(84, 'ADR 084'), adr(83, 'ADR 083')],
-    dependsOn: ['interrupt-line', 'orientation-spine', 'coordination-lanes'],
+      'Increment 4 — the last rung of the interrupt-line arc (design §8 item 4), the measurement layer that turns the whole arc from a claim into a before/after against the P3 37%-waste baseline. Three numbers derived purely from the message + lane log (no new capture, on the report engine): **steering latency** (a `steer` sent → the recipient\'s next act acknowledging it), **supersession-correctness** (acts taken against a *superseded* steer — should be zero, ADR 103), and **stale-work-caught** (the `stale_plan`/`stale_dependency` wakes that precede a lane owner changing course, ADR 111). Surfaced via `musterd report` + `team_report`, and doubling as the launch-demo A/B instrument (hook-on vs hook-off, ADR 056 benchmark scenario).',
+    refs: [adr(88, 'ADR 088'), adr(103, 'ADR 103'), adr(111, 'ADR 111'), adr(50, 'ADR 050'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
+    dependsOn: ['stale-plan-detection', 'insight-engine'],
   },
   {
     id: 'harness-residency',

@@ -5,7 +5,9 @@ demo failure Nick witnessed; **amended 2026-07-03 after the zoom-out round** (re
 `challenge` act, the injection-surface security requirement, bounded-staleness/coherence framing — see
 the arc: [brainstorm-arc-reachability-to-ontology.md](./brainstorm-arc-reachability-to-ontology.md),
 and the position doc: [agent-ontology.md](./agent-ontology.md)). The failure diagnosis is empirical; the
-design is decided-in-principle, not yet built. This is the next rung on the reachability ladder
+design is decided-in-principle and **increments 1–3 are shipped** (ADR 088 the interrupt line, ADR 103
+steer/challenge/defer, ADR 111 plan epochs + stale-plan detection — see §8); increment 4 (the
+steering-latency metric) is the last rung. This is the next rung on the reachability ladder
 ([ADR 046](../decisions/046-agent-side-reachability.md)
 / [053](../decisions/053-inbox-reaches-blocked-agent.md) / [054](../decisions/054-wake-on-message.md)) —
 the one none of them reach.

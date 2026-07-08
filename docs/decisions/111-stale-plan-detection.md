@@ -1,6 +1,6 @@
 # 111 — Stale-plan detection: goal epochs + dependency-targeted invalidation (ADR 088 increment 3)
 
-- Status: proposed — freezes increment 3 of the interrupt-line arc; implemented on `feat/stale-plan-detection`
+- Status: accepted — freezes increment 3 of the interrupt-line arc; shipped 2026-07-08 (PR #169, renumbered from 109 by #171)
 - Date: 2026-07-08
 
 ## Context
