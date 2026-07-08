@@ -71,4 +71,42 @@ describe('provisionWorkspace', () => {
     expect(second.dir).toBe(first.dir);
     expect(second.created).toBe(false);
   });
+
+  it('sets the seat git identity on the worktree, worktree-scoped (ADR 109)', () => {
+    const repo = tmp('mwd-git3-');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 'human@example.com'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'Human'], { cwd: repo });
+    execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
+
+    const ws = provisionWorkspace('June', { cwd: repo, team: 'revive' });
+    made.push(ws.dir);
+    const cfg = (key: string, cwd: string) =>
+      execFileSync('git', ['config', key], { cwd, encoding: 'utf8' }).trim();
+    expect(cfg('user.name', ws.dir)).toBe('June (musterd seat)');
+    expect(cfg('user.email', ws.dir)).toBe('June@revive.musterd');
+    // Worktree-scoped, not repo-local: the main tree keeps the human identity.
+    expect(cfg('user.name', repo)).toBe('Human');
+    expect(cfg('user.email', repo)).toBe('human@example.com');
+  });
+
+  it('repairs the seat git identity on reuse (pre-109 worktrees)', () => {
+    const repo = tmp('mwd-git4-');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
+    execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
+
+    const first = provisionWorkspace('June', { cwd: repo });
+    made.push(first.dir);
+    execFileSync('git', ['config', '--worktree', '--unset', 'user.name'], { cwd: first.dir });
+    execFileSync('git', ['config', '--worktree', '--unset', 'user.email'], { cwd: first.dir });
+    const second = provisionWorkspace('June', { cwd: repo, team: 'revive' });
+    expect(second.created).toBe(false);
+    const name = execFileSync('git', ['config', 'user.name'], {
+      cwd: second.dir,
+      encoding: 'utf8',
+    }).trim();
+    expect(name).toBe('June (musterd seat)');
+  });
 });

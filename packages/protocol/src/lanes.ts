@@ -86,6 +86,18 @@ export const UpdateLaneSchema = z.object({
   goal_id: z.string().nullable().optional(),
   /** Transfer ownership to this seat (lane_handoff / lane_claim sets it to the caller). */
   owner_seat: z.string().optional(),
+  /**
+   * Merge attestation (ADR 109), meaningful on a terminal move of a branch-carrying lane: the landed
+   * PR number, squash SHA, and the human whose authority the merge ran under (grant issuer or
+   * `request.decide` actor). Attested, never verified — recorded to the audit log as `git.pr_merged`.
+   */
+  merged: z
+    .object({
+      pr: z.number().int().optional(),
+      sha: z.string().optional(),
+      authorized_by: z.string().optional(),
+    })
+    .optional(),
 });
 export type UpdateLane = z.infer<typeof UpdateLaneSchema>;
 

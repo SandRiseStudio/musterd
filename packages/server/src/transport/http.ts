@@ -1319,6 +1319,24 @@ export async function handleHttp(
           deliverLaneTeamAct(ctx, team, member, `[lane] ${verb} "${lane.title}"`, {
             lane_resolve: { lane: lane.id, title: lane.title, state: lane.state },
           });
+          // ADR 109: a branch-carrying lane landed — record the seat→SHA→authorizer join. The detail
+          // is *attested* (ADR 101 hygiene: only the three known keys are copied off the client body,
+          // and only when the client sent them); the actor is server-derived from the authed seat.
+          if (lane.branch && lane.state === 'done') {
+            const m = body.merged;
+            appendAudit(ctx.db, team.id, {
+              actor: member.name,
+              action: 'git.pr_merged',
+              target: lane.branch,
+              result: 'allow',
+              detail: {
+                lane: lane.id,
+                ...(m?.pr !== undefined ? { pr: m.pr } : {}),
+                ...(m?.sha !== undefined ? { sha: m.sha } : {}),
+                ...(m?.authorized_by !== undefined ? { authorized_by: m.authorized_by } : {}),
+              },
+            });
+          }
         }
         return sendJson(res, 200, { lane, warnings });
       }

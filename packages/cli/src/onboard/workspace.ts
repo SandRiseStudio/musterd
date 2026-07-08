@@ -41,6 +41,25 @@ export interface WorkspaceOpts {
   path?: string;
   /** Base directory to resolve from; defaults to process.cwd(). */
   cwd?: string;
+  /** Team slug — used for the seat's synthetic git-identity email domain (ADR 109). */
+  team?: string;
+}
+
+/**
+ * Seat-attributed commits (ADR 109): give the worktree its own git identity so `git log` answers
+ * "which seat wrote this" natively. `--worktree` (not `--local`) is load-bearing — repo-local config
+ * is shared across all worktrees, so without `extensions.worktreeConfig` the last-provisioned seat
+ * would silently rename every other seat's commits. Best-effort: identity is attribution, never a
+ * gate on provisioning.
+ */
+function setSeatGitIdentity(name: string, dir: string, top: string, team?: string): void {
+  try {
+    git(['config', 'extensions.worktreeConfig', 'true'], top);
+    git(['config', '--worktree', 'user.name', `${name} (musterd seat)`], dir);
+    git(['config', '--worktree', 'user.email', `${name}@${team ?? 'seats'}.musterd`], dir);
+  } catch {
+    /* attribution only — never fail the workspace for it */
+  }
 }
 
 /**
@@ -64,7 +83,11 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
   if (top) {
     const dir = join(dirname(top), `${basename(top)}-${name}`);
     const branch = `agent/${name}`;
-    if (existsSync(dir)) return { dir, kind: 'worktree', branch, created: false };
+    if (existsSync(dir)) {
+      // Reuse path repairs identity too, so pre-109 worktrees pick it up on re-run.
+      setSeatGitIdentity(name, dir, top, opts.team);
+      return { dir, kind: 'worktree', branch, created: false };
+    }
     try {
       // New branch off HEAD so the agent has its own line to commit on.
       git(['worktree', 'add', '-b', branch, dir, 'HEAD'], top);
@@ -72,6 +95,7 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
       // Branch already exists (e.g. a prior run): attach a worktree to it.
       git(['worktree', 'add', dir, branch], top);
     }
+    setSeatGitIdentity(name, dir, top, opts.team);
     return { dir, kind: 'worktree', branch, created: true };
   }
 
