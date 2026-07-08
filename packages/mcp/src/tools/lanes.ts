@@ -190,12 +190,30 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     {
       description:
         'Mark a lane done — closure as a state transition, not a courtesy message. Clears its ' +
-        'warnings and releases its surface.',
-      inputSchema: { id: z.string().describe('lane id') },
+        'warnings and releases its surface. On a branch-carrying lane that landed, attest the merge ' +
+        '(ADR 109): pass pr/sha/authorized_by so the audit log joins your seat to the landed SHA and ' +
+        'the authorizing human (grant issuer or request decider).',
+      inputSchema: {
+        id: z.string().describe('lane id'),
+        pr: z.number().int().optional().describe('landed PR number (ADR 109 merge attestation)'),
+        sha: z.string().optional().describe('squash-merge SHA on main'),
+        authorized_by: z
+          .string()
+          .optional()
+          .describe('the human whose authority the merge ran under'),
+      },
     },
     async (args) => {
       try {
-        const { lane, warnings } = await client.updateLane(args.id, { state: 'done' });
+        const merged = {
+          ...(args.pr !== undefined ? { pr: args.pr } : {}),
+          ...(args.sha !== undefined ? { sha: args.sha } : {}),
+          ...(args.authorized_by !== undefined ? { authorized_by: args.authorized_by } : {}),
+        };
+        const { lane, warnings } = await client.updateLane(args.id, {
+          state: 'done',
+          ...(Object.keys(merged).length ? { merged } : {}),
+        });
         return textResult(fmtResult('lane done', lane, warnings) + branchCleanupHint(lane));
       } catch (err) {
         return textResult(`error: ${(err as Error).message}`);
