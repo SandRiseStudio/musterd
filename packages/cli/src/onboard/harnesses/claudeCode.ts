@@ -166,8 +166,9 @@ function sessionStartHookCommand(): string {
     "echo 'musterd: this folder has the musterd:start primer but the musterd MCP server is NOT " +
     'registered here — the team_* tools are unavailable. Run `musterd init` in this folder (or ' +
     "`musterd init --check` to confirm), then reload this session.'; fi; else " +
-    "echo 'You are on a musterd team (auto-joined on launch). Run team_inbox_check now to see " +
-    "anything waiting. Only call team_join if a tool says you are not joined.'; fi " +
+    "echo 'You are on a musterd team (your seat auto-claims on your first team_* tool call). Run " +
+    'team_inbox_check now to join and see anything waiting. Only call team_join if a tool says you ' +
+    "are not joined.'; fi " +
     `# ${SESSIONSTART_HOOK_MARKER}`
   );
 }

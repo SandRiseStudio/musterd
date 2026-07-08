@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PROTOCOL_VERSION } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -421,6 +424,63 @@ describe('MCP adapter', () => {
     ).sort();
     expect(registered).toEqual([...TOOL_NAMES].sort());
     client.close();
+  });
+
+  // Probe safety (the supersession ping-pong fix): a harness health probe (`claude mcp get musterd`,
+  // doctor, the ADR 060 SessionStart verify) boots the adapter, completes `initialize`, and exits —
+  // it never calls a tool. The launch autojoin therefore must NOT fire at build/boot; it fires once,
+  // memoized, on the first real tool call. Before this, every probe issued a real one-shot claim that
+  // displaced the live same-workspace session milliseconds before dying.
+  describe('deferred autojoin (probe safety)', () => {
+    // The team_join handler persists a binding to process.cwd() on success — pin cwd to a temp dir so
+    // this suite can never write `.musterd/binding.json` into the real repo (it did, once: the very
+    // dogfood workspace this fix protects got its binding clobbered by an early run of these tests).
+    let tmpCwd: string;
+    beforeEach(() => {
+      tmpCwd = mkdtempSync(join(tmpdir(), 'musterd-autojoin-'));
+      vi.spyOn(process, 'cwd').mockReturnValue(tmpCwd);
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+      rmSync(tmpCwd, { recursive: true, force: true });
+    });
+
+    const toolCb = (mcp: ReturnType<typeof buildMcpServer>, name: string) =>
+      (
+        mcp as unknown as {
+          _registeredTools: Record<string, { handler: (...a: unknown[]) => unknown }>;
+        }
+      )._registeredTools[name]!.handler;
+    const stubClient = () =>
+      ({
+        member: 'Ada',
+        roster: async () => ({ members: [] }),
+        join: async () => ({ member: 'Ada' }),
+        leave: async () => ({}),
+      }) as unknown as MusterdClient;
+
+    it('never fires at build time (a probe that only initializes claims nothing)', () => {
+      const join = vi.fn(async () => {});
+      buildMcpServer(stubClient(), adaConfig(), { onFirstToolCall: join });
+      expect(join).not.toHaveBeenCalled();
+    });
+
+    it('fires exactly once, on the first real tool call (memoized across calls)', async () => {
+      const join = vi.fn(async () => {});
+      const mcp = buildMcpServer(stubClient(), adaConfig(), { onFirstToolCall: join });
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      expect(join).toHaveBeenCalledTimes(1);
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      expect(join).toHaveBeenCalledTimes(1);
+    });
+
+    it('team_join and team_leave are exempt — an explicit join is not doubled, a leave never joins', async () => {
+      const join = vi.fn(async () => {});
+      const mcp = buildMcpServer(stubClient(), adaConfig(), { onFirstToolCall: join });
+      await Promise.resolve(toolCb(mcp, 'team_join')({})).catch(() => {});
+      await Promise.resolve(toolCb(mcp, 'team_leave')({})).catch(() => {});
+      expect(join).not.toHaveBeenCalled();
+    });
   });
 
   it('serves the primer as MCP instructions — file-free onboarding (ADR 012 follow-up)', () => {

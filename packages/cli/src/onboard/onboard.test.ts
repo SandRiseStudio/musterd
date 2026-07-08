@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -332,9 +332,21 @@ describe('harness registry', () => {
 
   // Non-hermetic: shells out to the real `claude` CLI (can take ~4–8s), so give it a generous
   // timeout — it trips vitest's 5s default under parallel load (flaky, but exercises the real probe).
+  // MUST run from a temp cwd: `claude mcp get musterd` reads local-scope config from the cwd, and in
+  // a bound workspace (this repo!) it health-checks the REAL adapter — which used to fire a real
+  // claim against the production daemon and displace the live seat (the supersession ping-pong; the
+  // adapter is probe-safe now, but a test suite must never touch a production daemon regardless).
   it('claude detect returns a shape even when probing the real CLI', async () => {
-    const d = await claudeCode.detect();
-    expect(typeof d.installed).toBe('boolean');
-    expect(typeof d.configured).toBe('boolean');
+    const probeCwd = mkdtempSync(join(tmpdir(), 'musterd-detect-'));
+    const origCwd = process.cwd();
+    process.chdir(probeCwd);
+    try {
+      const d = await claudeCode.detect();
+      expect(typeof d.installed).toBe('boolean');
+      expect(typeof d.configured).toBe('boolean');
+    } finally {
+      process.chdir(origCwd);
+      rmSync(probeCwd, { recursive: true, force: true });
+    }
   }, 15_000);
 });
