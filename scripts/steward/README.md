@@ -41,24 +41,34 @@ drift such a task would fix is _already prevented from reaching `main`_ by the s
 point of them). The level exists and the workflow honours it; the first `auto-merge` task lands with the
 judgment/agent layer — by editing `tasks.ts`, reviewed like any change.
 
-## Activation & the upgrade path
+## Activation
 
-**v1 needs no secrets.** The workflow uses the default `GITHUB_TOKEN` (scoped to `issues: write`) to open
-the tracking issue. It is live once this lands; trigger it by hand from the Actions tab (**workflow_dispatch**).
+The workflow has two modes, chosen automatically by which secrets exist:
 
-The richer ADR-112 modes are the next increment and need provisioning **you** do (granting an automated
-writer its keys is deliberately a human act):
+**Baseline — no secrets.** The `scan` job runs weekly and, on drift, upserts one self-updating tracking
+issue via the default `GITHUB_TOKEN`. Live as soon as this lands; trigger by hand from the Actions tab.
 
-1. **Draft-PR `propose`** — instead of an issue, open a draft PR that drafts the fix (e.g. marks an item
-   `shipped: { prs }`, refreshes stale prose). Needs a **`STEWARD_TOKEN`** (a PAT / GitHub App token with
-   `contents` + `pull-requests` write) — the default `GITHUB_TOKEN`'s PRs don't trigger the required `gates`
-   check, so auto-merge would stall.
-2. **`auto-merge`** — the seat arms `gh pr merge --auto` on a mechanical, statically-guarded fix. Still a PR
-   through the same protected-`main` gates; nothing bypasses CI. `roadmap-truth:check` is the seatbelt.
-3. **Agent drafting** — for findings that need judgment (write a new roadmap item, reword prose), a CI-launched
-   session drafts the change from the `--json` findings. Needs an **`ANTHROPIC_API_KEY`** secret.
-4. **Reachability chase** — post the PR to the musterd team and re-ping via the ladder if unreviewed; arrives
-   with daemon-triggered residency (the reserved roadmap item), swapping the cron trigger under the same seat.
+**Agent — with both secrets.** When `ANTHROPIC_API_KEY` **and** `STEWARD_TOKEN` are set, the `agent` job
+runs instead: a CI-launched Claude session (`anthropics/claude-code-action`) follows
+[`CHARTER.md`](./CHARTER.md) to draft each fix and open a **draft PR** — never a merge. It's for the
+findings that need judgment (write a roadmap item, reword prose, mark an item shipped with its PR).
 
-Until then, v1's assigned, self-updating issue is the shepherding surface — and the whole loop stays
-`propose`, human-approved, so _curated is a feature_ holds.
+- **`ANTHROPIC_API_KEY`** — the model key for the session.
+- **`STEWARD_TOKEN`** — a fine-grained PAT / GitHub App token with `contents` + `pull-requests` write. A
+  PAT is **required** (not the default `GITHUB_TOKEN`): GitHub won't trigger the required `gates` check on
+  a `GITHUB_TOKEN`-authored PR, so the checkout uses the PAT and the PRs run CI normally.
+
+> **Watch the first run.** This agent path can't be exercised outside CI, so **trigger it once by hand**
+> (Actions → steward → Run workflow) and read the logs. If the `claude-code-action` input/flag names
+> differ in the installed version, it's a one-line fix in `steward.yml`; the baseline issue path keeps
+> working meanwhile. Draft-PR-only + `roadmap-truth:check` as the seatbelt + protected `main` mean the
+> blast radius is "a draft PR a human reviews" — it cannot merge, PAT or not.
+
+### Still ahead
+
+- **`auto-merge`** — arming `gh pr merge --auto` on a mechanical, statically-guarded fix (still through the
+  same gates). No task uses it yet — the static checks already prevent the mechanical drift it would fix.
+- **Reachability chase** — post the PR to the musterd team and re-ping via the ladder if unreviewed;
+  arrives with daemon-triggered residency (the reserved roadmap item), swapping the cron under the same seat.
+
+Every task stays `propose` (human-approved), so _curated is a feature_ holds.
