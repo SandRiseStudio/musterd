@@ -27,6 +27,7 @@ import {
   mergedPRs,
   repoRoot,
   ROADMAP,
+  shippedArcAdrs,
 } from './lib.ts';
 import { type Autonomy, type FinderId, taskFor } from './tasks.ts';
 
@@ -61,17 +62,13 @@ function reverseDrift(): Finding[] {
 /** Merged feat PRs in the window that no shipped anchor claims and no shipped item's frozenBy covers. */
 function unmarkedFeatures(since: string): Finding[] {
   const anchored = anchoredPRs();
-  const shippedFrozen = new Set(
-    ROADMAP.filter((it) => it.status === 'shipped' && it.frozenBy !== undefined).map(
-      (it) => it.frozenBy!,
-    ),
-  );
+  const arcAdrs = shippedArcAdrs(); // ADRs an already-shipped item stands for (frozenBy + refs)
   // The steward's own upkeep PRs and pure docs/test/chore merges aren't features to declare.
   const IGNORE_TYPE = new Set(['docs', 'test', 'chore', 'ci', 'build', 'style', 'refactor']);
   return mergedPRs(since)
     .filter((pr) => pr.pr > ANCHOR_EPOCH_PR) // pre-convention features are legacy-covered by design
     .filter((pr) => pr.type === 'feat' && !anchored.has(pr.pr) && !IGNORE_TYPE.has(pr.type))
-    .filter((pr) => pr.adrs.every((a) => !shippedFrozen.has(a)))
+    .filter((pr) => pr.adrs.every((a) => !arcAdrs.has(a))) // not part of an already-shipped ADR arc
     .map((pr) =>
       annotate(
         'unmarked_feature',
