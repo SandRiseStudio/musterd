@@ -14,6 +14,12 @@ coverage/
 **/.musterd/workspace.json
 # ADR 033: client-side pending-presence markers are transient local state, never committed.
 **/.musterd/pending/
+# musterd provisioning state — regenerated per-workspace by `musterd init` (ADR 060/085), never committed.
+**/.musterd/provisioned.json
+**/.musterd/skill/
+# Claude Code local settings + the musterd-provisioned skill/slash-commands (`.claude/skills`,
+# `.claude/commands`) — per-workspace + personal, written by `musterd init` / the harness, never committed.
+.claude/
 *.db
 *.db-wal
 *.db-shm
