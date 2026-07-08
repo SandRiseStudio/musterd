@@ -38,7 +38,7 @@ export const GoalSchema = z.object({
   declared_at: z.number().int(),
   status: GoalStatusSchema,
   /**
-   * The Goal's **plan epoch** (ADR 109, ADR 088 increment 3) — a monotonic count of the direction-
+   * The Goal's **plan epoch** (ADR 111, ADR 088 increment 3) — a monotonic count of the direction-
    * changing acts that have landed on this Goal: every `defer` naming it (a re-sequence) and every
    * `steer` that names it via `meta.goal_id`. Derived from the durable act log, never stored (the
    * ADR 048 maxim) — the mirror of how `status` is a projection over lanes. `0` means nobody has

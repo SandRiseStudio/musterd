@@ -123,7 +123,7 @@ describe('listGoals (declared-Goal seam, ADR 048/084)', () => {
   });
 });
 
-describe('listGoals — plan epoch + defer re-sequencing (ADR 109, inc3)', () => {
+describe('listGoals — plan epoch + defer re-sequencing (ADR 111, inc3)', () => {
   it('a Goal with no direction-changing acts is on epoch 0 with its declared wave', () => {
     const { db, team, nick } = seed();
     declare(db, team.id, nick.id, { id: 'auth', title: 'Auth', wave: 3 }, 10);

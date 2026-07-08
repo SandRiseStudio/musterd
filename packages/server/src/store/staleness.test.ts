@@ -42,7 +42,7 @@ function bump(
   );
 }
 
-describe('staleLaneWarnings (ADR 109 — stale-plan detection, ADR 088 §5)', () => {
+describe('staleLaneWarnings (ADR 111 — stale-plan detection, ADR 088 §5)', () => {
   it('no warning when a lane was claimed at the Goal’s current epoch', () => {
     const { db, team, nick } = seed();
     // lane claimed at ts 100; a defer at ts 50 (BEFORE the claim) — the owner already had it.
