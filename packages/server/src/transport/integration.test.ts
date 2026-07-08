@@ -565,12 +565,14 @@ describe('WebSocket', () => {
     const all = await get('/teams/dawn/messages', tok);
     expect(all.json.messages.map((m: any) => m.id)).toEqual(['t1', 't2']);
 
-    // `since` pages forward (exclusive); `limit` caps.
+    // `since` pages forward (exclusive), oldest-after-first.
     const since = await get('/teams/dawn/messages?since=1000', tok);
     expect(since.json.messages.map((m: any) => m.id)).toEqual(['t2']);
+    // A bare `limit` caps to the NEWEST N (not the oldest) so a busy team's backfill shows what just
+    // happened, not its first N messages ever — the ADR 107 backfill fix.
     const limited = await get('/teams/dawn/messages?limit=1', tok);
     expect(limited.json.messages).toHaveLength(1);
-    expect(limited.json.messages[0].id).toBe('t1');
+    expect(limited.json.messages[0].id).toBe('t2');
   });
 
   it('observer seat: watches the firehose but is hidden from roster/count and cannot send (ADR 063)', async () => {

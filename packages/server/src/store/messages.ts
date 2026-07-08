@@ -194,23 +194,40 @@ export interface TeamMessagesOpts {
 
 /**
  * The whole team timeline — every persisted envelope, regardless of recipient — for the firehose's
- * history backfill (`GET /teams/:slug/messages`, ADR 061). `since` (exclusive, by ts) pages forward;
- * `limit` caps the page (default 200).
+ * history backfill (`GET /teams/:slug/messages`, ADR 061). Always returned in ascending (`ts, id`)
+ * display order; `limit` caps the page (default 200). The two modes differ only in *which* window the
+ * cap keeps:
+ *
+ * - **No `since` (initial backfill):** the most RECENT `limit` messages. This is what every live view
+ *   wants — you open `/live` (or `musterd inbox`) to see what just happened, not the team's first 200
+ *   messages ever. (The prior `ORDER BY ts ASC LIMIT` kept the OLDEST `limit` and silently dropped the
+ *   newest on any over-cap history, so a busy team's backfill missed exactly the acts it came for —
+ *   they only trickled in over the live socket. ADR 107 verification surfaced this.)
+ * - **`since` (forward catch-up):** the oldest `limit` messages strictly after `since` (by ts), so a
+ *   caller holding a cursor can page forward without skipping the gap. `since` is exclusive.
  */
 export function listTeamMessages(
   db: Database,
   teamId: string,
   opts: TeamMessagesOpts = {},
 ): MessageRow[] {
-  const params: unknown[] = [teamId];
-  let sql = 'SELECT * FROM messages WHERE team_id = ?';
+  const limit = opts.limit ?? 200;
   if (typeof opts.since === 'number') {
-    sql += ' AND ts > ?';
-    params.push(opts.since);
+    // Forward catch-up: walk forward from the cursor, oldest-first, so no message in the gap is skipped.
+    return db
+      .prepare<
+        unknown[],
+        MessageRow
+      >('SELECT * FROM messages WHERE team_id = ? AND ts > ? ORDER BY ts ASC, id ASC LIMIT ?')
+      .all(teamId, opts.since, limit);
   }
-  sql += ' ORDER BY ts ASC, id ASC LIMIT ?';
-  params.push(opts.limit ?? 200);
-  return db.prepare<unknown[], MessageRow>(sql).all(...params);
+  // Initial backfill: take the newest `limit` (DESC + LIMIT), then re-sort ascending for display.
+  return db
+    .prepare<
+      unknown[],
+      MessageRow
+    >('SELECT * FROM (SELECT * FROM messages WHERE team_id = ? ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC')
+    .all(teamId, limit);
 }
 
 /** Convert a stored row back to a protocol Envelope (for delivery/inbox responses). */

@@ -14,7 +14,7 @@ import {
   mintCredential,
   reapStaleObservers,
 } from './members.js';
-import { insertMessage, latestStatusUpdate, listInbox } from './messages.js';
+import { insertMessage, latestStatusUpdate, listInbox, listTeamMessages } from './messages.js';
 import {
   attach,
   clearMemberPresence,
@@ -657,5 +657,53 @@ describe('observer seat reaping (ADR 064)', () => {
       .map((m) => m.name)
       .sort();
     expect(remaining).toEqual(['nick', 'web-fresh', 'web-live', 'web-ref'].sort());
+  });
+});
+
+describe('listTeamMessages (firehose backfill window)', () => {
+  // Seed `count` team messages at ts = 1..count (id `m<ts>`, zero-padded so id order == ts order).
+  function seed(
+    db: ReturnType<typeof freshTeam>['db'],
+    team: ReturnType<typeof freshTeam>['team'],
+    count: number,
+  ) {
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    for (let ts = 1; ts <= count; ts++) {
+      const env = makeEnvelope({
+        id: `m${String(ts).padStart(4, '0')}`,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'team' },
+        act: 'message',
+        body: `#${ts}`,
+        ts,
+      });
+      insertMessage(db, team.id, ada.row.id, null, env);
+    }
+  }
+
+  it('returns the NEWEST `limit` messages (not the oldest) in ascending order when over cap', () => {
+    const { db, team } = freshTeam();
+    seed(db, team, 217); // over a 200 cap, like the busy team that surfaced this
+    const rows = listTeamMessages(db, team.id, { limit: 200 });
+    expect(rows).toHaveLength(200);
+    // Ascending display order…
+    expect(rows[0]!.ts).toBe(18); // 217 - 200 + 1 — the oldest 17 are dropped, not the newest
+    expect(rows[rows.length - 1]!.ts).toBe(217); // …and the very newest IS present (the bug was that it wasn't)
+  });
+
+  it('returns everything ascending when under the cap', () => {
+    const { db, team } = freshTeam();
+    seed(db, team, 5);
+    const rows = listTeamMessages(db, team.id, { limit: 200 });
+    expect(rows.map((r) => r.ts)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('pages forward from a `since` cursor: oldest-after-since first, no gap skipped', () => {
+    const { db, team } = freshTeam();
+    seed(db, team, 10);
+    const rows = listTeamMessages(db, team.id, { since: 3, limit: 2 });
+    // strictly after ts=3, oldest first, capped at 2 — so a cursor holder walks forward without skipping
+    expect(rows.map((r) => r.ts)).toEqual([4, 5]);
   });
 });
