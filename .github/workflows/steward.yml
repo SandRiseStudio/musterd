@@ -63,9 +63,9 @@ jobs:
         env:
           SINCE: ${{ github.event.inputs.since || '10 days ago' }}
         run: |
-          pnpm steward:scan --since "$SINCE" | tee -a "$GITHUB_STEP_SUMMARY"
-          pnpm steward:scan --since "$SINCE" --json > steward-findings.json
-          pnpm steward:scan --since "$SINCE" --md > steward-issue.md
+          pnpm --silent steward:scan --since "$SINCE" | tee -a "$GITHUB_STEP_SUMMARY"
+          pnpm --silent steward:scan --since "$SINCE" --json > steward-findings.json
+          pnpm --silent steward:scan --since "$SINCE" --md > steward-issue.md
           count=$(node -e "process.stdout.write(String(require('./steward-findings.json').findings.length))")
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
@@ -149,7 +149,7 @@ jobs:
       - name: Recompute findings for the session
         env:
           SINCE: ${{ github.event.inputs.since || '10 days ago' }}
-        run: pnpm steward:scan --since "$SINCE" --json > steward-findings.json
+        run: pnpm --silent steward:scan --since "$SINCE" --json > steward-findings.json
 
       - name: Steward drafts fixes as draft PRs
         uses: anthropics/claude-code-action@v1
