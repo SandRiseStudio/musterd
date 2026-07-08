@@ -1,8 +1,0 @@
-{
-  "server": "http://localhost:4849",
-  "team": "bravo",
-  "surface": "claude-code",
-  "claim": {
-    "mode": "chat"
-  }
-}

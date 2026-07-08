@@ -7,6 +7,11 @@ coverage/
 # ADR 058: the durable seat roster (.musterd/team.toml + seats/) is committed; only the
 # secret-bearing binding token is ignored — in any folder (** covers root + nested).
 **/.musterd/binding.json
+# ADR 080's committed launch spec is a *downstream-repo* feature (a fresh clone self-wires from it).
+# In musterd's OWN dogfood repo it's per-worktree launch config (team + seat) that every agent
+# re-stamps to its own identity — a perpetual uncommitted drift — so we ignore it here. The self-wire
+# feature is unaffected (it lives in CLI code; a user repo still `git add`s its own workspace.json).
+**/.musterd/workspace.json
 # ADR 033: client-side pending-presence markers are transient local state, never committed.
 **/.musterd/pending/
 *.db

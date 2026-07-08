@@ -69,6 +69,13 @@ env-referenced entry — a separate change to the binding model."_ This ADR is t
   config is committable; the credential is not.
 - Composes with ADR 018 (binding file), ADR 058 (committed `.musterd/`), ADR 060 (verify-don't-assume;
   this supersedes its non-goal), ADR 075/077 (agent key + claim/request lane).
+- **Exception — musterd's own repo ignores `workspace.json` (2026-07-07).** The committed-spec is a
+  _downstream-repo_ feature: one repo, one canonical team, `git add` it once. musterd's own repo is
+  dogfooded by many agents across many worktrees, each `musterd agent`/`init` **re-stamping**
+  `.musterd/workspace.json` with its own `team`/`seat` — so a committed copy is perpetually dirty in
+  every worktree (the drift that left a stray value on `main` and stashes in idle worktrees). So this
+  repo `.gitignore`s `**/.musterd/workspace.json`; each worktree keeps its own local spec (self-wire
+  still works — the file is present, just untracked). The feature is untouched for user repos.
 
 ## Observability & Evaluation
 
