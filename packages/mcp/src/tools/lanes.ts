@@ -33,6 +33,21 @@ function fmtResult(prefix: string, lane: Lane, warnings: LaneWarning[]): string 
   return `${prefix}\n${fmtLane(lane)}${fmtWarnings(warnings)}`;
 }
 
+/**
+ * On lane closure, remind the agent to clear the lane's local branch (ADR 106). GitHub auto-deletes
+ * the *remote* branch on merge, but the local one lingers in the worktree — and the naive cleanup
+ * fails here: you can't `git checkout main` (a sibling worktree owns it) and `git branch -d` refuses
+ * a squash-merged branch (it isn't an ancestor of main). The worktree-safe move detaches to fresh
+ * `origin/main` (also the start state for the next lane) and force-deletes. Empty when no branch.
+ */
+function branchCleanupHint(lane: Lane): string {
+  if (!lane.branch) return '';
+  return (
+    `\n\nlanded? clear the local branch (the remote auto-deleted on merge):\n` +
+    `  git fetch origin main --prune && git switch --detach origin/main && git branch -D ${lane.branch}`
+  );
+}
+
 export function registerLanes(server: McpServer, client: MusterdClient): void {
   server.registerTool(
     'lane_open',
@@ -181,7 +196,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     async (args) => {
       try {
         const { lane, warnings } = await client.updateLane(args.id, { state: 'done' });
-        return textResult(fmtResult('lane done', lane, warnings));
+        return textResult(fmtResult('lane done', lane, warnings) + branchCleanupHint(lane));
       } catch (err) {
         return textResult(`error: ${(err as Error).message}`);
       }

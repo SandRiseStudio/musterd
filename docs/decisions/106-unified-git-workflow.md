@@ -45,6 +45,15 @@ another way. Two halves: what GitHub **enforces**, and the **playbook** agents f
    local gates, `git push --force-with-lease`. Rebase (not `merge main`) keeps the branch linear;
    `--force-with-lease` refuses to clobber a teammate's push. This is safe because a lane's branch lives
    in one agent's worktree and is squashed at merge — its history is throwaway.
+6. **Clear the local branch once it lands.** Auto-delete removes the **remote** branch (§2), but the
+   **local** one lingers in your worktree, and the obvious cleanup fails: you can't `git checkout main`
+   (a sibling worktree owns it, ADR 065) and `git branch -d` **refuses a squash-merged branch** (the
+   squash commit isn't an ancestor of `main`). The worktree-safe move detaches to fresh `origin/main`
+   and force-deletes: `git fetch origin main --prune && git switch --detach origin/main && git branch -D
+   <branch>`. That also leaves the worktree **at fresh `origin/main` — the exact start state for step 1**,
+   so cleanup and next-lane prep are one action; a worktree between lanes rests detached at `origin/main`,
+   not on a stale branch. `lane resolve` / the `lane_resolve` tool prints this line for the lane's branch
+   so the reminder lands at closure.
 
 ### 2. What GitHub enforces (so the loop is the only easy path)
 
@@ -52,7 +61,8 @@ another way. Two halves: what GitHub **enforces**, and the **playbook** agents f
 
 - **Squash-only** — merge-commit and rebase-merge **disabled**; squash is the only button. Commit title
   = PR title, body = PR body (one clean `Title (#N)` commit per PR).
-- **Auto-delete head branches on merge** — no more lingering/again-and-again-deleted branches.
+- **Auto-delete head branches on merge** — no lingering **remote** branches. (The local worktree branch
+  is a separate cleanup — see §1 step 6; it is *not* covered by this setting.)
 - **Allow auto-merge** and **"update branch"** — so step 4 works hands-free.
 
 **Branch protection on `main`:**

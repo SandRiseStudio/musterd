@@ -109,6 +109,26 @@ describe('lane commands', () => {
     expect(resolved.out).toContain('done');
   });
 
+  it('resolve prints the local-branch cleanup hint when the lane carries a branch', async () => {
+    const id = await openLane(['landed', '--claim', '--branch', 'feat/landed']);
+    const resolved = await capture(() => laneCommand(parseArgs(['resolve', id])));
+    expect(resolved.out).toContain('clear the local branch');
+    expect(resolved.out).toContain('git branch -D feat/landed');
+    expect(resolved.out).toContain('git switch --detach origin/main');
+  });
+
+  it('resolve omits the cleanup hint for a lane with no branch', async () => {
+    const id = await openLane(['branchless']);
+    const resolved = await capture(() => laneCommand(parseArgs(['resolve', id])));
+    expect(resolved.out).not.toContain('clear the local branch');
+  });
+
+  it('claim does not print the branch-cleanup hint', async () => {
+    const id = await openLane(['nohint', '--branch', 'feat/nohint']);
+    const claimed = await capture(() => laneCommand(parseArgs(['claim', id])));
+    expect(claimed.out).not.toContain('clear the local branch');
+  });
+
   it('handoff reassigns to another seat with a branch', async () => {
     await new (await import('../client.js')).HttpClient({
       server: serverUrl,
