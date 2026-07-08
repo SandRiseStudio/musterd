@@ -58,14 +58,19 @@ export function RosterPanel({
 function SeatRow({ m }: { m: MemberSummary }) {
   const kind = m.kind === 'human' ? 'human' : 'agent';
   const online = m.presence !== 'offline';
+  // Reclaimable (ADR 105): the seat reads offline but is held within its reclaim grace — a reservation
+  // that may be reconnecting after a reload/blip. Surface it as "reconnecting" rather than a cold seat.
+  const reconnecting = !online && m.reclaimable === true;
   const status = accountStatusMeta(m.account_status);
   const badges = capabilityBadges(m.capabilities);
+  const dotState = online ? 'on' : reconnecting ? 'recon' : 'off';
+  const seatMod = online ? '' : reconnecting ? ' lc-seat--recon' : ' lc-seat--offline';
 
   return (
-    <div className={`lc-seat${online ? '' : ' lc-seat--offline'}`}>
+    <div className={`lc-seat${seatMod}`}>
       <span
-        className={`lc-seat__dot lc-seat__dot--${online ? 'on' : 'off'}`}
-        title={online ? `online · ${m.presence}` : 'offline'}
+        className={`lc-seat__dot lc-seat__dot--${dotState}`}
+        title={online ? `online · ${m.presence}` : reconnecting ? 'reconnecting — seat held within reclaim grace' : 'offline'}
       />
       <span className="lc-seat__avatar" style={{ background: memberColor(m.name, kind) }}>
         {initial(m.name)}
@@ -77,6 +82,11 @@ function SeatRow({ m }: { m: MemberSummary }) {
               consistent; the optional role is an *additional* tag only when the seat carries one. */}
           <span className={`lc-seat__kind lc-seat__kind--${kind}`}>{kind}</span>
           {m.role && <span className="lc-seat__role">{m.role}</span>}
+          {reconnecting && (
+            <span className="lc-seat__recon" title="Seat held within its reclaim grace (ADR 105)">
+              reconnecting
+            </span>
+          )}
         </div>
         <div className="lc-seat__gov">
           <span

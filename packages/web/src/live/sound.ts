@@ -58,6 +58,21 @@ const CUES: Record<string, Note[]> = {
     { freq: E4, t: 0.12, dur: 0.4, type: sine, gain: 0.09 },
   ],
   wait: [{ freq: D5, t: 0, dur: 0.46, type: sine, gain: 0.07 }],
+  // Steering trio (ADR 103). steer is the loudest — an assertive rising triad that grabs attention
+  // (interrupt-class); challenge lifts like a spoken question; defer settles gently downward (set aside).
+  steer: [
+    { freq: A4, t: 0, dur: 0.2, type: tri, gain: 0.11 },
+    { freq: E5, t: 0.09, dur: 0.24, type: tri, gain: 0.12 },
+    { freq: A5, t: 0.18, dur: 0.42, type: tri, gain: 0.13 },
+  ],
+  challenge: [
+    { freq: D5, t: 0, dur: 0.22, type: sine, gain: 0.09 },
+    { freq: A5, t: 0.12, dur: 0.34, type: sine, gain: 0.1 },
+  ],
+  defer: [
+    { freq: G5, t: 0, dur: 0.24, type: sine, gain: 0.08 },
+    { freq: D5, t: 0.12, dur: 0.42, type: sine, gain: 0.08 },
+  ],
   resolve: [
     { freq: C5, t: 0, dur: 0.34, type: sine, gain: 0.11 },
     { freq: E5, t: 0.12, dur: 0.38, type: sine, gain: 0.11 },

@@ -98,8 +98,14 @@ export function toneColor(tone: string): string {
       return '#88a9cf';
     case 'handoff':
       return '#c6a3ff';
+    case 'lane':
+      return '#8b84ff'; // indigo (mirrors --lc-lane) — lane transitions + defer's plan mutation
     case 'status':
       return '#2ad6bb';
+    case 'steer':
+      return '#ef6bbd'; // magenta-rose (mirrors --lc-steer) — interrupt-class redirect, prominent
+    case 'challenge':
+      return '#4bc4e0'; // cyan (mirrors --lc-challenge) — the epistemic "justify?"
     default:
       return '#ffd49a';
   }
@@ -752,7 +758,7 @@ export function coffeeAnchor(fit: Fit): Pt {
 export interface Cue {
   at: Pt;
   color: string;
-  glyph: '' | '?' | '!' | '📣' | '✓' | '↦';
+  glyph: '' | '?' | '!' | '📣' | '✓' | '↦' | '↪';
   t: number;
   urgent: boolean;
   kind?: 'ring' | 'wave' | 'door';

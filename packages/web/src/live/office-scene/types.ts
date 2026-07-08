@@ -67,6 +67,13 @@ export type OfficeEvent =
   | { kind: 'decline'; who: string }
   | { kind: 'wait'; who: string }
   | { kind: 'resolve'; who: string }
+  // The ADR 103 steering trio. `steer` is interrupt-class (always interrupts, newest supersedes) so it
+  // reads as loud as an urgent help — a room-wide sweep plus, when directed, an urgent redirect run to
+  // the target. `challenge` is an epistemic "justify?" question over the head(s). `defer` mutates the
+  // plan (a Goal, `meta.goal_id`) so it pulses across the board in the lane family.
+  | { kind: 'steer'; from: string; to: string | null; urgent: boolean }
+  | { kind: 'challenge'; from: string; to: string | null; urgent: boolean }
+  | { kind: 'defer'; who: string }
   // An act, typed out over the sender's head then faded — the body when it has one, else the act label.
   // Independent of the choreography cue above; both can fire for one act. `id` (the envelope id) makes
   // the bubble a click-through to the same act in the stream panel.

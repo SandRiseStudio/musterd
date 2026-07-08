@@ -8,6 +8,8 @@ export type ActTone =
   | 'handoff'
   | 'lane'
   | 'status'
+  | 'steer'
+  | 'challenge'
   | 'neutral';
 
 /** Map an act to its colour role — mirrors brand.md / the act-badge variants (ADR 061 view). */
@@ -35,6 +37,15 @@ export function actTone(act: string): ActTone {
       return 'handoff';
     case 'status_update':
       return 'status';
+    // Steering trio (ADR 103). `steer` is interrupt-class → its own prominent tone; `challenge` is the
+    // epistemic "justify?" → a distinct questioning tone; `defer` mutates a Goal on the plan, so it
+    // rides the lane (work-moving) family alongside the lane transitions above.
+    case 'steer':
+      return 'steer';
+    case 'challenge':
+      return 'challenge';
+    case 'defer':
+      return 'lane';
     default:
       return 'neutral';
   }
@@ -60,6 +71,8 @@ export function actLabel(act: string): string {
       return 'lane done';
     case 'lane_handoff':
       return 'lane handoff';
+    // The ADR 103 steering acts (`steer`, `challenge`, `defer`) are already single clean words, so they
+    // read verbatim through the default — no relabel needed (unlike the underscored lane_* sub-types).
     default:
       return act;
   }
