@@ -123,6 +123,28 @@ describe('lane commands', () => {
     expect(resolved.out).not.toContain('clear the local branch');
   });
 
+  it('resolve --pr/--sha/--authorized-by attests the merge to the audit log (ADR 109)', async () => {
+    const id = await openLane(['attested', '--claim', '--branch', 'feat/attested']);
+    const resolved = await capture(() =>
+      laneCommand(
+        parseArgs(['resolve', id, '--pr', '167', '--sha', 'abc123', '--authorized-by', 'nick']),
+      ),
+    );
+    expect(resolved.code).toBe(0);
+    expect(resolved.out).toContain('lane done');
+    const { auditCommand } = await import('./audit.js');
+    const audit = await capture(() => auditCommand(parseArgs(['--json'])));
+    const rows = JSON.parse(audit.out) as { action: string; detail: unknown }[];
+    const row = rows.find((r) => r.action === 'git.pr_merged');
+    expect(row).toBeDefined();
+    expect(row!.detail).toMatchObject({ pr: 167, sha: 'abc123', authorized_by: 'nick' });
+  });
+
+  it('resolve rejects a non-integer --pr with usage', async () => {
+    const id = await openLane(['badpr', '--claim']);
+    await expect(laneCommand(parseArgs(['resolve', id, '--pr', 'nope']))).rejects.toThrow(/usage/);
+  });
+
   it('claim does not print the branch-cleanup hint', async () => {
     const id = await openLane(['nohint', '--branch', 'feat/nohint']);
     const claimed = await capture(() => laneCommand(parseArgs(['claim', id])));

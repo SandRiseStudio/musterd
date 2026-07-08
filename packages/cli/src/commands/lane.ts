@@ -16,7 +16,7 @@ const USAGE =
   '  musterd lane claim <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>]\n' +
   '  musterd lane update <id> [--state open|claimed|active|blocked|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d]\n' +
-  '  musterd lane resolve <id>\n' +
+  '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lanes [--project p] [--mine] [--open] [--json]';
 
 /** Split a comma-separated repeatable flag; undefined when the flag is absent. */
@@ -110,10 +110,24 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
   if (sub === 'claim' || sub === 'resolve') {
     const id = parsed.positionals[1];
     if (!id) throw new CliError(USAGE, 2);
+    // resolve may attest the landed merge (ADR 109): {pr, sha, authorized_by} rides the terminal
+    // move and lands in the audit log as `git.pr_merged` — the seat→SHA→authorizer join.
+    const prRaw = flagStr(parsed.flags, 'pr');
+    const pr = prRaw !== undefined ? Number(prRaw) : undefined;
+    if (pr !== undefined && !Number.isInteger(pr)) throw new CliError(USAGE, 2);
+    const merged = {
+      ...(pr !== undefined ? { pr } : {}),
+      ...(flagStr(parsed.flags, 'sha') !== undefined ? { sha: flagStr(parsed.flags, 'sha')! } : {}),
+      ...(flagStr(parsed.flags, 'authorized-by') !== undefined
+        ? { authorized_by: flagStr(parsed.flags, 'authorized-by')! }
+        : {}),
+    };
     const res = await http.updateLane(
       team,
       id,
-      sub === 'claim' ? { owner_seat: identity.name } : { state: 'done' },
+      sub === 'claim'
+        ? { owner_seat: identity.name }
+        : { state: 'done', ...(Object.keys(merged).length ? { merged } : {}) },
     );
     process.stdout.write(
       `${theme.ok('✓')} lane ${sub === 'claim' ? 'claimed' : 'done'}\n${renderLane(res.lane)}\n`,

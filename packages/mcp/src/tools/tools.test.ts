@@ -760,4 +760,21 @@ describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
     expect(out).toContain('lane done');
     expect(out).not.toContain('git branch -D');
   });
+
+  it('passes the merge attestation through as merged {pr, sha, authorized_by} (ADR 109)', async () => {
+    const updateLane = vi.fn(async () => ({ lane: lane({ branch: 'feat/x' }), warnings: [] }));
+    const handlers = captureAll(registerLanes, { updateLane } as Partial<MusterdClient>);
+    await handlers['lane_resolve']!({ id: 'lane1', pr: 167, sha: 'abc123', authorized_by: 'nick' });
+    expect(updateLane).toHaveBeenCalledWith('lane1', {
+      state: 'done',
+      merged: { pr: 167, sha: 'abc123', authorized_by: 'nick' },
+    });
+  });
+
+  it('omits merged entirely when no attestation fields are given', async () => {
+    const updateLane = vi.fn(async () => ({ lane: lane(), warnings: [] }));
+    const handlers = captureAll(registerLanes, { updateLane } as Partial<MusterdClient>);
+    await handlers['lane_resolve']!({ id: 'lane1' });
+    expect(updateLane).toHaveBeenCalledWith('lane1', { state: 'done' });
+  });
 });
