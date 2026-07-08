@@ -1587,6 +1587,63 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(audit[0]!.detail).toContain('steer');
   });
 
+  it('defer act (ADR 109, inc3): re-sequences the Goal, bumps its epoch, and wakes the stale lane owner', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const stan = await post('/teams/dawn/members', { name: 'stan', kind: 'human' }, nickTok);
+    const stanTok = stan.json.human_credential;
+
+    // Two declared Goals; `spine` sorts first by wave.
+    await post('/teams/dawn/goals', { id: 'spine', title: 'Spine', wave: 1 }, nickTok);
+    await post('/teams/dawn/goals', { id: 'client', title: 'Client', wave: 2 }, nickTok);
+
+    // stan claims a lane on `spine` — building against epoch 0.
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'spine work', goal_id: 'spine', claim: true },
+      stanTok,
+    );
+    expect(lane.status).toBe(201);
+
+    // nick defers `spine` to the back (ts safely after the claim so the lane is provably stale).
+    const deferEnv = {
+      id: 'df-1',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'team' },
+      act: 'defer',
+      body: 'push spine behind client',
+      meta: { goal_id: 'spine' },
+      ts: Date.now() + 100_000,
+    };
+    const sent = await post('/teams/dawn/messages', { envelope: deferEnv }, nickTok);
+    expect(sent.status).toBe(201);
+
+    // Teeth #1 — the plan actually moved: `spine` is now `later` (sorts last) on epoch 1, so `next`
+    // recommends `client` instead. Derived, no stored column touched.
+    const goals = await get('/teams/dawn/goals', nickTok);
+    const spine = goals.json.goals.find((g: { id: string }) => g.id === 'spine');
+    expect(spine).toMatchObject({ wave: 'later', epoch: 1 });
+    const next = await get('/teams/dawn/next', nickTok);
+    expect(next.json.next_goal?.id).toBe('client');
+
+    // Teeth #2 — targeted invalidation: stan (the stale lane's owner) got a directed stale_plan wake.
+    const inbox = await get('/teams/dawn/inbox?unread=1', stanTok);
+    const stale = inbox.json.messages.filter(
+      (m: { meta?: { lane_warning?: { kind?: string } } }) =>
+        m.meta?.lane_warning?.kind === 'stale_plan',
+    );
+    expect(stale).toHaveLength(1);
+    expect(stale[0].meta.lane_warning.subject).toBe(lane.json.lane.id);
+
+    // ...and the board reflects it live.
+    const board = await get('/teams/dawn/lanes', stanTok);
+    expect(
+      board.json.warnings.filter((w: { kind: string }) => w.kind === 'stale_plan'),
+    ).toHaveLength(1);
+  });
+
   it('delivery ledger (ADR 090): logged → seen (cursor) → answered, on the endpoint and the report', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

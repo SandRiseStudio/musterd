@@ -42,9 +42,9 @@ function renderLane(l: Lane): string {
 
 function renderWarnings(warnings: LaneWarning[]): void {
   for (const w of warnings) {
-    process.stdout.write(
-      `${theme.warn('⚠')} ${w.kind}: ${w.detail} ${theme.meta(`(lane ${w.with})`)}\n`,
-    );
+    // For stale_plan the `with` is the moved Goal; for the others it's the other lane.
+    const ref = w.kind === 'stale_plan' ? `goal ${w.with}` : `lane ${w.with}`;
+    process.stdout.write(`${theme.warn('⚠')} ${w.kind}: ${w.detail} ${theme.meta(`(${ref})`)}\n`);
   }
   if (warnings.length > 0) {
     process.stdout.write(theme.meta('advisory only — coordinate or adjust; never blocked') + '\n');

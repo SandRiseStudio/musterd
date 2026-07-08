@@ -53,6 +53,7 @@ import {
   openLane,
   updateLane,
 } from '../store/lanes.js';
+import { staleLaneWarnings } from '../store/staleness.js';
 import {
   addMember,
   authMember,
@@ -1174,6 +1175,21 @@ export async function handleHttp(
         // (A human fanned out over several attested sessions on different models is the one ambiguous
         // case; the stateless request carries nothing to disambiguate it.)
         const result = routeEnvelope(ctx, team, member, env);
+        // Dependency-targeted invalidation (ADR 109, ADR 088 §5): a `defer` — or a `steer` that names a
+        // Goal — bumps that Goal's epoch, so any live lane claimed against the older epoch (on the Goal,
+        // or building on a lane on it) is now stale. Wake exactly those owners, never the team. Rides the
+        // same directed-wake helper as contention warnings; best-effort, warn-never-block.
+        if (env.act === 'defer' || env.act === 'steer') {
+          const goalId = (env.meta as { goal_id?: unknown } | null | undefined)?.goal_id;
+          if (typeof goalId === 'string' && goalId.trim().length > 0) {
+            deliverLaneWarnings(
+              ctx,
+              team,
+              member,
+              staleLaneWarnings(ctx.db, team.id, team.slug, goalId),
+            );
+          }
+        }
         const ack = rowToEnvelope(
           result.message,
           team.slug,
@@ -1197,7 +1213,14 @@ export async function handleHttp(
             ? { goalId: url.searchParams.get('goal')! }
             : {}),
         });
-        const warnings = boardWarnings(ctx.db, team.id, team.slug, lanes);
+        // Contention warnings (ADR 083) + staleness warnings (ADR 109 §5), one board read. Staleness is
+        // team-wide (a Goal's epoch is a team fact); intersect it with the lanes this filtered view shows
+        // so `?mine=1` / `?goal=` scopes carry only their own stale flags.
+        const shown = new Set(lanes.map((l) => l.id));
+        const warnings = [
+          ...boardWarnings(ctx.db, team.id, team.slug, lanes),
+          ...staleLaneWarnings(ctx.db, team.id, team.slug).filter((w) => shown.has(w.subject)),
+        ];
         return sendJson(res, 200, { lanes, warnings });
       }
 

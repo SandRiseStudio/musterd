@@ -47,14 +47,20 @@ export const LaneSchema = z.object({
 });
 export type Lane = z.infer<typeof LaneSchema>;
 
-/** The two Phase-1 contention signals. Advisory always — a warning never fails a verb. */
+/**
+ * The lane contention + staleness signals. Advisory always — a warning never fails a verb.
+ * Phase-1 (ADR 083): `unmet_dependency`, `surface_overlap`. Increment 3 (ADR 109 / ADR 088 §5) adds the
+ * two staleness signals the interrupt line can't catch: `stale_plan` (the lane's own Goal moved epoch
+ * since it was claimed) and `stale_dependency` (a lane it builds on had its Goal move). Both are
+ * owner-directed, never broadcast — directory-based invalidation over the goal_id join + depends_on edge.
+ */
 export const LaneWarningSchema = z.object({
-  kind: z.enum(['unmet_dependency', 'surface_overlap']),
-  /** The lane the acting party touched. */
+  kind: z.enum(['unmet_dependency', 'surface_overlap', 'stale_plan', 'stale_dependency']),
+  /** The lane the acting party touched (staleness: the stale lane itself). */
   subject: z.string(),
-  /** The other lane involved (the depended-on lane / the overlapping lane). */
+  /** The other party: the depended-on/overlapping lane, or — for `stale_plan` — the moved Goal id. */
   with: z.string(),
-  /** The other lane's owner (who gets the directed wake); null if unowned. */
+  /** Who gets the directed wake (contention: the other lane's owner; staleness: the stale lane's owner); null if unowned. */
   owner: z.string().nullable(),
   detail: z.string(),
 });
