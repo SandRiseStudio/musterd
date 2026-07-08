@@ -757,6 +757,18 @@ const RAW: RawItem[] = [
     dependsOn: ['stale-plan-detection', 'insight-engine'],
   },
   {
+    id: 'record-honesty',
+    title: 'Keep the declared record honest — truth check + the steward seat',
+    shipped: { prs: [174, 175, 176] },
+    category: 'insights',
+    blurb:
+      'The roadmap can’t silently lie: its shipped-status is derived from a verifiable anchor and checked against git + ADR statuses, and a standing steward seat hunts the drift a static check can’t see.',
+    detail:
+      'Grew out of a live gap — `roadmap:check` only proved ROADMAP.md matched its source, not that the source was true, so a shipped item sat mismarked. Two halves. **Static (PR #174):** the roadmap now dogfoods its own ADR 084 pattern — `status` is *derived* from a `shipped: { prs }` anchor, and `roadmap-truth:check` verifies every shipped item against a merged-PR commit and its freezing ADR’s own Status line, so the data can’t overclaim or drift from its ADR. **Agentic (ADR 112, PR #175/#176):** a standing **steward seat** — a teammate, not a cron (it owns and *chases* its output via the reachability ladder, so proposals don’t rot) — runs a deterministic drift scan weekly and opens a self-updating tracking issue for the discovery a linter is blind to (unmarked features, stale prose, shipped-but-unmarked items). Per-task autonomy (`propose` vs `auto-merge`) is a reusable knob; the static checks are the seatbelt that makes the agent safe. This very item was declared *because the steward flagged its own runtime as undeclared work* — the loop closing on itself. Next: draft-PR/auto-merge/agent-drafting modes (secret-gated) and the reachability chase via daemon residency.',
+    refs: [adr(112, 'ADR 112'), adr(84, 'ADR 084'), adr(111, 'ADR 111')],
+    dependsOn: ['insight-engine'],
+  },
+  {
     id: 'harness-residency',
     wave: 'later',
     title: 'musterd gives any harness residency (resume the offline)',
