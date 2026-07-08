@@ -46,6 +46,14 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
   { at: 3600, ev: { kind: 'resolve', who: 'Fen' } },
   { at: 3700, ev: { kind: 'speech', who: 'Fen', text: 'fixed — resolving the thread', tone: 'success' } },
   { at: 4200, ev: { kind: 'note', from: 'Ada', to: 'Cy', tone: 'info' } },
+  // Steering trio (ADR 103): a challenge questions a direction, an interrupt-class steer redirects it,
+  // and a defer pushes a Goal later — a board-wide pulse.
+  { at: 4700, ev: { kind: 'challenge', from: 'Dev', to: 'Bo', urgent: false } },
+  { at: 4800, ev: { kind: 'speech', who: 'Dev', text: 'why render.ts before the seating fix? can you justify the order?', tone: 'challenge' } },
+  { at: 5600, ev: { kind: 'steer', from: 'Ada', to: 'Hana', urgent: true } },
+  { at: 5700, ev: { kind: 'speech', who: 'Ada', text: 'change of plan — drop the profiling, the deploy is what matters now', tone: 'steer' } },
+  { at: 6600, ev: { kind: 'defer', who: 'Cy' } },
+  { at: 6700, ev: { kind: 'speech', who: 'Cy', text: 'deferring the firehose Goal to next wave', tone: 'lane' } },
 ];
 const LOOP = 5600;
 
@@ -139,6 +147,10 @@ function OfficePreviewPage() {
         <button className="lc__pbtn" title="urgent help (run)" onClick={() => fire({ kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' })}>!</button>
         <button className="lc__pbtn" title="handoff (carry box)" onClick={() => fire({ kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' })}>↦</button>
         <button className="lc__pbtn" title="broadcast (megaphone)" onClick={() => fire({ kind: 'megaphone', from: 'Ivy' })}>📣</button>
+        <span className="lc__pbtn-sep" />
+        <button className="lc__pbtn" title="steer (interrupt-class redirect)" onClick={() => fire({ kind: 'steer', from: 'Ada', to: 'Dev', urgent: true })}>↪</button>
+        <button className="lc__pbtn" title="challenge (justify?)" onClick={() => fire({ kind: 'challenge', from: 'Cy', to: 'Bo', urgent: false })}>🤔</button>
+        <button className="lc__pbtn" title="defer (plan mutation → board pulse)" onClick={() => fire({ kind: 'defer', who: 'Fen' })}>»</button>
         <span className="lc__pbtn-sep" />
         <button className="lc__pbtn" title="ambient gesture: stretch" onClick={() => handleRef.current?.pokeGesture(1)}>🙆</button>
         <button className="lc__pbtn" title="ambient gesture: glance" onClick={() => handleRef.current?.pokeGesture(2)}>👀</button>

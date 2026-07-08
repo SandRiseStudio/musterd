@@ -568,6 +568,31 @@ export function mountOffice(
       case 'resolve':
         pushCue(ev.who, '#5cd49a', '✓');
         break;
+      case 'steer': {
+        // Interrupt-class (ADR 103): a room-wide magenta sweep everyone feels, and — when the steer
+        // names a member — an urgent redirect run over to them. If the target is gone (or it's a team
+        // steer), the sweep plus a bold urgent marker at the sender carry it.
+        const col = toneColor('steer');
+        pushWave(ev.from, col);
+        if (!ev.to || !actors.walk(ev.from, { kind: 'help', to: ev.to, urgent: true })) {
+          pushCue(ev.from, col, '↪', true);
+        }
+        break;
+      }
+      case 'challenge': {
+        // An epistemic "justify?" — a question mark over the challenger, mirrored over the challenged
+        // party when it's directed. Urgent only when flagged (bolder ring + glyph then).
+        const col = toneColor('challenge');
+        pushCue(ev.from, col, '?', ev.urgent);
+        if (ev.to) pushCue(ev.to, col, '?', ev.urgent);
+        break;
+      }
+      case 'defer':
+        // A plan mutation on a Goal — the board shifts, so it pulses out across the room in the lane
+        // family rather than sitting as a single-seat cue.
+        pushCue(ev.who, toneColor('lane'), '');
+        pushWave(ev.who, toneColor('lane'));
+        break;
     }
     lastActive = performance.now(); // arm the afterglow tail (#5) off this real act
     ensureLoop();

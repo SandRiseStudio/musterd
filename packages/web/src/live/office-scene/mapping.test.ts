@@ -58,6 +58,46 @@ describe('actToEvent', () => {
     expect(actToEvent(env('resolve', { thread: 't1' }))).toEqual({ kind: 'resolve', who: 'ada' });
   });
 
+  it('maps steer to an interrupt-class redirect, directed or team-wide, escalating on urgent', () => {
+    // Directed steer carries its target so the office runs a redirect over to them.
+    expect(actToEvent(env('steer'))).toEqual({ kind: 'steer', from: 'ada', to: 'ben', urgent: false });
+    expect(actToEvent(env('steer', { meta: { urgent: true } }))).toEqual({
+      kind: 'steer',
+      from: 'ada',
+      to: 'ben',
+      urgent: true,
+    });
+    // A team steer has no member target — the room-wide sweep carries it.
+    expect(actToEvent(env('steer', { to: { kind: 'team' } }))).toEqual({
+      kind: 'steer',
+      from: 'ada',
+      to: null,
+      urgent: false,
+    });
+  });
+
+  it('maps challenge to a question at the challenger (and the challenged, when directed)', () => {
+    expect(actToEvent(env('challenge'))).toEqual({
+      kind: 'challenge',
+      from: 'ada',
+      to: 'ben',
+      urgent: false,
+    });
+    expect(actToEvent(env('challenge', { to: { kind: 'team' }, meta: { urgent: true } }))).toEqual({
+      kind: 'challenge',
+      from: 'ada',
+      to: null,
+      urgent: true,
+    });
+  });
+
+  it('maps defer to a sender-anchored plan mutation (its target is a Goal, not a member)', () => {
+    expect(actToEvent(env('defer', { meta: { goal_id: 'g1', wave: 3 } }))).toEqual({
+      kind: 'defer',
+      who: 'ada',
+    });
+  });
+
   it('returns null for acts it does not animate', () => {
     expect(actToEvent(env('nope' as Act))).toBeNull();
   });

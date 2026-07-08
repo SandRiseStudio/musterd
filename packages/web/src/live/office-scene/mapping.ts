@@ -47,6 +47,14 @@ export function actToEvent(env: Envelope): OfficeEvent | null {
       return { kind: 'wait', who: from };
     case 'resolve':
       return { kind: 'resolve', who: from };
+    // Steering acts (ADR 103) — a redirect is directed at a member (or the team); `defer` is a plan
+    // mutation and always sender-anchored (its target is a Goal, not a member).
+    case 'steer':
+      return { kind: 'steer', from, to: to.kind === 'member' ? to.name : null, urgent };
+    case 'challenge':
+      return { kind: 'challenge', from, to: to.kind === 'member' ? to.name : null, urgent };
+    case 'defer':
+      return { kind: 'defer', who: from };
     default:
       return null;
   }

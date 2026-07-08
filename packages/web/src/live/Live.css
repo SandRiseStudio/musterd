@@ -29,6 +29,8 @@
   --lc-info: #5b7fa6;
   --lc-handoff: #8a5fd6; /* violet — handoff (a distinct act tone, dark enough for cream) */
   --lc-lane: #5a52c9; /* indigo — lane transitions (ADR 102), handoff's family so the cluster reads as one */
+  --lc-steer: #c9418f; /* magenta-rose — steer (ADR 103): interrupt-class redirect, the loudest steering act */
+  --lc-challenge: #2f8fb3; /* cyan — challenge (ADR 103): the epistemic "justify this or reconsider" */
   --lc-agent: #1a9e88;
   --lc-human: #d9557d;
 
@@ -927,6 +929,46 @@
 .lc-seat__dot--off {
   background: var(--lc-faint);
 }
+/* Reclaimable (ADR 105): the seat reads offline, but it's held within its reclaim grace — reconnecting,
+   not gone. A slow amber breathe distinguishes it from a cold seat without shouting. */
+.lc-seat__dot--recon {
+  background: var(--lc-accent);
+  animation: lc-recon-breathe 1.6s var(--lc-ease) infinite;
+}
+@keyframes lc-recon-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-accent) 60%, transparent);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 7px color-mix(in srgb, var(--lc-accent) 70%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-seat__dot--recon {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+/* A reclaimable seat isn't as dim as a cold one — it's coming back. */
+.lc-seat--recon {
+  opacity: 0.75;
+}
+.lc-seat__recon {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  letter-spacing: -0.01em;
+  color: var(--lc-accent-bright);
+  padding: 0 6px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 34%, transparent);
+  background: color-mix(in srgb, var(--lc-accent) 10%, transparent);
+}
 .lc-seat__avatar {
   flex: 0 0 auto;
   width: 22px;
@@ -1248,6 +1290,18 @@
   color: var(--lc-agent);
   border-color: color-mix(in srgb, var(--lc-agent) 34%, transparent);
   background: color-mix(in srgb, var(--lc-agent) 11%, transparent);
+}
+/* Steering acts (ADR 103): steer reads loudest (interrupt-class), challenge a calmer question tone;
+   defer reuses --lc-badge--lane (its work-moving family). */
+.lc-badge--steer {
+  color: var(--lc-steer);
+  border-color: color-mix(in srgb, var(--lc-steer) 48%, transparent);
+  background: color-mix(in srgb, var(--lc-steer) 16%, transparent);
+}
+.lc-badge--challenge {
+  color: var(--lc-challenge);
+  border-color: color-mix(in srgb, var(--lc-challenge) 42%, transparent);
+  background: color-mix(in srgb, var(--lc-challenge) 13%, transparent);
 }
 .lc-badge {
   gap: 5px;

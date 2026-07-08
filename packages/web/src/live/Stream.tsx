@@ -307,6 +307,11 @@ const ACT_GLYPH: Record<string, ReactElement> = {
   lane_state: <path d="M2 2.6h5.2v6.8H2zM9 2.4v7M9 2.6h2.4l-.9 1.3.9 1.3H9" />,
   lane_resolve: <path d="M2 2.6h5.2v6.8H2zm1.1 4 1.6 1.6L7.3 5" />,
   lane_handoff: <path d="M2 6h5M5.5 3.5 8 6l-2.5 2.5M8.6 2.5h1.4v7H8.6" />,
+  // Steering trio (ADR 103): steer = a redirecting arrow (change of course); challenge = a raised
+  // pennant (an objection to justify); defer = a skip-forward chevron (push later on the plan).
+  steer: <path d="M2.7 9.6V6.2C2.7 4.7 3.9 4 5.2 4h3.8M6.9 2.1 9.2 4.2 6.9 6.3" />,
+  challenge: <path d="M3.4 2v8M3.4 2.6h5.2L7.3 4.4l1.3 1.8H3.4" />,
+  defer: <path d="M2.7 3.2 5.5 6l-2.8 2.8M6.1 3.2 8.9 6l-2.8 2.8" />,
 };
 
 /**
