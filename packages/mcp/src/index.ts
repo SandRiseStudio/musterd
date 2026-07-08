@@ -89,10 +89,51 @@ export function primerInstructions(config: McpConfig): string {
  * drift check can import it without the MCP SDK; re-exported here for normal consumers. */
 export { TOOL_NAMES } from './toolNames.js';
 
-/** Build (but do not connect) the MCP server with the musterd tools registered. */
+/** Tools that must NOT trigger the deferred launch autojoin: an explicit `team_join` supersedes the
+ * implicit one (firing both would claim twice), and a `team_leave` must never cause a join. */
+const AUTOJOIN_EXEMPT_TOOLS = new Set(['team_join', 'team_leave']);
+
+/**
+ * Arm `run` to fire once, before the FIRST real tool call (probe safety — the root cause of the
+ * seat-supersession ping-pong). A harness health probe (`claude mcp get musterd`, doctor, the ADR 060
+ * SessionStart verify) launches this adapter, completes the MCP `initialize` handshake, and exits —
+ * so anything that runs at boot runs on every probe. The launch autojoin used to claim the seat at
+ * boot, which meant each probe fired a real one-shot claim that displaced the live same-workspace
+ * session (ADR 068 displacement) milliseconds before dying. Tool calls are the boundary probes never
+ * cross: a real session's first act is a tool call (the SessionStart hook asks for `team_inbox_check`
+ * immediately), a probe's is never. Memoized: concurrent and later calls share the one join.
+ */
+function armAutojoinOnFirstToolCall(server: McpServer, run: () => Promise<void>): void {
+  let fired: Promise<void> | undefined;
+  const original = server.registerTool.bind(server) as (
+    name: string,
+    config: unknown,
+    cb: (...args: unknown[]) => unknown,
+  ) => unknown;
+  (server as { registerTool: unknown }).registerTool = (
+    name: string,
+    config: unknown,
+    cb: (...args: unknown[]) => unknown,
+  ) =>
+    original(
+      name,
+      config,
+      AUTOJOIN_EXEMPT_TOOLS.has(name)
+        ? cb
+        : async (...args: unknown[]) => {
+            await (fired ??= run());
+            return cb(...args);
+          },
+    );
+}
+
+/** Build (but do not connect) the MCP server with the musterd tools registered. `onFirstToolCall`
+ * (when given) runs once before the first non-join tool call — `main()` passes the launch autojoin
+ * here so a health probe that never calls a tool never claims a seat. */
 export function buildMcpServer(
   client: MusterdClient,
   config: ReturnType<typeof loadMcpConfig>,
+  opts: { onFirstToolCall?: () => Promise<void> } = {},
 ): McpServer {
   const server = new McpServer(
     { name: 'musterd', version: '0.2.0' },
@@ -101,6 +142,9 @@ export function buildMcpServer(
   // Patch registerTool before any tool registers, so every handler runs inside a
   // `musterd.tool.call` span (ADR 089) — the active span the ADR 011 meta.otel plumbing needs.
   instrumentTools(server, client, config.team);
+  // Patched second so the deferred autojoin runs INSIDE the first tool's span — the join latency it
+  // causes is attributed to the call that triggered it.
+  if (opts.onFirstToolCall) armAutojoinOnFirstToolCall(server, opts.onFirstToolCall);
   registerJoin(server, client, config);
   registerLeave(server, client, config);
   registerSend(server, client, config);
@@ -115,11 +159,13 @@ export function buildMcpServer(
 }
 
 /**
- * Launch-time autojoin (claim-on-first-use, ADR 032). Fires ⇔ a default claim exists: a session with
- * a concrete identity just `join()`s (today's `MUSTERD_AUTOJOIN=1` path); a pending session with a
- * `seat`/`role` folder policy auto-claims that seat and occupies it. A `chat` policy never
- * auto-claims — the session stays a pending presence until a human names it. Best-effort: a failure
- * is reported to stderr and leaves the session pending/dormant rather than crashing the adapter.
+ * The session autojoin (claim-on-first-use, ADR 032) — deferred to the first tool call by
+ * `armAutojoinOnFirstToolCall` so a health probe never fires it. Fires ⇔ a default claim exists: a
+ * session with a concrete identity just `join()`s (today's `MUSTERD_AUTOJOIN=1` path); a pending
+ * session with a `seat`/`role` folder policy auto-claims that seat and occupies it. A `chat` policy
+ * never auto-claims — the session stays a pending presence until a human names it. Best-effort: a
+ * failure is reported to stderr and leaves the session pending/dormant rather than crashing the
+ * adapter.
  */
 export async function autojoin(client: MusterdClient, config: McpConfig): Promise<void> {
   try {
@@ -182,7 +228,12 @@ async function main(): Promise<void> {
     writePendingMarker(config);
     stopWatcher = startResolutionWatcher(client, config);
   }
-  const server = buildMcpServer(client, config);
+  // The launch autojoin is DEFERRED to the first tool call (probe safety, see
+  // armAutojoinOnFirstToolCall): a health probe that only completes `initialize` must not claim —
+  // the boot-time claim is what let every `claude mcp get musterd` displace the live seat.
+  const server = buildMcpServer(client, config, {
+    onFirstToolCall: () => autojoin(client, config),
+  });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
@@ -199,8 +250,6 @@ async function main(): Promise<void> {
   client.onReplaced = () => {
     void teardown().finally(() => process.exit(0));
   };
-
-  await autojoin(client, config);
 
   installShutdownHandlers({ close: teardown, transport });
 }
