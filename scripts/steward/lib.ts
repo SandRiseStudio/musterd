@@ -107,3 +107,22 @@ export function anchoredPRs(): Set<number> {
   }
   return s;
 }
+
+/**
+ * ADR numbers a **shipped** item already stands for — its `frozenBy` plus any "ADR NNN" in its `refs`
+ * labels. A merged feature citing one of these is part of an already-declared shipped arc (e.g. a
+ * follow-up PR on an ADR whose item shipped), so the unmarked-feature finder treats it as covered —
+ * which keeps a multi-PR arc from re-flagging every increment.
+ */
+export function shippedArcAdrs(): Set<number> {
+  const s = new Set<number>();
+  for (const it of ROADMAP) {
+    if (it.status !== 'shipped') continue;
+    if (it.frozenBy !== undefined) s.add(it.frozenBy);
+    for (const r of it.refs ?? []) {
+      const m = r.label.match(/ADR\s+0*(\d+)/i);
+      if (m) s.add(Number(m[1]));
+    }
+  }
+  return s;
+}
