@@ -44,8 +44,10 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Tests
-        run: pnpm test
+      # `pnpm coverage` runs the full suite AND enforces the per-package line floors (vitest.config.ts),
+      # so a drop below the floor fails the gate — closes the silent coverage-drift gap (ADR 106).
+      - name: Tests + coverage
+        run: pnpm coverage
 
       # prettier + roadmap:check + arch-trees:check + obs-evals:check + guidance:check + vocab:check
       - name: Gates (format + docs)
