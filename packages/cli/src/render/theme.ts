@@ -42,6 +42,8 @@ export const theme = {
   err: (s: string) => colors.red(s),
   dim: (s: string) => colors.dim(s),
   bold: (s: string) => colors.bold(s),
+  /** A day-group section header in the inbox (`Today`, `Yesterday`, `Monday · Jul 7`) — quiet-bold. */
+  dayHeader: (s: string) => colors.bold(colors.gray(s)),
   /** The brand chip: text reversed out of a solid mustard block — the CLI wordmark lockup (ADR 114). */
   brandmark: (s: string) => colors.bold(colors.inverse(colors.yellow(s))),
 
@@ -75,4 +77,30 @@ export function clock(ts: number): string {
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${hh}:${mm}`;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Midnight (local) of the day `d` falls in, as ms — the unit day-distance is measured in. */
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/**
+ * A human day label for grouping the inbox by calendar day (local time): `Today` / `Yesterday` /
+ * `Monday · Jul 7` within the last week / `Jul 1` earlier this year / `7/1/26` in a prior year. Fixed
+ * month/weekday names (not `toLocaleDateString`) keep the output deterministic across locale + CI TZ.
+ * `now` is injectable so callers and tests aren't at the mercy of the wall clock.
+ */
+export function dayLabel(ts: number, now: number = Date.now()): string {
+  const d = new Date(ts);
+  const diffDays = Math.round((startOfDay(new Date(now)) - startOfDay(d)) / 86_400_000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays > 1 && diffDays < 7)
+    return `${WEEKDAYS[d.getDay()]} · ${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  if (d.getFullYear() === new Date(now).getFullYear())
+    return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(-2)}`;
 }

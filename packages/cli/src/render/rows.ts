@@ -5,7 +5,7 @@ import type {
   MemberSummary,
   PresenceStatus,
 } from '@musterd/protocol';
-import { clock, theme } from './theme.js';
+import { clock, dayLabel, theme } from './theme.js';
 import { padEndVisible, termWidth, visibleLen, wrapText } from './ui.js';
 
 export type KindOf = (name: string) => MemberKind;
@@ -53,6 +53,32 @@ function toLabel(to: Envelope['to'], kindOf: KindOf): string {
 }
 
 /** One message row: `HH:MM name [act] → to  body` with hanging-indent wrap at 80 cols. */
+/**
+ * The inbox body, grouped by calendar day (ADR: elite inbox). Messages come in ascending order and
+ * newest lands at the bottom (where the terminal cursor rests). Each day is announced once by a
+ * {@link theme.dayHeader} — `Today` / `Yesterday` / `Monday · Jul 7` — so a date is stated per day
+ * instead of never; rows keep a clean `HH:MM`. `cursorTs` drives the per-row unread marker.
+ */
+export function renderInbox(
+  messages: Envelope[],
+  kindOf: KindOf,
+  opts: { cursorTs: number; now?: number },
+): string {
+  const now = opts.now ?? Date.now();
+  const out: string[] = [];
+  let lastDay: string | null = null;
+  for (const m of messages) {
+    const day = dayLabel(m.ts, now);
+    if (day !== lastDay) {
+      // A blank line separates groups; the first header needs none.
+      out.push((lastDay === null ? '' : '\n') + theme.dayHeader(day));
+      lastDay = day;
+    }
+    out.push(renderMessageRow(m, kindOf, { unread: m.ts > opts.cursorTs }));
+  }
+  return out.join('\n');
+}
+
 export function renderMessageRow(
   env: Envelope,
   kindOf: KindOf,

@@ -72,6 +72,7 @@ import {
 } from '../store/members.js';
 import { clearMemory, getMemory, memoryEnvelope, saveMemory } from '../store/memory.js';
 import {
+  countInbox,
   latestStatusUpdate,
   listInbox,
   listTeamMessages,
@@ -1411,18 +1412,22 @@ export async function handleHttp(
         assertSeatCanRead(member);
         const unread = url.searchParams.get('unread') === '1';
         const since = url.searchParams.get('since');
+        const limitRaw = Number(url.searchParams.get('limit') ?? '');
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
         const cursor = getCursor(ctx.db, member.id);
         const rows = listInbox(ctx.db, member, {
           unreadOnly: unread,
           cursorTs: cursor.last_read_ts,
           ...(since ? { since: Number(since) } : {}),
+          ...(limit ? { limit } : {}),
         });
         const messages = rows.map((r) => {
           const from = getMemberById(ctx.db, r.from_member);
           const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
           return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
         });
-        return sendJson(res, 200, { messages, cursor });
+        // `total` is the full inbox size (visibility-scoped) so a bounded client can show "N of total".
+        return sendJson(res, 200, { messages, cursor, total: countInbox(ctx.db, member) });
       }
 
       // The whole team timeline — every envelope, not just the caller's inbox — for the firehose's

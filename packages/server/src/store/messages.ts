@@ -87,23 +87,48 @@ export function listInbox(
   opts: InboxOpts = {},
 ): MessageRow[] {
   const params: unknown[] = [member.team_id, member.id, member.id];
-  let sql = `SELECT * FROM messages
-     WHERE team_id = ?
+  let where = `WHERE team_id = ?
        AND (to_member = ? OR to_kind IN ('team','broadcast'))
        AND from_member != ?`;
   if (opts.unreadOnly) {
-    sql += ' AND ts > ?';
+    where += ' AND ts > ?';
     params.push(opts.cursorTs ?? 0);
   } else if (typeof opts.since === 'number') {
-    sql += ' AND ts > ?';
+    where += ' AND ts > ?';
     params.push(opts.since);
   }
-  sql += ' ORDER BY ts ASC, id ASC';
+  // With a limit, take the NEWEST `limit` (DESC + LIMIT) then re-sort ascending for display — an
+  // inbox is read most-recent-first, so a bounded view must keep the recent tail, not the oldest N
+  // (the `ts ASC LIMIT` bug that returned the wrong end; mirrors listTeamMessages' backfill).
   if (opts.limit) {
-    sql += ' LIMIT ?';
     params.push(opts.limit);
+    return db
+      .prepare<
+        unknown[],
+        MessageRow
+      >(`SELECT * FROM (SELECT * FROM messages ${where} ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC`)
+      .all(...params);
   }
-  return db.prepare<unknown[], MessageRow>(sql).all(...params);
+  return db
+    .prepare<unknown[], MessageRow>(`SELECT * FROM messages ${where} ORDER BY ts ASC, id ASC`)
+    .all(...params);
+}
+
+/**
+ * Total size of a member's inbox view (same visibility rule as {@link listInbox}, no cursor/limit) —
+ * the denominator behind the CLI's "showing N of TOTAL" footer, so a bounded default can honestly say
+ * how much history it elided. Cheap COUNT; unread is derived client-side from the cursor.
+ */
+export function countInbox(db: Database, member: { id: string; team_id: string }): number {
+  const row = db
+    .prepare<[string, string, string], { n: number }>(
+      `SELECT COUNT(*) AS n FROM messages
+        WHERE team_id = ?
+          AND (to_member = ? OR to_kind IN ('team','broadcast'))
+          AND from_member != ?`,
+    )
+    .get(member.team_id, member.id, member.id);
+  return row?.n ?? 0;
 }
 
 /**

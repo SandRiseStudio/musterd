@@ -102,12 +102,12 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
     actAs('dawn', 'bo', boToken);
 
     const inbox1 = await run(inboxCommand, []);
-    expect(inbox1.out).toContain('(1 unread)');
+    expect(inbox1.out).toContain('1 unread');
     expect(inbox1.out).toContain('hello bo');
 
     // reading advanced the cursor → second read shows 0 unread
     const inbox2 = await run(inboxCommand, []);
-    expect(inbox2.out).toContain('(0 unread)');
+    expect(inbox2.out).toContain('0 unread');
   });
 
   it('reports an empty inbox with the canonical string', async () => {

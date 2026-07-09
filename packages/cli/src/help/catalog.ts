@@ -354,10 +354,18 @@ export const CATALOG: readonly CommandEntry[] = [
     group: 'inbox',
     primary: true,
     detail:
-      'Your durable mailbox. `--watch` streams live; `--wait` blocks until the next directed act then ' +
-      'exits (pairs with /loop); `--interrupt-check` is silent unless an urgent act waits (the ADR 088 ' +
-      'PostToolUse interrupt hook).',
-    examples: ['musterd inbox', 'musterd inbox --unread', 'musterd inbox --wait --timeout 300'],
+      'Your durable mailbox. By default it shows a bounded RECENT window (newest last), grouped under ' +
+      'day headers (Today / Yesterday / Monday · Jul 7), and always includes every unread — reading ' +
+      'advances the cursor only past what it showed. `--limit <n>` resizes the window; `--limit 0` ' +
+      'shows the full history; `--peek` reads without marking anything read; `--unread` shows only new. ' +
+      '`--watch` streams live; `--wait` blocks until the next directed act then exits (pairs with /loop); ' +
+      '`--interrupt-check` is silent unless an urgent act waits (the ADR 088 PostToolUse interrupt hook).',
+    examples: [
+      'musterd inbox',
+      'musterd inbox --unread',
+      'musterd inbox --limit 40',
+      'musterd inbox --wait --timeout 300',
+    ],
   },
   {
     name: 'whoami',

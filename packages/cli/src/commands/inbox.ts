@@ -3,7 +3,7 @@ import type { Envelope, MemberKind } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { watchClaim } from '../client.js';
 import { wsBase, type Identity } from '../config.js';
-import { isActionNeeded, renderMessageRow } from '../render/rows.js';
+import { isActionNeeded, renderInbox, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { kindLookup, resolve, resolveRead } from './helpers.js';
 
@@ -13,6 +13,10 @@ export const WAIT_TIMEOUT_EXIT = 124;
 /** Default `--wait` bound (seconds): long enough to be a real event-wait, short enough that a dropped
  *  socket can't hang a `/loop` re-invoker forever (ADR 054). `--timeout 0` waits unbounded. */
 const DEFAULT_WAIT_TIMEOUT_S = 300;
+/** Default size of the bounded recent inbox view (ADR: elite inbox). `--limit 0` shows full history.
+ *  All unread are always shown even when they exceed this — the read cursor never advances past an
+ *  unread the view didn't render. */
+const DEFAULT_INBOX_WINDOW = 15;
 
 export async function inboxCommand(parsed: Parsed): Promise<number> {
   // --interrupt-check (ADR 088): the mid-loop interrupt line. A PostToolUse hook runs this at every
@@ -64,30 +68,56 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   }
 
   const unread = Boolean(parsed.flags['unread']);
-  const res = await http.inbox(team, { unread });
-  const messages = res.messages.filter((m) => matchesFilter(m, filter));
+  // Window size (ADR: elite inbox): a bounded recent view by default so the inbox never floods the
+  // terminal; `--limit <N>` resizes it, `--limit 0` shows the full history. `--all` is the separate
+  // firehose scope (handled above), not this count.
+  const limitStr = flagStr(parsed.flags, 'limit');
+  const window = limitStr !== undefined ? Number(limitStr) : DEFAULT_INBOX_WINDOW;
+  if (!Number.isInteger(window) || window < 0) {
+    process.stderr.write(`${theme.err('✗')} --limit must be a non-negative integer\n`);
+    return 2;
+  }
+
+  // The default is "recent window + ALL unread". The unread half is load-bearing for correctness: we
+  // advance the read cursor past what we display, so a bounded view that hid an unread would silently
+  // mark it read. Guarantee: if the oldest row in a bounded window is itself unread, there may be more
+  // unread older than the window — refetch every unread and show those instead, so nothing is elided
+  // and then consumed.
+  const bounded = window > 0 && !unread && !filtering;
+  const res = await http.inbox(team, unread ? { unread: true } : bounded ? { limit: window } : {});
+  const cursorTs = res.cursor.last_read_ts;
+  const total = res.total ?? res.messages.length;
+  let rows = res.messages;
+  if (bounded && rows.length > 0 && rows[0]!.ts > cursorTs) {
+    rows = (await http.inbox(team, { unread: true })).messages;
+  }
+  const messages = rows.filter((m) => matchesFilter(m, filter));
 
   if (parsed.flags['json']) {
     process.stdout.write(JSON.stringify(messages) + '\n');
     return 0;
   }
 
-  const unreadCount = countUnread(messages, res.cursor.last_read_ts, identity.name);
-  process.stdout.write(`${theme.accent('inbox')} — ${team} (${unreadCount} unread)\n`);
+  const unreadCount = countUnread(messages, cursorTs, identity.name);
+  const shown = messages.length;
+  const ofTotal = !filtering && total > shown ? theme.meta(` · ${shown} of ${total}`) : '';
+  process.stdout.write(
+    `${theme.accent('inbox')} — ${team} ${theme.meta(`· ${unreadCount} unread`)}${ofTotal}\n`,
+  );
   if (messages.length === 0) {
     process.stdout.write(theme.meta("inbox empty — nobody's mustered anything yet") + '\n');
     return 0;
   }
-  for (const m of messages) {
-    const isUnread = m.ts > res.cursor.last_read_ts;
-    process.stdout.write(renderMessageRow(m, kindOf, { unread: isUnread }) + '\n');
+  process.stdout.write('\n' + renderInbox(messages, kindOf, { cursorTs }) + '\n');
+
+  // Advance the read cursor to the NEWEST UNREAD we actually displayed — never past an unshown unread
+  // (the bounded-inbox invariant), and never at all when peeking or filtering (a lens must not consume).
+  if (!parsed.flags['peek'] && !filtering) {
+    const newestUnread = [...messages].reverse().find((m) => m.ts > cursorTs);
+    if (newestUnread) await http.markRead(team, newestUnread.id).catch(() => undefined);
   }
-  // Advance the read cursor unless peeking — or filtering (a narrowed lens must not mark the rest read).
-  if (!parsed.flags['peek'] && !filtering && messages.length > 0) {
-    const last = messages[messages.length - 1]!;
-    await http.markRead(team, last.id).catch(() => undefined);
-  }
-  process.stdout.write(theme.meta('musterd inbox --watch to follow live') + '\n');
+  const more = !filtering && total > shown ? 'musterd inbox --limit 0 for all history · ' : '';
+  process.stdout.write('\n' + theme.meta(`${more}musterd inbox --watch to follow live`) + '\n');
   return 0;
 }
 

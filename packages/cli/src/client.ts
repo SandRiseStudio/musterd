@@ -154,7 +154,7 @@ export class HttpClient {
   inbox(
     slug: string,
     opts: { unread?: boolean; limit?: number } = {},
-  ): Promise<{ messages: Envelope[]; cursor: { last_read_ts: number } }> {
+  ): Promise<{ messages: Envelope[]; cursor: { last_read_ts: number }; total?: number }> {
     const q = new URLSearchParams();
     if (opts.unread) q.set('unread', '1');
     if (opts.limit) q.set('limit', String(opts.limit));
