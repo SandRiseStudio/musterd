@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // vi.mock calls below are hoisted above these imports, so init.js resolves the mocked deps.
-import { cachedTeamLive, runInit } from './init.js';
+import { cachedTeamLive, missingGitignoreEntries, runInit } from './init.js';
 
 // Shared, hoisted test doubles the mock factories below close over.
 const h = vi.hoisted(() => {
@@ -383,8 +383,8 @@ describe('runInit — add-agent happy path', () => {
 });
 
 describe('runInit — secret/gitignore handling', () => {
-  it('offers to gitignore an in-tree secret config and appends it', async () => {
-    // binding path already ignored → "already covered"; the harness secret is not → offer to add.
+  it('offers to gitignore the in-tree secret config AND the provisioned guidance, appending both', async () => {
+    // binding path already ignored → "already covered"; the harness secret + the guidance skill are not.
     writeFileSync(join(cwd, '.gitignore'), '.musterd/binding.json\n');
     h.harness.configure.mockResolvedValue({
       target: '.cursor/mcp.json',
@@ -393,10 +393,12 @@ describe('runInit — secret/gitignore handling', () => {
     });
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
     h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role
-    h.confirmQueue.push(true, true, true, true); // autojoin, connect, gitignore-add, primer
+    // autojoin, connect, secret-gitignore, guidance-gitignore (ADR 085), primer — content-asserted below.
+    h.confirmQueue.push(true, true, true, true, true);
     expect(await runInit()).toBe(0);
     const gi = readFileSync(join(cwd, '.gitignore'), 'utf8');
-    expect(gi).toContain('.cursor/mcp.json');
+    expect(gi).toContain('.cursor/mcp.json'); // the token config (warnSecretConfig)
+    expect(gi).toContain('.musterd/skill/SKILL.md'); // the provisioned guidance (offerGitignoreGuidance)
     expect(gi).toContain('# musterd');
   });
 });
@@ -410,5 +412,38 @@ describe('cachedTeamLive', () => {
   it('is false when the probe rejects (stale token / wrong db)', async () => {
     h.http.inbox.mockRejectedValue(new Error('unauthorized'));
     expect(await cachedTeamLive('http://x', 'dawn', 'tok')).toBe(false);
+  });
+});
+
+describe('missingGitignoreEntries — which guidance paths still need ignoring (ADR 085)', () => {
+  const files = [
+    '.musterd/skill/SKILL.md',
+    '.cursor/rules/musterd.mdc',
+    '.cursor/commands/musterd-standup.md',
+  ];
+
+  it('returns every path when the .gitignore covers none', () => {
+    expect(missingGitignoreEntries('.claude/\n*.db\n', files)).toEqual(files);
+  });
+
+  it('drops paths already present, exact-line and leading-slash forms', () => {
+    const body = '.cursor/rules/musterd.mdc\n/.musterd/skill/SKILL.md\n';
+    expect(missingGitignoreEntries(body, files)).toEqual(['.cursor/commands/musterd-standup.md']);
+  });
+
+  it('returns none when all are covered (idempotent re-run)', () => {
+    const body = files.join('\n') + '\n';
+    expect(missingGitignoreEntries(body, files)).toEqual([]);
+  });
+
+  it('skips empties and out-of-tree paths, and de-duplicates', () => {
+    expect(
+      missingGitignoreEntries('', [
+        '',
+        '../outside',
+        '.cursor/rules/musterd.mdc',
+        '.cursor/rules/musterd.mdc',
+      ]),
+    ).toEqual(['.cursor/rules/musterd.mdc']);
   });
 });
