@@ -176,3 +176,40 @@ describe('claimCode stability (ADR 087 — a reconnect must not orphan --for <co
     expect(loadMcpConfig(roleEnv).claimCode).not.toBe(loadMcpConfig(roleEnv).claimCode);
   });
 });
+
+describe('model attestation ladder (ADR 101 — attest by default)', () => {
+  function bindingWithModel(model?: string): string {
+    const p = join(dir, 'binding-model.json');
+    writeFileSync(
+      p,
+      JSON.stringify({
+        server: 'http://localhost:9999',
+        team: 'lab',
+        agent_key: 'mskey_from_file',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'Ui' },
+        ...(model !== undefined ? { model } : {}),
+      }),
+    );
+    return p;
+  }
+
+  it('attests the model persisted in binding.json when the env declares none (the by-default fix)', () => {
+    // A `musterd agent --model qwen3:4b`-provisioned seat: the adapter env carries no MUSTERD_MODEL,
+    // but binding.json does — so the seat attests instead of rotting to `unknown`.
+    expect(loadMcpConfig({ MUSTERD_BINDING: bindingWithModel('qwen3:4b') }).model).toBe('qwen3:4b');
+  });
+
+  it('lets an env declaration override the binding (MUSTERD_MODEL wins, e.g. a /model switch)', () => {
+    expect(
+      loadMcpConfig({
+        MUSTERD_BINDING: bindingWithModel('qwen3:4b'),
+        MUSTERD_MODEL: 'claude-opus-4-8',
+      }).model,
+    ).toBe('claude-opus-4-8');
+  });
+
+  it('stays honestly unknown when neither env nor binding declares a model', () => {
+    expect(loadMcpConfig({ MUSTERD_BINDING: bindingWithModel(undefined) }).model).toBeUndefined();
+  });
+});

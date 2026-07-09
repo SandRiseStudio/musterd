@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { BINDING_DIR, BINDING_FILE, type Binding } from '@musterd/protocol';
+import { BINDING_DIR, BINDING_FILE, type Binding, resolveAttestedModel } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { loadConfig, saveBinding, saveWorkspaceSpec } from '../config.js';
 import { CliError } from '../errors.js';
@@ -28,11 +28,16 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   const name = parsed.positionals[0];
   if (!name || /\s/.test(name)) {
     throw new CliError(
-      'usage: musterd agent <name> [--role <role>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]',
+      'usage: musterd agent <name> [--role <role>] [--model <id>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]',
       2,
     );
   }
   const role = flagStr(parsed.flags, 'role');
+  // Model attestation (ADR 101): persist a *declared* model into the seat's binding.json so the adapter
+  // attests by default instead of rotting to `unknown`. `--model` wins, else the ambient env the CLI
+  // runs in (MUSTERD_MODEL / ANTHROPIC_MODEL, via the shared resolver). Never a guess — undefined stays
+  // honestly `unknown` (warn-never-block); the `init --check` note catches an unattested live seat.
+  const model = flagStr(parsed.flags, 'model') ?? resolveAttestedModel(process.env);
 
   // Which harness to wire (ADR 038/085 registry — the same adapters `init` drives). Default to Claude
   // Code for back-compat; a bad id fails fast with the valid set rather than silently doing nothing.
@@ -108,6 +113,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     surface: harness.surface,
     claim: { mode: 'seat', name },
     ...(grant !== undefined ? { grant } : {}),
+    ...(model !== undefined ? { model } : {}),
   };
   saveBinding(ws.dir, binding);
   // Also write the secret-free committed launch spec (ADR: committed launch spec) so this worktree

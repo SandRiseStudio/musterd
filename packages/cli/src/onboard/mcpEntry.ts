@@ -21,6 +21,10 @@ export interface AgentBinding {
   claim: ClaimPolicy;
   /** Optional pre-issued grant (msgr_) → `MUSTERD_GRANT`, skips the approval lane. */
   grant?: string;
+  /** Optional harness-attested model id (ADR 101) → `MUSTERD_MODEL`, so the seat attests by default
+   *  instead of rotting to `unknown`. Only a *declared* value is baked (never a guess — a stale/wrong
+   *  model is worse than none). Mirrors the `binding.json` model field the adapter also reads. */
+  model?: string;
 }
 
 /** The env that binds an MCP session to its claim (05-mcp.md; v0.3 ADR 075 — agent key + claim).
@@ -40,6 +44,7 @@ export function buildMcpEnv(b: AgentBinding): Record<string, string> {
     MUSTERD_TEAM: b.team,
     ...(b.agent_key !== undefined ? { MUSTERD_AGENT_KEY: b.agent_key } : {}),
     ...(b.grant !== undefined ? { MUSTERD_GRANT: b.grant } : {}),
+    ...(b.model !== undefined ? { MUSTERD_MODEL: b.model } : {}),
     MUSTERD_SURFACE: b.surface,
   };
 }
