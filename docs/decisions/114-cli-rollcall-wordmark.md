@@ -23,23 +23,36 @@ since ADR 113 said the wordmark would not change.
 
 ## Decision
 
-The CLI banner is a **roll-call lockup**, not block art: three presence dots — online (green ●), away
-(mustard ●), offline (dim ○), the CLI's own `theme.presenceDot` glyphs — beside the lowercase mustard
-wordmark `musterd`, with the tagline hanging under the wordmark.
+The CLI banner is a **roll-call lockup**: three presence dots — online (green ●), away (mustard ●),
+offline (dim ○), the CLI's own `theme.presenceDot` glyphs — above a solid-block `musterd` logotype
+(ANSI-Shadow style) with the block faces in mustard and the drop-shadow edges dimmed for depth, closed
+by the tagline.
 
 ```
-● ● ○  musterd
-       muster your agents and humans into persistent teams
+● ● ○
+███╗   ███╗██╗   ██╗███████╗████████╗███████╗██████╗ ██████╗
+████╗ ████║██║   ██║██╔════╝╚══██╔══╝██╔════╝██╔══██╗██╔══██╗
+██╔████╔██║██║   ██║███████╗   ██║   █████╗  ██████╔╝██║  ██║
+██║╚██╔╝██║██║   ██║╚════██║   ██║   ██╔══╝  ██╔══██╗██║  ██║
+██║ ╚═╝ ██║╚██████╔╝███████║   ██║   ███████╗██║  ██║██████╔╝
+╚═╝     ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═════╝
+muster your agents and humans into persistent teams
 ```
 
-Why this over the other sketched directions (a trailing terminal cursor, an accent bar, a letterspaced
-wordmark): `muster` _means_ roll call — assembling the team and taking presence — and presence is the
-product. The dots reuse the exact glyphs the roster already speaks, so the mark shows the thing itself:
-a team, present. It is two lines instead of five, and every character is 16-color-safe.
+The enemy retired here is the **thin-outline figlet** (`_ __ ___ | |_ …`) that read as 1990s BBS art —
+not block letters as such. A _solid, filled_ block logotype in a single mustard accent (faces bright,
+shadow dimmed) reads as a contemporary wordmark, and it gives the banner the weight a one-line wordmark
+lacked. The roll-call dots are the signature: `muster` _means_ roll call — assembling the team, taking
+presence — and presence is the product, so the dots (reusing the roster's own glyphs) show the thing
+itself, a team present.
+
+Iteration note: the first cut of this ADR shipped a deliberately minimal one-line wordmark (`● ● ○
+musterd`); it read as underweight for a banner, so the wordmark gained solid-block presence the same
+day while keeping the roll-call concept. Recorded here rather than in a churn of superseding ADRs.
 
 Implemented in [`packages/cli/src/render/rows.ts`](../../packages/cli/src/render/rows.ts) `renderBanner`
 — still the single source of truth. [brand.md](../design/brand.md) §1 is updated in the same change; the
-two Figma briefs that froze the old block art carry a supersede note pointing here.
+two Figma briefs that froze the old thin-outline block carry a supersede note pointing here.
 
 ## Consequences
 

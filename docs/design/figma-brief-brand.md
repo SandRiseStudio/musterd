@@ -32,7 +32,7 @@ Frames:
 1. `wordmark/primary` (640×200) — lowercase `musterd` in JetBrains Mono, weight 700, letter-spacing 0, color `zinc-900` on `zinc-50`. The `-d` (final letter) filled `accent`.
 2. `wordmark/reversed` (640×200) — same, `zinc-50` on `zinc-900`, `-d` in `mustard-300`.
 3. `wordmark/mono` (640×200) — single color, all `zinc-900` (and a dark variant) — no accent, for stamping/embroidery-style use.
-4. `wordmark/ascii-block` (640×240) — **SUPERSEDED ([ADR 114](../decisions/114-cli-rollcall-wordmark.md)).** The block/figlet CLI banner was retired for the roll-call lockup (three presence dots + lowercase mustard `musterd`, `renderBanner` in `packages/cli/src/render/rows.ts`, the source of truth). This frame should be redrawn as that lockup on the next Figma sync; do not copy the block art back into the CLI.
+4. `wordmark/ascii-block` (640×240) — **SUPERSEDED ([ADR 114](../decisions/114-cli-rollcall-wordmark.md)).** The thin-outline figlet CLI banner was retired for the roll-call lockup: three presence dots above a solid-block `musterd` logotype (ANSI-Shadow style, mustard faces + dimmed shadow) with the tagline under it — `renderBanner` in `packages/cli/src/render/rows.ts` is the source of truth. Redraw this frame as that lockup on the next Figma sync; do not copy the old thin-outline art back into the CLI.
 
 ## Page: Color
 
