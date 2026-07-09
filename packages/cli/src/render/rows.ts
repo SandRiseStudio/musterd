@@ -1,9 +1,10 @@
-import type {
-  Activity,
-  Envelope,
-  MemberKind,
-  MemberSummary,
-  PresenceStatus,
+import {
+  MODEL_UNKNOWN,
+  type Activity,
+  type Envelope,
+  type MemberKind,
+  type MemberSummary,
+  type PresenceStatus,
 } from '@musterd/protocol';
 import { clock, dayLabel, theme } from './theme.js';
 import { padEndVisible, termWidth, visibleLen, wrapText } from './ui.js';
@@ -112,13 +113,19 @@ export function renderStatusHeader(
 }
 
 /**
- * The roster table for `status`: MEMBER KIND ROLE LIFECYCLE ACTIVITY.
+ * The roster table for `status`: MEMBER KIND ROLE MODEL LIFECYCLE ACTIVITY.
+ * MODEL is the current occupancy's harness-attested model (ADR 101) — absent → `unknown`.
  * ACTIVITY is last because its `working: …` label is unbounded — a free-flowing final
  * column never collides with the columns after it.
  */
 export function renderStatusTable(members: MemberSummary[], now = Date.now()): string {
   const header = theme.meta(
-    pad('MEMBER', 14) + pad('KIND', 8) + pad('ROLE', 14) + pad('LIFECYCLE', 18) + 'ACTIVITY',
+    pad('MEMBER', 14) +
+      pad('KIND', 8) +
+      pad('ROLE', 14) +
+      pad('MODEL', 20) +
+      pad('LIFECYCLE', 18) +
+      'ACTIVITY',
   );
   const rows = members.map((m) => {
     const name = theme.memberName(m.name, m.kind);
@@ -136,11 +143,20 @@ export function renderStatusTable(members: MemberSummary[], now = Date.now()): s
       padEndVisible(name, 14) +
       pad(m.kind, 8) +
       pad(m.role || '—', 14) +
+      pad(modelLabel(m), 20) +
       pad(lifecycle, 18) +
       activity
     );
   });
   return [header, ...rows].join('\n');
+}
+
+/** Occupancy-attested model for the roster (ADR 101). Offline / unattested → `unknown`. */
+const MODEL_COL_MAX = 18;
+function modelLabel(m: MemberSummary): string {
+  const raw = m.presences[0]?.model?.trim();
+  const model = raw && raw.length > 0 ? raw : MODEL_UNKNOWN;
+  return model.length > MODEL_COL_MAX ? model.slice(0, MODEL_COL_MAX - 1) + '…' : model;
 }
 
 /**
