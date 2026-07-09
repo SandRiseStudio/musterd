@@ -7,7 +7,7 @@ correcting PR.
 
 The claim below is intentionally **false** — it is the drift under test:
 
-> Plan epochs and dependency-targeted invalidation are not yet built (ADR 111).
+> Plan epochs and dependency-targeted invalidation shipped (ADR 111, PR #169).
 
 In reality that work shipped (ADR 111 is accepted). The steward should open a draft PR rewording the line
 to reflect that — or, minimally, flag it for a human. Either way, this fixture then gets removed.
