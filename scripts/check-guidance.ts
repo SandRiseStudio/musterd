@@ -14,18 +14,22 @@
  * Hermetic (the `check-arch-trees.ts` / `check-obs-evals.ts` pattern): imports the names straight from
  * dependency-light source modules, runs on Node's native TypeScript, no build step, no extra deps.
  */
-import { HELP } from '../packages/cli/src/help.ts';
+import { CATALOG } from '../packages/cli/src/help/catalog.ts';
 import { TOOL_NAMES } from '../packages/mcp/src/toolNames.ts';
 import { SKILL_CLI_COMMANDS, SKILL_MCP_TOOLS } from '../packages/protocol/src/guidance.ts';
 
 const problems: string[] = [];
 
-// Every CLI command the skill names must appear (as a `musterd <cmd>` usage line) in HELP.
+// Every CLI command the skill names must exist in the CLI command catalog (help/catalog.ts) — the
+// single source of truth the `HELP` text and both help renderers derive from. Importing the catalog
+// leaf (which has zero relative imports) keeps this check hermetic on Node's native TypeScript.
+const commandNames = new Set(CATALOG.map((c) => c.name));
 for (const cmd of SKILL_CLI_COMMANDS) {
-  if (!HELP.includes(`musterd ${cmd}`)) {
+  if (!commandNames.has(cmd)) {
     problems.push(
-      `skill names \`musterd ${cmd}\` but it is not in the CLI HELP (packages/cli/src/help.ts) — ` +
-        `renamed/removed? update SKILL_CLI_COMMANDS + the skill body in packages/protocol/src/guidance.ts.`,
+      `skill names \`musterd ${cmd}\` but it is not in the CLI command catalog ` +
+        `(packages/cli/src/help/catalog.ts) — renamed/removed? update SKILL_CLI_COMMANDS + the skill ` +
+        `body in packages/protocol/src/guidance.ts.`,
     );
   }
 }

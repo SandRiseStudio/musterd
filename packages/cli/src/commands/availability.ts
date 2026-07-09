@@ -2,6 +2,7 @@ import { AvailabilityStatusSchema } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { success } from '../render/ui.js';
 import { resolve } from './helpers.js';
 
 /**
@@ -41,7 +42,9 @@ export async function availabilityCommand(parsed: Parsed): Promise<number> {
   }
   const tail = until ? theme.meta(` until ${new Date(until).toISOString()}`) : '';
   process.stdout.write(
-    `${theme.ok('✓')} availability set to ${theme.accent(status.data)}${tail}\n`,
+    success(`availability set to ${theme.accent(status.data)}${tail}`, {
+      next: 'musterd status',
+    }) + '\n',
   );
   return 0;
 }

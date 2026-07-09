@@ -1,15 +1,47 @@
 import type { Act, MemberKind, PresenceStatus } from '@musterd/protocol';
-import pc from 'picocolors';
+import { createColors } from 'picocolors';
 
-/** ANSI color roles, mapped per brand.md §2. Honors NO_COLOR / non-TTY via picocolors. */
+/**
+ * The active color instance. `createColors()` with no argument auto-detects support, so it already
+ * honors `NO_COLOR` and a non-TTY stdout — identical to picocolors' default export.
+ * `setColorEnabled(false)` swaps in a no-op instance so `--no-color` works too. Every `theme` role
+ * closes over this binding, so a toggle before first render is picked up at call time.
+ */
+let colors = createColors();
+
+/**
+ * Force color off (the `--no-color` flag, wired once in `bin.ts`). Only ever called with `false`:
+ * forcing color *on* (`createColors(true)`) would push ANSI into pipes and break `--json`/piped use,
+ * so enabling is left entirely to picocolors' auto-detection.
+ */
+export function setColorEnabled(enabled: boolean): void {
+  if (!enabled) colors = createColors(false);
+}
+
+type Colors = ReturnType<typeof createColors>;
+
+/**
+ * A live view of the active color instance, for the few call sites that need colors beyond the theme
+ * roles (the `init` wizard's `bgYellow`/`black`, etc.). It always delegates to the *current* instance,
+ * so `--no-color` is honored even though the import is captured once — unlike importing `picocolors`
+ * directly, which pins the default instance and escapes the toggle. Prefer the `theme` roles / `ui`
+ * helpers where they fit; reach for this only for one-off colors they don't cover.
+ */
+export const paint: Colors = new Proxy({} as Colors, {
+  get: (_t, prop: string) => (colors as unknown as Record<string, unknown>)[prop],
+});
+
+/** ANSI color roles, mapped per brand.md §2. Honors NO_COLOR / non-TTY / --no-color. */
 export const theme = {
-  accent: (s: string) => pc.bold(pc.yellow(s)),
+  accent: (s: string) => colors.bold(colors.yellow(s)),
   memberName: (name: string, kind: MemberKind) =>
-    kind === 'agent' ? pc.cyan(name) : pc.magenta(name),
-  meta: (s: string) => pc.gray(s),
-  ok: (s: string) => pc.green(s),
-  warn: (s: string) => pc.yellow(s),
-  err: (s: string) => pc.red(s),
+    kind === 'agent' ? colors.cyan(name) : colors.magenta(name),
+  meta: (s: string) => colors.gray(s),
+  ok: (s: string) => colors.green(s),
+  warn: (s: string) => colors.yellow(s),
+  err: (s: string) => colors.red(s),
+  dim: (s: string) => colors.dim(s),
+  bold: (s: string) => colors.bold(s),
 
   /**
    * A high-salience, sticky banner for an act that needs the human *now* — `request_help` or an
@@ -17,20 +49,21 @@ export const theme = {
    * watch pane (the supervising-human turn-taking failure Co-Gym's notification ablation measured;
    * see ADR 024). Outranks `accent` (plain bold-yellow) on purpose.
    */
-  actionNeeded: (label = '⚑ ACTION NEEDED') => pc.bold(pc.inverse(pc.yellow(` ${label} `))),
+  actionNeeded: (label = '⚑ ACTION NEEDED') =>
+    colors.bold(colors.inverse(colors.yellow(` ${label} `))),
 
   presenceDot(status: PresenceStatus): string {
-    if (status === 'online') return pc.green('●');
-    if (status === 'away') return pc.yellow('●');
-    return pc.gray('○');
+    if (status === 'online') return colors.green('●');
+    if (status === 'away') return colors.yellow('●');
+    return colors.gray('○');
   },
 
   actBadge(act: Act): string {
     const label = `[${act}]`;
-    if (act === 'request_help') return pc.bold(pc.yellow(label));
-    if (act === 'decline') return pc.red(label);
-    if (act === 'resolve') return pc.bold(pc.green(label)); // terminal/done — reads as completion
-    return pc.dim(pc.white(label));
+    if (act === 'request_help') return colors.bold(colors.yellow(label));
+    if (act === 'decline') return colors.red(label);
+    if (act === 'resolve') return colors.bold(colors.green(label)); // terminal/done — reads as completion
+    return colors.dim(colors.white(label));
   },
 };
 

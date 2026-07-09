@@ -69,7 +69,7 @@ describe('requests command', () => {
   it('renders an empty list without error', async () => {
     const res = await capture(() => requestsCommand(parseArgs([])));
     expect(res.code).toBe(0);
-    expect(res.out).toContain('no requests waiting');
+    expect(res.out).toContain("the front desk is quiet — no one's waiting");
   });
 
   it('lists a pending request', async () => {
@@ -88,7 +88,7 @@ describe('requests command', () => {
       key: loadConfig().identities['dawn']!.key,
     }).decideRequest('dawn', id, { decision: 'deny' });
     const res = await capture(() => requestsCommand(parseArgs(['--pending'])));
-    expect(res.out).toContain('no requests waiting');
+    expect(res.out).toContain("the front desk is quiet — no one's waiting");
   });
 
   it('emits a parseable JSON array with the protocol shape', async () => {

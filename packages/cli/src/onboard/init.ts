@@ -3,7 +3,8 @@ import { existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import * as p from '@clack/prompts';
 import type { MemberSummary } from '@musterd/protocol';
-import pc from 'picocolors';
+// The live, toggle-aware color view (honors --no-color) in place of a pinned picocolors import.
+import { paint as pc } from '../render/theme.js';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { claimCommand } from '../commands/claim.js';

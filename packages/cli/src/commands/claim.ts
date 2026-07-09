@@ -1,6 +1,5 @@
 import { resolveWorkspace } from '@musterd/mcp';
 import { bindingSeat, type Binding, type ClaimPolicy, type Surface } from '@musterd/protocol';
-import pc from 'picocolors';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient, watchClaim } from '../client.js';
 import { findBinding, loadConfig, saveBinding, wsBase } from '../config.js';
@@ -82,7 +81,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
       } else {
         process.stdout.write(
           `${theme.ok('✓')} ${theme.memberName(boundSeat, 'agent')} — already live on ${theme.accent(team)} ` +
-            `in this folder ${pc.dim(`(${surface})`)}\n`,
+            `in this folder ${theme.dim(`(${surface})`)}\n`,
         );
       }
       return 0;
@@ -117,7 +116,9 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
   const forCode = flagStr(flags, 'for');
   if (!forCode && pendings.length > 1) {
     const list = pendings
-      .map((p) => `  ${pc.bold(p.code)}  ${p.surface}${p.driver ? ` · driven by ${p.driver}` : ''}`)
+      .map(
+        (p) => `  ${theme.bold(p.code)}  ${p.surface}${p.driver ? ` · driven by ${p.driver}` : ''}`,
+      )
       .join('\n');
     throw new CliError(
       `several unclaimed sessions are waiting here — re-run with --for <code>:\n${list}`,
@@ -210,7 +211,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
           const memLine = memory ? `${renderMemoryLine(memory)}\n` : '';
           process.stdout.write(
             `${theme.ok('✓')} ${theme.memberName(seat, 'agent')} — occupied on ${team}\n` +
-              `${pc.dim(tail)}\n` +
+              `${theme.dim(tail)}\n` +
               memLine,
           );
           resolveP(0);
@@ -228,7 +229,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
         } else {
           process.stdout.write(
             `${theme.meta('⧖')} ${message}\n` +
-              pc.dim(
+              theme.dim(
                 `waiting for an admin to approve (request ${requestId}) — have an admin run ` +
                   `\`musterd requests decide ${requestId} --approve\`; ^C to stop waiting.`,
               ) +

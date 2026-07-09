@@ -1,6 +1,7 @@
 import type { Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { success } from '../render/ui.js';
 import { resolve } from './helpers.js';
 
 /**
@@ -18,7 +19,9 @@ export async function reclaimCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
   process.stdout.write(
-    `${theme.ok('✓')} reclaimed ${theme.memberName(res.member, 'agent')} — any live session was dropped; it can rejoin now\n`,
+    success(`reclaimed ${theme.memberName(res.member, 'agent')}`, { next: 'musterd status' }) +
+      '\n',
   );
+  process.stdout.write(theme.meta('any live session was dropped; it can rejoin now') + '\n');
   return 0;
 }

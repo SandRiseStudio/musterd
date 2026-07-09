@@ -1,5 +1,4 @@
 import { type Binding, bindingSeat, type ClaimPolicy } from '@musterd/protocol';
-import pc from 'picocolors';
 import { flagStr, type Parsed } from '../args.js';
 import { findWorkspaceSpec, loadConfig, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
@@ -104,8 +103,8 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
     const target = seat ? `as ${theme.memberName(seat, 'agent')}` : `(assign a seat in chat)`;
     process.stdout.write(
       autojoin
-        ? `${pc.dim(`this session will come online ${seat ? target : ''} automatically on launch.`)}\n`
-        : `${pc.dim(`the team_* tools are available — join when ready (team_join / musterd claim ${seat ?? '<name>'}). Reload the session to pick up the tools.`)}\n`,
+        ? `${theme.dim(`this session will come online ${seat ? target : ''} automatically on launch.`)}\n`
+        : `${theme.dim(`the team_* tools are available — join when ready (team_join / musterd claim ${seat ?? '<name>'}). Reload the session to pick up the tools.`)}\n`,
     );
   } else {
     process.stdout.write(

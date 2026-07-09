@@ -21,6 +21,7 @@ import {
 } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { hint, success } from '../render/ui.js';
 import { writeSeatFile } from '../roster.js';
 import { resolve } from './helpers.js';
 
@@ -72,12 +73,12 @@ async function teamCreate(parsed: Parsed): Promise<number> {
     process.stdout.write(JSON.stringify({ team: res.team, member: res.member }) + '\n');
     return 0;
   }
-  process.stdout.write(`${theme.ok('✓')} team "${slug}" created\n`);
+  process.stdout.write(success(`team "${slug}" created`, { next: 'musterd status' }) + '\n');
   process.stdout.write(
-    `you are now a member: ${theme.memberName(name, 'human')} (human${role ? `, ${role}` : ''})\n`,
+    `  on the team as ${theme.memberName(name, 'human')} ${theme.meta(`(human${role ? `, ${role}` : ''})`)}\n`,
   );
   process.stdout.write(theme.meta('bound this folder as your seat — act here with no --as') + '\n');
-  process.stdout.write(theme.meta('add members with: musterd team add <name> --kind agent') + '\n');
+  process.stdout.write(hint('add members: musterd team add <name> --kind agent') + '\n');
   return 0;
 }
 
@@ -121,7 +122,9 @@ async function teamAdd(parsed: Parsed): Promise<number> {
     return 0;
   }
   process.stdout.write(
-    `${theme.ok('✓')} added ${theme.memberName(name, kind)} (${kind}${role ? `, ${role}` : ''}) to ${team}\n`,
+    success(
+      `added ${theme.memberName(name, kind)} ${theme.meta(`(${kind}${role ? `, ${role}` : ''})`)} to ${team}`,
+    ) + '\n',
   );
   if (kind === 'agent') {
     // Agents authenticate with the team agent key (mskey_) + a seat claim (ADR 069/075) — not a per-seat
@@ -172,12 +175,12 @@ async function teamObserve(parsed: Parsed): Promise<number> {
     return 0;
   }
   process.stdout.write(
-    `${theme.ok('✓')} observer "${name}" ready for ${team} — read-only, hidden from the roster\n`,
+    success(
+      `observer "${name}" ready for ${team} ${theme.meta('— read-only, hidden from the roster')}`,
+    ) + '\n',
   );
   process.stdout.write(
-    theme.meta(
-      `open the dashboard at /live and connect:  team ${team}   as ${name}   token ${res.token}`,
-    ) + '\n',
+    hint(`open /live and connect:  team ${team}   as ${name}   token ${res.token}`) + '\n',
   );
   return 0;
 }
@@ -198,8 +201,9 @@ async function teamRemove(parsed: Parsed): Promise<number> {
     return 0;
   }
   process.stdout.write(
-    `${theme.ok('✓')} removed ${theme.memberName(res.member, res.kind)} from ${team} — off the roster; message history is kept\n`,
+    success(`removed ${theme.memberName(res.member, res.kind)} from ${team}`) + '\n',
   );
+  process.stdout.write(theme.meta('off the roster; message history is kept') + '\n');
   return 0;
 }
 
@@ -299,7 +303,9 @@ async function teamExport(parsed: Parsed): Promise<number> {
     return 0;
   }
   process.stdout.write(
-    `${theme.ok('✓')} exported "${slug}" roster → .musterd/ (${count} seat${count === 1 ? '' : 's'})\n`,
+    success(`exported "${slug}" roster → .musterd/ (${count} seat${count === 1 ? '' : 's'})`, {
+      next: 'musterd reload',
+    }) + '\n',
   );
   process.stdout.write(
     theme.meta(
@@ -308,7 +314,7 @@ async function teamExport(parsed: Parsed): Promise<number> {
   );
   process.stdout.write(
     theme.meta(
-      'provisioning (team add/claim) is file-backed immediately; SIGHUP the daemon (or restart) so its watcher tracks edits.',
+      'provisioning (team add/claim) is file-backed immediately; `musterd reload` makes the daemon track edits.',
     ) + '\n',
   );
   return 0;

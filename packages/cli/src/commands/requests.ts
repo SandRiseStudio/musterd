@@ -2,6 +2,7 @@ import { type Request } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { clock, theme } from '../render/theme.js';
+import { success, sym } from '../render/ui.js';
 import { resolve } from './helpers.js';
 
 /**
@@ -31,7 +32,7 @@ async function listCommand(parsed: Parsed): Promise<number> {
     `${theme.accent('requests')} — ${team} (${res.requests.length} entr${res.requests.length === 1 ? 'y' : 'ies'})\n`,
   );
   if (res.requests.length === 0) {
-    process.stdout.write(theme.meta('no requests waiting') + '\n');
+    process.stdout.write(theme.meta("the front desk is quiet — no one's waiting") + '\n');
     return 0;
   }
   for (const r of res.requests) process.stdout.write(renderRequest(r) + '\n');
@@ -56,7 +57,7 @@ async function decideCommand(parsed: Parsed): Promise<number> {
       process.stdout.write(JSON.stringify(res) + '\n');
       return 0;
     }
-    process.stdout.write(`${theme.ok('✓')} denied request ${theme.meta(res.request_id)}\n`);
+    process.stdout.write(success(`denied request ${theme.meta(res.request_id)}`) + '\n');
     return 0;
   }
 
@@ -83,7 +84,7 @@ async function decideCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(JSON.stringify(res) + '\n');
     return 0;
   }
-  process.stdout.write(`${theme.ok('✓')} approved request ${theme.meta(res.request_id)}\n`);
+  process.stdout.write(success(`approved request ${theme.meta(res.request_id)}`) + '\n');
   if (res.delivered) {
     process.stdout.write(
       theme.meta('the waiting session picked up the decision and is live now.') + '\n',
@@ -112,12 +113,12 @@ function renderRequest(r: Request): string {
   const ts = theme.meta(clock(r.ts));
   const status =
     r.status === 'pending'
-      ? theme.warn('pending')
+      ? `${theme.warn(sym.pending)} ${theme.warn('pending')}`
       : r.status === 'approved'
-        ? theme.ok('approved')
+        ? `${theme.ok(sym.ok)} ${theme.ok('approved')}`
         : r.status === 'denied'
-          ? theme.err('denied')
-          : theme.meta('expired');
-  const target = r.target ?? '—';
-  return `${ts} ${theme.meta(r.id)} [${r.kind}] ${target} via ${r.surface} — ${status}`;
+          ? `${theme.err(sym.err)} ${theme.err('denied')}`
+          : `${theme.meta(sym.dot)} ${theme.meta('expired')}`;
+  const target = r.target ?? theme.meta('—');
+  return `${ts} ${theme.meta(r.id)} ${theme.meta(`[${r.kind}]`)} ${target} ${theme.meta(`via ${r.surface}`)} ${status}`;
 }

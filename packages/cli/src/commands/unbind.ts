@@ -4,6 +4,7 @@ import { HttpClient } from '../client.js';
 import { findBinding, removeBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { success } from '../render/ui.js';
 
 /**
  * `musterd unbind` — stop occupying this folder's seat without removing it from the team (ADR 058).
@@ -29,11 +30,13 @@ export async function unbindCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
   process.stdout.write(
-    `${theme.ok('✓')} unbound ${theme.memberName(res.member, 'agent')} from this folder — the seat stays on ${binding.team}, free to re-claim\n`,
+    success(`unbound ${theme.memberName(res.member, 'agent')} from this folder`, {
+      next: 'musterd claim',
+    }) + '\n',
   );
   process.stdout.write(
     theme.meta(
-      'the seat is declared, not deleted; to remove it entirely: musterd team remove ' + res.member,
+      `the seat stays on ${binding.team}, free to re-claim — to remove it entirely: musterd team remove ${res.member}`,
     ) + '\n',
   );
   return 0;

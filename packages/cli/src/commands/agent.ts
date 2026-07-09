@@ -6,6 +6,7 @@ import { claudeCode } from '../onboard/harnesses/claudeCode.js';
 import { buildMcpEnv, resolveMcpLaunch } from '../onboard/mcpEntry.js';
 import { provisionWorkspace } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
+import { success, sym } from '../render/ui.js';
 import { writeSeatFile } from '../roster.js';
 import { resolve } from './helpers.js';
 
@@ -143,7 +144,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   }
 
   process.stdout.write(
-    `${theme.ok('✓')} ${reused ? 'reused' : 'added'} ${theme.memberName(name, 'agent')} (agent${role ? `, ${role}` : ''}) ${reused ? 'on' : 'to'} ${team}\n`,
+    `${theme.ok(sym.ok)} ${reused ? 'reused' : 'added'} ${theme.memberName(name, 'agent')} ${theme.meta(`(agent${role ? `, ${role}` : ''})`)} ${reused ? 'on' : 'to'} ${team}\n`,
   );
   const where =
     ws.kind === 'worktree'
@@ -151,18 +152,18 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
       : ws.kind === 'folder'
         ? 'folder'
         : 'this folder';
-  process.stdout.write(`${theme.ok('✓')} workspace: ${ws.dir} ${theme.meta(`(${where})`)}\n`);
+  process.stdout.write(`${theme.ok(sym.ok)} workspace ${ws.dir} ${theme.meta(`(${where})`)}\n`);
 
   if (mcpError === null) {
-    process.stdout.write(`${theme.ok('✓')} wired the musterd MCP server there (autojoin)\n`);
     process.stdout.write(
-      theme.accent('→') +
-        ` open a Claude Code session in ${ws.dir} — it joins as ${name} automatically\n`,
+      success('wired the musterd MCP server there (autojoin)', {
+        next: `open a Claude Code session in ${ws.dir} — it joins as ${name} automatically`,
+      }) + '\n',
     );
   } else {
     // Member + workspace + binding are set up; only the harness wiring failed (e.g. no `claude` CLI).
     process.stdout.write(
-      `${theme.warn('⚠')} couldn't auto-register the MCP server (${mcpError}). Register it in ${ws.dir} with:\n` +
+      `${theme.warn(sym.warn)} couldn't auto-register the MCP server (${mcpError}). Register it in ${ws.dir} with:\n` +
         theme.meta(
           `  cd ${ws.dir} && claude mcp add musterd -s local ` +
             // Rebuild from entry.env so the manual command matches auto-register exactly — notably it
