@@ -398,13 +398,21 @@ describe('renderReachabilityNudge (ADR 046 — agent-side reachability)', () => 
 });
 
 describe('renderBanner', () => {
-  it('is a compact lockup: presence dots + the musterd chip + tagline', () => {
+  it('is a framed nameplate: dots + musterd chip + cursor + tagline', () => {
     const banner = renderBanner();
     expect(banner).toContain('●'); // at least one roll-call presence dot
     expect(banner).toContain('○'); // …including the offline state
     expect(banner).toContain('musterd'); // the wordmark chip (literal word, no letter-art)
     expect(banner).toContain('persistent teams'); // the tagline
-    // Two lines only — no multi-line letter-art.
-    expect(banner.split('\n')).toHaveLength(2);
+    expect(banner).toContain('╭'); // the rounded nameplate frame
+    // Top border + two content rows + bottom border.
+    expect(banner.split('\n')).toHaveLength(4);
+  });
+
+  it('aligns the nameplate: every rendered line is the same visible width', () => {
+    // With color pinned off (NO_COLOR), visible width == string length. The frame must be a rectangle.
+    const lines = renderBanner().split('\n');
+    const widths = new Set(lines.map((l) => [...l].length));
+    expect(widths.size).toBe(1);
   });
 });
