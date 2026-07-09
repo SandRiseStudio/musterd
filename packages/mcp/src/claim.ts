@@ -1,5 +1,5 @@
 import { type Binding } from '@musterd/protocol';
-import { saveBinding } from './binding.js';
+import { findBinding, saveBinding } from './binding.js';
 import type { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
 import { clearPendingMarker } from './pending.js';
@@ -41,6 +41,22 @@ export async function claimAndJoin(
   const reused =
     client.claimed && 'seat' in target && client.member === target.seat && client.joined;
   if (reused) return { member: client.member!, reused: true };
+
+  // Re-read binding.json before an explicit named claim (#118 class / ADR 018 source-of-truth). The
+  // boot config pins the grant + key read at launch, so an in-session binding *repair* — e.g. a
+  // clobbered binding re-provisioned with `musterd agent <seat> --path <worktree>` — was invisible
+  // until a full MCP reconnect: `team_join {as:X}` kept presenting the stale boot grant (and could
+  // rejoin as the wrong seat). If the freshest on-disk binding now targets exactly this seat, adopt
+  // its grant/key/surface so the repair takes effect without a process restart. A binding for a
+  // *different* seat is left untouched — we never silently borrow another seat's grant.
+  if ('seat' in target) {
+    const fresh = findBinding(config.bindingDir);
+    if (fresh && fresh.claim && fresh.claim.mode === 'seat' && fresh.claim.name === target.seat) {
+      if (fresh.grant !== undefined) config.grant = fresh.grant;
+      if (fresh.agent_key !== undefined) config.agent_key = fresh.agent_key;
+      config.surface = fresh.surface;
+    }
+  }
 
   // Point the claim at the target; `join()` presents the agent key + this target and resolves the seat.
   // When no grant is present the server opens an approval request; `join()` parks on it up to `waitMs`
@@ -91,7 +107,10 @@ function persistBinding(config: McpConfig, seat: string): void {
     ...(config.grant !== undefined ? { grant: config.grant } : {}),
   };
   try {
-    saveBinding(process.cwd(), binding);
+    // Write back to the workspace this session was resolved from — NEVER ambient process.cwd(). An
+    // adapter whose cwd wandered into a sibling worktree used to clobber that worktree's binding.json
+    // with its own seat (byte-identical bindings, wrong-seat autojoin). `bindingDir` anchors the write.
+    saveBinding(config.bindingDir, binding);
   } catch {
     // identity is held in memory for this session regardless of a binding write failure
   }

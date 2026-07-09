@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BINDING_DIR, BINDING_FILE, PENDING_DIR, RESOLVED_SUFFIX } from '@musterd/protocol';
@@ -20,6 +20,9 @@ function baseConfig(over: Partial<McpConfig> = {}): McpConfig {
     claim: { mode: 'chat' },
     connId: 'conn-1',
     claimCode: 'AB12',
+    // Default the identity anchor to the (mocked) cwd so the existing suites, which assert the binding
+    // lands under `cwd`, keep passing; the clobber tests below override it to a distinct dir.
+    bindingDir: process.cwd(),
     ...over,
   };
 }
@@ -113,6 +116,85 @@ describe('claimAndJoin (v0.3 handshake, ADR 075)', () => {
     await expect(claimAndJoin(client, config, { seat: 'Ada' })).rejects.toBeInstanceOf(
       ClaimConflictError,
     );
+  });
+
+  // Finding 1 (binding clobber): the write must land in the workspace the session was resolved from
+  // (`bindingDir`), never ambient `process.cwd()` — a wandering cwd used to overwrite a *sibling*
+  // worktree's binding.json.
+  it('persists to config.bindingDir, not ambient process.cwd() (no sibling clobber)', async () => {
+    const anchor = mkdtempSync(join(tmpdir(), 'musterd-anchor-'));
+    const sibling = cwd; // the mocked process.cwd() — a different worktree
+    try {
+      const config = baseConfig({ bindingDir: anchor });
+      await claimAndJoin(joiningClient(config), config, { seat: 'Ada' });
+      // Written under the anchor…
+      expect(existsSync(bindingPath(anchor))).toBe(true);
+      expect(JSON.parse(readFileSync(bindingPath(anchor), 'utf8')).claim).toEqual({
+        mode: 'seat',
+        name: 'Ada',
+      });
+      // …and the ambient cwd (the "sibling worktree") is left untouched.
+      expect(existsSync(bindingPath(sibling))).toBe(false);
+    } finally {
+      rmSync(anchor, { recursive: true, force: true });
+    }
+  });
+
+  // Finding 2 (#118 class): an explicit named claim re-reads binding.json so an in-session repair
+  // (a re-provisioned grant/key) takes effect without a full MCP reconnect.
+  it('re-reads the on-disk binding for the target seat and adopts its repaired grant/key', async () => {
+    const anchor = mkdtempSync(join(tmpdir(), 'musterd-repair-'));
+    try {
+      // Simulate a repaired binding.json on disk (fresh grant/key for seat "Ada").
+      mkdirSync(join(anchor, BINDING_DIR), { recursive: true });
+      writeFileSync(
+        bindingPath(anchor),
+        JSON.stringify({
+          server: 'http://x',
+          team: 'dawn',
+          agent_key: 'mskey_repaired',
+          surface: 'cursor',
+          claim: { mode: 'seat', name: 'Ada' },
+          grant: 'msgr_repaired',
+        }),
+      );
+      // Boot config still holds the STALE grant/key.
+      const config = baseConfig({
+        bindingDir: anchor,
+        grant: 'msgr_stale',
+        agent_key: 'mskey_stale',
+      });
+      await claimAndJoin(joiningClient(config), config, { seat: 'Ada' });
+      expect(config.grant).toBe('msgr_repaired');
+      expect(config.agent_key).toBe('mskey_repaired');
+      expect(config.surface).toBe('cursor');
+    } finally {
+      rmSync(anchor, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the boot grant untouched when the on-disk binding targets a different seat', async () => {
+    const anchor = mkdtempSync(join(tmpdir(), 'musterd-otherseat-'));
+    try {
+      mkdirSync(join(anchor, BINDING_DIR), { recursive: true });
+      writeFileSync(
+        bindingPath(anchor),
+        JSON.stringify({
+          server: 'http://x',
+          team: 'dawn',
+          agent_key: 'mskey_ryder',
+          surface: 'cursor',
+          claim: { mode: 'seat', name: 'ryder' },
+          grant: 'msgr_ryder',
+        }),
+      );
+      const config = baseConfig({ bindingDir: anchor, grant: 'msgr_boot' });
+      // We ask to become "Ada" but the on-disk binding is for "ryder" → never borrow ryder's grant.
+      await claimAndJoin(joiningClient(config), config, { seat: 'Ada' });
+      expect(config.grant).toBe('msgr_boot');
+    } finally {
+      rmSync(anchor, { recursive: true, force: true });
+    }
   });
 });
 
