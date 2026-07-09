@@ -90,6 +90,9 @@ export class HttpClient {
   private async request(method: string, path: string, body?: unknown): Promise<any> {
     let res: Response;
     try {
+      // ADR 119: re-attest on every ambient HTTP touch when the env declares a model, so
+      // fire-and-exit CLI sends keep stamping after the claim presence expires (issue #172).
+      const attestedModel = resolveAttestedModel(process.env);
       res = await fetch(this.opts.server + path, {
         method,
         headers: {
@@ -98,6 +101,7 @@ export class HttpClient {
           ...(this.opts.seat ? { 'x-musterd-seat': this.opts.seat } : {}),
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
           ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
+          ...(attestedModel !== undefined ? { 'x-musterd-model': attestedModel } : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });

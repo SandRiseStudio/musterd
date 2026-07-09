@@ -290,11 +290,26 @@ const MemorySaveBody = z.object({
 });
 
 /**
+ * Optional harness-attested model from `x-musterd-model` (ADR 119). Same 120-char cap as claim /
+ * heartbeat; absent or empty → undefined (sticky COALESCE keeps any prior attestation).
+ */
+function attestedModelHeader(req: IncomingMessage): string | undefined {
+  const raw = req.headers['x-musterd-model'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, 120);
+}
+
+/**
  * Authenticate a request and write an ambient presence touch for the caller (ADR 057): a one-shot
  * authenticated command is itself proof of liveness, so it flips a bursty agent present between watch
  * sockets. A no-op when the member already holds a resident session; on an offline→online transition we
  * emit the same presence event the WS attach path does, so live watchers update. Surface defaults to
  * `cli` but honors `x-musterd-surface` so an adapter one-shot can label its real surface.
+ * When `x-musterd-model` is present, the ambient occupancy is (re)attested (ADR 119) — closing the
+ * CLI stamp gap after the claim presence expires (issue #172).
  */
 function authTouch(
   ctx: Ctx,
@@ -310,12 +325,47 @@ function authTouch(
   const hint = req.headers['x-musterd-surface'];
   const parsed = SurfaceSchema.safeParse(Array.isArray(hint) ? hint[0] : hint);
   const surface = parsed.success ? parsed.data : 'cli';
+  const model = attestedModelHeader(req);
+  // Snapshot the ambient row before the touch so a real model change can audit (source: ambient).
+  const before = model
+    ? ctx.db
+        .prepare<
+          [string],
+          { id: string; model: string | null }
+        >('SELECT id, model FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
+        .get(auth.member.id)
+    : undefined;
   const flipped = touchAmbientPresence(
     ctx.db,
     auth.member.id,
     surface,
     ctx.config.presenceTimeoutMs,
+    {
+      ...(model !== undefined ? { model } : {}),
+    },
   );
+  if (model) {
+    const after = ctx.db
+      .prepare<
+        [string],
+        { id: string; model: string | null }
+      >('SELECT id, model FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
+      .get(auth.member.id);
+    if (after && (before?.model ?? null) !== after.model) {
+      appendAudit(ctx.db, auth.team.id, {
+        actor: auth.member.name,
+        action: 'occupancy.model_attested',
+        target: auth.member.name,
+        result: 'allow',
+        detail: {
+          occupancy: after.id,
+          old: before?.model ?? null,
+          new: after.model,
+          source: 'ambient',
+        },
+      });
+    }
+  }
   if (flipped) {
     ctx.hub.broadcastTeam(auth.team.id, {
       type: 'presence',
@@ -1172,9 +1222,10 @@ export async function handleHttp(
         // No sender occupancy id here by design (ADR 101): a POST is stateless — it authenticates a
         // *seat* (agent key + acting seat), not a live session, so there is no per-request occupancy
         // to key the model stamp on. routeEnvelope falls back to the member's newest *attested*
-        // presence — which for a single-active agent is exactly its live claim, the right source.
-        // (A human fanned out over several attested sessions on different models is the one ambiguous
-        // case; the stateless request carries nothing to disambiguate it.)
+        // presence — which for a single-active agent is its live claim, or (ADR 119) the ambient row
+        // re-attested from `x-musterd-model` after that claim ages out. (A human fanned out over
+        // several attested sessions on different models is the one ambiguous case; the stateless
+        // request carries nothing to disambiguate it.)
         const result = routeEnvelope(ctx, team, member, env);
         // Dependency-targeted invalidation (ADR 111, ADR 088 §5): a `defer` — or a `steer` that names a
         // Goal — bumps that Goal's epoch, so any live lane claimed against the older epoch (on the Goal,

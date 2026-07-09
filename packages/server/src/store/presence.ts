@@ -161,7 +161,9 @@ export function touchAmbientPresence(
     // Model attestation is **sticky** across ambient touches (ADR 101): an authenticated HTTP request
     // carries no model, so `COALESCE(?, model)` preserves the value attested at claim instead of
     // clearing it (attestation only moves forward — a real switch comes via a claim/heartbeat that
-    // *does* carry a model). provenance/workspace/driver stay per-session seed and re-write normally.
+    // *does* carry a model). ADR 119: when the client *does* send a model (`x-musterd-model`), COALESCE
+    // installs it on a fresh or blank ambient row — the fire-and-exit CLI re-attest path.
+    // provenance/workspace/driver stay per-session seed and re-write normally.
     db.prepare(
       'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, model = COALESCE(?, model) WHERE id = ?',
     ).run(

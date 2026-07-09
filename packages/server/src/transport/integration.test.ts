@@ -1368,6 +1368,115 @@ describe('model attestation (ADR 101)', () => {
     a.close();
     l.close();
   });
+
+  it('HTTP claim + later one-shot with x-musterd-model stamps after the claim presence is reaped (ADR 119 / #172)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    const grant = await standingGrant(tok, 'Ada');
+
+    // Stateless claim with a harness-attested model (the thin-CLI path).
+    const claimed = await post('/teams/dawn/claim', {
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'cli',
+      model: 'qwen2.5:3b-instruct',
+    });
+    expect(claimed.status).toBe(200);
+    expect(claimed.json.type).toBe('occupied');
+
+    // First one-shot while the claim occupancy is still live — stamp from newest-attested.
+    const first = await fetch(base + '/teams/dawn/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${team.json.agent_key}`,
+        'x-musterd-seat': 'Ada',
+        'x-musterd-model': 'qwen2.5:3b-instruct',
+      },
+      body: JSON.stringify({
+        envelope: {
+          id: 'ada-1',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'member', name: 'Lin' },
+          act: 'status_update',
+          body: 'first',
+          ts: Date.now(),
+        },
+      }),
+    });
+    expect(first.status).toBe(201);
+    expect(((await first.json()) as any).ack.meta.model).toBe('qwen2.5:3b-instruct');
+
+    // Reap the claim occupancy — the fire-and-exit gap in finding 003 / issue #172.
+    const adaId = getMemberByName(server.db, getTeamBySlug(server.db, 'dawn')!.id, 'Ada')!.id;
+    const removed = server.db.prepare('DELETE FROM presence WHERE member_id = ?').run(adaId);
+    expect(removed.changes).toBeGreaterThan(0);
+
+    // Without the header: ambient attaches a bare row → stamp drops (the #172 hole).
+    const bare = await fetch(base + '/teams/dawn/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${team.json.agent_key}`,
+        'x-musterd-seat': 'Ada',
+      },
+      body: JSON.stringify({
+        envelope: {
+          id: 'ada-bare',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'member', name: 'Lin' },
+          act: 'status_update',
+          body: 'bare ambient',
+          ts: Date.now(),
+        },
+      }),
+    });
+    expect(bare.status).toBe(201);
+    expect(((await bare.json()) as any).ack.meta?.model).toBeUndefined();
+
+    // Clear again so the next touch is a fresh attach (not COALESCE onto the bare row).
+    server.db.prepare('DELETE FROM presence WHERE member_id = ?').run(adaId);
+
+    // With x-musterd-model the ambient touch re-attests, so the act keeps the stamp.
+    const later = await fetch(base + '/teams/dawn/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${team.json.agent_key}`,
+        'x-musterd-seat': 'Ada',
+        'x-musterd-model': 'qwen2.5:3b-instruct',
+      },
+      body: JSON.stringify({
+        envelope: {
+          id: 'ada-2',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'member', name: 'Lin' },
+          act: 'status_update',
+          body: 'reattest',
+          ts: Date.now(),
+        },
+      }),
+    });
+    expect(later.status).toBe(201);
+    expect(((await later.json()) as any).ack.meta.model).toBe('qwen2.5:3b-instruct');
+
+    const teamRow = getTeamBySlug(server.db, 'dawn')!;
+    const ambient = listAudit(server.db, teamRow.id).filter((r) => {
+      if (r.action !== 'occupancy.model_attested') return false;
+      const d = JSON.parse(r.detail!) as { source: string };
+      return d.source === 'ambient';
+    });
+    expect(ambient.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe('v0.3 P2 governance enforcement (ADR 071)', () => {
