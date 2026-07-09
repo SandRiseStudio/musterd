@@ -145,11 +145,62 @@ describe('renderStatusTable', () => {
     ];
     const out = renderStatusTable(members);
     expect(out).toContain('MEMBER');
+    expect(out).toContain('MODEL');
     expect(out).toContain('ACTIVITY');
     expect(out).toContain('nick');
     expect(out).toContain('online via cli');
     expect(out).toContain('online via claude-code');
     expect(out).toContain('offline');
+    // Offline / unattested occupancy → MODEL `unknown` (ADR 101).
+    expect(out).toMatch(/Lin\s+agent\s+frontend\s+unknown\s+/);
+  });
+
+  it('renders the occupancy-attested model in MODEL (ADR 101)', () => {
+    const members: MemberSummary[] = [
+      {
+        id: '1',
+        team: 'dawn',
+        name: 'Ada',
+        kind: 'agent',
+        role: 'backend',
+        lifecycle: 'session',
+        created_at: 0,
+        presence: 'online',
+        activity: 'online',
+        presences: [
+          {
+            surface: 'claude-code',
+            status: 'online',
+            last_seen_at: 0,
+            model: 'claude-opus-4-8',
+          },
+        ],
+      },
+      {
+        id: '2',
+        team: 'dawn',
+        name: 'tinybot',
+        kind: 'agent',
+        role: 'probe',
+        lifecycle: 'session',
+        created_at: 0,
+        presence: 'online',
+        activity: 'online',
+        presences: [
+          {
+            surface: 'cli',
+            status: 'online',
+            last_seen_at: 0,
+            model: 'qwen2.5:3b-instruct-extra-long-id',
+          },
+        ],
+      },
+    ];
+    const out = renderStatusTable(members);
+    expect(out).toContain('claude-opus-4-8');
+    // Long model ids clip so the LIFECYCLE/ACTIVITY columns stay aligned.
+    expect(out).toContain('qwen2.5:3b-instru…');
+    expect(out).not.toContain('qwen2.5:3b-instruct-extra-long-id');
   });
 
   it('renders self-declared availability, overriding the activity label (ADR 044)', () => {
