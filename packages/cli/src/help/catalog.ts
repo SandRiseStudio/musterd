@@ -129,12 +129,19 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'service',
     signature:
-      '<install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow] [--force]',
+      '<install|uninstall|start|stop|restart|refresh|status|logs> [--port <n>] [--host <h>] [--follow] [--force]',
     summary: 'run the daemon as a background service (macOS LaunchAgent)',
     group: 'setup',
     primary: true,
+    detail:
+      'Manage the daemon as a LaunchAgent (ADR 045). `refresh` is the one-command "run latest main" ' +
+      '(ADR 118): sync the daemon’s checkout to origin/main → `pnpm build` → restart, so merged work ' +
+      'goes live without the manual pull+build+restart dance (refuses on uncommitted changes; a failed ' +
+      'build aborts before the bounce). `restart`/`stop`/`refresh` refuse while teammates hold live ' +
+      'sessions unless `--force`.',
     examples: [
       'musterd service install',
+      'musterd service refresh',
       'musterd service status',
       'musterd service logs --follow',
     ],

@@ -153,6 +153,90 @@ describe('serviceCommand', () => {
     expect(out).toContain('restarted');
   });
 
+  // ADR 118: `service refresh` = sync main → build → restart, in one guarded verb.
+  function refreshRunner(
+    over: { dirty?: string; buildStatus?: number; before?: string; after?: string } = {},
+  ): Runner {
+    let head = 0;
+    return (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'git') {
+        if (args.includes('--is-inside-work-tree'))
+          return { status: 0, stdout: 'true', stderr: '' };
+        if (args.includes('--porcelain'))
+          return { status: 0, stdout: over.dirty ?? '', stderr: '' };
+        if (args.includes('HEAD'))
+          return {
+            status: 0,
+            stdout: head++ === 0 ? (over.before ?? 'aaa111') : (over.after ?? 'bbb222'),
+            stderr: '',
+          };
+        return { status: 0, stdout: '', stderr: '' }; // fetch / switch
+      }
+      if (cmd === 'pnpm')
+        return { status: over.buildStatus ?? 0, stdout: '', stderr: 'build boom' };
+      return { status: 0, stdout: '', stderr: '' }; // launchctl (restart)
+    };
+  }
+
+  it('refresh syncs to main, rebuilds, and restarts', async () => {
+    const c = ctx(refreshRunner());
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    // the sequence: fetch → switch → pnpm build → launchctl restart
+    expect(calls.some((x) => x.cmd === 'git' && x.args.includes('fetch'))).toBe(true);
+    expect(calls.some((x) => x.cmd === 'git' && x.args.includes('switch'))).toBe(true);
+    expect(calls.some((x) => x.cmd === 'pnpm' && x.args.includes('build'))).toBe(true);
+    expect(calls.some((x) => x.cmd === 'launchctl')).toBe(true);
+    expect(out).toContain('synced');
+    expect(out).toContain('rebuilt dist');
+    expect(out).toContain('restarted the musterd daemon on bbb222');
+  });
+
+  it('refresh refuses to clobber uncommitted changes (no build/restart)', async () => {
+    const c = ctx(refreshRunner({ dirty: ' M packages/cli/src/x.ts' }));
+    await expect(
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    ).rejects.toThrow(/uncommitted changes/);
+    expect(calls.some((x) => x.cmd === 'pnpm')).toBe(false);
+    expect(calls.some((x) => x.cmd === 'launchctl')).toBe(false);
+  });
+
+  it('refresh refuses with live sessions unless --force (guard before any side effect)', async () => {
+    const c = ctx(refreshRunner());
+    await expect(
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 2 }),
+      }),
+    ).rejects.toThrow(/2 live sessions.*--force/s);
+    expect(calls.some((x) => x.args.includes('fetch'))).toBe(false); // never synced
+    expect(calls.some((x) => x.cmd === 'pnpm')).toBe(false);
+  });
+
+  it('refresh aborts on a build failure and does NOT restart', async () => {
+    const c = ctx(refreshRunner({ buildStatus: 1 }));
+    await expect(
+      serviceCommand(parseArgs(['refresh', '--force']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 5 }),
+      }),
+    ).rejects.toThrow(/build failed/);
+    expect(calls.some((x) => x.cmd === 'launchctl')).toBe(false); // daemon left running old code
+  });
+
   it('uninstall removes the plist', async () => {
     const c = ctx(recorder());
     writeFileSync(c.plistPath, 'x', 'utf8');
