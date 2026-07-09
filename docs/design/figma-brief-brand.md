@@ -6,7 +6,7 @@
 
 ---
 
-> **Status: EXECUTED** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md)). File: [musterd / Brand](https://figma.com/design/ogOcNXhGq5THf9OBQgbYQB). Exports in [`assets/`](./assets/). Note: the ASCII block wordmark is mirrored *from* the CLI banner (`packages/cli/src/render/rows.ts`), which is the source of truth — not generated in Figma and copied back.
+> **Status: EXECUTED** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md)). File: [musterd / Brand](https://figma.com/design/ogOcNXhGq5THf9OBQgbYQB). Exports in [`assets/`](./assets/). Note: the ASCII block wordmark is mirrored _from_ the CLI banner (`packages/cli/src/render/rows.ts`), which is the source of truth — not generated in Figma and copied back.
 
 ## File
 
@@ -18,6 +18,7 @@
 Create a variable collection `musterd/core` with these modes: `light`, `dark`.
 
 **Color variables** (hex from `brand.md` §2):
+
 - `accent` → `#E1AD01` (both modes; dark may alias `mustard-300 #EFC94C` for text-on-dark)
 - full `mustard/{50,100,300,500,700,900}` and `zinc/{50,100,200,400,500,700,800,900,950}` ramps as raw color variables
 - semantic aliases: `success`, `warning`, `danger`, `info`, `muted` bound per-mode to the §2 semantic table
@@ -27,10 +28,11 @@ Create a variable collection `musterd/core` with these modes: `light`, `dark`.
 ## Page: Wordmark
 
 Frames:
+
 1. `wordmark/primary` (640×200) — lowercase `musterd` in JetBrains Mono, weight 700, letter-spacing 0, color `zinc-900` on `zinc-50`. The `-d` (final letter) filled `accent`.
 2. `wordmark/reversed` (640×200) — same, `zinc-50` on `zinc-900`, `-d` in `mustard-300`.
 3. `wordmark/mono` (640×200) — single color, all `zinc-900` (and a dark variant) — no accent, for stamping/embroidery-style use.
-4. `wordmark/ascii-block` (640×240) — the frozen ASCII block banner rendered as text in mono; this exact glyph string is the canonical CLI banner and **must** be copied verbatim into `packages/cli` as a string constant. Produce the block art here and paste the literal characters into a code block in the acceptance notes so the CLI agent can copy it.
+4. `wordmark/ascii-block` (640×240) — **SUPERSEDED ([ADR 114](../decisions/114-cli-rollcall-wordmark.md)).** The block/figlet CLI banner was retired for the roll-call lockup (three presence dots + lowercase mustard `musterd`, `renderBanner` in `packages/cli/src/render/rows.ts`, the source of truth). This frame should be redrawn as that lockup on the next Figma sync; do not copy the block art back into the CLI.
 
 ## Page: Color
 

@@ -13,15 +13,16 @@ export type KindOf = (name: string) => MemberKind;
 /** A status older than this is shown with its age (`working: x · Nm`) to signal it may be stale. */
 const STALE_AFTER_MS = 5 * 60_000;
 
-/** The ASCII wordmark banner + tagline (brand.md). Mirrors the Figma `cmp/banner`. */
+/**
+ * The wordmark banner + tagline (brand.md §1). A roll-call lockup, not block ASCII art: three presence
+ * dots (online · away · offline) — the CLI's own glyphs — beside the lowercase mustard wordmark, so the
+ * mark *is* the product: `muster` = take the roll, a team present. The tagline hangs under the wordmark.
+ */
 export function renderBanner(): string {
-  const word = [
-    ' _ __ ___  _   _ ___ | |_ ___ _ __ __| |',
-    "| '_ ` _ \\| | | / __|| __/ _ \\ '__/ _` |",
-    '| | | | | | |_| \\__ \\| ||  __/ | | (_| |',
-    '|_| |_| |_|\\__,_|___/ \\__\\___|_|  \\__,_|',
-  ].join('\n');
-  return `${theme.accent(word)}\n${theme.meta('muster your agents and humans into persistent teams')}`;
+  const rollcall = `${theme.presenceDot('online')} ${theme.presenceDot('away')} ${theme.presenceDot('offline')}`;
+  const indent = ' '.repeat(7); // width of `● ● ○  ` — aligns the tagline under the wordmark
+  const tagline = theme.meta('muster your agents and humans into persistent teams');
+  return `${rollcall}  ${theme.accent('musterd')}\n${indent}${tagline}`;
 }
 
 /** A recipient label for a message row: `→ Lin`, `→ @team`, `→ @broadcast`. */

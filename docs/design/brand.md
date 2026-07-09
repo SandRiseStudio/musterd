@@ -9,13 +9,13 @@ This file is the single source of truth from which all three Figma briefs and al
 ## 1. Name & wordmark
 
 - **Name:** `musterd` — always lowercase, even at the start of a sentence in body copy where possible. In headings it may be capitalized (`Musterd`) only when typographic convention forces it; prefer lowercase.
-- **Etymology / story (for voice, not for repetition):** *muster* ("assemble the team", "roll call" = presence) + the `-d` daemon suffix, with a deliberate mustard pun for warmth. Do not over-explain the pun in product copy; one wink in the README is enough.
-- **Tagline (canonical):** *"Muster your agents and humans into persistent teams."*
-- **One-liner (canonical):** *"Named, persistent teams of agents and humans — across any harness, framework, model, or surface — with a shared communication protocol."*
+- **Etymology / story (for voice, not for repetition):** _muster_ ("assemble the team", "roll call" = presence) + the `-d` daemon suffix, with a deliberate mustard pun for warmth. Do not over-explain the pun in product copy; one wink in the README is enough.
+- **Tagline (canonical):** _"Muster your agents and humans into persistent teams."_
+- **One-liner (canonical):** _"Named, persistent teams of agents and humans — across any harness, framework, model, or surface — with a shared communication protocol."_
 
 ### Wordmark rules
 
-- **ASCII wordmark** (CLI banner + README header): the literal lowercase string `musterd`. A block/ANSI-shaded version is allowed for the CLI banner; the canonical block form is generated and frozen in `figma-brief-brand.md` and mirrored as a string constant in `packages/cli`.
+- **CLI wordmark — the roll-call lockup** (CLI banner; ADR 114): three presence dots (online · away · offline, the CLI's own glyphs) beside the lowercase mustard string `musterd`, tagline hanging under the wordmark. The mark _is_ the product — `muster` = take the roll, a team present. This is the source of truth (`packages/cli/src/render/rows.ts` `renderBanner`); the earlier multi-line block/figlet wordmark is retired (it read as dated ASCII art). A plain lowercase `musterd` string is still the wordmark in the README header.
 - **Vector wordmark** (Figma): lowercase `musterd` set in the brand mono typeface (see §3), letter-spacing `0`, single accent dot or the `-d` rendered in accent mustard is the only permitted flourish.
 - **Never:** stylized "MusterD", camel case, a separate icon glyph that isn't derived from the letterforms, gradients, drop shadows, or 3-D treatments.
 
@@ -27,41 +27,41 @@ Single accent philosophy: **one mustard accent** carries the entire identity rig
 
 ### Accent — Mustard ramp
 
-| Token            | Hex       | Use |
-|------------------|-----------|-----|
-| `mustard-50`     | `#FBF3D5` | faint tint backgrounds (web) |
-| `mustard-100`    | `#F6E4A8` | hover tint |
-| `mustard-300`    | `#EFC94C` | secondary accent / highlights |
-| `mustard-500`    | `#E1AD01` | **primary accent** (canonical mustard) |
-| `mustard-700`    | `#B8860B` | accent pressed / dark-mode accent text |
-| `mustard-900`    | `#7A5A06` | accent on light, high-contrast text |
+| Token         | Hex       | Use                                    |
+| ------------- | --------- | -------------------------------------- |
+| `mustard-50`  | `#FBF3D5` | faint tint backgrounds (web)           |
+| `mustard-100` | `#F6E4A8` | hover tint                             |
+| `mustard-300` | `#EFC94C` | secondary accent / highlights          |
+| `mustard-500` | `#E1AD01` | **primary accent** (canonical mustard) |
+| `mustard-700` | `#B8860B` | accent pressed / dark-mode accent text |
+| `mustard-900` | `#7A5A06` | accent on light, high-contrast text    |
 
 Primary accent is **`#E1AD01`**. When a single color value is needed (badge, link, banner), use this.
 
 ### Neutrals — Zinc ramp
 
-| Token        | Hex       | Use |
-|--------------|-----------|-----|
-| `zinc-50`    | `#FAFAFA` | web light bg |
-| `zinc-100`   | `#F4F4F5` | light surface |
-| `zinc-200`   | `#E4E4E7` | borders (light) |
-| `zinc-400`   | `#A1A1AA` | muted text |
-| `zinc-500`   | `#71717A` | secondary text |
-| `zinc-700`   | `#3F3F46` | borders (dark) |
-| `zinc-800`   | `#27272A` | dark surface |
-| `zinc-900`   | `#18181B` | dark bg / terminal bg |
-| `zinc-950`   | `#09090B` | deepest bg |
+| Token      | Hex       | Use                   |
+| ---------- | --------- | --------------------- |
+| `zinc-50`  | `#FAFAFA` | web light bg          |
+| `zinc-100` | `#F4F4F5` | light surface         |
+| `zinc-200` | `#E4E4E7` | borders (light)       |
+| `zinc-400` | `#A1A1AA` | muted text            |
+| `zinc-500` | `#71717A` | secondary text        |
+| `zinc-700` | `#3F3F46` | borders (dark)        |
+| `zinc-800` | `#27272A` | dark surface          |
+| `zinc-900` | `#18181B` | dark bg / terminal bg |
+| `zinc-950` | `#09090B` | deepest bg            |
 
 ### Semantic (web dashboard + ANSI mapping)
 
-| Meaning   | Light hex | Dark hex  | ANSI (terminal) |
-|-----------|-----------|-----------|-----------------|
-| success   | `#15803D` | `#22C55E` | green |
-| warning   | `#B45309` | `#F59E0B` | yellow |
-| danger    | `#B91C1C` | `#EF4444` | red |
-| info      | `#1D4ED8` | `#60A5FA` | blue |
-| accent    | `#E1AD01` | `#EFC94C` | yellow (bold) |
-| muted     | `#71717A` | `#A1A1AA` | bright black |
+| Meaning | Light hex | Dark hex  | ANSI (terminal) |
+| ------- | --------- | --------- | --------------- |
+| success | `#15803D` | `#22C55E` | green           |
+| warning | `#B45309` | `#F59E0B` | yellow          |
+| danger  | `#B91C1C` | `#EF4444` | red             |
+| info    | `#1D4ED8` | `#60A5FA` | blue            |
+| accent  | `#E1AD01` | `#EFC94C` | yellow (bold)   |
+| muted   | `#71717A` | `#A1A1AA` | bright black    |
 
 ### ANSI color mapping (terminal — load-bearing, the CLI must obey)
 
@@ -88,14 +88,14 @@ Two families only.
 
 ### Type ramp (web/docs)
 
-| Token     | Size / line-height | Weight | Family |
-|-----------|--------------------|--------|--------|
-| display   | 40 / 48            | 700    | Inter  |
-| h1        | 28 / 36            | 700    | Inter  |
-| h2        | 22 / 30            | 600    | Inter  |
-| h3        | 18 / 26            | 600    | Inter  |
-| body      | 15 / 24            | 400    | Inter  |
-| small     | 13 / 20            | 400    | Inter  |
+| Token     | Size / line-height | Weight | Family         |
+| --------- | ------------------ | ------ | -------------- |
+| display   | 40 / 48            | 700    | Inter          |
+| h1        | 28 / 36            | 700    | Inter          |
+| h2        | 22 / 30            | 600    | Inter          |
+| h3        | 18 / 26            | 600    | Inter          |
+| body      | 15 / 24            | 400    | Inter          |
+| small     | 13 / 20            | 400    | Inter          |
 | mono-body | 14 / 22            | 400    | JetBrains Mono |
 | mono-sm   | 12 / 18            | 400    | JetBrains Mono |
 
@@ -120,13 +120,13 @@ Single mono size at `14 / 22`; bold for emphasis; never italic in terminal frame
 
 These five terms are load-bearing. They must appear with these exact meanings everywhere — code identifiers, CLI help text, doc prose, Figma labels. Do not introduce synonyms.
 
-| Term         | Definition | Not |
-|--------------|------------|-----|
-| **Team**     | A named, persistent group of Members with shared messaging — a **standing roster**, not a project. It outlives any task, session, *or repository*: the same Team is reused across folders to keep the same agents talking. The folder only decides *where* a given Member runs (the folder→agent binding); the Team is the durable, cross-project roster. | not "room", "channel", "swarm", "project" |
-| **Member**   | A durable identity in a Team. `kind: agent \| human`. Has a name, role (free text), lifecycle, availability. A Member is **not** a session. | not "agent", "user", "participant" |
-| **Presence** | Where a Member is currently attached (a Claude Code session, a Codex session, a CLI, later an app). One Member can have multiple Presences. | not "session", "connection", "status" |
-| **Surface**  | A kind of place a Member can be present: `cli`, `claude-code`, `codex`, (later) `ios`, `web`, `slack`. A Surface hosts a Presence. | not "client", "platform", "adapter" (adapter is the code; Surface is the concept) |
-| **Act**      | The typed intent of a message: `message`, `status_update`, `request_help`, `handoff`, `accept`, `decline`, `wait`, `resolve`. Grounded in the Co-Gym collaboration-act taxonomy. | not "type", "kind", "event", "verb" |
+| Term         | Definition                                                                                                                                                                                                                                                                                                                                                | Not                                                                               |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| **Team**     | A named, persistent group of Members with shared messaging — a **standing roster**, not a project. It outlives any task, session, _or repository_: the same Team is reused across folders to keep the same agents talking. The folder only decides _where_ a given Member runs (the folder→agent binding); the Team is the durable, cross-project roster. | not "room", "channel", "swarm", "project"                                         |
+| **Member**   | A durable identity in a Team. `kind: agent \| human`. Has a name, role (free text), lifecycle, availability. A Member is **not** a session.                                                                                                                                                                                                               | not "agent", "user", "participant"                                                |
+| **Presence** | Where a Member is currently attached (a Claude Code session, a Codex session, a CLI, later an app). One Member can have multiple Presences.                                                                                                                                                                                                               | not "session", "connection", "status"                                             |
+| **Surface**  | A kind of place a Member can be present: `cli`, `claude-code`, `codex`, (later) `ios`, `web`, `slack`. A Surface hosts a Presence.                                                                                                                                                                                                                        | not "client", "platform", "adapter" (adapter is the code; Surface is the concept) |
+| **Act**      | The typed intent of a message: `message`, `status_update`, `request_help`, `handoff`, `accept`, `decline`, `wait`, `resolve`. Grounded in the Co-Gym collaboration-act taxonomy.                                                                                                                                                                          | not "type", "kind", "event", "verb"                                               |
 
 Secondary nouns (consistent but not in the core five): **Inbox** (a Member's durable mailbox for messages received while offline), **Envelope** (the on-wire message structure), **Roster** (a Team's list of Members), **Lifecycle** (`forever | session | until <ts>`), **Availability** (a Member's schedule; v1 stores it, does not enforce it).
 
@@ -138,4 +138,4 @@ This entire identity is intentionally small: one name, one accent color, one wor
 
 ## 7. Web surface (carve-out)
 
-The **landing / marketing web surface** (`packages/web`) is allowed to go maximal — immersive WebGL, gradients, glows, depth, motion, and a deep-black ground — while the **product chrome** (CLI, terminal frames, the future dashboard's functional UI) stays minimal under §1–§6. The shared anchor is unchanged on every surface: mustard `#E1AD01` is still the one accent, Inter + JetBrains Mono are still the only typefaces, the wordmark is still lowercase JetBrains Mono, and copy stays plain and declarative (the *experience* carries the spectacle, never the words). This split, its guardrails (reduced-motion fallback, static-first content), and its limits are recorded in `docs/decisions/037-web-surface-aesthetic.md`.
+The **landing / marketing web surface** (`packages/web`) is allowed to go maximal — immersive WebGL, gradients, glows, depth, motion, and a deep-black ground — while the **product chrome** (CLI, terminal frames, the future dashboard's functional UI) stays minimal under §1–§6. The shared anchor is unchanged on every surface: mustard `#E1AD01` is still the one accent, Inter + JetBrains Mono are still the only typefaces, the wordmark is still lowercase JetBrains Mono, and copy stays plain and declarative (the _experience_ carries the spectacle, never the words). This split, its guardrails (reduced-motion fallback, static-first content), and its limits are recorded in `docs/decisions/037-web-surface-aesthetic.md`.
