@@ -32,7 +32,7 @@ Each is a Figma component with variants where noted:
 4. `cmp/act-badge` — `[message] [status_update] [request_help] [handoff] [accept] [decline] [wait] [resolve]`. Variant styling: `request_help` yellow-bold, `decline` red, `resolve` green-bold (terminal/done), rest dim white in brackets.
 5. `cmp/message-row` — composed: `HH:MM` (bright-black) + `member-chip` + `act-badge` + body (white, wraps at col 80 with 2-space hanging indent).
 6. `cmp/table-row` — for `status`/roster: fixed columns, see Commands.
-7. `cmp/banner` — **UPDATED ([ADR 114](../decisions/114-cli-rollcall-wordmark.md)):** the roll-call lockup — three presence dots (online green · away mustard · offline dim) then the lowercase mustard `musterd`, tagline in bright-black hanging under the wordmark. (Replaces the retired ASCII block; source of truth is `renderBanner` in `packages/cli/src/render/rows.ts`.)
+7. `cmp/banner` — **UPDATED ([ADR 114](../decisions/114-cli-rollcall-wordmark.md)):** the roll-call lockup — three presence dots (online green · away mustard · offline dim) above a solid-block `musterd` logotype (ANSI-Shadow style, mustard faces + dimmed drop-shadow), tagline in bright-black under it. (Replaces the retired thin-outline figlet; source of truth is `renderBanner` in `packages/cli/src/render/rows.ts`.)
 
 ## Page: Commands (one frame per command output)
 

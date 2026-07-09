@@ -14,15 +14,30 @@ export type KindOf = (name: string) => MemberKind;
 const STALE_AFTER_MS = 5 * 60_000;
 
 /**
- * The wordmark banner + tagline (brand.md §1). A roll-call lockup, not block ASCII art: three presence
- * dots (online · away · offline) — the CLI's own glyphs — beside the lowercase mustard wordmark, so the
- * mark *is* the product: `muster` = take the roll, a team present. The tagline hangs under the wordmark.
+ * The wordmark banner + tagline (brand.md §1, ADR 114). A solid-block `musterd` logotype (ANSI-Shadow
+ * style) — block faces in mustard, drop-shadow edges dimmed for depth — led by the roll-call dots
+ * (online · away · offline, the CLI's own presence glyphs) and closed by the tagline. `muster` = take
+ * the roll; the mark shows the product itself, a team present. All 16-color-safe; degrades cleanly.
  */
+const WORDMARK = [
+  '███╗   ███╗██╗   ██╗███████╗████████╗███████╗██████╗ ██████╗',
+  '████╗ ████║██║   ██║██╔════╝╚══██╔══╝██╔════╝██╔══██╗██╔══██╗',
+  '██╔████╔██║██║   ██║███████╗   ██║   █████╗  ██████╔╝██║  ██║',
+  '██║╚██╔╝██║██║   ██║╚════██║   ██║   ██╔══╝  ██╔══██╗██║  ██║',
+  '██║ ╚═╝ ██║╚██████╔╝███████║   ██║   ███████╗██║  ██║██████╔╝',
+  '╚═╝     ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═════╝',
+];
+
+/** Paint one wordmark line: bright mustard block faces (█), dimmed drop-shadow edges (box-drawing). */
+function paintWordmark(line: string): string {
+  return line.replace(/█+/g, (m) => theme.accent(m)).replace(/[╔╗╚╝║═]+/g, (m) => theme.meta(m));
+}
+
 export function renderBanner(): string {
   const rollcall = `${theme.presenceDot('online')} ${theme.presenceDot('away')} ${theme.presenceDot('offline')}`;
-  const indent = ' '.repeat(7); // width of `● ● ○  ` — aligns the tagline under the wordmark
+  const word = WORDMARK.map(paintWordmark).join('\n');
   const tagline = theme.meta('muster your agents and humans into persistent teams');
-  return `${rollcall}  ${theme.accent('musterd')}\n${indent}${tagline}`;
+  return `${rollcall}\n${word}\n${tagline}`;
 }
 
 /** A recipient label for a message row: `→ Lin`, `→ @team`, `→ @broadcast`. */
