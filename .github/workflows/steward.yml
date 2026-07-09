@@ -175,4 +175,3 @@ jobs:
             --max-turns 40 \
             --dangerously-skip-permissions \
             "$(cat steward-prompt.txt)"
-          GITHUB_TOKEN: ${{ secrets.STEWARD_TOKEN }}
