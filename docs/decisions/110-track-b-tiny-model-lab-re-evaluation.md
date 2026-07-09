@@ -1,7 +1,10 @@
 # 110 — Track B re-evaluation: revive Stage 1 as the guardrail-floor probe; Stage 2 stays gated on the dataset
 
-- Status: accepted (decision-only — implementation lives in `musterd-lab`, never the product repos)
-- Date: 2026-07-08 (re-evaluation mandated by ADR 101 §5; izzo)
+- Status: accepted (decision-only — implementation lives in `musterd-lab`, never the product repos).
+  **Stage 1 EXECUTED 2026-07-09** — `qwen3:4b` run through the full guardrail sweep; exit criterion
+  met by [finding 003](../research/003-guardrail-floor-tiny-model.md) (floor holds; gaps G1/G2 filed).
+  Stage 2 remains NO-GO (§2). §1 scope claim corrected 2026-07-09 (see the correction note below).
+- Date: 2026-07-08 (re-evaluation mandated by ADR 101 §5; izzo); Stage 1 executed 2026-07-09 (izzo)
 - Builds on: ADR 101 (model as a variable — the attestation substrate this streams into), ADR 056
   (research ladder: dataset → benchmark → paper → judge), ADR 051/052 (manifests + baselines),
   `docs/design/model-experimentation.md` §Track B (the frozen design under review)
@@ -39,9 +42,21 @@ Split the stages and decide them independently — they share a repo, not a fate
 
 A weak local agent probing the guardrail floor is still the cheapest high-signal experiment on the
 board: a 3–4B model fails in exactly the ways the primer + protocol guardrails exist to catch, where
-a frontier model papers over gaps. And it gained a second job since the design froze: it is the only
-realistic way to put a **non-`claude-*` family** into a live team, which turns the shipped diversity
-flag from untested code into observed behavior.
+a frontier model papers over gaps. That guardrail-floor probe is what the tiny model is _uniquely_
+for — a weak agent no frontier model can stand in for.
+
+> **Correction (2026-07-09, per finding 003).** An earlier draft of this section also claimed the
+> tiny model is "the only realistic way to put a non-`claude-*` family into a live team." That is
+> wrong, and it conflated two separate goals. **(a) Cross-family diversity data** — any harness that
+> sets `MUSTERD_MODEL` attests its family, so a _frontier_ non-Claude model (Grok 4.5 / GPT-5.6 /
+> GLM) run in Cursor with `MUSTERD_MODEL` set puts a real non-`claude` occupancy on a live team
+> today, and — being a _resident_ harness — avoids the attestation-durability gap (finding 003 G1)
+> that the fire-and-exit tiny-model CLI harness exposes. See the frontier-seat runbook in
+> `docs/design/model-experimentation.md`. **(b) The guardrail floor** — probing how a _weak_ agent
+> handles the primer + protocol — is what only the tiny model does; a strong frontier model papers
+> over exactly the gaps this probe exists to find. The tiny model is the guardrail-floor probe, not
+> the only cross-family source. Stage 1 still exercises attestation from a non-`claude` seat as a
+> secondary check (finding 003 confirmed it lands at claim, and caught G1).
 
 Re-scope (all inside `musterd-lab`):
 
