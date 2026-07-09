@@ -15,7 +15,7 @@ This file is the single source of truth from which all three Figma briefs and al
 
 ### Wordmark rules
 
-- **CLI wordmark — the roll-call lockup** (CLI banner; ADR 114): three presence dots (online · away · offline, the CLI's own glyphs) above a solid-block `musterd` logotype (ANSI-Shadow style — block faces in mustard, drop-shadow edges dimmed for depth), tagline under it. The mark _is_ the product — `muster` = take the roll, a team present. This is the source of truth (`packages/cli/src/render/rows.ts` `renderBanner`). The retired form is the **thin-outline figlet** (`_ __ ___`) that read as dated BBS art — a _solid, filled_ block in one mustard accent reads as a contemporary logotype, not retro. A plain lowercase `musterd` string is still the wordmark in the README header.
+- **CLI wordmark — the roll-call lockup** (CLI banner; ADR 114): three presence dots (online · away · offline, the CLI's own glyphs) beside the **`musterd` brand chip** — the lowercase word reversed out of a solid mustard block — with the tagline under it. Compact, bold, modern; **no multi-line letter-art** (block or outline, it reads as retro). The mark _is_ the product — `muster` = take the roll, a team present. Source of truth: `packages/cli/src/render/rows.ts` `renderBanner`. A plain lowercase `musterd` string is still the wordmark in the README header.
 - **Vector wordmark** (Figma): lowercase `musterd` set in the brand mono typeface (see §3), letter-spacing `0`, single accent dot or the `-d` rendered in accent mustard is the only permitted flourish.
 - **Never:** stylized "MusterD", camel case, a separate icon glyph that isn't derived from the letterforms, gradients, drop shadows, or 3-D treatments.
 

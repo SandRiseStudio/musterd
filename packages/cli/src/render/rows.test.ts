@@ -398,13 +398,13 @@ describe('renderReachabilityNudge (ADR 046 — agent-side reachability)', () => 
 });
 
 describe('renderBanner', () => {
-  it('is a roll-call lockup: presence dots + solid-block wordmark + tagline', () => {
+  it('is a compact lockup: presence dots + the musterd chip + tagline', () => {
     const banner = renderBanner();
     expect(banner).toContain('●'); // at least one roll-call presence dot
     expect(banner).toContain('○'); // …including the offline state
-    expect(banner).toContain('█'); // the solid-block wordmark faces
+    expect(banner).toContain('musterd'); // the wordmark chip (literal word, no letter-art)
     expect(banner).toContain('persistent teams'); // the tagline
-    // Dots line + 6 wordmark rows + tagline.
-    expect(banner.split('\n')).toHaveLength(8);
+    // Two lines only — no multi-line letter-art.
+    expect(banner.split('\n')).toHaveLength(2);
   });
 });

@@ -42,6 +42,8 @@ export const theme = {
   err: (s: string) => colors.red(s),
   dim: (s: string) => colors.dim(s),
   bold: (s: string) => colors.bold(s),
+  /** The brand chip: text reversed out of a solid mustard block — the CLI wordmark lockup (ADR 114). */
+  brandmark: (s: string) => colors.bold(colors.inverse(colors.yellow(s))),
 
   /**
    * A high-salience, sticky banner for an act that needs the human *now* — `request_help` or an
