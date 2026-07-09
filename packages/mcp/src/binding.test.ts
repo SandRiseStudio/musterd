@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolveBindingDir } from './binding.js';
 import { loadMcpConfig } from './config.js';
 
 let dir: string;
@@ -110,6 +111,39 @@ describe('loadMcpConfig committed launch-spec fallback (ADR: committed launch sp
     // The binding file (team 'lab') overrides the spec's team 'clonelab'.
     expect(cfg.team).toBe('lab');
     expect(cfg.server).toBe('http://localhost:9999');
+  });
+});
+
+describe('resolveBindingDir (identity anchor — the ambient-cwd clobber fix)', () => {
+  it('derives the workspace root from an explicit MUSTERD_BINDING path', () => {
+    const root = mkdtempSync(join(tmpdir(), 'musterd-anchor-'));
+    const p = join(root, '.musterd', 'binding.json');
+    expect(resolveBindingDir(process.cwd(), { MUSTERD_BINDING: p })).toBe(root);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('walks up from startDir to the nearest .musterd/binding.json', () => {
+    const root = mkdtempSync(join(tmpdir(), 'musterd-anchor-'));
+    mkdirSync(join(root, '.musterd'), { recursive: true });
+    writeFileSync(join(root, '.musterd', 'binding.json'), '{}');
+    const sub = join(root, 'a', 'b');
+    mkdirSync(sub, { recursive: true });
+    expect(resolveBindingDir(sub, {})).toBe(root);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('falls back to the nearest .musterd/workspace.json when no binding exists', () => {
+    const root = mkdtempSync(join(tmpdir(), 'musterd-anchor-'));
+    mkdirSync(join(root, '.musterd'), { recursive: true });
+    writeFileSync(join(root, '.musterd', 'workspace.json'), '{}');
+    expect(resolveBindingDir(join(root, 'x'), {})).toBe(root);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('falls back to startDir when no musterd file is on the walk-up path', () => {
+    const root = mkdtempSync(join(tmpdir(), 'musterd-empty-'));
+    expect(resolveBindingDir(root, {})).toBe(root);
+    rmSync(root, { recursive: true, force: true });
   });
 });
 

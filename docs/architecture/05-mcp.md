@@ -48,6 +48,14 @@ setups. **Identity is optional** (claim-on-first-use, ADR 032): only the **team*
 the `agent_key` may be absent, leaving the session a pending presence that claims a seat on first use
 (`team_join` / `musterd claim`, which writes the resolved seat back into binding.json).
 
+That write is **anchored to the workspace the config was resolved from** (`config.bindingDir`,
+`resolveBindingDir`), never ambient `process.cwd()` (ADR 115): a long-lived adapter's cwd is set by the
+harness, not the user, and when it wandered into a *sibling* worktree the persist used to clobber that
+worktree's `binding.json` with this session's seat. And because the boot config pins the grant read at
+launch, an explicit `team_join {as:X}` **re-reads `binding.json`** from `bindingDir` first — so an
+in-session identity repair (a re-provisioned grant for that seat) takes effect without a full MCP
+reconnect. A binding for a *different* seat is left untouched.
+
 On `team_join` the adapter sends two attach-time facts on the `hello` (provenance/where seed, ADR 014): **`provenance`** (from `MUSTERD_PROVENANCE`, default `session`) and a **`workspace`** label resolved once at load — the declared `MUSTERD_WORKSPACE` if set, else a gracefully-degrading auto-label (`cwd` folder, qualified by git branch when informative, else the cwd subpath within the repo, else the bare folder). Both are read context only — they carry no routing/auth meaning — and surface dim on the roster (`online via claude-code (session) · repo@branch`).
 
 ### Dormant by default (v0.2 M3 / ADR 007)

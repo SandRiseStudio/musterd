@@ -41,6 +41,35 @@ function readBinding(path: string): Binding | null {
 }
 
 /**
+ * The workspace directory this session's identity is anchored to — where {@link saveBinding} must
+ * write back a claimed seat, and where an in-session binding repair is re-read from. It is the dir of
+ * the `.musterd/` that seeded this config, resolved with the same precedence as {@link findBinding} /
+ * {@link findWorkspaceSpec}: an explicit `MUSTERD_BINDING` path (→ its workspace root), else the
+ * nearest ancestor holding `.musterd/binding.json`, else the nearest holding `.musterd/workspace.json`.
+ *
+ * Falls back to `startDir` only when no musterd file exists on the walk-up path. This is the fix for
+ * the ambient-cwd clobber (ADR 018): persisting to `process.cwd()` let an adapter whose cwd happened
+ * to be a *sibling* worktree overwrite that worktree's binding.json with its own seat. Anchoring to
+ * the resolved dir keeps a claim's write inside the workspace it was actually resolved from.
+ */
+export function resolveBindingDir(
+  startDir: string = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const explicit = env['MUSTERD_BINDING'];
+  // MUSTERD_BINDING names the binding *file* (<root>/.musterd/binding.json); its workspace root is two
+  // levels up. dirname twice is robust to the fixed `.musterd/binding.json` suffix saveBinding writes.
+  if (explicit) return dirname(dirname(explicit));
+  for (let dir = startDir; ; ) {
+    if (existsSync(join(dir, BINDING_DIR, BINDING_FILE))) return dir;
+    if (existsSync(join(dir, BINDING_DIR, WORKSPACE_SPEC_FILE))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return startDir;
+    dir = parent;
+  }
+}
+
+/**
  * Locate + parse the committed, secret-free launch spec `.musterd/workspace.json` (ADR: committed
  * launch spec). Walks up like {@link findBinding}. The adapter uses it as a base UNDER the gitignored
  * binding.json and env — so a fresh clone whose only musterd file is the committed spec (plus an

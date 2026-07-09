@@ -66,6 +66,7 @@ const config: McpConfig = {
   claim: { mode: 'seat', name: 'Ada' },
   connId: 'conn-1',
   claimCode: 'AB12',
+  bindingDir: '/tmp',
 };
 
 function member(over: Partial<MemberSummary> = {}): MemberSummary {

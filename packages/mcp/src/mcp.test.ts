@@ -82,6 +82,7 @@ function adaConfig(): McpConfig {
     claim: { mode: 'seat', name: 'Ada' },
     connId: 'conn-ada',
     claimCode: 'AD12',
+    bindingDir: process.cwd(),
   };
 }
 
