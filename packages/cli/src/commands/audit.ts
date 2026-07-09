@@ -2,6 +2,7 @@ import { type AuditEntry, type MemberKind } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { clock, theme } from '../render/theme.js';
+import { sym } from '../render/ui.js';
 import { kindLookup, resolve } from './helpers.js';
 
 /**
@@ -37,7 +38,9 @@ export async function auditCommand(parsed: Parsed): Promise<number> {
     `${theme.accent('audit')} — ${team} (${res.audit.length} entr${res.audit.length === 1 ? 'y' : 'ies'})\n`,
   );
   if (res.audit.length === 0) {
-    process.stdout.write(theme.meta('no governed decisions recorded yet') + '\n');
+    process.stdout.write(
+      theme.meta('no governed decisions recorded yet — the ledger is clean') + '\n',
+    );
     return 0;
   }
   for (const e of res.audit) process.stdout.write(renderAuditEntry(e, kindOf) + '\n');
@@ -74,9 +77,12 @@ function renderAuditEntry(e: AuditEntry, kindOf: (name: string) => MemberKind): 
   const ts = theme.meta(clock(e.ts));
   const actor =
     e.actor === null ? theme.meta('system') : theme.memberName(e.actor, kindOf(e.actor));
-  const action = theme.meta(e.action);
-  const result = e.result === 'allow' ? theme.ok('allow') : theme.err('deny');
+  const action = theme.meta(`[${e.action}]`);
+  const result =
+    e.result === 'allow'
+      ? `${theme.ok(sym.ok)} ${theme.ok('allow')}`
+      : `${theme.err(sym.err)} ${theme.err('deny')}`;
   const target = e.target === null ? theme.meta('—') : e.target;
   const detail = e.detail ? ' ' + theme.meta(JSON.stringify(e.detail)) : '';
-  return `${ts} ${actor} [${action}] ${result} → ${target}${detail}`;
+  return `${ts} ${actor} ${action} ${result} ${theme.meta(sym.arrow)} ${target}${detail}`;
 }

@@ -2,6 +2,7 @@ import type { MemoryEnvelope } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { success } from '../render/ui.js';
 import { resolve } from './helpers.js';
 
 /**
@@ -29,7 +30,9 @@ export async function memoryCommand(parsed: Parsed): Promise<number> {
       return 0;
     }
     process.stdout.write(
-      `${theme.ok('✓')} memory saved — your next occupy shows: ${theme.accent(`"${headline}"`)}\n`,
+      success(`memory saved — your next occupy shows ${theme.accent(`"${headline}"`)}`, {
+        next: 'musterd memory',
+      }) + '\n',
     );
     return 0;
   }
@@ -40,7 +43,11 @@ export async function memoryCommand(parsed: Parsed): Promise<number> {
       process.stdout.write(JSON.stringify({ ok: true }) + '\n');
       return 0;
     }
-    process.stdout.write(`${theme.ok('✓')} memory cleared\n`);
+    process.stdout.write(
+      success('memory cleared', {
+        next: 'musterd memory save --headline "<subject>"',
+      }) + '\n',
+    );
     return 0;
   }
 
@@ -58,8 +65,9 @@ export async function memoryCommand(parsed: Parsed): Promise<number> {
   } catch (err) {
     if (err instanceof CliError && err.code === 'not_found') {
       process.stdout.write(
-        theme.meta('no memory saved for this seat — musterd memory save --headline "<subject>"') +
-          '\n',
+        theme.meta(
+          'no memory saved for this seat yet — nothing to carry over. musterd memory save --headline "<subject>"',
+        ) + '\n',
       );
       return 0;
     }

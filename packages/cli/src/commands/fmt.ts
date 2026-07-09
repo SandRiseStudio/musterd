@@ -10,6 +10,7 @@ import {
 import type { Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { hint, success, sym } from '../render/ui.js';
 
 /**
  * `musterd fmt [--check]` — the ADR 058 guard-2 (tidiness) tool. Rewrites `.musterd/team.toml` +
@@ -62,25 +63,26 @@ export async function fmtCommand(parsed: Parsed, baseDir: string = process.cwd()
 
   if (check) {
     if (drifted.length === 0) {
-      process.stdout.write(`${theme.ok('✓')} ${canonical.length} roster file(s) are canonical\n`);
+      process.stdout.write(success(`${canonical.length} roster file(s) already canonical`) + '\n');
       return 0;
     }
     process.stdout.write(
-      `${theme.err('✗')} ${drifted.length} roster file(s) are not canonical — run \`musterd fmt\`:\n` +
-        drifted.map((d) => `  ${d}`).join('\n') +
+      `${theme.err(sym.err)} ${drifted.length} roster file(s) are not canonical — run \`musterd fmt\`:\n` +
+        drifted.map((d) => `  ${theme.meta(sym.dot)} ${d}`).join('\n') +
         '\n',
     );
     return 1;
   }
 
   if (drifted.length === 0) {
-    process.stdout.write(`${theme.ok('✓')} already canonical — nothing to do\n`);
+    process.stdout.write(success('already canonical — nothing to do') + '\n');
   } else {
     process.stdout.write(
-      `${theme.ok('✓')} formatted ${drifted.length} roster file(s):\n` +
-        drifted.map((d) => `  ${d}`).join('\n') +
+      `${theme.ok(sym.ok)} formatted ${drifted.length} roster file(s):\n` +
+        drifted.map((d) => `  ${theme.meta(sym.dot)} ${d}`).join('\n') +
         '\n',
     );
+    process.stdout.write(hint('musterd reload — pick up the changes') + '\n');
   }
   return 0;
 }

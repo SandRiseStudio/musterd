@@ -6,10 +6,10 @@ import type {
   PresenceStatus,
 } from '@musterd/protocol';
 import { clock, theme } from './theme.js';
+import { padEndVisible, termWidth, wrapText } from './ui.js';
 
 export type KindOf = (name: string) => MemberKind;
 
-const COLS = 80;
 /** A status older than this is shown with its age (`working: x · Nm`) to signal it may be stale. */
 const STALE_AFTER_MS = 5 * 60_000;
 
@@ -40,8 +40,8 @@ export function renderMessageRow(
   const marker = opts.unread ? theme.accent('▌') + ' ' : '  ';
   const head = `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${toLabel(env.to, kindOf)}`;
   const indent = '    ';
-  const body = wrap(env.body, COLS - indent.length)
-    .map((line, i) => (i === 0 ? `${indent}${line}` : `${indent}${line}`))
+  const body = wrapText(env.body, termWidth() - indent.length)
+    .map((line) => `${indent}${line}`)
     .join('\n');
   return env.body ? `${marker}${head}\n${body}` : `${marker}${head}`;
 }
@@ -86,7 +86,7 @@ export function renderStatusTable(members: MemberSummary[], now = Date.now()): s
         ? `until ${new Date(m.lifecycle_until).toISOString().slice(0, 10)}`
         : m.lifecycle;
     return (
-      padVisible(name, m.name, 14) +
+      padEndVisible(name, 14) +
       pad(m.kind, 8) +
       pad(m.role || '—', 14) +
       pad(lifecycle, 18) +
@@ -242,28 +242,6 @@ export function renderPresence(status: PresenceStatus, surface?: string): string
 
 // ---- helpers ----
 
-function wrap(text: string, width: number): string[] {
-  const words = text.split(/\s+/);
-  const lines: string[] = [];
-  let line = '';
-  for (const w of words) {
-    if (line.length + w.length + 1 > width) {
-      if (line) lines.push(line);
-      line = w;
-    } else {
-      line = line ? `${line} ${w}` : w;
-    }
-  }
-  if (line) lines.push(line);
-  return lines.length ? lines : [''];
-}
-
 function pad(s: string, width: number): string {
   return s.length >= width ? s + ' ' : s + ' '.repeat(width - s.length);
-}
-
-/** Pad a colorized string using its visible (uncolored) length, always leaving ≥1 trailing space. */
-function padVisible(colored: string, plain: string, width: number): string {
-  const extra = Math.max(1, width - plain.length);
-  return colored + ' '.repeat(extra);
 }

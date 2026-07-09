@@ -4,6 +4,7 @@ import { HttpClient } from '../client.js';
 import { loadConfig, rememberIdentity, saveBinding, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { success, sym } from '../render/ui.js';
 
 /**
  * `musterd join <slug> --as <name>` — occupy the named seat via the v0.3 claim handshake (ADR 075),
@@ -50,7 +51,7 @@ export async function joinCommand(parsed: Parsed): Promise<number> {
   }
   if (outcome.state === 'pending') {
     process.stdout.write(
-      `${theme.meta('⧖')} ${outcome.message} (request ${outcome.requestId}) — approve to go online\n`,
+      `${theme.meta(sym.pending)} ${outcome.message} ${theme.meta(`(request ${outcome.requestId}) — approve to go online`)}\n`,
     );
     return 0;
   }
@@ -76,7 +77,9 @@ export async function joinCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(JSON.stringify({ team: slug, member: seat, surface }) + '\n');
     return 0;
   }
-  process.stdout.write(`${theme.ok('✓')} ${seat} joined ${slug}\n`);
-  process.stdout.write(`${theme.presenceDot('online')} ${seat} online via ${surface}\n`);
+  process.stdout.write(success(`${seat} joined ${slug}`, { next: 'musterd next' }) + '\n');
+  process.stdout.write(
+    `${theme.presenceDot('online')} ${theme.meta(`${seat} online via ${surface}`)}\n`,
+  );
   return 0;
 }

@@ -10,6 +10,7 @@ import { HARNESSES } from '../onboard/harnesses/index.js';
 import { PROVISION_MANIFEST_FILE, readProvisionManifest } from '../onboard/manifest.js';
 import { classifyPrimerTarget, removePrimer } from '../onboard/primer.js';
 import { theme } from '../render/theme.js';
+import { hint, success, sym } from '../render/ui.js';
 
 /**
  * Per-folder uninstall (ADR 027 reversibility — the gap `reset` left open). Removes *exactly* what
@@ -40,7 +41,7 @@ export async function uninstallCommand(parsed: Parsed): Promise<number> {
   if (!harness && (localState || hasPrimer)) harness = await firstConfigured();
 
   if (!harness && !localState && !hasPrimer) {
-    process.stdout.write(`${theme.ok('✓')} nothing musterd installed in this folder\n`);
+    process.stdout.write(success('nothing musterd installed in this folder') + '\n');
     return 0;
   }
 
@@ -51,21 +52,21 @@ export async function uninstallCommand(parsed: Parsed): Promise<number> {
   if (!force) {
     if (!process.stdin.isTTY) {
       process.stderr.write(
-        `${theme.err('✗')} refusing to uninstall without confirmation — re-run with --force\n`,
+        `${theme.err(sym.err)} refusing to uninstall without confirmation — re-run with --force\n`,
       );
       return 2;
     }
     process.stdout.write(
-      `${theme.accent('musterd uninstall')} will remove from ${theme.meta(dir)}:\n` +
+      `${theme.warn(sym.warn)} ${theme.accent('musterd uninstall')} will remove from ${theme.meta(dir)}:\n` +
         (harness
-          ? `  • ${harness.label} MCP server${servers.length > 1 ? 's' : ''}: ${servers.join(', ')}\n`
+          ? `  ${theme.meta(sym.bullet)} ${harness.label} MCP server${servers.length > 1 ? 's' : ''}: ${servers.join(', ')}\n`
           : '') +
         (countPerms(permissions)
-          ? `  • ${countPerms(permissions)} provisioned permission(s)\n`
+          ? `  ${theme.meta(sym.bullet)} ${countPerms(permissions)} provisioned permission(s)\n`
           : '') +
-        `  • the AGENTS.md musterd primer block (your own content is kept)\n` +
-        `  • the musterd skill + slash commands this folder carries\n` +
-        `  • local .musterd state (binding + manifest)\n` +
+        `  ${theme.meta(sym.bullet)} the AGENTS.md musterd primer block (your own content is kept)\n` +
+        `  ${theme.meta(sym.bullet)} the musterd skill + slash commands this folder carries\n` +
+        `  ${theme.meta(sym.bullet)} local .musterd state (binding + manifest)\n` +
         `  ${theme.meta('the member stays on the team roster (offline) — removing it is server-side, v0.3')}\n`,
     );
     if (!(await confirm('proceed?'))) {
@@ -80,12 +81,12 @@ export async function uninstallCommand(parsed: Parsed): Promise<number> {
       await harness.unprovision({ servers, permissions }, 'local');
     } catch (err) {
       process.stderr.write(
-        `${theme.err('!')} couldn't fully unwind ${harness.label}: ${(err as Error).message}\n`,
+        `${theme.warn(sym.warn)} couldn't fully unwind ${harness.label}: ${(err as Error).message}\n`,
       );
     }
   } else if (harness) {
     process.stderr.write(
-      `${theme.err('!')} ${harness.label} has no uninstall renderer yet — remove its musterd servers by hand.\n`,
+      `${theme.warn(sym.warn)} ${harness.label} has no uninstall renderer yet — remove its musterd servers by hand.\n`,
     );
   }
 
@@ -110,12 +111,13 @@ export async function uninstallCommand(parsed: Parsed): Promise<number> {
   }
 
   process.stdout.write(
-    `${theme.ok('✓')} uninstalled musterd from ${theme.meta(dir)}` +
+    `${theme.ok(sym.ok)} uninstalled musterd from ${theme.meta(dir)}` +
       (harness ? ` — removed ${servers.length} server(s) from ${harness.label}` : '') +
       (primer.action === 'removed' ? `; stripped the AGENTS.md primer` : '') +
       (guidance.removed.length ? `; removed ${guidance.removed.length} guidance file(s)` : '') +
-      `.\n  Re-add any time with ${theme.accent('musterd init')}.\n`,
+      `.\n`,
   );
+  process.stdout.write(hint('re-add any time with musterd init') + '\n');
   return 0;
 }
 

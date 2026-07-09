@@ -2,6 +2,7 @@ import type { Goal } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { heading, success, sym } from '../render/ui.js';
 import { resolve } from './helpers.js';
 
 /**
@@ -27,7 +28,7 @@ function renderGoal(g: Goal): string {
   const deps = g.depends_on.length ? theme.meta(` deps:${g.depends_on.length}`) : '';
   // The plan epoch (ADR 111) — shown only once direction has changed, so a steady Goal stays quiet.
   const epoch = g.epoch > 0 ? theme.warn(` epoch:${g.epoch}`) : '';
-  return `${theme.meta(g.id)} ${status} "${g.title}"${wave}${deps}${epoch} — declared by ${g.declared_by}`;
+  return `${theme.meta(sym.goal)} ${theme.meta(g.id)} ${status} "${g.title}"${wave}${deps}${epoch} ${theme.meta(`— declared by ${g.declared_by}`)}`;
 }
 
 export async function goalCommand(parsed: Parsed): Promise<number> {
@@ -54,7 +55,14 @@ export async function goalCommand(parsed: Parsed): Promise<number> {
       ...(wave !== undefined ? { wave } : {}),
       ...(depends_on ? { depends_on } : {}),
     });
-    process.stdout.write(`${theme.ok('✓')} goal declared\n${renderGoal(goal)}\n`);
+    process.stdout.write(
+      success('goal declared', {
+        next: `musterd lane open "…" --goal ${id} --claim`,
+      }) +
+        '\n' +
+        renderGoal(goal) +
+        '\n',
+    );
     return 0;
   }
 
@@ -66,10 +74,13 @@ export async function goalCommand(parsed: Parsed): Promise<number> {
     }
     if (goals.length === 0) {
       process.stdout.write(
-        theme.meta('no declared goals — `musterd goal declare "<title>" --goal-id <id>`') + '\n',
+        theme.meta(
+          'no declared goals yet — the board is clear. `musterd goal declare "<title>" --goal-id <id>`',
+        ) + '\n',
       );
       return 0;
     }
+    process.stdout.write(heading('goals') + '\n');
     for (const g of goals) process.stdout.write(renderGoal(g) + '\n');
     return 0;
   }

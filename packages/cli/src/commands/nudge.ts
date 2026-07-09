@@ -24,6 +24,8 @@ export async function nudgeCommand(parsed: Parsed): Promise<number> {
     // (ADR 036) — has an inbox to surface.
     if (!explicit || !identity) return 0;
     const pending = await pendingActionSummary(http, team, identity.name);
+    // Silent when nothing waits: this rides an approval-prompt Notification hook, so a "nothing here"
+    // line would be noise on every parked prompt. Absence of output IS the empty state here.
     if (!pending) return 0;
     const line = renderReachabilityNudge(pending.count, pending.since, identity.name);
     if (line) process.stdout.write(line + '\n');

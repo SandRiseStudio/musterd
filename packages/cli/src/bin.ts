@@ -34,12 +34,22 @@ import { uninstallCommand } from './commands/uninstall.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { wireCommand } from './commands/wire.js';
 import { CliError } from './errors.js';
-import { HELP } from './help.js';
-import { renderBanner } from './render/rows.js';
-import { theme } from './render/theme.js';
+import {
+  nearestCommand,
+  renderCommandHelp,
+  renderGroupHelp,
+  renderHelp,
+  renderHelpJson,
+} from './render/help.js';
+import { setColorEnabled, theme } from './render/theme.js';
+import { sym } from './render/ui.js';
 import { cliVersion } from './version.js';
 
 async function main(argv: string[]): Promise<number> {
+  // Honor `--no-color` before any render. NO_COLOR / non-TTY are handled by picocolors' auto-detect;
+  // this is the one place the flag is wired, and every command renders through the theme seam.
+  if (argv.includes('--no-color')) setColorEnabled(false);
+
   const command = argv[0];
   const rest = parseArgs(argv.slice(1));
 
@@ -66,7 +76,26 @@ async function main(argv: string[]): Promise<number> {
     rest.flags['help'] === true ||
     argv.slice(1).some((a) => a === '--help' || a === '-h');
   if (wantsHelp) {
-    process.stdout.write(renderBanner() + '\n\n' + HELP + '\n');
+    // `help --json` → the machine-readable catalog (for agents/agentic workflows); `help <command>`
+    // or `help <group>` → focused detail; otherwise the grouped overview (`--full` inlines the rest).
+    if (rest.flags['json'] === true) {
+      process.stdout.write(renderHelpJson() + '\n');
+      return 0;
+    }
+    const topic = command === 'help' ? rest.positionals[0] : undefined;
+    if (topic) {
+      const detail = renderCommandHelp(topic) ?? renderGroupHelp(topic);
+      if (detail) {
+        process.stdout.write(detail + '\n');
+        return 0;
+      }
+      // Unknown topic — fall through to the overview, but say what we couldn't find first.
+      const near = nearestCommand(topic);
+      process.stderr.write(
+        `${theme.warn(sym.warn)} no command "${topic}"${near ? ` — did you mean "${near}"?` : ''}\n`,
+      );
+    }
+    process.stdout.write(renderHelp({ full: rest.flags['full'] === true }) + '\n');
     return 0;
   }
 
@@ -182,8 +211,11 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return resetCommand(rest);
     case 'uninstall':
       return uninstallCommand(rest);
-    default:
-      throw new CliError(`unknown command "${command}" — run: musterd help`, 2);
+    default: {
+      const near = nearestCommand(command);
+      const suggestion = near ? ` — did you mean "${near}"?` : '';
+      throw new CliError(`unknown command "${command}"${suggestion}  ·  musterd help`, 2);
+    }
   }
 }
 
@@ -194,6 +226,6 @@ main(process.argv.slice(2))
       process.stderr.write(`${theme.err('✗')} ${err.message}\n`);
       process.exit(err.exitCode);
     }
-    process.stderr.write(`${theme.err('✗')} ${(err as Error).message}\n`);
+    process.stderr.write(`${theme.err(sym.err)} ${(err as Error).message}\n`);
     process.exit(1);
   });

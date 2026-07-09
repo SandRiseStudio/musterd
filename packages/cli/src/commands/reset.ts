@@ -6,6 +6,7 @@ import { flagStr, type Parsed } from '../args.js';
 import { configPath, loadConfig, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { hint, success, sym } from '../render/ui.js';
 
 /**
  * Wipe the local daemon back to a clean slate (ADR 022): delete the SQLite db (every team, member,
@@ -34,7 +35,7 @@ export async function resetCommand(parsed: Parsed): Promise<number> {
   const identityCount = Object.keys(config.identities).length;
   const dbExists = existsSync(dbPath);
   if (!dbExists && identityCount === 0 && Object.keys(config.bindings).length === 0) {
-    process.stdout.write(`${theme.ok('✓')} already a clean slate — nothing to reset\n`);
+    process.stdout.write(success('already a clean slate — nothing to reset') + '\n');
     return 0;
   }
 
@@ -44,12 +45,12 @@ export async function resetCommand(parsed: Parsed): Promise<number> {
       throw new CliError('refusing to reset without confirmation — re-run with --force', 2);
     }
     process.stdout.write(
-      `${theme.accent('musterd reset')} will permanently wipe:\n` +
-        `  • the database at ${theme.meta(dbPath)} (all teams, members, sessions, messages)\n` +
-        `  • ${identityCount} local ${identityCount === 1 ? 'identity' : 'identities'} in ${theme.meta(configPath())}\n` +
+      `${theme.warn(sym.warn)} ${theme.accent('musterd reset')} will permanently wipe:\n` +
+        `  ${theme.meta(sym.bullet)} the database at ${theme.meta(dbPath)} (all teams, members, sessions, messages)\n` +
+        `  ${theme.meta(sym.bullet)} ${identityCount} local ${identityCount === 1 ? 'identity' : 'identities'} in ${theme.meta(configPath())}\n` +
         (noBackup
-          ? `  ${theme.err('no backup')} (--no-backup)\n`
-          : `  (a backup is written first)\n`),
+          ? `  ${theme.err('no backup')} ${theme.meta('(--no-backup)')}\n`
+          : `  ${theme.meta('(a backup is written first)')}\n`),
     );
     if (!(await confirm('proceed?'))) {
       process.stdout.write('aborted — nothing was changed\n');
@@ -81,11 +82,12 @@ export async function resetCommand(parsed: Parsed): Promise<number> {
   });
 
   process.stdout.write(
-    `${theme.ok('✓')} reset — wiped ${theme.meta(dbPath)}; ` +
+    `${theme.ok(sym.ok)} reset — wiped ${theme.meta(dbPath)}; ` +
       `cleared ${identityCount} local ${identityCount === 1 ? 'identity' : 'identities'}.` +
       backupNote +
-      `\n  Start fresh: ${theme.accent('musterd serve')} then ${theme.accent('musterd init')}.\n`,
+      '\n',
   );
+  process.stdout.write(hint('start fresh: musterd serve then musterd init') + '\n');
   return 0;
 }
 

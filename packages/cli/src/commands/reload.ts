@@ -2,6 +2,7 @@ import { platform as osPlatform } from 'node:os';
 import type { Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { success } from '../render/ui.js';
 import { serviceSupported } from '../service/launchd.js';
 import { status } from '../service/manage.js';
 import { resolveCtx } from './service.js';
@@ -37,7 +38,9 @@ export async function reloadCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
   process.stdout.write(
-    `${theme.ok('✓')} reloaded the musterd daemon (SIGHUP pid ${st.pid}) — it re-resolved roster roots and reconciled\n`,
+    success(`reloaded the musterd daemon (SIGHUP pid ${st.pid})`, { next: 'musterd status' }) +
+      '\n',
   );
+  process.stdout.write(theme.meta('re-resolved roster roots and reconciled') + '\n');
   return 0;
 }

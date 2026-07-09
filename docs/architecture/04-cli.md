@@ -18,7 +18,7 @@ The human surface. `npx`-installable, bin name `musterd`. Talks to the server ov
 ```
 src/
   bin.ts              // shebang entry; parse argv; dispatch; map errors -> exit codes
-  help.ts             // the `musterd help` usage text (extracted from bin.ts so guidance:check can import it; ADR 085)
+  help.ts             // re-exports the plain `HELP` string (from help/plain.ts) so guidance:check can import it; ADR 085
   args.ts             // argv parser → { command, positionals, flags }
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API
@@ -26,9 +26,14 @@ src/
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   errors.ts           // CliError(code) -> message + exit code
+  help/               // the structured command catalog behind `musterd help` (ADR 113)
+    catalog.ts        // pure, import-free command catalog (groups + entries) — the single source guidance:check reads
+    plain.ts          // renderPlainHelp(): the uncolored HELP string derived from the catalog (guidance-safe)
   render/
-    theme.ts          // ANSI roles from brand.md (online dot, member colors, act badges)
+    theme.ts          // mutable ANSI color instance + roles from brand.md; setColorEnabled wires --no-color (ADR 113)
+    ui.ts             // shared layout toolkit: glyph set, termWidth, defList, success/heading/hint, visible-length padding (ADR 113)
     rows.ts           // renderMessageRow, renderStatusTable, renderBanner, renderPresence
+    help.ts           // the pretty grouped/per-command/JSON help renderers + did-you-mean (ADR 113)
     credentials.ts    // v0.3 mint/env renderers: credentialEnv (SPEC A.9) + shown-once agent key / human credential / grant / team-create blocks (ADR 075/076; live post-P3 cutover)
   notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)
     os.ts             // OS push notification (macOS/Linux/Windows)

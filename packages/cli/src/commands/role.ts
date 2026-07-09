@@ -12,6 +12,7 @@ import {
   type RoleTemplate,
 } from '../onboard/role.js';
 import { theme } from '../render/theme.js';
+import { success, sym } from '../render/ui.js';
 
 /**
  * Manage role *provisioning templates* (ADR 026 / docs/design/provisioning-recipe.md §3) from the
@@ -51,11 +52,11 @@ function roleList(parsed: Parsed): number {
           ? theme.accent('overrides built-in')
           : theme.ok('user');
     const note = name === GENERALIST ? theme.meta(' — nothing extra') : '';
-    process.stdout.write(`  ${name}  ${tag}${note}\n`);
+    process.stdout.write(`  ${theme.meta(sym.bullet)} ${name}  ${tag}${note}\n`);
   }
   process.stdout.write(
     theme.meta(
-      'inspect with: musterd role show <name>   •   scaffold: musterd role create <name>',
+      `inspect with: musterd role show <name>   ${sym.dot}   scaffold: musterd role create <name>`,
     ) + '\n',
   );
   return 0;
@@ -122,7 +123,9 @@ function roleCreate(parsed: Parsed): number {
     return 0;
   }
   process.stdout.write(
-    `${theme.ok('✓')} wrote ${theme.accent(path)}${from ? theme.meta(` (from built-in "${from}")`) : ''}\n`,
+    success(`wrote ${theme.accent(path)}${from ? theme.meta(` (from built-in "${from}")`) : ''}`, {
+      next: 'musterd init',
+    }) + '\n',
   );
   process.stdout.write(
     theme.meta(
