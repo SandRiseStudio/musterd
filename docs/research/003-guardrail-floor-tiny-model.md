@@ -67,7 +67,10 @@ Full transcript (harness stdout, verbatim):
   CLI-per-act harness that fallback resolves to a presence without a model. A resident harness (one
   long-lived WS presence that heartbeats, e.g. Claude Code's MCP adapter) re-affirms the model each
   beat and never exposes this — so **the diversity substrate has coverage holes for exactly the
-  non-resident, non-`claude` harnesses Track B exists to represent.** Filable against ADR 101.
+  non-resident, non-`claude` harnesses Track B exists to represent.** This **reproduces
+  [issue #172](https://github.com/SandRiseStudio/musterd/issues/172)** (the attestation-coverage gap
+  first seen in the 2026-07-08 revive run with `qwen2.5:3b-instruct`) — now confirmed a second time
+  with `qwen3:4b`, so it is model-independent and reproducible, not a one-off.
 - **G2 — `reply_to` not set on the challenge-answering `accept`.** ADR 103 says `accept` auto-targets
   an open challenge; the emitted `accept` had `reply_to=null`. The model produced the right _act_ but
   not the thread linkage, so the challenge/response pair isn't joined in the log. Weak-model /
@@ -87,9 +90,11 @@ chain (a Claude seat added to `lab`, or the frontier-seat route below).
 **What it changes.**
 
 - **Satisfies ADR 110 Stage 1's exit criterion** (this finding). Stage 1 is done: revived, run, recorded.
-- **Files two substrate gaps** — G1 (attestation durability under non-resident harnesses) against
-  ADR 101; G2 (`reply_to` on `accept`) as a harness/threading fix. G1 is the higher-value one: it
-  says the diversity feature isn't yet honest for the very population it's meant to cover.
+- **Reproduces [issue #172](https://github.com/SandRiseStudio/musterd/issues/172)** (G1, attestation
+  durability under non-resident harnesses) with a second model — reinforcing it as a real,
+  model-independent ADR 101 gap, not a one-off — and **newly files G2** (`reply_to` on the
+  challenge-answering `accept`) as a harness/threading fix. G1 is the higher-value one: it says the
+  diversity feature isn't yet honest for the very population it's meant to cover.
 - **Corrects ADR 110's scope claim.** ADR 110 said the tiny model is "the only realistic way to put a
   non-`claude` family on a live team." It is not: a frontier non-Claude model (Grok 4.5 / GPT-5.6 /
   GLM) run in Cursor with `MUSTERD_MODEL` set attests real cross-family data today, and — being a
