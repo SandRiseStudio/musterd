@@ -34,7 +34,13 @@ vi.mock('../config.js', () => ({
   saveWorkspaceSpec: h.saveWorkspaceSpec,
 }));
 vi.mock('../roster.js', () => ({ writeSeatFile: h.writeSeatFile }));
-vi.mock('../onboard/harnesses/claudeCode.js', () => ({ claudeCode: { configure: h.configure } }));
+vi.mock('../onboard/harnesses/index.js', () => ({
+  HARNESSES: [
+    { id: 'claude-code', label: 'Claude Code', surface: 'claude-code', configure: h.configure },
+    { id: 'cursor', label: 'Cursor', surface: 'cursor', configure: h.configure },
+    { id: 'codex', label: 'Codex', surface: 'codex', configure: h.configure },
+  ],
+}));
 vi.mock('../onboard/workspace.js', () => ({ provisionWorkspace: () => h.workspace }));
 
 const { agentCommand } = await import('./agent.js');
@@ -70,10 +76,14 @@ describe('musterd agent <name>', () => {
         claim: { mode: 'seat', name: 'June' },
       }),
     );
-    // MCP registered with the v0.3 env triple + autojoin
+    // MCP registered pointing at the worktree's binding.json (single source of truth) + autojoin —
+    // NO secret (agent_key/grant) is inlined into the harness config, so an in-tree config (Cursor/
+    // Codex) is commit-safe (ADR 018/115).
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_AGENT_KEY).toBe('mskey_team');
-    // claim is carried by binding.json (asserted above via saveBinding), not baked into the MCP env
+    expect(entry.env.MUSTERD_BINDING).toContain('.musterd');
+    expect(entry.env.MUSTERD_BINDING).toContain('binding.json');
+    expect(entry.env.MUSTERD_SURFACE).toBe('claude-code');
+    expect(entry.env.MUSTERD_AGENT_KEY).toBeUndefined(); // key lives in binding.json, not the env
     expect(entry.env.MUSTERD_CLAIM).toBeUndefined();
     expect(entry.env.MUSTERD_AUTOJOIN).toBe('1');
 
@@ -91,7 +101,7 @@ describe('musterd agent <name>', () => {
     expect(specArg.grant).toBeUndefined();
   });
 
-  it('issues a standing grant and threads it into the binding + autojoin env (ADR 077)', async () => {
+  it('issues a standing grant and persists it in the binding (source of truth), not the env (ADR 077)', async () => {
     const code = await agentCommand(parseArgs(['June']));
     expect(code).toBe(0);
     // A standing seat grant is minted so autojoin occupies without an approval request.
@@ -100,14 +110,14 @@ describe('musterd agent <name>', () => {
       target: 'June',
       lifetime: 'standing',
     });
-    // The grant is persisted in the workspace binding...
+    // The grant is persisted in the workspace binding.json — the adapter reads it via MUSTERD_BINDING.
     expect(h.saveBinding).toHaveBeenCalledWith(
       h.workspace.dir,
       expect.objectContaining({ grant: 'msgr_standing' }),
     );
-    // ...and flows to MUSTERD_GRANT so the launched adapter claims with it.
+    // ...and is NOT inlined into the harness env (no secret baked into the config).
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_GRANT).toBe('msgr_standing');
+    expect(entry.env.MUSTERD_GRANT).toBeUndefined();
   });
 
   it('still comes online if the grant mint fails (falls back to the approval lane)', async () => {
@@ -119,6 +129,46 @@ describe('musterd agent <name>', () => {
     expect(binding.grant).toBeUndefined();
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
     expect(entry.env.MUSTERD_GRANT).toBeUndefined();
+  });
+
+  it('--harness cursor wires the Cursor surface (binding, spec, and env)', async () => {
+    const code = await agentCommand(parseArgs(['June', '--harness', 'cursor']));
+    expect(code).toBe(0);
+    expect(h.saveBinding).toHaveBeenCalledWith(
+      h.workspace.dir,
+      expect.objectContaining({ surface: 'cursor' }),
+    );
+    expect(h.saveWorkspaceSpec).toHaveBeenCalledWith(
+      h.workspace.dir,
+      expect.objectContaining({ surface: 'cursor' }),
+    );
+    const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
+    expect(entry.env.MUSTERD_SURFACE).toBe('cursor');
+  });
+
+  it('--harness codex wires the Codex surface', async () => {
+    const code = await agentCommand(parseArgs(['June', '--harness', 'codex']));
+    expect(code).toBe(0);
+    expect(h.saveBinding).toHaveBeenCalledWith(
+      h.workspace.dir,
+      expect.objectContaining({ surface: 'codex' }),
+    );
+    const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
+    expect(entry.env.MUSTERD_SURFACE).toBe('codex');
+  });
+
+  it('defaults to the claude-code harness when --harness is omitted', async () => {
+    await agentCommand(parseArgs(['June']));
+    expect(h.saveBinding).toHaveBeenCalledWith(
+      h.workspace.dir,
+      expect.objectContaining({ surface: 'claude-code' }),
+    );
+  });
+
+  it('rejects an unknown harness with the valid set', async () => {
+    await expect(agentCommand(parseArgs(['June', '--harness', 'emacs']))).rejects.toThrow(
+      /unknown harness "emacs".*claude-code, cursor, codex/s,
+    );
   });
 
   it('writes a seat file first for a file-backed team', async () => {
