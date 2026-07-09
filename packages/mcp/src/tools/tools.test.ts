@@ -8,7 +8,7 @@ import {
   type Lane,
   type MemberSummary,
 } from '@musterd/protocol';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
 import { formatMessage, notJoinedMessage, textResult } from './format.js';
@@ -66,8 +66,14 @@ const config: McpConfig = {
   claim: { mode: 'seat', name: 'Ada' },
   connId: 'conn-1',
   claimCode: 'AB12',
-  bindingDir: '/tmp',
+  // An ISOLATED temp subdir, never a shared root like `/tmp`: the team_join handler test persists a
+  // binding here (claimAndJoin → persistBinding writes bindingDir/.musterd/binding.json), and a shared
+  // root would sit on the walk-up path of every other test's temp dir under $TMPDIR — leaking an
+  // identity into their findBinding/resolveBindingDir (the CI-only failure this guards against). A
+  // sibling temp dir is never an ancestor, so it can't pollute.
+  bindingDir: mkdtempSync(pathJoin(tmpdir(), 'mcp-tools-bind-')),
 };
+afterAll(() => rmSync(config.bindingDir, { recursive: true, force: true }));
 
 function member(over: Partial<MemberSummary> = {}): MemberSummary {
   return {
