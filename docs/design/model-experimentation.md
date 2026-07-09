@@ -31,6 +31,43 @@ a finding.
 - **Ingest side:** the research radar (`research-radar-plan.md`) already sweeps new _research_; the model
   cadence is the sibling for new _models_ — a new frontier release is a trigger to run the manifest.
 
+## Frontier non-Claude diversity seats — the "today" path for cross-family data
+
+Getting a **non-`claude` family onto a live team does not require the tiny model.** Model attestation
+(ADR 101) resolves from `MUSTERD_MODEL` first (ahead of the Claude-only `ANTHROPIC_MODEL` fallback,
+per `resolveAttestedModel`), so _any_ harness that sets that env var attests its family. A frontier
+non-Claude model driven in Cursor (Grok 4.5, GPT-5.6, GLM, …) is a **resident** harness — one
+long-lived MCP presence that heartbeats — so it also avoids the attestation-durability gap the thin
+tiny-model CLI harness exposes ([finding 003](../research/003-guardrail-floor-tiny-model.md) G1). This
+is the fastest way to turn the shipped diversity flag from untested code into observed behavior, and
+it uses models that just shipped, with zero new code.
+
+**This is separate from Track B.** The tiny model is the _guardrail-floor_ probe (a **weak** agent);
+these seats are _strong_ frontier peers that supply cross-family **diversity** data. Both write to the
+same substrate; neither substitutes for the other.
+
+**Runbook** (per seat, one-time):
+
+1. In the Cursor MCP config for that seat's musterd server, pin the model in the `env` block:
+   ```jsonc
+   // .cursor/mcp.json (or the seat's musterd MCP server entry)
+   "musterd": { "command": "…", "env": { "MUSTERD_MODEL": "grok-4.5" } }
+   ```
+   Use the real id you're running (`gpt-5.6-terra`, `glm-5.2`, …). The server derives the **family**
+   (`grok`, `gpt`, `glm`) from the prefix; exact ids are manifest pins, not doctrine.
+2. Reconnect the musterd MCP server so the adapter reads the new env (the adapter caches its boot-time
+   attestation — an in-session change is invisible until reload).
+3. Verify: `musterd audit … | grep model_attested` shows a non-`claude` `new:` value; acts from the
+   seat carry `musterd.model.family ≠ claude`.
+4. To exercise the flag itself, form a **review/approval chain** across families (a `request_help` /
+   `handoff` / `challenge` answered by `accept`/`decline` from a _different_ seat, one Claude + one
+   non-Claude). `report.mast.diversity` flags a chain that is single-family end-to-end and — the case
+   we most want to see — leaves a genuinely mixed chain **un**flagged.
+
+**Caveat.** Cursor does not tell the MCP subprocess which model a message is live on, and you switch
+models per-message; a static `MUSTERD_MODEL` is only honest if you **dedicate the seat to one model**.
+A seat that hops models mid-session attests a stale family. Pin one model per seat.
+
 ## Track B — own the models end-to-end (the tiny-model fixture)
 
 > **Re-evaluated 2026-07-08 — ADR 110.** The stages were split and decided independently: Stage 1 is
