@@ -1,6 +1,6 @@
 # 112 — The steward seat: a standing agent teammate that keeps the declared record honest
 
-- Status: proposed — design freeze; runtime activation gated on secrets/permissions Nick provisions
+- Status: accepted — design frozen 2026-07-08; runtime shipped + validated end-to-end 2026-07-09 (PRs #176–#186). See **As built** below for where the implementation revised the frozen design.
 - Date: 2026-07-08
 
 ## Context
@@ -107,6 +107,31 @@ precedent), coverage-floor ratchet nudges.
 - Secrets (the API key for the CI-launched session, the scoped token) are provisioned by Nick — this ADR
   freezes the design; **runtime activation is gated on that provisioning**, deliberately, so granting an
   automated writer its keys is a human act.
+
+## As built (2026-07-09)
+
+The runtime shipped over PRs #176–#186 and was validated end-to-end (the steward opened a real draft PR,
+#184, correcting a planted fixture, seatbelt-green). Two parts of the frozen design changed in the build:
+
+- **Substrate is the Claude Code CLI, not `claude-code-action` (§3).** The action **mandates the Claude
+  GitHub App** for GitHub auth — there is no API-key-plus-PAT bypass. To keep the least-privilege model
+  (§5) rather than install a third-party App, the agent step runs `claude -p --dangerously-skip-permissions`
+  headlessly: `ANTHROPIC_API_KEY` for the model, a fine-grained PAT (`STEWARD_TOKEN`, contents +
+  pull-requests write, org-approved) for git/`gh`. The PAT is required — GitHub won't run the `gates`
+  check on a default-`GITHUB_TOKEN`-authored PR, so auto-merge would stall.
+- **v1 ships three `propose` tasks and no `auto-merge` task (§4).** The registry
+  ([`scripts/steward/tasks.ts`](../../scripts/steward/tasks.ts)) is `roadmap-reconcile`, `undeclared-work`,
+  and `stale-prose` — all `propose`. The design's `adr-status-hygiene` auto-merge task was **not** shipped:
+  the mechanical drift such a task would fix is *already prevented from reaching `main`* by the static
+  checks (that's the point of them), so there is honestly no deterministic auto-merge work yet. The
+  `auto-merge` level exists and the workflow honours it; the first auto-merge task lands by a `tasks.ts`
+  edit when a genuine mechanical fix appears (or with the judgment/agent layer).
+
+Also as built: the workflow auto-selects its mode by which secrets exist — **baseline** (no secrets) posts
+one self-updating tracking issue via the default token; **agent** (both secrets) opens draft PRs. The
+`shepherd`/`chase` via the reachability ladder, per-run lanes, and seat-memory-as-seen-file (§1) remain
+future work; today's shepherding surface is the assigned issue / the assigned draft PR. See
+[`scripts/steward/README.md`](../../scripts/steward/README.md).
 
 ## Consequences
 

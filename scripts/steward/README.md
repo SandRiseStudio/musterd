@@ -49,20 +49,22 @@ The workflow has two modes, chosen automatically by which secrets exist:
 issue via the default `GITHUB_TOKEN`. Live as soon as this lands; trigger by hand from the Actions tab.
 
 **Agent — with both secrets.** When `ANTHROPIC_API_KEY` **and** `STEWARD_TOKEN` are set, the `agent` job
-runs instead: a CI-launched Claude session (`anthropics/claude-code-action`) follows
-[`CHARTER.md`](./CHARTER.md) to draft each fix and open a **draft PR** — never a merge. It's for the
-findings that need judgment (write a roadmap item, reword prose, mark an item shipped with its PR).
+runs instead: a CI-launched **Claude Code CLI** session (`claude -p --dangerously-skip-permissions`,
+**no GitHub App**) follows [`CHARTER.md`](./CHARTER.md) to draft each fix and open a **draft PR** — never
+a merge. It's for the findings that need judgment (write a roadmap item, reword prose, mark an item
+shipped with its PR). _(We use the CLI, not `claude-code-action`, because the action mandates the Claude
+GitHub App — the CLI needs only the API key + PAT, keeping the least-privilege model.)_
 
 - **`ANTHROPIC_API_KEY`** — the model key for the session.
-- **`STEWARD_TOKEN`** — a fine-grained PAT / GitHub App token with `contents` + `pull-requests` write. A
-  PAT is **required** (not the default `GITHUB_TOKEN`): GitHub won't trigger the required `gates` check on
-  a `GITHUB_TOKEN`-authored PR, so the checkout uses the PAT and the PRs run CI normally.
+- **`STEWARD_TOKEN`** — a fine-grained PAT with `contents` + `pull-requests` write (org-approved for an
+  org repo; a classic `repo`-scoped PAT also works). Required over the default `GITHUB_TOKEN`: GitHub
+  won't trigger the required `gates` check on a `GITHUB_TOKEN`-authored PR, so the checkout uses the PAT
+  and the PRs run CI normally.
 
-> **Watch the first run.** This agent path can't be exercised outside CI, so **trigger it once by hand**
-> (Actions → steward → Run workflow) and read the logs. If the `claude-code-action` input/flag names
-> differ in the installed version, it's a one-line fix in `steward.yml`; the baseline issue path keeps
-> working meanwhile. Draft-PR-only + `roadmap-truth:check` as the seatbelt + protected `main` mean the
-> blast radius is "a draft PR a human reviews" — it cannot merge, PAT or not.
+> **Validated end-to-end** (2026-07-09): against a planted fixture the steward opened draft PR #184,
+> reworded the drift, and left `roadmap-truth:check` green. Draft-PR-only + the truth-check seatbelt +
+> protected `main` mean the blast radius is "a draft PR a human reviews" — it cannot merge, PAT or not.
+> Trigger a run any time from Actions → steward → Run workflow.
 
 ### Still ahead
 
