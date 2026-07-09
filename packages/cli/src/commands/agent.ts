@@ -1,9 +1,10 @@
-import type { Binding } from '@musterd/protocol';
+import { join } from 'node:path';
+import { BINDING_DIR, BINDING_FILE, type Binding } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { loadConfig, saveBinding, saveWorkspaceSpec } from '../config.js';
 import { CliError } from '../errors.js';
-import { claudeCode } from '../onboard/harnesses/claudeCode.js';
-import { buildMcpEnv, resolveMcpLaunch } from '../onboard/mcpEntry.js';
+import { HARNESSES } from '../onboard/harnesses/index.js';
+import { resolveMcpLaunch } from '../onboard/mcpEntry.js';
 import { provisionWorkspace } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
@@ -14,17 +15,35 @@ import { resolve } from './helpers.js';
  * `musterd agent <name>` — one command to add an agent AND give it an isolated, ready-to-run
  * workspace (ADR 065). It (1) adds/revives the agent member on the team, (2) creates a git worktree
  * (own branch + tree) — a sibling folder outside git — (3) writes that folder's binding, and
- * (4) registers the musterd MCP server there with autojoin. Opening a Claude Code session in the
- * printed folder then *is* that agent, with no binding thrash against your own seat.
+ * (4) registers the musterd MCP server there with autojoin, for the chosen harness. Opening a session
+ * of that harness in the printed folder then *is* that agent, with no binding thrash against your own
+ * seat.
  *
- * `--here` keeps the legacy single-folder behavior; `--path <dir>` targets an explicit folder.
+ * `--harness <claude-code|cursor|codex>` picks the harness to wire (default claude-code) — the same
+ * pluggable adapters `musterd init` uses (ADR 038/085), so a Cursor or Codex user gets a genuinely
+ * wired workspace, not a Claude-Code-only one. `--here` keeps the legacy single-folder behavior;
+ * `--path <dir>` targets an explicit folder.
  */
 export async function agentCommand(parsed: Parsed): Promise<number> {
   const name = parsed.positionals[0];
   if (!name || /\s/.test(name)) {
-    throw new CliError('usage: musterd agent <name> [--role <role>] [--here | --path <dir>]', 2);
+    throw new CliError(
+      'usage: musterd agent <name> [--role <role>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]',
+      2,
+    );
   }
   const role = flagStr(parsed.flags, 'role');
+
+  // Which harness to wire (ADR 038/085 registry — the same adapters `init` drives). Default to Claude
+  // Code for back-compat; a bad id fails fast with the valid set rather than silently doing nothing.
+  const harnessId = flagStr(parsed.flags, 'harness') ?? 'claude-code';
+  const harness = HARNESSES.find((h) => h.id === harnessId);
+  if (!harness) {
+    throw new CliError(
+      `unknown harness "${harnessId}" — choose one of: ${HARNESSES.map((h) => h.id).join(', ')}`,
+      2,
+    );
+  }
 
   // Adding a member is an admin act — needs an active identity (binding/env/--as), like `team add`.
   const { team, http, config } = resolve(parsed.flags);
@@ -86,7 +105,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     server: config.server,
     team,
     agent_key: agentKey,
-    surface: 'claude-code',
+    surface: harness.surface,
     claim: { mode: 'seat', name },
     ...(grant !== undefined ? { grant } : {}),
   };
@@ -96,18 +115,21 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   saveWorkspaceSpec(ws.dir, {
     server: config.server,
     team,
-    surface: 'claude-code',
+    surface: harness.surface,
     claim: { mode: 'seat', name },
   });
 
-  // Register the MCP server *for the workspace folder*: `claude mcp add -s local` keys off cwd, so we
-  // run the adapter with cwd set to ws.dir. Autojoin so a session opened there comes online as `name`.
-  // The grant (if any) flows to MUSTERD_GRANT via buildMcpEnv so autojoin occupies without approval.
+  // Register the MCP server *for the workspace folder*. The env points the adapter at this worktree's
+  // gitignored binding.json by absolute path (MUSTERD_BINDING) rather than inlining the agent key +
+  // grant — so no secret is baked into any harness config, including the in-tree ones Cursor
+  // (.cursor/mcp.json) and Codex (.codex/config.toml) write, and binding.json stays the single source
+  // of truth (ADR 018/115). We chdir into ws.dir first because the harness `configure` writes relative
+  // to cwd (`claude mcp add -s local` keys off it; Cursor/Codex write the project-local config there).
   const agentBinding = {
     server: config.server,
     team,
     agent_key: agentKey,
-    surface: 'claude-code' as const,
+    surface: harness.surface,
     claim: { mode: 'seat', name } as const,
     ...(grant !== undefined ? { grant } : {}),
   };
@@ -115,13 +137,17 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   const entry = {
     command: launch.command,
     args: launch.args,
-    env: { ...buildMcpEnv(agentBinding), MUSTERD_AUTOJOIN: '1' },
+    env: {
+      MUSTERD_BINDING: join(ws.dir, BINDING_DIR, BINDING_FILE),
+      MUSTERD_SURFACE: harness.surface,
+      MUSTERD_AUTOJOIN: '1',
+    },
   };
   let mcpError: string | null = null;
   const prevCwd = process.cwd();
   try {
     process.chdir(ws.dir);
-    await claudeCode.configure(entry, agentBinding);
+    await harness.configure(entry, agentBinding);
   } catch (err) {
     mcpError = (err as Error).message;
   } finally {
@@ -136,6 +162,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
         dir: ws.dir,
         kind: ws.kind,
         branch: ws.branch ?? null,
+        harness: harness.id,
         mcpRegistered: mcpError === null,
         granted: grant !== undefined,
       }) + '\n',
@@ -156,23 +183,18 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
 
   if (mcpError === null) {
     process.stdout.write(
-      success('wired the musterd MCP server there (autojoin)', {
-        next: `open a Claude Code session in ${ws.dir} — it joins as ${name} automatically`,
+      success(`wired the musterd MCP server there for ${harness.label} (autojoin)`, {
+        next: `open a ${harness.label} session in ${ws.dir} — it joins as ${name} automatically`,
       }) + '\n',
     );
   } else {
-    // Member + workspace + binding are set up; only the harness wiring failed (e.g. no `claude` CLI).
+    // Member + workspace + binding are set up; only the harness wiring failed (e.g. the harness CLI
+    // isn't installed). Point at `musterd init` in the folder, which re-runs the same harness adapter.
     process.stdout.write(
-      `${theme.warn(sym.warn)} couldn't auto-register the MCP server (${mcpError}). Register it in ${ws.dir} with:\n` +
+      `${theme.warn(sym.warn)} couldn't auto-register the musterd MCP server for ${harness.label} (${mcpError}).\n` +
         theme.meta(
-          `  cd ${ws.dir} && claude mcp add musterd -s local ` +
-            // Rebuild from entry.env so the manual command matches auto-register exactly — notably it
-            // carries no MUSTERD_CLAIM (the seat lives in the binding.json this command already wrote,
-            // the single source of truth), so the fallback can't reintroduce the re-claim drift.
-            Object.entries(entry.env)
-              .map(([k, v]) => `-e ${k}=${v}`)
-              .join(' ') +
-            ` -- ${entry.command} ${entry.args.join(' ')}`,
+          `  finish the wiring by running \`musterd init\` in ${ws.dir} and choosing ${harness.label} — ` +
+            `the binding.json is already written, so it only needs the harness config.`,
         ) +
         '\n',
     );

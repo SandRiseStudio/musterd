@@ -191,14 +191,17 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'agent',
-    signature: '<name> [--role <role>] [--here | --path <dir>]',
+    signature:
+      '<name> [--role <role>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]',
     summary: 'add an agent AND give it its own isolated workspace (worktree)',
     group: 'team',
     primary: true,
     detail:
       'Add an agent and give it its own isolated git-worktree workspace, wired to run (ADR 065). One ' +
-      'command instead of team add + worktree + wire + claim. Do not run `--here` inside a live seat’s folder.',
-    examples: ['musterd agent scout --role researcher'],
+      'command instead of team add + worktree + wire + claim. `--harness` picks which harness to wire ' +
+      '(default claude-code; also cursor, codex) — the same adapters `musterd init` uses. Do not run ' +
+      '`--here` inside a live seat’s folder.',
+    examples: ['musterd agent scout --role researcher', 'musterd agent ryder --harness cursor'],
   },
   {
     name: 'join',

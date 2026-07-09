@@ -63,7 +63,7 @@ src/
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report
     wire.ts           // musterd wire: headless MCP register from the committed .musterd/workspace.json (ADR 080)
-    agent.ts          // musterd agent <name>: add an agent + isolated worktree + binding + MCP register + standing grant + committed workspace.json (ADR 065/080)
+    agent.ts          // musterd agent <name> [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness, via the ADR 038 registry) + standing grant + committed workspace.json (ADR 065/080/116)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     serve.ts          // musterd serve [--port]
