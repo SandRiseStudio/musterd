@@ -23,25 +23,30 @@ since ADR 113 said the wordmark would not change.
 
 ## Decision
 
-The CLI banner is a **roll-call lockup**: three presence dots — online (green ●), away (mustard ●),
-offline (dim ○), the CLI's own `theme.presenceDot` glyphs — beside the **`musterd` brand chip** (the
-lowercase word reversed out of a solid mustard block, `theme.brandmark`), with the tagline under it.
+The CLI banner is a **framed roll-call nameplate** — no letter-art. A rounded panel (dim borders,
+matching the web's rounded-corner language) holds: the three presence dots — online (green ●), away
+(mustard ●), offline (dim ○), the CLI's own `theme.presenceDot` glyphs — the **`musterd` brand chip**
+(the lowercase word reversed out of a solid mustard block, `theme.brandmark`) with a trailing terminal
+cursor (`▊`, the web-hero nod), and the tagline.
 
 ```
-● ● ○  ▐ musterd ▌      ← “ musterd ” reversed out of a mustard block
-muster your agents and humans into persistent teams
+╭───────────────────────────────────────────────────────╮
+│  ● ● ○   ▐ musterd ▌ ▊                                 │   ← chip = word reversed out of mustard
+│  muster your agents and humans into persistent teams  │
+╰───────────────────────────────────────────────────────╯
 ```
 
-The enemy retired here is **multi-line letter-art** — the thin-outline figlet (`_ __ ___ | |_ …`) read
-as 1990s BBS art, and a solid-block figlet, tried next, still read as "the same kind of thing" (big
-letters spanning the banner). The chip sidesteps the whole category: it is a typographic logo lockup,
-compact and bold, that does not draw the letters. The roll-call dots are the signature: `muster`
-_means_ roll call — assembling the team, taking presence — and presence is the product, so the dots
-(reusing the roster's own glyphs) show the thing itself, a team present.
+The enemy retired is **multi-line letter-art** — the thin-outline figlet (`_ __ ___ | |_ …`) read as
+1990s BBS art, and a solid-block figlet, tried next, still read as "the same kind of thing" (big letters
+spanning the banner). The nameplate sidesteps the whole category: the wordmark is a typographic chip, not
+drawn letters, and the frame gives the banner structure and presence. The roll-call dots are the
+signature: `muster` _means_ roll call — assembling the team, taking presence — and presence is the
+product, so the dots (reusing the roster's own glyphs) show the thing itself, a team present.
 
 Iteration note (same day): minimal one-line wordmark → too underweight; solid-block figlet → too close
-to the original letter-art; landed on the reversed-out **chip** — present but not letter-art. Recorded
-inline rather than as a churn of superseding ADRs.
+to the original letter-art; reversed-out **chip** → the right primitive; landed on the chip **+ trailing
+cursor inside a rounded nameplate** for structure and weight. Recorded inline rather than as a churn of
+superseding ADRs.
 
 Implemented in [`packages/cli/src/render/rows.ts`](../../packages/cli/src/render/rows.ts) `renderBanner`
 — still the single source of truth. [brand.md](../design/brand.md) §1 is updated in the same change; the

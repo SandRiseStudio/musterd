@@ -6,23 +6,43 @@ import type {
   PresenceStatus,
 } from '@musterd/protocol';
 import { clock, theme } from './theme.js';
-import { padEndVisible, termWidth, wrapText } from './ui.js';
+import { padEndVisible, termWidth, visibleLen, wrapText } from './ui.js';
 
 export type KindOf = (name: string) => MemberKind;
 
 /** A status older than this is shown with its age (`working: x · Nm`) to signal it may be stale. */
 const STALE_AFTER_MS = 5 * 60_000;
 
+/** Pad a colorized string to an exact visible width (no trailing slack — for box alignment). */
+function padExact(s: string, width: number): string {
+  return s + ' '.repeat(Math.max(0, width - visibleLen(s)));
+}
+
+/** Wrap lines in a rounded nameplate; dim borders, padded to the widest visible line. */
+function nameplate(lines: string[], pad = 2): string {
+  const inner = Math.max(...lines.map(visibleLen));
+  const w = inner + pad * 2;
+  const bar = theme.meta('│');
+  const gap = ' '.repeat(pad);
+  const top = theme.meta('╭' + '─'.repeat(w) + '╮');
+  const bot = theme.meta('╰' + '─'.repeat(w) + '╯');
+  const body = lines.map((l) => `${bar}${gap}${padExact(l, inner)}${gap}${bar}`);
+  return [top, ...body, bot].join('\n');
+}
+
 /**
- * The wordmark banner + tagline (brand.md §1, ADR 114). A compact lockup — no letter-art: the roll-call
- * dots (online · away · offline, the CLI's own presence glyphs) beside the `musterd` brand chip (the
- * word reversed out of a solid mustard block), tagline under it. `muster` = take the roll; the dots
- * show the product itself — a team, present. 16-color-safe; degrades to plain ` musterd ` with color off.
+ * The wordmark banner (brand.md §1, ADR 114). A rounded nameplate — no letter-art — holding the
+ * roll-call dots (online · away · offline, the CLI's own presence glyphs), the `musterd` brand chip
+ * (the word reversed out of a solid mustard block) with a trailing terminal cursor (the web-hero nod),
+ * and the tagline. `muster` = take the roll; the dots show the product itself, a team present. The frame
+ * matches the web's rounded-corner language. 16-color-safe; degrades cleanly with color off.
  */
 export function renderBanner(): string {
-  const rollcall = `${theme.presenceDot('online')} ${theme.presenceDot('away')} ${theme.presenceDot('offline')}`;
+  const dots = `${theme.presenceDot('online')} ${theme.presenceDot('away')} ${theme.presenceDot('offline')}`;
+  const chip = theme.brandmark(' musterd ');
+  const cursor = theme.accent('▊');
   const tagline = theme.meta('muster your agents and humans into persistent teams');
-  return `${rollcall}  ${theme.brandmark(' musterd ')}\n${tagline}`;
+  return nameplate([`${dots}   ${chip} ${cursor}`, tagline]);
 }
 
 /** A recipient label for a message row: `→ Lin`, `→ @team`, `→ @broadcast`. */
