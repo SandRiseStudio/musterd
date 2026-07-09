@@ -43,8 +43,9 @@ export type AuditAction =
   | 'memory.save'
   | 'memory.clear'
   // ADR 101: a harness attested (or re-attested) the model on an occupancy. `detail` carries
-  // `{ occupancy, old, new, source: 'claim'|'heartbeat' }` — this append-only trail IS the
-  // occupancy's model-switch history (the ADR keeps no history column).
+  // `{ occupancy, old, new, source: 'claim'|'heartbeat'|'ambient' }` — this append-only trail IS the
+  // occupancy's model-switch history (the ADR keeps no history column). `ambient` is ADR 119: a
+  // CLI/HTTP one-shot carrying `x-musterd-model` after the claim presence expired.
   | 'occupancy.model_attested'
   // ADR 109: a lane carrying a branch reached a terminal state — the seat attests the landed merge.
   // actor = the resolving seat, target = the branch, `detail` carries the attested (never verified)

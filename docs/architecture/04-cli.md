@@ -21,7 +21,7 @@ src/
   help.ts             // re-exports the plain `HELP` string (from help/plain.ts) so guidance:check can import it; ADR 085
   args.ts             // argv parser → { command, positionals, flags }
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
-  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API
+  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; HttpClient forwards resolveAttestedModel as x-musterd-model (ADR 119)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)

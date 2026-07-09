@@ -519,6 +519,23 @@ describe('model attestation (ADR 101)', () => {
     // The attestation must survive — COALESCE keeps it, so per-act stamping still works.
     expect(currentAttestedModel(db, ada.row.id)).toBe('claude-opus-4-8');
   });
+
+  it('ambient touch after the attested row is reaped re-attests when the client carries a model (ADR 119 / #172)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    // Claim attested a model on a connectionless occupancy…
+    attach(db, ada.row.id, 'cli', null, { model: 'qwen2.5:3b-instruct' });
+    expect(currentAttestedModel(db, ada.row.id)).toBe('qwen2.5:3b-instruct');
+    // …then the reaper clears it (presence aged past the timeout).
+    expect(reapStale(db, 0)).toHaveLength(1);
+    expect(currentAttestedModel(db, ada.row.id)).toBeNull();
+    // A later one-shot without a model attaches a bare ambient row — the pre-119 hole.
+    touchAmbientPresence(db, ada.row.id, 'cli', 45_000, {});
+    expect(currentAttestedModel(db, ada.row.id)).toBeNull();
+    // With the model in AttachContext (authTouch from x-musterd-model), ambient re-attests.
+    touchAmbientPresence(db, ada.row.id, 'cli', 45_000, { model: 'qwen2.5:3b-instruct' });
+    expect(currentAttestedModel(db, ada.row.id)).toBe('qwen2.5:3b-instruct');
+  });
 });
 
 describe('ambient presence (ADR 057)', () => {

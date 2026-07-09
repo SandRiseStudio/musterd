@@ -49,7 +49,7 @@ src/
     validate.ts       // thin wrappers over @musterd/protocol schemas + error mapping
     route.ts          // routeEnvelope(): the ONE validate+persist+deliver path (WS & HTTP share it)
   transport/
-    http.ts           // HTTP route table (02-protocol HTTP API)
+    http.ts           // HTTP route table (02-protocol HTTP API); authTouch ambient presence (ADR 057) + x-musterd-model re-attest (ADR 119)
     ws.ts             // WS upgrade, handshake state machine, frame dispatch
     hub.ts            // in-memory connection registry: member -> Set<conn>; broadcast/deliver
   presence/
