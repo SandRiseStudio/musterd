@@ -27,6 +27,12 @@ coverage/
 # secret-bearing harness configs (security.md operational guidance)
 .cursor/mcp.json
 
+# musterd-provisioned Cursor guidance (ADR 085) — the skill rule + slash commands `musterd init` writes
+# for Cursor, the counterpart to the `.claude/` skill/commands above. Surgical (only musterd's stamped
+# files) rather than the whole dirs, because `.cursor/plans/` and any project-authored rules are committed.
+.cursor/rules/musterd.mdc
+.cursor/commands/musterd-*.md
+
 # Qoder editor workspace state — local tooling, never committed
 .qoder/
 
