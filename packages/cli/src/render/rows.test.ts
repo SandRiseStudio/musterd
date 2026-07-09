@@ -4,12 +4,14 @@ import {
   isActionNeeded,
   openActionNeeded,
   renderBanner,
+  renderInbox,
   renderMessageRow,
   renderPendingSummary,
   renderReachabilityNudge,
   renderStatusHeader,
   renderStatusTable,
 } from './rows.js';
+import { dayLabel } from './theme.js';
 
 // picocolors auto-disables color when stdout is not a TTY (vitest), so output is plain & deterministic.
 
@@ -53,6 +55,54 @@ describe('renderMessageRow', () => {
     const out = renderMessageRow(env({ act: 'wait', body: '' }), kindOf);
     expect(out).toContain('[wait]');
     expect(out.split('\n')).toHaveLength(1);
+  });
+});
+
+describe('dayLabel (smart inbox dates)', () => {
+  // A fixed "now": Tuesday, 2026-07-07 15:00 local.
+  const now = new Date(2026, 6, 7, 15, 0).getTime();
+  const at = (y: number, m: number, d: number, h = 10) => new Date(y, m, d, h).getTime();
+
+  it('labels today, yesterday, within-week weekday, this-year, and prior-year', () => {
+    expect(dayLabel(at(2026, 6, 7), now)).toBe('Today');
+    expect(dayLabel(at(2026, 6, 6), now)).toBe('Yesterday');
+    // 2 days ago (Sunday Jul 5) → weekday · month day
+    expect(dayLabel(at(2026, 6, 5), now)).toBe('Sunday · Jul 5');
+    // earlier this year, beyond a week → month day
+    expect(dayLabel(at(2026, 0, 3), now)).toBe('Jan 3');
+    // prior year → M/D/YY
+    expect(dayLabel(at(2025, 11, 25), now)).toBe('12/25/25');
+  });
+});
+
+describe('renderInbox (day-grouped)', () => {
+  const now = new Date(2026, 6, 7, 15, 0).getTime();
+  const at = (m: number, d: number, h: number) => new Date(2026, m, d, h).getTime();
+
+  it('groups by day with one header per day, newest last, unread marked', () => {
+    const msgs = [
+      env({ id: 'a', from: 'miley', body: 'old', ts: at(6, 5, 9) }), // Sunday
+      env({ id: 'b', from: 'izzo', body: 'y1', ts: at(6, 6, 11) }), // Yesterday
+      env({ id: 'c', from: 'izzo', body: 'y2', ts: at(6, 6, 17) }), // Yesterday
+      env({ id: 'd', from: 'miley', body: 'new', ts: at(6, 7, 10) }), // Today
+    ];
+    const cursorTs = at(6, 6, 12); // read through yesterday noon → y2 + today are unread
+    const out = renderInbox(msgs, kindOf, { cursorTs, now });
+
+    // One header per distinct day, in order.
+    expect(out.indexOf('Sunday · Jul 5')).toBeGreaterThanOrEqual(0);
+    expect(out.indexOf('Yesterday')).toBeGreaterThan(out.indexOf('Sunday · Jul 5'));
+    expect(out.indexOf('Today')).toBeGreaterThan(out.indexOf('Yesterday'));
+    // Yesterday header appears exactly once though it has two messages.
+    expect(out.split('Yesterday').length - 1).toBe(1);
+    // Newest message renders last (terminal-friendly).
+    expect(out.trimEnd().endsWith('new')).toBe(true);
+    // The unread head rows (y2 @17:00 yesterday, today @10:00) carry the ▌ bar; the read one (y1
+    // @11:00 yesterday, before the cursor) does not.
+    expect(out).toContain('▌ 17:00');
+    expect(out).toContain('▌ 10:00');
+    expect(out).toContain('  11:00'); // read → two-space marker, no bar
+    expect(out).not.toContain('▌ 11:00');
   });
 });
 

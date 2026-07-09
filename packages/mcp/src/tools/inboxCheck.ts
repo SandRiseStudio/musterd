@@ -31,7 +31,10 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const fetched = await client.fetchInbox(args.unread_only ?? true);
         const byId = new Map<string, Envelope>();
         for (const e of [...buffered, ...fetched.messages]) byId.set(e.id, e);
-        const messages = [...byId.values()].sort((a, b) => a.ts - b.ts).slice(0, args.limit ?? 50);
+        // Keep the NEWEST `limit` (an inbox is read most-recent-first), then present ascending — not
+        // the OLDEST N a bare `.sort().slice(0, limit)` would keep once the inbox exceeds the cap.
+        const ordered = [...byId.values()].sort((a, b) => a.ts - b.ts);
+        const messages = ordered.slice(Math.max(0, ordered.length - (args.limit ?? 50)));
 
         if (messages.length === 0) {
           return textResult('no new messages');

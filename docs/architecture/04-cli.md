@@ -72,7 +72,7 @@ src/
     fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files (ADR 058 guard 2)
     join.ts           // join
     send.ts           // send
-    inbox.ts          // inbox [--watch] [--wait] (ADR 054)
+    inbox.ts          // inbox [--watch] [--wait] [--limit <n>] — bounded recent window + day-grouped smart dates, always-show-unread (ADR 054/117)
     nudge.ts          // print directed acts waiting for this seat — the approval-prompt hook target (ADR 053)
     whoami.ts         // print the seat this folder resolves to: member/team/surface/source (ADR 067)
     status.ts         // status
