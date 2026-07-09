@@ -2,9 +2,8 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import * as p from '@clack/prompts';
-import type { MemberSummary } from '@musterd/protocol';
+import { type MemberSummary, resolveAttestedModel } from '@musterd/protocol';
 // The live, toggle-aware color view (honors --no-color) in place of a pinned picocolors import.
-import { paint as pc } from '../render/theme.js';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { claimCommand } from '../commands/claim.js';
@@ -17,6 +16,7 @@ import {
   type Config,
 } from '../config.js';
 import { renderBanner } from '../render/rows.js';
+import { paint as pc } from '../render/theme.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import { writeGuidance } from './guidance.js';
 import type { Harness } from './harness.js';
@@ -341,12 +341,18 @@ export async function runInit(): Promise<number> {
   // v0.3 (ADR 075): the adapter env authenticates with the team agent key (captured at create) + the
   // seat claim, not a per-seat token. `token` from the mint above is vestigial under the cutover.
   const agentKey = config.agentKeys[team] ?? process.env['MUSTERD_AGENT_KEY'] ?? '';
+  // Model attestation (ADR 101): if the shell running init already declares a model (MUSTERD_MODEL, or a
+  // pinned ANTHROPIC_MODEL), persist it into binding.json so this seat attests by default rather than
+  // rotting to `unknown` (the diversity flag is inert on unattested chains). Only a *declared* value is
+  // captured — never a guess; unset stays honestly `unknown` and the `init --check` note fires.
+  const model = resolveAttestedModel(process.env);
   const binding = {
     server,
     team,
     agent_key: agentKey,
     surface: chosen.surface,
     claim: { mode: 'seat' as const, name },
+    ...(model !== undefined ? { model } : {}),
   };
   const entry = buildEntry(binding);
 

@@ -48,6 +48,12 @@ export const BindingSchema = WorkspaceSpecSchema.extend({
   agent_key: z.string().optional(),
   /** Optional pre-issued grant (msgr_) that skips the pending/admin-approval lane (ADR 075). */
   grant: z.string().optional(),
+  /** Optional harness-attested model id (ADR 101) — the model this seat runs, declared at provisioning
+   *  (`musterd agent --model` / `init` capturing ambient `MUSTERD_MODEL`/`ANTHROPIC_MODEL`). Read by the
+   *  MCP adapter as a fallback under the env, so the seat attests by default instead of rotting to
+   *  `unknown`. Kept out of the committed `workspace.json` (a model is a per-machine choice, not shared).
+   *  Attested, never verified; absent ⇒ `unknown` (warn-never-block). */
+  model: z.string().max(120).optional(),
 });
 
 export type Binding = z.infer<typeof BindingSchema>;

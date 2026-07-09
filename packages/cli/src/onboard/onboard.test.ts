@@ -30,6 +30,13 @@ describe('mcpEntry', () => {
     expect(buildMcpEnv(binding)['MUSTERD_CLAIM']).toBeUndefined();
   });
 
+  it('emits MUSTERD_MODEL only when a model is declared (ADR 101 — attest by default, never a guess)', () => {
+    // Undeclared → absent, so the seat honestly stays `unknown` (warn-never-block).
+    expect(buildMcpEnv(binding)['MUSTERD_MODEL']).toBeUndefined();
+    // Declared → baked, so the seat attests by default instead of rotting to `unknown`.
+    expect(buildMcpEnv({ ...binding, model: 'grok-4.5' })['MUSTERD_MODEL']).toBe('grok-4.5');
+  });
+
   it('resolves a runnable launch command for the adapter', () => {
     const entry = buildEntry(binding);
     expect(entry.command).toBe(process.execPath);
