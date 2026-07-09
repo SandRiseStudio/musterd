@@ -67,7 +67,7 @@ src/
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     serve.ts          // musterd serve [--port]
-    service.ts        // musterd service install/uninstall/start/stop/restart/status/logs (ADR 045)
+    service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
     team.ts           // team create / team add / team remove / team export (ADR 058 db→file migration)
     fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files (ADR 058 guard 2)
     join.ts           // join

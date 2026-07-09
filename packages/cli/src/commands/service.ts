@@ -60,7 +60,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|status|logs> [--port <n>] [--host <h>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--port <n>] [--host <h>] [--follow] [--force]';
 
 /** Fetch the daemon's `/health` (ADR 016 + 047): the live `connections` count drives the guard below. */
 async function fetchHealth(): Promise<{ connections?: number }> {
@@ -184,6 +184,8 @@ export async function serviceCommand(
       ok('restarted the musterd daemon');
       return 0;
     }
+    case 'refresh':
+      return refreshDaemon(ctx, health, force, ok, fail);
     case 'status':
       return renderStatus(ctx);
     case 'logs': {
@@ -193,6 +195,78 @@ export async function serviceCommand(
     default:
       throw new CliError(USAGE, 2);
   }
+}
+
+/**
+ * `musterd service refresh` — the one-command "run latest main" for the daemon (ADR 118). The daemon
+ * serves *built* dist, and a long-lived Node process can't hot-swap its code, so picking up merged
+ * work is a three-step dance (sync main → `pnpm build` → restart) that also has to be run in the
+ * daemon's own checkout, not a worktree. This folds it into one guarded verb:
+ *
+ *   1. **Guard** the shared daemon exactly like `restart` (refuse with live sessions unless `--force`).
+ *   2. **Sync** the daemon's checkout to `origin/main` — detached, so the checkout can't drift onto a
+ *      stale feature branch (the exact snag that stranded a rebuild this week). Refuses on uncommitted
+ *      changes rather than clobber them.
+ *   3. **Build** dist; a failed build aborts *before* the restart, so the daemon never bounces onto
+ *      broken code.
+ *   4. **Restart** onto the fresh build.
+ *
+ * All shelling-out goes through `ctx.run` (the injected runner), so it's unit-testable without a repo.
+ */
+async function refreshDaemon(
+  ctx: ServiceCtx,
+  health: () => Promise<{ connections?: number }>,
+  force: boolean,
+  ok: (s: string) => void,
+  fail: (step: string, r: RunResult) => never,
+): Promise<number> {
+  const dir = ctx.workingDir;
+  const git = (...args: string[]): RunResult => ctx.run('git', ['-C', dir, ...args]);
+
+  if (git('rev-parse', '--is-inside-work-tree').status !== 0) {
+    throw new CliError(
+      `${dir} is not a git checkout — \`service refresh\` rebuilds the daemon from its own source, ` +
+        `which only works when the daemon runs from a repo (it runs from ${ctx.binJs}).`,
+      1,
+    );
+  }
+  // Never clobber someone's in-progress edits in the shared checkout.
+  if (git('status', '--porcelain').stdout.trim()) {
+    throw new CliError(
+      `${dir} has uncommitted changes — commit or stash them first (refresh won't discard work).`,
+      1,
+    );
+  }
+  // Guard the bounce up front (like restart/stop): fail fast before any sync/build side effects.
+  await guardLiveSessions(health, force);
+
+  const before = git('rev-parse', '--short', 'HEAD').stdout.trim();
+  const fetched = git('fetch', 'origin', 'main', '--quiet');
+  if (fetched.status !== 0) fail('git fetch origin main', fetched);
+  const switched = git('switch', '--detach', 'origin/main');
+  if (switched.status !== 0) fail('git switch origin/main', switched);
+  const after = git('rev-parse', '--short', 'HEAD').stdout.trim();
+  ok(
+    after === before
+      ? `already on the latest main (${after})`
+      : `synced ${dir} → ${after} ${theme.meta(`(was ${before})`)}`,
+  );
+
+  process.stdout.write(theme.meta('  building…') + '\n');
+  const built = ctx.run('pnpm', ['--dir', dir, 'build']);
+  if (built.status !== 0) {
+    throw new CliError(
+      `build failed — the daemon is still running the previous code (not bounced):\n` +
+        (built.stderr || built.stdout || '').trim(),
+      1,
+    );
+  }
+  ok('rebuilt dist');
+
+  const r = restart(ctx);
+  if (r.status !== 0) fail('restart', r);
+  ok(`restarted the musterd daemon on ${after}`);
+  return 0;
 }
 
 async function renderStatus(ctx: ServiceCtx): Promise<number> {
