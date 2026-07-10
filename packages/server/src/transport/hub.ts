@@ -120,15 +120,26 @@ export class Hub {
 
   /**
    * Push a frame to every firehose subscriber on a team, skipping members in `skipMemberIds`
-   * (recipients + sender already handled by `deliver`/`ack`, so no one is double-sent). Returns
-   * how many connections got it.
+   * (recipients + sender already handled by `deliver`/`ack`, so no one is double-sent). When
+   * `directed` is set (a member-kind envelope), only full-visibility connections receive it — admins
+   * and read-only observer seats (ADR 063, localhost-trust — the /live dashboard). Every firehose
+   * subscriber that reaches this loop is a non-party (parties are in `skipMemberIds`), so a regular
+   * member must not see another seat's DM. team/broadcast acts stay public (`directed` false). Closes
+   * the DM-leak on the live firehose for regular members. (Local-vs-shared observer scoping is a
+   * tracked follow-up.) Returns how many got it.
    */
-  broadcastFirehose(teamId: string, frame: WSServerFrame, skipMemberIds?: Set<string>): number {
+  broadcastFirehose(
+    teamId: string,
+    frame: WSServerFrame,
+    skipMemberIds?: Set<string>,
+    directed?: boolean,
+  ): number {
     let n = 0;
     for (const connId of this.firehose) {
       const conn = this.byConn.get(connId);
       if (!conn || conn.teamId !== teamId) continue;
       if (skipMemberIds?.has(conn.memberId)) continue;
+      if (directed && !(conn.isAdmin || conn.observer)) continue;
       conn.send(frame);
       n++;
     }

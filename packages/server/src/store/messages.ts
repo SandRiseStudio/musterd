@@ -241,6 +241,13 @@ export function latestStatusUpdate(
 export interface TeamMessagesOpts {
   since?: number;
   limit?: number;
+  /**
+   * Recipient-scoping (need-to-know): when set, restrict the timeline to envelopes this member is a
+   * party to — sender, recipient, or a team/broadcast act. Admin-visibility callers omit it and read
+   * the whole team timeline. Closes the DM-leak gap where any seat's `GET /messages` returned every
+   * directed envelope (ADR 061 follow-up).
+   */
+  forMemberId?: string;
 }
 
 /**
@@ -263,22 +270,27 @@ export function listTeamMessages(
   opts: TeamMessagesOpts = {},
 ): MessageRow[] {
   const limit = opts.limit ?? 200;
+  // Need-to-know scope: a party is the sender, the recipient, or anyone (a team/broadcast act).
+  const scopeSql = opts.forMemberId
+    ? " AND (from_member = ? OR to_member = ? OR to_kind IN ('team','broadcast'))"
+    : '';
+  const scopeParams = opts.forMemberId ? [opts.forMemberId, opts.forMemberId] : [];
   if (typeof opts.since === 'number') {
     // Forward catch-up: walk forward from the cursor, oldest-first, so no message in the gap is skipped.
     return db
       .prepare<
         unknown[],
         MessageRow
-      >('SELECT * FROM messages WHERE team_id = ? AND ts > ? ORDER BY ts ASC, id ASC LIMIT ?')
-      .all(teamId, opts.since, limit);
+      >(`SELECT * FROM messages WHERE team_id = ? AND ts > ?${scopeSql} ORDER BY ts ASC, id ASC LIMIT ?`)
+      .all(teamId, opts.since, ...scopeParams, limit);
   }
   // Initial backfill: take the newest `limit` (DESC + LIMIT), then re-sort ascending for display.
   return db
     .prepare<
       unknown[],
       MessageRow
-    >('SELECT * FROM (SELECT * FROM messages WHERE team_id = ? ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC')
-    .all(teamId, limit);
+    >(`SELECT * FROM (SELECT * FROM messages WHERE team_id = ?${scopeSql} ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC`)
+    .all(teamId, ...scopeParams, limit);
 }
 
 /** Convert a stored row back to a protocol Envelope (for delivery/inbox responses). */

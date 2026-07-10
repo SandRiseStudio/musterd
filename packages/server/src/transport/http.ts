@@ -1518,17 +1518,22 @@ export async function handleHttp(
         return sendJson(res, 200, { messages, cursor, total: countInbox(ctx.db, member) });
       }
 
-      // The whole team timeline — every envelope, not just the caller's inbox — for the firehose's
-      // history backfill (ADR 061). The dashboard GETs this, then live-tails via `subscribe team-all`.
-      // Authed like /inbox (any team member); read-only.
+      // The team timeline for the firehose's history backfill (ADR 061), then live-tailed via
+      // `subscribe team-all`. Recipient-scoped (need-to-know): a regular member sees only envelopes it
+      // is a party to (sender/recipient/team/broadcast). Admins and read-only observer seats (ADR 063,
+      // localhost-trust — the /live dashboard) see the whole timeline. Closes the DM-leak where any
+      // member's GET /messages returned every directed envelope on the team. (Local-vs-shared observer
+      // scoping — a shared watch-link seeing only public traffic — is a tracked follow-up.)
       if (method === 'GET' && rest === '/messages') {
         const { team, member } = authTouch(ctx, slug, req);
         assertSeatCanRead(member);
         const since = url.searchParams.get('since');
         const limit = url.searchParams.get('limit');
+        const scoped = !resolveCapabilities(member).is_admin && member.observer !== 1;
         const rows = listTeamMessages(ctx.db, team.id, {
           ...(since ? { since: Number(since) } : {}),
           ...(limit ? { limit: Math.min(Math.max(Number(limit), 1), 1000) } : {}),
+          ...(scoped ? { forMemberId: member.id } : {}),
         });
         const messages = rows.map((r) => {
           const from = getMemberById(ctx.db, r.from_member);
