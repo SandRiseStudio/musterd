@@ -57,6 +57,7 @@ describe('report command', () => {
     expect(res.out).toContain('report — dawn');
     expect(res.out).toContain('flow');
     expect(res.out).toContain('coordination');
+    expect(res.out).toContain('steering');
     expect(res.out).toContain('waiting on');
   });
 
@@ -117,6 +118,7 @@ describe('report command', () => {
   it('report coordination renders the MAST page (and --json)', async () => {
     const res = await capture(() => reportCommand(parseArgs(['coordination'])));
     expect(res.out).toContain('coordination — dawn');
+    expect(res.out).toContain('steering');
     expect(res.out).toContain('time to unblock');
     expect(res.out).toContain('ignored help');
     expect(res.out).toContain('stalled threads');
@@ -124,8 +126,13 @@ describe('report command', () => {
     expect(res.out).toContain('model diversity');
 
     const asJson = await capture(() => reportCommand(parseArgs(['coordination', '--json'])));
-    const parsed = JSON.parse(asJson.out) as { coordination: unknown; mast: unknown };
+    const parsed = JSON.parse(asJson.out) as {
+      coordination: unknown;
+      mast: unknown;
+      steering: unknown;
+    };
     expect(parsed.coordination).toBeDefined();
     expect(parsed.mast).toBeDefined();
+    expect(parsed.steering).toBeDefined();
   });
 });

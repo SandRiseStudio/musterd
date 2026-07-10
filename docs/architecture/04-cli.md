@@ -87,7 +87,7 @@ src/
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
     done.ts           // close your work — mark the lane done (auto-targets your live lane), then show next (ADR 049/084)
     goal.ts           // declare/list team Goals — the declared-outcome layer above lanes (ADR 048/084)
-    report.ts         // the insight report at ic/team/exec altitudes: flow metrics, waiting-on, Goal board (ADR 050/084)
+    report.ts         // the insight report at ic/team/exec altitudes: flow, coordination, steering (ADR 050/084/125), waiting-on, Goal board
     archaeology.ts    // musterd archaeology --start <sha>: wasted-work % from git alone (ADR 123 predicate set v1)
     unbind.ts         // release this folder's own seat — clears bound_at + presence, keeps it declared (ADR 058)
     reload.ts         // SIGHUP the service daemon to re-resolve roster roots + reconcile (ADR 058)

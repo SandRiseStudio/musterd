@@ -115,8 +115,30 @@ function render(r: Report, altitude: Altitude): void {
   renderFlow(r, w);
   w(`\n${theme.accent('coordination')}:\n`);
   renderCoordination(r, w);
+  w(`\n${theme.accent('steering')}:\n`);
+  renderSteering(r, w);
   w(`\n${theme.accent('waiting on')}:\n`);
   renderWaitingOn(r, w);
+}
+
+/** Interrupt-line metrics (ADR 125) — latency + supersession + stale-work-caught. */
+function renderSteering(r: Report, w: (s: string) => void): void {
+  const s = r.steering;
+  const lat =
+    s.latency_median_ms === null
+      ? theme.meta('—')
+      : `median ${ago(s.latency_median_ms)} · p95 ${ago(s.latency_p95_ms!)}`;
+  w(
+    `  ${s.acked}/${s.steers} steers acked · latency ${lat} ${theme.meta(`(${s.window_days}d)`)}\n`,
+  );
+  const superLine =
+    s.superseded_acts === 0
+      ? theme.ok('0 superseded-steer replies')
+      : theme.warn(`${s.superseded_acts} act(s) replied to a superseded steer`);
+  w(`  ${superLine}\n`);
+  w(
+    `  stale-work ${s.stale_caught}/${s.stale_wakes} wakes caught${s.stale_wakes > 0 && s.stale_caught === 0 ? theme.warn(' — wakes fired, no course-change yet') : ''}\n`,
+  );
 }
 
 /** One recipient's rung, compactly: `stanley seen 2h` / `nick answered (accept)` / `izzo unseen 3d`. */
@@ -173,10 +195,21 @@ async function coordinationReport(parsed: Parsed): Promise<number> {
   const w = process.stdout.write.bind(process.stdout);
   const m = report.mast;
   if (parsed.flags['json'])
-    return (w(JSON.stringify({ coordination: report.coordination, mast: m }) + '\n'), 0);
+    return (
+      w(
+        JSON.stringify({
+          coordination: report.coordination,
+          mast: m,
+          steering: report.steering,
+        }) + '\n',
+      ),
+      0
+    );
 
   w(`${theme.accent('coordination')} — ${team} ${theme.meta(`· last ${m.window_days}d`)}\n\n`);
   renderCoordination(report, w);
+  w(`\n${theme.accent('steering')}:\n`);
+  renderSteering(report, w);
 
   const t = m.time_to_unblock;
   w(`\n${theme.accent('time to unblock')}:\n`);

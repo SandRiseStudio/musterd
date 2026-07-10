@@ -5,9 +5,8 @@ demo failure Nick witnessed; **amended 2026-07-03 after the zoom-out round** (re
 `challenge` act, the injection-surface security requirement, bounded-staleness/coherence framing — see
 the arc: [brainstorm-arc-reachability-to-ontology.md](./brainstorm-arc-reachability-to-ontology.md),
 and the position doc: [agent-ontology.md](./agent-ontology.md)). The failure diagnosis is empirical; the
-design is decided-in-principle and **increments 1–3 are shipped** (ADR 088 the interrupt line, ADR 103
-steer/challenge/defer, ADR 111 plan epochs + stale-plan detection — see §8); increment 4 (the
-steering-latency metric) is the last rung. This is the next rung on the reachability ladder
+design is decided-in-principle and **increments 1–4 are shipped** (ADR 088 the interrupt line, ADR 103
+steer/challenge/defer, ADR 111 plan epochs + stale-plan detection, ADR 125 steering-latency metrics — see §8). This is the next rung on the reachability ladder
 ([ADR 046](../decisions/046-agent-side-reachability.md)
 / [053](../decisions/053-inbox-reaches-blocked-agent.md) / [054](../decisions/054-wake-on-message.md)) —
 the one none of them reach.
@@ -244,6 +243,7 @@ One design arc, four increments — the first is small, self-contained, and demo
 3. **Goal epochs + dependency-aware invalidation** — riding the Goal spine (048/084) and lanes Phase-1.
    _Frozen as [ADR 111](../decisions/111-stale-plan-detection.md); `defer` becomes an actuator here._
 4. **Steering-latency metric** in the report engine (050) — the number the launch demo is built around.
+   _Frozen as [ADR 125](../decisions/125-steering-latency-metrics.md)._
 
 ---
 
