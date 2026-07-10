@@ -181,9 +181,12 @@ export function mountOffice(
     });
   }
 
-  /** Position the spinning-fan and desk-coffee-steam overlays over the props the canvas just baked. */
+  /** Position the spinning-fan and desk-coffee-steam overlays over the props the canvas just baked. Fans
+   * only spin at occupied desks — an unattended fan reads as wrong — so pass the seated-slot set. */
   function syncDeskProps() {
-    const { fans, coffees } = animatedDeskAnchors(fit);
+    const occupied = new Set<number>();
+    for (const pl of placements.values()) if (pl.kind === 'desk') occupied.add(pl.slot);
+    const { fans, coffees } = animatedDeskAnchors(fit, occupied);
     syncAnchorPool(fanEls, fans, 'lc-amb-fan', '<div class="lc-amb-fan__tilt"><div class="lc-amb-fan__blades"></div></div>', 'translate(-50%, -50%)');
     syncAnchorPool(deskSteamEls, coffees, 'lc-amb-steam lc-amb-steam--desk', '<i></i><i></i><i></i>', 'translate(-50%, -100%)');
   }
