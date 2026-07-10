@@ -575,7 +575,7 @@ const RAW: RawItem[] = [
     detail:
       'Dataset-first on the HF ladder (dataset → benchmark + leaderboard → paper → judge model), MAST-in-the-wild as the first thesis (ADR 056). Substrate is telemetry-l2 + coordination-density; reproducibility rides on the flywheel’s pinned experiment manifests (ADR 051) and baselines (ADR 052). Release is gated on the opt-in + redaction posture (ADR 051) — no dataset ships before consent/redaction is enforced.',
     refs: [adr(56, 'ADR 056'), doc('docs/research/README.md', 'docs/research/')],
-    dependsOn: ['telemetry-l2', 'coordination-density'],
+    dependsOn: ['telemetry-l2', 'coordination-density', 'cookoff-value-experiment'],
   },
   {
     id: 'research-intake',
@@ -841,6 +841,25 @@ const RAW: RawItem[] = [
       'From agent-ontology.md §5 (the monoculture problem); design frozen 2026-07-06 in the "model as a variable" session (ADR 101). SHIPPED 2026-07-07 (PR #144, ADR 101 increment 1): musterd is the model-agnostic layer, so heterogeneity is ours to make first-class — the model attaches per-occupancy (harness-attested — attested, never verified; `unknown` legal and honestly poisons conclusions as "unverifiable", never "diverse"), and the insight/report layer flags a review/approval/challenge chain (request_help/handoff/challenge answered by accept/decline from a different seat) that was single-model-FAMILY end-to-end ("treat agreement as weak evidence") — family (`claude-*` vs `gpt-*`) is the decorrelation boundary, review/approval scope keeps the flag scarce, warn-never-block keeps it a watcher. Surfaced in `musterd report coordination`, the `team_report` MAST health block, and `report.mast.diversity`; measured by the `musterd.insight.diversity_flags` observable gauge (derived state, not a counter). Still feeds the research track (ADR 056): agreement correlation between same-family vs cross-family reviewer pairs on real coordination traces is the evidence that upgrades or confirms the family boundary.',
     refs: [adr(101, 'ADR 101'), doc('docs/design/agent-ontology.md', 'agent-ontology.md'), adr(56, 'ADR 056'), doc('docs/design/model-experimentation.md', 'model-experimentation')],
     dependsOn: ['model-experimentation'],
+  },
+  {
+    id: 'cookoff-value-experiment',
+    wave: 5,
+    title: 'cookoff — the controlled experiment that proves musterd’s value',
+    plan: 'near-term',
+    category: 'observability',
+    blurb:
+      'The commercial crux: a sellable, defensible number for coordinated-vs-siloed agents on the same task — one reusable instrument (the cookoff scenario) that also answers the model and harness questions by varying a different term.',
+    detail:
+      'Design frozen 2026-07-10 (ADR 122 / ADR 123): a five-cell matrix (A single agent · B one musterd agent · C2 human-dispatch · C3 markdown-board DIY-musterd · D N musterd agents) over one bespoke fixture, holding everything fixed except the coordination medium and N. Headline = wasted-work %, supports = interventions- and tokens-to-done, guardrail = hidden acceptance-test pass rate (no LLM judge on the headline). The apparatus is BUILT: prep froze the measurement protocol (PR #210 — predicate set v1 W3→W1→W2→W4 + I1–I6 interventions), `musterd archaeology` is the git-only wasted-work reference collector (PR #212), the "Skiff" scenario repo carries 8 trap tickets + hidden suites + scoring harness in its own repo (PR #214, kickoff `ea5c6d4`), and the run manifest pins the ladder (PR #217 — Sonnet 5 / Claude Code / N=3, smoke-only spend authorized). Next is the run ladder itself: smoke (1×D) → pilot (A+D) → flagship (5 cells × 3–5), each rung gating the next. Every flagship run is a labeled coordination transcript — the experiment produces the coordination-traces dataset as a byproduct (ADR 122 flywheel). The smoke rung already corrected one design assumption: finding 001’s ≈37% is a forensic proxy, not a reproducible calibration gate (single-actor history) — the reproducible anchor is the fixture’s multi-seat reference-solution (12.2%).',
+    refs: [
+      adr(122, 'ADR 122'),
+      adr(123, 'ADR 123'),
+      adr(51, 'ADR 051'),
+      doc('docs/design/cookoff-experiment.md', 'cookoff-experiment'),
+      doc('docs/design/cookoff-run-manifest.md', 'run-manifest'),
+    ],
+    dependsOn: ['model-experimentation', 'coordination-lanes'],
   },
   {
     id: 'lanes-phase2',
