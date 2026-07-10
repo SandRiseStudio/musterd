@@ -240,8 +240,10 @@ double-control** as the credibility spine.
   [`cookoff-measurement.md`](cookoff-measurement.md).
 - ~~Define the **interventions counting protocol**~~ — **done**: same freeze (six touch codes,
   uniform per-run log, musterd cells pay full fare).
-- Pin the **flagship model + harness version** — still open; recorded in the ADR 051 run manifest
-  when the smoke run is scheduled.
+- ~~Pin the **flagship model + harness version**~~ — **done**: frozen in the
+  [run manifest](cookoff-run-manifest.md) (Sonnet 5 + Claude Code `2.1.205`, N=3), together with the
+  smoke-rung apparatus de-risking and the correction that finding 001's ≈37% is not a reproducible
+  calibration gate (the multi-seat `reference-solution` 12.2% is).
 
 ## Related
 
