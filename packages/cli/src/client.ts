@@ -12,6 +12,7 @@ import {
   PROTOCOL_VERSION,
   ReportSchema,
   resolveAttestedModel,
+  TOKEN_PREFIXES,
   RequestsResponseSchema,
   type ActDelivery,
   type AuditResponse,
@@ -92,7 +93,12 @@ export class HttpClient {
     try {
       // ADR 119: re-attest on every ambient HTTP touch when the env declares a model, so
       // fire-and-exit CLI sends keep stamping after the claim presence expires (issue #172).
-      const attestedModel = resolveAttestedModel(process.env);
+      // ADR 121: only agent keys (mskey_) forward the header — a human credential (mscr_) is not a
+      // harness, so MUSTERD_MODEL in the human's shell must not stamp their occupancy.
+      const attestedModel =
+        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
+          ? resolveAttestedModel(process.env)
+          : undefined;
       res = await fetch(this.opts.server + path, {
         method,
         headers: {
