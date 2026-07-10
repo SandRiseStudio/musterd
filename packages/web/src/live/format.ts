@@ -31,6 +31,9 @@ export function actTone(act: string): ActTone {
     case 'lane_open':
     case 'lane_claim':
     case 'lane_state':
+    // A Goal declaration (ADR 084) is the umbrella the lanes hang under — same plan-spine family, so it
+    // rides the lane tone and the cluster reads together.
+    case 'goal':
       return 'lane';
     case 'handoff':
     case 'lane_handoff':
@@ -71,6 +74,8 @@ export function actLabel(act: string): string {
       return 'lane done';
     case 'lane_handoff':
       return 'lane handoff';
+    case 'goal':
+      return 'goal';
     // The ADR 103 steering acts (`steer`, `challenge`, `defer`) are already single clean words, so they
     // read verbatim through the default — no relabel needed (unlike the underscored lane_* sub-types).
     default:
@@ -98,6 +103,110 @@ export function laneEvent(env: Pick<Envelope, 'act' | 'meta'>): LaneEventKind | 
   if (env.meta['lane_resolve']) return 'lane_resolve';
   if (env.meta['lane_handoff']) return 'lane_handoff';
   return null;
+}
+
+/**
+ * A Goal declaration (ADR 084) also rides as a plain `message` + `meta.goal` — recover it the same way
+ * a lane event is recovered, so the stream badges it `goal` (not `message`) and renders the Goal title
+ * as a work item rather than dumping the composed `[goal] declared "…"` body.
+ */
+export function goalEvent(env: Pick<Envelope, 'act' | 'meta' | 'body'>): { title: string; wave?: string } | null {
+  if (env.act !== 'message' || !env.meta) return null;
+  const g = env.meta['goal'];
+  if (!g || typeof g !== 'object') return null;
+  const rec = g as Record<string, unknown>;
+  const title = typeof rec['title'] === 'string' ? rec['title'] : titleFromBody(env.body);
+  if (!title) return null;
+  return typeof rec['wave'] === 'string' ? { title, wave: rec['wave'] } : { title };
+}
+
+/**
+ * The human parts of a lane event, pulled from its structured meta (ADR 083 §4) — the title plus
+ * whichever of state/branch/project applies. This is what the stream renders as a rich work-item line
+ * so the row never repeats the badge's verb (`[lane] claimed …`) or exposes the raw lane ULID.
+ * `lane_handoff` carries only `{lane, branch}` in meta, so its title falls back to the quoted body.
+ */
+export interface LaneEventDetail {
+  title: string | null;
+  state?: string;
+  branch?: string;
+  project?: string;
+}
+export function laneEventDetail(env: Pick<Envelope, 'meta' | 'body'>): LaneEventDetail | null {
+  const meta = env.meta;
+  if (!meta) return null;
+  const bag =
+    meta['lane_open'] ??
+    meta['lane_claim'] ??
+    meta['lane_state'] ??
+    meta['lane_resolve'] ??
+    meta['lane_handoff'];
+  if (!bag || typeof bag !== 'object') return null;
+  const b = bag as Record<string, unknown>;
+  const out: LaneEventDetail = {
+    title: typeof b['title'] === 'string' ? b['title'] : titleFromBody(env.body),
+  };
+  if (typeof b['state'] === 'string') out.state = b['state'];
+  if (typeof b['branch'] === 'string') out.branch = b['branch'];
+  // `default` is the unnamed project — not worth a pill.
+  if (typeof b['project'] === 'string' && b['project'] !== 'default') out.project = b['project'];
+  return out;
+}
+
+/** The first `"quoted"` span of a composed body — the title fallback when meta doesn't carry one. */
+function titleFromBody(body: string): string | null {
+  const m = body.match(/"([^"]+)"/);
+  return m ? m[1]! : null;
+}
+
+/* ─── rich body text ──────────────────────────────────────────────────────────────────────────────
+ * Free-text bodies (status updates, messages, handoff notes) are prose an agent wrote — often carrying
+ * `**emphasis**`, `code`/paths, PR/issue refs (`#210`), commit SHAs, and the occasional raw ULID. The
+ * stream renders them richly rather than as a flat dump: tokenize once here (pure, testable), style in
+ * the view. Long unique ids (ULIDs) are collapsed to a `01KX6Q…SF6R` monospace token so a 26-char
+ * identifier never blows out a line while the full value stays available on hover. */
+
+export type RichToken =
+  | { kind: 'text'; text: string }
+  | { kind: 'strong'; text: string }
+  | { kind: 'code'; text: string }
+  | { kind: 'ref'; text: string }
+  /** A collapsed long id: `text` is the short display form, `title` the full value (for hover). */
+  | { kind: 'id'; text: string; title: string };
+
+// One scan, alternation in priority order: `code` · **strong** · ULID · #ref · hex SHA. Boundaries keep
+// `#210` from matching inside a word/url and keep a 7–40-char lowercase hex run (a commit) distinct from
+// an uppercase 26-char Crockford ULID.
+const RICH_RE =
+  /`([^`]+)`|\*\*([^*\n]+)\*\*|\b[0-9A-HJKMNP-TV-Z]{26}\b|(?<![\w/#])#\d{1,6}\b|(?<![\w])[0-9a-f]{7,40}(?![\w])/g;
+const LEADING_TAG = /^\[(?:lane|goal)\]\s+/;
+
+export function richTokens(input: string): RichToken[] {
+  const text = input.replace(LEADING_TAG, '');
+  const out: RichToken[] = [];
+  let last = 0;
+  const push = (t: string) => {
+    if (t) out.push({ kind: 'text', text: t });
+  };
+  RICH_RE.lastIndex = 0;
+  for (let m = RICH_RE.exec(text); m; m = RICH_RE.exec(text)) {
+    push(text.slice(last, m.index));
+    const raw = m[0];
+    if (m[1] != null) out.push({ kind: 'code', text: m[1] });
+    else if (m[2] != null) out.push({ kind: 'strong', text: m[2] });
+    else if (/^[0-9A-HJKMNP-TV-Z]{26}$/.test(raw))
+      out.push({ kind: 'id', text: `${raw.slice(0, 6)}…${raw.slice(-4)}`, title: raw });
+    else if (raw[0] === '#') out.push({ kind: 'ref', text: raw });
+    else out.push({ kind: 'code', text: raw });
+    last = m.index + raw.length;
+  }
+  push(text.slice(last));
+  return out;
+}
+
+/** Total visible length of a token stream — what a character-by-character reveal counts against. */
+export function richLength(tokens: RichToken[]): number {
+  return tokens.reduce((n, t) => n + t.text.length, 0);
 }
 
 /** Where a message went, distilled to the three audiences a reader cares about (ADR 061 firehose). */
