@@ -68,7 +68,7 @@ src/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report
     wire.ts           // musterd wire: headless MCP register from the committed .musterd/workspace.json (ADR 080)
     agent.ts          // musterd agent <name> [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness, via the ADR 038 registry) + standing grant + committed workspace.json (ADR 065/080/116)
-    audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074)
+    audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     serve.ts          // musterd serve [--port]
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
@@ -278,9 +278,9 @@ The **headless, no-prompt counterpart to `init`** for a folder carrying a commit
 
 `POST /teams/:slug/members/:name/reclaim`. Force-drops a member's live session so it can rejoin — the sanctioned escape hatch (ADR 017 follow-up) instead of editing the daemon's DB. Newest-wins self-heals a _reconnecting_ session, but an orphaned presence that never comes back needs this. Any team member may reclaim any member (localhost/v0.2; the v0.3 seat model will gate it). Output: `✓ reclaimed <member> — any live session was dropped; it can rejoin now`. Errors: unknown member → `not_found` (exit 6).
 
-### `musterd audit [--limit <n>] [--before <ms-epoch>] [--json]`
+### `musterd audit [--limit <n>] [--before <ms-epoch>] [--authorized-by <seat>] [--json]`
 
-`GET /teams/:slug/audit` — the governance audit log reader (ADR 071), admin-only. Pretty-prints entries newest-first: `<HH:MM> <actor> [<action>] <allow|deny> → <target> <detail>`, `allow` green / `deny` red, `action` dim, the `detail` JSON blob in meta. `--limit` caps the page (integer 1..500; server default 100); `--before <ms-epoch>` pages entries older than a ts (the oldest row's ts is printed as the next `--before` cursor); `--json` passes the raw `AuditEntry[]` through. `action` is an **open string** (ADR 074) — unknown verbs render plainly instead of erroring, so P3's new governance actions (`grant.*`, `claim.*`, `account_status.change`, …) don't require a CLI release. Needs an **active admin identity** like any act (ADR 036); an ambient global-config read can't list who-did-what across the team. The response is parsed through `AuditResponseSchema` at the client boundary. Output: `cmd/audit`-style `audit — <team> (<n> entries)` + rows. Errors: non-admin → `forbidden` (exit 5); `--limit`/`--before` out of range → `bad_request` (exit 2).
+`GET /teams/:slug/audit` — the governance audit log reader (ADR 071), admin-only. Pretty-prints entries newest-first: `<HH:MM> <actor> [<action>] <allow|deny> → <target> <detail>`, `allow` green / `deny` red, `action` dim, the `detail` JSON blob in meta. `--limit` caps the page (integer 1..500; server default 100); `--before <ms-epoch>` pages entries older than a ts (the oldest row's ts is printed as the next `--before` cursor); `--authorized-by <seat>` keeps rows whose `detail.authorized_by` matches (ADR 127 — decide/grant/merge authorizer filter); `--json` passes the raw `AuditEntry[]` through. `action` is an **open string** (ADR 074) — unknown verbs render plainly instead of erroring, so P3's new governance actions (`grant.*`, `claim.*`, `account_status.change`, …) don't require a CLI release. Needs an **active admin identity** like any act (ADR 036); an ambient global-config read can't list who-did-what across the team. The response is parsed through `AuditResponseSchema` at the client boundary. Output: `cmd/audit`-style `audit — <team> (<n> entries)` + rows. Errors: non-admin → `forbidden` (exit 5); `--limit`/`--before` out of range → `bad_request` (exit 2).
 
 ### `musterd requests [--pending] [--json]` / `musterd requests decide <id> --approve [--once | --standing | --ttl-hours <n>] | --deny`
 

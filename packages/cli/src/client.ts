@@ -243,11 +243,12 @@ export class HttpClient {
    */
   async audit(
     slug: string,
-    opts: { limit?: number; before?: number } = {},
+    opts: { limit?: number; before?: number; authorized_by?: string } = {},
   ): Promise<AuditResponse> {
     const q = new URLSearchParams();
     if (opts.limit) q.set('limit', String(opts.limit));
     if (opts.before) q.set('before', String(opts.before));
+    if (opts.authorized_by) q.set('authorized_by', opts.authorized_by);
     const qs = q.toString();
     const json = await this.request('GET', `/teams/${slug}/audit${qs ? `?${qs}` : ''}`);
     const parsed = AuditResponseSchema.safeParse(json);

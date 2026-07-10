@@ -364,7 +364,7 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'audit',
-    signature: '[--limit <n>] [--before <ms-epoch>] [--json]',
+    signature: '[--limit <n>] [--before <ms-epoch>] [--authorized-by <seat>] [--json]',
     summary: 'read the governance audit log (admin-only)',
     group: 'insight',
   },

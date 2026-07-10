@@ -1959,6 +1959,8 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(auditRows('dawn').some((r) => r.action === 'grant.issue' && r.actor === 'nick')).toBe(
       true,
     );
+    const issue = auditRows('dawn').find((r) => r.action === 'grant.issue')!;
+    expect(JSON.parse(issue.detail!).authorized_by).toBe('nick');
 
     // listed without the secret token/hash
     const list = await get('/teams/dawn/grants', nickTok);

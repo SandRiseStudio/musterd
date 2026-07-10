@@ -211,6 +211,15 @@ describe('POST /requests/{id}/decide', () => {
 
     const after = await get('/teams/dawn/requests', nickCred);
     expect(after.json.requests.find((rq: any) => rq.id === id)?.status).toBe('approved');
+
+    // ADR 127: decide + minted grant both carry authorized_by.
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const decide = listAudit(server.db, teamId).find((a) => a.action === 'request.decide')!;
+    expect(JSON.parse(decide.detail!).authorized_by).toBe('nick');
+    const grantIssue = listAudit(server.db, teamId).find(
+      (a) => a.action === 'grant.issue' && JSON.parse(a.detail!).via === 'request.decide',
+    )!;
+    expect(JSON.parse(grantIssue.detail!).authorized_by).toBe('nick');
   });
 
   it('approve with lifetime "once" does not echo a resume token', async () => {

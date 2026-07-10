@@ -963,8 +963,8 @@ const RAW: RawItem[] = [
     category: 'platform',
     blurb: 'For audit: when a decision, escalation, or merge routes to a human for authorization, record which human authorized it — a first-class, attestable link from an approved action back to the approver.',
     detail:
-      'The merge/grant half is now BUILT: ADR 109 (PRs #167/#170) records `authorized_by` on the audit trail — the attestable join from a seat\'s landed SHA back to the authorizing human (grant issuer / request decider), surfaced via `lane resolve --authorized-by` and the `lane_resolve` tool. Seeds it built on — the P2 append-only audit log (ADR 071), the request-lane recorded decider (ADR 077), and human credentials (P3). Remaining scope (reserved): extend the same attestable link beyond merges to the broader decision/escalation gates. Relates to the shared/remote-team hardening cluster.',
-    refs: [adr(109, 'ADR 109'), adr(71, 'ADR 071'), adr(77, 'ADR 077'), doc('docs/design/security.md', 'security.md')],
+      'The merge half shipped as ADR 109 (PRs #167/#170): `authorized_by` on `git.pr_merged`, surfaced via `lane resolve --authorized-by`. ADR 127 extends the same key to `request.decide` + `grant.issue` (server-derived from the authenticated admin), writes `grant.issue` when an approve mints a grant, and adds `musterd audit --authorized-by <seat>` / `?authorized_by=` so admins can filter the ledger by authorizer. Seeds: P2 audit log (ADR 071), request lane (ADR 077), human credentials (P3).',
+    refs: [adr(127, 'ADR 127'), adr(109, 'ADR 109'), adr(71, 'ADR 071'), adr(77, 'ADR 077'), doc('docs/design/security.md', 'security.md')],
     dependsOn: ['v03-p2-enforcement'],
   },
   {

@@ -130,13 +130,33 @@ export function hasInterruptRaised(
   }
 }
 
-/** Read the audit log for a team, newest-first, capped. `before` pages older than a given ts. */
+/** Read the audit log for a team, newest-first, capped. `before` pages older than a given ts.
+ *  `authorized_by` keeps rows whose detail.authorized_by matches (ADR 127). */
 export function listAudit(
   db: Database,
   teamId: string,
-  opts: { limit?: number; before?: number } = {},
+  opts: { limit?: number; before?: number; authorized_by?: string } = {},
 ): AuditRow[] {
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+  const by = opts.authorized_by;
+  if (by != null && by.length > 0) {
+    if (opts.before != null) {
+      return db
+        .prepare<[string, number, string, number], AuditRow>(
+          `SELECT * FROM audit WHERE team_id = ? AND ts < ?
+             AND json_extract(detail, '$.authorized_by') = ?
+           ORDER BY ts DESC, id DESC LIMIT ?`,
+        )
+        .all(teamId, opts.before, by, limit);
+    }
+    return db
+      .prepare<[string, string, number], AuditRow>(
+        `SELECT * FROM audit WHERE team_id = ?
+           AND json_extract(detail, '$.authorized_by') = ?
+         ORDER BY ts DESC, id DESC LIMIT ?`,
+      )
+      .all(teamId, by, limit);
+  }
   if (opts.before != null) {
     return db
       .prepare<
