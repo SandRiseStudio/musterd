@@ -248,13 +248,29 @@ export function deriveSteeringMetrics(
       .get(teamId, a.in_reply_to);
     if (!named || named.act !== 'steer' || !named.to_member) continue;
     // A newer steer to the same recipient before this act → the named one was superseded.
+    // Tie-break equal timestamps with message id (ADR 103 / pendingInterrupts: higher id wins).
     const newer = db
-      .prepare<[string, string, number, number], { n: number }>(
+      .prepare<
+        [string, string, string, number, number, string, number, number, string],
+        { n: number }
+      >(
         `SELECT COUNT(*) AS n FROM messages
           WHERE team_id = ? AND act = 'steer' AND to_member = ?
-            AND ts > ? AND ts < ?`,
+            AND id != ?
+            AND (ts > ? OR (ts = ? AND id > ?))
+            AND (ts < ? OR (ts = ? AND id < ?))`,
       )
-      .get(teamId, named.to_member, named.ts, a.ts);
+      .get(
+        teamId,
+        named.to_member,
+        a.in_reply_to,
+        named.ts,
+        named.ts,
+        a.in_reply_to,
+        a.ts,
+        a.ts,
+        a.id,
+      );
     if ((newer?.n ?? 0) > 0) superseded_acts += 1;
   }
 
