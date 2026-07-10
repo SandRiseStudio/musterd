@@ -1,6 +1,6 @@
 # 104 — Work-items board + insight layer (web): a view over the act log, no second store
 
-- Status: proposed
+- Status: accepted — increment 1 (the `/board` work-items surface) shipped (#151)
 - Date: 2026-07-07
 - Builds on: ADR 050 (insight engine — derived projections, "queries not instrumentation"), ADR 083
   (lanes — the work-item primitive), ADR 084 (server-side placement + `deriveGoalStatus`), ADR 048

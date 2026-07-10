@@ -94,7 +94,7 @@ New docs use the **canonical work-item vocabulary** (ADR 098): Goal / Lane are t
 
 ## What is out of scope for v1 (do not build — it's on `ROADMAP.md`)
 
-Sandbox runtime, schedule **enforcement** (availability is stored, not enforced), team-to-team federation, iOS/web/Slack surfaces, the web dashboard _build_ (it's designed in Figma now, built later), Python SDK. Keep the schema fields that anticipate these; don't wire behavior to them.
+Sandbox runtime, schedule **enforcement** (availability is stored, not enforced), team-to-team federation, iOS/Slack surfaces, broader web analytics/approvals views (the `/live` console + `/board` already ship), Python SDK. Keep the schema fields that anticipate these; don't wire behavior to them.
 
 ## Definition of "the product works"
 

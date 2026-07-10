@@ -1,6 +1,6 @@
 # 108 — Probe-safe autojoin: defer the launch claim to the first tool call
 
-- Status: proposed
+- Status: accepted — probe-safe autojoin shipped (#165)
 - Date: 2026-07-08
 - Builds on: ADR 032 (claim-on-first-use / launch autojoin), ADR 060 (SessionStart verify runs
   `claude mcp get musterd`), ADR 068 (workspace-scoped displacement), ADR 092 (durability-gated

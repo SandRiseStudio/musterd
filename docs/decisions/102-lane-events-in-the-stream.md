@@ -1,6 +1,6 @@
 # 102 — Lane events in the stream: distinct rendering of noteless transitions
 
-- Status: proposed
+- Status: accepted — lane events in the stream shipped (#142)
 - Date: 2026-07-06
 - Builds on: ADR 083 (lane events ride `act: 'message'` + `meta.lane_*`, no new act token), ADR 098
   (canonical work-item vocabulary — Lane is the entity), the orientation spine (Goal/Lane), and the

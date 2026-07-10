@@ -1,6 +1,6 @@
 # 087 — Seat resume ≠ claim: occupy-from-binding, a resume token, and one seating verb
 
-- Status: proposed
+- Status: accepted — seat resume≠claim arc shipped (#95/#96/#99/#102)
 - Date: 2026-07-03
 - Supersedes/extends: ADR 033 (pending presence), ADR 034 (live-claim resolution), ADR 081 (seat-in-binding)
 - Builds on: ADR 010 (reclaim grace), ADR 017 (newest-session-wins), ADR 077 (claim handshake + request lane)

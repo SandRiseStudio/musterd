@@ -1,6 +1,6 @@
 # 050 — Insights: `musterd report`, flow metrics, and the waiting-on view
 
-- Status: proposed
+- Status: accepted — insight engine shipped (report engine #82, coordination-density #84)
 - Date: 2026-06-24
 - Amended by: ADR 084 (lanes join the Plan — flow metrics read lane timestamps first; thread
   `open → resolve` is the fallback; projections are computed server-side, surfaces render)

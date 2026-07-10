@@ -1,6 +1,6 @@
 # 098 — Canonical work-item vocabulary: the words for work, gated
 
-- Status: proposed
+- Status: accepted — canonical vocabulary + `vocab:check` gate shipped (#127)
 - Date: 2026-07-06
 - Builds on: ADR 048 (Plan/Goal model), ADR 084 (lanes join the Plan), ADR 052 (obs-evals gate — the
   checker pattern), ADR 085 (guidance drift-check precedent)

@@ -1,6 +1,6 @@
 # 048 — The Plan/Goal work-item model: declared skeleton, derived flesh
 
-- Status: proposed
+- Status: accepted — Plan/Goal spine shipped (orientation-spine arc, #81 increment 2)
 - Date: 2026-06-24
 - Amended by: ADR 084 (lanes join the Plan — the work-item noun below a Goal is the lane when
   ownership/contention matters; Goal status derives lanes-first over `Goals × lanes × threads`)

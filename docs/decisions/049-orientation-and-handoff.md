@@ -1,6 +1,6 @@
 # 049 — Orientation & handoff: `musterd next` / `done`, the derived floor, no copy-paste
 
-- Status: proposed
+- Status: accepted — orientation & handoff shipped (`musterd next`/`done`, orientation-spine arc)
 - Date: 2026-06-24
 - Amended by: ADR 084 (lanes join the Plan — `musterd done` closes the **lane** when one carries the
   work; thread `resolve` is the lane-less fallback. The load-bearing terminal is lane-`done`, not the

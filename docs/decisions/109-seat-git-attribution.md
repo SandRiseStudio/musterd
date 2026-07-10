@@ -1,6 +1,6 @@
 # 109 — Seat-level git attribution + the authorized-by trail
 
-- Status: proposed
+- Status: accepted — seat git attribution + `authorized_by` merge trail shipped (#167/#170)
 - Date: 2026-07-08
 - Builds on: ADR 065 (agent workspace worktrees), ADR 069 (v0.3 governance: keys/grants), ADR 071
   (audit log), ADR 077 (request lane — `request.decide`), ADR 083 (lanes carry a `branch`), ADR 101
