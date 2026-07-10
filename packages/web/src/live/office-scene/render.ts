@@ -661,13 +661,15 @@ function deskFan(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number
 }
 
 /** A desk lamp: base + slim pole + a warm glowing shade. */
-function deskLamp(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number): void {
+function deskLamp(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number, lit: boolean): void {
   box(ctx, fit, ix, iy, 10, 10, 3, '#3d4650', up); // base
   box(ctx, fit, ix, iy, 3, 3, 22, '#4a545f', up + 3); // pole
   const g = project(ix, iy, fit);
   const ty = g.y - (up + 26) * fit.scale;
-  ellipse(ctx, { x: g.x, y: ty }, 9 * fit.scale, 5 * fit.scale, '#e9c46a'); // shade
-  ellipse(ctx, { x: g.x, y: ty + 2 * fit.scale }, 6 * fit.scale, 3 * fit.scale, '#fff1c2'); // warm glow
+  // Lit only when a member's at the desk — warm amber shade + inner glow; unattended it's switched off, a
+  // cool grey shade with no glow (matches the idle fan / empty mug).
+  ellipse(ctx, { x: g.x, y: ty }, 9 * fit.scale, 5 * fit.scale, lit ? '#e9c46a' : '#aab0b8');
+  if (lit) ellipse(ctx, { x: g.x, y: ty + 2 * fit.scale }, 6 * fit.scale, 3 * fit.scale, '#fff1c2'); // warm glow
 }
 
 /** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works), plus a
@@ -738,7 +740,7 @@ function drawWorkstation(
         case 'photo':
           return deskPhoto(ctx, fit, ix, iy, sn, up, PHOTOS[Math.floor(deskRnd(id, 41) * PHOTOS.length)]!);
         case 'lamp':
-          return deskLamp(ctx, fit, ix, iy, up);
+          return deskLamp(ctx, fit, ix, iy, up, node != null);
         case 'fan':
           return deskFan(ctx, fit, ix, iy, up);
       }
