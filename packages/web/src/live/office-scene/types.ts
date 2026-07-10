@@ -20,6 +20,8 @@ export interface OfficeNode {
 
 /** The office has no arcs — relationships show as choreography, not edges. */
 export interface OfficeData {
+  /** Stable visual seed for desk moods; absent in previews, where the default seed is used. */
+  teamName?: string;
   nodes: OfficeNode[];
 }
 

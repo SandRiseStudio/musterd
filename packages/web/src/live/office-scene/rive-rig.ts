@@ -53,6 +53,9 @@ interface Member {
   /** Frames left to keep re-rendering after the last input change so a state transition settles on-screen
    * before the frame freezes into the cache. */
   settle: number;
+  /** Gesture inputs are one-shot triggers in the exported rig; pulse them once instead of holding a state
+   * value, which can make the Gesture layer loop until Rive's max-iteration guard fires. */
+  gesturePulsed: boolean;
   /** The member's last rendered frame, held so an unchanged idle seat blits a bitmap instead of re-running
    * Rive. Null until the first render; dropped with the member when they leave. */
   cache: HTMLCanvasElement | null;
@@ -117,7 +120,18 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
         // default states play (idle / gesture "none"). This is what makes the Gesture layer (stretch/
         // glance) and mode-driven states actually fire in the office.
         sm.bindViewModelInstance(vmi);
-        m = { artboard, sm, vmi, key: '', dirty: true, moving: false, settle: 0, cache: null, cctx: null };
+        m = {
+          artboard,
+          sm,
+          vmi,
+          key: '',
+          dirty: true,
+          moving: false,
+          settle: 0,
+          gesturePulsed: false,
+          cache: null,
+          cctx: null,
+        };
         members.set(name, m);
       }
       return m;
@@ -157,9 +171,18 @@ export async function loadRiveRig(): Promise<RiveRig | null> {
           m.vmi.number('mode')!.value = r.mode;
           m.vmi.number('facing')!.value = r.facing;
           m.vmi.number('run')!.value = r.run;
-          // In-place gesture overlay — guarded, so it no-ops until the `.riv` exposes a `gesture` input +
-          // Gesture layer (ADR 086 Phase 2 tail) and lights up automatically on the next asset export.
-          setNumberIfPresent(m.vmi, 'gesture', r.gesture);
+          // In-place gesture overlay — the exported Gesture layer treats this as a one-shot selector.
+          // Holding 1/2 for the full actor gesture window makes the state machine re-enter itself until
+          // Rive's max-iteration guard fires, so pulse the selector once and return it to zero.
+          if (r.gesture !== 0 && !m.gesturePulsed) {
+            setNumberIfPresent(m.vmi, 'gesture', r.gesture);
+            m.gesturePulsed = true;
+          } else if (r.gesture !== 0) {
+            setNumberIfPresent(m.vmi, 'gesture', 0);
+          } else if (r.gesture === 0) {
+            setNumberIfPresent(m.vmi, 'gesture', 0);
+            m.gesturePulsed = false;
+          }
           // An urgent (running) walk plays its cycle faster — visibly hurried legs/bob.
           const step = dt * (r.run ? 1.8 : 1);
           m.sm.advance(step);

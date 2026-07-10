@@ -18,6 +18,7 @@ import {
   type Bookshelf,
   type Huddle,
 } from './layout';
+import { deskMoodFor, deskMoodStyle } from './moods';
 import type { Placement } from './seating';
 import type { Dir, OfficeNode, Pose } from './types';
 
@@ -683,6 +684,7 @@ function drawWorkstation(
   fit: Fit,
   slot: { lx: number; ly: number; dir: Dir; id: number },
   node: OfficeNode | null,
+  teamName: string,
 ): void {
   const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
@@ -696,6 +698,7 @@ function drawWorkstation(
   const dy = sn ? Df : W;
   const up = DESK_UP; // desk-surface height — where every prop sits (DH + ST)
   const working = node?.activity === 'working';
+  const mood = node ? deskMoodStyle(deskMoodFor(teamName, node.name)) : null;
 
   for (const [sx, sy] of [
     [-1, -1],
@@ -727,7 +730,7 @@ function drawWorkstation(
 
   // optional personal props — each present-or-not per desk by a stable hash, at its own station
   for (const kind of PROP_KINDS) {
-    if (!deskHasProp(id, kind)) continue;
+    if (!deskHasProp(id, kind) && !mood?.props.includes(kind)) continue;
     const sp = PROP_SPEC[kind];
     at(sp.along, sp.across, (ix, iy) => {
       switch (kind) {
@@ -774,6 +777,7 @@ export function renderScene(
   byName: Map<string, OfficeNode>,
   poses: Map<string, Pose>,
   rig?: RigDrawer,
+  teamName = 'revive',
 ): SceneAnchors {
   drawFloor(ctx, fit);
 
@@ -811,7 +815,7 @@ export function renderScene(
   for (const slot of DESK_SLOTS) {
     const name = slotMember.get(slot.id) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
-    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node) });
+    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName) });
     // The task chair sorts at its own spot behind/in front of the desk, so a seated member paints
     // between chair and desk (or desk and chair, by facing) instead of being swallowed by either.
     const f = FWD[slot.dir];
@@ -945,15 +949,40 @@ export function coffeeAnchor(fit: Fit): Pt {
  * at the entrance when someone comes or goes (`door`). */
 export interface Cue {
   at: Pt;
+  to?: Pt;
+  source?: string;
   color: string;
   glyph: '' | '?' | '!' | '📣' | '✓' | '↦' | '↪';
   t: number;
   urgent: boolean;
-  kind?: 'ring' | 'wave' | 'door';
+  kind?: 'ring' | 'wave' | 'door' | 'thread';
 }
 
 export function drawCue(ctx: CanvasRenderingContext2D, cue: Cue, scale: number): void {
   const { at, color, t } = cue;
+
+  if (cue.kind === 'thread' && cue.to) {
+    const dx = cue.to.x - at.x;
+    const dy = cue.to.y - at.y;
+    const lift = Math.min(70, Math.max(18, Math.hypot(dx, dy) * 0.18));
+    const control = {
+      x: at.x + dx / 2,
+      y: at.y + dy / 2 - lift * scale,
+    };
+    const eased = 1 - Math.pow(1 - t, 2);
+    ctx.globalAlpha = (1 - t) * 0.58;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2 * scale;
+    ctx.setLineDash([7 * scale, 8 * scale]);
+    ctx.lineDashOffset = -eased * 30 * scale;
+    ctx.beginPath();
+    ctx.moveTo(at.x, at.y);
+    ctx.quadraticCurveTo(control.x, control.y, cue.to.x, cue.to.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    return;
+  }
 
   if (cue.kind === 'wave') {
     // A broadcast sweep: a big, diffuse ring rolling out from the announcer across the room.

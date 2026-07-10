@@ -6,8 +6,9 @@ import { actToEvent } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
 
 /** Roster → the office's node data (presence/activity drives who's in the room + their state). */
-function computeData(roster: MemberSummary[]): OfficeData {
+function computeData(teamName: string, roster: MemberSummary[]): OfficeData {
   return {
+    teamName,
     nodes: roster.map((m) => {
       const kind = m.kind === 'human' ? 'human' : 'agent';
       return {
@@ -30,6 +31,7 @@ function computeData(roster: MemberSummary[]): OfficeData {
  * HTML overlay.
  */
 export function OfficeScene({
+  teamName,
   roster,
   envelopes,
   liveIds,
@@ -37,6 +39,7 @@ export function OfficeScene({
   onCollapse,
   onActClick,
 }: {
+  teamName: string;
   roster: MemberSummary[];
   envelopes: Envelope[];
   liveIds: Set<string>;
@@ -50,7 +53,7 @@ export function OfficeScene({
   const handleRef = useRef<OfficeHandle | null>(null);
   const emittedRef = useRef<Set<string>>(new Set());
 
-  const data = useMemo(() => computeData(roster), [roster]);
+  const data = useMemo(() => computeData(teamName, roster), [teamName, roster]);
   const dataRef = useRef(data);
   dataRef.current = data;
   const onActClickRef = useRef(onActClick);

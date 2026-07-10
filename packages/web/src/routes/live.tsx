@@ -246,6 +246,7 @@ function LivePage() {
             }
           >
             <OfficeScene
+              teamName={team}
               roster={roster}
               envelopes={envelopes}
               liveIds={liveIds}
