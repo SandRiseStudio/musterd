@@ -70,6 +70,32 @@ export function countOpenLoops(db: Database): number {
   return row?.n ?? 0;
 }
 
+/**
+ * Open loops grouped by team slug (#207) — the per-team form of {@link countOpenLoops} for the
+ * `open_loops` observable gauge, so a per-team/per-model coordination leaderboard can read the gauge
+ * by `musterd.team`. Only teams with ≥1 open loop appear (a zero team is simply absent this cycle).
+ */
+export function countOpenLoopsByTeam(db: Database): { team: string; count: number }[] {
+  return db
+    .prepare<[], { team: string; count: number }>(
+      `SELECT t.slug AS team, COUNT(*) AS count FROM messages m
+         JOIN teams t ON t.id = m.team_id
+        WHERE m.act IN ('request_help','handoff')
+          AND NOT EXISTS (
+            SELECT 1 FROM messages r
+             WHERE r.team_id = m.team_id
+               AND r.act IN ('accept','decline')
+               AND json_extract(r.meta, '$.in_reply_to') = m.id)
+          AND NOT EXISTS (
+            SELECT 1 FROM messages v
+             WHERE v.team_id = m.team_id
+               AND v.act = 'resolve'
+               AND v.thread_id = COALESCE(m.thread_id, m.id))
+        GROUP BY t.slug`,
+    )
+    .all();
+}
+
 export interface InboxOpts {
   since?: number;
   unreadOnly?: boolean;
