@@ -1,7 +1,7 @@
 import { makeEnvelope, type Act } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
-import { coordinationDensity, flowMetrics, waitingOn } from './insights.js';
+import { coordinationDensity, deriveSteeringMetrics, flowMetrics, waitingOn } from './insights.js';
 import { openLane, updateLane } from './lanes.js';
 import { addMember } from './members.js';
 import { insertMessage } from './messages.js';
@@ -210,5 +210,217 @@ describe('coordinationDensity (the P3 broadcast-journal signal)', () => {
     const { db, team } = seed();
     const c = coordinationDensity(db, team.id, NOW);
     expect(c).toMatchObject({ acts: 0, journal_ratio: 0, exchange_ratio: 0, flag: false });
+  });
+});
+
+describe('deriveSteeringMetrics (ADR 125 — interrupt-line arc metrics)', () => {
+  const NOW = 40 * 86_400_000;
+
+  it('is empty-safe: zeros and null latencies', () => {
+    const { db, team } = seed();
+    expect(deriveSteeringMetrics(db, team.id, NOW)).toEqual({
+      window_days: 7,
+      steers: 0,
+      acked: 0,
+      latency_median_ms: null,
+      latency_p95_ms: null,
+      superseded_acts: 0,
+      stale_wakes: 0,
+      stale_caught: 0,
+    });
+  });
+
+  it('measures steer→ack latency from the recipient’s next act', () => {
+    const { db, team, nick, ada } = seed();
+    // nick steers ada; ada’s next status_update 2m later is the ack.
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 'steer1',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'member', name: 'ada' },
+        act: 'steer',
+        body: 'use v2',
+        ts: NOW - 5 * 60_000,
+      }),
+    );
+    insertMessage(
+      db,
+      team.id,
+      ada.id,
+      null,
+      makeEnvelope({
+        id: 'ack1',
+        team: 'revive',
+        from: 'ada',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: 'switching to v2',
+        ts: NOW - 3 * 60_000,
+      }),
+    );
+    const s = deriveSteeringMetrics(db, team.id, NOW);
+    expect(s.steers).toBe(1);
+    expect(s.acked).toBe(1);
+    expect(s.latency_median_ms).toBe(2 * 60_000);
+    expect(s.latency_p95_ms).toBe(2 * 60_000);
+  });
+
+  it('counts an unacked steer without inventing a latency', () => {
+    const { db, team, nick, ada } = seed();
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 'steer-open',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'member', name: 'ada' },
+        act: 'steer',
+        body: 'stop',
+        ts: NOW - 60_000,
+      }),
+    );
+    const s = deriveSteeringMetrics(db, team.id, NOW);
+    expect(s.steers).toBe(1);
+    expect(s.acked).toBe(0);
+    expect(s.latency_median_ms).toBeNull();
+  });
+
+  it('counts acts that reply to a superseded steer', () => {
+    const { db, team, nick, ada } = seed();
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 's-old',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'member', name: 'ada' },
+        act: 'steer',
+        body: 'do A',
+        ts: NOW - 10 * 60_000,
+      }),
+    );
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 's-new',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'member', name: 'ada' },
+        act: 'steer',
+        body: 'do B instead',
+        ts: NOW - 5 * 60_000,
+      }),
+    );
+    // ada accepts the OLD steer after the new one landed — contradictory-stack failure.
+    insertMessage(
+      db,
+      team.id,
+      ada.id,
+      nick.id,
+      makeEnvelope({
+        id: 'bad-ack',
+        team: 'revive',
+        from: 'ada',
+        to: { kind: 'member', name: 'nick' },
+        act: 'accept',
+        body: 'doing A',
+        ts: NOW - 4 * 60_000,
+        meta: { in_reply_to: 's-old' },
+      }),
+    );
+    expect(deriveSteeringMetrics(db, team.id, NOW).superseded_acts).toBe(1);
+  });
+
+  it('counts a stale wake as caught when the subject lane is later abandoned', () => {
+    const { db, team, nick, ada } = seed();
+    const lane = openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'stale work', claim: true },
+      NOW - 20 * 60_000,
+    );
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 'wake1',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'member', name: 'ada' },
+        act: 'message',
+        body: '[lane] plan moved',
+        ts: NOW - 10 * 60_000,
+        meta: {
+          lane_warning: {
+            kind: 'stale_plan',
+            subject: lane.id,
+            with: 'goal-x',
+            owner: 'ada',
+            detail: 'plan moved',
+          },
+        },
+      }),
+    );
+    updateLane(db, team.id, lane.id, 'revive', { state: 'abandoned' }, NOW - 5 * 60_000);
+    const s = deriveSteeringMetrics(db, team.id, NOW);
+    expect(s.stale_wakes).toBe(1);
+    expect(s.stale_caught).toBe(1);
+  });
+
+  it('does not count a stale wake as caught when the lane stays live untouched', () => {
+    const { db, team, nick, ada } = seed();
+    const lane = openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'still building', claim: true },
+      NOW - 20 * 60_000,
+    );
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 'wake2',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'member', name: 'ada' },
+        act: 'message',
+        body: '[lane] dep moved',
+        ts: NOW - 10 * 60_000,
+        meta: {
+          lane_warning: {
+            kind: 'stale_dependency',
+            subject: lane.id,
+            with: 'other-lane',
+            owner: 'ada',
+            detail: 'dep moved',
+          },
+        },
+      }),
+    );
+    const s = deriveSteeringMetrics(db, team.id, NOW);
+    expect(s.stale_wakes).toBe(1);
+    expect(s.stale_caught).toBe(0);
   });
 });

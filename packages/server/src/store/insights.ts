@@ -3,6 +3,7 @@ import type {
   CoordinationDensity,
   FlowMetrics,
   Report,
+  SteeringMetrics,
   WaitingOnEntry,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
@@ -19,6 +20,8 @@ import { deriveMast } from './mast.js';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const CONTENDING = "('claimed','active','blocked')";
+const STEERING_WINDOW_DAYS = 7;
+const STEERING_WINDOW_MS = STEERING_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
 /** Flow metrics from the lanes table (ADR 050 Part 5 / ADR 084). Single aggregate queries. */
 export function flowMetrics(db: Database, teamId: string, now: number = Date.now()): FlowMetrics {
@@ -162,6 +165,152 @@ export function coordinationDensity(
   };
 }
 
+interface SteerRow {
+  id: string;
+  recipient_id: string;
+  ts: number;
+}
+
+interface ActRow {
+  id: string;
+  from_member: string;
+  ts: number;
+  in_reply_to: string | null;
+}
+
+interface WakeRow {
+  id: string;
+  recipient_id: string;
+  subject: string;
+  ts: number;
+}
+
+function percentile(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null;
+  return sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]!;
+}
+
+/**
+ * Interrupt-line arc metrics (ADR 125): steering latency, supersession-correctness, stale-work-caught.
+ * Pure read over messages + lanes — the launch-demo instrument panel.
+ */
+export function deriveSteeringMetrics(
+  db: Database,
+  teamId: string,
+  now: number = Date.now(),
+): SteeringMetrics {
+  const since = now - STEERING_WINDOW_MS;
+
+  const steers = db
+    .prepare<[string, number], SteerRow>(
+      `SELECT m.id AS id, m.to_member AS recipient_id, m.ts AS ts
+         FROM messages m
+        WHERE m.team_id = ? AND m.act = 'steer' AND m.to_kind = 'member'
+          AND m.to_member IS NOT NULL AND m.ts > ?`,
+    )
+    .all(teamId, since);
+
+  const latencies: number[] = [];
+  for (const s of steers) {
+    // Recipient's first act strictly after the steer (ts, then id) — the acknowledgment.
+    const later = db
+      .prepare<[string, string, number, number, string], { ts: number }>(
+        `SELECT ts FROM messages
+          WHERE team_id = ? AND from_member = ?
+            AND (ts > ? OR (ts = ? AND id > ?))
+          ORDER BY ts ASC, id ASC LIMIT 1`,
+      )
+      .get(teamId, s.recipient_id, s.ts, s.ts, s.id);
+    if (later) latencies.push(later.ts - s.ts);
+  }
+
+  latencies.sort((a, b) => a - b);
+
+  // Supersession-correctness: acts whose in_reply_to names a steer already superseded at act.ts.
+  const replyActs = db
+    .prepare<[string, number], ActRow>(
+      `SELECT m.id AS id, m.from_member AS from_member, m.ts AS ts,
+              json_extract(m.meta, '$.in_reply_to') AS in_reply_to
+         FROM messages m
+        WHERE m.team_id = ? AND m.ts > ?
+          AND json_extract(m.meta, '$.in_reply_to') IS NOT NULL`,
+    )
+    .all(teamId, since);
+
+  let superseded_acts = 0;
+  for (const a of replyActs) {
+    if (!a.in_reply_to) continue;
+    const named = db
+      .prepare<
+        [string, string],
+        { act: string; to_member: string | null; ts: number }
+      >(`SELECT act, to_member, ts FROM messages WHERE team_id = ? AND id = ?`)
+      .get(teamId, a.in_reply_to);
+    if (!named || named.act !== 'steer' || !named.to_member) continue;
+    // A newer steer to the same recipient before this act → the named one was superseded.
+    const newer = db
+      .prepare<[string, string, number, number], { n: number }>(
+        `SELECT COUNT(*) AS n FROM messages
+          WHERE team_id = ? AND act = 'steer' AND to_member = ?
+            AND ts > ? AND ts < ?`,
+      )
+      .get(teamId, named.to_member, named.ts, a.ts);
+    if ((newer?.n ?? 0) > 0) superseded_acts += 1;
+  }
+
+  const wakes = db
+    .prepare<[string, number], WakeRow>(
+      `SELECT m.id AS id, m.to_member AS recipient_id,
+              json_extract(m.meta, '$.lane_warning.subject') AS subject,
+              m.ts AS ts
+         FROM messages m
+        WHERE m.team_id = ? AND m.ts > ?
+          AND json_extract(m.meta, '$.lane_warning.kind') IN ('stale_plan','stale_dependency')
+          AND m.to_member IS NOT NULL
+          AND json_extract(m.meta, '$.lane_warning.subject') IS NOT NULL`,
+    )
+    .all(teamId, since);
+
+  let stale_caught = 0;
+  for (const w of wakes) {
+    const lane = db
+      .prepare<
+        [string, string],
+        { state: string; resolved_at: number | null }
+      >(`SELECT state, resolved_at FROM lanes WHERE team_id = ? AND id = ?`)
+      .get(teamId, w.subject);
+    const abandonedOrDone =
+      lane !== undefined &&
+      (lane.state === 'abandoned' || lane.state === 'done') &&
+      lane.resolved_at !== null &&
+      lane.resolved_at > w.ts;
+    if (abandonedOrDone) {
+      stale_caught += 1;
+      continue;
+    }
+    // Owner course-change via a subsequent accept/handoff/status_update/resolve.
+    const course = db
+      .prepare<[string, string, number], { n: number }>(
+        `SELECT COUNT(*) AS n FROM messages
+          WHERE team_id = ? AND from_member = ? AND ts > ?
+            AND act IN ('accept','handoff','status_update','resolve')`,
+      )
+      .get(teamId, w.recipient_id, w.ts);
+    if ((course?.n ?? 0) > 0) stale_caught += 1;
+  }
+
+  return {
+    window_days: STEERING_WINDOW_DAYS,
+    steers: steers.length,
+    acked: latencies.length,
+    latency_median_ms: percentile(latencies, 0.5),
+    latency_p95_ms: percentile(latencies, 0.95),
+    superseded_acts,
+    stale_wakes: wakes.length,
+    stale_caught,
+  };
+}
+
 /** The whole report projection (ADR 050) — altitude-agnostic; the surfaces frame it per altitude. */
 export function deriveReport(
   db: Database,
@@ -183,5 +332,6 @@ export function deriveReport(
     coordination: coordinationDensity(db, teamId, now),
     open_directed: openDirectedLedger(db, teamId, now),
     mast: deriveMast(db, teamId, now),
+    steering: deriveSteeringMetrics(db, teamId, now),
   };
 }

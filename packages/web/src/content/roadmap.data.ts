@@ -752,8 +752,8 @@ const RAW: RawItem[] = [
     blurb:
       'The number the launch demo is built around: measure how fast steering reaches a busy agent, and how much stale work the anti-staleness layer actually catches.',
     detail:
-      'Increment 4 — the last rung of the interrupt-line arc (design §8 item 4), the measurement layer that turns the whole arc from a claim into a before/after against the P3 37%-waste baseline. Three numbers derived purely from the message + lane log (no new capture, on the report engine): **steering latency** (a `steer` sent → the recipient\'s next act acknowledging it), **supersession-correctness** (acts taken against a *superseded* steer — should be zero, ADR 103), and **stale-work-caught** (the `stale_plan`/`stale_dependency` wakes that precede a lane owner changing course, ADR 111). Surfaced via `musterd report` + `team_report`, and doubling as the launch-demo A/B instrument (hook-on vs hook-off, ADR 056 benchmark scenario).',
-    refs: [adr(88, 'ADR 088'), adr(103, 'ADR 103'), adr(111, 'ADR 111'), adr(50, 'ADR 050'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
+      'Increment 4 — the last rung of the interrupt-line arc (design §8 item 4), the measurement layer that turns the whole arc from a claim into a before/after against the P3 37%-waste baseline. Three numbers derived purely from the message + lane log (no new capture, on the report engine): **steering latency** (a `steer` sent → the recipient\'s next act acknowledging it), **supersession-correctness** (acts taken against a *superseded* steer — should be zero, ADR 103), and **stale-work-caught** (the `stale_plan`/`stale_dependency` wakes that precede a lane owner changing course, ADR 111). Surfaced via `musterd report` + `team_report`, and doubling as the launch-demo A/B instrument (hook-on vs hook-off, ADR 056 benchmark scenario). Frozen as ADR 125.',
+    refs: [adr(125, 'ADR 125'), adr(88, 'ADR 088'), adr(103, 'ADR 103'), adr(111, 'ADR 111'), adr(50, 'ADR 050'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
     dependsOn: ['stale-plan-detection', 'insight-engine'],
   },
   {

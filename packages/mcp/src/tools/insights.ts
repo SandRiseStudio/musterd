@@ -71,6 +71,19 @@ function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
       lines.push(
         '  ⚠ coordination that only looks collaborative — mostly broadcast status_updates, little directed/threaded exchange',
       );
+    const s = r.steering;
+    const lat =
+      s.latency_median_ms === null
+        ? '—'
+        : `median ${ago(s.latency_median_ms)} · p95 ${ago(s.latency_p95_ms!)}`;
+    lines.push('\nsteering:');
+    lines.push(`  ${s.acked}/${s.steers} steers acked · latency ${lat} (${s.window_days}d)`);
+    lines.push(
+      s.superseded_acts === 0
+        ? '  0 superseded-steer replies'
+        : `  ⚠ ${s.superseded_acts} act(s) replied to a superseded steer`,
+    );
+    lines.push(`  stale-work ${s.stale_caught}/${s.stale_wakes} wakes caught`);
     lines.push('\nwaiting on:');
     lines.push(...waitingLines());
   }
@@ -128,8 +141,8 @@ export function registerInsights(server: McpServer, client: MusterdClient): void
       description:
         "The insight report (ADR 050) — leadership projections over the team's lanes + act log, one " +
         'derived truth at three altitudes: ic (the Goal board), team (flow metrics: throughput, cycle ' +
-        'time, WIP + the waiting-on view), exec (milestones + exceptions). Nothing stored; measures ' +
-        'outcomes and queues, never message volume.',
+        'time, WIP + steering latency / stale-work-caught + the waiting-on view), exec (milestones + ' +
+        'exceptions). Nothing stored; measures outcomes and queues, never message volume.',
       inputSchema: {
         altitude: z
           .enum(['ic', 'team', 'exec'])

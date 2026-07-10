@@ -184,6 +184,29 @@ export const MastBlockSchema = z.object({
 export type MastBlock = z.infer<typeof MastBlockSchema>;
 
 /**
+ * Interrupt-line arc metrics (ADR 125 / ADR 088 increment 4) — steering latency, supersession
+ * correctness, and stale-work-caught. Derived from the message + lane log; diagnostic, never a score.
+ */
+export const SteeringMetricsSchema = z.object({
+  window_days: z.number().int(),
+  /** Directed `steer` acts in the window. */
+  steers: z.number().int(),
+  /** Steers that got a subsequent act from the recipient. */
+  acked: z.number().int(),
+  /** Median steer→ack latency in ms; null when nothing acked. */
+  latency_median_ms: z.number().nullable(),
+  /** p95 steer→ack latency in ms; null when nothing acked. */
+  latency_p95_ms: z.number().nullable(),
+  /** Acts whose `in_reply_to` named a superseded steer — should be zero (ADR 103). */
+  superseded_acts: z.number().int(),
+  /** `stale_plan` / `stale_dependency` wake acts in the window. */
+  stale_wakes: z.number().int(),
+  /** Those wakes followed by an owner course-change (ADR 111). */
+  stale_caught: z.number().int(),
+});
+export type SteeringMetrics = z.infer<typeof SteeringMetricsSchema>;
+
+/**
  * `GET /teams/:slug/report` — the whole projection, altitude-agnostic. The surfaces (CLI/MCP/dashboard)
  * pick what to emphasise per altitude (ic = the board, team = the digest, exec = milestones+exceptions);
  * the engine computes everything once. `generated_ts` stamps when the projection was taken.
@@ -207,5 +230,7 @@ export const ReportSchema = z.object({
   open_directed: z.array(ActDeliverySchema),
   /** The MAST-aware failure detectors (ADR 091) — the thread-shaped views over the same log. */
   mast: MastBlockSchema,
+  /** Interrupt-line metrics (ADR 125) — steering latency + stale-work-caught. */
+  steering: SteeringMetricsSchema,
 });
 export type Report = z.infer<typeof ReportSchema>;
