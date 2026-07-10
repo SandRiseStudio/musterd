@@ -589,7 +589,7 @@ const DESK_UP = 38 + 8;
 const PROP_KINDS = ['coffee', 'water', 'plant', 'photo', 'lamp', 'fan'] as const;
 type PropKind = (typeof PROP_KINDS)[number];
 const PROP_SPEC: Record<PropKind, { salt: number; prob: number; along: number; across: number }> = {
-  coffee: { salt: 1, prob: 0.5, along: -4, across: -34 },
+  coffee: { salt: 1, prob: 0.4, along: -4, across: -34 },
   water: { salt: 2, prob: 0.42, along: 7, across: -36 },
   plant: { salt: 3, prob: 0.46, along: 20, across: -40 },
   photo: { salt: 4, prob: 0.42, along: 20, across: 38 },
@@ -619,10 +619,13 @@ function deskMouse(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: numb
   ellipse(ctx, { x: g.x, y: g.y - (up + 4) * fit.scale }, 5 * fit.scale, 3 * fit.scale, '#525863');
 }
 
-function deskCoffee(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number, mug: string): void {
+function deskCoffee(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number, mug: string, filled: boolean): void {
   box(ctx, fit, ix, iy, 11, 11, 12, mug, up); // mug body
   const g = project(ix, iy, fit);
-  ellipse(ctx, { x: g.x, y: g.y - (up + 12) * fit.scale }, 5.2 * fit.scale, 2.5 * fit.scale, '#3a2416'); // coffee
+  const rim = { x: g.x, y: g.y - (up + 12) * fit.scale };
+  // A full mug (a member's at the desk) shows a dark coffee surface and steams; an unattended mug is
+  // drawn empty — just its bare inner shadow, no coffee, no steam.
+  ellipse(ctx, rim, 5.2 * fit.scale, 2.5 * fit.scale, filled ? '#3a2416' : dim(mug, 0.68));
 }
 
 function deskWater(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number): void {
@@ -727,7 +730,7 @@ function drawWorkstation(
     at(sp.along, sp.across, (ix, iy) => {
       switch (kind) {
         case 'coffee':
-          return deskCoffee(ctx, fit, ix, iy, up, MUGS[Math.floor(deskRnd(id, 11) * MUGS.length)]!);
+          return deskCoffee(ctx, fit, ix, iy, up, MUGS[Math.floor(deskRnd(id, 11) * MUGS.length)]!, node != null);
         case 'water':
           return deskWater(ctx, fit, ix, iy, up);
         case 'plant':
@@ -906,16 +909,17 @@ export function monitorAnchors(
  * Screen anchors for the *animated* desk props (Tier-A CSS overlays, ADR 086): the spinning point of each
  * desktop fan's grille and the steam source above each desk coffee mug. Recomputed from the same
  * `PROP_SPEC` geometry the canvas draw uses, so a fan/steam element always lands on its drawn prop. Which
- * desks *carry* a prop is a stable per-desk hash, but a **fan only spins at an occupied desk** — an
- * unattended fan reads as wrong (nobody's there to run it), so `occupied` (the set of desk slot ids with a
- * seated member) gates the fan overlay; the physical fan is still drawn, just idle. Coffee steam stays on
- * every mug (a fresh cup outlives a member briefly stepping away).
+ * desks *carry* a prop is a stable per-desk hash, but both animate **only at an occupied desk** — an
+ * unattended running fan or a steaming fresh mug reads as wrong (nobody's there). `occupied` (the set of
+ * desk slot ids with a seated member) gates both; the physical fan and mug are still drawn at empty desks,
+ * just idle (the fan off, the mug empty — see `deskFan` / `deskCoffee`).
  */
 export function animatedDeskAnchors(fit: Fit, occupied: Set<number>): { fans: Pt[]; coffees: Pt[] } {
   const fans: Pt[] = [];
   const coffees: Pt[] = [];
   for (const slot of DESK_SLOTS) {
-    if (deskHasProp(slot.id, 'fan') && occupied.has(slot.id)) {
+    if (!occupied.has(slot.id)) continue; // empty desk: fan idle, mug empty — nothing animates
+    if (deskHasProp(slot.id, 'fan')) {
       const [ix, iy] = deskPoint(slot, PROP_SPEC.fan.along, PROP_SPEC.fan.across);
       const b = project(ix, iy, fit);
       fans.push({ x: b.x, y: b.y - (DESK_UP + 17) * fit.scale }); // matches deskFan's grille centre
