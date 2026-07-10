@@ -959,7 +959,8 @@ const RAW: RawItem[] = [
     id: 'authorization-provenance',
     wave: 'later',
     title: 'Authorization provenance (who approved it)',
-    plan: 'reserved',
+    shipped: { prs: [167, 170, 227] },
+    frozenBy: 127,
     category: 'platform',
     blurb: 'For audit: when a decision, escalation, or merge routes to a human for authorization, record which human authorized it — a first-class, attestable link from an approved action back to the approver.',
     detail:
