@@ -60,6 +60,9 @@ src/
       cursor.ts       // detect/configure via .cursor/mcp.json (ADR 006 adds the `cursor` surface)
       codex.ts        // detect/configure via project-local .codex/config.toml (ADR 031)
       codexToml.ts    // TOML read/merge helper for the codex adapter
+  archaeology/        // cookoff wasted-work reference collector — git-only, no daemon (ADR 122/123)
+    engine.ts         // pure predicate-set-v1 classifier: W3 dup → W1 abandoned → W2 clobbered → W4 churn
+    git.ts            // RepoFacts extractor over git plumbing; actor identity = ADR 109 attribution
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report
     wire.ts           // musterd wire: headless MCP register from the committed .musterd/workspace.json (ADR 080)
@@ -84,6 +87,7 @@ src/
     done.ts           // close your work — mark the lane done (auto-targets your live lane), then show next (ADR 049/084)
     goal.ts           // declare/list team Goals — the declared-outcome layer above lanes (ADR 048/084)
     report.ts         // the insight report at ic/team/exec altitudes: flow metrics, waiting-on, Goal board (ADR 050/084)
+    archaeology.ts    // musterd archaeology --start <sha>: wasted-work % from git alone (ADR 123 predicate set v1)
     unbind.ts         // release this folder's own seat — clears bound_at + presence, keeps it declared (ADR 058)
     reload.ts         // SIGHUP the service daemon to re-resolve roster roots + reconcile (ADR 058)
     reclaim.ts        // operator force-drop of a member's stuck live session (ADR 017 follow-up)

@@ -336,6 +336,19 @@ export const CATALOG: readonly CommandEntry[] = [
       '  report coordination      coordination health — density, time-to-unblock, ignored help, stalls',
   },
   {
+    name: 'archaeology',
+    signature: '--start <sha> [--delivered <ref>] [--repo <path>] [--exclude <glob>,…] [--json]',
+    summary: 'wasted-work % from git alone — the cookoff reference collector',
+    group: 'insight',
+    primary: false,
+    detail:
+      'Classifies every authored line after the kickoff commit per wasted-work predicate set v1 ' +
+      '(ADR 123): W3 duplicated → W1 abandoned → W2 clobbered → W4 conflict churn. Needs only git — ' +
+      'no daemon; actor identity comes from git attribution (ADR 109 seat identities / Co-authored-by ' +
+      'trailers). Runs on any repo.',
+    examples: ['musterd archaeology --start a1b2c3d --delivered main --json'],
+  },
+  {
     name: 'status',
     signature: '',
     summary: 'the roster — who’s on the team, present, and working',
