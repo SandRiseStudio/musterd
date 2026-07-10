@@ -6,22 +6,25 @@ import { sym } from '../render/ui.js';
 import { kindLookup, resolve } from './helpers.js';
 
 /**
- * `musterd audit [--limit <n>] [--before <ms-epoch>] [--json]` — read the governance audit log
- * (ADR 071) via the admin-only `GET /teams/:slug/audit`. Pretty-prints entries newest-first;
- * `--limit` (1..500) and `--before` page older entries; `--json` passes the raw array through.
- * `action` is an open string (ADR 074) — unknown verbs render plainly instead of erroring, so P3's
- * new actions don't require a CLI release. Admin-only, so it needs an **explicit** acting identity
- * (ADR 036): an ambient global-config read can't list who-did-what across the team.
+ * `musterd audit [--limit <n>] [--before <ms-epoch>] [--authorized-by <seat>] [--json]` — read the
+ * governance audit log (ADR 071) via the admin-only `GET /teams/:slug/audit`. Pretty-prints entries
+ * newest-first; `--limit` (1..500) and `--before` page older entries; `--authorized-by` keeps rows
+ * whose detail.authorized_by matches (ADR 127); `--json` passes the raw array through. `action` is an
+ * open string (ADR 074) — unknown verbs render plainly instead of erroring, so P3's new actions don't
+ * require a CLI release. Admin-only, so it needs an **explicit** acting identity (ADR 036): an ambient
+ * global-config read can't list who-did-what across the team.
  */
 export async function auditCommand(parsed: Parsed): Promise<number> {
   const { team, http } = resolve(parsed.flags);
 
   const limit = parseLimit(flagStr(parsed.flags, 'limit'));
   const before = parseBefore(flagStr(parsed.flags, 'before'));
+  const authorizedBy = flagStr(parsed.flags, 'authorized-by');
 
   const res = await http.audit(team, {
     ...(limit !== undefined ? { limit } : {}),
     ...(before !== undefined ? { before } : {}),
+    ...(authorizedBy !== undefined ? { authorized_by: authorizedBy } : {}),
   });
 
   if (parsed.flags['json']) {

@@ -704,9 +704,11 @@ export async function handleHttp(
         const { team } = authAdmin(ctx, slug, req);
         const limit = Number(url.searchParams.get('limit') ?? '');
         const before = Number(url.searchParams.get('before') ?? '');
+        const authorizedBy = url.searchParams.get('authorized_by');
         const rows = listAudit(ctx.db, team.id, {
           ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
           ...(Number.isFinite(before) && before > 0 ? { before } : {}),
+          ...(authorizedBy ? { authorized_by: authorizedBy } : {}),
         });
         return sendJson(res, 200, {
           audit: rows.map((r) => ({
@@ -854,7 +856,27 @@ export async function handleHttp(
             action: 'request.decide',
             target: targetMember.name,
             result: 'allow',
-            detail: { decision: 'approve', request_id: requestId, delivered },
+            detail: {
+              decision: 'approve',
+              request_id: requestId,
+              delivered,
+              authorized_by: admin.name,
+            },
+          });
+          // ADR 127: the minted grant also gets a grant.issue row so the grant→authorizer join exists.
+          appendAudit(ctx.db, team.id, {
+            actor: admin.name,
+            action: 'grant.issue',
+            target: targetMember.name,
+            result: 'allow',
+            detail: {
+              scope: mint.grant.scope,
+              lifetime: mint.grant.lifetime,
+              grant_id: mint.grant.id,
+              via: 'request.decide',
+              request_id: requestId,
+              authorized_by: admin.name,
+            },
           });
           // Also consume the grant if once (it was issued for the seat; the approve itself IS the use).
           if (body.lifetime === 'once') consumeGrant(ctx.db, mint.grant.id);
@@ -880,7 +902,12 @@ export async function handleHttp(
             action: 'request.decide',
             target: existing.target,
             result: 'deny',
-            detail: { decision: 'deny', request_id: requestId, delivered },
+            detail: {
+              decision: 'deny',
+              request_id: requestId,
+              delivered,
+              authorized_by: admin.name,
+            },
           });
           return sendJson(res, 200, { request_id: requestId, decision: 'deny', delivered });
         }
@@ -903,7 +930,12 @@ export async function handleHttp(
           action: 'grant.issue',
           target: body.target,
           result: 'allow',
-          detail: { scope: body.scope, lifetime: body.lifetime },
+          detail: {
+            scope: body.scope,
+            lifetime: body.lifetime,
+            grant_id: mint.grant.id,
+            authorized_by: member.name,
+          },
         });
         return sendJson(res, 201, mint);
       }
@@ -1400,6 +1432,8 @@ export async function handleHttp(
           // ADR 109: a branch-carrying lane landed — record the seat→SHA→authorizer join. The detail
           // is *attested* (ADR 101 hygiene: only the three known keys are copied off the client body,
           // and only when the client sent them); the actor is server-derived from the authed seat.
+          // `authorized_by` here is client-attested (unlike decide/grant — ADR 127 — where the daemon
+          // knows the admin).
           if (lane.branch && lane.state === 'done') {
             const m = body.merged;
             appendAudit(ctx.db, team.id, {

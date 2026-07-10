@@ -155,6 +155,25 @@ describe('audit command', () => {
     await expect(client.audit('dawn')).rejects.toMatchObject({ exitCode: 5 });
   });
 
+  it('filters by --authorized-by (ADR 127)', async () => {
+    // Issue a grant as nick — writes grant.issue with authorized_by=nick.
+    await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).issueGrant('dawn', {
+      scope: 'seat',
+      target: 'Ada',
+      lifetime: 'once',
+    });
+    const hit = await capture(() => auditCommand(parseArgs(['--authorized-by', 'nick', '--json'])));
+    expect(hit.code).toBe(0);
+    const rows = JSON.parse(hit.out) as { action: string; detail: { authorized_by?: string } }[];
+    expect(rows.some((r) => r.action === 'grant.issue' && r.detail?.authorized_by === 'nick')).toBe(
+      true,
+    );
+    const miss = await capture(() =>
+      auditCommand(parseArgs(['--authorized-by', 'nobody', '--json'])),
+    );
+    expect(JSON.parse(miss.out)).toEqual([]);
+  });
+
   it('treats an unknown action as an open string (parses, does not reject)', async () => {
     // A P3-style verb must survive the schema boundary so the CLI renders it plainly instead of
     // erroring — the open-string action contract (ADR 074). Confirms forward-compat with P3 verbs.

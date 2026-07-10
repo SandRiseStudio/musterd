@@ -40,7 +40,7 @@ src/
     delivery.ts       // the per-recipient delivery ledger, derived from log + cursors + audit: actDelivery + openDirectedLedger (ADR 090)
     mast.ts           // the MAST failure detectors: timeToUnblock + stalledThreads + circularHandoffs → deriveMast (ADR 091)
     memory.ts         // seat memory: saveMemory/getMemory/memoryEnvelope/clearMemory — daemon-private continuity blob, LWW, caps (ADR 093)
-    audit.ts          // append-only governance audit log: appendAudit/listAudit (ADR 071, P2)
+    audit.ts          // append-only governance audit log: appendAudit/listAudit (+ authorized_by filter, ADR 071/127)
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)
     roles.ts          // roles table: role defaults (capabilities + charter), projected from roles/*.toml (ADR 070)
