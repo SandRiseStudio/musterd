@@ -1213,6 +1213,75 @@
   text-wrap: pretty;
 }
 
+/* ─── rich body text: emphasis / code / refs / collapsed ids ──────────────────
+   Inline spans a prose body may carry, styled so a status line reads like written
+   text, not a raw dump. Muted by default; the marked-up bits carry the weight. */
+.lc-rt-b {
+  font-weight: 650;
+  color: var(--lc-text);
+}
+.lc-rt-code,
+.lc-rt-id {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.88em;
+  padding: 0.05em 0.34em;
+  border-radius: 4px;
+  border: 1px solid var(--lc-border);
+  background: color-mix(in srgb, var(--lc-text) 5%, transparent);
+  color: var(--lc-dim);
+  white-space: nowrap;
+}
+/* a collapsed long id (ULID) reads as a quiet reference, not content */
+.lc-rt-id {
+  color: var(--lc-muted);
+  cursor: default;
+}
+/* a PR/issue ref (#210) — a live-feeling accent token, no box */
+.lc-rt-ref {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  font-weight: 600;
+  color: var(--lc-lane);
+}
+
+/* ─── work item: the subject of a lane/goal event ────────────────────────────
+   The badge already carries the verb (lane claim · lane done · goal); this line
+   carries only the title + any state/branch/project pills — no verb echo, no id. */
+.lc-work {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: var(--lc-3) 0 0;
+  padding-left: 28px;
+  max-width: 72ch;
+}
+.lc-work__title {
+  font-size: 13.5px;
+  line-height: 1.4;
+  font-weight: 560;
+  color: var(--lc-text);
+  letter-spacing: -0.01em;
+  text-wrap: pretty;
+}
+.lc-work__pill {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--lc-border-2);
+  background: var(--lc-surface-2);
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  letter-spacing: -0.01em;
+  color: var(--lc-muted);
+  white-space: nowrap;
+}
+.lc-work__pill--mono {
+  color: var(--lc-dim);
+}
+
 .lc-chip {
   display: inline-flex;
   align-items: center;

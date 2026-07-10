@@ -6,13 +6,19 @@ import {
   clock,
   dayKey,
   dayLabel,
+  goalEvent,
   initial,
   kindOf,
   laneEvent,
+  laneEventDetail,
+  type LaneEventDetail,
   memberColor,
   recipientName,
   recipientScope,
+  richLength,
+  richTokens,
   rosterIndex,
+  type RichToken,
 } from './format';
 import { CollapseButton, PanelRail } from './PanelChrome';
 
@@ -152,7 +158,11 @@ function Row({
   // A lane open/resolve/handoff rides as `act: 'message'` + structured meta (ADR 083 §4) — recover the
   // sub-type so the badge/glyph read as "lane open" etc. instead of a generic "message".
   const lane = laneEvent(env);
-  const effAct = lane ?? env.act;
+  // A lane transition or Goal declaration rides as `message` + structured meta — recover the intended
+  // sub-type + its human parts so the row renders a rich work item instead of the composed body dump.
+  const goal = lane ? null : goalEvent(env);
+  const structured = lane ? laneEventDetail(env) : goal;
+  const effAct = lane ?? (goal ? 'goal' : env.act);
   const tone = actTone(effAct);
   const kind = kindOf(env.from, idx);
   const scope = recipientScope(env.to);
@@ -194,15 +204,21 @@ function Row({
             style={{ background: memberColor(parent.from, kindOf(parent.from, idx)) }}
           />
           <span className="lc-quote__who">{parent.from}</span>
-          <span className="lc-quote__text">{parent.body || `(${parent.act})`}</span>
+          <span className="lc-quote__text">{summaryLine(parent)}</span>
         </button>
       )}
-      {env.body &&
+      {structured ? (
+        <WorkItem detail={structured} />
+      ) : (
+        env.body &&
         (doType ? (
-          <Typewriter text={env.body} className="lc-row__body" />
+          <RichTypewriter tokens={richTokens(env.body)} className="lc-row__body" />
         ) : (
-          <p className="lc-row__body">{env.body}</p>
-        ))}
+          <p className="lc-row__body">
+            <RichText tokens={richTokens(env.body)} />
+          </p>
+        ))
+      )}
     </div>
   );
   if (!threaded) return body;
@@ -307,6 +323,8 @@ const ACT_GLYPH: Record<string, ReactElement> = {
   lane_state: <path d="M2 2.6h5.2v6.8H2zM9 2.4v7M9 2.6h2.4l-.9 1.3.9 1.3H9" />,
   lane_resolve: <path d="M2 2.6h5.2v6.8H2zm1.1 4 1.6 1.6L7.3 5" />,
   lane_handoff: <path d="M2 6h5M5.5 3.5 8 6l-2.5 2.5M8.6 2.5h1.4v7H8.6" />,
+  // A declared Goal (ADR 084) — a flag planted on the plan: the umbrella its lanes advance toward.
+  goal: <path d="M3 10.5V2M3 2.4h6l-1.3 2 1.3 2H3" />,
   // Steering trio (ADR 103): steer = a redirecting arrow (change of course); challenge = a raised
   // pennant (an objection to justify); defer = a skip-forward chevron (push later on the plan).
   steer: <path d="M2.7 9.6V6.2C2.7 4.7 3.9 4 5.2 4h3.8M6.9 2.1 9.2 4.2 6.9 6.3" />,
@@ -315,21 +333,93 @@ const ACT_GLYPH: Record<string, ReactElement> = {
 };
 
 /**
- * Reveal `text` one character at a time — a gentle, gradual typewriter. The per-character interval is
- * length-adaptive (clamped 22–60ms) so short lines aren't instant and long ones don't crawl, but it's
- * always 1 char per step so the reveal stays smooth. Honors prefers-reduced-motion (shows full text).
+ * A lane transition / Goal declaration rendered as a **work item** — the title standing on its own
+ * (quoted, in the row's tone) with small pills for whichever of state / branch / project applies. The
+ * badge overhead already says what happened (`lane claim`, `lane done`, `goal`); this carries only the
+ * *subject*, so nothing the badge said is repeated and the raw lane id never appears.
  */
-function Typewriter({ text, className }: { text: string; className?: string }) {
+function WorkItem({ detail }: { detail: LaneEventDetail }) {
+  const pills: Array<{ key: string; text: string; mono?: boolean }> = [];
+  if (detail.state) pills.push({ key: 'state', text: detail.state });
+  if (detail.project) pills.push({ key: 'project', text: detail.project });
+  if (detail.branch) pills.push({ key: 'branch', text: detail.branch, mono: true });
+  return (
+    <div className="lc-work">
+      {detail.title && <span className="lc-work__title">{detail.title}</span>}
+      {pills.map((p) => (
+        <span key={p.key} className={`lc-work__pill${p.mono ? ' lc-work__pill--mono' : ''}`}>
+          {p.text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** A clean one-line summary for a reply quote — the structured title if any, else the body with its
+ * composed `[lane]`/`[goal]` tag stripped. Never the raw dump. */
+function summaryLine(env: Envelope): string {
+  const detail = laneEventDetail(env) ?? goalEvent(env);
+  if (detail?.title) return detail.title;
+  return env.body.replace(/^\[(?:lane|goal)\]\s+/, '') || `(${env.act})`;
+}
+
+/** Render a tokenized body richly. With `reveal` set (the typewriter), only that many visible
+ * characters are shown, trailing a caret — tokens past the cut are dropped, the one straddling it is
+ * sliced. Without it, the whole stream renders. */
+function RichText({ tokens, reveal }: { tokens: RichToken[]; reveal?: number }) {
+  const limited = reveal != null;
+  let left = reveal ?? Infinity;
+  const out: ReactElement[] = [];
+  for (let i = 0; i < tokens.length && left > 0; i++) {
+    const t = tokens[i]!;
+    const text = limited && t.text.length > left ? t.text.slice(0, left) : t.text;
+    left -= t.text.length;
+    out.push(<RichSpan key={i} token={t} text={text} />);
+  }
+  const typing = limited && (reveal ?? 0) < richLength(tokens);
+  return (
+    <>
+      {out}
+      {typing && <span className="lc-caret" aria-hidden="true" />}
+    </>
+  );
+}
+
+function RichSpan({ token, text }: { token: RichToken; text: string }) {
+  switch (token.kind) {
+    case 'strong':
+      return <strong className="lc-rt-b">{text}</strong>;
+    case 'code':
+      return <code className="lc-rt-code">{text}</code>;
+    case 'ref':
+      return <span className="lc-rt-ref">{text}</span>;
+    case 'id':
+      return (
+        <code className="lc-rt-id" title={token.title}>
+          {text}
+        </code>
+      );
+    default:
+      return <>{text}</>;
+  }
+}
+
+/**
+ * Reveal a rich body one character at a time — the same gentle, length-adaptive typewriter as before
+ * (clamped 22–60ms/char), now driving a token stream so `**emphasis**`, code, refs and ids keep their
+ * formatting as they type in. Honors prefers-reduced-motion (shows the full body at once).
+ */
+function RichTypewriter({ tokens, className }: { tokens: RichToken[]; className?: string }) {
+  const total = richLength(tokens);
   const [n, setN] = useState(0);
   useEffect(() => {
     if (
       typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     ) {
-      setN(text.length);
+      setN(total);
       return;
     }
-    const total = text.length;
     // aim for ~total*45ms reading time, clamped to a comfortable per-char pace
     const tickMs = Math.min(60, Math.max(22, Math.round(2000 / Math.max(total, 1))));
     let i = 0;
@@ -340,13 +430,11 @@ function Typewriter({ text, className }: { text: string; className?: string }) {
       if (i >= total) clearInterval(h);
     }, tickMs);
     return () => clearInterval(h);
-  }, [text]);
+  }, [total]);
 
-  const typing = n < text.length;
   return (
     <p className={className}>
-      {text.slice(0, n)}
-      {typing && <span className="lc-caret" aria-hidden="true" />}
+      <RichText tokens={tokens} reveal={n} />
     </p>
   );
 }
