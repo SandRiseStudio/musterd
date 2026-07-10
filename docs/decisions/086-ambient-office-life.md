@@ -1,6 +1,6 @@
 # 086 — Ambient office life: a two-tier render architecture for a live-at-rest office
 
-- Status: proposed — 2026-07-02
+- Status: accepted — ambient office life shipped (#86/#88/#90); render substrate later revised by ADR 094
 - Date: 2026-07-02
 
 ## Context

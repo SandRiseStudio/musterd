@@ -1,6 +1,6 @@
 # 084 — Lanes join the Plan: reconciling the work-item nouns
 
-- Status: proposed
+- Status: accepted — lanes↔Goal join shipped (orientation-spine arc, #81)
 - Date: 2026-07-02
 
 ## Context

@@ -891,9 +891,9 @@ const RAW: RawItem[] = [
     title: 'Driver co-presence gap — make steering light up the human',
     plan: 'reserved',
     category: 'human-loop',
-    blurb: 'Driver co-presence shipped (ADR 021) but is dormant: it only annotates the agent row ("· driven by nick") and only when MUSTERD_DRIVER is set — which provisioning never writes — so a human steering an agent still reads offline.',
+    blurb: 'Driver co-presence shipped (ADR 021) but is dormant: it only annotates the agent row ("· driven by nick") and only when MUSTERD_DRIVER is set, which `musterd agent` (unlike `init`) never writes — so a human steering an agent-provisioned seat still reads offline.',
     detail:
-      'Diagnosed 2026-07-04 from the live roster (nick shows offline while actively steering) + the code: (1) `init`/`agent` never write MUSTERD_DRIVER, so the "driven by" annotation never fires; (2) even when set, ADR 021 annotates the *agent* row, it does not give the human seat its own presence — so it does not match the expectation "I steer, therefore I am online". Fix has two parts: provision the driver link (opt-in, per workspace) so the annotation works, and decide whether steering should also mark the human seat present (closer to the driver-co-presence intent + the humans-as-peers thesis). Small, but it touches the presence model (ADR 010/042/057), so it is scoped as its own item at the tail of the depth wave.',
+      'Diagnosed 2026-07-04 from the live roster (nick shows offline while actively steering) + the code: (1) `musterd agent` never writes MUSTERD_DRIVER (unlike `init`, which sets it from the saved operator identity — init.ts:404), so the "driven by" annotation never fires for agent-provisioned seats; (2) even when set, ADR 021 annotates the *agent* row, it does not give the human seat its own presence — so it does not match the expectation "I steer, therefore I am online". Fix has two parts: provision the driver link (opt-in, per workspace) so the annotation works, and decide whether steering should also mark the human seat present (closer to the driver-co-presence intent + the humans-as-peers thesis). Small, but it touches the presence model (ADR 010/042/057), so it is scoped as its own item at the tail of the depth wave.',
     refs: [adr(21, 'ADR 021'), adr(57, 'ADR 057'), adr(42, 'ADR 042')],
     dependsOn: ['agent-presence-touch'],
   },
@@ -963,8 +963,8 @@ const RAW: RawItem[] = [
     category: 'platform',
     blurb: 'For audit: when a decision, escalation, or merge routes to a human for authorization, record which human authorized it — a first-class, attestable link from an approved action back to the approver.',
     detail:
-      'A placeholder for a thread parked for its own design pass (raised 2026-07-03): as agents take consequential actions gated on human sign-off, the audit trail must name the authorizing human, not just that "a human approved." Seeds already in place — the P2 append-only audit log (ADR 071), the request-lane recorded decider (ADR 077), and human credentials (P3) to bind an attestation to. Not yet designed; captured so it is not lost. Relates to the shared/remote-team hardening cluster.',
-    refs: [adr(71, 'ADR 071'), adr(77, 'ADR 077'), doc('docs/design/security.md', 'security.md')],
+      'The merge/grant half is now BUILT: ADR 109 (PRs #167/#170) records `authorized_by` on the audit trail — the attestable join from a seat\'s landed SHA back to the authorizing human (grant issuer / request decider), surfaced via `lane resolve --authorized-by` and the `lane_resolve` tool. Seeds it built on — the P2 append-only audit log (ADR 071), the request-lane recorded decider (ADR 077), and human credentials (P3). Remaining scope (reserved): extend the same attestable link beyond merges to the broader decision/escalation gates. Relates to the shared/remote-team hardening cluster.',
+    refs: [adr(109, 'ADR 109'), adr(71, 'ADR 071'), adr(77, 'ADR 077'), doc('docs/design/security.md', 'security.md')],
     dependsOn: ['v03-p2-enforcement'],
   },
   {

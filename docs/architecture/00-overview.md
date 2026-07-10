@@ -59,4 +59,4 @@ Hard rule: **never change `@musterd/protocol` schemas without an ADR.** The prot
 
 ## Out of scope for v1 (on `ROADMAP.md`, schema-reserved where noted)
 
-Sandbox runtime, schedule **enforcement** (availability is stored, not enforced), team-to-team federation, iOS/web/Slack surfaces, the web dashboard build, Python SDK. Schema fields that anticipate these (e.g. `availability`, `lifecycle`) exist from day one so nothing is designed into a corner.
+Sandbox runtime, schedule **enforcement** (availability is stored, not enforced), team-to-team federation, iOS/Slack surfaces, broader web analytics/approvals views (the `/live` console + `/board` already ship), Python SDK. Schema fields that anticipate these (e.g. `availability`, `lifecycle`) exist from day one so nothing is designed into a corner.

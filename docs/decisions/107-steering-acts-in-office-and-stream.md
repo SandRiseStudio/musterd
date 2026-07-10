@@ -1,6 +1,6 @@
 # 107 — Steering acts in the office & stream: rendering steer / challenge / defer
 
-- Status: proposed
+- Status: accepted — steering-act render shipped on `/live` (#158/#161)
 - Date: 2026-07-07
 - Builds on: ADR 103 (the `steer` / `challenge` / `defer` acts on the interrupt line), ADR 102 (lane
   events in the stream — the precedent this applies to a second act family), ADR 105 (clobber-guard

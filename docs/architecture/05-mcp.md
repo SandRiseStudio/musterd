@@ -2,7 +2,7 @@
 
 > **Living document.** This is the initial direction, not gospel. It will evolve. If you (the executing agent) find an error, contradiction, or better approach during implementation: (1) do not silently deviate — record the issue and your proposed change in `docs/decisions/NNN-<slug>.md` (a short ADR: context, problem, decision, consequences), (2) make the smallest correct change, (3) update the affected doc in the same commit. Docs and code must never disagree at the end of a commit.
 
-The **universal harness adapter**. One MCP (stdio) server exposing **six tools**. Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
+The **universal harness adapter**. One MCP (stdio) server exposing **eighteen tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the lane, goal, seat-memory, and report tools added by later ADRs (083/084/091/093). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
 
 ## Stack
 
@@ -87,9 +87,11 @@ Phantom Presence now drops within the 45s reclaim grace instead of lingering. Th
 
 `buildMcpServer` sets the server's **`instructions`** (returned on `initialize`) to the agent primer — `renderPrimer` from `@musterd/protocol`, the **same source** the CLI writes into `AGENTS.md`. This is the _file-free_ onboarding surface: any MCP-speaking harness injects `instructions` as standing context, so the agent learns it's on a team and how to coordinate **without touching `CLAUDE.md` or any per-harness file** (the boundary ADR 012 set; `AGENTS.md` remains the surface for the CLI / no-MCP path). `primerInstructions(config)` is the pure wiring: a **provisioned** session (`config.member` set) gets a named-seat primer; an **unclaimed** session gets the "claim a seat first" variant. The primer is channel-aware — it documents both the `team_*` tools and the `musterd` CLI.
 
-## The 6 tools (JSON schemas — verbatim contract)
+## The core tools (JSON schemas — verbatim contract)
 
-Two lifecycle tools (`team_join` / `team_leave`) gate the four working tools. Inspection (`team_status` / `team_members`) works while dormant/pending; sending and inbox draining require a live join.
+This section contracts the **six core team tools** verbatim; the lane, goal, seat-memory, and report
+tools (18 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093). Two lifecycle
+tools (`team_join` / `team_leave`) gate the working tools. Inspection (`team_status` / `team_members`) works while dormant/pending; sending and inbox draining require a live join.
 
 Tool names are stable; descriptions are written for the _agent_ reading them.
 
@@ -221,7 +223,7 @@ Drains the in-memory buffer + `GET /inbox?unread=1`, advances the cursor, return
 }
 ```
 
-Same data source as `team_status`, filtered/detailed. (`team_status` = quick roster; `team_members` = detail. Kept separate per the plan's 4-tool list.)
+Same data source as `team_status`, filtered/detailed. (`team_status` = quick roster; `team_members` = detail. Kept separate per the original core-tool list.)
 
 ### `team_memory_save` / `team_memory_read` (ADR 093)
 
@@ -237,7 +239,7 @@ Delivery is **envelope-on-occupy / body-on-demand**: the `occupied` frame carrie
 
 ```
 src/
-  index.ts        // stdio MCP server; registers the 6 tools; reads env config;
+  index.ts        // stdio MCP server; registers all tools (see `toolNames.ts`); reads env config;
                   //   installShutdownHandlers (drop presence + exit on host teardown);
                   //   autojoin(): claim+join on launch when a default claim exists (ADR 032);
                   //   when unclaimed: writes a pending marker (ADR 033) + startResolutionWatcher (ADR 034)
