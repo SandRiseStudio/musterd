@@ -697,7 +697,7 @@ const RAW: RawItem[] = [
   // busy on its own work. ADR 088 + the agent-ontology + interrupt-line design docs freeze the arc.
   // Increments 1–3 SHIPPED: the interrupt line (ADR 088, 2026-07-05), steer/challenge/defer acts
   // (ADR 103, 2026-07-06), and plan epochs + stale-plan detection (ADR 111, 2026-07-08). The last
-  // rung is increment 4 — the steering-latency & stale-work-caught metrics — next in build order.
+  // Interrupt-line arc (design §8): increments 1–4 all shipped (088 → 103 → 111 → 125).
   {
     id: 'interrupt-line',
     title: 'The interrupt line — reach a busy agent mid-loop',
@@ -747,12 +747,13 @@ const RAW: RawItem[] = [
     id: 'steering-latency-metric',
     wave: 4,
     title: 'Steering-latency & stale-work-caught metrics',
-    plan: 'reserved',
+    shipped: { prs: [216, 218] },
+    frozenBy: 125,
     category: 'insights',
     blurb:
       'The number the launch demo is built around: measure how fast steering reaches a busy agent, and how much stale work the anti-staleness layer actually catches.',
     detail:
-      'Increment 4 — the last rung of the interrupt-line arc (design §8 item 4), the measurement layer that turns the whole arc from a claim into a before/after against the P3 37%-waste baseline. Three numbers derived purely from the message + lane log (no new capture, on the report engine): **steering latency** (a `steer` sent → the recipient\'s next act acknowledging it), **supersession-correctness** (acts taken against a *superseded* steer — should be zero, ADR 103), and **stale-work-caught** (the `stale_plan`/`stale_dependency` wakes that precede a lane owner changing course, ADR 111). Surfaced via `musterd report` + `team_report`, and doubling as the launch-demo A/B instrument (hook-on vs hook-off, ADR 056 benchmark scenario). Frozen as ADR 125.',
+      'Increment 4 — the last rung of the interrupt-line arc (design §8 item 4) — SHIPPED 2026-07-10 (ADR 125, PRs #216/#218): the measurement layer that turns the whole arc from a claim into a before/after against the P3 37%-waste baseline. Three numbers derived purely from the message + lane log (no new capture, on the report engine): **steering latency** (a `steer` sent → the recipient\'s next act acknowledging it), **supersession-correctness** (acts taken against a *superseded* steer — should be zero, ADR 103; same-ts tie-break via message id matching `pendingInterrupts`), and **stale-work-caught** (the `stale_plan`/`stale_dependency` wakes that precede a lane owner changing course, ADR 111). Surfaced via `musterd report` + `team_report`, and doubling as the launch-demo A/B instrument (hook-on vs hook-off, ADR 056 benchmark scenario).',
     refs: [adr(125, 'ADR 125'), adr(88, 'ADR 088'), adr(103, 'ADR 103'), adr(111, 'ADR 111'), adr(50, 'ADR 050'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
     dependsOn: ['stale-plan-detection', 'insight-engine'],
   },
