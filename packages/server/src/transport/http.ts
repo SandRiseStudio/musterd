@@ -53,7 +53,6 @@ import {
   openLane,
   updateLane,
 } from '../store/lanes.js';
-import { staleLaneWarnings } from '../store/staleness.js';
 import {
   addMember,
   authMember,
@@ -91,6 +90,7 @@ import {
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
+import { staleLaneWarnings } from '../store/staleness.js';
 import {
   createTeam,
   getAgentKeyHash,
@@ -1519,7 +1519,13 @@ export async function handleHttp(
         // send→seen histogram, the read-side twin of loop_latency. Watermark semantics: every act
         // covered by one advance shares this instant. Scope lives in crossedBySeen (store).
         for (const m of crossedBySeen(ctx.db, team.id, member.id, prev.last_read_ts, row.ts)) {
-          recordSeenLatency(member.name, m.act, m.urgent, Math.max(0, cursor.updated_at - m.ts));
+          recordSeenLatency(
+            slug,
+            member.name,
+            m.act,
+            m.urgent,
+            Math.max(0, cursor.updated_at - m.ts),
+          );
         }
         return sendJson(res, 200, { cursor });
       }

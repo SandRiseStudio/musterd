@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { setCursor } from './cursors.js';
 import { addMember } from './members.js';
-import { countOpenLoops, getMessageTs, insertMessage } from './messages.js';
+import { countOpenLoops, countOpenLoopsByTeam, getMessageTs, insertMessage } from './messages.js';
 import { activePresenceBySurface, slowestInboxLagMs } from './metrics.js';
 import { attach } from './presence.js';
 import { createTeam } from './teams.js';
@@ -106,6 +106,9 @@ describe('countOpenLoops / getMessageTs (ADR 082 slice 3)', () => {
     // Ada accepts the request → one loop closes; the handoff stays open.
     send('a1', 'Ada', ada.id, 'accept', { in_reply_to: 'r1' });
     expect(countOpenLoops(db)).toBe(1);
+
+    // #207: the same count, grouped by team slug for the per-team open_loops gauge.
+    expect(countOpenLoopsByTeam(db)).toEqual([{ team: 'dawn', count: 1 }]);
 
     expect(getMessageTs(db, team.id, 'r1')).toBe(500);
     expect(getMessageTs(db, team.id, 'nope')).toBeNull();

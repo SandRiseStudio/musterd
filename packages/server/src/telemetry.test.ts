@@ -134,8 +134,8 @@ describe('envelope instrumentation', () => {
         { surface: 'claude-code', count: 2 },
       ],
       inboxLagMs: () => 12_000,
-      openLoops: () => 3,
-      diversityFlags: () => 2,
+      openLoopsByTeam: () => [{ team: 'dawn', count: 3 }],
+      diversityFlagsByTeam: () => [{ team: 'dawn', count: 2 }],
     });
 
     const { resourceMetrics } = await reader.collect();
@@ -153,29 +153,35 @@ describe('envelope instrumentation', () => {
 
     const loops = all.find((m) => m.descriptor.name === 'musterd.coordination.open_loops')!;
     expect(loops.dataPoints[0]!.value).toBe(3);
+    expect(loops.dataPoints[0]!.attributes['musterd.team']).toBe('dawn'); // #207 per-team dim
 
     const diversity = all.find((m) => m.descriptor.name === 'musterd.insight.diversity_flags')!;
     expect(diversity.dataPoints[0]!.value).toBe(2);
+    expect(diversity.dataPoints[0]!.attributes['musterd.team']).toBe('dawn'); // #207 per-team dim
   });
 
-  it('records coordination loop latency by closing act (ADR 082 slice 3)', async () => {
-    recordLoopClosure('accept', 250);
-    recordLoopClosure('resolve', 1_000);
+  it('records coordination loop latency by closing act, team, and closer model family (#207)', async () => {
+    recordLoopClosure('accept', 250, { team: 'dawn', family: 'grok' });
+    recordLoopClosure('resolve', 1_000, { team: 'dawn' }); // no attested model → no family label
 
     const { resourceMetrics } = await reader.collect();
     const all = resourceMetrics.scopeMetrics.flatMap((s) => s.metrics);
     const hist = all.find((m) => m.descriptor.name === 'musterd.coordination.loop_latency')!;
     expect(hist).toBeTruthy();
     const byAct = Object.fromEntries(
-      hist.dataPoints.map((dp) => [dp.attributes['musterd.act'], dp.value]),
-    ) as Record<string, { count: number; sum: number }>;
-    expect(byAct['accept']!.count).toBe(1);
-    expect(byAct['accept']!.sum).toBe(250);
-    expect(byAct['resolve']!.sum).toBe(1_000);
+      hist.dataPoints.map((dp) => [dp.attributes['musterd.act'], dp]),
+    );
+    expect((byAct['accept']!.value as { count: number; sum: number }).sum).toBe(250);
+    expect(byAct['accept']!.attributes['musterd.team']).toBe('dawn');
+    expect(byAct['accept']!.attributes['musterd.model.family']).toBe('grok');
+    expect((byAct['resolve']!.value as { sum: number }).sum).toBe(1_000);
+    expect(byAct['resolve']!.attributes['musterd.team']).toBe('dawn');
+    // Unattested closer → no family label (never guessed).
+    expect(byAct['resolve']!.attributes['musterd.model.family']).toBeUndefined();
   });
 
   it('records seen latency by act/urgency, keyed on the normalized seat id (ADR 090)', async () => {
-    recordSeenLatency('Ada', 'handoff', true, 5_000);
+    recordSeenLatency('dawn', 'Ada', 'handoff', true, 5_000);
 
     const { resourceMetrics } = await reader.collect();
     const all = resourceMetrics.scopeMetrics.flatMap((s) => s.metrics);
@@ -183,6 +189,7 @@ describe('envelope instrumentation', () => {
     expect(hist).toBeTruthy();
     const dp = hist.dataPoints[0]!;
     expect((dp.value as { sum: number }).sum).toBe(5_000);
+    expect(dp.attributes['musterd.team']).toBe('dawn'); // #207 per-team dim
     expect(dp.attributes['musterd.act']).toBe('handoff');
     expect(dp.attributes['musterd.urgent']).toBe(true);
     expect(dp.attributes['musterd.member.id']).toBe('ada');
@@ -225,5 +232,8 @@ describe('envelope instrumentation', () => {
     expect(byDir['input']!.attributes['musterd.member.id']).toBe('ada');
     expect(byDir['input']!.attributes['musterd.member']).toBe('Ada');
     expect(byDir['input']!.attributes['musterd.model']).toBe('claude-opus-4-8');
+    // #207: team + derived family are the per-team / per-model cost axes of the leaderboard.
+    expect(byDir['input']!.attributes['musterd.team']).toBe('dawn');
+    expect(byDir['input']!.attributes['musterd.model.family']).toBe('claude');
   });
 });

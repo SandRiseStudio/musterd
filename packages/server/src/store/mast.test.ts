@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import {
   circularHandoffs,
+  countDiversityFlagsByTeam,
   deriveMast,
   diversityFlags,
   stalledThreads,
@@ -162,6 +163,8 @@ describe('diversityFlags (ADR 101)', () => {
       families: ['claude'],
       verdict: 'flagged',
     });
+    // #207: the per-team gauge form — one point per team with a live flag, keyed on team slug.
+    expect(countDiversityFlagsByTeam(db, NOW)).toEqual([{ team: team.slug, count: 1 }]);
     // nick unused in this test — keep the seed signature.
     void nick;
   });

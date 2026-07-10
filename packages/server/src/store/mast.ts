@@ -227,6 +227,21 @@ export function countDiversityFlags(db: Database, now: number = Date.now()): num
   return teams.reduce((n, t) => n + diversityFlags(db, t.id, now).length, 0);
 }
 
+/**
+ * Live diversity flags grouped by team slug (#207) — the per-team form of {@link countDiversityFlags}
+ * for the `diversity_flags` observable gauge, so the gauge is queryable per team. Only teams with ≥1
+ * live flag appear (a clean team is simply absent this cycle).
+ */
+export function countDiversityFlagsByTeam(
+  db: Database,
+  now: number = Date.now(),
+): { team: string; count: number }[] {
+  const teams = db.prepare<[], { id: string; slug: string }>('SELECT id, slug FROM teams').all();
+  return teams
+    .map((t) => ({ team: t.slug, count: diversityFlags(db, t.id, now).length }))
+    .filter((r) => r.count > 0);
+}
+
 /** The whole mast block for the report (ADR 091). */
 export function deriveMast(db: Database, teamId: string, now: number = Date.now()): MastBlock {
   return {

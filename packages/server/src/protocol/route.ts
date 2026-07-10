@@ -1,4 +1,4 @@
-import type { Envelope } from '@musterd/protocol';
+import { type Envelope, modelFamily } from '@musterd/protocol';
 import type { Ctx } from '../context.js';
 import { MusterdError } from '../errors.js';
 import { log } from '../log.js';
@@ -160,13 +160,21 @@ function routeEnvelopeInner(
   // Coordination loop latency (ADR 082 slice 3): accept/decline close the directed act they answer
   // (meta.in_reply_to); resolve closes its thread root. Emitted first-party instead of reconstructed
   // (finding 001). Best-effort — an unknown reference just records nothing.
+  // Dimension the loop by team + the closer's model family (#207): "how fast does model X close
+  // loops" is the per-model leaderboard's headline metric. `attestedModel` is this closer's occupancy
+  // model (resolved above); absent → no family label (never guessed).
+  const loopDims = {
+    team: env.team,
+    ...(attestedModel ? { family: modelFamily(attestedModel) } : {}),
+  };
   if (env.act === 'accept' || env.act === 'decline') {
     const ref = env.meta?.['in_reply_to'];
     const refTs = typeof ref === 'string' ? getMessageTs(ctx.db, team.id, ref) : null;
-    if (refTs !== null && env.ts >= refTs) recordLoopClosure(env.act, env.ts - refTs);
+    if (refTs !== null && env.ts >= refTs) recordLoopClosure(env.act, env.ts - refTs, loopDims);
   } else if (env.act === 'resolve' && env.thread) {
     const rootTs = getMessageTs(ctx.db, team.id, env.thread);
-    if (rootTs !== null && env.ts >= rootTs) recordLoopClosure('resolve', env.ts - rootTs);
+    if (rootTs !== null && env.ts >= rootTs)
+      recordLoopClosure('resolve', env.ts - rootTs, loopDims);
   }
   // Self-reported token usage (meta.usage — ADR 082 slice 4): opt-in, harness-agnostic.
   recordTokenUsage(outgoingEnv);

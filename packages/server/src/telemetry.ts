@@ -132,7 +132,13 @@ export function withEnvelopeSpan<T>(env: Envelope, fn: () => T): T {
         'musterd.to.kind': env.to.kind,
       };
       ix().envelopes.add(1, attrs);
-      ix().deliveryLatency.record(Date.now() - t0, { 'musterd.act': env.act });
+      // Dimension the persist+route histogram by team (#207) so per-team server-path latency is
+      // queryable, not just a global aggregate. Model is intentionally omitted — delivery latency is
+      // server work, independent of the sender's model (that dimension belongs on loop_latency).
+      ix().deliveryLatency.record(Date.now() - t0, {
+        'musterd.act': env.act,
+        'musterd.team': env.team,
+      });
       span.setStatus({ code: SpanStatusCode.OK });
       return result;
     } catch (err) {
@@ -167,9 +173,21 @@ export function recordError(errorClass: string): void {
  * Record a closed coordination loop (ADR 082 slice 3): `closingAct` is accept/decline (answering a
  * request_help/handoff via meta.in_reply_to) or resolve (closing its thread root). Emitted first-party
  * instead of being reconstructed from the message DB (finding 001's "directed-act latency").
+ *
+ * Dimensioned by team and by the **closer's** `model.family` (#207): "how fast does model X close
+ * loops" is the per-model coordination leaderboard's headline metric (findings 004/005). `family` is
+ * absent when the closer didn't attest a model (`unknown` stays out of the label space, not guessed).
  */
-export function recordLoopClosure(closingAct: string, latencyMs: number): void {
-  ix().loopLatency.record(latencyMs, { 'musterd.act': closingAct });
+export function recordLoopClosure(
+  closingAct: string,
+  latencyMs: number,
+  dims: { team: string; family?: string },
+): void {
+  ix().loopLatency.record(latencyMs, {
+    'musterd.act': closingAct,
+    'musterd.team': dims.team,
+    ...(dims.family ? { 'musterd.model.family': dims.family } : {}),
+  });
 }
 
 /**
@@ -178,12 +196,14 @@ export function recordLoopClosure(closingAct: string, latencyMs: number): void {
  * N observations with the same "seen" instant. Keys on the normalized seat id (issue #107).
  */
 export function recordSeenLatency(
+  team: string,
   seat: string,
   act: string,
   urgent: boolean,
   latencyMs: number,
 ): void {
   ix().seenLatency.record(latencyMs, {
+    'musterd.team': team,
     'musterd.act': act,
     'musterd.urgent': urgent,
     'musterd.member.id': normalizeSeatName(seat),
@@ -214,15 +234,21 @@ export function recordTokenUsage(env: Envelope): void {
   const usage = (env.meta as { usage?: unknown } | null | undefined)?.usage;
   if (typeof usage !== 'object' || usage === null) return;
   const u = usage as { input_tokens?: unknown; output_tokens?: unknown; model?: unknown };
-  const model = typeof u.model === 'string' ? { 'musterd.model': u.model } : {};
+  // Raw attested id + the derived family (#207): family is the per-model **cost** axis of the
+  // coordination leaderboard (findings 004/005), the raw id stays for exact accounting.
+  const model =
+    typeof u.model === 'string'
+      ? { 'musterd.model': u.model, 'musterd.model.family': modelFamily(u.model) }
+      : {};
   for (const [dir, val] of [
     ['input', u.input_tokens],
     ['output', u.output_tokens],
   ] as const) {
     if (typeof val === 'number' && Number.isFinite(val) && val > 0) {
       ix().agentTokens.add(val, {
-        // Key on the normalized seat id so per-agent token totals don't fragment across teams/resets
-        // (issue #107); keep the raw name as a secondary label.
+        // Team + normalized seat id so per-agent token totals don't fragment across teams/resets
+        // (issue #107) and are queryable per team (#207); keep the raw name as a secondary label.
+        'musterd.team': env.team,
         'musterd.member.id': normalizeSeatName(env.from),
         'musterd.member': env.from,
         'musterd.token.direction': dir,
@@ -253,12 +279,14 @@ export function recordPresenceChurn(event: 'attach' | 'detach', surface?: string
 export interface RuntimeSampler {
   presenceBySurface: () => { surface: string; count: number }[];
   inboxLagMs: () => number;
-  /** Directed acts (request_help/handoff) not yet answered by an accept/decline (ADR 082 slice 3). */
-  openLoops: () => number;
-  /** Live model-diversity flags on review/approval chains (ADR 101) — flagged + unverifiable. A
-   *  point-in-time count of *derived* state, so a gauge (sampled each cycle), never a counter that
-   *  would conflate flag scarcity with report-poll frequency. */
-  diversityFlags: () => number;
+  /** Directed acts (request_help/handoff) not yet answered by an accept/decline (ADR 082 slice 3),
+   *  **by team** (#207) — one observation per team with open loops, so the gauge is queryable per
+   *  team instead of a single daemon-wide number. */
+  openLoopsByTeam: () => { team: string; count: number }[];
+  /** Live model-diversity flags on review/approval chains (ADR 101) — flagged + unverifiable — **by
+   *  team** (#207). A point-in-time count of *derived* state, so a gauge (sampled each cycle), never a
+   *  counter that would conflate flag scarcity with report-poll frequency. */
+  diversityFlagsByTeam: () => { team: string; count: number }[];
 }
 
 /**
@@ -290,8 +318,14 @@ export function registerRuntimeGauges(sampler: RuntimeSampler): void {
         obs.observe(active, row.count, { 'musterd.surface': row.surface });
       }
       obs.observe(lag, sampler.inboxLagMs());
-      obs.observe(openLoops, sampler.openLoops());
-      obs.observe(diversityFlags, sampler.diversityFlags());
+      // One point per team (#207): a per-team leaderboard reads these gauges by `musterd.team`.
+      // Teams with a zero count simply have no point this cycle — the natural gauge semantics.
+      for (const row of sampler.openLoopsByTeam()) {
+        obs.observe(openLoops, row.count, { 'musterd.team': row.team });
+      }
+      for (const row of sampler.diversityFlagsByTeam()) {
+        obs.observe(diversityFlags, row.count, { 'musterd.team': row.team });
+      }
     },
     [active, lag, openLoops, diversityFlags],
   );
