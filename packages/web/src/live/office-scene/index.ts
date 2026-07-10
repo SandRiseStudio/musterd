@@ -90,6 +90,7 @@ export function mountOffice(
   const actors: Actors = createActors();
   let rig: RiveRig | null = null; // the Rive character rig, once its WASM + .riv load (else code-drawn)
   let placements = new Map<string, Placement>();
+  let teamName = 'revive';
   let heads = new Map<string, Pt>(); // home head anchors — where in-place cues sit
 
   const labels = new Map<string, HTMLDivElement>();
@@ -154,7 +155,7 @@ export function mountOffice(
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
     const poses = actors.poses();
-    const anchors = renderScene(bctx, fit, placements, nodes, poses);
+    const anchors = renderScene(bctx, fit, placements, nodes, poses, undefined, teamName);
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
@@ -389,7 +390,7 @@ export function mountOffice(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), rig ?? undefined);
+    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), rig ?? undefined, teamName);
     drawCues();
     positionLabels(anchors.heads);
   }
@@ -521,6 +522,7 @@ export function mountOffice(
   }
 
   function update(next: OfficeData) {
+    teamName = next.teamName ?? 'revive';
     placements = assignSeats(next.nodes);
     const byName = new Map(next.nodes.map((n) => [n.name, n]));
     // Animate presence changes (walk in/out, drift) unless reduced-motion asked for stillness.
@@ -542,6 +544,23 @@ export function mountOffice(
     const at = heads.get(name);
     if (!at) return;
     cues.push({ at: { x: at.x, y: at.y + 20 }, color, glyph: '', t: 0, urgent: false, kind: 'wave' });
+  }
+
+  /** A quiet mustard relationship between two Members for a meaningful directed Act. */
+  function pushThread(from: string, to: string, color = toneColor('accent')) {
+    const start = heads.get(from);
+    const end = heads.get(to);
+    if (!start || !end || cues.some((cue) => cue.kind === 'thread' && cue.source === from)) return;
+    cues.push({
+      at: { x: start.x, y: start.y + 18 },
+      to: { x: end.x, y: end.y + 18 },
+      color,
+      glyph: '',
+      t: 0,
+      urgent: false,
+      kind: 'thread',
+      source: from,
+    });
   }
 
   /** The entrance glows as a member walks in or out. */
@@ -570,14 +589,17 @@ export function mountOffice(
       case 'note':
         pushCue(ev.to, toneColor(ev.tone), '');
         pushCue(ev.from, toneColor(ev.tone), '');
+        pushThread(ev.from, ev.to, toneColor(ev.tone));
         break;
       case 'walk-help':
+        pushThread(ev.from, ev.to);
         // A real walk-over; fall back to an in-place cue only if the walk can't play (target gone).
         if (!actors.walk(ev.from, { kind: 'help', to: ev.to, urgent: ev.tier === 'urgent' })) {
           pushCue(ev.from, '#f4cf52', ev.tier === 'urgent' ? '!' : '', ev.tier === 'urgent');
         }
         break;
       case 'walk-handoff':
+        pushThread(ev.from, ev.to, toneColor('handoff'));
         if (!actors.walk(ev.from, { kind: 'handoff', to: ev.to, urgent: false })) {
           pushCue(ev.from, '#c6a3ff', '↦');
         }
