@@ -3,6 +3,7 @@ import { startTelemetry, telemetryEnabled } from '@musterd/telemetry';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import { parseArgs } from './args.js';
 import { agentCommand } from './commands/agent.js';
+import { archaeologyCommand } from './commands/archaeology.js';
 import { auditCommand } from './commands/audit.js';
 import { availabilityCommand } from './commands/availability.js';
 import { claimCommand } from './commands/claim.js';
@@ -155,6 +156,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return agentCommand(rest);
     case 'audit':
       return auditCommand(rest);
+    case 'archaeology':
+      return archaeologyCommand(rest);
     case 'serve':
       return serveCommand(rest);
     case 'service':
