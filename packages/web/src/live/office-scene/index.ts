@@ -3,6 +3,7 @@ import { fitFloor, project, type Fit, type Pt } from './iso';
 import { ENTRANCE } from './layout';
 import { assignSeats, type Placement } from './seating';
 import {
+  animatedDeskAnchors,
   coffeeAnchor,
   DARK_PALETTE,
   drawCue,
@@ -102,6 +103,11 @@ export function mountOffice(
   ambientHost.className = 'lc-gl-ambient';
   const glows = new Map<string, HTMLDivElement>(); // per working-member monitor glow
   let steamEl: HTMLDivElement | null = null;
+  // Animated desk props (Tier-A CSS): a spinning blade over each fan and rising steam over each desk mug.
+  // Fixed sets (a stable per-desk hash decides which desks have them), so these pools only reposition on
+  // resize/rebake — never grow/shrink with the roster.
+  const fanEls: HTMLDivElement[] = [];
+  const deskSteamEls: HTMLDivElement[] = [];
   if (!reduced) {
     host.appendChild(ambientHost);
     const daylight = document.createElement('div');
@@ -155,7 +161,31 @@ export function mountOffice(
     if (!reduced) {
       syncGlows(monitorAnchors(placements, nodes, fit));
       positionSteam();
+      syncDeskProps();
     }
+  }
+
+  /** Grow/shrink an element pool to `pts.length` and position each at its anchor. Used for the fixed-set
+   * animated desk props — cheap reposition on every bake, structural change only if the count ever moves. */
+  function syncAnchorPool(pool: HTMLDivElement[], pts: Pt[], cls: string, inner: string, origin: string) {
+    while (pool.length < pts.length) {
+      const el = document.createElement('div');
+      el.className = cls;
+      el.innerHTML = inner;
+      ambientHost.appendChild(el);
+      pool.push(el);
+    }
+    while (pool.length > pts.length) pool.pop()!.remove();
+    pts.forEach((p, i) => {
+      pool[i]!.style.transform = `${origin} translate(${p.x}px, ${p.y}px)`;
+    });
+  }
+
+  /** Position the spinning-fan and desk-coffee-steam overlays over the props the canvas just baked. */
+  function syncDeskProps() {
+    const { fans, coffees } = animatedDeskAnchors(fit);
+    syncAnchorPool(fanEls, fans, 'lc-amb-fan', '<div class="lc-amb-fan__tilt"><div class="lc-amb-fan__blades"></div></div>', 'translate(-50%, -50%)');
+    syncAnchorPool(deskSteamEls, coffees, 'lc-amb-steam lc-amb-steam--desk', '<i></i><i></i><i></i>', 'translate(-50%, -100%)');
   }
 
   /** Create/remove/position a breathing glow over each working member's monitor (Tier-A, CSS-animated). */

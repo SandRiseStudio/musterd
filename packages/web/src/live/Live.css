@@ -840,6 +840,50 @@
     opacity: 0;
   }
 }
+/* spinning blade shimmer over a desktop fan's canvas grille (positioned inline over the grille centre) */
+.lc-amb-fan {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 20px;
+  height: 20px;
+}
+.lc-amb-fan__tilt {
+  position: absolute;
+  inset: 0;
+  transform: scaleY(0.72); /* fake the iso tilt of the grille the blades ride on */
+}
+.lc-amb-fan__blades {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    rgba(224, 233, 240, 0),
+    rgba(224, 233, 240, 0.55) 22%,
+    rgba(224, 233, 240, 0) 44%,
+    rgba(224, 233, 240, 0.55) 72%,
+    rgba(224, 233, 240, 0) 94%
+  );
+  mix-blend-mode: screen;
+  animation: lc-fan-spin 0.5s linear infinite;
+  will-change: transform;
+}
+@keyframes lc-fan-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+/* a smaller steam plume for a desk coffee mug (reuses the nook steam keyframe, scaled down) */
+.lc-amb-steam--desk {
+  width: 10px;
+  height: 26px;
+}
+.lc-amb-steam--desk i {
+  width: 5px;
+  height: 5px;
+  animation-duration: 3.6s;
+}
 @media (prefers-reduced-motion: reduce) {
   .lc-gl-ambient {
     display: none;
