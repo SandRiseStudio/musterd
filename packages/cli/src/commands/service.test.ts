@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
-import { SERVICE_LABEL } from '../service/launchd.js';
+import { LIVE_LABEL, LIVE_SYNC_LABEL, SERVICE_LABEL } from '../service/launchd.js';
 import type { RunResult, Runner, ServiceCtx } from '../service/manage.js';
+import type { LiveCtx } from '../service/live.js';
 import { serviceCommand } from './service.js';
 
 describe('serviceCommand', () => {
@@ -266,5 +267,74 @@ describe('serviceCommand', () => {
     expect(code).toBe(0);
     expect(out).toContain(SERVICE_LABEL);
     expect(out).toContain('loaded');
+  });
+
+  // ADR 124: `--live` retargets the verbs at the /live viewer bundle instead of the daemon.
+  function liveCtx(runner: Runner): LiveCtx {
+    return {
+      uid: 501,
+      serverLabel: LIVE_LABEL,
+      syncLabel: LIVE_SYNC_LABEL,
+      worktree: join(dir, 'agents-live'),
+      sourceRepo: join(dir, 'agents'),
+      serverPlistPath: join(dir, `${LIVE_LABEL}.plist`),
+      syncPlistPath: join(dir, `${LIVE_SYNC_LABEL}.plist`),
+      serveScriptPath: join(dir, 'live', 'serve.sh'),
+      syncScriptPath: join(dir, 'live', 'sync.sh'),
+      serverLogPath: join(dir, 'live', 'viewer.log'),
+      syncLogPath: join(dir, 'live', 'sync.log'),
+      port: 5173,
+      nodeDir: '/opt/node/bin',
+      gitDir: '/opt/homebrew/bin',
+      intervalSeconds: 60,
+      run: runner,
+      sleep: () => {},
+    };
+  }
+
+  it('install --live adds the worktree, writes artifacts, and bootstraps both agents', async () => {
+    const lc = liveCtx(recorder());
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['install', '--live']), { platform: 'darwin', liveCtx: lc }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain('/live viewer');
+    expect(existsSync(lc.serverPlistPath)).toBe(true);
+    expect(existsSync(lc.syncPlistPath)).toBe(true);
+    expect(calls).toContainEqual({
+      cmd: 'launchctl',
+      args: ['bootstrap', 'gui/501', lc.serverPlistPath],
+    });
+  });
+
+  it('refresh --live kickstarts the server (no live-session guard, no health call)', async () => {
+    const lc = liveCtx(recorder());
+    const health = vi.fn(async () => ({ connections: 5 })); // would BLOCK a daemon refresh
+    const { code } = await capture(() =>
+      serviceCommand(parseArgs(['refresh', '--live']), { platform: 'darwin', liveCtx: lc, health }),
+    );
+    expect(code).toBe(0);
+    expect(health).not.toHaveBeenCalled();
+    expect(calls).toContainEqual({
+      cmd: 'launchctl',
+      args: ['kickstart', '-k', `gui/501/${LIVE_LABEL}`],
+    });
+  });
+
+  it('status --live reports both viewer agents', async () => {
+    const lc = liveCtx(
+      recorder({ status: 0, stdout: '\tpid = 42\n\tstate = running\n', stderr: '' }),
+    );
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['status', '--live']), {
+        platform: 'darwin',
+        liveCtx: lc,
+        probeViewer: async () => true,
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain(LIVE_LABEL);
+    expect(out).toContain(LIVE_SYNC_LABEL);
+    expect(out).toContain('up');
   });
 });
