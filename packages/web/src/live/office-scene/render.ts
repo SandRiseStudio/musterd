@@ -906,13 +906,16 @@ export function monitorAnchors(
  * Screen anchors for the *animated* desk props (Tier-A CSS overlays, ADR 086): the spinning point of each
  * desktop fan's grille and the steam source above each desk coffee mug. Recomputed from the same
  * `PROP_SPEC` geometry the canvas draw uses, so a fan/steam element always lands on its drawn prop. Which
- * desks have them is a stable per-desk hash, independent of who's seated — so empty desks animate too.
+ * desks *carry* a prop is a stable per-desk hash, but a **fan only spins at an occupied desk** — an
+ * unattended fan reads as wrong (nobody's there to run it), so `occupied` (the set of desk slot ids with a
+ * seated member) gates the fan overlay; the physical fan is still drawn, just idle. Coffee steam stays on
+ * every mug (a fresh cup outlives a member briefly stepping away).
  */
-export function animatedDeskAnchors(fit: Fit): { fans: Pt[]; coffees: Pt[] } {
+export function animatedDeskAnchors(fit: Fit, occupied: Set<number>): { fans: Pt[]; coffees: Pt[] } {
   const fans: Pt[] = [];
   const coffees: Pt[] = [];
   for (const slot of DESK_SLOTS) {
-    if (deskHasProp(slot.id, 'fan')) {
+    if (deskHasProp(slot.id, 'fan') && occupied.has(slot.id)) {
       const [ix, iy] = deskPoint(slot, PROP_SPEC.fan.along, PROP_SPEC.fan.across);
       const b = project(ix, iy, fit);
       fans.push({ x: b.x, y: b.y - (DESK_UP + 17) * fit.scale }); // matches deskFan's grille centre
