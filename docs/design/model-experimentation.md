@@ -68,6 +68,19 @@ same substrate; neither substitutes for the other.
 models per-message; a static `MUSTERD_MODEL` is only honest if you **dedicate the seat to one model**.
 A seat that hops models mid-session attests a stale family. Pin one model per seat.
 
+### Harness identity and model self-identification
+
+The MCP host already supplies `clientInfo` during initialization. The adapter should retain its
+sanitized name and version as **harness context**, but must not treat either value as a model id:
+`clientInfo` answers which harness launched the adapter, not which model generated an Act. The
+attestation ladder remains `MUSTERD_MODEL` → `ANTHROPIC_MODEL` → binding value → `unknown`.
+
+The next adapter increment adds a warn-only self-ID tripwire. A missing declaration stays usable and
+stamps `unknown`, while the adapter reports the missing declaration with its harness context so
+`init --check` and telemetry can expose the coverage gap. A future per-turn host identity seam may
+replace a stale static pin; until then the adapter must never infer a model from a client name,
+client version, prompt, or tool arguments. See [ADR 120](../decisions/120-harness-model-attestation-seam.md).
+
 ## Track B — own the models end-to-end (the tiny-model fixture)
 
 > **Re-evaluated 2026-07-08 — ADR 110.** The stages were split and decided independently: Stage 1 is
