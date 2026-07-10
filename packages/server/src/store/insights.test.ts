@@ -345,6 +345,59 @@ describe('deriveSteeringMetrics (ADR 125 — interrupt-line arc metrics)', () =>
     expect(deriveSteeringMetrics(db, team.id, NOW).superseded_acts).toBe(1);
   });
 
+  it('counts a same-ts superseded steer via id tie-break (ADR 103 / Bugbot #216)', () => {
+    const { db, team, nick, ada } = seed();
+    const ts = NOW - 5 * 60_000;
+    // Two steers in the same millisecond — higher id wins (ULID order), matching pendingInterrupts.
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 's-a',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'member', name: 'ada' },
+        act: 'steer',
+        body: 'do A',
+        ts,
+      }),
+    );
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 's-b',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'member', name: 'ada' },
+        act: 'steer',
+        body: 'do B instead',
+        ts,
+      }),
+    );
+    insertMessage(
+      db,
+      team.id,
+      ada.id,
+      nick.id,
+      makeEnvelope({
+        id: 'bad-same-ts',
+        team: 'revive',
+        from: 'ada',
+        to: { kind: 'member', name: 'nick' },
+        act: 'accept',
+        body: 'doing A',
+        ts: ts + 1000,
+        meta: { in_reply_to: 's-a' },
+      }),
+    );
+    expect(deriveSteeringMetrics(db, team.id, NOW).superseded_acts).toBe(1);
+  });
+
   it('counts a stale wake as caught when the subject lane is later abandoned', () => {
     const { db, team, nick, ada } = seed();
     const lane = openLane(
