@@ -5,7 +5,12 @@ import { flagStr, type Parsed } from '../args.js';
 import { configPath, loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
-import { SERVICE_LABEL, serviceSupported } from '../service/launchd.js';
+import {
+  LIVE_LABEL,
+  LIVE_SYNC_LABEL,
+  SERVICE_LABEL,
+  serviceSupported,
+} from '../service/launchd.js';
 import {
   install,
   restart,
@@ -18,6 +23,15 @@ import {
   type Runner,
   type ServiceCtx,
 } from '../service/manage.js';
+import {
+  installLive,
+  refreshLive,
+  startLive,
+  statusLive,
+  stopLive,
+  uninstallLive,
+  type LiveCtx,
+} from '../service/live.js';
 
 /** Shell out to `launchctl` synchronously, capturing output and never throwing on a non-zero exit. */
 const spawnRunner: Runner = (cmd, args): RunResult => {
@@ -60,7 +74,41 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--port <n>] [--host <h>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live] [--port <n>] [--host <h>] [--follow] [--force]';
+
+/**
+ * Resolve the `/live` viewer service (ADR 124) from the running process. The viewer worktree is a
+ * sibling of the daemon's own checkout (`…/agents` → `…/agents-live`), added from it since they share
+ * the git object store. Scripts + logs live under `~/.musterd/live/`; the two plists sit beside the
+ * daemon's in `~/Library/LaunchAgents`. `gitDir` is resolved so the tracker's minimal PATH finds git.
+ */
+function resolveLiveCtx(port: number, run: Runner): LiveCtx {
+  const binJs = resolvePath(process.argv[1] ?? '');
+  const repoRoot = resolvePath(binJs, '../../../..');
+  const home = dirname(configPath()); // ~/.musterd
+  const liveDir = join(home, 'live');
+  const agents = join(homedir(), 'Library', 'LaunchAgents');
+  const whichGit = run('which', ['git']).stdout.trim();
+  const gitDir = whichGit ? dirname(whichGit) : '/opt/homebrew/bin';
+  return {
+    uid: typeof process.getuid === 'function' ? process.getuid() : '',
+    serverLabel: LIVE_LABEL,
+    syncLabel: LIVE_SYNC_LABEL,
+    worktree: `${repoRoot}-live`,
+    sourceRepo: repoRoot,
+    serverPlistPath: join(agents, `${LIVE_LABEL}.plist`),
+    syncPlistPath: join(agents, `${LIVE_SYNC_LABEL}.plist`),
+    serveScriptPath: join(liveDir, 'serve.sh'),
+    syncScriptPath: join(liveDir, 'sync.sh'),
+    serverLogPath: join(liveDir, 'viewer.log'),
+    syncLogPath: join(liveDir, 'sync.log'),
+    port,
+    nodeDir: dirname(process.execPath),
+    gitDir,
+    intervalSeconds: 60,
+    run,
+  };
+}
 
 /** Fetch the daemon's `/health` (ADR 016 + 047): the live `connections` count drives the guard below. */
 async function fetchHealth(): Promise<{ connections?: number }> {
@@ -110,7 +158,10 @@ export async function serviceCommand(
   deps: {
     platform?: NodeJS.Platform;
     ctx?: ServiceCtx;
+    liveCtx?: LiveCtx;
     health?: () => Promise<{ connections?: number }>;
+    /** Probe whether the /live dev server answers on its port (injected so tests skip the network). */
+    probeViewer?: (port: number) => Promise<boolean>;
   } = {},
 ): Promise<number> {
   const sub = parsed.positionals[0];
@@ -142,6 +193,14 @@ export async function serviceCommand(
       1,
     );
   };
+
+  // `--live` retargets every verb at the /live web viewer (ADR 124) instead of the daemon. The viewer
+  // is dev-side and drops no teammate session, so its ops skip the shared-daemon live-session guard.
+  if (parsed.flags['live'] === true) {
+    const livePort = port ? Number(port) : 5173;
+    const liveCtx = deps.liveCtx ?? resolveLiveCtx(livePort, ctx.run);
+    return liveServiceCommand(sub, liveCtx, parsed, ok, fail, deps.probeViewer ?? probeViewer);
+  }
 
   switch (sub) {
     case 'install': {
@@ -267,6 +326,132 @@ async function refreshDaemon(
   if (r.status !== 0) fail('restart', r);
   ok(`restarted the musterd daemon on ${after}`);
   return 0;
+}
+
+/**
+ * `musterd service <verb> --live` — manage the /live web viewer (ADR 124): a KeepAlive dev server on
+ * `:5173` + a main-tracker that restarts it whenever `origin/main` moves, both generated + installed
+ * from versioned templates. Unlike the daemon verbs, these drop no teammate session (the viewer is a
+ * dev-side web tab), so there's no live-session guard.
+ */
+/** Does the /live dev server answer on `port`? A short-timeout GET, so `status` says "serving", not
+ * just "agent loaded". Injected in `serviceCommand` so tests never touch the network. */
+async function probeViewer(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://localhost:${port}/`, { signal: AbortSignal.timeout(2000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function liveServiceCommand(
+  sub: string,
+  ctx: LiveCtx,
+  parsed: Parsed,
+  ok: (s: string) => void,
+  fail: (step: string, r: RunResult) => never,
+  probe: (port: number) => Promise<boolean>,
+): Promise<number> {
+  const meta = (s: string) => process.stdout.write(theme.meta(s) + '\n');
+  switch (sub) {
+    case 'install': {
+      const res = installLive(ctx);
+      if (res.worktree.result && !res.worktree.created && res.worktree.result.status !== 0)
+        fail('git worktree add', res.worktree.result);
+      if (res.server.status !== 0) fail('server (bootstrap)', res.server);
+      if (res.sync.status !== 0) fail('tracker (bootstrap)', res.sync);
+      ok(`installed + started the /live viewer on :${ctx.port} (${theme.accent(ctx.serverLabel)})`);
+      meta(`  worktree: ${ctx.worktree}${res.worktree.created ? ' (created)' : ''}`);
+      meta(`  server:   ${ctx.serveScriptPath}  → serves origin/main`);
+      meta(
+        `  tracker:  ${ctx.syncScriptPath}  → restarts on main move (every ${ctx.intervalSeconds}s)`,
+      );
+      meta(`  logs:     ${ctx.serverLogPath}`);
+      return 0;
+    }
+    case 'uninstall': {
+      const purge = parsed.flags['purge'] === true;
+      const res = uninstallLive(ctx, purge);
+      ok(
+        res.removedPlists > 0
+          ? `stopped + removed the /live viewer${purge ? ' + worktree' : ''}`
+          : `/live viewer was not installed — nothing to remove`,
+      );
+      return 0;
+    }
+    case 'start': {
+      const r = startLive(ctx);
+      if (r.server.status !== 0) fail('start (server)', r.server);
+      ok('started the /live viewer');
+      return 0;
+    }
+    case 'stop': {
+      stopLive(ctx);
+      ok('stopped the /live viewer');
+      return 0;
+    }
+    case 'restart':
+    case 'refresh': {
+      const r = refreshLive(ctx);
+      if (r.status !== 0) fail('restart', r);
+      ok(`restarted the /live viewer — it will re-sync to the tip of origin/main`);
+      return 0;
+    }
+    case 'status':
+      return renderLiveStatus(ctx, probe);
+    case 'logs': {
+      const follow = parsed.flags['follow'] === true || parsed.positionals.includes('-f');
+      return liveLogs(ctx, follow);
+    }
+    default:
+      throw new CliError(USAGE, 2);
+  }
+}
+
+async function renderLiveStatus(
+  ctx: LiveCtx,
+  probe: (port: number) => Promise<boolean>,
+): Promise<number> {
+  const st = statusLive(ctx);
+  const line = (_label: string, s: (typeof st)['server']) =>
+    s.loaded
+      ? theme.ok(`loaded${s.pid ? ` · pid ${s.pid}` : ''}${s.state ? ` · ${s.state}` : ''}`)
+      : theme.warn('not loaded');
+  process.stdout.write(`${theme.accent(ctx.serverLabel)}  ${line(ctx.serverLabel, st.server)}\n`);
+  process.stdout.write(`${theme.accent(ctx.syncLabel)}  ${line(ctx.syncLabel, st.sync)}\n`);
+  process.stdout.write(theme.meta(`  worktree: ${ctx.worktree}`) + '\n');
+  // Probe the dev server so status reflects "is :5173 actually serving", not just "is the agent loaded".
+  const up = await probe(ctx.port);
+  process.stdout.write(
+    `  ${theme.meta('viewer:')} ${up ? theme.ok(`up`) : theme.err('unreachable')}${theme.meta(` · http://localhost:${ctx.port}/live`)}\n`,
+  );
+  return 0;
+}
+
+function liveLogs(ctx: LiveCtx, follow: boolean): Promise<number> {
+  if (!follow) {
+    for (const [label, path] of [
+      ['server', ctx.serverLogPath],
+      ['tracker', ctx.syncLogPath],
+    ] as const) {
+      const lines = tailFile(path, 40);
+      if (lines.length === 0) continue;
+      process.stdout.write(theme.meta(`── ${label}: ${path} ──`) + '\n');
+      process.stdout.write(lines.join('\n') + '\n');
+    }
+    return Promise.resolve(0);
+  }
+  return new Promise<number>((resolveP) => {
+    const child = spawn('tail', ['-f', ctx.serverLogPath, ctx.syncLogPath], { stdio: 'inherit' });
+    const stopFollow = () => {
+      child.kill();
+      resolveP(0);
+    };
+    process.on('SIGINT', stopFollow);
+    child.on('error', () => resolveP(0));
+    child.on('exit', () => resolveP(0));
+  });
 }
 
 async function renderStatus(ctx: ServiceCtx): Promise<number> {

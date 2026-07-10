@@ -26,6 +26,8 @@ const BOOLEAN_FLAGS = new Set([
   'deny',
   'standing',
   'autojoin',
+  'live',
+  'purge',
 ]);
 
 export function parseArgs(argv: string[]): Parsed {
