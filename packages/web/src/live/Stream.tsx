@@ -13,10 +13,10 @@ import {
   laneEventDetail,
   type LaneEventDetail,
   memberColor,
+  proseSegments,
   recipientName,
   recipientScope,
   richLength,
-  richTokens,
   rosterIndex,
   type RichToken,
 } from './format';
@@ -210,14 +210,7 @@ function Row({
       {structured ? (
         <WorkItem detail={structured} />
       ) : (
-        env.body &&
-        (doType ? (
-          <RichTypewriter tokens={richTokens(env.body)} className="lc-row__body" />
-        ) : (
-          <p className="lc-row__body">
-            <RichText tokens={richTokens(env.body)} />
-          </p>
-        ))
+        env.body && <ProseBody segments={proseSegments(env.body)} type={doType} />
       )}
     </div>
   );
@@ -366,7 +359,7 @@ function summaryLine(env: Envelope): string {
 /** Render a tokenized body richly. With `reveal` set (the typewriter), only that many visible
  * characters are shown, trailing a caret — tokens past the cut are dropped, the one straddling it is
  * sliced. Without it, the whole stream renders. */
-function RichText({ tokens, reveal }: { tokens: RichToken[]; reveal?: number }) {
+function RichText({ tokens, reveal }: { tokens: RichToken[]; reveal?: number | undefined }) {
   const limited = reveal != null;
   let left = reveal ?? Infinity;
   const out: ReactElement[] = [];
@@ -405,14 +398,17 @@ function RichSpan({ token, text }: { token: RichToken; text: string }) {
 }
 
 /**
- * Reveal a rich body one character at a time — the same gentle, length-adaptive typewriter as before
- * (clamped 22–60ms/char), now driving a token stream so `**emphasis**`, code, refs and ids keep their
- * formatting as they type in. Honors prefers-reduced-motion (shows the full body at once).
+ * A prose body laid out for reading: its clauses (from `proseSegments`) stacked as lines, the first a
+ * subtly heavier **lead** so the row has a headline you scan before the detail. A single-clause body
+ * (short messages) renders as one plain line — no lead, unchanged. When `type` is set (a live row), the
+ * same gentle length-adaptive typewriter reveals character-by-character *across* the segments, so the
+ * clauses appear in turn with their rich formatting intact. Honors prefers-reduced-motion.
  */
-function RichTypewriter({ tokens, className }: { tokens: RichToken[]; className?: string }) {
-  const total = richLength(tokens);
-  const [n, setN] = useState(0);
+function ProseBody({ segments, type }: { segments: RichToken[][]; type: boolean }) {
+  const total = segments.reduce((n, s) => n + richLength(s), 0);
+  const [n, setN] = useState(type ? 0 : total);
   useEffect(() => {
+    if (!type) return;
     if (
       typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -430,11 +426,21 @@ function RichTypewriter({ tokens, className }: { tokens: RichToken[]; className?
       if (i >= total) clearInterval(h);
     }, tickMs);
     return () => clearInterval(h);
-  }, [total]);
+  }, [type, total]);
 
-  return (
-    <p className={className}>
-      <RichText tokens={tokens} reveal={n} />
-    </p>
-  );
+  const multi = segments.length > 1;
+  let remaining = type ? n : Infinity;
+  const lines: ReactElement[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    if (type && remaining <= 0) break; // don't render clauses the reveal hasn't reached yet
+    const seg = segments[i]!;
+    const reveal = type ? Math.min(richLength(seg), remaining) : undefined;
+    remaining -= richLength(seg);
+    lines.push(
+      <p key={i} className={multi ? (i === 0 ? 'lc-lead' : 'lc-clause') : undefined}>
+        <RichText tokens={seg} reveal={reveal} />
+      </p>,
+    );
+  }
+  return <div className="lc-row__body">{lines}</div>;
 }
