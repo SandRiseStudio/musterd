@@ -201,10 +201,14 @@ function routeEnvelopeInner(
   );
   const skip = new Set(recipients);
   skip.add(sender.id);
+  // Directed (member-kind) envelopes reach only full-visibility connections on the firehose — admins
+  // and read-only observers (ADR 063); team/broadcast acts stay public. Regular non-party members no
+  // longer see others' DMs (recipient-scoping).
   const firehoseDelivered = ctx.hub.broadcastFirehose(
     team.id,
     { type: 'deliver', envelope: firehoseEnv },
     skip,
+    message.to_kind === 'member',
   );
 
   log.info({

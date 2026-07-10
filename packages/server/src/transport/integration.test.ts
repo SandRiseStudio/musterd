@@ -464,7 +464,7 @@ describe('WebSocket', () => {
     l.close();
   });
 
-  it('firehose (subscribe team-all): an observer sees a directed DM between two other members (ADR 061)', async () => {
+  it('firehose (subscribe team-all): a regular member sees team/broadcast, not others’ DMs (recipient-scoping)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
@@ -497,7 +497,8 @@ describe('WebSocket', () => {
       await standingGrant(team.json.human_credential, 'Obs'),
     );
 
-    // Lin is the recipient AND a firehose subscriber (tests dedup); Obs is a pure observer.
+    // Lin is the recipient AND a firehose subscriber (tests dedup); Obs is a regular (non-party,
+    // non-observer, non-admin) member watching the firehose — recipient-scoping must apply to it.
     const linSub = await l.subscribe('team-all');
     const obsSub = await o.subscribe('team-all');
     expect((linSub as any).scope).toBe('team-all');
@@ -518,15 +519,30 @@ describe('WebSocket', () => {
     });
     await a.waitFor('ack');
 
-    // The observer — not addressed — still receives the directed envelope.
-    const obsDeliver = await o.waitFor('deliver');
-    expect((obsDeliver as any).envelope.body).toBe('firehose ping');
-    expect((obsDeliver as any).envelope.to).toEqual({ kind: 'member', name: 'Lin' });
-
-    // The recipient gets it exactly once, despite also being on the firehose (dedup via skip set).
+    // The recipient gets the DM exactly once, despite also being on the firehose (dedup via skip set).
     await l.waitFor('deliver');
     await new Promise((r) => setTimeout(r, 40));
     expect(l.countFrames('deliver')).toBe(1);
+    // Recipient-scoping: the regular member must NOT see a DM it is not party to.
+    expect(o.countFrames('deliver')).toBe(0);
+
+    // But a team broadcast is public — the observer does receive it.
+    a.send({
+      type: 'send',
+      envelope: {
+        id: 'fh2',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: 'team ping',
+        ts: Date.now(),
+      },
+    });
+    await a.waitFor('ack');
+    const obsBroadcast = await o.waitFor('deliver');
+    expect((obsBroadcast as any).envelope.body).toBe('team ping');
 
     a.close();
     l.close();
@@ -561,7 +577,7 @@ describe('WebSocket', () => {
       { key: team.json.agent_key, seat: 'Lin' },
     );
 
-    // nick — party to neither — sees BOTH via the team timeline (firehose history backfill).
+    // nick is the team admin, so — party to neither — still sees BOTH via the full team timeline.
     const all = await get('/teams/dawn/messages', tok);
     expect(all.json.messages.map((m: any) => m.id)).toEqual(['t1', 't2']);
 
@@ -573,6 +589,50 @@ describe('WebSocket', () => {
     const limited = await get('/teams/dawn/messages?limit=1', tok);
     expect(limited.json.messages).toHaveLength(1);
     expect(limited.json.messages[0].id).toBe('t2');
+  });
+
+  it('GET /messages recipient-scopes for a non-admin: only envelopes the caller is party to', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Bo', kind: 'agent' }, tok);
+    const key = team.json.agent_key;
+
+    const mk = (id: string, from: string, to: any, body: string, ts: number) => ({
+      id,
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from,
+      to,
+      act: 'message',
+      body,
+      ts,
+    });
+    // m1 Ada→Lin (Bo not party) · m2 Bo→Ada (Bo party) · m3 Lin→team (public).
+    await post(
+      '/teams/dawn/messages',
+      { envelope: mk('m1', 'Ada', { kind: 'member', name: 'Lin' }, 'ada->lin', 1000) },
+      { key, seat: 'Ada' },
+    );
+    await post(
+      '/teams/dawn/messages',
+      { envelope: mk('m2', 'Bo', { kind: 'member', name: 'Ada' }, 'bo->ada', 2000) },
+      { key, seat: 'Bo' },
+    );
+    await post(
+      '/teams/dawn/messages',
+      { envelope: mk('m3', 'Lin', { kind: 'team' }, 'all', 3000) },
+      { key, seat: 'Lin' },
+    );
+
+    // Bo (non-admin) sees only its own DM (m2) + the public broadcast (m3) — never the Ada→Lin DM.
+    const boView = await get('/teams/dawn/messages', { key, seat: 'Bo' });
+    expect(boView.json.messages.map((m: any) => m.id)).toEqual(['m2', 'm3']);
+
+    // The admin (nick) still sees everything, incl. the DM Bo cannot.
+    const adminView = await get('/teams/dawn/messages', tok);
+    expect(adminView.json.messages.map((m: any) => m.id)).toEqual(['m1', 'm2', 'm3']);
   });
 
   it('observer seat: watches the firehose but is hidden from roster/count and cannot send (ADR 063)', async () => {
@@ -612,7 +672,9 @@ describe('WebSocket', () => {
     expect(roster.json.members.map((m: any) => m.name)).not.toContain('wall');
     expect((await get('/health')).json.connections).toBe(1);
 
-    // It still receives a directed DM between two others via the firehose.
+    // A read-only observer seat (ADR 063, localhost-trust) has full visibility, so it still receives a
+    // directed DM between two others via the firehose. (Regular members are recipient-scoped — see the
+    // recipient-scoping tests above; local-vs-shared observer scoping is a tracked follow-up.)
     a.send({
       type: 'send',
       envelope: {
