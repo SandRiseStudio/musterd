@@ -558,18 +558,130 @@ function monitor(
   ellipse(ctx, { x: g.x, y: g.y - (surfaceUp + 32) * fit.scale }, 12 * fit.scale, 4 * fit.scale, working ? '#59c3a3' : '#33504c');
 }
 
-/** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works). The task
- * chair and the seated member are NOT drawn here — the chair is its own depth item at its own footprint
- * (see renderScene) and members are free actors (see `drawActor`), so chair < sitter < desk (or the
- * mirror of it, by facing) paint in true painter's order instead of the desk blob swallowing both. */
+// ── desk-surface props: a keyboard + mouse on every desk, plus a deterministic personal mix ──────────
+// Each optional prop (coffee / water / photo / plant / fan / lamp) is present or not per desk from a
+// stable hash of the slot id, so a desk always shows the same combination frame to frame (no jitter) but
+// desks differ from each other — one desk might carry a lone coffee mug, another a lamp + plant + photo.
+
+const KEYBOARD = '#2b2f36';
+const MOUSE = '#454b54';
+/** Distinct "photos" for standing frames — each desk with a frame gets one of these by hash. */
+const PHOTOS = ['#6fa3c9', '#e0a05a', '#8db36a', '#c97f9c', '#9a8fce', '#d9b24a', '#e08585', '#5ab0a4'];
+/** Mug colours, so coffee cups aren't all identical. */
+const MUGS = ['#d6d0c6', '#c95c4a', '#3d6b8f', '#e0a72b', '#5f8a5a'];
+
+/** FNV-ish hash of (desk id, salt) → a stable 0..1. Deterministic, so props never flicker per frame. */
+function deskRnd(id: number, salt: number): number {
+  let h = (2166136261 ^ (id + 1)) >>> 0;
+  h = Math.imul(h, 16777619) ^ (salt * 0x9e3779b1);
+  h = Math.imul(h, 16777619);
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
+/** The desk surface height (leg height + slab thickness) — where every prop sits. */
+const DESK_UP = 38 + 8;
+
+/** The optional personal props and where each sits on the desk, in desk-relative (along-facing, across)
+ * coords: `along` +toward the monitor / −toward the seat, `across` +right / −left. `salt`+`prob` decide
+ * per-desk presence from a stable hash. Shared by the canvas draw AND the animated-overlay anchors
+ * (`animatedDeskAnchors`) so the spinning fan / coffee steam land exactly on the drawn prop. */
+const PROP_KINDS = ['coffee', 'water', 'plant', 'photo', 'lamp', 'fan'] as const;
+type PropKind = (typeof PROP_KINDS)[number];
+const PROP_SPEC: Record<PropKind, { salt: number; prob: number; along: number; across: number }> = {
+  coffee: { salt: 1, prob: 0.5, along: -4, across: -34 },
+  water: { salt: 2, prob: 0.42, along: 7, across: -36 },
+  plant: { salt: 3, prob: 0.46, along: 20, across: -40 },
+  photo: { salt: 4, prob: 0.42, along: 20, across: 38 },
+  lamp: { salt: 5, prob: 0.4, along: 8, across: 42 },
+  fan: { salt: 6, prob: 0.38, along: -10, across: 38 },
+};
+/** Whether a given desk carries a given prop — a stable per-desk hash, independent of who's seated. */
+function deskHasProp(id: number, kind: PropKind): boolean {
+  return deskRnd(id, PROP_SPEC[kind].salt) < PROP_SPEC[kind].prob;
+}
+/** Desk-relative (along,across) → absolute logical point, given the desk's facing. */
+function deskPoint(slot: { lx: number; ly: number; dir: Dir }, along: number, across: number): [number, number] {
+  const f = FWD[slot.dir];
+  return [slot.lx + f[0] * along - f[1] * across, slot.ly + f[1] * along + f[0] * across];
+}
+
+/** A flat keyboard: a base tray + a slightly raised key deck, oriented across the desk (facing-relative). */
+function deskKeyboard(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, sn: boolean, up: number): void {
+  box(ctx, fit, ix, iy, sn ? 34 : 13, sn ? 13 : 34, 3, KEYBOARD, up);
+  box(ctx, fit, ix, iy, sn ? 30 : 9, sn ? 9 : 30, 4, '#3b414a', up); // key deck, a touch proud of the tray
+}
+
+/** A little mouse beside the keyboard — long axis pointing front-to-back, rounded top. */
+function deskMouse(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, sn: boolean, up: number): void {
+  box(ctx, fit, ix, iy, sn ? 7 : 11, sn ? 11 : 7, 4, MOUSE, up);
+  const g = project(ix, iy, fit);
+  ellipse(ctx, { x: g.x, y: g.y - (up + 4) * fit.scale }, 5 * fit.scale, 3 * fit.scale, '#525863');
+}
+
+function deskCoffee(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number, mug: string): void {
+  box(ctx, fit, ix, iy, 11, 11, 12, mug, up); // mug body
+  const g = project(ix, iy, fit);
+  ellipse(ctx, { x: g.x, y: g.y - (up + 12) * fit.scale }, 5.2 * fit.scale, 2.5 * fit.scale, '#3a2416'); // coffee
+}
+
+function deskWater(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number): void {
+  box(ctx, fit, ix, iy, 9, 9, 24, '#bfe3f2', up); // translucent-looking body
+  box(ctx, fit, ix, iy, 6, 6, 4, '#5aa0c9', up + 24); // cap
+}
+
+/** A standing photo frame: a thin upright frame with an inset "photo" panel on its room-facing faces. */
+function deskPhoto(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, sn: boolean, up: number, photo: string): void {
+  box(ctx, fit, ix, iy, sn ? 20 : 6, sn ? 6 : 20, 18, '#cfc8b8', up); // frame
+  box(ctx, fit, ix, iy, sn ? 15 : 3, sn ? 3 : 15, 13, photo, up + 3); // inset photo (shows on the visible faces)
+}
+
+/** A small potted desk plant — terracotta pot + a low leafy cluster. */
+function deskPlant(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number): void {
+  box(ctx, fit, ix, iy, 12, 12, 9, '#b9603a', up);
+  const g = project(ix, iy, fit);
+  const ty = g.y - (up + 9) * fit.scale;
+  ellipse(ctx, { x: g.x, y: ty - 4 * fit.scale }, 9 * fit.scale, 7 * fit.scale, '#5f9350');
+  ellipse(ctx, { x: g.x - 4 * fit.scale, y: ty - 1 * fit.scale }, 5 * fit.scale, 4 * fit.scale, '#74a860');
+  ellipse(ctx, { x: g.x + 4 * fit.scale, y: ty - 6 * fit.scale }, 4.5 * fit.scale, 4 * fit.scale, '#6fa35a');
+}
+
+/** A desktop fan: a small base + neck holding a round grille disc. */
+function deskFan(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number): void {
+  box(ctx, fit, ix, iy, 9, 9, 5, '#556069', up); // base
+  box(ctx, fit, ix, iy, 3, 3, 12, '#4c565f', up + 4); // neck
+  const g = project(ix, iy, fit);
+  const cy = g.y - (up + 17) * fit.scale;
+  ellipse(ctx, { x: g.x, y: cy }, 11 * fit.scale, 8 * fit.scale, '#8794a0');
+  ellipse(ctx, { x: g.x, y: cy }, 8 * fit.scale, 5.5 * fit.scale, '#aeb9c2');
+  ellipse(ctx, { x: g.x, y: cy }, 2.4 * fit.scale, 1.8 * fit.scale, '#5a646e'); // hub
+}
+
+/** A desk lamp: base + slim pole + a warm glowing shade. */
+function deskLamp(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number): void {
+  box(ctx, fit, ix, iy, 10, 10, 3, '#3d4650', up); // base
+  box(ctx, fit, ix, iy, 3, 3, 22, '#4a545f', up + 3); // pole
+  const g = project(ix, iy, fit);
+  const ty = g.y - (up + 26) * fit.scale;
+  ellipse(ctx, { x: g.x, y: ty }, 9 * fit.scale, 5 * fit.scale, '#e9c46a'); // shade
+  ellipse(ctx, { x: g.x, y: ty + 2 * fit.scale }, 6 * fit.scale, 3 * fit.scale, '#fff1c2'); // warm glow
+}
+
+/** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works), plus a
+ * keyboard + mouse and a deterministic mix of personal props. The task chair and the seated member are
+ * NOT drawn here — the chair is its own depth item at its own footprint (see renderScene) and members are
+ * free actors (see `drawActor`), so chair < sitter < desk (or the mirror of it, by facing) paint in true
+ * painter's order instead of the desk blob swallowing both. Surface props self-sort back-to-front within
+ * the desk by their own footprint depth, so a tall lamp/photo behind a mug never paints through it. */
 function drawWorkstation(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
-  slot: { lx: number; ly: number; dir: Dir },
+  slot: { lx: number; ly: number; dir: Dir; id: number },
   node: OfficeNode | null,
 ): void {
-  const { lx, ly, dir } = slot;
+  const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
+  const p: [number, number] = [-f[1], f[0]]; // desk-left/right unit (perpendicular to facing)
   const sn = dir === 'S' || dir === 'N';
   const W = DESK_W;
   const Df = DESK_D;
@@ -577,6 +689,7 @@ function drawWorkstation(
   const ST = 8;
   const wx = sn ? W : Df;
   const dy = sn ? Df : W;
+  const up = DESK_UP; // desk-surface height — where every prop sits (DH + ST)
   const working = node?.activity === 'working';
 
   for (const [sx, sy] of [
@@ -588,7 +701,49 @@ function drawWorkstation(
     box(ctx, fit, lx + sx * (wx / 2 - 6), ly + sy * (dy / 2 - 6), 8, 8, DH, dim(PAL.wood, 0.9));
   }
   box(ctx, fit, lx, ly, wx, dy, ST, PAL.wood, DH);
-  monitor(ctx, fit, lx + f[0] * (Df / 2 - 12), ly + f[1] * (Df / 2 - 12), dir, working, DH + ST);
+
+  // Surface props, placed in desk-relative (along-facing, across) coords and self-sorted back-to-front so
+  // overlaps paint correctly regardless of the desk's facing. `along` +toward the monitor, −toward the seat.
+  interface Prop {
+    sum: number;
+    fn: () => void;
+  }
+  const props: Prop[] = [];
+  const at = (along: number, across: number, fn: (ix: number, iy: number) => void): void => {
+    const ix = lx + f[0] * along + p[0] * across;
+    const iy = ly + f[1] * along + p[1] * across;
+    props.push({ sum: f[0] * along + p[0] * across + (f[1] * along + p[1] * across), fn: () => fn(ix, iy) });
+  };
+
+  // the monitor at the back, then the always-present keyboard (front-centre) + mouse (front-right)
+  at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up));
+  at(-6, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up));
+  at(-4, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up));
+
+  // optional personal props — each present-or-not per desk by a stable hash, at its own station
+  for (const kind of PROP_KINDS) {
+    if (!deskHasProp(id, kind)) continue;
+    const sp = PROP_SPEC[kind];
+    at(sp.along, sp.across, (ix, iy) => {
+      switch (kind) {
+        case 'coffee':
+          return deskCoffee(ctx, fit, ix, iy, up, MUGS[Math.floor(deskRnd(id, 11) * MUGS.length)]!);
+        case 'water':
+          return deskWater(ctx, fit, ix, iy, up);
+        case 'plant':
+          return deskPlant(ctx, fit, ix, iy, up);
+        case 'photo':
+          return deskPhoto(ctx, fit, ix, iy, sn, up, PHOTOS[Math.floor(deskRnd(id, 41) * PHOTOS.length)]!);
+        case 'lamp':
+          return deskLamp(ctx, fit, ix, iy, up);
+        case 'fan':
+          return deskFan(ctx, fit, ix, iy, up);
+      }
+    });
+  }
+
+  props.sort((a, b) => a.sum - b.sum);
+  for (const pr of props) pr.fn();
 }
 
 export interface SceneAnchors {
@@ -745,6 +900,30 @@ export function monitorAnchors(
     out.set(name, { x: s.x, y: s.y - 78 * fit.scale });
   }
   return out;
+}
+
+/**
+ * Screen anchors for the *animated* desk props (Tier-A CSS overlays, ADR 086): the spinning point of each
+ * desktop fan's grille and the steam source above each desk coffee mug. Recomputed from the same
+ * `PROP_SPEC` geometry the canvas draw uses, so a fan/steam element always lands on its drawn prop. Which
+ * desks have them is a stable per-desk hash, independent of who's seated — so empty desks animate too.
+ */
+export function animatedDeskAnchors(fit: Fit): { fans: Pt[]; coffees: Pt[] } {
+  const fans: Pt[] = [];
+  const coffees: Pt[] = [];
+  for (const slot of DESK_SLOTS) {
+    if (deskHasProp(slot.id, 'fan')) {
+      const [ix, iy] = deskPoint(slot, PROP_SPEC.fan.along, PROP_SPEC.fan.across);
+      const b = project(ix, iy, fit);
+      fans.push({ x: b.x, y: b.y - (DESK_UP + 17) * fit.scale }); // matches deskFan's grille centre
+    }
+    if (deskHasProp(slot.id, 'coffee')) {
+      const [ix, iy] = deskPoint(slot, PROP_SPEC.coffee.along, PROP_SPEC.coffee.across);
+      const b = project(ix, iy, fit);
+      coffees.push({ x: b.x, y: b.y - (DESK_UP + 12) * fit.scale }); // matches deskCoffee's mug rim
+    }
+  }
+  return { fans, coffees };
 }
 
 /** Screen position of the break-nook coffee machine (the ambient steam source, ADR 086). */
