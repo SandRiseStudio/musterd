@@ -308,8 +308,9 @@ function attestedModelHeader(req: IncomingMessage): string | undefined {
  * sockets. A no-op when the member already holds a resident session; on an offline→online transition we
  * emit the same presence event the WS attach path does, so live watchers update. Surface defaults to
  * `cli` but honors `x-musterd-surface` so an adapter one-shot can label its real surface.
- * When `x-musterd-model` is present, the ambient occupancy is (re)attested (ADR 119) — closing the
- * CLI stamp gap after the claim presence expires (issue #172).
+ * When `x-musterd-model` is present on an **agent** seat, the ambient occupancy is (re)attested
+ * (ADR 119) — closing the CLI stamp gap after the claim presence expires (issue #172). Human seats
+ * ignore the header (ADR 121): attestation is a harness fact, not a human-shell env leak.
  */
 function authTouch(
   ctx: Ctx,
@@ -325,7 +326,9 @@ function authTouch(
   const hint = req.headers['x-musterd-surface'];
   const parsed = SurfaceSchema.safeParse(Array.isArray(hint) ? hint[0] : hint);
   const surface = parsed.success ? parsed.data : 'cli';
-  const model = attestedModelHeader(req);
+  // ADR 121: model attestation is a harness fact — only agent seats re-attest from the header.
+  // A human with MUSTERD_MODEL in their shell (or a buggy client) must not stamp their occupancy.
+  const model = auth.member.kind === 'agent' ? attestedModelHeader(req) : undefined;
   // Snapshot the ambient row before the touch so a real model change can audit (source: ambient).
   const before = model
     ? ctx.db

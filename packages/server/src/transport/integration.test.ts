@@ -1477,6 +1477,51 @@ describe('model attestation (ADR 101)', () => {
     });
     expect(ambient.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('human credential + x-musterd-model does not attest the human occupancy (ADR 121)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential as string;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // A human one-shot carrying the header (e.g. MUSTERD_MODEL leaked into Nick's shell) must
+    // still flip present for liveness, but must NOT write model onto the occupancy or stamp acts.
+    const sent = await fetch(base + '/teams/dawn/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${nickTok}`,
+        'x-musterd-model': 'claude-opus-4-8',
+      },
+      body: JSON.stringify({
+        envelope: {
+          id: 'nick-1',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'Ada' },
+          act: 'status_update',
+          body: 'human send',
+          ts: Date.now(),
+        },
+      }),
+    });
+    expect(sent.status).toBe(201);
+    const ack = (await sent.json()) as { ack: { meta?: { model?: string } } };
+    expect(ack.ack.meta?.model).toBeUndefined();
+
+    const roster = await get('/teams/dawn/members', nickTok);
+    const nickRow = roster.json.members.find((m: { name: string }) => m.name === 'nick');
+    expect(nickRow?.presence).toBe('online');
+    expect(nickRow?.presences?.[0]?.model ?? null).toBeNull();
+
+    const teamRow = getTeamBySlug(server.db, 'dawn')!;
+    const ambient = listAudit(server.db, teamRow.id).filter((r) => {
+      if (r.action !== 'occupancy.model_attested') return false;
+      const d = JSON.parse(r.detail!) as { source: string };
+      return d.source === 'ambient';
+    });
+    expect(ambient).toHaveLength(0);
+  });
 });
 
 describe('v0.3 P2 governance enforcement (ADR 071)', () => {
