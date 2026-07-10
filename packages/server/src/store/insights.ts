@@ -182,6 +182,8 @@ interface WakeRow {
   id: string;
   recipient_id: string;
   subject: string;
+  /** `lane_warning.with` — Goal id for stale_plan, other lane id for stale_dependency. */
+  with_ref: string | null;
   ts: number;
 }
 
@@ -278,6 +280,7 @@ export function deriveSteeringMetrics(
     .prepare<[string, number], WakeRow>(
       `SELECT m.id AS id, m.to_member AS recipient_id,
               json_extract(m.meta, '$.lane_warning.subject') AS subject,
+              json_extract(m.meta, '$.lane_warning.with') AS with_ref,
               m.ts AS ts
          FROM messages m
         WHERE m.team_id = ? AND m.ts > ?
@@ -292,8 +295,8 @@ export function deriveSteeringMetrics(
     const lane = db
       .prepare<
         [string, string],
-        { state: string; resolved_at: number | null }
-      >(`SELECT state, resolved_at FROM lanes WHERE team_id = ? AND id = ?`)
+        { state: string; resolved_at: number | null; goal_id: string | null }
+      >(`SELECT state, resolved_at, goal_id FROM lanes WHERE team_id = ? AND id = ?`)
       .get(teamId, w.subject);
     const abandonedOrDone =
       lane !== undefined &&
@@ -304,14 +307,34 @@ export function deriveSteeringMetrics(
       stale_caught += 1;
       continue;
     }
-    // Owner course-change via a subsequent accept/handoff/status_update/resolve.
+    // Course-change must reference the warned work (ADR 126): reply to the wake, or name the
+    // lane's goal_id / the wake's `with` Goal id — not any owner chatter.
+    const laneGoal = lane?.goal_id ?? null;
+    const withRef = w.with_ref;
     const course = db
-      .prepare<[string, string, number], { n: number }>(
+      .prepare<
+        [
+          string,
+          string,
+          number,
+          string,
+          string | null,
+          string | null,
+          string | null,
+          string | null,
+        ],
+        { n: number }
+      >(
         `SELECT COUNT(*) AS n FROM messages
           WHERE team_id = ? AND from_member = ? AND ts > ?
-            AND act IN ('accept','handoff','status_update','resolve')`,
+            AND act IN ('accept','handoff','status_update','resolve')
+            AND (
+              json_extract(meta, '$.in_reply_to') = ?
+              OR (? IS NOT NULL AND json_extract(meta, '$.goal_id') = ?)
+              OR (? IS NOT NULL AND json_extract(meta, '$.goal_id') = ?)
+            )`,
       )
-      .get(teamId, w.recipient_id, w.ts);
+      .get(teamId, w.recipient_id, w.ts, w.id, laneGoal, laneGoal, withRef, withRef);
     if ((course?.n ?? 0) > 0) stale_caught += 1;
   }
 

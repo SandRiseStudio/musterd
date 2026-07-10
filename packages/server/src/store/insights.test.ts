@@ -476,4 +476,112 @@ describe('deriveSteeringMetrics (ADR 125 — interrupt-line arc metrics)', () =>
     expect(s.stale_wakes).toBe(1);
     expect(s.stale_caught).toBe(0);
   });
+
+  it('does not count an unrelated owner status_update as catching a stale wake (ADR 126)', () => {
+    const { db, team, nick, ada } = seed();
+    const lane = openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'warned work', claim: true, goal_id: 'goal-x' },
+      NOW - 20 * 60_000,
+    );
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 'wake-unrelated',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'member', name: 'ada' },
+        act: 'message',
+        body: '[lane] plan moved',
+        ts: NOW - 10 * 60_000,
+        meta: {
+          lane_warning: {
+            kind: 'stale_plan',
+            subject: lane.id,
+            with: 'goal-x',
+            owner: 'ada',
+            detail: 'plan moved',
+          },
+        },
+      }),
+    );
+    // Routine journal about other work — must NOT count as caught.
+    insertMessage(
+      db,
+      team.id,
+      ada.id,
+      null,
+      makeEnvelope({
+        id: 'other-work',
+        team: 'revive',
+        from: 'ada',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: 'working on something else',
+        ts: NOW - 5 * 60_000,
+      }),
+    );
+    const s = deriveSteeringMetrics(db, team.id, NOW);
+    expect(s.stale_wakes).toBe(1);
+    expect(s.stale_caught).toBe(0);
+  });
+
+  it('counts a wake as caught when the owner replies to it or names its goal (ADR 126)', () => {
+    const { db, team, nick, ada } = seed();
+    const lane = openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'warned work', claim: true, goal_id: 'goal-x' },
+      NOW - 20 * 60_000,
+    );
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 'wake-scoped',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'member', name: 'ada' },
+        act: 'message',
+        body: '[lane] plan moved',
+        ts: NOW - 10 * 60_000,
+        meta: {
+          lane_warning: {
+            kind: 'stale_plan',
+            subject: lane.id,
+            with: 'goal-x',
+            owner: 'ada',
+            detail: 'plan moved',
+          },
+        },
+      }),
+    );
+    insertMessage(
+      db,
+      team.id,
+      ada.id,
+      null,
+      makeEnvelope({
+        id: 'recheck',
+        team: 'revive',
+        from: 'ada',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: 're-checking direction on goal-x',
+        ts: NOW - 5 * 60_000,
+        meta: { goal_id: 'goal-x' },
+      }),
+    );
+    expect(deriveSteeringMetrics(db, team.id, NOW).stale_caught).toBe(1);
+  });
 });
