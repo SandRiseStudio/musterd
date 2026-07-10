@@ -209,6 +209,34 @@ export function richLength(tokens: RichToken[]): number {
   return tokens.reduce((n, t) => n + t.text.length, 0);
 }
 
+/**
+ * Break a prose body into scannable **clauses** so a long status update reads as a short stack of lines
+ * (with the first as a lead) instead of one wall of text. Split points are natural reading pauses —
+ * sentence ends (`. `/`! `/`? ` before a capital/digit/quote), semicolons, and spaced em-dashes — so
+ * the segmentation follows how the sentence already breathes. Short bodies (< ~140 chars) are left
+ * whole: a one-liner shouldn't be chopped up. Each segment is tokenized for rich inline rendering, and
+ * the caller renders segment 0 as the lead. Purely presentational — the text is unchanged, just re-laid.
+ */
+const CLAUSE_MIN_LEN = 140;
+export function proseSegments(input: string): RichToken[][] {
+  const text = input.replace(LEADING_TAG, '').trim();
+  if (text.length < CLAUSE_MIN_LEN) return [richTokens(text)];
+  // Scan for reading-pause boundaries and cut there. A sentence terminator (.!?) stays with the
+  // clause it ends; a semicolon or spaced em-dash is dropped (the line break stands in for it).
+  const boundary = /([.!?])\s+(?=["\x27([]?[A-Z0-9])|;\s+|\s+—\s+/g;
+  const pieces: string[] = [];
+  let last = 0;
+  for (let m = boundary.exec(text); m; m = boundary.exec(text)) {
+    const end = m.index + (m[1] ? 1 : 0);
+    const piece = text.slice(last, end).trim();
+    if (piece) pieces.push(piece);
+    last = m.index + m[0].length;
+  }
+  const tail = text.slice(last).trim();
+  if (tail) pieces.push(tail);
+  return (pieces.length > 1 ? pieces : [text]).map((p) => richTokens(p));
+}
+
 /** Where a message went, distilled to the three audiences a reader cares about (ADR 061 firehose). */
 export type ActScope = 'direct' | 'team' | 'all';
 export function recipientScope(to: Envelope['to']): ActScope {

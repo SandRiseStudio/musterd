@@ -5,6 +5,7 @@ import {
   actTone,
   goalEvent,
   laneEventDetail,
+  proseSegments,
   richLength,
   richTokens,
   type RichToken,
@@ -121,6 +122,36 @@ describe('richTokens — prose rendered richly, not as a raw dump', () => {
   it('richLength counts the visible characters (short id, inner bold text)', () => {
     expect(richLength(richTokens('**hi** there'))).toBe('hi there'.length);
     expect(richLength(richTokens('01KX6QBGJ8W0NAHWAMFNQ38JRX'))).toBe('01KX6Q…8JRX'.length);
+  });
+});
+
+describe('proseSegments — long bodies become scannable clause lines', () => {
+  const text = (segs: RichToken[][]) => segs.map((s) => s.map((t) => t.text).join(''));
+
+  it('leaves a short body as a single segment (no chopping)', () => {
+    expect(proseSegments('on it — will open the PR')).toHaveLength(1);
+  });
+
+  it('splits a long body on sentence ends, semicolons, and spaced em-dashes', () => {
+    const body =
+      'Migration done: synced the checkout to origin/main and rebuilt the dist. ' +
+      'Ran the install — both agents re-bootstrapped; the viewer is verified up on :5173.';
+    const segs = text(proseSegments(body));
+    expect(segs.length).toBeGreaterThanOrEqual(3);
+    // sentence terminator stays with its clause
+    expect(segs[0]).toBe('Migration done: synced the checkout to origin/main and rebuilt the dist.');
+    // em-dash + semicolon are dropped (the line break stands in)
+    expect(segs.some((s) => s.startsWith('Ran the install'))).toBe(true);
+    expect(segs.some((s) => s.startsWith('the viewer is verified up'))).toBe(true);
+  });
+
+  it('does not split inside decimals, versions, or abbreviations mid-word', () => {
+    const body =
+      'Shipped v0.2 with a 12.2% win and the docs/design layout; the archaeology tool fires cleanly ' +
+      'on the seeded commit and the acceptance suite is green across every one of the trap tickets.';
+    const segs = text(proseSegments(body));
+    // "v0.2" and "12.2%" have no space after the dot, so they never become split points
+    expect(segs.some((s) => s.includes('v0.2') && s.includes('12.2%'))).toBe(true);
   });
 });
 

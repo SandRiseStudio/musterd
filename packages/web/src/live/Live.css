@@ -1212,6 +1212,22 @@
   max-width: 72ch;
   text-wrap: pretty;
 }
+/* clause lines within a body — the wall of prose re-laid as scannable lines with a little rhythm */
+.lc-row__body > p {
+  margin: 0;
+}
+.lc-row__body > p + p {
+  margin-top: 5px;
+}
+/* the lead line: a subtly heavier, brighter headline the eye lands on first */
+.lc-lead {
+  color: var(--lc-text);
+  font-weight: 480;
+}
+/* supporting clauses read a touch quieter than the lead */
+.lc-clause {
+  color: var(--lc-dim);
+}
 
 /* ─── rich body text: emphasis / code / refs / collapsed ids ──────────────────
    Inline spans a prose body may carry, styled so a status line reads like written
