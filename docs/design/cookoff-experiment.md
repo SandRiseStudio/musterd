@@ -74,7 +74,8 @@ judge-free, so the headline experiment needs no LLM judge at all.
 ## The instrument: the cookoff scenario
 
 **cookoff** is a fixed scenario you run configurations through — same recipe, different kitchens,
-judged plates. It is:
+judged plates. It is **built** — the **Skiff** fixture in its own repo
+(`SandRiseStudio/cookoff-scenario`; see [`cookoff-scenario-repo.md`](cookoff-scenario-repo.md)). It is:
 
 - **A bespoke small codebase.** Bespoke matters: it cannot be in any model's training data, or the
   agents solve from memory and the coordination signal vanishes.
@@ -245,6 +246,8 @@ double-control** as the credibility spine.
 ## Related
 
 - [ADR 122](../decisions/122-cookoff-value-experiment.md) (the frozen decision this doc details).
+- [`cookoff-scenario-repo.md`](cookoff-scenario-repo.md) (the built Skiff fixture — repo, kickoff SHA,
+  trap tickets, hidden suites, scoring harness).
 - [`model-experimentation.md`](model-experimentation.md) (Track A leaderboard — the model-axis run),
   ADR 051 (the flywheel's experiment axis), ADR 052 (obs-evals baselines), ADR 056 (the research
   ladder), ADR 082 (the coordination telemetry this measures on), ADR 090 (why the delivery ledger
