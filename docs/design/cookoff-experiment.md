@@ -234,11 +234,13 @@ double-control** as the credibility spine.
 
 ## Open before the smoke run
 
-- Freeze the **wasted-work operational predicates** (dup-hunk threshold, clobber-detection rule,
-  abandonment rule); start from finding 001's method.
-- Define the **interventions counting protocol** — what exactly counts as a touch, logged uniformly in
-  the non-musterd cells (a human run-log discipline).
-- Pin the **flagship model + harness version**.
+- ~~Freeze the **wasted-work operational predicates**~~ — **done**: predicate set v1 frozen by
+  [ADR 123](../decisions/123-cookoff-measurement-protocol.md) /
+  [`cookoff-measurement.md`](cookoff-measurement.md).
+- ~~Define the **interventions counting protocol**~~ — **done**: same freeze (six touch codes,
+  uniform per-run log, musterd cells pay full fare).
+- Pin the **flagship model + harness version** — still open; recorded in the ADR 051 run manifest
+  when the smoke run is scheduled.
 
 ## Related
 
