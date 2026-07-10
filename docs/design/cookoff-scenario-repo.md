@@ -81,9 +81,13 @@ scoring script, and git archaeology are proven to work together before any paid 
 
 ## What's next (not this Lane)
 
-The **run ladder** Lane (`01KX6QBY86YD9A7W696P31ABXQ`) consumes this fixture: its smoke rung also
-recalibrates `musterd archaeology` against finding 001's ≈37% before scoring any cell, and pins the
-flagship model + harness in the ADR 051 run manifest (still open, ADR 123 §7).
+The **run ladder** Lane (`01KX6QBY86YD9A7W696P31ABXQ`) consumes this fixture. Its pins (model, harness,
+N, wall-clock cap) and spend authorization are frozen in the
+[**run manifest**](cookoff-run-manifest.md) (ADR 051 / ADR 123 §7). The manifest also records the
+smoke-rung calibration: finding 001's ≈37% is **not reproducible** by the git tool (single-actor
+history + deleted abandoned branches — see the manifest §3), so the reproducible calibration anchor is
+this fixture's multi-seat `reference-solution` (12.2%, non-zero, per-actor), validated before any paid
+cell.
 
 ## Related
 
