@@ -1,7 +1,21 @@
+import { spawnSync } from 'node:child_process';
+import { resolve as resolvePath } from 'node:path';
 import { createServer } from '@musterd/server';
 import { flagStr, type Parsed } from '../args.js';
 import { renderBanner } from '../render/rows.js';
 import { theme } from '../render/theme.js';
+
+/**
+ * The commit this daemon boots from (ADR 130), resolved once from the CLI's own checkout — the same
+ * repo-root derivation `service refresh` syncs (`…/packages/cli/dist/bin.js` → up four). Best-effort:
+ * an npm-installed CLI has no checkout and the daemon simply omits `build` from `/health`.
+ */
+function resolveBuildRef(): string | undefined {
+  const repoRoot = resolvePath(process.argv[1] ?? '', '../../../..');
+  const r = spawnSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
+  const ref = r.status === 0 ? r.stdout.trim() : '';
+  return /^[0-9a-f]{40}$/.test(ref) ? ref : undefined;
+}
 
 /**
  * Launch the daemon in the foreground. This is the one place the CLI imports
@@ -15,6 +29,7 @@ export async function serveCommand(parsed: Parsed): Promise<number> {
   const trustProxy = parsed.flags['insecure-trust-proxy'] === true;
   // Serve a built web UI same-origin (ADR 062) — flag or MUSTERD_WEB_ROOT.
   const webRoot = flagStr(parsed.flags, 'web-root') ?? process.env['MUSTERD_WEB_ROOT'];
+  const buildRef = resolveBuildRef();
   const server = createServer({
     ...(portFlag ? { port: Number(portFlag) } : {}),
     ...(host ? { host } : {}),
@@ -22,6 +37,7 @@ export async function serveCommand(parsed: Parsed): Promise<number> {
     ...(tlsKey ? { tlsKey } : {}),
     ...(trustProxy ? { trustProxy: true } : {}),
     ...(webRoot ? { webRoot } : {}),
+    ...(buildRef ? { buildRef } : {}),
   });
   const { port, host: boundHost } = await server.listen();
 

@@ -167,6 +167,20 @@ describe('HTTP API', () => {
     expect(typeof r.json.schema).toBe('number');
     // ADR 047: derived cross-team count of live sessions; zero on a fresh daemon.
     expect(r.json.connections).toBe(0);
+    // ADR 130: no buildRef configured → the build field is omitted, never null/empty.
+    expect(r.json).not.toHaveProperty('build');
+  });
+
+  it('health names the boot commit when the embedder passes buildRef (ADR 130)', async () => {
+    const sha = 'b'.repeat(40);
+    const s = createServer({ db: openDb(':memory:'), port: 0, buildRef: sha });
+    const { port } = await s.listen();
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      expect(((await res.json()) as { build?: string }).build).toBe(sha);
+    } finally {
+      await s.close();
+    }
   });
 
   it('creates a team + creator token; duplicate slug is 409', async () => {
