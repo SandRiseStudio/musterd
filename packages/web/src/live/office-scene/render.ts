@@ -330,6 +330,10 @@ function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
   // welcome mat: a bordered two-tone mat instead of the old flat brown patch
   rug(ctx, fit, lx, ly, 70, '#6b4326');
   rug(ctx, fit, lx, ly, 58, '#8f5c33');
+  // contact shadow along the door base — grounds the posts on the floor (every other standing piece
+  // has one; without it the tall glass panel reads as floating)
+  const foot = project(lx, ly - 42, fit);
+  ellipse(ctx, { x: foot.x, y: foot.y + 2 * s }, 52 * s, 15 * s, 'rgba(0,0,0,0.13)');
   // threshold strip under the doorway
   box(ctx, fit, lx, ly - 42, 94, 6, 3, '#4e3a24');
   // door posts
