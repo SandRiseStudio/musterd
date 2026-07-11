@@ -29,9 +29,10 @@ export type ShippedAnchor = { prs: number[] } | { legacy: true };
 /**
  * Build-order lane — priority/sequence, orthogonal to {@link Status}. Status is the coarse
  * "how imminent/designed" grouping; `wave` is the linear order we actually build in. Every unshipped,
- * in-scope item carries one; shipped/out-of-scope items omit it.
+ * in-scope item carries one; out-of-scope items omit it. A shipped item may keep the wave it was
+ * built in as history (the map badge), but the generated Build sequence lists only unshipped work.
  */
-export type Wave = 1 | 2 | 3 | 4 | 5 | 'later';
+export type Wave = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 'later';
 
 export type Category =
   | 'human-loop'
@@ -160,7 +161,7 @@ export const CATEGORY_ORDER: Category[] = [
 
 export const STATUS_ORDER: Status[] = ['shipped', 'near-term', 'reserved', 'out-of-scope'];
 
-export const WAVE_ORDER: Wave[] = [1, 2, 3, 4, 5, 'later'];
+export const WAVE_ORDER: Wave[] = [1, 2, 3, 4, 5, 6, 7, 8, 'later'];
 
 export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
   1: { label: 'Wave 1', tone: 'Harden the coordination loop — small, additive, evidence-backed.' },
@@ -173,6 +174,18 @@ export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
   5: {
     label: 'Wave 5',
     tone: 'Depth — turn the telemetry we already emit into a real observability layer, then per-seat memory, model as a variable, observed-surface contention, and the insight board; closing with the presence-gap fix.',
+  },
+  6: {
+    label: 'Wave 6',
+    tone: 'Prove it — run the cookoff ladder (smoke → pilot → flagship) and ship the coordination-traces dataset it produces; the sellable number decides how everything after is weighed.',
+  },
+  7: {
+    label: 'Wave 7',
+    tone: 'Humans as peers, re-founded — reevaluate the human role and human↔agent coordination as a whole, then build what it names (starting with the presence gap and the human-facing board).',
+  },
+  8: {
+    label: 'Wave 8',
+    tone: 'Any harness, always on — residency (resume the offline) plus the reevaluated role-template/mixed-harness layer; the top of the reachability ladder.',
   },
   later: { label: 'Later', tone: 'No near-term pull; opportunistic.' },
 };
@@ -566,18 +579,6 @@ const RAW: RawItem[] = [
     dependsOn: ['telemetry-l2', 'insight-engine'],
   },
   {
-    id: 'coordination-dataset',
-    wave: 'later',
-    title: 'Coordination-traces dataset & MAST-in-the-wild',
-    plan: 'reserved',
-    category: 'observability',
-    blurb: 'The first research artifact: an open, redacted dataset of real human+agent coordination traces on HuggingFace, plus MAST failure detectors over the act-typed log — the data no single-agent vendor can produce.',
-    detail:
-      'Dataset-first on the HF ladder (dataset → benchmark + leaderboard → paper → judge model), MAST-in-the-wild as the first thesis (ADR 056). Substrate is telemetry-l2 + coordination-density; reproducibility rides on the flywheel’s pinned experiment manifests (ADR 051) and baselines (ADR 052). Release is gated on the opt-in + redaction posture (ADR 051) — no dataset ships before consent/redaction is enforced.',
-    refs: [adr(56, 'ADR 056'), doc('docs/research/README.md', 'docs/research/')],
-    dependsOn: ['telemetry-l2', 'coordination-density', 'cookoff-value-experiment'],
-  },
-  {
     id: 'research-intake',
     wave: 'later',
     title: 'Research radar (ingest)',
@@ -621,11 +622,11 @@ const RAW: RawItem[] = [
     id: 'web-dashboard',
     wave: 3,
     title: 'Web dashboard — live team console',
-    plan: 'near-term',
+    shipped: { legacy: true },
     category: 'surfaces',
     blurb: 'A browser console for the team: the firehose observer stream, the live roster, and the governance/approval web views — a read-only window onto the same Members.',
     detail:
-      'Substantially built: the team firehose (ADR 061, subscribe scope team-all + GET /teams/:slug/messages), the daemon static-serve (ADR 062), the read-only observer seat (ADR 063/064), the approval card (ADR 072), and the governance web views (ADR 073) all landed; the /live dashboard has had a polish pass. The web observer now connects via the v0.3 P3.2 claim handshake (ADR 077) and the shared read-only watch link (ADR 063) shipped — so the console works end-to-end against a live P3 daemon (the claim-handshake gap this item once tracked is closed). Remaining: general hardening. The Surface enum already includes web/ios/slack — same Member, more Presences.',
+      'Built: the team firehose (ADR 061, subscribe scope team-all + GET /teams/:slug/messages), the daemon static-serve (ADR 062), the read-only observer seat (ADR 063/064), the approval card (ADR 072), and the governance web views (ADR 073) all landed; the /live dashboard has had polish passes and the office render on top. The web observer connects via the v0.3 P3.2 claim handshake (ADR 077) and the shared read-only watch link (ADR 063) shipped — the console works end-to-end against a live P3 daemon. Marked shipped at the 2026-07-10 reprioritization: the console does its job today; the once-vague "general hardening" remainder is now tracked concretely elsewhere — observer scoping under shared/remote-team security hardening, and the board/insight rail under the web insight layer. The Surface enum already includes web/ios/slack — same Member, more Presences.',
     refs: [adr(61, 'ADR 061'), adr(63, 'ADR 063'), adr(72, 'ADR 072'), adr(73, 'ADR 073'), adr(77, 'ADR 077')],
   },
   {
@@ -641,11 +642,13 @@ const RAW: RawItem[] = [
   },
   {
     id: 'more-surfaces',
-    wave: 3,
-    title: 'iOS & Slack surfaces',
+    wave: 'later',
+    title: 'Slack surface (iOS deferred)',
     plan: 'reserved',
     category: 'surfaces',
-    blurb: 'An iOS app and a Slack surface, so a Member is reachable wherever its human or agent already lives.',
+    blurb: 'A Slack surface, so a Member is reachable where its human already lives; a native iOS app is explicitly deferred behind it.',
+    detail:
+      'Re-scoped at the 2026-07-10 reprioritization: no evidence pull for iOS anywhere in the record, while Slack is where the reachability loop (notify → availability → urgent) most plausibly meets a human day-to-day. Slack-first when a surface wave opens; iOS only on real demand.',
     dependsOn: ['web-dashboard'],
   },
   {
@@ -772,14 +775,14 @@ const RAW: RawItem[] = [
   },
   {
     id: 'harness-residency',
-    wave: 'later',
+    wave: 8,
     title: 'musterd gives any harness residency (resume the offline)',
-    plan: 'reserved',
+    plan: 'near-term',
     category: 'harness',
     blurb:
       'The offline rung: a seat binding holds the harness session id, so the daemon can resurrect an exited session on a directed act — turning a turn-scoped harness into an always-on one.',
     detail:
-      'From agent-ontology.md §4 (residency classes). Turn-scoped harnesses (Claude Code, Cursor) die between turns; the strategic claim is that musterd, holding the session id, can resurrect them on a directed act (`claude --resume <id> -p …`). Nobody has built the multi-agent, multi-human, one-team residency layer — the always-on gateways (OpenClaw, Hermes) are single-agent, single-human. Bigger lift (session-id capture, harness-specific resume), no near-term pull, so it waits — but it is the top of the reachability ladder and the "musterd makes any harness always-on" position.',
+      'From agent-ontology.md §4 (residency classes). Turn-scoped harnesses (Claude Code, Cursor) die between turns; the strategic claim is that musterd, holding the session id, can resurrect them on a directed act (`claude --resume <id> -p …`). Nobody has built the multi-agent, multi-human, one-team residency layer — the always-on gateways (OpenClaw, Hermes) are single-agent, single-human. Pulled up at the 2026-07-10 reprioritization: the interrupt-line arc is complete and measured (ADR 088 → 125), so residency is the one rung of the reachability ladder left — and the "musterd makes any harness always-on" position is still unclaimed by anyone. Bigger lift (session-id capture, harness-specific resume); the first increment is a design session freezing the residency contract per harness class (agent-ontology.md §4).',
     refs: [doc('docs/design/agent-ontology.md', 'agent-ontology.md'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
     dependsOn: ['wake-on-message'],
   },
@@ -844,7 +847,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'cookoff-value-experiment',
-    wave: 5,
+    wave: 6,
     title: 'cookoff — the controlled experiment that proves musterd’s value',
     plan: 'near-term',
     category: 'observability',
@@ -862,20 +865,51 @@ const RAW: RawItem[] = [
     dependsOn: ['model-experimentation', 'coordination-lanes'],
   },
   {
+    id: 'coordination-dataset',
+    wave: 6,
+    title: 'Coordination-traces dataset & MAST-in-the-wild',
+    plan: 'near-term',
+    category: 'observability',
+    blurb: 'The first research artifact: an open, redacted dataset of real human+agent coordination traces on HuggingFace, plus MAST failure detectors over the act-typed log — the data no single-agent vendor can produce.',
+    detail:
+      'Dataset-first on the HF ladder (dataset → benchmark + leaderboard → paper → judge model), MAST-in-the-wild as the first thesis (ADR 056). Substrate is telemetry-l2 + coordination-density; reproducibility rides on the flywheel’s pinned experiment manifests (ADR 051) and baselines (ADR 052). Pulled up 2026-07-10 into the cookoff wave: ADR 122 makes every flagship cookoff run a labeled coordination transcript, so the dataset is now a *byproduct* of the experiment, not an independent build — sequenced directly behind the run ladder. Release stays gated on the opt-in + redaction posture (ADR 051) — no dataset ships before consent/redaction is enforced.',
+    refs: [adr(56, 'ADR 056'), doc('docs/research/README.md', 'docs/research/')],
+    dependsOn: ['telemetry-l2', 'coordination-density', 'cookoff-value-experiment'],
+  },
+  {
     id: 'lanes-phase2',
-    wave: 5,
+    wave: 'later',
     title: 'Coordination lanes — Phase 2 (observed surface + merge-funnel)',
     plan: 'reserved',
     category: 'platform',
     blurb: 'The observed-surface + merge-funnel layer on top of the Phase-1 lane primitive — tighter contention signal, less reliance on declarations.',
     detail:
-      'Phase-1 (ADR 083) shipped the declared intent+dependency layer. Phase 2: observed surface (fs-watch / git-diff sampling instead of only declared globs), the symbol/hunk-level merge-funnel, lane_ack to silence a warning, role-pool auto-assignment of open lanes, and auto-done when a lane\'s branch merges. Watcher, never gatekeeper.',
+      'Phase-1 (ADR 083) shipped the declared intent+dependency layer. Phase 2: observed surface (fs-watch / git-diff sampling instead of only declared globs), the symbol/hunk-level merge-funnel, lane_ack to silence a warning, role-pool auto-assignment of open lanes, and auto-done when a lane\'s branch merges. Watcher, never gatekeeper. Deliberately parked behind the cookoff (2026-07-10): cell D measures how much contention the *declared* Phase-1 layer already catches — if declared lanes cover most of it, Phase 2\'s priority drops; if wasted-work stays high with lanes on, this is the next lever.',
     refs: [adr(83, 'ADR 083'), doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax')],
     dependsOn: ['coordination-lanes'],
   },
   {
+    id: 'human-role-reevaluation',
+    wave: 7,
+    title: 'Re-found the human role — human↔agent coordination, reevaluated whole',
+    plan: 'near-term',
+    category: 'human-loop',
+    blurb:
+      'A dedicated design pass that reevaluates the human’s role in musterd end-to-end — presence, steering, notification, approval, and thread-close — against the humans-as-peers thesis and what the dogfood record actually shows, before more human-loop features are built piecemeal.',
+    detail:
+      'Declared at the 2026-07-10 reprioritization. The human-loop layer shipped rung by rung (nudge → availability/urgent → tiers → interrupt line → steer/challenge/defer), each fixing a local dogfood wound — but the founding thesis (humans as peers, not approvers; Co-Gym’s 2× win from the notification protocol) has never been re-examined as a whole against how humans *actually* show up in the record: mostly as approvers and steerers, near-invisible on the roster while driving (the driver co-presence gap), and rarely as first-class doers of lanes. Scope: (1) the human presence model — driver co-presence, ambient human presence, fan-out (ADR 010/021/042/057); (2) the human’s work identity — do humans own lanes/Goals or only steer them; (3) the approval/authorization surface (request lane, authorized_by) vs the peer thesis; (4) notification/availability fit against real usage; and (5) the previously-parked **verified thread close** question (resolve as a state gate — a soft self-closed-without-counterpart signal rather than a refusal; see resolve-as-state-gate-brainstorm.md), which this item absorbs. Deliverable: a design doc + one or more ADRs that re-sequence the human-loop backlog; the driver co-presence fix builds on its answer.',
+    refs: [
+      doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md'),
+      doc('docs/design/research-foundation.md', 'research-foundation.md'),
+      doc('docs/design/resolve-as-state-gate-brainstorm.md', 'resolve-as-state-gate-brainstorm.md'),
+      adr(21, 'ADR 021'),
+      adr(25, 'ADR 025'),
+    ],
+    dependsOn: ['resolve-act', 'steering-latency-metric'],
+  },
+  {
     id: 'insight-dashboard',
-    wave: 5,
+    wave: 7,
     title: 'Work items, board & insight layer (web)',
     plan: 'near-term',
     category: 'insights',
@@ -887,42 +921,27 @@ const RAW: RawItem[] = [
   },
   {
     id: 'driver-copresence-gap',
-    wave: 5,
+    wave: 7,
     title: 'Driver co-presence gap — make steering light up the human',
     plan: 'reserved',
     category: 'human-loop',
     blurb: 'Driver co-presence shipped (ADR 021) but is dormant: it only annotates the agent row ("· driven by nick") and only when MUSTERD_DRIVER is set, which `musterd agent` (unlike `init`) never writes — so a human steering an agent-provisioned seat still reads offline.',
     detail:
-      'Diagnosed 2026-07-04 from the live roster (nick shows offline while actively steering) + the code: (1) `musterd agent` never writes MUSTERD_DRIVER (unlike `init`, which sets it from the saved operator identity — init.ts:404), so the "driven by" annotation never fires for agent-provisioned seats; (2) even when set, ADR 021 annotates the *agent* row, it does not give the human seat its own presence — so it does not match the expectation "I steer, therefore I am online". Fix has two parts: provision the driver link (opt-in, per workspace) so the annotation works, and decide whether steering should also mark the human seat present (closer to the driver-co-presence intent + the humans-as-peers thesis). Small, but it touches the presence model (ADR 010/042/057), so it is scoped as its own item at the tail of the depth wave.',
+      'Diagnosed 2026-07-04 from the live roster (nick shows offline while actively steering) + the code: (1) `musterd agent` never writes MUSTERD_DRIVER (unlike `init`, which sets it from the saved operator identity — init.ts:404), so the "driven by" annotation never fires for agent-provisioned seats; (2) even when set, ADR 021 annotates the *agent* row, it does not give the human seat its own presence — so it does not match the expectation "I steer, therefore I am online". Fix has two parts: provision the driver link (opt-in, per workspace) so the annotation works, and decide whether steering should also mark the human seat present (closer to the driver-co-presence intent + the humans-as-peers thesis). Small, but it touches the presence model (ADR 010/042/057) — and the "should steering mean present" question is exactly what the human-role reevaluation answers first, so this builds on it.',
     refs: [adr(21, 'ADR 021'), adr(57, 'ADR 057'), adr(42, 'ADR 042')],
-    dependsOn: ['agent-presence-touch'],
+    dependsOn: ['agent-presence-touch', 'human-role-reevaluation'],
   },
 
-  {
-    id: 'resolve-state-gate',
-    wave: 'later',
-    title: 'Verified thread close (resolve as a state gate)',
-    plan: 'reserved',
-    category: 'human-loop',
-    blurb:
-      'An open question, not a commitment: should closing a thread ever require a separate actor’s signal — so resolve is a verified state transition, not a self-asserted recap?',
-    detail:
-      'Surfaced from the verifier-first agentic-loop literature (landscape.md §4): “verification as a state-transition gate, not a recap,” and “a verifier can’t share the generator’s optimization target.” musterd already has the separate actor — a handoff/request_help has a counterpart who could verify — but a hard counterpart-ack gate can wedge a thread whose other party left, and a human peer may legitimately close unilaterally. The likely shape is a soft signal (record the close, flag self-closed-without-counterpart in the audit/roster) rather than a refusal, plus evidence in the close (artifact/trace meta). Parked for a dedicated session; reconciles with the terminal-done-marker thread in planning-and-insights-brainstorm.md. musterd stays the coordination signal, never the verifier (that’s batond).',
-    refs: [
-      doc('docs/design/resolve-as-state-gate-brainstorm.md', 'resolve-as-state-gate-brainstorm.md'),
-      adr(25, 'ADR 025'),
-    ],
-    dependsOn: ['resolve-act'],
-  },
 
   {
     id: 'own-harness',
-    wave: 'later',
+    wave: 8,
     title: 'Role templates & mixed-harness teams',
     plan: 'reserved',
     category: 'harness',
     blurb: 'A Role becomes a harness-agnostic provisioning template, rendered per-harness — then musterd’s own harness, then mixed-harness teams.',
-    detail: 'Provisioning is a starting point, not a security boundary. It stays additive, reversible, and non-obligating.',
+    detail:
+      'Provisioning is a starting point, not a security boundary. It stays additive, reversible, and non-obligating. Pulled up at the 2026-07-10 reprioritization to ride the residency wave — but it needs a reevaluation first: the ADR 026–030 template design predates the model-as-a-variable work (ADR 101 makes model family a team-composition property, which a role template should be able to declare) and the mixed-harness evidence from Track B (finding 003: non-Claude harnesses coordinate through musterd today). First increment = re-freeze the template contract against those two.',
     refs: [adr(26, 'ADRs 026–030')],
     dependsOn: ['harness-adapters'],
   },
