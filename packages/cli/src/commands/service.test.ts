@@ -269,6 +269,74 @@ describe('serviceCommand', () => {
     expect(out).toContain('loaded');
   });
 
+  // ADR 130: status names the running daemon's build and its skew against origin/main.
+  function gitScriptedRunner(over: { revList?: RunResult }): Runner {
+    return (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd !== 'git') return { status: 0, stdout: '\tpid = 7\n\tstate = running\n', stderr: '' };
+      const verb = args[2];
+      if (verb === 'rev-parse') return { status: 0, stdout: 'true\n', stderr: '' };
+      if (verb === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (verb === 'rev-list') return over.revList ?? { status: 0, stdout: '0\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+  }
+  const buildSha = 'a'.repeat(40);
+
+  it('status warns when the daemon build is behind origin/main, naming service refresh', async () => {
+    const c = ctx(gitScriptedRunner({ revList: { status: 0, stdout: '3\n', stderr: '' } }));
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['status']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0, build: buildSha }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain('3 commits behind origin/main');
+    expect(out).toContain('musterd service refresh');
+    // The comparison ran against the daemon's own checkout.
+    expect(calls.some((x) => x.cmd === 'git' && x.args.join(' ').includes('/repo'))).toBe(true);
+  });
+
+  it('status reports up-to-date when the daemon build matches origin/main', async () => {
+    const c = ctx(gitScriptedRunner({}));
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['status']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0, build: buildSha }),
+      }),
+    );
+    expect(out).toContain('up to date with origin/main');
+  });
+
+  it('status degrades to the bare build ref when the commit is unknown locally', async () => {
+    const c = ctx(gitScriptedRunner({ revList: { status: 128, stdout: '', stderr: 'unknown' } }));
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['status']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0, build: buildSha }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain(buildSha.slice(0, 7));
+    expect(out).not.toContain('behind origin/main');
+  });
+
+  it('status prints no build line when the daemon reports none', async () => {
+    const c = ctx(recorder({ status: 0, stdout: '\tpid = 7\n\tstate = running\n', stderr: '' }));
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['status']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(out).not.toContain('build:');
+  });
+
   // ADR 124: `--live` retargets the verbs at the /live viewer bundle instead of the daemon.
   function liveCtx(runner: Runner): LiveCtx {
     return {

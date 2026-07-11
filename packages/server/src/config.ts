@@ -38,6 +38,10 @@ export interface ResolvedConfig {
   allowedOrigins: string[];
   /** Absolute path to a built web UI to serve same-origin (ADR 062), or null to stay API-only. */
   webRoot: string | null;
+  /** The commit this daemon booted from (ADR 130), or null when not running from a git checkout.
+   * Resolved by the embedder (`musterd serve`) at boot; surfaced on `/health` as `build` so
+   * `service status` can name how far the running daemon is behind `origin/main`. */
+  buildRef: string | null;
 }
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -131,6 +135,8 @@ export interface ConfigOptions {
   trustProxy?: boolean;
   /** Serve a built web UI from this directory, same-origin (ADR 062). */
   webRoot?: string;
+  /** The commit this daemon boots from (ADR 130) — resolved by the embedder, e.g. `musterd serve`. */
+  buildRef?: string;
 }
 
 export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
@@ -162,6 +168,7 @@ export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
     allowedHosts: envList('MUSTERD_ALLOWED_HOSTS'),
     allowedOrigins: envList('MUSTERD_ALLOWED_ORIGINS'),
     webRoot: webRootOf(opts?.webRoot ?? process.env['MUSTERD_WEB_ROOT']),
+    buildRef: opts?.buildRef?.trim() || null,
   };
 }
 

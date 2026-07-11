@@ -40,6 +40,8 @@ export interface ServerOptions {
   /** Roster roots to project + watch (ADR 058). Defaults to {@link resolveRosterRoots}; pass an
    * explicit list to keep tests hermetic (no global-config dependency). `[]` disables reconcile. */
   rosterRoots?: string[];
+  /** The commit this daemon boots from (ADR 130) — resolved by the embedder; surfaced on /health. */
+  buildRef?: string;
 }
 
 export interface RunningServer {

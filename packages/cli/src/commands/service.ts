@@ -110,12 +110,46 @@ function resolveLiveCtx(port: number, run: Runner): LiveCtx {
   };
 }
 
+/** The daemon's `/health` shape as this command reads it (ADR 016 + 047 + 130). */
+export interface DaemonHealth {
+  connections?: number;
+  v?: string;
+  db?: string;
+  schema?: number;
+  /** The commit the daemon booted from (ADR 130) — absent when not running from a git checkout. */
+  build?: string;
+}
+
 /** Fetch the daemon's `/health` (ADR 016 + 047): the live `connections` count drives the guard below. */
-async function fetchHealth(): Promise<{ connections?: number }> {
+async function fetchHealth(): Promise<DaemonHealth> {
   const server = loadConfig().server;
   const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(2000) });
   if (!res.ok) throw new Error(`health ${res.status}`);
-  return (await res.json()) as { connections?: number };
+  return (await res.json()) as DaemonHealth;
+}
+
+/**
+ * Name the running daemon's build skew against `origin/main` (ADR 130) — the detector half of
+ * `service refresh`. Best-effort by design: the daemon may not run from a checkout, the fetch may be
+ * offline, the commit may be unknown locally — every failure degrades to just naming the build ref.
+ * `status` must never fail because of this check (watcher, never gatekeeper).
+ */
+export function buildSkewNote(build: string, dir: string, run: Runner): string {
+  const short = build.slice(0, 7);
+  const git = (...args: string[]): RunResult => run('git', ['-C', dir, ...args]);
+  if (git('rev-parse', '--is-inside-work-tree').status !== 0) return short;
+  git('fetch', 'origin', 'main', '--quiet'); // best-effort — offline still compares the last-known tip
+  const counted = git('rev-list', '--count', `${build}..origin/main`);
+  if (counted.status !== 0) return short; // unknown commit / no origin/main — no verdict
+  const behind = Number(counted.stdout.trim());
+  if (!Number.isFinite(behind)) return short;
+  if (behind === 0) return `${short} ${theme.meta('· up to date with origin/main')}`;
+  return (
+    `${short} · ` +
+    theme.warn(
+      `⚠ ${behind} commit${behind === 1 ? '' : 's'} behind origin/main — run \`musterd service refresh\``,
+    )
+  );
 }
 
 /**
@@ -125,7 +159,7 @@ async function fetchHealth(): Promise<{ connections?: number }> {
  * so let the verb through. `--force` is the universal override.
  */
 async function guardLiveSessions(
-  health: () => Promise<{ connections?: number }>,
+  health: () => Promise<DaemonHealth>,
   force: boolean,
 ): Promise<void> {
   if (force) return;
@@ -159,7 +193,7 @@ export async function serviceCommand(
     platform?: NodeJS.Platform;
     ctx?: ServiceCtx;
     liveCtx?: LiveCtx;
-    health?: () => Promise<{ connections?: number }>;
+    health?: () => Promise<DaemonHealth>;
     /** Probe whether the /live dev server answers on its port (injected so tests skip the network). */
     probeViewer?: (port: number) => Promise<boolean>;
   } = {},
@@ -246,7 +280,7 @@ export async function serviceCommand(
     case 'refresh':
       return refreshDaemon(ctx, health, force, ok, fail);
     case 'status':
-      return renderStatus(ctx);
+      return renderStatus(ctx, health);
     case 'logs': {
       const follow = parsed.flags['follow'] === true || parsed.positionals.includes('-f');
       return logs(ctx, follow);
@@ -274,7 +308,7 @@ export async function serviceCommand(
  */
 async function refreshDaemon(
   ctx: ServiceCtx,
-  health: () => Promise<{ connections?: number }>,
+  health: () => Promise<DaemonHealth>,
   force: boolean,
   ok: (s: string) => void,
   fail: (step: string, r: RunResult) => never,
@@ -454,13 +488,15 @@ function liveLogs(ctx: LiveCtx, follow: boolean): Promise<number> {
   });
 }
 
-async function renderStatus(ctx: ServiceCtx): Promise<number> {
+async function renderStatus(
+  ctx: ServiceCtx,
+  fetchHealthFn: () => Promise<DaemonHealth>,
+): Promise<number> {
   const st = status(ctx);
   const server = loadConfig().server;
-  let health: { v?: string; db?: string; schema?: number } | undefined;
+  let health: DaemonHealth | undefined;
   try {
-    const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(2000) });
-    if (res.ok) health = (await res.json()) as typeof health;
+    health = await fetchHealthFn();
   } catch {
     // daemon may be down or unreachable — reflected below
   }
@@ -477,6 +513,12 @@ async function renderStatus(ctx: ServiceCtx): Promise<number> {
         : theme.err('unreachable') + theme.meta(` · ${server}`)
     }\n`,
   );
+  // Build provenance + skew (ADR 130): the running daemon names its commit; we name the gap.
+  if (health?.build) {
+    process.stdout.write(
+      `  ${theme.meta('build:')}  ${buildSkewNote(health.build, ctx.workingDir, ctx.run)}\n`,
+    );
+  }
   return 0;
 }
 

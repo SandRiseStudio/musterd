@@ -561,6 +561,9 @@ export async function handleHttp(
         db: ctx.config.dbPath,
         schema: schemaVersion(ctx.db),
         connections: countLivePresences(ctx.db, ctx.config.presenceTimeoutMs),
+        // The commit this daemon booted from (ADR 130) — lets `service status` name build skew
+        // against origin/main. Omitted when not running from a git checkout.
+        ...(ctx.config.buildRef ? { build: ctx.config.buildRef } : {}),
       });
     }
 
