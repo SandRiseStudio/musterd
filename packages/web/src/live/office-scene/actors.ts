@@ -74,9 +74,10 @@ export function homePoses(
       if (pl.index >= STRIP_CAP) continue; // past the cap: represented by the "+N waiting" pill
       // Overflow past the 12 desks: a single-file queue receding from the entrance into the room, facing
       // the desks — reads as "waiting to be seated" rather than a floating grid stacked off the edge.
+      // The door is on the back-left wall, so the line recedes inward (+lx) toward the desks.
       out.set(name, {
-        lx: ENTRANCE.lx - 34 + pl.index * 30,
-        ly: ENTRANCE.ly - 56 - pl.index * 28,
+        lx: ENTRANCE.lx + 34 + pl.index * 32,
+        ly: ENTRANCE.ly - 10 - pl.index * 6,
         dir: 'N',
         small: true,
         carry: false,

@@ -97,8 +97,9 @@ export const COFFEE_STAND = { lx: NOOK.lx - 74, ly: NOOK.ly - 46 };
 export const STRIP_CAP = 6;
 export const NOOK_CAP = 6;
 
-/** The glass entrance (front-left edge) — the enter/exit path endpoint + overflow strip anchor. */
-export const ENTRANCE = { lx: 185, ly: 815 };
+/** The glass entrance, set flush into the back-left floor edge (lx≈0) — the enter/exit path endpoint +
+ * overflow strip anchor. `lx` is the mat centre just inside the doorway; the door plane sits ~42 back. */
+export const ENTRANCE = { lx: 47, ly: 815 };
 
 export interface Huddle {
   lx: number;

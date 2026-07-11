@@ -78,9 +78,10 @@ function solidRects(): Rect[] {
     const sn = s.dir === 'S' || s.dir === 'N';
     out.push(rect(s.lx, s.ly, sn ? SHELF_LONG : SHELF_DEEP, sn ? SHELF_DEEP : SHELF_LONG));
   }
-  // entrance door posts (the doorway between them stays open)
-  out.push(rect(ENTRANCE.lx - 44, ENTRANCE.ly - 42, 10, 10, 6));
-  out.push(rect(ENTRANCE.lx + 44, ENTRANCE.ly - 42, 10, 10, 6));
+  // entrance door posts (the doorway between them stays open) — the door runs along the back-left wall,
+  // so the posts straddle it in ly with the plane set back in −lx.
+  out.push(rect(ENTRANCE.lx - 42, ENTRANCE.ly - 44, 10, 10, 6));
+  out.push(rect(ENTRANCE.lx - 42, ENTRANCE.ly + 44, 10, 10, 6));
   return out;
 }
 
