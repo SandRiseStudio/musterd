@@ -327,20 +327,25 @@ function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
   const { lx, ly } = ENTRANCE;
   const s = fit.scale;
   const H = 96;
+  // The door is set into the back-left wall (the lx≈0 floor edge): it runs *along* the wall (±ly) and its
+  // plane sits `dx` back toward the edge (−lx), so the panel is flush with the perimeter, not floating
+  // inland. The mat sits just inside (+lx), its rear corner meeting the threshold.
+  const dx = 42;
+  const wx = lx - dx; // door plane, nestled against the floor edge
   // welcome mat: a bordered two-tone mat instead of the old flat brown patch
-  rug(ctx, fit, lx, ly, 70, '#6b4326');
-  rug(ctx, fit, lx, ly, 58, '#8f5c33');
+  rug(ctx, fit, lx + 28, ly, 70, '#6b4326');
+  rug(ctx, fit, lx + 28, ly, 58, '#8f5c33');
   // contact shadow along the door base — grounds the posts on the floor (every other standing piece
   // has one; without it the tall glass panel reads as floating)
-  const foot = project(lx, ly - 42, fit);
+  const foot = project(wx, ly, fit);
   ellipse(ctx, { x: foot.x, y: foot.y + 2 * s }, 52 * s, 15 * s, 'rgba(0,0,0,0.13)');
-  // threshold strip under the doorway
-  box(ctx, fit, lx, ly - 42, 94, 6, 3, '#4e3a24');
+  // threshold strip under the doorway (runs along the wall)
+  box(ctx, fit, wx, ly, 6, 94, 3, '#4e3a24');
   // door posts
-  box(ctx, fit, lx - 44, ly - 42, 10, 10, H, '#5c452c');
-  box(ctx, fit, lx + 44, ly - 42, 10, 10, H, '#5c452c');
-  const a = project(lx - 44, ly - 42, fit);
-  const b = project(lx + 44, ly - 42, fit);
+  box(ctx, fit, wx, ly - 44, 10, 10, H, '#5c452c');
+  box(ctx, fit, wx, ly + 44, 10, 10, H, '#5c452c');
+  const a = project(wx, ly - 44, fit);
+  const b = project(wx, ly + 44, fit);
   const up = H * s;
   // glass: a vertical sky-tint gradient (brighter at the top) instead of one flat wash
   const glass = ctx.createLinearGradient(0, Math.min(a.y, b.y) - up, 0, Math.max(a.y, b.y));
@@ -391,7 +396,7 @@ function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
   roundRect(ctx, mid.x - 5.5 * s, hy - 7 * s, 2.6 * s, 14 * s, 1.3 * s, '#3c2e1e');
   roundRect(ctx, mid.x + 2.9 * s, hy - 7 * s, 2.6 * s, 14 * s, 1.3 * s, '#3c2e1e');
   // header beam over the doorway
-  box(ctx, fit, lx, ly - 42, 98, 8, 10, '#6b4a2a', H);
+  box(ctx, fit, wx, ly, 8, 98, 10, '#6b4a2a', H);
 }
 
 function drawPlant(
@@ -880,7 +885,7 @@ export function renderScene(
     }
   }
   if (stripTotal - stripDrawn > 0) {
-    const a = project(ENTRANCE.lx - 34, ENTRANCE.ly - 56, fit);
+    const a = project(ENTRANCE.lx + 34, ENTRANCE.ly - 10, fit);
     drawCountPill(ctx, { x: a.x, y: a.y - 66 * fit.scale }, `+${stripTotal - stripDrawn} waiting`, fit.scale);
   }
   if (nookTotal - nookDrawn > 0) {
