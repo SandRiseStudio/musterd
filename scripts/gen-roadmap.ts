@@ -88,7 +88,9 @@ function renderSequence(): string {
     `**Gate — ship v0.2.** ${SEQUENCE_GATE}`,
   ];
   for (const wave of WAVE_ORDER) {
-    const items = ROADMAP.filter((i) => i.wave === wave);
+    // The sequence is what we build NEXT — shipped items keep their wave as history, but only
+    // unshipped work renders here (a shipped item under "Later" reads as still-pending drift).
+    const items = ROADMAP.filter((i) => i.wave === wave && i.status !== 'shipped');
     if (items.length === 0) continue;
     lines.push('', `### ${WAVE_META[wave].label} — ${WAVE_META[wave].tone}`, '');
     for (const item of items) {
@@ -99,9 +101,13 @@ function renderSequence(): string {
 }
 
 function renderWedge(): string {
-  return [`## ${WEDGE.heading}`, '', WEDGE.body, '', `See: ${WEDGE.refs.map((r) => `[${r.label}](${r.href})`).join(', ')}.`].join(
-    '\n',
-  );
+  return [
+    `## ${WEDGE.heading}`,
+    '',
+    WEDGE.body,
+    '',
+    `See: ${WEDGE.refs.map((r) => `[${r.label}](${r.href})`).join(', ')}.`,
+  ].join('\n');
 }
 
 function generatedRegion(): string {
@@ -132,7 +138,9 @@ const next = build(current);
 
 if (check) {
   if (current !== next) {
-    process.stderr.write('ROADMAP.md is out of date with roadmap.data.ts — run `pnpm roadmap:gen`.\n');
+    process.stderr.write(
+      'ROADMAP.md is out of date with roadmap.data.ts — run `pnpm roadmap:gen`.\n',
+    );
     process.exit(1);
   }
   process.stdout.write('ROADMAP.md is in sync with roadmap.data.ts.\n');
