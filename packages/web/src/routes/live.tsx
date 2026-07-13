@@ -12,6 +12,7 @@ import {
   saveObserver,
   forgetObserver,
   genObserverName,
+  acquireWatchLinkObserver,
 } from '../live/client';
 import { firehoseSound } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
@@ -276,22 +277,37 @@ function LivePage() {
 }
 
 /**
- * Copy a shareable, read-only **watch link** — the current observer seat's credential in the URL
- * fragment (`#w=…`, so it never hits the server). Anyone the team hands it to opens the office as this
- * same observer: read-only by construction (ADR 063), fans out to any number of viewers, no account
- * and no per-viewer seat. This is the "team-controlled" way to let non-musterd people watch.
+ * Copy a shareable, read-only **watch link** — an observer credential in the URL fragment (`#w=…`, so
+ * it never hits the server). Anyone the team hands it to opens the office as that observer: read-only
+ * by construction (ADR 063), fans out to any number of viewers, no account and no per-viewer seat.
+ *
+ * The link carries a **public-grade** seat of its own (ADR 136), minted on first share — *not* this
+ * dashboard's credential. It used to be `cfg.token`, which is the operator's own full-grade seat, so
+ * sharing a link shared every DM on the team. A viewer now sees team/broadcast traffic and nothing
+ * directed.
  */
 function WatchLinkButton({ cfg }: { cfg: LiveConfig }) {
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
   const copy = async () => {
     const { origin } = window.location;
+    let creds;
+    try {
+      creds = await acquireWatchLinkObserver(cfg.team);
+    } catch {
+      // Minting failed — do NOT fall back to cfg.token. That fallback is the whole bug: it would
+      // silently hand out a full-visibility credential at the exact moment we meant to withhold one.
+      setFailed(true);
+      window.setTimeout(() => setFailed(false), 2400);
+      return;
+    }
     const url =
-      `${origin}/live?team=${encodeURIComponent(cfg.team)}&as=${encodeURIComponent(cfg.as)}` +
-      `#w=${encodeURIComponent(cfg.token)}`;
+      `${origin}/live?team=${encodeURIComponent(cfg.team)}&as=${encodeURIComponent(creds.name)}` +
+      `#w=${encodeURIComponent(creds.token)}`;
     try {
       await navigator.clipboard.writeText(url);
     } catch {
-      window.prompt('Copy this read-only watch link:', url);
+      window.prompt('Copy this read-only watch link (public traffic only):', url);
     }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
@@ -301,7 +317,11 @@ function WatchLinkButton({ cfg }: { cfg: LiveConfig }) {
       type="button"
       className={`lc__pbtn${copied ? ' lc__pbtn--on' : ''}`}
       onClick={() => void copy()}
-      title="Copy a shareable read-only watch link (anyone can watch — no account)"
+      title={
+        failed
+          ? 'Could not mint a watch-link seat — copy it from the daemon host'
+          : 'Copy a shareable read-only watch link (public traffic only — no DMs, no account)'
+      }
     >
       {copied ? (
         <svg viewBox="0 0 16 16" aria-hidden="true">

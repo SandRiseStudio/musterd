@@ -686,9 +686,10 @@ describe('WebSocket', () => {
     expect(roster.json.members.map((m: any) => m.name)).not.toContain('wall');
     expect((await get('/health')).json.connections).toBe(1);
 
-    // A read-only observer seat (ADR 063, localhost-trust) has full visibility, so it still receives a
-    // directed DM between two others via the firehose. (Regular members are recipient-scoped — see the
-    // recipient-scoping tests above; local-vs-shared observer scoping is a tracked follow-up.)
+    // A **full-grade** observer (the default, and what the trusted local dashboard mints — ADR 136)
+    // has full visibility, so it still receives a directed DM between two others via the firehose.
+    // Regular members are recipient-scoped (see the recipient-scoping tests above), and so is a
+    // public-grade observer — see the observer-grades block below.
     a.send({
       type: 'send',
       envelope: {
@@ -2820,5 +2821,180 @@ describe('provisioning is localhost-trust, enforced (observer DM disclosure)', (
     const res = await post('/teams/dusk/members', { name: 'web-1', kind: 'human', observer: true });
     expect(res.status).toBe(201);
     expect(res.json.human_credential).toMatch(/^mscr_/);
+  });
+});
+
+/**
+ * Observer grades (ADR 136) — a shared watch-link sees only public traffic.
+ *
+ * `members.observer` said *that* a seat was a read-only watcher but not *how much it may see*, so
+ * every observer was full-visibility and a shared watch-link carried the team's DMs. A link now mints
+ * a **public-grade** observer of its own.
+ *
+ * The enforcement is deliberately *not* a new query: a public observer is simply no longer exempt from
+ * the ADR 128 recipient-scoping, and for an observer that predicate collapses to exactly the public
+ * timeline — it can never be a sender (read-only), and team/broadcast fanout excludes it.
+ */
+describe('observer grades: a public-grade observer sees only public traffic (ADR 136)', () => {
+  async function seedTeam() {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential as string;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    return { team, tok, key: team.json.agent_key as string };
+  }
+
+  /** Ada→Lin DM (private), then Ada→team (public). */
+  async function seedTraffic(key: string) {
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          id: 'dm1',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'member', name: 'Lin' },
+          act: 'message',
+          body: 'private',
+          ts: Date.now(),
+        },
+      },
+      { key, seat: 'Ada' },
+    );
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          id: 'pub1',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'team' },
+          act: 'status_update',
+          body: 'public',
+          ts: Date.now() + 1,
+        },
+      },
+      { key, seat: 'Ada' },
+    );
+  }
+
+  it('GET /messages: the public observer gets team traffic, never the DM — the full one gets both', async () => {
+    const { tok, key } = await seedTeam();
+    const shared = await post(
+      '/teams/dawn/members',
+      { name: 'watch-1', kind: 'human', observer: true, observer_scope: 'public' },
+      tok,
+    );
+    const local = await post(
+      '/teams/dawn/members',
+      { name: 'web-1', kind: 'human', observer: true },
+      tok,
+    );
+    await seedTraffic(key);
+
+    const sharedView = await get('/teams/dawn/messages', shared.json.human_credential);
+    expect(sharedView.json.messages.map((m: any) => m.id)).toEqual(['pub1']);
+
+    // The local dashboard is unchanged — grade defaults to full, so it still sees the coordination.
+    const localView = await get('/teams/dawn/messages', local.json.human_credential);
+    expect(localView.json.messages.map((m: any) => m.id)).toEqual(['dm1', 'pub1']);
+  });
+
+  it('firehose: the public observer is not pushed a DM between two others, but does get team acts', async () => {
+    const { team, tok, key } = await seedTeam();
+    const shared = await post(
+      '/teams/dawn/members',
+      { name: 'watch-1', kind: 'human', observer: true, observer_scope: 'public' },
+      tok,
+    );
+    expect(shared.status).toBe(201);
+
+    const a = new TestWs();
+    const w = new TestWs();
+    await Promise.all([a.open(), w.open()]);
+    await a.claim('dawn', key, 'Ada', 'claude-code', await standingGrant(tok, 'Ada'));
+    await w.claim('dawn', key, 'watch-1', 'web', await standingGrant(tok, 'watch-1'));
+    await w.subscribe('team-all');
+
+    // A DM between two other seats must NOT reach the shared link …
+    a.send({
+      type: 'send',
+      envelope: {
+        id: 'dm1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'member', name: 'Lin' },
+        act: 'message',
+        body: 'private',
+        ts: Date.now(),
+      },
+    });
+    // … while a team act, sent after it, must. Asserting on the *next* frame is what makes this a real
+    // test: if the DM leaked it would arrive first, and the public act would not be frame #1.
+    a.send({
+      type: 'send',
+      envelope: {
+        id: 'pub1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: 'public',
+        ts: Date.now() + 1,
+      },
+    });
+
+    const frame = await w.waitFor('deliver');
+    expect((frame as any).envelope.id).toBe('pub1');
+    expect((frame as any).envelope.body).toBe('public');
+
+    a.close();
+    w.close();
+    expect(team.status).toBe(201);
+  });
+
+  it('a DM addressed TO the public observer still reaches it — it is that seat’s own mail', async () => {
+    const { tok, key } = await seedTeam();
+    const shared = await post(
+      '/teams/dawn/members',
+      { name: 'watch-1', kind: 'human', observer: true, observer_scope: 'public' },
+      tok,
+    );
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          id: 'toWatcher',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'member', name: 'watch-1' },
+          act: 'message',
+          body: 'for the watcher',
+          ts: Date.now(),
+        },
+      },
+      { key, seat: 'Ada' },
+    );
+
+    const view = await get('/teams/dawn/messages', shared.json.human_credential);
+    expect(view.json.messages.map((m: any) => m.id)).toEqual(['toWatcher']);
+  });
+
+  it('existing observers are unaffected by the migration — no silent downgrade of a live dashboard', async () => {
+    const { tok, key } = await seedTeam();
+    // A seat minted with no grade at all — the pre-ADR-135 shape, and what v17 backfills to 'full'.
+    const legacy = await post(
+      '/teams/dawn/members',
+      { name: 'web-legacy', kind: 'human', observer: true },
+      tok,
+    );
+    await seedTraffic(key);
+    const view = await get('/teams/dawn/messages', legacy.json.human_credential);
+    expect(view.json.messages.map((m: any) => m.id)).toEqual(['dm1', 'pub1']);
   });
 });

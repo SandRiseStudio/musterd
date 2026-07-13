@@ -362,6 +362,22 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE presence ADD COLUMN build TEXT');
     },
   },
+  {
+    // v18 — observer grades (ADR 136). `members.observer` said *that* a seat was a read-only watcher;
+    // it could not say *how much it may see*, so every observer was full-visibility and a shared
+    // watch-link carried the team's DMs. `observer_scope` is that second bit: 'full' (the local
+    // dashboard — the trusted operator's own window) or 'public' (a shared link — team/broadcast only).
+    //
+    // Additive + nullable. NULL means 'full', and existing observer rows are backfilled to it
+    // explicitly rather than left to the default: an observer minted before this migration was, by
+    // definition, minted by a trusted local operator (ADR 134 now enforces that), so silently
+    // downgrading it would break the live dashboard for no security gain.
+    version: 18,
+    up: (db) => {
+      db.exec('ALTER TABLE members ADD COLUMN observer_scope TEXT');
+      db.exec("UPDATE members SET observer_scope = 'full' WHERE observer = 1");
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

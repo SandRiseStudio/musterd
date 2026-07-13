@@ -1,4 +1,6 @@
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { MIGRATIONS, runMigrations } from './migrations.js';
 import { openDb } from './open.js';
 import { seedDawn } from './seed.js';
 
@@ -8,7 +10,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('17');
+    expect(ver?.value).toBe('18');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -89,6 +91,63 @@ describe('db', () => {
     // running again should not throw or duplicate
     const before = db.prepare('SELECT count(*) AS n FROM schema_meta').get() as { n: number };
     expect(before.n).toBe(1);
+    db.close();
+  });
+  /**
+   * The v18 backfill (ADR 136), on the path that actually matters: an EXISTING database that already
+   * holds observer seats — i.e. a live daemon with an open /live dashboard.
+   *
+   * Every other test opens a fresh db, where the backfill runs against zero rows and proves nothing.
+   * If it were wrong, existing observers would come up with `observer_scope = NULL`... which still
+   * resolves to 'full', so the *default* saves us — but only by luck. Pin the backfill itself: an
+   * observer that predates grades must be explicitly 'full', never silently downgraded to 'public'
+   * (which would blank the DM traffic out of a dashboard that has been working all along).
+   */
+  it('v18 backfills pre-existing observer seats to the full grade (no silent dashboard downgrade)', () => {
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+
+    // Build the database as it stood at v17 — every migration up to, but not including, observer grades.
+    for (const m of MIGRATIONS) {
+      if (m.version > 17) break;
+      m.up(db);
+    }
+    db.prepare(
+      "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '17') " +
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    ).run();
+
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO teams (id, slug, display, default_lifecycle, created_at, updated_at)
+       VALUES ('t1', 'dawn', 'Dawn', 'forever', ?, ?)`,
+    ).run(now, now);
+    // A v17-shape row: no observer_scope column exists yet to set.
+    const member = (observer: number, id: string, name: string) =>
+      db
+        .prepare(
+          `INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
+           VALUES (?, 't1', ?, 'human', '', 'forever', ?, ?, ?)`,
+        )
+        .run(id, name, observer, now, now);
+    member(1, 'm-obs', 'web-legacy');
+    member(0, 'm-reg', 'nick');
+
+    expect(runMigrations(db)).toBe(18);
+
+    const scope = (id: string) =>
+      db
+        .prepare<
+          [string],
+          { observer_scope: string | null }
+        >('SELECT observer_scope FROM members WHERE id = ?')
+        .get(id)?.observer_scope;
+
+    // The live dashboard's observer keeps seeing everything …
+    expect(scope('m-obs')).toBe('full');
+    // … and the grade stays meaningless (NULL) on an ordinary member, rather than reading as if it
+    // governed one.
+    expect(scope('m-reg')).toBeNull();
     db.close();
   });
 });

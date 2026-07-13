@@ -37,6 +37,10 @@ export interface MemberRow {
   bound_at: number | null;
   /** Read-only observer seat (ADR 063): hidden from roster/counts/presence, can't send. 0/1. */
   observer: number;
+  /** How much this observer may see (ADR 136): `'full'` — the whole timeline, the trusted local
+   * dashboard; `'public'` — team/broadcast traffic only, a shared watch-link. NULL ⇒ `'full'`
+   * (pre-v18 rows, and the default for a mint that doesn't ask). Meaningless when `observer = 0`. */
+  observer_scope: string | null;
   /** Admin-set account-status override (ADR 070): disabled|banned|archived. NULL ⇒ derived from
    * occupancy (`bound_at`): held ⇒ active, never-held ⇒ provisioned. */
   account_status: string | null;
@@ -106,6 +110,31 @@ export function resolveAccountStatus(row: MemberRow): AccountStatus {
 export function resolveCapabilities(row: MemberRow): Capabilities {
   if (!row.capabilities) return GENERALIST_CAPABILITIES;
   return CapabilitiesSchema.safeParse(JSON.parse(row.capabilities)).data ?? GENERALIST_CAPABILITIES;
+}
+
+/**
+ * Observer grade (ADR 136). NULL ⇒ `'full'`: a pre-v18 row, or a mint that didn't ask. Defaulting to
+ * full is safe *because minting is privileged* — ADR 134 restricts provisioning to a local peer or an
+ * admin — so the only seats that reach this default were created by a trusted party. A shared
+ * watch-link asks for `'public'` explicitly.
+ */
+export function resolveObserverScope(row: MemberRow): 'full' | 'public' {
+  return row.observer_scope === 'public' ? 'public' : 'full';
+}
+
+/**
+ * May this seat read the team's *directed* traffic — every DM, not just its own?
+ *
+ * The single predicate behind both enforcement points (`GET /messages` and the firehose). They were
+ * two independent `member.observer` / `conn.observer` tests before ADR 136, which is precisely the
+ * shape that lets a scoping rule drift out of sync between the history read and the live stream.
+ *
+ * Full visibility is: an **admin**, or a **full-grade observer** (the trusted local dashboard). Every
+ * other seat — ordinary members and public-grade observers alike — is recipient-scoped (ADR 128).
+ */
+export function hasFullMessageVisibility(row: MemberRow): boolean {
+  if (resolveCapabilities(row).is_admin) return true;
+  return row.observer === 1 && resolveObserverScope(row) === 'full';
 }
 
 /** Map a member row (+ its team slug) to the public protocol Member shape (no token_hash). */
