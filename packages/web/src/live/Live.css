@@ -753,29 +753,18 @@
   overflow: hidden;
   contain: strict;
 }
-/* a very slow day-cycle wash — cool-warm morning → bright noon → amber dusk, looped over minutes */
+/* the natural-light wash entering from the windows — colour (warm dawn/dusk → cool noon) and strength both
+   come off the real PST clock (index.ts sets --lc-amb-tint / --lc-amb-strength each minute); at night the
+   strength eases to ~0 and the canvas night-veil takes over. A gentle opacity ease keeps the minute steps
+   from popping. */
 .lc-amb-daylight {
   position: absolute;
   inset: -10%;
   mix-blend-mode: soft-light;
-  background: radial-gradient(120% 95% at 32% -5%, rgba(255, 226, 172, 0.55), rgba(255, 176, 116, 0) 62%);
-  animation: lc-daycycle 210s ease-in-out infinite;
-  will-change: opacity, filter;
-}
-@keyframes lc-daycycle {
-  0%,
-  100% {
-    filter: hue-rotate(-8deg) brightness(1.02);
-    opacity: 0.42;
-  }
-  35% {
-    filter: hue-rotate(0deg) brightness(1.06);
-    opacity: 0.3;
-  }
-  70% {
-    filter: hue-rotate(12deg) brightness(0.98);
-    opacity: 0.56;
-  }
+  background: radial-gradient(120% 95% at 32% -5%, var(--lc-amb-tint, rgb(255, 226, 172)), transparent 62%);
+  opacity: var(--lc-amb-strength, 0.3);
+  transition: opacity 1200ms ease;
+  will-change: opacity;
 }
 /* breathing screen-glow over a working member's monitor (positioned inline; only opacity animates so the
    breathe never fights the positioning transform) */

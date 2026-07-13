@@ -1,6 +1,7 @@
 import { createActors, type Actors } from './actors';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { ENTRANCE } from './layout';
+import { computeLightEnv, type LightEnv } from './lighting';
 import { assignSeats, type Placement } from './seating';
 import {
   animatedDeskAnchors,
@@ -44,6 +45,34 @@ const AMBIENT_MAX_MS = 180000;
  * this much wall time has built up. A coffee stroll is visually identical at 20fps and ~3× cheaper; real
  * acts keep 60fps because their motion is not `ambientOnly`. */
 const AMBIENT_FRAME_MS = 50;
+
+/** How often the office re-reads the PST clock so the lighting tracks the real sun (the sun moves slowly —
+ * once a minute is plenty, and a rebake only happens when the veil/lamp state actually crosses a step). */
+const LIGHT_TICK_MS = 60000;
+
+/**
+ * Current hour-of-day (0..24) in America/Los_Angeles — the office clock the lighting follows. A
+ * `?light=HH` / `?light=HH:MM` query param overrides it, a dev aid for previewing dawn/dusk/night without
+ * waiting for the wall clock (harmless in prod — it only applies when explicitly present).
+ */
+function pstNowHours(): number {
+  try {
+    const q = new URLSearchParams(window.location.search).get('light');
+    const m = q && /^(\d{1,2})(?::(\d{2}))?$/.exec(q.trim());
+    if (m) return (Number(m[1]) % 24) + (m[2] ? Number(m[2]) / 60 : 0);
+  } catch {
+    /* no window/search available — fall through to the real clock */
+  }
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const hh = Number(parts.find((p) => p.type === 'hour')?.value ?? '12');
+  const mm = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  return (hh % 24) + mm / 60;
+}
 
 /** An in-flight speech bubble over a member's head — its DOM root plus the timers/frames to cancel when
  * it's superseded (a newer act from the same member) or the office is disposed. */
@@ -92,6 +121,8 @@ export function mountOffice(
   let placements = new Map<string, Placement>();
   let teamName = 'revive';
   let heads = new Map<string, Pt>(); // home head anchors — where in-place cues sit
+  let occupied = false; // any online member on the floor → overhead lights on
+  let lightEnv: LightEnv = computeLightEnv(pstNowHours(), occupied); // office lighting from the PST clock
 
   const labels = new Map<string, HTMLDivElement>();
   const speeches = new Map<string, Speech>(); // one live speech bubble per member (name → bubble)
@@ -148,6 +179,20 @@ export function mountOffice(
     };
   }
 
+  /** Recompute the office lighting from the PST clock + occupancy, and push the natural-light wash (tint +
+   * strength) to the CSS overlay. Returns whether the *canvas* light (night veil / desk lamps) crossed a
+   * step and so needs a rebake — the caller decides whether to act on it. */
+  function refreshLightEnv(): boolean {
+    const prev = lightEnv;
+    lightEnv = computeLightEnv(pstNowHours(), occupied);
+    if (!reduced) {
+      // natural light enters as the soft-light wash — colour + strength straight off the clock
+      ambientHost.style.setProperty('--lc-amb-strength', lightEnv.skyStrength.toFixed(3));
+      ambientHost.style.setProperty('--lc-amb-tint', lightEnv.skyTint);
+    }
+    return Math.abs(lightEnv.veilAlpha - prev.veilAlpha) > 0.01 || lightEnv.lampsOn !== prev.lampsOn;
+  }
+
   /** Redraw the office at rest (everyone home) into the offscreen buffer and rebuild the name labels. */
   function bake() {
     setScenePalette(resolveScenePalette()); // follow the theme cascaded to the host before painting
@@ -155,7 +200,7 @@ export function mountOffice(
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
     const poses = actors.poses();
-    const anchors = renderScene(bctx, fit, placements, nodes, poses, undefined, teamName);
+    const anchors = renderScene(bctx, fit, placements, nodes, poses, undefined, teamName, lightEnv);
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
@@ -390,7 +435,7 @@ export function mountOffice(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), rig ?? undefined, teamName);
+    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), rig ?? undefined, teamName, lightEnv);
     drawCues();
     positionLabels(anchors.heads);
   }
@@ -525,6 +570,9 @@ export function mountOffice(
     teamName = next.teamName ?? 'revive';
     placements = assignSeats(next.nodes);
     const byName = new Map(next.nodes.map((n) => [n.name, n]));
+    // The overhead lights follow occupancy: on while anyone's online on the floor, off once the room empties.
+    occupied = next.nodes.some((n) => n.presence === 'online');
+    refreshLightEnv(); // fold the new occupancy (+ current clock) into the lighting before we bake
     // Animate presence changes (walk in/out, drift) unless reduced-motion asked for stillness.
     actors.setHomes(placements, byName, !reduced);
     if (!reduced && actors.takeDoorPulses() > 0) pushDoorCue(); // the entrance "opens" as someone comes/goes
@@ -667,10 +715,19 @@ export function mountOffice(
   };
   document.addEventListener('visibilitychange', onVisibility);
 
+  refreshLightEnv(); // seat the natural-light wash + veil from the PST clock before the first bake
   sizeCanvases();
   bake();
   drawStatic();
   scheduleAmbient(); // start the idle coffee-stroll timer (no-op under reduced-motion)
+
+  // Track the real PST sun: re-read the clock every minute and rebake only when the veil/lamp state moves.
+  const lightTimer = setInterval(() => {
+    if (refreshLightEnv()) {
+      bake();
+      if (!raf) paintResting();
+    }
+  }, LIGHT_TICK_MS);
 
   // Load the Rive character rig (client-only WASM). On success the office switches to a continuous
   // Rive redraw; on any failure `rig` stays null and the code-drawn avatar is used unchanged.
@@ -706,6 +763,7 @@ export function mountOffice(
     dispose: () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      clearInterval(lightTimer); // stop the PST lighting clock
       if (ambientTimer) clearTimeout(ambientTimer); // stop the idle-beat scheduler
       window.removeEventListener('resize', onResize);
       ro?.disconnect();
