@@ -107,3 +107,22 @@ Alongside it, the furniture is corrected so a seated member can actually be seen
 - `docs/design/office-rive-character-spec.md` is **superseded** (header added, kept for the archaeology).
   The hair-style / hair-colour items it lists as "`.riv` side pending" are now moot — the painter tints
   hair from the member's own colour directly.
+
+## Observability & Evaluation
+
+- **Traces:** n/a — a browser-side rendering change inside the `/live` office canvas. It emits no protocol
+  acts, reads no new server state, and changes nothing the daemon derives: the character is a pure function
+  of the `Pose` the actor system already produced (ADR 089–091 continue to cover the acts that _drive_ that
+  pose). The one runtime property worth watching is not a trace but an invariant — **the office still parks
+  at 0 rAF/sec when nobody is working** — which is asserted in the loop's own gating (`living()`), not
+  sampled.
+- **Eval:** n/a — no agent-facing model decision, no dataset to score. This is a decorative surface: the
+  roster (`RosterPanel`) remains the accessible, load-bearing counterpart to the office (see 08-web.md), so
+  nothing an agent or human _acts on_ depends on the character rendering. The animation's correctness is
+  instead pinned mechanically by `skeleton.test.ts` (20 assertions: no foot through the floor at any phase,
+  one lift per stride, arms counter-swinging the legs, seated head/shoulders clearing the desk, hands within
+  actual arm reach) — the class of check a binary `.riv` could not support, and part of the reason for the
+  change.
+- **Experiment:** n/a — no behavioural variant, no flag, no rollout. A single deterministic renderer swap;
+  the previous implementation is deleted rather than kept behind a toggle (there is no longer a code path
+  that can fail to load). Visual verification is `/office-preview`, driven headless.
