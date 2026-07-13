@@ -160,6 +160,45 @@ export function buildSkewNote(build: string, dir: string, run: Runner): string {
 }
 
 /**
+ * Refuse to write a plist whose embedded node can't actually run the daemon.
+ *
+ * `install` embeds `process.execPath` — whatever node ran this CLI (ADR 045, "self-correcting"). If that
+ * node's ABI doesn't match the daemon's compiled native module (`better-sqlite3`), the daemon crashloops
+ * on boot with a `NODE_MODULE_VERSION` mismatch **while `install` cheerfully reports success** — and the
+ * daemon goes dark. That is exactly how the dogfood daemon was taken down (2026-07-12): `install` run from
+ * a Node 20 shell against a Node 22 build. `refresh`/`start`/`restart` are unaffected — they reuse the
+ * existing plist and never re-embed a node — so this guards the one verb that can do it.
+ *
+ * Deliberately conservative: it reports a mismatch **only** when the loader says `NODE_MODULE_VERSION`.
+ * Any other probe failure (packaged install, module not resolvable, no checkout) returns null and the
+ * install proceeds untouched — so this can never block an install it doesn't understand.
+ */
+export function nodeAbiMismatch(ctx: ServiceCtx): string | null {
+  const from = join(ctx.workingDir, 'packages', 'server');
+  // NB: we must *construct a Database*, not merely `require` the module. better-sqlite3 binds its native
+  // addon lazily on first use, so a bare `require` exits 0 even under a mismatched node — a probe that
+  // would have sailed straight past the very outage this guards (verified against the real checkout).
+  const probe = ctx.run(ctx.node, [
+    '-e',
+    `const D=require(require.resolve('better-sqlite3',{paths:[${JSON.stringify(from)}]}));new D(':memory:').close();`,
+  ]);
+  if (probe.status === 0) return null;
+  const err = `${probe.stderr ?? ''}\n${probe.stdout ?? ''}`;
+  if (!err.includes('NODE_MODULE_VERSION')) return null; // not an ABI problem — don't get in the way
+  // The loader names both ABIs ("compiled against … 127 … requires … 115"); say it in one plain line.
+  const abis = [...err.matchAll(/NODE_MODULE_VERSION (\d+)/g)].map((m) => m[1]);
+  if (abis.length >= 2) {
+    return `the daemon's better-sqlite3 is built for NODE_MODULE_VERSION ${abis[0]}, but this node provides ${abis[1]}.`;
+  }
+  return (
+    err
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l.includes('NODE_MODULE_VERSION')) ?? err.trim()
+  );
+}
+
+/**
  * Guard the destructive `service` verbs (ADR 047): refuse to bounce a *shared* daemon while other
  * members hold live sessions, so a restart is a conscious choice, not a silent teammate-drop.
  * Fail-open — if `/health` is unreachable the daemon's already down and can't be disrupting anyone,
@@ -248,6 +287,21 @@ export async function serviceCommand(
 
   switch (sub) {
     case 'install': {
+      // The plist is about to embed *this* node. If it can't load the daemon's native modules, installing
+      // would silently crashloop the daemon — refuse, and say how to fix it. `--force` overrides.
+      const abi = force ? null : nodeAbiMismatch(ctx);
+      if (abi) {
+        throw new CliError(
+          `refusing to install: ${ctx.node} cannot load the daemon's native modules, so the daemon ` +
+            `would crashloop on boot (and this command would still report success).\n\n` +
+            `  ${abi}\n\n` +
+            `The plist embeds the node that runs this CLI, and you are on ${process.version} — this repo ` +
+            `needs Node >=22. Put a matching node first on PATH and re-run, e.g.\n` +
+            `  export PATH="/opt/homebrew/opt/node@22/bin:$PATH" && musterd service install\n\n` +
+            `(\`musterd service refresh\` is safe — it never rewrites the plist. \`--force\` overrides.)`,
+          1,
+        );
+      }
       const res = install(ctx);
       if (!res.ok) fail('install (bootstrap)', res.bootstrap);
       ctx.run('launchctl', ['kickstart', '-k', `gui/${ctx.uid}/${ctx.label}`]);
