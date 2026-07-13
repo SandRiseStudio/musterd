@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Clock } from '../live/Clock';
 import liveCss from '../live/Live.css?url';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
@@ -217,6 +218,7 @@ function LivePage() {
         {connected && <WatchLinkButton cfg={cfg!} />}
         {connected && <CompanionToggle on={companion} onToggle={toggleCompanion} />}
         {connected && <SoundToggle />}
+        <Clock />
         <StatusPill status={status} live={roster.filter((m) => m.presence !== 'offline').length} />
       </header>
 

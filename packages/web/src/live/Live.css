@@ -190,6 +190,129 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* ─── office clock ────────────────────────────────────────────────────────
+ * Wall time as a glass pill: tabular digits, each in a fixed-width slot that a changed glyph rolls
+ * up through (the seconds column moves every tick, the hour once an hour). A sheen sweeps the pill on
+ * a slow loop so it reads as lit glass rather than a label. */
+.lc-clock {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  position: relative;
+  padding: 4px 11px 5px;
+  border: 1px solid var(--lc-border);
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #fff 55%, transparent),
+      color-mix(in srgb, var(--lc-accent) 7%, transparent)
+    ),
+    rgba(255, 255, 255, 0.04);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 1px 3px rgba(60, 40, 20, 0.07);
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    border-color var(--lc-med) var(--lc-ease),
+    box-shadow var(--lc-med) var(--lc-ease);
+}
+.lc-clock:hover {
+  border-color: color-mix(in srgb, var(--lc-accent) 40%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 0 18px color-mix(in srgb, var(--lc-accent) 22%, transparent);
+}
+/* the sheen — a slow diagonal glint across the glass */
+.lc-clock::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 38%,
+    color-mix(in srgb, #fff 62%, transparent) 50%,
+    transparent 62%
+  );
+  transform: translateX(-120%);
+  animation: lc-clock-sheen 7s var(--lc-ease-quart) infinite;
+  pointer-events: none;
+}
+@keyframes lc-clock-sheen {
+  0%,
+  62% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+.lc-clock__time {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: var(--font-mono, monospace);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--lc-text);
+}
+/* one slot per glyph: the roll happens inside it, so neighbours never reflow */
+.lc-clock__digit {
+  display: inline-block;
+  width: 0.62em;
+  text-align: center;
+  animation: lc-clock-roll 420ms var(--lc-ease) both;
+}
+@keyframes lc-clock-roll {
+  from {
+    transform: translateY(-0.5em) scale(0.86);
+    opacity: 0;
+    filter: blur(1.5px);
+    color: var(--lc-accent-bright);
+  }
+  to {
+    transform: none;
+    opacity: 1;
+    filter: none;
+    color: var(--lc-text);
+  }
+}
+.lc-clock__colon {
+  display: inline-block;
+  width: 0.34em;
+  text-align: center;
+  color: var(--lc-accent);
+  animation: lc-clock-breathe 2s var(--lc-ease) infinite;
+}
+/* A breath, not a blink: the colons stay legible at the trough — a colon that vanishes reads as a
+   gap in the number rather than as a ticking clock. */
+@keyframes lc-clock-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+.lc-clock__zone {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  color: var(--lc-muted);
+}
+/* Motion is decoration here — the time is legible without any of it. */
+@media (prefers-reduced-motion: reduce) {
+  .lc-clock::after,
+  .lc-clock__digit,
+  .lc-clock__colon {
+    animation: none;
+  }
+}
+
 .lc__status {
   display: inline-flex;
   align-items: center;

@@ -3,6 +3,7 @@ import { toneColor } from './office-scene/render';
 import {
   actLabel,
   actTone,
+  formatClock,
   goalEvent,
   laneEventDetail,
   proseSegments,
@@ -161,5 +162,25 @@ describe('toneColor — office palette mirrors the CSS tokens', () => {
     for (const tone of ['steer', 'challenge', 'lane', 'handoff', 'status', 'accent', 'success']) {
       expect(toneColor(tone)).not.toBe(defaultColor);
     }
+  });
+});
+
+describe('formatClock — the office clock', () => {
+  it('renders wall time as h:mm:ss with an un-padded hour, plus meridiem and zone', () => {
+    // 2026-07-13T16:27:11Z is 9:27:11 AM in Los Angeles (PDT in July).
+    const d = new Date('2026-07-13T16:27:11Z');
+    const { time, meridiem, zone } = formatClock(d);
+    expect(time).toMatch(/^\d{1,2}:\d{2}:\d{2}$/);
+    expect(meridiem).toMatch(/^[AP]M$/);
+    expect(zone.length).toBeGreaterThan(0);
+    // The hour never carries a leading zero — "9:27:11", not "09:27:11".
+    expect(time.startsWith('0')).toBe(false);
+  });
+
+  it('pads minutes and seconds to two digits so the slots never reflow', () => {
+    const { time } = formatClock(new Date('2026-07-13T16:03:04Z'));
+    const [, min, sec] = time.split(':');
+    expect(min).toHaveLength(2);
+    expect(sec).toHaveLength(2);
   });
 });

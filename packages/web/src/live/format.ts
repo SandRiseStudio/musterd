@@ -426,6 +426,27 @@ export function auditTime(ts: number): string {
   });
 }
 
+/**
+ * Wall time split into its animated parts: `time` ("9:27:11" — no leading zero on the hour), the
+ * `meridiem` ("AM"), and the viewer's `zone` ("PST"). Split rather than one string because the clock
+ * animates the digits per-glyph and holds the zone steady beside them.
+ */
+export function formatClock(d: Date): { time: string; meridiem: string; zone: string } {
+  const parts = new Intl.DateTimeFormat([], {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  }).formatToParts(d);
+  const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return {
+    time: `${pick('hour')}:${pick('minute')}:${pick('second')}`,
+    meridiem: pick('dayPeriod').toUpperCase(),
+    zone: pick('timeZoneName'),
+  };
+}
+
 /** Roster sort for the rail: online before offline, then humans before agents, then by name. */
 export function rosterOrder(a: MemberSummary, b: MemberSummary): number {
   const onA = a.presence !== 'offline' ? 0 : 1;
