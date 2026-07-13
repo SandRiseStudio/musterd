@@ -13,26 +13,35 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(JSON.stringify(res.members) + '\n');
     return 0;
   }
-  // Lead with what's waiting for me (comeback path, ADR 024): a returning/away human sees the
-  // unanswered request_help / @me acts up top, read off the durable inbox cursor — best-effort.
-  // Skipped for an ambient/absent identity: an inbox is member-specific (and auth-gated).
+  // What's waiting for me (comeback path, ADR 024): the unanswered request_help / @me acts, read off
+  // the durable inbox cursor — best-effort. Skipped for an ambient/absent identity: an inbox is
+  // member-specific (and auth-gated). It rides *inside* the header now, where it outranks everything.
   const pending =
     explicit && identity
       ? await pendingActionSummary(http, team, identity.name).catch(() => undefined)
       : undefined;
-  if (pending) {
-    process.stdout.write(renderPendingSummary(pending.count, pending.since) + '\n');
-  }
-  // The continuity one-liner (ADR 093 §3): the envelope read — headline + age, never the body —
-  // same line `claim` prints on occupy. Seat-authed and best-effort: an ambient identity, a seat
-  // with nothing saved (not_found), or any read failure all stay silent.
-  if (explicit && identity) {
-    const env = await http.getMemoryEnvelope(team).catch(() => undefined);
-    if (env) process.stdout.write(renderMemoryLine(env) + '\n');
-  }
+  // The continuity one-liner (ADR 093 §3): the envelope read — headline + age, never the body. Seat-
+  // authed and best-effort: an ambient identity, a seat with nothing saved (not_found), or any read
+  // failure all stay silent. Compact here — the header has five other things to say.
+  const memory =
+    explicit && identity ? await http.getMemoryEnvelope(team).catch(() => undefined) : undefined;
   // Surface which daemon + db we're reading, so a wrong-db ("everyone offline") is obvious.
   const health = await http.health().catch(() => undefined);
-  process.stdout.write(renderStatusHeader(team, config.server, health, res.members) + '\n');
+
+  // `Identity` carries no kind — the roster is the authority on it, so read it back from there.
+  const mine = identity ? res.members.find((m) => m.name === identity.name) : undefined;
+  const me = identity ? { name: identity.name, kind: mine?.kind ?? 'agent' } : undefined;
+  process.stdout.write(
+    renderStatusHeader({
+      team,
+      server: config.server,
+      health,
+      members: res.members,
+      me,
+      pending: pending ? renderPendingSummary(pending.count, pending.since) : undefined,
+      memory: memory ? renderMemoryLine(memory, Date.now(), { compact: true }) : undefined,
+    }) + '\n',
+  );
   process.stdout.write('\n' + renderRoster(res.members) + '\n');
   return 0;
 }
