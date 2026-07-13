@@ -205,6 +205,29 @@ export function isLoopbackHost(host: string): boolean {
 }
 
 /**
+ * Is this *connection* from the local machine? (`req.socket.remoteAddress`.)
+ *
+ * `isLoopbackHost` answers a question about a **bind address we chose**; this answers one about a
+ * **peer address we were told**, which is a different trust question and must be treated as such:
+ *
+ * - **`trustProxy` poisons it.** Behind a TLS-terminating proxy (`--insecure-trust-proxy`, ADR 040)
+ *   every remote request arrives *from the proxy* — i.e. from loopback. A bare peer check would then
+ *   read the entire internet as "local", which is worse than no check at all. Callers MUST pass the
+ *   flag, and a trust-proxy daemon is never peer-local.
+ * - **IPv4-mapped IPv6.** A dual-stack listener reports `::ffff:127.0.0.1`, which is loopback and
+ *   which `isLoopbackHost` alone would reject.
+ *
+ * A missing address (destroyed socket) is not local: fail closed.
+ */
+export function isLocalPeer(remoteAddress: string | undefined, trustProxy: boolean): boolean {
+  if (trustProxy) return false;
+  if (!remoteAddress) return false;
+  // Unwrap the IPv4-mapped IPv6 form (`::ffff:127.0.0.1`) before testing the v4 block.
+  const addr = normalizeHost(remoteAddress).replace(/^::ffff:/, '');
+  return isLoopbackHost(addr);
+}
+
+/**
  * Refuse to bind beyond loopback in plaintext (Principle 7, ADR 040). A non-loopback bind is allowed
  * only with native TLS or an explicit `--insecure-trust-proxy` acknowledging a TLS-terminating proxy/
  * overlay in front. Throws a helpful refusal (ADR 036 style) otherwise. Pure: takes the decided inputs.

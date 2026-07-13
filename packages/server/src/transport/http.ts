@@ -28,7 +28,7 @@ import {
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { z } from 'zod';
-import { resolveRosterRoots } from '../config.js';
+import { isLocalPeer, resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
@@ -523,6 +523,39 @@ function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage): TeamRow
   return team;
 }
 
+/**
+ * Authorize **seat provisioning** (`POST /members`).
+ *
+ * This route mints a seat and hands back its secret, and for `{observer: true}` that secret carries
+ * full message visibility — the recipient-scoping in `GET /messages` and the firehose both exempt
+ * observers (ADR 128). So an unauthenticated caller here can read every DM on the team.
+ *
+ * The route has always *described* itself as localhost-trust, but nothing enforced it: the server
+ * never looked at the peer address, so "local" was an emergent property of the default 127.0.0.1
+ * bind rather than a checked predicate. Under ADR 040's off-loopback bind (TLS or trust-proxy) that
+ * left the endpoint open to anyone who could reach the port. This enforces the claim.
+ *
+ * Local peer ⇒ unauthenticated, exactly as before (the CLI and the daemon-served /live dashboard both
+ * provision this way, and neither holds an admin credential). Anyone else ⇒ admin.
+ */
+function authProvision(ctx: Ctx, slug: string, req: IncomingMessage): void {
+  if (isLocalPeer(req.socket.remoteAddress, ctx.config.trustProxy)) return;
+  try {
+    authAdmin(ctx, slug, req);
+  } catch (e) {
+    // Re-frame the generic admin refusal: the caller's real problem is *where they are*, not their role.
+    if (e instanceof MusterdError && (e.code === 'unauthorized' || e.code === 'forbidden')) {
+      throw new MusterdError(
+        e.code,
+        'provisioning a seat from off this machine requires an admin credential — an observer seat ' +
+          "reads the team's directed messages, so it is not mintable anonymously over the network. " +
+          'Provision on the daemon host, or authenticate as an admin seat (is_admin).',
+      );
+    }
+    throw e;
+  }
+}
+
 /** Best-effort: resolve the calling seat from a bearer token if one is present and valid, else null.
  *  Used by the roster reads to scope the projection (ADR 071) without making them require auth. */
 function tryAuth(ctx: Ctx, slug: string, req: IncomingMessage): MemberRow | null {
@@ -654,6 +687,7 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/members') {
+        authProvision(ctx, slug, req);
         const body = parseOrBadRequest(AddMemberBody, await readJson(req));
         // ADR 058 project-and-return: for a *file-backed* team the file is the single writer — the CLI
         // has already written `seats/<name>.toml`; the daemon reconciles it and hands back the token,
