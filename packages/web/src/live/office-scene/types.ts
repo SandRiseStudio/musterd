@@ -42,14 +42,33 @@ export interface Pose {
   bubble: Bubble;
   /** Draw opacity — ramps 0→1 entering the office and 1→0 leaving (door staging); 1 otherwise. */
   alpha: number;
-  /** True while travelling along a walk leg (drives the Rive `walking` mode); false when seated/holding. */
+  /** True while travelling along a walk leg (drives the walk cycle); false when seated/holding. */
   moving: boolean;
-  /** True while the active walk is an urgent run (drives the Rive `run` modifier). */
+  /** True while the active walk is an urgent run (longer stride, deeper lean, harder arm drive). */
   run: boolean;
   /** An in-place ambient gesture playing this frame (ADR 086 Phase 2 tail): `0` none · `1` stretch ·
-   * `2` glance. Drives the Rive `gesture` overlay layer; self-generated filler, cleared by a real act.
-   * No-op against a `.riv` without the `gesture` input (the guarded write in rive-rig.ts). */
+   * `2` glance. Self-generated filler, cleared by a real act. */
   gesture: number;
+  /** Progress through the current gesture's window, 0→1 — so the beat arcs in and out instead of snapping. */
+  gestureT: number;
+  /**
+   * Gait phase in [0,1). **Advanced by distance travelled, not by wall time** (`STRIDE` logical units per
+   * cycle) — a stride is a fixed length of *floor*, so the feet plant on it. Drive this off a clock instead
+   * and the legs cycle at a rate unrelated to the body's speed, which is exactly what makes a character
+   * look like it is skating rather than walking. It persists across legs so a walker doesn't hitch at a
+   * waypoint, and keeps its value while standing so the next departure starts from the foot it stopped on.
+   */
+  phase: number;
+  /**
+   * How much of the walk cycle is expressed, 0→1. Eased rather than switched, so a walker *settles* out of
+   * its stride into a stand instead of the legs popping from mid-step to attention the frame a leg ends.
+   */
+  stride: number;
+  /**
+   * Seated blend, 0 standing → 1 folded onto the chair. Eased, so arriving at a desk is a member sitting
+   * *down* and leaving is them standing *up*; a boolean here would teleport them into the chair.
+   */
+  sit: number;
 }
 
 /** Motion intensity == notification tier (memory: travel-intensity == notification tiers). */

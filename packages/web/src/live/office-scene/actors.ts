@@ -1,6 +1,7 @@
 import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, NOOK, NOOK_CAP, NOOK_SPOTS, SEAT_BACK, STRIP_CAP } from './layout';
 import { findPath, type P } from './nav';
 import type { Placement } from './seating';
+import { STRIDE } from './skeleton';
 import type { Bubble, Dir, OfficeNode, Pose } from './types';
 
 /**
@@ -15,6 +16,27 @@ import type { Bubble, Dir, OfficeNode, Pose } from './types';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const easeInOut = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+/** How long a member takes to settle out of a stride, and to fold onto (or off) a chair. */
+const STRIDE_EASE = 0.18; // seconds
+const SIT_EASE = 0.6; // seconds — unhurried; you can see them sit
+/** Move `cur` toward `target` at a constant rate (the blend is shaped by `smooth()` where it's consumed). */
+function toward(cur: number, target: number, rate: number): number {
+  return cur < target ? Math.min(target, cur + rate) : Math.max(target, cur - rate);
+}
+
+/** The animation state a member carries *between* frames — none of it is derivable from the pose alone. */
+interface Anim {
+  /** Gait phase, advanced by distance travelled (see `Pose.phase`). */
+  phase: number;
+  /** Walk-cycle expression, eased 0↔1. */
+  stride: number;
+  /** Seated blend, eased 0↔1. */
+  sit: number;
+}
+
+/** The animation fields every freshly-built pose starts from; the live values are overlaid in `posesNow`. */
+const AT_REST = { moving: false, run: false, gesture: 0, gestureT: 0, phase: 0, stride: 0, sit: 0 } as const;
 
 /** Face the direction of travel from (fx,fy) → (tx,ty) in logical space. */
 export function travelDir(fx: number, fy: number, tx: number, ty: number): Dir {
@@ -48,9 +70,8 @@ export function homePoses(
         carry: false,
         bubble: null,
         alpha: 1,
-        moving: false,
-        run: false,
-        gesture: 0,
+        ...AT_REST,
+        sit: 1, // a desk member's home *is* the chair — they belong seated
       });
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);
@@ -66,9 +87,7 @@ export function homePoses(
         carry: false,
         bubble: null,
         alpha: 1,
-        moving: false,
-        run: false,
-        gesture: 0,
+        ...AT_REST,
       });
     } else if (pl.kind === 'strip') {
       if (pl.index >= STRIP_CAP) continue; // past the cap: represented by the "+N waiting" pill
@@ -83,9 +102,7 @@ export function homePoses(
         carry: false,
         bubble: null,
         alpha: 1,
-        moving: false,
-        run: false,
-        gesture: 0,
+        ...AT_REST,
       });
     }
   }
@@ -180,8 +197,11 @@ export interface Actors {
   /** Preempt any in-flight ambient stroll, gracefully returning the walker home. Called the instant a
    * real act arrives so ambient never delays real choreography. */
   cancelAmbient(): void;
-  /** Advance all walks by dt seconds; returns true while any walk (act or transition) is in flight. */
+  /** Advance all walks + animation blends by dt seconds; true while any walk, gesture, or blend is live. */
   step(dt: number): boolean;
+  /** True while a member is mid-blend (settling out of a stride, sitting down, standing up) — the loop
+   * must keep running through it or they freeze half-out of the chair. */
+  settling(): boolean;
   /** The current pose of every drawn member (home, or interpolated if walking — incl. those leaving). */
   poses(): Map<string, Pose>;
   /** Nodes to draw this frame — the live roster plus any members currently walking out. */
@@ -201,12 +221,14 @@ export function createActors(): Actors {
   // seated member's idle pose for a short window, then cleared. Parallel to `walks` — no movement, so it
   // keeps the loop alive (advance the Rive gesture layer) without a walk. `t` counts up to `dur` seconds.
   const gestures = new Map<string, { kind: number; t: number; dur: number }>();
+  /** Per-member animation blends (gait phase, stride, sit) — carried between frames; see `advanceAnim`. */
+  const anim = new Map<string, Anim>();
   const exiting = new Set<string>();
   let initialized = false;
   let doorPulses = 0; // members that entered/left since the last takeDoorPulses()
 
   function entrancePose(ref: Pose): Pose {
-    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1, moving: false, run: false, gesture: 0 };
+    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1, ...AT_REST };
   }
   function moved(a: Pose, b: Pose): boolean {
     return Math.hypot(a.lx - b.lx, a.ly - b.ly) > 8;
@@ -231,10 +253,31 @@ export function createActors(): Actors {
     };
   }
 
+  /** The between-frame animation state of a member, seeded from their home the first time we see them. */
+  function animOf(name: string): Anim {
+    let a = anim.get(name);
+    if (!a) {
+      a = { phase: 0, stride: 0, sit: homes.get(name)?.sit ?? 0 };
+      anim.set(name, a);
+    }
+    return a;
+  }
+
   function posesNow(): Map<string, Pose> {
     const out = new Map<string, Pose>();
     // At-home members carry any active in-place gesture (a stationary ambient beat overlaid on idle).
-    for (const [n, p] of homes) out.set(n, { ...p, gesture: gestures.get(n)?.kind ?? p.gesture });
+    for (const [n, p] of homes) {
+      const g = gestures.get(n);
+      const a = animOf(n);
+      out.set(n, {
+        ...p,
+        gesture: g?.kind ?? p.gesture,
+        gestureT: g ? clamp(g.t / g.dur, 0, 1) : 0,
+        phase: a.phase,
+        stride: a.stride,
+        sit: a.sit,
+      });
+    }
     for (const [name, w] of walks) {
       const leg = w.legs[w.i]!;
       const e = easeInOut(clamp(w.t, 0, 1));
@@ -243,6 +286,7 @@ export function createActors(): Actors {
       const prog = (w.i + clamp(w.t, 0, 1)) / w.legs.length;
       const alpha =
         w.fade === 'in' ? clamp(prog / 0.35, 0, 1) : w.fade === 'out' ? clamp((1 - prog) / 0.35, 0, 1) : 1;
+      const a = animOf(name);
       out.set(name, {
         lx: leg.fx + (leg.tx - leg.fx) * e,
         ly: leg.fy + (leg.ty - leg.fy) * e,
@@ -255,9 +299,48 @@ export function createActors(): Actors {
         moving: leg.fx !== leg.tx || leg.fy !== leg.ty,
         run: w.run ?? false,
         gesture: 0, // a walker never gestures — gestures are stationary idle beats
+        gestureT: 0,
+        phase: a.phase,
+        stride: a.stride,
+        sit: a.sit, // eased down as they rise from the chair, so leaving a desk is a stand-up
       });
     }
     return out;
+  }
+
+  /**
+   * Advance the per-member animation blends from what actually happened on the floor this frame.
+   *
+   * The gait phase is integrated from **distance travelled** — a stride is `STRIDE` units of floor, so a
+   * walker's feet plant on the ground they cover, at any speed, and an urgent run's legs cycle faster
+   * because the body is *going* faster, not because a timer was told to hurry.
+   */
+  function advanceAnim(dt: number, before: Map<string, Pose>, after: Map<string, Pose>): void {
+    for (const [name, p] of after) {
+      const a = animOf(name);
+      const b = before.get(name);
+      const dist = b ? Math.hypot(p.lx - b.lx, p.ly - b.ly) : 0;
+      a.phase = (a.phase + dist / STRIDE) % 1;
+      // Express the walk cycle only while actually covering ground — a walker paused on a hold leg stands.
+      const speed = dt > 0 ? dist / dt : 0;
+      a.stride = toward(a.stride, p.moving && speed > 2 ? 1 : 0, dt / STRIDE_EASE);
+      // Sit whenever the member is home at a desk and not walking. Rising for an errand and settling back
+      // afterwards are then just this blend running in each direction.
+      const seatedHome = (homes.get(name)?.sit ?? 0) > 0 && !walks.has(name);
+      a.sit = toward(a.sit, seatedHome ? 1 : 0, dt / SIT_EASE);
+    }
+    for (const n of [...anim.keys()]) if (!after.has(n)) anim.delete(n);
+  }
+
+  /** True while any member is still mid-blend (settling out of a stride, sitting down, standing up). The
+   * loop must keep running through it, or a member freezes half-out of their chair. */
+  function settling(): boolean {
+    for (const [name, a] of anim) {
+      if (a.stride > 0.001) return true;
+      const target = (homes.get(name)?.sit ?? 0) > 0 && !walks.has(name) ? 1 : 0;
+      if (Math.abs(a.sit - target) > 0.001) return true;
+    }
+    return false;
   }
 
   function build(from: string, req: Req, origin?: { lx: number; ly: number }): Walk | null {
@@ -317,6 +400,7 @@ export function createActors(): Actors {
         exiting.clear();
         ghosts.clear();
         gestures.clear();
+        anim.clear(); // snap: everyone starts settled at their home (desk members already seated)
         return;
       }
 
@@ -452,6 +536,7 @@ export function createActors(): Actors {
       gestures.clear(); // a real act preempts in-place gestures too — they carry no motion to yield home
     },
     step(dt) {
+      const before = posesNow();
       for (const [name, w] of [...walks.entries()]) {
         const leg = w.legs[w.i]!;
         w.t += dt / leg.dur;
@@ -474,9 +559,11 @@ export function createActors(): Actors {
         g.t += dt;
         if (g.t >= g.dur) gestures.delete(name);
       }
-      return walks.size > 0 || gestures.size > 0;
+      advanceAnim(dt, before, posesNow());
+      return walks.size > 0 || gestures.size > 0 || settling();
     },
     poses: posesNow,
+    settling,
     nodes() {
       const out = new Map<string, OfficeNode>(ghosts);
       for (const [n, node] of live) out.set(n, node);

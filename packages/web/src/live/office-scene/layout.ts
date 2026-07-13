@@ -23,7 +23,33 @@ export const SEAT_BACK = 40;
 export const DESK_W = 100;
 export const DESK_D = 68;
 export const CHAIR_SIZE = 34;
-export const CHAIR_OFF = DESK_D / 2 + 17;
+/** The chair sits directly under the seat point, not behind it — a member seated at `SEAT_BACK` lands on
+ * the seat rather than hovering in front of it. (Seat 40 back, chair centred 42 back: pelvis on cushion.) */
+export const CHAIR_OFF = 42;
+
+// ── Seat and desk heights ─────────────────────────────────────────────────────────────────────────────
+// These decide whether a seated member reads as *at* the desk or *buried behind* it, so they are derived
+// from each other rather than hand-tuned in isolation. The reference is the human one: a desk sits about a
+// hand's-breadth above the seated hip, and the seated shoulder clears it comfortably. Before this the desk
+// stood 46 units tall against a 92-unit character — taller than a seated person's shoulders — which is why
+// only the tops of their heads showed above it.
+
+/** Chair seat: how far the legs hold the cushion off the floor, and the cushion's own thickness. */
+export const CHAIR_LIFT = 10;
+export const CHAIR_SEAT_H = 12;
+/** Top of the cushion — where a seated pelvis rests (see `skeleton.ts`). */
+export const SEAT_TOP = CHAIR_LIFT + CHAIR_SEAT_H;
+
+/** Desk: leg height + slab thickness. The surface lands ~14 above the seated hip — desk-height, by eye. */
+export const DESK_LEG_H = 29;
+export const DESK_SLAB = 7;
+/** The desk surface — where every prop sits and where seated forearms come to rest. */
+export const DESK_UP = DESK_LEG_H + DESK_SLAB;
+
+/** How far behind the desk centre the keyboard sits. Within a seated member's arm reach *by construction*:
+ * `skeleton.ts`'s `DESK_REACH.z` is `SEAT_BACK − KEYBOARD_ALONG`, so tucking the chair in moves the hands
+ * with it instead of leaving them grasping at air. */
+export const KEYBOARD_ALONG = -14;
 
 export interface DeskSlot {
   id: number;

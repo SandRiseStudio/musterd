@@ -1,7 +1,22 @@
 # Office Rive character — state-machine & input spec
 
-Status: draft (2026-07-01) · Owner: web/live · Relates to: ADR 079 (live isometric office), Figma
-`b6zXGHxG9CnCa8tFgpQWx2` frame **07 Character Rig**.
+> ## ⚠️ SUPERSEDED by [ADR 133](../decisions/133-procedural-character-skeleton.md) — 2026-07-13
+>
+> **The Rive rig is retired.** `character.riv`, `rig.ts`, `rive-rig.ts` and `@rive-app/canvas-advanced`
+> are deleted; the office character is now a **procedural skeleton** (`office-scene/skeleton.ts` solves
+> 3D joints, `office-scene/character.ts` paints them).
+>
+> The rig this document specifies was **flat and ungrouped** — as its own as-built notes below record, the
+> states are "position-only" keyframes and "whole-cluster translations". With no joint hierarchy there was
+> nothing to bend, so walkers glided and nobody ever sat down. Combined with the fact that **the MCP cannot
+> export a runtime `.riv`** (see "Remaining", below), every polish pass was gated on a human opening the
+> Rive editor — which is why the hair and gesture work below sat "code-side ready, `.riv` side pending"
+> indefinitely. ADR 133 has the full reasoning.
+>
+> Kept for the archaeology. **Nothing below is live.**
+
+Status: superseded (was: draft 2026-07-01) · Owner: web/live · Relates to: ADR 079 (live isometric
+office), ADR 133 (supersedes this), Figma `b6zXGHxG9CnCa8tFgpQWx2` frame **07 Character Rig**.
 
 > ## ✅ As-built (v1 — 2026-07-01)
 >
