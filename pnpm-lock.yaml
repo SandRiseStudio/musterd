@@ -213,9 +213,6 @@ importers:
       '@musterd/protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@rive-app/canvas-advanced':
-        specifier: 2.38.4
-        version: 2.38.4
       '@tanstack/react-router':
         specifier: 1.170.16
         version: 1.170.16(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -858,9 +855,6 @@ packages:
 
   '@protobufjs/utf8@1.1.1':
     resolution: {integrity: sha512-oOAWABowe8EAbMyWKM0tYDKi8Yaox52D+HWZhAIJqQXbqe0xI/GV7FhLWqlEKreMkfDjshR5FKgi3mnle0h6Eg==}
-
-  '@rive-app/canvas-advanced@2.38.4':
-    resolution: {integrity: sha512-yfmL/Zyhq2iGFgjmdJW6//wrw6xytb4TOGs1RCk+ND3/oH9gFdnCo+vvNzv3CEX7S6X+0J6N4PxeckNUqydFZA==}
 
   '@rolldown/binding-android-arm64@1.1.2':
     resolution: {integrity: sha512-2cZ+7xRS+DBcuJBJKnfzsbleumJhBqSlJVpuzHC0nTqfd3QQ7Vx2/x5YR/D7cBamKSeWplwo82Fn9lqYUDEMfA==}
@@ -4078,8 +4072,6 @@ snapshots:
   '@protobufjs/pool@1.1.0': {}
 
   '@protobufjs/utf8@1.1.1': {}
-
-  '@rive-app/canvas-advanced@2.38.4': {}
 
   '@rolldown/binding-android-arm64@1.1.2':
     optional: true

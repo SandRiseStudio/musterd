@@ -15,7 +15,6 @@ import {
   type Cue,
   type ScenePalette,
 } from './render';
-import { loadRiveRig, type RiveRig } from './rive-rig';
 import { truncateSpeech, typeCadence } from './speech';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
@@ -117,7 +116,9 @@ export function mountOffice(
   let fit: Fit = fitFloor(width, height);
 
   const actors: Actors = createActors();
-  let rig: RiveRig | null = null; // the Rive character rig, once its WASM + .riv load (else code-drawn)
+  /** The scene clock, in seconds. Everything that animates on its own — breathing, the typing bursts —
+   * reads it, so it advances only while the loop runs and a rested office holds its frame. */
+  let clock = 0;
   let placements = new Map<string, Placement>();
   let teamName = 'revive';
   let heads = new Map<string, Pt>(); // home head anchors — where in-place cues sit
@@ -200,7 +201,7 @@ export function mountOffice(
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
     const poses = actors.poses();
-    const anchors = renderScene(bctx, fit, placements, nodes, poses, undefined, teamName, lightEnv);
+    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv);
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
@@ -435,36 +436,33 @@ export function mountOffice(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), rig ?? undefined, teamName, lightEnv);
+    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv);
     drawCues();
     positionLabels(anchors.heads);
   }
 
-  /** Feed the Rive rig this frame's live (node, pose) for every drawn member. */
-  function advanceRig(dt: number) {
-    if (!rig) return;
-    const nodes = actors.nodes();
-    const present = new Map<string, { node: OfficeNode; pose: Pose }>();
-    for (const [name, pose] of actors.poses()) {
-      const node = nodes.get(name);
-      if (node) present.set(name, { node, pose });
-    }
-    rig.advance(dt, present);
+  /**
+   * Is the room *alive* — is there body motion the scene has to keep drawing even with nobody walking?
+   *
+   * A member at their desk who is `working` breathes and types, so their frame changes every tick. This is
+   * the one deliberate perf trade in the character work (the Rive rig anticipated it: "if we later want
+   * always-on breathing, it's a deliberate perf trade recorded then"). It is bounded three ways: the loop
+   * is capped to the ambient ~20fps when this is the *only* thing happening, it stops dead on a hidden tab
+   * or under reduced-motion, and a room where nobody is working still rests on the baked frame — which is
+   * exactly the state ADR 086 was protecting.
+   */
+  function living(): boolean {
+    if (reduced) return false;
+    for (const n of actors.nodes().values()) if (n.activity === 'working') return true;
+    return false;
   }
 
-  /** Paint one resting frame with no loop running: settle the Rive characters into their idle pose (a
-   * small nominal advance), else blit the code-drawn buffer. Used when nothing is animating so the office
-   * holds a still frame instead of burning rAF — Rive's own idle motion is intentionally frozen at rest. */
+  /** Paint one resting frame with no loop running — the office holds a still frame instead of burning rAF. */
   function paintResting() {
-    if (rig) {
-      advanceRig(1 / 60);
-      drawDynamic();
-    } else {
-      drawStatic();
-    }
+    drawStatic();
   }
 
-  let disposed = false; // set in dispose(); gates the async Rive load and the ambient scheduler's re-arm
+  let disposed = false; // set in dispose(); gates the ambient scheduler's re-arm
 
   // — the loop runs while walks or cues are in flight; otherwise the office rests on a still frame —
   let raf = 0;
@@ -472,11 +470,13 @@ export function mountOffice(
   let acc = 0; // wall time accrued since the last drawn frame — coalesced under the ambient FPS cap
   let wasActive = false;
   function tick(now: number) {
-    // Idle-FPS cap (ADR 086 Phase 2): when the only motion is an ambient beat, don't advance/redraw every
-    // frame — accrue wall time and coalesce toward ~20fps. Real acts (not `ambientOnly`) and the afterglow
-    // settle keep the full frame rate. Accumulate `dt` so the walk maths stay correct with fewer samples.
-    const inAfterglow = rig != null && lastActive > 0 && now - lastActive < AFTERGLOW_MS;
-    const capped = actors.ambientOnly() && cues.length === 0 && !inAfterglow;
+    // Idle-FPS cap (ADR 086 Phase 2): when the only motion is ambient — a coffee-stroll beat, or just a
+    // room of people breathing and typing at their desks — don't redraw every frame; accrue wall time and
+    // coalesce toward ~20fps. Real acts and cues keep the full frame rate. `dt` accumulates either way, so
+    // the walk maths stay correct with fewer samples.
+    const inAfterglow = lastActive > 0 && now - lastActive < AFTERGLOW_MS;
+    const noRealMotion = actors.ambientOnly() || !actors.active();
+    const capped = noRealMotion && cues.length === 0 && !inAfterglow;
     acc += last ? now - last : 1000 / 60;
     last = now;
     if (capped && acc < AMBIENT_FRAME_MS) {
@@ -485,6 +485,7 @@ export function mountOffice(
     }
     const dt = Math.min(0.05, acc / 1000);
     acc = 0;
+    clock += dt;
     const walking = actors.step(dt);
     for (let i = cues.length - 1; i >= 0; i--) {
       const c = cues[i]!;
@@ -496,24 +497,21 @@ export function mountOffice(
     // measures from the frame the last walk/cue clears — the Rive character eases into idle rather than
     // freezing the instant a long walk ends (#5).
     if (walking || cues.length) lastActive = now;
-    if (rig) {
-      advanceRig(dt);
-      drawDynamic();
-    } else if (walking) {
+    const alive = living();
+    if (walking || alive) {
       drawDynamic();
     } else {
-      if (wasActive) bake(); // walkers just re-seated — refresh the buffer + labels to home
+      if (wasActive) bake(); // walkers just re-seated (or the last worker went idle) — refresh the buffer
       drawStatic();
     }
-    wasActive = walking;
-    // Keep animating only while something actually moves. With the Rive rig loaded this is what lets the
-    // office *rest*: Rive characters animate continuously, so gating the loop on `rig` (as before) meant it
-    // never stopped and redrew every frame forever. Now, when the last walk/cue clears we draw one final
-    // settled frame (above) and park — the frame stays on-canvas until the next act or presence change.
-    // Afterglow (#5): for a brief window after the last motion, keep advancing so the Rive character settles
-    // into idle instead of freezing mid-gesture — a bounded post-act tail, not a continuous loop.
-    const settling = rig != null && lastActive > 0 && now - lastActive < AFTERGLOW_MS;
-    if ((walking || cues.length || settling) && !reduced && VISIBLE()) {
+    wasActive = walking || alive;
+    // Keep animating while anything moves *or* while the room is alive (someone at a desk breathing and
+    // typing — capped to ~20fps above). When the last walk/cue clears and nobody is working, we draw one
+    // final settled frame and park: the frame stays on-canvas until the next act or presence change.
+    // Afterglow: a brief tail past the last motion so a character eases into idle instead of freezing
+    // mid-gesture — `actors.step` also reports its own blends, so a member never stops half-out of a chair.
+    const settling = lastActive > 0 && now - lastActive < AFTERGLOW_MS;
+    if ((walking || cues.length || settling || alive) && !reduced && VISIBLE()) {
       raf = requestAnimationFrame(tick);
     } else {
       raf = 0;
@@ -704,14 +702,14 @@ export function mountOffice(
   const onResize = () => {
     sizeCanvases();
     bake();
-    if (!raf) paintResting(); // repaint the resting frame at the new size (Rive-aware)
+    if (!raf) paintResting(); // repaint the resting frame at the new size
   };
   window.addEventListener('resize', onResize);
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
   ro?.observe(host);
 
   const onVisibility = () => {
-    if (document.visibilityState === 'visible' && (rig || actors.active() || cues.length)) ensureLoop();
+    if (document.visibilityState === 'visible' && (living() || actors.active() || cues.length)) ensureLoop();
   };
   document.addEventListener('visibilitychange', onVisibility);
 
@@ -729,22 +727,7 @@ export function mountOffice(
     }
   }, LIGHT_TICK_MS);
 
-  // Load the Rive character rig (client-only WASM). On success the office switches to a continuous
-  // Rive redraw; on any failure `rig` stays null and the code-drawn avatar is used unchanged.
-  void loadRiveRig().then((r) => {
-    if (disposed) {
-      r?.dispose();
-      return;
-    }
-    rig = r;
-    if (!rig) return;
-    if (reduced) {
-      advanceRig(0.016); // reduced-motion: one settled frame, no loop
-      drawDynamic();
-    } else {
-      ensureLoop();
-    }
-  });
+  ensureLoop(); // a room with anyone working is alive from the first frame (no-op under reduced-motion)
 
   return {
     update,
@@ -768,8 +751,6 @@ export function mountOffice(
       window.removeEventListener('resize', onResize);
       ro?.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
-      rig?.dispose();
-      rig = null;
       for (const [who, s] of [...speeches]) clearSpeech(who, s); // cancel timers + remove bubbles
       for (const el of labels.values()) el.remove();
       labels.clear();

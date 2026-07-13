@@ -4,7 +4,7 @@
 > `packages/web/src/styles/tokens.css` (mustard accent, Inter + JetBrains Mono) and extends them into
 > one language across every page (`/`, `/live`, `/approvals`, `/audit`). Reference feel: a **warm
 > isometric office at dusk** — a co-work floor you look down into, where agents and humans share desks,
-> a lounge, and huddle spaces. Rendered as a living Canvas2D/Rive scene; the rest of the app is the
+> a lounge, and huddle spaces. Rendered as a living Canvas2D scene; the rest of the app is the
 > same building's other rooms. (Supersedes the prior "dusk observatory / three.js constellation" system.)
 
 > **Status (2026-07-06):** the two-theme token layer is in place (`tokens.css`), but **dark is still the
@@ -67,10 +67,12 @@ Two-family pairing on a contrast axis (mono "wire" vs humanist body):
 
 - **Chrome + stream (product discipline):** 140–240ms, ease-out-expo (`cubic-bezier(.16,1,.3,1)`).
   Row arrival, hover, focus, panel crossfade. No bounce/elastic.
-- **The office scene (ambient — the exception):** a living Canvas2D/Rive floor. People sit, occasionally
+- **The office scene (ambient — the exception):** a living Canvas2D floor. People **sit down** at their
+  desks and type, breathe, and blink; they **walk** on a real jointed gait (arms counter-swinging the legs,
+  the stride measured in floor covered, so feet plant instead of skate — ADR 133); they occasionally
   stretch/glance (ambient gestures); a `request_help` walks someone over (runs when urgent); a `handoff`
   carries a labeled box between desks; a `megaphone` broadcasts; coffee steam, monitor glow, and a slow
-  day-cycle wash keep the room breathing. Falls back to a code-drawn frame if Rive/WASM fails.
+  day-cycle wash keep the room breathing.
 - **Signature beat:** a `resolve` settles its thread — the actor brightens once and cools to green,
   synchronized between the scene and the stream.
 - `prefers-reduced-motion`: all ambient motion off; the room renders one still populated frame;
@@ -92,7 +94,7 @@ Two-family pairing on a contrast axis (mono "wire" vs humanist body):
 ## Components
 
 `message-row` (timestamp · member-chip · act-badge · recipient · body), `act-badge` (per-act tone),
-`member-chip` (avatar initial + name, jade/rose), the `office-scene` (Canvas2D/Rive floor + projected
+`member-chip` (avatar initial + name, jade/rose), the `office-scene` (Canvas2D floor + projected
 label overlay), `now` divider, connect card, and — new — the shared **wayfinding shell** (Floor ·
 Approvals Desk · Records Room). Every control ships default / hover / focus-visible / active / disabled /
 loading. Empty + connecting + error states are first-class and stay in the office voice

@@ -56,9 +56,11 @@ hand someone a spectator view without provisioning them a real seat.
 ## The three `/live` panels
 
 - **Office** (`live/OfficeScene.tsx` + `live/office-scene/`) — a 2D isometric co-work office (ADR 079).
-  Presence → placement, act → choreography, travel-intensity == notification tier. Per-member Rive
-  characters (`character.riv`) with a code-drawn avatar fallback if the WASM/asset fails. ADR 086 layers
-  ambient life (idle strolls, gestures) on top, idle-parked to 0 rAF/sec at rest.
+  Presence → placement, act → choreography, travel-intensity == notification tier. Members are drawn from a
+  **procedural jointed skeleton** (ADR 133 — `skeleton.ts` solves the joints, `character.ts` paints them):
+  a distance-driven walk cycle, a seated pose with the hands typing on the desk, and eased sit/stride
+  blends. ADR 086 layers ambient life (idle strolls, gestures) on top; the scene idle-parks to 0 rAF/sec
+  when nobody is working.
 - **Stream** (`live/Stream.tsx`) — the legible half: the act feed, newest-last, live rows type out,
   threaded replies indent, day/now dividers. This is where a human reads the team.
 - **Roster** (`live/RosterPanel.tsx`) — the governance rail (ADR 070 projection): each seat's
@@ -122,7 +124,8 @@ live/
     types.ts                    // OfficeEvent / OfficeNode / Pose / OfficeHandle
     render.ts                   // canvas drawing primitives + toneColor + Cue
     actors.ts / nav.ts / seating.ts / layout.ts / iso.ts   // placement, walk routing, iso projection
-    rig.ts / rive-rig.ts        // the Rive character rig contract + loader (client-only WASM)
+    skeleton.ts                 // THE character animation: 3D joints, renderer-free (walk/sit/type) — ADR 133
+    character.ts                // paints a skeleton onto the iso canvas (facing + limb self-occlusion)
     speech.ts                   // the over-head speech-bubble text model
 components/                     // marketing surface (Hero, Roadmap, Footer, LiquidGlass, Wedge)
 ```
@@ -131,8 +134,11 @@ components/                     // marketing surface (Hero, Roadmap, Footer, Liq
 
 - **Unit:** the render seam is covered by fast vitest files — `office-scene/mapping.test.ts` (the
   `actToEvent` projection), `live/format.test.ts` (tones/labels/`toneColor`), and the scene's
-  `actors`/`nav`/`seating`/`rig`/`speech` tests. Run from the repo root (`pnpm exec vitest run
-packages/web/src/live/`) — a per-package `vitest` invocation trips the app's build target.
+  `actors`/`nav`/`seating`/`skeleton`/`speech` tests. `skeleton.test.ts` is where the _animation_ is
+  pinned — feet never through the floor, arms counter-swinging the legs, the seated head clearing the desk
+  — because those are the things a screenshot can't check and a reviewer can't eyeball. Run from the repo
+  root (`pnpm exec vitest run packages/web/src/live/`) — a per-package `vitest` invocation trips the app's
+  build target.
 - **Visual / live:** drive `/office-preview` headless for choreography without a daemon, or point the
   dev server at a live daemon (`MUSTERD_DAEMON=…`, `pnpm dev` → `:5174`) and watch real acts flow through
   `/live`. ADR 107 records a full live-daemon verification of the steering acts.

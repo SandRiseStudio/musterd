@@ -1,13 +1,20 @@
+import { drawCharacter } from './character';
 import { depth, FLOOR, project, THICK, type Fit, type Pt } from './iso';
 import {
   BOOKSHELVES,
+  CHAIR_LIFT,
   CHAIR_OFF,
+  CHAIR_SEAT_H,
   DESK_D,
+  DESK_LEG_H,
+  DESK_SLAB,
   DESK_SLOTS,
+  DESK_UP,
   DESK_W,
   ENTRANCE,
   FWD,
   HUDDLES,
+  KEYBOARD_ALONG,
   LOUNGE,
   NOOK,
   NOOK_RUG_R,
@@ -21,6 +28,7 @@ import {
 import { DAY_ENV, type LightEnv } from './lighting';
 import { deskMoodFor, deskMoodStyle } from './moods';
 import type { Placement } from './seating';
+import { seedOf, solveSkeleton, typingBurst } from './skeleton';
 import type { Dir, OfficeNode, Pose } from './types';
 
 /**
@@ -434,51 +442,28 @@ function drawPlant(
   }
 }
 
-// ── avatar (placeholder — Rive replaces this in M2) ──────────────────────────
-function avatar(
-  ctx: CanvasRenderingContext2D,
-  fit: Fit,
-  lx: number,
-  ly: number,
-  node: OfficeNode,
-  dir: Dir,
-  small = false,
-  moving = false,
-  run = false,
-): void {
-  const p = project(lx, ly, fit);
-  const s = fit.scale * (small ? 0.72 : 1);
-  const acc = node.color;
-  const dk = hslL(acc, 0.7);
-  // Walk cycle (code-drawn fallback only — the Rive rig animates its own limbs): feet alternate and the
-  // arms counter-swing on a time-based phase, so a mover strides instead of gliding.
-  const ph = moving ? Math.sin(performance.now() / (run ? 55 : 90)) : 0;
-  ellipse(ctx, { x: p.x, y: p.y }, 24 * s, 6 * s, 'rgba(0,0,0,0.18)');
-  if (moving) {
-    ellipse(ctx, { x: p.x - 8 * s + ph * 5 * s, y: p.y - 3 * s - Math.max(0, ph) * 4 * s }, 5.5 * s, 3.5 * s, dk);
-    ellipse(ctx, { x: p.x + 8 * s - ph * 5 * s, y: p.y - 3 * s - Math.max(0, -ph) * 4 * s }, 5.5 * s, 3.5 * s, dk);
-  }
-  roundRect(ctx, p.x - 19 * s, p.y - 44 * s, 38 * s, 32 * s, 12 * s, acc);
-  roundRect(ctx, p.x - 25 * s, p.y - (42 - ph * 5) * s, 8 * s, 22 * s, 4 * s, dk);
-  roundRect(ctx, p.x + 17 * s, p.y - (42 + ph * 5) * s, 8 * s, 22 * s, 4 * s, dk);
-  ellipse(ctx, { x: p.x, y: p.y - 56 * s }, 15 * s, 15 * s, SKIN);
-  if (node.kind === 'agent') {
-    ctx.strokeStyle = acc;
-    ctx.lineWidth = 2 * s;
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y - 68 * s);
-    ctx.lineTo(p.x, p.y - 78 * s);
-    ctx.stroke();
-    ellipse(ctx, { x: p.x, y: p.y - 80 * s }, 4 * s, 4 * s, '#74e08a');
-    if (dir === 'S') roundRect(ctx, p.x - 11 * s, p.y - 61 * s, 22 * s, 8 * s, 4 * s, '#2e3a38');
-    ellipse(ctx, { x: p.x, y: p.y - 34 * s }, 4 * s, 4 * s, '#74e08a');
-  } else {
-    ellipse(ctx, { x: p.x, y: p.y - 62 * s }, 16 * s, 8 * s, hslL(node.color, 0.42));
-    if (dir === 'S') {
-      ellipse(ctx, { x: p.x - 6 * s, y: p.y - 55 * s }, 2.4 * s, 2.4 * s, '#2e2a26');
-      ellipse(ctx, { x: p.x + 6 * s, y: p.y - 55 * s }, 2.4 * s, 2.4 * s, '#2e2a26');
-    }
-  }
+/**
+ * Solve a member's skeleton for this frame from their pose (see `skeleton.ts` — all the animation lives
+ * there; this only decides *which* animation state the pose implies).
+ */
+function skelFor(pose: Pose, node: OfficeNode, t: number) {
+  const seed = seedOf(node.name);
+  // Typing is gated on actually working *and* actually being at the desk — a member half-way out of their
+  // chair has better things to do, and a room with nobody typing is a room the scene can stop redrawing.
+  const typing = node.activity === 'working' && pose.sit > 0.9 ? typingBurst(seed, t) : 0;
+  return solveSkeleton({
+    phase: pose.phase,
+    sit: pose.sit,
+    stride: pose.stride,
+    run: pose.run,
+    t,
+    typing,
+    carry: pose.carry,
+    help: pose.bubble !== null,
+    gesture: pose.gesture,
+    gestureT: pose.gestureT,
+    seed,
+  });
 }
 
 /** A speech/thought bubble over an actor's head (raised-hand `?`, urgent `!`). Screen-space. */
@@ -501,41 +486,75 @@ function bubble(ctx: CanvasRenderingContext2D, x: number, y: number, glyph: '?' 
 }
 
 /**
- * Draw a member as a free actor at a pose: the placeholder avatar, plus a carried box (handoff) and a
- * head bubble (raised hand). Position drives depth-sort in `renderScene`, so a walker overlaps desks
- * correctly. (Rive replaces the avatar body in a later cut, behind this same call.)
+ * Draw a member as a free actor at a pose. Position drives the depth-sort in `renderScene`, so a walker
+ * overlaps desks correctly; the body itself is whatever `skeleton.ts` solved for this frame.
+ *
+ * `armsOnly` is the seated overlay pass — see `renderScene`.
  */
-export function drawActor(ctx: CanvasRenderingContext2D, fit: Fit, pose: Pose, node: OfficeNode): void {
-  const fade = pose.alpha < 1;
-  if (fade) ctx.globalAlpha = Math.max(0, pose.alpha);
-  avatar(ctx, fit, pose.lx, pose.ly, node, pose.dir, pose.small, pose.moving, pose.run);
-  const p = project(pose.lx, pose.ly, fit);
-  const s = fit.scale * (pose.small ? 0.72 : 1);
-  if (pose.carry) {
-    // a labelled box held at chest height, tinted the handoff colour
-    roundRect(ctx, p.x - 11 * s, p.y - 34 * s, 22 * s, 17 * s, 3 * s, '#b592f0');
-    roundRect(ctx, p.x - 11 * s, p.y - 34 * s, 22 * s, 5 * s, 2 * s, '#8a5fd6');
+export function drawActor(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  pose: Pose,
+  node: OfficeNode,
+  t: number,
+  armsOnly = false,
+): void {
+  drawCharacter(
+    ctx,
+    fit,
+    {
+      lx: pose.lx,
+      ly: pose.ly,
+      dir: pose.dir,
+      node,
+      skel: skelFor(pose, node, t),
+      size: pose.small ? 0.72 : 1,
+      alpha: pose.alpha,
+      carry: pose.carry,
+      t,
+      seed: seedOf(node.name),
+    },
+    armsOnly,
+  );
+  if (!armsOnly && pose.bubble) {
+    const p = project(pose.lx, pose.ly, fit);
+    bubble(ctx, p.x, p.y - (pose.small ? 74 : 98) * fit.scale, pose.bubble, fit.scale);
   }
-  if (fade) ctx.globalAlpha = 1;
-  if (pose.bubble) bubble(ctx, p.x, p.y - (pose.small ? 62 : 74) * fit.scale, pose.bubble, fit.scale);
 }
 
 // ── a workstation: legged desk + task chair + oriented glowing monitor ──
-function chair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, dir: Dir, color: string): void {
-  const f = FWD[dir];
-  const sn = f[1] !== 0;
-  const lift = 10; // seat height off the floor — the legs' reach
-  // four splayed legs under the seat (chairs used to sit legless on the floor)
+/**
+ * A task chair, in **two pieces**, because a seated member is *inside* it — and painter's order can only
+ * put a whole object in front of or behind them.
+ *
+ * The cushion is under the sitter and the backrest is behind their back, so drawing the chair as one box
+ * meant whichever side of the member it sorted on, it was wrong: it swallowed them from the waist down.
+ * Split, each piece sorts at its own footprint and the right thing happens at every facing on its own — the
+ * sitter paints over the cushion they are sitting on, and the backrest paints over their back only when the
+ * chair is actually between them and the viewer.
+ */
+const CHAIR_BACK_OFF = 14; // how far behind the seat centre the backrest stands
+
+/** Legs + cushion — the part a member sits *on*, so it paints before them. */
+function chairBase(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, dir: Dir, color: string): void {
+  const sn = FWD[dir][1] !== 0;
   for (const [sx, sy] of [
     [-1, -1],
     [1, -1],
     [1, 1],
     [-1, 1],
   ] as const) {
-    box(ctx, fit, lx + sx * 10, ly + sy * 10, 4, 4, lift, dim(color, 0.6));
+    box(ctx, fit, lx + sx * 10, ly + sy * 10, 4, 4, CHAIR_LIFT, dim(color, 0.6));
   }
-  box(ctx, fit, lx, ly, sn ? 34 : 30, sn ? 30 : 34, 12, color, lift); // seat
-  box(ctx, fit, lx - f[0] * 14, ly - f[1] * 14, sn ? 34 : 7, sn ? 7 : 34, 26, dim(color, 0.85), lift + 4); // backrest
+  // The cushion top is SEAT_TOP — the exact height `skeleton.ts` puts a seated pelvis at, so a member lands
+  // on the chair rather than near it.
+  box(ctx, fit, lx, ly, sn ? 34 : 30, sn ? 30 : 34, CHAIR_SEAT_H, color, CHAIR_LIFT);
+}
+
+/** The backrest — its own footprint, so it sorts behind or in front of the sitter purely by facing. */
+function chairBack(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, dir: Dir, color: string): void {
+  const sn = FWD[dir][1] !== 0;
+  box(ctx, fit, lx, ly, sn ? 34 : 7, sn ? 7 : 34, 26, dim(color, 0.85), CHAIR_LIFT + 4);
 }
 
 function monitor(
@@ -589,9 +608,6 @@ function deskRnd(id: number, salt: number): number {
   h ^= h >>> 15;
   return (h >>> 0) / 4294967296;
 }
-
-/** The desk surface height (leg height + slab thickness) — where every prop sits. */
-const DESK_UP = 38 + 8;
 
 /** The optional personal props and where each sits on the desk, in desk-relative (along-facing, across)
  * coords: `along` +toward the monitor / −toward the seat, `across` +right / −left. `salt`+`prob` decide
@@ -703,8 +719,8 @@ function drawWorkstation(
   const sn = dir === 'S' || dir === 'N';
   const W = DESK_W;
   const Df = DESK_D;
-  const DH = 38;
-  const ST = 8;
+  const DH = DESK_LEG_H;
+  const ST = DESK_SLAB;
   const wx = sn ? W : Df;
   const dy = sn ? Df : W;
   const up = DESK_UP; // desk-surface height — where every prop sits (DH + ST)
@@ -734,10 +750,11 @@ function drawWorkstation(
     props.push({ sum: f[0] * along + p[0] * across + (f[1] * along + p[1] * across), fn: () => fn(ix, iy) });
   };
 
-  // the monitor at the back, then the always-present keyboard (front-centre) + mouse (front-right)
+  // The monitor at the back, then the keyboard + mouse pulled in to where a seated member's hands actually
+  // land (`KEYBOARD_ALONG`; `skeleton.ts` reaches for exactly this spot).
   at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up));
-  at(-6, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up));
-  at(-4, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up));
+  at(KEYBOARD_ALONG, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up));
+  at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up));
 
   // optional personal props — each present-or-not per desk by a stable hash, at its own station
   for (const kind of PROP_KINDS) {
@@ -809,12 +826,6 @@ function drawInteriorLight(
   ctx.restore();
 }
 
-/** Minimal Rive drawer seam (real impl in rive-rig.ts) — kept WASM-free so render.ts stays pure. */
-export interface RigDrawer {
-  has(name: string): boolean;
-  draw(ctx: CanvasRenderingContext2D, name: string, feetX: number, feetY: number, spriteH: number): void;
-}
-
 /**
  * Draw the whole office in painter's order, returning per-member screen anchors. Desks are drawn empty;
  * each present member is drawn as a free actor at its current `poses` entry (home seat when idle, or
@@ -826,7 +837,8 @@ export function renderScene(
   placements: Map<string, Placement>,
   byName: Map<string, OfficeNode>,
   poses: Map<string, Pose>,
-  rig?: RigDrawer,
+  /** The scene clock, in seconds — everything that animates on its own (breathing, typing) reads it. */
+  t = 0,
   teamName = 'revive',
   env: LightEnv = DAY_ENV,
 ): SceneAnchors {
@@ -867,13 +879,17 @@ export function renderScene(
     const name = slotMember.get(slot.id) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
     items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, env) });
-    // The task chair sorts at its own spot behind/in front of the desk, so a seated member paints
-    // between chair and desk (or desk and chair, by facing) instead of being swallowed by either.
+    // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
+    // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
+    // the two instead of being swallowed by a single chair box.
     const f = FWD[slot.dir];
     const cx = slot.lx - f[0] * CHAIR_OFF;
     const cy = slot.ly - f[1] * CHAIR_OFF;
+    const bx = cx - f[0] * CHAIR_BACK_OFF;
+    const by = cy - f[1] * CHAIR_BACK_OFF;
     const chairColor = node ? hslL(node.color, 0.5) : '#4a5560';
-    items.push({ d: depth(cx, cy), fn: () => chair(ctx, fit, cx, cy, slot.dir, chairColor) });
+    items.push({ d: depth(cx, cy) - 0.2, fn: () => chairBase(ctx, fit, cx, cy, slot.dir, chairColor) });
+    items.push({ d: depth(bx, by), fn: () => chairBack(ctx, fit, bx, by, slot.dir, chairColor) });
   }
 
   // Queue lane: a faint pad under each overflow (strip) member so the entrance line reads as a designated
@@ -889,23 +905,36 @@ export function renderScene(
     const node = byName.get(name);
     if (!node) continue;
     const b = project(pose.lx, pose.ly, fit);
-    if (rig?.has(name)) {
-      // Rive character: draw its current frame at the feet, sized to match the code-drawn avatar.
-      const spriteH = fit.scale * 96 * (pose.small ? 0.72 : 1);
-      const alpha = pose.alpha;
-      items.push({
-        d: depth(pose.lx, pose.ly) + 0.1,
-        fn: () => {
-          if (alpha < 1) ctx.globalAlpha = Math.max(0, alpha);
-          rig.draw(ctx, name, b.x, b.y, spriteH);
-          if (alpha < 1) ctx.globalAlpha = 1;
-        },
-      });
-    } else {
-      items.push({ d: depth(pose.lx, pose.ly) + 0.1, fn: () => drawActor(ctx, fit, pose, node) });
+    const pl = placements.get(name);
+    const slot = pl?.kind === 'desk' ? DESK_SLOTS[pl.slot] : undefined;
+    const seated = pose.sit > 0.5 && slot;
+
+    // A seated member's depth key comes from **the chair**, not their own feet. Their feet sit a couple of
+    // units off the chair centre, and at north/west-facing desks that tiny offset was enough to sort the
+    // cushion in *front* of them — so the chair painted over their legs. Keying off the chair puts them
+    // between its base and its backrest at every facing, which is where a person in a chair belongs.
+    let d = depth(pose.lx, pose.ly) + 0.1;
+    if (seated) {
+      const f = FWD[slot.dir];
+      d = depth(slot.lx - f[0] * CHAIR_OFF, slot.ly - f[1] * CHAIR_OFF) + 0.1;
     }
+    items.push({ d, fn: () => drawActor(ctx, fit, pose, node, t) });
+
+    // Seated overlay: the desk paints over a member sitting behind it (correct — that is what a desk does
+    // to your legs), but their forearms *rest on the surface*, above it, so they must paint on top of the
+    // slab. One character, two depth slots: the body at the chair, the arms on the desk. Without this the
+    // hands disappear into the desk and the typing is invisible.
+    if (seated) {
+      items.push({
+        d: depth(slot.lx, slot.ly) + 0.05,
+        fn: () => drawActor(ctx, fit, pose, node, t, true),
+      });
+    }
+
     bases.set(name, b);
-    heads.set(name, { x: b.x, y: b.y - (pose.small ? 54 : 74) * fit.scale });
+    // The label rides above the crown — higher for a standing member than a seated one, so it tracks the
+    // head through a sit rather than floating where the head used to be.
+    heads.set(name, { x: b.x, y: b.y - (pose.small ? 74 : 98 - pose.sit * 22) * fit.scale });
   }
 
   items.sort((a, b) => a.d - b.d);
