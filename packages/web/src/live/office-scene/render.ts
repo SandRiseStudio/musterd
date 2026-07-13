@@ -18,6 +18,7 @@ import {
   type Bookshelf,
   type Huddle,
 } from './layout';
+import { DAY_ENV, type LightEnv } from './lighting';
 import { deskMoodFor, deskMoodStyle } from './moods';
 import type { Placement } from './seating';
 import type { Dir, OfficeNode, Pose } from './types';
@@ -676,8 +677,8 @@ function deskLamp(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: numbe
   box(ctx, fit, ix, iy, 3, 3, 22, '#4a545f', up + 3); // pole
   const g = project(ix, iy, fit);
   const ty = g.y - (up + 26) * fit.scale;
-  // Lit only when a member's at the desk — warm amber shade + inner glow; unattended it's switched off, a
-  // cool grey shade with no glow (matches the idle fan / empty mug).
+  // Lit when a member's at the desk and it's dark enough out (see LightEnv.lampsOn) — warm amber shade +
+  // inner glow; otherwise switched off, a cool grey shade with no glow (matches the idle fan / empty mug).
   ellipse(ctx, { x: g.x, y: ty }, 9 * fit.scale, 5 * fit.scale, lit ? '#e9c46a' : '#aab0b8');
   if (lit) ellipse(ctx, { x: g.x, y: ty + 2 * fit.scale }, 6 * fit.scale, 3 * fit.scale, '#fff1c2'); // warm glow
 }
@@ -694,6 +695,7 @@ function drawWorkstation(
   slot: { lx: number; ly: number; dir: Dir; id: number },
   node: OfficeNode | null,
   teamName: string,
+  env: LightEnv,
 ): void {
   const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
@@ -752,7 +754,8 @@ function drawWorkstation(
         case 'photo':
           return deskPhoto(ctx, fit, ix, iy, sn, up, PHOTOS[Math.floor(deskRnd(id, 41) * PHOTOS.length)]!);
         case 'lamp':
-          return deskLamp(ctx, fit, ix, iy, up, node != null);
+          // A lamp lights up only when someone's at the desk *and* it's dark enough out to want it on.
+          return deskLamp(ctx, fit, ix, iy, up, node != null && env.lampsOn);
         case 'fan':
           return deskFan(ctx, fit, ix, iy, up);
       }
@@ -766,6 +769,44 @@ function drawWorkstation(
 export interface SceneAnchors {
   heads: Map<string, Pt>;
   bases: Map<string, Pt>;
+}
+
+/**
+ * Interior lighting pass, painted after all furniture/actors: a cool night veil at `env.veilAlpha` (an
+ * empty office after dark goes properly dark; an occupied one is lifted by the overhead fill so it reads
+ * lit), then a warm floor pool under every *lit* desk lamp — drawn additively so occupied desks glow
+ * through the dark like real lamps. During the day `veilAlpha` is ~0 and lamps are off, so this no-ops.
+ */
+function drawInteriorLight(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  env: LightEnv,
+  slotMember: Map<number, string>,
+): void {
+  if (env.veilAlpha > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = env.veilAlpha;
+    ctx.fillStyle = env.veilColor;
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height); // whole canvas (overshoots under DPR — harmless)
+    ctx.restore();
+  }
+  if (!env.lampsOn) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter'; // additive: the pool *adds* light back over the veil
+  for (const slot of DESK_SLOTS) {
+    if (!slotMember.has(slot.id) || !deskHasProp(slot.id, 'lamp')) continue; // lit lamps only (occupied desk)
+    const [ix, iy] = deskPoint(slot, PROP_SPEC.lamp.along, PROP_SPEC.lamp.across);
+    const p = project(ix, iy, fit);
+    const r = 72 * fit.scale;
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+    g.addColorStop(0, 'rgba(255, 200, 120, 0.42)');
+    g.addColorStop(1, 'rgba(255, 200, 120, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, r, r * 0.62, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /** Minimal Rive drawer seam (real impl in rive-rig.ts) — kept WASM-free so render.ts stays pure. */
@@ -787,6 +828,7 @@ export function renderScene(
   poses: Map<string, Pose>,
   rig?: RigDrawer,
   teamName = 'revive',
+  env: LightEnv = DAY_ENV,
 ): SceneAnchors {
   drawFloor(ctx, fit);
 
@@ -824,7 +866,7 @@ export function renderScene(
   for (const slot of DESK_SLOTS) {
     const name = slotMember.get(slot.id) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
-    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName) });
+    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, env) });
     // The task chair sorts at its own spot behind/in front of the desk, so a seated member paints
     // between chair and desk (or desk and chair, by facing) instead of being swallowed by either.
     const f = FWD[slot.dir];
@@ -868,6 +910,9 @@ export function renderScene(
 
   items.sort((a, b) => a.d - b.d);
   for (const it of items) it.fn();
+
+  // Interior lighting: veil the room to the night level, then let occupied desks' lamps glow through.
+  drawInteriorLight(ctx, fit, env, slotMember);
 
   // Collapse any queue/nook members past the render cap into a single "+N" pill, so a very large roster
   // stays bounded. Hidden count = placed-but-not-drawn (capped members get no pose in homePoses).
