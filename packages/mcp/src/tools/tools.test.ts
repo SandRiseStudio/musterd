@@ -447,6 +447,50 @@ describe('team_members handler', () => {
   });
 });
 
+describe('build skew warning (ADR 135)', () => {
+  const sha = (c: string) => c.repeat(40);
+  const rosterOk = (async () => ({
+    members: [member({ name: 'Ada', presence: 'online' })],
+  })) as any;
+
+  it('team_status appends the differs-from-daemon warning when builds mismatch', async () => {
+    const handler = capture(registerStatus, {
+      roster: rosterOk,
+      build: sha('a'),
+      daemonBuild: (async () => sha('b')) as any,
+    });
+    const out = text(await handler({}));
+    expect(out).toContain('differs from the daemon');
+    expect(out).toContain(sha('a').slice(0, 7));
+    expect(out).toContain(sha('b').slice(0, 7));
+    expect(out).toContain('/mcp reload');
+  });
+
+  it('stays silent when the builds match', async () => {
+    const handler = capture(registerStatus, {
+      roster: rosterOk,
+      build: sha('a'),
+      daemonBuild: (async () => sha('a')) as any,
+    });
+    expect(text(await handler({}))).not.toContain('differs from the daemon');
+  });
+
+  it('stays silent when either side is unknown (unstamped adapter / unreachable daemon)', async () => {
+    const unstamped = capture(registerStatus, {
+      roster: rosterOk,
+      build: undefined,
+      daemonBuild: (async () => sha('b')) as any,
+    });
+    expect(text(await unstamped({}))).not.toContain('differs');
+    const noDaemon = capture(registerStatus, {
+      roster: rosterOk,
+      build: sha('a'),
+      daemonBuild: (async () => undefined) as any,
+    });
+    expect(text(await noDaemon({}))).not.toContain('differs');
+  });
+});
+
 describe('team_status handler', () => {
   it('renders online (with surface) and offline members', async () => {
     const handler = capture(registerStatus, {

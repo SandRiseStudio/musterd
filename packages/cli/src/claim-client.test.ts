@@ -57,6 +57,24 @@ describe('buildClaimFrame (SPEC A.3, ADR 078)', () => {
     expect(f.grant).toBe('msgr_y');
     expect(f.target).toEqual({ role: 'backend' });
   });
+  it('carries a build attestation when supplied (ADR 135), omits it otherwise', () => {
+    const sha = 'a'.repeat(40);
+    const f = buildClaimFrame({
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'cli',
+      build: sha,
+    });
+    expect(f.build).toBe(sha);
+    const bare = buildClaimFrame({
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    expect(bare.build).toBeUndefined();
+  });
   it('throws on a bad target shape', () => {
     expect(() =>
       buildClaimFrame({

@@ -52,6 +52,7 @@ import { WebSocket } from 'ws';
 import { buildClaimFrame, parseClaimResponse } from './claim-client.js';
 import type { ClaimOutcome } from './claim-client.js';
 import { CliError, exitForCode, isConnRefused } from './errors.js';
+import { cliBuild } from './version.js';
 
 /** The `/inbox/interrupt-check` response (ADR 088). `raised: false` is the silent common path. */
 export interface InterruptCheck {
@@ -116,6 +117,10 @@ export class HttpClient {
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
           ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
           ...(attestedModel !== undefined ? { 'x-musterd-model': attestedModel } : {}),
+          // ADR 135: build attestation rides every request, for EVERY credential — no ADR 121 gate.
+          // The model gate exists because a model is a harness fact a human must not stamp; build
+          // attests the *binary* itself, which a human's (possibly stale) CLI genuinely has.
+          ...(cliBuild() !== undefined ? { 'x-musterd-build': cliBuild()! } : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
@@ -150,6 +155,8 @@ export class HttpClient {
     db?: string;
     schema?: number;
     connections?: number;
+    /** The commit the daemon's dist was built from (ADR 130/134) — the client-skew reference. */
+    build?: string;
   }> {
     return this.request('GET', '/health');
   }
@@ -471,6 +478,7 @@ export class HttpClient {
       surface: input.surface,
       ...(input.grant !== undefined ? { grant: input.grant } : {}),
       ...(model !== undefined ? { model } : {}),
+      ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
     });
     const body = {
       key: frame.key,
@@ -478,6 +486,7 @@ export class HttpClient {
       ...(frame.grant !== undefined ? { grant: frame.grant } : {}),
       surface: frame.surface,
       ...(frame.model !== undefined ? { model: frame.model } : {}),
+      ...(frame.build !== undefined ? { build: frame.build } : {}),
     };
     let res: Response;
     try {
@@ -676,6 +685,8 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
           ...(opts.workspace !== undefined ? { workspace: opts.workspace } : {}),
           // Model attestation (ADR 101): explicit opt wins, else the shared env resolution.
           ...(attestedModel !== undefined ? { model: attestedModel } : {}),
+          // Build attestation (ADR 135): this CLI dist's own stamp.
+          ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
         }),
       ),
     );

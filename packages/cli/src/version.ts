@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { readBuildStamp } from '@musterd/protocol';
 
 /**
  * The `@musterd/cli` version, read from the package's own `package.json` at runtime (ADR 067). A
@@ -15,4 +16,17 @@ export function cliVersion(): string {
   } catch {
     return '0.0.0';
   }
+}
+
+let memoBuild: string | undefined | null = null; // null = not yet read; undefined = read, unstamped
+
+/**
+ * The git build ref this CLI dist was built from (ADR 135) — the `dist/build.json` stamp written by
+ * `scripts/stamp-build.mjs` at build time. Unlike `cliVersion()` (a slow-moving package version),
+ * this names the exact commit, so skew against the daemon or `origin/main` is decidable. Read once
+ * per process; `undefined` when unstamped (published tarball, stripped dist) — consumers stay silent.
+ */
+export function cliBuild(): string | undefined {
+  if (memoBuild === null) memoBuild = readBuildStamp(import.meta.url);
+  return memoBuild;
 }

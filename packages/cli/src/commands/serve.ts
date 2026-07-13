@@ -1,16 +1,24 @@
 import { spawnSync } from 'node:child_process';
 import { resolve as resolvePath } from 'node:path';
+import { readBuildStamp } from '@musterd/protocol';
 import { createServer } from '@musterd/server';
 import { flagStr, type Parsed } from '../args.js';
 import { renderBanner } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 
 /**
- * The commit this daemon boots from (ADR 130), resolved once from the CLI's own checkout — the same
- * repo-root derivation `service refresh` syncs (`…/packages/cli/dist/bin.js` → up four). Best-effort:
- * an npm-installed CLI has no checkout and the daemon simply omits `build` from `/health`.
+ * The commit this daemon boots from (ADR 130), preferring the dist's own build stamp (ADR 135).
+ *
+ * The stamp is what the *code is*; `git rev-parse HEAD` is what the *checkout says* — and the two
+ * disagree exactly when someone checked out a newer commit but forgot to rebuild, the "but I merged
+ * it" lie this whole mechanism exists to kill. ADR 130 originally declined build-time stamping as a
+ * non-goal; ADR 135 supersedes that with the stamp as the primary source. The rev-parse fallback
+ * covers dists built before the stamp landed. Best-effort throughout: an npm-installed CLI has
+ * neither, and the daemon simply omits `build` from `/health`.
  */
 function resolveBuildRef(): string | undefined {
+  const stamped = readBuildStamp(import.meta.url);
+  if (stamped) return stamped;
   const repoRoot = resolvePath(process.argv[1] ?? '', '../../../..');
   const r = spawnSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
   const ref = r.status === 0 ? r.stdout.trim() : '';

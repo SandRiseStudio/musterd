@@ -132,3 +132,24 @@ export function notReadyMessage(
   }
   return notJoinedMessage(action, client.lastJoinError);
 }
+
+/**
+ * One warning line when this adapter's dist differs from the daemon's build (ADR 135) — the
+ * "money surface": the running process reports the stamp it *booted* with, so a stale dist on disk
+ * AND a rebuilt-but-not-reloaded session both self-incriminate. Silence unless BOTH sides are known
+ * (an unstamped client or unreachable daemon must not cry wolf). Pure inequality, and the wording is
+ * "differs", never "behind" — a feature-branch build is legitimately ahead of the daemon.
+ */
+export async function buildSkewWarning(client: {
+  build: string | undefined;
+  daemonBuild: () => Promise<string | undefined>;
+}): Promise<string> {
+  const mine = client.build;
+  if (!mine) return '';
+  const daemon = await client.daemonBuild();
+  if (!daemon || daemon === mine) return '';
+  return (
+    `\n⚠ your musterd adapter (${mine.slice(0, 7)}) differs from the daemon (${daemon.slice(0, 7)})` +
+    ` — this session runs stale tools. Rebuild this worktree (pnpm build) and /mcp reload to pick it up.`
+  );
+}

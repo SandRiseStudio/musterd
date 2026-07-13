@@ -72,6 +72,10 @@ export class MusterdClient {
   }
 
   /** This session's pending-presence disambiguation code (ADR 033). */
+  /** This adapter dist's own build ref (ADR 135) — what the running process booted with. */
+  get build(): string | undefined {
+    return this.config.build;
+  }
   get claimCode(): string {
     return this.config.claimCode;
   }
@@ -132,8 +136,31 @@ export class MusterdClient {
     return json;
   }
 
-  async health(): Promise<void> {
-    await this.request('GET', '/health');
+  async health(): Promise<{ ok?: boolean; build?: string }> {
+    return (await this.request('GET', '/health')) as { ok?: boolean; build?: string };
+  }
+
+  private daemonBuildMemo: { value: string | undefined; at: number } | null = null;
+
+  /**
+   * The daemon's build ref from `/health` (ADR 130/134) — the reference every client compares its own
+   * stamp against. Memoized for 60s: cheap on chatty tools, yet a daemon `service refresh` mid-session
+   * is picked up on the next poll rather than never. Auth-optional endpoint, so this works pre-join.
+   * Errors → undefined (the skew check stays silent rather than guessing).
+   */
+  async daemonBuild(): Promise<string | undefined> {
+    const now = Date.now();
+    if (this.daemonBuildMemo && now - this.daemonBuildMemo.at < 60_000) {
+      return this.daemonBuildMemo.value;
+    }
+    let value: string | undefined;
+    try {
+      value = (await this.health()).build;
+    } catch {
+      value = undefined;
+    }
+    this.daemonBuildMemo = { value, at: now };
+    return value;
   }
 
   sendEnvelope(envelope: Envelope) {
@@ -331,6 +358,8 @@ export class MusterdClient {
           ...(this.config.driver ? { driver: this.config.driver } : {}),
           // Model attestation (ADR 101): attested, never verified — absent reads as `unknown`.
           ...(this.config.model ? { model: this.config.model } : {}),
+          // Build attestation (ADR 135): the dist this process booted from; absent when unstamped.
+          ...(this.config.build ? { build: this.config.build } : {}),
         }),
       );
     });

@@ -371,6 +371,24 @@ describe('serviceCommand', () => {
     expect(out).toContain('up to date with origin/main');
   });
 
+  it('strips a -dirty suffix before rev-list but keeps it in the display (ADR 135)', async () => {
+    const c = ctx(gitScriptedRunner({ revList: { status: 0, stdout: '2\n', stderr: '' } }));
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['status']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0, build: `${buildSha}-dirty` }),
+      }),
+    );
+    // git plumbing saw the clean sha (rev-list would fail on `…-dirty..origin/main`)…
+    const revList = calls.find((x) => x.cmd === 'git' && x.args.includes('rev-list'));
+    expect(revList?.args.join(' ')).toContain(`${buildSha}..origin/main`);
+    expect(revList?.args.join(' ')).not.toContain('-dirty..');
+    // …while the human-facing ref keeps the honest dirty flag and the verdict still lands.
+    expect(out).toContain('-dirty');
+    expect(out).toContain('2 commits behind origin/main');
+  });
+
   it('status degrades to the bare build ref when the commit is unknown locally', async () => {
     const c = ctx(gitScriptedRunner({ revList: { status: 128, stdout: '', stderr: 'unknown' } }));
     const { code, out } = await capture(() =>
