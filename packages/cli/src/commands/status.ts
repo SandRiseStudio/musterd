@@ -1,5 +1,5 @@
 import type { Parsed } from '../args.js';
-import { renderPendingSummary, renderStatusHeader, renderStatusTable } from '../render/rows.js';
+import { renderPendingSummary, renderRoster, renderStatusHeader } from '../render/rows.js';
 import { pendingActionSummary, resolveRead } from './helpers.js';
 import { renderMemoryLine } from './memory.js';
 
@@ -32,7 +32,7 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
   }
   // Surface which daemon + db we're reading, so a wrong-db ("everyone offline") is obvious.
   const health = await http.health().catch(() => undefined);
-  process.stdout.write(renderStatusHeader(team, config.server, health) + '\n');
-  process.stdout.write(renderStatusTable(res.members) + '\n');
+  process.stdout.write(renderStatusHeader(team, config.server, health, res.members) + '\n');
+  process.stdout.write('\n' + renderRoster(res.members) + '\n');
   return 0;
 }
