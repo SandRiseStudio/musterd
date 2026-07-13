@@ -23,6 +23,7 @@ import { reclaimCommand } from './commands/reclaim.js';
 import { reloadCommand } from './commands/reload.js';
 import { reportCommand } from './commands/report.js';
 import { requestsCommand } from './commands/requests.js';
+import { residencyCommand } from './commands/residency.js';
 import { resetCommand } from './commands/reset.js';
 import { roleCommand } from './commands/role.js';
 import { sendCommand } from './commands/send.js';
@@ -206,6 +207,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return reclaimCommand(rest);
     case 'requests':
       return requestsCommand(rest);
+    case 'residency':
+      return residencyCommand(rest);
     case 'wire':
       return wireCommand(rest);
     case 'role':

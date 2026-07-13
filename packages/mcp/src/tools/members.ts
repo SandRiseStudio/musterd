@@ -22,9 +22,12 @@ export function registerMembers(server: McpServer, client: MusterdClient): void 
           return textResult(args.name ? `no member "${args.name}"` : 'no members');
         }
         const lines = selected.map((m) => {
+          // A residency-enrolled seat (ADR 131) is absent but wakeable — a directed act reaches it.
           const presences = m.presences.length
             ? m.presences.map((p) => `${p.surface}:${p.status}`).join(', ')
-            : 'not present';
+            : m.wakeable
+              ? 'not present · wakeable'
+              : 'not present';
           const lifecycle =
             m.lifecycle === 'until' && m.lifecycle_until
               ? `until ${new Date(m.lifecycle_until).toISOString()}`

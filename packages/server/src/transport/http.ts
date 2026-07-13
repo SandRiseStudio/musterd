@@ -14,6 +14,10 @@ import {
   DecideRequestSchema,
   IssueGrantSchema,
   PolicySchema,
+  EnrollResidencyBodySchema,
+  RevokeResidencyBodySchema,
+  WakeLeasesBodySchema,
+  WakeReportBodySchema,
   OpenLaneSchema,
   UpdateLaneSchema,
   DeclareGoalSchema,
@@ -88,6 +92,16 @@ import {
   touchAmbientPresence,
 } from '../store/presence.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
+import {
+  claimWakeLeases,
+  enrollResidency,
+  getResidency,
+  listResidency,
+  listWakeableMemberIds,
+  revokeResidency,
+  settleWakeLease,
+  toResidency,
+} from '../store/residency.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
 import { staleLaneWarnings } from '../store/staleness.js';
@@ -490,6 +504,25 @@ function authAdmin(
   return auth;
 }
 
+/**
+ * Authenticate a bearer that must be the **team agent key, with no acting seat** (ADR 131): the
+ * wake-lease/wake-report poller (`musterd host`) is harness-side infrastructure, not a seat — it
+ * never occupies anything, so there is no member to resolve, no presence to touch, nothing to
+ * impersonate. Presence-neutral by construction (the woken session announces itself by occupying
+ * via the seat's own grant).
+ */
+function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage): TeamRow {
+  const team = requireTeam(ctx.db, slug);
+  const keyHash = getAgentKeyHash(ctx.db, team.id);
+  if (!keyHash || hashToken(bearer(req)) !== keyHash) {
+    throw new MusterdError(
+      'unauthorized',
+      `the residency wake endpoints authenticate with the team agent key (mskey_) for "${slug}"`,
+    );
+  }
+  return team;
+}
+
 /** Best-effort: resolve the calling seat from a bearer token if one is present and valid, else null.
  *  Used by the roster reads to scope the projection (ADR 071) without making them require auth. */
 function tryAuth(ctx: Ctx, slug: string, req: IncomingMessage): MemberRow | null {
@@ -520,6 +553,8 @@ function summarize(
   // Seats held within their ADR 010 reclaim grace — read `offline` above, but a reservation the clobber
   // guard (ADR 066/105) must treat as occupied. Computed once for the team, not per-member.
   const reclaimable = listReclaimableMemberIds(ctx.db, teamId, Date.now());
+  // Seats enrolled in harness residency (ADR 131) — offline reads `offline · wakeable`.
+  const wakeable = listWakeableMemberIds(ctx.db, teamId);
   return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => {
     // Two-clocks rule (M2): liveness from presence, working-label from the latest status_update.
     const activity = resolveActivity(
@@ -535,6 +570,7 @@ function summarize(
       presences: s.presences,
       ...activity,
       reclaimable: reclaimable.has(s.member.id),
+      wakeable: wakeable.has(s.member.id),
     };
   });
 }
@@ -986,6 +1022,184 @@ export async function handleHttp(
           detail: policy,
         });
         return sendJson(res, 200, { policy });
+      }
+
+      // ── Harness residency: the wake ledger (ADR 131, increment 2) ──────────────────────────────
+      // Enrollment is the authorization event (admin-authorized, actor≠authorizer per ADR 127):
+      // one verb writes the enrollment row + mints the standing resume grant whose revocation is
+      // the kill switch. The grant token travels ONCE in this response — the CLI writes it into the
+      // seat's `binding.grant`, so woken sessions occupy via the seat's own credential and the
+      // daemon never holds it.
+      if (method === 'POST' && rest === '/residency/enroll') {
+        const { team, member: authorizer, viaFallback } = authGovernance(ctx, slug, req);
+        const body = parseOrBadRequest(EnrollResidencyBodySchema, await readJson(req));
+        const target = getMemberByName(ctx.db, team.id, body.seat);
+        if (!target || target.left_at !== null)
+          throw new MusterdError('not_found', `no seat "${body.seat}" in team "${slug}"`);
+        // Residency resurrects *harness* sessions — an agent-seat concept. A human's reachability
+        // path is notify (ADR 024/035); an observer never participates at all.
+        if (target.kind !== 'agent' || target.observer === 1)
+          throw new MusterdError(
+            'forbidden',
+            `residency enrolls agent seats — "${body.seat}" is a ${target.observer === 1 ? 'observer' : target.kind} seat`,
+          );
+        const status = resolveAccountStatus(target);
+        if (status === 'disabled' || status === 'banned')
+          throw new MusterdError('forbidden', `seat "${body.seat}" is ${status}`);
+
+        // Standing-while-enrolled (the considered ADR 087 exception): a quiet week must not make
+        // the seat unwakeable, so control moves from TTL decay to explicit revocation.
+        const mint = issueGrant(
+          ctx.db,
+          team.id,
+          { scope: 'seat', target: target.name, lifetime: 'standing', single_use: false },
+          authorizer.name,
+        );
+        const { row, previous } = enrollResidency(ctx.db, team.id, {
+          member_id: target.id,
+          harness: body.harness,
+          host: body.host,
+          grant_id: mint.grant.id,
+          authorized_by: authorizer.name,
+        });
+        // Last-enrolled-wins: the superseded enrollment's grant dies with it (no orphan standing
+        // grants), and the host swap is named in the audit detail.
+        if (previous?.grant_id) revokeGrant(ctx.db, team.id, previous.grant_id);
+        appendAudit(ctx.db, team.id, {
+          actor: authorizer.name,
+          action: 'residency.enrolled',
+          target: target.name,
+          result: 'allow',
+          detail: {
+            harness: body.harness,
+            host: body.host,
+            grant_id: mint.grant.id,
+            authorized_by: authorizer.name,
+            ...(previous ? { previous_host: previous.host } : {}),
+            ...(viaFallback ? { fallback: 'no-admin' } : {}),
+          },
+        });
+        appendAudit(ctx.db, team.id, {
+          actor: authorizer.name,
+          action: 'grant.issue',
+          target: target.name,
+          result: 'allow',
+          detail: {
+            scope: 'seat',
+            lifetime: 'standing',
+            grant_id: mint.grant.id,
+            via: 'residency.enroll',
+            authorized_by: authorizer.name,
+          },
+        });
+        return sendJson(res, 201, {
+          residency: toResidency(row, team.slug, target.name),
+          grant: mint.token,
+        });
+      }
+
+      // The kill switch (`musterd residency off`): the seat itself or an admin — revocation must
+      // be easy. Reverses the enrollment and revokes the standing grant in one verb.
+      if (method === 'POST' && rest === '/residency/revoke') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(RevokeResidencyBodySchema, await readJson(req));
+        const target = getMemberByName(ctx.db, team.id, body.seat);
+        if (!target || target.left_at !== null)
+          throw new MusterdError('not_found', `no seat "${body.seat}" in team "${slug}"`);
+        const selfRevoke = member.id === target.id;
+        if (!selfRevoke && !resolveCapabilities(member).is_admin && teamHasAdmin(ctx.db, team.id))
+          throw new MusterdError(
+            'forbidden',
+            `revoking another seat's residency requires an admin seat (is_admin)`,
+          );
+        const removed = revokeResidency(ctx.db, team.id, target.id);
+        if (!removed)
+          throw new MusterdError('not_found', `seat "${body.seat}" is not enrolled in residency`);
+        if (removed.grant_id) revokeGrant(ctx.db, team.id, removed.grant_id);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'residency.revoked',
+          target: target.name,
+          result: 'allow',
+          detail: {
+            host: removed.host,
+            ...(removed.grant_id ? { grant_id: removed.grant_id } : {}),
+            authorized_by: member.name,
+          },
+        });
+        return sendJson(res, 200, { ok: true });
+      }
+
+      // The team's enrollments (`musterd residency status`) — any authenticated member may read;
+      // the roster already shows the same fact as `wakeable`.
+      if (method === 'GET' && rest === '/residency') {
+        const { team } = authTouch(ctx, slug, req);
+        const residency = listResidency(ctx.db, team.id).map((r) =>
+          toResidency(r, team.slug, getMemberById(ctx.db, r.member_id)?.name ?? '?'),
+        );
+        return sendJson(res, 200, { residency });
+      }
+
+      // The host's poll (ADR 131 §4): one transaction derives due wakes, inserts leases, returns
+      // orders — double-spawn is structurally impossible. Agent-key auth, no seat (the host is
+      // infrastructure); the response carries structured fields only, never message bodies.
+      if (method === 'POST' && rest === '/residency/wake-leases') {
+        const team = authAgentKeyOnly(ctx, slug, req);
+        const body = parseOrBadRequest(WakeLeasesBodySchema, await readJson(req));
+        const orders = claimWakeLeases(
+          ctx.db,
+          team.id,
+          team.slug,
+          body.host,
+          ctx.config.presenceTimeoutMs,
+        );
+        return sendJson(res, 200, { orders });
+      }
+
+      // The host's outcome report: settles the lease and writes the actuation audit — the
+      // `residency.woke`/`wake_failed` rows the rate policy (cooldown / hourly cap / attempt cap)
+      // is derived from. No session ids cross here (ADR 131 §5 — ids stay in `binding.session`).
+      if (method === 'POST' && rest === '/residency/wake-report') {
+        const team = authAgentKeyOnly(ctx, slug, req);
+        const body = parseOrBadRequest(WakeReportBodySchema, await readJson(req));
+        const lease = settleWakeLease(ctx.db, team.id, body.lease_id);
+        if (!lease) {
+          const exists = ctx.db
+            .prepare<
+              [string, string],
+              { one: number }
+            >('SELECT 1 AS one FROM wake_leases WHERE team_id = ? AND id = ?')
+            .get(team.id, body.lease_id);
+          if (exists)
+            throw new MusterdError('conflict', `lease "${body.lease_id}" is already reported`);
+          throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
+        }
+        const seat = getMemberById(ctx.db, lease.member_id);
+        const sender = ctx.db
+          .prepare<[string, string], { name: string }>(
+            `SELECT mem.name AS name FROM messages m JOIN members mem ON mem.id = m.from_member
+              WHERE m.team_id = ? AND m.id = ?`,
+          )
+          .get(team.id, lease.act_id);
+        const enrollment = getResidency(ctx.db, team.id, lease.member_id);
+        appendAudit(ctx.db, team.id, {
+          actor: null,
+          action: body.occupied ? 'residency.woke' : 'residency.wake_failed',
+          target: seat?.name ?? '?',
+          result: body.occupied ? 'allow' : 'deny',
+          detail: {
+            act: lease.act_id,
+            sender: sender?.name ?? '?',
+            lease_id: lease.id,
+            lane: lease.lane,
+            ...(enrollment?.grant_id ? { grant_id: enrollment.grant_id } : {}),
+            ...(body.session ? { session: body.session } : {}),
+            ...(body.answered !== undefined ? { answered: body.answered } : {}),
+            ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
+            ...(body.reason ? { reason: body.reason } : {}),
+          },
+        });
+        return sendJson(res, 200, { ok: true, lease_id: lease.id, status: 'reported' });
       }
 
       // P3.2 stateless claim mirror (SPEC A.7, ADR 077) — unauthenticated (key in body, not Bearer).

@@ -77,5 +77,12 @@ export const MemberSummarySchema = MemberSchema.extend({
    * back-compat; the server always sets it.
    */
   reclaimable: z.boolean().optional(),
+  /**
+   * True when the seat is enrolled in harness residency (ADR 131) — offline is not unreachable: a
+   * directed act can wake it, so the roster reads `offline · wakeable`. An enrollment fact (set
+   * whether or not the seat is currently offline); renderers apply it to the offline label.
+   * Optional for back-compat; the server always sets it.
+   */
+  wakeable: z.boolean().optional(),
 });
 export type MemberSummary = z.infer<typeof MemberSummarySchema>;

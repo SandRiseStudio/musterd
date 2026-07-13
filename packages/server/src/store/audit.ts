@@ -50,7 +50,20 @@ export type AuditAction =
   // ADR 109: a lane carrying a branch reached a terminal state — the seat attests the landed merge.
   // actor = the resolving seat, target = the branch, `detail` carries the attested (never verified)
   // `{ pr, sha, authorized_by }` — the join table between seats, main SHAs, and authorizing humans.
-  | 'git.pr_merged';
+  | 'git.pr_merged'
+  // ADR 131: harness residency — the six wake-ledger verbs. `enrolled`/`revoked` are the
+  // authorization events (actor = the deciding caller, detail carries `authorized_by`, ADR 127).
+  // `wake_leased` is the daemon ordering an actuation (actor null — machine decision); `woke` /
+  // `wake_failed` record the host's reported outcome with detail
+  // `{ act, sender, grant_id, lease_id, session: 'fresh'|'resumed' }` — these rows ARE the rate
+  // policy (cooldown / hourly cap / per-act attempt cap are derived from them, never stored).
+  // `wake_exhausted` is the terminal per-act row: attempt cap hit, stop waking for this act.
+  | 'residency.enrolled'
+  | 'residency.revoked'
+  | 'residency.wake_leased'
+  | 'residency.woke'
+  | 'residency.wake_failed'
+  | 'residency.wake_exhausted';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */
