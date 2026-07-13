@@ -70,6 +70,7 @@ src/
     agent.ts          // musterd agent <name> [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness, via the ADR 038 registry) + standing grant + committed workspace.json (ADR 065/080/116)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
+    residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant; status names local drift (ADR 131)
     serve.ts          // musterd serve [--port]
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
     team.ts           // team create / team add / team remove / team export (ADR 058 db→file migration)

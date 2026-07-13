@@ -447,6 +447,23 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: ['musterd requests --pending', 'musterd requests decide r7 --approve --standing'],
   },
   {
+    name: 'residency',
+    signature: 'on [--harness <class>] [--host <name>] | off | status  [--seat <name>] [--json]',
+    summary: 'enroll this seat for wake-on-message while offline (ADR 131)',
+    group: 'admin',
+    detail:
+      'Harness residency (ADR 131): an enrolled seat that goes offline stays reachable — the daemon ' +
+      'derives wake-due directed acts and `musterd host` (increment 3) resurrects the harness session. ' +
+      '`on` (admin-authorized) enrolls the workspace’s seat and lands a standing resume grant in ' +
+      '.musterd/binding.json; `off` is the kill switch (revokes the grant); `status` lists enrollments ' +
+      'and names local drift. The roster shows enrolled offline seats as `offline · wakeable`.',
+    examples: [
+      'musterd residency on --as nick',
+      'musterd residency status',
+      'musterd residency off',
+    ],
+  },
+  {
     name: 'unbind',
     signature: '',
     summary: 'release this folder’s seat — keeps it on the team, free to re-claim',

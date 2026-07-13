@@ -1,0 +1,422 @@
+import type { Residency, WakeLane, WakeOrder } from '@musterd/protocol';
+import type { Database } from 'better-sqlite3';
+import { ulid } from 'ulid';
+import { appendAudit } from './audit.js';
+import { getCursor } from './cursors.js';
+import { openDirectedLedger } from './delivery.js';
+import { getMemberById } from './members.js';
+import { listInbox, pendingInterrupts, rowToEnvelope } from './messages.js';
+import { hasLivePresence, listReclaimableMemberIds } from './presence.js';
+import type { MemberRow } from './rows.js';
+
+/**
+ * The wake ledger (ADR 131, increment 2). The daemon side of harness residency: enrollment rows
+ * (which seats are wakeable, on which host, under whose authority) and **wake leases** — the stored
+ * mutual-exclusion record for wake actuation. Leases follow the `requests` precedent (short TTL,
+ * reaper-expired), because actuation needs correctness the best-effort audit log cannot bear; every
+ * *rate-shaped* decision (cooldown, hourly cap, per-act attempt cap) is DERIVED from
+ * `residency.woke`/`residency.wake_failed` audit rows (the `hasInterruptRaised` pattern), never
+ * stored. The daemon orders wakes; it never spawns a process (`musterd host`, increment 3, acts).
+ */
+
+/** Lease TTL: a wake the host hasn't reported within this window re-becomes due (crash-safe). */
+export const WAKE_LEASE_TTL_MS = 120_000;
+/** Batched-lane cooldown between wakes of one seat (launch default, owner call 2026-07-11). */
+export const WAKE_COOLDOWN_MS = 30 * 60_000;
+/** Hard cap on wake actuations per seat per hour, both lanes (spend bound). */
+export const WAKE_HOURLY_CAP = 2;
+/** Attempts per act before a terminal `residency.wake_exhausted` (termination is provable). */
+export const WAKE_ATTEMPT_CAP = 3;
+
+export interface ResidencyRow {
+  id: string;
+  team_id: string;
+  member_id: string;
+  harness: string;
+  host: string;
+  grant_id: string | null;
+  authorized_by: string | null;
+  policy: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface WakeLeaseRow {
+  id: string;
+  team_id: string;
+  member_id: string;
+  act_id: string;
+  host: string;
+  lane: string;
+  status: string;
+  created_at: number;
+  expires_at: number;
+}
+
+/** Project a stored enrollment to the public shape (seat name resolved by the caller-provided row). */
+export function toResidency(row: ResidencyRow, teamSlug: string, seatName: string): Residency {
+  return {
+    id: row.id,
+    team: teamSlug,
+    seat: seatName,
+    harness: row.harness,
+    host: row.host,
+    grant_id: row.grant_id,
+    authorized_by: row.authorized_by,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+/**
+ * Enroll a seat into residency — an **upsert** keyed on the member (one enrollment per seat, one
+ * host per seat): re-enrolling moves the seat to the new host/harness/grant (last-enrolled-wins,
+ * ADR 131 §4 — the displaced host is told it is not the actuator by simply deriving nothing).
+ * Returns the row plus the previous enrollment (if any) so the route can revoke the superseded
+ * grant and audit the host swap.
+ */
+export function enrollResidency(
+  db: Database,
+  teamId: string,
+  input: {
+    member_id: string;
+    harness: string;
+    host: string;
+    grant_id: string | null;
+    authorized_by: string | null;
+  },
+): { row: ResidencyRow; previous: ResidencyRow | null } {
+  const now = Date.now();
+  const previous =
+    db
+      .prepare<[string], ResidencyRow>('SELECT * FROM residency WHERE member_id = ?')
+      .get(input.member_id) ?? null;
+  if (previous) {
+    db.prepare(
+      `UPDATE residency SET harness = ?, host = ?, grant_id = ?, authorized_by = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(input.harness, input.host, input.grant_id, input.authorized_by, now, previous.id);
+    const row = db
+      .prepare<[string], ResidencyRow>('SELECT * FROM residency WHERE id = ?')
+      .get(previous.id)!;
+    return { row, previous };
+  }
+  const row: ResidencyRow = {
+    id: ulid(),
+    team_id: teamId,
+    member_id: input.member_id,
+    harness: input.harness,
+    host: input.host,
+    grant_id: input.grant_id,
+    authorized_by: input.authorized_by,
+    policy: null,
+    created_at: now,
+    updated_at: now,
+  };
+  db.prepare(
+    `INSERT INTO residency (id, team_id, member_id, harness, host, grant_id, authorized_by, policy, created_at, updated_at)
+     VALUES (@id, @team_id, @member_id, @harness, @host, @grant_id, @authorized_by, @policy, @created_at, @updated_at)`,
+  ).run(row);
+  return { row, previous: null };
+}
+
+/** Revoke a seat's enrollment (the `residency off` kill switch). Returns the removed row, or null. */
+export function revokeResidency(
+  db: Database,
+  teamId: string,
+  memberId: string,
+): ResidencyRow | null {
+  const row = db
+    .prepare<
+      [string, string],
+      ResidencyRow
+    >('SELECT * FROM residency WHERE team_id = ? AND member_id = ?')
+    .get(teamId, memberId);
+  if (!row) return null;
+  db.prepare('DELETE FROM residency WHERE id = ?').run(row.id);
+  return row;
+}
+
+export function getResidency(db: Database, teamId: string, memberId: string): ResidencyRow | null {
+  return (
+    db
+      .prepare<
+        [string, string],
+        ResidencyRow
+      >('SELECT * FROM residency WHERE team_id = ? AND member_id = ?')
+      .get(teamId, memberId) ?? null
+  );
+}
+
+export function listResidency(db: Database, teamId: string): ResidencyRow[] {
+  return db
+    .prepare<
+      [string],
+      ResidencyRow
+    >('SELECT * FROM residency WHERE team_id = ? ORDER BY created_at ASC, id ASC')
+    .all(teamId);
+}
+
+/** Member ids enrolled in residency — the roster's `wakeable` flag (`offline · wakeable`). */
+export function listWakeableMemberIds(db: Database, teamId: string): Set<string> {
+  const rows = db
+    .prepare<[string], { member_id: string }>('SELECT member_id FROM residency WHERE team_id = ?')
+    .all(teamId);
+  return new Set(rows.map((r) => r.member_id));
+}
+
+/** A seat's live (unexpired, unreported) lease, if any — the mutual-exclusion read. */
+function liveLease(db: Database, memberId: string, now: number): WakeLeaseRow | null {
+  return (
+    db
+      .prepare<
+        [string, number],
+        WakeLeaseRow
+      >("SELECT * FROM wake_leases WHERE member_id = ? AND status = 'leased' AND expires_at > ? LIMIT 1")
+      .get(memberId, now) ?? null
+  );
+}
+
+/** Completed wake actuations (reported or expired-as-failed) for a seat since `sinceTs` — the
+ *  derived rate-policy read (ADR 131 §4: `residency.woke`/`wake_failed` rows ARE the rate state). */
+function wakesSince(db: Database, teamId: string, seatName: string, sinceTs: number): number {
+  const row = db
+    .prepare<[string, string, number], { n: number }>(
+      `SELECT COUNT(*) AS n FROM audit
+        WHERE team_id = ? AND action IN ('residency.woke','residency.wake_failed')
+          AND target = ? AND ts > ?`,
+    )
+    .get(teamId, seatName, sinceTs);
+  return row?.n ?? 0;
+}
+
+/** Actuation attempts recorded for one act (woke + failed) — drives the per-act attempt cap. */
+function attemptsForAct(db: Database, teamId: string, actId: string): number {
+  const row = db
+    .prepare<[string, string], { n: number }>(
+      `SELECT COUNT(*) AS n FROM audit
+        WHERE team_id = ? AND action IN ('residency.woke','residency.wake_failed')
+          AND json_extract(detail, '$.act') = ?`,
+    )
+    .get(teamId, actId);
+  return row?.n ?? 0;
+}
+
+/** Has this act already been declared exhausted? (One terminal row per act, ever.) */
+function isExhausted(db: Database, teamId: string, actId: string): boolean {
+  const row = db
+    .prepare<[string, string], { one: number }>(
+      `SELECT 1 AS one FROM audit
+        WHERE team_id = ? AND action = 'residency.wake_exhausted'
+          AND json_extract(detail, '$.act') = ? LIMIT 1`,
+    )
+    .get(teamId, actId);
+  return row != null;
+}
+
+/**
+ * The daemon-composed spawn line (ADR 088 §4 injection bar): structured fields only — act enum,
+ * delimited sender/seat names, one instruction to read the inbox through the governed tools. The
+ * triggering act's **body never appears here** (nor anywhere in a lease response, ADR 128).
+ */
+function composeWakeLine(seat: string, teamSlug: string, act: string, sender: string): string {
+  return (
+    `musterd wake — you are seat "${seat}" on team "${teamSlug}": a ${act} from "${sender}" is ` +
+    `waiting. Read it now via team_inbox_check (or 'musterd inbox') and respond.`
+  );
+}
+
+/** A due-wake candidate before leasing: the triggering act + its lane. */
+interface WakeCandidate {
+  act_id: string;
+  act: string;
+  sender: string;
+  lane: WakeLane;
+}
+
+/**
+ * Derive this member's due-wake candidates, immediate lane first (ADR 131 §3):
+ *
+ * - **immediate** — the ADR 088 interrupt predicate (`pendingInterrupts`: urgent or steer, directed,
+ *   unresolved) over the seat's unread inbox — the same scarcity and `can_flag_urgent` gate as the
+ *   live interrupt line; residency adds a new *state* it reaches, not a new way to command a machine.
+ * - **batched** — the ADR 090 open directed ledger (request_help/handoff + urgent directed acts,
+ *   unanswered), oldest first, subject to the cooldown checked by the caller.
+ *
+ * Ping-pong demotion (acts sent from a provenance-`wake` occupancy only qualify for the batched
+ * lane) starts mattering in increment 3 when `wake` occupancies exist; nothing to demote yet.
+ */
+function dueCandidates(
+  db: Database,
+  teamSlug: string,
+  member: MemberRow,
+  batchedEligible: boolean,
+): WakeCandidate[] {
+  const out: WakeCandidate[] = [];
+  const seen = new Set<string>();
+
+  const cursor = getCursor(db, member.id);
+  const rows = listInbox(db, member, { unreadOnly: true, cursorTs: cursor.last_read_ts });
+  const envelopes = rows.map((r) => {
+    const from = getMemberById(db, r.from_member);
+    const to = r.to_member ? getMemberById(db, r.to_member) : null;
+    return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
+  });
+  for (const env of pendingInterrupts(envelopes, member.name)) {
+    if (seen.has(env.id)) continue;
+    seen.add(env.id);
+    out.push({ act_id: env.id, act: env.act, sender: env.from, lane: 'immediate' });
+  }
+
+  if (batchedEligible) {
+    for (const delivery of openDirectedLedger(db, member.team_id)) {
+      if (seen.has(delivery.id)) continue;
+      const mine = delivery.recipients.find((r) => r.seat === member.name);
+      if (!mine || mine.state === 'answered') continue;
+      seen.add(delivery.id);
+      out.push({ act_id: delivery.id, act: delivery.act, sender: delivery.from, lane: 'batched' });
+    }
+  }
+  return out;
+}
+
+/**
+ * The host's poll (`POST …/residency/wake-leases`), run **in one transaction**: derive due wakes for
+ * the seats enrolled to `host`, insert a lease per order, and return the orders — two hosts, a crash
+ * mid-spawn, or a re-poll race can never double-spawn a seat (ADR 131 §4). Per seat, in order:
+ *
+ * 1. enrolled to this host (a seat enrolled elsewhere derives nothing here — last-enrolled-wins);
+ * 2. **offline** — no live presence AND not held within reclaim grace (a reservation may be
+ *    reconnecting on its own; waking it would race the reclaim);
+ * 3. no live lease (mutual exclusion — the stored bit);
+ * 4. under the hourly cap (derived); the batched lane additionally respects the cooldown (derived);
+ * 5. per act: not exhausted; an act at the attempt cap writes the terminal
+ *    `residency.wake_exhausted` (once) and is skipped — termination is provable:
+ *    wake → cooldown → cap → exhausted.
+ *
+ * One lease per seat per poll (the composed line names one act; the woken session reads its whole
+ * inbox anyway). Audit `residency.wake_leased` is written here per lease — actor null (a machine
+ * decision), best-effort by `appendAudit`'s contract.
+ */
+export function claimWakeLeases(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  host: string,
+  presenceTimeoutMs: number,
+  now = Date.now(),
+): WakeOrder[] {
+  const tx = db.transaction((): WakeOrder[] => {
+    const orders: WakeOrder[] = [];
+    const reclaimable = listReclaimableMemberIds(db, teamId, now);
+    const enrollments = listResidency(db, teamId).filter((r) => r.host === host);
+    for (const enrollment of enrollments) {
+      const member = getMemberById(db, enrollment.member_id);
+      if (!member || member.left_at !== null) continue;
+      if (hasLivePresence(db, member.id, presenceTimeoutMs)) continue;
+      if (reclaimable.has(member.id)) continue;
+      if (liveLease(db, member.id, now)) continue;
+      if (wakesSince(db, teamId, member.name, now - 3_600_000) >= WAKE_HOURLY_CAP) continue;
+
+      const cooled = wakesSince(db, teamId, member.name, now - WAKE_COOLDOWN_MS) === 0;
+      const candidates = dueCandidates(db, teamSlug, member, cooled);
+      for (const candidate of candidates) {
+        if (isExhausted(db, teamId, candidate.act_id)) continue;
+        if (attemptsForAct(db, teamId, candidate.act_id) >= WAKE_ATTEMPT_CAP) {
+          appendAudit(db, teamId, {
+            actor: null,
+            action: 'residency.wake_exhausted',
+            target: member.name,
+            result: 'deny',
+            detail: { act: candidate.act_id, sender: candidate.sender, attempts: WAKE_ATTEMPT_CAP },
+          });
+          continue;
+        }
+        const lease: WakeLeaseRow = {
+          id: ulid(),
+          team_id: teamId,
+          member_id: member.id,
+          act_id: candidate.act_id,
+          host,
+          lane: candidate.lane,
+          status: 'leased',
+          created_at: now,
+          expires_at: now + WAKE_LEASE_TTL_MS,
+        };
+        db.prepare(
+          `INSERT INTO wake_leases (id, team_id, member_id, act_id, host, lane, status, created_at, expires_at)
+           VALUES (@id, @team_id, @member_id, @act_id, @host, @lane, @status, @created_at, @expires_at)`,
+        ).run(lease);
+        appendAudit(db, teamId, {
+          actor: null,
+          action: 'residency.wake_leased',
+          target: member.name,
+          result: 'allow',
+          detail: {
+            lease_id: lease.id,
+            act: candidate.act_id,
+            sender: candidate.sender,
+            lane: candidate.lane,
+            host,
+          },
+        });
+        orders.push({
+          lease_id: lease.id,
+          seat: member.name,
+          act_id: candidate.act_id,
+          act: candidate.act,
+          sender: candidate.sender,
+          lane: candidate.lane,
+          composed_line: composeWakeLine(member.name, teamSlug, candidate.act, candidate.sender),
+          expires_at: lease.expires_at,
+        });
+        break; // one lease per seat per poll
+      }
+    }
+    return orders;
+  });
+  return tx();
+}
+
+/**
+ * Settle a lease from the host's `WakeOutcome` report. `leased` (or `expired` — a slow-but-honest
+ * report after the reaper gave up on it) transitions to `reported`; returns the lease row or null
+ * for unknown/already-reported (the caller 404s/409s). The route writes the outcome audit
+ * (`residency.woke` / `residency.wake_failed`) — this only settles the stored bit.
+ */
+export function settleWakeLease(
+  db: Database,
+  teamId: string,
+  leaseId: string,
+): WakeLeaseRow | null {
+  const row = db
+    .prepare<
+      [string, string],
+      WakeLeaseRow
+    >('SELECT * FROM wake_leases WHERE team_id = ? AND id = ?')
+    .get(teamId, leaseId);
+  if (!row || row.status === 'reported') return null;
+  db.prepare("UPDATE wake_leases SET status = 'reported' WHERE id = ?").run(row.id);
+  return row;
+}
+
+/**
+ * Expire live leases past `expires_at` (the reaper, mirroring `expireRequests`). Returns the expired
+ * rows so the reaper can write `residency.wake_failed {reason: 'lease_expired'}` for each — a
+ * crashed/hung wake still consumes attempt budget (else a host that dies mid-spawn would retry
+ * forever), and the act re-becomes due, still bounded by the derived rate policy.
+ */
+export function expireWakeLeases(db: Database, now = Date.now()): WakeLeaseRow[] {
+  const rows = db
+    .prepare<
+      [number],
+      WakeLeaseRow
+    >("SELECT * FROM wake_leases WHERE status = 'leased' AND expires_at < ?")
+    .all(now);
+  if (rows.length > 0) {
+    db.prepare(
+      "UPDATE wake_leases SET status = 'expired' WHERE status = 'leased' AND expires_at < ?",
+    ).run(now);
+  }
+  return rows;
+}

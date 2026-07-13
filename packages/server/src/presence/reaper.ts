@@ -5,6 +5,7 @@ import { getMemberById, reapStaleObservers } from '../store/members.js';
 import { hasLivePresence, reapStale } from '../store/presence.js';
 import { expireRequests } from '../store/requests.js';
 import type { RequestRow } from '../store/requests.js';
+import { expireWakeLeases } from '../store/residency.js';
 
 /** Periodically remove stale presence rows and emit offline events for members who lost all presence. */
 export function startReaper(ctx: Ctx): () => void {
@@ -38,6 +39,30 @@ export function startReaper(ctx: Ctx): () => void {
         });
       }
       log.info({ msg: 'reap_requests_expired', count: expiredRows.length });
+    }
+
+    // ADR 131: expire wake leases the host never reported (a crash mid-spawn, a hung headless
+    // harness past the watchdog). Each expiry writes `residency.wake_failed` so the attempt still
+    // consumes rate budget — a host that dies mid-spawn can never retry forever — and the wake
+    // re-becomes due on the next poll, bounded by the derived cooldown/caps.
+    const expiredLeases = expireWakeLeases(ctx.db, now);
+    for (const lease of expiredLeases) {
+      const seat = getMemberById(ctx.db, lease.member_id);
+      appendAudit(ctx.db, lease.team_id, {
+        actor: null,
+        action: 'residency.wake_failed',
+        target: seat?.name ?? '?',
+        result: 'deny',
+        detail: {
+          act: lease.act_id,
+          lease_id: lease.id,
+          lane: lease.lane,
+          reason: 'lease_expired',
+        },
+      });
+    }
+    if (expiredLeases.length > 0) {
+      log.info({ msg: 'reap_wake_leases_expired', count: expiredLeases.length });
     }
 
     // Reap idle observer seats (ADR 064) so the auto-provisioned `web-xxxx` seats don't accumulate.

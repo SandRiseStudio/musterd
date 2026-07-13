@@ -14,6 +14,11 @@ import {
   resolveAttestedModel,
   TOKEN_PREFIXES,
   RequestsResponseSchema,
+  EnrollResidencyResponseSchema,
+  ResidencyListResponseSchema,
+  type EnrollResidencyBody,
+  type EnrollResidencyResponse,
+  type ResidencyListResponse,
   type ActDelivery,
   type AuditResponse,
   type ClaimTarget,
@@ -376,6 +381,37 @@ export class HttpClient {
     const parsed = DecideResponseSchema.safeParse(json);
     if (!parsed.success) {
       throw new CliError('decide response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /**
+   * Enroll a seat into harness residency (ADR 131) — `POST /teams/:slug/residency/enroll`,
+   * admin-authorized. The response carries the standing resume grant token **once**; the caller
+   * (`musterd residency on`) writes it into the seat's `binding.grant`.
+   */
+  async enrollResidency(slug: string, body: EnrollResidencyBody): Promise<EnrollResidencyResponse> {
+    const json = await this.request('POST', `/teams/${slug}/residency/enroll`, body);
+    const parsed = EnrollResidencyResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('residency enroll response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /** The residency kill switch (ADR 131) — `POST /teams/:slug/residency/revoke` (seat or admin). */
+  async revokeResidency(slug: string, seat: string): Promise<{ ok: boolean }> {
+    return (await this.request('POST', `/teams/${slug}/residency/revoke`, { seat })) as {
+      ok: boolean;
+    };
+  }
+
+  /** The team's residency enrollments (ADR 131) — `GET /teams/:slug/residency`. */
+  async residency(slug: string): Promise<ResidencyListResponse> {
+    const json = await this.request('GET', `/teams/${slug}/residency`);
+    const parsed = ResidencyListResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('residency response did not match the protocol schema', 1);
     }
     return parsed.data;
   }

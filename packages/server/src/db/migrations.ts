@@ -310,6 +310,49 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE requests ADD COLUMN model TEXT');
     },
   },
+  {
+    // v16 — harness residency (ADR 131, increment 2): the wake ledger. `residency` is the per-seat
+    // enrollment (opt-in, admin-authorized, one host per seat via the UNIQUE member index —
+    // last-enrolled-wins is an upsert, audited). `wake_leases` is the stored mutual-exclusion record
+    // for wake *actuation* — the argued exception to ADR 090's derive-everything maxim: audit rows
+    // are best-effort by contract and cannot bear correctness, so leases follow the `requests` table
+    // precedent (short TTL, reaper-expired). Everything rate-shaped (cooldown, hourly cap, per-act
+    // attempt cap) stays DERIVED from `residency.*` audit rows, never stored. `policy` is a reserved
+    // nullable JSON column for per-seat enrollment overrides (increment 5's knobs — no v17 needed).
+    version: 16,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE residency (
+          id            TEXT PRIMARY KEY,
+          team_id       TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          harness       TEXT NOT NULL,
+          host          TEXT NOT NULL,
+          grant_id      TEXT,
+          authorized_by TEXT,
+          policy        TEXT,
+          created_at    INTEGER NOT NULL,
+          updated_at    INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX idx_residency_member ON residency(member_id);
+        CREATE INDEX idx_residency_team ON residency(team_id);
+
+        CREATE TABLE wake_leases (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          act_id      TEXT NOT NULL,
+          host        TEXT NOT NULL,
+          lane        TEXT NOT NULL CHECK (lane IN ('immediate','batched')),
+          status      TEXT NOT NULL DEFAULT 'leased' CHECK (status IN ('leased','reported','expired')),
+          created_at  INTEGER NOT NULL,
+          expires_at  INTEGER NOT NULL
+        );
+        CREATE INDEX idx_wake_leases_member ON wake_leases(member_id, status);
+        CREATE INDEX idx_wake_leases_team ON wake_leases(team_id, status);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

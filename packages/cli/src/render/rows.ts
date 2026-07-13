@@ -197,7 +197,8 @@ function activityOf(m: MemberSummary): Activity {
  */
 function activityLabel(m: MemberSummary, now: number): string {
   const activity = activityOf(m);
-  if (activity === 'offline') return 'offline';
+  // A residency-enrolled seat (ADR 131) is offline but not unreachable — a directed act wakes it.
+  if (activity === 'offline') return m.wakeable ? 'offline · wakeable' : 'offline';
   const p = m.presences[0];
   let core: string;
   if (activity === 'working' && m.state) {
