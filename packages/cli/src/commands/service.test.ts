@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { LIVE_LABEL, LIVE_SYNC_LABEL, SERVICE_LABEL } from '../service/launchd.js';
-import type { RunResult, Runner, ServiceCtx } from '../service/manage.js';
 import type { LiveCtx } from '../service/live.js';
+import type { RunResult, Runner, ServiceCtx } from '../service/manage.js';
 import { serviceCommand } from './service.js';
 
 describe('serviceCommand', () => {

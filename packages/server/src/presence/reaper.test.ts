@@ -1,15 +1,15 @@
+import type { Database } from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig, type ResolvedConfig } from '../config.js';
 import type { Ctx } from '../context.js';
 import { openDb } from '../db/open.js';
+import { listAudit } from '../store/audit.js';
+import { addMember } from '../store/members.js';
 import { attach, release } from '../store/presence.js';
 import { createRequest } from '../store/requests.js';
-import { addMember } from '../store/members.js';
-import { listAudit } from '../store/audit.js';
 import { createTeam } from '../store/teams.js';
 import { Hub } from '../transport/hub.js';
 import { startReaper } from './reaper.js';
-import type { Database } from 'better-sqlite3';
 
 /**
  * The reaper is a `setInterval` tick, so drive it with fake timers: seed a stale row, advance one

@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import type { Parsed } from '../args.js';
-import { claudeCodeBackend } from '../host/backends/claudeCode.js';
+import { flagStr } from '../args.js';
 import type { ActuatorBackend } from '../host/backend.js';
+import { claudeCodeBackend } from '../host/backends/claudeCode.js';
 import { pollHostOnce, type HostPollDeps } from '../host/loop.js';
 import { hostRegistryPath, loadHostRegistry } from '../host/registry.js';
-import { flagStr } from '../args.js';
 import { theme } from '../render/theme.js';
 
 /**
