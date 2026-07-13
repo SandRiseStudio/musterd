@@ -415,21 +415,109 @@ describe('renderRoster', () => {
   });
 });
 
-describe('renderStatusHeader', () => {
-  it('shows team, server, and the db path + schema when health is available', () => {
-    const out = renderStatusHeader('dawn', 'http://localhost:4849', {
-      db: '/Users/nick/musterd-demo/demo.db',
-      schema: 3,
+describe('renderStatusHeader (the orientation card)', () => {
+  const members: MemberSummary[] = [
+    {
+      id: '1',
+      team: 'dawn',
+      name: 'Ada',
+      kind: 'agent',
+      role: '',
+      lifecycle: 'forever',
+      created_at: 0,
+      presence: 'online',
+      activity: 'working',
+      state: 'wiring auth',
+      presences: [
+        {
+          surface: 'claude-code',
+          status: 'online',
+          last_seen_at: 0,
+          model: 'claude-opus-4-8',
+          workspace: 'movetrail@feat/login',
+        },
+      ],
+    },
+  ];
+
+  it('shows team, roll call, and the plumbing (server, db, schema, build)', () => {
+    const out = renderStatusHeader({
+      team: 'dawn',
+      server: 'http://localhost:4849',
+      health: { db: '/srv/demo.db', schema: 3, build: 'bfe043c680cb552260b4ad3a9c64452ebb6b4f57' },
+      members,
     });
     expect(out).toContain('dawn');
-    expect(out).toContain('http://localhost:4849');
-    expect(out).toContain('db: /Users/nick/musterd-demo/demo.db (schema 3)');
+    expect(out).toContain('1 member · 1 present · 1 working');
+    expect(out).toContain('localhost:4849');
+    // the db path stays: a daemon serving the wrong db reads as "everyone offline" (dogfood finding)
+    expect(out).toContain('/srv/demo.db');
+    expect(out).toContain('schema 3');
+    // the daemon build is shown short (ADR 130) — a stale daemon is visible without digging
+    expect(out).toContain('build bfe043c');
+    expect(out).not.toContain('bfe043c680cb552260b4ad3a9c64452ebb6b4f57');
   });
 
-  it('omits the db segment when health is unavailable (pre-0.2 daemon)', () => {
-    const out = renderStatusHeader('dawn', 'http://localhost:4849');
-    expect(out).toContain('dawn');
-    expect(out).not.toContain('db:');
+  it('answers "which seat is this folder?" — the question the old header never did', () => {
+    const out = renderStatusHeader({
+      team: 'dawn',
+      server: 'http://localhost:4849',
+      members,
+      me: { name: 'Ada', kind: 'agent' },
+    });
+    expect(out).toContain('you are ');
+    expect(out).toContain('Ada');
+    // your own facets, so a wrong-folder mistake is catchable at a glance
+    expect(out).toContain('claude-opus-4-8');
+    expect(out).toContain('movetrail@feat/login');
+  });
+
+  it('says so — with the fix — when this folder holds no seat', () => {
+    const out = renderStatusHeader({
+      team: 'dawn',
+      server: 'http://localhost:4849',
+      members,
+    });
+    expect(out).toContain('you hold no seat here');
+    expect(out).toContain('musterd claim');
+  });
+
+  it('carries the waiting-acts banner inside the header, where it outranks everything (ADR 024)', () => {
+    const out = renderStatusHeader({
+      team: 'dawn',
+      server: 'http://localhost:4849',
+      members,
+      me: { name: 'Ada', kind: 'agent' },
+      pending: renderPendingSummary(2, Date.UTC(2026, 5, 9, 14, 32)),
+    });
+    expect(out).toContain('2 requests waiting for you');
+  });
+
+  it('marks the daemon dead when health is unavailable — the roster below is then stale', () => {
+    const live = renderStatusHeader({
+      team: 'dawn',
+      server: 'http://x',
+      health: { schema: 3 },
+      members,
+    });
+    const dead = renderStatusHeader({ team: 'dawn', server: 'http://x', members });
+    expect(live).toContain('●');
+    expect(dead).toContain('○');
+    // and with no daemon there is no db to name
+    expect(dead).not.toContain('schema');
+  });
+
+  it('compresses $HOME to ~ so the db path states its identity, not its prefix', () => {
+    const home = process.env['HOME'];
+    if (!home) return;
+    const out = renderStatusHeader({
+      team: 'dawn',
+      server: 'http://x',
+      health: { db: `${home}/.musterd/musterd.db` },
+      members,
+    });
+    expect(out).toContain('~/.musterd/musterd.db');
+    expect(out).not.toContain(`${home}/.musterd`);
   });
 });
 

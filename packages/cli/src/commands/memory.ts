@@ -2,7 +2,7 @@ import type { MemoryEnvelope } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
-import { success } from '../render/ui.js';
+import { success, sym, termWidth } from '../render/ui.js';
 import { resolve } from './helpers.js';
 
 /**
@@ -87,11 +87,30 @@ export async function memoryCommand(parsed: Parsed): Promise<number> {
 /**
  * The one-line continuity pointer `musterd claim` / `musterd status` print (ADR 093 §3) — headline +
  * age, never the body, so the returning occupant makes an informed fetch decision.
+ *
+ * `compact` is the `status` header form: glyph-led and clipped to one line. The long prose form
+ * (`saved memory from 6d ago: "…" — \`musterd memory\` to load it`) is right when it is the *only*
+ * thing on screen after a claim, and is the single noisiest line in a header that has five other
+ * things to say — so the header gets a version that states the same facts and sits down.
  */
-export function renderMemoryLine(env: MemoryEnvelope, now = Date.now()): string {
-  return theme.meta(
-    `saved memory from ${ago(now - env.saved_at)} ago: "${env.headline}" — \`musterd memory\` to load it`,
-  );
+export function renderMemoryLine(
+  env: MemoryEnvelope,
+  now = Date.now(),
+  opts: { compact?: boolean; width?: number } = {},
+): string {
+  const age = ago(now - env.saved_at);
+  if (!opts.compact) {
+    return theme.meta(
+      `saved memory from ${age} ago: "${env.headline}" — \`musterd memory\` to load it`,
+    );
+  }
+  const width = opts.width ?? termWidth();
+  const lead = `${sym.goal} memory ${sym.dot} ${age}  `;
+  const tail = `  ${sym.arrow} musterd memory`;
+  const room = Math.max(16, width - lead.length - tail.length - 2);
+  const headline =
+    env.headline.length > room ? env.headline.slice(0, room - 1) + sym.more : env.headline;
+  return theme.meta(`${lead}"${headline}"${tail}`);
 }
 
 function ago(ms: number): string {

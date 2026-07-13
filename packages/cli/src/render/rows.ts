@@ -94,31 +94,90 @@ export function renderMessageRow(
   return env.body ? `${marker}${head}\n${body}` : `${marker}${head}`;
 }
 
+export interface Health {
+  db?: string;
+  schema?: number;
+  /** The daemon's build ref (ADR 130) — shown short, so a stale daemon is visible without digging. */
+  build?: string;
+}
+
+export interface StatusHead {
+  team: string;
+  server: string;
+  health?: Health | undefined;
+  members: MemberSummary[];
+  /** The seat *this folder* resolves to, if any — the question `status` never used to answer. */
+  me?: { name: string; kind: MemberKind } | undefined;
+  /** Rendered `⚑ N acts waiting for you` banner, or '' — outranks everything else on screen. */
+  pending?: string | undefined;
+  /** Rendered seat-memory continuity line, or '' (ADR 093). */
+  memory?: string | undefined;
+}
+
 /**
- * The `status` header: the roll call (`muster` = take the roll — the team, present) over a dim
- * provenance line.
+ * The `status` header — an orientation card, read top-down in order of what you need first:
  *
- * The provenance line keeps the daemon + **db path**: a daemon silently serving the wrong db reads as
- * "everyone offline", and that path is what makes it diagnosable at a glance (dogfood finding). It is
- * dimmed to a second line rather than dropped — it earns its place only when you go looking.
- * `db`/`schema` are omitted pre-0.2.
+ *   1. **the team** + a live dot (mustard, bold) — the anchor, and proof the daemon answered
+ *   2. **who you are here** — with six seats across worktrees, "which seat is this folder?" is the
+ *      question `status` is really asked, and the old header never answered it
+ *   3. **what needs you** — the ⚑ banner (inverse mustard), outranking everything by design (ADR 024)
+ *   4. **what you were doing** — the seat-memory continuity line (ADR 093)
+ *   5. **the plumbing** — server / db / build, dimmest and home-compressed
+ *
+ * The plumbing stays because a daemon silently serving the wrong db reads as "everyone offline", and
+ * that path is what makes it diagnosable (dogfood finding). It is demoted, never dropped: quiet until
+ * you go looking for it.
  */
-export function renderStatusHeader(
-  team: string,
-  server: string,
-  health?: { db?: string; schema?: number },
-  members: MemberSummary[] = [],
-): string {
+export function renderStatusHeader(head: StatusHead): string {
+  const { team, server, health, members, me, pending, memory } = head;
+  // A dot before the team: the daemon answered (green) or didn't (a red ○ — the roster below is stale).
+  const alive = health ? theme.ok(sym.online) : theme.err(sym.offline);
   const lines = [
-    theme.accent(team) + (members.length ? theme.meta(` ${sym.dot} ${rollCall(members)}`) : ''),
+    `${alive} ${theme.accent(team)}` + (members.length ? theme.meta(`  ${rollCall(members)}`) : ''),
   ];
-  const provenance = [server];
-  if (health?.db) {
-    // Keep the `db:` label — a bare path is ambiguous, and naming it is the entire point of this line.
-    provenance.push(`db: ${health.db}${health.schema != null ? ` (schema ${health.schema})` : ''}`);
+
+  if (me) {
+    // Your own seat, in your own identity color — the one row on screen that is *you*.
+    const mine = members.find((m) => m.name === me.name);
+    const facets = mine ? meFacets(mine) : '';
+    lines.push(
+      theme.meta('you are ') +
+        theme.bold(theme.memberName(me.name, me.kind)) +
+        (facets ? theme.meta(`  ${facets}`) : ''),
+    );
+  } else {
+    // Not seated here is not an error — but it *is* the reason your acts would fail. Say so, with the fix.
+    lines.push(theme.meta('you hold no seat here') + '  ' + hint('musterd claim <name>'));
   }
-  lines.push(theme.meta(provenance.join(` ${sym.dot} `)));
+
+  if (pending) lines.push(pending);
+  if (memory) lines.push(memory);
+  lines.push(theme.dim(plumbing(server, health)));
   return lines.join('\n');
+}
+
+/** The facets of *your* seat: model + where you're running — enough to catch a wrong-folder mistake. */
+function meFacets(m: MemberSummary): string {
+  const parts: string[] = [m.kind];
+  const model = m.presences[0]?.model?.trim();
+  if (model && model !== MODEL_UNKNOWN) parts.push(model);
+  if (m.presences[0]?.workspace) parts.push(m.presences[0]!.workspace);
+  return parts.join(` ${sym.dot} `);
+}
+
+/** `127.0.0.1:4849 · ~/.musterd/musterd.db · schema 16 · build bfe043c` — quiet, but there when needed. */
+function plumbing(server: string, health?: Health): string {
+  const parts = [server.replace(/^https?:\/\//, '')];
+  if (health?.db) parts.push(tildeHome(health.db));
+  if (health?.schema != null) parts.push(`schema ${health.schema}`);
+  if (health?.build) parts.push(`build ${health.build.slice(0, 7)}`);
+  return parts.join(` ${sym.dot} `);
+}
+
+/** Compress `$HOME` to `~` — the db path is long, and its *identity* is what matters, not its prefix. */
+function tildeHome(p: string): string {
+  const home = process.env['HOME'];
+  return home && p.startsWith(home + '/') ? '~' + p.slice(home.length) : p;
 }
 
 /** `6 members · 3 present · 2 working` — the roll call, stated once so the roster needs no counting. */

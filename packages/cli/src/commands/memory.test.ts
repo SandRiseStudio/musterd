@@ -101,7 +101,10 @@ describe('memory command (ADR 093)', () => {
       memoryCommand(parseArgs(['save', '--headline', 'mid-refactor', 'the secret body'])),
     );
     const res = await capture(() => statusCommand(parseArgs([])));
-    expect(res.out).toContain('saved memory from');
+    // The header carries the *compact* form (it has five other things to say); `claim` keeps the long
+    // prose one, where it is the only line on screen. Same facts, and the ADR 093 guarantee holds:
+    // headline + age, never the body.
+    expect(res.out).toContain('memory');
     expect(res.out).toContain('"mid-refactor"');
     expect(res.out).toContain('musterd memory');
     expect(res.out).not.toContain('the secret body');
@@ -120,5 +123,22 @@ describe('memory command (ADR 093)', () => {
     );
     expect(line).toContain('saved memory from 2h ago: "mid-refactor of ws.ts eviction, tests red"');
     expect(line).toContain('`musterd memory` to load it');
+  });
+
+  it('the compact form states the same facts in one quiet line, clipped to width', () => {
+    const env = {
+      headline: 'mid-refactor of ws.ts eviction, tests red, and a great deal more besides',
+      saved_at: 1000,
+      size_bytes: 42,
+    };
+    const line = renderMemoryLine(env, 1000 + 2 * 3600_000, { compact: true, width: 60 });
+    expect(line).toContain('memory');
+    expect(line).toContain('2h');
+    expect(line).toContain('musterd memory');
+    expect(line).toContain('mid-refactor'); // the headline still leads
+    expect(line).toContain('…'); // ...clipped, not wrapped — the header is a card, not a paragraph
+    expect(line.length).toBeLessThanOrEqual(60);
+    // the long prose form is NOT what the header prints
+    expect(line).not.toContain('saved memory from');
   });
 });
