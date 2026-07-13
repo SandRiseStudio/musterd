@@ -936,14 +936,30 @@ const RAW: RawItem[] = [
   {
     id: 'own-harness',
     wave: 8,
-    title: 'Role templates & mixed-harness teams',
+    title: 'musterd as its own harness & mixed-harness teams',
     plan: 'reserved',
     category: 'harness',
-    blurb: 'A Role becomes a harness-agnostic provisioning template, rendered per-harness — then musterd’s own harness, then mixed-harness teams.',
+    blurb: 'musterd grows a standalone harness/chat of its own — a seat that runs on musterd directly, like Claude Code or Codex, instead of only sitting on top of them — then mixed-harness teams as a first-class shape.',
     detail:
-      'Provisioning is a starting point, not a security boundary. It stays additive, reversible, and non-obligating. Pulled up at the 2026-07-10 reprioritization to ride the residency wave — but it needs a reevaluation first: the ADR 026–030 template design predates the model-as-a-variable work (ADR 101 makes model family a team-composition property, which a role template should be able to declare) and the mixed-harness evidence from Track B (finding 003: non-Claude harnesses coordinate through musterd today). First increment = re-freeze the template contract against those two.',
-    refs: [adr(26, 'ADRs 026–030')],
+      'Today every seat runs on someone else’s harness (Claude Code, Cursor, Codex) with musterd as the coordination layer on top; the residency work (ADR 131) already names musterd’s own native harness as its reference actuator row. This item is that ambition whole: a musterd-native runtime a seat can live on directly, plus mixed-harness teams as the deliberately-supported composition (Track B finding 003: non-Claude harnesses coordinate through musterd today; ADR 101 makes model family a team-composition property). Role creation/assignment is deliberately NOT this item — roles are harness-independent (see roles-and-stewardship) and must work identically whether a seat runs on Claude Code, Codex, or musterd’s own harness. (Split 2026-07-13: this item previously also carried the role-template reevaluation.)',
+    refs: [adr(26, 'ADRs 026–030'), adr(131, 'ADR 131')],
     dependsOn: ['harness-adapters'],
+  },
+  {
+    id: 'roles-and-stewardship',
+    wave: 8,
+    title: 'Roles & stewardship — a role library with an infra-touch guardrail',
+    plan: 'reserved',
+    category: 'platform',
+    blurb: 'Create and assign named roles (steward, platform guardian, product manager, UX designer, experimenter, researcher, support, database guru…) with charters + capabilities — including "only designated platform agents touch running infrastructure".',
+    detail:
+      'Captured 2026-07-13 (owner intent; full brainstorm/design session pending — docs/design/roles-and-stewardship.md is the seed). The prompting problem: any agent can restart/rebuild shared infrastructure or modify platform code while teammates are online and depending on it; the desired end state is that only designated platform agent(s) may, and everyone else routes infra requests + troubleshooting to them (request_help by role). Explicitly lenient while the team is still building musterd itself — warn-first, watcher-never-gatekeeper, hardening later. Builds on what exists rather than re-inventing: the ADR 069/070 capability substrate (roles/<name>.toml already carries defaults + charter, per-seat narrowing, in-band enforcement + audit), the ADR 026–030 provisioning templates (the per-harness rendering half), the steward (ADR 112) as the first worked example of a role-agent (charter + autonomy knobs + guardrails; today an Action, wants to be a resident seat via ADR 131), and the no-orchestrator stance (a role is charter + capabilities on an ordinary seat, never a new protocol power). Roles are harness-independent by design — the same role assignable on Claude Code, Codex, Cursor, or musterd’s own future harness.',
+    refs: [
+      adr(70, 'ADRs 069–070'),
+      adr(112, 'ADR 112'),
+      doc('docs/design/roles-and-stewardship.md', 'roles-and-stewardship.md'),
+    ],
+    dependsOn: ['v03-p1-seats'],
   },
   {
     id: 'sandboxed-runtime',
