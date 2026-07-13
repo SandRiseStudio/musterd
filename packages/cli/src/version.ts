@@ -1,5 +1,5 @@
-import { readBuildStamp } from '@musterd/protocol';
 import { createRequire } from 'node:module';
+import { readBuildStamp } from '@musterd/protocol';
 
 /**
  * The `@musterd/cli` version, read from the package's own `package.json` at runtime (ADR 067). A
