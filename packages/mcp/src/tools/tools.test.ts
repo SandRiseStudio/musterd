@@ -400,14 +400,16 @@ describe('team_inbox_check handler', () => {
 });
 
 describe('team_members handler', () => {
-  it('lists members with presence, role and lifecycle', async () => {
+  it('lists members with their facets, and no empty-field noise', async () => {
     const handler = capture(registerMembers, {
       roster: (async () => ({ members: [member()] })) as any,
     });
-    const r = await handler({});
-    expect(text(r)).toContain(
-      'Ada — kind=agent role=backend lifecycle=forever presence=[claude-code:active]',
-    );
+    const out = text(await handler({}));
+    expect(out).toContain('Ada (agent · backend · claude-code)');
+    // the old `key=value` dump printed `role=—` / `lifecycle=forever` — an empty field is not a fact
+    expect(out).not.toContain('kind=');
+    expect(out).not.toContain('role=');
+    expect(out).not.toContain('lifecycle=forever');
   });
 
   it('renders an until-lifecycle and a not-present member, and filters by name', async () => {
@@ -419,12 +421,10 @@ describe('team_members handler', () => {
         ],
       })) as any,
     });
-    const r = await handler({ name: 'Lin' });
-    const out = text(r);
+    const out = text(await handler({ name: 'Lin' }));
     expect(out).toContain('Lin');
-    expect(out).toContain('role=—');
-    expect(out).toContain('lifecycle=until');
-    expect(out).toContain('presence=[not present]');
+    expect(out).toContain('until 1970-01-01'); // a non-default lifecycle still says so
+    expect(out).not.toContain('role='); // ...but an absent role stays silent
     expect(out).not.toContain('Ada');
   });
 
@@ -458,8 +458,32 @@ describe('team_status handler', () => {
       })) as any,
     });
     const out = text(await handler({}));
-    expect(out).toContain('Ada (agent, backend) — online via claude-code');
-    expect(out).toContain('nick (human) — offline');
+    expect(out).toContain('2 members · 1 present');
+    expect(out).toContain('Ada (agent · backend · claude-code)');
+    expect(out).toContain('here:');
+    expect(out).toContain('out:');
+    expect(out).toContain('nick (human)');
+  });
+
+  it('tells an agent what its teammates are working on — the point of a coordination roster', async () => {
+    const handler = capture(registerStatus, {
+      member: 'Lin',
+      roster: (async () => ({
+        members: [
+          member({
+            name: 'Ada',
+            presence: 'online',
+            activity: 'working',
+            state: 'refactoring the wake ledger',
+          }),
+        ],
+      })) as any,
+    });
+    const out = text(await handler({}));
+    // the old tool could say Ada was *online* but never what she was *doing*
+    expect(out).toContain('refactoring the wake ledger');
+    expect(out).toContain('working:');
+    expect(out).toContain('you are Lin');
   });
 
   it('reports no members and surfaces errors', async () => {

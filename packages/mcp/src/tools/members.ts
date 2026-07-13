@@ -1,11 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
-import { textResult } from './format.js';
+import { formatMember, textResult } from './format.js';
 
 const DESCRIPTION =
-  'Get detail on one member (or all): kind, role, lifecycle, current presences/surfaces. ' +
-  'Use to decide who to hand off to or ask for help.';
+  'Get detail on one member (or all): what they are working on, the model they run, their role, ' +
+  'and where they are present. Use to decide who to hand off to or ask for help.';
 
 export function registerMembers(server: McpServer, client: MusterdClient): void {
   server.registerTool(
@@ -21,18 +21,15 @@ export function registerMembers(server: McpServer, client: MusterdClient): void 
         if (selected.length === 0) {
           return textResult(args.name ? `no member "${args.name}"` : 'no members');
         }
+        // The shared member line (what they're doing, model, where) — the substance an agent decides on.
+        // A member with several presences is the one case this tool must say more than the roster does:
+        // it is the "detail on one member" tool, so the extra surfaces are appended rather than dropped.
         const lines = selected.map((m) => {
-          // A residency-enrolled seat (ADR 131) is absent but wakeable — a directed act reaches it.
-          const presences = m.presences.length
-            ? m.presences.map((p) => `${p.surface}:${p.status}`).join(', ')
-            : m.wakeable
-              ? 'not present · wakeable'
-              : 'not present';
-          const lifecycle =
-            m.lifecycle === 'until' && m.lifecycle_until
-              ? `until ${new Date(m.lifecycle_until).toISOString()}`
-              : m.lifecycle;
-          return `${m.name} — kind=${m.kind} role=${m.role || '—'} lifecycle=${lifecycle} presence=[${presences}]`;
+          const line = formatMember(m);
+          const extra = m.presences.slice(1);
+          return extra.length
+            ? `${line} (also ${extra.map((p) => `${p.surface}:${p.status}`).join(', ')})`
+            : line;
         });
         return textResult(lines.join('\n'));
       } catch (err) {
