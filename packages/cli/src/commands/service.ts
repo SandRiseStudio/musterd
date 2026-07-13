@@ -12,6 +12,15 @@ import {
   serviceSupported,
 } from '../service/launchd.js';
 import {
+  installLive,
+  refreshLive,
+  startLive,
+  statusLive,
+  stopLive,
+  uninstallLive,
+  type LiveCtx,
+} from '../service/live.js';
+import {
   install,
   restart,
   start,
@@ -23,15 +32,6 @@ import {
   type Runner,
   type ServiceCtx,
 } from '../service/manage.js';
-import {
-  installLive,
-  refreshLive,
-  startLive,
-  statusLive,
-  stopLive,
-  uninstallLive,
-  type LiveCtx,
-} from '../service/live.js';
 
 /** Shell out to `launchctl` synchronously, capturing output and never throwing on a non-zero exit. */
 const spawnRunner: Runner = (cmd, args): RunResult => {

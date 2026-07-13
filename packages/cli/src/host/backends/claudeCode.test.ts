@@ -67,7 +67,7 @@ function harness(child: FakeChild) {
   const backend = claudeCodeBackend({
     resolveBin: async () => '/fake/claude',
     // reason: the fake child mirrors only the ChildProcess surface the backend touches.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     spawn: ((bin: string, args: string[], opts: SpawnCall['opts']) => {
       calls.push({ bin, args, opts });
       return child as any;
