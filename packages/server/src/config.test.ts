@@ -5,6 +5,7 @@ import {
   DEFAULT_HOST,
   HEARTBEAT_INTERVAL_MS,
   hostnameOf,
+  isLocalPeer,
   isLoopbackHost,
   PRESENCE_TIMEOUT_MS,
   RECLAIM_GRACE_MS,
@@ -57,6 +58,34 @@ describe('isLoopbackHost', () => {
     ]) {
       expect(isLoopbackHost(h)).toBe(false);
     }
+  });
+});
+
+describe('isLocalPeer', () => {
+  it('accepts a loopback peer, including the IPv4-mapped IPv6 form a dual-stack listener reports', () => {
+    for (const a of ['127.0.0.1', '127.1.2.3', '::1', '::ffff:127.0.0.1', '::FFFF:127.0.0.1']) {
+      expect(isLocalPeer(a, false)).toBe(true);
+    }
+  });
+
+  it('rejects a routable peer', () => {
+    for (const a of ['10.0.0.1', '192.168.1.5', '100.64.0.1', '::ffff:203.0.113.7']) {
+      expect(isLocalPeer(a, false)).toBe(false);
+    }
+  });
+
+  // The whole point of the flag. Behind a TLS-terminating proxy every remote request arrives FROM the
+  // proxy — i.e. from loopback — so a peer check that ignored trustProxy would read the open internet
+  // as "local" and hand it the keys. Loopback must stop meaning "local" the moment we trust a proxy.
+  it('trusts no peer at all when a proxy is trusted — loopback included', () => {
+    for (const a of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) {
+      expect(isLocalPeer(a, true)).toBe(false);
+    }
+  });
+
+  it('fails closed on a missing peer address (destroyed socket)', () => {
+    expect(isLocalPeer(undefined, false)).toBe(false);
+    expect(isLocalPeer('', false)).toBe(false);
   });
 });
 

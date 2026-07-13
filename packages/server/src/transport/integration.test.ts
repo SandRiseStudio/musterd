@@ -2633,3 +2633,99 @@ describe('seat memory endpoints + occupy envelope (ADR 093)', () => {
     expect(clears).toHaveLength(1);
   });
 });
+
+/**
+ * Seat provisioning is localhost-trust — and now actually enforces it.
+ *
+ * `POST /members` mints a seat and returns its secret, and an `{observer:true}` seat reads every
+ * directed message on the team (GET /messages and the firehose both exempt observers, ADR 128). The
+ * route always *described* itself as localhost-trust but never checked the peer, so on an ADR 040
+ * off-loopback bind anyone who could reach the port could mint a DM-reading credential.
+ *
+ * These tests bind on loopback (so the peer really is 127.0.0.1) and flip `trustProxy` to model the
+ * off-loopback deployment: with a proxy in front, the peer address stops being evidence of anything,
+ * which is exactly the case a naive `remoteAddress === '127.0.0.1'` check would get catastrophically
+ * wrong.
+ */
+describe('provisioning is localhost-trust, enforced (observer DM disclosure)', () => {
+  let proxied: RunningServer;
+  let pbase: string;
+
+  beforeEach(async () => {
+    proxied = createServer({ db: openDb(':memory:'), port: 0, trustProxy: true });
+    const { port } = await proxied.listen();
+    pbase = `http://127.0.0.1:${port}`;
+  });
+  afterEach(async () => {
+    await proxied.close();
+  });
+
+  async function ppost(path: string, body: unknown, auth?: string) {
+    const res = await fetch(pbase + path, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(auth ? { authorization: `Bearer ${auth}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
+  }
+
+  it('refuses to mint an observer for an unauthenticated non-local caller', async () => {
+    await ppost('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+
+    const res = await ppost('/teams/dawn/members', {
+      name: 'watcher',
+      kind: 'human',
+      observer: true,
+    });
+
+    expect(res.status).toBe(401);
+    // The refusal has to explain *where they are*, not just "unauthorized" — the caller is a browser.
+    expect(res.json.error.message).toMatch(/directed messages|admin credential/i);
+  });
+
+  it('refuses an ordinary seat too — the mint itself is the privilege', async () => {
+    await ppost('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const res = await ppost('/teams/dawn/members', { name: 'Ada', kind: 'agent' });
+    expect(res.status).toBe(401);
+  });
+
+  it('an admin credential still provisions from anywhere', async () => {
+    const team = await ppost('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential as string;
+    expect(team.json.member.capabilities.is_admin).toBe(true);
+
+    const res = await ppost(
+      '/teams/dawn/members',
+      { name: 'watcher', kind: 'human', observer: true },
+      nickTok,
+    );
+    expect(res.status).toBe(201);
+    expect(res.json.human_credential).toMatch(/^mscr_/);
+  });
+
+  it('a non-admin seat cannot mint — no privilege laundering through an ordinary credential', async () => {
+    const team = await ppost('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential as string;
+    const ada = await ppost('/teams/dawn/members', { name: 'Ada', kind: 'human' }, nickTok);
+    const adaTok = ada.json.human_credential as string;
+
+    const res = await ppost(
+      '/teams/dawn/members',
+      { name: 'watcher', kind: 'human', observer: true },
+      adaTok,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('the local dashboard is untouched: a loopback peer still provisions unauthenticated', async () => {
+    // `server` (the outer suite's) has no trustProxy — a real 127.0.0.1 peer, the /live case.
+    await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
+    const res = await post('/teams/dusk/members', { name: 'web-1', kind: 'human', observer: true });
+    expect(res.status).toBe(201);
+    expect(res.json.human_credential).toMatch(/^mscr_/);
+  });
+});
