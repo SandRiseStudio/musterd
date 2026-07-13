@@ -288,7 +288,8 @@ function memberFacets(m: MemberSummary, group: Group): string {
   if (model && model !== MODEL_UNKNOWN) parts.push(model);
   if (group !== 'out' && m.presences[0]?.surface) parts.push(m.presences[0]!.surface);
   if (m.lifecycle === 'session') parts.push('session');
-  if (m.lifecycle === 'until' && m.lifecycle_until) {
+  // `!= null`, not truthiness: an epoch-0 timestamp is falsy and would silently drop the date.
+  if (m.lifecycle === 'until' && m.lifecycle_until != null) {
     parts.push(`until ${new Date(m.lifecycle_until).toISOString().slice(0, 10)}`);
   }
   // A residency-enrolled seat (ADR 131) is offline but not unreachable — a directed act wakes it.
