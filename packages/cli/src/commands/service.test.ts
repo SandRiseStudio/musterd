@@ -58,6 +58,60 @@ describe('serviceCommand', () => {
     await expect(serviceCommand(parseArgs([]))).rejects.toThrow(/usage/);
   });
 
+  // The plist embeds process.execPath; a node that can't load better-sqlite3 crashloops the daemon while
+  // `install` reports success (this took the dogfood daemon down). Guard only that verb, only on a
+  // definite ABI mismatch.
+  describe('install ABI guard', () => {
+    const ABI_ERR =
+      "Error: The module '/repo/node_modules/.pnpm/better-sqlite3/build/Release/better_sqlite3.node'\n" +
+      'was compiled against a different Node.js version using\nNODE_MODULE_VERSION 127. This version of ' +
+      'Node.js requires\nNODE_MODULE_VERSION 115.';
+    /** Fail the `node -e` probe with `err`; every other command (launchctl) succeeds. */
+    const probeFails =
+      (err: string): Runner =>
+      (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd.endsWith('node')) return { status: 1, stdout: '', stderr: err };
+        return { status: 0, stdout: '', stderr: '' };
+      };
+
+    it('refuses to install when the embedded node has the wrong ABI', async () => {
+      const c = ctx(probeFails(ABI_ERR));
+      await expect(
+        serviceCommand(parseArgs(['install']), { platform: 'darwin', ctx: c }),
+      ).rejects.toThrow(/refusing to install|NODE_MODULE_VERSION/);
+      // and it never wrote the plist / bootstrapped
+      expect(existsSync(c.plistPath)).toBe(false);
+      expect(calls.some((k) => k.cmd === 'launchctl')).toBe(false);
+    });
+
+    it('--force overrides the guard', async () => {
+      const c = ctx(probeFails(ABI_ERR));
+      const { code } = await capture(() =>
+        serviceCommand(parseArgs(['install', '--force']), { platform: 'darwin', ctx: c }),
+      );
+      expect(code).toBe(0);
+      expect(existsSync(c.plistPath)).toBe(true);
+    });
+
+    it('proceeds when the probe fails for any NON-ABI reason (never blocks what it cannot read)', async () => {
+      const c = ctx(probeFails("Error: Cannot find module 'better-sqlite3'")); // packaged install, etc.
+      const { code } = await capture(() =>
+        serviceCommand(parseArgs(['install']), { platform: 'darwin', ctx: c }),
+      );
+      expect(code).toBe(0);
+      expect(existsSync(c.plistPath)).toBe(true);
+    });
+
+    it('does not guard refresh/start/restart (they never re-embed a node)', async () => {
+      const c = ctx(probeFails(ABI_ERR));
+      const { code } = await capture(() =>
+        serviceCommand(parseArgs(['start']), { platform: 'darwin', ctx: c }),
+      );
+      expect(code).toBe(0); // start reuses the existing plist — no ABI decision to make
+    });
+  });
+
   it('refuses unsupported platforms with the systemd/Windows seam', async () => {
     await expect(serviceCommand(parseArgs(['install']), { platform: 'linux' })).rejects.toThrow(
       /macOS-only/,
@@ -72,7 +126,13 @@ describe('serviceCommand', () => {
     expect(code).toBe(0);
     expect(existsSync(c.plistPath)).toBe(true);
     expect(out).toContain('installed + started');
-    expect(calls.map((x) => x.args[0])).toEqual(['bootout', 'bootstrap', 'kickstart']);
+    // The ABI guard probes the target node *before* touching launchd (it must not half-install).
+    expect(calls[0]?.cmd).toBe(c.node);
+    expect(calls.filter((x) => x.cmd === 'launchctl').map((x) => x.args[0])).toEqual([
+      'bootout',
+      'bootstrap',
+      'kickstart',
+    ]);
   });
 
   it('install surfaces a bootstrap failure as a CliError', async () => {

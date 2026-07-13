@@ -25,6 +25,14 @@ const proxyEntry = { target: daemon, changeOrigin: true, configure: stripOrigin 
 // ourselves (required for the dev-mode React Refresh runtime).
 export default defineConfig({
   server: {
+    // Deliberately NOT Vite's default 5173. `:5173` used to be *the* /live viewer (a `pnpm dev` server run
+    // as a LaunchAgent, ADR 124) until the daemon took over serving /live from its own origin (ADR 132).
+    // Leaving dev on 5173 would let a stale bookmark quietly resolve to whatever WIP dev server happened to
+    // be up — the exact "is my change live, and on which port?" confusion ADR 132 set out to kill. Pinning
+    // dev to 5174 keeps 5173 dead (a stale link fails fast) and keeps the two roles unambiguous:
+    //   :4849/live → THE viewer (daemon-served, production bundle, always on)
+    //   :5174/live → your ephemeral WIP preview (this dev server, proxied to the daemon for data)
+    port: 5174,
     proxy: {
       '/teams': proxyEntry,
       '/health': proxyEntry,
