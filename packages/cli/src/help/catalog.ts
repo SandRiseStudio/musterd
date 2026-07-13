@@ -138,10 +138,11 @@ export const CATALOG: readonly CommandEntry[] = [
       '(ADR 118): sync the daemon’s checkout to origin/main → `pnpm build` → restart, so merged work ' +
       'goes live without the manual pull+build+restart dance (refuses on uncommitted changes; a failed ' +
       'build aborts before the bounce). `restart`/`stop`/`refresh` refuse while teammates hold live ' +
-      'sessions unless `--force`. Add `--live` to target the /live web viewer instead of the daemon ' +
-      '(ADR 124): `install --live` stands up a self-updating dev server on :5173 (a dedicated ' +
-      'detached-on-main worktree + a tracker that restarts it whenever main moves), so /live always ' +
-      'shows the latest main with no manual step; `refresh --live` forces the sync now.',
+      'sessions unless `--force`. Add `--live` to target the /live viewer instead of the daemon ' +
+      '(ADR 132): `install --live` stands up a self-updating build-publisher (a dedicated ' +
+      'detached-on-main worktree + an interval agent that rebuilds the web app and publishes it into ' +
+      'the daemon’s web-root whenever main moves), so the daemon serves /live from its own origin — ' +
+      'always the latest main, no dev server, no daemon restart; `refresh --live` forces a rebuild now.',
     examples: [
       'musterd service install',
       'musterd service refresh',

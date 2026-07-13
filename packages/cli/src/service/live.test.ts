@@ -11,10 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  buildLiveServePlist,
-  buildLiveServeScript,
-  buildLiveSyncPlist,
-  buildLiveSyncScript,
+  buildLiveBuildPlist,
+  buildLiveBuildScript,
   LIVE_LABEL,
   LIVE_SYNC_LABEL,
 } from './launchd.js';
@@ -29,70 +27,52 @@ import {
 } from './live.js';
 import type { RunResult, Runner } from './manage.js';
 
-// ---- pure: generated scripts ----
+// ---- pure: the generated build-publisher script (ADR 132) ----
 
-describe('buildLiveServeScript', () => {
-  const s = buildLiveServeScript({
+describe('buildLiveBuildScript', () => {
+  const s = buildLiveBuildScript({
     worktree: '/Users/x/agents-live',
-    port: 5173,
+    webRoot: '/Users/x/.musterd/live/web',
     nodeDir: '/opt/node/bin',
-    gitDir: '/opt/homebrew/bin',
-    uid: 501,
-    serverLabel: LIVE_LABEL,
+    gitDir: '/opt/git/bin',
   });
-  it('syncs to origin/main, builds protocol, and execs vite on the port', () => {
+  it('syncs to origin/main, builds the web app, and does NOT run a dev server', () => {
     expect(s).toContain('git checkout --quiet --detach origin/main');
-    expect(s).toContain('pnpm --filter @musterd/protocol build');
-    expect(s).toContain('exec pnpm dev --port 5173');
+    expect(s).toContain('pnpm --filter @musterd/web build');
+    expect(s).not.toContain('pnpm dev'); // no dev server anymore
     expect(s).toContain('WORKTREE="/Users/x/agents-live"');
-    expect(s).toContain('cd "$WORKTREE/packages/web"');
+    expect(s).toContain('WEBROOT="/Users/x/.musterd/live/web"');
   });
-  it('puts node + pnpm on PATH (pnpm lives under $HOME/Library/pnpm)', () => {
+  it('atomically publishes the built bundle into the web-root (stage + rename swap)', () => {
+    expect(s).toContain('cp -R "$SRC" "$STAGE"'); // stage on the web-root filesystem
+    expect(s).toContain('mv "$STAGE" "$WEBROOT"'); // atomic swap into place
+    expect(s).toContain('packages/web/dist/client'); // the vite client output
+  });
+  it('skips the build when already current AND already published', () => {
+    expect(s).toContain('rev-parse HEAD');
+    expect(s).toContain('rev-parse origin/main');
+    expect(s).toContain('-f "$WEBROOT/index.html"');
+  });
+  it('puts node + git + pnpm on PATH (pnpm lives under $HOME/Library/pnpm)', () => {
     expect(s).toContain('/opt/node/bin');
+    expect(s).toContain('/opt/git/bin');
     expect(s).toContain('${HOME}/Library/pnpm');
   });
 });
 
-describe('buildLiveSyncScript', () => {
-  const s = buildLiveSyncScript({
-    worktree: '/Users/x/agents-live',
-    port: 5173,
-    nodeDir: '/opt/node/bin',
-    gitDir: '/opt/git/bin',
-    uid: 501,
-    serverLabel: LIVE_LABEL,
-  });
-  it('is a no-op when HEAD already equals origin/main, else kickstarts the server', () => {
-    expect(s).toContain('rev-parse HEAD');
-    expect(s).toContain('rev-parse origin/main');
-    expect(s).toContain(`kickstart -k gui/501/${LIVE_LABEL}`);
-  });
-});
-
-describe('buildLive*Plist', () => {
-  it('server plist is KeepAlive and runs its script via bash', () => {
-    const p = buildLiveServePlist({
+describe('buildLiveBuildPlist', () => {
+  it('is interval-driven and NOT KeepAlive (it exits after publishing)', () => {
+    const p = buildLiveBuildPlist({
       label: LIVE_LABEL,
-      scriptPath: '/home/.musterd/live/serve.sh',
+      scriptPath: '/home/.musterd/live/build.sh',
       workingDir: '/w',
-      stdoutPath: '/l/viewer.log',
-      stderrPath: '/l/viewer.log',
+      stdoutPath: '/l/build.log',
+      stderrPath: '/l/build.log',
+      intervalSeconds: 60,
     });
     expect(p).toContain(`<string>${LIVE_LABEL}</string>`);
     expect(p).toContain('<string>/bin/bash</string>');
-    expect(p).toContain('<string>/home/.musterd/live/serve.sh</string>');
-    expect(p).toMatch(/<key>KeepAlive<\/key>\s*<true\/>/);
-    expect(p).not.toContain('StartInterval');
-  });
-  it('tracker plist is interval-driven and NOT KeepAlive', () => {
-    const p = buildLiveSyncPlist({
-      label: LIVE_SYNC_LABEL,
-      scriptPath: '/home/.musterd/live/sync.sh',
-      workingDir: '/w',
-      stdoutPath: '/l/sync.log',
-      stderrPath: '/l/sync.log',
-      intervalSeconds: 60,
-    });
+    expect(p).toContain('<string>/home/.musterd/live/build.sh</string>');
     expect(p).toMatch(/<key>StartInterval<\/key>\s*<integer>60<\/integer>/);
     expect(p).not.toContain('<key>KeepAlive</key>');
   });
@@ -103,17 +83,17 @@ describe('buildLive*Plist', () => {
 function makeCtx(run: Runner, dir: string): LiveCtx {
   return {
     uid: 501,
-    serverLabel: LIVE_LABEL,
-    syncLabel: LIVE_SYNC_LABEL,
+    buildLabel: LIVE_LABEL,
+    legacySyncLabel: LIVE_SYNC_LABEL,
     worktree: join(dir, 'agents-live'),
     sourceRepo: join(dir, 'agents'),
-    serverPlistPath: join(dir, 'LaunchAgents', `${LIVE_LABEL}.plist`),
-    syncPlistPath: join(dir, 'LaunchAgents', `${LIVE_SYNC_LABEL}.plist`),
-    serveScriptPath: join(dir, 'live', 'serve.sh'),
-    syncScriptPath: join(dir, 'live', 'sync.sh'),
-    serverLogPath: join(dir, 'live', 'viewer.log'),
-    syncLogPath: join(dir, 'live', 'sync.log'),
-    port: 5173,
+    webRoot: join(dir, 'live', 'web'),
+    buildPlistPath: join(dir, 'LaunchAgents', `${LIVE_LABEL}.plist`),
+    buildScriptPath: join(dir, 'live', 'build.sh'),
+    buildLogPath: join(dir, 'live', 'build.log'),
+    legacySyncPlistPath: join(dir, 'LaunchAgents', `${LIVE_SYNC_LABEL}.plist`),
+    legacyServeScriptPath: join(dir, 'live', 'serve.sh'),
+    legacySyncScriptPath: join(dir, 'live', 'sync.sh'),
     nodeDir: '/opt/node/bin',
     gitDir: '/opt/homebrew/bin',
     intervalSeconds: 60,
@@ -129,7 +109,7 @@ describe('installLive', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('adds the worktree, writes executable scripts + both plists, and bootstraps both agents', () => {
+  it('adds the worktree, writes an executable script + plist, and bootstraps the build agent', () => {
     const calls: string[][] = [];
     const run: Runner = (cmd, args) => {
       calls.push([cmd, ...args]);
@@ -139,8 +119,7 @@ describe('installLive', () => {
     const res = installLive(ctx);
 
     expect(res.worktree.created).toBe(true);
-    expect(res.server.status).toBe(0);
-    expect(res.sync.status).toBe(0);
+    expect(res.build.status).toBe(0);
 
     // worktree added from the source repo, detached at origin/main
     expect(calls).toContainEqual([
@@ -153,15 +132,34 @@ describe('installLive', () => {
       ctx.worktree,
       'origin/main',
     ]);
-    // both agents bootstrapped
-    expect(calls).toContainEqual(['launchctl', 'bootstrap', 'gui/501', ctx.serverPlistPath]);
-    expect(calls).toContainEqual(['launchctl', 'bootstrap', 'gui/501', ctx.syncPlistPath]);
+    // the single build agent bootstrapped
+    expect(calls).toContainEqual(['launchctl', 'bootstrap', 'gui/501', ctx.buildPlistPath]);
 
-    // artifacts on disk, scripts executable
-    expect(readFileSync(ctx.serveScriptPath, 'utf8')).toContain('exec pnpm dev --port 5173');
-    expect(readFileSync(ctx.serverPlistPath, 'utf8')).toContain(LIVE_LABEL);
-    expect(readFileSync(ctx.syncPlistPath, 'utf8')).toContain(LIVE_SYNC_LABEL);
-    expect(statSync(ctx.serveScriptPath).mode & 0o100).toBeTruthy(); // owner-executable
+    // artifacts on disk, script executable
+    expect(readFileSync(ctx.buildScriptPath, 'utf8')).toContain('pnpm --filter @musterd/web build');
+    expect(readFileSync(ctx.buildPlistPath, 'utf8')).toContain(LIVE_LABEL);
+    expect(statSync(ctx.buildScriptPath).mode & 0o100).toBeTruthy(); // owner-executable
+  });
+
+  it('retires the ADR 124 dev-server bundle on install (boots out the old sync agent + files)', () => {
+    const calls: string[][] = [];
+    const run: Runner = (cmd, args) => {
+      calls.push([cmd, ...args]);
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const ctx = makeCtx(run, dir);
+    // Simulate a prior ADR 124 install leaving these artifacts behind.
+    mkdirSync(join(dir, 'live'), { recursive: true });
+    writeFileSync(ctx.legacyServeScriptPath, '# old serve.sh');
+    writeFileSync(ctx.legacySyncScriptPath, '# old sync.sh');
+    mkdirSync(join(dir, 'LaunchAgents'), { recursive: true });
+    writeFileSync(ctx.legacySyncPlistPath, '<plist/>');
+
+    installLive(ctx);
+    expect(calls).toContainEqual(['launchctl', 'bootout', 'gui/501/' + LIVE_SYNC_LABEL]);
+    expect(existsSync(ctx.legacyServeScriptPath)).toBe(false);
+    expect(existsSync(ctx.legacySyncScriptPath)).toBe(false);
+    expect(existsSync(ctx.legacySyncPlistPath)).toBe(false);
   });
 
   it('skips the worktree add when the worktree already exists (existing .git)', () => {
@@ -171,7 +169,6 @@ describe('installLive', () => {
       return { status: 0, stdout: '', stderr: '' };
     };
     const ctx = makeCtx(run, dir);
-    // Simulate an already-present worktree: a `.git` file inside ctx.worktree.
     mkdirSync(ctx.worktree, { recursive: true });
     writeFileSync(join(ctx.worktree, '.git'), 'gitdir: ...\n');
     const res = ensureWorktree(ctx);
@@ -187,7 +184,7 @@ describe('uninstallLive / stopLive / refreshLive / statusLive', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('uninstall boots out both agents and removes the two plists', () => {
+  it('uninstall boots out the agent (+ legacy), removes the plist, and clears the published bundle', () => {
     const calls: string[][] = [];
     const run: Runner = (cmd, args) => {
       calls.push([cmd, ...args]);
@@ -195,15 +192,19 @@ describe('uninstallLive / stopLive / refreshLive / statusLive', () => {
     };
     const ctx = makeCtx(run, dir);
     installLive(ctx);
+    // Simulate a published bundle in the web-root.
+    mkdirSync(ctx.webRoot, { recursive: true });
+    writeFileSync(join(ctx.webRoot, 'index.html'), '<!doctype html>');
+
     const res = uninstallLive(ctx);
-    expect(res.removedPlists).toBe(2);
-    expect(existsSync(ctx.serverPlistPath)).toBe(false);
-    expect(existsSync(ctx.syncPlistPath)).toBe(false);
+    expect(res.removedPlists).toBe(1);
+    expect(existsSync(ctx.buildPlistPath)).toBe(false);
+    expect(existsSync(ctx.webRoot)).toBe(false); // published bundle cleared → daemon 404s /live
     expect(calls).toContainEqual(['launchctl', 'bootout', 'gui/501/' + LIVE_LABEL]);
-    expect(calls).toContainEqual(['launchctl', 'bootout', 'gui/501/' + LIVE_SYNC_LABEL]);
+    expect(calls).toContainEqual(['launchctl', 'bootout', 'gui/501/' + LIVE_SYNC_LABEL]); // legacy too
   });
 
-  it('refresh kickstarts the server agent', () => {
+  it('refresh kickstarts the build agent (forces a rebuild + publish now)', () => {
     const calls: string[][] = [];
     const run: Runner = (cmd, args) => {
       calls.push([cmd, ...args]);
@@ -214,21 +215,20 @@ describe('uninstallLive / stopLive / refreshLive / statusLive', () => {
     expect(calls).toContainEqual(['launchctl', 'kickstart', '-k', 'gui/501/' + LIVE_LABEL]);
   });
 
-  it('status reports both agents from launchctl print', () => {
+  it('status reports the build agent from launchctl print', () => {
     const run: Runner = (_cmd, args): RunResult => {
       const target = args[args.length - 1];
       if (target === 'gui/501/' + LIVE_LABEL)
         return { status: 0, stdout: 'state = running\npid = 4242', stderr: '' };
-      return { status: 1, stdout: '', stderr: 'not loaded' }; // sync not loaded
+      return { status: 1, stdout: '', stderr: 'not loaded' };
     };
     const ctx = makeCtx(run, dir);
     const st = statusLive(ctx);
-    expect(st.server.loaded).toBe(true);
-    expect(st.server.pid).toBe(4242);
-    expect(st.sync.loaded).toBe(false);
+    expect(st.build.loaded).toBe(true);
+    expect(st.build.pid).toBe(4242);
   });
 
-  it('stop boots out both without touching artifacts', () => {
+  it('stop boots out the agent without touching artifacts', () => {
     const calls: string[][] = [];
     const run: Runner = (cmd, args) => {
       calls.push([cmd, ...args]);
@@ -237,7 +237,7 @@ describe('uninstallLive / stopLive / refreshLive / statusLive', () => {
     const ctx = makeCtx(run, dir);
     installLive(ctx);
     stopLive(ctx);
-    expect(existsSync(ctx.serverPlistPath)).toBe(true); // stop leaves the plist
+    expect(existsSync(ctx.buildPlistPath)).toBe(true); // stop leaves the plist
     expect(calls).toContainEqual(['launchctl', 'bootout', 'gui/501/' + LIVE_LABEL]);
   });
 });

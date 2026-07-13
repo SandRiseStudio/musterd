@@ -76,13 +76,20 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 const USAGE =
   'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live] [--port <n>] [--host <h>] [--follow] [--force]';
 
+/** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
+ * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
+export function liveWebRoot(): string {
+  return join(dirname(configPath()), 'live', 'web');
+}
+
 /**
- * Resolve the `/live` viewer service (ADR 124) from the running process. The viewer worktree is a
+ * Resolve the `/live` viewer service (ADR 132) from the running process. The viewer worktree is a
  * sibling of the daemon's own checkout (`…/agents` → `…/agents-live`), added from it since they share
- * the git object store. Scripts + logs live under `~/.musterd/live/`; the two plists sit beside the
- * daemon's in `~/Library/LaunchAgents`. `gitDir` is resolved so the tracker's minimal PATH finds git.
+ * the git object store. The generated build script + log live under `~/.musterd/live/`; the plist sits
+ * beside the daemon's in `~/Library/LaunchAgents`. `gitDir` is resolved so the build's PATH finds git.
+ * The `legacy*` fields name the retired ADR 124 dev-server bundle so an in-place upgrade cleans it up.
  */
-function resolveLiveCtx(port: number, run: Runner): LiveCtx {
+function resolveLiveCtx(run: Runner): LiveCtx {
   const binJs = resolvePath(process.argv[1] ?? '');
   const repoRoot = resolvePath(binJs, '../../../..');
   const home = dirname(configPath()); // ~/.musterd
@@ -92,17 +99,17 @@ function resolveLiveCtx(port: number, run: Runner): LiveCtx {
   const gitDir = whichGit ? dirname(whichGit) : '/opt/homebrew/bin';
   return {
     uid: typeof process.getuid === 'function' ? process.getuid() : '',
-    serverLabel: LIVE_LABEL,
-    syncLabel: LIVE_SYNC_LABEL,
+    buildLabel: LIVE_LABEL,
+    legacySyncLabel: LIVE_SYNC_LABEL,
     worktree: `${repoRoot}-live`,
     sourceRepo: repoRoot,
-    serverPlistPath: join(agents, `${LIVE_LABEL}.plist`),
-    syncPlistPath: join(agents, `${LIVE_SYNC_LABEL}.plist`),
-    serveScriptPath: join(liveDir, 'serve.sh'),
-    syncScriptPath: join(liveDir, 'sync.sh'),
-    serverLogPath: join(liveDir, 'viewer.log'),
-    syncLogPath: join(liveDir, 'sync.log'),
-    port,
+    webRoot: liveWebRoot(),
+    buildPlistPath: join(agents, `${LIVE_LABEL}.plist`),
+    buildScriptPath: join(liveDir, 'build.sh'),
+    buildLogPath: join(liveDir, 'build.log'),
+    legacySyncPlistPath: join(agents, `${LIVE_SYNC_LABEL}.plist`),
+    legacyServeScriptPath: join(liveDir, 'serve.sh'),
+    legacySyncScriptPath: join(liveDir, 'sync.sh'),
     nodeDir: dirname(process.execPath),
     gitDir,
     intervalSeconds: 60,
@@ -194,8 +201,8 @@ export async function serviceCommand(
     ctx?: ServiceCtx;
     liveCtx?: LiveCtx;
     health?: () => Promise<DaemonHealth>;
-    /** Probe whether the /live dev server answers on its port (injected so tests skip the network). */
-    probeViewer?: (port: number) => Promise<boolean>;
+    /** Probe whether the daemon serves /live (injected so tests skip the network). */
+    probeViewer?: (url: string) => Promise<boolean>;
   } = {},
 ): Promise<number> {
   const sub = parsed.positionals[0];
@@ -216,6 +223,10 @@ export async function serviceCommand(
   const host = flagStr(parsed.flags, 'host');
   if (port) serveArgs.push('--port', port);
   if (host) serveArgs.push('--host', host);
+  // ADR 132: the daemon serves /live from its own origin — point it at the service-owned web-root the
+  // `--live` build-publisher publishes into. Inert until populated (serveStatic 404s the UI; API is
+  // unaffected — ADR 062), so this is safe on every daemon, viewer installed or not.
+  serveArgs.push('--web-root', liveWebRoot());
   const ctx = deps.ctx ?? resolveCtx(serveArgs);
   const health = deps.health ?? fetchHealth;
   const force = parsed.flags['force'] === true;
@@ -228,11 +239,10 @@ export async function serviceCommand(
     );
   };
 
-  // `--live` retargets every verb at the /live web viewer (ADR 124) instead of the daemon. The viewer
-  // is dev-side and drops no teammate session, so its ops skip the shared-daemon live-session guard.
+  // `--live` retargets every verb at the /live build-publisher (ADR 132) instead of the daemon. It runs
+  // no server and drops no teammate session, so its ops skip the shared-daemon live-session guard.
   if (parsed.flags['live'] === true) {
-    const livePort = port ? Number(port) : 5173;
-    const liveCtx = deps.liveCtx ?? resolveLiveCtx(livePort, ctx.run);
+    const liveCtx = deps.liveCtx ?? resolveLiveCtx(ctx.run);
     return liveServiceCommand(sub, liveCtx, parsed, ok, fail, deps.probeViewer ?? probeViewer);
   }
 
@@ -363,16 +373,18 @@ async function refreshDaemon(
 }
 
 /**
- * `musterd service <verb> --live` — manage the /live web viewer (ADR 124): a KeepAlive dev server on
- * `:5173` + a main-tracker that restarts it whenever `origin/main` moves, both generated + installed
- * from versioned templates. Unlike the daemon verbs, these drop no teammate session (the viewer is a
- * dev-side web tab), so there's no live-session guard.
+ * `musterd service <verb> --live` — manage the /live build-publisher (ADR 132): a single interval agent
+ * that advances the `…/agents-live` worktree to `origin/main`, builds the web app, and atomically
+ * publishes it into the daemon's web-root, which the daemon serves at `/live` from its own origin. No dev
+ * server, no `:5173`. Unlike the daemon verbs these drop no teammate session (nothing long-lived is
+ * bounced), so there's no live-session guard.
  */
-/** Does the /live dev server answer on `port`? A short-timeout GET, so `status` says "serving", not
- * just "agent loaded". Injected in `serviceCommand` so tests never touch the network. */
-async function probeViewer(port: number): Promise<boolean> {
+/** Does the daemon serve `/live`? A short-timeout GET against the daemon's own origin, so `status --live`
+ * reflects "is the page actually served" (the real surface now), not just "agent loaded". Injected in
+ * `serviceCommand` so tests never touch the network. */
+async function probeViewer(url: string): Promise<boolean> {
   try {
-    const res = await fetch(`http://localhost:${port}/`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`${url}/live`, { signal: AbortSignal.timeout(2000) });
     return res.ok;
   } catch {
     return false;
@@ -385,7 +397,7 @@ async function liveServiceCommand(
   parsed: Parsed,
   ok: (s: string) => void,
   fail: (step: string, r: RunResult) => never,
-  probe: (port: number) => Promise<boolean>,
+  probe: (url: string) => Promise<boolean>,
 ): Promise<number> {
   const meta = (s: string) => process.stdout.write(theme.meta(s) + '\n');
   switch (sub) {
@@ -393,15 +405,12 @@ async function liveServiceCommand(
       const res = installLive(ctx);
       if (res.worktree.result && !res.worktree.created && res.worktree.result.status !== 0)
         fail('git worktree add', res.worktree.result);
-      if (res.server.status !== 0) fail('server (bootstrap)', res.server);
-      if (res.sync.status !== 0) fail('tracker (bootstrap)', res.sync);
-      ok(`installed + started the /live viewer on :${ctx.port} (${theme.accent(ctx.serverLabel)})`);
-      meta(`  worktree: ${ctx.worktree}${res.worktree.created ? ' (created)' : ''}`);
-      meta(`  server:   ${ctx.serveScriptPath}  → serves origin/main`);
-      meta(
-        `  tracker:  ${ctx.syncScriptPath}  → restarts on main move (every ${ctx.intervalSeconds}s)`,
-      );
-      meta(`  logs:     ${ctx.serverLogPath}`);
+      if (res.build.status !== 0) fail('build-publisher (bootstrap)', res.build);
+      ok(`installed + started the /live build-publisher (${theme.accent(ctx.buildLabel)})`);
+      meta(`  worktree:  ${ctx.worktree}${res.worktree.created ? ' (created)' : ''}`);
+      meta(`  builds →   ${ctx.webRoot}  (the daemon serves this at /live)`);
+      meta(`  publishes: on load + every ${ctx.intervalSeconds}s when origin/main moves`);
+      meta(`  logs:      ${ctx.buildLogPath}`);
       return 0;
     }
     case 'uninstall': {
@@ -409,27 +418,27 @@ async function liveServiceCommand(
       const res = uninstallLive(ctx, purge);
       ok(
         res.removedPlists > 0
-          ? `stopped + removed the /live viewer${purge ? ' + worktree' : ''}`
-          : `/live viewer was not installed — nothing to remove`,
+          ? `stopped + removed the /live build-publisher${purge ? ' + worktree' : ''}`
+          : `/live build-publisher was not installed — nothing to remove`,
       );
       return 0;
     }
     case 'start': {
       const r = startLive(ctx);
-      if (r.server.status !== 0) fail('start (server)', r.server);
-      ok('started the /live viewer');
+      if (r.build.status !== 0) fail('start (build-publisher)', r.build);
+      ok('started the /live build-publisher');
       return 0;
     }
     case 'stop': {
       stopLive(ctx);
-      ok('stopped the /live viewer');
+      ok('stopped the /live build-publisher');
       return 0;
     }
     case 'restart':
     case 'refresh': {
       const r = refreshLive(ctx);
-      if (r.status !== 0) fail('restart', r);
-      ok(`restarted the /live viewer — it will re-sync to the tip of origin/main`);
+      if (r.status !== 0) fail('refresh', r);
+      ok(`triggered a /live rebuild — it will publish the tip of origin/main`);
       return 0;
     }
     case 'status':
@@ -445,39 +454,35 @@ async function liveServiceCommand(
 
 async function renderLiveStatus(
   ctx: LiveCtx,
-  probe: (port: number) => Promise<boolean>,
+  probe: (url: string) => Promise<boolean>,
 ): Promise<number> {
-  const st = statusLive(ctx);
-  const line = (_label: string, s: (typeof st)['server']) =>
-    s.loaded
-      ? theme.ok(`loaded${s.pid ? ` · pid ${s.pid}` : ''}${s.state ? ` · ${s.state}` : ''}`)
-      : theme.warn('not loaded');
-  process.stdout.write(`${theme.accent(ctx.serverLabel)}  ${line(ctx.serverLabel, st.server)}\n`);
-  process.stdout.write(`${theme.accent(ctx.syncLabel)}  ${line(ctx.syncLabel, st.sync)}\n`);
+  const s = statusLive(ctx).build;
+  const line = s.loaded
+    ? theme.ok(`loaded${s.pid ? ` · pid ${s.pid}` : ''}${s.state ? ` · ${s.state}` : ''}`)
+    : theme.warn('not loaded');
+  process.stdout.write(`${theme.accent(ctx.buildLabel)}  ${line}\n`);
   process.stdout.write(theme.meta(`  worktree: ${ctx.worktree}`) + '\n');
-  // Probe the dev server so status reflects "is :5173 actually serving", not just "is the agent loaded".
-  const up = await probe(ctx.port);
+  process.stdout.write(theme.meta(`  web-root: ${ctx.webRoot}`) + '\n');
+  // Probe the *daemon's* /live — the real serving surface now — instead of a dev port.
+  const server = loadConfig().server;
+  const up = await probe(server);
   process.stdout.write(
-    `  ${theme.meta('viewer:')} ${up ? theme.ok(`up`) : theme.err('unreachable')}${theme.meta(` · http://localhost:${ctx.port}/live`)}\n`,
+    `  ${theme.meta('viewer:')} ${up ? theme.ok('up') : theme.err('unreachable')}${theme.meta(` · ${server}/live`)}\n`,
   );
   return 0;
 }
 
 function liveLogs(ctx: LiveCtx, follow: boolean): Promise<number> {
   if (!follow) {
-    for (const [label, path] of [
-      ['server', ctx.serverLogPath],
-      ['tracker', ctx.syncLogPath],
-    ] as const) {
-      const lines = tailFile(path, 40);
-      if (lines.length === 0) continue;
-      process.stdout.write(theme.meta(`── ${label}: ${path} ──`) + '\n');
+    const lines = tailFile(ctx.buildLogPath, 40);
+    if (lines.length) {
+      process.stdout.write(theme.meta(`── build: ${ctx.buildLogPath} ──`) + '\n');
       process.stdout.write(lines.join('\n') + '\n');
     }
     return Promise.resolve(0);
   }
   return new Promise<number>((resolveP) => {
-    const child = spawn('tail', ['-f', ctx.serverLogPath, ctx.syncLogPath], { stdio: 'inherit' });
+    const child = spawn('tail', ['-f', ctx.buildLogPath], { stdio: 'inherit' });
     const stopFollow = () => {
       child.kill();
       resolveP(0);
