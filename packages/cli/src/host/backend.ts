@@ -47,10 +47,15 @@ export interface BackendContext {
    *  with how the occupancy attests (`provenance` should read `wake`) or `occupied: false` on
    *  window expiry. `windowMs` shortens the poll window (default: the loop's full verify window) —
    *  a resume attempt (increment 4) verifies in a sub-window so a failure still leaves budget for
-   *  the fresh fallback inside the same lease. */
+   *  the fresh fallback inside the same lease. `sinceTs` is the freshness bar (default: call time):
+   *  only presence touched at-or-after it counts — a lingering presence row from a PREVIOUS
+   *  occupancy can read non-offline for minutes after the daemon's lease-eligibility read went
+   *  offline, and crediting it once reported a dead resume child as woke (first live fallback
+   *  rehearsal, 2026-07-13). Backends pass their spawn timestamp. */
   verifyOccupied(
     seat: string,
     windowMs?: number,
+    sinceTs?: number,
   ): Promise<{ occupied: boolean; provenance?: string | null }>;
   /** One narrator line to the host's stdout (never per poll tick — telemetry carve-out). */
   log(line: string): void;
