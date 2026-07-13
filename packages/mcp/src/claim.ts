@@ -105,6 +105,11 @@ function persistBinding(config: McpConfig, seat: string): void {
     surface: config.surface,
     claim: { mode: 'seat', name: seat },
     ...(config.grant !== undefined ? { grant: config.grant } : {}),
+    // Carry the attested model through the rewrite (ADR 101). `config.model` is the resolved ladder
+    // (env > binding.json), so a re-claim re-persists what this occupancy attests instead of dropping
+    // it — without this, every autojoin/reclaim silently wiped a `--model`-provisioned seat back to
+    // `unknown` and the diversity flag went dark on the next boot.
+    ...(config.model !== undefined ? { model: config.model } : {}),
   };
   try {
     // Write back to the workspace this session was resolved from — NEVER ambient process.cwd(). An

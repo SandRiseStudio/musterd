@@ -1,6 +1,6 @@
 import { type Binding, bindingSeat, type ClaimPolicy } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
-import { findWorkspaceSpec, loadConfig, saveBinding } from '../config.js';
+import { findBinding, findWorkspaceSpec, loadConfig, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { claudeCode } from '../onboard/harnesses/claudeCode.js';
 import { buildMcpEnv, resolveMcpLaunch } from '../onboard/mcpEntry.js';
@@ -71,6 +71,10 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
 
   // Materialize the gitignored binding.json (spec + resolved secrets) so subsequent CLI acts in this
   // folder resolve identity — mirrors `init`. A keyless binding is valid (a chat/human folder).
+  // A re-wire must not forget what the seat attests: the model is a per-machine declaration that lives
+  // only in the gitignored binding (never the committed spec), so re-deriving the binding from the spec
+  // would drop it (ADR 101). Carry the existing declaration forward.
+  const priorModel = findBinding()?.model;
   const binding: Binding = {
     server,
     team,
@@ -78,6 +82,7 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
     claim,
     ...(agentKey !== undefined ? { agent_key: agentKey } : {}),
     ...(grant !== undefined ? { grant } : {}),
+    ...(priorModel !== undefined ? { model: priorModel } : {}),
   };
   saveBinding(process.cwd(), binding);
 

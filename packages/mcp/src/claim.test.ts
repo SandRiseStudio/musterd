@@ -98,6 +98,21 @@ describe('claimAndJoin (v0.3 handshake, ADR 075)', () => {
     expect(existsSync(join(cwd, BINDING_DIR, PENDING_DIR, 'AB12.json'))).toBe(false);
   });
 
+  it('carries the attested model through the re-claim rewrite (ADR 101)', async () => {
+    // Regression: persistBinding rebuilt the binding from scratch and omitted `model`, so every
+    // autojoin/reclaim silently wiped a `--model`-provisioned seat back to `unknown` — the diversity
+    // flag went dark on the next adapter boot.
+    const config = baseConfig({ model: 'claude-fable-5' });
+    await claimAndJoin(joiningClient(config), config, { seat: 'Ada' });
+    expect(JSON.parse(readFileSync(bindingPath(cwd), 'utf8')).model).toBe('claude-fable-5');
+  });
+
+  it('persists no model when the occupancy attests none (stays honestly unknown)', async () => {
+    const config = baseConfig();
+    await claimAndJoin(joiningClient(config), config, { seat: 'Ada' });
+    expect(JSON.parse(readFileSync(bindingPath(cwd), 'utf8')).model).toBeUndefined();
+  });
+
   it('resolves a role pool seat server-side', async () => {
     const config = baseConfig();
     const res = await claimAndJoin(joiningClient(config), config, { role: 'backend' });

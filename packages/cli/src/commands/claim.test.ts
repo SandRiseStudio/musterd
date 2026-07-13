@@ -306,6 +306,25 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     }
   }, 10_000);
 
+  it('preserves an attested model across the claim rewrite (ADR 101)', async () => {
+    await declareSeat('Ada');
+    const g = await grant('Ada');
+    // A seat provisioned with `--model` holds the declaration in binding.json. A claim resolves a seat;
+    // it never redeclares the model — so the rewrite must carry it through. (Regression: it didn't, and
+    // the seat reverted to `unknown` on the next adapter boot.)
+    saveBinding(cwd, {
+      server: serverUrl,
+      team: 'dawn',
+      agent_key: agentKey,
+      surface: 'claude-code',
+      claim: { mode: 'seat', name: 'Ada' },
+      model: 'claude-fable-5',
+    });
+    const { code } = await run(['Ada', '--team', 'dawn', '--grant', g]);
+    expect(code).toBe(0);
+    expect(readBinding().model).toBe('claude-fable-5');
+  }, 10_000);
+
   it('claims the next open pool seat for a role (server-resolved)', async () => {
     await declareSeat('backend-1', 'backend');
     const g = await grant('backend', 'role');
