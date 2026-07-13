@@ -467,6 +467,20 @@ export const CATALOG: readonly CommandEntry[] = [
     ],
   },
   {
+    name: 'session',
+    signature: 'show [--json]  |  start --stdin | end --stdin',
+    summary: 'this workspace’s captured harness session — what a wake would resume (ADR 131)',
+    group: 'admin',
+    detail:
+      'Session capture (ADR 131 inc 4): the SessionStart/SessionEnd hooks (`musterd init` wires ' +
+      'them) pipe the harness hook JSON into `start`/`end`, which record the session in the ' +
+      'gitignored .musterd/binding.json — the id and transcript path never leave this machine; the ' +
+      'daemon gets a harness-class-only attestation (presence-neutral, never claims). A wake then ' +
+      'upgrades from fresh to `--resume`, and a live local session defers the wake entirely. ' +
+      '`show` is the human view: what is captured here, is it live, would a wake resume or defer.',
+    examples: ['musterd session show', 'musterd session show --json'],
+  },
+  {
     name: 'host',
     signature: '[--once] [--interval <s>] [--timeout <s>] [--host <label>]',
     summary: 'the wake actuator — resurrect enrolled offline seats on this machine (ADR 131)',

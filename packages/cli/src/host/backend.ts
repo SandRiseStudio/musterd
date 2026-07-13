@@ -45,8 +45,13 @@ export interface WakeActuation {
 export interface BackendContext {
   /** Poll the roster (presence-neutral, agent-key) until the seat shows a live presence; resolves
    *  with how the occupancy attests (`provenance` should read `wake`) or `occupied: false` on
-   *  window expiry. */
-  verifyOccupied(seat: string): Promise<{ occupied: boolean; provenance?: string | null }>;
+   *  window expiry. `windowMs` shortens the poll window (default: the loop's full verify window) —
+   *  a resume attempt (increment 4) verifies in a sub-window so a failure still leaves budget for
+   *  the fresh fallback inside the same lease. */
+  verifyOccupied(
+    seat: string,
+    windowMs?: number,
+  ): Promise<{ occupied: boolean; provenance?: string | null }>;
   /** One narrator line to the host's stdout (never per poll tick — telemetry carve-out). */
   log(line: string): void;
 }

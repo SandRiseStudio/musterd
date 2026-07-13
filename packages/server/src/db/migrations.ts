@@ -378,6 +378,18 @@ export const MIGRATIONS: Migration[] = [
       db.exec("UPDATE members SET observer_scope = 'full' WHERE observer = 1");
     },
   },
+  {
+    // v19 — session capture (ADR 131 §5, increment 4): the resumable attestation. Harness CLASS +
+    // timestamp only — the daemon never learns a session id or a transcript path (those stay in the
+    // workspace's binding.session). Additive + nullable per the v15 precedent: pre-capture rows read
+    // null and `residency status` renders nothing. Lives on the enrollment row (not presence) because
+    // capture is presence-neutral by contract (ADR 057) — it must never touch an occupancy record.
+    version: 19,
+    up: (db) => {
+      db.exec('ALTER TABLE residency ADD COLUMN resumable_harness TEXT');
+      db.exec('ALTER TABLE residency ADD COLUMN resumable_at INTEGER');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

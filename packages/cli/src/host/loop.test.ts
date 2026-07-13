@@ -85,6 +85,8 @@ function deps(over: Partial<HostPollDeps> & Pick<HostPollDeps, 'backends'>): Hos
     bounds: { timeout_ms: 60_000 },
     log: () => undefined,
     readAgentKey: () => 'mskey_test',
+    // Deterministic guard state: default = no local session (the pre-capture world).
+    liveness: () => ({ state: 'none' }),
     verifyWindowMs: 50,
     verifyPollMs: 5,
     ...over,
@@ -250,5 +252,48 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
       }),
     );
     expect(verified).toEqual({ occupied: false });
+  });
+
+  it('the local-session guard (inc 4): a live local session defers — backend never called, lease settled', async () => {
+    const { client, calls } = fakeClient([order()]);
+    const { backend, specs } = fakeBackend();
+    const lines: string[] = [];
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+        log: (l) => lines.push(l),
+        liveness: (workspace) => {
+          expect(workspace).toBe('/ws/scout'); // judged through the registry's workspace path
+          return {
+            state: 'live',
+            session: { harness: 'claude-code', id: 'cap-1', started_at: 1 },
+          };
+        },
+      }),
+    );
+    expect(specs).toHaveLength(0); // no spawn beside a working session — the whole point
+    expect(calls.reports).toEqual([
+      { lease_id: 'L1', occupied: false, deferred: true, reason: 'local-session-live' },
+    ]);
+    expect(lines.join('\n')).toContain('wake deferred: scout');
+  });
+
+  it('the guard passes resumable/ended/none states straight through to the backend', async () => {
+    for (const state of ['resumable', 'gc-expired', 'none'] as const) {
+      const { client, calls } = fakeClient([order()]);
+      const { backend, specs } = fakeBackend();
+      await pollHostOnce(
+        deps({
+          backends: new Map([['claude-code', backend]]),
+          loadRegistry: () => ({ entries: [entryOf()] }),
+          clientFor: () => client,
+          liveness: () => ({ state }),
+        }),
+      );
+      expect(specs).toHaveLength(1);
+      expect(calls.reports[0]!.deferred).toBeUndefined();
+    }
   });
 });

@@ -105,3 +105,50 @@ describe('multi-identity vault (ADR 059)', () => {
     expect(davids).toEqual([{ team: 'alpha', name: 'David', key: 'mskey_d2', surface: 'cli' }]);
   });
 });
+
+describe('saveBinding merge-guard + atomic write (ADR 131 inc 4)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-saveb-'));
+    process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
+  });
+  afterEach(() => delete process.env['MUSTERD_CONFIG']);
+
+  const base = {
+    server: 'http://s1',
+    team: 'dawn',
+    surface: 'claude-code' as const,
+    claim: { mode: 'seat' as const, name: 'scout' },
+    agent_key: 'mskey_1',
+  };
+  const capture = { harness: 'claude-code', id: 'sid-1', started_at: 123 };
+  const onDisk = () =>
+    JSON.parse(readFileSync(join(dir, '.musterd', 'binding.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+
+  it('a session-less write preserves the on-disk capture (the every-wake clobber sequence)', () => {
+    // The hook captures…
+    saveBinding(dir, { ...base, session: capture });
+    // …then a stale-state writer (the adapter's autojoin persist, `musterd agent`) rewrites the
+    // binding it read before the capture existed. The capture must survive.
+    saveBinding(dir, { ...base, grant: 'msgr_new' });
+    expect(onDisk()['session']).toEqual(capture);
+    expect(onDisk()['grant']).toBe('msgr_new');
+  });
+
+  it('an explicit session on the argument wins over the on-disk one', () => {
+    saveBinding(dir, { ...base, session: capture });
+    const newer = { ...capture, id: 'sid-2' };
+    saveBinding(dir, { ...base, session: newer });
+    expect(onDisk()['session']).toEqual(newer);
+  });
+
+  it('leaves no tmp file behind (atomic rename)', () => {
+    saveBinding(dir, base);
+    const entries = readFileSync(join(dir, '.musterd', 'binding.json'), 'utf8');
+    expect(entries).toContain('"team": "dawn"');
+    expect(existsSync(join(dir, '.musterd', `binding.json.${process.pid}.tmp`))).toBe(false);
+  });
+});

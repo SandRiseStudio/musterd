@@ -111,10 +111,20 @@ function removePermissions(perms: ProvisionPermissions): void {
  *   case it prints one daemon-composed line the model sees mid-turn. This is what makes a busy agent
  *   reachable in seconds instead of at its next task boundary; it degrades to the ADR 046 per-command
  *   nudge where a harness lacks a tool-boundary hook.
+ * - `SessionStart` capture + `SessionEnd` (ADR 131 §5, increment 4) — **project-local**. Session
+ *   capture: pipe the hook's stdin JSON (`{session_id, transcript_path, cwd}` — which musterd used
+ *   to discard) into `musterd session start|end --stdin`, which records it in the workspace's
+ *   gitignored `binding.json` so a wake can `--resume` the seat's transcript instead of starting
+ *   cold. Project-local (unlike the orientation SessionStart): capture is a per-seat-workspace
+ *   fact, drift-checkable per folder, and a wake spawn runs with cwd = the workspace so the local
+ *   hook fires and captures the minted session — capture is self-maintaining. Both are `>/dev/null`
+ *   silent: SessionStart hook stdout is injected into model context, and capture must add zero.
  */
 export const NOTIFICATION_HOOK_MARKER = 'musterd-notify-hook';
 export const SESSIONSTART_HOOK_MARKER = 'musterd-sessionstart-hook';
 export const POSTTOOLUSE_HOOK_MARKER = 'musterd-interrupt-hook';
+export const SESSION_CAPTURE_HOOK_MARKER = 'musterd-session-capture-hook';
+export const SESSION_END_HOOK_MARKER = 'musterd-session-end-hook';
 
 /** The user's GLOBAL Claude Code settings (read at session start for all folders). Honors
  *  `CLAUDE_CONFIG_DIR` (which Claude Code itself respects) so the config home is overridable + testable. */
@@ -175,6 +185,30 @@ function sessionStartHookCommand(): string {
     // when `musterd` resolves), read-only, ≤2s, and never failing — the hook contract stays intact.
     'command -v musterd >/dev/null 2>&1 && musterd init --check-build 2>/dev/null || true ' +
     `# ${SESSIONSTART_HOOK_MARKER}`
+  );
+}
+
+function sessionCaptureHookCommand(): string {
+  // Session capture (ADR 131 §5): pipe this hook's stdin JSON through to `musterd session start`,
+  // which anchors its write to the payload's cwd (never bare process.cwd() — the ADR 018 clobber).
+  // The cd is belt-and-braces with that anchor; `cd`/`command -v` consume no stdin, so the JSON
+  // flows through untouched. Fully silent (`>/dev/null`): SessionStart stdout lands in model
+  // context, and capture must add zero tokens. Best-effort + never-failing, like every musterd hook.
+  return (
+    'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd session start --stdin >/dev/null 2>&1 || true ' +
+    `# ${SESSION_CAPTURE_HOOK_MARKER}`
+  );
+}
+
+function sessionEndHookCommand(): string {
+  // The advisory end-of-session annotation (ADR 131 §5): stamps `ended_at` on the capture so the
+  // local-session guard can tell "cleanly ended" from "live". SessionEnd never fires on a crash —
+  // resumability never depends on this hook. Same silent/best-effort shape as the capture hook.
+  return (
+    'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd session end --stdin >/dev/null 2>&1 || true ' +
+    `# ${SESSION_END_HOOK_MARKER}`
   );
 }
 
@@ -260,6 +294,21 @@ export function installMusterdHooks(): void {
     (m) => isMusterdHookFor(m, POSTTOOLUSE_HOOK_MARKER),
     postToolUseHookCommand(),
   );
+  // Project-local session capture (ADR 131 §5) — a DIFFERENT concern (and marker) from the global
+  // orientation SessionStart below: the capture matcher selects only capture-marked entries, so the
+  // two SessionStart hooks coexist (global orients, local captures) without absorbing each other.
+  upsertHook(
+    settingsLocalPath(),
+    'SessionStart',
+    (m) => isMusterdHookFor(m, SESSION_CAPTURE_HOOK_MARKER),
+    sessionCaptureHookCommand(),
+  );
+  upsertHook(
+    settingsLocalPath(),
+    'SessionEnd',
+    (m) => isMusterdHookFor(m, SESSION_END_HOOK_MARKER),
+    sessionEndHookCommand(),
+  );
   upsertHook(
     globalSettingsPath(),
     'SessionStart',
@@ -282,14 +331,30 @@ export function inspectClaudeHookDrift(cwd: string): string[] {
   if (!existsSync(path)) return []; // no local settings yet — the bare-folder drift already covers it
   const settings = readSettingsSafe(path);
   if (!settings) return []; // present but unparseable — never invent drift from a file we can't read
-  const present = (settings.hooks?.['PostToolUse'] ?? []).some((m) =>
-    isMusterdHookFor(m, POSTTOOLUSE_HOOK_MARKER),
-  );
-  if (present) return [];
-  return [
-    'the Claude Code PostToolUse interrupt hook is missing from .claude/settings.local.json — a busy ' +
-      'agent will not see urgent steering mid-loop (ADR 088). Run `musterd init` to wire it.',
-  ];
+  const has = (event: string, marker: string): boolean =>
+    (settings.hooks?.[event] ?? []).some((m) => isMusterdHookFor(m, marker));
+  const drift: string[] = [];
+  if (!has('PostToolUse', POSTTOOLUSE_HOOK_MARKER)) {
+    drift.push(
+      'the Claude Code PostToolUse interrupt hook is missing from .claude/settings.local.json — a busy ' +
+        'agent will not see urgent steering mid-loop (ADR 088). Run `musterd init` to wire it.',
+    );
+  }
+  if (!has('SessionStart', SESSION_CAPTURE_HOOK_MARKER)) {
+    drift.push(
+      'the Claude Code SessionStart session-capture hook is missing from .claude/settings.local.json — ' +
+        'wakes will run fresh-only, never resuming this seat’s transcript (ADR 131 §5). Run `musterd ' +
+        'init` to wire it.',
+    );
+  }
+  if (!has('SessionEnd', SESSION_END_HOOK_MARKER)) {
+    drift.push(
+      'the Claude Code SessionEnd hook is missing from .claude/settings.local.json — captured sessions ' +
+        'will never be marked ended, so the local-session guard leans on transcript staleness alone ' +
+        '(ADR 131 §5). Run `musterd init` to wire it.',
+    );
+  }
+  return drift;
 }
 
 /**
@@ -306,6 +371,12 @@ export function removeMusterdHooks(): void {
   dropHook(settingsLocalPath(), 'SessionStart', (m) =>
     isMusterdHookFor(m, SESSIONSTART_HOOK_MARKER),
   );
+  // Session capture (ADR 131 §5): both project-local, both marker-exact — the capture drop must not
+  // touch the legacy pre-consolidation SessionStart above, nor any user hook.
+  dropHook(settingsLocalPath(), 'SessionStart', (m) =>
+    isMusterdHookFor(m, SESSION_CAPTURE_HOOK_MARKER),
+  );
+  dropHook(settingsLocalPath(), 'SessionEnd', (m) => isMusterdHookFor(m, SESSION_END_HOOK_MARKER));
 }
 
 // `has`/`resolveClaudeBin` moved to the shared `claudeBin.ts` (ADR 131 inc 3): the wake actuator

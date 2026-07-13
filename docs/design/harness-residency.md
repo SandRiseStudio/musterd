@@ -34,9 +34,9 @@ writes/reverses/cross-checks all three:
 
 | store                         | holds                                          | why here                                                             |
 | ----------------------------- | ---------------------------------------------- | -------------------------------------------------------------------- |
-| `binding.session` (workspace) | harness, session id, started/ended             | where hooks can write; per-machine secret-adjacent (never committed) |
+| `binding.session` (workspace) | harness, session id, transcript path, started/ended | where hooks can write; per-machine secret-adjacent (never committed) |
 | host registry (machine-local) | seat → workspace path, harness                 | the host must resolve paths; the daemon must never learn them        |
-| `residency` table (daemon)    | enrolled, harness class, host, `authorized_by` | roster/predicate need it; survives presence expiry                   |
+| `residency` table (daemon)    | enrolled, harness class, host, `authorized_by`, `resumable_at` | roster/predicate need it; survives presence expiry                   |
 
 ## 2. The wake pipeline
 
@@ -52,6 +52,10 @@ writes/reverses/cross-checks all three:
    (structured fields; never message bodies). Bounds: `{timeout_ms (mandatory watchdog),
 max_turns?, budget_usd?}`. Tool policy: `reply-only` (musterd MCP tools only, default
    permission mode) or `seat-policy` (workspace settings govern). Never a skip-permissions flag.
+   **Local-session guard** (inc 4, ADR 131 §5 amendment): roster-offline ≠ workspace-idle — the
+   host first consults the workspace's `binding.session` liveness (transcript mtime; survives a
+   crash), and a live local session **defers** the wake: lease settles `deferred: true`, audited
+   `residency.wake_deferred`, no attempt/rate budget burned, derivation snoozed briefly.
 4. **Verify** — from the roster/audit (occupancy appears for the seat, provenance `wake`), never
    from process stdout. Per-harness identity check where the harness can silently mint a new
    session (Codex). Resume failure ⇒ **fresh fallback inside the same lease** (see doctrine).
@@ -118,7 +122,8 @@ message-shaped rest.
   unenroll / reclaim.
 - **Autonomy:** reply-only default; `seat-policy` defers to workspace settings; the wake path
   never widens permissions and never passes a skip-permissions flag.
-- **Visibility:** provenance `wake` on occupancies; six `residency.*` audit verbs; roster label
+- **Visibility:** provenance `wake` on occupancies; nine `residency.*` audit verbs (the six
+  wake-ledger verbs + inc 4's `wake_deferred`, `session_captured`, `session_ended`); roster label
   `offline · wakeable`.
 - **Spend:** watchdog + turn/budget bounds + cooldown/caps/attempt-exhaustion; ping-pong
   demotion bounds chains.
@@ -130,7 +135,7 @@ message-shaped rest.
 | 1   | this doc + ADR 131                           | the frozen contract                                                                                                                                                                                                    |
 | 2   | wake ledger (server)                         | migration v16 (`residency`, `wake_leases`), `store/residency.ts` (through-DB tests), 6 audit verbs, enroll/lease/report routes, reaper lease expiry, `musterd residency` CLI, roster label                             |
 | 3   | `musterd host` + claude backend, fresh-first | `cli/src/host/{loop,registry,backend,backends/claudeCode}.ts`, shared `resolveClaudeBin` (LaunchAgent PATH gap), provenance `wake` + surface `musterd` reserved, telemetry carve-out — **first measured wake latency** |
-| 4   | session capture                              | SessionStart/SessionEnd hooks → `musterd session start\|end --stdin`, `binding.session`, `init --check`/uninstall drift coverage, resume upgrade + hygiene in backend                                                  |
+| 4   | session capture                              | SessionStart/SessionEnd hooks → `musterd session start\|end --stdin`, `binding.session`, `init --check`/uninstall drift coverage, resume upgrade + hygiene in backend, local-session guard (`wake_deferred`)           |
 | 5   | policy + measurement + service               | knobs (team config + enrollment flags), wake latency/answer-rate in the report engine, `musterd service` host label, steward cron→wake experiment, cookoff residency row                                               |
 | 6   | native backend (owner-gated)                 | thin Agent-SDK loop in the host, surface `musterd` live — the reference row proven                                                                                                                                     |
 

@@ -9,6 +9,8 @@ import {
   NOTIFICATION_HOOK_MARKER,
   POSTTOOLUSE_HOOK_MARKER,
   removeMusterdHooks,
+  SESSION_CAPTURE_HOOK_MARKER,
+  SESSION_END_HOOK_MARKER,
   SESSIONSTART_HOOK_MARKER,
 } from './claudeCode.js';
 
@@ -51,7 +53,21 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     const global = read(globalPath());
     expect(cmdFor(local, 'Notification')).toContain(NOTIFICATION_HOOK_MARKER);
     expect(cmdFor(local, 'Notification')).toContain('musterd nudge');
-    expect(local.hooks?.['SessionStart']).toBeUndefined(); // SessionStart is NOT local
+    // The LOCAL SessionStart is the inc-4 session-capture hook — a different marker and concern
+    // from the global orientation hook; exactly one entry, piping stdin, fully silent.
+    expect(local.hooks?.['SessionStart']).toHaveLength(1);
+    const capture = cmdFor(local, 'SessionStart');
+    expect(capture).toContain(SESSION_CAPTURE_HOOK_MARKER);
+    expect(capture).toContain('musterd session start --stdin');
+    expect(capture).toContain('>/dev/null'); // SessionStart stdout lands in model context
+    expect(capture).not.toContain(SESSIONSTART_HOOK_MARKER);
+    // The SessionEnd advisory hook (ADR 131 §5), same shape.
+    expect(local.hooks?.['SessionEnd']).toHaveLength(1);
+    const end = cmdFor(local, 'SessionEnd');
+    expect(end).toContain(SESSION_END_HOOK_MARKER);
+    expect(end).toContain('musterd session end --stdin');
+    expect(end).toContain('>/dev/null');
+    expect(global.hooks?.['SessionEnd']).toBeUndefined(); // SessionEnd is NOT global
 
     // The global SessionStart is self-gating (grep musterd:start) and verifies before orienting.
     const ss = cmdFor(global, 'SessionStart');
@@ -78,33 +94,51 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     installMusterdHooks();
     expect(read(localPath()).hooks?.['Notification']).toHaveLength(1);
     expect(read(localPath()).hooks?.['PostToolUse']).toHaveLength(1);
+    expect(read(localPath()).hooks?.['SessionStart']).toHaveLength(1);
+    expect(read(localPath()).hooks?.['SessionEnd']).toHaveLength(1);
     expect(read(globalPath()).hooks?.['SessionStart']).toHaveLength(1);
   });
 
-  it('init --check drift: flags a missing PostToolUse interrupt hook, clears once installed', () => {
-    // A folder with a settings file but no interrupt hook (e.g. hand-deleted, or a renamed flag) —
-    // reachability would silently die, so the doctor must surface it (ADR 088).
+  it('init --check drift: flags each missing hook, clears once installed', () => {
+    // A folder with a settings file but no musterd hooks (e.g. hand-deleted, or a renamed flag) —
+    // reachability (ADR 088) and resumability (ADR 131 §5) would silently die; the doctor surfaces
+    // each one by name.
     mkdirSync(join(cwd, '.claude'), { recursive: true });
     writeFileSync(localPath(), JSON.stringify({ hooks: { Notification: [] } }), 'utf8');
     const drift = inspectClaudeHookDrift(cwd);
-    expect(drift).toHaveLength(1);
+    expect(drift).toHaveLength(3);
     expect(drift[0]).toContain('PostToolUse interrupt hook is missing');
+    expect(drift[1]).toContain('session-capture hook is missing');
+    expect(drift[2]).toContain('SessionEnd hook is missing');
 
-    // Once init wires it, the drift clears.
+    // Once init wires them, the drift clears.
     installMusterdHooks();
     expect(inspectClaudeHookDrift(cwd)).toEqual([]);
+
+    // Hand-delete just the capture hook → exactly that drift line comes back.
+    const s = read(localPath());
+    delete s.hooks!['SessionStart'];
+    writeFileSync(localPath(), JSON.stringify(s), 'utf8');
+    const captureDrift = inspectClaudeHookDrift(cwd);
+    expect(captureDrift).toHaveLength(1);
+    expect(captureDrift[0]).toContain('wakes will run fresh-only');
 
     // No settings file at all → not this check's concern (the "no server registered" drift covers it).
     rmSync(join(cwd, '.claude'), { recursive: true, force: true });
     expect(inspectClaudeHookDrift(cwd)).toEqual([]);
   });
 
-  it('removal reverses the local PostToolUse interrupt hook', () => {
+  it('removal reverses the local PostToolUse + capture hooks, leaves the global orientation hook', () => {
     installMusterdHooks();
     expect(cmdFor(read(localPath()), 'PostToolUse')).toContain(POSTTOOLUSE_HOOK_MARKER);
+    expect(cmdFor(read(localPath()), 'SessionStart')).toContain(SESSION_CAPTURE_HOOK_MARKER);
     removeMusterdHooks();
     const after = read(localPath());
     expect(after.hooks?.['PostToolUse']).toBeUndefined();
+    expect(after.hooks?.['SessionStart']).toBeUndefined();
+    expect(after.hooks?.['SessionEnd']).toBeUndefined();
+    // The global self-gating orientation hook is machine-shared — uninstalling one folder keeps it.
+    expect(cmdFor(read(globalPath()), 'SessionStart')).toContain(SESSIONSTART_HOOK_MARKER);
   });
 
   it('absorbs a hand-pasted global recipe instead of duplicating it', () => {

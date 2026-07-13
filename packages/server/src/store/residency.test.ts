@@ -9,6 +9,7 @@ import { attach } from './presence.js';
 import {
   WAKE_ATTEMPT_CAP,
   WAKE_COOLDOWN_MS,
+  WAKE_DEFER_SNOOZE_MS,
   WAKE_HOURLY_CAP,
   WAKE_LEASE_TTL_MS,
   claimWakeLeases,
@@ -16,6 +17,7 @@ import {
   expireWakeLeases,
   getResidency,
   listWakeableMemberIds,
+  recordSessionAttestation,
   revokeResidency,
   settleWakeLease,
 } from './residency.js';
@@ -303,5 +305,73 @@ describe('wake-lease settlement + expiry', () => {
     const again = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
     expect(again).toHaveLength(1);
     expect(again[0]!.act_id).toBe('u1');
+  });
+});
+
+describe('session capture (ADR 131 inc 4): attestation + the wake_deferred snooze', () => {
+  /** A host-reported deferral (the local-session guard) — the audit row the snooze derives from. */
+  function deferredRow(db: Database, team: TeamRow, seat: string, ts?: number) {
+    appendAudit(db, team.id, {
+      actor: null,
+      action: 'residency.wake_deferred',
+      target: seat,
+      result: 'allow',
+      detail: { act: 'u1', lease_id: 'x', reason: 'local-session-live' },
+    });
+    if (ts !== undefined) {
+      db.prepare(
+        'UPDATE audit SET ts = ? WHERE rowid = (SELECT rowid FROM audit ORDER BY rowid DESC LIMIT 1)',
+      ).run(ts);
+    }
+  }
+
+  it('recordSessionAttestation stamps the enrolled row (harness class only); unenrolled is false', () => {
+    const { db, team, ada, bob } = seed();
+    enroll(db, team, ada);
+    expect(recordSessionAttestation(db, team.id, ada.id, 'claude-code', 42)).toBe(true);
+    const row = getResidency(db, team.id, ada.id)!;
+    expect(row.resumable_harness).toBe('claude-code');
+    expect(row.resumable_at).toBe(42);
+    // bob never enrolled — the capture is honest about it, and nothing is created.
+    expect(recordSessionAttestation(db, team.id, bob.id, 'claude-code')).toBe(false);
+    expect(getResidency(db, team.id, bob.id)).toBeNull();
+  });
+
+  it('a fresh wake_deferred snoozes lease derivation; it lifts after WAKE_DEFER_SNOOZE_MS', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+    deferredRow(db, team, ada.name); // just reported — the human is working there
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+
+    // Backdate the deferral past the snooze window: the act is still due, full budget intact.
+    db.prepare("UPDATE audit SET ts = ? WHERE action = 'residency.wake_deferred'").run(
+      Date.now() - WAKE_DEFER_SNOOZE_MS - 1_000,
+    );
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.act_id).toBe('u1');
+  });
+
+  it('deferrals burn NO attempt or rate budget: many deferrals, then a wake with full caps', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+    // A long working session deferred the wake many times over (all past the snooze window now) —
+    // more rows than the attempt cap and the hourly cap combined.
+    const old = Date.now() - WAKE_DEFER_SNOOZE_MS - 60_000;
+    for (let i = 0; i < WAKE_ATTEMPT_CAP + WAKE_HOURLY_CAP + 1; i++) {
+      deferredRow(db, team, ada.name, old - i * 1_000);
+    }
+    // The act still derives a lease (attempt cap untouched), and no wake_exhausted was written.
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(
+      listAudit(db, team.id).filter((r) => r.action === 'residency.wake_exhausted'),
+    ).toHaveLength(0);
   });
 });

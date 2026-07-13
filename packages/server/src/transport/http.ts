@@ -16,6 +16,7 @@ import {
   PolicySchema,
   EnrollResidencyBodySchema,
   RevokeResidencyBodySchema,
+  SessionAttestationBodySchema,
   WakeLeasesBodySchema,
   WakeReportBodySchema,
   OpenLaneSchema,
@@ -98,6 +99,7 @@ import {
   getResidency,
   listResidency,
   listWakeableMemberIds,
+  recordSessionAttestation,
   revokeResidency,
   settleWakeLease,
   toResidency,
@@ -1248,11 +1250,20 @@ export async function handleHttp(
           )
           .get(team.id, lease.act_id);
         const enrollment = getResidency(ctx.db, team.id, lease.member_id);
+        // A deferral (increment 4's local-session guard) is its own verb, NOT a failure: it is
+        // excluded by construction from the derived rate/attempt reads (they count woke+wake_failed
+        // only), so a human working in the worktree can never exhaust the act — and it feeds the
+        // `WAKE_DEFER_SNOOZE_MS` skip in the next lease derivation.
+        const action = body.deferred
+          ? 'residency.wake_deferred'
+          : body.occupied
+            ? 'residency.woke'
+            : 'residency.wake_failed';
         appendAudit(ctx.db, team.id, {
           actor: null,
-          action: body.occupied ? 'residency.woke' : 'residency.wake_failed',
+          action,
           target: seat?.name ?? '?',
-          result: body.occupied ? 'allow' : 'deny',
+          result: body.occupied || body.deferred ? 'allow' : 'deny',
           detail: {
             act: lease.act_id,
             sender: sender?.name ?? '?',
@@ -1266,6 +1277,31 @@ export async function handleHttp(
           },
         });
         return sendJson(res, 200, { ok: true, lease_id: lease.id, status: 'reported' });
+      }
+
+      // The resumable attestation (ADR 131 §5, increment 4): `musterd session start|end --stdin`
+      // pushes harness CLASS + event only — never a session id, never a transcript path (the body
+      // schema has no field for them). Agent-key auth like the other host-side residency routes;
+      // presence-neutral by nature (this handler touches no presence row) and it never claims —
+      // a hook must never displace the live occupant (ADR 108).
+      if (method === 'POST' && rest === '/residency/session') {
+        const team = authAgentKeyOnly(ctx, slug, req);
+        const body = parseOrBadRequest(SessionAttestationBodySchema, await readJson(req));
+        const target = getMemberByName(ctx.db, team.id, body.seat);
+        if (!target || target.left_at !== null)
+          throw new MusterdError('not_found', `no seat "${body.seat}" in team "${slug}"`);
+        const enrolled =
+          body.event === 'start'
+            ? recordSessionAttestation(ctx.db, team.id, target.id, body.harness)
+            : getResidency(ctx.db, team.id, target.id) !== null;
+        appendAudit(ctx.db, team.id, {
+          actor: null,
+          action: body.event === 'start' ? 'residency.session_captured' : 'residency.session_ended',
+          target: target.name,
+          result: 'allow',
+          detail: { harness: body.harness, enrolled },
+        });
+        return sendJson(res, 200, { ok: true, enrolled });
       }
 
       // P3.2 stateless claim mirror (SPEC A.7, ADR 077) — unauthenticated (key in body, not Bearer).

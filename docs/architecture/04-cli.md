@@ -44,7 +44,9 @@ src/
     backend.ts        // ActuatorBackend seam: spawn-or-invoke + roster-derived verify + WakeOutcome; native row must stay expressible (ADR 131 §7)
     loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); agent-key auth read through workspace bindings; one wake span per actuation
     backends/
-      claudeCode.ts   // backend #1: fresh-first `claude -p` spawn (pre-minted --session-id, reply-only allowedTools, mandatory watchdog, no skip-permissions ever)
+      claudeCode.ts   // backend #1: resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to the fresh `claude -p` spawn in the same lease (pre-minted --session-id, reply-only allowedTools, mandatory watchdog, no skip-permissions ever) (ADR 131 §5)
+  session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
+    liveness.ts       // localSessionLiveness(workspace): binding.session + transcript stat → none|live|resumable|gc-expired; shared by the host's local-session guard and `session show`
   service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)
     launchd.ts        // pure: plist generation (daemon + /live agents) + launchctl argv builders + status parsing (platform seam)
     manage.ts         // install/uninstall/start/stop/restart/status + log tail (injectable launchctl runner)
@@ -78,6 +80,7 @@ src/
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant + host-registry entry; status cross-checks all three stores (ADR 131)
+    session.ts        // musterd session start|end --stdin (hook-driven capture → binding.session + harness-class-only attestation push) | show (the human triage view) (ADR 131 §5, inc 4)
     host.ts           // musterd host [--once]: the resident wake-actuator loop (notify-shaped; ADR 131 inc 3)
     serve.ts          // musterd serve [--port]
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)

@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolveBindingDir } from './binding.js';
+import { resolveBindingDir, saveBinding } from './binding.js';
 import { loadMcpConfig } from './config.js';
 
 let dir: string;
@@ -211,5 +211,33 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
 
   it('stays honestly unknown when neither env nor binding declares a model', () => {
     expect(loadMcpConfig({ MUSTERD_BINDING: bindingWithModel(undefined) }).model).toBeUndefined();
+  });
+});
+
+describe('saveBinding merge-guard (ADR 131 inc 4 — the adapter must not clobber a hook capture)', () => {
+  it('persisting a boot-time binding preserves the session the SessionStart hook just wrote', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-saveb-'));
+    try {
+      const boot = {
+        server: 'http://s1',
+        team: 'lab',
+        surface: 'claude-code' as const,
+        claim: { mode: 'seat' as const, name: 'Ui' },
+        agent_key: 'mskey_1',
+      };
+      const capture = { harness: 'claude-code', id: 'sid-wake', started_at: 1 };
+      // The wake sequence: hook writes the capture…
+      saveBinding(ws, { ...boot, session: capture });
+      // …then the adapter's first-tool-call autojoin persists the binding it built from
+      // boot-time config (no session field). Without the guard this wiped every wake's capture.
+      saveBinding(ws, { ...boot, model: 'claude-test-1' });
+      const after = JSON.parse(
+        readFileSync(join(ws, '.musterd', 'binding.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      expect(after['session']).toEqual(capture);
+      expect(after['model']).toBe('claude-test-1');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
   });
 });
