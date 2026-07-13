@@ -7,7 +7,7 @@ import {
   type PresenceStatus,
 } from '@musterd/protocol';
 import { clock, dayLabel, theme } from './theme.js';
-import { padEndVisible, termWidth, visibleLen, wrapText } from './ui.js';
+import { heading, hint, padEndVisible, sym, termWidth, visibleLen, wrapText } from './ui.js';
 
 export type KindOf = (name: string) => MemberKind;
 
@@ -95,68 +95,175 @@ export function renderMessageRow(
 }
 
 /**
- * The `status` header: which team, which daemon, and — critically — which database that daemon
- * serves. A daemon silently serving the wrong db reads as "everyone offline", so surfacing the db
- * path makes that diagnosable at a glance (dogfood finding). `db`/`schema` are omitted pre-0.2.
+ * The `status` header: the roll call (`muster` = take the roll — the team, present) over a dim
+ * provenance line.
+ *
+ * The provenance line keeps the daemon + **db path**: a daemon silently serving the wrong db reads as
+ * "everyone offline", and that path is what makes it diagnosable at a glance (dogfood finding). It is
+ * dimmed to a second line rather than dropped — it earns its place only when you go looking.
+ * `db`/`schema` are omitted pre-0.2.
  */
 export function renderStatusHeader(
   team: string,
   server: string,
   health?: { db?: string; schema?: number },
+  members: MemberSummary[] = [],
 ): string {
-  const parts = [theme.accent(team), theme.meta(server)];
+  const lines = [
+    theme.accent(team) + (members.length ? theme.meta(` ${sym.dot} ${rollCall(members)}`) : ''),
+  ];
+  const provenance = [server];
   if (health?.db) {
-    const schema = health.schema != null ? ` (schema ${health.schema})` : '';
-    parts.push(theme.meta(`db: ${health.db}${schema}`));
+    // Keep the `db:` label — a bare path is ambiguous, and naming it is the entire point of this line.
+    provenance.push(`db: ${health.db}${health.schema != null ? ` (schema ${health.schema})` : ''}`);
   }
-  return parts.join(theme.meta('  ·  '));
+  lines.push(theme.meta(provenance.join(` ${sym.dot} `)));
+  return lines.join('\n');
+}
+
+/** `6 members · 3 present · 2 working` — the roll call, stated once so the roster needs no counting. */
+function rollCall(members: MemberSummary[]): string {
+  const present = members.filter((m) => activityOf(m) !== 'offline').length;
+  const working = members.filter((m) => groupOf(m) === 'working').length;
+  const noun = members.length === 1 ? 'member' : 'members';
+  const parts = [`${members.length} ${noun}`, `${present} present`];
+  if (working) parts.push(`${working} working`);
+  return parts.join(` ${sym.dot} `);
+}
+
+/** The roster groups, in reading order — the question `status` answers, top to bottom. */
+type Group = 'working' | 'here' | 'away' | 'out';
+const GROUPS: { key: Group; label: string }[] = [
+  { key: 'working', label: 'working' },
+  { key: 'here', label: 'here' },
+  { key: 'away', label: 'away' },
+  { key: 'out', label: 'out' },
+];
+
+/**
+ * Which group a member sits in. Availability (SPEC A.6 Axis 2) outranks the activity-derived state in
+ * the display resolution (ADR 044) — a member who declared themselves away is `away` even while
+ * attached — and only a member actually reporting work lands in `working`.
+ */
+function groupOf(m: MemberSummary): Group {
+  if (activityOf(m) === 'offline') return 'out';
+  if (availabilityLabel(m)) return 'away';
+  return activityOf(m) === 'working' && m.state ? 'working' : 'here';
 }
 
 /**
- * The roster table for `status`: MEMBER KIND ROLE MODEL LIFECYCLE ACTIVITY.
- * MODEL is the current occupancy's harness-attested model (ADR 101) — absent → `unknown`.
- * ACTIVITY is last because its `working: …` label is unbounded — a free-flowing final
- * column never collides with the columns after it.
+ * The roster for `status` — a grouped roll call, not a table.
+ *
+ * The old grid paid a fixed column width for `KIND`/`ROLE`/`MODEL`/`LIFECYCLE` — information that is
+ * absent for most members most of the time (`—`, `unknown`, `forever`) — while clipping the one thing
+ * you actually read, the self-reported status, at 72 chars. This inverts that: facets appear **only
+ * when they carry information** (progressive disclosure), and the status text gets its own wrapped
+ * line so it can be read instead of guessed at.
+ *
+ * Grouping answers the question the command is asked: who is working, who is here, who is out.
  */
-export function renderStatusTable(members: MemberSummary[], now = Date.now()): string {
-  const header = theme.meta(
-    pad('MEMBER', 14) +
-      pad('KIND', 8) +
-      pad('ROLE', 14) +
-      pad('MODEL', 20) +
-      pad('LIFECYCLE', 18) +
-      'ACTIVITY',
-  );
-  const rows = members.map((m) => {
-    const name = theme.memberName(m.name, m.kind);
-    // Availability (SPEC A.6 Axis 2) outranks the activity-derived label in the display resolution
-    // (away → `off until <ts>`); when unset/available it falls through to the live activity (ADR 044).
-    const avail = availabilityLabel(m);
-    const label = avail ?? activityLabel(m, now);
-    const dot = avail ? 'away' : activityOf(m) === 'offline' ? 'offline' : 'online';
-    const activity = `${theme.presenceDot(dot)} ${theme.meta(label)}`;
-    const lifecycle =
-      m.lifecycle === 'until' && m.lifecycle_until
-        ? `until ${new Date(m.lifecycle_until).toISOString().slice(0, 10)}`
-        : m.lifecycle;
-    return (
-      padEndVisible(name, 14) +
-      pad(m.kind, 8) +
-      pad(m.role || '—', 14) +
-      pad(modelLabel(m), 20) +
-      pad(lifecycle, 18) +
-      activity
-    );
-  });
-  return [header, ...rows].join('\n');
+export function renderRoster(
+  members: MemberSummary[],
+  now = Date.now(),
+  width = termWidth(),
+): string {
+  if (members.length === 0) {
+    return theme.meta("nobody's on the team yet") + '\n' + hint('musterd team add <name>');
+  }
+  // One name column across every group, so the eye tracks a single left edge down the whole roster.
+  const nameCol = Math.max(...members.map((m) => visibleLen(m.name))) + 2;
+  const out: string[] = [];
+  for (const { key, label } of GROUPS) {
+    const inGroup = members.filter((m) => groupOf(m) === key);
+    if (inGroup.length === 0) continue; // an empty group is not a fact worth a heading
+    out.push('', `${heading(label)}  ${theme.meta(String(inGroup.length))}`);
+    const entries = inGroup.map((m) => renderMember(m, key, nameCol, now, width));
+    // Multi-line entries (a working member, with their status) need air between them or they read as
+    // one wall of text; a group of one-liners stays tight. Spacing follows the content, not the group.
+    const multiline = entries.some((e) => e.includes('\n'));
+    out.push(entries.join(multiline ? '\n\n' : '\n'));
+  }
+  return out.join('\n').trimStart();
 }
 
-/** Occupancy-attested model for the roster (ADR 101). Offline / unattested → `unknown`. */
-const MODEL_COL_MAX = 18;
-function modelLabel(m: MemberSummary): string {
-  const raw = m.presences[0]?.model?.trim();
-  const model = raw && raw.length > 0 ? raw : MODEL_UNKNOWN;
-  return model.length > MODEL_COL_MAX ? model.slice(0, MODEL_COL_MAX - 1) + '…' : model;
+/**
+ * One member: a headline (dot · name · the facets that say something) and, for a working member, the
+ * status they reported plus where they're doing it. A quiet member is exactly one line.
+ */
+function renderMember(
+  m: MemberSummary,
+  group: Group,
+  nameCol: number,
+  now: number,
+  width: number,
+): string {
+  const dot = theme.presenceDot(group === 'out' ? 'offline' : group === 'away' ? 'away' : 'online');
+  const head = `  ${dot} ${padEndVisible(theme.memberName(m.name, m.kind), nameCol)}`;
+  const facets = memberFacets(m, group);
+  const lines = [head + (facets ? theme.meta(facets) : '')];
+
+  const indent = ' '.repeat(4);
+  // The reported status — wrapped, not clipped. This is the payload of the command.
+  if (group === 'working' && m.state) {
+    const body = wrapText(oneLine(m.state), Math.max(24, width - indent.length));
+    for (const line of body.slice(0, STATUS_MAX_LINES)) lines.push(indent + line);
+    if (body.length > STATUS_MAX_LINES) lines[lines.length - 1] += theme.meta(` ${sym.more}`);
+  }
+  const context = memberContext(m, group, now);
+  if (context) lines.push(indent + theme.meta(context));
+  return lines.join('\n');
+}
+
+/** How many wrapped lines of a self-reported status to show before eliding (agents post paragraphs). */
+const STATUS_MAX_LINES = 2;
+
+/**
+ * The identity facets, shown **only when they carry information**: kind always (it is the one thing
+ * color alone encodes, and color may be off); role, attested model (ADR 101), and surface when set;
+ * lifecycle only when it is not the `forever` default. An absent facet is silence, not a `—`.
+ */
+function memberFacets(m: MemberSummary, group: Group): string {
+  const parts: string[] = [m.kind];
+  if (m.role) parts.push(m.role);
+  const model = m.presences[0]?.model?.trim();
+  if (model && model !== MODEL_UNKNOWN) parts.push(model);
+  if (group !== 'out' && m.presences[0]?.surface) parts.push(m.presences[0]!.surface);
+  if (m.lifecycle === 'session') parts.push('session');
+  if (m.lifecycle === 'until' && m.lifecycle_until) {
+    parts.push(`until ${new Date(m.lifecycle_until).toISOString().slice(0, 10)}`);
+  }
+  // A residency-enrolled seat (ADR 131) is offline but not unreachable — a directed act wakes it.
+  if (group === 'out' && m.wakeable) parts.push('wakeable');
+  if (group === 'away') parts.push(availabilityLabel(m) ?? 'away');
+  return parts.join(` ${sym.dot} `);
+}
+
+/**
+ * The dim second line: where the work is happening and how fresh it is. Provenance (`why`), driver
+ * (`who`), and workspace (`where`) are attach-time context (ADR 014 + ADR 021) — `driven by …` makes
+ * the roster tell the truth when a human is steering an agent's session. Age appears only once the
+ * status is stale enough to doubt.
+ */
+function memberContext(m: MemberSummary, group: Group, now: number): string {
+  if (group === 'out') return '';
+  const p = m.presences[0];
+  const parts: string[] = [];
+  if (p?.workspace) parts.push(p.workspace);
+  // Provenance is shown only when it is *not* the `session` default: "a human opened a session" is the
+  // boring case and printing it on every row is what made the old table read as a dump. A seat that is
+  // up because a directed act woke it (`wake`, ADR 131) is genuinely worth saying — and now it stands out.
+  if (p?.provenance && p.provenance !== 'session') parts.push(p.provenance);
+  if (p?.driver) parts.push(`driven by ${p.driver}`);
+  const stale = m.last_status_at != null && now - m.last_status_at >= STALE_AFTER_MS;
+  if (group === 'working' && stale && m.last_status_at != null) {
+    parts.push(ageLabel(m.last_status_at, now));
+  }
+  return parts.join(` ${sym.dot} `);
+}
+
+/** Collapse a self-reported status to a single flowing line before wrapping. */
+function oneLine(state: string): string {
+  return state.replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -183,45 +290,6 @@ function shortTs(ms: number): string {
 /** Activity, falling back to a presence-derived value for older rosters that predate the field. */
 function activityOf(m: MemberSummary): Activity {
   return m.activity ?? (m.presence === 'offline' ? 'offline' : 'online');
-}
-
-/**
- * The text after the dot. Examples:
- *   `offline`
- *   `online via claude-code (session) · driven by nick · movetrail@feat/login`
- *   `working: refactoring auth · 18m (session) · driven by nick · movetrail@feat/login`
- * Provenance (`why`), driver (`who`), and workspace (`where`) are attach-time context (ADR 014 +
- * ADR 021), read from the live presence and shown dim alongside the activity. `driven by …` makes
- * the roster tell the truth when a human is steering the agent's session, instead of showing that
- * human offline — location/co-presence context, not an authoritative scope.
- */
-function activityLabel(m: MemberSummary, now: number): string {
-  const activity = activityOf(m);
-  // A residency-enrolled seat (ADR 131) is offline but not unreachable — a directed act wakes it.
-  if (activity === 'offline') return m.wakeable ? 'offline · wakeable' : 'offline';
-  const p = m.presences[0];
-  let core: string;
-  if (activity === 'working' && m.state) {
-    const stale = m.last_status_at != null && now - m.last_status_at >= STALE_AFTER_MS;
-    const age = stale && m.last_status_at != null ? ` · ${ageLabel(m.last_status_at, now)}` : '';
-    core = `working: ${clipStatus(m.state)}${age}`;
-  } else {
-    core = p?.surface ? `online via ${p.surface}` : 'online';
-  }
-  const why = p?.provenance ? ` (${p.provenance})` : '';
-  const who = p?.driver ? ` · driven by ${p.driver}` : '';
-  const where = p?.workspace ? ` · ${p.workspace}` : '';
-  return `${core}${why}${who}${where}`;
-}
-
-/**
- * Clip a self-reported status to one tidy roster line: collapse whitespace and cap length. The full
- * text is preserved in `status --json`; agents sometimes post a paragraph (keep the table readable).
- */
-const STATUS_MAX = 72;
-function clipStatus(state: string): string {
-  const oneLine = state.replace(/\s+/g, ' ').trim();
-  return oneLine.length > STATUS_MAX ? oneLine.slice(0, STATUS_MAX - 1) + '…' : oneLine;
 }
 
 /** Coarse human age: `18m` / `2h` / `3d`. */
@@ -302,10 +370,4 @@ export function renderPresence(status: PresenceStatus, surface?: string): string
   const dot = theme.presenceDot(status);
   const label = surface && status !== 'offline' ? `${status} via ${surface}` : status;
   return `${dot} ${theme.meta(label)}`;
-}
-
-// ---- helpers ----
-
-function pad(s: string, width: number): string {
-  return s.length >= width ? s + ' ' : s + ' '.repeat(width - s.length);
 }

@@ -9,7 +9,7 @@ import {
   renderPendingSummary,
   renderReachabilityNudge,
   renderStatusHeader,
-  renderStatusTable,
+  renderRoster,
 } from './rows.js';
 import { dayLabel } from './theme.js';
 
@@ -106,84 +106,122 @@ describe('renderInbox (day-grouped)', () => {
   });
 });
 
-describe('renderStatusTable', () => {
-  it('renders the dawn roster with columns', () => {
+describe('renderRoster', () => {
+  const base = {
+    team: 'dawn',
+    lifecycle: 'forever' as const,
+    created_at: 0,
+  };
+
+  it('groups the roster by working / here / out, with counts', () => {
     const members: MemberSummary[] = [
       {
+        ...base,
         id: '1',
-        team: 'dawn',
         name: 'nick',
         kind: 'human',
         role: 'lead',
-        lifecycle: 'forever',
-        created_at: 0,
         presence: 'online',
+        activity: 'online',
         presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
       },
       {
+        ...base,
         id: '2',
-        team: 'dawn',
         name: 'Ada',
         kind: 'agent',
-        role: 'backend',
-        lifecycle: 'session',
-        created_at: 0,
+        role: '',
         presence: 'online',
+        activity: 'working',
+        state: 'scaffolding tests',
         presences: [{ surface: 'claude-code', status: 'online', last_seen_at: 0 }],
       },
       {
+        ...base,
         id: '3',
-        team: 'dawn',
         name: 'Lin',
         kind: 'agent',
-        role: 'frontend',
-        lifecycle: 'session',
-        created_at: 0,
+        role: '',
         presence: 'offline',
+        activity: 'offline',
         presences: [],
       },
     ];
-    const out = renderStatusTable(members);
-    expect(out).toContain('MEMBER');
-    expect(out).toContain('MODEL');
-    expect(out).toContain('ACTIVITY');
+    const out = renderRoster(members);
+    expect(out).toContain('WORKING');
+    expect(out).toContain('HERE');
+    expect(out).toContain('OUT');
+    // the working member's reported status is the payload — it reads in full
+    expect(out).toContain('scaffolding tests');
     expect(out).toContain('nick');
-    expect(out).toContain('online via cli');
-    expect(out).toContain('online via claude-code');
-    expect(out).toContain('offline');
-    // Offline / unattested occupancy → MODEL `unknown` (ADR 101).
-    expect(out).toMatch(/Lin\s+agent\s+frontend\s+unknown\s+/);
+    expect(out).toContain('Lin');
   });
 
-  it('renders the occupancy-attested model in MODEL (ADR 101)', () => {
+  it('omits a group entirely when nobody is in it (an empty group is not a fact)', () => {
     const members: MemberSummary[] = [
       {
+        ...base,
         id: '1',
-        team: 'dawn',
-        name: 'Ada',
+        name: 'Lin',
         kind: 'agent',
-        role: 'backend',
-        lifecycle: 'session',
-        created_at: 0,
-        presence: 'online',
-        activity: 'online',
-        presences: [
-          {
-            surface: 'claude-code',
-            status: 'online',
-            last_seen_at: 0,
-            model: 'claude-opus-4-8',
-          },
-        ],
+        role: '',
+        presence: 'offline',
+        activity: 'offline',
+        presences: [],
       },
+    ];
+    const out = renderRoster(members);
+    expect(out).toContain('OUT');
+    expect(out).not.toContain('WORKING');
+    expect(out).not.toContain('HERE');
+  });
+
+  it('drops the lifecycle facet when it is the `forever` default, keeps it when it is not', () => {
+    const forever: MemberSummary = {
+      ...base,
+      id: '1',
+      name: 'Ada',
+      kind: 'agent',
+      role: '',
+      presence: 'online',
+      activity: 'online',
+      presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
+    };
+    expect(renderRoster([forever])).not.toContain('forever');
+    // a `session` seat is a real signal — it says so
+    expect(renderRoster([{ ...forever, lifecycle: 'session' }])).toContain('session');
+    const until = Date.UTC(2026, 5, 24, 17, 0);
+    expect(renderRoster([{ ...forever, lifecycle: 'until', lifecycle_until: until }])).toContain(
+      'until 2026-06-24',
+    );
+  });
+
+  it('shows role and model only when they carry information (no `—` / `unknown` columns)', () => {
+    const bare: MemberSummary = {
+      ...base,
+      id: '1',
+      name: 'Ada',
+      kind: 'agent',
+      role: '',
+      presence: 'online',
+      activity: 'online',
+      presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
+    };
+    const out = renderRoster([bare]);
+    expect(out).not.toContain('—');
+    expect(out).not.toContain('unknown');
+    // kind survives, because color may be off (NO_COLOR / piped) and it is the only text that encodes it
+    expect(out).toContain('agent');
+  });
+
+  it('renders the occupancy-attested model in full, never clipped to a column (ADR 101)', () => {
+    const members: MemberSummary[] = [
       {
-        id: '2',
-        team: 'dawn',
+        ...base,
+        id: '1',
         name: 'tinybot',
         kind: 'agent',
         role: 'probe',
-        lifecycle: 'session',
-        created_at: 0,
         presence: 'online',
         activity: 'online',
         presences: [
@@ -196,168 +234,125 @@ describe('renderStatusTable', () => {
         ],
       },
     ];
-    const out = renderStatusTable(members);
-    expect(out).toContain('claude-opus-4-8');
-    // Long model ids clip so the LIFECYCLE/ACTIVITY columns stay aligned.
-    expect(out).toContain('qwen2.5:3b-instru…');
-    expect(out).not.toContain('qwen2.5:3b-instruct-extra-long-id');
+    const out = renderRoster(members);
+    // the old table clipped this to fit a fixed column; a facet has no column to fit
+    expect(out).toContain('qwen2.5:3b-instruct-extra-long-id');
+    expect(out).toContain('probe');
   });
 
-  it('renders self-declared availability, overriding the activity label (ADR 044)', () => {
+  it('groups a self-declared-away member under AWAY, overriding the live activity (ADR 044)', () => {
     const until = Date.UTC(2026, 5, 24, 17, 0);
     const members: MemberSummary[] = [
-      // away_until: even though present, availability outranks the live activity (off until <ts>).
       {
+        ...base,
         id: '1',
-        team: 'dawn',
         name: 'nick',
         kind: 'human',
         role: 'lead',
-        lifecycle: 'forever',
-        created_at: 0,
         presence: 'online',
+        activity: 'online',
         presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
         availability: { status: 'away', until },
       },
-      // dnd renders plainly.
       {
+        ...base,
         id: '2',
-        team: 'dawn',
         name: 'Ada',
         kind: 'agent',
-        role: 'backend',
-        lifecycle: 'session',
-        created_at: 0,
+        role: '',
         presence: 'online',
+        activity: 'online',
         presences: [{ surface: 'claude-code', status: 'online', last_seen_at: 0 }],
         availability: { status: 'dnd' },
       },
-      // available is the implicit default — never overrides the activity column.
-      {
-        id: '3',
-        team: 'dawn',
-        name: 'Lin',
-        kind: 'agent',
-        role: 'frontend',
-        lifecycle: 'session',
-        created_at: 0,
-        presence: 'online',
-        presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
-        availability: { status: 'available' },
-      },
     ];
-    const out = renderStatusTable(members);
+    const out = renderRoster(members);
+    expect(out).toContain('AWAY');
     expect(out).toContain('off until 2026-06-24');
     expect(out).toContain('dnd');
-    expect(out).toContain('online via cli'); // Lin: available falls through to activity
+    // availability outranks presence: neither lands in HERE despite being attached
+    expect(out).not.toContain('HERE');
   });
 
-  it('renders working with state, adding the age only once stale (≥5m)', () => {
+  it('adds the age to a working member only once the status is stale (>=5m)', () => {
     const now = Date.UTC(2026, 5, 9, 15, 0);
-    const base = {
-      team: 'dawn',
+    const working = {
+      ...base,
       kind: 'agent' as const,
-      role: 'backend',
-      lifecycle: 'session' as const,
-      created_at: 0,
+      role: '',
+      presence: 'online' as const,
+      activity: 'working' as const,
       presences: [
         { surface: 'claude-code' as const, status: 'online' as const, last_seen_at: now },
       ],
     };
-    const members: MemberSummary[] = [
-      // fresh status (2 min ago) → no age suffix
-      {
-        ...base,
-        id: '1',
-        name: 'Ada',
-        presence: 'online',
-        activity: 'working',
-        state: 'scaffolding tests',
-        last_status_at: now - 2 * 60_000,
-      },
-      // stale status (18 min ago) → age shown
-      {
-        ...base,
-        id: '2',
-        name: 'Lin',
-        presence: 'online',
-        activity: 'working',
-        state: 'refactoring auth',
-        last_status_at: now - 18 * 60_000,
-      },
-    ];
-    const out = renderStatusTable(members, now);
-    expect(out).toContain('working: scaffolding tests');
-    expect(out).not.toContain('scaffolding tests ·');
-    expect(out).toContain('working: refactoring auth · 18m');
+    const fresh = renderRoster(
+      [
+        {
+          ...working,
+          id: '1',
+          name: 'Ada',
+          state: 'scaffolding tests',
+          last_status_at: now - 2 * 60_000,
+        },
+      ],
+      now,
+    );
+    expect(fresh).toContain('scaffolding tests');
+    expect(fresh).not.toMatch(/\d+m$/m); // fresh → no age
+
+    const stale = renderRoster(
+      [
+        {
+          ...working,
+          id: '2',
+          name: 'Lin',
+          state: 'refactoring auth',
+          last_status_at: now - 18 * 60_000,
+        },
+      ],
+      now,
+    );
+    expect(stale).toContain('refactoring auth');
+    expect(stale).toContain('18m');
   });
 
-  it('clips a long, multi-line status to one tidy roster line', () => {
+  it('wraps a long multi-line status instead of clipping it to one line, and never overflows', () => {
     const longState =
       'Working on FindMyMoney scan/pricing.\nDone: bounded the URL-inference pass with per-file dedupe and caps; now implementing /api/scan blocking on codegen so the gap list settles server-side.';
     const members: MemberSummary[] = [
       {
+        ...base,
         id: '1',
-        team: 'dawn',
         name: 'Mike',
         kind: 'agent',
-        role: 'backend',
-        lifecycle: 'forever',
-        created_at: 0,
+        role: '',
         presence: 'online',
         activity: 'working',
         state: longState,
         presences: [{ surface: 'claude-code', status: 'online', last_seen_at: 0 }],
       },
     ];
-    const out = renderStatusTable(members);
-    expect(out).toContain('working: Working on FindMyMoney');
-    expect(out).toContain('…'); // clipped
-    expect(out).not.toContain('\nDone:'); // newline collapsed, not spilled into the table
-    // the working cell stays on one line
-    const mikeLine = out.split('\n').find((l) => l.includes('Mike'))!;
-    expect(mikeLine.length).toBeLessThan(160);
+    const width = 72;
+    const out = renderRoster(members, Date.now(), width);
+    expect(out).toContain('Working on FindMyMoney');
+    expect(out).not.toContain('\nDone:'); // the raw newline is collapsed, never spilled
+    expect(out).toContain('Done:'); // ...but the text after it is still readable — it wraps
+    // responsive: nothing overflows the given width
+    for (const line of out.split('\n')) expect(line.length).toBeLessThanOrEqual(width);
   });
 
-  it('renders provenance (why) and workspace (where) dim alongside activity (ADR 014)', () => {
+  it('shows the workspace (where) and driver (who), and stays quiet about a `session` provenance', () => {
     const members: MemberSummary[] = [
       {
+        ...base,
         id: '1',
-        team: 'dawn',
         name: 'Ada',
         kind: 'agent',
-        role: 'backend',
-        lifecycle: 'session',
-        created_at: 0,
+        role: '',
         presence: 'online',
-        activity: 'online',
-        presences: [
-          {
-            surface: 'claude-code',
-            status: 'online',
-            last_seen_at: 0,
-            provenance: 'session',
-            workspace: 'movetrail@feat/login',
-          },
-        ],
-      },
-    ];
-    const out = renderStatusTable(members);
-    expect(out).toContain('online via claude-code (session) · movetrail@feat/login');
-  });
-
-  it('names the driving human (driver co-presence, ADR 021)', () => {
-    const members: MemberSummary[] = [
-      {
-        id: '1',
-        team: 'dawn',
-        name: 'Ada',
-        kind: 'agent',
-        role: 'backend',
-        lifecycle: 'session',
-        created_at: 0,
-        presence: 'online',
-        activity: 'online',
+        activity: 'working',
+        state: 'wiring auth',
         presences: [
           {
             surface: 'claude-code',
@@ -370,10 +365,53 @@ describe('renderStatusTable', () => {
         ],
       },
     ];
-    const out = renderStatusTable(members);
-    expect(out).toContain(
-      'online via claude-code (session) · driven by nick · movetrail@feat/login',
-    );
+    const out = renderRoster(members);
+    expect(out).toContain('movetrail@feat/login');
+    expect(out).toContain('driven by nick');
+    // `session` is the boring default — printing it on every row is what made the old table a dump
+    expect(out).not.toContain('session');
+  });
+
+  it('surfaces a non-default provenance — a woken seat says so (ADR 131)', () => {
+    const members: MemberSummary[] = [
+      {
+        ...base,
+        id: '1',
+        name: 'Ada',
+        kind: 'agent',
+        role: '',
+        presence: 'online',
+        activity: 'working',
+        state: 'picking up the handoff',
+        presences: [
+          { surface: 'claude-code', status: 'online', last_seen_at: 0, provenance: 'wake' },
+        ],
+      },
+    ];
+    expect(renderRoster(members)).toContain('wake');
+  });
+
+  it('marks a residency-enrolled offline seat as wakeable — offline is not unreachable (ADR 131)', () => {
+    const members: MemberSummary[] = [
+      {
+        ...base,
+        id: '1',
+        name: 'ryder',
+        kind: 'agent',
+        role: '',
+        presence: 'offline',
+        activity: 'offline',
+        presences: [],
+        wakeable: true,
+      },
+    ];
+    expect(renderRoster(members)).toContain('wakeable');
+  });
+
+  it('keeps the office voice when the team is empty', () => {
+    const out = renderRoster([]);
+    expect(out).toContain("nobody's on the team yet");
+    expect(out).toContain('musterd team add');
   });
 });
 
