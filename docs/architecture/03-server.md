@@ -43,7 +43,7 @@ src/
     audit.ts          // append-only governance audit log: appendAudit/listAudit (+ authorized_by filter, ADR 071/127)
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)
-    residency.ts      // the wake ledger: residency enrollment + wake leases — claimWakeLeases (transactional derivation) / settleWakeLease / expireWakeLeases; rate policy derived from residency.* audit rows (ADR 131)
+    residency.ts      // the wake ledger: residency enrollment + wake leases — claimWakeLeases (transactional derivation, defer-snoozed) / settleWakeLease / expireWakeLeases / recordSessionAttestation (harness-class-only, inc 4); rate policy derived from residency.* audit rows (ADR 131)
     roles.ts          // roles table: role defaults (capabilities + charter), projected from roles/*.toml (ADR 070)
     rows.ts           // raw DB row shapes (TeamRow/MemberRow/PresenceRow/MessageRow) + toMember (resolves account_status + capabilities, ADR 070)
   protocol/

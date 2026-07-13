@@ -10,6 +10,7 @@ import { joinCommand } from './commands/join.js';
 import { nudgeCommand } from './commands/nudge.js';
 import { reclaimCommand } from './commands/reclaim.js';
 import { sendCommand } from './commands/send.js';
+import { captureSession } from './commands/session.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
 import { whoamiCommand } from './commands/whoami.js';
@@ -680,6 +681,58 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
       expect(chunks.join('')).toContain('wake up please');
     } finally {
       spy.mockRestore();
+    }
+  });
+});
+
+describe('session capture end-to-end (ADR 131 inc 4)', () => {
+  it('captures locally and pushes the harness-class-only attestation to the live daemon', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['add', 'scout', '--kind', 'agent']);
+    const agentKey = loadConfig().agentKeys['dawn']!;
+
+    // A seat workspace whose binding points at the live in-memory daemon — what the SessionStart
+    // hook sees after `musterd agent scout`.
+    const ws = mkdtempSync(join(tmpdir(), 'musterd-e2e-ws-'));
+    try {
+      saveBinding(ws, {
+        server: process.env['MUSTERD_SERVER']!,
+        team: 'dawn',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'scout' },
+        agent_key: agentKey,
+      });
+      await captureSession('start', {
+        session_id: 'sid-e2e',
+        transcript_path: join(ws, 't.jsonl'),
+        cwd: ws,
+      });
+
+      // Local: the full capture (id + transcript path) landed in the gitignored binding.
+      const binding = JSON.parse(readFileSync(join(ws, '.musterd', 'binding.json'), 'utf8')) as {
+        session?: { id: string; transcript_path?: string };
+      };
+      expect(binding.session?.id).toBe('sid-e2e');
+
+      // Daemon: harness class + event only — the audit detail carries NO id and NO path, and the
+      // push was presence-neutral (no presence row for scout).
+      const audit = server.db
+        .prepare<
+          [],
+          { target: string; detail: string }
+        >("SELECT target, detail FROM audit WHERE action = 'residency.session_captured'")
+        .all();
+      expect(audit).toHaveLength(1);
+      expect(audit[0]!.target).toBe('scout');
+      expect(audit[0]!.detail).not.toContain('sid-e2e');
+      expect(audit[0]!.detail).not.toContain('t.jsonl');
+      expect(JSON.parse(audit[0]!.detail)).toEqual({ harness: 'claude-code', enrolled: false });
+      const presences = server.db
+        .prepare<[], { n: number }>('SELECT COUNT(*) AS n FROM presence')
+        .get();
+      expect(presences?.n ?? 0).toBe(0);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
     }
   });
 });

@@ -1,9 +1,30 @@
-import { bindingSeat, type MemberKind, type MemberSummary } from '@musterd/protocol';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import {
+  BINDING_DIR,
+  BINDING_FILE,
+  bindingSeat,
+  type MemberKind,
+  type MemberSummary,
+} from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, identityFromEnv, loadConfig, type Config, type Identity } from '../config.js';
 import { CliError } from '../errors.js';
 import { openActionNeeded, renderReachabilityNudge } from '../render/rows.js';
+
+/** Walk up from `startDir` to the folder holding `.musterd/binding.json` (the workspace root), or
+ *  null. The anchor for commands that WRITE the binding — never write at bare `process.cwd()`
+ *  (the ambient-cwd clobber, ADR 018). */
+export function findWorkspaceDir(startDir: string = process.cwd()): string | null {
+  let dir = startDir;
+  for (;;) {
+    if (existsSync(join(dir, BINDING_DIR, BINDING_FILE))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
 
 /**
  * Where a resolved identity came from. `env`/`binding` are workspace-explicit; `flag` means the

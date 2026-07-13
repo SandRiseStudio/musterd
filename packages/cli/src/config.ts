@@ -1,4 +1,12 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -140,18 +148,39 @@ export function identityFromEnv(
   };
 }
 
-/** Persist a workspace binding (ADR 018). Holds a token → 0600, and init gitignores `.musterd/`. */
+/**
+ * Persist a workspace binding (ADR 018). Holds a token → 0600, and init gitignores `.musterd/`.
+ *
+ * Two hardenings for session capture (ADR 131 §5, increment 4), mirrored in the MCP adapter's
+ * `saveBinding`:
+ * - **Merge-guard on `session`.** The capture is hook-written, but most callers rebuild the binding
+ *   from state read long before (the ADR 101 model-wipe precedent: every autojoin/reclaim persist
+ *   silently dropped `model` until it was carried through) — on a wake, the SessionStart hook
+ *   writes `session` and the adapter's first-tool-call autojoin would immediately overwrite it.
+ *   So: re-read the on-disk file at write time and preserve its `session` unless the caller
+ *   explicitly set one. Preserving is not *reading* the capture (the adapter never consumes it) —
+ *   it is refusing to destroy another writer's field.
+ * - **Atomic write.** Hook and adapter can write concurrently; tmp-file + rename means a
+ *   concurrent reader never sees a torn file (and the 0600 mode exists from the first byte).
+ */
 export function saveBinding(dir: string, binding: Binding): string {
   const bindingDir = join(dir, BINDING_DIR);
   mkdirSync(bindingDir, { recursive: true });
   const p = join(bindingDir, BINDING_FILE);
-  writeFileSync(p, JSON.stringify(binding, null, 2) + '\n', 'utf8');
+  const onDisk = readBinding(p);
+  const merged: Binding =
+    binding.session === undefined && onDisk?.session !== undefined
+      ? { ...binding, session: onDisk.session }
+      : binding;
+  const tmp = `${p}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   try {
-    chmodSync(p, 0o600);
+    chmodSync(tmp, 0o600);
   } catch {
     // best-effort on platforms without chmod semantics
   }
-  recordBinding(dir, binding);
+  renameSync(tmp, p);
+  recordBinding(dir, merged);
   return p;
 }
 

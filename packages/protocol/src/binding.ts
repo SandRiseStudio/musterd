@@ -42,6 +42,30 @@ export const WorkspaceSpecSchema = z.object({
 
 export type WorkspaceSpec = z.infer<typeof WorkspaceSpecSchema>;
 
+/**
+ * The captured harness session for this workspace (ADR 131 §5, increment 4) — written ONLY by the
+ * SessionStart/SessionEnd hooks via `musterd session start|end --stdin`. Strictly machine-local: it
+ * lives in the gitignored 0600 `binding.json` (`WorkspaceSpecSchema.parse` strips it from the
+ * committed `workspace.json`), the session id and transcript path NEVER cross the wire (the daemon
+ * gets a harness-class-only attestation), and the MCP adapter never reads it (no hook-vs-adapter
+ * boot race). `transcript_path` powers the two local judgements: file mtime = liveness (the only
+ * signal that survives a crash — SessionEnd is advisory and never fires on one), file size = the
+ * context-hygiene "bloated" bound. `ended_at` set ⇒ not live, still resumable.
+ */
+export const SessionCaptureSchema = z.object({
+  /** Harness class (`claude-code`, …) — open string, matches the residency enrollment vocabulary. */
+  harness: z.string().min(1).max(40),
+  /** The harness session id (`claude --resume <id>`). Local-only, never sent to the daemon. */
+  id: z.string().min(1).max(120),
+  /** Absolute transcript path as the harness reported it on hook stdin. Local-only. */
+  transcript_path: z.string().optional(),
+  started_at: z.number().int(),
+  /** Set by the advisory SessionEnd hook; absent after a crash — resumability never depends on it. */
+  ended_at: z.number().int().optional(),
+});
+
+export type SessionCapture = z.infer<typeof SessionCaptureSchema>;
+
 /** The full workspace binding — the secret-free {@link WorkspaceSpecSchema} plus the two secrets. */
 export const BindingSchema = WorkspaceSpecSchema.extend({
   /** Team agent join key (mskey_, ADR 075/076). Optional — absent for chat/human folders; enforced present at claim time for seat/role auto-claim. */
@@ -54,6 +78,9 @@ export const BindingSchema = WorkspaceSpecSchema.extend({
    *  `unknown`. Kept out of the committed `workspace.json` (a model is a per-machine choice, not shared).
    *  Attested, never verified; absent ⇒ `unknown` (warn-never-block). */
   model: z.string().max(120).optional(),
+  /** The captured harness session (ADR 131 §5) — see {@link SessionCaptureSchema} for the strict
+   *  local-only contract. Hook-written; per-machine like `model`, so kept out of `workspace.json`. */
+  session: SessionCaptureSchema.optional(),
 });
 
 export type Binding = z.infer<typeof BindingSchema>;

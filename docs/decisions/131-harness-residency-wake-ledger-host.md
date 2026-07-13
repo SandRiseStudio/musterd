@@ -149,6 +149,19 @@ carries a hygiene clause: the host prefers resume for continuity but rolls over 
 session when the transcript is bloated or stale — the cost bound and the compaction escape hatch
 are the same clause. Fork-on-wake is a deferred per-seat knob.
 
+**The local-session guard** (amended 2026-07-13, from the first measured wake; owner-endorsed):
+**roster-offline ≠ workspace-idle.** The daemon leases on the presence it can see — and a daemon
+bounce once dropped a seat's WebSocket so the roster honestly read `offline · wakeable` while a
+human-driven session was actively working in that worktree; the wake spawned a concurrent session
+beside it. Only the host's machine can see local liveness, so before actuating, the host consults
+the target workspace's `binding.session`: no `ended_at` and a freshly-touched transcript (the
+mtime signal survives a crash, unlike the advisory SessionEnd) means a live session holds the
+workspace, and the wake is **deferred** — the lease settles with `deferred: true`, audited as
+`residency.wake_deferred`, and the daemon snoozes further lease derivation for that seat for a
+short window. A deferral burns **no** attempt/cooldown/hourly budget: a working human must never
+exhaust the act's wake budget; the act stays fully due for when the session ends. Guard-first
+ordering also means resume can never target a live transcript.
+
 ### 6. The wake run is bounded, composed, and visible
 
 - **Composed, never quoted:** the spawn prompt is built from structured fields only (act enum,
@@ -167,7 +180,10 @@ are the same clause. Fork-on-wake is a deferred per-seat knob.
 - **Visible:** woken occupancies carry provenance **`wake`** (additive `PROVENANCES` entry), so
   the roster, stream, and office can distinguish machine-initiated sessions; every step is
   audited — `residency.enrolled|revoked|wake_leased|woke|wake_failed|wake_exhausted`, with wake
-  detail `{act, sender, grant_id, lease_id, session: fresh|resumed}`.
+  detail `{act, sender, grant_id, lease_id, session: fresh|resumed}`. Increment 4 adds three:
+  `residency.wake_deferred` (the local-session guard — outside every rate/attempt derivation) and
+  `residency.session_captured|session_ended` (the capture pushes, detail `{harness, enrolled}` —
+  harness class only, never an id or a path).
 
 ### 7. One actuator interface; musterd itself is a harness
 

@@ -1,8 +1,16 @@
 import { EventEmitter } from 'node:events';
 import type { WakeOrder } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
+import type { LocalSessionLiveness } from '../../session/liveness.js';
 import type { BackendContext, WakeSpec } from '../backend.js';
-import { buildWakeArgs, claudeCodeBackend, parseRunSummary } from './claudeCode.js';
+import {
+  buildResumeArgs,
+  buildWakeArgs,
+  claudeCodeBackend,
+  parseRunSummary,
+  RESUME_TRANSCRIPT_MAX_BYTES,
+  type ClaudeCodeDeps,
+} from './claudeCode.js';
 
 /**
  * The invariants this backend carries (ADR 131 §6) are asserted here so a refactor can't quietly
@@ -62,7 +70,8 @@ interface SpawnCall {
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; detached?: boolean };
 }
 
-function harness(child: FakeChild) {
+function harness(children: FakeChild | FakeChild[], deps: Partial<ClaudeCodeDeps> = {}) {
+  const queue = Array.isArray(children) ? [...children] : [children];
   const calls: SpawnCall[] = [];
   const backend = claudeCodeBackend({
     resolveBin: async () => '/fake/claude',
@@ -70,13 +79,30 @@ function harness(child: FakeChild) {
 
     spawn: ((bin: string, args: string[], opts: SpawnCall['opts']) => {
       calls.push({ bin, args, opts });
-      return child as any;
+      return (queue.length > 1 ? queue.shift()! : queue[0]!) as any;
     }) as any,
     mintSessionId: () => '00000000-0000-4000-8000-000000000000',
     killGraceMs: 5,
+    // Deterministic capture state: default = the pre-capture world (fresh path, quiet).
+    readSession: () => ({ state: 'none' }),
+    ...deps,
   });
   return { backend, calls };
 }
+
+/** A resumable capture as the shared liveness module would report it. */
+const resumable = (over: Partial<LocalSessionLiveness> = {}): LocalSessionLiveness => ({
+  state: 'resumable',
+  session: {
+    harness: 'claude-code',
+    id: 'cap-1234',
+    transcript_path: '/ws/scout/.claude/t.jsonl',
+    started_at: Date.now() - 60_000,
+  },
+  transcriptBytes: 4096,
+  transcriptMtime: Date.now() - 20 * 60_000,
+  ...over,
+});
 
 describe('buildWakeArgs (the spawn argv invariants)', () => {
   const args = buildWakeArgs('musterd wake — line', 'uuid-1');
@@ -95,6 +121,24 @@ describe('buildWakeArgs (the spawn argv invariants)', () => {
   });
   it('no permission-mode override: the workspace’s own settings govern', () => {
     expect(args).not.toContain('--permission-mode');
+  });
+});
+
+describe('buildResumeArgs (the resume argv invariants, inc 4)', () => {
+  const args = buildResumeArgs('musterd wake — line', 'cap-1234');
+
+  it('resumes the captured session id, with the composed line verbatim via -p', () => {
+    expect(args[args.indexOf('--resume') + 1]).toBe('cap-1234');
+    expect(args[args.indexOf('-p') + 1]).toBe('musterd wake — line');
+    expect(args).not.toContain('--session-id'); // the source of the id is the capture, not a mint
+  });
+  it('identical permission posture to fresh: reply-only tools, default permission mode', () => {
+    expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__musterd');
+    expect(args).not.toContain('--permission-mode');
+  });
+  it('NEVER a skip-permissions flag — on EITHER arg builder (ADR 131 §6)', () => {
+    expect(args.join(' ')).not.toMatch(/skip-permissions|dangerously/i);
+    expect(buildWakeArgs('l', 'i').join(' ')).not.toMatch(/skip-permissions|dangerously/i);
   });
 });
 
@@ -170,6 +214,114 @@ describe('claudeCodeBackend.wake', () => {
     );
     expect(actuation.outcome.occupied).toBe(false);
     expect(actuation.outcome.reason).toMatch(/claude CLI not found/);
+  });
+});
+
+describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
+  it('resumable capture: spawns --resume and reports session=resumed on roster occupancy', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, { readSession: () => resumable() });
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('cap-1234');
+    expect(calls[0]!.opts.env?.['MUSTERD_PROVENANCE']).toBe('wake'); // same provenance either path
+    expect(actuation.outcome).toEqual({ occupied: true, session: 'resumed' });
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('resume that never occupies: killed, then a fresh fallback in the same wake call', async () => {
+    const resumeChild = new FakeChild();
+    const freshChild = new FakeChild();
+    const { backend, calls } = harness([resumeChild, freshChild], {
+      readSession: () => resumable(),
+      resumeVerifyWindowMs: 5,
+    });
+    // The fake roster: the resume attempt (sub-window 5ms) never sees the seat; the fresh attempt
+    // (no explicit window) does — occupancy only ever comes from the roster, either path.
+    const context = ctx(((_seat: string, windowMs?: number) =>
+      Promise.resolve(
+        windowMs === 5 ? { occupied: false } : { occupied: true, provenance: 'wake' },
+      )) as never);
+    const actuation = await backend.wake(spec(), context);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.args).toContain('--resume');
+    expect(calls[1]!.args).toContain('--session-id'); // the complete inc-3 fresh path
+    // The same daemon-composed line, verbatim, on both attempts — one lease, one prompt.
+    expect(calls[1]!.args[calls[1]!.args.indexOf('-p') + 1]).toBe(spec().order.composed_line);
+    expect(resumeChild.signals).toContain('SIGTERM'); // the dead resume never lingers
+    expect(actuation.outcome.occupied).toBe(true);
+    expect(actuation.outcome.session).toBe('fresh');
+    expect(context.lines.join('\n')).toMatch(/resume failed .* fresh fallback/);
+    resumeChild.exit(143);
+    freshChild.exit(0);
+    await actuation.settled;
+  });
+
+  it.each([
+    [
+      'harness mismatch',
+      resumable({ session: { ...resumable().session!, harness: 'codex' } }),
+      /captured harness/,
+    ],
+    ['gc horizon', resumable({ state: 'gc-expired' }), /GC horizon/],
+    [
+      'missing transcript',
+      resumable({ transcriptBytes: undefined, session: { ...resumable().session! } }),
+      /transcript is missing/,
+    ],
+    [
+      'bloated transcript',
+      resumable({ transcriptBytes: RESUME_TRANSCRIPT_MAX_BYTES + 1 }),
+      /hygiene bound/,
+    ],
+  ] as const)(
+    'ladder rung "%s" degrades to fresh with a named skip',
+    async (_name, liveness, re) => {
+      const child = new FakeChild();
+      const { backend, calls } = harness(child, { readSession: () => liveness });
+      const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+      const actuation = await backend.wake(spec(), context);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.args).toContain('--session-id');
+      expect(calls[0]!.args).not.toContain('--resume');
+      expect(actuation.outcome.session).toBe('fresh');
+      expect(context.lines.join('\n')).toMatch(re);
+      child.exit(0);
+      await actuation.settled;
+    },
+  );
+
+  it('the pre-capture world (state none) goes fresh QUIETLY — no skip noise', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child); // default readSession: none
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const actuation = await backend.wake(spec(), context);
+    expect(calls[0]!.args).toContain('--session-id');
+    expect(context.lines.join('\n')).not.toContain('resume skipped');
+    expect(actuation.outcome.session).toBe('fresh');
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('a LIVE local session: defensive defer — nothing spawns, even if the loop guard is bypassed', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable({ state: 'live', transcriptMtime: Date.now() - 1_000 }),
+    });
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: true })),
+    );
+    expect(calls).toHaveLength(0);
+    expect(actuation.outcome.occupied).toBe(false);
+    expect(actuation.outcome.deferred).toBe(true);
+    expect(actuation.outcome.reason).toBe('local-session-live');
+    await actuation.settled;
   });
 });
 

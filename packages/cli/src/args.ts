@@ -28,6 +28,7 @@ const BOOLEAN_FLAGS = new Set([
   'autojoin',
   'live',
   'purge',
+  'stdin',
 ]);
 
 export function parseArgs(argv: string[]): Parsed {

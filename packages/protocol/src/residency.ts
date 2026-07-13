@@ -28,6 +28,10 @@ export const ResidencySchema = z.object({
   grant_id: z.string().nullable(),
   /** Who authorized the enrollment (ADR 127 actor≠authorizer). */
   authorized_by: z.string().nullable(),
+  /** When the seat last attested a capturable session (ADR 131 §5, increment 4) — the resumable
+   *  attestation is harness-class-only, so this timestamp is ALL the daemon learns about sessions:
+   *  never an id, never a transcript path. Null until the first `musterd session start` push. */
+  resumable_at: z.number().int().nullable(),
   created_at: z.number().int(),
   updated_at: z.number().int(),
 });
@@ -54,6 +58,28 @@ export const RevokeResidencyBodySchema = z.object({
   seat: z.string(),
 });
 export type RevokeResidencyBody = z.infer<typeof RevokeResidencyBodySchema>;
+
+/**
+ * Body of `POST /teams/:slug/residency/session` — the resumable attestation (ADR 131 §5,
+ * increment 4), pushed by `musterd session start|end --stdin` from the SessionStart/SessionEnd
+ * hooks. Harness CLASS only, by construction: this schema has no field for a session id or a
+ * transcript path, so they cannot cross the wire. Agent-key authenticated (the hook holds only the
+ * workspace binding), presence-neutral (ADR 057 — capture must never flip the roster) and never
+ * claiming (ADR 108 — a hook must never displace the live occupant).
+ */
+export const SessionAttestationBodySchema = z.object({
+  seat: z.string(),
+  harness: z.string().min(1).max(40),
+  event: z.enum(['start', 'end']),
+});
+export type SessionAttestationBody = z.infer<typeof SessionAttestationBodySchema>;
+
+/** Response of the session attestation push: `enrolled` says whether a residency row recorded it. */
+export const SessionAttestationResponseSchema = z.object({
+  ok: z.boolean(),
+  enrolled: z.boolean(),
+});
+export type SessionAttestationResponse = z.infer<typeof SessionAttestationResponseSchema>;
 
 /** Response of `GET /teams/:slug/residency` — the team's enrollments. */
 export const ResidencyListResponseSchema = z.object({
@@ -109,6 +135,11 @@ export const WakeReportBodySchema = z.object({
   answered: z.boolean().optional(),
   /** Fresh spawn or resumed session (the fresh-first doctrine's outcome axis). */
   session: z.enum(['fresh', 'resumed']).optional(),
+  /** True ⇒ the host skipped this wake because a live local session already holds the workspace
+   *  (the local-session guard — roster-offline ≠ workspace-idle). Settles the lease, audits
+   *  `residency.wake_deferred`, and consumes NO attempt/cooldown/hourly budget: a working human
+   *  must never exhaust the act. `occupied` is false on a deferral. */
+  deferred: z.boolean().optional(),
   /** Attested spend for the wake run, when the backend surfaces it. */
   cost_usd: z.number().nonnegative().optional(),
   /** Failure summary for a not-occupied outcome (watchdog timeout, spawn error) — host-composed,

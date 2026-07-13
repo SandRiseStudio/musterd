@@ -27,6 +27,11 @@ export const WAKE_COOLDOWN_MS = 30 * 60_000;
 export const WAKE_HOURLY_CAP = 2;
 /** Attempts per act before a terminal `residency.wake_exhausted` (termination is provable). */
 export const WAKE_ATTEMPT_CAP = 3;
+/** After a host defers a wake for a live local session, the seat derives no new lease for this
+ *  window (increment 4's local-session guard) — else a working human generates a lease+defer pair
+ *  every poll tick. Deferrals consume NO attempt/cooldown/hourly budget (they are neither
+ *  `residency.woke` nor `residency.wake_failed`), so the act stays fully due afterwards. */
+export const WAKE_DEFER_SNOOZE_MS = 5 * 60_000;
 
 export interface ResidencyRow {
   id: string;
@@ -37,6 +42,10 @@ export interface ResidencyRow {
   grant_id: string | null;
   authorized_by: string | null;
   policy: string | null;
+  /** Harness class of the last session-capture attestation (v17, ADR 131 §5) — class only, never an id. */
+  resumable_harness: string | null;
+  /** When the seat last attested a capturable session (v17). Null until the first capture. */
+  resumable_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -63,6 +72,7 @@ export function toResidency(row: ResidencyRow, teamSlug: string, seatName: strin
     host: row.host,
     grant_id: row.grant_id,
     authorized_by: row.authorized_by,
+    resumable_at: row.resumable_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -110,14 +120,38 @@ export function enrollResidency(
     grant_id: input.grant_id,
     authorized_by: input.authorized_by,
     policy: null,
+    resumable_harness: null,
+    resumable_at: null,
     created_at: now,
     updated_at: now,
   };
   db.prepare(
-    `INSERT INTO residency (id, team_id, member_id, harness, host, grant_id, authorized_by, policy, created_at, updated_at)
-     VALUES (@id, @team_id, @member_id, @harness, @host, @grant_id, @authorized_by, @policy, @created_at, @updated_at)`,
+    `INSERT INTO residency (id, team_id, member_id, harness, host, grant_id, authorized_by, policy, resumable_harness, resumable_at, created_at, updated_at)
+     VALUES (@id, @team_id, @member_id, @harness, @host, @grant_id, @authorized_by, @policy, @resumable_harness, @resumable_at, @created_at, @updated_at)`,
   ).run(row);
   return { row, previous: null };
+}
+
+/**
+ * Record a session-capture attestation (ADR 131 §5, increment 4) on the seat's enrollment row —
+ * harness class + timestamp only; the daemon never sees an id or a path. Returns whether the seat
+ * is enrolled (an unenrolled capture updates nothing but the caller still audits it). Only the
+ * `start` event lands here — `end` is advisory and audit-only (resumability never depends on it).
+ */
+export function recordSessionAttestation(
+  db: Database,
+  teamId: string,
+  memberId: string,
+  harness: string,
+  now = Date.now(),
+): boolean {
+  const info = db
+    .prepare(
+      `UPDATE residency SET resumable_harness = ?, resumable_at = ?
+        WHERE team_id = ? AND member_id = ?`,
+    )
+    .run(harness, now, teamId, memberId);
+  return info.changes > 0;
 }
 
 /** Revoke a seat's enrollment (the `residency off` kill switch). Returns the removed row, or null. */
@@ -188,6 +222,20 @@ function wakesSince(db: Database, teamId: string, seatName: string, sinceTs: num
     )
     .get(teamId, seatName, sinceTs);
   return row?.n ?? 0;
+}
+
+/** Was this seat's last wake deferred for a live local session within the snooze window? Derived
+ *  from `residency.wake_deferred` audit rows (increment 4's guard) — deliberately NOT part of
+ *  `wakesSince`/`attemptsForAct`: a deferral burns no rate or attempt budget, it only snoozes. */
+function deferredSince(db: Database, teamId: string, seatName: string, sinceTs: number): boolean {
+  const row = db
+    .prepare<[string, string, number], { one: number }>(
+      `SELECT 1 AS one FROM audit
+        WHERE team_id = ? AND action = 'residency.wake_deferred'
+          AND target = ? AND ts > ? LIMIT 1`,
+    )
+    .get(teamId, seatName, sinceTs);
+  return row != null;
 }
 
 /** Actuation attempts recorded for one act (woke + failed) — drives the per-act attempt cap. */
@@ -289,6 +337,8 @@ function dueCandidates(
  * 2. **offline** — no live presence AND not held within reclaim grace (a reservation may be
  *    reconnecting on its own; waking it would race the reclaim);
  * 3. no live lease (mutual exclusion — the stored bit);
+ * 3b. not snoozed by a recent `residency.wake_deferred` (increment 4's local-session guard —
+ *     derived, burns no budget);
  * 4. under the hourly cap (derived); the batched lane additionally respects the cooldown (derived);
  * 5. per act: not exhausted; an act at the attempt cap writes the terminal
  *    `residency.wake_exhausted` (once) and is skipped — termination is provable:
@@ -316,6 +366,9 @@ export function claimWakeLeases(
       if (hasLivePresence(db, member.id, presenceTimeoutMs)) continue;
       if (reclaimable.has(member.id)) continue;
       if (liveLease(db, member.id, now)) continue;
+      // Local-session guard snooze (increment 4): the host reported a live local session in this
+      // seat's workspace — don't re-derive a lease every tick while someone is plainly working there.
+      if (deferredSince(db, teamId, member.name, now - WAKE_DEFER_SNOOZE_MS)) continue;
       if (wakesSince(db, teamId, member.name, now - 3_600_000) >= WAKE_HOURLY_CAP) continue;
 
       const cooled = wakesSince(db, teamId, member.name, now - WAKE_COOLDOWN_MS) === 0;

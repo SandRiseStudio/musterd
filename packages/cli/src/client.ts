@@ -16,10 +16,13 @@ import {
   RequestsResponseSchema,
   EnrollResidencyResponseSchema,
   ResidencyListResponseSchema,
+  SessionAttestationResponseSchema,
   WakeLeasesResponseSchema,
   type EnrollResidencyBody,
   type EnrollResidencyResponse,
   type ResidencyListResponse,
+  type SessionAttestationBody,
+  type SessionAttestationResponse,
   type WakeLeasesResponse,
   type WakeReportBody,
   type ActDelivery,
@@ -442,6 +445,24 @@ export class HttpClient {
       lease_id: string;
       status: string;
     };
+  }
+
+  /**
+   * The resumable attestation push (ADR 131 §5, increment 4) — `POST /teams/:slug/residency/session`,
+   * agent-key auth. Harness CLASS + event only; a session id or transcript path structurally cannot
+   * cross (the body schema has no field for them). Callers use `.presenceNeutral()` — capture must
+   * never flip the roster (ADR 057) and never claims (ADR 108).
+   */
+  async attestSession(
+    slug: string,
+    body: SessionAttestationBody,
+  ): Promise<SessionAttestationResponse> {
+    const json = await this.request('POST', `/teams/${slug}/residency/session`, body);
+    const parsed = SessionAttestationResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('session attestation response did not match the protocol schema', 1);
+    }
+    return parsed.data;
   }
 
   /** The team's residency enrollments (ADR 131) — `GET /teams/:slug/residency`. */

@@ -63,7 +63,17 @@ export type AuditAction =
   | 'residency.wake_leased'
   | 'residency.woke'
   | 'residency.wake_failed'
-  | 'residency.wake_exhausted';
+  | 'residency.wake_exhausted'
+  // ADR 131 increment 4: `wake_deferred` — the host skipped an actuation because a live local
+  // session already held the workspace (the local-session guard; roster-offline ≠ workspace-idle).
+  // Deliberately OUTSIDE the rate/attempt derivations (those count woke+wake_failed only): a
+  // deferral burns no budget, it only snoozes lease derivation for `WAKE_DEFER_SNOOZE_MS`.
+  // `session_captured`/`session_ended` record the resumable attestation pushes from the
+  // SessionStart/SessionEnd hooks — detail carries `{ harness, enrolled }`, harness CLASS only:
+  // a session id or transcript path never reaches the daemon.
+  | 'residency.wake_deferred'
+  | 'residency.session_captured'
+  | 'residency.session_ended';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

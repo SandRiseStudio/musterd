@@ -33,4 +33,18 @@ describe('WorkspaceSpec / Binding schemas', () => {
     // A binding with no secrets (e.g. the committed spec loaded as a Binding) is valid.
     expect(BindingSchema.parse(spec).agent_key).toBeUndefined();
   });
+
+  it('the captured session round-trips on Binding and is STRIPPED from WorkspaceSpec (never committed)', () => {
+    const session = {
+      harness: 'claude-code',
+      id: 'sid-1',
+      transcript_path: '/w/.claude/t.jsonl',
+      started_at: 1,
+    };
+    const full = BindingSchema.parse({ ...spec, session });
+    expect(full.session).toEqual(session);
+    // The committable workspace.json can structurally never carry a session id or transcript path.
+    const committed = WorkspaceSpecSchema.parse({ ...spec, session }) as Record<string, unknown>;
+    expect(committed['session']).toBeUndefined();
+  });
 });

@@ -30,6 +30,7 @@ import { roleCommand } from './commands/role.js';
 import { sendCommand } from './commands/send.js';
 import { serveCommand } from './commands/serve.js';
 import { serviceCommand } from './commands/service.js';
+import { sessionCommand } from './commands/session.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
 import { unbindCommand } from './commands/unbind.js';
@@ -210,6 +211,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return requestsCommand(rest);
     case 'residency':
       return residencyCommand(rest);
+    case 'session':
+      return sessionCommand(rest);
     case 'host':
       return hostCommand(rest);
     case 'wire':

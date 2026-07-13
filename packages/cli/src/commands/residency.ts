@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { BINDING_DIR, BINDING_FILE, bindingSeat, type Residency } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { findBinding, saveBinding } from '../config.js';
@@ -13,7 +13,7 @@ import {
 } from '../host/registry.js';
 import { clock, theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
-import { resolve, resolveRead } from './helpers.js';
+import { findWorkspaceDir, resolve, resolveRead } from './helpers.js';
 
 /**
  * `musterd residency on|off|status` (ADR 131) — enroll this workspace's seat into harness
@@ -38,17 +38,6 @@ export async function residencyCommand(parsed: Parsed): Promise<number> {
       '(--seat <agent> = what gets enrolled, default this workspace’s seat; --as <admin> = who authorizes)',
     2,
   );
-}
-
-/** Walk up from cwd to the folder holding `.musterd/binding.json` (the workspace root), or null. */
-function findWorkspaceDir(startDir: string = process.cwd()): string | null {
-  let dir = startDir;
-  for (;;) {
-    if (existsSync(join(dir, BINDING_DIR, BINDING_FILE))) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
 }
 
 /** The seat this invocation is about: `--seat` wins, else the workspace binding's fixed seat. */

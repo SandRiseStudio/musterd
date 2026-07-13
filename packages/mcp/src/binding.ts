@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   BINDING_DIR,
@@ -104,16 +104,32 @@ function readWorkspaceSpec(path: string): WorkspaceSpec | null {
  * Persist the workspace binding after an in-session claim (ADR 032), so a reconnect / a shelled-out
  * `musterd` resolves to the seat this session just claimed (ADR 018's single source of truth). Holds
  * a token → 0600. Mirrors the CLI's `saveBinding`; the shared `BindingSchema` locks the shape.
+ *
+ * Merge-guard on `session` (ADR 131 §5, increment 4): `persistBinding` rebuilds the binding from
+ * boot-time config, and on every wake the SessionStart hook writes `binding.session` moments before
+ * this adapter's first-tool-call autojoin persists — without the guard, every wake's capture would
+ * be clobbered on arrival (the exact ADR 101 model-wipe failure shape). Re-read the on-disk file
+ * and carry its `session` through unless the caller explicitly set one. This is NOT the adapter
+ * *reading* `binding.session` (the no-boot-race contract): it never consumes the value, it only
+ * refuses to destroy another writer's field. Tmp-file + rename keeps the concurrent-hook write
+ * untorn (and 0600 from the first byte).
  */
 export function saveBinding(dir: string, binding: Binding): string {
   const bindingDir = join(dir, BINDING_DIR);
   mkdirSync(bindingDir, { recursive: true });
   const p = join(bindingDir, BINDING_FILE);
-  writeFileSync(p, JSON.stringify(binding, null, 2) + '\n', 'utf8');
+  const onDisk = readBinding(p);
+  const merged: Binding =
+    binding.session === undefined && onDisk?.session !== undefined
+      ? { ...binding, session: onDisk.session }
+      : binding;
+  const tmp = `${p}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   try {
-    chmodSync(p, 0o600);
+    chmodSync(tmp, 0o600);
   } catch {
     // best-effort on platforms without chmod semantics
   }
+  renameSync(tmp, p);
   return p;
 }

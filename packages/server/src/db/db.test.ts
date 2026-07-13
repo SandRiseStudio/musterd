@@ -10,7 +10,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('18');
+    expect(ver?.value).toBe('19');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -48,6 +48,15 @@ describe('db', () => {
       db.prepare('PRAGMA table_info(presence)').all() as { name: string }[]
     ).map((c) => c.name);
     expect(presenceCols).toContain('model');
+    db.close();
+  });
+
+  it('v19 adds the resumable-attestation columns on residency (ADR 131 inc 4)', () => {
+    const db = openDb(':memory:');
+    const cols = (db.prepare('PRAGMA table_info(residency)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    expect(cols).toEqual(expect.arrayContaining(['resumable_harness', 'resumable_at']));
     db.close();
   });
 
@@ -133,7 +142,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(18);
+    expect(runMigrations(db)).toBe(19); // runs v18 (under test) + v19 (additive residency columns)
 
     const scope = (id: string) =>
       db
