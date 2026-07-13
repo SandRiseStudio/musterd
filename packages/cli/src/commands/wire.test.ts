@@ -88,6 +88,29 @@ describe('musterd wire', () => {
     expect(readBinding().agent_key).toBe('mskey_fromconfig');
   });
 
+  it('preserves an attested model across a re-wire (ADR 101)', async () => {
+    writeSpec(SPEC);
+    writeConfig({ bravo: 'mskey_x' });
+    // A seat provisioned with `--model` carries the declaration in the gitignored binding only — the
+    // committed spec never holds it. Re-deriving the binding from the spec must not forget it.
+    mkdirSync(join(cwd, BINDING_DIR), { recursive: true });
+    writeFileSync(
+      join(cwd, BINDING_DIR, BINDING_FILE),
+      JSON.stringify({ ...SPEC, agent_key: 'mskey_x', model: 'claude-fable-5' }),
+      'utf8',
+    );
+    await run([]);
+    expect(readBinding().model).toBe('claude-fable-5');
+  });
+
+  it('leaves the model absent when the seat never declared one', async () => {
+    writeSpec(SPEC);
+    writeConfig({ bravo: 'mskey_x' });
+    await run([]);
+    // undeclared stays honestly undeclared — never a guess (the server renders `unknown`)
+    expect(readBinding().model).toBeUndefined();
+  });
+
   it('--autojoin opts into claim-on-launch', async () => {
     writeSpec(SPEC);
     writeConfig({ bravo: 'mskey_x' });

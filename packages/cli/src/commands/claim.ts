@@ -186,6 +186,10 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
           // Record the resolved seat as the folder's standing policy so re-launches re-occupy it.
           claim: { mode: 'seat', name: seat },
           ...(effectiveGrant !== undefined ? { grant: effectiveGrant } : {}),
+          // Preserve the attested model across the rewrite (ADR 101) — a claim resolves a seat, it
+          // never redeclares which model sits in it. Dropping it here reverted a provisioned seat to
+          // `unknown` on the next adapter boot.
+          ...(binding?.model !== undefined ? { model: binding.model } : {}),
         };
         saveBinding(process.cwd(), next);
 
