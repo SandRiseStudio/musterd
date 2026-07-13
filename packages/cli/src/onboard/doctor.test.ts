@@ -30,7 +30,7 @@ vi.mock('../client.js', () => ({
   },
 }));
 
-const { inspectProvisioning } = await import('./doctor.js');
+const { buildSkewNotes, inspectProvisioning, runCheckBuild } = await import('./doctor.js');
 const { writeGuidance, CANONICAL_SKILL_PATH } = await import('./guidance.js');
 const { writeProvisionManifest } = await import('./manifest.js');
 
@@ -286,5 +286,68 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     const r = await inspectProvisioning(dir);
     expect(r.drift).toEqual([]);
     expect(r.notes.some((n) => n.includes('local edits'))).toBe(true);
+  });
+});
+
+describe('build skew (ADR 135) — warn-only freshness, never drift', () => {
+  const sha = (c: string) => c.repeat(40);
+  // A temp non-git dir as repoDir keeps the origin/main comparison silent, isolating check (a).
+  const noGit = () => mkdtempSync(join(tmpdir(), 'musterd-nogit-'));
+
+  it('notes a CLI-vs-daemon mismatch, silent on match or unknown', async () => {
+    const differs = await buildSkewNotes({
+      cliRef: sha('a'),
+      daemonBuild: async () => sha('d'),
+      repoDir: noGit(),
+    });
+    expect(differs.join(' ')).toContain('differs from the daemon');
+    expect(differs.join(' ')).toContain(sha('a').slice(0, 7));
+
+    const matches = await buildSkewNotes({
+      cliRef: sha('d'),
+      daemonBuild: async () => sha('d'),
+      repoDir: noGit(),
+    });
+    expect(matches).toEqual([]);
+
+    // unstamped CLI → total silence (no daemon fetch even attempted)
+    expect(await buildSkewNotes({ cliRef: undefined, repoDir: noGit() })).toEqual([]);
+    // unreachable daemon → silence, never a throw
+    const down = await buildSkewNotes({
+      cliRef: sha('a'),
+      daemonBuild: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+      repoDir: noGit(),
+    });
+    expect(down).toEqual([]);
+  });
+
+  it('runCheckBuild prints one line on mismatch and ALWAYS exits 0 (hook contract)', async () => {
+    const lines: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((c: string) => {
+      lines.push(String(c));
+      return true;
+    }) as never);
+    try {
+      const mismatch = await runCheckBuild({ cliRef: sha('a'), daemonBuild: async () => sha('d') });
+      expect(mismatch).toBe(0);
+      expect(lines.join('')).toContain('differs from the daemon');
+
+      lines.length = 0;
+      expect(await runCheckBuild({ cliRef: sha('d'), daemonBuild: async () => sha('d') })).toBe(0);
+      expect(lines.join('')).toBe('');
+      expect(await runCheckBuild({ cliRef: undefined })).toBe(0); // unstamped → instant silence
+      expect(
+        await runCheckBuild({
+          cliRef: sha('a'),
+          daemonBuild: async () => {
+            throw new Error('down');
+          },
+        }),
+      ).toBe(0); // daemon down → silence, exit 0
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

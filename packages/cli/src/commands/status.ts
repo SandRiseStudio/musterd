@@ -1,5 +1,6 @@
 import type { Parsed } from '../args.js';
 import { renderPendingSummary, renderRoster, renderStatusHeader } from '../render/rows.js';
+import { cliBuild } from '../version.js';
 import { pendingActionSummary, resolveRead } from './helpers.js';
 import { renderMemoryLine } from './memory.js';
 
@@ -40,8 +41,11 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
       me,
       pending: pending ? renderPendingSummary(pending.count, pending.since) : undefined,
       memory: memory ? renderMemoryLine(memory, Date.now(), { compact: true }) : undefined,
+      cliBuild: cliBuild(),
     }) + '\n',
   );
-  process.stdout.write('\n' + renderRoster(res.members) + '\n');
+  process.stdout.write(
+    '\n' + renderRoster(res.members, undefined, undefined, health?.build) + '\n',
+  );
   return 0;
 }

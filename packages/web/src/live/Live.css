@@ -1125,6 +1125,21 @@
   border: 1px solid color-mix(in srgb, var(--lc-accent) 34%, transparent);
   background: color-mix(in srgb, var(--lc-accent) 10%, transparent);
 }
+/* ADR 135: this seat's runtime attests a different build than the daemon — quiet amber, details in
+   the title (both short SHAs). Same chip anatomy as reconnecting, warn-toned instead of accent. */
+.lc-seat__stale {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  letter-spacing: -0.01em;
+  color: var(--lc-warn, #f4cf52);
+  padding: 0 6px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--lc-warn, #f4cf52) 34%, transparent);
+  background: color-mix(in srgb, var(--lc-warn, #f4cf52) 10%, transparent);
+}
 .lc-seat__avatar {
   flex: 0 0 auto;
   width: 22px;

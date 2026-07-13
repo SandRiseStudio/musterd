@@ -25,6 +25,8 @@ export interface LiveState {
   error: string | null;
   /** Ids that arrived live over the socket (vs the initial backfill) — drives the typewriter. */
   liveIds: Set<string>;
+  /** The daemon's build ref (ADR 130/135) — the reference member builds are compared against. */
+  daemonBuild?: string | undefined;
 }
 
 /**
@@ -38,6 +40,8 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
   const hooksRef = useRef(hooks);
   hooksRef.current = hooks;
   const [envelopes, setEnvelopes] = useState<Envelope[]>([]);
+  // The daemon's build ref (ADR 130/135) — the reference the roster compares member builds against.
+  const [daemonBuild, setDaemonBuild] = useState<string | undefined>(undefined);
   const [roster, setRoster] = useState<MemberSummary[]>([]);
   const [status, setStatus] = useState<ConnStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +71,15 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
         return [...prev, ...fresh].sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
       });
     };
+
+    // The daemon's build (ADR 135): one same-origin fetch per mount, best-effort — an unreachable or
+    // provenance-less daemon leaves it undefined and the stale chips simply never render.
+    fetch('/health', { signal: AbortSignal.timeout(2500) })
+      .then((r) => r.json())
+      .then((h: { build?: string }) => {
+        if (alive && h.build) setDaemonBuild(h.build);
+      })
+      .catch(() => {});
 
     // Backfill (roster + history) in parallel, then the socket live-tails on top.
     Promise.all([fetchRoster(cfg), fetchHistory(cfg, { limit: 200 })])
@@ -121,5 +134,5 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
     };
   }, [cfg?.team, cfg?.as, cfg?.token]);
 
-  return { envelopes, roster, status, error, liveIds };
+  return { envelopes, roster, status, error, liveIds, daemonBuild };
 }

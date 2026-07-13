@@ -112,6 +112,8 @@ export interface StatusHead {
   pending?: string | undefined;
   /** Rendered seat-memory continuity line, or '' (ADR 093). */
   memory?: string | undefined;
+  /** This CLI dist's own build stamp (ADR 135) — compared to health.build for the self-check line. */
+  cliBuild?: string | undefined;
 }
 
 /**
@@ -152,6 +154,17 @@ export function renderStatusHeader(head: StatusHead): string {
 
   if (pending) lines.push(pending);
   if (memory) lines.push(memory);
+  // ADR 135 self-check: the binary you just typed vs the daemon it answered from. Both-known-only —
+  // an unstamped CLI or a daemon without provenance stays silent. "differs", never "behind": this
+  // CLI may legitimately be ahead (a feature-branch build).
+  const cli = head.cliBuild;
+  if (cli && health?.build && cli !== health.build) {
+    lines.push(
+      theme.warn(
+        `⚠ your CLI build (${cli.slice(0, 7)}) differs from the daemon (${health.build.slice(0, 7)}) — rebuild your checkout (pnpm build)`,
+      ),
+    );
+  }
   lines.push(theme.dim(plumbing(server, health)));
   return lines.join('\n');
 }
@@ -225,6 +238,7 @@ export function renderRoster(
   members: MemberSummary[],
   now = Date.now(),
   width = termWidth(),
+  daemonBuild?: string,
 ): string {
   if (members.length === 0) {
     return theme.meta("nobody's on the team yet") + '\n' + hint('musterd team add <name>');
@@ -236,7 +250,7 @@ export function renderRoster(
     const inGroup = members.filter((m) => groupOf(m) === key);
     if (inGroup.length === 0) continue; // an empty group is not a fact worth a heading
     out.push('', `${heading(label)}  ${theme.meta(String(inGroup.length))}`);
-    const entries = inGroup.map((m) => renderMember(m, key, nameCol, now, width));
+    const entries = inGroup.map((m) => renderMember(m, key, nameCol, now, width, daemonBuild));
     // Multi-line entries (a working member, with their status) need air between them or they read as
     // one wall of text; a group of one-liners stays tight. Spacing follows the content, not the group.
     const multiline = entries.some((e) => e.includes('\n'));
@@ -255,10 +269,11 @@ function renderMember(
   nameCol: number,
   now: number,
   width: number,
+  daemonBuild?: string,
 ): string {
   const dot = theme.presenceDot(group === 'out' ? 'offline' : group === 'away' ? 'away' : 'online');
   const head = `  ${dot} ${padEndVisible(theme.memberName(m.name, m.kind), nameCol)}`;
-  const facets = memberFacets(m, group);
+  const facets = memberFacets(m, group, daemonBuild);
   const lines = [head + (facets ? theme.meta(facets) : '')];
 
   const indent = ' '.repeat(4);
@@ -281,11 +296,17 @@ const STATUS_MAX_LINES = 2;
  * color alone encodes, and color may be off); role, attested model (ADR 101), and surface when set;
  * lifecycle only when it is not the `forever` default. An absent facet is silence, not a `—`.
  */
-function memberFacets(m: MemberSummary, group: Group): string {
+function memberFacets(m: MemberSummary, group: Group, daemonBuild?: string): string {
   const parts: string[] = [m.kind];
   if (m.role) parts.push(m.role);
   const model = m.presences[0]?.model?.trim();
   if (model && model !== MODEL_UNKNOWN) parts.push(model);
+  // ADR 135: a member running a different build than the daemon is worth a warn facet; a matching or
+  // unknown build is silence (most rows, most of the time — this only speaks when something's off).
+  const build = m.presences[0]?.build?.trim();
+  if (build && daemonBuild && build !== daemonBuild) {
+    parts.push(theme.warn(`build ${build.slice(0, 7)}`));
+  }
   if (group !== 'out' && m.presences[0]?.surface) parts.push(m.presences[0]!.surface);
   if (m.lifecycle === 'session') parts.push('session');
   // `!= null`, not truthiness: an epoch-0 timestamp is falsy and would silently drop the date.
