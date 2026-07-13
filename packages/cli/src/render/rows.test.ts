@@ -113,6 +113,31 @@ describe('renderRoster', () => {
     created_at: 0,
   };
 
+  // ADR 135: a member whose attested build differs from the daemon gets a warn facet; matching or
+  // unknown builds are silence (the roster must not turn into a wall of hashes).
+  it('marks a member whose build differs from the daemon, stays silent when matching/unknown', () => {
+    const sha = (c: string) => c.repeat(40);
+    const withBuild = (name: string, build?: string): MemberSummary => ({
+      ...base,
+      id: name,
+      name,
+      kind: 'agent',
+      role: '',
+      presence: 'online',
+      activity: 'online',
+      presences: [{ surface: 'cli', status: 'online', last_seen_at: 0, build }],
+    });
+    // differing → warn facet with the short sha
+    const stale = renderRoster([withBuild('Ada', sha('a'))], 0, 120, sha('d'));
+    expect(stale).toContain(`build ${sha('a').slice(0, 7)}`);
+    // matching → silence
+    const fresh = renderRoster([withBuild('Ada', sha('d'))], 0, 120, sha('d'));
+    expect(fresh).not.toContain('build');
+    // unknown member build, or no daemon reference → silence
+    expect(renderRoster([withBuild('Ada')], 0, 120, sha('d'))).not.toContain('build');
+    expect(renderRoster([withBuild('Ada', sha('a'))], 0, 120, undefined)).not.toContain('build');
+  });
+
   it('groups the roster by working / here / out, with counts', () => {
     const members: MemberSummary[] = [
       {
@@ -456,6 +481,26 @@ describe('renderStatusHeader (the orientation card)', () => {
     // the daemon build is shown short (ADR 130) — a stale daemon is visible without digging
     expect(out).toContain('build bfe043c');
     expect(out).not.toContain('bfe043c680cb552260b4ad3a9c64452ebb6b4f57');
+  });
+
+  it('warns when the CLI build differs from the daemon, silent when matching or unknown (ADR 135)', () => {
+    const daemon = 'd'.repeat(40);
+    const head = {
+      team: 'dawn',
+      server: 'http://localhost:4849',
+      health: { build: daemon },
+      members,
+    };
+    const warned = renderStatusHeader({ ...head, cliBuild: 'c'.repeat(40) });
+    expect(warned).toContain('your CLI build');
+    expect(warned).toContain('c'.repeat(7));
+    expect(warned).toContain('pnpm build');
+    // matching → silence; unstamped CLI → silence; daemon without provenance → silence
+    expect(renderStatusHeader({ ...head, cliBuild: daemon })).not.toContain('your CLI build');
+    expect(renderStatusHeader(head)).not.toContain('your CLI build');
+    expect(renderStatusHeader({ ...head, health: {}, cliBuild: 'c'.repeat(40) })).not.toContain(
+      'your CLI build',
+    );
   });
 
   it('answers "which seat is this folder?" — the question the old header never did', () => {

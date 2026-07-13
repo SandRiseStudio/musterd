@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { resolveWorkspace } from '@musterd/mcp';
 import {
   GUIDANCE_CONTENT_VERSION,
@@ -9,8 +10,9 @@ import {
   type Binding,
 } from '@musterd/protocol';
 import { HttpClient } from '../client.js';
-import { findBinding } from '../config.js';
+import { findBinding, loadConfig } from '../config.js';
 import { theme } from '../render/theme.js';
+import { cliBuild } from '../version.js';
 import { contentHash, strippedBody } from './guidance.js';
 import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
 import { HARNESSES } from './harnesses/index.js';
@@ -231,8 +233,100 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
 }
 
 /** Render + exit-code for `musterd init --check`. Exit 1 on drift, 0 when healthy or unprovisioned. */
+/**
+ * Build-skew notes (ADR 135): is the `musterd` you just typed the code you think it is? Two
+ * comparisons, both best-effort and warn-only (freshness is a fact, not provisioning drift):
+ *   (a) this CLI's dist stamp vs the daemon's `/health.build` — offline SHA equality, and
+ *   (b) this CLI's dist stamp vs `origin/main` — behind/ahead counts, git-gated.
+ * Silence when a side is unknown (unstamped dist, unreachable daemon, no checkout) — never guess.
+ */
+export async function buildSkewNotes(deps?: {
+  cliRef?: string | undefined;
+  daemonBuild?: () => Promise<string | undefined>;
+  repoDir?: string;
+}): Promise<string[]> {
+  const notes: string[] = [];
+  const ref = deps?.cliRef !== undefined ? deps.cliRef : cliBuild();
+  if (!ref) return notes;
+  const short = ref.slice(0, 7);
+
+  // (a) vs the daemon — the fleet reference (level-2 skew, ADR 135): "differs", never "behind".
+  const fetchDaemon =
+    deps?.daemonBuild ??
+    (async () => {
+      const server = loadConfig().server;
+      const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(2000) });
+      return ((await res.json()) as { build?: string }).build;
+    });
+  const daemon = await fetchDaemon().catch(() => undefined);
+  if (daemon && daemon !== ref) {
+    notes.push(
+      `your CLI build (${short}) differs from the daemon (${daemon.slice(0, 7)}) — rebuild your checkout (pnpm build).`,
+    );
+  }
+
+  // (b) vs origin/main — behind/ahead, only where a checkout + git exist. Strip -dirty for plumbing.
+  const dir = deps?.repoDir ?? resolvePath(process.argv[1] ?? '', '../../../..');
+  const sha = ref.replace(/-dirty$/, '');
+  const git = (...args: string[]): string | null => {
+    try {
+      return execFileSync('git', ['-C', dir, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 2000,
+      }).trim();
+    } catch {
+      return null;
+    }
+  };
+  if (git('rev-parse', '--is-inside-work-tree') === 'true') {
+    git('fetch', 'origin', 'main', '--quiet'); // best-effort — offline compares the last-known tip
+    const behind = Number(git('rev-list', '--count', `${sha}..origin/main`));
+    if (Number.isFinite(behind) && behind > 0) {
+      notes.push(
+        `your CLI build (${short}) is ${behind} commit${behind === 1 ? '' : 's'} behind origin/main — sync + rebuild your checkout.`,
+      );
+    }
+  }
+  return notes;
+}
+
+/**
+ * `musterd init --check-build` (ADR 135): the hook-cheap freshness probe — ONLY the CLI-vs-daemon
+ * SHA compare (one 2s health fetch, no git, no manifest reads). One line on stdout when the builds
+ * differ, silence otherwise, and ALWAYS exit 0 — this runs inside the SessionStart hook, which must
+ * never fail or slow a session start.
+ */
+export async function runCheckBuild(deps?: {
+  cliRef?: string | undefined;
+  daemonBuild?: () => Promise<string | undefined>;
+}): Promise<number> {
+  const ref = deps?.cliRef !== undefined ? deps.cliRef : cliBuild();
+  if (!ref) return 0;
+  try {
+    const fetchDaemon =
+      deps?.daemonBuild ??
+      (async () => {
+        const server = loadConfig().server;
+        const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(2000) });
+        return ((await res.json()) as { build?: string }).build;
+      });
+    const daemon = await fetchDaemon();
+    if (daemon && daemon !== ref) {
+      process.stdout.write(
+        `musterd: your CLI build (${ref.slice(0, 7)}) differs from the daemon (${daemon.slice(0, 7)}) — this checkout's dist is stale. Rebuild it (pnpm build); if your MCP tools also warn, /mcp reload after.\n`,
+      );
+    }
+  } catch {
+    // daemon down / unreachable — silence, never noise at session start
+  }
+  return 0;
+}
+
 export async function runInitDoctor(json: boolean, cwd: string = process.cwd()): Promise<number> {
   const report = await inspectProvisioning(cwd);
+  // ADR 135: freshness notes ride the report (warn-only, never drift/exit-1).
+  report.notes.push(...(await buildSkewNotes()));
   if (json) {
     process.stdout.write(JSON.stringify(report) + '\n');
     return report.drift.length > 0 ? 1 : 0;

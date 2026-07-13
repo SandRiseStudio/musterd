@@ -18,10 +18,13 @@ export function RosterPanel({
   roster,
   collapsed = false,
   onCollapse,
+  daemonBuild,
 }: {
   roster: MemberSummary[];
   collapsed?: boolean;
   onCollapse?: () => void;
+  /** The daemon's build ref (ADR 135) — member builds that differ get a `stale` chip. */
+  daemonBuild?: string | undefined;
 }) {
   const members = [...roster].sort(rosterOrder);
   const admins = members.filter((m) => m.capabilities?.is_admin).length;
@@ -48,16 +51,20 @@ export function RosterPanel({
           <p className="lc-roster__empty">No seats on this team yet.</p>
         )}
         {members.map((m) => (
-          <SeatRow key={m.id} m={m} />
+          <SeatRow key={m.id} m={m} daemonBuild={daemonBuild} />
         ))}
       </div>
     </aside>
   );
 }
 
-function SeatRow({ m }: { m: MemberSummary }) {
+function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | undefined }) {
   const kind = m.kind === 'human' ? 'human' : 'agent';
   const online = m.presence !== 'offline';
+  // ADR 135: this member's occupancy runs a different build than the daemon. Never about the web
+  // bundle itself (deliberately decoupled, ADR 132) — only what teammates' runtimes attest.
+  const memberBuild = m.presences?.[0]?.build ?? undefined;
+  const staleBuild = Boolean(memberBuild && daemonBuild && memberBuild !== daemonBuild);
   // Reclaimable (ADR 105): the seat reads offline but is held within its reclaim grace — a reservation
   // that may be reconnecting after a reload/blip. Surface it as "reconnecting" rather than a cold seat.
   const reconnecting = !online && m.reclaimable === true;
@@ -85,6 +92,14 @@ function SeatRow({ m }: { m: MemberSummary }) {
           {reconnecting && (
             <span className="lc-seat__recon" title="Seat held within its reclaim grace (ADR 105)">
               reconnecting
+            </span>
+          )}
+          {staleBuild && (
+            <span
+              className="lc-seat__stale"
+              title={`Running build ${memberBuild!.slice(0, 7)} · daemon is ${daemonBuild!.slice(0, 7)} — this seat's dist needs a rebuild (ADR 135)`}
+            >
+              stale
             </span>
           )}
         </div>
