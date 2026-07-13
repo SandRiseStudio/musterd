@@ -11,6 +11,7 @@ import { doneCommand } from './commands/done.js';
 import { fmtCommand } from './commands/fmt.js';
 import { goalCommand } from './commands/goal.js';
 import { reachabilityNudge } from './commands/helpers.js';
+import { hostCommand } from './commands/host.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
@@ -209,6 +210,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return requestsCommand(rest);
     case 'residency':
       return residencyCommand(rest);
+    case 'host':
+      return hostCommand(rest);
     case 'wire':
       return wireCommand(rest);
     case 'role':

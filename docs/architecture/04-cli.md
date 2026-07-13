@@ -23,6 +23,7 @@ src/
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; HttpClient forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
+  claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   errors.ts           // CliError(code) -> message + exit code
@@ -38,6 +39,12 @@ src/
   notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)
     os.ts             // OS push notification (macOS/Linux/Windows)
     select.ts         // pick which away human to nudge
+  host/               // the `musterd host` wake actuator — harness residency's per-machine hand (ADR 131 inc 3)
+    registry.ts       // machine-local seat → workspace/harness registry (~/.musterd/host-registry.json); written by `residency on`, never by the daemon
+    backend.ts        // ActuatorBackend seam: spawn-or-invoke + roster-derived verify + WakeOutcome; native row must stay expressible (ADR 131 §7)
+    loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); agent-key auth read through workspace bindings; one wake span per actuation
+    backends/
+      claudeCode.ts   // backend #1: fresh-first `claude -p` spawn (pre-minted --session-id, reply-only allowedTools, mandatory watchdog, no skip-permissions ever)
   service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)
     launchd.ts        // pure: plist generation (daemon + /live agents) + launchctl argv builders + status parsing (platform seam)
     manage.ts         // install/uninstall/start/stop/restart/status + log tail (injectable launchctl runner)
@@ -70,7 +77,8 @@ src/
     agent.ts          // musterd agent <name> [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness, via the ADR 038 registry) + standing grant + committed workspace.json (ADR 065/080/116)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
-    residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant; status names local drift (ADR 131)
+    residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant + host-registry entry; status cross-checks all three stores (ADR 131)
+    host.ts           // musterd host [--once]: the resident wake-actuator loop (notify-shaped; ADR 131 inc 3)
     serve.ts          // musterd serve [--port]
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
     team.ts           // team create / team add / team remove / team export (ADR 058 db→file migration)

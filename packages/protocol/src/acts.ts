@@ -27,7 +27,9 @@ export const ACTS = [
 export type Act = (typeof ACTS)[number];
 export const ActSchema = z.enum(ACTS);
 
-/** Surfaces a Member can be present on. v0.1 implements cli/claude-code/codex; the rest are reserved. */
+/** Surfaces a Member can be present on. v0.1 implements cli/claude-code/codex; the rest are
+ *  reserved. `musterd` (ADR 131 §7) is the native harness — the agent loop hosted in `musterd host`
+ *  — reserved so native-hosted occupancies are roster-distinct when increment 6 lands. */
 export const SURFACES = [
   'cli',
   'claude-code',
@@ -37,6 +39,7 @@ export const SURFACES = [
   'ios',
   'slack',
   'other',
+  'musterd',
 ] as const;
 export type Surface = (typeof SURFACES)[number];
 export const SurfaceSchema = z.enum(SURFACES);
@@ -71,7 +74,10 @@ export const ActivitySchema = z.enum(ACTIVITIES);
  * member was asked to do something; `hook` = a harness hook/function fired; `scheduled` = a timer
  * started it; `daemon` = an always-on process. It dissolves the driving-posture confusion without
  * modelling humans: `(session)` says "someone is behind this", `(scheduled)` says "nobody need be".
+ * `wake` (ADR 131 §6) = musterd resurrected this session because a directed act was waiting —
+ * machine-initiated, roster/stream/office-distinguishable, and the ping-pong bound's join key:
+ * acts sent from a `wake` occupancy only qualify for other seats' *batched* wake lane.
  */
-export const PROVENANCES = ['session', 'asked', 'hook', 'scheduled', 'daemon'] as const;
+export const PROVENANCES = ['session', 'asked', 'hook', 'scheduled', 'daemon', 'wake'] as const;
 export type Provenance = (typeof PROVENANCES)[number];
 export const ProvenanceSchema = z.enum(PROVENANCES);

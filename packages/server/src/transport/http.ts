@@ -1038,10 +1038,14 @@ export async function handleHttp(
           throw new MusterdError('not_found', `no seat "${body.seat}" in team "${slug}"`);
         // Residency resurrects *harness* sessions — an agent-seat concept. A human's reachability
         // path is notify (ADR 024/035); an observer never participates at all.
+        // UX papercut (dogfood 2026-07-13): the common miss is `--as nick` naming the AUTHORIZER
+        // while the seat fell back to the human's own identity — the error must name the fix.
         if (target.kind !== 'agent' || target.observer === 1)
           throw new MusterdError(
             'forbidden',
-            `residency enrolls agent seats — "${body.seat}" is a ${target.observer === 1 ? 'observer' : target.kind} seat`,
+            `residency enrolls agent seats — "${body.seat}" is a ` +
+              `${target.observer === 1 ? 'observer' : target.kind} seat. Run \`musterd residency on\` ` +
+              `in the agent's workspace (or pass --seat <agent>); --as names who authorizes, not what enrolls`,
           );
         const status = resolveAccountStatus(target);
         if (status === 'disabled' || status === 'banned')

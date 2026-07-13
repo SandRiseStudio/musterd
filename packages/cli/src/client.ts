@@ -16,9 +16,12 @@ import {
   RequestsResponseSchema,
   EnrollResidencyResponseSchema,
   ResidencyListResponseSchema,
+  WakeLeasesResponseSchema,
   type EnrollResidencyBody,
   type EnrollResidencyResponse,
   type ResidencyListResponse,
+  type WakeLeasesResponse,
+  type WakeReportBody,
   type ActDelivery,
   type AuditResponse,
   type ClaimTarget,
@@ -403,6 +406,34 @@ export class HttpClient {
   async revokeResidency(slug: string, seat: string): Promise<{ ok: boolean }> {
     return (await this.request('POST', `/teams/${slug}/residency/revoke`, { seat })) as {
       ok: boolean;
+    };
+  }
+
+  /**
+   * The host's lease poll (ADR 131 §4) — `POST /teams/:slug/residency/wake-leases`, agent-key
+   * auth. One transaction server-side: derive due wakes, insert leases, return orders. The orders
+   * carry structured fields only (never message bodies) — parsed here so a drifted daemon can't
+   * hand the actuator an unvetted shape.
+   */
+  async wakeLeases(slug: string, host: string): Promise<WakeLeasesResponse> {
+    const json = await this.request('POST', `/teams/${slug}/residency/wake-leases`, { host });
+    const parsed = WakeLeasesResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('wake-leases response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /** The host's outcome report (ADR 131 §6) — `POST /teams/:slug/residency/wake-report`. Settles
+   *  the lease and writes the `residency.woke`/`wake_failed` row the rate policy derives from. */
+  async wakeReport(
+    slug: string,
+    body: WakeReportBody,
+  ): Promise<{ ok: boolean; lease_id: string; status: string }> {
+    return (await this.request('POST', `/teams/${slug}/residency/wake-report`, body)) as {
+      ok: boolean;
+      lease_id: string;
+      status: string;
     };
   }
 

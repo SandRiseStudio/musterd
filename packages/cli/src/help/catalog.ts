@@ -453,15 +453,33 @@ export const CATALOG: readonly CommandEntry[] = [
     group: 'admin',
     detail:
       'Harness residency (ADR 131): an enrolled seat that goes offline stays reachable — the daemon ' +
-      'derives wake-due directed acts and `musterd host` (increment 3) resurrects the harness session. ' +
-      '`on` (admin-authorized) enrolls the workspace’s seat and lands a standing resume grant in ' +
-      '.musterd/binding.json; `off` is the kill switch (revokes the grant); `status` lists enrollments ' +
-      'and names local drift. The roster shows enrolled offline seats as `offline · wakeable`.',
+      'derives wake-due directed acts and `musterd host` resurrects the harness session. ' +
+      '`on` (admin-authorized) enrolls a seat, lands a standing resume grant in .musterd/binding.json, ' +
+      'and registers the workspace in the machine-local host registry; `off` is the kill switch ' +
+      '(reverses all three); `status` cross-checks the stores and names drift. Two different flags: ' +
+      '--seat = WHAT gets enrolled (an agent seat; defaults to this workspace’s binding), --as = WHO ' +
+      'authorizes (an admin). The roster shows enrolled offline seats as `offline · wakeable`.',
     examples: [
       'musterd residency on --as nick',
+      'musterd residency on --seat scout --as nick',
       'musterd residency status',
       'musterd residency off',
     ],
+  },
+  {
+    name: 'host',
+    signature: '[--once] [--interval <s>] [--timeout <s>] [--host <label>]',
+    summary: 'the wake actuator — resurrect enrolled offline seats on this machine (ADR 131)',
+    group: 'admin',
+    detail:
+      'The per-machine wake actuator (ADR 131 inc 3): polls the daemon for wake leases ' +
+      '(agent-key, presence-neutral), spawns the harness fresh in the seat’s registered workspace ' +
+      'with the daemon-composed one-line prompt (never message bodies), verifies occupancy from ' +
+      'the roster (never stdout), kills on the mandatory watchdog (--timeout, default 300s), and ' +
+      'reports the outcome. Reply-only by default: the spawned run gets musterd MCP tools under ' +
+      'the workspace’s own permission mode — never a skip-permissions flag. Seats register via ' +
+      '`musterd residency on` in their workspace; `--once` polls a single time (for cron/testing).',
+    examples: ['musterd host', 'musterd host --once', 'musterd host --interval 5 --timeout 120'],
   },
   {
     name: 'unbind',
