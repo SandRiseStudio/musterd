@@ -77,6 +77,24 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
     expect(over.success).toBe(false);
   });
 
+  it('parses a claim carrying a build attestation (ADR 135) — optional, capped, -dirty legal', () => {
+    const base = {
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'claude-code',
+    };
+    const sha = 'a'.repeat(40);
+    expect(ClaimFrame.parse({ ...base, build: sha }).build).toBe(sha);
+    expect(ClaimFrame.parse({ ...base, build: `${sha}-dirty` }).build).toBe(`${sha}-dirty`);
+    // Absent is legal (unstamped/older client) — never blocks.
+    expect(ClaimFrame.parse(base).build).toBeUndefined();
+    // Over the 64-char wire cap → rejected.
+    expect(ClaimFrame.safeParse({ ...base, build: 'x'.repeat(65) }).success).toBe(false);
+  });
+
   it('parses a claim with an observe target (human credential)', () => {
     const f = ClaimFrame.parse({
       type: 'claim',

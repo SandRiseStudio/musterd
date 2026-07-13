@@ -142,11 +142,15 @@ async function fetchHealth(): Promise<DaemonHealth> {
  * `status` must never fail because of this check (watcher, never gatekeeper).
  */
 export function buildSkewNote(build: string, dir: string, run: Runner): string {
-  const short = build.slice(0, 7);
+  // A stamped build can carry a `-dirty` suffix (ADR 135) — keep it in the display (an honest "built
+  // from uncommitted edits" flag) but strip it before any git plumbing: `rev-list abc-dirty..` fails,
+  // which would silently degrade the skew verdict for exactly the builds most likely to be skewed.
+  const sha = build.replace(/-dirty$/, '');
+  const short = build.slice(0, 7) + (build.endsWith('-dirty') ? '-dirty' : '');
   const git = (...args: string[]): RunResult => run('git', ['-C', dir, ...args]);
   if (git('rev-parse', '--is-inside-work-tree').status !== 0) return short;
   git('fetch', 'origin', 'main', '--quiet'); // best-effort — offline still compares the last-known tip
-  const counted = git('rev-list', '--count', `${build}..origin/main`);
+  const counted = git('rev-list', '--count', `${sha}..origin/main`);
   if (counted.status !== 0) return short; // unknown commit / no origin/main — no verdict
   const behind = Number(counted.stdout.trim());
   if (!Number.isFinite(behind)) return short;

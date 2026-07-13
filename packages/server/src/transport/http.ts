@@ -317,6 +317,21 @@ function attestedModelHeader(req: IncomingMessage): string | undefined {
 }
 
 /**
+ * Optional client-attested build ref from `x-musterd-build` (ADR 135). Same shape as the model
+ * header; 64-char cap matches the claim frame. Absent or empty → undefined (sticky COALESCE keeps
+ * any prior attestation). Unlike model there is NO agent-key gate: build attests the *binary* the
+ * caller runs, which a human's CLI genuinely has — a stale human CLI is exactly in scope.
+ */
+function attestedBuildHeader(req: IncomingMessage): string | undefined {
+  const raw = req.headers['x-musterd-build'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, 64);
+}
+
+/**
  * Authenticate a request and write an ambient presence touch for the caller (ADR 057): a one-shot
  * authenticated command is itself proof of liveness, so it flips a bursty agent present between watch
  * sockets. A no-op when the member already holds a resident session; on an offline→online transition we
@@ -343,6 +358,7 @@ function authTouch(
   // ADR 121: model attestation is a harness fact — only agent seats re-attest from the header.
   // A human with MUSTERD_MODEL in their shell (or a buggy client) must not stamp their occupancy.
   const model = auth.member.kind === 'agent' ? attestedModelHeader(req) : undefined;
+  const build = attestedBuildHeader(req); // all credentials — the binary is the binary (ADR 135)
   // Snapshot the ambient row before the touch so a real model change can audit (source: ambient).
   const before = model
     ? ctx.db
@@ -359,6 +375,7 @@ function authTouch(
     ctx.config.presenceTimeoutMs,
     {
       ...(model !== undefined ? { model } : {}),
+      ...(build !== undefined ? { build } : {}),
     },
   );
   if (model) {
@@ -1250,6 +1267,10 @@ export async function handleHttp(
           surface: SurfaceSchema,
           // Model attestation (ADR 101), mirroring the WS claim frame — attested, never verified.
           model: z.string().max(120).optional(),
+          // Build attestation (ADR 135), mirroring the WS claim frame. No requests-table carry: a
+          // grant-less claim that goes through approval gets its build installed by the very next
+          // authed request's `x-musterd-build` ambient touch (sticky COALESCE).
+          build: z.string().max(64).optional(),
         });
         const body = parseOrBadRequest(ClaimBody, await readJson(req));
         const team = requireTeam(ctx.db, slug);
@@ -1395,6 +1416,7 @@ export async function handleHttp(
             workspace: null,
             driver: null,
             model: body.model ?? null,
+            build: body.build ?? null,
           });
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
@@ -1437,6 +1459,7 @@ export async function handleHttp(
             workspace: null,
             driver: null,
             model: body.model ?? null,
+            build: body.build ?? null,
           });
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {

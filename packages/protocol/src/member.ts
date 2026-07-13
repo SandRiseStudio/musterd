@@ -57,6 +57,10 @@ export const PresenceSchema = z.object({
   /** Harness-attested model id for this occupancy (ADR 101). Attested, never verified; null/absent
    *  when the adapter doesn't attest — rendered as `unknown`, never blocks. */
   model: z.string().nullish(),
+  /** Client-attested build ref for this occupancy's dist (ADR 135) — the git SHA (optionally
+   *  `-dirty`) the client's own `dist/build.json` stamp carries. Null/absent for unstamped or older
+   *  clients; surfaces render skew only when both sides are known. */
+  build: z.string().nullish(),
 });
 export type Presence = z.infer<typeof PresenceSchema>;
 

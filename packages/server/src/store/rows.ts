@@ -68,6 +68,10 @@ export interface PresenceRow {
   /** Harness-attested model id for this occupancy (ADR 101). Attested, never verified; null when
    *  the adapter doesn't attest — rendered as `unknown`, never blocks. Re-attestable mid-occupancy. */
   model: string | null;
+  /** Client-attested build ref of the connecting dist (ADR 135): a git SHA, `-dirty`-suffixed for an
+   *  uncommitted build. Null for unstamped/older clients. Only changes with a fresh claim (a build
+   *  can only change on process restart), so there is no heartbeat re-attest path. */
+  build: string | null;
   created_at: number;
 }
 

@@ -353,6 +353,15 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 135 build provenance: the connecting client's dist build ref (git SHA, optionally
+    // `-dirty`), attested on claim / ambient touch exactly like `model` (v15). Additive + nullable —
+    // pre-migration rows and unstamped clients read NULL and every surface renders silence.
+    version: 17,
+    up: (db) => {
+      db.exec('ALTER TABLE presence ADD COLUMN build TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

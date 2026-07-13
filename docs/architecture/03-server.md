@@ -50,7 +50,7 @@ src/
     validate.ts       // thin wrappers over @musterd/protocol schemas + error mapping
     route.ts          // routeEnvelope(): the ONE validate+persist+deliver path (WS & HTTP share it)
   transport/
-    http.ts           // HTTP route table (02-protocol HTTP API); authTouch ambient presence (ADR 057) + x-musterd-model re-attest for agent seats only (ADR 119/121)
+    http.ts           // HTTP route table (02-protocol HTTP API); authTouch ambient presence (ADR 057) + x-musterd-model re-attest for agent seats only (ADR 119/121) + x-musterd-build for all credentials (ADR 135)
     ws.ts             // WS upgrade, handshake state machine, frame dispatch
     hub.ts            // in-memory connection registry: member -> Set<conn>; broadcast/deliver
   presence/
@@ -94,7 +94,7 @@ export function routeEnvelope(ctx: Ctx, team: TeamRow, sender: Member, env: Enve
 //         -> return RouteResult
 
 // store/presence.ts
-export function attach(db, memberId, surface, connId, ctx?): Presence;    // creates row, status online; ctx = { provenance, workspace } (ADR 014) + { driver } (ADR 021) + { model } (ADR 101)
+export function attach(db, memberId, surface, connId, ctx?): Presence;    // creates row, status online; ctx = { provenance, workspace } (ADR 014) + { driver } (ADR 021) + { model } (ADR 101) + { build } (ADR 135)
 export function heartbeat(db, presenceId): void;                          // bumps last_seen_at
 export function reattestModel(db, presenceId, model): {previous}|void;    // ADR 101: mid-occupancy model switch; writes + returns previous only on a real change
 export function currentAttestedModel(db, memberId, presenceId?): string|null; // ADR 101: the per-act model stamp source — the sending occupancy's attestation (presenceId), else newest-attested
@@ -143,7 +143,7 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 ## Roster activity (v0.2)
 
 - `listPresence`/roster `summarize` resolve a coarse `activity` per Member by the **two-clocks rule** (`store/activity.ts` `resolveActivity`): the liveness clock (fresh presence?) decides `offline` vs present; the status clock (latest `status_update`, via `latestStatusUpdate` — prefers `meta.state`, falls back to body) decides `online` (idle) vs `working`. The backing summary is returned as `state`, with `last_status_at` driving the CLI's `· <age>` staleness suffix. These are **additive** roster fields; a v0.1 reader ignoring them still conforms.
-- `summarize` also sets **`reclaimable`** per Member (ADR 105) from `listReclaimableMemberIds` (`store/presence.ts`) — a seat whose reclaim hold is still in the future (`held_until > now`). This is the one *positive* read of held rows (every other query filters them out); the seat still reads `presence: 'offline'` (grace stays hidden from display), but the flag lets the client-side clobber guard (ADR 066) treat a held-within-grace reservation as occupied rather than a vacancy. Additive; older readers ignore it.
+- `summarize` also sets **`reclaimable`** per Member (ADR 105) from `listReclaimableMemberIds` (`store/presence.ts`) — a seat whose reclaim hold is still in the future (`held_until > now`). This is the one _positive_ read of held rows (every other query filters them out); the seat still reads `presence: 'offline'` (grace stays hidden from display), but the flag lets the client-side clobber guard (ADR 066) treat a held-within-grace reservation as occupied rather than a vacancy. Additive; older readers ignore it.
 
 ## Availability (v0.2 — ADR 044)
 

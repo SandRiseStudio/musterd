@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpClient } from './client.js';
 import { CliError } from './errors.js';
 
+// Pin the CLI's own build stamp to "unstamped": the exact-body assertions below must not pick up
+// this worktree's ambient dist/build.json (ADR 135) — the build field has its own dedicated tests.
+vi.mock('./version.js', () => ({ cliVersion: () => '0.0.0', cliBuild: () => undefined }));
+
 const seat = { id: 'm1', team: 'dawn', name: 'Ada', kind: 'agent' as const, created_at: 1 };
 const input = { key: 'mskey_x', target: { seat: 'Ada' } as const, surface: 'cli' as const };
 

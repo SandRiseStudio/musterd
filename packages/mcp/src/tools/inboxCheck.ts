@@ -3,7 +3,7 @@ import type { Envelope } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { linkReceived } from '../otel.js';
-import { formatMessage, notReadyMessage, textResult } from './format.js';
+import { buildSkewWarning, formatMessage, notReadyMessage, textResult } from './format.js';
 
 const DESCRIPTION =
   'Check for new messages addressed to you or the team since you last checked. ' +
@@ -37,7 +37,9 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const messages = ordered.slice(Math.max(0, ordered.length - (args.limit ?? 50)));
 
         if (messages.length === 0) {
-          return textResult('no new messages');
+          // ADR 135: inbox-check is every agent's minute-0 call (the SessionStart hook routes here),
+          // so a stale adapter learns about itself immediately — even on an empty inbox.
+          return textResult('no new messages' + (await buildSkewWarning(client)));
         }
         // Link any sender trace context (meta.otel) to our trace as causality (ADR 011 receiver).
         linkReceived(messages);
@@ -45,7 +47,7 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const newest = messages[messages.length - 1]!;
         await client.markRead(newest.id).catch(() => undefined);
 
-        const text = messages.map(formatMessage).join('\n');
+        const text = messages.map(formatMessage).join('\n') + (await buildSkewWarning(client));
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {

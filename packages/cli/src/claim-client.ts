@@ -50,6 +50,7 @@ export function buildClaimFrame(input: {
   grant?: string;
   workspace?: string;
   model?: string;
+  build?: string;
 }): ClaimFrame {
   return ClaimFrame.parse({
     type: 'claim',
@@ -64,6 +65,8 @@ export function buildClaimFrame(input: {
     ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
     // Model attestation (ADR 101) — harness-attested per-occupancy; absent reads as `unknown`.
     ...(input.model !== undefined ? { model: input.model } : {}),
+    // Build attestation (ADR 135) — the client dist's own stamp; absent for unstamped builds.
+    ...(input.build !== undefined ? { build: input.build } : {}),
     surface: input.surface,
   });
 }

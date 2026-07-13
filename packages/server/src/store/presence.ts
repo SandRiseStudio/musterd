@@ -14,6 +14,7 @@ export interface PresenceSummary {
     workspace: string | null;
     driver: string | null;
     model: string | null;
+    build: string | null;
   }[];
 }
 
@@ -24,6 +25,8 @@ export interface AttachContext {
   driver?: string | null;
   /** Harness-attested model id (ADR 101). Attested, never verified; absent → null (`unknown`). */
   model?: string | null;
+  /** Client-attested build ref of the connecting dist (ADR 135); absent → null (unstamped client). */
+  build?: string | null;
 }
 
 /**
@@ -51,11 +54,12 @@ export function attach(
     workspace: ctx.workspace ?? null,
     driver: ctx.driver ?? null,
     model: ctx.model ?? null,
+    build: ctx.build ?? null,
     created_at: now,
   };
   db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @created_at)`,
+    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, build, created_at)
+     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @build, @created_at)`,
   ).run(row);
   return row;
 }
@@ -165,7 +169,7 @@ export function touchAmbientPresence(
     // installs it on a fresh or blank ambient row — the fire-and-exit CLI re-attest path.
     // provenance/workspace/driver stay per-session seed and re-write normally.
     db.prepare(
-      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, model = COALESCE(?, model) WHERE id = ?',
+      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, model = COALESCE(?, model), build = COALESCE(?, build) WHERE id = ?',
     ).run(
       Date.now(),
       'online',
@@ -174,6 +178,7 @@ export function touchAmbientPresence(
       ctx.workspace ?? null,
       ctx.driver ?? null,
       ctx.model ?? null,
+      ctx.build ?? null,
       existing.id,
     );
   } else {
@@ -246,6 +251,7 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         workspace: p.workspace ?? null,
         driver: p.driver ?? null,
         model: p.model ?? null,
+        build: p.build ?? null,
       })),
     };
   });

@@ -50,11 +50,11 @@ the `agent_key` may be absent, leaving the session a pending presence that claim
 
 That write is **anchored to the workspace the config was resolved from** (`config.bindingDir`,
 `resolveBindingDir`), never ambient `process.cwd()` (ADR 115): a long-lived adapter's cwd is set by the
-harness, not the user, and when it wandered into a *sibling* worktree the persist used to clobber that
+harness, not the user, and when it wandered into a _sibling_ worktree the persist used to clobber that
 worktree's `binding.json` with this session's seat. And because the boot config pins the grant read at
 launch, an explicit `team_join {as:X}` **re-reads `binding.json`** from `bindingDir` first — so an
 in-session identity repair (a re-provisioned grant for that seat) takes effect without a full MCP
-reconnect. A binding for a *different* seat is left untouched.
+reconnect. A binding for a _different_ seat is left untouched.
 
 On `team_join` the adapter sends two attach-time facts on the `hello` (provenance/where seed, ADR 014): **`provenance`** (from `MUSTERD_PROVENANCE`, default `session`) and a **`workspace`** label resolved once at load — the declared `MUSTERD_WORKSPACE` if set, else a gracefully-degrading auto-label (`cwd` folder, qualified by git branch when informative, else the cwd subpath within the repo, else the bare folder). Both are read context only — they carry no routing/auth meaning — and surface dim on the roster (`online via claude-code (session) · repo@branch`).
 
@@ -244,7 +244,7 @@ src/
                   //   autojoin(): claim+join on launch when a default claim exists (ADR 032);
                   //   when unclaimed: writes a pending marker (ADR 033) + startResolutionWatcher (ADR 034)
   toolNames.ts    // TOOL_NAMES: the registered-tool name list (dependency-free so guidance:check can import it; ADR 085)
-  config.ts       // env > binding.json > workspace.json -> { server, team, agent_key?, grant?, surface, claim, connId, claimCode }; validates
+  config.ts       // env > binding.json > workspace.json -> { server, team, agent_key?, grant?, surface, claim, connId, claimCode }; validates; + build (own dist stamp, ADR 135)
   client.ts       // HTTP + background WS client; join()/leave()/close(); `joined`/`claimed`;
                   //   setIdentity() (late claim); addMember() (tokenless mint); buffers live while joined
   claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() + adoptIdentity() (live claim, ADR 034)
@@ -257,14 +257,14 @@ src/
     join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)
     send.ts       // refuses until ready (pending → claim; dormant → join)
-    inboxCheck.ts // refuses until ready (pending → claim; dormant → join)
-    status.ts     // works while dormant/pending
+    inboxCheck.ts // refuses until ready (pending → claim; dormant → join); appends the ADR 135 build-skew warning
+    status.ts     // works while dormant/pending; appends the ADR 135 build-skew warning
     members.ts    // works while dormant/pending
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next orientation brief (ADR 083/084)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084/125)
-    format.ts     // compact text rendering of a message for an agent to read
+    format.ts     // compact text rendering of a message for an agent to read; buildSkewWarning (ADR 135)
   bind.ts         // reachability check only (GET /health) — claims no presence
 ```
 

@@ -1600,6 +1600,99 @@ describe('model attestation (ADR 101)', () => {
   });
 });
 
+describe('build attestation (ADR 135)', () => {
+  it('WS claim attests the client build onto the presence row; absent stays null', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+
+    const sha = 'a'.repeat(40);
+    const a = new TestWs();
+    const l = new TestWs();
+    await Promise.all([a.open(), l.open()]);
+    a.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(tok, 'Ada'),
+      surface: 'claude-code',
+      build: sha,
+    });
+    await a.waitFor('occupied');
+    // Lin attests nothing — legal (unstamped/older client), never blocks.
+    await l.claim('dawn', team.json.agent_key, 'Lin', 'codex', await standingGrant(tok, 'Lin'));
+
+    const roster = await get('/teams/dawn/members', tok);
+    const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+    const lin = roster.json.members.find((m: any) => m.name === 'Lin');
+    expect(ada.presences[0].build).toBe(sha);
+    expect(lin.presences[0].build).toBeNull();
+
+    a.close();
+    l.close();
+  });
+
+  it('x-musterd-build re-attests on the ambient touch, sticky across build-less requests, ALL credentials', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    const sha = 'b'.repeat(40) + '-dirty'; // a dirty build is attestable — display keeps the suffix
+
+    // Unlike model (ADR 121 agent-key gate), build rides a HUMAN credential too: it attests the
+    // binary the caller runs, which a human's stale CLI genuinely has. Reads never touch (ADR 057),
+    // so drive the ambient touch through a touching call (POST /messages), like the ADR 119 test.
+    const sendAsNick = (id: string, headers: Record<string, string>) =>
+      fetch(base + '/teams/dawn/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}`, ...headers },
+        body: JSON.stringify({
+          envelope: {
+            id,
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from: 'nick',
+            to: { kind: 'team' },
+            act: 'status_update',
+            body: 'hello',
+            ts: Date.now(),
+          },
+        }),
+      });
+
+    expect((await sendAsNick('n1', { 'x-musterd-build': sha })).status).toBe(201);
+    let roster = await get('/teams/dawn/members', tok);
+    let nickRow = roster.json.members.find((m: any) => m.name === 'nick');
+    expect(nickRow.presences[0].build).toBe(sha);
+
+    // A later touching request WITHOUT the header keeps the attested value (sticky COALESCE).
+    expect((await sendAsNick('n2', {})).status).toBe(201);
+    roster = await get('/teams/dawn/members', tok);
+    nickRow = roster.json.members.find((m: any) => m.name === 'nick');
+    expect(nickRow.presences[0].build).toBe(sha);
+  });
+
+  it('HTTP claim carries the build onto the stateless occupancy', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    const sha = 'c'.repeat(40);
+
+    const r = await post('/teams/dawn/claim', {
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(tok, 'Ada'),
+      surface: 'cli',
+      build: sha,
+    });
+    expect(r.status).toBe(200);
+    const roster = await get('/teams/dawn/members', tok);
+    const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(ada.presences[0].build).toBe(sha);
+  });
+});
+
 describe('v0.3 P2 governance enforcement (ADR 071)', () => {
   /** Narrow a seat's effective caps directly (in P1 reconcile is the only writer; tests stand in for it). */
   function setCaps(

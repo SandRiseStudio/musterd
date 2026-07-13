@@ -79,6 +79,14 @@ export const ClaimFrame = z.object({
    * switch is real); the audit log keeps the switch history (`occupancy.model_attested`).
    */
   model: z.string().max(120).optional(),
+  /**
+   * The build ref (git SHA, `-dirty`-suffixed for an uncommitted build) of the *client dist* this
+   * session runs from (ADR 135) — read from the dist's own `build.json` stamp, so it reports what the
+   * code IS, not what the checkout says. Attested like `model`; omitted by unstamped/older clients
+   * (legal, never blocks). No heartbeat re-attestation: a build only changes on process restart,
+   * which is a fresh claim.
+   */
+  build: z.string().max(64).optional(),
 });
 export type ClaimFrame = z.infer<typeof ClaimFrame>;
 
