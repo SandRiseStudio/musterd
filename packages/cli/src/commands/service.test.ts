@@ -337,21 +337,21 @@ describe('serviceCommand', () => {
     expect(out).not.toContain('build:');
   });
 
-  // ADR 124: `--live` retargets the verbs at the /live viewer bundle instead of the daemon.
+  // ADR 132: `--live` retargets the verbs at the /live build-publisher instead of the daemon.
   function liveCtx(runner: Runner): LiveCtx {
     return {
       uid: 501,
-      serverLabel: LIVE_LABEL,
-      syncLabel: LIVE_SYNC_LABEL,
+      buildLabel: LIVE_LABEL,
+      legacySyncLabel: LIVE_SYNC_LABEL,
       worktree: join(dir, 'agents-live'),
       sourceRepo: join(dir, 'agents'),
-      serverPlistPath: join(dir, `${LIVE_LABEL}.plist`),
-      syncPlistPath: join(dir, `${LIVE_SYNC_LABEL}.plist`),
-      serveScriptPath: join(dir, 'live', 'serve.sh'),
-      syncScriptPath: join(dir, 'live', 'sync.sh'),
-      serverLogPath: join(dir, 'live', 'viewer.log'),
-      syncLogPath: join(dir, 'live', 'sync.log'),
-      port: 5173,
+      webRoot: join(dir, 'live', 'web'),
+      buildPlistPath: join(dir, `${LIVE_LABEL}.plist`),
+      buildScriptPath: join(dir, 'live', 'build.sh'),
+      buildLogPath: join(dir, 'live', 'build.log'),
+      legacySyncPlistPath: join(dir, `${LIVE_SYNC_LABEL}.plist`),
+      legacyServeScriptPath: join(dir, 'live', 'serve.sh'),
+      legacySyncScriptPath: join(dir, 'live', 'sync.sh'),
       nodeDir: '/opt/node/bin',
       gitDir: '/opt/homebrew/bin',
       intervalSeconds: 60,
@@ -360,22 +360,21 @@ describe('serviceCommand', () => {
     };
   }
 
-  it('install --live adds the worktree, writes artifacts, and bootstraps both agents', async () => {
+  it('install --live adds the worktree, writes artifacts, and bootstraps the build agent', async () => {
     const lc = liveCtx(recorder());
     const { code, out } = await capture(() =>
       serviceCommand(parseArgs(['install', '--live']), { platform: 'darwin', liveCtx: lc }),
     );
     expect(code).toBe(0);
-    expect(out).toContain('/live viewer');
-    expect(existsSync(lc.serverPlistPath)).toBe(true);
-    expect(existsSync(lc.syncPlistPath)).toBe(true);
+    expect(out).toContain('build-publisher');
+    expect(existsSync(lc.buildPlistPath)).toBe(true);
     expect(calls).toContainEqual({
       cmd: 'launchctl',
-      args: ['bootstrap', 'gui/501', lc.serverPlistPath],
+      args: ['bootstrap', 'gui/501', lc.buildPlistPath],
     });
   });
 
-  it('refresh --live kickstarts the server (no live-session guard, no health call)', async () => {
+  it('refresh --live kickstarts the build agent (no live-session guard, no health call)', async () => {
     const lc = liveCtx(recorder());
     const health = vi.fn(async () => ({ connections: 5 })); // would BLOCK a daemon refresh
     const { code } = await capture(() =>
@@ -389,7 +388,7 @@ describe('serviceCommand', () => {
     });
   });
 
-  it('status --live reports both viewer agents', async () => {
+  it('status --live reports the build agent and probes the daemon /live', async () => {
     const lc = liveCtx(
       recorder({ status: 0, stdout: '\tpid = 42\n\tstate = running\n', stderr: '' }),
     );
@@ -402,7 +401,7 @@ describe('serviceCommand', () => {
     );
     expect(code).toBe(0);
     expect(out).toContain(LIVE_LABEL);
-    expect(out).toContain(LIVE_SYNC_LABEL);
     expect(out).toContain('up');
+    expect(out).toContain('/live');
   });
 });
