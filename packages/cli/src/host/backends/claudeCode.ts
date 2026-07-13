@@ -36,6 +36,10 @@ const KILL_GRACE_MS = 10_000;
  *  90s verify budget for the fresh fallback under the 120s lease TTL. */
 const RESUME_VERIFY_WINDOW_MS = 30_000;
 
+/** How long a roster-verified child must stay alive (or have exited 0) before the hit counts —
+ *  the anti-debris confirmation beat. A stale-id resume dies in ~2-3s; a real occupant lives on. */
+const VERIFY_CONFIRM_BEAT_MS = 3_000;
+
 /** The context-hygiene bound (ADR 131 §5: "prefers resume for continuity but rolls over to a
  *  fresh session when the transcript is bloated or stale" — the cost bound and the compaction
  *  escape are one clause). 10 MiB of transcript JSONL is several compaction cycles deep; past it,
@@ -52,6 +56,7 @@ export interface ClaudeCodeDeps {
   /** Injectable capture read (default: the shared {@link localSessionLiveness}). */
   readSession?: (workspace: string) => LocalSessionLiveness;
   resumeVerifyWindowMs?: number;
+  confirmBeatMs?: number;
 }
 
 /**
@@ -142,6 +147,7 @@ interface AttemptOpts {
   label: 'fresh' | 'resumed';
   timeoutMs: number;
   verifyWindowMs?: number;
+  confirmBeatMs: number;
 }
 
 function runAttempt(
@@ -204,13 +210,27 @@ function runAttempt(
     // gone): give presence a beat, then take one final short read. A won race leaves the loser's
     // windowed poll running to its deadline — harmless presence-neutral reads.
     const verified = await Promise.race([
-      ctx.verifyOccupied(seat, opts.verifyWindowMs),
+      ctx.verifyOccupied(seat, opts.verifyWindowMs, spawnedAt),
       exited
         .then(() => new Promise((r) => setTimeout(r, 2_000)))
-        .then(() => ctx.verifyOccupied(seat, opts.verifyWindowMs)),
+        .then(() => ctx.verifyOccupied(seat, opts.verifyWindowMs, spawnedAt)),
     ]);
 
     if (verified.occupied) {
+      // Confirmation beat (first live fallback rehearsal, 2026-07-13): a stale-id `--resume` died
+      // with exit 1 at 2.3s, but its adapter had already blipped a presence row at 2.1s — the
+      // roster read credited a dead child as woke and the act went unanswered. A roster hit only
+      // counts if the child is still alive (or finished cleanly) a beat later; a legit
+      // faster-than-verify run exits 0. Exit-status-as-a-NEGATIVE-signal does not breach the
+      // never-verify-from-stdout bar — a nonzero-exited process cannot be a live occupant.
+      await new Promise((r) => setTimeout(r, opts.confirmBeatMs));
+      if (child.exitCode !== null && child.exitCode !== 0) {
+        return {
+          occupied: false,
+          reason: `run exited (code ${child.exitCode}) moments after the roster read — debris presence, not an occupant`,
+          settled,
+        };
+      }
       const wakeLatencyMs = Date.now() - spawnedAt;
       ctx.log(
         `⚡ woke ${seat}: spawn→roster ${(wakeLatencyMs / 1000).toFixed(1)}s, ` +
@@ -311,6 +331,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
             label: 'resumed',
             timeoutMs: spec.bounds.timeout_ms,
             verifyWindowMs: deps.resumeVerifyWindowMs ?? RESUME_VERIFY_WINDOW_MS,
+            confirmBeatMs: deps.confirmBeatMs ?? VERIFY_CONFIRM_BEAT_MS,
           },
         );
         if ('result' in attempt) {
@@ -345,6 +366,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
         {
           label: 'fresh',
           timeoutMs: remaining,
+          confirmBeatMs: deps.confirmBeatMs ?? VERIFY_CONFIRM_BEAT_MS,
         },
       );
       if ('spawnFailure' in fresh) {

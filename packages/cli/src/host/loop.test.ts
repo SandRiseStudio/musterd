@@ -209,7 +209,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
           {
             surface: 'claude-code',
             status: 'online',
-            last_seen_at: 2,
+            last_seen_at: Date.now() + 1_000, // fresh evidence — touched after the verify began
             provenance: 'wake',
           },
         ],
@@ -242,6 +242,52 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
       wake: async (_spec, ctx) => {
         verified = await ctx.verifyOccupied('scout');
         return { outcome: { occupied: false, reason: 'x' }, settled: Promise.resolve() };
+      },
+    };
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+      }),
+    );
+    expect(verified).toEqual({ occupied: false });
+  });
+
+  it('roster verify: STALE presence (pre-spawn last_seen_at) never verifies — the debris bar', async () => {
+    // The first live fallback rehearsal (2026-07-13): a presence row lingering from a previous
+    // occupancy read non-offline and a dead resume child was reported woke. Only evidence touched
+    // at-or-after the spawn counts.
+    const stale: MemberSummary[] = [
+      {
+        id: 'm1',
+        team: 'dawn',
+        name: 'scout',
+        kind: 'agent',
+        role: '',
+        lifecycle: 'forever',
+        presence: 'online',
+        presences: [
+          {
+            surface: 'claude-code',
+            status: 'online',
+            last_seen_at: Date.now() - 60_000, // a minute old — predates any spawn this tick
+            provenance: 'session',
+          },
+        ],
+        created_at: 1,
+      },
+    ];
+    const { client } = fakeClient([order()], [stale]);
+    let verified: { occupied: boolean } | undefined;
+    const backend: ActuatorBackend = {
+      harness: 'claude-code',
+      wake: async (_spec, ctx) => {
+        verified = await ctx.verifyOccupied('scout', undefined, Date.now());
+        return {
+          outcome: { occupied: verified.occupied, reason: 'x' },
+          settled: Promise.resolve(),
+        };
       },
     };
     await pollHostOnce(

@@ -83,6 +83,7 @@ function harness(children: FakeChild | FakeChild[], deps: Partial<ClaudeCodeDeps
     }) as any,
     mintSessionId: () => '00000000-0000-4000-8000-000000000000',
     killGraceMs: 5,
+    confirmBeatMs: 5,
     // Deterministic capture state: default = the pre-capture world (fresh path, quiet).
     readSession: () => ({ state: 'none' }),
     ...deps,
@@ -305,6 +306,34 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
     expect(context.lines.join('\n')).not.toContain('resume skipped');
     expect(actuation.outcome.session).toBe('fresh');
     child.exit(0);
+    await actuation.settled;
+  });
+
+  it('debris presence: a resume child that dies right after the roster hit is NOT woke — fresh fallback', async () => {
+    // The first live fallback rehearsal (2026-07-13): a stale-id --resume died with exit 1 at
+    // 2.3s but its adapter had blipped a presence row at 2.1s; the roster read credited a dead
+    // child as woke {session:resumed} and the act went unanswered. The confirmation beat catches
+    // it: a roster hit only counts if the child is still alive (or exited 0) a beat later.
+    const resumeChild = new FakeChild();
+    const freshChild = new FakeChild();
+    const { backend, calls } = harness([resumeChild, freshChild], {
+      readSession: () => resumable(),
+      resumeVerifyWindowMs: 5,
+      confirmBeatMs: 30,
+    });
+    // The roster says occupied instantly on BOTH attempts (the debris row lingers)…
+    const context = ctx(async () => ({ occupied: true, provenance: 'session' }));
+    // …but the resume child dies nonzero during the confirmation beat.
+    setTimeout(() => resumeChild.exit(1), 10);
+    const actuation = await backend.wake(spec(), context);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.args).toContain('--resume');
+    expect(calls[1]!.args).toContain('--session-id');
+    expect(actuation.outcome.occupied).toBe(true);
+    expect(actuation.outcome.session).toBe('fresh'); // the debris resume never counted
+    expect(context.lines.join('\n')).toMatch(/resume failed .*debris presence/);
+    freshChild.exit(0);
     await actuation.settled;
   });
 
