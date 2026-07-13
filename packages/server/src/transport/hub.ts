@@ -9,6 +9,18 @@ export interface Connection {
   /** Read-only observer seat (ADR 063): no presence events, exempt from single-active displacement. */
   observer?: boolean;
   /**
+   * May this connection see the team's *directed* traffic on the firehose (ADR 128 + ADR 136)?
+   *
+   * Deliberately NOT the same bit as `observer`. An observer is still an observer for presence and
+   * displacement purposes whatever it may read; what changes with its grade is only how much of the
+   * stream it gets. Conflating the two is what made every shared watch-link full-visibility.
+   *
+   * True for admins and full-grade observers (the local dashboard). A public-grade observer is false —
+   * it sees team/broadcast acts, and directed envelopes addressed to it still arrive by direct
+   * delivery, never through this fan-out.
+   */
+  fullVisibility?: boolean;
+  /**
    * The client's workspace (e.g. `repo@branch`), if it sent one. Agent single-active displacement is
    * scoped by this: a hello from the *same* workspace is the same seat reconnecting (a reload or a
    * health-check probe that briefly spawns the MCP server), so it must not supersede the live session
@@ -121,12 +133,11 @@ export class Hub {
   /**
    * Push a frame to every firehose subscriber on a team, skipping members in `skipMemberIds`
    * (recipients + sender already handled by `deliver`/`ack`, so no one is double-sent). When
-   * `directed` is set (a member-kind envelope), only full-visibility connections receive it — admins
-   * and read-only observer seats (ADR 063, localhost-trust — the /live dashboard). Every firehose
+   * `directed` is set (a member-kind envelope), only `fullVisibility` connections receive it — admins
+   * and **full-grade** observers, i.e. the trusted local dashboard (ADR 128 + ADR 136). Every firehose
    * subscriber that reaches this loop is a non-party (parties are in `skipMemberIds`), so a regular
-   * member must not see another seat's DM. team/broadcast acts stay public (`directed` false). Closes
-   * the DM-leak on the live firehose for regular members. (Local-vs-shared observer scoping is a
-   * tracked follow-up.) Returns how many got it.
+   * member — or a public-grade observer on a shared watch-link — must not see another seat's DM.
+   * team/broadcast acts stay public (`directed` false). Returns how many got it.
    */
   broadcastFirehose(
     teamId: string,
@@ -139,7 +150,7 @@ export class Hub {
       const conn = this.byConn.get(connId);
       if (!conn || conn.teamId !== teamId) continue;
       if (skipMemberIds?.has(conn.memberId)) continue;
-      if (directed && !(conn.isAdmin || conn.observer)) continue;
+      if (directed && !conn.fullVisibility) continue;
       conn.send(frame);
       n++;
     }

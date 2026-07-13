@@ -91,6 +91,9 @@ export interface AddMemberInput {
   availability?: Record<string, unknown> | null;
   /** Provision a read-only observer seat (ADR 063): hidden from roster/counts/presence, can't send. */
   observer?: boolean;
+  /** Observer grade (ADR 136): `'public'` sees only team/broadcast traffic — what a shared watch-link
+   *  gets. Omitted ⇒ `'full'` (the local dashboard). Ignored unless `observer`. */
+  observerScope?: 'full' | 'public';
 }
 
 /** Add a member to a team and mint its one-time token. Returns the row plus the plaintext token. */
@@ -143,6 +146,9 @@ export function addMember(
     // (ADR 058). The INSERT omits the column, so it defaults to NULL; kept here for the typed row.
     bound_at: null,
     observer: input.observer ? 1 : 0,
+    // Grade is meaningless off an observer seat — keep it NULL there rather than storing a value that
+    // reads as if it governs an ordinary member (ADR 136).
+    observer_scope: input.observer ? (input.observerScope ?? 'full') : null,
     // Governance is projected by reconcile (ADR 070), not at mint — a fresh seat is NULL (⇒ derived
     // account status + generalist capabilities) until the file-backed values are reconciled in.
     account_status: null,
@@ -154,9 +160,9 @@ export function addMember(
   };
   db.prepare(
     `INSERT INTO members
-       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, token_hash, observer, account_status, capabilities, left_at, created_at, updated_at)
+       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, token_hash, observer, observer_scope, account_status, capabilities, left_at, created_at, updated_at)
      VALUES
-       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @token_hash, @observer, @account_status, @capabilities, @left_at, @created_at, @updated_at)`,
+       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @token_hash, @observer, @observer_scope, @account_status, @capabilities, @left_at, @created_at, @updated_at)`,
   ).run(row);
   return { row, token };
 }

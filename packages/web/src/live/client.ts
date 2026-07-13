@@ -216,7 +216,9 @@ export function genObserverName(): string {
 }
 
 /** Load this browser's cached observer for the team, or provision a fresh one and cache it. Returns the
- * {@link LiveConfig} a read-only surface connects with. */
+ * {@link LiveConfig} a read-only surface connects with. This is the operator's OWN dashboard seat, on
+ * their own machine — full-grade, so the office/stream still show the directed coordination that is
+ * most of what there is to watch (ADR 136). */
 export async function acquireObserver(team: string): Promise<LiveConfig> {
   let creds = loadObserver(team);
   if (!creds) {
@@ -226,6 +228,41 @@ export async function acquireObserver(team: string): Promise<LiveConfig> {
     saveObserver(team, creds);
   }
   return { team, as: creds.name, token: creds.token };
+}
+
+/* ─── the shared watch-link seat (ADR 136) ────────────────────────────────────────────────────────
+ * A watch link used to carry `acquireObserver`'s credential — the operator's own **full-grade** seat —
+ * so handing someone a link handed them every DM on the team. A link now gets its own **public-grade**
+ * observer: a distinct seat that sees team/broadcast traffic only. Cached per team so the link is
+ * stable (repeated copies hand out the same URL rather than littering seats; idle ones are reaped at
+ * the 24h observer TTL, ADR 064). */
+const watchLinkKey = (team: string) => `musterd.live.watchlink.v1.${team}`;
+
+/** The team's shared public-grade watch-link seat — cached, or minted on first share.
+ *
+ * Minting requires a local peer or an admin (ADR 134). The operator clicking "copy watch link" in the
+ * daemon-served dashboard is local by construction, so this succeeds exactly where it should. */
+export async function acquireWatchLinkObserver(team: string): Promise<ObserverCreds> {
+  try {
+    const raw = window.localStorage.getItem(watchLinkKey(team));
+    if (raw) {
+      const creds = JSON.parse(raw) as ObserverCreds;
+      if (creds && creds.token) return creds;
+    }
+  } catch {
+    // fall through and mint
+  }
+  const name = 'watch-' + Math.random().toString(36).slice(2, 8);
+  const token = await provisionObserver(team, name, 'public');
+  const creds = { name, token };
+  window.localStorage.setItem(watchLinkKey(team), JSON.stringify(creds));
+  return creds;
+}
+
+/** Drop the cached watch-link seat — the link stops working on the next mint (the old seat lingers
+ *  until the observer TTL reaps it). */
+export function forgetWatchLinkObserver(team: string) {
+  window.localStorage.removeItem(watchLinkKey(team));
 }
 
 /**
@@ -294,16 +331,26 @@ export async function decideRequest(
 
 /**
  * Provision a hidden read-only observer seat (ADR 063). Lets the dashboard be "enter a team and watch"
- * — no pre-made seat. The endpoint is unauthenticated (localhost-trust, like team creation); the seat is
- * hidden from the roster and can't send. Returns both secrets: the `token` (HTTP bearer for the roster/
- * history reads) and the `key` — the human credential (mscr_) the v0.3 WS `claim` handshake authenticates
- * with (ADR 077). The observer claims its **own** seat, which is self-authorizing (no grant/approval).
+ * — no pre-made seat. The seat is hidden from the roster and can't send. Returns the human credential
+ * (mscr_) the v0.3 WS `claim` handshake authenticates with (ADR 077); the observer claims its **own**
+ * seat, which is self-authorizing (no grant/approval).
+ *
+ * Unauthenticated **from a local peer only** — the daemon now enforces the localhost-trust this route
+ * always claimed (ADR 134); off-machine callers need an admin credential.
+ *
+ * `scope` is the observer's grade (ADR 136): `'full'` (default) is the operator's own dashboard on
+ * their own machine and sees the whole timeline; `'public'` sees team/broadcast traffic only and is
+ * what a **shared watch-link** gets — see {@link acquireWatchLinkObserver}.
  */
-export async function provisionObserver(team: string, name: string): Promise<string> {
+export async function provisionObserver(
+  team: string,
+  name: string,
+  scope: 'full' | 'public' = 'full',
+): Promise<string> {
   const res = await fetch(`/teams/${encodeURIComponent(team)}/members`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name, kind: 'human', observer: true }),
+    body: JSON.stringify({ name, kind: 'human', observer: true, observer_scope: scope }),
   });
   const text = await res.text();
   const json = text ? JSON.parse(text) : {};

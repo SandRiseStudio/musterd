@@ -103,7 +103,12 @@ import {
   toResidency,
 } from '../store/residency.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
-import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
+import {
+  hasFullMessageVisibility,
+  resolveAccountStatus,
+  resolveCapabilities,
+  toMember,
+} from '../store/rows.js';
 import { staleLaneWarnings } from '../store/staleness.js';
 import {
   createTeam,
@@ -271,6 +276,10 @@ const AddMemberBody = z.object({
   lifecycle_until: z.number().int().nullish(),
   /** Provision a read-only observer seat (ADR 063), db-only even on a file-backed team. */
   observer: z.boolean().optional(),
+  /** Observer grade (ADR 136). `'public'` — team/broadcast traffic only, what a shared watch-link
+   *  gets. Omitted ⇒ `'full'`, the trusted local dashboard; safe as a default only because ADR 134
+   *  restricts minting to a local peer or an admin. */
+  observer_scope: z.enum(['full', 'public']).optional(),
 });
 
 /**
@@ -765,7 +774,9 @@ export async function handleHttp(
           role: body.role ?? '',
           ...(body.lifecycle ? { lifecycle: body.lifecycle } : {}),
           lifecycleUntil: body.lifecycle_until ?? null,
-          ...(body.observer ? { observer: true } : {}),
+          ...(body.observer
+            ? { observer: true, observerScope: body.observer_scope ?? 'full' }
+            : {}),
         });
         return sendJson(res, 201, {
           member: toMember(row, team.slug),
@@ -1797,17 +1808,21 @@ export async function handleHttp(
       }
 
       // The team timeline for the firehose's history backfill (ADR 061), then live-tailed via
-      // `subscribe team-all`. Recipient-scoped (need-to-know): a regular member sees only envelopes it
-      // is a party to (sender/recipient/team/broadcast). Admins and read-only observer seats (ADR 063,
-      // localhost-trust — the /live dashboard) see the whole timeline. Closes the DM-leak where any
-      // member's GET /messages returned every directed envelope on the team. (Local-vs-shared observer
-      // scoping — a shared watch-link seeing only public traffic — is a tracked follow-up.)
+      // `subscribe team-all`. Recipient-scoped (need-to-know): a caller sees only envelopes it is a
+      // party to (sender/recipient/team/broadcast) unless it has full visibility — an admin, or a
+      // **full-grade** observer, i.e. the trusted local dashboard (ADR 128 + ADR 136).
+      //
+      // A **public-grade** observer (a shared watch-link) is scoped like anyone else, and that alone
+      // yields exactly the public timeline: it can never be a sender (observers are read-only), and
+      // team/broadcast fanout excludes it, so the party predicate collapses to
+      // `to_kind IN ('team','broadcast')` — plus anything explicitly addressed to it, which is
+      // legitimately its own mail. No separate "public" query: not exempting it *is* the scoping.
       if (method === 'GET' && rest === '/messages') {
         const { team, member } = authTouch(ctx, slug, req);
         assertSeatCanRead(member);
         const since = url.searchParams.get('since');
         const limit = url.searchParams.get('limit');
-        const scoped = !resolveCapabilities(member).is_admin && member.observer !== 1;
+        const scoped = !hasFullMessageVisibility(member);
         const rows = listTeamMessages(ctx.db, team.id, {
           ...(since ? { since: Number(since) } : {}),
           ...(limit ? { limit: Math.min(Math.max(Number(limit), 1), 1000) } : {}),

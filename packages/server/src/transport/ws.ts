@@ -28,7 +28,12 @@ import {
   release,
 } from '../store/presence.js';
 import { createRequest } from '../store/requests.js';
-import { resolveAccountStatus, resolveCapabilities, toMember } from '../store/rows.js';
+import {
+  hasFullMessageVisibility,
+  resolveAccountStatus,
+  resolveCapabilities,
+  toMember,
+} from '../store/rows.js';
 import { getAgentKeyHash, requireTeam } from '../store/teams.js';
 import { recordError, recordPresenceChurn } from '../telemetry.js';
 import type { Connection } from './hub.js';
@@ -443,6 +448,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
                   teamId: team.id,
                   presenceId,
                   observer: targetMember?.observer === 1,
+                  // Firehose visibility (ADR 136) — same predicate the history read uses, so the live
+                  // stream and `GET /messages` can never disagree about what this seat may see.
+                  fullVisibility: targetMember ? hasFullMessageVisibility(targetMember) : false,
                   send: (f) => send(ws, f),
                   close: () => ws.close(),
                 };
@@ -511,6 +519,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             presenceId: presence.id,
             observer: targetMember.observer === 1,
             isAdmin: resolveCapabilities(targetMember).is_admin,
+            // Firehose visibility (ADR 136) — same predicate the history read uses, so the live stream
+            // and `GET /messages` can never disagree about what this seat may see.
+            fullVisibility: hasFullMessageVisibility(targetMember),
             workspace: frame.workspace ?? null,
             send: (f) => send(ws, f),
             close: () => ws.close(),
