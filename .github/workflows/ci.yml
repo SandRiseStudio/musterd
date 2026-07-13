@@ -48,6 +48,12 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # Lint is a gate, not a suggestion: without it, import/order and dead eslint-disables drift into
+      # main between the rare manual `pnpm lint` (8 had accumulated by #248). Runs after Build because
+      # the import resolver follows workspace packages to their ./dist, which does not exist pre-build.
+      - name: Lint
+        run: pnpm lint
+
       # `pnpm coverage` runs the full suite AND enforces the per-package line floors (vitest.config.ts),
       # so a drop below the floor fails the gate — closes the silent coverage-drift gap (ADR 106).
       - name: Tests + coverage
