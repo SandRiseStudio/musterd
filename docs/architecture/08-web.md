@@ -134,7 +134,28 @@ components/                     // marketing surface (Hero, Roadmap, Footer, Liq
   `actors`/`nav`/`seating`/`rig`/`speech` tests. Run from the repo root (`pnpm exec vitest run
 packages/web/src/live/`) — a per-package `vitest` invocation trips the app's build target.
 - **Visual / live:** drive `/office-preview` headless for choreography without a daemon, or point the
-  dev server at a live daemon (`MUSTERD_DAEMON=…`) and watch real acts flow through `/live`. ADR 107
-  records a full live-daemon verification of the steering acts.
+  dev server at a live daemon (`MUSTERD_DAEMON=…`, `pnpm dev` → `:5174`) and watch real acts flow through
+  `/live`. ADR 107 records a full live-daemon verification of the steering acts.
 - The build (`pnpm --filter @musterd/web build`) prerenders each route; a broken route fails the build,
   which the CI `gates` job runs.
+
+## How the built bundle is actually served (ADR 132)
+
+The dev server is **only** an inner-loop tool for un-merged work. The **viewer** — the thing teammates
+look at — is served by the **daemon** from its own origin: `http://<host>:4849/live`
+([ADR 062](../decisions/062-daemon-static-serve.md) static-serve + the same-origin WS gate). There is no
+separate web host and no proxy in that path.
+
+The bundle gets there via the `--live` **build-publisher**
+([ADR 132](../decisions/132-live-viewer-on-daemon-origin.md)): a single interval LaunchAgent that advances
+the `…/agents-live` worktree to `origin/main`, runs `pnpm --filter @musterd/web build`, and **atomically
+publishes** `dist/client` into the daemon's web-root (`~/.musterd/live/web`). Because `serveStatic` reads
+per-request, a UI change goes live **without restarting the daemon** — so shipping web work never drops a
+teammate's session. Consequences worth internalising:
+
+- The daemon's build SHA and the served UI's SHA are **independent** and routinely differ. That is by
+  design; it is not drift to "fix" with `musterd service refresh` (which bounces the shared daemon).
+- `~/.musterd/live/build.log` is the source of truth for what the UI is serving (`published <sha>`).
+- A failed web build keeps the **previously published** bundle — the viewer never goes blank on a bad merge.
+- `:5173` (the retired ADR 124 `pnpm dev` viewer) is dead; dev servers now bind `:5174`, so a stale link
+  fails fast rather than silently resolving to somebody's WIP.

@@ -55,6 +55,26 @@ pnpm bin -g                                                # if `musterd` is not
 
 Isolate dogfood state from your real `~/.musterd` with env: `MUSTERD_CONFIG`, `MUSTERD_DB`, `MUSTERD_SERVER`/`MUSTERD_PORT`. Rebuild after any source change — the bin runs `dist/`, not `src/`.
 
+## Getting your change onto `/live` (read this before you touch the daemon)
+
+**The viewer is `http://localhost:4849/live?team=<team>` — the _daemon_ serves it** ([ADR 132](docs/decisions/132-live-viewer-on-daemon-origin.md)), from the same origin as its data. It is always on. You never start it, and it is **not** a dev server.
+
+What your change needs depends entirely on _what you changed_:
+
+| You changed…                          | What to do                                                                                                                    | Bounces the daemon?      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **Web / UI** (`packages/web`)         | **Nothing.** Merge to `main`. Within ~60s the build-publisher rebuilds and republishes, and the daemon serves the new bundle. | **No**                   |
+| **Server / protocol / CLI**           | `musterd service refresh` (sync `main` → build → restart)                                                                     | **Yes** — announce first |
+| **Un-merged WIP you want to eyeball** | `pnpm dev` in your worktree → `http://localhost:5174/live`                                                                    | No                       |
+
+**Do not run `service refresh` to see a UI change.** It restarts the _shared_ daemon and drops your teammates' live sessions for nothing. The UI is **decoupled from the daemon's build**: the served bundle lives in `~/.musterd/live/web`, published from the `agents-live` worktree — **not** in the daemon's checkout. So the daemon's build SHA and the UI's SHA differ routinely, and that is correct, not drift to "fix" with a refresh.
+
+- To check what the UI is actually serving: `tail ~/.musterd/live/build.log` (it logs `published <sha>`).
+- Impatient? `musterd service refresh --live` forces a rebuild + publish **now** — still no daemon restart.
+- Ports: `:4849/live` = **the** viewer · `:5174/live` = your ephemeral dev preview · `:5173` = **dead** (the retired ADR 124 dev-server viewer; a link to it should fail fast, not resolve).
+
+**TRAP — `musterd service install`** embeds whatever `node` runs it into the daemon's plist, and the daemon's native `better-sqlite3` needs **Node ≥22**. Installing from a Node 20 shell used to crashloop the daemon while reporting success; it now refuses with the fix. `service refresh` never rewrites the plist and is always safe.
+
 ## Hard rules (violating these is a bug, not a choice)
 
 1. **Never change `@musterd/protocol` schemas without an ADR.** Other implementations depend on the protocol.
@@ -107,10 +127,10 @@ checks), so don't improvise a merge method or a catch-up strategy.
 
 1. **Branch from fresh `main`, in your worktree.** `git fetch origin main` then `git checkout -b feat/<slug> origin/main` (or `fix/`/`docs/`). One branch per lane.
 2. **Work and commit normally — as your seat.** Intermediate commits don't matter — the PR is **squash-merged** to one commit. Your worktree's git identity is your seat ([ADR 109](docs/decisions/109-seat-git-attribution.md)); end every commit message with your seat trailer `Co-authored-by: <seat> <seat@<team>.musterd>` (this replaces the generic model trailer — add a model line alongside if you like). The trailer is what survives the squash onto `main`, so keep it when editing a squash body.
-3. **Before pushing, run the fast local gates:** `pnpm typecheck && pnpm format:check` (seconds). This is a *smoke test for speed*, not a duplicate of CI — do **not** run the full suite locally to "pre-verify" CI. CI is the authority.
+3. **Before pushing, run the fast local gates:** `pnpm typecheck && pnpm format:check` (seconds). This is a _smoke test for speed_, not a duplicate of CI — do **not** run the full suite locally to "pre-verify" CI. CI is the authority.
 4. **Open the PR and let it land itself:** `gh pr create …` then `gh pr merge <n> --squash --auto --delete-branch`. Auto-merge waits for the required checks (`gates` CI + `Cursor Bugbot`) and squash-merges when green. **Don't poll or babysit** — walk away; you'll be notified.
 5. **Fell behind `main`? Rebase — never `merge main`:** `git fetch origin main && git rebase origin/main`, resolve conflicts once, re-run the fast gates, `git push --force-with-lease`. Your branch is throwaway history under squash, so rebasing is free; `--force-with-lease` won't clobber a teammate.
-6. **When you resolve the lane, attest the merge:** pass `{pr, sha, authorized_by}` on the lane resolve so the audit log joins your seat to the landed SHA and the authorizing human (ADR 109; `authorized_by` defaults to your grant's issuer). Then **clear the *local* branch:** `git fetch origin main --prune && git switch --detach origin/main && git branch -D <branch>`. Auto-delete only removes the **remote** branch; the local one lingers. You can't `git checkout main` (a sibling worktree owns it) and `git branch -d` refuses a squash-merged branch — so **detach to fresh `origin/main`** (which is also step 1's start state) and force-delete. Between lanes your worktree rests detached at `origin/main`, not on a stale branch. `lane resolve` prints this line for you.
+6. **When you resolve the lane, attest the merge:** pass `{pr, sha, authorized_by}` on the lane resolve so the audit log joins your seat to the landed SHA and the authorizing human (ADR 109; `authorized_by` defaults to your grant's issuer). Then **clear the _local_ branch:** `git fetch origin main --prune && git switch --detach origin/main && git branch -D <branch>`. Auto-delete only removes the **remote** branch; the local one lingers. You can't `git checkout main` (a sibling worktree owns it) and `git branch -d` refuses a squash-merged branch — so **detach to fresh `origin/main`** (which is also step 1's start state) and force-delete. Between lanes your worktree rests detached at `origin/main`, not on a stale branch. `lane resolve` prints this line for you.
 
 **Hard rules:** never merge with a merge-commit or rebase-merge (disabled anyway); never `git push --force` (use `--force-with-lease`); never merge past a red `gates` run or an unresolved Bugbot finding. Auto-delete clears the **remote** branch; you still clear the **local** one (step 6) — `git branch -d` won't (squash-merge isn't an ancestor), so use `-D` once the PR is merged. The `gates` check runs `build → typecheck → test → format:check`; Bugbot is the Cursor GitHub App (configured at cursor.com/dashboard/bugbot, **not** in-repo).
 
