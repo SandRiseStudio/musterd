@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
 import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
 
 const exec = promisify(execFile);
@@ -303,45 +304,8 @@ export function removeMusterdHooks(): void {
   );
 }
 
-async function has(cmd: string, args: string[]): Promise<{ ok: boolean; out: string }> {
-  try {
-    const { stdout } = await exec(cmd, args, { timeout: 8000 });
-    return { ok: true, out: stdout };
-    // reason: exec rejection is an untyped error-like with optional stdout/message.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (err: any) {
-    return { ok: false, out: String(err?.stdout ?? err?.message ?? '') };
-  }
-}
-
-/**
- * Where the `claude` CLI commonly lives. `execFile` resolves against the *launching terminal's*
- * PATH only, so a venv/conda/non-login shell can hide an installed CLI — init then reports
- * "not installed" while the Claude Code extension runs fine (dogfood finding). Falling back to
- * these absolute paths (and using the resolved one for `configure`) makes detection PATH-robust.
- */
-function claudeCandidates(): string[] {
-  const home = homedir();
-  return [
-    join(home, '.npmglobal/bin/claude'),
-    join(home, '.npm-global/bin/claude'),
-    join(home, '.claude/local/claude'),
-    join(home, '.local/bin/claude'),
-    '/opt/homebrew/bin/claude',
-    '/usr/local/bin/claude',
-  ];
-}
-
-let claudeBinCache: string | null | undefined;
-/** Resolve a runnable `claude`: PATH first, then known install locations. Cached per process. */
-async function resolveClaudeBin(): Promise<string | null> {
-  if (claudeBinCache !== undefined) return claudeBinCache;
-  if ((await has('claude', ['--version'])).ok) return (claudeBinCache = 'claude');
-  for (const c of claudeCandidates()) {
-    if (existsSync(c) && (await has(c, ['--version'])).ok) return (claudeBinCache = c);
-  }
-  return (claudeBinCache = null);
-}
+// `has`/`resolveClaudeBin` moved to the shared `claudeBin.ts` (ADR 131 inc 3): the wake actuator
+// (`musterd host`) needs the same PATH-robust resolution under launchd's minimal PATH.
 
 /** Claude Code: configured through the official `claude mcp` CLI (no hand-editing JSON). */
 export const claudeCode: Harness = {
