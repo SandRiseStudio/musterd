@@ -67,7 +67,13 @@ function OfficePreviewPage() {
   const labelRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<OfficeHandle | null>(null);
 
-  const [present, setPresent] = useState<Set<string>>(() => new Set(POOL.map((m) => m.name)));
+  // `?n=<count>` starts with only the first N of the pool present — the sparse-roster case the floor plan
+  // has to survive (a real team is ~5 against 12 desks, and that is when empty desks read loudest).
+  const [present, setPresent] = useState<Set<string>>(() => {
+    const n = Number(new URLSearchParams(window.location.search).get('n'));
+    const pool = Number.isFinite(n) && n > 0 ? POOL.slice(0, n) : POOL;
+    return new Set(pool.map((m) => m.name));
+  });
   const [away, setAway] = useState<Set<string>>(() => new Set(['Gus']));
 
   const buildData = useCallback(

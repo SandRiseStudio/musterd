@@ -1,6 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { DESK_SLOTS, HUDDLES, NOOK, NOOK_RUG_R, NOOK_SPOTS } from './layout';
+import { DESK_SLOTS, ENTRANCE, FWD, HUDDLES, NOOK, NOOK_RUG_R, NOOK_SPOTS, SEAT_BACK } from './layout';
 import { findPath, walkable } from './nav';
+
+describe('the floor plan stays navigable', () => {
+  it('leaves every desk seat standable and reachable from the door', () => {
+    // The guard that matters when the floor plan changes: a new zone (a rug's furniture, a
+    // plant) dropped on the wrong spot can fence a pod off or land on top of a seat, and nothing else in
+    // the scene would fail — the member would just glide through the wall to a chair inside a table.
+    for (const slot of DESK_SLOTS) {
+      const f = FWD[slot.dir];
+      const seat = { lx: slot.lx - f[0] * SEAT_BACK, ly: slot.ly - f[1] * SEAT_BACK };
+      // every pod backs onto an aisle: the floor behind the seat is open, so a member can push the chair
+      // back and stand. (Measured a chair's depth clear of the seat — nearer than that and the coarse
+      // grid just reports the chair's own padded footprint, which tells you nothing.)
+      expect(walkable(seat.lx - f[0] * 60, seat.ly - f[1] * 60)).toBe(true);
+
+      const path = findPath(ENTRANCE, seat);
+      expect(path.length).toBeGreaterThan(1);
+      // every waypoint but the last (the seat itself, inside the chair's footprint) is real open floor;
+      // a degenerate straight glide through the furniture would fail here
+      for (const p of path.slice(0, -1)) expect(walkable(p.lx, p.ly)).toBe(true);
+    }
+  });
+});
 
 describe('walkability grid', () => {
   it('blocks furniture but keeps rugs walkable', () => {

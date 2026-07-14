@@ -16,14 +16,22 @@ import {
   HUDDLES,
   KEYBOARD_ALONG,
   LOUNGE,
+  MEETING,
   NOOK,
+  NOOK_RUG,
   NOOK_RUG_R,
   PLANTS,
+  PODS,
+  POD_RUG,
+  PRINTER,
+  RECEPTION,
   SHELF_DEEP,
   SHELF_H,
   SHELF_LONG,
   type Bookshelf,
   type Huddle,
+  type Pod,
+  type Rug,
 } from './layout';
 import { DAY_ENV, type LightEnv } from './lighting';
 import { deskMoodFor, deskMoodStyle } from './moods';
@@ -209,6 +217,99 @@ function rug(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, r:
   quad(ctx, [A, B, C, D], fill);
 }
 
+/** A rectangular iso rug — zones a pod / the meeting table / reception, which are rectangular, not round. */
+function rugRect(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  lx: number,
+  ly: number,
+  w: number,
+  d: number,
+  fill: string,
+): void {
+  quad(
+    ctx,
+    [
+      project(lx - w / 2, ly - d / 2, fit),
+      project(lx + w / 2, ly - d / 2, fit),
+      project(lx + w / 2, ly + d / 2, fit),
+      project(lx - w / 2, ly + d / 2, fit),
+    ],
+    fill,
+  );
+}
+
+/**
+ * Paint a zone rug: its shape (rectangle or diamond) in its field colour, then its weave *inside* that
+ * outline — an inset border, or stripes across the short axis. Every rug on the floor goes through here,
+ * so a zone's rug is a piece of data (`Rug`) rather than a bespoke call, and no pattern can leak past a
+ * rug's own edge onto the floor.
+ */
+function drawRug(ctx: CanvasRenderingContext2D, fit: Fit, r: Rug, lx: number, ly: number, w: number, d: number): void {
+  if (r.shape === 'diamond') {
+    rug(ctx, fit, lx, ly, w / 2, r.fill);
+    if (r.weave === 'border') rug(ctx, fit, lx, ly, w / 2 - 14, r.mark);
+    return;
+  }
+  rugRect(ctx, fit, lx, ly, w, d, r.fill);
+  if (r.weave === 'border') {
+    rugRect(ctx, fit, lx, ly, w - 26, d - 26, r.mark);
+    rugRect(ctx, fit, lx, ly, w - 40, d - 40, r.fill);
+  } else if (r.weave === 'stripes') {
+    // bands running across the rug's short axis, inset from the ends so they read as woven, not painted on
+    const across = w >= d;
+    const span = across ? w : d;
+    const inset = 18;
+    for (let i = 0; i < 3; i++) {
+      const off = -span / 4 + (i * span) / 4;
+      const bw = across ? 16 : w - inset * 2;
+      const bd = across ? d - inset * 2 : 16;
+      rugRect(ctx, fit, lx + (across ? off : 0), ly + (across ? 0 : off), bw, bd, r.mark);
+    }
+  }
+}
+
+/** The meeting table: a long slab on four legs, with four chairs pulled up to it. */
+function meetingTable(ctx: CanvasRenderingContext2D, fit: Fit): void {
+  const M = MEETING;
+  const s = project(M.lx, M.ly, fit);
+  ellipse(ctx, { x: s.x, y: s.y + 2 * fit.scale }, (M.w / 2) * fit.scale, 20 * fit.scale, 'rgba(0,0,0,0.12)');
+  for (const [sx, sy] of [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ] as const) {
+    box(ctx, fit, M.lx + sx * (M.w / 2 - 8), M.ly + sy * (M.d / 2 - 8), 8, 8, M.h - 6, dim(PAL.wood, 0.9));
+  }
+  box(ctx, fit, M.lx, M.ly, M.w, M.d, 6, woodTop(), M.h - 6);
+}
+
+/** A meeting chair — the same two-piece cushion/backrest trick as a task chair, in a plain wood tone. */
+function meetingChair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, dir: Dir): void {
+  chairBase(ctx, fit, lx, ly, dir, '#8a6a4c');
+  const f = FWD[dir];
+  chairBack(ctx, fit, lx - f[0] * CHAIR_BACK_OFF, ly - f[1] * CHAIR_BACK_OFF, dir, '#8a6a4c');
+}
+
+/** The printer/supply station: a grey body with a paper tray and a stack of output on top. */
+function printer(ctx: CanvasRenderingContext2D, fit: Fit): void {
+  const P = PRINTER;
+  box(ctx, fit, P.lx, P.ly, P.w, P.d, P.h, '#9aa3ab');
+  box(ctx, fit, P.lx, P.ly, P.w - 12, P.d - 10, 5, '#6d757d', P.h); // output tray
+  box(ctx, fit, P.lx, P.ly, P.w - 20, P.d - 16, 4, '#f2f0ea', P.h + 5); // paper
+}
+
+/** Reception: a waiting couch turned toward the door, a low table, and a plant — the nook's vocabulary. */
+function receptionItems(ctx: CanvasRenderingContext2D, fit: Fit): DepthItem[] {
+  const R = RECEPTION;
+  return [
+    { d: depth(R.couch.lx, R.couch.ly), fn: () => couch(ctx, fit, R.couch.lx, R.couch.ly, PAL.couch, R.couch.dir) },
+    { d: depth(R.table.lx, R.table.ly), fn: () => ctable(ctx, fit, R.table.lx, R.table.ly) },
+    { d: depth(R.plant.lx, R.plant.ly), fn: () => drawPlant(ctx, fit, R.plant.lx, R.plant.ly, 'fiddle') },
+  ];
+}
+
 function couch(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, c: string, dir: Dir): void {
   const f = FWD[dir];
   const p: [number, number] = [-f[1], f[0]];
@@ -249,7 +350,7 @@ function nookItems(ctx: CanvasRenderingContext2D, fit: Fit): { rug: () => void; 
   const L = LOUNGE;
   const at = (dx: number, dy: number, fn: () => void): DepthItem => ({ d: depth(lx + dx, ly + dy), fn });
   return {
-    rug: () => rug(ctx, fit, lx, ly, NOOK_RUG_R, '#ce9256'),
+    rug: () => drawRug(ctx, fit, NOOK_RUG, lx, ly, NOOK_RUG_R * 2, NOOK_RUG_R * 2),
     items: [
       at(L.plant.dx, L.plant.dy, () => drawPlant(ctx, fit, lx + L.plant.dx, ly + L.plant.dy, 'fiddle')),
       at(L.fridge.dx, L.fridge.dy, () => box(ctx, fit, lx + L.fridge.dx, ly + L.fridge.dy, L.fridge.w, L.fridge.d, L.fridge.h, '#edeff1')),
@@ -301,7 +402,7 @@ function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf): void 
 function huddleItems(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): { rug: () => void; items: DepthItem[] } {
   const at = (dx: number, dy: number, fn: () => void): DepthItem => ({ d: depth(h.lx + dx, h.ly + dy), fn });
   return {
-    rug: () => rug(ctx, fit, h.lx, h.ly, 96, h.rug),
+    rug: () => drawRug(ctx, fit, h.rug, h.lx, h.ly, 192, 192),
     items: [
       at(0, -54, () => box(ctx, fit, h.lx, h.ly - 54, 44, 44, 28, h.poufs[0])),
       at(0, 0, () => box(ctx, fit, h.lx, h.ly, 66, 66, 18, woodTop())),
@@ -864,6 +965,14 @@ export function renderScene(
   }
   // Rugs are flat floor paint — draw them right after the floor (before every solid/actor), so a member
   // standing anywhere on a rug is never over-painted by it. Solid pieces self-sort at their footprints.
+  for (const pod of PODS) {
+    const ns = pod.axis === 'ns';
+    const w = ns ? POD_RUG.across : POD_RUG.along;
+    const d = ns ? POD_RUG.along : POD_RUG.across;
+    drawRug(ctx, fit, pod.rug, pod.cx, pod.cy, w, d);
+  }
+  drawRug(ctx, fit, MEETING.rug, MEETING.lx, MEETING.ly, MEETING.rug.w, MEETING.rug.d);
+  drawRug(ctx, fit, RECEPTION.rug, RECEPTION.rug.lx, RECEPTION.rug.ly, RECEPTION.rug.w, RECEPTION.rug.d);
   const nook = nookItems(ctx, fit);
   nook.rug();
   items.push(...nook.items);
@@ -872,6 +981,14 @@ export function renderScene(
     hud.rug();
     items.push(...hud.items);
   }
+  items.push({ d: depth(MEETING.lx, MEETING.ly), fn: () => meetingTable(ctx, fit) });
+  for (const c of MEETING.chairs) {
+    const cx = MEETING.lx + c.dx;
+    const cy = MEETING.ly + c.dy;
+    items.push({ d: depth(cx, cy), fn: () => meetingChair(ctx, fit, cx, cy, c.dir) });
+  }
+  items.push(...receptionItems(ctx, fit));
+  items.push({ d: depth(PRINTER.lx, PRINTER.ly), fn: () => printer(ctx, fit) });
   items.push({ d: depth(ENTRANCE.lx, ENTRANCE.ly), fn: () => drawEntrance(ctx, fit) });
 
   for (const slot of DESK_SLOTS) {
