@@ -197,20 +197,24 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
   it('attests the model persisted in binding.json when the env declares none (the by-default fix)', () => {
     // A `musterd agent --model qwen3:4b`-provisioned seat: the adapter env carries no MUSTERD_MODEL,
     // but binding.json does — so the seat attests instead of rotting to `unknown`.
-    expect(loadMcpConfig({ MUSTERD_BINDING: bindingWithModel('qwen3:4b') }).model).toBe('qwen3:4b');
+    const config = loadMcpConfig({ MUSTERD_BINDING: bindingWithModel('qwen3:4b') });
+    expect(config.model).toBe('qwen3:4b');
+    expect(config.modelSource).toBe('binding');
   });
 
   it('lets an env declaration override the binding (MUSTERD_MODEL wins, e.g. a /model switch)', () => {
-    expect(
-      loadMcpConfig({
-        MUSTERD_BINDING: bindingWithModel('qwen3:4b'),
-        MUSTERD_MODEL: 'claude-opus-4-8',
-      }).model,
-    ).toBe('claude-opus-4-8');
+    const config = loadMcpConfig({
+      MUSTERD_BINDING: bindingWithModel('qwen3:4b'),
+      MUSTERD_MODEL: 'claude-opus-4-8',
+    });
+    expect(config.model).toBe('claude-opus-4-8');
+    expect(config.modelSource).toBe('environment');
   });
 
   it('stays honestly unknown when neither env nor binding declares a model', () => {
-    expect(loadMcpConfig({ MUSTERD_BINDING: bindingWithModel(undefined) }).model).toBeUndefined();
+    const config = loadMcpConfig({ MUSTERD_BINDING: bindingWithModel(undefined) });
+    expect(config.model).toBeUndefined();
+    expect(config.modelSource).toBe('unknown');
   });
 });
 

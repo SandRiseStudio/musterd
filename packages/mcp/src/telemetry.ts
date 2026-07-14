@@ -4,6 +4,7 @@ import { startTelemetry, type TelemetryHandle } from '@musterd/telemetry';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
+import type { HarnessContext } from './harness.js';
 
 /**
  * Adapter-side telemetry (ADR 089 increment 1). Boots the shared SDK as `musterd-mcp` and wraps
@@ -37,6 +38,38 @@ export function startMcpTelemetry(config: McpConfig): Promise<TelemetryHandle> {
       ...(config.model ? { 'musterd.model': config.model } : {}),
     },
   });
+}
+
+/**
+ * Record MCP's initialized host identity and declaration state (ADR 120). Harness context is
+ * diagnostic only: it is never copied into the model attribute or sent to the team server.
+ */
+export function recordAdapterInitialization(
+  config: McpConfig,
+  harness: HarnessContext | undefined,
+  warn: (message: string) => void = (message) => process.stderr.write(`${message}\n`),
+): void {
+  tracer.startActiveSpan('musterd.mcp.initialize', (span) => {
+    span.setAttribute('musterd.team', config.team);
+    span.setAttribute('musterd.model.declaration', config.modelSource);
+    if (config.model) span.setAttribute('musterd.model', config.model);
+    if (harness) {
+      span.setAttribute('musterd.harness.name', harness.name);
+      if (harness.version) span.setAttribute('musterd.harness.version', harness.version);
+    }
+    span.setStatus({ code: SpanStatusCode.OK });
+    span.end();
+  });
+
+  if (config.modelSource === 'unknown') {
+    const source = harness
+      ? ` (harness: ${harness.name}${harness.version ? ` ${harness.version}` : ''})`
+      : '';
+    warn(
+      `musterd MCP has no declared model; this session will attest unknown${source}. ` +
+        'Set MUSTERD_MODEL, expose ANTHROPIC_MODEL, or provision a binding model.',
+    );
+  }
 }
 
 type ToolCallback = (...args: unknown[]) => unknown;

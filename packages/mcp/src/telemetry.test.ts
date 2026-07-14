@@ -6,10 +6,12 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MusterdClient } from './client.js';
+import type { McpConfig } from './config.js';
+import type { HarnessContext } from './harness.js';
 import { withTraceContext } from './otel.js';
-import { instrumentTools } from './telemetry.js';
+import { instrumentTools, recordAdapterInitialization } from './telemetry.js';
 
 type Handler = (...args: unknown[]) => unknown;
 
@@ -28,21 +30,38 @@ function stubClient(member?: string): MusterdClient {
   return { member } as unknown as MusterdClient;
 }
 
+function testConfig(modelSource: McpConfig['modelSource'], model?: string): McpConfig {
+  return {
+    server: 'http://localhost:4849',
+    team: 'dawn',
+    surface: 'cursor',
+    provenance: 'session',
+    workspace: 'repo',
+    modelSource,
+    ...(model ? { model } : {}),
+    claim: { mode: 'chat' },
+    connId: 'conn-1',
+    claimCode: 'AB12',
+    bindingDir: process.cwd(),
+  };
+}
+
+const cursorHarness: HarnessContext = { name: 'Cursor', version: '1.8.0' };
+const spans = new InMemorySpanExporter();
+
+beforeAll(() => {
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+  trace.setGlobalTracerProvider(
+    new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(spans)] }),
+  );
+});
+afterAll(() => {
+  context.disable();
+  trace.disable();
+});
+beforeEach(() => spans.reset());
+
 describe('instrumentTools (ADR 089: the musterd.tool.call span)', () => {
-  const spans = new InMemorySpanExporter();
-
-  beforeAll(() => {
-    context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
-    trace.setGlobalTracerProvider(
-      new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(spans)] }),
-    );
-  });
-  afterAll(() => {
-    context.disable();
-    trace.disable();
-  });
-  beforeEach(() => spans.reset());
-
   it('wraps a registered tool in a musterd.tool.call span with structural attributes only', async () => {
     const { server, handlers } = stubServer();
     instrumentTools(server, stubClient('Ada'), 'dawn');
@@ -108,5 +127,37 @@ describe('instrumentTools (ADR 089: the musterd.tool.call span)', () => {
     expect(span.status.code).toBe(2); // SpanStatusCode.ERROR
     // Pending seat: no member attributes rather than a fake identity.
     expect(span.attributes['musterd.member.id']).toBeUndefined();
+  });
+});
+
+describe('recordAdapterInitialization (ADR 120)', () => {
+  it('records harness context and a declared model without inferring from the host identity', () => {
+    const warn = vi.fn();
+
+    recordAdapterInitialization(testConfig('environment', 'gpt-5.2'), cursorHarness, warn);
+
+    const span = spans.getFinishedSpans().find((s) => s.name === 'musterd.mcp.initialize')!;
+    expect(span.attributes).toMatchObject({
+      'musterd.team': 'dawn',
+      'musterd.model.declaration': 'environment',
+      'musterd.model': 'gpt-5.2',
+      'musterd.harness.name': 'Cursor',
+      'musterd.harness.version': '1.8.0',
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('warns once when no model declaration exists while retaining harness context', () => {
+    const warn = vi.fn();
+
+    recordAdapterInitialization(testConfig('unknown'), cursorHarness, warn);
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no declared model'));
+    expect(warn.mock.calls[0]![0]).toContain('Cursor');
+    const span = spans.getFinishedSpans().find((s) => s.name === 'musterd.mcp.initialize')!;
+    expect(span.attributes['musterd.model.declaration']).toBe('unknown');
+    expect(span.attributes['musterd.model']).toBeUndefined();
+    expect(span.attributes['musterd.harness.name']).toBe('Cursor');
   });
 });
