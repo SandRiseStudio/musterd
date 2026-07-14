@@ -1,3 +1,4 @@
+import { FLOOR } from './iso';
 import type { Dir } from './types';
 
 /**
@@ -166,9 +167,10 @@ export const SHELF_LONG = 58;
 export const SHELF_DEEP = 20;
 export const SHELF_H = 66;
 
-/** Freestanding bookshelves lining the open wall stretches between desks — warm decor, block nav. */
+/** Freestanding bookshelves flush to the open wall stretches (back of footprint on the perimeter,
+ * same pattern as the entrance door) — warm decor, block nav. */
 export const BOOKSHELVES: Bookshelf[] = [
-  { lx: 250, ly: 58, dir: 'S' }, // back-left wall, between the top-row desks and the corner
-  { lx: 858, ly: 320, dir: 'W' }, // right wall, above the lounge
-  { lx: 56, ly: 470, dir: 'E' }, // left wall, beside the huddle
+  { lx: 250, ly: SHELF_DEEP / 2, dir: 'S' }, // back wall, between the top-row desks and the corner
+  { lx: FLOOR - SHELF_DEEP / 2, ly: 320, dir: 'W' }, // right wall, above the lounge
+  { lx: SHELF_DEEP / 2, ly: 470, dir: 'E' }, // left wall, beside the huddle
 ];
