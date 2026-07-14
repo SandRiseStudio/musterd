@@ -58,8 +58,26 @@ watcher, never gatekeeper) until the platform stabilizes enough to harden.
 | **Researcher**                | Landscape/prior-art sweeps, the research radar.                                                                                                                                      |
 | **Customer support**          | Triage inbound issues/questions; the human-facing voice.                                                                                                                             |
 | **Database guru**             | Schema/migration review, data integrity, query performance.                                                                                                                          |
+| **Facilitator / brainstorm**  | Human-paired diverge→converge seat. Runs design/planning sessions; never owns implementation lanes. Success = a decided direction landed as a Goal/lane/ADR — not a PR.             |
 
 The library should be open-ended — these are seeds, not a closed set.
+
+### Seed sketch — Facilitator / brainstorm (captured 2026-07-13)
+
+Dogfood evidence for this seed (not a product decision):
+
+- An earlier attempt provisioned a brainstorm seat with **tldraw MCP** so a human and the agent could
+  whiteboard live in one canvas — strong for **diverge** (messy systems, flows, exploration).
+- A later session on Cursor + GPT-5.6 used the **Superpowers brainstorming** skill with its visual UI
+  companion (option cards with stance tags + visuals beside the chat) — strong for **converge**
+  (pick-one among named directions).
+
+These are complementary modes of one role, not competing products: **diverge** on a shared mutable
+board, **converge** on a structured decision surface, then **hand off** the chosen direction into a
+Goal/lane/ADR for coding seats. Keep the portable template as charter + intent (“visual facilitation
+surface”); render tldraw / harness companion / FigJam per harness so the role stays
+harness-independent (see Q5). Distinct from `no-orchestrator`: this seat helps a human decide one
+direction — it does not become the team’s mandatory dispatcher.
 
 ## Questions for the design session (deliberately unanswered here)
 
