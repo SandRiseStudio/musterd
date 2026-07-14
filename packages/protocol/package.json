@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./build-stamp": {
+      "types": "./dist/build-stamp.d.ts",
+      "default": "./dist/build-stamp.js"
     }
   },
   "files": ["dist"],
