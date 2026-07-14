@@ -287,3 +287,11 @@ experiment pre-registration._
 trigger under an unchanged charter, comparing task latency and cost per task across a week each;
 (2) a cookoff residency benchmark row (research finding 005's resident-vs-CLI coverage axis) once
 the run ladder resumes.
+
+_Amendment (2026-07-14, increment 5): both are now registered in full — (1) arms, metrics, the
+mined offline baseline (n=4: median ≈13 min answered, half never answered — vs the +46 s first
+measured wake) and abort conditions in the contract doc §7, with the trigger (`steward:notify`),
+runbook, and `service --wake` actuator shipped and the run itself owner-gated on spend; (2) the
+D-res cell pinned in the cookoff run manifest, defined-not-authorized. Also shipped here: the
+`musterd service … --wake` LaunchAgent (spelled `--wake` because `--host` is the daemon's bind
+flag), completing the §1 "LaunchAgent-managed in a later increment" clause._

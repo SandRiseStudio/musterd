@@ -158,14 +158,14 @@ message-shaped rest.
 
 ## 5. Increment map (each = one lane-sized PR)
 
-| inc | lane                                         | lands                                                                                                                                                                                                                  |
-| --- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | this doc + ADR 131                           | the frozen contract                                                                                                                                                                                                    |
-| 2   | wake ledger (server)                         | migration v16 (`residency`, `wake_leases`), `store/residency.ts` (through-DB tests), 6 audit verbs, enroll/lease/report routes, reaper lease expiry, `musterd residency` CLI, roster label                             |
-| 3   | `musterd host` + claude backend, fresh-first | `cli/src/host/{loop,registry,backend,backends/claudeCode}.ts`, shared `resolveClaudeBin` (LaunchAgent PATH gap), provenance `wake` + surface `musterd` reserved, telemetry carve-out — **first measured wake latency** |
-| 4   | session capture                              | SessionStart/SessionEnd hooks → `musterd session start\|end --stdin`, `binding.session`, `init --check`/uninstall drift coverage, resume upgrade + hygiene in backend, local-session guard (`wake_deferred`)           |
-| 5   | policy + measurement + service               | knobs (team config + enrollment flags), wake latency/answer-rate in the report engine, `musterd service` host label, steward cron→wake experiment, cookoff residency row                                               |
-| 6   | native backend (owner-gated)                 | thin Agent-SDK loop in the host, surface `musterd` live — the reference row proven                                                                                                                                     |
+| inc | lane                                         | lands                                                                                                                                                                                                                                                                                                                                                                                  |
+| --- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | this doc + ADR 131                           | the frozen contract                                                                                                                                                                                                                                                                                                                                                                    |
+| 2   | wake ledger (server)                         | migration v16 (`residency`, `wake_leases`), `store/residency.ts` (through-DB tests), 6 audit verbs, enroll/lease/report routes, reaper lease expiry, `musterd residency` CLI, roster label                                                                                                                                                                                             |
+| 3   | `musterd host` + claude backend, fresh-first | `cli/src/host/{loop,registry,backend,backends/claudeCode}.ts`, shared `resolveClaudeBin` (LaunchAgent PATH gap), provenance `wake` + surface `musterd` reserved, telemetry carve-out — **first measured wake latency**                                                                                                                                                                 |
+| 4   | session capture                              | SessionStart/SessionEnd hooks → `musterd session start\|end --stdin`, `binding.session`, `init --check`/uninstall drift coverage, resume upgrade + hygiene in backend, local-session guard (`wake_deferred`)                                                                                                                                                                           |
+| 5   | policy + measurement + service               | **landed 2026-07-14** (#269 knobs + ping-pong demotion + provenance newest-wins, #271 wake metrics + `wake_cost` + resumable badge, + `service --wake` + the steward-swap wiring/pre-registration): knobs (team config + enrollment flags), wake latency/answer-rate in the report engine, the wake actuator as a LaunchAgent, steward cron→wake trigger, cookoff residency row pinned |
+| 6   | native backend (owner-gated)                 | thin Agent-SDK loop in the host, surface `musterd` live — the reference row proven                                                                                                                                                                                                                                                                                                     |
 
 ## 6. Deliberate deferrals
 
@@ -176,3 +176,29 @@ wakeable, so both stay) · wake-chain depth derivation (alternating `residency.w
 dogfood shows chains · fork-on-wake per-seat knob · office choreography for `wake` provenance ·
 multi-host failover policy (leases already make active-active safe; preference is policy) ·
 notify/host convergence into one resident client process.
+
+## 7. Steward substrate swap — pre-registered (ADR 131 O&E experiment 1; wired 2026-07-14)
+
+The ADR 112 §3 promise, run as an experiment: the steward's trigger swaps from cron to the wake
+ledger **under an unchanged charter** (`CHARTER.md` and the task registry are byte-identical
+across arms). Registered BEFORE the run; the result is written back here as a dated note.
+
+- **Arm A (incumbent):** the weekly CI cron's `agent` job — a CI-launched Claude session drafts
+  the fixes. Trigger latency floor = the cron cadence; cost from the CI job's API billing.
+- **Arm B (residency):** `pnpm steward:notify` runs the same deterministic finders locally on the
+  same weekly cadence and sends one structured `request_help` per drifted task to the enrolled
+  `steward` seat (batched lane → `musterd host` wakes it; `seat-policy` autonomy — the charter
+  drafts PRs; the wake path never passes a skip-permissions flag, the CI shape does not transfer).
+  Cost from the wake ledger (`musterd report residency`, the `residency.wake_cost` records).
+- **Duration:** one week per arm, same task registry, drift planted only by reality.
+- **Metrics:** task latency (finder-run timestamp → draft-PR opened, via `gh api`) and cost per
+  completed task; secondary, arm B only: wake latency + answer rate from the report engine.
+- **Baseline (mined 2026-07-14, the O&E recipe over the dogfood DB, pre-residency epoch):** 4
+  offline-recipient directed acts (answer = accept/decline naming the act, or a thread resolve;
+  offline proxied as "no recipient act within 60s of send" — presence rows are transient, stated
+  approximation): **2 answered, median ≈ 13.2 min; 2 never answered.** The first measured wake
+  (2026-07-13) answered at **+46 s** — the number the swap is expected to generalize.
+- **Abort conditions:** any `residency.wake_exhausted` on the steward seat, an `over_budget` flag
+  (budget $2/wake), or a wake acting outside the charter — `musterd residency off` is the switch.
+- **Run gate:** owner-approved spend only — provisioning and the 2-week run start on an explicit
+  go (the runbook lives in `scripts/steward/README.md`).

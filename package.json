@@ -18,6 +18,7 @@
     "roadmap:check": "node --disable-warning=ExperimentalWarning scripts/gen-roadmap.ts --check",
     "roadmap-truth:check": "node --disable-warning=ExperimentalWarning scripts/check-roadmap-truth.ts",
     "steward:scan": "node --disable-warning=ExperimentalWarning scripts/steward/scan.ts",
+    "steward:notify": "node --disable-warning=ExperimentalWarning scripts/steward/notify.ts",
     "arch-trees:check": "node --disable-warning=ExperimentalWarning scripts/check-arch-trees.ts --check",
     "obs-evals:check": "node --disable-warning=ExperimentalWarning scripts/check-obs-evals.ts --check",
     "test": "vitest run",

@@ -4,8 +4,19 @@ import { dirname, join, resolve as resolvePath } from 'node:path';
 import { flagStr, type Parsed } from '../args.js';
 import { configPath, loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
+import { loadHostRegistry } from '../host/registry.js';
 import { theme } from '../render/theme.js';
 import {
+  installWakeHost,
+  restartWakeHost,
+  startWakeHost,
+  statusWakeHost,
+  stopWakeHost,
+  uninstallWakeHost,
+  type WakeHostCtx,
+} from '../service/host.js';
+import {
+  HOST_LABEL,
   LIVE_LABEL,
   LIVE_SYNC_LABEL,
   SERVICE_LABEL,
@@ -74,7 +85,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live] [--port <n>] [--host <h>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake] [--port <n>] [--host <h>] [--interval <s>] [--timeout <s>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -89,6 +100,46 @@ export function liveWebRoot(): string {
  * beside the daemon's in `~/Library/LaunchAgents`. `gitDir` is resolved so the build's PATH finds git.
  * The `legacy*` fields name the retired ADR 124 dev-server bundle so an in-place upgrade cleans it up.
  */
+/**
+ * Resolve the wake-actuator service (ADR 131 inc 5) from the running process: the plist runs
+ * `node bin.js host [flags]` with the daemon's node/entry pair. `--interval`/`--timeout` (bare
+ * seconds, `musterd host`'s own contract) are baked into the plist at install — operator facts,
+ * like the daemon's `--port`; the per-seat policy knobs arrive per wake order and need no service
+ * op. The label deliberately reads `--wake`, not `--host`: `--host <h>` is the daemon's bind flag.
+ */
+function resolveWakeCtx(run: Runner, parsed: Parsed): WakeHostCtx {
+  const binJs = resolvePath(process.argv[1] ?? '');
+  const home = dirname(configPath()); // ~/.musterd
+  const hostArgs: string[] = [];
+  const interval = flagStr(parsed.flags, 'interval');
+  const timeout = flagStr(parsed.flags, 'timeout');
+  if (interval) hostArgs.push('--interval', interval);
+  if (timeout) hostArgs.push('--timeout', timeout);
+  return {
+    uid: typeof process.getuid === 'function' ? process.getuid() : '',
+    label: HOST_LABEL,
+    plistPath: join(homedir(), 'Library', 'LaunchAgents', `${HOST_LABEL}.plist`),
+    node: process.execPath,
+    binJs,
+    hostArgs,
+    workingDir: resolvePath(binJs, '../../../..'),
+    logPath: join(home, 'host.log'),
+    errLogPath: join(home, 'host.err.log'),
+    // The loop loads the CLI's native modules AND spawns harnesses (claude, git, node tooling) —
+    // both need more PATH than launchd's default.
+    path: [
+      dirname(process.execPath),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+      '/usr/sbin',
+      '/sbin',
+    ].join(':'),
+    run,
+  };
+}
+
 function resolveLiveCtx(run: Runner): LiveCtx {
   const binJs = resolvePath(process.argv[1] ?? '');
   const repoRoot = resolvePath(binJs, '../../../..');
@@ -243,6 +294,7 @@ export async function serviceCommand(
     platform?: NodeJS.Platform;
     ctx?: ServiceCtx;
     liveCtx?: LiveCtx;
+    wakeCtx?: WakeHostCtx;
     health?: () => Promise<DaemonHealth>;
     /** Probe whether the daemon serves /live (injected so tests skip the network). */
     probeViewer?: (url: string) => Promise<boolean>;
@@ -287,6 +339,15 @@ export async function serviceCommand(
   if (parsed.flags['live'] === true) {
     const liveCtx = deps.liveCtx ?? resolveLiveCtx(ctx.run);
     return liveServiceCommand(sub, liveCtx, parsed, ok, fail, deps.probeViewer ?? probeViewer);
+  }
+
+  // `--wake` retargets every verb at the wake actuator (`musterd host` as a LaunchAgent, ADR 131
+  // inc 5). Same posture as `--live`: no server, no teammate session dropped, no live-session
+  // guard — in-flight wake runs keep their own watchdogs and an interrupted lease expires back to
+  // due. The abi guard DOES apply on install: `musterd host` loads the CLI's native modules.
+  if (parsed.flags['wake'] === true) {
+    const wakeCtx = deps.wakeCtx ?? resolveWakeCtx(ctx.run, parsed);
+    return wakeServiceCommand(sub, ctx, wakeCtx, parsed, ok, fail, force);
   }
 
   switch (sub) {
@@ -504,6 +565,124 @@ async function liveServiceCommand(
     case 'logs': {
       const follow = parsed.flags['follow'] === true || parsed.positionals.includes('-f');
       return liveLogs(ctx, follow);
+    }
+    default:
+      throw new CliError(USAGE, 2);
+  }
+}
+
+/**
+ * `musterd service <verb> --wake` — manage the wake actuator (`musterd host`) as a LaunchAgent
+ * (ADR 131 inc 5), so residency survives a reboot instead of depending on a terminal someone left
+ * open. Same posture as `--live`: no server, no live-session guard (bouncing it drops nobody; an
+ * interrupted lease expires back to due). The one daemon-shaped concern that DOES carry over is
+ * the abi guard on `install`: the plist embeds `process.execPath`, and `musterd host` loads the
+ * CLI's native modules (the CLI links @musterd/server statically) — a Node-20 install would
+ * crashloop it exactly like the daemon.
+ */
+async function wakeServiceCommand(
+  sub: string,
+  daemonCtx: ServiceCtx,
+  ctx: WakeHostCtx,
+  parsed: Parsed,
+  ok: (s: string) => void,
+  fail: (step: string, r: RunResult) => never,
+  force: boolean,
+): Promise<number> {
+  const meta = (s: string) => process.stdout.write(theme.meta(s) + '\n');
+  const registrySummary = () => {
+    const entries = loadHostRegistry().entries;
+    return entries.length === 0
+      ? theme.warn('0 seats registered — run `musterd residency on` in a seat workspace')
+      : `${entries.length} seat${entries.length === 1 ? '' : 's'} registered (${entries.map((e) => e.seat).join(', ')})`;
+  };
+  switch (sub) {
+    case 'install': {
+      const abi = force ? null : nodeAbiMismatch(daemonCtx);
+      if (abi) {
+        throw new CliError(
+          `refusing to install: ${ctx.node} cannot load the CLI's native modules, so the wake ` +
+            `actuator would crashloop on boot.\n\n  ${abi}\n\n` +
+            `Put a matching node first on PATH and re-run, e.g.\n` +
+            `  export PATH="/opt/homebrew/opt/node@22/bin:$PATH" && musterd service install --wake\n\n` +
+            `(\`--force\` overrides.)`,
+          1,
+        );
+      }
+      const res = installWakeHost(ctx);
+      if (res.status !== 0) fail('install --wake (bootstrap)', res);
+      ok(`installed + started the wake actuator (LaunchAgent ${theme.accent(ctx.label)})`);
+      meta(`  plist:    ${ctx.plistPath}`);
+      meta(`  runs:     ${ctx.binJs} host ${ctx.hostArgs.join(' ')}`.trimEnd());
+      meta(`  registry: ${registrySummary()}`);
+      meta(`  logs:     ${ctx.logPath}`);
+      return 0;
+    }
+    case 'uninstall': {
+      const res = uninstallWakeHost(ctx);
+      ok(
+        res.removedPlist
+          ? `stopped + removed the wake actuator (${ctx.label})`
+          : `wake actuator was not installed — nothing to remove`,
+      );
+      return 0;
+    }
+    case 'start': {
+      const r = startWakeHost(ctx);
+      if (r.status !== 0) fail('start --wake (bootstrap)', r);
+      ok('started the wake actuator');
+      return 0;
+    }
+    case 'stop': {
+      const r = stopWakeHost(ctx);
+      ok(r.status === 0 ? 'stopped the wake actuator' : 'wake actuator was not running');
+      return 0;
+    }
+    case 'restart':
+    case 'refresh': {
+      // The loop re-reads its registry every tick, so enrollment changes need NO service op; a
+      // restart only matters to pick up a rebuilt dist (`service refresh` on the daemon checkout
+      // rebuilds it — then this).
+      const r = restartWakeHost(ctx);
+      if (r.status !== 0) fail('restart --wake', r);
+      ok('restarted the wake actuator (picks up the current dist + registry)');
+      return 0;
+    }
+    case 'status': {
+      const s = statusWakeHost(ctx);
+      const line = s.loaded
+        ? theme.ok(`loaded${s.pid ? ` · pid ${s.pid}` : ''}${s.state ? ` · ${s.state}` : ''}`)
+        : theme.warn('not loaded');
+      process.stdout.write(`${theme.accent(ctx.label)}  ${line}\n`);
+      meta(`  plist:    ${ctx.plistPath}`);
+      meta(`  registry: ${registrySummary()}`);
+      meta(`  logs:     ${ctx.logPath}`);
+      return 0;
+    }
+    case 'logs': {
+      const follow = parsed.flags['follow'] === true || parsed.positionals.includes('-f');
+      if (!follow) {
+        for (const [label, path] of [
+          ['host', ctx.logPath],
+          ['stderr', ctx.errLogPath],
+        ] as const) {
+          const lines = tailFile(path, 40);
+          if (lines.length === 0) continue;
+          process.stdout.write(theme.meta(`── ${label}: ${path} ──`) + '\n');
+          process.stdout.write(lines.join('\n') + '\n');
+        }
+        return 0;
+      }
+      return new Promise<number>((resolveP) => {
+        const child = spawn('tail', ['-f', ctx.logPath], { stdio: 'inherit' });
+        const stopFollow = () => {
+          child.kill();
+          resolveP(0);
+        };
+        process.on('SIGINT', stopFollow);
+        child.on('error', () => resolveP(0));
+        child.on('exit', () => resolveP(0));
+      });
     }
     default:
       throw new CliError(USAGE, 2);

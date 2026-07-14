@@ -48,9 +48,10 @@ src/
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
     liveness.ts       // localSessionLiveness(workspace): binding.session + transcript stat → none|live|resumable|gc-expired; shared by the host's local-session guard and `session show`
   service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)
-    launchd.ts        // pure: plist generation (daemon + /live agents) + launchctl argv builders + status parsing (platform seam)
+    launchd.ts        // pure: plist generation (daemon + /live + wake-actuator agents) + launchctl argv builders + status parsing (platform seam)
     manage.ts         // install/uninstall/start/stop/restart/status + log tail (injectable launchctl runner)
     live.ts           // `service --live`: the /live web-viewer bundle — generate scripts + 2 plists, worktree, bootstrap both agents (ADR 124)
+    host.ts           // `service --wake`: the wake actuator (`musterd host`) as a KeepAlive LaunchAgent — residency survives reboots (ADR 131 inc 5)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
     doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server + claim value-coherence drift detector, read-only (ADR 060, PR #58)

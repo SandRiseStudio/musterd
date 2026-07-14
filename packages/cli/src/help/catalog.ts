@@ -129,8 +129,8 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'service',
     signature:
-      '<install|uninstall|start|stop|restart|refresh|status|logs> [--live] [--port <n>] [--host <h>] [--follow] [--force]',
-    summary: 'run the daemon (or the /live viewer) as a background service (macOS LaunchAgent)',
+      '<install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake] [--port <n>] [--host <h>] [--interval <s>] [--timeout <s>] [--follow] [--force]',
+    summary: 'run the daemon (or the /live viewer, or the wake actuator) as a background service',
     group: 'setup',
     primary: true,
     detail:
@@ -142,7 +142,12 @@ export const CATALOG: readonly CommandEntry[] = [
       '(ADR 132): `install --live` stands up a self-updating build-publisher (a dedicated ' +
       'detached-on-main worktree + an interval agent that rebuilds the web app and publishes it into ' +
       'the daemon’s web-root whenever main moves), so the daemon serves /live from its own origin — ' +
-      'always the latest main, no dev server, no daemon restart; `refresh --live` forces a rebuild now.',
+      'always the latest main, no dev server, no daemon restart; `refresh --live` forces a rebuild now. ' +
+      'Add `--wake` to target the wake actuator (ADR 131 inc 5): `install --wake` runs `musterd host` ' +
+      'as a LaunchAgent (RunAtLoad + KeepAlive) so enrolled seats stay wakeable across reboots — no ' +
+      'terminal left open; `--interval`/`--timeout` (bare seconds) bake the loop’s cadence/watchdog ' +
+      'into the plist. NOT `--host`: that flag is the daemon’s bind host. Bouncing `--wake`/`--live` ' +
+      'drops no teammate session, so neither takes the live-session guard.',
     examples: [
       'musterd service install',
       'musterd service refresh',

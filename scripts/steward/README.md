@@ -66,11 +66,47 @@ GitHub App — the CLI needs only the API key + PAT, keeping the least-privilege
 > protected `main` mean the blast radius is "a draft PR a human reviews" — it cannot merge, PAT or not.
 > Trigger a run any time from Actions → steward → Run workflow.
 
+## The residency arm (ADR 112 §3 → ADR 131 inc 5): cron → wake
+
+The named destination is built: the steward's trigger can swap from the CI cron to the wake ledger
+**under an unchanged charter**. Arm B replaces "CI launches a Claude session" with "a local scan
+sends a directed act; harness residency wakes the enrolled steward seat on this machine" —
+GitHub Actions cannot reach the laptop-local daemon, so the trigger must live where the daemon does.
+
+```
+pnpm steward:notify                # scan + one request_help per drifted task → the steward seat
+pnpm steward:notify --dry-run      # print what would be sent, send nothing
+```
+
+The ask body is **structured only** (task id + finding count — never finder detail text, which
+quotes PR titles/doc prose); the woken steward re-runs `pnpm steward:scan --json` itself. Sender
+identity is the CWD's binding, so the runbook uses a dedicated `steward-scan` seat — an unattended
+send must not impersonate a human.
+
+### Runbook (owner-gated — the 2-week A/B run needs an explicit go; it spends API budget)
+
+1. **Provision the two seats** (once):
+   `musterd agent steward --team <team>` (the workhorse — its worktree is where wakes run) and
+   `musterd agent steward-scan --team <team>` (the sender — authenticated discovery→ask only).
+2. **Enroll the steward** from its workspace (admin authorizes):
+   `musterd residency on --as <admin> --lane batched --tool-policy seat-policy --timeout 15m --budget 2`
+   — `seat-policy` because the charter drafts PRs (the workspace's own Claude settings govern);
+   the wake path still never passes a skip-permissions flag — the CI shape does **not** transfer.
+3. **Keep the actuator resident**: `musterd service install --wake`.
+4. **Schedule the trigger** (matches the CI cron, Mondays 08:00): a user cron/LaunchAgent line that
+   runs `pnpm steward:notify` from the `steward-scan` workspace, e.g.
+   `0 8 * * 1 cd <steward-scan-workspace> && pnpm --dir <repo> steward:notify`.
+5. **During arm B** disable the CI `agent` job (leave the deterministic `scan` job — the tracking
+   issue is arm-independent); re-enable it for arm A. `musterd residency off` is the kill switch.
+
+The pre-registered comparison (arms, metrics, abort conditions) lives in
+[harness-residency.md §7](../../docs/design/harness-residency.md).
+
 ### Still ahead
 
 - **`auto-merge`** — arming `gh pr merge --auto` on a mechanical, statically-guarded fix (still through the
   same gates). No task uses it yet — the static checks already prevent the mechanical drift it would fix.
-- **Reachability chase** — post the PR to the musterd team and re-ping via the ladder if unreviewed;
-  arrives with daemon-triggered residency (the reserved roadmap item), swapping the cron under the same seat.
+- **Reachability chase** — post the PR to the musterd team and re-ping via the ladder if unreviewed —
+  natural on the residency arm, where the steward is a live musterd seat.
 
 Every task stays `propose` (human-approved), so _curated is a feature_ holds.
