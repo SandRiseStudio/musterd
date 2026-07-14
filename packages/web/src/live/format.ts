@@ -3,6 +3,7 @@ import type {
   Capabilities,
   Envelope,
   MemberSummary,
+  OfflineReason,
   Posture,
 } from '@musterd/protocol';
 import { resolvePosture } from '@musterd/protocol';
@@ -338,11 +339,42 @@ export function postureMeta(posture: Posture): StatusMeta {
 /** Resolve the chip posture from a summary — prefer the server field; fall back for pre-138 daemons. */
 export function memberPosture(m: MemberSummary): Posture {
   if (m.posture) return m.posture;
-  const activity = m.activity ?? (m.presence === 'offline' ? 'offline' : 'online');
+  const activity = m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle');
   return resolvePosture({
     activity,
     availability: m.availability ?? null,
   });
+}
+
+/**
+ * Primary roster chip (ADR 138/141): posture token, except when offline — then prefer
+ * `offline_reason` when it isn't `unknown` (so the chip reads reconnecting/disconnected/…).
+ */
+export function rosterPrimaryChip(m: MemberSummary): StatusMeta {
+  const posture = memberPosture(m);
+  if (posture !== 'offline') return postureMeta(posture);
+  const reason = m.offline_reason;
+  if (reason && reason !== 'unknown') return offlineReasonMeta(reason);
+  return postureMeta('offline');
+}
+
+export function offlineReasonMeta(reason: OfflineReason): StatusMeta {
+  switch (reason) {
+    case 'reconnecting':
+      return { label: 'reconnecting', tone: 'pending', quiet: false };
+    case 'disconnected':
+      return { label: 'disconnected', tone: 'muted', quiet: true };
+    case 'signed_off':
+      return { label: 'signed off', tone: 'muted', quiet: true };
+    case 'off_hours':
+      return { label: 'off hours', tone: 'pending', quiet: false };
+    case 'unknown':
+      return { label: 'offline', tone: 'muted', quiet: true };
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
 }
 
 /** How an account_status reads: wire token + tone. Healthy norms are quiet (and usually hidden). */

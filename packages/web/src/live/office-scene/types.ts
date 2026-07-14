@@ -11,7 +11,7 @@ export interface OfficeNode {
   name: string;
   kind: 'agent' | 'human';
   presence: 'online' | 'away' | 'offline';
-  activity: 'offline' | 'online' | 'working';
+  activity: 'offline' | 'idle' | 'working';
   state: string | null;
   /** The member's signature colour — `memberColor(name, kind)`, an `hsl()` string. */
   color: string;

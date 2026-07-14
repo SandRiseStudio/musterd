@@ -7,6 +7,7 @@ import { getCursor, setCursor } from './cursors.js';
 import {
   addMember,
   authMember,
+  getMemberById,
   getMemberByName,
   hashToken,
   leaveMember,
@@ -271,14 +272,14 @@ describe('messages + inbox', () => {
 });
 
 describe('activity (two-clocks)', () => {
-  it('resolveActivity: offline when not live; online when live with no status; working with a status', () => {
+  it('resolveActivity: offline when not live; idle when live with no status; working with a status', () => {
     expect(resolveActivity(false, { state: 'x', ts: 1 })).toEqual({
       activity: 'offline',
       state: null,
       last_status_at: null,
     });
     expect(resolveActivity(true, null)).toEqual({
-      activity: 'online',
+      activity: 'idle',
       state: null,
       last_status_at: null,
     });
@@ -406,6 +407,22 @@ describe('presence', () => {
     expect(listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')?.status).toBe(
       'offline',
     );
+  });
+
+  it('sticky offline reason: release stamps disconnected; re-attach clears; leave stamps signed_off (ADR 141)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBeNull();
+
+    const p = attach(db, ada.row.id, 'claude-code', 'c1');
+    release(db, p.id, 45_000);
+    expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBe('disconnected');
+
+    attach(db, ada.row.id, 'claude-code', 'c2');
+    expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBeNull();
+
+    leaveMember(db, ada.row.id);
+    expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBe('signed_off');
   });
 
   it('listReclaimableMemberIds: a held-within-grace seat is reclaimable though it reads offline (ADR 105)', () => {

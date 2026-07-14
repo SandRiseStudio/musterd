@@ -15,7 +15,7 @@ function computeData(teamName: string, roster: MemberSummary[]): OfficeData {
         name: m.name,
         kind,
         presence: m.presence,
-        activity: m.activity ?? (m.presence === 'offline' ? 'offline' : 'online'),
+        activity: m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle'),
         state: m.state ?? null,
         color: memberColor(m.name, kind),
         role: m.role,

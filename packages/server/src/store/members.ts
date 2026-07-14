@@ -154,6 +154,7 @@ export function addMember(
     account_status: null,
     capabilities: null,
     credential_hash: null,
+    last_offline_reason: null,
     left_at: null,
     created_at: now,
     updated_at: now,
@@ -400,11 +401,17 @@ export function setAvailability(
 }
 
 export function leaveMember(db: Database, memberId: string): void {
-  db.prepare('UPDATE members SET left_at = ?, updated_at = ? WHERE id = ?').run(
-    Date.now(),
-    Date.now(),
-    memberId,
-  );
+  const now = Date.now();
+  db.prepare(
+    "UPDATE members SET left_at = ?, last_offline_reason = 'signed_off', updated_at = ? WHERE id = ?",
+  ).run(now, now, memberId);
+}
+
+/** Sticky offline reason for an intentional seat release (unbind) — ADR 141. */
+export function markSignedOff(db: Database, memberId: string): void {
+  db.prepare(
+    "UPDATE members SET last_offline_reason = 'signed_off', updated_at = ? WHERE id = ?",
+  ).run(Date.now(), memberId);
 }
 
 export { newToken };

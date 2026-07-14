@@ -63,10 +63,10 @@ hand someone a spectator view without provisioning them a real seat.
   when nobody is working.
 - **Stream** (`live/Stream.tsx`) — the legible half: the act feed, newest-last, live rows type out,
   threaded replies indent, day/now dividers. This is where a human reads the team.
-- **Roster** (`live/RosterPanel.tsx`) — posture + governance rail (ADR 138 / 070): each seat's
-  server-projected `posture` chip (`working`·`idle`·`away`·`offline`), account-status only for
-  exceptions (`disabled`/`banned`/`archived`), capability deviations, presence dot, and the ADR 105
-  "reconnecting" hint for a reclaimable seat. The accessible counterpart to the (decorative) office.
+- **Roster** (`live/RosterPanel.tsx`) — posture + offline reason + governance (ADR 138/141/070):
+  server-projected `posture` (`working`·`idle`·`away`·`offline`), with offline chips preferring
+  `offline_reason` (`reconnecting`/`disconnected`/`signed off`/`off hours`) when known; account-status
+  only for exceptions (`disabled`/`banned`/`archived`); capability deviations; presence dot.
 
 ## Act rendering vocabulary (the load-bearing contract)
 
@@ -114,7 +114,7 @@ live/
   useLiveStream.ts              // the React hook: envelopes, roster, liveIds, conn status; drives the chime
   format.ts                     // act tone/label, laneEvent recovery, roster/colour/status projections
   Stream.tsx                    // the act feed + ACT_GLYPH + typewriter
-  RosterPanel.tsx               // posture chip + exception account_status + reconnecting hint
+  RosterPanel.tsx               // posture/offline_reason chip + exception account_status
   OfficeScene.tsx               // React wrapper: mounts the scene, feeds it envelopes → emit
   Board.tsx / ApprovalQueue.tsx / ApprovalCard.tsx / AuditLog.tsx   // the other live views
   sound.ts                      // opt-in WebAudio firehose cues

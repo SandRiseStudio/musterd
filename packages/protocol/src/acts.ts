@@ -60,11 +60,13 @@ export type PresenceStatus = (typeof PRESENCE_STATUSES)[number];
 export const PresenceStatusSchema = z.enum(PRESENCE_STATUSES);
 
 /**
- * Roster activity (musterd/0.2). A coarser, demo-facing read of a member than raw presence:
- * `offline` (no live attachment), `online` (present, idle), `working` (present + a self-reported
- * task). Resolved server-side from presence + the latest `status_update` (two-clocks rule).
+ * Roster activity (musterd/0.2, renamed ADR 140). A coarser, demo-facing read of a member than raw
+ * presence: `offline` (no live attachment), `idle` (present, no self-reported task), `working`
+ * (present + a self-reported task). Resolved server-side from presence + the latest `status_update`
+ * (two-clocks rule). Was `online` for the idle state — renamed to avoid colliding with presence
+ * `online`.
  */
-export const ACTIVITIES = ['offline', 'online', 'working'] as const;
+export const ACTIVITIES = ['offline', 'idle', 'working'] as const;
 export type Activity = (typeof ACTIVITIES)[number];
 export const ActivitySchema = z.enum(ACTIVITIES);
 

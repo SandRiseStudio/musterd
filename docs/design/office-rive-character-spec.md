@@ -110,7 +110,7 @@ Per member, per frame, the scene has these in hand (no new plumbing needed for m
 | ------------- | ------------------------------------ | ------------------------- | ----------------------------------------------------------- |
 | `name`        | string                               | roster                    | identity; seeds deterministic variety                       |
 | `kind`        | `'agent' \| 'human'`                 | `OfficeNode.kind`         | drives the agent/human tell                                 |
-| `activity`    | `'offline' \| 'online' \| 'working'` | `OfficeNode.activity`     | `working` ⇒ typing                                          |
+| `activity`    | `'offline' \| 'idle' \| 'working'`   | `OfficeNode.activity`     | `working` ⇒ typing                                          |
 | `presence`    | `'online' \| 'away' \| 'offline'`    | `OfficeNode.presence`     | `away` ⇒ lounging                                           |
 | `color`       | `hsl(H, 68%, 62%)`                   | `memberColor(name, kind)` | **H is the identity hue** (agents 150–280°, humans 320–70°) |
 | `pose.dir`    | `'S' \| 'E' \| 'N' \| 'W'`           | `Pose.dir`                | facing (S = toward viewer)                                  |

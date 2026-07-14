@@ -44,7 +44,7 @@ const ROSTER_STATE_MAX = 180;
 
 type RosterGroup = 'working' | 'here' | 'out';
 function rosterGroup(m: MemberSummary): RosterGroup {
-  const activity = m.activity ?? (m.presence === 'offline' ? 'offline' : 'online');
+  const activity = m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle');
   if (activity === 'offline') return 'out';
   return activity === 'working' && m.state ? 'working' : 'here';
 }

@@ -14,7 +14,7 @@ function member(name: string, over: Partial<MemberSummary> = {}): MemberSummary 
     created_at: 0,
     presence: 'online',
     presences: [],
-    activity: 'online',
+    activity: 'idle',
     ...over,
   };
 }

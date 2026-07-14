@@ -27,6 +27,8 @@ import {
   type LaneWarning,
   type MemberSummary,
   resolvePosture,
+  resolveOfflineReason,
+  type OfflineReason,
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { z } from 'zod';
@@ -69,6 +71,7 @@ import {
   hashToken,
   leaveMember,
   markBound,
+  markSignedOff,
   mintCredential,
   rotateToken,
   setAvailability,
@@ -626,6 +629,15 @@ function summarize(
     const member = toMember(s.member, teamSlug);
     const seesCaps = viewerIsAdmin || viewer?.id === s.member.id;
     const { capabilities: _caps, ...needToKnow } = member;
+    const isReclaimable = reclaimable.has(s.member.id);
+    const sticky = s.member.last_offline_reason;
+    const offlineReason = resolveOfflineReason({
+      live: s.status !== 'offline',
+      reclaimable: isReclaimable,
+      availability: member.availability ?? null,
+      lastOfflineReason:
+        sticky === 'disconnected' || sticky === 'signed_off' ? (sticky as OfflineReason) : null,
+    });
     return {
       ...(seesCaps ? member : needToKnow),
       presence: s.status,
@@ -635,7 +647,8 @@ function summarize(
         activity: activity.activity,
         availability: member.availability ?? null,
       }),
-      reclaimable: reclaimable.has(s.member.id),
+      ...(offlineReason ? { offline_reason: offlineReason } : {}),
+      reclaimable: isReclaimable,
       wakeable: wakeable.has(s.member.id),
     };
   });
@@ -2052,6 +2065,7 @@ export async function handleHttp(
           ctx.hub.remove(old.connId);
         }
         clearMemberPresence(ctx.db, member.id);
+        markSignedOff(ctx.db, member.id);
         clearBound(ctx.db, member.id);
         ctx.hub.broadcastTeam(team.id, {
           type: 'presence',

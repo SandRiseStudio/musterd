@@ -4,7 +4,7 @@ import { DESK_SLOTS } from './layout';
 export interface Seatable {
   name: string;
   presence: 'online' | 'away' | 'offline';
-  availability?: { status: 'available' | 'away' | 'dnd' } | null | undefined;
+  availability?: { status: 'available' | 'away' | 'dnd' | 'off_hours' } | null | undefined;
 }
 
 /** Where a member is rendered this frame. */
