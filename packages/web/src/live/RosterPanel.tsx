@@ -106,7 +106,7 @@ function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | 
         <div className="lc-seat__gov">
           <span
             className={`lc-stat lc-stat--${status.quiet ? 'quiet' : status.tone}`}
-            title={`Account status: ${status.label}`}
+            title={`Account status: ${m.account_status ?? status.label}`}
           >
             {status.label}
           </span>
