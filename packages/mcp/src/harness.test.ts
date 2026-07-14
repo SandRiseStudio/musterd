@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { describe, expect, it } from 'vitest';
 import { captureHarnessContext, observeHarnessInitialization } from './harness.js';
 
@@ -30,10 +30,10 @@ describe('captureHarnessContext (ADR 120)', () => {
   });
 
   it('captures clientInfo only after the MCP initialize callback completes', () => {
-    let client: { name: string; version?: string } | undefined;
+    const state: { client?: { name: string; version?: string } } = {};
     let priorCalls = 0;
     const source = {
-      getClientVersion: () => client,
+      getClientVersion: () => state.client,
       oninitialized: () => {
         priorCalls++;
       },
@@ -43,7 +43,7 @@ describe('captureHarnessContext (ADR 120)', () => {
     observeHarnessInitialization(source, (context) => captured.push(context));
     expect(captured).toEqual([]);
 
-    client = { name: 'Cursor', version: '1.8.0' };
+    state.client = { name: 'Cursor', version: '1.8.0' };
     source.oninitialized!();
 
     expect(priorCalls).toBe(1);

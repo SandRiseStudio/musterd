@@ -18,10 +18,11 @@ export interface InitializeObservable extends ClientVersionSource {
 }
 
 const MAX_HARNESS_FIELD_LENGTH = 120;
+const ANSI_CSI_SEQUENCE = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
 
 function sanitize(value: string | undefined): string | undefined {
   const trimmed = value
-    ?.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+    ?.replace(ANSI_CSI_SEQUENCE, '')
     .replace(/[^\x20-\x7E]/g, '')
     .trim();
   return trimmed ? trimmed.slice(0, MAX_HARNESS_FIELD_LENGTH) : undefined;
