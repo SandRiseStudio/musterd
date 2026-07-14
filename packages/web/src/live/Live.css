@@ -98,14 +98,6 @@
   font-size: 14px;
   letter-spacing: -0.01em;
 }
-.lc__word::before {
-  content: '';
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--lc-accent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--lc-accent) 75%, transparent);
-}
 .lc__team {
   font-family: var(--font-mono, monospace);
   color: var(--lc-muted);

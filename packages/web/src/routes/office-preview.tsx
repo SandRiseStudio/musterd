@@ -1,13 +1,18 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import liveCss from '../live/Live.css?url';
+import brandCss from '../brand/brand.css?url';
+import { MusterdWord } from '../brand/MusterdWord';
 import { memberColor } from '../live/format';
 import type { OfficeData, OfficeEvent, OfficeHandle } from '../live/office-scene';
 
 export const Route = createFileRoute('/office-preview')({
   head: () => ({
     meta: [{ title: 'musterd — office preview' }],
-    links: [{ rel: 'stylesheet', href: liveCss }],
+    links: [
+      { rel: 'stylesheet', href: liveCss },
+      { rel: 'stylesheet', href: brandCss },
+    ],
   }),
   component: OfficePreviewPage,
 });
@@ -140,7 +145,7 @@ function OfficePreviewPage() {
   return (
     <main className="lc">
       <header className="lc__topbar">
-        <span className="lc__word">musterd</span>
+        <MusterdWord />
         <span className="lc__team">/ office preview</span>
         <span className="lc__spacer" />
         <button className="lc__pbtn" title="request help (walk-over)" onClick={() => fire({ kind: 'walk-help', from: 'Ada', to: 'Bo', tier: 'needs-attn' })}>?</button>

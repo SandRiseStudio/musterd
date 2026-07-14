@@ -10,11 +10,16 @@ import {
   type LiveConfig,
 } from '../live/client';
 import liveCss from '../live/Live.css?url';
+import brandCss from '../brand/brand.css?url';
+import { MusterdWord } from '../brand/MusterdWord';
 
 export const Route = createFileRoute('/board')({
   head: () => ({
     meta: [{ title: 'musterd — work board' }],
-    links: [{ rel: 'stylesheet', href: liveCss }],
+    links: [
+      { rel: 'stylesheet', href: liveCss },
+      { rel: 'stylesheet', href: brandCss },
+    ],
   }),
   component: BoardPage,
 });
@@ -93,7 +98,7 @@ function BoardPage() {
   return (
     <main className="lc">
       <header className="lc__topbar">
-        <span className="lc__word">musterd</span>
+        <MusterdWord />
         <span className="lc__team">/ {connected ? `${cfg!.team} · board` : 'board'}</span>
         <span className="lc__spacer" />
         {connected && (

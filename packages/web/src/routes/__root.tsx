@@ -1,5 +1,7 @@
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
+import brandCss from '../brand/brand.css?url';
+import chipIcon from '../brand/chip.svg?url';
 import globalCss from '../styles/global.css?url';
 
 const TITLE = 'musterd — roadmap';
@@ -21,7 +23,11 @@ export const Route = createRootRoute({
       { property: 'og:type', content: 'website' },
       { name: 'twitter:card', content: 'summary_large_image' },
     ],
-    links: [{ rel: 'stylesheet', href: globalCss }],
+    links: [
+      { rel: 'icon', href: chipIcon, type: 'image/svg+xml' },
+      { rel: 'stylesheet', href: globalCss },
+      { rel: 'stylesheet', href: brandCss },
+    ],
   }),
   shellComponent: RootDocument,
 });

@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { renderPrimer } from '@musterd/protocol';
 import { bind } from './bind.js';
+import { MCP_ICONS } from './brand.js';
 import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
 import { MusterdClient } from './client.js';
 import { isClaimedConfig, loadMcpConfig, type McpConfig } from './config.js';
@@ -136,7 +137,7 @@ export function buildMcpServer(
   opts: { onFirstToolCall?: () => Promise<void> } = {},
 ): McpServer {
   const server = new McpServer(
-    { name: 'musterd', version: '0.2.0' },
+    { name: 'musterd', version: '0.2.0', icons: [...MCP_ICONS] },
     { instructions: primerInstructions(config) },
   );
   // Patch registerTool before any tool registers, so every handler runs inside a

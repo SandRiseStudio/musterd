@@ -2,6 +2,8 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Clock } from '../live/Clock';
 import liveCss from '../live/Live.css?url';
+import brandCss from '../brand/brand.css?url';
+import { MusterdWord } from '../brand/MusterdWord';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
@@ -20,7 +22,10 @@ import { useLiveStream } from '../live/useLiveStream';
 export const Route = createFileRoute('/live')({
   head: () => ({
     meta: [{ title: 'musterd — live comms' }],
-    links: [{ rel: 'stylesheet', href: liveCss }],
+    links: [
+      { rel: 'stylesheet', href: liveCss },
+      { rel: 'stylesheet', href: brandCss },
+    ],
   }),
   component: LivePage,
 });
@@ -213,7 +218,7 @@ function LivePage() {
   return (
     <main className="lc">
       <header className="lc__topbar">
-        <span className="lc__word">musterd</span>
+        <MusterdWord />
         {connected && <span className="lc__team">/ {cfg!.team}</span>}
         <span className="lc__spacer" />
         {connected && <WatchLinkButton cfg={cfg!} />}
