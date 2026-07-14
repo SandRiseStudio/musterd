@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import { type Binding, resolveAttestedModel } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { loadConfig, saveBinding, saveWorkspaceSpec } from '../config.js';
