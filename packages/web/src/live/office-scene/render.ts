@@ -60,6 +60,8 @@ export interface ScenePalette {
   floor2: string;
   wood: string;
   couch: string;
+  /** The back walls — a warm interior surface (the `--wall` token, unused until now). */
+  wall: string;
 }
 
 /** Dusk office (the historical hard-coded values) — also the fallback when a token can't be read. */
@@ -68,6 +70,7 @@ export const DARK_PALETTE: ScenePalette = {
   floor2: '#c6863f',
   wood: '#7a4e2d',
   couch: '#e3a72b',
+  wall: '#2a2030', // the dusk `--wall` token (tokens.css)
 };
 
 let PAL: ScenePalette = DARK_PALETTE;
@@ -206,6 +209,129 @@ function drawFloor(ctx: CanvasRenderingContext2D, fit: Fit): void {
   quad(ctx, [c10, c11, dn(c11), dn(c10)], PAL.floor2);
   quad(ctx, [c01, c11, dn(c11), dn(c01)], mul(PAL.floor2, 0.955));
   quad(ctx, [c00, c10, c11, c01], PAL.floor);
+}
+
+// ── the room shell: the two back walls + their windows (office-walls-windows.md) ────────────────────────
+// The floor diamond's back corner is (0,0). The two back walls rise from the two upper edges meeting there:
+// the `ly=0` edge (back-right) and the `lx=0` edge (back-left, the one the door sits in). They are drawn
+// ONCE as a backdrop — right after the floor, before the depth-sorted items — because a wall spans many
+// depths (it is one plane) and so can't take a single depth key; nothing on the floor is ever *behind* the
+// back edges, so a backdrop that every furniture piece paints over is correct at every position.
+
+/** Wall height in screen px at scale 1 — tall enough to read as a room, short enough not to wall the view in. */
+const WALL_H = 188;
+
+/** A window, as a fraction along its wall's edge `[t0,t1]` and up the wall `[u0,u1]`. */
+interface Win {
+  t0: number;
+  t1: number;
+  u0: number;
+  u1: number;
+}
+/** Two windows per wall — spaced so the wall reads as a facade, not a single porthole. */
+const WINDOWS: readonly Win[] = [
+  { t0: 0.28, t1: 0.46, u0: 0.34, u1: 0.82 },
+  { t0: 0.58, t1: 0.78, u0: 0.34, u1: 0.82 },
+];
+
+/** How far into the room a daylight beam reaches (logical units), and its sideways sun-shear. */
+const BEAM_LEN = 150;
+const BEAM_SHEAR = 46;
+
+/**
+ * The glass colour: bright sky by day (warm at golden hour via `skyTint`), a dark pane with a faint city
+ * glow by night. Interpolated on `daylight`, so it tracks the same PST clock as the beam and the veil.
+ */
+export function glassColor(env: LightEnv): string {
+  const [sr, sg, sb] = hexRgb('#0f1626'); // night pane
+  const m = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(env.skyTint);
+  const [dr, dg, db] = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [206, 226, 244];
+  const t = env.daylight;
+  const c = (n: number, d: number) => Math.round(n + (d - n) * t);
+  return `rgb(${c(sr, dr)}, ${c(sg, dg)}, ${c(sb, db)})`;
+}
+
+/**
+ * Draw the two back walls and their windows. `edge(t,u)` maps a wall coordinate to the floor point + lift,
+ * so the same body serves both walls — the back-right wall runs `lx` along the `ly=0` edge, the back-left
+ * runs `ly` along the `lx=0` edge.
+ */
+function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void {
+  const lift = WALL_H * fit.scale;
+  const wall = (
+    edge: (t: number) => [number, number],
+    faceShade: number,
+  ): void => {
+    const pt = (t: number, u: number): Pt => {
+      const [lx, ly] = edge(t);
+      const p = project(lx, ly, fit);
+      return { x: p.x, y: p.y - u * lift };
+    };
+    // the wall face
+    quad(ctx, [pt(0, 0), pt(1, 0), pt(1, 1), pt(0, 1)], shade(PAL.wall, faceShade));
+    // a darker top cap, so the wall has a lip where it meets the (absent) ceiling
+    quad(ctx, [pt(0, 1), pt(1, 1), pt(1, 1.04), pt(0, 1.04)], shade(PAL.wall, faceShade * 0.86));
+    // windows
+    const frame = shade(PAL.wall, faceShade * 0.7);
+    const glass = glassColor(env);
+    for (const w of WINDOWS) {
+      quad(ctx, [pt(w.t0, w.u0), pt(w.t1, w.u0), pt(w.t1, w.u1), pt(w.t0, w.u1)], frame); // reveal
+      const iT = (w.t1 - w.t0) * 0.08;
+      const iU = (w.u1 - w.u0) * 0.1;
+      quad(ctx, [pt(w.t0 + iT, w.u0 + iU), pt(w.t1 - iT, w.u0 + iU), pt(w.t1 - iT, w.u1 - iU), pt(w.t0 + iT, w.u1 - iU)], glass);
+      // panes: one vertical + one horizontal mullion, so it reads as a window, not a lit hole
+      const mid = (w.t0 + w.t1) / 2;
+      const midU = (w.u0 + w.u1) / 2;
+      quad(ctx, [pt(mid - iT * 0.35, w.u0 + iU), pt(mid + iT * 0.35, w.u0 + iU), pt(mid + iT * 0.35, w.u1 - iU), pt(mid - iT * 0.35, w.u1 - iU)], frame);
+      quad(ctx, [pt(w.t0 + iT, midU - iU * 0.35), pt(w.t1 - iT, midU - iU * 0.35), pt(w.t1 - iT, midU + iU * 0.35), pt(w.t0 + iT, midU + iU * 0.35)], frame);
+    }
+  };
+  // Two faces at slightly different shades so the back corner reads (like box()'s side faces).
+  // back-left wall (lx=0 edge) is a touch darker — more edge-on to the implied upper-left light.
+  wall((t) => [0, t * FLOOR], 0.9);
+  // back-right wall (ly=0 edge) catches more of that light.
+  wall((t) => [t * FLOOR, 0], 0.99);
+}
+
+/**
+ * The daylight beams — a warm parallelogram of light cast from each window onto the floor, reaching into
+ * the room and sheared sideways to imply an angled sun. Additive (it *adds* light), strength tied to
+ * `skyStrength`, so at night there is simply no beam. Drawn on the floor before the furniture, so a desk
+ * correctly sits *on* the light rather than glowing.
+ */
+function drawWindowBeams(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void {
+  if (env.skyStrength < 0.02) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const beam = (base: (t: number) => [number, number], into: (l: [number, number], d: number) => [number, number]): void => {
+    for (const w of WINDOWS) {
+      const a = base(w.t0);
+      const b = base(w.t1);
+      const far0 = into(a, BEAM_LEN);
+      const far1 = into(b, BEAM_LEN);
+      const pa = project(a[0], a[1], fit);
+      const pb = project(b[0], b[1], fit);
+      const pf0 = project(far0[0], far0[1], fit);
+      const pf1 = project(far1[0], far1[1], fit);
+      // fade along the throw: bright at the window sill, gone at the far end.
+      const grad = ctx.createLinearGradient((pa.x + pb.x) / 2, (pa.y + pb.y) / 2, (pf0.x + pf1.x) / 2, (pf0.y + pf1.y) / 2);
+      const m = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(env.skyTint);
+      const [r, g, bl] = m ? [m[1], m[2], m[3]] : ['255', '210', '150'];
+      const peak = 0.5 * env.skyStrength;
+      grad.addColorStop(0, `rgba(${r}, ${g}, ${bl}, ${peak})`);
+      grad.addColorStop(1, `rgba(${r}, ${g}, ${bl}, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      for (const [i, p] of [pa, pb, pf1, pf0].entries()) i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+  };
+  // back-left wall (lx=0): beam throws into +lx, sheared along +ly.
+  beam((t) => [0, t * FLOOR], (l, d) => [d, l[1] + (d / BEAM_LEN) * BEAM_SHEAR]);
+  // back-right wall (ly=0): beam throws into +ly, sheared along +lx.
+  beam((t) => [t * FLOOR, 0], (l, d) => [l[0] + (d / BEAM_LEN) * BEAM_SHEAR, d]);
+  ctx.restore();
 }
 
 /** A round-ish iso rug (a filled iso square). */
@@ -943,6 +1069,10 @@ export function renderScene(
   env: LightEnv = DAY_ENV,
 ): SceneAnchors {
   drawFloor(ctx, fit);
+  // The room shell: back walls + windows as a backdrop (behind every item), then the daylight beams they
+  // cast onto the floor (under every item). Both before the depth-sorted loop — see the walls note above.
+  drawWalls(ctx, fit, env);
+  drawWindowBeams(ctx, fit, env);
 
   // desk → seat owner (for the monitor's working glow); the owner may be walking but the seat stays lit.
   const slotMember = new Map<number, string>();

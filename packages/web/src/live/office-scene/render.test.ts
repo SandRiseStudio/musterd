@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { fitFloor } from './iso';
 import { DESK_SLOTS } from './layout';
-import { animatedDeskAnchors } from './render';
+import { computeLightEnv } from './lighting';
+import { animatedDeskAnchors, glassColor } from './render';
 
 /** The fan/coffee overlay anchors (Tier-A animated props). The key behaviour: a fan only spins and a mug
  * only steams at an *occupied* desk — an unattended running fan or a steaming fresh mug reads as wrong. */
@@ -42,5 +43,26 @@ describe('animatedDeskAnchors', () => {
     const minusOne = new Set(allSlots);
     minusOne.delete(mugSlot!.id);
     expect(animatedDeskAnchors(fit, minusOne).coffees.length).toBe(full - 1);
+  });
+});
+
+/** The window glass reads from the same PST lighting as the beams and the veil — bright sky by day, a
+ * dark pane by night — so the whole room tells one time-of-day story (office-walls-windows.md). */
+describe('glassColor (windows track the day cycle)', () => {
+  const rgb = (s: string) => (/rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(s) ?? []).slice(1).map(Number);
+  const luma = ([r, g, b]: number[]) => 0.299 * r! + 0.587 * g! + 0.114 * b!;
+
+  it('is a bright pane at midday and a dark pane at deep night', () => {
+    const day = luma(rgb(glassColor(computeLightEnv(12, true))));
+    const night = luma(rgb(glassColor(computeLightEnv(1, false))));
+    expect(day).toBeGreaterThan(night + 80); // unmistakably lit vs unlit
+    expect(night).toBeLessThan(60); // genuinely dark, not just dimmer
+  });
+
+  it('warms toward golden hour rather than staying cold blue', () => {
+    // dawn/dusk skew warm (more red than blue); flat midday is the coolest.
+    const [dr, , db] = rgb(glassColor(computeLightEnv(6.5, true))); // dawn ramp
+    const [nr, , nb] = rgb(glassColor(computeLightEnv(12, true))); // noon
+    expect(dr! - db!).toBeGreaterThan(nr! - nb!);
   });
 });

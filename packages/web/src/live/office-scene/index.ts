@@ -177,6 +177,7 @@ export function mountOffice(
       floor2: read('--floor-2', DARK_PALETTE.floor2),
       wood: read('--wood', DARK_PALETTE.wood),
       couch: read('--couch', DARK_PALETTE.couch),
+      wall: read('--wall', DARK_PALETTE.wall),
     };
   }
 
