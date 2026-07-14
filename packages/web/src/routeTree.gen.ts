@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as OfficePreviewRouteImport } from './routes/office-preview'
 import { Route as LiveRouteImport } from './routes/live'
+import { Route as CharacterSheetRouteImport } from './routes/character-sheet'
 import { Route as BoardRouteImport } from './routes/board'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as ApprovalsRouteImport } from './routes/approvals'
@@ -25,6 +26,11 @@ const OfficePreviewRoute = OfficePreviewRouteImport.update({
 const LiveRoute = LiveRouteImport.update({
   id: '/live',
   path: '/live',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CharacterSheetRoute = CharacterSheetRouteImport.update({
+  id: '/character-sheet',
+  path: '/character-sheet',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BoardRoute = BoardRouteImport.update({
@@ -59,6 +65,7 @@ export interface FileRoutesByFullPath {
   '/approvals': typeof ApprovalsRoute
   '/audit': typeof AuditRoute
   '/board': typeof BoardRoute
+  '/character-sheet': typeof CharacterSheetRoute
   '/live': typeof LiveRoute
   '/office-preview': typeof OfficePreviewRoute
 }
@@ -68,6 +75,7 @@ export interface FileRoutesByTo {
   '/approvals': typeof ApprovalsRoute
   '/audit': typeof AuditRoute
   '/board': typeof BoardRoute
+  '/character-sheet': typeof CharacterSheetRoute
   '/live': typeof LiveRoute
   '/office-preview': typeof OfficePreviewRoute
 }
@@ -78,6 +86,7 @@ export interface FileRoutesById {
   '/approvals': typeof ApprovalsRoute
   '/audit': typeof AuditRoute
   '/board': typeof BoardRoute
+  '/character-sheet': typeof CharacterSheetRoute
   '/live': typeof LiveRoute
   '/office-preview': typeof OfficePreviewRoute
 }
@@ -89,6 +98,7 @@ export interface FileRouteTypes {
     | '/approvals'
     | '/audit'
     | '/board'
+    | '/character-sheet'
     | '/live'
     | '/office-preview'
   fileRoutesByTo: FileRoutesByTo
@@ -98,6 +108,7 @@ export interface FileRouteTypes {
     | '/approvals'
     | '/audit'
     | '/board'
+    | '/character-sheet'
     | '/live'
     | '/office-preview'
   id:
@@ -107,6 +118,7 @@ export interface FileRouteTypes {
     | '/approvals'
     | '/audit'
     | '/board'
+    | '/character-sheet'
     | '/live'
     | '/office-preview'
   fileRoutesById: FileRoutesById
@@ -117,6 +129,7 @@ export interface RootRouteChildren {
   ApprovalsRoute: typeof ApprovalsRoute
   AuditRoute: typeof AuditRoute
   BoardRoute: typeof BoardRoute
+  CharacterSheetRoute: typeof CharacterSheetRoute
   LiveRoute: typeof LiveRoute
   OfficePreviewRoute: typeof OfficePreviewRoute
 }
@@ -135,6 +148,13 @@ declare module '@tanstack/react-router' {
       path: '/live'
       fullPath: '/live'
       preLoaderRoute: typeof LiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/character-sheet': {
+      id: '/character-sheet'
+      path: '/character-sheet'
+      fullPath: '/character-sheet'
+      preLoaderRoute: typeof CharacterSheetRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/board': {
@@ -181,6 +201,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApprovalsRoute: ApprovalsRoute,
   AuditRoute: AuditRoute,
   BoardRoute: BoardRoute,
+  CharacterSheetRoute: CharacterSheetRoute,
   LiveRoute: LiveRoute,
   OfficePreviewRoute: OfficePreviewRoute,
 }

@@ -66,11 +66,15 @@ export const DESK_SLOTS: DeskSlot[] = [
   { id: 1, lx: 330, ly: 150, dir: 'S' },
   { id: 2, lx: 470, ly: 160, dir: 'E' },
   { id: 3, lx: 150, ly: 330, dir: 'E' },
-  { id: 4, lx: 350, ly: 340, dir: 'N' },
+  // Two of the interior desks face **S** (toward the viewer) on purpose. Most of the floor faces away, so
+  // most of the team showed you the back of their head — and a face (eyes, visor, a blink) is the single
+  // thing that makes a member read as a person rather than a coloured block. Kept to two: turning the
+  // whole floor toward the camera would make the room read as a stage set rather than an office.
+  { id: 4, lx: 350, ly: 340, dir: 'S' },
   { id: 5, lx: 620, ly: 440, dir: 'N' },
   { id: 6, lx: 780, ly: 430, dir: 'W' },
   { id: 7, lx: 150, ly: 610, dir: 'N' },
-  { id: 8, lx: 520, ly: 560, dir: 'N' },
+  { id: 8, lx: 520, ly: 560, dir: 'S' },
   { id: 9, lx: 780, ly: 630, dir: 'W' },
   { id: 10, lx: 340, ly: 735, dir: 'S' },
   { id: 11, lx: 650, ly: 760, dir: 'N' },
