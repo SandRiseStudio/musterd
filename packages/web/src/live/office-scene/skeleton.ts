@@ -61,9 +61,11 @@ export const CHAR = {
   chest: 52,
   shoulder: 58,
   neck: 64,
-  /** Head centre; the crown is `headC + headR`. */
-  headC: 76,
-  headR: 13,
+  /** Head centre; the crown is `headC + headR`. Shrunk from 13 → 11.5: the head is the loudest shape in
+   * the silhouette, and at 13 it read as a pale sphere that swallowed the body. Raised slightly to keep
+   * the crown (and so the label anchor) at about the same height. */
+  headC: 77,
+  headR: 11.5,
   /** Half-widths at the hips and shoulders. The shoulders must sit **outside** the torso's own half-width
    * (`TORSO_W / 2` in character.ts) or the arms are swallowed by the body and the far one never shows. */
   hipW: 7,

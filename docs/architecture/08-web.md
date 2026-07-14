@@ -25,15 +25,16 @@ Two design commitments follow from "read-only projection":
 
 ## Routes
 
-| Route               | What it is                                                                                                                                                                               |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/` (`index.tsx`)   | Marketing / hero + the roadmap map (rendered from `content/roadmap.data.ts`, the same source `ROADMAP.md` is generated from).                                                            |
-| `/live`             | The team console: the isometric **office** + the **stream** + the governance **roster**. The flagship surface.                                                                           |
-| `/board`            | Read-only kanban over `GET /lanes` — one column per lane state (ADR 104 increment 1).                                                                                                    |
-| `/approvals`        | The approval queue / card web views (ADR 072/073).                                                                                                                                       |
-| `/audit`            | The audit-log view (ADR 071 projection).                                                                                                                                                 |
-| `/office-preview`   | A design/verification harness: a scripted act sequence + a control bar that fires each `OfficeEvent` on demand. Not a live surface — the place to eyeball choreography without a daemon. |
-| `/approval-preview` | The same idea for the approval card.                                                                                                                                                     |
+| Route               | What it is                                                                                                                                                                                                                                                      |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/` (`index.tsx`)   | Marketing / hero + the roadmap map (rendered from `content/roadmap.data.ts`, the same source `ROADMAP.md` is generated from).                                                                                                                                   |
+| `/live`             | The team console: the isometric **office** + the **stream** + the governance **roster**. The flagship surface.                                                                                                                                                  |
+| `/board`            | Read-only kanban over `GET /lanes` — one column per lane state (ADR 104 increment 1).                                                                                                                                                                           |
+| `/approvals`        | The approval queue / card web views (ADR 072/073).                                                                                                                                                                                                              |
+| `/audit`            | The audit-log view (ADR 071 projection).                                                                                                                                                                                                                        |
+| `/office-preview`   | A design/verification harness: a scripted act sequence + a control bar that fires each `OfficeEvent` on demand. Not a live surface — the place to eyeball choreography without a daemon.                                                                        |
+| `/character-sheet`  | The character turnaround (ADR 142): the office character at ~4×, every facing, every pose, across two dozen names. The office draws people ~40px tall, where a wardrobe bug is invisible until it ships — iterate on the character **here**, not in the office. |
+| `/approval-preview` | The same idea for the approval card.                                                                                                                                                                                                                            |
 
 ## The `/live` connection model
 
@@ -126,7 +127,8 @@ live/
     render.ts                   // canvas drawing primitives + toneColor + Cue
     actors.ts / nav.ts / seating.ts / layout.ts / iso.ts   // placement, walk routing, iso projection
     skeleton.ts                 // THE character animation: 3D joints, renderer-free (walk/sit/type) — ADR 133
-    character.ts                // paints a skeleton onto the iso canvas (facing + limb self-occlusion)
+    appearance.ts               // THE character identity: skin/hair/hats/clothes, name-seeded, pure — ADR 142
+    character.ts                // paints a skeleton in an appearance (facing + limb self-occlusion)
     speech.ts                   // the over-head speech-bubble text model
 components/                     // marketing surface (Hero, Roadmap, Footer, LiquidGlass, Wedge)
 brand/                          // unified marks — Chip + MusterdWord topbar lockup (ADR 137)

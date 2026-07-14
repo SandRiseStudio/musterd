@@ -39,7 +39,6 @@ import type { Dir, OfficeNode, Pose } from './types';
  * (couch + armchairs + kitchenette), huddle spaces, and big floor plants.
  */
 
-const SKIN = '#f0c9a0';
 
 /**
  * Theme-varying scene surfaces — the floor and the wooden/upholstered furniture. Furniture-*intrinsic*

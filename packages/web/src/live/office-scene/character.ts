@@ -1,25 +1,26 @@
+import { appearanceOf, type Appearance } from './appearance';
 import { project, type Fit, type Pt } from './iso';
 import { FWD } from './layout';
 import { CHAR, type Skel, type V3 } from './skeleton';
 import type { Dir, OfficeNode } from './types';
 
 /**
- * The character painter: flattens a `Skel` (3D joints, see `skeleton.ts`) onto the 2:1 iso canvas.
+ * The character painter: flattens a `Skel` (3D joints, see `skeleton.ts`) onto the 2:1 iso canvas and
+ * dresses it in an `Appearance` (see `appearance.ts`).
  *
- * Deliberately dumb. It owns no animation — every curve lives in the skeleton — so it stays swappable:
- * this is the file a future 3D renderer *replaces*, while the walk cycle and the sit survive it.
+ * Deliberately dumb about *motion* — every curve lives in the skeleton — so it stays swappable: this is
+ * the file a future 3D renderer replaces, while the walk cycle and the sit survive it.
  *
- * Two things it does own, both of which are depth, not motion:
+ * Three things it does own, all of them spatial rather than animated:
  *  - **Facing.** Character space (+z forward, +x right) is rotated onto the floor by the member's facing,
  *    so one skeleton serves all four directions — no mirrored art, no baked profiles.
  *  - **Self-occlusion.** Limbs are depth-sorted *within* the character by their own world depth, so the
- *    near arm swings in front of the torso and the far arm behind it, and it falls out correctly for every
- *    facing rather than being special-cased per direction. The far limbs are also shaded down a touch,
- *    which is what stops a flat-filled figure from reading as a paper cut-out.
+ *    near arm swings in front of the torso and the far arm behind it, at every facing, with no per-facing
+ *    special cases. Far limbs shade down a touch, which is what stops a flat figure reading as a cut-out.
+ *  - **The wardrobe.** Trousers, shoes, sleeves, hair, hats, facial hair. All of it must survive being
+ *    ~40px tall, so everything differs by **silhouette and block colour**, never by fine detail.
  */
 
-const SKIN = '#f0c9a0';
-const SKIN_DARK = '#d9ac82';
 /** Torso thickness. Kept under 2×`CHAR.shoulderW` so the arms hang outside the body's silhouette. */
 const TORSO_W = 25;
 
@@ -30,10 +31,16 @@ function hslL(color: string, f: number): string {
   const [, h, s, l] = m;
   return `hsl(${h}, ${s}%, ${Math.max(0, Math.min(100, Number(l) * f))}%)`;
 }
-/** Shade a flat fill for a limb that is on the character's far side — a cheap, effective depth cue. */
-function far(color: string): string {
-  return hslL(color, 0.82);
+/** Multiply a `#rrggbb` toward black — the far-side shading for hex wardrobe colours. */
+function shade(hex: string, f: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return hex;
+  const n = parseInt(m[1]!, 16);
+  const c = (v: number) => Math.max(0, Math.min(255, Math.round(v * f)));
+  return `rgb(${c((n >> 16) & 255)}, ${c((n >> 8) & 255)}, ${c(n & 255)})`;
 }
+/** A limb on the character's far side — a cheap, effective depth cue for a flat-filled figure. */
+const FAR = 0.82;
 
 /** Where a character-space joint lands on screen, and how deep it is on the floor. */
 interface Proj {
@@ -91,14 +98,14 @@ export interface CharacterOpts {
 }
 
 /**
- * How open the eyes are, 0→1. A blink is *fast* (~120ms) and rare (every 4–8s, seeded per member), which
+ * How open the eyes are, 0→1. A blink is *fast* (~130ms) and rare (every 4–8s, seeded per member), which
  * is precisely why it registers as alive rather than as a twitch — you never quite catch it happening.
  */
 function blink(t: number, seed: number): number {
   const period = 4 + seed * 4;
   const p = (t + seed * 20) % period;
   if (p > 0.13) return 1;
-  return Math.abs(p - 0.065) / 0.065; // shut and open again across the window
+  return Math.abs(p - 0.065) / 0.065;
 }
 
 /**
@@ -113,55 +120,65 @@ export function drawCharacter(
   armsOnly = false,
 ): void {
   const { skel: k, node, dir, size } = o;
-  const s = size;
-  const px = projector(o.lx, o.ly, dir, fit, s);
-  const u = fit.scale * s; // one logical unit, in screen px, at this character's size
-  const acc = node.color;
-  const dk = hslL(acc, 0.7);
+  const px = projector(o.lx, o.ly, dir, fit, size);
+  const u = fit.scale * size; // one logical unit, in screen px, at this character's size
+  const look = appearanceOf(node);
+  const acc = node.color; // the identity hue — the top, and only the top
+  const accDark = hslL(acc, 0.72);
 
   const prev = ctx.globalAlpha;
   if (o.alpha < 1) ctx.globalAlpha = Math.max(0, o.alpha);
 
-  // ── the character's own parts, each with a depth so they sort against one another ──
   interface Part {
     d: number;
     fn: () => void;
   }
   const parts: Part[] = [];
+  const chestD = px(k.chest).d;
 
+  // ── an arm: sleeve to the elbow, then either sleeve or bare skin to the wrist ──
   const arm = (i: 0 | 1): Part => {
     const sh = px(k.shoulder[i]);
     const el = px(k.elbow[i]);
     const wr = px(k.wrist[i]);
     const d = (sh.d + el.d + wr.d) / 3;
-    // Behind the torso → shade down. `k.chest`'s depth is the reference plane.
-    const back = d < px(k.chest).d;
-    const c = back ? far(dk) : dk;
+    const back = d < chestD;
+    // A short sleeve leaves the forearm bare. On a 90-unit character that is a bigger, clearer difference
+    // than any pattern — it changes the arm's *colour*, not its texture.
+    const sleeve = back ? hslL(accDark, FAR) : accDark;
+    const fore = look.bareArms
+      ? back
+        ? shade(look.skin, FAR)
+        : look.skin
+      : sleeve;
+    const hand = back ? shade(look.skin, FAR) : look.skin;
     return {
       d,
       fn: () => {
-        bone(ctx, sh.p, el.p, 7.5 * u, c);
-        bone(ctx, el.p, wr.p, 6.5 * u, c);
-        disc(ctx, wr.p, 3.6 * u, 3.2 * u, back ? SKIN_DARK : SKIN); // the hand
+        bone(ctx, sh.p, el.p, 7.5 * u, sleeve);
+        bone(ctx, el.p, wr.p, 6.5 * u, fore);
+        disc(ctx, wr.p, 3.6 * u, 3.2 * u, hand);
       },
     };
   };
 
+  // ── a leg: trouser to the ankle, then a shoe ──
   const leg = (i: 0 | 1): Part => {
     const hp = px(k.hip[i]);
     const kn = px(k.knee[i]);
     const an = px(k.ankle[i]);
     const d = (hp.d + kn.d + an.d) / 3;
     const back = d < px(k.pelvis).d;
-    const c = back ? far(dk) : dk;
+    const trouser = back ? shade(look.bottom, FAR) : look.bottom;
+    const shoe = back ? shade(look.shoes, FAR) : look.shoes;
     return {
       d,
       fn: () => {
-        bone(ctx, hp.p, kn.p, 9 * u, c);
-        bone(ctx, kn.p, an.p, 8 * u, c);
-        // The foot: a small slab pointing the way the character faces.
-        const toe = px({ x: k.ankle[i].x, y: 1.5, z: k.ankle[i].z + 6 });
-        bone(ctx, an.p, toe.p, 5.5 * u, back ? far(dk) : dk);
+        bone(ctx, hp.p, kn.p, 9 * u, trouser);
+        bone(ctx, kn.p, an.p, 8 * u, trouser);
+        // The shoe: a small slab pointing the way the character faces.
+        const toe = px({ x: k.ankle[i].x, y: 1.5, z: k.ankle[i].z + 6.5 });
+        bone(ctx, an.p, toe.p, 6 * u, shoe);
       },
     };
   };
@@ -173,26 +190,42 @@ export function drawCharacter(
     return;
   }
 
-  // Contact shadow — tightens and darkens as the body settles, so a mid-stride lift reads off the floor.
-  const ground = project(o.lx, o.ly, fit);
-  disc(ctx, ground, 21 * u, 5.5 * u, 'rgba(0,0,0,0.16)');
+  // Contact shadow.
+  disc(ctx, project(o.lx, o.ly, fit), 21 * u, 5.5 * u, 'rgba(0,0,0,0.16)');
 
   parts.push(leg(0), leg(1));
 
-  // Torso: pelvis → chest → neck, tapering upward, plus a shoulder bar across the top. The bar is what
-  // gives the silhouette actual shoulders instead of a tube, and it must stay narrower than `shoulderW` so
-  // the arms hang clear of the body.
+  // ── the torso, in the member's identity hue, cut by their `TopCut` ──
   const pel = px(k.pelvis);
   const ch = px(k.chest);
   const nk = px(k.neck);
   const shL = px(k.shoulder[0]);
   const shR = px(k.shoulder[1]);
   parts.push({
-    d: ch.d,
+    d: chestD,
     fn: () => {
       bone(ctx, pel.p, ch.p, TORSO_W * u, acc);
       bone(ctx, ch.p, nk.p, (TORSO_W - 5) * u, acc);
-      bone(ctx, shL.p, shR.p, 9 * u, acc); // the shoulder line
+      bone(ctx, shL.p, shR.p, 9 * u, acc); // the shoulder line — what gives the silhouette shoulders
+
+      if (look.cut === 'stripe') {
+        // Two bands across the chest, in the identity hue's own dark — reads as a striped tee at 40px,
+        // where an actual stripe pattern would just turn to mush.
+        for (const f of [0.3, 0.62]) {
+          const a = px({ x: -TORSO_W / 2, y: k.pelvis.y + (k.chest.y - k.pelvis.y) * f, z: k.chest.z });
+          const b = px({ x: TORSO_W / 2, y: k.pelvis.y + (k.chest.y - k.pelvis.y) * f, z: k.chest.z });
+          bone(ctx, a.p, b.p, 4.5 * u, accDark);
+        }
+      } else if (look.cut === 'vest') {
+        // A darker panel down the front — a gilet over a bare-armed tee.
+        const a = px({ x: 0, y: k.pelvis.y, z: k.pelvis.z + 5 });
+        const b = px({ x: 0, y: k.chest.y + 2, z: k.chest.z + 5 });
+        bone(ctx, a.p, b.p, 15 * u, accDark);
+      } else if (look.cut === 'hoodie') {
+        // The hood: a bulge behind the neck. It sits at −z, so it depth-sorts behind the head naturally.
+        const hood = px({ x: 0, y: k.neck.y + 1, z: k.neck.z - 7 });
+        disc(ctx, hood.p, 11 * u, 8 * u, accDark);
+      }
       if (node.kind === 'agent') disc(ctx, ch.p, 3 * u, 2.8 * u, '#74e08a'); // the chest LED
     },
   });
@@ -201,60 +234,146 @@ export function drawCharacter(
   parts.sort((a, b) => a.d - b.d);
   for (const p of parts) p.fn();
 
-  // The head always paints last — it is the top of the silhouette at every facing, and it is the thing the
-  // eye reads first, so it never gets clipped by an arm.
-  drawHead(ctx, px, k, node, dir, u, acc, o.t, o.seed);
+  // The head paints last — it is the top of the silhouette at every facing and the thing the eye reads
+  // first, so it never gets clipped by an arm.
+  drawHead(ctx, px, k, node, look, dir, u, acc, o.t, o.seed);
   if (o.carry) drawCarry(ctx, px, k, u);
 
   ctx.globalAlpha = prev;
 }
 
-/** The head, and the agent/human tell — antenna + visor, or hair + eyes. */
+/**
+ * The head: neck, back hair, skull, front hair, hat, face, and the agent tell.
+ *
+ * Order matters and is the whole trick — hair that falls *behind* the skull (a bob's back mass, a
+ * ponytail, an afro) is drawn before it, and hair that sits *on* it (the cap of every style) after. That
+ * one split is what lets nine hairstyles read as nine silhouettes at 30px.
+ */
 function drawHead(
   ctx: CanvasRenderingContext2D,
   px: (j: V3) => Proj,
   k: Skel,
   node: OfficeNode,
+  look: Appearance,
   dir: Dir,
   u: number,
   acc: string,
   t: number,
   seed: number,
 ): void {
-  // A short neck, so the head is *carried* rather than welded onto the shoulders.
-  const nk = px(k.neck);
-  const hd = px(k.head);
-  bone(ctx, nk.p, hd.p, 8 * u, SKIN_DARK);
-  const r = k.headR * u;
-  disc(ctx, hd.p, r, r * 0.98, SKIN);
+  const H = k.head;
+  const R = k.headR;
+  const hd = px(H);
+  const r = R * u;
+  const hc = look.hairColor;
   // The face only reads when the character is turned toward the viewer; from behind it is just a head.
   const facingUs = dir === 'S' || dir === 'E';
+  const at = (x: number, y: number, z: number): Pt => px({ x: H.x + x, y: H.y + y, z: H.z + z }).p;
 
+  bone(ctx, px(k.neck).p, hd.p, 6 * u, shade(look.skin, 0.86)); // a short neck — the head is *carried*
+
+  /**
+   * The face is **billboarded**: laid out in *screen* space around the head, nudged a little in the
+   * direction the character faces.
+   *
+   * The first cut placed the eyes and visor at a `+z` offset in character space — geometrically "correct",
+   * and it looked terrible. On a 2:1 iso floor **south projects to down-*left*, not straight down**, so
+   * offsetting a face along its facing slides it onto the cheek: the visor read as a monocle. Leaning it
+   * only "a little" toward the facing did not fix it either — it just made a smaller monocle.
+   *
+   * So the face does not use the projection at all. It is laid out in **pure screen space, centred on the
+   * skull**, level and symmetric, like a sticker on the front of a ball. The *body* already tells you which
+   * way a member is turned — the face only has to be legible, and at 25px across, legible means centred.
+   */
+  const face = (dx: number, dy: number): Pt => ({ x: hd.p.x + dx * r, y: hd.p.y + dy * r });
+
+  // ── hair behind the skull ── (kept close to the skull: at r×1.5 an afro was wider than the torso)
+  if (look.hair === 'afro') disc(ctx, at(0, 1.5, -1), r * 1.22, r * 1.18, hc);
+  else if (look.hair === 'long') disc(ctx, at(0, -4, -2), r * 0.98, r * 1.16, hc);
+  else if (look.hair === 'bob') disc(ctx, at(0, -1.5, -2), r * 1.06, r * 1.02, hc);
+  else if (look.hair === 'ponytail') disc(ctx, at(0, -2, -7), r * 0.42, r * 0.72, hc);
+  else if (look.hair === 'bun') disc(ctx, at(0, R + 2, -2), r * 0.46, r * 0.42, hc);
+
+  // ── the skull ──
+  disc(ctx, hd.p, r, r * 0.98, look.skin);
+
+  // ── hair (and hats) that sit ON the skull ──
+  //
+  // These are drawn as a disc *clipped to the head*, pushed up by `drop`. That clip is the whole trick: two
+  // overlapping circles meet in a straight line, so the visible hair is a crown with a clean **hairline**
+  // across the brow at `drop/2`. Drawn as an un-clipped flat ellipse instead (as this first did), hair reads
+  // as a beret balanced on a ball — the single ugliest thing on the first pass of this sheet. A bigger
+  // `drop` = a higher hairline = less hair.
+  const crown = (color: string, drop: number, overhang = 1) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(hd.p.x, hd.p.y, r * overhang, r * 0.98 * overhang, 0, 0, Math.PI * 2);
+    ctx.clip();
+    disc(ctx, at(0, drop, 0), r * overhang, r * 0.98 * overhang, color);
+    ctx.restore();
+  };
+
+  if (look.hair !== 'bald') {
+    const DROP: Record<Exclude<typeof look.hair, 'bald'>, number> = {
+      buzz: 9.5, // a high, tight hairline
+      short: 8,
+      side: 7,
+      bob: 6,
+      long: 6,
+      ponytail: 7,
+      bun: 7,
+      afro: 4.5, // a low hairline — lots of hair
+    };
+    crown(hc, DROP[look.hair]);
+    // A side parting: a sweep of hair across one side of the brow, breaking the symmetry.
+    if (look.hair === 'side') disc(ctx, at(R * 0.42, 4.5, R * 0.34), r * 0.46, r * 0.3, hc);
+  }
+
+  // ── the hat, over the hair ──
+  if (look.hat === 'beanie') {
+    crown(look.hatColor, 5, 1.06);
+    disc(ctx, at(0, 3.5, R * 0.3), r * 1.0, r * 0.2, shade(look.hatColor, 0.82)); // the turn-up
+  } else if (look.hat === 'cap') {
+    crown(look.hatColor, 6, 1.04);
+    // The peak, level across the brow — a cap reads as a cap by its flat front edge, not by its direction.
+    if (facingUs) {
+      bone(ctx, face(-0.72, -0.16), face(0.72, -0.16), r * 0.3, shade(look.hatColor, 0.78));
+    }
+  } else if (look.hat === 'band') {
+    bone(ctx, face(-0.86, -0.3), face(0.86, -0.3), r * 0.28, look.hatColor);
+  }
+
+  // ── the face — only ever drawn on the side the face is actually on ──
+  // The visor used to render at *every* facing, which painted a dark plate straight through the back of
+  // every agent's skull. A face belongs on a face: from behind, an agent is a head and an antenna.
+  if (node.kind === 'agent' && facingUs) {
+    // A level bar straight across the face, with a lit slit in the member's own hue. Drawn as a capsule
+    // rather than an ellipse: at 25px an ellipse's soft edges turn to mush, where a hard bar stays a *visor*
+    // — and it is the slit lighting up in their colour that makes an agent read as awake across the room.
+    bone(ctx, face(-0.6, 0.08), face(0.6, 0.08), r * 0.52, '#20282c');
+    bone(ctx, face(-0.42, 0.08), face(0.42, 0.08), r * 0.2, acc);
+  } else if (node.kind === 'human' && facingUs) {
+    const open = blink(t, seed);
+    for (const dx of [-0.36, 0.36]) {
+      disc(ctx, face(dx, 0.06), 2.0 * u, 2.2 * u * open, '#2e2a26');
+    }
+    // Facial hair, below the eyes and over the jaw.
+    const fh = look.facialHair;
+    if (fh === 'stubble') disc(ctx, face(0, 0.56), r * 0.6, r * 0.3, shade(hc, 0.72));
+    else if (fh === 'beard') disc(ctx, face(0, 0.58), r * 0.64, r * 0.4, hc);
+    else if (fh === 'goatee') disc(ctx, face(0, 0.66), r * 0.24, r * 0.22, hc);
+    else if (fh === 'moustache') disc(ctx, face(0, 0.34), r * 0.34, r * 0.11, hc);
+  }
+
+  // ── the agent antenna: drawn last, so it pokes through any hat. Which is the correct joke. ──
+  // It is also the *only* tell visible from behind, so it must read at office scale: short and stubby beats
+  // long and thin, which just disappears into the floor.
   if (node.kind === 'agent') {
-    const tip = px({ x: k.head.x, y: k.head.y + CHAR.headR + 10, z: k.head.z });
-    bone(ctx, hd.p, tip.p, 1.8 * u, acc);
-    // The LED breathes — an agent's one involuntary sign of life, and it reads from right across the room.
+    const tip = px({ x: H.x, y: H.y + R + 8, z: H.z });
+    bone(ctx, hd.p, tip.p, 2.4 * u, acc);
+    // The LED breathes — an agent's one involuntary sign of life, readable across the room.
     const pulse = 0.82 + 0.18 * Math.sin(t * 1.6 + seed * 6);
-    disc(ctx, tip.p, 3.6 * u * pulse, 3.4 * u * pulse, '#74e08a');
-    if (facingUs) {
-      // The visor sits on the face, so it must ride the head's forward offset, not the head's centre.
-      const vis = px({ x: k.head.x, y: k.head.y - 1.5, z: k.head.z + CHAR.headR * 0.6 });
-      ctx.fillStyle = '#2e3a38';
-      ctx.beginPath();
-      ctx.ellipse(vis.p.x, vis.p.y, r * 0.74, r * 0.3, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else {
-    // Hair: a cap over the crown, tinted from the member's own colour so it stays in the palette.
-    const cap = px({ x: k.head.x, y: k.head.y + 5, z: k.head.z - 1 });
-    disc(ctx, cap.p, r * 1.02, r * 0.62, hslL(node.color, 0.42));
-    if (facingUs) {
-      const open = blink(t, seed);
-      for (const dx of [-0.4, 0.4]) {
-        const e = px({ x: k.head.x + dx * CHAR.headR, y: k.head.y - 1, z: k.head.z + CHAR.headR * 0.7 });
-        disc(ctx, e.p, 2.3 * u, 2.4 * u * open, '#2e2a26');
-      }
-    }
+    disc(ctx, tip.p, 3.4 * u * pulse, 3.2 * u * pulse, '#74e08a');
   }
 }
 
