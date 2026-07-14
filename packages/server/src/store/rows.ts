@@ -91,6 +91,9 @@ export interface MessageRow {
   body: string;
   thread_id: string | null;
   meta: string | null;
+  /** Sender's presence provenance at send time (v21, ADR 131 §4) — server-stamped, never wire-fed;
+   *  the wake ledger's ping-pong demotion read. Null: pre-v21 row or no live presence at send. */
+  from_provenance: string | null;
   ts: number;
   created_at: number;
 }

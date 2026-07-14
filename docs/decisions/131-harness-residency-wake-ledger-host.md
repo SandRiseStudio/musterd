@@ -102,6 +102,14 @@ cooldown, 2 wakes/hour/seat, 3 attempts per act — and **configurable**: team-l
 per-seat overrides at enrollment (`residency on --lane both|interrupt|batched`, cooldown/cap
 flags).
 
+_Amendment (2026-07-14, increment 5): the knobs shipped — `ResidencyPolicySchema` (protocol) is
+the single source of defaults/ranges; team defaults ride `teams.policy` (`PolicySchema.residency`,
+set via `musterd residency policy`), the seat override is a sparse partial in the v16-reserved
+`residency.policy` column, and every rate gate in the lease derivation reads the effective merge.
+The actuation knobs (tool policy, bounds, transcript hygiene bound) travel per `WakeOrder`; the
+host's local `--timeout` remains the ceiling policy can only tighten. Knob table + the two honesty
+clauses (no `lane: off`; `budget_usd` flags, never kills) live in the contract doc §2._
+
 ### 4. Mutual exclusion is stored (wake leases); rate policy stays derived
 
 The pressure-test correction this ADR codifies: ADR 090's "derived, never stored" maxim governs
@@ -123,6 +131,14 @@ provable: wake → cooldown → cap → exhausted. **Ping-pong bound:** acts sen
 provenance-`wake` occupancy never qualify for another seat's _immediate_ wake — they fall to the
 batched lane, so machine-to-machine chains run at cooldown cadence under caps, without lineage
 tracking.
+
+_Amendment (2026-07-14, increment 5): the ping-pong bound is now implemented — it shipped dark
+(increments 2–4 had nothing recording who sent an act from where). Migration v21 adds
+`messages.from_provenance`, stamped at insert from the sender's freshest live presence,
+**server-derived by construction** (no wire field exists, so a wake-born session cannot
+masquerade as human-driven); the lease derivation demotes interrupt-class candidates whose
+trigger reads `wake` into the batched set. Depends on the §6 provenance amendment — without it,
+resumed wakes sent acts labelled `session` and escaped demotion._
 
 ### 5. Session capture rides the hooks; the seat, not the session, is the identity
 
@@ -184,6 +200,18 @@ ordering also means resume can never target a live transcript.
   `residency.wake_deferred` (the local-session guard — outside every rate/attempt derivation) and
   `residency.session_captured|session_ended` (the capture pushes, detail `{harness, enrolled}` —
   harness class only, never an id or a path).
+
+  _Amendment (2026-07-14, increment 5, owner-endorsed): **provenance describes the current
+  animation source — newest wins.** The inc-4 rehearsals found resumed wakes attesting `session`:
+  the woken session's hook-driven CLI one-shots ambient-touched the seat before the MCP adapter
+  claimed, and the CLI never resolved `MUSTERD_PROVENANCE`, so the touch wrote the `session`
+  default — verify credited that row, and the roster could not mark machine-initiated resumed
+  occupancies. Fix: the CLI resolves `MUSTERD_PROVENANCE` exactly like the MCP adapter
+  (`resolveAttestedProvenance`, agent keys only — a human shell must not label itself `wake`) and
+  sends `x-musterd-provenance`; the ambient touch stamps it enum-validated. Where ADR 014 read as
+  sticky-attach-time, this supersedes it for provenance: a machine wake reads `wake` from its
+  first authenticated command, and a human later resuming that same session correctly flips it
+  back to `session`. (Model/build attestations keep their COALESCE stickiness — ADR 101/135.)_
 
 ### 7. One actuator interface; musterd itself is a harness
 

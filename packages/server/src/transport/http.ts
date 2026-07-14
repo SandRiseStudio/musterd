@@ -26,6 +26,7 @@ import {
   type Envelope,
   type LaneWarning,
   type MemberSummary,
+  type Provenance,
   resolvePosture,
   resolveOfflineReason,
   type OfflineReason,
@@ -92,6 +93,7 @@ import {
   attach,
   clearMemberPresence,
   countLivePresences,
+  hasLivePresence,
   listPresence,
   listReclaimableMemberIds,
   touchAmbientPresence,
@@ -347,6 +349,20 @@ function attestedBuildHeader(req: IncomingMessage): string | undefined {
 }
 
 /**
+ * Optional session provenance from `x-musterd-provenance` (ADR 131 §6 amendment, increment 5).
+ * The CLI resolves `MUSTERD_PROVENANCE` exactly like the MCP adapter, so a woken session's
+ * hook-driven one-shots ambient-touch as `wake` instead of the default `session` — before this,
+ * verify credited the wake against a `session`-labelled ambient row and the roster could not mark
+ * machine-initiated occupancies (inc-4 finding a). Enum-validated; anything else → undefined.
+ */
+function provenanceHeader(req: IncomingMessage): Provenance | undefined {
+  const raw = req.headers['x-musterd-provenance'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const parsed = ProvenanceSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
  * Authenticate a request and write an ambient presence touch for the caller (ADR 057): a one-shot
  * authenticated command is itself proof of liveness, so it flips a bursty agent present between watch
  * sockets. A no-op when the member already holds a resident session; on an offline→online transition we
@@ -374,6 +390,9 @@ function authTouch(
   // A human with MUSTERD_MODEL in their shell (or a buggy client) must not stamp their occupancy.
   const model = auth.member.kind === 'agent' ? attestedModelHeader(req) : undefined;
   const build = attestedBuildHeader(req); // all credentials — the binary is the binary (ADR 135)
+  // Provenance describes the *current* animation source (newest-wins, owner call 2026-07-14) —
+  // agent seats only, mirroring the model gate: a human shell must not label itself `wake`.
+  const provenance = auth.member.kind === 'agent' ? provenanceHeader(req) : undefined;
   // Snapshot the ambient row before the touch so a real model change can audit (source: ambient).
   const before = model
     ? ctx.db
@@ -391,6 +410,7 @@ function authTouch(
     {
       ...(model !== undefined ? { model } : {}),
       ...(build !== undefined ? { build } : {}),
+      ...(provenance !== undefined ? { provenance } : {}),
     },
   );
   if (model) {
@@ -1106,6 +1126,13 @@ export async function handleHttp(
         return sendJson(res, 200, { policy });
       }
 
+      // The read half of the policy verb (increment 5): `musterd residency policy` does
+      // read → merge → POST, so admins can set one knob without re-stating the rest.
+      if (method === 'GET' && rest === '/policy') {
+        const { team } = authAdmin(ctx, slug, req);
+        return sendJson(res, 200, { policy: getPolicy(ctx.db, team.id) });
+      }
+
       // ── Harness residency: the wake ledger (ADR 131, increment 2) ──────────────────────────────
       // Enrollment is the authorization event (admin-authorized, actor≠authorizer per ADR 127):
       // one verb writes the enrollment row + mints the standing resume grant whose revocation is
@@ -1147,6 +1174,8 @@ export async function handleHttp(
           host: body.host,
           grant_id: mint.grant.id,
           authorized_by: authorizer.name,
+          // Sparse knob override (increment 5): absent = preserve, `{}` = clear, object = replace.
+          ...(body.policy !== undefined ? { policy: body.policy } : {}),
         });
         // Last-enrolled-wins: the superseded enrollment's grant dies with it (no orphan standing
         // grants), and the host swap is named in the audit detail.
@@ -1161,6 +1190,7 @@ export async function handleHttp(
             host: body.host,
             grant_id: mint.grant.id,
             authorized_by: authorizer.name,
+            ...(body.policy !== undefined ? { policy: body.policy } : {}),
             ...(previous ? { previous_host: previous.host } : {}),
             ...(viaFallback ? { fallback: 'no-admin' } : {}),
           },
@@ -1178,9 +1208,14 @@ export async function handleHttp(
             authorized_by: authorizer.name,
           },
         });
+        // Grant-rotation trap (dogfood 2026-07-13): a re-enroll revokes the previous standing
+        // grant, but a LIVE session still holds it in its adapter — name that so the operator
+        // knows the new grant/policy only govern from the seat's next wake/claim.
+        const seatLive = hasLivePresence(ctx.db, target.id, ctx.config.presenceTimeoutMs);
         return sendJson(res, 201, {
           residency: toResidency(row, team.slug, target.name),
           grant: mint.token,
+          ...(seatLive ? { seat_live: true } : {}),
         });
       }
 
@@ -1223,7 +1258,12 @@ export async function handleHttp(
         const residency = listResidency(ctx.db, team.id).map((r) =>
           toResidency(r, team.slug, getMemberById(ctx.db, r.member_id)?.name ?? '?'),
         );
-        return sendJson(res, 200, { residency });
+        // Team wake-policy defaults ride along (increment 5) so `residency status` can render the
+        // effective policy per seat and star the overridden knobs — one read, no drift.
+        return sendJson(res, 200, {
+          residency,
+          policy_defaults: getPolicy(ctx.db, team.id).residency,
+        });
       }
 
       // The host's poll (ADR 131 §4): one transaction derives due wakes, inserts leases, returns

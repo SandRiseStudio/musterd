@@ -1,8 +1,16 @@
 import { existsSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { BINDING_DIR, BINDING_FILE, bindingSeat, type Residency } from '@musterd/protocol';
-import { flagStr, type Parsed } from '../args.js';
+import {
+  BINDING_DIR,
+  BINDING_FILE,
+  bindingSeat,
+  ResidencyPolicySchema,
+  type Residency,
+  type ResidencyPolicy,
+  type ResidencyPolicyOverride,
+} from '@musterd/protocol';
+import { flagStr, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import {
@@ -27,17 +35,104 @@ import { findWorkspaceDir, resolve, resolveRead } from './helpers.js';
  * The two identities in play are deliberately different flags: `--seat` names *what gets
  * enrolled* (an agent seat; defaults to this workspace's binding), `--as` names *who authorizes*
  * (an admin — enrollment is an actor≠authorizer gate, ADR 127).
+ *
+ * Increment 5 adds the knobs (ADR 131 §3): `on` takes per-seat override flags, `policy` reads or
+ * sets the team-wide defaults with the same flag vocabulary, and `status` renders the effective
+ * policy per seat (overridden knobs starred). There is deliberately no `--lane off`: an enrollment
+ * that can never wake is a contradiction — "stop waking this seat" is `residency off`.
  */
+const POLICY_FLAGS_USAGE =
+  '[--lane both|interrupt|batched] [--cooldown <15m>] [--hourly-cap <n>] [--attempt-cap <n>] ' +
+  '[--tool-policy reply-only|seat-policy] [--timeout <5m>] [--max-turns <n>] [--budget <usd>] ' +
+  '[--transcript-max <MiB>]';
+
 export async function residencyCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
   if (sub === 'on') return onCommand(parsed);
   if (sub === 'off') return offCommand(parsed);
+  if (sub === 'policy') return policyCommand(parsed);
   if (sub === 'status' || sub === undefined) return statusCommand(parsed);
   throw new CliError(
-    'usage: musterd residency on | off | status  ' +
-      '(--seat <agent> = what gets enrolled, default this workspace’s seat; --as <admin> = who authorizes)',
+    'usage: musterd residency on | off | status | policy  ' +
+      '(--seat <agent> = what gets enrolled, default this workspace’s seat; --as <admin> = who ' +
+      `authorizes). Knobs, on \`on\` (this seat) or \`policy\` (team defaults): ${POLICY_FLAGS_USAGE}`,
     2,
   );
+}
+
+/**
+ * Collect the knob flags into a sparse policy object — only explicitly-passed flags enter it, so
+ * an enroll without knob flags preserves any existing override (`undefined`), and `--reset-policy`
+ * clears back to team defaults (`{}`). Ranges are enforced server-side (the 400 names the range);
+ * here we only refuse shapes that cannot travel (non-numbers, malformed durations).
+ */
+function collectPolicyFlags(parsed: Parsed): ResidencyPolicyOverride | undefined {
+  const out: Record<string, unknown> = {};
+  const num = (flag: string, key: string, scale = 1) => {
+    const raw = flagStr(parsed.flags, flag);
+    if (raw === undefined) return;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) throw new CliError(`--${flag} wants a number (got "${raw}")`, 2);
+    out[key] = Math.round(n * scale);
+  };
+  const lane = flagStr(parsed.flags, 'lane');
+  if (lane !== undefined) out['lane'] = lane;
+  const cooldown = flagStr(parsed.flags, 'cooldown');
+  if (cooldown !== undefined) out['cooldown_ms'] = parseDurationMs(cooldown, '--cooldown');
+  num('hourly-cap', 'hourly_cap');
+  num('attempt-cap', 'attempt_cap');
+  const toolPolicy = flagStr(parsed.flags, 'tool-policy');
+  if (toolPolicy !== undefined) out['tool_policy'] = toolPolicy;
+  const timeout = flagStr(parsed.flags, 'timeout');
+  if (timeout !== undefined) out['timeout_ms'] = parseDurationMs(timeout, '--timeout');
+  num('max-turns', 'max_turns');
+  const budget = flagStr(parsed.flags, 'budget');
+  if (budget !== undefined) {
+    const n = Number(budget);
+    if (!Number.isFinite(n)) throw new CliError(`--budget wants dollars (got "${budget}")`, 2);
+    out['budget_usd'] = n;
+  }
+  num('transcript-max', 'transcript_max_bytes', 1_048_576); // MiB → bytes
+  if (parsed.flags['reset-policy'] === true) {
+    if (Object.keys(out).length > 0)
+      throw new CliError('--reset-policy clears every knob — drop the other policy flags', 2);
+    return {};
+  }
+  return Object.keys(out).length > 0 ? (out as ResidencyPolicyOverride) : undefined;
+}
+
+/** One-line policy summary. With `override`, starred knobs are the seat-overridden ones. */
+function renderPolicy(policy: ResidencyPolicy, override?: ResidencyPolicyOverride | null): string {
+  const star = (key: keyof ResidencyPolicy) => (override && override[key] !== undefined ? '*' : '');
+  const bits = [
+    `lane ${policy.lane}${star('lane')}`,
+    `cooldown ${fmtDurationMs(policy.cooldown_ms)}${star('cooldown_ms')}`,
+    `${policy.hourly_cap}/h${star('hourly_cap')}`,
+    `${policy.attempt_cap} attempts${star('attempt_cap')}`,
+    `${policy.tool_policy}${star('tool_policy')}`,
+    `timeout ${fmtDurationMs(policy.timeout_ms)}${star('timeout_ms')}`,
+  ];
+  if (policy.max_turns !== undefined) bits.push(`${policy.max_turns} turns${star('max_turns')}`);
+  if (policy.budget_usd !== undefined)
+    bits.push(`budget $${policy.budget_usd}${star('budget_usd')}`);
+  bits.push(
+    `transcript ${(policy.transcript_max_bytes / 1_048_576).toFixed(0)}MiB${star('transcript_max_bytes')}`,
+  );
+  return bits.join(' · ');
+}
+
+/** Launch defaults ⊕ team defaults ⊕ seat override — the CLI-side twin of the server's
+ *  `effectiveWakePolicy`, for rendering only (the daemon derives its own at lease time). */
+function mergePolicy(
+  defaults: ResidencyPolicy,
+  override: ResidencyPolicyOverride | null | undefined,
+): ResidencyPolicy {
+  if (!override) return defaults;
+  const merged: ResidencyPolicy = { ...defaults };
+  for (const [key, value] of Object.entries(override)) {
+    if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
+  }
+  return merged;
 }
 
 /** The seat this invocation is about: `--seat` wins, else the workspace binding's fixed seat. */
@@ -63,8 +158,14 @@ async function onCommand(parsed: Parsed): Promise<number> {
     throw new CliError('no harness — pass --harness <class> (e.g. claude-code)', 2);
   }
   const host = flagStr(parsed.flags, 'host') ?? hostname();
+  const policy = collectPolicyFlags(parsed);
 
-  const res = await http.enrollResidency(team, { seat, harness, host });
+  const res = await http.enrollResidency(team, {
+    seat,
+    harness,
+    host,
+    ...(policy !== undefined ? { policy } : {}),
+  });
 
   // Land the standing grant in this workspace's binding so woken sessions occupy via the seat's
   // own credential (the daemon never holds it) — only when this folder is actually the seat's.
@@ -101,6 +202,24 @@ async function onCommand(parsed: Parsed): Promise<number> {
   process.stdout.write(
     theme.meta(`  harness ${res.residency.harness} · host ${res.residency.host}`) + '\n',
   );
+  if (res.residency.policy && Object.keys(res.residency.policy).length > 0) {
+    process.stdout.write(
+      theme.meta(`  seat overrides: ${JSON.stringify(res.residency.policy)}`) + '\n',
+    );
+  } else if (policy !== undefined && Object.keys(policy).length === 0) {
+    process.stdout.write(theme.meta('  seat overrides cleared — team defaults govern') + '\n');
+  }
+  // Grant-rotation trap (dogfood 2026-07-13): re-enrolling rotates the standing grant while a
+  // live session still holds the old one in its adapter — say so, or the next daemon bounce
+  // surprises with "grant revoked".
+  if (res.seat_live) {
+    process.stdout.write(
+      theme.warn(
+        `  ! "${seat}" has a live session — it occupies via the grant this enroll just rotated; ` +
+          'the new grant and policy govern from its next wake/claim (a reconnect may need team_join)',
+      ) + '\n',
+    );
+  }
   if (grantSaved) {
     process.stdout.write(
       theme.meta('  standing grant saved to .musterd/binding.json (revoked by `residency off`)') +
@@ -154,23 +273,76 @@ async function offCommand(parsed: Parsed): Promise<number> {
   return 0;
 }
 
+/**
+ * `musterd residency policy` — the team-wide wake-policy defaults, same flag vocabulary as `on`
+ * (one mental model: `policy` sets the team, `on` overrides one seat). No knob flags = print the
+ * current defaults. Sets go read → merge → POST so one knob changes without re-stating the rest;
+ * the server re-parses with defaults and audits `policy.change` (admin, ADR 127).
+ */
+async function policyCommand(parsed: Parsed): Promise<number> {
+  const { team, http } = resolve(parsed.flags);
+  const knobs = collectPolicyFlags(parsed);
+  const { policy: current } = await http.getPolicy(team);
+
+  if (knobs === undefined) {
+    if (parsed.flags['json']) {
+      process.stdout.write(JSON.stringify(current.residency) + '\n');
+      return 0;
+    }
+    process.stdout.write(`${theme.accent('wake policy defaults')} — ${team}\n`);
+    process.stdout.write(`  ${renderPolicy(current.residency)}\n`);
+    process.stdout.write(
+      theme.meta('  set: musterd residency policy --cooldown 15m …  ' + POLICY_FLAGS_USAGE) + '\n',
+    );
+    return 0;
+  }
+
+  const residency =
+    Object.keys(knobs).length === 0
+      ? // `--reset-policy`: back to launch defaults.
+        ResidencyPolicySchema.parse({})
+      : mergePolicy(current.residency, knobs);
+  const { policy: updated } = await http.setPolicy(team, { ...current, residency });
+  if (parsed.flags['json']) {
+    process.stdout.write(JSON.stringify(updated.residency) + '\n');
+    return 0;
+  }
+  process.stdout.write(success(`wake policy defaults updated — ${team}`) + '\n');
+  process.stdout.write(`  ${renderPolicy(updated.residency)}\n`);
+  return 0;
+}
+
 async function statusCommand(parsed: Parsed): Promise<number> {
   const { team, http } = resolveRead(parsed.flags);
-  const { residency } = await http.residency(team);
+  const { residency, policy_defaults } = await http.residency(team);
 
   if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify(residency) + '\n');
+    process.stdout.write(JSON.stringify({ residency, policy_defaults }) + '\n');
     return 0;
   }
 
   process.stdout.write(`${theme.accent('residency')} — ${team} (${residency.length} enrolled)\n`);
+  if (policy_defaults) {
+    process.stdout.write(theme.meta(`defaults: ${renderPolicy(policy_defaults)}`) + '\n');
+  }
   if (residency.length === 0) {
     process.stdout.write(
       theme.meta('no seats enrolled — `musterd residency on` in a seat’s workspace') + '\n',
     );
     return 0;
   }
-  for (const r of residency) process.stdout.write(renderResidency(r) + '\n');
+  for (const r of residency) {
+    process.stdout.write(renderResidency(r) + '\n');
+    // Effective policy per seat, seat-overridden knobs starred. Only when something differs from
+    // the defaults line above — an all-defaults seat stays one line.
+    if (r.policy && Object.keys(r.policy).length > 0 && policy_defaults) {
+      process.stdout.write(
+        theme.meta(
+          `    policy: ${renderPolicy(mergePolicy(policy_defaults, r.policy), r.policy)}`,
+        ) + '\n',
+      );
+    }
+  }
 
   // Cross-check the local workspace's stores against the server row (the `init --check` idiom).
   const binding = findBinding();

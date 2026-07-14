@@ -399,6 +399,17 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE members ADD COLUMN last_offline_reason TEXT');
     },
   },
+  {
+    // v21 — send-time provenance (ADR 131 §4, increment 5): the sender's presence provenance
+    // stamped onto each message at insert, SERVER-derived by construction (no wire field — a
+    // caller cannot supply it), so the wake ledger can demote interrupt-class acts sent from a
+    // provenance-`wake` occupancy to the batched lane (the ping-pong bound). Additive + nullable:
+    // pre-v21 rows and senders with no live presence read NULL, which demotes nothing.
+    version: 21,
+    up: (db) => {
+      db.exec('ALTER TABLE messages ADD COLUMN from_provenance TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

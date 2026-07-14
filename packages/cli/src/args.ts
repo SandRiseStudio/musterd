@@ -1,3 +1,5 @@
+import { CliError } from './errors.js';
+
 /** Minimal argv parser (ADR 002: no arg-parsing dependency). Splits flags from positionals. */
 export interface Parsed {
   positionals: string[];
@@ -29,6 +31,7 @@ const BOOLEAN_FLAGS = new Set([
   'live',
   'purge',
   'stdin',
+  'reset-policy',
 ]);
 
 export function parseArgs(argv: string[]): Parsed {
@@ -61,6 +64,30 @@ export function parseArgs(argv: string[]): Parsed {
 export function flagStr(flags: Record<string, string | boolean>, name: string): string | undefined {
   const v = flags[name];
   return typeof v === 'string' ? v : undefined;
+}
+
+/**
+ * Parse a human duration flag (`45s`, `15m`, `2h`) to milliseconds. The unit suffix is REQUIRED —
+ * minute-scale knobs (wake cooldowns) sit next to second-scale ones (watchdog timeouts), so a bare
+ * number is ambiguous; refuse it and show the shape. (`musterd host --timeout` predates this and
+ * keeps its bare-seconds contract.)
+ */
+export function parseDurationMs(raw: string, flag: string): number {
+  const m = /^(\d+(?:\.\d+)?)(s|m|h)$/.exec(raw.trim());
+  if (!m) {
+    throw new CliError(`${flag} wants a duration like 45s, 15m, or 2h (got "${raw}")`, 2);
+  }
+  const mult = m[2] === 's' ? 1_000 : m[2] === 'm' ? 60_000 : 3_600_000;
+  return Math.round(Number(m[1]) * mult);
+}
+
+/** Render milliseconds as the shortest exact unit (`1800000` → `30m`) — the render twin of
+ *  {@link parseDurationMs} for policy summaries. */
+export function fmtDurationMs(ms: number): string {
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
+  if (ms % 60_000 === 0) return `${ms / 60_000}m`;
+  if (ms % 1_000 === 0) return `${ms / 1_000}s`;
+  return `${ms}ms`;
 }
 
 /** Parse `--meta k=v` pairs into an object, coercing numbers/booleans. */

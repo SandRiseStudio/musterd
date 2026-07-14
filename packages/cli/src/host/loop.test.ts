@@ -113,6 +113,30 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     await Promise.all(result.settled);
   });
 
+  it('policy bounds only TIGHTEN the operator ceiling: min(order, --timeout), knobs pass through', async () => {
+    const { client } = fakeClient([
+      order({ bounds: { timeout_ms: 30_000, max_turns: 9, budget_usd: 2 } }),
+      order({ lease_id: 'L2', act_id: 'A2', bounds: { timeout_ms: 900_000 } }),
+      order({ lease_id: 'L3', act_id: 'A3' }), // pre-inc-5 daemon: no bounds on the order
+    ]);
+    const { backend, specs } = fakeBackend();
+    const lines: string[] = [];
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+        log: (l) => lines.push(l),
+      }),
+    );
+    // Wait — one lease per seat per poll server-side; here three orders exercise the same entry.
+    expect(specs).toHaveLength(3);
+    expect(specs[0]!.bounds).toEqual({ timeout_ms: 30_000, max_turns: 9, budget_usd: 2 });
+    expect(specs[1]!.bounds.timeout_ms).toBe(60_000); // 900s policy clamped to the 60s flag
+    expect(lines.join('\n')).toMatch(/clamped/);
+    expect(specs[2]!.bounds.timeout_ms).toBe(60_000); // absent bounds ⇒ the operator flag
+  });
+
   it('an order for a seat this machine does not hold is reported failed, never dropped', async () => {
     const { client, calls } = fakeClient([order({ seat: 'ghost', lease_id: 'L9' })]);
     await pollHostOnce(

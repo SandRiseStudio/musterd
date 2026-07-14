@@ -7,22 +7,26 @@ import { addMember } from './members.js';
 import { insertMessage } from './messages.js';
 import { attach } from './presence.js';
 import {
-  WAKE_ATTEMPT_CAP,
-  WAKE_COOLDOWN_MS,
   WAKE_DEFER_SNOOZE_MS,
-  WAKE_HOURLY_CAP,
   WAKE_LEASE_TTL_MS,
+  WAKE_POLICY_DEFAULTS,
   claimWakeLeases,
+  effectiveWakePolicy,
   enrollResidency,
   expireWakeLeases,
   getResidency,
   listWakeableMemberIds,
+  parsePolicyOverride,
   recordSessionAttestation,
   revokeResidency,
   settleWakeLease,
 } from './residency.js';
 import type { MemberRow, TeamRow } from './rows.js';
-import { createTeam } from './teams.js';
+import { createTeam, getPolicy, setPolicy } from './teams.js';
+
+const WAKE_COOLDOWN_MS = WAKE_POLICY_DEFAULTS.cooldown_ms;
+const WAKE_HOURLY_CAP = WAKE_POLICY_DEFAULTS.hourly_cap;
+const WAKE_ATTEMPT_CAP = WAKE_POLICY_DEFAULTS.attempt_cap;
 
 const PRESENCE_TIMEOUT_MS = 45_000;
 const HOST = 'laptop.local';
@@ -65,13 +69,20 @@ function msg(
   );
 }
 
-function enroll(db: Database, team: TeamRow, member: MemberRow, host = HOST) {
+function enroll(
+  db: Database,
+  team: TeamRow,
+  member: MemberRow,
+  host = HOST,
+  policy?: Record<string, unknown>,
+) {
   return enrollResidency(db, team.id, {
     member_id: member.id,
     harness: 'claude-code',
     host,
     grant_id: 'g1',
     authorized_by: 'nick',
+    ...(policy !== undefined ? { policy } : {}),
   });
 }
 
@@ -373,5 +384,141 @@ describe('session capture (ADR 131 inc 4): attestation + the wake_deferred snooz
     expect(
       listAudit(db, team.id).filter((r) => r.action === 'residency.wake_exhausted'),
     ).toHaveLength(0);
+  });
+});
+
+describe('wake policy (ADR 131 inc 5): defaults ⊕ team ⊕ seat', () => {
+  it('effectiveWakePolicy layers a sparse override; unparseable/unknown input degrades honestly', () => {
+    const defaults = WAKE_POLICY_DEFAULTS;
+    expect(effectiveWakePolicy(defaults, null)).toEqual(defaults);
+    const merged = effectiveWakePolicy(defaults, JSON.stringify({ cooldown_ms: 900_000 }));
+    expect(merged.cooldown_ms).toBe(900_000);
+    expect(merged.hourly_cap).toBe(defaults.hourly_cap); // unset keys flow through
+    // Drift (hand-edit, downgrade): unreadable ⇒ no override, never a throwing wake pipeline.
+    expect(effectiveWakePolicy(defaults, 'not json')).toEqual(defaults);
+    expect(parsePolicyOverride('{"unknown_knob": 5}')).toEqual({}); // zod strips unknowns
+  });
+
+  it('team defaults govern the derivation (cooldown via setPolicy, no per-seat override)', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    // Shrink the team cooldown to 5 minutes; a wake 10 minutes ago no longer blocks batched.
+    setPolicy(db, team.id, {
+      ...getPolicy(db, team.id),
+      residency: { ...WAKE_POLICY_DEFAULTS, cooldown_ms: 5 * 60_000 },
+    });
+    wakeOutcomeRow(db, team, 'Ada', 'old-act', 'residency.woke', Date.now() - 10 * 60_000);
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(1);
+  });
+
+  it('a seat override tightens the hourly cap below the team default', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { hourly_cap: 1 });
+    wakeOutcomeRow(db, team, 'Ada', 'past-0', 'residency.woke', Date.now() - 45 * 60_000);
+    msg(db, team, nick, ada, 'steer', 's1', 1_000);
+    // One wake this hour ≥ the seat's cap of 1 — nothing derives (default cap of 2 would allow).
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('lane=interrupt never leases batched candidates; lane=batched never leases a steer', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { lane: 'interrupt' });
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+    msg(db, team, nick, ada, 'steer', 's1', 2_000);
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.lane).toBe('immediate');
+
+    const { db: db2, team: team2, nick: nick2, ada: ada2 } = seed();
+    enroll(db2, team2, ada2, HOST, { lane: 'batched' });
+    msg(db2, team2, nick2, ada2, 'steer', 's1', 1_000);
+    expect(claimWakeLeases(db2, team2.id, team2.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+    msg(db2, team2, nick2, ada2, 'handoff', 'h1', 2_000);
+    const orders2 = claimWakeLeases(db2, team2.id, team2.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders2).toHaveLength(1);
+    expect(orders2[0]!.lane).toBe('batched');
+  });
+
+  it('a seat attempt_cap override exhausts at the effective cap and audits it', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { attempt_cap: 2 });
+    msg(db, team, nick, ada, 'steer', 's1', 1_000);
+    const old = Date.now() - 2 * 3_600_000;
+    for (let i = 0; i < 2; i++) wakeOutcomeRow(db, team, 'Ada', 's1', 'residency.wake_failed', old);
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+    const exhausted = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_exhausted');
+    expect(exhausted).toHaveLength(1);
+    expect(JSON.parse(exhausted[0]!.detail!)['attempts']).toBe(2);
+  });
+
+  it('the emitted order carries the effective actuation knobs for the host', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, {
+      tool_policy: 'seat-policy',
+      timeout_ms: 120_000,
+      max_turns: 12,
+      budget_usd: 2,
+      transcript_max_bytes: 2_097_152,
+    });
+    msg(db, team, nick, ada, 'steer', 's1', 1_000);
+    const [order] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(order!.tool_policy).toBe('seat-policy');
+    expect(order!.bounds).toEqual({ timeout_ms: 120_000, max_turns: 12, budget_usd: 2 });
+    expect(order!.transcript_max_bytes).toBe(2_097_152);
+  });
+
+  it('re-enroll without a policy preserves the override; {} clears it', () => {
+    const { db, team, ada } = seed();
+    enroll(db, team, ada, HOST, { hourly_cap: 5 });
+    expect(getResidency(db, team.id, ada.id)?.policy).toBe('{"hourly_cap":5}');
+    enroll(db, team, ada); // drift-fixing re-enroll, no policy — tuning survives
+    expect(getResidency(db, team.id, ada.id)?.policy).toBe('{"hourly_cap":5}');
+    enroll(db, team, ada, HOST, {}); // explicit clear
+    expect(getResidency(db, team.id, ada.id)?.policy).toBeNull();
+  });
+});
+
+describe('ping-pong demotion (ADR 131 §4, landed inc 5)', () => {
+  /** A steer sent while the SENDER's live presence attests provenance `wake` — the machine chain. */
+  function steerFromWakeOccupancy(
+    db: Database,
+    team: TeamRow,
+    sender: MemberRow,
+    recipient: MemberRow,
+    id: string,
+    ts: number,
+  ) {
+    attach(db, sender.id, 'claude-code', `conn-${id}`, { provenance: 'wake' });
+    msg(db, team, sender, recipient, 'steer', id, ts);
+  }
+
+  it('an interrupt-class act sent from a wake occupancy is demoted to the batched lane', () => {
+    const { db, team, ada, bob } = seed();
+    enroll(db, team, ada);
+    steerFromWakeOccupancy(db, team, bob, ada, 's1', 1_000);
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.lane).toBe('batched'); // still reachable — at cooldown cadence, not instantly
+  });
+
+  it('the demoted act respects the batched cooldown (chains run at cooldown cadence)', () => {
+    const { db, team, ada, bob } = seed();
+    enroll(db, team, ada);
+    wakeOutcomeRow(db, team, 'Ada', 'old-act', 'residency.woke', Date.now() - 5 * 60_000);
+    steerFromWakeOccupancy(db, team, bob, ada, 's1', 1_000);
+    // Inside the 30-minute cooldown a human steer would wake immediately; the machine steer waits.
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('a human-sent steer still wakes immediately (nothing over-demotes)', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    attach(db, nick.id, 'cli', 'conn-nick'); // provenance null — a human session
+    msg(db, team, nick, ada, 'steer', 's1', 1_000);
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.lane).toBe('immediate');
   });
 });

@@ -448,7 +448,8 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'residency',
-    signature: 'on [--harness <class>] [--host <name>] | off | status  [--seat <name>] [--json]',
+    signature:
+      'on [--harness <class>] [--host <name>] [knobs] | off | status | policy [knobs]  [--seat <name>] [--json]',
     summary: 'enroll this seat for wake-on-message while offline (ADR 131)',
     group: 'admin',
     detail:
@@ -456,12 +457,19 @@ export const CATALOG: readonly CommandEntry[] = [
       'derives wake-due directed acts and `musterd host` resurrects the harness session. ' +
       '`on` (admin-authorized) enrolls a seat, lands a standing resume grant in .musterd/binding.json, ' +
       'and registers the workspace in the machine-local host registry; `off` is the kill switch ' +
-      '(reverses all three); `status` cross-checks the stores and names drift. Two different flags: ' +
-      '--seat = WHAT gets enrolled (an agent seat; defaults to this workspace’s binding), --as = WHO ' +
-      'authorizes (an admin). The roster shows enrolled offline seats as `offline · wakeable`.',
+      '(reverses all three); `status` cross-checks the stores, names drift, and renders the effective ' +
+      'wake policy (seat overrides starred). Two different flags: --seat = WHAT gets enrolled (an ' +
+      'agent seat; defaults to this workspace’s binding), --as = WHO authorizes (an admin). Knobs ' +
+      '(inc 5) — on `on` they override THIS seat, on `policy` they set the TEAM defaults: ' +
+      '--lane both|interrupt|batched, --cooldown 15m, --hourly-cap N, --attempt-cap N, ' +
+      '--tool-policy reply-only|seat-policy, --timeout 5m, --max-turns N, --budget USD, ' +
+      '--transcript-max MiB; --reset-policy clears a seat back to team defaults. There is no ' +
+      '`--lane off` — "stop waking this seat" is `residency off`. The roster shows enrolled offline ' +
+      'seats as `offline · wakeable`.',
     examples: [
       'musterd residency on --as nick',
-      'musterd residency on --seat scout --as nick',
+      'musterd residency on --seat scout --as nick --lane batched --budget 2',
+      'musterd residency policy --cooldown 15m --hourly-cap 4 --as nick',
       'musterd residency status',
       'musterd residency off',
     ],

@@ -12,7 +12,9 @@ import {
   PROTOCOL_VERSION,
   ReportSchema,
   resolveAttestedModel,
+  resolveAttestedProvenance,
   TOKEN_PREFIXES,
+  type Policy,
   RequestsResponseSchema,
   EnrollResidencyResponseSchema,
   ResidencyListResponseSchema,
@@ -111,6 +113,14 @@ export class HttpClient {
         this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
           ? resolveAttestedModel(process.env)
           : undefined;
+      // ADR 131 §6 (increment 5): provenance rides the same gate as model — a wake-spawned
+      // session's hook/one-shot CLI commands inherit MUSTERD_PROVENANCE from the actuator, so
+      // their ambient touches label the seat `wake` instead of the `session` default (the inc-4
+      // mislabel: verify credited a wake against a session-labelled ambient row).
+      const attestedProvenance =
+        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
+          ? resolveAttestedProvenance(process.env)
+          : undefined;
       res = await fetch(this.opts.server + path, {
         method,
         headers: {
@@ -120,6 +130,9 @@ export class HttpClient {
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
           ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
           ...(attestedModel !== undefined ? { 'x-musterd-model': attestedModel } : {}),
+          ...(attestedProvenance !== undefined
+            ? { 'x-musterd-provenance': attestedProvenance }
+            : {}),
           // ADR 135: build attestation rides every request, for EVERY credential — no ADR 121 gate.
           // The model gate exists because a model is a harness fact a human must not stamp; build
           // attests the *binary* itself, which a human's (possibly stale) CLI genuinely has.
@@ -473,6 +486,17 @@ export class HttpClient {
       throw new CliError('residency response did not match the protocol schema', 1);
     }
     return parsed.data;
+  }
+
+  /** The team governance policy (SPEC A.6) — `GET /teams/:slug/policy`, admin. The read half of
+   *  `musterd residency policy`: read → merge → set, so one knob changes without re-stating the rest. */
+  async getPolicy(slug: string): Promise<{ policy: Policy }> {
+    return (await this.request('GET', `/teams/${slug}/policy`)) as { policy: Policy };
+  }
+
+  /** Set the team governance policy — `POST /teams/:slug/policy`, admin, audited `policy.change`. */
+  async setPolicy(slug: string, policy: Policy): Promise<{ policy: Policy }> {
+    return (await this.request('POST', `/teams/${slug}/policy`, policy)) as { policy: Policy };
   }
 
   /**

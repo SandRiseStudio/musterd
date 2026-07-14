@@ -13,6 +13,47 @@ export const WAKE_LANES = ['immediate', 'batched'] as const;
 export type WakeLane = (typeof WAKE_LANES)[number];
 export const WakeLaneSchema = z.enum(WAKE_LANES);
 
+/**
+ * Wake policy — the ADR 131 §3 knobs (increment 5). Team defaults live on `teams.policy`
+ * (`PolicySchema.residency`); a per-seat enrollment override is a **sparse** partial stored in
+ * `residency.policy`, so later team-default changes flow through unset keys. Defaults are defined
+ * here and nowhere else — the server derives every rate gate from the parsed schema.
+ *
+ * There is deliberately no `lane: off`: an enrollment that can never wake is a contradiction (the
+ * standing grant and the roster's `wakeable` badge would lie). "Stop waking this seat" is
+ * `residency off` (the kill switch); "pause this machine" is stopping the actuator.
+ */
+export const ResidencyPolicySchema = z.object({
+  /** Which wake lanes are live for the seat: both (launch default), or one. */
+  lane: z.enum(['both', 'interrupt', 'batched']).default('both'),
+  /** Batched-lane cooldown between wakes (1min–24h). */
+  cooldown_ms: z.number().int().min(60_000).max(86_400_000).default(1_800_000),
+  /** Wakes per seat per hour, both lanes. */
+  hourly_cap: z.number().int().min(1).max(20).default(2),
+  /** Attempts per act before a terminal `residency.wake_exhausted`. */
+  attempt_cap: z.number().int().min(1).max(10).default(3),
+  /** `reply-only` scopes the woken session to the musterd tools; `seat-policy` defers to the
+   *  workspace's own settings. Neither ever widens permissions (ADR 131 §6). */
+  tool_policy: z.enum(['reply-only', 'seat-policy']).default('reply-only'),
+  /** Watchdog timeout for the wake run — the one universally enforceable bound. The actuator's
+   *  local `--timeout` flag stays the ceiling; policy can only tighten it. */
+  timeout_ms: z.number().int().min(30_000).max(3_600_000).default(300_000),
+  /** Turn cap, applied where the backend supports it. */
+  max_turns: z.number().int().min(1).max(200).optional(),
+  /** Spend *report* bound: wakes whose attested cost exceeds it are flagged `over_budget` in the
+   *  report. No backend can kill a run mid-flight on dollars — enforcement stays with
+   *  cooldown/caps/watchdog (owner call, 2026-07-14). */
+  budget_usd: z.number().positive().max(100).optional(),
+  /** Resume hygiene bound: transcripts past this roll over to a fresh session (64KiB–256MiB).
+   *  Default 10MiB ≈ 60 wake lives at the measured ~108KiB/life. */
+  transcript_max_bytes: z.number().int().min(65_536).max(268_435_456).default(10_485_760),
+});
+export type ResidencyPolicy = z.infer<typeof ResidencyPolicySchema>;
+
+/** A per-seat enrollment override: same knobs, all optional — only explicitly-set keys stick. */
+export const ResidencyPolicyOverrideSchema = ResidencyPolicySchema.partial();
+export type ResidencyPolicyOverride = z.infer<typeof ResidencyPolicyOverrideSchema>;
+
 /** A seat's residency enrollment (public shape — the standing grant travels once, never here). */
 export const ResidencySchema = z.object({
   id: z.string(),
@@ -32,6 +73,8 @@ export const ResidencySchema = z.object({
    *  attestation is harness-class-only, so this timestamp is ALL the daemon learns about sessions:
    *  never an id, never a transcript path. Null until the first `musterd session start` push. */
   resumable_at: z.number().int().nullable(),
+  /** The seat's sparse policy override (increment 5) — null when the team defaults govern whole. */
+  policy: ResidencyPolicyOverrideSchema.nullish(),
   created_at: z.number().int(),
   updated_at: z.number().int(),
 });
@@ -42,6 +85,9 @@ export const EnrollResidencyBodySchema = z.object({
   seat: z.string(),
   harness: z.string().min(1).max(40),
   host: z.string().min(1).max(120),
+  /** Per-seat knob override. Absent = preserve any existing override (a drift-fixing re-enroll
+   *  must not nuke tuning); present = replace wholesale; `{}` = clear back to team defaults. */
+  policy: ResidencyPolicyOverrideSchema.optional(),
 });
 export type EnrollResidencyBody = z.infer<typeof EnrollResidencyBodySchema>;
 
@@ -50,6 +96,9 @@ export type EnrollResidencyBody = z.infer<typeof EnrollResidencyBodySchema>;
 export const EnrollResidencyResponseSchema = z.object({
   residency: ResidencySchema,
   grant: z.string(),
+  /** True when the seat had a live session at enroll time — that session occupies via the grant
+   *  this enroll just superseded, and the new grant/policy only govern from its next wake/claim. */
+  seat_live: z.boolean().optional(),
 });
 export type EnrollResidencyResponse = z.infer<typeof EnrollResidencyResponseSchema>;
 
@@ -84,6 +133,9 @@ export type SessionAttestationResponse = z.infer<typeof SessionAttestationRespon
 /** Response of `GET /teams/:slug/residency` — the team's enrollments. */
 export const ResidencyListResponseSchema = z.object({
   residency: z.array(ResidencySchema),
+  /** The team's wake-policy defaults (fully defaulted), so `residency status` can render the
+   *  effective policy and star the seat-overridden knobs. Optional for back-compat. */
+  policy_defaults: ResidencyPolicySchema.optional(),
 });
 export type ResidencyListResponse = z.infer<typeof ResidencyListResponseSchema>;
 
@@ -113,6 +165,19 @@ export const WakeOrderSchema = z.object({
   composed_line: z.string(),
   /** Lease expiry (ms epoch, ~120s): report before this or the wake re-becomes due. */
   expires_at: z.number().int(),
+  /** Effective tool policy for the run (increment 5). Absent (older daemon) ⇒ reply-only. */
+  tool_policy: z.enum(['reply-only', 'seat-policy']).optional(),
+  /** Effective run bounds. `timeout_ms` can only tighten the actuator's local `--timeout` ceiling;
+   *  `max_turns`/`budget_usd` apply where the backend supports them. */
+  bounds: z
+    .object({
+      timeout_ms: z.number().int(),
+      max_turns: z.number().int().optional(),
+      budget_usd: z.number().optional(),
+    })
+    .optional(),
+  /** Effective resume-hygiene bound for this seat (increment 5). Absent ⇒ backend default. */
+  transcript_max_bytes: z.number().int().optional(),
 });
 export type WakeOrder = z.infer<typeof WakeOrderSchema>;
 

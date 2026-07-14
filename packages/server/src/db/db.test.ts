@@ -10,7 +10,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('20');
+    expect(ver?.value).toBe('21');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -151,7 +151,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(20); // runs v18…v20 (observer grades + residency + offline reason)
+    expect(runMigrations(db)).toBe(21); // runs v18…v21 (observer grades + residency + offline reason + send provenance)
 
     const scope = (id: string) =>
       db

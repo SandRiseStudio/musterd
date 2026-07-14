@@ -43,9 +43,30 @@ const VERIFY_CONFIRM_BEAT_MS = 3_000;
 /** The context-hygiene bound (ADR 131 §5: "prefers resume for continuity but rolls over to a
  *  fresh session when the transcript is bloated or stale" — the cost bound and the compaction
  *  escape are one clause). 10 MiB of transcript JSONL is several compaction cycles deep; past it,
- *  resume spends more re-ingesting history than a fresh seat-primer boot costs. A placeholder
- *  constant — increment 5's metrics re-tune it into a policy knob. */
+ *  resume spends more re-ingesting history than a fresh seat-primer boot costs. Since increment 5
+ *  this is the DEFAULT — per-seat policy delivers `transcript_max_bytes` on the wake order (the
+ *  rehearsal data reads ~108 KiB/life, so 10 MiB ≈ 60 lives; the default stands). */
 export const RESUME_TRANSCRIPT_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Per-run argv options (increment 5) — delivered on the wake order by the daemon's effective
+ *  policy, applied identically to the fresh and resume paths (one permission posture per run). */
+export interface WakeArgOpts {
+  /** `reply-only` (default) scopes the run to the musterd tools via `--allowedTools`; `seat-policy`
+   *  omits the flag so the workspace's own settings govern. NEITHER ever passes a skip-permissions
+   *  flag — the explicit ADR 131 §6 invariant, enforced by the argv tests for both policies. */
+  toolPolicy?: 'reply-only' | 'seat-policy';
+  /** `--max-turns` where set (the claude CLI supports it; other backends may not). */
+  maxTurns?: number;
+}
+
+function argTail(opts: WakeArgOpts): string[] {
+  return [
+    ...(opts.toolPolicy === 'seat-policy' ? [] : ['--allowedTools', 'mcp__musterd']),
+    ...(opts.maxTurns !== undefined ? ['--max-turns', String(opts.maxTurns)] : []),
+    '--output-format',
+    'json',
+  ];
+}
 
 /** Injectables so tests never spawn a real harness. */
 export interface ClaudeCodeDeps {
@@ -65,33 +86,23 @@ export interface ClaudeCodeDeps {
  * with zero adapter changes. `--output-format json` is for the *completion log only* (cost/duration
  * telemetry) — never verification.
  */
-export function buildWakeArgs(composedLine: string, sessionId: string): string[] {
-  return [
-    '-p',
-    composedLine,
-    '--session-id',
-    sessionId,
-    '--allowedTools',
-    'mcp__musterd',
-    '--output-format',
-    'json',
-  ];
+export function buildWakeArgs(
+  composedLine: string,
+  sessionId: string,
+  opts: WakeArgOpts = {},
+): string[] {
+  return ['-p', composedLine, '--session-id', sessionId, ...argTail(opts)];
 }
 
 /** The exact resume argv (exported for the invariant tests): identical permission posture to the
- *  fresh path — same allowed-tools scope, same default permission mode, never a skip flag — only
+ *  fresh path — same tool-policy scope, same default permission mode, never a skip flag — only
  *  the session source differs (`--resume <captured id>` instead of `--session-id <minted>`). */
-export function buildResumeArgs(composedLine: string, sessionId: string): string[] {
-  return [
-    '--resume',
-    sessionId,
-    '-p',
-    composedLine,
-    '--allowedTools',
-    'mcp__musterd',
-    '--output-format',
-    'json',
-  ];
+export function buildResumeArgs(
+  composedLine: string,
+  sessionId: string,
+  opts: WakeArgOpts = {},
+): string[] {
+  return ['--resume', sessionId, '-p', composedLine, ...argTail(opts)];
 }
 
 /** SIGTERM the child's process group (detached ⇒ it leads one), escalating to SIGKILL. */
@@ -271,16 +282,19 @@ function runAttempt(
  * lives here (liveness itself is the loop's guard; a `live` state reaching this backend is a
  * caller bug handled defensively in `wake`).
  */
-function resumeLadder(liveness: LocalSessionLiveness): { id: string } | { skip: string | null } {
+function resumeLadder(
+  liveness: LocalSessionLiveness,
+  transcriptMaxBytes: number,
+): { id: string } | { skip: string | null } {
   if (liveness.state === 'none') return { skip: null }; // the pre-capture world — quiet fresh
   const s = liveness.session!;
   if (s.harness !== 'claude-code') return { skip: `captured harness is "${s.harness}"` };
   if (liveness.state === 'gc-expired') return { skip: 'capture past the 30d GC horizon' };
   if (!s.transcript_path || liveness.transcriptBytes === undefined)
     return { skip: 'captured transcript is missing' };
-  if (liveness.transcriptBytes > RESUME_TRANSCRIPT_MAX_BYTES)
+  if (liveness.transcriptBytes > transcriptMaxBytes)
     return {
-      skip: `transcript is ${(liveness.transcriptBytes / 1_048_576).toFixed(1)} MiB (hygiene bound ${RESUME_TRANSCRIPT_MAX_BYTES / 1_048_576} MiB)`,
+      skip: `transcript is ${(liveness.transcriptBytes / 1_048_576).toFixed(1)} MiB (hygiene bound ${(transcriptMaxBytes / 1_048_576).toFixed(1)} MiB)`,
     };
   return { id: s.id };
 }
@@ -315,16 +329,26 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
 
       const deadline = Date.now() + spec.bounds.timeout_ms;
       const settledParts: Promise<void>[] = [];
+      // Per-order knobs (increment 5): tool policy + turn cap ride the argv; the transcript bound
+      // parameterizes the ladder. `budget_usd` is carried for the report only (no CLI can enforce
+      // a dollar cap mid-run) — the loop already logged the clamped watchdog.
+      const argOpts: WakeArgOpts = {
+        ...(spec.order.tool_policy !== undefined ? { toolPolicy: spec.order.tool_policy } : {}),
+        ...(spec.bounds.max_turns !== undefined ? { maxTurns: spec.bounds.max_turns } : {}),
+      };
 
       // ── The resume upgrade (increment 4) ──────────────────────────────────────────────────
-      const rung = resumeLadder(liveness);
+      const rung = resumeLadder(
+        liveness,
+        spec.order.transcript_max_bytes ?? RESUME_TRANSCRIPT_MAX_BYTES,
+      );
       if ('skip' in rung) {
         if (rung.skip) ctx.log(`resume skipped for ${seat}: ${rung.skip} — fresh spawn`);
       } else {
         const attempt = runAttempt(
           deps,
           bin,
-          buildResumeArgs(spec.order.composed_line, rung.id),
+          buildResumeArgs(spec.order.composed_line, rung.id, argOpts),
           spec,
           ctx,
           {
@@ -360,7 +384,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       const fresh = runAttempt(
         deps,
         bin,
-        buildWakeArgs(spec.order.composed_line, sessionId),
+        buildWakeArgs(spec.order.composed_line, sessionId, argOpts),
         spec,
         ctx,
         {

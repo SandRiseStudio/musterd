@@ -1,4 +1,11 @@
-import type { Residency, WakeLane, WakeOrder } from '@musterd/protocol';
+import type {
+  Residency,
+  ResidencyPolicy,
+  ResidencyPolicyOverride,
+  WakeLane,
+  WakeOrder,
+} from '@musterd/protocol';
+import { ResidencyPolicyOverrideSchema, ResidencyPolicySchema } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { appendAudit } from './audit.js';
@@ -8,6 +15,7 @@ import { getMemberById } from './members.js';
 import { listInbox, pendingInterrupts, rowToEnvelope } from './messages.js';
 import { hasLivePresence, listReclaimableMemberIds } from './presence.js';
 import type { MemberRow } from './rows.js';
+import { getPolicy } from './teams.js';
 
 /**
  * The wake ledger (ADR 131, increment 2). The daemon side of harness residency: enrollment rows
@@ -19,14 +27,13 @@ import type { MemberRow } from './rows.js';
  * stored. The daemon orders wakes; it never spawns a process (`musterd host`, increment 3, acts).
  */
 
-/** Lease TTL: a wake the host hasn't reported within this window re-becomes due (crash-safe). */
+/** Lease TTL: a wake the host hasn't reported within this window re-becomes due (crash-safe).
+ *  Mechanism, not owner policy — deliberately NOT a `ResidencyPolicySchema` knob. */
 export const WAKE_LEASE_TTL_MS = 120_000;
-/** Batched-lane cooldown between wakes of one seat (launch default, owner call 2026-07-11). */
-export const WAKE_COOLDOWN_MS = 30 * 60_000;
-/** Hard cap on wake actuations per seat per hour, both lanes (spend bound). */
-export const WAKE_HOURLY_CAP = 2;
-/** Attempts per act before a terminal `residency.wake_exhausted` (termination is provable). */
-export const WAKE_ATTEMPT_CAP = 3;
+/** The launch-default wake policy (increment 5): every rate gate — cooldown, hourly cap, attempt
+ *  cap, lanes — now reads from the effective policy (team defaults ⊕ per-seat override), and the
+ *  defaults live in ONE place, the protocol schema. */
+export const WAKE_POLICY_DEFAULTS: ResidencyPolicy = ResidencyPolicySchema.parse({});
 /** After a host defers a wake for a live local session, the seat derives no new lease for this
  *  window (increment 4's local-session guard) — else a working human generates a lease+defer pair
  *  every poll tick. Deferrals consume NO attempt/cooldown/hourly budget (they are neither
@@ -62,6 +69,41 @@ export interface WakeLeaseRow {
   expires_at: number;
 }
 
+/**
+ * Parse a stored per-seat policy override — **leniently**: the write side validated strictly, so an
+ * unparseable blob here is drift (a hand-edit, a downgrade), and the honest read is "no override"
+ * rather than a wake pipeline that throws. `residency status` names the drift separately.
+ */
+export function parsePolicyOverride(raw: string | null): ResidencyPolicyOverride | null {
+  if (!raw) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const parsed = ResidencyPolicyOverrideSchema.safeParse(json);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * The effective wake policy for one enrollment: launch defaults ⊕ team defaults ⊕ seat override
+ * (ADR 131 §3). Team defaults arrive already default-filled (`getPolicy` parses with defaults);
+ * the sparse override contributes only its explicitly-set keys.
+ */
+export function effectiveWakePolicy(
+  teamDefaults: ResidencyPolicy,
+  storedOverride: string | null,
+): ResidencyPolicy {
+  const override = parsePolicyOverride(storedOverride);
+  if (!override) return teamDefaults;
+  const merged: ResidencyPolicy = { ...teamDefaults };
+  for (const [key, value] of Object.entries(override)) {
+    if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
+  }
+  return merged;
+}
+
 /** Project a stored enrollment to the public shape (seat name resolved by the caller-provided row). */
 export function toResidency(row: ResidencyRow, teamSlug: string, seatName: string): Residency {
   return {
@@ -73,6 +115,7 @@ export function toResidency(row: ResidencyRow, teamSlug: string, seatName: strin
     grant_id: row.grant_id,
     authorized_by: row.authorized_by,
     resumable_at: row.resumable_at,
+    policy: parsePolicyOverride(row.policy),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -94,18 +137,36 @@ export function enrollResidency(
     host: string;
     grant_id: string | null;
     authorized_by: string | null;
+    /** Sparse knob override (increment 5). `undefined` = preserve the existing override on a
+     *  re-enroll (a drift-fixing `residency on` must not nuke tuning); an object = replace
+     *  wholesale; `{}` = clear back to team defaults (stored as NULL, not `'{}'`). */
+    policy?: Record<string, unknown>;
   },
 ): { row: ResidencyRow; previous: ResidencyRow | null } {
   const now = Date.now();
+  const policyJson =
+    input.policy === undefined
+      ? undefined
+      : Object.keys(input.policy).length === 0
+        ? null
+        : JSON.stringify(input.policy);
   const previous =
     db
       .prepare<[string], ResidencyRow>('SELECT * FROM residency WHERE member_id = ?')
       .get(input.member_id) ?? null;
   if (previous) {
     db.prepare(
-      `UPDATE residency SET harness = ?, host = ?, grant_id = ?, authorized_by = ?, updated_at = ?
+      `UPDATE residency SET harness = ?, host = ?, grant_id = ?, authorized_by = ?, policy = ?, updated_at = ?
        WHERE id = ?`,
-    ).run(input.harness, input.host, input.grant_id, input.authorized_by, now, previous.id);
+    ).run(
+      input.harness,
+      input.host,
+      input.grant_id,
+      input.authorized_by,
+      policyJson === undefined ? previous.policy : policyJson,
+      now,
+      previous.id,
+    );
     const row = db
       .prepare<[string], ResidencyRow>('SELECT * FROM residency WHERE id = ?')
       .get(previous.id)!;
@@ -119,7 +180,7 @@ export function enrollResidency(
     host: input.host,
     grant_id: input.grant_id,
     authorized_by: input.authorized_by,
-    policy: null,
+    policy: policyJson ?? null,
     resumable_harness: null,
     resumable_at: null,
     created_at: now,
@@ -282,6 +343,18 @@ interface WakeCandidate {
   lane: WakeLane;
 }
 
+/** Was this act sent from a provenance-`wake` occupancy? Server-stamped at insert (v21) — the
+ *  ping-pong demotion read (ADR 131 §4). Null (pre-v21 rows, no live presence at send) ⇒ not wake. */
+function sentFromWake(db: Database, actId: string): boolean {
+  const row = db
+    .prepare<
+      [string],
+      { from_provenance: string | null }
+    >('SELECT from_provenance FROM messages WHERE id = ?')
+    .get(actId);
+  return row?.from_provenance === 'wake';
+}
+
 /**
  * Derive this member's due-wake candidates, immediate lane first (ADR 131 §3):
  *
@@ -291,41 +364,62 @@ interface WakeCandidate {
  * - **batched** — the ADR 090 open directed ledger (request_help/handoff + urgent directed acts,
  *   unanswered), oldest first, subject to the cooldown checked by the caller.
  *
- * Ping-pong demotion (acts sent from a provenance-`wake` occupancy only qualify for the batched
- * lane) starts mattering in increment 3 when `wake` occupancies exist; nothing to demote yet.
+ * **Ping-pong demotion** (ADR 131 §4, landed increment 5): an interrupt-class act *sent from a
+ * provenance-`wake` occupancy* never wakes another seat immediately — it is demoted to the batched
+ * lane (kept as a candidate there, ahead of the ledger's, since it is still interrupt-class), so
+ * machine-to-machine chains run at cooldown cadence under the caps, without lineage tracking.
  */
 function dueCandidates(
   db: Database,
   teamSlug: string,
   member: MemberRow,
-  batchedEligible: boolean,
+  lanes: { immediate: boolean; batched: boolean },
 ): WakeCandidate[] {
-  const out: WakeCandidate[] = [];
+  const immediate: WakeCandidate[] = [];
+  const batched: WakeCandidate[] = [];
   const seen = new Set<string>();
 
-  const cursor = getCursor(db, member.id);
-  const rows = listInbox(db, member, { unreadOnly: true, cursorTs: cursor.last_read_ts });
-  const envelopes = rows.map((r) => {
-    const from = getMemberById(db, r.from_member);
-    const to = r.to_member ? getMemberById(db, r.to_member) : null;
-    return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
-  });
-  for (const env of pendingInterrupts(envelopes, member.name)) {
-    if (seen.has(env.id)) continue;
-    seen.add(env.id);
-    out.push({ act_id: env.id, act: env.act, sender: env.from, lane: 'immediate' });
+  if (lanes.immediate || lanes.batched) {
+    const cursor = getCursor(db, member.id);
+    const rows = listInbox(db, member, { unreadOnly: true, cursorTs: cursor.last_read_ts });
+    const envelopes = rows.map((r) => {
+      const from = getMemberById(db, r.from_member);
+      const to = r.to_member ? getMemberById(db, r.to_member) : null;
+      return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
+    });
+    for (const env of pendingInterrupts(envelopes, member.name)) {
+      if (seen.has(env.id)) continue;
+      seen.add(env.id);
+      const demoted = sentFromWake(db, env.id);
+      const candidate: WakeCandidate = {
+        act_id: env.id,
+        act: env.act,
+        sender: env.from,
+        lane: demoted ? 'batched' : 'immediate',
+      };
+      if (demoted) {
+        if (lanes.batched) batched.push(candidate);
+      } else if (lanes.immediate) {
+        immediate.push(candidate);
+      }
+    }
   }
 
-  if (batchedEligible) {
+  if (lanes.batched) {
     for (const delivery of openDirectedLedger(db, member.team_id)) {
       if (seen.has(delivery.id)) continue;
       const mine = delivery.recipients.find((r) => r.seat === member.name);
       if (!mine || mine.state === 'answered') continue;
       seen.add(delivery.id);
-      out.push({ act_id: delivery.id, act: delivery.act, sender: delivery.from, lane: 'batched' });
+      batched.push({
+        act_id: delivery.id,
+        act: delivery.act,
+        sender: delivery.from,
+        lane: 'batched',
+      });
     }
   }
-  return out;
+  return [...immediate, ...batched];
 }
 
 /**
@@ -344,6 +438,10 @@ function dueCandidates(
  *    `residency.wake_exhausted` (once) and is skipped — termination is provable:
  *    wake → cooldown → cap → exhausted.
  *
+ * Every rate gate reads the seat's **effective policy** (team defaults ⊕ enrollment override,
+ * increment 5) — and the emitted order carries the actuation knobs (tool policy, bounds, hygiene
+ * bound) so the host applies them without ever reading policy itself.
+ *
  * One lease per seat per poll (the composed line names one act; the woken session reads its whole
  * inbox anyway). Audit `residency.wake_leased` is written here per lease — actor null (a machine
  * decision), best-effort by `appendAudit`'s contract.
@@ -360,6 +458,7 @@ export function claimWakeLeases(
     const orders: WakeOrder[] = [];
     const reclaimable = listReclaimableMemberIds(db, teamId, now);
     const enrollments = listResidency(db, teamId).filter((r) => r.host === host);
+    const teamDefaults = getPolicy(db, teamId).residency;
     for (const enrollment of enrollments) {
       const member = getMemberById(db, enrollment.member_id);
       if (!member || member.left_at !== null) continue;
@@ -369,19 +468,27 @@ export function claimWakeLeases(
       // Local-session guard snooze (increment 4): the host reported a live local session in this
       // seat's workspace — don't re-derive a lease every tick while someone is plainly working there.
       if (deferredSince(db, teamId, member.name, now - WAKE_DEFER_SNOOZE_MS)) continue;
-      if (wakesSince(db, teamId, member.name, now - 3_600_000) >= WAKE_HOURLY_CAP) continue;
+      const policy = effectiveWakePolicy(teamDefaults, enrollment.policy);
+      if (wakesSince(db, teamId, member.name, now - 3_600_000) >= policy.hourly_cap) continue;
 
-      const cooled = wakesSince(db, teamId, member.name, now - WAKE_COOLDOWN_MS) === 0;
-      const candidates = dueCandidates(db, teamSlug, member, cooled);
+      const cooled = wakesSince(db, teamId, member.name, now - policy.cooldown_ms) === 0;
+      const candidates = dueCandidates(db, teamSlug, member, {
+        immediate: policy.lane !== 'batched',
+        batched: cooled && policy.lane !== 'interrupt',
+      });
       for (const candidate of candidates) {
         if (isExhausted(db, teamId, candidate.act_id)) continue;
-        if (attemptsForAct(db, teamId, candidate.act_id) >= WAKE_ATTEMPT_CAP) {
+        if (attemptsForAct(db, teamId, candidate.act_id) >= policy.attempt_cap) {
           appendAudit(db, teamId, {
             actor: null,
             action: 'residency.wake_exhausted',
             target: member.name,
             result: 'deny',
-            detail: { act: candidate.act_id, sender: candidate.sender, attempts: WAKE_ATTEMPT_CAP },
+            detail: {
+              act: candidate.act_id,
+              sender: candidate.sender,
+              attempts: policy.attempt_cap,
+            },
           });
           continue;
         }
@@ -422,6 +529,13 @@ export function claimWakeLeases(
           lane: candidate.lane,
           composed_line: composeWakeLine(member.name, teamSlug, candidate.act, candidate.sender),
           expires_at: lease.expires_at,
+          tool_policy: policy.tool_policy,
+          bounds: {
+            timeout_ms: policy.timeout_ms,
+            ...(policy.max_turns !== undefined ? { max_turns: policy.max_turns } : {}),
+            ...(policy.budget_usd !== undefined ? { budget_usd: policy.budget_usd } : {}),
+          },
+          transcript_max_bytes: policy.transcript_max_bytes,
         });
         break; // one lease per seat per poll
       }
