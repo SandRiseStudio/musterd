@@ -193,7 +193,9 @@ describe('HTTP API', () => {
     // v0.3 P3 composite mint (SPEC A.7): agent key + creator credential + policy, each shown once.
     expect(r.json.agent_key).toMatch(/^mskey_/);
     expect(r.json.human_credential).toMatch(/^mscr_/);
-    expect(r.json.policy).toEqual({ allow_pre_issued_grants: false });
+    // Policy mints with defaults for every block — inc 5 added the residency knobs (ADR 131).
+    expect(r.json.policy).toMatchObject({ allow_pre_issued_grants: false });
+    expect(r.json.policy.residency.hourly_cap).toBe(2);
     expect(r.json.seat.name).toBe('nick');
     const dup = await post('/teams', { slug: 'dawn', creator: { name: 'x', kind: 'human' } });
     expect(dup.status).toBe(409);

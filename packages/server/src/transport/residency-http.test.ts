@@ -180,3 +180,107 @@ describe('wake-report deferred:true — the local-session guard settles honestly
     expect(again.json.orders).toHaveLength(0);
   });
 });
+
+describe('wake policy knobs over HTTP (ADR 131 inc 5)', () => {
+  it('enroll stores + audits a sparse policy; re-enroll preserves; {} clears; bad range 400s', async () => {
+    const first = await post(
+      '/teams/dawn/residency/enroll',
+      { seat: 'Ada', harness: 'claude-code', host: 'laptop.local', policy: { hourly_cap: 4 } },
+      nickCred,
+    );
+    expect(first.status).toBe(201);
+    expect(first.json.residency.policy).toEqual({ hourly_cap: 4 });
+    const enrolled = audits('residency.enrolled');
+    expect(JSON.parse(enrolled[0]!.detail as string)).toMatchObject({
+      policy: { hourly_cap: 4 },
+    });
+
+    // A drift-fixing re-enroll without `policy` must not nuke the tuning.
+    await enrollAda();
+    const list = await get('/teams/dawn/residency', nickCred);
+    expect(list.json.residency[0].policy).toEqual({ hourly_cap: 4 });
+
+    // `{}` is the explicit clear.
+    const cleared = await post(
+      '/teams/dawn/residency/enroll',
+      { seat: 'Ada', harness: 'claude-code', host: 'laptop.local', policy: {} },
+      nickCred,
+    );
+    expect(cleared.json.residency.policy ?? null).toBeNull();
+
+    const bad = await post(
+      '/teams/dawn/residency/enroll',
+      { seat: 'Ada', harness: 'claude-code', host: 'laptop.local', policy: { attempt_cap: 99 } },
+      nickCred,
+    );
+    expect(bad.status).toBe(400);
+  });
+
+  it('names a live seat at enroll time (the grant-rotation warning input)', async () => {
+    await enrollAda();
+    // Give Ada a live ambient presence via an authenticated read as the seat.
+    const touched = await fetch(base + '/teams/dawn/inbox', {
+      headers: { authorization: `Bearer ${agentKey}`, 'x-musterd-seat': 'Ada' },
+    });
+    expect(touched.status).toBe(200);
+    const hdrs = { 'content-type': 'application/json', authorization: `Bearer ${nickCred}` };
+    const res = await fetch(base + '/teams/dawn/residency/enroll', {
+      method: 'POST',
+      headers: hdrs,
+      body: JSON.stringify({ seat: 'Ada', harness: 'claude-code', host: 'laptop.local' }),
+    });
+    const json = (await res.json()) as { seat_live?: boolean };
+    expect(json.seat_live).toBe(true);
+  });
+
+  it('GET /policy round-trips the residency defaults; GET /residency carries policy_defaults', async () => {
+    const before = await get('/teams/dawn/policy', nickCred);
+    expect(before.status).toBe(200);
+    expect(before.json.policy.residency.cooldown_ms).toBe(30 * 60_000);
+
+    const set = await post(
+      '/teams/dawn/policy',
+      { ...before.json.policy, residency: { ...before.json.policy.residency, hourly_cap: 6 } },
+      nickCred,
+    );
+    expect(set.status).toBe(200);
+
+    const after = await get('/teams/dawn/policy', nickCred);
+    expect(after.json.policy.residency.hourly_cap).toBe(6);
+
+    await enrollAda();
+    const list = await get('/teams/dawn/residency', nickCred);
+    expect(list.json.policy_defaults.hourly_cap).toBe(6);
+  });
+});
+
+describe('x-musterd-provenance — the ambient touch attests the animation source (inc 5)', () => {
+  it('an agent-key read with the header labels the ambient presence `wake`; junk is ignored', async () => {
+    const read = async (provenance?: string) => {
+      const res = await fetch(base + '/teams/dawn/inbox?seat=Ada', {
+        headers: {
+          authorization: `Bearer ${agentKey}`,
+          'x-musterd-seat': 'Ada',
+          ...(provenance ? { 'x-musterd-provenance': provenance } : {}),
+        },
+      });
+      expect(res.status).toBe(200);
+    };
+    await read('wake');
+    let status = await get('/teams/dawn/members', nickCred);
+    let ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
+    expect(ada.presences[0].provenance).toBe('wake');
+
+    // Newest-wins (owner call 2026-07-14): a later human-driven touch flips it back to session…
+    await read();
+    status = await get('/teams/dawn/members', nickCred);
+    ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
+    expect(ada.presences[0].provenance).toBe('session');
+
+    // …and an unknown value never lands (enum-validated, silently dropped).
+    await read('root');
+    status = await get('/teams/dawn/members', nickCred);
+    ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
+    expect(ada.presences[0].provenance).toBe('session');
+  });
+});

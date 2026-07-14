@@ -143,7 +143,47 @@ describe('buildResumeArgs (the resume argv invariants, inc 4)', () => {
   });
 });
 
+describe('WakeArgOpts (inc 5): tool policy + turn cap ride the argv', () => {
+  it('seat-policy omits --allowedTools (workspace settings govern) — and STILL never a skip flag', () => {
+    for (const args of [
+      buildWakeArgs('l', 'i', { toolPolicy: 'seat-policy' }),
+      buildResumeArgs('l', 'i', { toolPolicy: 'seat-policy' }),
+    ]) {
+      expect(args).not.toContain('--allowedTools');
+      expect(args.join(' ')).not.toMatch(/skip-permissions|dangerously/i);
+      expect(args).not.toContain('--permission-mode');
+    }
+  });
+  it('--max-turns lands when bounded; reply-only stays the default posture', () => {
+    const args = buildWakeArgs('l', 'i', { maxTurns: 12 });
+    expect(args[args.indexOf('--max-turns') + 1]).toBe('12');
+    expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__musterd');
+    expect(buildWakeArgs('l', 'i')).not.toContain('--max-turns');
+  });
+});
+
 describe('claudeCodeBackend.wake', () => {
+  it('order knobs flow into the spawn argv; a per-seat transcript bound tightens the ladder', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, { readSession: () => resumable() });
+    // The capture is 4096 bytes; the seat's policy bound is 1 KiB — resume rolls over to fresh.
+    const actuation = await backend.wake(
+      spec({
+        order: order({ tool_policy: 'seat-policy', transcript_max_bytes: 1_024 }),
+        bounds: { timeout_ms: 60_000, max_turns: 7 },
+      }),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    expect(calls).toHaveLength(1); // no resume attempt — the ladder skipped it
+    expect(calls[0]!.args).toContain('--session-id');
+    expect(calls[0]!.args).not.toContain('--resume');
+    expect(calls[0]!.args).not.toContain('--allowedTools'); // seat-policy
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--max-turns') + 1]).toBe('7');
+    expect(actuation.outcome).toEqual({ occupied: true, session: 'fresh' });
+    child.exit(0);
+    await actuation.settled;
+  });
+
   it('spawns in the seat workspace with MUSTERD_PROVENANCE=wake in the env, detached', async () => {
     const child = new FakeChild();
     const { backend, calls } = harness(child);

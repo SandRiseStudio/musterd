@@ -2,6 +2,23 @@ import { PROTOCOL_VERSION, type Envelope } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import type { MessageRow } from './rows.js';
 
+/**
+ * The sender's presence provenance at send time — the freshest non-held row (a resident socket's
+ * heartbeat and the ambient touch both keep `last_seen_at` current). Stamped onto the message by
+ * `insertMessage` itself, SERVER-derived by construction (there is no wire field), so a wake-born
+ * session cannot masquerade as human-driven to escape the ADR 131 §4 ping-pong demotion.
+ */
+function senderProvenance(db: Database, memberId: string): string | null {
+  const row = db
+    .prepare<[string], { provenance: string | null }>(
+      `SELECT provenance FROM presence
+        WHERE member_id = ? AND held_until IS NULL
+        ORDER BY last_seen_at DESC, created_at DESC LIMIT 1`,
+    )
+    .get(memberId);
+  return row?.provenance ?? null;
+}
+
 /** Insert an envelope into the append-only log. `toMemberId` set iff to.kind==='member'. */
 export function insertMessage(
   db: Database,
@@ -20,14 +37,15 @@ export function insertMessage(
     body: env.body,
     thread_id: env.thread ?? null,
     meta: env.meta ? JSON.stringify(env.meta) : null,
+    from_provenance: senderProvenance(db, fromMemberId),
     ts: env.ts,
     created_at: Date.now(),
   };
   db.prepare(
     `INSERT INTO messages
-       (id, team_id, from_member, to_kind, to_member, act, body, thread_id, meta, ts, created_at)
+       (id, team_id, from_member, to_kind, to_member, act, body, thread_id, meta, from_provenance, ts, created_at)
      VALUES
-       (@id, @team_id, @from_member, @to_kind, @to_member, @act, @body, @thread_id, @meta, @ts, @created_at)`,
+       (@id, @team_id, @from_member, @to_kind, @to_member, @act, @body, @thread_id, @meta, @from_provenance, @ts, @created_at)`,
   ).run(row);
   return row;
 }

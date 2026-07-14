@@ -1,3 +1,5 @@
+import { PROVENANCES, type Provenance } from './acts.js';
+
 /**
  * Model attestation helpers (ADR 101). musterd is the model-agnostic coordination layer, so *which
  * model sits in each seat* is data only musterd holds — attached per-occupancy (harness-attested,
@@ -21,6 +23,22 @@ export const MODEL_UNKNOWN = 'unknown';
 export function resolveAttestedModel(env: Record<string, string | undefined>): string | undefined {
   const raw = (env['MUSTERD_MODEL'] ?? env['ANTHROPIC_MODEL'])?.trim();
   return raw ? raw.slice(0, 120) : undefined;
+}
+
+/**
+ * Resolve the session provenance this client should attest, from `MUSTERD_PROVENANCE` — the wake
+ * actuator sets it on every process it spawns (ADR 131 §6), and child processes (hooks, one-shot
+ * CLI sends) inherit it. Undefined when unset or not a known provenance: the caller then sends
+ * nothing and the server-side defaults govern. Provenance describes the *current* animation source
+ * (newest-wins, ADR 131 §6 amendment) — sharing this resolver keeps the CLI's ambient touches and
+ * the MCP adapter's claim frames attesting identically, so a woken session reads `wake` on the
+ * roster from its very first hook-driven command, fresh or resumed.
+ */
+export function resolveAttestedProvenance(
+  env: Record<string, string | undefined>,
+): Provenance | undefined {
+  const raw = env['MUSTERD_PROVENANCE'];
+  return (PROVENANCES as readonly string[]).includes(raw ?? '') ? (raw as Provenance) : undefined;
 }
 
 /**

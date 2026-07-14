@@ -32,10 +32,10 @@ act reaches the seat even when no session is animating it — because musterd wa
 **Three stores, each at its only-possible layer** — one verb (`musterd residency on|off|status`)
 writes/reverses/cross-checks all three:
 
-| store                         | holds                                          | why here                                                             |
-| ----------------------------- | ---------------------------------------------- | -------------------------------------------------------------------- |
-| `binding.session` (workspace) | harness, session id, transcript path, started/ended | where hooks can write; per-machine secret-adjacent (never committed) |
-| host registry (machine-local) | seat → workspace path, harness                 | the host must resolve paths; the daemon must never learn them        |
+| store                         | holds                                                          | why here                                                             |
+| ----------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `binding.session` (workspace) | harness, session id, transcript path, started/ended            | where hooks can write; per-machine secret-adjacent (never committed) |
+| host registry (machine-local) | seat → workspace path, harness                                 | the host must resolve paths; the daemon must never learn them        |
 | `residency` table (daemon)    | enrolled, harness class, host, `authorized_by`, `resumable_at` | roster/predicate need it; survives presence expiry                   |
 
 ## 2. The wake pipeline
@@ -69,10 +69,35 @@ an upgrade, never a dependency. **Context hygiene:** wake runs append to the sea
 transcript is bloated/stale — cost bound and compaction escape in one clause.
 
 **Ping-pong bound.** Acts sent from a provenance-`wake` occupancy qualify only for the _batched_
-lane of other seats — chains run at cooldown cadence under caps.
+lane of other seats — chains run at cooldown cadence under caps. _Implemented increment 5
+(2026-07-14): the daemon stamps the sender's presence provenance onto each message at insert
+(server-derived, never wire-fed — v21 `messages.from_provenance`), and the lease derivation
+demotes interrupt-class acts whose trigger reads `wake` into the batched candidate set._
 
-**Policy knobs** (team defaults, per-seat override at enrollment): lanes on/off, cooldown
-(default ~30min), hourly cap (2), attempt cap (3), tool policy, bounds.
+**Policy knobs** (team defaults ⊕ per-seat override at enrollment — shipped increment 5,
+2026-07-14; `ResidencyPolicySchema` is the one source of defaults and ranges):
+
+| knob                   | default      | range                  | flag (`residency on` = seat, `residency policy` = team) |
+| ---------------------- | ------------ | ---------------------- | ------------------------------------------------------- |
+| `lane`                 | `both`       | both/interrupt/batched | `--lane`                                                |
+| `cooldown_ms`          | 30m          | 1m–24h                 | `--cooldown 15m`                                        |
+| `hourly_cap`           | 2            | 1–20                   | `--hourly-cap`                                          |
+| `attempt_cap`          | 3            | 1–10                   | `--attempt-cap`                                         |
+| `tool_policy`          | `reply-only` | reply-only/seat-policy | `--tool-policy`                                         |
+| `timeout_ms`           | 5m           | 30s–1h                 | `--timeout 5m` (only _tightens_ the host's `--timeout`) |
+| `max_turns`            | unset        | 1–200                  | `--max-turns`                                           |
+| `budget_usd`           | unset        | ≤100                   | `--budget` (report flag — see below)                    |
+| `transcript_max_bytes` | 10 MiB       | 64KiB–256MiB           | `--transcript-max <MiB>` (hygiene rollover bound)       |
+
+Team defaults live on `teams.policy` (`PolicySchema.residency`); the seat override is a **sparse**
+partial in `residency.policy` (reserved since v16 — no migration), preserved on a plain re-enroll
+and cleared by `--reset-policy`. The effective policy is resolved per lease derivation and the
+actuation knobs ride each `WakeOrder`, so the host applies policy it never stores. Two honesty
+clauses: there is deliberately **no `lane: off`** (an unwakeable enrollment is a contradiction —
+the kill switch is `residency off`; pausing the machine is stopping the actuator), and
+**`budget_usd` flags, never kills** (no harness CLI can stop a run mid-flight on dollars — spend
+_control_ stays cooldown/caps/watchdog; wakes whose attested cost exceeds it read `over_budget` in
+the report, increment 5's metrics).
 
 ## 3. The residency contract, per class
 

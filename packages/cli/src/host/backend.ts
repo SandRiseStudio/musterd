@@ -9,9 +9,14 @@ import type { WakeOrder, WakeReportBody } from '@musterd/protocol';
  */
 
 /** Bounds for one wake run (ADR 131 §6). The watchdog timeout is the one universally enforceable
- *  bound and is mandatory; turn/budget caps apply where a backend supports them (deferred knobs). */
+ *  bound and is mandatory; turn/budget caps apply where a backend supports them. Policy-supplied
+ *  values arrive per-order (increment 5) and can only TIGHTEN the operator's local `--timeout`
+ *  ceiling — the loop computes the effective minimum before the backend sees it. `budget_usd` is a
+ *  report bound, not a kill switch: no backend can stop a run mid-flight on dollars. */
 export interface WakeBounds {
   timeout_ms: number;
+  max_turns?: number;
+  budget_usd?: number;
 }
 
 /** Everything a backend may know about one wake: the daemon's order (structured fields only — no

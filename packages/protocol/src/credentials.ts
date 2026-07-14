@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ResidencyPolicySchema } from './residency.js';
 
 /**
  * Credential + team-policy contracts (SPEC A.2/A.6, ADR 069 P3 / ADR 076). Secrets are minted with a
@@ -36,5 +37,8 @@ export type CredentialMint = z.infer<typeof CredentialMintSchema>;
  */
 export const PolicySchema = z.object({
   allow_pre_issued_grants: z.boolean().default(false),
+  /** Team-wide wake-policy defaults (ADR 131 increment 5) — per-seat enrollment overrides layer on
+   *  top (`ResidencyPolicyOverrideSchema` in `residency.policy`). `parse({})` yields launch defaults. */
+  residency: ResidencyPolicySchema.default({}),
 });
 export type Policy = z.infer<typeof PolicySchema>;
