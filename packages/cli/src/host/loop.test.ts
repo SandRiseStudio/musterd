@@ -74,7 +74,10 @@ function fakeBackend(harness = 'claude-code'): { backend: ActuatorBackend; specs
       harness,
       wake: async (spec) => {
         specs.push(spec);
-        return { outcome: { occupied: true, session: 'fresh' }, settled: Promise.resolve() };
+        return {
+          outcome: { occupied: true, session: 'fresh' },
+          settled: Promise.resolve(undefined),
+        };
       },
     },
   };
@@ -245,7 +248,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
       harness: 'claude-code',
       wake: async (_spec, ctx) => {
         verified = await ctx.verifyOccupied('scout');
-        return { outcome: { occupied: verified.occupied }, settled: Promise.resolve() };
+        return { outcome: { occupied: verified.occupied }, settled: Promise.resolve(undefined) };
       },
     };
     await pollHostOnce(
@@ -265,7 +268,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
       harness: 'claude-code',
       wake: async (_spec, ctx) => {
         verified = await ctx.verifyOccupied('scout');
-        return { outcome: { occupied: false, reason: 'x' }, settled: Promise.resolve() };
+        return { outcome: { occupied: false, reason: 'x' }, settled: Promise.resolve(undefined) };
       },
     };
     await pollHostOnce(
@@ -310,7 +313,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
         verified = await ctx.verifyOccupied('scout', undefined, Date.now());
         return {
           outcome: { occupied: verified.occupied, reason: 'x' },
-          settled: Promise.resolve(),
+          settled: Promise.resolve(undefined),
         };
       },
     };
@@ -365,5 +368,61 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
       expect(specs).toHaveLength(1);
       expect(calls.reports[0]!.deferred).toBeUndefined();
     }
+  });
+});
+
+describe('the supplementary wake-cost report (inc 5)', () => {
+  it('posts a second report when the run settles with a summary the primary lacked', async () => {
+    const { client, calls } = fakeClient([order()]);
+    const backend: ActuatorBackend = {
+      harness: 'claude-code',
+      wake: async () => ({
+        outcome: { occupied: true, session: 'fresh' },
+        settled: Promise.resolve({ cost_usd: 0.42, duration_ms: 34_000 }),
+      }),
+    };
+    const result = await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+      }),
+    );
+    await Promise.all(result.settled);
+    expect(calls.reports).toEqual([
+      { lease_id: 'L1', occupied: true, session: 'fresh' },
+      { lease_id: 'L1', occupied: true, cost_usd: 0.42, duration_ms: 34_000 },
+    ]);
+  });
+
+  it('no supplement when the primary already carried cost (fast-fail merge) or none exists', async () => {
+    const { client, calls } = fakeClient([order(), order({ lease_id: 'L2', act_id: 'A2' })]);
+    let call = 0;
+    const backend: ActuatorBackend = {
+      harness: 'claude-code',
+      wake: async () => {
+        call += 1;
+        return call === 1
+          ? {
+              // Fast-fail: the primary outcome already carries the summary.
+              outcome: { occupied: false, session: 'fresh', reason: 'x', cost_usd: 0.05 },
+              settled: Promise.resolve({ cost_usd: 0.05, duration_ms: 900 }),
+            }
+          : {
+              // A run that surfaced no summary (hung, killed) — nothing to supplement.
+              outcome: { occupied: false, session: 'fresh', reason: 'y' },
+              settled: Promise.resolve(undefined),
+            };
+      },
+    };
+    const result = await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+      }),
+    );
+    await Promise.all(result.settled);
+    expect(calls.reports).toHaveLength(2); // the two primaries, zero supplements
   });
 });

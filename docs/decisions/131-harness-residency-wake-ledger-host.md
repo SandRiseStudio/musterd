@@ -271,6 +271,18 @@ before residency lands — median directed-act→first-answer latency where the 
 was offline at send (finite and honest, unlike "∞"); the steering-latency metric (ADR 125)
 extends to offline recipients as the same headline number.
 
+_Amendment (2026-07-14, increment 5): the metrics shipped — `deriveWakeMetrics` in the report
+engine (`Report.wake`; `musterd report residency` + the team-altitude wake section + team_report),
+per-distinct-act latency/answer-rate (the message log proxies "authenticated act", the ADR 125
+convention; answer state is a LIVE ledger read, never the host's report-time snapshot), and wake
+economics: cost per lease (deduped, a supplementary `residency.wake_cost` row wins — cost exists
+only at run exit, after the primary report settled the lease inside the TTL) with `cost_reported`
+as the honesty denominator and per-seat `over_budget` flags against the effective `budget_usd`
+report bound. Presence rows are transient, so "recipient offline at send" is not retroactively
+derivable — the live extension IS the wake block (wake-triggered acts are the offline-at-send set
+by construction); the mined pre-residency baseline stays a one-off recipe recorded with the
+experiment pre-registration._
+
 **Experiment** — two, pre-registered: (1) the ADR 112 steward substrate swap — cron → residency
 trigger under an unchanged charter, comparing task latency and cost per task across a week each;
 (2) a cookoff residency benchmark row (research finding 005's resident-vs-CLI coverage axis) once

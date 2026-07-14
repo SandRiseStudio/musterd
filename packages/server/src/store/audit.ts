@@ -73,7 +73,14 @@ export type AuditAction =
   // a session id or transcript path never reaches the daemon.
   | 'residency.wake_deferred'
   | 'residency.session_captured'
-  | 'residency.session_ended';
+  | 'residency.session_ended'
+  // ADR 131 increment 5: the SUPPLEMENTARY cost record. The primary wake report lands at roster
+  // verification (~seconds, inside the lease TTL); harness-attested cost only exists when the run
+  // exits, often minutes later — so the host posts a second report for the already-settled lease
+  // and it lands here, detail `{ act, lease_id, cost_usd?, duration_ms? }`. Deliberately OUTSIDE
+  // the rate/attempt derivations (one actuation must not count twice); the wake metrics dedupe
+  // cost by lease_id, preferring this row over the primary's.
+  | 'residency.wake_cost';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

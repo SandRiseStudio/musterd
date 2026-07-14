@@ -77,6 +77,20 @@ function answerBy(
   return row ?? null;
 }
 
+/**
+ * Has this recipient ANSWERED the act, by the ledger's own definition — an accept/decline naming
+ * it via `meta.in_reply_to`, or a `resolve` closing its thread? Exported for the wake metrics
+ * (ADR 131 O&E: "woken acts that reach `answered` in the ADR 090 ledger"), so the report reads
+ * the LIVE ledger state rather than the host's report-time snapshot.
+ */
+export function actAnswered(
+  db: Database,
+  msg: MessageRow,
+  recipientId: string,
+): { act: string; id: string; ts: number } | null {
+  return answerBy(db, msg, recipientId) ?? threadResolve(db, msg);
+}
+
 /** ADR 088 interrupt raises recorded for this (act, recipient) — the attempt history. */
 function interruptRaises(db: Database, msg: MessageRow, recipientName: string): number {
   const row = db

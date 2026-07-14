@@ -314,7 +314,13 @@ function memberFacets(m: MemberSummary, group: Group, daemonBuild?: string): str
     parts.push(`until ${new Date(m.lifecycle_until).toISOString().slice(0, 10)}`);
   }
   // A residency-enrolled seat (ADR 131) is offline but not unreachable — a directed act wakes it.
-  if (group === 'out' && m.wakeable) parts.push('wakeable');
+  if (group === 'out' && m.wakeable) {
+    parts.push('wakeable');
+    // `resumable` only while the capture is inside the harness's ~30d GC horizon (the timestamp
+    // exists so this freshness can be applied — a stale capture must not promise continuity).
+    if (m.resumable_at != null && Date.now() - m.resumable_at < 30 * 24 * 60 * 60 * 1000)
+      parts.push('resumable');
+  }
   if (group === 'away') parts.push(availabilityLabel(m) ?? 'away');
   return parts.join(` ${sym.dot} `);
 }

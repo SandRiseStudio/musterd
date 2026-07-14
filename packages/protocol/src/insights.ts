@@ -206,6 +206,56 @@ export const SteeringMetricsSchema = z.object({
 });
 export type SteeringMetrics = z.infer<typeof SteeringMetricsSchema>;
 
+/** Per-seat wake economics (ADR 131 inc 5, finding c): spend against the seat's `budget_usd`
+ *  report bound. `over_budget` FLAGS — nothing was stopped (no backend can kill a run on dollars;
+ *  spend control stays cooldown/caps/watchdog). */
+export const WakeSeatCostSchema = z.object({
+  seat: z.string(),
+  wakes: z.number().int(),
+  /** Sum of attested wake spend; null when no wake in the window reported a cost. */
+  cost_usd_total: z.number().nullable(),
+  /** The seat's effective `budget_usd` report bound; null when unset. */
+  budget_usd: z.number().nullable(),
+  over_budget: z.boolean(),
+});
+export type WakeSeatCost = z.infer<typeof WakeSeatCostSchema>;
+
+/**
+ * Wake metrics (ADR 131 O&E, increment 5) — the headline pair (wake latency: directed-act ts →
+ * woken seat's first authenticated act; answer rate: woken acts reaching `answered` in the ADR 090
+ * ledger) plus the operational wake economics. Derived from `residency.*` audit rows joined to the
+ * message log; diagnostic, never a score. Latency uses the message log as the "authenticated act"
+ * proxy, consistent with the ADR 125 steering latency. Cost here is *operational wake spend* from
+ * harness-reported totals — explicitly not the deferred cost-per-shipped-item seam.
+ */
+export const WakeMetricsSchema = z.object({
+  window_days: z.number().int(),
+  /** Distinct acts that produced at least one `residency.woke` in the window. */
+  wakes: z.number().int(),
+  /** Of those, resumed sessions (the fresh-first doctrine's upgrade axis). */
+  resumed: z.number().int(),
+  /** Failed actuations (`residency.wake_failed` rows — attempts, not distinct acts). */
+  failed: z.number().int(),
+  /** Deferred actuations (the local-session guard) — budget-neutral by construction. */
+  deferred: z.number().int(),
+  /** Acts declared terminally exhausted in the window. */
+  exhausted: z.number().int(),
+  /** Woken acts that reached `answered` in the delivery ledger (live read, not report-time). */
+  answered: z.number().int(),
+  /** answered / wakes; null when no wakes. */
+  answer_rate: z.number().nullable(),
+  /** Median directed-act→first-recipient-act latency over woken acts; null when unmeasurable. */
+  latency_median_ms: z.number().nullable(),
+  latency_p95_ms: z.number().nullable(),
+  /** Sum/avg of attested wake spend; null when no cost was reported in the window. */
+  cost_usd_total: z.number().nullable(),
+  cost_usd_per_wake: z.number().nullable(),
+  /** How many woke acts carried a cost — the honesty denominator for the averages. */
+  cost_reported: z.number().int(),
+  by_seat: z.array(WakeSeatCostSchema),
+});
+export type WakeMetrics = z.infer<typeof WakeMetricsSchema>;
+
 /**
  * `GET /teams/:slug/report` — the whole projection, altitude-agnostic. The surfaces (CLI/MCP/dashboard)
  * pick what to emphasise per altitude (ic = the board, team = the digest, exec = milestones+exceptions);
@@ -232,5 +282,8 @@ export const ReportSchema = z.object({
   mast: MastBlockSchema,
   /** Interrupt-line metrics (ADR 125) — steering latency + stale-work-caught. */
   steering: SteeringMetricsSchema,
+  /** Wake metrics (ADR 131 inc 5). Optional for back-compat with pre-inc-5 daemons — the server
+   *  always sets it. */
+  wake: WakeMetricsSchema.optional(),
 });
 export type Report = z.infer<typeof ReportSchema>;

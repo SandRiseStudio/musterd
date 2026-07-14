@@ -34,15 +34,24 @@ export interface WakeSpec {
  *  `resumed`. */
 export type WakeOutcome = Omit<WakeReportBody, 'lease_id'>;
 
+/** What the settled run attested about itself (increment 5) — harness-reported cost/duration,
+ *  known only at exit. The loop posts it as a SUPPLEMENTARY wake report (the daemon records
+ *  `residency.wake_cost`); undefined when the run surfaced no summary. */
+export interface WakeCompletion {
+  cost_usd?: number;
+  duration_ms?: number;
+}
+
 /**
  * A concluded actuation. `outcome` is ready as soon as the wake is *verified* (occupied on the
  * roster, or conclusively failed) so the loop reports inside the lease TTL; `settled` resolves when
  * the spawned run actually finishes (exit, or watchdog kill) — the host awaits it before exiting so
- * the mandatory watchdog can never be orphaned by a short-lived host process (`host --once`).
+ * the mandatory watchdog can never be orphaned by a short-lived host process (`host --once`) — and
+ * carries the run's cost/duration summary for the supplementary report.
  */
 export interface WakeActuation {
   outcome: WakeOutcome;
-  settled: Promise<void>;
+  settled: Promise<WakeCompletion | undefined>;
 }
 
 /** Host-side context a backend actuates with. Verification is roster-derived on purpose — headless

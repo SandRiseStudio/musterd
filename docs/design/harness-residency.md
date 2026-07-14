@@ -147,9 +147,12 @@ message-shaped rest.
   unenroll / reclaim.
 - **Autonomy:** reply-only default; `seat-policy` defers to workspace settings; the wake path
   never widens permissions and never passes a skip-permissions flag.
-- **Visibility:** provenance `wake` on occupancies; nine `residency.*` audit verbs (the six
-  wake-ledger verbs + inc 4's `wake_deferred`, `session_captured`, `session_ended`); roster label
-  `offline · wakeable`.
+- **Visibility:** provenance `wake` on occupancies; ten `residency.*` audit verbs (the six
+  wake-ledger verbs + inc 4's `wake_deferred`, `session_captured`, `session_ended` + inc 5's
+  `wake_cost` — the supplementary spend record, since harness-attested cost only exists at run
+  exit, after the primary report settled the lease); roster label `offline · wakeable`, with a
+  `resumable` badge while the capture sits inside the ~30d GC horizon (a timestamp on the wire,
+  so renderers apply freshness — inc 5, finding b).
 - **Spend:** watchdog + turn/budget bounds + cooldown/caps/attempt-exhaustion; ping-pong
   demotion bounds chains.
 

@@ -1,10 +1,19 @@
 import { makeEnvelope, type Act } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
-import { coordinationDensity, deriveSteeringMetrics, flowMetrics, waitingOn } from './insights.js';
+import { appendAudit } from './audit.js';
+import {
+  coordinationDensity,
+  deriveReport,
+  deriveSteeringMetrics,
+  deriveWakeMetrics,
+  flowMetrics,
+  waitingOn,
+} from './insights.js';
 import { openLane, updateLane } from './lanes.js';
 import { addMember } from './members.js';
 import { insertMessage } from './messages.js';
+import { enrollResidency } from './residency.js';
 import { createTeam } from './teams.js';
 
 function seed() {
@@ -583,5 +592,248 @@ describe('deriveSteeringMetrics (ADR 125 — interrupt-line arc metrics)', () =>
       }),
     );
     expect(deriveSteeringMetrics(db, team.id, NOW).stale_caught).toBe(1);
+  });
+});
+
+describe('deriveWakeMetrics (ADR 131 inc 5) — latency, answer rate, cost, budgets', () => {
+  const NOW = 10_000_000_000;
+
+  function wakeSeed() {
+    const { db, team, nick, ada } = seed();
+    enrollResidency(db, team.id, {
+      member_id: ada.id,
+      harness: 'claude-code',
+      host: 'mac.lan',
+      grant_id: 'g1',
+      authorized_by: 'nick',
+    });
+    return { db, team, nick, ada };
+  }
+
+  /** A residency audit row with detail + a backdated ts (appendAudit stamps now). */
+  function residencyRow(
+    db: ReturnType<typeof openDb>,
+    teamId: string,
+    action:
+      | 'residency.woke'
+      | 'residency.wake_failed'
+      | 'residency.wake_deferred'
+      | 'residency.wake_exhausted'
+      | 'residency.wake_cost',
+    seat: string,
+    detail: Record<string, unknown>,
+    ts: number,
+  ) {
+    appendAudit(db, teamId, {
+      actor: null,
+      action,
+      target: seat,
+      result: action === 'residency.woke' || action === 'residency.wake_cost' ? 'allow' : 'deny',
+      detail,
+    });
+    db.prepare(
+      'UPDATE audit SET ts = ? WHERE rowid = (SELECT rowid FROM audit ORDER BY rowid DESC LIMIT 1)',
+    ).run(ts);
+  }
+
+  function directed(
+    db: ReturnType<typeof openDb>,
+    team: { id: string; slug?: string },
+    from: { id: string; name: string },
+    to: { id: string; name: string },
+    act: Act,
+    id: string,
+    ts: number,
+    meta: Record<string, unknown> | null = null,
+  ) {
+    insertMessage(
+      db,
+      team.id,
+      from.id,
+      to.id,
+      makeEnvelope({
+        id,
+        team: 'revive',
+        from: from.name,
+        to: { kind: 'member', name: to.name },
+        act,
+        body: 'x',
+        ts,
+        meta,
+      }),
+    );
+  }
+
+  it('empty window ⇒ zero counts and nulls, never NaN', () => {
+    const { db, team } = wakeSeed();
+    const k = deriveWakeMetrics(db, team.id, NOW);
+    expect(k).toMatchObject({
+      wakes: 0,
+      resumed: 0,
+      failed: 0,
+      deferred: 0,
+      exhausted: 0,
+      answered: 0,
+      answer_rate: null,
+      latency_median_ms: null,
+      cost_usd_total: null,
+      cost_usd_per_wake: null,
+      cost_reported: 0,
+      by_seat: [],
+    });
+  });
+
+  it('latency = trigger ts → seat first act; attempts dedupe to one sample per act', () => {
+    const { db, team, nick, ada } = wakeSeed();
+    directed(db, team, nick, ada, 'handoff', 'h1', NOW - 60 * 60_000);
+    // Two woke rows for the SAME act (a retry) — one latency sample, classified by the last row.
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'h1', lease_id: 'L1' },
+      NOW - 50 * 60_000,
+    );
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'h1', lease_id: 'L2', session: 'resumed' },
+      NOW - 40 * 60_000,
+    );
+    // ada's first act after the trigger: 5 minutes later.
+    directed(db, team, ada, nick, 'accept', 'a1', NOW - 55 * 60_000, { in_reply_to: 'h1' });
+
+    const k = deriveWakeMetrics(db, team.id, NOW);
+    expect(k.wakes).toBe(1);
+    expect(k.resumed).toBe(1);
+    expect(k.latency_median_ms).toBe(5 * 60_000);
+    expect(k.answered).toBe(1); // the accept names h1 in the LIVE ledger
+    expect(k.answer_rate).toBe(1);
+  });
+
+  it('answer rate reads the ledger live, not the report-time snapshot', () => {
+    const { db, team, nick, ada } = wakeSeed();
+    directed(db, team, nick, ada, 'handoff', 'h1', NOW - 60 * 60_000);
+    // The host reported answered:false at verify time (honest but stale)…
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'h1', lease_id: 'L1', answered: false },
+      NOW - 50 * 60_000,
+    );
+    const before = deriveWakeMetrics(db, team.id, NOW);
+    expect(before.answered).toBe(0);
+    // …then the woken session answered AFTER the report settled — the metric must see it.
+    directed(db, team, ada, nick, 'accept', 'a1', NOW - 30 * 60_000, { in_reply_to: 'h1' });
+    const after = deriveWakeMetrics(db, team.id, NOW);
+    expect(after.answered).toBe(1);
+  });
+
+  it('cost dedupes by lease, preferring the supplementary wake_cost row; counters count', () => {
+    const { db, team, nick, ada } = wakeSeed();
+    directed(db, team, nick, ada, 'handoff', 'h1', NOW - 60 * 60_000);
+    directed(db, team, nick, ada, 'steer', 's2', NOW - 59 * 60_000);
+    // Wake 1: primary report carried a (stale, partial) cost; the supplement corrects it.
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'h1', lease_id: 'L1', cost_usd: 0.1 },
+      NOW - 50 * 60_000,
+    );
+    residencyRow(
+      db,
+      team.id,
+      'residency.wake_cost',
+      'ada',
+      { act: 'h1', lease_id: 'L1', cost_usd: 0.9, duration_ms: 30_000 },
+      NOW - 49 * 60_000,
+    );
+    // Wake 2: no cost ever reported (crash) — the honesty denominator must show 1 of 2.
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 's2', lease_id: 'L2' },
+      NOW - 45 * 60_000,
+    );
+    // Quiet counters.
+    residencyRow(
+      db,
+      team.id,
+      'residency.wake_failed',
+      'ada',
+      { act: 's2', lease_id: 'L3' },
+      NOW - 44 * 60_000,
+    );
+    residencyRow(
+      db,
+      team.id,
+      'residency.wake_deferred',
+      'ada',
+      { act: 's2', lease_id: 'L4' },
+      NOW - 43 * 60_000,
+    );
+    residencyRow(db, team.id, 'residency.wake_exhausted', 'ada', { act: 'h0' }, NOW - 42 * 60_000);
+
+    const k = deriveWakeMetrics(db, team.id, NOW);
+    expect(k.wakes).toBe(2);
+    expect(k.failed).toBe(1);
+    expect(k.deferred).toBe(1);
+    expect(k.exhausted).toBe(1);
+    expect(k.cost_usd_total).toBeCloseTo(0.9); // L1 deduped to the supplement, L2 costless
+    expect(k.cost_reported).toBe(1);
+    expect(k.cost_usd_per_wake).toBeCloseTo(0.9);
+  });
+
+  it('by_seat flags over_budget against the effective budget_usd (a per-run report bound)', () => {
+    const { db, team, nick, ada } = wakeSeed();
+    // Seat override: budget $0.50 per wake.
+    enrollResidency(db, team.id, {
+      member_id: ada.id,
+      harness: 'claude-code',
+      host: 'mac.lan',
+      grant_id: 'g1',
+      authorized_by: 'nick',
+      policy: { budget_usd: 0.5 },
+    });
+    directed(db, team, nick, ada, 'handoff', 'h1', NOW - 60 * 60_000);
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'h1', lease_id: 'L1', cost_usd: 0.8 },
+      NOW - 50 * 60_000,
+    );
+    const k = deriveWakeMetrics(db, team.id, NOW);
+    expect(k.by_seat).toEqual([
+      { seat: 'ada', wakes: 1, cost_usd_total: 0.8, budget_usd: 0.5, over_budget: true },
+    ]);
+  });
+
+  it('window excludes older rows; deriveReport carries the wake block', () => {
+    const { db, team, nick, ada } = wakeSeed();
+    directed(db, team, nick, ada, 'handoff', 'h1', NOW - 10 * 24 * 60 * 60_000);
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'h1', lease_id: 'L1' },
+      NOW - 9 * 24 * 60 * 60_000, // 9 days ago — outside the 7d window
+    );
+    const k = deriveWakeMetrics(db, team.id, NOW);
+    expect(k.wakes).toBe(0);
+    const report = deriveReport(db, team.id, 'revive', NOW);
+    expect(report.wake).toBeDefined();
+    expect(report.wake!.window_days).toBe(7);
   });
 });

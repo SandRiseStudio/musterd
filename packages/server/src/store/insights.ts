@@ -5,12 +5,18 @@ import type {
   Report,
   SteeringMetrics,
   WaitingOnEntry,
+  WakeMetrics,
+  WakeSeatCost,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { openDirectedLedger } from './delivery.js';
+import { actAnswered, openDirectedLedger } from './delivery.js';
 import { listGoals } from './goals.js';
 import { listLanes } from './lanes.js';
 import { deriveMast } from './mast.js';
+import { getMemberByName } from './members.js';
+import { effectiveWakePolicy, getResidency } from './residency.js';
+import type { MessageRow } from './rows.js';
+import { getPolicy } from './teams.js';
 
 /**
  * The insight engine (ADR 050, server-side per ADR 084) — leadership projections over lanes + the act
@@ -350,6 +356,151 @@ export function deriveSteeringMetrics(
   };
 }
 
+const WAKE_WINDOW_DAYS = 7;
+const WAKE_WINDOW_MS = WAKE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+/** One parsed `residency.*` audit row — the wake ledger's outcome record. */
+interface WakeAuditRow {
+  action: string;
+  /** Seat name (audit `target`). */
+  target: string;
+  ts: number;
+  detail: {
+    act?: string;
+    lease_id?: string;
+    session?: string;
+    cost_usd?: number;
+  };
+}
+
+/**
+ * Wake metrics (ADR 131 O&E, increment 5) — derived from `residency.*` audit rows joined to the
+ * message log, the `deriveSteeringMetrics` shape. The headline pair:
+ *
+ * - **wake latency**: triggering directed act's ts → the woken seat's first act strictly after it.
+ *   The message log proxies "first authenticated act", consistent with ADR 125 steering latency —
+ *   non-message authenticated activity (presence touches, lane ops) deliberately doesn't count.
+ * - **answer rate**: woken acts that reach `answered` in the ADR 090 ledger — a LIVE read via
+ *   {@link actAnswered}, never the host's report-time `answered` snapshot (honest but stale).
+ *
+ * Attempts don't multiply samples: latency/answer are per *distinct* woken act. Cost is summed per
+ * lease, preferring a supplementary `residency.wake_cost` row over the primary report's field, and
+ * `cost_reported` carries the honesty denominator. Per-seat economics flag `over_budget` against
+ * the seat's effective `budget_usd` — a REPORT bound (nothing was stopped mid-run).
+ */
+export function deriveWakeMetrics(
+  db: Database,
+  teamId: string,
+  now: number = Date.now(),
+): WakeMetrics {
+  const since = now - WAKE_WINDOW_MS;
+  const rows: WakeAuditRow[] = db
+    .prepare<
+      [string, number],
+      { action: string; target: string; ts: number; detail: string | null }
+    >(
+      `SELECT action, target, ts, detail FROM audit
+        WHERE team_id = ?
+          AND action IN ('residency.woke','residency.wake_failed','residency.wake_deferred',
+                         'residency.wake_exhausted','residency.wake_cost')
+          AND ts > ?
+        ORDER BY ts ASC`,
+    )
+    .all(teamId, since)
+    .map((r) => {
+      let detail: WakeAuditRow['detail'] = {};
+      try {
+        detail = r.detail ? (JSON.parse(r.detail) as WakeAuditRow['detail']) : {};
+      } catch {
+        /* best-effort rows stay countable */
+      }
+      return { action: r.action, target: r.target, ts: r.ts, detail };
+    });
+
+  const failed = rows.filter((r) => r.action === 'residency.wake_failed').length;
+  const deferred = rows.filter((r) => r.action === 'residency.wake_deferred').length;
+  const exhausted = rows.filter((r) => r.action === 'residency.wake_exhausted').length;
+
+  // Distinct woken acts (attempt-dedupe): the LAST woke row classifies fresh-vs-resumed.
+  const wokeRows = rows.filter((r) => r.action === 'residency.woke');
+  const byAct = new Map<string, WakeAuditRow>();
+  for (const r of wokeRows) if (r.detail.act) byAct.set(r.detail.act, r);
+
+  // Cost per lease: primary report fields first, a supplementary wake_cost row wins.
+  const costByLease = new Map<string, { seat: string; cost: number }>();
+  for (const r of rows) {
+    if (r.detail.lease_id === undefined || r.detail.cost_usd === undefined) continue;
+    if (r.action === 'residency.wake_cost' || !costByLease.has(r.detail.lease_id)) {
+      costByLease.set(r.detail.lease_id, { seat: r.target, cost: r.detail.cost_usd });
+    }
+  }
+
+  const latencies: number[] = [];
+  let answered = 0;
+  const wakesBySeat = new Map<string, number>();
+  for (const [actId, woke] of byAct) {
+    wakesBySeat.set(woke.target, (wakesBySeat.get(woke.target) ?? 0) + 1);
+    const msg = db
+      .prepare<[string, string], MessageRow>('SELECT * FROM messages WHERE team_id = ? AND id = ?')
+      .get(teamId, actId);
+    const recipient = getMemberByName(db, teamId, woke.target);
+    if (!msg || !recipient) continue;
+    // The seat's first act strictly after the trigger (ts, then id) — the steering tie-break.
+    const later = db
+      .prepare<[string, string, number, number, string], { ts: number }>(
+        `SELECT ts FROM messages
+          WHERE team_id = ? AND from_member = ?
+            AND (ts > ? OR (ts = ? AND id > ?))
+          ORDER BY ts ASC, id ASC LIMIT 1`,
+      )
+      .get(teamId, recipient.id, msg.ts, msg.ts, msg.id);
+    if (later) latencies.push(later.ts - msg.ts);
+    if (actAnswered(db, msg, recipient.id)) answered += 1;
+  }
+  latencies.sort((a, b) => a - b);
+
+  // Per-seat economics against the effective budget_usd (a per-run report bound: over_budget
+  // when any single wake's attested cost exceeded it).
+  const teamDefaults = getPolicy(db, teamId).residency;
+  const by_seat: WakeSeatCost[] = [...wakesBySeat.entries()]
+    .map(([seat, wakes]) => {
+      const costs = [...costByLease.values()].filter((c) => c.seat === seat).map((c) => c.cost);
+      const total = costs.length > 0 ? costs.reduce((a, b) => a + b, 0) : null;
+      const member = getMemberByName(db, teamId, seat);
+      const enrollment = member ? getResidency(db, teamId, member.id) : null;
+      const budget = enrollment
+        ? (effectiveWakePolicy(teamDefaults, enrollment.policy).budget_usd ?? null)
+        : null;
+      return {
+        seat,
+        wakes,
+        cost_usd_total: total,
+        budget_usd: budget,
+        over_budget: budget !== null && costs.some((c) => c > budget),
+      };
+    })
+    .sort((a, b) => a.seat.localeCompare(b.seat));
+
+  const costs = [...costByLease.values()].map((c) => c.cost);
+  const costTotal = costs.length > 0 ? costs.reduce((a, b) => a + b, 0) : null;
+  return {
+    window_days: WAKE_WINDOW_DAYS,
+    wakes: byAct.size,
+    resumed: [...byAct.values()].filter((r) => r.detail.session === 'resumed').length,
+    failed,
+    deferred,
+    exhausted,
+    answered,
+    answer_rate: byAct.size > 0 ? answered / byAct.size : null,
+    latency_median_ms: percentile(latencies, 0.5),
+    latency_p95_ms: percentile(latencies, 0.95),
+    cost_usd_total: costTotal,
+    cost_usd_per_wake: costTotal !== null ? costTotal / costs.length : null,
+    cost_reported: costs.length,
+    by_seat,
+  };
+}
+
 /** The whole report projection (ADR 050) — altitude-agnostic; the surfaces frame it per altitude. */
 export function deriveReport(
   db: Database,
@@ -372,5 +523,6 @@ export function deriveReport(
     open_directed: openDirectedLedger(db, teamId, now),
     mast: deriveMast(db, teamId, now),
     steering: deriveSteeringMetrics(db, teamId, now),
+    wake: deriveWakeMetrics(db, teamId, now),
   };
 }

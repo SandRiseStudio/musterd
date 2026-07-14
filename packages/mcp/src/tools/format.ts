@@ -73,7 +73,12 @@ export function formatMember(
     facets.push(`until ${new Date(m.lifecycle_until).toISOString().slice(0, 10)}`);
   }
   // A residency-enrolled seat (ADR 131) is offline but not unreachable — a directed act wakes it.
-  if (group === 'out' && m.wakeable) facets.push('wakeable');
+  if (group === 'out' && m.wakeable) {
+    facets.push('wakeable');
+    // `resumable` only inside the harness's ~30d GC horizon (why the wire carries a timestamp).
+    if (m.resumable_at != null && Date.now() - m.resumable_at < 30 * 24 * 60 * 60 * 1000)
+      facets.push('resumable');
+  }
 
   let line = `${m.name} (${facets.join(' · ')})`;
   // The payload: what they said they are doing — the fact the old tools left out entirely.

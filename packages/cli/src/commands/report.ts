@@ -110,15 +110,52 @@ function render(r: Report, altitude: Altitude): void {
     return;
   }
 
-  // team (default): the digest.
+  // team (default): the digest. Wake sits directly under steering — the ADR 131 O&E baseline is
+  // the steering-latency metric "extended to offline recipients as the same headline number".
   w(`\n${theme.accent('flow')}:\n`);
   renderFlow(r, w);
   w(`\n${theme.accent('coordination')}:\n`);
   renderCoordination(r, w);
   w(`\n${theme.accent('steering')}:\n`);
   renderSteering(r, w);
+  if (r.wake) {
+    w(`\n${theme.accent('wake')}:\n`);
+    renderWake(r.wake, w);
+  }
   w(`\n${theme.accent('waiting on')}:\n`);
   renderWaitingOn(r, w);
+}
+
+/** Wake metrics (ADR 131 inc 5) — the always-on claim's instrument panel. */
+function renderWake(k: NonNullable<Report['wake']>, w: (s: string) => void): void {
+  if (k.wakes === 0 && k.failed === 0 && k.deferred === 0) {
+    w(theme.meta(`  no wakes (${k.window_days}d)`) + '\n');
+    return;
+  }
+  const rate = k.answer_rate === null ? '' : ` (${Math.round(k.answer_rate * 100)}%)`;
+  const lat =
+    k.latency_median_ms === null
+      ? theme.meta('—')
+      : `median ${ago(k.latency_median_ms)} · p95 ${ago(k.latency_p95_ms!)}`;
+  const resumed = k.resumed > 0 ? ` (${k.resumed} resumed)` : '';
+  w(
+    `  ${k.wakes} wake${k.wakes === 1 ? '' : 's'}${resumed} · ${k.answered} answered${rate} · latency ${lat} ${theme.meta(`(${k.window_days}d)`)}\n`,
+  );
+  if (k.cost_usd_total !== null) {
+    w(
+      `  cost $${k.cost_usd_total.toFixed(2)} total · $${k.cost_usd_per_wake!.toFixed(2)}/wake ${theme.meta(`(${k.cost_reported} of ${k.wakes} reported)`)}\n`,
+    );
+  }
+  const quiet: string[] = [];
+  if (k.failed > 0) quiet.push(`${k.failed} failed attempt${k.failed === 1 ? '' : 's'}`);
+  if (k.deferred > 0) quiet.push(`${k.deferred} deferred (live local session)`);
+  if (quiet.length > 0) w(theme.meta(`  ${quiet.join(' · ')}`) + '\n');
+  if (k.exhausted > 0)
+    w(`  ${theme.warn(`${k.exhausted} act(s) exhausted their wake attempts`)}\n`);
+  for (const s of k.by_seat.filter((s) => s.over_budget))
+    w(
+      `  ${theme.warn('over budget')} ${theme.memberName(s.seat, 'agent')} — a wake exceeded its $${s.budget_usd} report bound\n`,
+    );
 }
 
 /** Interrupt-line metrics (ADR 125) — latency + supersession + stale-work-caught. */
@@ -249,9 +286,46 @@ async function coordinationReport(parsed: Parsed): Promise<number> {
   return 0;
 }
 
+/**
+ * `musterd report residency` (ADR 131 inc 5): the wake instrument panel — the O&E headline pair
+ * (wake latency, answer rate) plus operational economics (cost-per-wake, per-seat budgets) and the
+ * quiet counters (failed/deferred/exhausted). Diagnostics, never a score.
+ */
+async function residencyReport(parsed: Parsed): Promise<number> {
+  const { team, http } = resolve(parsed.flags);
+  const report = await http.report(team);
+  const w = process.stdout.write.bind(process.stdout);
+  const k = report.wake;
+  if (parsed.flags['json']) return (w(JSON.stringify(k ?? null) + '\n'), 0);
+  if (!k) {
+    w(
+      theme.meta('this daemon predates wake metrics (ADR 131 inc 5) — rebuild + restart it') + '\n',
+    );
+    return 0;
+  }
+  w(`${theme.accent('wake report')} — ${team} ${theme.meta(`· last ${k.window_days}d`)}\n\n`);
+  renderWake(k, w);
+  if (k.by_seat.length > 0) {
+    w(`\n${theme.accent('by seat')}:\n`);
+    for (const s of k.by_seat) {
+      const cost =
+        s.cost_usd_total === null ? theme.meta('cost —') : `$${s.cost_usd_total.toFixed(2)}`;
+      const budget =
+        s.budget_usd === null
+          ? theme.meta('no budget bound')
+          : `budget $${s.budget_usd}${s.over_budget ? ` ${theme.warn('EXCEEDED')}` : ` ${theme.ok('ok')}`}`;
+      w(
+        `  ${theme.memberName(s.seat, 'agent')} — ${s.wakes} wake${s.wakes === 1 ? '' : 's'} · ${cost} · ${budget}\n`,
+      );
+    }
+  }
+  return 0;
+}
+
 export async function reportCommand(parsed: Parsed): Promise<number> {
   if (parsed.positionals[0] === 'delivery') return deliveryReport(parsed, parsed.positionals[1]);
   if (parsed.positionals[0] === 'coordination') return coordinationReport(parsed);
+  if (parsed.positionals[0] === 'residency') return residencyReport(parsed);
   const { team, http } = resolve(parsed.flags);
   const report = await http.report(team);
   if (parsed.flags['json']) {
@@ -261,7 +335,7 @@ export async function reportCommand(parsed: Parsed): Promise<number> {
   const raw = flagStr(parsed.flags, 'altitude') ?? 'team';
   if (raw !== 'ic' && raw !== 'team' && raw !== 'exec')
     throw new CliError(
-      'usage: musterd report [delivery [<id>]] [--altitude ic|team|exec] [--json]',
+      'usage: musterd report [delivery [<id>] | coordination | residency] [--altitude ic|team|exec] [--json]',
       2,
     );
   render(report, raw);

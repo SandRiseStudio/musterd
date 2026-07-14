@@ -104,7 +104,6 @@ import {
   enrollResidency,
   getResidency,
   listResidency,
-  listWakeableMemberIds,
   recordSessionAttestation,
   revokeResidency,
   settleWakeLease,
@@ -638,8 +637,12 @@ function summarize(
   // Seats held within their ADR 010 reclaim grace — read `offline` above, but a reservation the clobber
   // guard (ADR 066/105) must treat as occupied. Computed once for the team, not per-member.
   const reclaimable = listReclaimableMemberIds(ctx.db, teamId, Date.now());
-  // Seats enrolled in harness residency (ADR 131) — offline reads `offline · wakeable`.
-  const wakeable = listWakeableMemberIds(ctx.db, teamId);
+  // Seats enrolled in harness residency (ADR 131) — offline reads `offline · wakeable`, and the
+  // capture timestamp feeds the `resumable` badge (inc 5: a timestamp, so renderers apply the GC
+  // freshness instead of trusting a stale boolean). One listResidency pass covers both facts.
+  const residency = new Map(
+    listResidency(ctx.db, teamId).map((r) => [r.member_id, r.resumable_at] as const),
+  );
   return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => {
     // Two-clocks rule (M2): liveness from presence, working-label from the latest status_update.
     const activity = resolveActivity(
@@ -669,7 +672,8 @@ function summarize(
       }),
       ...(offlineReason ? { offline_reason: offlineReason } : {}),
       reclaimable: isReclaimable,
-      wakeable: wakeable.has(s.member.id),
+      wakeable: residency.has(s.member.id),
+      resumable_at: residency.get(s.member.id) ?? null,
     };
   });
 }
@@ -1290,15 +1294,39 @@ export async function handleHttp(
         const body = parseOrBadRequest(WakeReportBodySchema, await readJson(req));
         const lease = settleWakeLease(ctx.db, team.id, body.lease_id);
         if (!lease) {
-          const exists = ctx.db
+          const settled = ctx.db
             .prepare<
               [string, string],
-              { one: number }
-            >('SELECT 1 AS one FROM wake_leases WHERE team_id = ? AND id = ?')
+              { member_id: string; act_id: string }
+            >('SELECT member_id, act_id FROM wake_leases WHERE team_id = ? AND id = ?')
             .get(team.id, body.lease_id);
-          if (exists)
-            throw new MusterdError('conflict', `lease "${body.lease_id}" is already reported`);
-          throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
+          if (!settled)
+            throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
+          // The supplementary cost record (increment 5): the primary report landed at verification,
+          // but harness-attested cost/duration only exist at run exit — a second report carrying
+          // them lands as `residency.wake_cost` (outside every rate/attempt derivation; the wake
+          // metrics dedupe by lease_id). A cost-less duplicate is still a conflict — the mutual-
+          // exclusion guard against a double-reporting host stays intact.
+          if (body.cost_usd !== undefined || body.duration_ms !== undefined) {
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'residency.wake_cost',
+              target: getMemberById(ctx.db, settled.member_id)?.name ?? '?',
+              result: 'allow',
+              detail: {
+                act: settled.act_id,
+                lease_id: body.lease_id,
+                ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
+                ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),
+              },
+            });
+            return sendJson(res, 200, {
+              ok: true,
+              lease_id: body.lease_id,
+              status: 'cost_recorded',
+            });
+          }
+          throw new MusterdError('conflict', `lease "${body.lease_id}" is already reported`);
         }
         const seat = getMemberById(ctx.db, lease.member_id);
         const sender = ctx.db
@@ -1331,6 +1359,7 @@ export async function handleHttp(
             ...(body.session ? { session: body.session } : {}),
             ...(body.answered !== undefined ? { answered: body.answered } : {}),
             ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
+            ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),
             ...(body.reason ? { reason: body.reason } : {}),
           },
         });

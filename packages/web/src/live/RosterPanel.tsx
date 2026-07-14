@@ -68,6 +68,12 @@ function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | 
   // Reclaimable (ADR 105): seat held within reclaim grace. Chip shows `reconnecting` via
   // offline_reason (ADR 141); no separate recon label.
   const reconnecting = !online && m.reclaimable === true;
+  // Residency (ADR 131): an enrolled offline seat is not unreachable — a directed act wakes it;
+  // `resumable` only while the capture sits inside the harness's ~30d GC horizon (inc 5), which is
+  // exactly why the wire carries a timestamp and not a boolean.
+  const wakeable = !online && !reconnecting && m.wakeable === true;
+  const resumable =
+    wakeable && m.resumable_at != null && Date.now() - m.resumable_at < 30 * 24 * 60 * 60 * 1000;
   const chip = rosterPrimaryChip(m);
   const accountEx = accountStatusException(m.account_status);
   const badges = capabilityBadges(m.capabilities);
@@ -119,6 +125,22 @@ function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | 
               {b.label}
             </span>
           ))}
+          {wakeable && (
+            <span
+              className="lc-stat lc-stat--quiet"
+              title="Enrolled in harness residency (ADR 131) — a directed act wakes this seat"
+            >
+              wakeable
+            </span>
+          )}
+          {resumable && (
+            <span
+              className="lc-stat lc-stat--quiet"
+              title="A captured harness session is resumable — a wake continues the seat's own transcript"
+            >
+              resumable
+            </span>
+          )}
         </div>
       </div>
     </div>
