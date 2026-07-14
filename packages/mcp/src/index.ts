@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { renderPrimer } from '@musterd/protocol';
 import { bind } from './bind.js';
+import { MCP_ICONS } from './brand.js';
 import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
 import { MusterdClient } from './client.js';
 import { isClaimedConfig, loadMcpConfig, type McpConfig } from './config.js';
@@ -18,7 +19,6 @@ import { registerMembers } from './tools/members.js';
 import { registerMemory } from './tools/memory.js';
 import { registerSend } from './tools/send.js';
 import { registerStatus } from './tools/status.js';
-import { MCP_ICONS } from './brand.js';
 
 export { MusterdClient } from './client.js';
 export { loadMcpConfig, type McpConfig } from './config.js';
