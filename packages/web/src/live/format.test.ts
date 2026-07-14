@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { toneColor } from './office-scene/render';
 import {
+  accountStatusException,
   accountStatusMeta,
   actLabel,
   actTone,
   formatClock,
   goalEvent,
   laneEventDetail,
+  postureMeta,
   proseSegments,
   richLength,
   richTokens,
@@ -166,18 +168,31 @@ describe('toneColor — office palette mirrors the CSS tokens', () => {
   });
 });
 
-describe('accountStatusMeta — roster account_status pill (ADR 073 / 137)', () => {
-  it('labels the healthy active seat as enabled, not active (presence collision)', () => {
-    // Wire enum stays `active`; the pill must not read like online/offline.
-    expect(accountStatusMeta('active')).toEqual({ label: 'enabled', tone: 'ok', quiet: true });
+describe('postureMeta — roster posture pill (ADR 138)', () => {
+  it('renders wire posture tokens with tones', () => {
+    expect(postureMeta('working')).toEqual({ label: 'working', tone: 'ok', quiet: false });
+    expect(postureMeta('idle')).toEqual({ label: 'idle', tone: 'ok', quiet: true });
+    expect(postureMeta('away')).toEqual({ label: 'away', tone: 'pending', quiet: false });
+    expect(postureMeta('offline')).toEqual({ label: 'offline', tone: 'muted', quiet: true });
+  });
+});
+
+describe('accountStatusException — governance exceptions only (ADR 138)', () => {
+  it('hides provisioned/active/unknown — posture owns the primary chip', () => {
+    expect(accountStatusException('active')).toBeNull();
+    expect(accountStatusException('provisioned')).toBeNull();
+    expect(accountStatusException(undefined)).toBeNull();
   });
 
-  it('keeps exception statuses as their wire tokens', () => {
+  it('surfaces disabled/banned/archived as wire tokens', () => {
+    expect(accountStatusException('disabled')?.label).toBe('disabled');
+    expect(accountStatusException('banned')?.label).toBe('banned');
+    expect(accountStatusException('archived')?.label).toBe('archived');
+  });
+
+  it('keeps accountStatusMeta for tooltips / non-rail uses', () => {
+    expect(accountStatusMeta('active').label).toBe('active');
     expect(accountStatusMeta('provisioned').label).toBe('provisioned');
-    expect(accountStatusMeta('disabled').label).toBe('disabled');
-    expect(accountStatusMeta('banned').label).toBe('banned');
-    expect(accountStatusMeta('archived').label).toBe('archived');
-    expect(accountStatusMeta(undefined).label).toBe('unknown');
   });
 });
 

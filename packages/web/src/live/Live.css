@@ -1201,7 +1201,7 @@
   gap: var(--lc-2);
   margin-top: 3px;
 }
-/* account_status pill — quiet for the healthy wire-`active` norm (display: enabled, ADR 137) */
+/* posture + exception account_status pills (ADR 138) — quiet for idle/offline norms */
 .lc-stat {
   font-family: var(--font-mono, monospace);
   font-size: 9.5px;

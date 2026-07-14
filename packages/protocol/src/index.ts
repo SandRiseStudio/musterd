@@ -11,6 +11,7 @@ export * from './claim.js';
 export * from './claim-handshake.js';
 export * from './envelope.js';
 export * from './member.js';
+export * from './posture.js';
 export * from './model.js';
 export * from './seatfile.js';
 export * from './errors.js';

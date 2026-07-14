@@ -26,6 +26,7 @@ import {
   type Envelope,
   type LaneWarning,
   type MemberSummary,
+  resolvePosture,
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { z } from 'zod';
@@ -600,9 +601,9 @@ function tryAuth(ctx: Ctx, slug: string, req: IncomingMessage): MemberRow | null
  * Project the roster, **scoped to the viewer's `visibility_level`** (ADR 071, P2). An `admin` viewer (or
  * the seat looking at *itself*) sees the full `Member` incl. effective `capabilities`; a `team`-level
  * viewer (or an unauthenticated read) gets the need-to-know projection — every seat's handle, kind, role,
- * presence, availability, and account_status, but **not** other seats' capabilities (the authority map:
- * who is admin, who is muted, who is narrowed). Permissive by default — no token still yields a usable
- * roster, just without the authority detail that only an admin dashboard needs.
+ * presence, availability, account_status, and composed `posture` (ADR 138), but **not** other seats'
+ * capabilities (the authority map: who is admin, who is muted, who is narrowed). Permissive by default —
+ * no token still yields a usable roster, just without the authority detail that only an admin dashboard needs.
  */
 function summarize(
   ctx: Ctx,
@@ -630,6 +631,10 @@ function summarize(
       presence: s.status,
       presences: s.presences,
       ...activity,
+      posture: resolvePosture({
+        activity: activity.activity,
+        availability: member.availability ?? null,
+      }),
       reclaimable: reclaimable.has(s.member.id),
       wakeable: wakeable.has(s.member.id),
     };

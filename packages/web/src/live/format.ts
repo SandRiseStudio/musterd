@@ -1,4 +1,11 @@
-import type { AccountStatus, Capabilities, Envelope, MemberSummary } from '@musterd/protocol';
+import type {
+  AccountStatus,
+  Capabilities,
+  Envelope,
+  MemberSummary,
+  Posture,
+} from '@musterd/protocol';
+import { resolvePosture } from '@musterd/protocol';
 
 export type ActTone =
   | 'accent'
@@ -305,25 +312,52 @@ export function memberColor(name: string, kind: Kind): string {
   return `hsl(${hue}, 68%, 62%)`;
 }
 
-/* ─── governance projection (ADR 070 capability/account-status surface) ───────────────────────────
- * The web read-only view of the v0.3 seat model: it renders whatever the daemon *projects* (role
- * defaults ⊕ per-seat narrowing → effective capabilities, plus the derived account_status). Nothing is
- * enforced here — this is the observable surface. P2 (server) is the enforcement half. */
+/* ─── roster posture + governance projection (ADR 138 / 073 / 070) ────────────────────────────────
+ * Primary chip = server-projected `posture` (working|idle|away|offline). Account-status chips are
+ * exceptions only (disabled/banned/archived). Capability badges still show deviations from the
+ * generalist default. Nothing is enforced here — this is the observable surface. */
 
-/** How an account_status reads in the rail: a tone + whether it's the healthy norm (shown quiet). */
+/** How a posture reads in the rail. */
+export function postureMeta(posture: Posture): StatusMeta {
+  switch (posture) {
+    case 'working':
+      return { label: 'working', tone: 'ok', quiet: false };
+    case 'idle':
+      return { label: 'idle', tone: 'ok', quiet: true };
+    case 'away':
+      return { label: 'away', tone: 'pending', quiet: false };
+    case 'offline':
+      return { label: 'offline', tone: 'muted', quiet: true };
+    default: {
+      const _exhaustive: never = posture;
+      return _exhaustive;
+    }
+  }
+}
+
+/** Resolve the chip posture from a summary — prefer the server field; fall back for pre-138 daemons. */
+export function memberPosture(m: MemberSummary): Posture {
+  if (m.posture) return m.posture;
+  const activity = m.activity ?? (m.presence === 'offline' ? 'offline' : 'online');
+  return resolvePosture({
+    activity,
+    availability: m.availability ?? null,
+  });
+}
+
+/** How an account_status reads: wire token + tone. Healthy norms are quiet (and usually hidden). */
 export interface StatusMeta {
   label: string;
   tone: 'ok' | 'pending' | 'danger' | 'muted';
-  /** Wire `active` is the steady state — rendered subdued so the rail only *shouts* the exceptions. */
+  /** Healthy / unknown norms are quiet; exceptions take a tone. */
   quiet: boolean;
 }
 export function accountStatusMeta(status: AccountStatus | undefined): StatusMeta {
   switch (status) {
     case 'active':
-      // Display as `enabled` (ADR 137) — wire enum stays `active`; "active" reads as presence.
-      return { label: 'enabled', tone: 'ok', quiet: true };
+      return { label: 'active', tone: 'ok', quiet: true };
     case 'provisioned':
-      return { label: 'provisioned', tone: 'pending', quiet: false };
+      return { label: 'provisioned', tone: 'pending', quiet: true };
     case 'disabled':
       return { label: 'disabled', tone: 'muted', quiet: false };
     case 'banned':
@@ -331,8 +365,28 @@ export function accountStatusMeta(status: AccountStatus | undefined): StatusMeta
     case 'archived':
       return { label: 'archived', tone: 'muted', quiet: false };
     default:
-      // Pre-v0.3 daemon (no account_status projected) — say so rather than inventing 'enabled'.
       return { label: 'unknown', tone: 'muted', quiet: true };
+  }
+}
+
+/**
+ * Account-status chip for the roster rail (ADR 138) — only governance exceptions. Healthy
+ * `active`/`provisioned` are omitted; posture owns the primary chip.
+ */
+export function accountStatusException(status: AccountStatus | undefined): StatusMeta | null {
+  switch (status) {
+    case 'disabled':
+    case 'banned':
+    case 'archived':
+      return accountStatusMeta(status);
+    case 'active':
+    case 'provisioned':
+    case undefined:
+      return null;
+    default: {
+      const _exhaustive: never = status;
+      return _exhaustive;
+    }
   }
 }
 

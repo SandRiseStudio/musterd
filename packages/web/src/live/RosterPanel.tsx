@@ -1,18 +1,19 @@
 import type { MemberSummary } from '@musterd/protocol';
 import {
-  accountStatusMeta,
+  accountStatusException,
   capabilityBadges,
   initial,
   memberColor,
+  memberPosture,
+  postureMeta,
   rosterOrder,
 } from './format';
 import { CollapseButton, PanelRail } from './PanelChrome';
 
 /**
- * The governance roster rail — the accessible, semantic counterpart to the (decorative, aria-hidden)
- * constellation. It surfaces the v0.3 seat model the daemon now projects (ADR 070): each member's
- * account_status and effective capabilities. Read-only: this is the *observable* surface; enforcement
- * lives server-side (P2). A fully-generalist team reads calm — only governance deviations draw a badge.
+ * The roster rail — presence posture (ADR 138) plus governance exceptions/capabilities (ADR 073/070).
+ * Primary chip is server-projected `posture` (`working`·`idle`·`away`·`offline`); account_status only
+ * paints when disabled/banned/archived. Read-only: enforcement lives server-side.
  */
 export function RosterPanel({
   roster,
@@ -68,7 +69,8 @@ function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | 
   // Reclaimable (ADR 105): the seat reads offline but is held within its reclaim grace — a reservation
   // that may be reconnecting after a reload/blip. Surface it as "reconnecting" rather than a cold seat.
   const reconnecting = !online && m.reclaimable === true;
-  const status = accountStatusMeta(m.account_status);
+  const posture = postureMeta(memberPosture(m));
+  const accountEx = accountStatusException(m.account_status);
   const badges = capabilityBadges(m.capabilities);
   const dotState = online ? 'on' : reconnecting ? 'recon' : 'off';
   const seatMod = online ? '' : reconnecting ? ' lc-seat--recon' : ' lc-seat--offline';
@@ -105,11 +107,19 @@ function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | 
         </div>
         <div className="lc-seat__gov">
           <span
-            className={`lc-stat lc-stat--${status.quiet ? 'quiet' : status.tone}`}
-            title={`Account status: ${m.account_status ?? status.label}`}
+            className={`lc-stat lc-stat--${posture.quiet ? 'quiet' : posture.tone}`}
+            title={`Posture: ${posture.label}`}
           >
-            {status.label}
+            {posture.label}
           </span>
+          {accountEx && (
+            <span
+              className={`lc-stat lc-stat--${accountEx.tone}`}
+              title={`Account status: ${m.account_status}`}
+            >
+              {accountEx.label}
+            </span>
+          )}
           {badges.map((b) => (
             <span key={b.key} className={`lc-cap lc-cap--${b.tone}`} title={b.title}>
               {b.label}
