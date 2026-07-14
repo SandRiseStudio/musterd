@@ -412,3 +412,80 @@ describe('parseRunSummary (completion telemetry, never verification)', () => {
     expect(parseRunSummary('not json at all')).toBeNull();
   });
 });
+
+describe('WakeCompletion (inc 5): settled resolves the run summary; fast-fail merges', () => {
+  it('settled resolves cost/duration parsed from the run summary after exit', async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    expect(actuation.outcome).toEqual({ occupied: true, session: 'fresh' });
+    child.stdout.emit(
+      'data',
+      Buffer.from(JSON.stringify({ total_cost_usd: 0.42, duration_ms: 34_000 })),
+    );
+    child.exit(0);
+    const completion = await actuation.settled;
+    expect(completion).toEqual({ cost_usd: 0.42, duration_ms: 34_000 });
+  });
+
+  it('an instant crash carries its summary on the PRIMARY outcome (fast-fail merge)', async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const p = backend.wake(
+      spec(),
+      ctx(async () => {
+        // The child dies with a summary before verification concludes.
+        child.stdout.emit(
+          'data',
+          Buffer.from(JSON.stringify({ total_cost_usd: 0.05, duration_ms: 900, is_error: true })),
+        );
+        child.exit(1);
+        return { occupied: false };
+      }),
+    );
+    const actuation = await p;
+    expect(actuation.outcome.occupied).toBe(false);
+    expect(actuation.outcome.cost_usd).toBe(0.05);
+    expect(actuation.outcome.duration_ms).toBe(900);
+    await actuation.settled;
+  });
+
+  it('a failed resume and the fresh fallback SUM their attested spend (same lease)', async () => {
+    const resumeChild = new FakeChild();
+    const freshChild = new FakeChild();
+    let call = 0;
+    const { backend } = harness([resumeChild, freshChild], {
+      readSession: () => resumable(),
+      resumeVerifyWindowMs: 20,
+    });
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => {
+        call += 1;
+        if (call === 1) {
+          // The resume attempt dies (with a cost) — fresh fallback follows.
+          resumeChild.stdout.emit(
+            'data',
+            Buffer.from(JSON.stringify({ total_cost_usd: 0.1, duration_ms: 800 })),
+          );
+          resumeChild.exit(1);
+          return { occupied: false };
+        }
+        return { occupied: true, provenance: 'wake' };
+      }),
+    );
+    expect(actuation.outcome.occupied).toBe(true);
+    expect(actuation.outcome.session).toBe('fresh');
+    freshChild.stdout.emit(
+      'data',
+      Buffer.from(JSON.stringify({ total_cost_usd: 0.9, duration_ms: 30_000 })),
+    );
+    freshChild.exit(0);
+    const completion = await actuation.settled;
+    expect(completion?.cost_usd).toBeCloseTo(1.0);
+    expect(completion?.duration_ms).toBe(30_800);
+  });
+});

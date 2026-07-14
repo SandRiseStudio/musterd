@@ -2,7 +2,13 @@ import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { resolveClaudeBin } from '../../claudeBin.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
-import type { ActuatorBackend, BackendContext, WakeActuation, WakeSpec } from '../backend.js';
+import type {
+  ActuatorBackend,
+  BackendContext,
+  WakeActuation,
+  WakeCompletion,
+  WakeSpec,
+} from '../backend.js';
 
 /**
  * Backend #1: Claude Code, fresh-first with the increment-4 resume upgrade (ADR 131 §5). The
@@ -150,8 +156,12 @@ interface AttemptResult {
   provenance?: string | null;
   /** Host-composed failure summary; null when occupied. */
   reason: string | null;
-  /** Resolves when the spawned run finishes (exit or watchdog kill). */
-  settled: Promise<void>;
+  /** Resolves when the spawned run finishes (exit or watchdog kill), carrying the run's parsed
+   *  cost/duration summary for the supplementary wake report (increment 5). */
+  settled: Promise<WakeCompletion | undefined>;
+  /** Set when the run had ALREADY settled at verification time (instant crash, fast run) — the
+   *  loop merges it into the primary report instead of posting a supplement. */
+  completion?: WakeCompletion;
 }
 
 interface AttemptOpts {
@@ -205,7 +215,7 @@ function runAttempt(
   }, opts.timeoutMs);
   watchdog.unref();
 
-  const settled = exited.then((code) => {
+  const settled: Promise<WakeCompletion | undefined> = exited.then((code) => {
     clearTimeout(watchdog);
     const summary = parseRunSummary(stdout);
     const cost = summary?.cost_usd !== undefined ? ` cost=$${summary.cost_usd.toFixed(4)}` : '';
@@ -213,6 +223,13 @@ function runAttempt(
       `run for ${seat} (${opts.label}) settled: exit=${code ?? 'error'}` +
         `${timedOut ? ' (watchdog)' : ''}${cost} wall=${((Date.now() - spawnedAt) / 1000).toFixed(1)}s`,
     );
+    // The completion record (increment 5): harness-reported cost + measured wall clock. Cost only
+    // exists at exit — the loop posts it as a supplementary report against the settled lease.
+    if (!summary) return undefined;
+    return {
+      ...(summary.cost_usd !== undefined ? { cost_usd: summary.cost_usd } : {}),
+      duration_ms: summary.duration_ms ?? Date.now() - spawnedAt,
+    };
   });
 
   const result = (async (): Promise<AttemptResult> => {
@@ -270,7 +287,16 @@ function runAttempt(
         : child.exitCode !== null
           ? `run exited (code ${child.exitCode}) without occupying the seat`
           : 'no roster occupancy within the verify window';
-    return { occupied: false, reason: reason.slice(0, 200), settled };
+    // Fast-fail merge (increment 5): a run that already EXITED has its summary in hand — carry it
+    // on the primary report so no supplement is needed. A watchdogged/live child stays deferred to
+    // `settled` (awaiting the kill grace here would delay the report for no gain).
+    const completion = child.exitCode !== null || spawnError ? await settled : undefined;
+    return {
+      occupied: false,
+      reason: reason.slice(0, 200),
+      settled,
+      ...(completion ? { completion } : {}),
+    };
   })();
 
   return { result };
@@ -313,7 +339,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
             session: 'fresh',
             reason: 'claude CLI not found (PATH + known install locations)',
           },
-          settled: Promise.resolve(),
+          settled: Promise.resolve(undefined),
         };
       }
 
@@ -323,12 +349,28 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       if (liveness.state === 'live') {
         return {
           outcome: { occupied: false, deferred: true, reason: 'local-session-live' },
-          settled: Promise.resolve(),
+          settled: Promise.resolve(undefined),
         };
       }
 
       const deadline = Date.now() + spec.bounds.timeout_ms;
-      const settledParts: Promise<void>[] = [];
+      // Every attempt's settle is awaited (watchdogs never orphaned); the merged completion sums
+      // the attempts' attested spend — a failed resume burned real tokens in the SAME lease, so
+      // its cost belongs to the same supplementary record as the fresh fallback's.
+      const settledParts: Promise<WakeCompletion | undefined>[] = [];
+      const settleAll = (): Promise<WakeCompletion | undefined> =>
+        Promise.all(settledParts).then((parts) => {
+          const known = parts.filter((p): p is WakeCompletion => p !== undefined);
+          if (known.length === 0) return undefined;
+          const costs = known.filter((k) => k.cost_usd !== undefined);
+          const durations = known.filter((k) => k.duration_ms !== undefined);
+          return {
+            ...(costs.length > 0 ? { cost_usd: costs.reduce((a, k) => a + k.cost_usd!, 0) } : {}),
+            ...(durations.length > 0
+              ? { duration_ms: durations.reduce((a, k) => a + k.duration_ms!, 0) }
+              : {}),
+          };
+        });
       // Per-order knobs (increment 5): tool policy + turn cap ride the argv; the transcript bound
       // parameterizes the ladder. `budget_usd` is carried for the report only (no CLI can enforce
       // a dollar cap mid-run) — the loop already logged the clamped watchdog.
@@ -364,7 +406,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
           if (resumed.occupied) {
             return {
               outcome: { occupied: true, session: 'resumed' },
-              settled: Promise.all(settledParts).then(() => undefined),
+              settled: settleAll(),
             };
           }
           ctx.log(
@@ -396,7 +438,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       if ('spawnFailure' in fresh) {
         return {
           outcome: { occupied: false, session: 'fresh', reason: fresh.spawnFailure },
-          settled: Promise.all(settledParts).then(() => undefined),
+          settled: settleAll(),
         };
       }
       const outcome = await fresh.result;
@@ -406,8 +448,15 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
           occupied: outcome.occupied,
           session: 'fresh',
           ...(outcome.reason ? { reason: outcome.reason } : {}),
+          // Fast-fail merge: an already-settled run's summary rides the primary report.
+          ...(outcome.completion?.cost_usd !== undefined
+            ? { cost_usd: outcome.completion.cost_usd }
+            : {}),
+          ...(outcome.completion?.duration_ms !== undefined
+            ? { duration_ms: outcome.completion.duration_ms }
+            : {}),
         },
-        settled: Promise.all(settledParts).then(() => undefined),
+        settled: settleAll(),
       };
     },
   };

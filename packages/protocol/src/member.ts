@@ -101,5 +101,12 @@ export const MemberSummarySchema = MemberSchema.extend({
    * Optional for back-compat; the server always sets it.
    */
   wakeable: z.boolean().optional(),
+  /**
+   * When the seat last attested a capturable harness session (ADR 131 §5) — the resumable badge's
+   * input (inc 5, finding b). A TIMESTAMP, not a boolean, deliberately: captures age past the
+   * harness's ~30d GC horizon, so renderers apply freshness instead of trusting a stale `true`.
+   * Null/absent: never captured, or not enrolled. Optional for back-compat.
+   */
+  resumable_at: z.number().int().nullish(),
 });
 export type MemberSummary = z.infer<typeof MemberSummarySchema>;

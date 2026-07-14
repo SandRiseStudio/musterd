@@ -84,6 +84,29 @@ function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
         : `  ⚠ ${s.superseded_acts} act(s) replied to a superseded steer`,
     );
     lines.push(`  stale-work ${s.stale_caught}/${s.stale_wakes} wakes caught`);
+    // Wake metrics (ADR 131 inc 5), directly under steering — the O&E baseline extends the
+    // steering-latency headline to offline recipients. Silent when the daemon predates them.
+    const k = r.wake;
+    if (k && (k.wakes > 0 || k.failed > 0 || k.deferred > 0 || k.exhausted > 0)) {
+      const wlat =
+        k.latency_median_ms === null
+          ? '—'
+          : `median ${ago(k.latency_median_ms)} · p95 ${ago(k.latency_p95_ms!)}`;
+      const rate = k.answer_rate === null ? '' : ` (${Math.round(k.answer_rate * 100)}%)`;
+      lines.push('\nwake:');
+      lines.push(
+        `  ${k.wakes} wake(s)${k.resumed > 0 ? ` (${k.resumed} resumed)` : ''} · ` +
+          `${k.answered} answered${rate} · latency ${wlat} (${k.window_days}d)`,
+      );
+      if (k.cost_usd_total !== null)
+        lines.push(
+          `  cost $${k.cost_usd_total.toFixed(2)} total · $${k.cost_usd_per_wake!.toFixed(2)}/wake ` +
+            `(${k.cost_reported} of ${k.wakes} reported)`,
+        );
+      if (k.exhausted > 0) lines.push(`  ⚠ ${k.exhausted} act(s) exhausted their wake attempts`);
+      for (const seat of k.by_seat.filter((b) => b.over_budget))
+        lines.push(`  ⚠ ${seat.seat} — a wake exceeded its $${seat.budget_usd} report bound`);
+    }
     lines.push('\nwaiting on:');
     lines.push(...waitingLines());
   }

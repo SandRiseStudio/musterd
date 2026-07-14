@@ -284,3 +284,89 @@ describe('x-musterd-provenance — the ambient touch attests the animation sourc
     expect(ada.presences[0].provenance).toBe('session');
   });
 });
+
+describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
+  async function reportedLease(): Promise<string> {
+    await enrollAda();
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: makeEnvelope({
+          id: 'u2',
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'Ada' },
+          act: 'message',
+          body: 'need you',
+          meta: { urgent: true, urgent_reason: 'wake me' },
+        }),
+      },
+      nickCred,
+    );
+    const leases = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'laptop.local' },
+      agentKey,
+    );
+    const leaseId = leases.json.orders[0].lease_id as string;
+    const primary = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, session: 'fresh' },
+      agentKey,
+    );
+    expect(primary.status).toBe(200);
+    return leaseId;
+  }
+
+  it('a second report carrying cost lands as residency.wake_cost (200 cost_recorded)', async () => {
+    const leaseId = await reportedLease();
+    const supplement = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, cost_usd: 0.42, duration_ms: 34_000 },
+      agentKey,
+    );
+    expect(supplement.status).toBe(200);
+    expect(supplement.json.status).toBe('cost_recorded');
+    const rows = audits('residency.wake_cost');
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0]!.detail as string)).toMatchObject({
+      lease_id: leaseId,
+      cost_usd: 0.42,
+      duration_ms: 34_000,
+    });
+    // The wake report projection folds it in.
+    const report = await get('/teams/dawn/report', nickCred);
+    expect(report.json.wake.cost_usd_total).toBeCloseTo(0.42);
+    expect(report.json.wake.cost_reported).toBe(1);
+  });
+
+  it('a cost-less duplicate still 409s — the double-report guard stays intact', async () => {
+    const leaseId = await reportedLease();
+    const dup = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true },
+      agentKey,
+    );
+    expect(dup.status).toBe(409);
+    expect(audits('residency.wake_cost')).toHaveLength(0);
+  });
+});
+
+describe('roster resumable_at (ADR 131 inc 5, finding b)', () => {
+  it('projects the capture timestamp for enrolled seats; null before any capture', async () => {
+    await enrollAda();
+    let status = await get('/teams/dawn/members', nickCred);
+    let ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
+    expect(ada.wakeable).toBe(true);
+    expect(ada.resumable_at).toBeNull();
+
+    await post(
+      '/teams/dawn/residency/session',
+      { seat: 'Ada', harness: 'claude-code', event: 'start' },
+      agentKey,
+    );
+    status = await get('/teams/dawn/members', nickCred);
+    ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
+    expect(ada.resumable_at).toBeGreaterThan(0);
+  });
+});

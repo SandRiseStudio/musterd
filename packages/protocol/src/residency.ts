@@ -205,8 +205,13 @@ export const WakeReportBodySchema = z.object({
    *  `residency.wake_deferred`, and consumes NO attempt/cooldown/hourly budget: a working human
    *  must never exhaust the act. `occupied` is false on a deferral. */
   deferred: z.boolean().optional(),
-  /** Attested spend for the wake run, when the backend surfaces it. */
+  /** Attested spend for the wake run, when the backend surfaces it. The primary report rarely has
+   *  it (verification concludes long before the run exits, where cost is printed) — a woken run's
+   *  cost usually arrives on a SUPPLEMENTARY report for the already-settled lease, which the
+   *  daemon records as a `residency.wake_cost` audit row (increment 5). */
   cost_usd: z.number().nonnegative().optional(),
+  /** Wall-clock of the settled run (harness-reported), riding the same supplementary report. */
+  duration_ms: z.number().nonnegative().optional(),
   /** Failure summary for a not-occupied outcome (watchdog timeout, spawn error) — host-composed,
    *  never model output. */
   reason: z.string().max(200).optional(),
