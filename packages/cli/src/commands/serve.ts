@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { resolve as resolvePath } from 'node:path';
-import { readBuildStamp } from '@musterd/protocol';
+import { readBuildStamp } from '@musterd/protocol/build-stamp';
 import { createServer } from '@musterd/server';
 import { flagStr, type Parsed } from '../args.js';
 import { renderBanner } from '../render/rows.js';
