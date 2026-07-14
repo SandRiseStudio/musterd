@@ -7,8 +7,9 @@ import { MCP_ICONS } from './brand.js';
 import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
 import { MusterdClient } from './client.js';
 import { isClaimedConfig, loadMcpConfig, type McpConfig } from './config.js';
+import { observeHarnessInitialization } from './harness.js';
 import { readAndConsumeResolution, writePendingMarker } from './pending.js';
-import { instrumentTools, startMcpTelemetry } from './telemetry.js';
+import { instrumentTools, recordAdapterInitialization, startMcpTelemetry } from './telemetry.js';
 import { registerGoals } from './tools/goals.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
 import { registerInsights } from './tools/insights.js';
@@ -235,6 +236,11 @@ async function main(): Promise<void> {
   const server = buildMcpServer(client, config, {
     onFirstToolCall: () => autojoin(client, config),
   });
+  // The SDK stores clientInfo only after the client's initialize request finishes. Retain it as
+  // bounded adapter-local diagnostics, never as a model or Envelope field (ADR 120).
+  observeHarnessInitialization(server.server, (harness) =>
+    recordAdapterInitialization(config, harness),
+  );
   const transport = new StdioServerTransport();
   await server.connect(transport);
 

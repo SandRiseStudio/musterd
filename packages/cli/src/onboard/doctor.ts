@@ -156,8 +156,8 @@ async function inspectModelAttestation(binding: Binding | null): Promise<string[
   // seat's acts carry a model, so an idle/ambient sibling row without one isn't drift.
   if (liveHere.length === 0 || liveHere.some((p) => p.model)) return [];
   return [
-    `seat "${seat}"'s live session here attests no model — its acts read as model: unknown and ` +
-      `diversity conclusions on its chains become unverifiable (ADR 101). Set MUSTERD_MODEL (or ` +
+    `seat "${seat}"'s live MCP model declaration is unknown — its acts read as model: unknown and ` +
+      `diversity conclusions on its chains become unverifiable (ADR 120). Set MUSTERD_MODEL (or ` +
       `let the harness env carry ANTHROPIC_MODEL) and reconnect to attest.`,
   ];
 }

@@ -202,6 +202,42 @@ describe('inspectProvisioning — duplicate adapters (ADR 092)', () => {
   });
 });
 
+describe('inspectProvisioning — model attestation (ADR 120)', () => {
+  beforeEach(() => {
+    h.harnesses = [];
+    h.primer = 'none';
+    h.binding = {
+      server: 'http://x',
+      team: 'dawn',
+      surface: 'claude-code',
+      claim: { mode: 'seat', name: 'Ada' },
+    };
+    h.rosterThrows = false;
+    process.env['MUSTERD_WORKSPACE'] = 'repo@main';
+  });
+  afterEach(() => {
+    delete process.env['MUSTERD_WORKSPACE'];
+  });
+
+  it('reports an unknown live MCP attestation as a warn-only provisioning note', async () => {
+    h.roster = {
+      members: [
+        {
+          name: 'Ada',
+          presences: [{ surface: 'claude-code', status: 'online', workspace: 'repo@main' }],
+        },
+      ],
+    };
+
+    const report = await inspectProvisioning('/x');
+
+    expect(report.drift).toEqual([]);
+    expect(report.notes).toContainEqual(
+      expect.stringContaining('MCP model declaration is unknown'),
+    );
+  });
+});
+
 describe('inspectProvisioning — guidance drift (ADR 085)', () => {
   beforeEach(() => {
     h.harnesses = [];

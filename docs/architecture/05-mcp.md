@@ -10,6 +10,13 @@ The **universal harness adapter**. One MCP (stdio) server exposing **eighteen to
 - `@musterd/protocol` for envelope/act validation (identical rules to server + CLI).
 - Same `client.ts` HTTP/WS approach as the CLI (consider extracting a shared `@musterd/protocol`-level client; if you do, ADR it).
 
+**Harness identity and model attestation (ADR 120).** Once MCP initialization completes, the adapter
+retains the SDK's bounded `clientInfo.name`/`version` as local diagnostic context and emits it on its
+initialization telemetry. It never treats client identity as model truth or forwards it in an Envelope.
+The existing declaration ladder remains `MUSTERD_MODEL` → `ANTHROPIC_MODEL` → local
+`binding.json` model → `unknown`; an unknown declaration is usable but writes one warn-level
+adapter-start diagnostic and appears as a warn-only `musterd init --check` note for a live seat.
+
 ## How a session binds to a Member (identity bootstrapping)
 
 The MCP server process is configured (via env, set by whoever registers the MCP server in the harness) with:
@@ -248,6 +255,7 @@ src/
   client.ts       // HTTP + background WS client; join()/leave()/close(); `joined`/`claimed`;
                   //   setIdentity() (late claim); addMember() (tokenless mint); buffers live while joined
   claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() + adoptIdentity() (live claim, ADR 034)
+  harness.ts      // bounded MCP clientInfo capture: adapter-local harness diagnostics, never model inference (ADR 120)
   pending.ts      // pending markers (.musterd/pending/<code>.json) + resolution sidecars (ADR 034)
   binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI)
   brand.ts        // canonical chip SVG + MCP serverInfo.icons data URI (ADR 137)
