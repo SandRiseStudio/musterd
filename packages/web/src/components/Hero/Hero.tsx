@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { TAGLINE } from '../../content/roadmap.data';
+import { MusterdChip } from '../../brand/MusterdWord';
 import { memberColor } from '../../live/format';
 import type { OfficeData, OfficeEvent, OfficeHandle } from '../../live/office-scene';
 import './Hero.css';
@@ -111,7 +112,10 @@ export function Hero() {
       <div className="hero__content shell">
         <p className="hero__eyebrow mono">SandRise Studio</p>
         <h1 className="hero__wordmark mono">
-          musterd<span className="hero__cursor" aria-hidden="true">_</span>
+          <MusterdChip size={56} className="hero__chip" />
+          <span className="hero__word">
+            musterd<span className="hero__cursor" aria-hidden="true">_</span>
+          </span>
         </h1>
         <p className="hero__tagline">{TAGLINE}</p>
         <a className="hero__scroll" href="#roadmap">

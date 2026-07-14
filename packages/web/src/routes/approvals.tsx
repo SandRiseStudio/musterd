@@ -1,6 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import liveCss from '../live/Live.css?url';
+import brandCss from '../brand/brand.css?url';
+import { MusterdWord } from '../brand/MusterdWord';
 import { ApprovalQueue, isPendingRequest, type Decision } from '../live/ApprovalQueue';
 import { ReceptionScene } from '../live/ReceptionScene';
 import type { ApprovalRequest, GrantLifetime } from '../live/ApprovalCard';
@@ -9,7 +11,10 @@ import { AuditFetchError, decideRequest, fetchRequests, type LiveConfig, type Re
 export const Route = createFileRoute('/approvals')({
   head: () => ({
     meta: [{ title: 'musterd — approvals' }],
-    links: [{ rel: 'stylesheet', href: liveCss }],
+    links: [
+      { rel: 'stylesheet', href: liveCss },
+      { rel: 'stylesheet', href: brandCss },
+    ],
   }),
   component: ApprovalsPage,
 });
@@ -121,7 +126,7 @@ function ApprovalsPage() {
   return (
     <main className="lc">
       <header className="lc__topbar">
-        <span className="lc__word">musterd</span>
+        <MusterdWord />
         <span className="lc__team">/ approvals</span>
         <span className="lc__spacer" />
         <span className={`lc__status ${cfg ? 'lc__status--live' : 'lc__status--idle'}`}>

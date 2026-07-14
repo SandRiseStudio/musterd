@@ -1,6 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import liveCss from '../live/Live.css?url';
+import brandCss from '../brand/brand.css?url';
+import { MusterdWord } from '../brand/MusterdWord';
 import { AuditLog } from '../live/AuditLog';
 import { RecordShelf } from '../live/RecordShelf';
 import { AuditFetchError, fetchAudit, type AuditEntry, type LiveConfig } from '../live/client';
@@ -8,7 +10,10 @@ import { AuditFetchError, fetchAudit, type AuditEntry, type LiveConfig } from '.
 export const Route = createFileRoute('/audit')({
   head: () => ({
     meta: [{ title: 'musterd — governance audit' }],
-    links: [{ rel: 'stylesheet', href: liveCss }],
+    links: [
+      { rel: 'stylesheet', href: liveCss },
+      { rel: 'stylesheet', href: brandCss },
+    ],
   }),
   component: AuditPage,
 });
@@ -103,7 +108,7 @@ function AuditPage() {
   return (
     <main className="lc">
       <header className="lc__topbar">
-        <span className="lc__word">musterd</span>
+        <MusterdWord />
         <span className="lc__team">/ {connected ? `${cfg!.team} · audit` : 'audit'}</span>
         <span className="lc__spacer" />
         {connected && (

@@ -1,6 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import liveCss from '../live/Live.css?url';
+import brandCss from '../brand/brand.css?url';
+import { MusterdWord } from '../brand/MusterdWord';
 import { ApprovalCard } from '../live/ApprovalCard';
 import { ReceptionScene } from '../live/ReceptionScene';
 import type { ApprovalState, GrantLifetime } from '../live/ApprovalCard';
@@ -8,7 +10,10 @@ import type { ApprovalState, GrantLifetime } from '../live/ApprovalCard';
 export const Route = createFileRoute('/approval-preview')({
   head: () => ({
     meta: [{ title: 'musterd — approval card preview' }],
-    links: [{ rel: 'stylesheet', href: liveCss }],
+    links: [
+      { rel: 'stylesheet', href: liveCss },
+      { rel: 'stylesheet', href: brandCss },
+    ],
   }),
   component: ApprovalPreviewPage,
 });
@@ -102,7 +107,7 @@ function ApprovalPreviewPage() {
   return (
     <main className="lc" style={{ overflowY: 'auto' }}>
       <header className="lc__topbar">
-        <span className="lc__word">musterd</span>
+        <MusterdWord />
         <span className="lc__team">/ approval card preview</span>
         <span className="lc__spacer" />
         <span className="lc__status lc__status--live">design preview</span>

@@ -1,9 +1,7 @@
 ```
- _ __ ___  _   _ ___ | |_ ___ _ __ __| |
-| '_ ` _ \| | | / __|| __/ _ \ '__/ _` |
-| | | | | | |_| \__ \| ||  __/ | | (_| |
-|_| |_| |_|\__,_|___/ \__\___|_|  \__,_|
-```
+<p align="center">
+  <img src="docs/design/assets/chip.svg" width="56" alt="musterd" />
+</p>
 
 **Muster your agents and humans into persistent teams.**
 

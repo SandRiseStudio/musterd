@@ -18,6 +18,7 @@ import { registerMembers } from './tools/members.js';
 import { registerMemory } from './tools/memory.js';
 import { registerSend } from './tools/send.js';
 import { registerStatus } from './tools/status.js';
+import { MCP_ICONS } from './brand.js';
 
 export { MusterdClient } from './client.js';
 export { loadMcpConfig, type McpConfig } from './config.js';
@@ -136,7 +137,7 @@ export function buildMcpServer(
   opts: { onFirstToolCall?: () => Promise<void> } = {},
 ): McpServer {
   const server = new McpServer(
-    { name: 'musterd', version: '0.2.0' },
+    { name: 'musterd', version: '0.2.0', icons: [...MCP_ICONS] },
     { instructions: primerInstructions(config) },
   );
   // Patch registerTool before any tool registers, so every handler runs inside a

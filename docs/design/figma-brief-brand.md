@@ -53,8 +53,10 @@ Build these frames at **exact** dimensions and mark each for export:
 
 1. `asset/readme-header` — **1280×320**. Dark (`zinc-900` bg), centered wordmark + tagline (`brand.md` canonical tagline) in `mono-body` `zinc-400`. Export `@1x` and `@2x` PNG.
 2. `asset/social-card` — **1200×630**. Dark bg, wordmark upper-left, one-liner centered, subtle 80-col grid texture at low opacity. Export PNG `@1x` and `@2x`.
-3. `asset/avatar` — **512×512**. The `-d` motif or compact `musterd` lockup centered on `zinc-900`, accent `-d`. Export PNG at 512 and 256 and SVG. Used for npm + GitHub org avatar.
+3. `asset/avatar` — **512×512**. The **Brand Chip** (ADR 137): mustard block, reversed `m`, cursor notch, on `zinc-900`. Export PNG at 512 and 256 and SVG. Used for npm + GitHub org avatar.
 4. `asset/badge` — **120×20** shields-style mustard badge reading `musterd` (for README). Export SVG.
+5. `mark/chip` (64×64) — flat Brand Chip SVG source frame.
+6. `mark/tile` (128×128) — isometric Nameplate Tile with optional glow (web/marketing).
 
 ## Acceptance checklist ("done" means all true)
 

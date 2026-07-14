@@ -64,12 +64,24 @@
 
 .hero__wordmark {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: clamp(0.8rem, 2.5vw, 1.4rem);
   font-weight: 700;
   font-size: clamp(3.4rem, 13vw, 9rem);
   line-height: 0.92;
   letter-spacing: -0.04em;
   color: var(--text);
   text-shadow: 0 0 60px rgba(225, 173, 1, 0.25);
+}
+
+.hero__chip {
+  flex: 0 0 auto;
+  filter: drop-shadow(0 8px 24px rgba(184, 134, 11, 0.28));
+}
+
+.hero__word {
+  display: inline-block;
 }
 
 .hero__cursor {

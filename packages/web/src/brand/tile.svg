@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="musterd">
+  <defs>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- isometric nameplate tile  office 2:1 projection (iso.ts KX/KY) -->
+  <g filter="url(#glow)">
+    <!-- front face -->
+    <path fill="#B8860B" d="M32 38 L46.5 45.2 L32 52.4 L17.5 45.2 Z"/>
+    <!-- top face -->
+    <path fill="#E1AD01" d="M17.5 31.2 L32 24 L46.5 31.2 L32 38 Z"/>
+    <!-- m on top face -->
+    <path
+      fill="#18181B"
+      transform="translate(19 26.5) scale(0.52)"
+      d="M7.5 22V11.8h2.3v2.4c0-1.7 1-2.8 2.5-2.8 1.4 0 2.3.9 2.3 2.6V22h-2.3v-5.6c0-.9-.5-1.4-1.2-1.4-.8 0-1.2.5-1.2 1.4V22H7.5zm7.2 0v-6.2c0-1.9 1-3 2.6-3 1.1 0 1.9.5 2.2 1.3v-1.1h2.3V22h-2.3v-5.7c0-.9-.5-1.4-1.2-1.4-.8 0-1.2.5-1.2 1.4V22h-2.4z"
+    />
+    <!-- cursor on front edge -->
+    <rect x="41" y="40" width="2" height="7" rx="0.3" fill="#18181B" transform="rotate(26 42 43.5)"/>
+  </g>
+</svg>
