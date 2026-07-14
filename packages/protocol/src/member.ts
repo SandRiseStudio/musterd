@@ -8,6 +8,7 @@ import {
   SurfaceSchema,
 } from './acts.js';
 import { AccountStatusSchema, CapabilitiesSchema } from './capabilities.js';
+import { PostureSchema } from './posture.js';
 
 /**
  * The self-set availability axis (SPEC A.6 Axis 2) — explicit, **never inferred**. `away_until(ts)`
@@ -74,6 +75,12 @@ export const MemberSummarySchema = MemberSchema.extend({
   state: z.string().nullish(),
   /** When `state` was last refreshed (ms epoch); drives staleness in the roster. */
   last_status_at: z.number().int().nullish(),
+  /**
+   * Composed roster posture (ADR 138) — `working | idle | away | offline`. Resolved server-side from
+   * activity ∩ availability; the chip renders this token (no client synonym). Optional for back-compat;
+   * the server always sets it.
+   */
+  posture: PostureSchema.optional(),
   /**
    * True when the seat is *held within its reclaim-grace window* (ADR 010) — a **reservation**, not
    * live presence. The seat still reads `presence: 'offline'` (grace is hidden from display, ADR 010),

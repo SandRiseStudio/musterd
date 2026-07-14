@@ -802,9 +802,12 @@ describe('WebSocket', () => {
     const by = (name: string) => roster.json.members.find((m: any) => m.name === name);
     expect(by('Ada').activity).toBe('working');
     expect(by('Ada').state).toBe('refactoring auth');
+    expect(by('Ada').posture).toBe('working');
     expect(by('nick').activity).toBe('online');
     expect(by('nick').state).toBeNull();
+    expect(by('nick').posture).toBe('idle');
     expect(by('Lin').activity).toBe('offline');
+    expect(by('Lin').posture).toBe('offline');
 
     n.close();
     a.close();
