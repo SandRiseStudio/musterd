@@ -2,10 +2,19 @@ import { FLOOR } from './iso';
 import type { Dir } from './types';
 
 /**
- * The office floor plan: 12 desk slots distributed across the interior + edges (mixed facings), a rich
- * break nook (back-right), a glass entrance (front-left), two huddle spaces, and big floor plants —
- * ported from the Figma "Floor Plan" frame. Anchors are logical floor coords (iso.ts, FLOOR=900).
- * Zones (nook / entrance / huddles) are kept clear of desks so the room reads uncluttered.
+ * The office floor plan. Anchors are logical floor coords (iso.ts, FLOOR=900).
+ *
+ * The 12 desks are grouped into **three pods of four** rather than scattered across the interior. A
+ * loose grid of identical lone desks made a partly-full room read as a half-abandoned one: each empty
+ * desk sat alone in the middle of nothing, so it read as missing furniture rather than as a colleague
+ * who happens to be out. In a pod, an empty desk is a teammate's desk — the pod is the unit that reads
+ * as occupied, and one person at a pod of four looks like an office, not a vacancy. Making the desks
+ * *bigger* was the tempting alternative and is the wrong one: bigger desks only make the empty ones
+ * louder.
+ *
+ * The pods leave the middle and the front of the floor open, and that space is programmed rather than
+ * left as bare floor: a break nook (right), a huddle in the centre, a meeting table and a reception
+ * area across the front, and wall pieces (bookshelves, plants, a printer) around the edges.
  */
 
 /** Unit "forward" vector (logical dx,dy) for each facing — shared by drawing and the actor system. */
@@ -59,26 +68,109 @@ export interface DeskSlot {
   ly: number;
   /** Which way the seated member faces — decides monitor + member draw order. */
   dir: Dir;
+  /** Which pod this desk belongs to (index into `PODS`). */
+  pod: number;
 }
 
-export const DESK_SLOTS: DeskSlot[] = [
-  { id: 0, lx: 150, ly: 150, dir: 'S' },
-  { id: 1, lx: 330, ly: 150, dir: 'S' },
-  { id: 2, lx: 470, ly: 160, dir: 'E' },
-  { id: 3, lx: 150, ly: 330, dir: 'E' },
-  // Two of the interior desks face **S** (toward the viewer) on purpose. Most of the floor faces away, so
-  // most of the team showed you the back of their head — and a face (eyes, visor, a blink) is the single
-  // thing that makes a member read as a person rather than a coloured block. Kept to two: turning the
-  // whole floor toward the camera would make the room read as a stage set rather than an office.
-  { id: 4, lx: 350, ly: 340, dir: 'S' },
-  { id: 5, lx: 620, ly: 440, dir: 'N' },
-  { id: 6, lx: 780, ly: 430, dir: 'W' },
-  { id: 7, lx: 150, ly: 610, dir: 'N' },
-  { id: 8, lx: 520, ly: 560, dir: 'S' },
-  { id: 9, lx: 780, ly: 630, dir: 'W' },
-  { id: 10, lx: 340, ly: 735, dir: 'S' },
-  { id: 11, lx: 650, ly: 760, dir: 'N' },
+/**
+ * A rug: a flat zone marker on the floor. Each one carries its own `shape`, `weave` and colours, because
+ * a floor of identical tan rectangles reads as a rendering artefact rather than as furnishing — the rugs
+ * are how you tell one zone from another at a glance, and identical rugs throw that away.
+ *
+ * `weave` paints *inside* the rug's own outline, so a pattern never leaks onto the floor:
+ *  - `border` — an inset field in a second colour (a bound rug)
+ *  - `stripes` — bands across the rug's short axis (a runner / a kilim)
+ *  - `plain` — one flat field
+ */
+export interface Rug {
+  shape: 'rect' | 'diamond';
+  weave: 'plain' | 'border' | 'stripes';
+  /** The rug's field colour, and the colour of its border/stripes. */
+  fill: string;
+  mark: string;
+}
+
+/**
+ * A pod: four desks in two facing pairs, monitors inward against a shared privacy screen, seats on the
+ * outside. `axis` is the axis the pairs face along — `'ns'` seats a pair to the north and a pair to the
+ * south (so both north desks face **S**, toward the viewer); `'ew'` turns the pod a quarter-turn.
+ *
+ * Exactly one pod is `'ns'`, which is what keeps **exactly two desks facing the viewer**. A face — eyes,
+ * a visor, a blink — is the one thing that makes a member read as a person rather than a coloured block,
+ * so the room needs some; turning more of the floor toward the camera would make it a stage set.
+ */
+export interface Pod {
+  id: number;
+  cx: number;
+  cy: number;
+  axis: 'ns' | 'ew';
+  /** The pod's floor rug — a zone marker under the whole cluster, seats included. With no divider to carry
+   * it, the rug is the *only* thing that makes a pod a place: it is what lets a member say "the blue pod". */
+  rug: Rug;
+}
+
+export const PODS: Pod[] = [
+  {
+    id: 0,
+    cx: 240,
+    cy: 220,
+    axis: 'ns',
+    rug: { shape: 'rect', weave: 'border', fill: '#93a9a4', mark: '#75908a' },
+  },
+  {
+    id: 1,
+    cx: 620,
+    cy: 560,
+    axis: 'ew',
+    rug: { shape: 'rect', weave: 'stripes', fill: '#97a7b8', mark: '#7c8ca0' },
+  },
+  {
+    id: 2,
+    cx: 260,
+    cy: 560,
+    axis: 'ew',
+    rug: { shape: 'rect', weave: 'border', fill: '#ab97a4', mark: '#8b7683' },
+  },
 ];
+
+/** Desk centre offsets from the pod centre: along the pairing axis, and across it (two desks per row). */
+export const POD_ALONG = 40; // desk centre to pod centre, across the shared screen (68-deep desks → a 12 gap)
+export const POD_ACROSS = 55; // the two desks of a row, side by side (100-wide desks → a 10 gap)
+/**
+ * No divider stands between the two rows, and that is a decision rather than an omission.
+ *
+ * A screen in the gap sits ~40 units *nearer the camera* than the back row's desks, so from this fixed
+ * iso angle it is literally between you and their desktop. There is no painter order that shows both: sort
+ * the screen at its own footprint and it paints over that row's monitors, keyboard and mug; sort it behind
+ * them and their desk slab eats its lower half, so it reads as a broken half-panel. Every version of the
+ * fix trades one of the two away — and a member's monitor (lit when they work, dark when they don't) is
+ * load-bearing, while the divider is decor. So the divider goes.
+ *
+ * What makes a pod read as a pod is the desks facing each other across a shared rug, not a panel.
+ */
+export const POD_RUG = { along: 230, across: 250 };
+
+/** The four desks of a pod, in pod-local order (north/west row first). */
+function podDesks(pod: Pod): DeskSlot[] {
+  const ns = pod.axis === 'ns';
+  const near: Dir = ns ? 'S' : 'E'; // the row on the low side faces *into* the pod, i.e. toward +axis
+  const far: Dir = ns ? 'N' : 'W';
+  const at = (along: number, across: number, dir: Dir, i: number): DeskSlot => ({
+    id: pod.id * 4 + i,
+    lx: pod.cx + (ns ? across : along),
+    ly: pod.cy + (ns ? along : across),
+    dir,
+    pod: pod.id,
+  });
+  return [
+    at(-POD_ALONG, -POD_ACROSS, near, 0),
+    at(-POD_ALONG, POD_ACROSS, near, 1),
+    at(POD_ALONG, -POD_ACROSS, far, 2),
+    at(POD_ALONG, POD_ACROSS, far, 3),
+  ];
+}
+
+export const DESK_SLOTS: DeskSlot[] = PODS.flatMap(podDesks);
 
 /** The break nook — where `away` members drift; also the broadcast megaphone spot. */
 export const NOOK = { lx: 700, ly: 190 };
@@ -86,6 +178,9 @@ export const NOOK = { lx: 700, ly: 190 };
 /** The nook rug's iso radius — furniture and the away cluster stay inside it. Roomy enough that the
  * lounge set + kitchenette can breathe with real gaps between pieces. */
 export const NOOK_RUG_R = 192;
+
+/** The nook's rug: the room's one big diamond, bound with a darker edge. */
+export const NOOK_RUG: Rug = { shape: 'diamond', weave: 'border', fill: '#ce9256', mark: '#b2743c' };
 
 /**
  * The lounge set, as *data* (offsets from NOOK, logical sizes) shared by drawing (render.ts) and
@@ -135,14 +230,59 @@ export const ENTRANCE = { lx: 47, ly: 815 };
 export interface Huddle {
   lx: number;
   ly: number;
-  rug: string;
+  rug: Rug;
   poufs: [string, string, string];
 }
 
-/** One huddle space (was two — the second crowded the floor for no roster payoff). */
+/** One huddle space, in the clearing the three pods leave in the middle of the room. */
 export const HUDDLES: Huddle[] = [
-  { lx: 255, ly: 470, rug: '#7fb4aa', poufs: ['#f06d5a', '#e3a72b', '#8b6fd6'] },
+  {
+    lx: 420,
+    ly: 350,
+    rug: { shape: 'diamond', weave: 'border', fill: '#7fb4aa', mark: '#5f958c' },
+    poufs: ['#f06d5a', '#e3a72b', '#8b6fd6'],
+  },
 ];
+
+/** The meeting table in the front corner: a long table with four chairs, on its own rug. */
+export const MEETING = {
+  lx: 740,
+  ly: 800,
+  w: 170,
+  d: 92,
+  h: 30,
+  /** Chair centres, as offsets — two down each long side. */
+  chairs: [
+    { dx: -52, dy: -72, dir: 'S' as Dir },
+    { dx: 52, dy: -72, dir: 'S' as Dir },
+    { dx: -52, dy: 72, dir: 'N' as Dir },
+    { dx: 52, dy: 72, dir: 'N' as Dir },
+  ],
+  chairSize: 36,
+  rug: { w: 300, d: 196, shape: 'rect', weave: 'stripes', fill: '#9aa886', mark: '#7e8c6b' },
+} as const;
+
+/**
+ * Reception, in the left corner: the rug the entrance queue waits on, a waiting couch turned back toward
+ * the door, and a low table. The queue strip (`ENTRANCE` + `STRIP_CAP`) already lands here, so this
+ * dresses a space members genuinely stand in rather than adding a decorative island somewhere pretty.
+ *
+ * The pieces are the *same* couch and coffee table the break nook uses — a second furniture vocabulary
+ * for one corner would read as a different building.
+ */
+export const RECEPTION = {
+  // The rug keeps a clear band of bare floor between itself and pod 2's rug (which reaches ly 685). Two
+  // rugs meeting edge-to-edge fuse into one big shapeless patch and both zones stop reading as zones —
+  // the floor *between* rugs is what makes each one an area rather than a stain.
+  rug: { lx: 170, ly: 800, w: 300, d: 170, shape: 'rect', weave: 'border', fill: '#c07a55', mark: '#9c5c3c' },
+  /** Past the far end of the queue strip, facing back down it toward the door. */
+  couch: { lx: 330, ly: 800, dir: 'W' as Dir },
+  table: { lx: 258, ly: 800 },
+  plant: { lx: 335, ly: 690 },
+} as const;
+
+/** The printer/supply station against the back wall. */
+export const PRINTER = { lx: 390, ly: 60, w: 46, d: 34, h: 32 };
 
 export interface Plant {
   lx: number;
@@ -150,13 +290,18 @@ export interface Plant {
   species: 'snake' | 'fiddle';
 }
 
+/** Big floor plants — mostly on the perimeter, where they soften the wall edges and break up the bare
+ * floor between zones without standing in a walking line. */
 export const PLANTS: Plant[] = [
   { lx: 70, ly: 110, species: 'snake' },
-  { lx: 470, ly: 55, species: 'fiddle' },
+  { lx: 480, ly: 55, species: 'fiddle' },
   { lx: 855, ly: 130, species: 'fiddle' },
-  { lx: 60, ly: 720, species: 'fiddle' },
-  { lx: 855, ly: 760, species: 'snake' },
-  { lx: 540, ly: 855, species: 'fiddle' },
+  { lx: 60, ly: 640, species: 'fiddle' },
+  { lx: 862, ly: 690, species: 'snake' },
+  { lx: 380, ly: 870, species: 'fiddle' },
+  { lx: 110, ly: 380, species: 'fiddle' }, // left flank, between the huddle and the wall
+  { lx: 830, ly: 330, species: 'snake' }, // right flank, under the nook shelf
+  { lx: 830, ly: 870, species: 'fiddle' }, // front corner, past the meeting table
 ];
 
 export interface Bookshelf {
@@ -174,7 +319,8 @@ export const SHELF_H = 66;
 /** Freestanding bookshelves flush to the open wall stretches (back of footprint on the perimeter,
  * same pattern as the entrance door) — warm decor, block nav. */
 export const BOOKSHELVES: Bookshelf[] = [
-  { lx: 250, ly: SHELF_DEEP / 2, dir: 'S' }, // back wall, between the top-row desks and the corner
-  { lx: FLOOR - SHELF_DEEP / 2, ly: 320, dir: 'W' }, // right wall, above the lounge
-  { lx: SHELF_DEEP / 2, ly: 470, dir: 'E' }, // left wall, beside the huddle
+  { lx: 130, ly: SHELF_DEEP / 2, dir: 'S' }, // back wall, in the corner behind pod 0
+  { lx: FLOOR - SHELF_DEEP / 2, ly: 320, dir: 'W' }, // right wall, below the lounge
+  { lx: SHELF_DEEP / 2, ly: 240, dir: 'E' }, // left wall, beside pod 0
+  { lx: SHELF_DEEP / 2, ly: 560, dir: 'E' }, // left wall, beside pod 2
 ];

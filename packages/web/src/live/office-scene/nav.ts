@@ -10,8 +10,11 @@ import {
   FWD,
   HUDDLES,
   LOUNGE,
+  MEETING,
   NOOK,
   PLANTS,
+  PRINTER,
+  RECEPTION,
   SHELF_DEEP,
   SHELF_LONG,
 } from './layout';
@@ -73,6 +76,14 @@ function solidRects(): Rect[] {
     out.push(rect(h.lx - 52, h.ly + 32, 44, 44));
     out.push(rect(h.lx, h.ly, 66, 66)); // low table
   }
+  out.push(rect(MEETING.lx, MEETING.ly, MEETING.w, MEETING.d));
+  for (const c of MEETING.chairs) {
+    out.push(rect(MEETING.lx + c.dx, MEETING.ly + c.dy, MEETING.chairSize, MEETING.chairSize, 4));
+  }
+  out.push(rect(RECEPTION.couch.lx, RECEPTION.couch.ly, LOUNGE.couch.dep, LOUNGE.couch.len)); // faces W
+  out.push(rect(RECEPTION.table.lx, RECEPTION.table.ly, LOUNGE.table.w, LOUNGE.table.d));
+  out.push(rect(RECEPTION.plant.lx, RECEPTION.plant.ly, 26, 26));
+  out.push(rect(PRINTER.lx, PRINTER.ly, PRINTER.w, PRINTER.d));
   for (const p of PLANTS) out.push(rect(p.lx, p.ly, 26, 26));
   for (const s of BOOKSHELVES) {
     const sn = s.dir === 'S' || s.dir === 'N';
