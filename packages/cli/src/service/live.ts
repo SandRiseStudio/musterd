@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   bootoutArgs,
   bootstrapArgs,
@@ -178,10 +178,12 @@ export function stopLive(ctx: LiveCtx): { build: RunResult } {
 
 /**
  * `refresh --live` — force a build + publish *now* instead of waiting for the builder's next poll:
- * `kickstart -k` the agent (its script re-syncs, rebuilds, and publishes on start). Falls back to
- * `bootstrap` if it isn't loaded, so `refresh` also works from cold.
+ * clear the published-sha stamp (so the script does not early-exit), then `kickstart -k` the agent.
+ * Falls back to `bootstrap` if it isn't loaded, so `refresh` also works from cold.
  */
 export function refreshLive(ctx: LiveCtx): RunResult {
+  const stamp = join(ctx.webRoot, '.published-sha');
+  if (existsSync(stamp)) rmSync(stamp, { force: true });
   const kick = ctx.run('launchctl', kickstartArgs(ctx.uid, ctx.buildLabel));
   if (kick.status === 0) return kick;
   return ctx.run('launchctl', bootstrapArgs(ctx.uid, ctx.buildPlistPath));

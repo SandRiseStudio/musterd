@@ -36,8 +36,9 @@ describe('buildLiveBuildScript', () => {
     nodeDir: '/opt/node/bin',
     gitDir: '/opt/git/bin',
   });
-  it('syncs to origin/main, builds the web app, and does NOT run a dev server', () => {
+  it('syncs to origin/main, builds protocol then web, and does NOT run a dev server', () => {
     expect(s).toContain('git checkout --quiet --detach origin/main');
+    expect(s).toContain('pnpm --filter @musterd/protocol build');
     expect(s).toContain('pnpm --filter @musterd/web build');
     expect(s).not.toContain('pnpm dev'); // no dev server anymore
     expect(s).toContain('WORKTREE="/Users/x/agents-live"');
@@ -48,10 +49,11 @@ describe('buildLiveBuildScript', () => {
     expect(s).toContain('mv "$STAGE" "$WEBROOT"'); // atomic swap into place
     expect(s).toContain('packages/web/dist/client'); // the vite client output
   });
-  it('skips the build when already current AND already published', () => {
+  it('skips the build when already current AND the published tip stamp matches', () => {
     expect(s).toContain('rev-parse HEAD');
     expect(s).toContain('rev-parse origin/main');
-    expect(s).toContain('-f "$WEBROOT/index.html"');
+    expect(s).toContain('.published-sha');
+    expect(s).not.toContain('-f "$WEBROOT/index.html"');
   });
   it('puts node + git + pnpm on PATH (pnpm lives under $HOME/Library/pnpm)', () => {
     expect(s).toContain('/opt/node/bin');
@@ -204,14 +206,17 @@ describe('uninstallLive / stopLive / refreshLive / statusLive', () => {
     expect(calls).toContainEqual(['launchctl', 'bootout', 'gui/501/' + LIVE_SYNC_LABEL]); // legacy too
   });
 
-  it('refresh kickstarts the build agent (forces a rebuild + publish now)', () => {
+  it('refresh clears the published stamp then kickstarts (forces a rebuild + publish now)', () => {
     const calls: string[][] = [];
     const run: Runner = (cmd, args) => {
       calls.push([cmd, ...args]);
       return { status: 0, stdout: '', stderr: '' };
     };
     const ctx = makeCtx(run, dir);
+    mkdirSync(ctx.webRoot, { recursive: true });
+    writeFileSync(join(ctx.webRoot, '.published-sha'), 'deadbeef\n');
     refreshLive(ctx);
+    expect(existsSync(join(ctx.webRoot, '.published-sha'))).toBe(false);
     expect(calls).toContainEqual(['launchctl', 'kickstart', '-k', 'gui/501/' + LIVE_LABEL]);
   });
 
