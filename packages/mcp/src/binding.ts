@@ -1,5 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   BINDING_DIR,
   BINDING_FILE,
@@ -20,16 +20,64 @@ export function findBinding(
   startDir: string = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
 ): Binding | null {
-  const explicit = env['MUSTERD_BINDING'];
+  const explicit = trustedExplicitBinding(startDir, env);
   if (explicit) return readBinding(explicit);
-  let dir = startDir;
-  for (;;) {
+  const local = walkUpForBinding(startDir);
+  return local ? readBinding(local) : null;
+}
+
+/** The nearest ancestor's `.musterd/binding.json`, walking up from `startDir`. */
+function walkUpForBinding(startDir: string): string | null {
+  for (let dir = startDir; ; ) {
     const p = join(dir, BINDING_DIR, BINDING_FILE);
-    if (existsSync(p)) return readBinding(p);
+    if (existsSync(p)) return p;
     const parent = dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
+}
+
+/**
+ * **The seat-identity guard.** Returns `MUSTERD_BINDING` only when it is not a *cross-workspace leak*.
+ *
+ * `MUSTERD_BINDING` exists so a host can inject an identity into a workspace that has none (ADR 018/115),
+ * and it deliberately outranks the on-disk binding. But that ladder had a hole with teeth: an adapter would
+ * happily adopt a binding belonging to a **completely different workspace** — so one bad env var could
+ * silently turn every session on the machine into the same seat.
+ *
+ * It happened (2026-07-13). `musterd agent dolly`, run from the shared repo root, registered the MCP server
+ * with `MUSTERD_BINDING=<...>/agents-dolly/.musterd/binding.json` in Claude Code's **local** scope — and
+ * that scope is keyed by **repo root**, not cwd. Every seat worktree (`agents-miley`, `agents-izzo`, …) is a
+ * git worktree of the same repo, so they all share that one entry: every live session booted its adapter as
+ * `dolly`, and the daemon superseded them against each other ("your session as dolly was taken over by a
+ * newer one"). Two agents lost their identity mid-task.
+ *
+ * The invariant that makes it impossible, regardless of who writes what:
+ *
+ * > **If the workspace you are running in has its own seat, that seat is who you are.**
+ *
+ * So: when the cwd walk-up finds a `binding.json` *and* `MUSTERD_BINDING` points at a different workspace,
+ * the env is a leak by definition — refuse it, loudly, and use the workspace's own binding. Genuine host
+ * injection is untouched: a workspace with no local binding still honours the env, which is the only case
+ * the env was ever for.
+ */
+function trustedExplicitBinding(startDir: string, env: NodeJS.ProcessEnv): string | undefined {
+  const explicit = env['MUSTERD_BINDING'];
+  if (!explicit) return undefined;
+  const local = walkUpForBinding(startDir);
+  if (!local) return explicit; // no local seat — genuine host injection, honour it
+  // `MUSTERD_BINDING` names the binding *file* (`<root>/.musterd/binding.json`), so its workspace root is
+  // two levels up; compare roots rather than paths so a `./` or trailing-slash difference isn't a "leak".
+  const envRoot = resolve(dirname(dirname(explicit)));
+  const localRoot = resolve(dirname(dirname(local)));
+  if (envRoot === localRoot) return explicit; // same workspace — nothing to protect against
+  // stderr, never stdout: stdout is the MCP stdio transport.
+  console.error(
+    `[musterd] refusing MUSTERD_BINDING=${explicit} — it belongs to another workspace (${envRoot}), ` +
+      `but this workspace (${localRoot}) has its own seat. Using the workspace binding. ` +
+      `This is the cross-worktree seat leak (ADR 143); the env var is almost certainly stale.`,
+  );
+  return undefined;
 }
 
 function readBinding(path: string): Binding | null {
@@ -56,7 +104,10 @@ export function resolveBindingDir(
   startDir: string = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const explicit = env['MUSTERD_BINDING'];
+  // Same guard as `findBinding` — and it matters *more* here, because this decides where a claimed seat is
+  // written *back to disk*. An un-guarded leak would have one worktree's adapter overwrite a sibling
+  // worktree's binding.json with its own seat: the ADR 143 leak escalating into the ADR 065 clobber.
+  const explicit = trustedExplicitBinding(startDir, env);
   // MUSTERD_BINDING names the binding *file* (<root>/.musterd/binding.json); its workspace root is two
   // levels up. dirname twice is robust to the fixed `.musterd/binding.json` suffix saveBinding writes.
   if (explicit) return dirname(dirname(explicit));

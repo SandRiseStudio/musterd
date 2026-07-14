@@ -76,12 +76,20 @@ describe('musterd agent <name>', () => {
         claim: { mode: 'seat', name: 'June' },
       }),
     );
-    // MCP registered pointing at the worktree's binding.json (single source of truth) + autojoin —
-    // NO secret (agent_key/grant) is inlined into the harness config, so an in-tree config (Cursor/
-    // Codex) is commit-safe (ADR 018/115).
+    // MCP registered with NO secret (agent_key/grant) in the harness config, so an in-tree config
+    // (Cursor/Codex) is commit-safe (ADR 018/115) — and, critically, **no `MUSTERD_BINDING`** (ADR 143).
+    //
+    // This assertion used to be its inverse. Naming the binding file in the env looked harmless, because
+    // we chdir into the worktree first — but Claude Code keys its *local* MCP scope by **repo root**, and
+    // every seat worktree is a git worktree of the same repo. So the env was one global slot that each
+    // `musterd agent` overwrote, and provisioning one seat re-pointed *every live session on the machine*
+    // at it. On 2026-07-13 they all booted as `dolly` and superseded each other off their own seats.
+    //
+    // The adapter anchors on the binding it finds by walking up from its **cwd** — genuinely per-worktree,
+    // unlike the shared config — so the env was never needed here. Omitting it makes the shared entry
+    // identical for every seat, and therefore harmless.
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_BINDING).toContain('.musterd');
-    expect(entry.env.MUSTERD_BINDING).toContain('binding.json');
+    expect(entry.env.MUSTERD_BINDING).toBeUndefined();
     expect(entry.env.MUSTERD_SURFACE).toBe('claude-code');
     expect(entry.env.MUSTERD_AGENT_KEY).toBeUndefined(); // key lives in binding.json, not the env
     expect(entry.env.MUSTERD_CLAIM).toBeUndefined();

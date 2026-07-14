@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { BINDING_DIR, BINDING_FILE, type Binding, resolveAttestedModel } from '@musterd/protocol';
+import { type Binding, resolveAttestedModel } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { loadConfig, saveBinding, saveWorkspaceSpec } from '../config.js';
 import { CliError } from '../errors.js';
@@ -125,12 +125,23 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     claim: { mode: 'seat', name },
   });
 
-  // Register the MCP server *for the workspace folder*. The env points the adapter at this worktree's
-  // gitignored binding.json by absolute path (MUSTERD_BINDING) rather than inlining the agent key +
-  // grant — so no secret is baked into any harness config, including the in-tree ones Cursor
-  // (.cursor/mcp.json) and Codex (.codex/config.toml) write, and binding.json stays the single source
-  // of truth (ADR 018/115). We chdir into ws.dir first because the harness `configure` writes relative
-  // to cwd (`claude mcp add -s local` keys off it; Cursor/Codex write the project-local config there).
+  // Register the MCP server *for the workspace folder*. No secret is baked into any harness config —
+  // binding.json stays the single source of truth (ADR 018/115) — and, critically, **we do not name the
+  // binding file in the env** (ADR 143).
+  //
+  // We used to set `MUSTERD_BINDING=<ws.dir>/.musterd/binding.json` here, on the assumption that chdir-ing
+  // into `ws.dir` scoped the registration to this worktree: "`claude mcp add -s local` keys off cwd".
+  // **That assumption is false.** Claude Code keys its local scope by **repo root**, and every seat
+  // worktree (`agents-miley`, `agents-dolly`, …) is a git worktree of the *same* repo — so all of them
+  // share one entry, and `MUSTERD_BINDING` was a single global slot that each `musterd agent` overwrote.
+  // Provisioning one seat therefore re-pointed *every live session on the machine* at that seat: on
+  // 2026-07-13 they all booted as `dolly` and superseded each other off their own seats, mid-task.
+  //
+  // The env var was never needed here anyway: the adapter anchors on the `.musterd/binding.json` it finds
+  // by walking up from its **cwd**, which the harness sets to the session's workspace — a signal that is
+  // genuinely per-worktree, unlike the shared config. Omitting it makes the shared entry identical for
+  // every seat, and therefore harmless. (The adapter also refuses a cross-workspace `MUSTERD_BINDING`
+  // outright now — see `mcp/binding.ts` — so this can't come back through another door.)
   const agentBinding = {
     server: config.server,
     team,
@@ -144,7 +155,6 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     command: launch.command,
     args: launch.args,
     env: {
-      MUSTERD_BINDING: join(ws.dir, BINDING_DIR, BINDING_FILE),
       MUSTERD_SURFACE: harness.surface,
       MUSTERD_AUTOJOIN: '1',
     },
