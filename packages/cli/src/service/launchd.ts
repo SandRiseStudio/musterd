@@ -23,6 +23,15 @@ export const SERVICE_LABEL = 'studio.sandrise.musterd';
 export const LIVE_LABEL = 'studio.sandrise.musterd-live';
 export const LIVE_SYNC_LABEL = 'studio.sandrise.musterd-live-sync';
 
+/**
+ * The wake actuator (ADR 131 inc 5): `musterd host` as a LaunchAgent, so "musterd makes any
+ * harness always-on" survives a reboot instead of depending on a terminal someone left open.
+ * `service … --wake` targets it (NOT `--host` — that flag is the daemon's bind host). Distinct
+ * from the daemon: it runs no server and drops no teammate session when bounced; in-flight wake
+ * runs keep their own watchdogs.
+ */
+export const HOST_LABEL = 'studio.sandrise.musterd-host';
+
 /** Is process lifecycle management implemented for this platform yet? */
 export function serviceSupported(platform: NodeJS.Platform): boolean {
   return platform === 'darwin';
@@ -116,6 +125,28 @@ export function buildPlist(o: PlistOpts): string {
   return renderPlist({
     label: o.label,
     programArguments: [o.node, o.binJs, ...o.serveArgs],
+    workingDir: o.workingDir,
+    stdoutPath: o.stdoutPath,
+    stderrPath: o.stderrPath,
+    path: o.path,
+    keepAlive: true,
+    runAtLoad: true,
+    throttleInterval: 10,
+  });
+}
+
+/**
+ * The wake-actuator LaunchAgent plist (ADR 131 inc 5): `musterd host` under the same
+ * RunAtLoad+KeepAlive+throttle posture as the daemon — the poll loop runs forever, so any exit is
+ * restart-worthy. `hostArgs` carries the operator's cadence/watchdog flags, baked at install time
+ * (`--interval`/`--timeout` stay operator facts; per-seat policy arrives per wake order). PATH
+ * matters twice here: launchd's default is minimal, and the actuator must both load the CLI's
+ * native modules and let spawned harnesses find their own tooling.
+ */
+export function buildHostPlist(o: Omit<PlistOpts, 'serveArgs'> & { hostArgs: string[] }): string {
+  return renderPlist({
+    label: o.label,
+    programArguments: [o.node, o.binJs, 'host', ...o.hostArgs],
     workingDir: o.workingDir,
     stdoutPath: o.stdoutPath,
     stderrPath: o.stderrPath,

@@ -94,6 +94,22 @@ preserved via the `--single-branch --branch main` per-cell clone), so the tool i
 on every cell. **The smoke rung gates on the reference-solution anchor, not finding 001.** A one-line
 correction to the two design docs is proposed under this manifest's authority.
 
+## 3b. Cell **D-res** — the residency row (pinned 2026-07-14; **defined, NOT authorized**)
+
+The harness-axis cell-D variant ADR 122 §6 and ADR 131's O&E both name (research finding 005's
+resident-vs-CLI coverage axis). Same pins as cell D in every respect (§1: model, harness version,
+N=3, kickoff SHA, predicate set, wall-clock cap) with ONE delta: the three seats are **enrolled in
+harness residency** under a running `musterd host` (wake actuator resident for the whole run;
+`reply-only` tool policy is NOT used here — the run needs edits, so `seat-policy` under the pinned
+cell allowlist), where plain cell D runs fire-and-exit CLI sessions.
+
+Measures, beyond the standard cell scoring: **attestation coverage** (finding 005's 100% resident
+vs ≈5% fire-and-exit — provenance + model + build fields present per occupancy), **steer-lands
+rate** (does a mid-task `steer` reach a working/woken seat inside the ADR 125 window), and **wake
+latency / answer rate** for acts that arrive while a seat is between sessions (from
+`musterd report residency`). Runs when the ladder resumes, after the pilot rung, under its own
+spend authorization row in §2 — this section defines it so the definition predates the data.
+
 ## 4. Still open (flagged for the smoke run, not this freeze)
 
 - **Wall-clock cap `T`** — proposed 90 min/run; calibrate against the smoke cell-D build's actual
