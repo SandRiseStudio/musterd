@@ -390,6 +390,15 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE residency ADD COLUMN resumable_at INTEGER');
     },
   },
+  {
+    // v20 — sticky offline reason (ADR 141): how the seat last went dark (`disconnected` |
+    // `signed_off`). Projected as MemberSummary.offline_reason with reclaimable/off_hours overlays.
+    // Additive + nullable; never-connected seats read null → `unknown` on the roster.
+    version: 20,
+    up: (db) => {
+      db.exec('ALTER TABLE members ADD COLUMN last_offline_reason TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

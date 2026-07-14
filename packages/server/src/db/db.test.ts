@@ -10,7 +10,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('19');
+    expect(ver?.value).toBe('20');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -57,6 +57,15 @@ describe('db', () => {
       (c) => c.name,
     );
     expect(cols).toEqual(expect.arrayContaining(['resumable_harness', 'resumable_at']));
+    db.close();
+  });
+
+  it('v20 adds last_offline_reason on members (ADR 141)', () => {
+    const db = openDb(':memory:');
+    const cols = (db.prepare('PRAGMA table_info(members)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    expect(cols).toContain('last_offline_reason');
     db.close();
   });
 
@@ -142,7 +151,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(19); // runs v18 (under test) + v19 (additive residency columns)
+    expect(runMigrations(db)).toBe(20); // runs v18…v20 (observer grades + residency + offline reason)
 
     const scope = (id: string) =>
       db

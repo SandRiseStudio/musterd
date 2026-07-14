@@ -11,7 +11,7 @@ describe('resolvePosture — roster chip source (ADR 138)', () => {
 
   it('lets explicit away/dnd outrank a live activity (ADR 044)', () => {
     expect(resolvePosture({ activity: 'working', availability: { status: 'away' } })).toBe('away');
-    expect(resolvePosture({ activity: 'online', availability: { status: 'dnd' } })).toBe('away');
+    expect(resolvePosture({ activity: 'idle', availability: { status: 'dnd' } })).toBe('away');
   });
 
   it('is working when live with a reported task', () => {
@@ -22,9 +22,9 @@ describe('resolvePosture — roster chip source (ADR 138)', () => {
   });
 
   it('is idle when live without a reported task', () => {
-    expect(resolvePosture({ activity: 'online' })).toBe('idle');
-    expect(resolvePosture({ activity: 'online', availability: null })).toBe('idle');
-    expect(resolvePosture({ activity: 'online', availability: { status: 'available' } })).toBe(
+    expect(resolvePosture({ activity: 'idle' })).toBe('idle');
+    expect(resolvePosture({ activity: 'idle', availability: null })).toBe('idle');
+    expect(resolvePosture({ activity: 'idle', availability: { status: 'available' } })).toBe(
       'idle',
     );
   });

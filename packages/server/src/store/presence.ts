@@ -42,6 +42,8 @@ export function attach(
   ctx: AttachContext = {},
 ): PresenceRow {
   const now = Date.now();
+  // Back online — clear any sticky offline reason (ADR 141).
+  db.prepare('UPDATE members SET last_offline_reason = NULL WHERE id = ?').run(memberId);
   const row: PresenceRow = {
     id: ulid(),
     member_id: memberId,
@@ -68,12 +70,21 @@ export function attach(
  * Release a presence on a clean disconnect: drop the connection but keep the row as a *hold*
  * the same member can reclaim for `graceMs` (single-active, ADR 010). The reaper frees it when
  * `held_until` passes. Held rows are excluded from the live/roster views below.
+ * Stamps sticky `disconnected` (ADR 141); during grace `reclaimable` still projects `reconnecting`.
  */
 export function release(db: Database, presenceId: string, graceMs: number): void {
   const now = Date.now();
+  const member = db
+    .prepare<[string], { member_id: string }>('SELECT member_id FROM presence WHERE id = ?')
+    .get(presenceId);
   db.prepare(
     'UPDATE presence SET conn_id = NULL, last_seen_at = ?, held_until = ? WHERE id = ?',
   ).run(now, now + graceMs, presenceId);
+  if (member) {
+    db.prepare(
+      "UPDATE members SET last_offline_reason = 'disconnected', updated_at = ? WHERE id = ?",
+    ).run(now, member.member_id);
+  }
 }
 
 /**
@@ -183,6 +194,9 @@ export function touchAmbientPresence(
     );
   } else {
     attach(db, memberId, surface, null, { ...ctx, provenance });
+  }
+  if (!wasLive) {
+    db.prepare('UPDATE members SET last_offline_reason = NULL WHERE id = ?').run(memberId);
   }
   return !wasLive;
 }

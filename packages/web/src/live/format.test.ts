@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { MemberSummary } from '@musterd/protocol';
 import { toneColor } from './office-scene/render';
 import {
   accountStatusException,
@@ -12,6 +13,7 @@ import {
   proseSegments,
   richLength,
   richTokens,
+  rosterPrimaryChip,
   type RichToken,
 } from './format';
 
@@ -174,6 +176,44 @@ describe('postureMeta — roster posture pill (ADR 138)', () => {
     expect(postureMeta('idle')).toEqual({ label: 'idle', tone: 'ok', quiet: true });
     expect(postureMeta('away')).toEqual({ label: 'away', tone: 'pending', quiet: false });
     expect(postureMeta('offline')).toEqual({ label: 'offline', tone: 'muted', quiet: true });
+  });
+});
+
+describe('rosterPrimaryChip — posture + offline reason (ADR 138/141)', () => {
+  it('shows idle/working from posture when live', () => {
+    expect(
+      rosterPrimaryChip({
+        posture: 'idle',
+        presence: 'online',
+        activity: 'idle',
+      } as MemberSummary).label,
+    ).toBe('idle');
+    expect(
+      rosterPrimaryChip({
+        posture: 'working',
+        presence: 'online',
+        activity: 'working',
+      } as MemberSummary).label,
+    ).toBe('working');
+  });
+
+  it('prefers offline_reason over bare offline when known', () => {
+    expect(
+      rosterPrimaryChip({
+        posture: 'offline',
+        presence: 'offline',
+        activity: 'offline',
+        offline_reason: 'disconnected',
+      } as MemberSummary).label,
+    ).toBe('disconnected');
+    expect(
+      rosterPrimaryChip({
+        posture: 'offline',
+        presence: 'offline',
+        activity: 'offline',
+        offline_reason: 'unknown',
+      } as MemberSummary).label,
+    ).toBe('offline');
   });
 });
 

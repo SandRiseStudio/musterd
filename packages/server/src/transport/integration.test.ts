@@ -284,7 +284,7 @@ describe('HTTP API', () => {
     await get('/teams/dawn/inbox', adaTok);
     const after = await get('/teams/dawn/members', nickTok);
     const adaRow = after.json.members.find((m: any) => m.name === 'Ada');
-    expect(adaRow?.activity).toBe('online'); // present, but no status_update → not "working"
+    expect(adaRow?.activity).toBe('idle'); // present, but no status_update → not "working"
     expect(adaRow?.presence).toBe('online');
     // the ambient row is connectionless and carries the surface header
     expect(adaRow?.presences?.[0]?.surface).toBe('cli');
@@ -763,7 +763,7 @@ describe('WebSocket', () => {
     n.close();
   });
 
-  it('roster activity reflects working from a status_update, online when present, offline otherwise', async () => {
+  it('roster activity reflects working from a status_update, idle when present, offline otherwise', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
@@ -803,11 +803,12 @@ describe('WebSocket', () => {
     expect(by('Ada').activity).toBe('working');
     expect(by('Ada').state).toBe('refactoring auth');
     expect(by('Ada').posture).toBe('working');
-    expect(by('nick').activity).toBe('online');
+    expect(by('nick').activity).toBe('idle');
     expect(by('nick').state).toBeNull();
     expect(by('nick').posture).toBe('idle');
     expect(by('Lin').activity).toBe('offline');
     expect(by('Lin').posture).toBe('offline');
+    expect(by('Lin').offline_reason).toBe('unknown');
 
     n.close();
     a.close();

@@ -29,7 +29,7 @@ src/
     members.ts        // addMember (issues token), getMember, authMember(token), leaveMember
     messages.ts       // insertMessage, listInbox(memberId, since), listTeamMessages
     presence.ts       // attach, heartbeat, detach/release, listPresence, reapStale (kind-scoped single-active, ADR 042)
-    activity.ts       // resolveActivity: the two-clocks rule → offline/online/working (v0.2 M2)
+    activity.ts       // resolveActivity: the two-clocks rule → offline/idle/working (v0.2 M2; ADR 140)
     cursors.ts        // getCursor, setCursor, unreadCount
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
     lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084)
@@ -142,7 +142,8 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 
 ## Roster activity (v0.2)
 
-- `listPresence`/roster `summarize` resolve a coarse `activity` per Member by the **two-clocks rule** (`store/activity.ts` `resolveActivity`): the liveness clock (fresh presence?) decides `offline` vs present; the status clock (latest `status_update`, via `latestStatusUpdate` — prefers `meta.state`, falls back to body) decides `online` (idle) vs `working`. The backing summary is returned as `state`, with `last_status_at` driving the CLI's `· <age>` staleness suffix. These are **additive** roster fields; a v0.1 reader ignoring them still conforms.
+- `listPresence`/roster `summarize` resolve a coarse `activity` per Member by the **two-clocks rule** (`store/activity.ts` `resolveActivity`): the liveness clock (fresh presence?) decides `offline` vs present; the status clock (latest `status_update`, via `latestStatusUpdate` — prefers `meta.state`, falls back to body) decides `idle` (ADR 140; was `online`) vs `working`. The backing summary is returned as `state`, with `last_status_at` driving the CLI's `· <age>` staleness suffix. These are **additive** roster fields; a v0.1 reader ignoring them still conforms.
+- `summarize` also sets **`posture`** (ADR 138) and **`offline_reason`** (ADR 141) — composed chip reads from activity ∩ availability, with sticky `members.last_offline_reason` + reclaimable/off_hours overlays when offline.
 - `summarize` also sets **`reclaimable`** per Member (ADR 105) from `listReclaimableMemberIds` (`store/presence.ts`) — a seat whose reclaim hold is still in the future (`held_until > now`). This is the one _positive_ read of held rows (every other query filters them out); the seat still reads `presence: 'offline'` (grace stays hidden from display), but the flag lets the client-side clobber guard (ADR 066) treat a held-within-grace reservation as occupied rather than a vacancy. Additive; older readers ignore it.
 
 ## Availability (v0.2 — ADR 044)
@@ -190,6 +191,6 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - Two WS clients on team `dawn`: a `send` from Ada to Lin yields a `deliver` to Lin and an `ack` to Ada; Lin offline → message appears in Lin's `inbox` fetch with correct unread count.
 - Presence: attach → online in roster; stop heartbeats → reaper offlines within ~`timeout+interval`; clean close → immediate offline.
 - Single-active newest-wins (agents, ADR 017): a second concurrent `claim` for the same _agent_ Member takes over and the first receives `superseded`; after detach, a re-attach within the 45s grace succeeds (the `held_until` seat is reclaimed). Kind-scoped (ADR 042): two concurrent claims for the same _human_ Member both occupy (neither superseded), a directed message and a `@team` broadcast both deliver to both human sessions, and the roster lists the human once with both surfaces. Workspace-scoped + durability-gated (ADR 068/092): a same-workspace probe that disconnects within the grace never supersedes the incumbent, while a durable same-workspace successor reaps its predecessor with `same_workspace:true` after `supersedeGraceMs`; a different-workspace claim still supersedes immediately (no `same_workspace` flag).
-- Activity: a present Member with a recent `status_update` resolves to `working` (with `state`/`last_status_at`); present without one → `online`; no fresh presence → `offline`.
+- Activity: a present Member with a recent `status_update` resolves to `working` (with `state`/`last_status_at`); present without one → `idle` (ADR 140); no fresh presence → `offline`. Offline seats also project `offline_reason` (ADR 141).
 - Availability (ADR 044): `POST /availability` sets the caller's seat; the roster reflects `away`+`until` / `dnd` / `available`; `until` is kept only for `away`; an unknown status → `400 bad_request`; unauthenticated → `401`.
 - `seedDawn` produces the exact fixture in `01-data-model.md`.

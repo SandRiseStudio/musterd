@@ -49,6 +49,8 @@ export interface MemberRow {
   capabilities: string | null;
   /** v0.3 P3 (ADR 076): sha256 of this human's credential. NULL for agent seats / pre-P3 rows. */
   credential_hash: string | null;
+  /** Sticky why-offline (ADR 141): `disconnected` | `signed_off`. NULL ⇒ never stamped / cleared on attach. */
+  last_offline_reason: string | null;
   left_at: number | null;
   created_at: number;
   updated_at: number;

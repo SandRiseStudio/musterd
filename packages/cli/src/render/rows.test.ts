@@ -124,7 +124,7 @@ describe('renderRoster', () => {
       kind: 'agent',
       role: '',
       presence: 'online',
-      activity: 'online',
+      activity: 'idle',
       presences: [{ surface: 'cli', status: 'online', last_seen_at: 0, build }],
     });
     // differing → warn facet with the short sha
@@ -147,7 +147,7 @@ describe('renderRoster', () => {
         kind: 'human',
         role: 'lead',
         presence: 'online',
-        activity: 'online',
+        activity: 'idle',
         presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
       },
       {
@@ -209,7 +209,7 @@ describe('renderRoster', () => {
       kind: 'agent',
       role: '',
       presence: 'online',
-      activity: 'online',
+      activity: 'idle',
       presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
     };
     expect(renderRoster([forever])).not.toContain('forever');
@@ -229,7 +229,7 @@ describe('renderRoster', () => {
       kind: 'agent',
       role: '',
       presence: 'online',
-      activity: 'online',
+      activity: 'idle',
       presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
     };
     const out = renderRoster([bare]);
@@ -248,7 +248,7 @@ describe('renderRoster', () => {
         kind: 'agent',
         role: 'probe',
         presence: 'online',
-        activity: 'online',
+        activity: 'idle',
         presences: [
           {
             surface: 'cli',
@@ -275,7 +275,7 @@ describe('renderRoster', () => {
         kind: 'human',
         role: 'lead',
         presence: 'online',
-        activity: 'online',
+        activity: 'idle',
         presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
         availability: { status: 'away', until },
       },
@@ -286,7 +286,7 @@ describe('renderRoster', () => {
         kind: 'agent',
         role: '',
         presence: 'online',
-        activity: 'online',
+        activity: 'idle',
         presences: [{ surface: 'claude-code', status: 'online', last_seen_at: 0 }],
         availability: { status: 'dnd' },
       },

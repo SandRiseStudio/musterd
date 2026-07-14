@@ -8,6 +8,7 @@ import {
   SurfaceSchema,
 } from './acts.js';
 import { AccountStatusSchema, CapabilitiesSchema } from './capabilities.js';
+import { OfflineReasonSchema } from './offline.js';
 import { PostureSchema } from './posture.js';
 
 /**
@@ -15,7 +16,7 @@ import { PostureSchema } from './posture.js';
  * is encoded as `{ status: 'away', until: <ms epoch> }`. The localhost down-payment (ADR 044) stores
  * and exposes this; `off_hours` / full schedule enforcement is roadmap.
  */
-export const AvailabilityStatusSchema = z.enum(['available', 'away', 'dnd']);
+export const AvailabilityStatusSchema = z.enum(['available', 'away', 'dnd', 'off_hours']);
 export type AvailabilityStatus = z.infer<typeof AvailabilityStatusSchema>;
 
 export const AvailabilitySchema = z.object({
@@ -81,6 +82,11 @@ export const MemberSummarySchema = MemberSchema.extend({
    * the server always sets it.
    */
   posture: PostureSchema.optional(),
+  /**
+   * Why the seat is offline (ADR 141). Set only when not live; omitted/`null` while present.
+   * Optional for back-compat; the server always sets it when offline.
+   */
+  offline_reason: OfflineReasonSchema.nullish(),
   /**
    * True when the seat is *held within its reclaim-grace window* (ADR 010) — a **reservation**, not
    * live presence. The seat still reads `presence: 'offline'` (grace is hidden from display, ADR 010),

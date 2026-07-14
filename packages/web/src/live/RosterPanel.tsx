@@ -4,9 +4,8 @@ import {
   capabilityBadges,
   initial,
   memberColor,
-  memberPosture,
-  postureMeta,
   rosterOrder,
+  rosterPrimaryChip,
 } from './format';
 import { CollapseButton, PanelRail } from './PanelChrome';
 
@@ -66,10 +65,10 @@ function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | 
   // bundle itself (deliberately decoupled, ADR 132) — only what teammates' runtimes attest.
   const memberBuild = m.presences?.[0]?.build ?? undefined;
   const staleBuild = Boolean(memberBuild && daemonBuild && memberBuild !== daemonBuild);
-  // Reclaimable (ADR 105): the seat reads offline but is held within its reclaim grace — a reservation
-  // that may be reconnecting after a reload/blip. Surface it as "reconnecting" rather than a cold seat.
+  // Reclaimable (ADR 105): seat held within reclaim grace. Chip shows `reconnecting` via
+  // offline_reason (ADR 141); no separate recon label.
   const reconnecting = !online && m.reclaimable === true;
-  const posture = postureMeta(memberPosture(m));
+  const chip = rosterPrimaryChip(m);
   const accountEx = accountStatusException(m.account_status);
   const badges = capabilityBadges(m.capabilities);
   const dotState = online ? 'on' : reconnecting ? 'recon' : 'off';
@@ -91,11 +90,6 @@ function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | 
               consistent; the optional role is an *additional* tag only when the seat carries one. */}
           <span className={`lc-seat__kind lc-seat__kind--${kind}`}>{kind}</span>
           {m.role && <span className="lc-seat__role">{m.role}</span>}
-          {reconnecting && (
-            <span className="lc-seat__recon" title="Seat held within its reclaim grace (ADR 105)">
-              reconnecting
-            </span>
-          )}
           {staleBuild && (
             <span
               className="lc-seat__stale"
@@ -107,10 +101,10 @@ function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | 
         </div>
         <div className="lc-seat__gov">
           <span
-            className={`lc-stat lc-stat--${posture.quiet ? 'quiet' : posture.tone}`}
-            title={`Posture: ${posture.label}`}
+            className={`lc-stat lc-stat--${chip.quiet ? 'quiet' : chip.tone}`}
+            title={m.offline_reason ? `Offline reason: ${m.offline_reason}` : `Posture: ${chip.label}`}
           >
-            {posture.label}
+            {chip.label}
           </span>
           {accountEx && (
             <span

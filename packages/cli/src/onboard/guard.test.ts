@@ -35,7 +35,7 @@ describe('liveBindingClobber (ADR 066/105)', () => {
       member({
         name: 'Ada',
         presence: 'online',
-        activity: 'online',
+        activity: 'idle',
         presences: [{ surface: 'cli', status: 'online', last_seen_at: 1, workspace: 'repo@main' }],
       }),
     ];
