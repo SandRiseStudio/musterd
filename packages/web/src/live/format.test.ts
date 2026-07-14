@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { toneColor } from './office-scene/render';
 import {
+  accountStatusMeta,
   actLabel,
   actTone,
   formatClock,
@@ -162,6 +163,21 @@ describe('toneColor — office palette mirrors the CSS tokens', () => {
     for (const tone of ['steer', 'challenge', 'lane', 'handoff', 'status', 'accent', 'success']) {
       expect(toneColor(tone)).not.toBe(defaultColor);
     }
+  });
+});
+
+describe('accountStatusMeta — roster account_status pill (ADR 073 / 137)', () => {
+  it('labels the healthy active seat as enabled, not active (presence collision)', () => {
+    // Wire enum stays `active`; the pill must not read like online/offline.
+    expect(accountStatusMeta('active')).toEqual({ label: 'enabled', tone: 'ok', quiet: true });
+  });
+
+  it('keeps exception statuses as their wire tokens', () => {
+    expect(accountStatusMeta('provisioned').label).toBe('provisioned');
+    expect(accountStatusMeta('disabled').label).toBe('disabled');
+    expect(accountStatusMeta('banned').label).toBe('banned');
+    expect(accountStatusMeta('archived').label).toBe('archived');
+    expect(accountStatusMeta(undefined).label).toBe('unknown');
   });
 });
 

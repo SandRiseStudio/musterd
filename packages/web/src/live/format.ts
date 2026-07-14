@@ -314,13 +314,14 @@ export function memberColor(name: string, kind: Kind): string {
 export interface StatusMeta {
   label: string;
   tone: 'ok' | 'pending' | 'danger' | 'muted';
-  /** `active` is the steady state — rendered subdued so the rail only *shouts* the exceptions. */
+  /** Wire `active` is the steady state — rendered subdued so the rail only *shouts* the exceptions. */
   quiet: boolean;
 }
 export function accountStatusMeta(status: AccountStatus | undefined): StatusMeta {
   switch (status) {
     case 'active':
-      return { label: 'active', tone: 'ok', quiet: true };
+      // Display as `enabled` (ADR 137) — wire enum stays `active`; "active" reads as presence.
+      return { label: 'enabled', tone: 'ok', quiet: true };
     case 'provisioned':
       return { label: 'provisioned', tone: 'pending', quiet: false };
     case 'disabled':
@@ -330,7 +331,7 @@ export function accountStatusMeta(status: AccountStatus | undefined): StatusMeta
     case 'archived':
       return { label: 'archived', tone: 'muted', quiet: false };
     default:
-      // Pre-v0.3 daemon (no account_status projected) — say so rather than inventing 'active'.
+      // Pre-v0.3 daemon (no account_status projected) — say so rather than inventing 'enabled'.
       return { label: 'unknown', tone: 'muted', quiet: true };
   }
 }
