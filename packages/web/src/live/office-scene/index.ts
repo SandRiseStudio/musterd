@@ -9,6 +9,7 @@ import {
   coffeeAnchor,
   DARK_PALETTE,
   drawCue,
+  magicAnchors,
   monitorAnchors,
   renderScene,
   setScenePalette,
@@ -144,6 +145,11 @@ export function mountOffice(
   // resize/rebake — never grow/shrink with the roster.
   const fanEls: HTMLDivElement[] = [];
   const deskSteamEls: HTMLDivElement[] = [];
+  // Ambient magic (fixed sets, positions from the scene geometry): golden dust motes drifting in the
+  // window light shafts — they fade with --lc-amb-strength, so night simply has none — and a soft
+  // twinkle riding each string-light bulb the canvas paints.
+  const moteEls: HTMLDivElement[] = [];
+  const twinkleEls: HTMLDivElement[] = [];
   if (!reduced) {
     host.appendChild(ambientHost);
     const daylight = document.createElement('div');
@@ -213,7 +219,24 @@ export function mountOffice(
       syncGlows(monitorAnchors(placements, nodes, fit));
       positionSteam();
       syncDeskProps();
+      syncMagic();
     }
+  }
+
+  /** Position the dust-mote and bulb-twinkle overlays on the scene geometry (see `magicAnchors`).
+   * Fixed sets — only repositioned on rebake/resize. Each element gets a stable stagger so the field
+   * shimmers out of phase instead of pulsing in lockstep. */
+  function syncMagic() {
+    const { motes, bulbs } = magicAnchors(fit);
+    syncAnchorPool(moteEls, motes, 'lc-amb-mote', '<i></i>', 'translate(-50%, -50%)');
+    syncAnchorPool(twinkleEls, bulbs, 'lc-amb-twinkle', '<i></i>', 'translate(-50%, -50%)');
+    moteEls.forEach((el, i) => {
+      el.style.setProperty('--lc-mote-delay', `${((i * 1.37) % 8).toFixed(2)}s`);
+      el.style.setProperty('--lc-mote-dur', `${(7 + (i % 5) * 1.15).toFixed(2)}s`);
+    });
+    twinkleEls.forEach((el, i) => {
+      el.style.setProperty('--lc-twinkle-delay', `${((i * 0.61) % 3.4).toFixed(2)}s`);
+    });
   }
 
   /** Grow/shrink an element pool to `pts.length` and position each at its anchor. Used for the fixed-set

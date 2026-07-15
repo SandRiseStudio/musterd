@@ -988,6 +988,71 @@
   height: 5px;
   animation-duration: 3.6s;
 }
+/* golden dust motes drifting through the window light shafts (anchored inside the beam parallelograms —
+   see magicAnchors). Peak opacity rides --lc-amb-strength, the same clock var as the daylight wash, so
+   the motes are richest in strong sun and simply absent at night — no JS needed to turn them off. */
+.lc-amb-mote {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 6px;
+  height: 6px;
+}
+.lc-amb-mote i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 243, 200, 0.95), rgba(255, 226, 148, 0) 72%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  animation: lc-mote-drift var(--lc-mote-dur, 8s) ease-in-out var(--lc-mote-delay, 0s) infinite;
+  will-change: transform, opacity;
+}
+@keyframes lc-mote-drift {
+  0% {
+    transform: translate(0, 8px) scale(0.7);
+    opacity: 0;
+  }
+  30% {
+    opacity: calc(var(--lc-amb-strength, 0.3) * 1.5);
+  }
+  60% {
+    opacity: calc(var(--lc-amb-strength, 0.3) * 0.9);
+  }
+  100% {
+    transform: translate(10px, -30px) scale(1.05);
+    opacity: 0;
+  }
+}
+/* a slow twinkle riding each string-light bulb the canvas paints — out of phase per bulb (inline delay),
+   gentle enough to read as pearls by day and firefly-warm by night */
+.lc-amb-twinkle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+}
+.lc-amb-twinkle i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 240, 176, 0.9), rgba(255, 190, 82, 0) 70%);
+  mix-blend-mode: screen;
+  animation: lc-twinkle 3.4s ease-in-out var(--lc-twinkle-delay, 0s) infinite;
+  will-change: opacity, transform;
+}
+@keyframes lc-twinkle {
+  0%,
+  100% {
+    opacity: 0.1;
+    transform: scale(0.75);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.1);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .lc-gl-ambient {
     display: none;
