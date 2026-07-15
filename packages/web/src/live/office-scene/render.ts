@@ -1012,11 +1012,11 @@ function chairBack(
 // guarantee coverage, and did collapse to all-single). Every pod gets a mix, and the two camera-facing
 // desks (ids 0,1) carry the boldest setups so the variety actually reads. Every panel still lights teal
 // when its member is `working` and stays dim otherwise — the load-bearing work cue is intact.
-type MonitorSetup = 'single' | 'dual' | 'ultrawide';
+type MonitorSetup = 'single' | 'dual' | 'ultrawide' | 'laptop';
 const MONITOR_SETUPS_BY_ID: readonly MonitorSetup[] = [
-  'ultrawide', 'dual', 'single', 'dual', // pod 0 (top — ids 0,1 face the camera)
-  'single', 'ultrawide', 'dual', 'single', // pod 1 (centre)
-  'dual', 'single', 'ultrawide', 'single', // pod 2 (left)
+  'ultrawide', 'dual', 'laptop', 'single', // pod 0 (top — ids 0,1 face the camera)
+  'single', 'laptop', 'dual', 'ultrawide', // pod 1 (centre)
+  'dual', 'single', 'laptop', 'single', // pod 2 (left)
 ];
 function monitorSetupFor(id: number): MonitorSetup {
   return MONITOR_SETUPS_BY_ID[id % MONITOR_SETUPS_BY_ID.length]!;
@@ -1083,17 +1083,45 @@ function monitor(
   const setup = id == null ? 'single' : monitorSetupFor(id);
   const p: [number, number] = [-FWD[dir][1], FWD[dir][0]]; // across-desk unit
   if (setup === 'dual') {
-    box(ctx, fit, mx, my, 10, 8, 8, '#33272b', surfaceUp); // shared dual-arm foot
+    // Two full-size panels (each the size of a single monitor) on a shared dual-arm stand, sat side by
+    // side so they read as two real screens, not two half-screens. `[-1,1]` order paints the nearer last.
+    box(ctx, fit, mx, my, 12, 8, 8, '#33272b', surfaceUp); // shared dual-arm foot
     for (const s of [-1, 1] as const) {
-      screenPanel(ctx, fit, mx + p[0] * s * 15, my + p[1] * s * 15, dir, working, surfaceUp, 22, 20, false);
+      screenPanel(ctx, fit, mx + p[0] * s * 18, my + p[1] * s * 18, dir, working, surfaceUp, 34, 22, false);
     }
   } else if (setup === 'ultrawide') {
     box(ctx, fit, mx, my, 10, 6, 8, '#33272b', surfaceUp);
     screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 54, 20, true);
+  } else if (setup === 'laptop') {
+    // A single monitor with a laptop propped on a stand to one side (side alternates by desk id).
+    box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
+    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false);
+    const side = id != null && id % 2 === 0 ? 1 : -1;
+    laptopOnStand(ctx, fit, mx + p[0] * side * 30, my + p[1] * side * 30, dir, working, surfaceUp);
   } else {
     box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
     screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false);
   }
+}
+
+/** A laptop raised on a stand beside the main monitor: a riser, a keyboard deck, and the lit lid (a short
+ * screen panel). The lid sits directly on the deck — `screenPanel` adds its own +8 neck gap, so we pass a
+ * base 8 lower to cancel it. */
+function laptopOnStand(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  mx: number,
+  my: number,
+  dir: Dir,
+  working: boolean,
+  up: number,
+): void {
+  const sn = dir === 'S' || dir === 'N';
+  const f = FWD[dir];
+  box(ctx, fit, mx, my, sn ? 16 : 11, sn ? 11 : 16, 9, '#9298a0', up); // stand riser
+  const deckUp = up + 9;
+  box(ctx, fit, mx - f[0] * 4, my - f[1] * 4, sn ? 20 : 14, sn ? 14 : 20, 2, '#31353c', deckUp); // keyboard deck
+  screenPanel(ctx, fit, mx + f[0] * 3, my + f[1] * 3, dir, working, deckUp - 8, 20, 13, false); // lid
 }
 
 // ── desk-surface props: a keyboard + mouse on every desk, plus a deterministic personal mix ──────────
