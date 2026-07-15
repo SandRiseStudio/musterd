@@ -907,16 +907,21 @@ interface ChairStyle {
   headrest: boolean; // a headrest bump above the backrest
   wings: boolean; // racing-style side bolsters on the backrest
 }
-const CHAIR_STYLE_SALT = 21;
 const CHAIR_ARM_SALT = 22;
 const TASK_CHAIR: ChairStyle = { caster: false, backH: 26, backW: 34, arms: false, headrest: false, wings: false };
 
+// The office is a *fixed* set of 12 desks (three pods of four). A probability hash over so few ids doesn't
+// guarantee coverage — it can (and did) bucket all 12 into one variant, so the variety never shows. Instead
+// each desk's chair/monitor is a curated spread: every kind appears, and every pod shows a mix (adjacent
+// desks differ), which is exactly what makes the variety read. Still fully deterministic + stable per frame.
+const CHAIR_KINDS_BY_ID: readonly ChairKind[] = [
+  'gamer', 'wheeled', 'exec', 'stool', // pod 0 (top — two desks face the camera)
+  'exec', 'gamer', 'stool', 'wheeled', // pod 1 (centre)
+  'wheeled', 'exec', 'gamer', 'stool', // pod 2 (left)
+];
+
 function chairKindFor(id: number): ChairKind {
-  const r = deskRnd(id, CHAIR_STYLE_SALT);
-  if (r < 0.34) return 'stool';
-  if (r < 0.62) return 'wheeled';
-  if (r < 0.84) return 'exec';
-  return 'gamer';
+  return CHAIR_KINDS_BY_ID[id % CHAIR_KINDS_BY_ID.length]!;
 }
 function chairStyleFor(id: number): ChairStyle {
   const arms = deskRnd(id, CHAIR_ARM_SALT) < 0.5;
@@ -1003,15 +1008,18 @@ function chairBack(
 
 // ── monitor variety ─────────────────────────────────────────────────────────────────────────────────
 // Desks differ in what's on them: a lone monitor, two panels on a dual-arm stand, or one ultrawide curved
-// screen. Chosen by a stable per-desk hash so the setup never flickers frame to frame. Every panel still
-// lights teal when its member is `working` and stays dim otherwise — the load-bearing work cue is intact.
+// screen. Curated per desk (same reasoning as the chairs — a probability hash over 12 fixed ids doesn't
+// guarantee coverage, and did collapse to all-single). Every pod gets a mix, and the two camera-facing
+// desks (ids 0,1) carry the boldest setups so the variety actually reads. Every panel still lights teal
+// when its member is `working` and stays dim otherwise — the load-bearing work cue is intact.
 type MonitorSetup = 'single' | 'dual' | 'ultrawide';
-const MONITOR_SALT = 31;
+const MONITOR_SETUPS_BY_ID: readonly MonitorSetup[] = [
+  'ultrawide', 'dual', 'single', 'dual', // pod 0 (top — ids 0,1 face the camera)
+  'single', 'ultrawide', 'dual', 'single', // pod 1 (centre)
+  'dual', 'single', 'ultrawide', 'single', // pod 2 (left)
+];
 function monitorSetupFor(id: number): MonitorSetup {
-  const r = deskRnd(id, MONITOR_SALT);
-  if (r < 0.52) return 'single';
-  if (r < 0.8) return 'dual';
-  return 'ultrawide';
+  return MONITOR_SETUPS_BY_ID[id % MONITOR_SETUPS_BY_ID.length]!;
 }
 
 /** One monitor panel: the stand box + the lit screen face (shown on the camera-facing N/W faces) + a soft
