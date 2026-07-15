@@ -80,7 +80,12 @@ export type AuditAction =
   // and it lands here, detail `{ act, lease_id, cost_usd?, duration_ms? }`. Deliberately OUTSIDE
   // the rate/attempt derivations (one actuation must not count twice); the wake metrics dedupe
   // cost by lease_id, preferring this row over the primary's.
-  | 'residency.wake_cost';
+  | 'residency.wake_cost'
+  // ADR 144 increment 1: a seat's adapter attested what its rendered MCP tool surface weighs —
+  // once per session, on the first telemetry flush. detail carries `{ tools, bytes, est_tokens,
+  // breakdown? }` (byte counts and tool names only, never content). Append-only like the model/
+  // build attestations: the row history IS the before/after for the surface-redesign increments.
+  | 'mcp.surface_rendered';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

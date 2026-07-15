@@ -262,6 +262,7 @@ src/
   workspace.ts    // the gracefully-degrading "where" label captured at join (ADR 014)
   otel.ts         // cross-runtime trace-context propagation through the envelope (ADR 011)
   telemetry.ts    // boots the shared SDK as musterd-mcp + wraps every tool in a musterd.tool.call span (ADR 089)
+  toolTelemetry.ts // first-party tool-call telemetry: times/classifies every tools/call (bounces included) + attests the rendered-surface weight, batched to the daemon (ADR 144 inc 1)
   tools/
     join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)

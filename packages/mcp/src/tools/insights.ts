@@ -107,6 +107,24 @@ function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
       for (const seat of k.by_seat.filter((b) => b.over_budget))
         lines.push(`  ⚠ ${seat.seat} — a wake exceeded its $${seat.budget_usd} report bound`);
     }
+    // Tool-call telemetry (ADR 144 inc 1) — the surface-redesign instrument panel, rendered only
+    // once something has landed. Full per-tool detail lives in `musterd report tools`.
+    const t = r.tool_calls;
+    if (t && (t.calls > 0 || t.surface.length > 0)) {
+      lines.push('\ntool surface:');
+      if (t.calls > 0) {
+        const worst = t.tools.filter((row) => row.bounces > 0).slice(0, 3);
+        lines.push(
+          `  ${t.calls} calls · ${t.bounces} invalid-input bounce${t.bounces === 1 ? '' : 's'} (${t.window_days}d)`,
+        );
+        for (const row of worst)
+          lines.push(
+            `  ⚠ ${row.tool} — ${row.bounces}/${row.calls} bounced (${Math.round((row.bounce_rate ?? 0) * 100)}%)`,
+          );
+      }
+      for (const s of t.surface)
+        lines.push(`  ${s.seat}: ${s.tools} tools ≈ ${s.est_tokens} tokens rendered at connect`);
+    }
     lines.push('\nwaiting on:');
     lines.push(...waitingLines());
   }

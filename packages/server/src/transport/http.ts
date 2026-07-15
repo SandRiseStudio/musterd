@@ -19,6 +19,7 @@ import {
   SessionAttestationBodySchema,
   WakeLeasesBodySchema,
   WakeReportBodySchema,
+  ToolTelemetryReportSchema,
   OpenLaneSchema,
   UpdateLaneSchema,
   DeclareGoalSchema,
@@ -125,6 +126,7 @@ import {
   rotateAgentKey,
   setPolicy,
 } from '../store/teams.js';
+import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
 import { recordError, recordInterruptCheck, recordSeenLatency } from '../telemetry.js';
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -1735,6 +1737,19 @@ export async function handleHttp(
       if (method === 'GET' && rest === '/report') {
         const { team, member: _member } = authTouch(ctx, slug, req);
         return sendJson(res, 200, deriveReport(ctx.db, team.id, team.slug));
+      }
+
+      // Tool-call telemetry ingest (ADR 144 inc 1): the adapter's batched flush of its own MCP
+      // tool invocations, folded into the hourly aggregate; the once-per-session rendered-surface
+      // weight rides the first flush and lands as an `mcp.surface_rendered` audit row. The caller
+      // role is stamped HERE from the member row (the from_provenance rule — never a wire field).
+      // The adapter sends x-musterd-no-touch: telemetry is presence-neutral by contract.
+      if (method === 'POST' && rest === '/telemetry/tool-calls') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(ToolTelemetryReportSchema, await readJson(req));
+        recordToolCalls(ctx.db, team.id, member.name, member.role || null, body.events);
+        if (body.surface) recordSurfaceRender(ctx.db, team.id, member.name, body.surface);
+        return sendJson(res, 200, {});
       }
 
       // Declared Goals (ADR 048's general-team seam, resolved by ADR 084) — a Goal is an ordinary

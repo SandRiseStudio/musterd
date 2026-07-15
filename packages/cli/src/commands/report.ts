@@ -322,10 +322,66 @@ async function residencyReport(parsed: Parsed): Promise<number> {
   return 0;
 }
 
+/**
+ * `musterd report tools` (ADR 144 inc 1): the MCP tool-surface instrument panel — per-tool calls,
+ * bounce rate (invalid-input per call), latency, and the caller-role split, plus each seat's
+ * latest attested rendered-surface weight. The before/after for every surface-redesign increment.
+ */
+async function toolsReport(parsed: Parsed): Promise<number> {
+  const { team, http } = resolve(parsed.flags);
+  const report = await http.report(team);
+  const w = process.stdout.write.bind(process.stdout);
+  const t = report.tool_calls;
+  if (parsed.flags['json']) return (w(JSON.stringify(t ?? null) + '\n'), 0);
+  if (!t) {
+    w(
+      theme.meta(
+        'this daemon predates tool-call telemetry (ADR 144 inc 1) — rebuild + restart it',
+      ) + '\n',
+    );
+    return 0;
+  }
+  w(`${theme.accent('tool calls')} — ${team} ${theme.meta(`· last ${t.window_days}d`)}\n\n`);
+  if (t.tools.length === 0) {
+    w(theme.meta('  no tool calls recorded yet — they land as adapters flush (~30s)') + '\n');
+  } else {
+    const rate = t.calls > 0 ? ` · bounce ${pct(t.bounces / t.calls)}` : '';
+    w(`  ${theme.accent(String(t.calls))} calls · ${t.bounces} bounces${rate}\n\n`);
+    for (const row of t.tools) {
+      const bounce =
+        row.bounces > 0
+          ? ` · ${theme.warn(`${row.bounces} bounce${row.bounces === 1 ? '' : 's'} (${pct(row.bounce_rate ?? 0)})`)}`
+          : '';
+      const errors = row.errors > 0 ? ` · ${row.errors} error${row.errors === 1 ? '' : 's'}` : '';
+      const lat =
+        row.avg_duration_ms === null
+          ? ''
+          : ` · avg ${row.avg_duration_ms}ms / max ${row.max_duration_ms}ms`;
+      const roles = Object.entries(row.by_role)
+        .sort((a, b) => b[1] - a[1])
+        .map(([role, n]) => `${role} ${n}`)
+        .join(', ');
+      w(`  ${row.tool} — ${row.calls} call${row.calls === 1 ? '' : 's'}${bounce}${errors}${lat}\n`);
+      if (roles) w(theme.meta(`    by role: ${roles}`) + '\n');
+    }
+  }
+  w(`\n${theme.accent('rendered surface')} ${theme.meta('(latest attestation per seat)')}:\n`);
+  if (t.surface.length === 0) {
+    w(theme.meta('  none attested yet — a seat attests on its first flush after connect') + '\n');
+  } else {
+    for (const s of t.surface)
+      w(
+        `  ${theme.memberName(s.seat, 'agent')} — ${s.tools} tools · ${(s.bytes / 1024).toFixed(1)}KB ≈ ${s.est_tokens} tokens ${theme.meta(`(${ago(Date.now() - s.ts)} ago)`)}\n`,
+      );
+  }
+  return 0;
+}
+
 export async function reportCommand(parsed: Parsed): Promise<number> {
   if (parsed.positionals[0] === 'delivery') return deliveryReport(parsed, parsed.positionals[1]);
   if (parsed.positionals[0] === 'coordination') return coordinationReport(parsed);
   if (parsed.positionals[0] === 'residency') return residencyReport(parsed);
+  if (parsed.positionals[0] === 'tools') return toolsReport(parsed);
   const { team, http } = resolve(parsed.flags);
   const report = await http.report(team);
   if (parsed.flags['json']) {
@@ -335,7 +391,7 @@ export async function reportCommand(parsed: Parsed): Promise<number> {
   const raw = flagStr(parsed.flags, 'altitude') ?? 'team';
   if (raw !== 'ic' && raw !== 'team' && raw !== 'exec')
     throw new CliError(
-      'usage: musterd report [delivery [<id>] | coordination | residency] [--altitude ic|team|exec] [--json]',
+      'usage: musterd report [delivery [<id>] | coordination | residency | tools] [--altitude ic|team|exec] [--json]',
       2,
     );
   render(report, raw);

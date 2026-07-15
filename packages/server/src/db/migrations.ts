@@ -410,6 +410,34 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE messages ADD COLUMN from_provenance TEXT');
     },
   },
+  {
+    // v22 — tool-call telemetry (ADR 144 increment 1): hour-bucketed per-(seat, tool, outcome)
+    // counters behind the surface-redesign evals. Tool calls are an order of magnitude chattier
+    // than coordination acts, so this is an UPSERT aggregate (the ambient-presence "a thousand
+    // commands leave one row" rule) — never one row per call, and deliberately NOT audit rows
+    // (the ledger stays coordination-grained; the once-per-session rendered-surface weight lands
+    // there instead, as `mcp.surface_rendered`). `role` is stamped server-side at ingest (the v21
+    // from_provenance rule) and stays out of the key: it annotates the seat's calls, last write
+    // wins. `outcome` is open TEXT (the v5 CHECK-rebuild trap).
+    version: 22,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE tool_call_stats (
+          team_id           TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          seat              TEXT NOT NULL,
+          role              TEXT,
+          tool              TEXT NOT NULL,
+          outcome           TEXT NOT NULL,
+          bucket_start      INTEGER NOT NULL,
+          calls             INTEGER NOT NULL DEFAULT 0,
+          total_duration_ms INTEGER NOT NULL DEFAULT 0,
+          max_duration_ms   INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (team_id, seat, tool, outcome, bucket_start)
+        );
+        CREATE INDEX idx_tool_call_stats_team_bucket ON tool_call_stats(team_id, bucket_start);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

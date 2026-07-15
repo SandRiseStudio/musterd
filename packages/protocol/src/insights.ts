@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { GoalSchema } from './goals.js';
+import { ToolCallMetricsSchema } from './tool-telemetry.js';
 
 /**
  * The insight layer (ADR 050, engine placement per ADR 084): leadership-grade **projections over the
@@ -286,5 +287,8 @@ export const ReportSchema = z.object({
   /** Wake metrics (ADR 131 inc 5). Optional for back-compat with pre-inc-5 daemons — the server
    *  always sets it. */
   wake: WakeMetricsSchema.optional(),
+  /** Tool-call telemetry (ADR 144 inc 1). Optional for back-compat with pre-inc-1 daemons — the
+   *  server always sets it. */
+  tool_calls: ToolCallMetricsSchema.optional(),
 });
 export type Report = z.infer<typeof ReportSchema>;

@@ -17,6 +17,7 @@ import { getMemberByName } from './members.js';
 import { effectiveWakePolicy, getResidency } from './residency.js';
 import type { MessageRow } from './rows.js';
 import { getPolicy } from './teams.js';
+import { deriveToolCallMetrics } from './toolCalls.js';
 
 /**
  * The insight engine (ADR 050, server-side per ADR 084) — leadership projections over lanes + the act
@@ -524,5 +525,6 @@ export function deriveReport(
     mast: deriveMast(db, teamId, now),
     steering: deriveSteeringMetrics(db, teamId, now),
     wake: deriveWakeMetrics(db, teamId, now),
+    tool_calls: deriveToolCallMetrics(db, teamId, now),
   };
 }

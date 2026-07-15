@@ -22,3 +22,4 @@ export * from './guidance.js';
 export * from './goals.js';
 export * from './insights.js';
 export * from './lanes.js';
+export * from './tool-telemetry.js';
