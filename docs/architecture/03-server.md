@@ -36,7 +36,7 @@ src/
     orientation.ts    // deriveNext: the `musterd next` orientation brief over lanes + the latest handoff (ADR 049/084)
     goals.ts          // declared-Goal seam: listGoals (meta.goal messages, status + epoch derived) + nextGoal + goalEpochBumps (ADR 048/084/111)
     staleness.ts      // stale-plan detection: stale_plan/stale_dependency lane warnings from goal-epoch vs claim-time (ADR 111)
-    insights.ts       // the insight engine: flowMetrics + waitingOn + deriveSteeringMetrics + deriveReport (ADR 050/084/125)
+    insights.ts       // the insight engine: flowMetrics + waitingOn + coordinationDensity + deriveSteeringMetrics + deriveReport (ADR 050/084/125)
     delivery.ts       // the per-recipient delivery ledger, derived from log + cursors + audit: actDelivery + openDirectedLedger (ADR 090)
     mast.ts           // the MAST failure detectors: timeToUnblock + stalledThreads + circularHandoffs → deriveMast (ADR 091)
     memory.ts         // seat memory: saveMemory/getMemory/memoryEnvelope/clearMemory — daemon-private continuity blob, LWW, caps (ADR 093)

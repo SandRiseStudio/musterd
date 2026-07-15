@@ -668,7 +668,7 @@ const RAW: RawItem[] = [
     category: 'insights',
     blurb: 'One projection engine in the daemon — Goal status, the board view, flow metrics, waiting-on — computed over Goals × lanes × threads, never stored, exposed as an HTTP API.',
     detail:
-      'The single engine every insight surface renders (ADR 050 as amended by ADR 084), shipped as the report engine — flow metrics + waiting-on + GET /report (PR #82): derived Goal status (lanes-first, threads-fallback), the board projection (the IC altitude — every work item, its latest-state column), flow metrics from lane timestamps (cycle time, WIP, age, throughput), and the waiting-on view (openActionNeeded aggregated by recipient). Distinct from the shipped lanes contention board (ADR 083), which warns about overlap/dependency — this layer derives meaning from the same substrate. Goodhart guard: outcomes and queues, never message volume; v0.3 need-to-know governs derived human metrics.',
+      'The single engine every insight surface renders (ADR 050 as amended by ADR 084), shipped as the report engine — flow metrics + waiting-on + GET /report (PR #82), then the coordination-density warning (PR #84): derived Goal status (lanes-first, threads-fallback), the board projection (the IC altitude — every work item, its latest-state column), flow metrics from lane timestamps (cycle time, WIP, age, throughput), the waiting-on view (openActionNeeded aggregated by recipient), and the broadcast-journal versus directed/threaded-exchange signal. Distinct from the shipped lanes contention board (ADR 083), which warns about overlap/dependency — this layer derives meaning from the same substrate. Goodhart guard: outcomes and queues, never message volume; v0.3 need-to-know governs derived human metrics.',
     refs: [adr(50, 'ADR 050'), adr(84, 'ADR 084'), doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
     dependsOn: ['orientation-spine', 'resolve-act', 'coordination-lanes'],
   },
@@ -686,12 +686,13 @@ const RAW: RawItem[] = [
   {
     id: 'coordination-density',
     title: 'Coordination-density insight',
-    shipped: { legacy: true },
+    shipped: { prs: [84] },
     category: 'insights',
     blurb: 'An insight that flags when a team’s traffic is all broadcast-journal and no directed or threaded exchange — coordination that only looks collaborative.',
     detail:
-      'A dogfood finding: status_updates posted into a channel where no one shares the work degrade into a journal. A signal only musterd’s act-typed log can compute — a candidate metric for the standalone coordination-observability product.',
-    refs: [doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+      'Shipped in PR #84 under ADR 050: the report engine computes a seven-day broadcast-status-update share versus directed/threaded-exchange ratio from the act-typed log and warns only when a non-trivial sample is journal-heavy. `musterd report` and `team_report` surface the diagnostic; it is a candidate metric for the standalone coordination-observability product.',
+    refs: [adr(50, 'ADR 050'), doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+    frozenBy: 50,
     dependsOn: ['insight-engine'],
   },
 

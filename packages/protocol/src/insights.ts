@@ -53,9 +53,10 @@ export type BlockedLane = z.infer<typeof BlockedLaneSchema>;
  * broadcast? A `status_update` fired at `@team` that no one threads or answers is a journal entry, not
  * coordination — 51% of the P3 session was exactly that. Over a recent window: how much traffic is
  * broadcast journal vs directed/threaded exchange. `flag` trips when it's journal-heavy and
- * exchange-light — "coordination that only looks collaborative." A signal only the act-typed log can
- * compute; a candidate metric for the standalone coordination-observability product. Goodhart-safe: it
- * measures the *shape* of coordination, never volume as a reward.
+ * exchange-light — "coordination that only looks collaborative." Shipped in ADR 050 / PR #84, this is
+ * a signal only the act-typed log can compute and a candidate metric for the standalone
+ * coordination-observability product. Goodhart-safe: it measures the *shape* of coordination, never
+ * volume as a reward.
  */
 export const CoordinationDensitySchema = z.object({
   /** The window this is computed over, in days. */
