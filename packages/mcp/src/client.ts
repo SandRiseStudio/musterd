@@ -10,6 +10,7 @@ import {
   type MemoryEnvelope,
   type NextBrief,
   type Report,
+  type ToolTelemetryReport,
   type WSServerFrame,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
@@ -112,8 +113,14 @@ export class MusterdClient {
   }
 
   // reason: returns parsed JSON of varying shape; callers narrow at each call site.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async request(method: string, path: string, body?: unknown): Promise<any> {
+
+  private async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    opts: { headers?: Record<string, string>; timeoutMs?: number } = {},
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<any> {
     const res = await fetch(this.config.server + path, {
       method,
       headers: {
@@ -124,8 +131,10 @@ export class MusterdClient {
         // The agent key authenticates the harness, not a seat — reads carry the occupied seat so the
         // server can assert occupancy (SPEC A.7 §253). A send conveys it via the envelope `from`.
         ...(this.config.member ? { 'x-musterd-seat': this.config.member } : {}),
+        ...(opts.headers ?? {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(opts.timeoutMs !== undefined ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
     });
     const text = await res.text();
     const json = text ? JSON.parse(text) : {};
@@ -231,6 +240,18 @@ export class MusterdClient {
   /** The insight report (ADR 050/084) — one server-side projection. */
   report(): Promise<Report> {
     return this.request('GET', `/teams/${this.config.team}/report`);
+  }
+
+  /**
+   * The batched tool-call telemetry flush (ADR 144 inc 1). Presence-neutral by contract
+   * (x-musterd-no-touch): a background timer must never fake liveness. Hard-capped so a dead
+   * daemon can't hang the graceful teardown's final flush.
+   */
+  async reportToolTelemetry(report: ToolTelemetryReport): Promise<void> {
+    await this.request('POST', `/teams/${this.config.team}/telemetry/tool-calls`, report, {
+      headers: { 'x-musterd-no-touch': '1' },
+      timeoutMs: 1500,
+    });
   }
 
   // ── Seat memory (ADR 093): the seat's private continuity blob, seat-authenticated — the server

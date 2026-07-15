@@ -3004,3 +3004,64 @@ describe('observer grades: a public-grade observer sees only public traffic (ADR
     expect(view.json.messages.map((m: any) => m.id)).toEqual(['dm1', 'pub1']);
   });
 });
+
+describe('tool-call telemetry ingest (ADR 144 inc 1)', () => {
+  it('folds a flush into the report, stamps role at ingest, and 400s malformed batches', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent', role: 'ux' }, nickTok);
+
+    // Malformed: an outcome outside the enum bounces the whole batch (parseOrBadRequest).
+    const bad = await post(
+      '/teams/dawn/telemetry/tool-calls',
+      {
+        events: [{ tool: 't', outcome: 'meh', calls: 1, total_duration_ms: 0, max_duration_ms: 0 }],
+      },
+      ada,
+    );
+    expect(bad.status).toBe(400);
+
+    const ok = await post(
+      '/teams/dawn/telemetry/tool-calls',
+      {
+        events: [
+          {
+            tool: 'team_send',
+            outcome: 'ok',
+            calls: 2,
+            total_duration_ms: 90,
+            max_duration_ms: 60,
+          },
+          {
+            tool: 'team_send',
+            outcome: 'invalid_input',
+            calls: 1,
+            total_duration_ms: 3,
+            max_duration_ms: 3,
+          },
+        ],
+        surface: { tools: 18, bytes: 40_000, est_tokens: 10_000 },
+      },
+      ada,
+    );
+    expect(ok.status).toBe(200);
+
+    const report = await get('/teams/dawn/report', nickTok);
+    const t = report.json.tool_calls;
+    expect(t.calls).toBe(3);
+    expect(t.bounces).toBe(1);
+    // Role was stamped server-side from the member row — the wire carries no role field.
+    expect(t.tools[0].by_role).toEqual({ ux: 3 });
+    expect(t.surface).toEqual([
+      expect.objectContaining({ seat: 'Ada', tools: 18, bytes: 40_000, est_tokens: 10_000 }),
+    ]);
+    // The attestation is an ordinary append-only audit row (the wake_cost precedent).
+    const teamRow = getTeamBySlug(server.db, 'dawn')!;
+    const audit = listAudit(server.db, teamRow.id).filter(
+      (r) => r.action === 'mcp.surface_rendered',
+    );
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.actor).toBe('Ada');
+  });
+});

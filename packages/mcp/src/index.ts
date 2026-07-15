@@ -20,6 +20,11 @@ import { registerMembers } from './tools/members.js';
 import { registerMemory } from './tools/memory.js';
 import { registerSend } from './tools/send.js';
 import { registerStatus } from './tools/status.js';
+import {
+  instrumentToolTransport,
+  startToolTelemetryFlush,
+  ToolCallRecorder,
+} from './toolTelemetry.js';
 
 export { MusterdClient } from './client.js';
 export { loadMcpConfig, type McpConfig } from './config.js';
@@ -135,7 +140,7 @@ function armAutojoinOnFirstToolCall(server: McpServer, run: () => Promise<void>)
 export function buildMcpServer(
   client: MusterdClient,
   config: ReturnType<typeof loadMcpConfig>,
-  opts: { onFirstToolCall?: () => Promise<void> } = {},
+  opts: { onFirstToolCall?: () => Promise<void>; recorder?: ToolCallRecorder } = {},
 ): McpServer {
   const server = new McpServer(
     { name: 'musterd', version: '0.2.0', icons: [...MCP_ICONS] },
@@ -144,6 +149,10 @@ export function buildMcpServer(
   // Patch registerTool before any tool registers, so every handler runs inside a
   // `musterd.tool.call` span (ADR 089) — the active span the ADR 011 meta.otel plumbing needs.
   instrumentTools(server, client, config.team);
+  // First-party tool-call telemetry (ADR 144 inc 1) hooks one level above the handlers, at the
+  // SDK's tools/call request handler — the only seam that sees invalid-input bounces. Installed
+  // before the first registerTool (which is what makes the SDK install that handler).
+  if (opts.recorder) instrumentToolTransport(server, opts.recorder);
   // Patched second so the deferred autojoin runs INSIDE the first tool's span — the join latency it
   // causes is attributed to the call that triggered it.
   if (opts.onFirstToolCall) armAutojoinOnFirstToolCall(server, opts.onFirstToolCall);
@@ -233,9 +242,14 @@ async function main(): Promise<void> {
   // The launch autojoin is DEFERRED to the first tool call (probe safety, see
   // armAutojoinOnFirstToolCall): a health probe that only completes `initialize` must not claim —
   // the boot-time claim is what let every `claude mcp get musterd` displace the live seat.
+  // The tool-call recorder (ADR 144 inc 1) is probe-safe by the same construction: it only ever
+  // sends after a real tool call gave the session a seat to attribute to.
+  const recorder = new ToolCallRecorder();
   const server = buildMcpServer(client, config, {
     onFirstToolCall: () => autojoin(client, config),
+    recorder,
   });
+  const stopToolTelemetry = startToolTelemetryFlush(client, recorder);
   // The SDK stores clientInfo only after the client's initialize request finishes. Retain it as
   // bounded adapter-local diagnostics, never as a model or Envelope field (ADR 120).
   observeHarnessInitialization(server.server, (harness) =>
@@ -246,8 +260,11 @@ async function main(): Promise<void> {
 
   // The one graceful teardown, shared by every exit path: stop the resolution watcher, drop presence,
   // and flush the telemetry tail with a hard cap so a dead collector never hangs the exit.
-  const teardown = (): Promise<void> => {
+  const teardown = async (): Promise<void> => {
     stopWatcher?.();
+    // Final tool-telemetry flush BEFORE the client closes (it sends through it); hard-capped
+    // inside reportToolTelemetry so a dead daemon never hangs the exit.
+    await stopToolTelemetry();
     client.close();
     return telemetry.shutdown({ timeoutMs: 1000 });
   };
