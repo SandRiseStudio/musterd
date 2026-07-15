@@ -303,17 +303,37 @@ export function glassColor(env: LightEnv): string {
  * so the same body serves both walls — the back-right wall runs `lx` along the `ly=0` edge, the back-left
  * runs `ly` along the `lx=0` edge.
  */
+/** The two back-wall edges, as `t ∈ [0,1] → floor point` — shared by the walls, the string-light cable,
+ * and the ambient-magic overlay anchors (`magicAnchors`). */
+const WALL_EDGES: ReadonlyArray<(t: number) => [number, number]> = [
+  (t) => [0, t * FLOOR], // back-left wall (the lx=0 edge)
+  (t) => [t * FLOOR, 0], // back-right wall (the ly=0 edge)
+];
+
+/** A wall-surface point: `t` along the edge, `u` up the wall (0 floor … 1 top). */
+function wallPt(edge: (t: number) => [number, number], t: number, u: number, fit: Fit): Pt {
+  const [lx, ly] = edge(t);
+  const p = project(lx, ly, fit);
+  return { x: p.x, y: p.y - u * WALL_H * fit.scale };
+}
+
+/** The sagging string-light cable for one wall — bulbs hang at the odd indices (see drawWalls). */
+function cablePts(edge: (t: number) => [number, number], fit: Fit): Pt[] {
+  const out: Pt[] = [];
+  for (let i = 0; i <= 12; i++) {
+    const t = 0.1 + (i / 12) * 0.8;
+    const sag = Math.sin((i / 12) * Math.PI) * 0.045;
+    out.push(wallPt(edge, t, 0.91 - sag, fit));
+  }
+  return out;
+}
+
 function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void {
-  const lift = WALL_H * fit.scale;
   const wall = (
     edge: (t: number) => [number, number],
     faceShade: number,
   ): void => {
-    const pt = (t: number, u: number): Pt => {
-      const [lx, ly] = edge(t);
-      const p = project(lx, ly, fit);
-      return { x: p.x, y: p.y - u * lift };
-    };
+    const pt = (t: number, u: number): Pt => wallPt(edge, t, u, fit);
     // the wall face
     quad(ctx, [pt(0, 0), pt(1, 0), pt(1, 1), pt(0, 1)], shade(PAL.wall, faceShade));
     // a darker top cap, so the wall has a lip where it meets the (absent) ceiling
@@ -335,12 +355,7 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void
 
     // A low, slightly sagging strand of warm bulbs turns the architectural shell into a place people
     // chose to inhabit. The bulbs stay on in daylight too, but read as tiny pearl pins rather than glare.
-    const cable: Pt[] = [];
-    for (let i = 0; i <= 12; i++) {
-      const t = 0.1 + (i / 12) * 0.8;
-      const sag = Math.sin((i / 12) * Math.PI) * 0.045;
-      cable.push(pt(t, 0.91 - sag));
-    }
+    const cable = cablePts(edge, fit);
     ctx.save();
     ctx.strokeStyle = 'rgba(91, 61, 38, 0.46)';
     ctx.lineWidth = Math.max(0.7, 1.25 * fit.scale);
@@ -365,9 +380,47 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void
   };
   // Two faces at slightly different shades so the back corner reads (like box()'s side faces).
   // back-left wall (lx=0 edge) is a touch darker — more edge-on to the implied upper-left light.
-  wall((t) => [0, t * FLOOR], 0.9);
+  wall(WALL_EDGES[0]!, 0.9);
   // back-right wall (ly=0 edge) catches more of that light.
-  wall((t) => [t * FLOOR, 0], 0.99);
+  wall(WALL_EDGES[1]!, 0.99);
+}
+
+/** Deterministic 0..1 hash — the ambient-magic anchors must not shuffle on every rebake. */
+function magicRnd(n: number): number {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/**
+ * Screen anchors for the ambient-magic CSS overlay (index.ts): golden dust motes floating inside each
+ * window's daylight shaft, and a twinkle halo on each string-light bulb. Both mirror the geometry the
+ * canvas draws — the beams (`drawWindowBeams`) and the cable (`cablePts`) — so the overlay sits exactly
+ * on the painted light. Positions are hash-deterministic: rebakes reposition, never reshuffle.
+ */
+export function magicAnchors(fit: Fit): { motes: Pt[]; bulbs: Pt[] } {
+  const motes: Pt[] = [];
+  const bulbs: Pt[] = [];
+  WALL_EDGES.forEach((edge, wi) => {
+    // Bulbs: the same odd cable indices drawWalls glows (dropped the same 2px the canvas drops them).
+    const cable = cablePts(edge, fit);
+    for (let i = 1; i < cable.length - 1; i += 2) {
+      bulbs.push({ x: cable[i]!.x, y: cable[i]!.y + 2 * fit.scale });
+    }
+    // Motes: a handful of points per window, scattered through the beam's floor throw and lifted off the
+    // floor — they drift in the *shaft* of light, which is what sells the light as volume, not paint.
+    WINDOWS.forEach((w, ci) => {
+      for (let k = 0; k < 6; k++) {
+        const n = wi * 100 + ci * 10 + k;
+        const t = w.t0 + (0.15 + 0.7 * magicRnd(n)) * (w.t1 - w.t0);
+        const d = 14 + magicRnd(n + 1) * BEAM_LEN * 0.72;
+        const shear = (d / BEAM_LEN) * BEAM_SHEAR;
+        const [ex, ey] = edge(t);
+        const p = wi === 0 ? project(d, ey + shear, fit) : project(ex + shear, d, fit);
+        motes.push({ x: p.x, y: p.y - (6 + magicRnd(n + 2) * 40) * fit.scale });
+      }
+    });
+  });
+  return { motes, bulbs };
 }
 
 /**
