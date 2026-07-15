@@ -195,7 +195,8 @@ export const LOUNGE = {
   counter: { dx: -54, dy: -76, w: 78, d: 24, h: 32 },
   machine: { dx: -74, dy: -76 },
   cooler: { dx: 42, dy: -82, w: 22, d: 22, h: 48 }, // water cooler
-  plant: { dx: 112, dy: -46 },
+  // (a nook plant used to sit at dx 112 — removed to thin the nook's right edge, which already has the
+  // big floor plant at 830,330 and the right-wall bookshelf beside it.)
   // conversation set in the front, with breathing room between each piece
   couch: { dx: 6, dy: 2, len: 108, dep: 44 }, // faces S (toward the room)
   table: { dx: 6, dy: 66, w: 56, d: 40 },
@@ -244,7 +245,9 @@ export const HUDDLES: Huddle[] = [
     ly: 350,
     // A logical rectangle projects as an iso diamond on the floor. The former logical diamond projected
     // as a screen-space rectangle, which read like translucent panels attached to the poufs.
-    rug: { shape: 'rect', weave: 'border', fill: '#d88c62', mark: '#b9694d' },
+    // Softened toward the muted pod-rug treatment: a calmer clay field with a low-contrast border, so the
+    // huddle rug seats onto the floor instead of popping forward like a floating slab.
+    rug: { shape: 'rect', weave: 'border', fill: '#d4a483', mark: '#c69172' },
     rugSize: 168,
     poufs: ['#f06d5a', '#e3a72b', '#8b6fd6'],
   },
