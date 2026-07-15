@@ -1,9 +1,9 @@
 # musterd's MCP server, examined — names, descriptions, schemas, results & discovery
 
-> Status: **captured idea / seed brief** — not yet an ADR, not yet designed. Written 2026-07-14 (stanley)
-> from a batch of external sources plus a read of our own MCP package. This is the internal home for the
-> `mcp-tool-surface` roadmap item; it exists to hold the evidence and name the increments, not to freeze
-> a decision.
+> Status: **evidence base + increment map, frozen by [ADR 144](../decisions/144-mcp-tool-surface-measure-then-craft.md)**
+> (2026-07-15). Written 2026-07-14 (stanley) from a batch of external sources plus a read of our own MCP
+> package. This is the internal home for the `mcp-tool-surface` and `tool-call-telemetry` roadmap items:
+> the evidence lives here; the frozen sequence and principles live in the ADR.
 
 ## The frame
 
@@ -154,7 +154,7 @@ borrowing?
   in increments 2–3 now; keep the model-in-the-path variant as a researchable extension (good tiny-model
   dogfood) rather than a committed increment.
 
-## Proposed increments (sequence, not yet frozen)
+## Proposed increments (sequence frozen by ADR 144, with measurement first as its increment 1)
 
 1. **Names & descriptions.** Audit all 18 tool names for one convention (resolve the `team_*` /
    `lane_*` split), and rewrite descriptions for concision — the cheapest, highest-leverage lever per
