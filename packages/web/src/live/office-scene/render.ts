@@ -209,6 +209,63 @@ function drawFloor(ctx: CanvasRenderingContext2D, fit: Fit): void {
   quad(ctx, [c10, c11, dn(c11), dn(c10)], PAL.floor2);
   quad(ctx, [c01, c11, dn(c11), dn(c01)], mul(PAL.floor2, 0.955));
   quad(ctx, [c00, c10, c11, c01], PAL.floor);
+
+  // A basket-weave field of long ceramic tiles. Alternating paired orientations keeps the tactile scale
+  // of the first pass without turning the whole room into a checkerboard.
+  ctx.save();
+  ctx.strokeStyle = 'rgba(126, 73, 30, 0.24)';
+  ctx.lineWidth = Math.max(0.55, 0.85 * fit.scale);
+  const cell = 90;
+  const half = cell / 2;
+  const plank = (lx: number, ly: number, w: number, d: number, fill: string): void => {
+    const pts = [
+      project(lx, ly, fit),
+      project(lx + w, ly, fit),
+      project(lx + w, ly + d, fit),
+      project(lx, ly + d, fit),
+    ];
+    quad(ctx, pts, fill);
+    ctx.beginPath();
+    ctx.moveTo(pts[0]!.x, pts[0]!.y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+    ctx.closePath();
+    ctx.stroke();
+  };
+  for (let lx = 0; lx < FLOOR; lx += cell) {
+    for (let ly = 0; ly < FLOOR; ly += cell) {
+      const warm = ((lx + ly) / cell) % 3 === 0;
+      const light = warm ? 'rgba(255, 247, 211, 0.18)' : 'rgba(255, 237, 191, 0.1)';
+      const shade = warm ? 'rgba(162, 88, 31, 0.065)' : 'rgba(136, 72, 25, 0.045)';
+      if ((lx / cell + ly / cell) % 2 === 0) {
+        plank(lx, ly, half, cell, light);
+        plank(lx + half, ly, half, cell, shade);
+      } else {
+        plank(lx, ly, cell, half, shade);
+        plank(lx, ly + half, cell, half, light);
+      }
+    }
+  }
+
+  // Pearlescent glints at a sparse, deterministic set of joints: a quiet "coordination dust" trail that
+  // makes the floor magical up close without turning the office into a particle effect.
+  ctx.globalCompositeOperation = 'lighter';
+  for (let gx = 1; gx < FLOOR / cell; gx++) {
+    for (let gy = 1; gy < FLOOR / cell; gy++) {
+      if ((gx * 7 + gy * 11) % 13 !== 0) continue;
+      const p = project(gx * cell, gy * cell, fit);
+      const glow = 7 * fit.scale;
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glow);
+      g.addColorStop(0, 'rgba(255, 250, 213, 0.78)');
+      g.addColorStop(0.28, 'rgba(255, 226, 148, 0.35)');
+      g.addColorStop(1, 'rgba(255, 226, 148, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, glow, 0, Math.PI * 2);
+      ctx.fill();
+      ellipse(ctx, p, 2.5 * fit.scale, 1.5 * fit.scale, 'rgba(255, 252, 226, 0.92)');
+    }
+  }
+  ctx.restore();
 }
 
 // ── the room shell: the two back walls + their windows (office-walls-windows.md) ────────────────────────
@@ -285,6 +342,36 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void
       quad(ctx, [pt(mid - iT * 0.35, w.u0 + iU), pt(mid + iT * 0.35, w.u0 + iU), pt(mid + iT * 0.35, w.u1 - iU), pt(mid - iT * 0.35, w.u1 - iU)], frame);
       quad(ctx, [pt(w.t0 + iT, midU - iU * 0.35), pt(w.t1 - iT, midU - iU * 0.35), pt(w.t1 - iT, midU + iU * 0.35), pt(w.t0 + iT, midU + iU * 0.35)], frame);
     }
+
+    // A low, slightly sagging strand of warm bulbs turns the architectural shell into a place people
+    // chose to inhabit. The bulbs stay on in daylight too, but read as tiny pearl pins rather than glare.
+    const cable: Pt[] = [];
+    for (let i = 0; i <= 12; i++) {
+      const t = 0.1 + (i / 12) * 0.8;
+      const sag = Math.sin((i / 12) * Math.PI) * 0.045;
+      cable.push(pt(t, 0.91 - sag));
+    }
+    ctx.save();
+    ctx.strokeStyle = 'rgba(91, 61, 38, 0.46)';
+    ctx.lineWidth = Math.max(0.7, 1.25 * fit.scale);
+    ctx.beginPath();
+    cable.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 1; i < cable.length - 1; i += 2) {
+      const p = cable[i]!;
+      const r = 8 * fit.scale;
+      const glow = ctx.createRadialGradient(p.x, p.y + 2 * fit.scale, 0, p.x, p.y + 2 * fit.scale, r);
+      glow.addColorStop(0, 'rgba(255, 236, 166, 0.76)');
+      glow.addColorStop(0.25, 'rgba(255, 190, 82, 0.35)');
+      glow.addColorStop(1, 'rgba(255, 190, 82, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y + 2 * fit.scale, r, 0, Math.PI * 2);
+      ctx.fill();
+      ellipse(ctx, { x: p.x, y: p.y + 2 * fit.scale }, 2.4 * fit.scale, 2.9 * fit.scale, '#fff0b0');
+    }
+    ctx.restore();
   };
   // Two faces at slightly different shades so the back corner reads (like box()'s side faces).
   // back-left wall (lx=0 edge) is a touch darker — more edge-on to the implied upper-left light.
@@ -393,6 +480,17 @@ function drawRug(ctx: CanvasRenderingContext2D, fit: Fit, r: Rug, lx: number, ly
       rugRect(ctx, fit, lx + (across ? off : 0), ly + (across ? 0 : off), bw, bd, r.mark);
     }
   }
+  // Four tiny pom-poms give every woven rectangle a handmade edge. They also break up the strict
+  // box-on-box geometry without changing any footprints or painter-order assumptions.
+  for (const [sx, sy] of [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ] as const) {
+    const p = project(lx + sx * (w / 2 - 4), ly + sy * (d / 2 - 4), fit);
+    ellipse(ctx, p, 4.2 * fit.scale, 2.4 * fit.scale, r.mark);
+  }
 }
 
 /** The meeting table: a long slab on four legs, with four chairs pulled up to it. */
@@ -409,6 +507,13 @@ function meetingTable(ctx: CanvasRenderingContext2D, fit: Fit): void {
     box(ctx, fit, M.lx + sx * (M.w / 2 - 8), M.ly + sy * (M.d / 2 - 8), 8, 8, M.h - 6, dim(PAL.wood, 0.9));
   }
   box(ctx, fit, M.lx, M.ly, M.w, M.d, 6, woodTop(), M.h - 6);
+  // A tiny shared centrepiece: ceramic pot, leaves, and mustard blossom. At office scale it reads as a
+  // warm irregularity on the long slab; in companion mode the individual pieces resolve.
+  box(ctx, fit, M.lx, M.ly, 14, 14, 9, '#efe2c6', M.h);
+  const vase = project(M.lx, M.ly, fit);
+  ellipse(ctx, { x: vase.x - 4 * fit.scale, y: vase.y - 43 * fit.scale }, 5 * fit.scale, 7 * fit.scale, '#6f985d');
+  ellipse(ctx, { x: vase.x + 4 * fit.scale, y: vase.y - 45 * fit.scale }, 5 * fit.scale, 7 * fit.scale, '#7eaa69');
+  ellipse(ctx, { x: vase.x, y: vase.y - 50 * fit.scale }, 3.5 * fit.scale, 3 * fit.scale, '#f4cf52');
 }
 
 /** A meeting chair — the same two-piece cushion/backrest trick as a task chair, in a plain wood tone. */
@@ -446,6 +551,19 @@ function couch(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, 
   box(ctx, fit, lx, ly, sn ? L : Dp, sn ? Dp : L, 20, c);
   box(ctx, fit, lx + p[0] * (L / 2 - 5), ly + p[1] * (L / 2 - 5), sn ? 10 : Dp, sn ? Dp : 10, 27, dim(c, 0.95));
   box(ctx, fit, lx - p[0] * (L / 2 - 5), ly - p[1] * (L / 2 - 5), sn ? 10 : Dp, sn ? Dp : 10, 27, dim(c, 0.95));
+  // Three plump seat pads soften the block silhouette. Iso circles project to ellipses, so the cushions
+  // keep their rounded living-room character at every sofa facing.
+  for (const along of [-34, 0, 34]) {
+    const cp = project(lx + p[0] * along + f[0] * 4, ly + p[1] * along + f[1] * 4, fit);
+    ellipse(ctx, { x: cp.x, y: cp.y - 20 * fit.scale }, 18 * fit.scale, 7 * fit.scale, '#f3c95a');
+  }
+  // Two mismatched throw pillows: intentionally a little quirky, and small enough not to compete with
+  // member colours or act cues.
+  const pillowColors = ['#f1dcc0', '#6f9e8c'];
+  for (const [i, along] of [-25, 27].entries()) {
+    const pp = project(lx + p[0] * along - f[0] * 12, ly + p[1] * along - f[1] * 12, fit);
+    ellipse(ctx, { x: pp.x, y: pp.y - 36 * fit.scale }, 11 * fit.scale, 9 * fit.scale, pillowColors[i]!);
+  }
 }
 
 function armchair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, c: string, dir: Dir): void {
@@ -454,12 +572,18 @@ function armchair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: numbe
   const S = LOUNGE.chairW.size;
   box(ctx, fit, lx - f[0] * (S / 2 - 6), ly - f[1] * (S / 2 - 6), sn ? S - 2 : 10, sn ? 10 : S - 2, 32, dim(c, 0.9));
   box(ctx, fit, lx, ly, sn ? S - 2 : S, sn ? S : S - 2, 20, c);
+  const seat = project(lx + f[0] * 5, ly + f[1] * 5, fit);
+  ellipse(ctx, { x: seat.x, y: seat.y - 20 * fit.scale }, 21 * fit.scale, 8 * fit.scale, '#eabf50');
 }
 
 function ctable(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
   const s = project(lx, ly, fit);
   ellipse(ctx, { x: s.x, y: s.y }, 42 * fit.scale, 13 * fit.scale, 'rgba(0,0,0,0.12)');
   box(ctx, fit, lx, ly, LOUNGE.table.w, LOUNGE.table.d, 16, woodTop());
+  // Fruit bowl + a single flower keeps the lounge from reading like untouched showroom furniture.
+  ellipse(ctx, { x: s.x, y: s.y - 18 * fit.scale }, 10 * fit.scale, 4 * fit.scale, '#e8c17d');
+  ellipse(ctx, { x: s.x - 4 * fit.scale, y: s.y - 21 * fit.scale }, 3 * fit.scale, 2 * fit.scale, '#d8774f');
+  ellipse(ctx, { x: s.x + 3 * fit.scale, y: s.y - 22 * fit.scale }, 3 * fit.scale, 2 * fit.scale, '#f4cf52');
 }
 
 /** One depth-sortable draw call. The nook/huddle used to paint as single blobs anchored at their
@@ -527,13 +651,20 @@ function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf): void 
  * roomier poufs and a bigger low table on a wider rug. */
 function huddleItems(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): { rug: () => void; items: DepthItem[] } {
   const at = (dx: number, dy: number, fn: () => void): DepthItem => ({ d: depth(h.lx + dx, h.ly + dy), fn });
+  const pouf = (lx: number, ly: number, color: string): void => {
+    const p = project(lx, ly, fit);
+    ellipse(ctx, { x: p.x, y: p.y + 3 * fit.scale }, 23 * fit.scale, 8 * fit.scale, 'rgba(64, 39, 25, 0.13)');
+    box(ctx, fit, lx, ly, 42, 42, 20, dim(color, 0.93));
+    ellipse(ctx, { x: p.x, y: p.y - 20 * fit.scale }, 20 * fit.scale, 8 * fit.scale, mul(color, 1.07));
+    ellipse(ctx, { x: p.x - 5 * fit.scale, y: p.y - 23 * fit.scale }, 7 * fit.scale, 2.2 * fit.scale, 'rgba(255,255,255,0.18)');
+  };
   return {
-    rug: () => drawRug(ctx, fit, h.rug, h.lx, h.ly, 192, 192),
+    rug: () => drawRug(ctx, fit, h.rug, h.lx, h.ly, h.rugSize, h.rugSize),
     items: [
-      at(0, -54, () => box(ctx, fit, h.lx, h.ly - 54, 44, 44, 28, h.poufs[0])),
+      at(0, -54, () => pouf(h.lx, h.ly - 54, h.poufs[0])),
       at(0, 0, () => box(ctx, fit, h.lx, h.ly, 66, 66, 18, woodTop())),
-      at(52, 32, () => box(ctx, fit, h.lx + 52, h.ly + 32, 44, 44, 28, h.poufs[1])),
-      at(-52, 32, () => box(ctx, fit, h.lx - 52, h.ly + 32, 44, 44, 28, h.poufs[2])),
+      at(52, 32, () => pouf(h.lx + 52, h.ly + 32, h.poufs[1])),
+      at(-52, 32, () => pouf(h.lx - 52, h.ly + 32, h.poufs[2])),
     ],
   };
 }

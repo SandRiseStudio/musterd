@@ -137,9 +137,9 @@
 
   /* Office — daylight */
   --sky: linear-gradient(180deg, #e9d9c3 0%, #f3e7d4 52%, #ffe9c8 100%);
-  --floor: #f0c188;
-  --floor-2: #dca35f;
-  --wall: #fbf3e6;
+  --floor: #efbd7d;
+  --floor-2: #d7964f;
+  --wall: #f2d4aa;
   --wood: #9a6a42;
   --couch: #e8b23d;
   --ink: #2a2118;

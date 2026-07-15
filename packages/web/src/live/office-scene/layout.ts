@@ -231,15 +231,21 @@ export interface Huddle {
   lx: number;
   ly: number;
   rug: Rug;
+  rugSize: number;
   poufs: [string, string, string];
 }
 
 /** One huddle space, in the clearing the three pods leave in the middle of the room. */
 export const HUDDLES: Huddle[] = [
   {
-    lx: 420,
+    // Shifted east of the north pod's rug; the old centre overlapped that zone and made the huddle
+    // look partially tucked beneath its desks.
+    lx: 450,
     ly: 350,
-    rug: { shape: 'diamond', weave: 'border', fill: '#7fb4aa', mark: '#5f958c' },
+    // A logical rectangle projects as an iso diamond on the floor. The former logical diamond projected
+    // as a screen-space rectangle, which read like translucent panels attached to the poufs.
+    rug: { shape: 'rect', weave: 'border', fill: '#d88c62', mark: '#b9694d' },
+    rugSize: 168,
     poufs: ['#f06d5a', '#e3a72b', '#8b6fd6'],
   },
 ];
