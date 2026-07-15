@@ -1013,10 +1013,12 @@ function chairBack(
 // desks (ids 0,1) carry the boldest setups so the variety actually reads. Every panel still lights teal
 // when its member is `working` and stays dim otherwise — the load-bearing work cue is intact.
 type MonitorSetup = 'single' | 'dual' | 'ultrawide' | 'laptop';
+// Laptops (and the boldest screen setups) sit on N/W-facing desks — the rows whose screens face the camera
+// — so a laptop's lit lid actually shows. ids 2 (pod 0, N), 7 (pod 1, W), 10 (pod 2, W).
 const MONITOR_SETUPS_BY_ID: readonly MonitorSetup[] = [
-  'ultrawide', 'dual', 'laptop', 'single', // pod 0 (top — ids 0,1 face the camera)
-  'single', 'laptop', 'dual', 'ultrawide', // pod 1 (centre)
-  'dual', 'single', 'laptop', 'single', // pod 2 (left)
+  'single', 'dual', 'laptop', 'ultrawide', // pod 0 (top — 2,3 face the camera)
+  'single', 'dual', 'ultrawide', 'laptop', // pod 1 (centre — 6,7 face the camera)
+  'single', 'dual', 'laptop', 'ultrawide', // pod 2 (left — 10,11 face the camera)
 ];
 function monitorSetupFor(id: number): MonitorSetup {
   return MONITOR_SETUPS_BY_ID[id % MONITOR_SETUPS_BY_ID.length]!;
@@ -1104,9 +1106,10 @@ function monitor(
   }
 }
 
-/** A laptop raised on a stand beside the main monitor: a riser, a keyboard deck, and the lit lid (a short
- * screen panel). The lid sits directly on the deck — `screenPanel` adds its own +8 neck gap, so we pass a
- * base 8 lower to cancel it. */
+/** A laptop raised on a stand beside the main monitor: a slim riser, a silver keyboard base, and a silver
+ * lid with a lit screen. Deliberately **silver** — a dark laptop reads as just more monitor; the aluminium
+ * body is what makes it legible as a distinct laptop against the dark displays. Only placed on desks whose
+ * screens face the camera (N/W), so the lid's lit face shows. */
 function laptopOnStand(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -1118,10 +1121,32 @@ function laptopOnStand(
 ): void {
   const sn = dir === 'S' || dir === 'N';
   const f = FWD[dir];
-  box(ctx, fit, mx, my, sn ? 16 : 11, sn ? 11 : 16, 9, '#9298a0', up); // stand riser
-  const deckUp = up + 9;
-  box(ctx, fit, mx - f[0] * 4, my - f[1] * 4, sn ? 20 : 14, sn ? 14 : 20, 2, '#31353c', deckUp); // keyboard deck
-  screenPanel(ctx, fit, mx + f[0] * 3, my + f[1] * 3, dir, working, deckUp - 8, 20, 13, false); // lid
+  const silver = '#c4c9d0';
+  box(ctx, fit, mx, my, 6, 6, 12, '#70757d', up); // slim stand riser
+  const deckUp = up + 12;
+  box(ctx, fit, mx - f[0] * 5, my - f[1] * 5, sn ? 24 : 16, sn ? 16 : 24, 3, silver, deckUp); // silver keyboard base
+  const lw = sn ? 24 : 5;
+  const ld = sn ? 5 : 24;
+  const cx = mx + f[0] * 4;
+  const cy = my + f[1] * 4;
+  box(ctx, fit, cx, cy, lw, ld, 17, dim(silver, 0.88), deckUp); // silver lid, standing at the back of the base
+  // The lit screen on the camera-facing lid face (same N/W convention as the monitors) + a glow that reads
+  // regardless. Screen inset a hair inside the silver bezel so the aluminium frames it.
+  const scr = working ? '#7fe0ce' : '#4a6b66';
+  const lo = (deckUp + 2) * fit.scale;
+  const hi = (deckUp + 15) * fit.scale;
+  const dn = (pt: Pt, u: number): Pt => ({ x: pt.x, y: pt.y - u });
+  if (dir === 'N') {
+    const D = project(cx - lw / 2, cy + ld / 2, fit);
+    const C = project(cx + lw / 2, cy + ld / 2, fit);
+    quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], scr);
+  } else if (dir === 'W') {
+    const B = project(cx + lw / 2, cy - ld / 2, fit);
+    const C = project(cx + lw / 2, cy + ld / 2, fit);
+    quad(ctx, [dn(B, lo), dn(C, lo), dn(C, hi), dn(B, hi)], scr);
+  }
+  const g = project(cx, cy, fit);
+  ellipse(ctx, { x: g.x, y: g.y - (deckUp + 17) * fit.scale }, 8 * fit.scale, 3 * fit.scale, working ? '#59c3a3' : '#33504c');
 }
 
 // ── desk-surface props: a keyboard + mouse on every desk, plus a deterministic personal mix ──────────
