@@ -1,6 +1,7 @@
 import { createActors, type Actors } from './actors';
+import { catBeat, createCat, stepCat } from './cat';
 import { fitFloor, project, type Fit, type Pt } from './iso';
-import { ENTRANCE } from './layout';
+import { CHAIR_OFF, DESK_SLOTS, ENTRANCE, FWD } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
 import { assignSeats, type Placement } from './seating';
 import {
@@ -116,6 +117,8 @@ export function mountOffice(
   let fit: Fit = fitFloor(width, height);
 
   const actors: Actors = createActors();
+  /** The office cat (cat.ts): asleep in the baked frame; stirred by the ambient scheduler below. */
+  const cat = createCat();
   /** The scene clock, in seconds. Everything that animates on its own — breathing, the typing bursts —
    * reads it, so it advances only while the loop runs and a rested office holds its frame. */
   let clock = 0;
@@ -202,7 +205,7 @@ export function mountOffice(
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
     const poses = actors.poses();
-    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv);
+    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv, cat);
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
@@ -437,7 +440,7 @@ export function mountOffice(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv);
+    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, cat);
     drawCues();
     positionLabels(anchors.heads);
   }
@@ -488,6 +491,7 @@ export function mountOffice(
     acc = 0;
     clock += dt;
     const walking = actors.step(dt);
+    const catActive = stepCat(cat, dt); // false once it's asleep — the cat never keeps the room awake
     for (let i = cues.length - 1; i >= 0; i--) {
       const c = cues[i]!;
       c.t += dt / CUE_SECS;
@@ -499,20 +503,20 @@ export function mountOffice(
     // freezing the instant a long walk ends (#5).
     if (walking || cues.length) lastActive = now;
     const alive = living();
-    if (walking || alive) {
+    if (walking || alive || catActive) {
       drawDynamic();
     } else {
-      if (wasActive) bake(); // walkers just re-seated (or the last worker went idle) — refresh the buffer
+      if (wasActive) bake(); // walkers just re-seated (or the cat curled up) — refresh the buffer
       drawStatic();
     }
-    wasActive = walking || alive;
+    wasActive = walking || alive || catActive;
     // Keep animating while anything moves *or* while the room is alive (someone at a desk breathing and
     // typing — capped to ~20fps above). When the last walk/cue clears and nobody is working, we draw one
     // final settled frame and park: the frame stays on-canvas until the next act or presence change.
     // Afterglow: a brief tail past the last motion so a character eases into idle instead of freezing
     // mid-gesture — `actors.step` also reports its own blends, so a member never stops half-out of a chair.
     const settling = lastActive > 0 && now - lastActive < AFTERGLOW_MS;
-    if ((walking || cues.length || settling || alive) && !reduced && VISIBLE()) {
+    if ((walking || cues.length || settling || alive || catActive) && !reduced && VISIBLE()) {
       raf = requestAnimationFrame(tick);
     } else {
       raf = 0;
@@ -534,6 +538,24 @@ export function mountOffice(
   // it and pushes the next slot out. Off entirely under reduced-motion / hidden tab.
   let ambientTimer: ReturnType<typeof setTimeout> | null = null;
   /** No real motion in flight (no walks, no cues, past the afterglow tail) — safe to inject a beat. */
+  /** Open-floor spots just beside each working member's chair — where the cat sits to supervise. */
+  function workingSideSpots(): { lx: number; ly: number }[] {
+    const out: { lx: number; ly: number }[] = [];
+    for (const [name, pl] of placements) {
+      if (pl.kind !== 'desk') continue;
+      if (actors.nodes().get(name)?.activity !== 'working') continue;
+      const slot = DESK_SLOTS[pl.slot];
+      if (!slot) continue;
+      const f = FWD[slot.dir];
+      // beside the chair: back from the desk to the chair, then out perpendicular to the facing
+      out.push({
+        lx: slot.lx - f[0] * CHAIR_OFF + f[1] * 46,
+        ly: slot.ly - f[1] * CHAIR_OFF - f[0] * 46,
+      });
+    }
+    return out;
+  }
+
   function quiet(): boolean {
     return !actors.active() && cues.length === 0 && !(lastActive > 0 && performance.now() - lastActive < AFTERGLOW_MS);
   }
@@ -549,6 +571,13 @@ export function mountOffice(
 
     // Only stir a calm, visible room; otherwise let this slot pass and wait for the next one.
     if (!reduced && VISIBLE() && quiet()) {
+      // Sometimes the beat is the cat's: it wakes, stretches, pads to a fresh nap spot (a sunbeam by
+      // day, a rug by night, occasionally a working member's side) and curls back up.
+      if (Math.random() < 0.35 && catBeat(cat, { daylight: lightEnv.daylight, workSpots: workingSideSpots() })) {
+        ensureLoop();
+        scheduleAmbient();
+        return;
+      }
       const idle = actors.idleDeskMembers();
       const who = idle.length ? idle[Math.floor(Math.random() * idle.length)]! : null;
       if (who) {

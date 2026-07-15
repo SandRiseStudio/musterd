@@ -38,9 +38,10 @@ function CharacterSheet() {
 
     void (async () => {
       // Client-only: the scene modules reach for canvas/DOM at import time.
-      const [{ drawCharacter }, { solveSkeleton, seedOf, typingBurst }] = await Promise.all([
+      const [{ drawCharacter }, { solveSkeleton, seedOf, typingBurst }, { drawCat }] = await Promise.all([
         import('../live/office-scene/character'),
         import('../live/office-scene/skeleton'),
+        import('../live/office-scene/render'),
       ]);
       if (stop) return;
 
@@ -50,7 +51,8 @@ function CharacterSheet() {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       // 3 blocks (seated+typing / walking / standing) × 4 facings each is too wide; instead: for each name,
       // one row of 4 facings seated, and a second sweep walking. Keep it to a readable grid.
-      const rows = Math.ceil(NAMES.length / cols) * 3;
+      // + 1 extra row at the bottom: the office cat, one cell per pose (it needs the same 4× scrutiny).
+      const rows = Math.ceil(NAMES.length / cols) * 3 + 1;
       const W = cols * CELL;
       const H = rows * ROW + 40;
       canvas.width = W * dpr;
@@ -128,6 +130,41 @@ function CharacterSheet() {
             ctx.textAlign = 'center';
             ctx.fillText(`${name} · ${kind[0]} · ${dir} · ${mode.label}`, cx, row * ROW + ROW - 6);
           });
+        });
+        // The office cat, at the same 4×: every pose, both facings for the walk.
+        const catRow = Math.ceil(NAMES.length / cols) * 3;
+        const CAT_CELLS = [
+          { label: 'sleep', mode: 'sleep' as const, flip: false },
+          { label: 'curl', mode: 'curl' as const, flip: false },
+          { label: 'sit', mode: 'sit' as const, flip: false },
+          { label: 'walk', mode: 'walk' as const, flip: false },
+          { label: 'walk · flipped', mode: 'walk' as const, flip: true },
+          { label: 'stretch', mode: 'stretch' as const, flip: false },
+        ];
+        CAT_CELLS.forEach((cell, i) => {
+          const cx = i * CELL + CELL / 2;
+          const cy = catRow * ROW + ROW - 60;
+          drawCat(
+            ctx,
+            { ox: cx, oy: cy, scale: 3.4 },
+            {
+              lx: 0,
+              ly: 0,
+              mode: cell.mode,
+              modeT: cell.mode === 'curl' ? (t * 0.9) % 1.1 : 1,
+              phase: t * 1.3,
+              flip: cell.flip,
+              path: [],
+              seg: 0,
+              plan: 'nap',
+              sitFor: 99,
+            },
+            t,
+          );
+          ctx.fillStyle = 'rgba(30,20,10,.72)';
+          ctx.font = '11px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(`cat · ${cell.label}`, cx, catRow * ROW + ROW - 6);
         });
         raf = requestAnimationFrame(frame);
       };

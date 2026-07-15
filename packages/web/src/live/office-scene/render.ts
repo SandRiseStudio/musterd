@@ -1,6 +1,9 @@
 import { drawCharacter } from './character';
 import { depth, FLOOR, project, THICK, type Fit, type Pt } from './iso';
+import type { CatState } from './cat';
 import {
+  BEAM_LEN,
+  BEAM_SHEAR,
   BOOKSHELVES,
   CHAIR_LIFT,
   CHAIR_OFF,
@@ -29,6 +32,7 @@ import {
   SHELF_DEEP,
   SHELF_H,
   SHELF_LONG,
+  WINDOWS,
   type Bookshelf,
   type Huddle,
   type Pod,
@@ -279,22 +283,7 @@ function drawFloor(ctx: CanvasRenderingContext2D, fit: Fit): void {
 /** Wall height in screen px at scale 1 — tall enough to read as a room, short enough not to wall the view in. */
 const WALL_H = 188;
 
-/** A window, as a fraction along its wall's edge `[t0,t1]` and up the wall `[u0,u1]`. */
-interface Win {
-  t0: number;
-  t1: number;
-  u0: number;
-  u1: number;
-}
-/** Two windows per wall — spaced so the wall reads as a facade, not a single porthole. */
-const WINDOWS: readonly Win[] = [
-  { t0: 0.28, t1: 0.46, u0: 0.34, u1: 0.82 },
-  { t0: 0.58, t1: 0.78, u0: 0.34, u1: 0.82 },
-];
-
-/** How far into the room a daylight beam reaches (logical units), and its sideways sun-shear. */
-const BEAM_LEN = 150;
-const BEAM_SHEAR = 46;
+// The windows + beam geometry live in layout.ts (the cat's sunbeam nap spots derive from the same data).
 
 /**
  * The glass colour: bright sky by day (warm at golden hour via `skyTint`), a dark pane with a faint city
@@ -798,6 +787,173 @@ function drawPlant(
     }
   }
 }
+
+// ── the office cat (behaviour in cat.ts; this is only the painter) ──────────────────────────────────────
+
+const CAT = {
+  fur: '#e08a43',
+  stripe: '#c9702f',
+  cream: '#f7e9d4',
+  earIn: '#eaa98e',
+  collar: '#e3a72b', // the huddle-pouf mustard — the team cat wears the team colour
+  eye: '#3a2c1c',
+} as const;
+
+/**
+ * Draw the cat at its current pose. Screen-space profile (like the members' billboarded faces): the body
+ * reads side-on and `flip` mirrors it for leftward travel. Small on purpose — cat-sized next to ~40px
+ * people — so judge it at 4× on /character-sheet, not here.
+ */
+export function drawCat(ctx: CanvasRenderingContext2D, fit: Fit, cat: CatState, t: number): void {
+  const p = project(cat.lx, cat.ly, fit);
+  const s = fit.scale;
+  const m = cat.flip ? -1 : 1;
+  const px = (dx: number, dy: number): Pt => ({ x: p.x + dx * m * s, y: p.y + dy * s });
+
+  ctx.save();
+  const tail = (x0: number, y0: number, cx: number, cy: number, x1: number, y1: number, w: number): void => {
+    ctx.strokeStyle = CAT.fur;
+    ctx.lineWidth = w * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    const a = px(x0, y0);
+    const c = px(cx, cy);
+    const b = px(x1, y1);
+    ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(c.x, c.y, b.x, b.y);
+    ctx.stroke();
+  };
+  const leg = (x: number, lift: number, w = 2.6): void => {
+    const top = px(x, -9);
+    const foot = px(x, -lift);
+    ctx.strokeStyle = CAT.fur;
+    ctx.lineWidth = w * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(top.x, top.y);
+    ctx.lineTo(foot.x, foot.y);
+    ctx.stroke();
+  };
+  const ear = (x: number, y: number, r: number): void => {
+    const a = px(x - r, y);
+    const b = px(x + r, y);
+    const tip = px(x, y - r * 1.7);
+    quad(ctx, [a, tip, b], CAT.fur);
+    const ia = px(x - r * 0.45, y - r * 0.15);
+    const ib = px(x + r * 0.45, y - r * 0.15);
+    const itip = px(x, y - r * 1.1);
+    quad(ctx, [ia, itip, ib], CAT.earIn);
+  };
+  const head = (x: number, y: number, awake: boolean): void => {
+    ear(x - 4, y - 4.5, 2.6);
+    ear(x + 3.5, y - 4.5, 2.6);
+    ellipse(ctx, px(x, y), 6.2 * s, 5.6 * s, CAT.fur);
+    ellipse(ctx, px(x + 2.6, y + 2.6), 2.2 * s, 1.7 * s, CAT.cream); // muzzle
+    if (awake) {
+      ellipse(ctx, px(x - 1.6, y - 0.6), 0.9 * s, 1.1 * s, CAT.eye);
+      ellipse(ctx, px(x + 3.4, y - 0.6), 0.9 * s, 1.1 * s, CAT.eye);
+    } else {
+      ctx.strokeStyle = CAT.eye;
+      ctx.lineWidth = 0.8 * s;
+      for (const ex of [-1.6, 3.4]) {
+        const a = px(ex - 1, y - 0.4);
+        const b = px(ex + 1, y - 0.4);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+    }
+  };
+  const stripes = (x: number, y: number, r: number): void => {
+    ctx.strokeStyle = CAT.stripe;
+    ctx.lineWidth = 1.6 * s;
+    ctx.lineCap = 'round';
+    for (const dx of [-r * 0.45, 0.5, r * 0.55]) {
+      const a = px(x + dx, y - r * 0.55);
+      const b = px(x + dx + 1.4, y + r * 0.1);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+  };
+  const collar = (x: number, y: number, r: number): void => {
+    ellipse(ctx, px(x, y), r * s, r * 0.42 * s, CAT.collar);
+  };
+
+  switch (cat.mode) {
+    case 'sleep':
+    case 'curl': {
+      // Curled into a bun: tail wrapped round the front, head tucked, slow breathing.
+      const settle = cat.mode === 'curl' ? Math.min(1, cat.modeT / CURL_VIS_S) : 1;
+      const breathe = 1 + 0.045 * Math.sin(t * 2.1) * settle;
+      ellipse(ctx, px(0, 1.5), 14 * s, 4.5 * s, 'rgba(0,0,0,0.14)');
+      ellipse(ctx, px(0, -6), 12 * s, 7.2 * breathe * s, CAT.fur);
+      stripes(-1, -7, 11);
+      tail(-9, -2, 0, 2.5, 9.5, -1.5, 3.2);
+      head(7, -7.5, false);
+      break;
+    }
+    case 'sit': {
+      // Upright, tail wrapped with a flicking tip, eyes open — the supervising pose.
+      ellipse(ctx, px(0, 1.5), 12 * s, 4 * s, 'rgba(0,0,0,0.14)');
+      const flick = Math.sin(t * 3.2) * 2.4;
+      tail(-7, -3, -13, -2, -14, -6 - flick, 2.6);
+      ellipse(ctx, px(-1, -8), 8 * s, 8.5 * s, CAT.fur); // haunches
+      stripes(-2, -10, 8);
+      ellipse(ctx, px(3.5, -12), 5.2 * s, 7 * s, CAT.fur); // chest, up
+      ellipse(ctx, px(4, -9), 3 * s, 4.5 * s, CAT.cream); // chest patch
+      leg(2.2, 0.5);
+      leg(5.4, 0.5);
+      collar(4.5, -18, 4.4);
+      head(5, -23, true);
+      break;
+    }
+    case 'stretch': {
+      // The wake-up: front low and reaching, haunches high, tail straight up.
+      ellipse(ctx, px(0, 1.5), 15 * s, 4.5 * s, 'rgba(0,0,0,0.14)');
+      tail(-10, -16, -13, -24, -11, -27, 2.6);
+      ellipse(ctx, px(-7, -13), 7.5 * s, 7 * s, CAT.fur); // haunches, up
+      stripes(-8, -14, 7);
+      leg(-9, 0.5, 3);
+      ellipse(ctx, px(2, -6), 8 * s, 4.6 * s, CAT.fur); // chest sweeping low
+      const reach = px(12, -1.5);
+      const sh = px(4, -6);
+      ctx.strokeStyle = CAT.fur;
+      ctx.lineWidth = 2.6 * s;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(sh.x, sh.y);
+      ctx.lineTo(reach.x, reach.y);
+      ctx.stroke();
+      collar(9.5, -9, 4);
+      head(12.5, -12.5, true);
+      break;
+    }
+    case 'walk': {
+      // Padding along: diagonal gait, tail carried high, slight body bob.
+      const cyc = cat.phase * Math.PI * 2;
+      const bob = Math.sin(cyc * 2) * 0.7;
+      ellipse(ctx, px(0, 1.5), 14 * s, 4.5 * s, 'rgba(0,0,0,0.12)');
+      tail(-10, -13 + bob, -16, -22, -13, -27 + Math.sin(t * 2.3) * 1.6, 2.6);
+      // far legs first, then body, then near legs — so the gait reads as four feet, not a comb
+      leg(-7 + Math.sin(cyc) * 2, -Math.max(0, Math.sin(cyc)) * 2.5 + 0.5, 2.2);
+      leg(6 + Math.sin(cyc + Math.PI) * 2, -Math.max(0, Math.sin(cyc + Math.PI)) * 2.5 + 0.5, 2.2);
+      ellipse(ctx, px(0, -12.5 + bob), 11.5 * s, 6 * s, CAT.fur);
+      stripes(-1, -13.5 + bob, 10);
+      leg(-6 + Math.sin(cyc + Math.PI) * 2, -Math.max(0, Math.sin(cyc + Math.PI)) * 2.5 + 0.5);
+      leg(7 + Math.sin(cyc) * 2, -Math.max(0, Math.sin(cyc)) * 2.5 + 0.5);
+      collar(10.5, -16.5 + bob, 4);
+      head(12.5, -21 + bob, true);
+      break;
+    }
+  }
+  ctx.restore();
+}
+
+/** How long the settle-down takes to visually damp the breathing in from the sit (matches cat.ts CURL_S). */
+const CURL_VIS_S = 1.1;
 
 /**
  * Solve a member's skeleton for this frame from their pose (see `skeleton.ts` — all the animation lives
@@ -1579,6 +1735,7 @@ export function renderScene(
   t = 0,
   teamName = 'revive',
   env: LightEnv = DAY_ENV,
+  cat: CatState | null = null,
 ): SceneAnchors {
   drawFloor(ctx, fit);
   // The room shell: back walls + windows as a backdrop (behind every item), then the daylight beams they
@@ -1632,6 +1789,9 @@ export function renderScene(
   items.push(...receptionItems(ctx, fit));
   items.push({ d: depth(PRINTER.lx, PRINTER.ly), fn: () => printer(ctx, fit) });
   items.push({ d: depth(ENTRANCE.lx, ENTRANCE.ly), fn: () => drawEntrance(ctx, fit) });
+
+  // The office cat sorts with everything else at its own floor position (behaviour lives in cat.ts).
+  if (cat) items.push({ d: depth(cat.lx, cat.ly) + 0.08, fn: () => drawCat(ctx, fit, cat, t) });
 
   for (const slot of DESK_SLOTS) {
     const name = slotMember.get(slot.id) ?? null;
