@@ -313,6 +313,24 @@ export const PLANTS: Plant[] = [
   { lx: 830, ly: 870, species: 'fiddle' }, // front corner, past the meeting table
 ];
 
+/** A back-wall window, as a fraction along its wall's edge `[t0,t1]` and up the wall `[u0,u1]`.
+ * Layout data (not paint): the daylight beams, and the cat's sunbeam nap spots, both derive from it. */
+export interface Win {
+  t0: number;
+  t1: number;
+  u0: number;
+  u1: number;
+}
+/** Two windows per back wall — spaced so the wall reads as a facade, not a single porthole. */
+export const WINDOWS: readonly Win[] = [
+  { t0: 0.28, t1: 0.46, u0: 0.34, u1: 0.82 },
+  { t0: 0.58, t1: 0.78, u0: 0.34, u1: 0.82 },
+];
+
+/** How far into the room a window's daylight beam reaches (logical units), and its sideways sun-shear. */
+export const BEAM_LEN = 150;
+export const BEAM_SHEAR = 46;
+
 export interface Bookshelf {
   lx: number;
   ly: number;
