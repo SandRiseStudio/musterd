@@ -1026,9 +1026,126 @@ function monitorSetupFor(id: number): MonitorSetup {
   return MONITOR_SETUPS_BY_ID[id % MONITOR_SETUPS_BY_ID.length]!;
 }
 
-/** One monitor panel: the stand box + the lit screen face (shown on the camera-facing N/W faces) + a soft
- * glow. `wAcross` is the panel width along the shoulders; `h` its height; `curved` dims the outer thirds so
- * an ultrawide reads as bowed toward the viewer. */
+// ── screen life: the animated desktop on a working member's monitor ─────────────────────────────────
+// A lit screen isn't a flat teal slab any more — it's a tiny living desktop: editor windows with
+// traffic-light dots, pastel code lines that type themselves in and scroll away, a blinking caret, and
+// the occasional sparkle drifting up off the glass. Everything is deterministic in (seed, t) — the seed
+// keeps each desk's windows in their own places frame to frame, and `t` (the scene clock) drives typing,
+// blink and sparkle phase, so two desks never twinkle in sync.
+
+/** Stable 0..1 from two ints — same shape as `deskRnd`, usable before its declaration point. */
+function scrRnd(seed: number, salt: number): number {
+  let h = (2166136261 ^ (seed + 1)) >>> 0;
+  h = Math.imul(h, 16777619) ^ (salt * 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 2246822519);
+  return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
+}
+
+/** The code-line syntax palette — warm mustard first (it's musterd's office), then mint/coral/lavender. */
+const CODE_HUES = ['#ffd166', '#7fe0ce', '#f4989c', '#c8b6f2', '#9ad1ff'] as const;
+// Lit wallpaper brighter than the idle slab, so "glowing = working" still reads from across the room;
+// the editor panes are the dark thing, floating on it like real windows.
+const SCREEN_BG = '#2f9a8a';
+const SCREEN_IDLE = '#4a6b66';
+
+/** Map from screen-face UV (u across 0..1, v up 0..1) to canvas px. The face is a parallelogram: its
+ * bottom edge runs BL→BR in projected space and its vertical is a straight screen-space lift of `vh`. */
+type FaceMap = (u: number, v: number) => Pt;
+
+function faceQuad(ctx: CanvasRenderingContext2D, map: FaceMap, u0: number, v0: number, u1: number, v1: number, fill: string): void {
+  quad(ctx, [map(u0, v0), map(u1, v0), map(u1, v1), map(u0, v1)], fill);
+}
+
+/** Paint the living desktop inside an already-computed screen face. `wPx` is the face's on-canvas width
+ * (decides how much detail fits); `windows` is how many editor panes to draw (1 for a laptop lid). */
+function drawScreenLife(
+  ctx: CanvasRenderingContext2D,
+  map: FaceMap,
+  wPx: number,
+  scale: number,
+  seed: number,
+  t: number,
+  windows: number,
+): void {
+  ctx.save();
+  const path = [map(0, 0), map(1, 0), map(1, 1), map(0, 1)];
+  ctx.beginPath();
+  ctx.moveTo(path[0]!.x, path[0]!.y);
+  for (let i = 1; i < 4; i++) ctx.lineTo(path[i]!.x, path[i]!.y);
+  ctx.closePath();
+  ctx.fillStyle = SCREEN_BG;
+  ctx.fill();
+  ctx.clip();
+
+  // A slow aurora wash behind the windows — two soft drifting bands, so even the "wallpaper" is alive.
+  for (let a = 0; a < 2; a++) {
+    const cu = 0.5 + 0.42 * Math.sin(t * 0.21 + a * 2.4 + seed);
+    faceQuad(ctx, map, cu - 0.26, 0, cu + 0.26, 1, a === 0 ? 'rgba(213, 255, 244, 0.16)' : 'rgba(255, 224, 130, 0.13)');
+  }
+
+  const tiny = wPx < 26 * scale; // laptop lids and far-off panels: fewer, chunkier details
+  for (let k = 0; k < windows; k++) {
+    const r = (s: number): number => scrRnd(seed, k * 97 + s);
+    // Window k's stable geometry, in face UV. The second window offsets right/down so panes overlap.
+    const wu = 0.05 + r(1) * 0.18 + k * 0.34;
+    const wv = 0.08 + r(2) * 0.14 + k * 0.1;
+    const ww = Math.min(0.56 + r(3) * 0.14, 0.97 - wu);
+    const wh = Math.min(0.62 + r(4) * 0.2, 0.9 - wv);
+    // Pane + title bar (the near-black chrome makes the pastel lines pop) + traffic-light dots.
+    faceQuad(ctx, map, wu, wv, wu + ww, wv + wh, '#123b40');
+    const barH = 0.14;
+    faceQuad(ctx, map, wu, wv + wh - barH, wu + ww, wv + wh, '#0a2b30');
+    if (!tiny) {
+      const dots = ['#ff6b6b', '#ffc24b', '#59d68f'];
+      for (let d = 0; d < 3; d++) {
+        const c = map(wu + 0.035 + d * 0.055, wv + wh - barH / 2);
+        ellipse(ctx, c, 1.1 * scale, 0.8 * scale, dots[d]!);
+      }
+    }
+    // Code lines typing in: a rolling cycle — each pane types its rows top to bottom, holds, then a new
+    // "file" (gen) reshuffles the line widths. The caret blinks at the end of the line being typed.
+    const rows = tiny ? 3 : 5;
+    const cycle = t * 1.5 + r(5) * 40;
+    const gen = Math.floor(cycle / (rows + 3));
+    const prog = cycle - gen * (rows + 3); // 0..rows+3: type rows, then hold
+    const lineH = (wh - barH) / (rows + 1);
+    for (let row = 0; row < rows; row++) {
+      if (prog < row) break;
+      const full = 0.2 + scrRnd(seed, k * 97 + gen * 13 + row * 31) * (ww - 0.3);
+      const frac = Math.max(0, Math.min(1, prog - row)); // this row's typed-in fraction
+      const lv = wv + wh - barH - (row + 1) * lineH;
+      const hue = CODE_HUES[(seed + gen + row * 2 + k) % CODE_HUES.length]!;
+      const indent = scrRnd(seed, k * 97 + gen * 13 + row * 31 + 7) < 0.35 ? 0.08 : 0;
+      faceQuad(ctx, map, wu + 0.05 + indent, lv, wu + 0.05 + indent + full * frac, lv + lineH * 0.45, hue);
+      if (frac < 1 && Math.floor(t * 2.6) % 2 === 0) {
+        // the blinking caret, riding the end of the active line
+        faceQuad(ctx, map, wu + 0.05 + indent + full * frac, lv - lineH * 0.1, wu + 0.07 + indent + full * frac, lv + lineH * 0.6, '#fff6da');
+      }
+    }
+  }
+  ctx.restore();
+
+  // Sparkles: two motes per screen, each on its own loop — born near the glass, drifting up past the top
+  // edge and fading. Drawn unclipped so the magic visibly leaves the screen. Four-point star = two slivers.
+  for (let s = 0; s < 2; s++) {
+    const period = 3.2 + scrRnd(seed, 300 + s) * 2.5;
+    const ph = (t / period + scrRnd(seed, 310 + s)) % 1;
+    const a = Math.sin(ph * Math.PI);
+    if (a < 0.05) continue;
+    const p = map(0.15 + scrRnd(seed, 320 + s) * 0.7 + 0.08 * Math.sin(t * 1.7 + s * 3), 0.55 + ph * 0.9);
+    const r = (1.6 + 1.1 * a) * scale;
+    ctx.save();
+    ctx.globalAlpha = a * 0.9;
+    quad(ctx, [{ x: p.x - r, y: p.y }, { x: p.x, y: p.y - r * 0.32 }, { x: p.x + r, y: p.y }, { x: p.x, y: p.y + r * 0.32 }], '#ffe9a8');
+    quad(ctx, [{ x: p.x, y: p.y - r }, { x: p.x + r * 0.32, y: p.y }, { x: p.x, y: p.y + r }, { x: p.x - r * 0.32, y: p.y }], '#fff6da');
+    ctx.restore();
+  }
+}
+
+/** One monitor panel: the stand box + the screen face (shown on the camera-facing N/W faces) + a soft
+ * glow. A working member's screen runs the animated desktop (see `drawScreenLife`); an idle one stays a
+ * flat dim slab, so "lit + alive = working" remains the load-bearing cue. `wAcross` is the panel width
+ * along the shoulders; `h` its height; `curved` shades the outer thirds so an ultrawide reads as bowed. */
 function screenPanel(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -1040,38 +1157,49 @@ function screenPanel(
   wAcross: number,
   h: number,
   curved: boolean,
+  t = 0,
 ): void {
   const sn = dir === 'S' || dir === 'N';
   const pw = sn ? wAcross : 5;
   const pd = sn ? 5 : wAcross;
   box(ctx, fit, mx, my, pw, pd, h, '#2a2e33', up + 8);
-  const scr = working ? '#7fe0ce' : '#4a6b66';
   const lo = (up + 8) * fit.scale;
   const hi = (up + 8 + h) * fit.scale;
   const dn = (p: Pt, u: number): Pt => ({ x: p.x, y: p.y - u });
+  // The camera-facing face's bottom corners (BL→BR left-to-right on canvas); vertical is a straight lift.
+  let BL: Pt | null = null;
+  let BR: Pt | null = null;
   if (dir === 'N') {
-    const D = project(mx - pw / 2, my + pd / 2, fit);
-    const C = project(mx + pw / 2, my + pd / 2, fit);
-    quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], scr);
-    if (curved) {
-      const L2 = project(mx - pw / 6, my + pd / 2, fit);
-      const R2 = project(mx + pw / 6, my + pd / 2, fit);
-      quad(ctx, [dn(D, lo), dn(L2, lo), dn(L2, hi), dn(D, hi)], dim(scr, 0.82));
-      quad(ctx, [dn(R2, lo), dn(C, lo), dn(C, hi), dn(R2, hi)], dim(scr, 0.82));
-    }
+    BL = project(mx - pw / 2, my + pd / 2, fit);
+    BR = project(mx + pw / 2, my + pd / 2, fit);
   } else if (dir === 'W') {
-    const B = project(mx + pw / 2, my - pd / 2, fit);
-    const C = project(mx + pw / 2, my + pd / 2, fit);
-    quad(ctx, [dn(B, lo), dn(C, lo), dn(C, hi), dn(B, hi)], scr);
+    BL = project(mx + pw / 2, my + pd / 2, fit);
+    BR = project(mx + pw / 2, my - pd / 2, fit);
+  }
+  if (BL && BR) {
+    const bl = BL;
+    const br = BR;
+    if (working) {
+      const map: FaceMap = (u, v) => ({ x: bl.x + u * (br.x - bl.x), y: bl.y + u * (br.y - bl.y) - lo - v * (hi - lo) });
+      const wPx = Math.abs(br.x - bl.x);
+      drawScreenLife(ctx, map, wPx, fit.scale, Math.abs(Math.round(mx * 7 + my * 13)), t, wAcross >= 30 ? 2 : 1);
+    } else {
+      quad(ctx, [dn(bl, lo), dn(br, lo), dn(br, hi), dn(bl, hi)], SCREEN_IDLE);
+    }
     if (curved) {
-      const B2 = project(mx + pw / 2, my - pd / 6, fit);
-      const C2 = project(mx + pw / 2, my + pd / 6, fit);
-      quad(ctx, [dn(B, lo), dn(B2, lo), dn(B2, hi), dn(B, hi)], dim(scr, 0.82));
-      quad(ctx, [dn(C2, lo), dn(C, lo), dn(C, hi), dn(C2, hi)], dim(scr, 0.82));
+      // Bow shading over whatever's on screen — translucent, so the animated desktop stays visible.
+      const L2 = { x: bl.x + (br.x - bl.x) / 3, y: bl.y + (br.y - bl.y) / 3 };
+      const R2 = { x: bl.x + ((br.x - bl.x) * 2) / 3, y: bl.y + ((br.y - bl.y) * 2) / 3 };
+      quad(ctx, [dn(bl, lo), dn(L2, lo), dn(L2, hi), dn(bl, hi)], 'rgba(6, 20, 22, 0.22)');
+      quad(ctx, [dn(R2, lo), dn(br, lo), dn(br, hi), dn(R2, hi)], 'rgba(6, 20, 22, 0.22)');
     }
   }
   const g = project(mx, my, fit);
+  const pulse = working ? 0.85 + 0.15 * Math.sin(t * 2.1 + mx + my) : 1;
+  ctx.save();
+  ctx.globalAlpha = pulse;
   ellipse(ctx, { x: g.x, y: g.y - (up + 10 + h) * fit.scale }, wAcross * 0.35 * fit.scale, 4 * fit.scale, working ? '#59c3a3' : '#33504c');
+  ctx.restore();
 }
 
 function monitor(
@@ -1083,6 +1211,7 @@ function monitor(
   working: boolean,
   surfaceUp: number,
   id: number | null,
+  t = 0,
 ): void {
   const setup = id == null ? 'single' : monitorSetupFor(id);
   const p: [number, number] = [-FWD[dir][1], FWD[dir][0]]; // across-desk unit
@@ -1091,24 +1220,24 @@ function monitor(
     // side so they read as two real screens, not two half-screens. `[-1,1]` order paints the nearer last.
     box(ctx, fit, mx, my, 12, 8, 8, '#33272b', surfaceUp); // shared dual-arm foot
     for (const s of [-1, 1] as const) {
-      screenPanel(ctx, fit, mx + p[0] * s * 18, my + p[1] * s * 18, dir, working, surfaceUp, 34, 22, false);
+      screenPanel(ctx, fit, mx + p[0] * s * 18, my + p[1] * s * 18, dir, working, surfaceUp, 34, 22, false, t);
     }
   } else if (setup === 'ultrawide') {
     box(ctx, fit, mx, my, 10, 6, 8, '#33272b', surfaceUp);
-    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 54, 20, true);
+    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 54, 20, true, t);
   } else if (setup === 'laptopRiser' || setup === 'laptopDock') {
     // A single monitor with a laptop rig to one side (side alternates by desk id): either an open laptop
     // raised on an aluminium stand, or a closed laptop stood in a wooden vertical dock.
     box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
-    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false);
+    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false, t);
     const side = id != null && id % 2 === 0 ? 1 : -1;
     const lxp = mx + p[0] * side * 30;
     const lyp = my + p[1] * side * 30;
-    if (setup === 'laptopRiser') laptopRiser(ctx, fit, lxp, lyp, dir, working, surfaceUp);
+    if (setup === 'laptopRiser') laptopRiser(ctx, fit, lxp, lyp, dir, working, surfaceUp, t);
     else laptopDock(ctx, fit, lxp, lyp, dir, surfaceUp);
   } else {
     box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
-    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false);
+    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false, t);
   }
 }
 
@@ -1126,6 +1255,7 @@ function laptopRiser(
   dir: Dir,
   working: boolean,
   up: number,
+  t = 0,
 ): void {
   const sn = dir === 'S' || dir === 'N';
   const f = FWD[dir];
@@ -1143,18 +1273,28 @@ function laptopRiser(
   const cy = my + f[1] * 5;
   const lidUp = deckUp + 1;
   box(ctx, fit, cx, cy, lw, ld, 16, dim(LAPTOP_SILVER, 0.9), lidUp); // silver lid
-  const scr = working ? '#7fe0ce' : '#4a6b66';
   const lo = (lidUp + 2) * fit.scale;
   const hi = (lidUp + 14) * fit.scale;
   const dn = (pt: Pt, u: number): Pt => ({ x: pt.x, y: pt.y - u });
+  let BL: Pt | null = null;
+  let BR: Pt | null = null;
   if (dir === 'N') {
-    const D = project(cx - lw / 2, cy + ld / 2, fit);
-    const C = project(cx + lw / 2, cy + ld / 2, fit);
-    quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], scr);
+    BL = project(cx - lw / 2, cy + ld / 2, fit);
+    BR = project(cx + lw / 2, cy + ld / 2, fit);
   } else if (dir === 'W') {
-    const B = project(cx + lw / 2, cy - ld / 2, fit);
-    const C = project(cx + lw / 2, cy + ld / 2, fit);
-    quad(ctx, [dn(B, lo), dn(C, lo), dn(C, hi), dn(B, hi)], scr);
+    BL = project(cx + lw / 2, cy + ld / 2, fit);
+    BR = project(cx + lw / 2, cy - ld / 2, fit);
+  }
+  if (BL && BR) {
+    const bl = BL;
+    const br = BR;
+    if (working) {
+      // The laptop's little screen runs the same living desktop as the monitor — one pane, chunky details.
+      const map: FaceMap = (u, v) => ({ x: bl.x + u * (br.x - bl.x), y: bl.y + u * (br.y - bl.y) - lo - v * (hi - lo) });
+      drawScreenLife(ctx, map, Math.abs(br.x - bl.x), fit.scale, Math.abs(Math.round(cx * 7 + cy * 13)), t, 1);
+    } else {
+      quad(ctx, [dn(bl, lo), dn(br, lo), dn(br, hi), dn(bl, hi)], SCREEN_IDLE);
+    }
   }
   const g = project(cx, cy, fit);
   ellipse(ctx, { x: g.x, y: g.y - (lidUp + 16) * fit.scale }, 7 * fit.scale, 3 * fit.scale, working ? '#59c3a3' : '#33504c');
@@ -1307,6 +1447,7 @@ function drawWorkstation(
   node: OfficeNode | null,
   teamName: string,
   env: LightEnv,
+  t = 0,
 ): void {
   const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
@@ -1349,7 +1490,7 @@ function drawWorkstation(
   // land (`KEYBOARD_ALONG`; `skeleton.ts` reaches for exactly this spot).
   const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
   const mouseColor = MOUSE_COLORS[Math.floor(deskRnd(id, KB_SALT + 1) * MOUSE_COLORS.length)]!;
-  at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up, id));
+  at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up, id, t));
   at(KEYBOARD_ALONG, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up, kbShoulder));
   at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up, mouseColor));
 
@@ -1495,7 +1636,7 @@ export function renderScene(
   for (const slot of DESK_SLOTS) {
     const name = slotMember.get(slot.id) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
-    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, env) });
+    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, env, t) });
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
     // the two instead of being swallowed by a single chair box.
