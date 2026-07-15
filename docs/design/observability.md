@@ -130,7 +130,10 @@ This layer should ship as its **own product** (working name **batond**, reversib
 1. ~~**Now (v0.2/M-next):** Layer 1 server instrumentation (§4). ADR 011 accepted as a recommended convention.~~ ✅ **done (ADR 015)** — server envelope span + counters/histogram, off by default; ADR 011 accepted, server records `traceparent`. (Deferred within §4: the two observable gauges.)
 2. ~~**With first SDK/adapters that own an OTel context:** emit/honor `meta.otel` in `@musterd/mcp` and examples.~~ ✅ **done** — the adapter emits its active trace context as `meta.otel` on `team_send` and links incoming `meta.otel` on `team_inbox_check` (ADR 011; `packages/mcp/src/otel.ts`). ✅ **Live in production since ADR 089** (2026-07-05): the shared `@musterd/telemetry` SDK boots in the adapter and the CLI, the adapter's `musterd.tool.call` span supplies the active context, and the CLI's `send` attaches `meta.otel` the same way — the cross-agent distributed trace exists end-to-end.
    2b. ~~**Instrument-by-default + the finding-001 gaps:**~~ ✅ **done (ADR 082, 2026-07-01)** — the dogfood daemon boots the SDK to a local sink; a structured HTTP request log; first-party coordination metrics (`loop_latency`, `open_loops`) + opt-in per-agent tokens (`meta.usage`). Two §5b views (time-to-unblock, the void-detector) landed early as _emitted metrics_ rather than waiting for derived views over the log.
-3. **With the web dashboard:** first derived coordination views (time-to-unblock, waiting-on), per the roadmap's insight-layer entry.
+3. ~~**With the report surfaces:** first derived coordination views (time-to-unblock, waiting-on,
+   broadcast-journal density).~~ ✅ **done** — the server-side insight engine exposes them through
+   `musterd report` and `team_report` (ADR 050 / PRs #82 and #84; ADR 091 for the MAST views). The
+   remaining web-dashboard work is the insight rail in the roadmap's web insight-layer entry.
 4. **Later, by explicit decision:** the standalone product (§5), once dogfooding proves which views matter.
 
 ## 7. Non-goals

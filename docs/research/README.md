@@ -12,7 +12,7 @@ Research is the publishable output of the trace → eval → experiment flywheel
 
 ## First thesis — MAST in the wild
 
-Operationalize MAST's multi-agent failure taxonomy ([arXiv 2503.13657](https://arxiv.org/abs/2503.13657)) as live detectors over musterd's act-typed message log — ignored `request_help`, circular handoffs, stalled threads, broadcast-only "journal" coordination. Substrate: the `coordination-density` insight + `telemetry-l2` work on the roadmap. Contribution vs MAST: the first **dataset + detectors of real coordination failures**, not annotated transcripts.
+Operationalize MAST's multi-agent failure taxonomy ([arXiv 2503.13657](https://arxiv.org/abs/2503.13657)) as live detectors over musterd's act-typed message log — ignored `request_help`, circular handoffs, stalled threads, broadcast-only "journal" coordination. Substrate: the shipped `coordination-density` insight (ADR 050, PR #84) and Telemetry Layer 2. Contribution vs MAST: the first **dataset + detectors of real coordination failures**, not annotated transcripts.
 
 **First artifact:** an open, redacted coordination-traces dataset (OTel/Langfuse-shaped). Release is **gated on the opt-in + redaction posture** (ADR 051) being enforced — no dataset ships before consent/redaction is real.
 
