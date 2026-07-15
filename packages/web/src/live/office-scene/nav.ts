@@ -65,7 +65,6 @@ function solidRects(): Rect[] {
   out.push(rect(NOOK.lx + L.fridge.dx, NOOK.ly + L.fridge.dy, L.fridge.w, L.fridge.d));
   out.push(rect(NOOK.lx + L.counter.dx, NOOK.ly + L.counter.dy, L.counter.w, L.counter.d));
   out.push(rect(NOOK.lx + L.cooler.dx, NOOK.ly + L.cooler.dy, L.cooler.w, L.cooler.d));
-  out.push(rect(NOOK.lx + L.plant.dx, NOOK.ly + L.plant.dy, 26, 26));
   out.push(rect(NOOK.lx + L.couch.dx, NOOK.ly + L.couch.dy, L.couch.len, L.couch.dep));
   out.push(rect(NOOK.lx + L.table.dx, NOOK.ly + L.table.dy, L.table.w, L.table.d));
   out.push(rect(NOOK.lx + L.chairW.dx, NOOK.ly + L.chairW.dy, L.chairW.size, L.chairW.size));

@@ -25,6 +25,7 @@ import {
   POD_RUG,
   PRINTER,
   RECEPTION,
+  SEAT_TOP,
   SHELF_DEEP,
   SHELF_H,
   SHELF_LONG,
@@ -602,7 +603,6 @@ function nookItems(ctx: CanvasRenderingContext2D, fit: Fit): { rug: () => void; 
   return {
     rug: () => drawRug(ctx, fit, NOOK_RUG, lx, ly, NOOK_RUG_R * 2, NOOK_RUG_R * 2),
     items: [
-      at(L.plant.dx, L.plant.dy, () => drawPlant(ctx, fit, lx + L.plant.dx, ly + L.plant.dy, 'fiddle')),
       at(L.fridge.dx, L.fridge.dy, () => box(ctx, fit, lx + L.fridge.dx, ly + L.fridge.dy, L.fridge.w, L.fridge.d, L.fridge.h, '#edeff1')),
       at(L.counter.dx, L.counter.dy, () => {
         box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy, L.counter.w, L.counter.d, L.counter.h, woodTop());
@@ -892,26 +892,174 @@ export function drawActor(
  */
 const CHAIR_BACK_OFF = 14; // how far behind the seat centre the backrest stands
 
+// ── task-chair variety ──────────────────────────────────────────────────────────────────────────────
+// Not every desk gets the same chair. The *kind* is a stable per-desk hash (like the surface props), so a
+// desk always shows the same chair frame to frame but the pod reads as a real office — a plain task stool
+// here, a wheeled office chair there, an armed exec seat, the odd high-backed gamer chair. The variation
+// never touches the two load-bearing invariants: the cushion top stays at SEAT_TOP (where `skeleton.ts`
+// lands a seated pelvis) and the backrest keeps its footprint (so a sitter still sorts between the two).
+type ChairKind = 'stool' | 'wheeled' | 'exec' | 'gamer';
+interface ChairStyle {
+  caster: boolean; // a 5-star wheeled base instead of four splayed legs
+  backH: number; // backrest height
+  backW: number; // backrest width along the shoulders
+  arms: boolean; // a low armrest each side
+  headrest: boolean; // a headrest bump above the backrest
+  wings: boolean; // racing-style side bolsters on the backrest
+}
+const CHAIR_STYLE_SALT = 21;
+const CHAIR_ARM_SALT = 22;
+const TASK_CHAIR: ChairStyle = { caster: false, backH: 26, backW: 34, arms: false, headrest: false, wings: false };
+
+function chairKindFor(id: number): ChairKind {
+  const r = deskRnd(id, CHAIR_STYLE_SALT);
+  if (r < 0.34) return 'stool';
+  if (r < 0.62) return 'wheeled';
+  if (r < 0.84) return 'exec';
+  return 'gamer';
+}
+function chairStyleFor(id: number): ChairStyle {
+  const arms = deskRnd(id, CHAIR_ARM_SALT) < 0.5;
+  switch (chairKindFor(id)) {
+    case 'stool':
+      return TASK_CHAIR;
+    case 'wheeled':
+      return { caster: true, backH: 27, backW: 34, arms, headrest: false, wings: false };
+    case 'exec':
+      return { caster: true, backH: 35, backW: 36, arms: true, headrest: false, wings: false };
+    case 'gamer':
+      return { caster: true, backH: 43, backW: 38, arms: true, headrest: true, wings: true };
+  }
+}
+
 /** Legs + cushion — the part a member sits *on*, so it paints before them. */
-function chairBase(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, dir: Dir, color: string): void {
+function chairBase(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  lx: number,
+  ly: number,
+  dir: Dir,
+  color: string,
+  style: ChairStyle = TASK_CHAIR,
+): void {
   const sn = FWD[dir][1] !== 0;
-  for (const [sx, sy] of [
-    [-1, -1],
-    [1, -1],
-    [1, 1],
-    [-1, 1],
-  ] as const) {
-    box(ctx, fit, lx + sx * 10, ly + sy * 10, 4, 4, CHAIR_LIFT, dim(color, 0.6));
+  const p: [number, number] = [-FWD[dir][1], FWD[dir][0]]; // across-seat unit
+  if (style.caster) {
+    // A 5-star caster base: five little wheels on the floor + a central column up to the cushion.
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + 0.4;
+      const wp = project(lx + Math.cos(a) * 14, ly + Math.sin(a) * 14, fit);
+      ellipse(ctx, wp, 4 * fit.scale, 2.3 * fit.scale, dim(color, 0.5));
+    }
+    box(ctx, fit, lx, ly, 6, 6, CHAIR_LIFT, dim(color, 0.55));
+  } else {
+    for (const [sx, sy] of [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ] as const) {
+      box(ctx, fit, lx + sx * 10, ly + sy * 10, 4, 4, CHAIR_LIFT, dim(color, 0.6));
+    }
   }
   // The cushion top is SEAT_TOP — the exact height `skeleton.ts` puts a seated pelvis at, so a member lands
   // on the chair rather than near it.
   box(ctx, fit, lx, ly, sn ? 34 : 30, sn ? 30 : 34, CHAIR_SEAT_H, color, CHAIR_LIFT);
+  // Armrests: a low rail either side, resting on the cushion (so they read beside the sitter's forearms).
+  if (style.arms) {
+    for (const s of [-1, 1] as const) {
+      const ax = lx + p[0] * s * 17;
+      const ay = ly + p[1] * s * 17;
+      box(ctx, fit, ax, ay, sn ? 7 : 5, sn ? 5 : 7, 6, dim(color, 0.72), SEAT_TOP);
+    }
+  }
 }
 
 /** The backrest — its own footprint, so it sorts behind or in front of the sitter purely by facing. */
-function chairBack(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, dir: Dir, color: string): void {
+function chairBack(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  lx: number,
+  ly: number,
+  dir: Dir,
+  color: string,
+  style: ChairStyle = TASK_CHAIR,
+): void {
   const sn = FWD[dir][1] !== 0;
-  box(ctx, fit, lx, ly, sn ? 34 : 7, sn ? 7 : 34, 26, dim(color, 0.85), CHAIR_LIFT + 4);
+  const p: [number, number] = [-FWD[dir][1], FWD[dir][0]];
+  box(ctx, fit, lx, ly, sn ? style.backW : 7, sn ? 7 : style.backW, style.backH, dim(color, 0.85), CHAIR_LIFT + 4);
+  if (style.wings) {
+    // Two darker vertical bolsters at the shoulders — the racing-chair silhouette.
+    for (const s of [-1, 1] as const) {
+      const wx = lx + p[0] * s * (style.backW / 2 - 2);
+      const wy = ly + p[1] * s * (style.backW / 2 - 2);
+      box(ctx, fit, wx, wy, 5, 5, style.backH + 3, dim(color, 0.68), CHAIR_LIFT + 4);
+    }
+  }
+  if (style.headrest) {
+    box(ctx, fit, lx, ly, sn ? 16 : 5, sn ? 5 : 16, 7, dim(color, 0.78), CHAIR_LIFT + 4 + style.backH);
+  }
+}
+
+// ── monitor variety ─────────────────────────────────────────────────────────────────────────────────
+// Desks differ in what's on them: a lone monitor, two panels on a dual-arm stand, or one ultrawide curved
+// screen. Chosen by a stable per-desk hash so the setup never flickers frame to frame. Every panel still
+// lights teal when its member is `working` and stays dim otherwise — the load-bearing work cue is intact.
+type MonitorSetup = 'single' | 'dual' | 'ultrawide';
+const MONITOR_SALT = 31;
+function monitorSetupFor(id: number): MonitorSetup {
+  const r = deskRnd(id, MONITOR_SALT);
+  if (r < 0.52) return 'single';
+  if (r < 0.8) return 'dual';
+  return 'ultrawide';
+}
+
+/** One monitor panel: the stand box + the lit screen face (shown on the camera-facing N/W faces) + a soft
+ * glow. `wAcross` is the panel width along the shoulders; `h` its height; `curved` dims the outer thirds so
+ * an ultrawide reads as bowed toward the viewer. */
+function screenPanel(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  mx: number,
+  my: number,
+  dir: Dir,
+  working: boolean,
+  up: number,
+  wAcross: number,
+  h: number,
+  curved: boolean,
+): void {
+  const sn = dir === 'S' || dir === 'N';
+  const pw = sn ? wAcross : 5;
+  const pd = sn ? 5 : wAcross;
+  box(ctx, fit, mx, my, pw, pd, h, '#2a2e33', up + 8);
+  const scr = working ? '#7fe0ce' : '#4a6b66';
+  const lo = (up + 8) * fit.scale;
+  const hi = (up + 8 + h) * fit.scale;
+  const dn = (p: Pt, u: number): Pt => ({ x: p.x, y: p.y - u });
+  if (dir === 'N') {
+    const D = project(mx - pw / 2, my + pd / 2, fit);
+    const C = project(mx + pw / 2, my + pd / 2, fit);
+    quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], scr);
+    if (curved) {
+      const L2 = project(mx - pw / 6, my + pd / 2, fit);
+      const R2 = project(mx + pw / 6, my + pd / 2, fit);
+      quad(ctx, [dn(D, lo), dn(L2, lo), dn(L2, hi), dn(D, hi)], dim(scr, 0.82));
+      quad(ctx, [dn(R2, lo), dn(C, lo), dn(C, hi), dn(R2, hi)], dim(scr, 0.82));
+    }
+  } else if (dir === 'W') {
+    const B = project(mx + pw / 2, my - pd / 2, fit);
+    const C = project(mx + pw / 2, my + pd / 2, fit);
+    quad(ctx, [dn(B, lo), dn(C, lo), dn(C, hi), dn(B, hi)], scr);
+    if (curved) {
+      const B2 = project(mx + pw / 2, my - pd / 6, fit);
+      const C2 = project(mx + pw / 2, my + pd / 6, fit);
+      quad(ctx, [dn(B, lo), dn(B2, lo), dn(B2, hi), dn(B, hi)], dim(scr, 0.82));
+      quad(ctx, [dn(C2, lo), dn(C, lo), dn(C, hi), dn(C2, hi)], dim(scr, 0.82));
+    }
+  }
+  const g = project(mx, my, fit);
+  ellipse(ctx, { x: g.x, y: g.y - (up + 10 + h) * fit.scale }, wAcross * 0.35 * fit.scale, 4 * fit.scale, working ? '#59c3a3' : '#33504c');
 }
 
 function monitor(
@@ -922,27 +1070,22 @@ function monitor(
   dir: Dir,
   working: boolean,
   surfaceUp: number,
+  id: number | null,
 ): void {
-  const sn = dir === 'S' || dir === 'N';
-  const pw = sn ? 34 : 5;
-  const pd = sn ? 5 : 34;
-  box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
-  box(ctx, fit, mx, my, pw, pd, 22, '#2a2e33', surfaceUp + 8);
-  const scr = working ? '#7fe0ce' : '#4a6b66';
-  const lo = (surfaceUp + 8) * fit.scale;
-  const hi = (surfaceUp + 30) * fit.scale;
-  const dn = (p: Pt, u: number): Pt => ({ x: p.x, y: p.y - u });
-  if (dir === 'N') {
-    const D = project(mx - pw / 2, my + pd / 2, fit);
-    const C = project(mx + pw / 2, my + pd / 2, fit);
-    quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], scr);
-  } else if (dir === 'W') {
-    const B = project(mx + pw / 2, my - pd / 2, fit);
-    const C = project(mx + pw / 2, my + pd / 2, fit);
-    quad(ctx, [dn(B, lo), dn(C, lo), dn(C, hi), dn(B, hi)], scr);
+  const setup = id == null ? 'single' : monitorSetupFor(id);
+  const p: [number, number] = [-FWD[dir][1], FWD[dir][0]]; // across-desk unit
+  if (setup === 'dual') {
+    box(ctx, fit, mx, my, 10, 8, 8, '#33272b', surfaceUp); // shared dual-arm foot
+    for (const s of [-1, 1] as const) {
+      screenPanel(ctx, fit, mx + p[0] * s * 15, my + p[1] * s * 15, dir, working, surfaceUp, 22, 20, false);
+    }
+  } else if (setup === 'ultrawide') {
+    box(ctx, fit, mx, my, 10, 6, 8, '#33272b', surfaceUp);
+    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 54, 20, true);
+  } else {
+    box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
+    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false);
   }
-  const g = project(mx, my, fit);
-  ellipse(ctx, { x: g.x, y: g.y - (surfaceUp + 32) * fit.scale }, 12 * fit.scale, 4 * fit.scale, working ? '#59c3a3' : '#33504c');
 }
 
 // ── desk-surface props: a keyboard + mouse on every desk, plus a deterministic personal mix ──────────
@@ -952,6 +1095,11 @@ function monitor(
 
 const KEYBOARD = '#2b2f36';
 const MOUSE = '#454b54';
+/** Mouse shells, so the peripheral isn't identical desk to desk (paired with keyboard-width variety). */
+const MOUSE_COLORS = ['#454b54', '#5a6069', '#6a5568', '#4a5f57', '#6b5a48'];
+/** Keyboard widths along the shoulders: compact / standard / full — chosen per desk by a stable hash. */
+const KEYBOARD_WIDTHS = [26, 34, 40] as const;
+const KB_SALT = 32;
 /** Distinct "photos" for standing frames — each desk with a frame gets one of these by hash. */
 const PHOTOS = ['#6fa3c9', '#e0a05a', '#8db36a', '#c97f9c', '#9a8fce', '#d9b24a', '#e08585', '#5ab0a4'];
 /** Mug colours, so coffee cups aren't all identical. */
@@ -990,17 +1138,19 @@ function deskPoint(slot: { lx: number; ly: number; dir: Dir }, along: number, ac
   return [slot.lx + f[0] * along - f[1] * across, slot.ly + f[1] * along + f[0] * across];
 }
 
-/** A flat keyboard: a base tray + a slightly raised key deck, oriented across the desk (facing-relative). */
-function deskKeyboard(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, sn: boolean, up: number): void {
-  box(ctx, fit, ix, iy, sn ? 34 : 13, sn ? 13 : 34, 3, KEYBOARD, up);
-  box(ctx, fit, ix, iy, sn ? 30 : 9, sn ? 9 : 30, 4, '#3b414a', up); // key deck, a touch proud of the tray
+/** A flat keyboard: a base tray + a slightly raised key deck, oriented across the desk (facing-relative).
+ * `shoulder` is its width along the shoulders (compact/standard/full) — per-desk, so keyboards vary. */
+function deskKeyboard(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, sn: boolean, up: number, shoulder = 34): void {
+  box(ctx, fit, ix, iy, sn ? shoulder : 13, sn ? 13 : shoulder, 3, KEYBOARD, up);
+  box(ctx, fit, ix, iy, sn ? shoulder - 4 : 9, sn ? 9 : shoulder - 4, 4, '#3b414a', up); // key deck, a touch proud of the tray
 }
 
-/** A little mouse beside the keyboard — long axis pointing front-to-back, rounded top. */
-function deskMouse(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, sn: boolean, up: number): void {
-  box(ctx, fit, ix, iy, sn ? 7 : 11, sn ? 11 : 7, 4, MOUSE, up);
+/** A little mouse beside the keyboard — long axis pointing front-to-back, rounded top. Shell colour varies
+ * per desk (`color`) so no two stations are quite identical. */
+function deskMouse(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, sn: boolean, up: number, color = MOUSE): void {
+  box(ctx, fit, ix, iy, sn ? 7 : 11, sn ? 11 : 7, 4, color, up);
   const g = project(ix, iy, fit);
-  ellipse(ctx, { x: g.x, y: g.y - (up + 4) * fit.scale }, 5 * fit.scale, 3 * fit.scale, '#525863');
+  ellipse(ctx, { x: g.x, y: g.y - (up + 4) * fit.scale }, 5 * fit.scale, 3 * fit.scale, mul(color, 1.2));
 }
 
 function deskCoffee(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number, mug: string, filled: boolean): void {
@@ -1109,9 +1259,11 @@ function drawWorkstation(
 
   // The monitor at the back, then the keyboard + mouse pulled in to where a seated member's hands actually
   // land (`KEYBOARD_ALONG`; `skeleton.ts` reaches for exactly this spot).
-  at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up));
-  at(KEYBOARD_ALONG, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up));
-  at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up));
+  const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
+  const mouseColor = MOUSE_COLORS[Math.floor(deskRnd(id, KB_SALT + 1) * MOUSE_COLORS.length)]!;
+  at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up, id));
+  at(KEYBOARD_ALONG, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up, kbShoulder));
+  at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up, mouseColor));
 
   // optional personal props — each present-or-not per desk by a stable hash, at its own station
   for (const kind of PROP_KINDS) {
@@ -1265,8 +1417,9 @@ export function renderScene(
     const bx = cx - f[0] * CHAIR_BACK_OFF;
     const by = cy - f[1] * CHAIR_BACK_OFF;
     const chairColor = node ? hslL(node.color, 0.5) : '#4a5560';
-    items.push({ d: depth(cx, cy) - 0.2, fn: () => chairBase(ctx, fit, cx, cy, slot.dir, chairColor) });
-    items.push({ d: depth(bx, by), fn: () => chairBack(ctx, fit, bx, by, slot.dir, chairColor) });
+    const chairStyle = chairStyleFor(slot.id);
+    items.push({ d: depth(cx, cy) - 0.2, fn: () => chairBase(ctx, fit, cx, cy, slot.dir, chairColor, chairStyle) });
+    items.push({ d: depth(bx, by), fn: () => chairBack(ctx, fit, bx, by, slot.dir, chairColor, chairStyle) });
   }
 
   // Queue lane: a faint pad under each overflow (strip) member so the entrance line reads as a designated

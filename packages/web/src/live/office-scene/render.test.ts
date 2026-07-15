@@ -2,7 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { fitFloor } from './iso';
 import { DESK_SLOTS } from './layout';
 import { computeLightEnv } from './lighting';
-import { animatedDeskAnchors, glassColor } from './render';
+import { animatedDeskAnchors, glassColor, renderScene } from './render';
+
+/** A no-op 2D context that records nothing — just enough surface for the scene's draw calls so we can
+ * assert the whole painter's-order pass runs end to end without throwing. */
+function mockCtx(): CanvasRenderingContext2D {
+  const grad = { addColorStop() {} };
+  const handler: ProxyHandler<Record<string, unknown>> = {
+    get(target, prop) {
+      if (prop === 'canvas') return { width: 1200, height: 900 };
+      if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => grad;
+      if (prop === 'measureText') return () => ({ width: 0 });
+      if (prop in target) return target[prop as string];
+      return () => undefined; // every draw method is a no-op
+    },
+    set() {
+      return true; // fillStyle/strokeStyle/font/etc. — accept and ignore
+    },
+  };
+  return new Proxy({}, handler) as unknown as CanvasRenderingContext2D;
+}
 
 /** The fan/coffee overlay anchors (Tier-A animated props). The key behaviour: a fan only spins and a mug
  * only steams at an *occupied* desk — an unattended running fan or a steaming fresh mug reads as wrong. */
@@ -43,6 +62,23 @@ describe('animatedDeskAnchors', () => {
     const minusOne = new Set(allSlots);
     minusOne.delete(mugSlot!.id);
     expect(animatedDeskAnchors(fit, minusOne).coffees.length).toBe(full - 1);
+  });
+});
+
+/** The full painter's-order pass. An *empty* office still draws all 12 workstations — every chair (the
+ * per-desk style variety), every monitor setup, keyboard and mouse — so this exercises the whole furniture
+ * surface, including the stable per-desk chair/monitor/peripheral variation, without needing live actors. */
+describe('renderScene draws the whole office without throwing', () => {
+  const fit = fitFloor(1200, 900);
+  const empty = new Map();
+
+  it('renders an empty office (all desks vacant) — every chair style + monitor setup drawn', () => {
+    expect(() => renderScene(mockCtx(), fit, empty, new Map(), new Map())).not.toThrow();
+  });
+
+  it('renders through the day and the night lighting envelopes', () => {
+    expect(() => renderScene(mockCtx(), fit, empty, new Map(), new Map(), 0, 'revive', computeLightEnv(12, true))).not.toThrow();
+    expect(() => renderScene(mockCtx(), fit, empty, new Map(), new Map(), 0, 'revive', computeLightEnv(1, false))).not.toThrow();
   });
 });
 
