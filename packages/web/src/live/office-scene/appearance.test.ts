@@ -56,6 +56,16 @@ describe('variety', () => {
     expect(bearded).toBeLessThan(0.7);
   });
 
+  it('gives accessories (the per-person quirk) to some but keeps them rare, and varies the smile', () => {
+    const accessorised = looks.filter((l) => l.accessory !== 'none').length / looks.length;
+    expect(accessorised).toBeGreaterThan(0);
+    expect(accessorised).toBeLessThan(0.6);
+    // more than one kind of accessory shows up across the roster
+    expect(new Set(looks.map((l) => l.accessory)).size).toBeGreaterThan(2);
+    // both smile widths are present
+    expect(new Set(looks.map((l) => l.smile)).size).toBe(2);
+  });
+
   it('never gives anyone hair that vanishes into their skin', () => {
     // With a full-rainbow skin palette, an independent hair pick eventually puts green hair on a green
     // head — which at 30px is not a person, it is a blob. (This shipped once; the sheet caught it.)
@@ -91,6 +101,12 @@ describe('the identity read (load-bearing)', () => {
     for (const n of NAMES) expect(agent(n).facialHair).toBe('none');
     // ...and humans do get it, so the absence is a tell rather than an oversight.
     expect(NAMES.some((n) => human(n).facialHair !== 'none')).toBe(true);
+  });
+
+  it('never puts glasses on an agent — a visor has nowhere for them to sit (like facial hair)', () => {
+    for (const n of NAMES) expect(agent(n).accessory).not.toBe('glasses');
+    // ...but humans do wear them, so the absence is a rule rather than a dead feature.
+    expect(NAMES.some((n) => human(n).accessory === 'glasses')).toBe(true);
   });
 
   it('dresses the same person the same way whichever kind they are, apart from the tell', () => {
