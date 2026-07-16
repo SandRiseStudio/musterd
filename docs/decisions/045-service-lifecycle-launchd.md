@@ -55,6 +55,14 @@ checkout is picked up by re-running `install`) and avoids the brittle versioned 
 hand-authored plist used. launchd's `PATH` is set explicitly (node's dir + Homebrew + system) so child
 shellouts (osascript/notify-send/tail) resolve. `--port`/`--host` flow into the embedded `serve` args.
 
+The plist is thus the record of **which checkout the daemon runs from**, and the lifecycle ops read it
+back rather than re-deriving from the caller. `install` legitimately embeds the *invoked* checkout (you
+are installing this one). But `refresh` — which rebuilds source and bounces — reads the daemon's real
+checkout back **out of the installed plist** (its `ProgramArguments`) and rebuilds that, not wherever the
+CLI happened to be invoked from ([ADR 118](118-service-refresh.md); issue #289). `restart`/`stop`/`start`
+never had the ambiguity — they target the daemon by launchd **label**. This keeps a `refresh` run from a
+seat worktree from silently rebuilding the worktree and bouncing the daemon onto its own unchanged dist.
+
 ### 4. No new dependency; macOS-only with a named cross-platform seam
 
 `launchctl` is an OS tool we invoke via `child_process` (hard rule #6) — no npm package, mirroring ADR
