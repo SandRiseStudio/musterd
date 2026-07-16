@@ -180,10 +180,9 @@ export function registerInsights(server: McpServer, client: MusterdClient): void
     'team_report',
     {
       description:
-        "The insight report (ADR 050) — leadership projections over the team's lanes + act log, one " +
-        'derived truth at three altitudes: ic (the Goal board), team (flow metrics: throughput, cycle ' +
-        'time, WIP + steering latency / stale-work-caught + the waiting-on view), exec (milestones + ' +
-        'exceptions). Nothing stored; measures outcomes and queues, never message volume.',
+        'The insight report over lanes + the act log at three altitudes: ic (the Goal board), ' +
+        'team (flow, steering, waiting-on — the default), exec (milestones + exceptions). ' +
+        'Derived, never stored; measures outcomes and queues, not message volume.',
       inputSchema: {
         altitude: z
           .enum(['ic', 'team', 'exec'])

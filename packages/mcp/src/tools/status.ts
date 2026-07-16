@@ -3,9 +3,8 @@ import type { MusterdClient } from '../client.js';
 import { buildSkewWarning, formatRoster, textResult } from './format.js';
 
 const DESCRIPTION =
-  'The team roster, grouped by working / here / out: who is on the team, what each of them is ' +
-  'currently working on, the model they run, and where. Use it to see what the team is doing before ' +
-  'you pick up work, and to decide who to hand off to or ask for help.';
+  'The team roster grouped by working / here / out: who is on the team, what each is working ' +
+  'on, their model, and where. Check it before picking up work or choosing who to hand off to.';
 
 export function registerStatus(server: McpServer, client: MusterdClient): void {
   server.registerTool('team_status', { description: DESCRIPTION, inputSchema: {} }, async () => {

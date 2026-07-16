@@ -53,9 +53,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_open',
     {
       description:
-        'Open a lane — declare a unit of work (title + the paths it will touch + what it builds on). ' +
-        'Set claim=true to own it yourself (the usual task-start move). Returns the lane + any ' +
-        'contention warnings (unmet dependency / surface overlap) — advisory, never blocking.',
+        'Declare a unit of work as a lane: title, the paths it touches, what it builds on. ' +
+        'claim:true owns it now — the usual task-start move. Returns the lane + advisory ' +
+        'contention warnings (unmet dependency, surface overlap) — never blocking.',
       inputSchema: {
         title: z.string().describe('the work-item, short'),
         detail: z.string().optional().describe('acceptance criteria / notes'),
@@ -69,9 +69,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         goal_id: z
           .string()
           .optional()
-          .describe(
-            'link this lane to a Goal (ADR 084) — the id `team_next` groups + derives status by',
-          ),
+          .describe('link this lane to a Goal (team_next groups by it)'),
         role: z.string().optional().describe('assignment hint (advisory)'),
         claim: z.boolean().optional().describe('own it yourself now (recommended at task start)'),
       },
@@ -110,9 +108,8 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_board',
     {
       description:
-        'The lane board — who owns what, in what state, with live contention warnings. Pull this at ' +
-        'task start and before picking up new work (the roster says who is present; the board says ' +
-        'who owns what).',
+        'The lane board: who owns what, in what state, with live contention warnings. Pull at ' +
+        'task start and before picking up new work.',
       inputSchema: {
         project: z.string().optional().describe('filter to one project'),
         mine: z.boolean().optional().describe('only lanes I own'),
@@ -135,8 +132,8 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_handoff',
     {
       description:
-        'Transfer a lane to another seat, carrying the branch — the work arrives as an artifact the ' +
-        'recipient builds on, not a description they re-derive. The recipient gets a directed wake.',
+        'Hand a lane to another seat, carrying its branch so the work arrives as an artifact, ' +
+        'not a description. The recipient gets a directed wake.',
       inputSchema: {
         id: z.string().describe('lane id'),
         to: z.string().describe('recipient seat name'),
@@ -160,8 +157,8 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_update',
     {
       description:
-        'Update a lane — state (active/blocked/…), surface, dependencies, branch, detail. Going ' +
-        'active re-runs the contention checks.',
+        'Update a lane: state (active/blocked/done/…), surface, dependencies, branch, detail. ' +
+        'Going active re-runs contention checks.',
       inputSchema: {
         id: z.string().describe('lane id'),
         state: z
@@ -189,13 +186,12 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_resolve',
     {
       description:
-        'Mark a lane done — closure as a state transition, not a courtesy message. Clears its ' +
-        'warnings and releases its surface. On a branch-carrying lane that landed, attest the merge ' +
-        '(ADR 109): pass pr/sha/authorized_by so the audit log joins your seat to the landed SHA and ' +
-        'the authorizing human (grant issuer or request decider).',
+        'Mark a lane done — clears its warnings and releases its surface. If its branch landed, ' +
+        'attest the merge: pass pr, sha, and authorized_by so the audit log joins your seat to ' +
+        'the landed SHA and the authorizing human.',
       inputSchema: {
         id: z.string().describe('lane id'),
-        pr: z.number().int().optional().describe('landed PR number (ADR 109 merge attestation)'),
+        pr: z.number().int().optional().describe('landed PR number'),
         sha: z.string().optional().describe('squash-merge SHA on main'),
         authorized_by: z
           .string()
@@ -225,9 +221,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'team_next',
     {
       description:
-        'Your orientation brief (ADR 049/084) — self-orient at the start of a session without a ' +
-        'human-authored prompt: what you are carrying, what just shipped, open lanes to pick up, and ' +
-        "the latest handoff *why*. Derived from the team's own lane/act state; call it at task start.",
+        'Your orientation brief at session start: what you are carrying, what just shipped, open ' +
+        "lanes to pick up, and the latest handoff's why — derived from the team's own lane and " +
+        'act state, no human prompt needed.',
       inputSchema: {},
     },
     async () => {

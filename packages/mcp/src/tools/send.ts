@@ -13,16 +13,16 @@ import type { McpConfig } from '../config.js';
 import { withTraceContext } from '../otel.js';
 import { notReadyMessage, textResult } from './format.js';
 
+// Rewritten for concision + retrievability (ADR 144 inc 2): the act vocabulary is the API and
+// stays complete, one terse clause each; the plan-epoch/interrupt mechanics live in the skill.
 const DESCRIPTION =
-  'Send a message to a teammate, the whole team, or broadcast. Use the right act: ' +
-  'status_update to report progress, request_help when blocked, handoff to pass work, ' +
-  'accept/decline to answer a request_help/handoff/challenge (auto-targets the latest open one — set reply_to to override), ' +
-  'wait to signal you are paused, resolve to close a thread when the work is done (set thread to the thread/root id). ' +
-  'Steering (ADR 103): steer to change direction (always interrupts; the newest steer supersedes prior direction — ' +
-  "add meta.goal_id to scope it to a Goal, which bumps that Goal's plan epoch), " +
-  'challenge to make a teammate justify a task/assumption or reconsider (answer it with an accept carrying evidence), ' +
-  'defer to reorder/defer a Goal on the plan (set meta.goal_id, optional meta.wave — a number reorders, "later" defers). ' +
-  'defer/steer on a Goal actually re-sequence it and flag lanes left building against the older plan (ADR 111).';
+  "Send an act to a teammate, '@team', or '@broadcast'. Acts: status_update = report progress; " +
+  'request_help = you are blocked; handoff = pass work; accept/decline = answer the latest open ' +
+  'ask (set reply_to to override); wait = paused; resolve = close a thread (set thread to its ' +
+  'root id); steer = redirect a teammate (interrupts; newest steer wins; meta.goal_id scopes it ' +
+  'to a Goal); challenge = demand justification (answered by an accept with evidence); defer = ' +
+  "re-sequence a Goal (meta.goal_id, meta.wave: a number reorders, 'later' defers). Goal-scoped " +
+  'steer/defer re-sequence the plan and flag lanes building against the old one.';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };
@@ -70,9 +70,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
         reply_to: z
           .string()
           .optional()
-          .describe(
-            'message id this accepts/declines (optional — accept/decline auto-target the latest open request_help/handoff)',
-          ),
+          .describe('message id this accepts/declines; omit to answer the latest open ask'),
         meta: z.record(z.unknown()).optional().describe('act-specific fields, e.g. {progress:0.5}'),
       },
     },

@@ -13,16 +13,14 @@ import { notReadyMessage, textResult } from './format.js';
  */
 
 const SAVE_DESCRIPTION =
-  "Save this seat's memory — the working state your next session (or a successor occupant) needs: " +
-  'what you were doing, decisions mid-flight, where you left off. Call at natural boundaries: before ' +
-  'a handoff, at a wrap-up status_update, when told to wind down. One note per seat, last-write-wins ' +
-  '(this replaces the previous note). Headline ≤120 chars (the commit-subject discipline — it is the ' +
-  'one line the next occupy shows); body ≤8KB. Private to this seat; never put secrets in it.';
+  "Save this seat's memory for the next session or occupant: what you were doing, decisions " +
+  'mid-flight, where you left off. Call before a handoff, at wrap-up, or when winding down. ' +
+  'One note per seat, last-write-wins. headline ≤120 chars (shown on the next occupy); body ' +
+  '≤8KB. Private to this seat; never store secrets.';
 
 const READ_DESCRIPTION =
-  "Load this seat's saved memory — the full note behind the one-line pointer team_join showed. " +
-  'Call it when the headline looks relevant to what you are about to do; the age is shown so you ' +
-  'can judge staleness yourself.';
+  "Load this seat's saved memory — the full note behind the headline team_join showed. Call " +
+  'when the headline looks relevant; judge staleness from its age.';
 
 function ago(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -49,10 +47,8 @@ export function registerMemory(server: McpServer, client: MusterdClient): void {
     {
       description: SAVE_DESCRIPTION,
       inputSchema: {
-        headline: z
-          .string()
-          .describe('one-line subject (≤120 chars) — what the next session sees on occupy'),
-        body: z.string().optional().describe('the full note (≤8KB); omit for a headline-only note'),
+        headline: z.string().describe('one-line subject (≤120 chars)'),
+        body: z.string().optional().describe('the full note (≤8KB); omit for headline-only'),
       },
     },
     async (args) => {
