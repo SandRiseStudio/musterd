@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
-import { LIVE_LABEL, LIVE_SYNC_LABEL, SERVICE_LABEL } from '../service/launchd.js';
+import { buildPlist, LIVE_LABEL, LIVE_SYNC_LABEL, SERVICE_LABEL } from '../service/launchd.js';
 import type { LiveCtx } from '../service/live.js';
 import type { RunResult, Runner, ServiceCtx } from '../service/manage.js';
 import { serviceCommand } from './service.js';
@@ -26,6 +26,13 @@ describe('serviceCommand', () => {
       path: '/usr/bin:/bin',
       run: runner,
       sleep: () => {},
+      readFile: (p) => {
+        try {
+          return readFileSync(p, 'utf8');
+        } catch {
+          return null;
+        }
+      },
     };
   }
   const recorder =
@@ -258,6 +265,64 @@ describe('serviceCommand', () => {
     expect(out).toContain('synced');
     expect(out).toContain('rebuilt dist');
     expect(out).toContain('restarted the musterd daemon on bbb222');
+  });
+
+  // Issue #289: run from a seat worktree, refresh must still target the DAEMON's own checkout —
+  // read back from the installed plist — not the invoked CLI's `workingDir`, which used to silently
+  // rebuild the worktree and restart the daemon on stale code.
+  it('refresh targets the daemon checkout from the plist, not the invoked CLI', async () => {
+    writeFileSync(
+      join(dir, 'agent.plist'),
+      buildPlist({
+        label: SERVICE_LABEL,
+        node: '/opt/homebrew/bin/node',
+        binJs: '/Users/nick/agents/packages/cli/dist/bin.js', // daemon runs from ~/agents
+        serveArgs: ['serve'],
+        workingDir: '/Users/nick/agents',
+        stdoutPath: '/l',
+        stderrPath: '/e',
+        path: '/p',
+      }),
+    );
+    // ...but the CLI was invoked from a seat worktree.
+    const c = { ...ctx(refreshRunner()), workingDir: '/Users/nick/agents-stanley' };
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    // every git op runs against the daemon's checkout, never the worktree the CLI ran from.
+    const gitDirs = calls
+      .filter((x) => x.cmd === 'git')
+      .map((x) => x.args[x.args.indexOf('-C') + 1]);
+    expect(gitDirs.every((d) => d === '/Users/nick/agents')).toBe(true);
+    expect(calls.some((x) => x.cmd === 'pnpm' && x.args.includes('/Users/nick/agents'))).toBe(true);
+    expect(
+      calls.some((x) => x.cmd === 'pnpm' && x.args.includes('/Users/nick/agents-stanley')),
+    ).toBe(false);
+    expect(out).toContain("targeting the daemon's own checkout");
+    expect(out).toContain('/Users/nick/agents-stanley'); // names where you invoked from
+  });
+
+  it('refresh falls back to the invoked checkout when no plist is installed', async () => {
+    // No plist written → daemonCheckout returns null → behaves exactly as before.
+    const c = ctx(refreshRunner());
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    const gitDirs = calls
+      .filter((x) => x.cmd === 'git')
+      .map((x) => x.args[x.args.indexOf('-C') + 1]);
+    expect(gitDirs.every((d) => d === '/repo')).toBe(true);
+    expect(out).not.toContain("targeting the daemon's own checkout");
   });
 
   it('refresh refuses to clobber uncommitted changes (no build/restart)', async () => {

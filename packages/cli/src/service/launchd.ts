@@ -45,6 +45,32 @@ function xmlEscape(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** Inverse of {@link xmlEscape} — `&amp;` must resolve last so `&amp;lt;` round-trips to `&lt;`. */
+function xmlUnescape(s: string): string {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
+}
+
+/**
+ * Read an installed daemon plist back to the `ProgramArguments` it runs — `[node, binJs, 'serve',
+ * …]`. This is how `service refresh` learns the checkout the daemon *actually* runs from (ADR 118
+ * hardening): the plist is the source of truth, not wherever the CLI happened to be invoked from, so
+ * running `refresh` from a seat worktree still rebuilds the daemon's own checkout instead of silently
+ * rebuilding the worktree and restarting the daemon on stale code. Returns null when the file isn't a
+ * parseable plist with a non-empty `ProgramArguments` array.
+ */
+export function parsePlistProgramArguments(xml: string): string[] | null {
+  const block = xml.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/);
+  if (!block) return null;
+  const strings = [...block[1]!.matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) =>
+    xmlUnescape(m[1]!),
+  );
+  return strings.length > 0 ? strings : null;
+}
+
 export interface PlistOpts {
   label: string;
   /** Absolute node binary (the one running the CLI — `process.execPath`). */
