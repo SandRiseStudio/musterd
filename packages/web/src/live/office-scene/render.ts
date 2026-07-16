@@ -1735,17 +1735,41 @@ export interface SceneAnchors {
   bases: Map<string, Pt>;
 }
 
+/** A soft additive warm pool: an ellipse of warm light that *adds* back over the night veil. */
+function warmPool(ctx: CanvasRenderingContext2D, p: Pt, r: number, flatten: number, color: string, peak: number): void {
+  const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+  g.addColorStop(0, `rgba(${color}, ${peak})`);
+  g.addColorStop(1, `rgba(${color}, 0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(p.x, p.y, r, r * flatten, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 /**
  * Interior lighting pass, painted after all furniture/actors: a cool night veil at `env.veilAlpha` (an
- * empty office after dark goes properly dark; an occupied one is lifted by the overhead fill so it reads
- * lit), then a warm floor pool under every *lit* desk lamp — drawn additively so occupied desks glow
- * through the dark like real lamps. During the day `veilAlpha` is ~0 and lamps are off, so this no-ops.
+ * empty office after dark goes properly dark), then — gated on it being dark enough to want the lights on
+ * (`env.lampsOn`) — the warm sources that punch back through the veil, all additive and all scaled by how
+ * deep the night is (`night`), so the room stays cosy-dark but never pitch black:
+ *
+ *  - **The string lights emit** — each bulb (same anchors the canvas paints, see `magicAnchors`) casts a
+ *    faint warm pool down the wall and onto the floor beneath it. Previously the bulbs glowed but lit nothing.
+ *  - **Desk lamps** — the existing warm pool under every lit desk lamp (occupied desk, dark out).
+ *  - **A personal glow per present member** — a soft warm pool that travels with each online member, so
+ *    the character work (faces, cheeks, the round body) never dissolves into the veil away from a lamp.
+ *
+ * Kept deliberately gentle: the office is meant to read *dim and cosy* after dark (the overhead fill the
+ * lighting model already bakes into an occupied room is the only ceiling light — these just add warmth and
+ * legibility, they don't try to light the room up). During the day `veilAlpha` is ~0 and `lampsOn` is
+ * false, so everything below no-ops.
  */
 function drawInteriorLight(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   env: LightEnv,
   slotMember: Map<number, string>,
+  poses: Map<string, Pose>,
+  byName: Map<string, OfficeNode>,
 ): void {
   if (env.veilAlpha > 0.01) {
     ctx.save();
@@ -1755,21 +1779,36 @@ function drawInteriorLight(
     ctx.restore();
   }
   if (!env.lampsOn) return;
+  // How deep the night is, 0..1 — the warm sources scale by it, so they fade in as dusk falls rather than
+  // snapping on at the lamp threshold.
+  const night = Math.min(1, env.veilAlpha / 0.55);
+
   ctx.save();
-  ctx.globalCompositeOperation = 'lighter'; // additive: the pool *adds* light back over the veil
-  for (const slot of DESK_SLOTS) {
-    if (!slotMember.has(slot.id) || !deskHasProp(slot.id, 'lamp')) continue; // lit lamps only (occupied desk)
-    const [ix, iy] = deskPoint(slot, PROP_SPEC.lamp.along, PROP_SPEC.lamp.across);
-    const p = project(ix, iy, fit);
-    const r = 72 * fit.scale;
-    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-    g.addColorStop(0, 'rgba(255, 200, 120, 0.42)');
-    g.addColorStop(1, 'rgba(255, 200, 120, 0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.ellipse(p.x, p.y, r, r * 0.62, 0, 0, Math.PI * 2);
-    ctx.fill();
+  ctx.globalCompositeOperation = 'lighter'; // additive: each pool *adds* light back over the veil
+
+  // The string lights emit: a faint warm pool cast down from each bulb onto the wall + floor beneath it.
+  for (const b of magicAnchors(fit).bulbs) {
+    warmPool(ctx, { x: b.x, y: b.y + 22 * fit.scale }, 38 * fit.scale, 0.9, '255, 198, 118', 0.1 * night);
   }
+
+  // Desk lamps — a warm floor pool under each lit lamp (occupied desk).
+  for (const slot of DESK_SLOTS) {
+    if (!slotMember.has(slot.id) || !deskHasProp(slot.id, 'lamp')) continue;
+    const [ix, iy] = deskPoint(slot, PROP_SPEC.lamp.along, PROP_SPEC.lamp.across);
+    warmPool(ctx, project(ix, iy, fit), 72 * fit.scale, 0.62, '255, 200, 120', 0.42);
+  }
+
+  // A personal glow travelling with each present (online) member — just enough to keep the character work
+  // (faces, cheeks, the round body) from dissolving into the veil away from a lamp. Kept subtle on purpose.
+  for (const [name, pose] of poses) {
+    const node = byName.get(name);
+    if (!node || node.presence !== 'online') continue;
+    const b = project(pose.lx, pose.ly, fit);
+    const scale = pose.small ? 0.7 : 1;
+    // centred a little up the body so it warms the face/torso, not just the floor at the feet
+    warmPool(ctx, { x: b.x, y: b.y - 30 * fit.scale * scale }, 40 * fit.scale * scale, 0.9, '255, 214, 158', 0.13 * night);
+  }
+
   ctx.restore();
 }
 
@@ -1913,7 +1952,7 @@ export function renderScene(
   for (const it of items) it.fn();
 
   // Interior lighting: veil the room to the night level, then let occupied desks' lamps glow through.
-  drawInteriorLight(ctx, fit, env, slotMember);
+  drawInteriorLight(ctx, fit, env, slotMember, poses, byName);
 
   // Collapse any queue/nook members past the render cap into a single "+N" pill, so a very large roster
   // stays bounded. Hidden count = placed-but-not-drawn (capped members get no pose in homePoses).
