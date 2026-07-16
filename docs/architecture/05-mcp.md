@@ -100,14 +100,20 @@ This section contracts the **six core team tools** verbatim; the lane, goal, sea
 tools (18 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093). Two lifecycle
 tools (`team_join` / `team_leave`) gate the working tools. Inspection (`team_status` / `team_members`) works while dormant/pending; sending and inbox draining require a live join.
 
-Tool names are stable; descriptions are written for the _agent_ reading them.
+Tool names are stable; descriptions are written for the _agent_ reading them — concise,
+front-loaded (what it does, when to call it), no ADR references (maintainer context lives in code
+comments; on-demand depth lives in the skill, ADR 085). **Naming convention (ADR 144 inc 2):**
+`<namespace>_<operation>`, two deliberate namespaces — `team_*` (coordination: presence, acts,
+goals, memory, insight) and `lane_*` (the work-board sub-surface). The split is intentional, not
+drift (MCP spec #2808's namespacing direction favors several small namespaces over one flat
+prefix); the full statement lives in `toolNames.ts`.
 
 ### `team_join` (overloaded — claim-on-first-use, ADR 032)
 
 ```json
 {
   "name": "team_join",
-  "description": "Claim a seat on your team and go online — call this once when you start working. Overloaded (claim-on-first-use): {as:\"Ada\"} claims a named seat (auto-minted if new); {role:\"backend\"} claims the next open seat in a role pool (e.g. backend-2); {} uses this folder's claim policy. The result tells you who you are. Until you claim you are a pending presence — reachable, but you cannot send or check your inbox. After joining, check your inbox.",
+  "description": "Claim your seat on the team and go online — call once when you start working. {as:\"Ada\"} claims a named seat (auto-minted if new); {role:\"backend\"} claims the next open seat in that pool; {} uses this folder's claim policy. Blocks until an admin approves when approval is needed, so one call gets you seated. After joining, check your inbox.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -128,7 +134,7 @@ Resolves the target (`as` → named seat; `role` → next `<role>-<n>` handle; n
 ```json
 {
   "name": "team_leave",
-  "description": "Leave the team and go offline (release your seat). Call this when you finish working or step away for a while. The seat is held briefly (~45s) so you can rejoin without losing it; the musterd tools stay available, and team_join brings you back online.",
+  "description": "Go offline and release your seat — call when you finish working or step away. The seat is held ~45s for a quick rejoin; team_join brings you back.",
   "inputSchema": { "type": "object", "properties": {} }
 }
 ```
@@ -140,7 +146,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
 ```json
 {
   "name": "team_send",
-  "description": "Send a message to a teammate, the whole team, or broadcast. Use the right act: status_update to report progress, request_help when blocked, handoff to pass work, accept/decline to answer a request_help/handoff/challenge (auto-targets the latest open one — set reply_to to override), wait to signal you're paused, resolve to close a thread when the work is done (set thread to the thread/root id). Steering (ADR 103): steer to change direction (always interrupts; the newest steer supersedes prior direction), challenge to make a teammate justify a task/assumption or reconsider (answer it with an accept carrying evidence), defer to reorder/defer a Goal on the plan (set meta.goal_id, optional meta.wave — a number reorders, \"later\" defers).",
+  "description": "Send an act to a teammate, '@team', or '@broadcast'. Acts: status_update = report progress; request_help = you are blocked; handoff = pass work; accept/decline = answer the latest open ask (set reply_to to override); wait = paused; resolve = close a thread (set thread to its root id); steer = redirect a teammate (interrupts; newest steer wins; meta.goal_id scopes it to a Goal); challenge = demand justification (answered by an accept with evidence); defer = re-sequence a Goal (meta.goal_id, meta.wave: a number reorders, 'later' defers). Goal-scoped steer/defer re-sequence the plan and flag lanes building against the old one.",
   "inputSchema": {
     "type": "object",
     "required": ["act", "body"],
@@ -172,7 +178,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
       },
       "reply_to": {
         "type": "string",
-        "description": "message id this accepts/declines (optional — accept/decline auto-target the latest open request_help/handoff, ADR 067)"
+        "description": "message id this accepts/declines; omit to answer the latest open ask"
       },
       "meta": {
         "type": "object",
@@ -190,7 +196,7 @@ Maps `to` → Recipient (`@team`/`@broadcast`/name), builds an Envelope (`from`=
 ```json
 {
   "name": "team_inbox_check",
-  "description": "Check for new messages addressed to you or the team since you last checked. Returns unread messages and marks them read. Call this when you want to see if teammates have responded or need you.",
+  "description": "Check unread messages addressed to you or the team, marking them read. Call at task start, task end, and after heads-down work — directed asks and replies only surface when you check.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -208,7 +214,7 @@ Drains the in-memory buffer + `GET /inbox?unread=1`, advances the cursor, return
 ```json
 {
   "name": "team_status",
-  "description": "List the team roster: who's a member, their role, kind (agent/human), and whether they're currently online and on what surface.",
+  "description": "The team roster grouped by working / here / out: who is on the team, what each is working on, their model, and where. Check it before picking up work or choosing who to hand off to.",
   "inputSchema": { "type": "object", "properties": {} }
 }
 ```
@@ -220,7 +226,7 @@ Drains the in-memory buffer + `GET /inbox?unread=1`, advances the cursor, return
 ```json
 {
   "name": "team_members",
-  "description": "Get detail on one member (or all): kind, role, lifecycle, current presences/surfaces. Use to decide who to hand off to or ask for help.",
+  "description": "Detail on one member (or all): current work, model, role, presence. Use to pick who to hand off to or ask for help.",
   "inputSchema": {
     "type": "object",
     "properties": {

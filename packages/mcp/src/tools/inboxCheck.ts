@@ -6,10 +6,8 @@ import { linkReceived } from '../otel.js';
 import { buildSkewWarning, formatMessage, notReadyMessage, textResult } from './format.js';
 
 const DESCRIPTION =
-  'Check for new messages addressed to you or the team since you last checked. ' +
-  'Returns unread messages and marks them read. Call this to see if teammates have responded or need you. ' +
-  'Best practice: call it at the start and end of each task and whenever you finish a reply — teammates may ' +
-  'be waiting on you, and messages that arrived while you were heads-down only surface when you check.';
+  'Check unread messages addressed to you or the team, marking them read. Call at task start, ' +
+  'task end, and after heads-down work — directed asks and replies only surface when you check.';
 
 export function registerInboxCheck(server: McpServer, client: MusterdClient): void {
   server.registerTool(

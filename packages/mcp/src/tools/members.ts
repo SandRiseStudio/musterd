@@ -4,8 +4,8 @@ import type { MusterdClient } from '../client.js';
 import { formatMember, textResult } from './format.js';
 
 const DESCRIPTION =
-  'Get detail on one member (or all): what they are working on, the model they run, their role, ' +
-  'and where they are present. Use to decide who to hand off to or ask for help.';
+  'Detail on one member (or all): current work, model, role, presence. Use to pick who to hand ' +
+  'off to or ask for help.';
 
 export function registerMembers(server: McpServer, client: MusterdClient): void {
   server.registerTool(

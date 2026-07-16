@@ -24,8 +24,8 @@ export function registerGoals(server: McpServer, client: MusterdClient): void {
     'team_goals',
     {
       description:
-        "List the team's declared Goals with derived status (planned/in-flight/shipped, computed from " +
-        'the lanes joined to each). The coarse outcome layer above lanes; team_next picks the next one.',
+        'List declared Goals with derived status (planned/in-flight/shipped, computed from their ' +
+        'lanes) — the outcome layer above lanes; team_next picks the next one.',
       inputSchema: {},
     },
     async () => {
@@ -44,9 +44,9 @@ export function registerGoals(server: McpServer, client: MusterdClient): void {
     'team_goal_declare',
     {
       description:
-        'Declare a team Goal (a declared outcome). Lanes link to it via goal_id; its status is derived ' +
-        'from those lanes, never stored. Re-declaring the same id amends it. Optional wave (build order) ' +
-        'and depends_on (goal ids that must ship first) drive what team_next suggests.',
+        'Declare a Goal (a named outcome). Lanes link to it via goal_id; status is derived from ' +
+        'them, never stored. Re-declaring the same id amends it. wave sets build order; ' +
+        'depends_on names goals that must ship first.',
       inputSchema: {
         id: z.string().describe('stable Goal id, e.g. "orientation-spine"'),
         title: z.string().describe('the outcome, short'),

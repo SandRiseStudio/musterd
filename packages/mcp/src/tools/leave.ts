@@ -4,9 +4,8 @@ import type { McpConfig } from '../config.js';
 import { textResult } from './format.js';
 
 const DESCRIPTION =
-  'Leave the team and go offline (release your seat). Call this when you finish working or step ' +
-  'away for a while. The seat is held briefly (~45s) so you can rejoin without losing it; the ' +
-  'musterd tools stay available, and team_join brings you back online.';
+  'Go offline and release your seat — call when you finish working or step away. The seat is ' +
+  'held ~45s for a quick rejoin; team_join brings you back.';
 
 export function registerLeave(server: McpServer, client: MusterdClient, config: McpConfig): void {
   server.registerTool('team_leave', { description: DESCRIPTION, inputSchema: {} }, async () => {
