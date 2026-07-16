@@ -1786,9 +1786,10 @@ function drawInteriorLight(
   ctx.save();
   ctx.globalCompositeOperation = 'lighter'; // additive: each pool *adds* light back over the veil
 
-  // The string lights emit: a faint warm pool cast down from each bulb onto the wall + floor beneath it.
+  // The string lights emit: a warm pool cast down from each bulb onto the wall + floor beneath it. Tuned
+  // to actually read against the veil (a first pass was too faint to see) while staying a warm accent.
   for (const b of magicAnchors(fit).bulbs) {
-    warmPool(ctx, { x: b.x, y: b.y + 22 * fit.scale }, 38 * fit.scale, 0.9, '255, 198, 118', 0.1 * night);
+    warmPool(ctx, { x: b.x, y: b.y + 24 * fit.scale }, 52 * fit.scale, 0.95, '255, 200, 120', 0.2 * night);
   }
 
   // Desk lamps — a warm floor pool under each lit lamp (occupied desk).
@@ -1806,7 +1807,7 @@ function drawInteriorLight(
     const b = project(pose.lx, pose.ly, fit);
     const scale = pose.small ? 0.7 : 1;
     // centred a little up the body so it warms the face/torso, not just the floor at the feet
-    warmPool(ctx, { x: b.x, y: b.y - 30 * fit.scale * scale }, 40 * fit.scale * scale, 0.9, '255, 214, 158', 0.13 * night);
+    warmPool(ctx, { x: b.x, y: b.y - 30 * fit.scale * scale }, 48 * fit.scale * scale, 0.9, '255, 214, 158', 0.22 * night);
   }
 
   ctx.restore();
