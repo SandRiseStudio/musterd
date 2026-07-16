@@ -139,6 +139,23 @@ const BOTTOMS = [
 
 const SHOES = ['#f2eee6', '#22262b', '#d1503f', '#2f4a70', '#a9683a', '#2f8f7a', '#e1ad01'] as const;
 
+/**
+ * A small personal accessory — the per-person "quirk" that turns a dressed body into a *character*. Kept
+ * rare (weighted toward `none`) so it stays a delight, not a uniform, and drawn in its own cosy colour so
+ * it never competes with the identity hue on the top. Glasses need a face, so agents (who wear a visor
+ * across theirs) never get them — they can still wear headphones or a scarf.
+ */
+export type Accessory = 'none' | 'glasses' | 'headphones' | 'scarf';
+const ACCESSORIES: readonly Accessory[] = ['none', 'none', 'none', 'none', 'none', 'glasses', 'glasses', 'headphones', 'scarf'];
+const AGENT_ACCESSORIES: readonly Accessory[] = ['none', 'none', 'none', 'none', 'none', 'headphones', 'headphones', 'scarf'];
+/** Cosy, saturated accessory tones (scarf wool / headphone shells) — a warm set, deliberately off the
+ * identity hue so the accessory reads as *a thing they own*, not part of their colour signature. */
+const ACCESSORY_COLORS = ['#d1503f', '#e08a43', '#e1ad01', '#2f8f7a', '#3f6fa8', '#8a5fd6', '#c85a7a', '#4f8a3a'] as const;
+
+/** A gentle per-person smile for humans — some beam wide, some just turn the corners up. */
+export type Smile = 'soft' | 'wide';
+const SMILES: readonly Smile[] = ['soft', 'soft', 'wide'];
+
 export interface Appearance {
   skin: string;
   hair: HairStyle;
@@ -152,6 +169,12 @@ export interface Appearance {
   bareArms: boolean;
   bottom: string;
   shoes: string;
+  /** The per-person quirk (glasses/headphones/scarf) — see `Accessory`. */
+  accessory: Accessory;
+  /** The accessory's own cosy colour — never the identity hue. */
+  accessoryColor: string;
+  /** How a human smiles (agents smile through their visor instead). */
+  smile: Smile;
 }
 
 /**
@@ -180,5 +203,9 @@ export function appearanceOf(node: Pick<OfficeNode, 'name' | 'kind'>): Appearanc
     bareArms: cut === 'tee' || cut === 'vest',
     bottom: pick(BOTTOMS, name, 9),
     shoes: pick(SHOES, name, 10),
+    // Agents can't wear glasses over a visor — same reason they get no facial hair.
+    accessory: pick(kind === 'agent' ? AGENT_ACCESSORIES : ACCESSORIES, name, 11),
+    accessoryColor: pick(ACCESSORY_COLORS, name, 12),
+    smile: pick(SMILES, name, 13),
   };
 }

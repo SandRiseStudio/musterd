@@ -61,11 +61,12 @@ export const CHAR = {
   chest: 52,
   shoulder: 58,
   neck: 64,
-  /** Head centre; the crown is `headC + headR`. Shrunk from 13 → 11.5: the head is the loudest shape in
-   * the silhouette, and at 13 it read as a pale sphere that swallowed the body. Raised slightly to keep
-   * the crown (and so the label anchor) at about the same height. */
-  headC: 77,
-  headR: 11.5,
+  /** Head centre; the crown is `headC + headR`. A gentle charm nudge (11.5 → 12.6): a slightly bigger head
+   * reads younger and cuter, and the rounder body (see `TORSO_W` in character.ts) now balances it where a
+   * bare-bones stick body couldn't. `headC` drops in step so the crown — and so the label anchor — holds
+   * the same height. (13 was the old too-big value that swallowed a *thin* body; 12.6 with a round one sits.) */
+  headC: 75.9,
+  headR: 12.6,
   /** Half-widths at the hips and shoulders. The shoulders must sit **outside** the torso's own half-width
    * (`TORSO_W / 2` in character.ts) or the arms are swallowed by the body and the far one never shows. */
   hipW: 7,

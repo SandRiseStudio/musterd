@@ -21,8 +21,9 @@ import type { Dir, OfficeNode } from './types';
  *    ~40px tall, so everything differs by **silhouette and block colour**, never by fine detail.
  */
 
-/** Torso thickness. Kept under 2×`CHAR.shoulderW` so the arms hang outside the body's silhouette. */
-const TORSO_W = 25;
+/** Torso thickness. Kept under 2×`CHAR.shoulderW` so the arms hang outside the body's silhouette. Nudged
+ * 25 → 27 for the charm pass: a rounder, softer body to sit under the slightly larger head. */
+const TORSO_W = 27;
 
 /** Darken/lighten an `hsl()` string by a lightness factor (mirrors render.ts's `hslL`). */
 function hslL(color: string, f: number): string {
@@ -155,9 +156,9 @@ export function drawCharacter(
     return {
       d,
       fn: () => {
-        bone(ctx, sh.p, el.p, 7.5 * u, sleeve);
-        bone(ctx, el.p, wr.p, 6.5 * u, fore);
-        disc(ctx, wr.p, 3.6 * u, 3.2 * u, hand);
+        bone(ctx, sh.p, el.p, 8.4 * u, sleeve);
+        bone(ctx, el.p, wr.p, 7.2 * u, fore);
+        disc(ctx, wr.p, 4.4 * u, 4.1 * u, hand); // a soft mitten hand — rounder reads friendlier
       },
     };
   };
@@ -174,11 +175,12 @@ export function drawCharacter(
     return {
       d,
       fn: () => {
-        bone(ctx, hp.p, kn.p, 9 * u, trouser);
-        bone(ctx, kn.p, an.p, 8 * u, trouser);
-        // The shoe: a small slab pointing the way the character faces.
+        bone(ctx, hp.p, kn.p, 9.8 * u, trouser);
+        bone(ctx, kn.p, an.p, 8.6 * u, trouser);
+        // The shoe: a small slab pointing the way the character faces, with a rounded toe.
         const toe = px({ x: k.ankle[i].x, y: 1.5, z: k.ankle[i].z + 6.5 });
-        bone(ctx, an.p, toe.p, 6 * u, shoe);
+        bone(ctx, an.p, toe.p, 6.6 * u, shoe);
+        disc(ctx, toe.p, 3.3 * u, 2.6 * u, shoe); // a soft rounded toe cap
       },
     };
   };
@@ -190,8 +192,9 @@ export function drawCharacter(
     return;
   }
 
-  // Contact shadow.
-  disc(ctx, project(o.lx, o.ly, fit), 21 * u, 5.5 * u, 'rgba(0,0,0,0.16)');
+  // Contact shadow — a warm brown, not neutral black, so the character sits in the room's golden light
+  // rather than being cut out of it.
+  disc(ctx, project(o.lx, o.ly, fit), 21 * u, 5.5 * u, 'rgba(64, 38, 16, 0.15)');
 
   parts.push(leg(0), leg(1));
 
@@ -206,6 +209,10 @@ export function drawCharacter(
     fn: () => {
       bone(ctx, pel.p, ch.p, TORSO_W * u, acc);
       bone(ctx, ch.p, nk.p, (TORSO_W - 5) * u, acc);
+      // A soft rounded belly: a gentle bulge low on the torso so the body reads plush and cuddly rather
+      // than as a straight barrel. Sits between the pelvis and chest, in the identity hue.
+      const belly = { x: (pel.p.x + ch.p.x) / 2, y: pel.p.y + (ch.p.y - pel.p.y) * 0.36 };
+      disc(ctx, belly, TORSO_W * 0.6 * u, TORSO_W * 0.5 * u, acc);
       bone(ctx, shL.p, shR.p, 9 * u, acc); // the shoulder line — what gives the silhouette shoulders
 
       if (look.cut === 'stripe') {
@@ -271,6 +278,15 @@ function drawHead(
   const at = (x: number, y: number, z: number): Pt => px({ x: H.x + x, y: H.y + y, z: H.z + z }).p;
 
   bone(ctx, px(k.neck).p, hd.p, 6 * u, shade(look.skin, 0.86)); // a short neck — the head is *carried*
+
+  // ── a cosy scarf, wrapped round the neck under the chin (drawn before the skull so it tucks under) ──
+  if (look.accessory === 'scarf') {
+    const np = px(k.neck).p;
+    disc(ctx, { x: np.x, y: np.y - 1 * u }, r * 1.05, r * 0.5, look.accessoryColor);
+    disc(ctx, { x: np.x, y: np.y + 1.5 * u }, r * 0.86, r * 0.42, shade(look.accessoryColor, 0.86));
+    // a short hanging tail, front-and-centre
+    bone(ctx, { x: np.x + 2 * u, y: np.y }, { x: np.x + 3 * u, y: np.y + r * 0.9 }, 3.4 * u, look.accessoryColor);
+  }
 
   /**
    * The face is **billboarded**: laid out in *screen* space around the head, nudged a little in the
@@ -343,19 +359,74 @@ function drawHead(
     bone(ctx, face(-0.86, -0.3), face(0.86, -0.3), r * 0.28, look.hatColor);
   }
 
+  // ── headphones: a band over the crown + an ear cup each side. Screen-space around the skull, so they
+  // read from every facing (a member seen from behind is still visibly wearing them). ──
+  if (look.accessory === 'headphones') {
+    const col = look.accessoryColor;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2.6 * u;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.ellipse(hd.p.x, hd.p.y - r * 0.12, r * 1.04, r * 1.06, 0, Math.PI * 1.08, Math.PI * 1.92);
+    ctx.stroke();
+    disc(ctx, { x: hd.p.x - r * 0.98, y: hd.p.y + r * 0.1 }, 3.0 * u, 3.9 * u, col);
+    disc(ctx, { x: hd.p.x + r * 0.98, y: hd.p.y + r * 0.1 }, 3.0 * u, 3.9 * u, col);
+    disc(ctx, { x: hd.p.x - r * 0.98, y: hd.p.y + r * 0.1 }, 1.4 * u, 1.9 * u, shade(col, 0.8));
+    disc(ctx, { x: hd.p.x + r * 0.98, y: hd.p.y + r * 0.1 }, 1.4 * u, 1.9 * u, shade(col, 0.8));
+  }
+
   // ── the face — only ever drawn on the side the face is actually on ──
   // The visor used to render at *every* facing, which painted a dark plate straight through the back of
   // every agent's skull. A face belongs on a face: from behind, an agent is a head and an antenna.
+  //
+  // A curved mouth (a `∪` bowed downward in canvas space, whose corners turn *up*), for the warm faces.
+  const smile = (halfW: number, my: number, drop: number, color: string, lw: number): void => {
+    const a = face(-halfW, my);
+    const b = face(halfW, my);
+    const c = face(0, my + drop);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lw;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(c.x, c.y, b.x, b.y);
+    ctx.stroke();
+  };
+  // Rosy cheeks — the single warmest cue, and it costs two soft discs. Given to agents too (a robot that
+  // blushes is exactly the quirky-cute the office is going for), tinted to their hue rather than coral.
+  const cheeks = (color: string): void => {
+    for (const dx of [-0.58, 0.58]) disc(ctx, face(dx, 0.34), r * 0.25, r * 0.2, color);
+  };
+
   if (node.kind === 'agent' && facingUs) {
-    // A level bar straight across the face, with a lit slit in the member's own hue. Drawn as a capsule
-    // rather than an ellipse: at 25px an ellipse's soft edges turn to mush, where a hard bar stays a *visor*
-    // — and it is the slit lighting up in their colour that makes an agent read as awake across the room.
-    bone(ctx, face(-0.6, 0.08), face(0.6, 0.08), r * 0.52, '#20282c');
-    bone(ctx, face(-0.42, 0.08), face(0.42, 0.08), r * 0.2, acc);
+    cheeks('rgba(255, 150, 120, 0.32)');
+    // A rounded visor housing with two friendly glowing eyes and a little smile of light in the member's
+    // own hue — reads as a cheerful robot, not a security camera. The glow in their colour is still the
+    // "awake across the room" tell the old slit carried.
+    bone(ctx, face(-0.52, 0.04), face(0.52, 0.04), r * 0.56, '#242d33');
+    for (const dx of [-0.26, 0.26]) {
+      disc(ctx, face(dx, 0.02), 2.6 * u, 2.6 * u, acc);
+      disc(ctx, face(dx - 0.06, -0.04), 0.9 * u, 0.9 * u, 'rgba(255,255,255,0.9)'); // catchlight
+    }
+    smile(0.22, 0.2, 0.12, acc, 1.7 * u);
   } else if (node.kind === 'human' && facingUs) {
+    cheeks('rgba(233, 118, 100, 0.30)');
     const open = blink(t, seed);
-    for (const dx of [-0.36, 0.36]) {
-      disc(ctx, face(dx, 0.06), 2.0 * u, 2.2 * u * open, '#2e2a26');
+    for (const dx of [-0.34, 0.34]) {
+      disc(ctx, face(dx, 0.04), 2.3 * u, 2.5 * u * open, '#2e2a26');
+      if (open > 0.6) disc(ctx, face(dx - 0.08, -0.04), 0.85 * u, 0.85 * u * open, 'rgba(255,255,255,0.85)');
+    }
+    // Round glasses over the eyes, with a bridge — the per-person quirk that needs a face to land on.
+    if (look.accessory === 'glasses') {
+      ctx.strokeStyle = '#33302a';
+      ctx.lineWidth = 1.5 * u;
+      for (const dx of [-0.34, 0.34]) {
+        const c = face(dx, 0.04);
+        ctx.beginPath();
+        ctx.ellipse(c.x, c.y, 3.2 * u, 3.1 * u, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      bone(ctx, face(-0.12, 0.02), face(0.12, 0.02), 1.1 * u, '#33302a');
     }
     // Facial hair, below the eyes and over the jaw.
     const fh = look.facialHair;
@@ -363,6 +434,11 @@ function drawHead(
     else if (fh === 'beard') disc(ctx, face(0, 0.58), r * 0.64, r * 0.4, hc);
     else if (fh === 'goatee') disc(ctx, face(0, 0.66), r * 0.24, r * 0.22, hc);
     else if (fh === 'moustache') disc(ctx, face(0, 0.34), r * 0.34, r * 0.11, hc);
+    // A gentle smile — but only where facial hair wouldn't swallow it (a beard/moustache hides the mouth).
+    if (fh !== 'beard' && fh !== 'moustache') {
+      const wide = look.smile === 'wide';
+      smile(wide ? 0.32 : 0.22, 0.44, wide ? 0.2 : 0.13, '#7a4335', 1.8 * u);
+    }
   }
 
   // ── the agent antenna: drawn last, so it pokes through any hat. Which is the correct joke. ──
