@@ -75,6 +75,8 @@ What your change needs depends entirely on _what you changed_:
 
 **TRAP — `musterd service install`** embeds whatever `node` runs it into the daemon's plist, and the daemon's native `better-sqlite3` needs **Node ≥22**. Installing from a Node 20 shell used to crashloop the daemon while reporting success; it now refuses with the fix. `service refresh` never rewrites the plist and is always safe.
 
+**`service refresh` self-locates the daemon's checkout** ([issue #289](docs/decisions/118-service-refresh.md)). It reads the daemon's real checkout back from the installed plist and rebuilds **that**, so you can run it from **any** worktree — no `cd` to the daemon's checkout first. When the checkout you invoked from differs, it says so (`targeting the daemon's own checkout <X> …`). Before this fix it silently rebuilt whatever checkout the CLI was invoked from and then bounced the daemon onto its own unchanged dist — a full run of ✓s that deployed nothing; if you see a daemon that "won't update," confirm you're on a build that includes the fix.
+
 **Your own runtime can be stale too (ADR 135).** Every `pnpm build` stamps `dist/build.json` with the commit it was built from, and your MCP adapter attests that stamp on connect. If `team_status`/`team_inbox_check` shows "⚠ your musterd adapter (…) differs from the daemon (…)", your session is running stale tools: rebuild this worktree (`pnpm build`) **and** `/mcp` reload — a rebuild alone doesn't reach the running process. The web viewer's SHA differing from the daemon's remains correct (see above); the adapter warning is about _your_ dist only.
 
 ## Hard rules (violating these is a bug, not a choice)
