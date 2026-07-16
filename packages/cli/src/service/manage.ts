@@ -39,6 +39,9 @@ export interface ServiceCtx {
   run: Runner;
   /** Blocking sleep between bootstrap retries; injected so tests don't actually wait. */
   sleep?: (ms: number) => void;
+  /** Read a file (the installed plist) as text, or null if absent. Injected so `service refresh`
+   *  can resolve the daemon's real checkout in tests without touching `~/Library/LaunchAgents`. */
+  readFile?: (path: string) => string | null;
 }
 
 /** A synchronous sleep (one-shot CLI; no event loop to block) for the bootstrap retry. */

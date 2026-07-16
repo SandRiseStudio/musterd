@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { homedir, platform as osPlatform } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { flagStr, type Parsed } from '../args.js';
@@ -19,6 +20,7 @@ import {
   HOST_LABEL,
   LIVE_LABEL,
   LIVE_SYNC_LABEL,
+  parsePlistProgramArguments,
   SERVICE_LABEL,
   serviceSupported,
 } from '../service/launchd.js';
@@ -81,6 +83,13 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
     stderrPath: join(home, 'daemon.err.log'),
     path: [nodeDir, '/opt/homebrew/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(':'),
     run: spawnRunner,
+    readFile: (p) => {
+      try {
+        return readFileSync(p, 'utf8');
+      } catch {
+        return null;
+      }
+    },
   };
 }
 
@@ -435,6 +444,21 @@ export async function serviceCommand(
  *
  * All shelling-out goes through `ctx.run` (the injected runner), so it's unit-testable without a repo.
  */
+/**
+ * The checkout the installed daemon runs from, read back from its plist's `ProgramArguments`
+ * (`[node, binJs, 'serve', …]`) — the repo root is four levels up from `…/packages/cli/dist/bin.js`,
+ * the same derivation `resolveCtx` uses for the running CLI. Null when no plist is installed or it
+ * doesn't parse, so the caller falls back to the invoked CLI's checkout.
+ */
+function daemonCheckout(ctx: ServiceCtx): string | null {
+  const xml = ctx.readFile?.(ctx.plistPath);
+  if (!xml) return null;
+  const args = parsePlistProgramArguments(xml);
+  const binJs = args?.[1];
+  if (!binJs) return null;
+  return resolvePath(binJs, '../../../..');
+}
+
 async function refreshDaemon(
   ctx: ServiceCtx,
   health: () => Promise<DaemonHealth>,
@@ -442,13 +466,25 @@ async function refreshDaemon(
   ok: (s: string) => void,
   fail: (step: string, r: RunResult) => never,
 ): Promise<number> {
-  const dir = ctx.workingDir;
+  // The checkout the daemon ACTUALLY runs from — read back from its installed plist, not derived
+  // from where this CLI was invoked. `restart` already cycles the daemon by launchd label, but the
+  // sync+build must target the daemon's own checkout: run `refresh` from a seat worktree and the
+  // old behavior silently rebuilt the worktree, then restarted the daemon on its unchanged (stale)
+  // dist — every ✓ printed like success (issue #289). Fall back to the invoked checkout only when
+  // no installed plist resolves (e.g. the daemon isn't installed yet).
+  const dir = daemonCheckout(ctx) ?? ctx.workingDir;
+  if (dir !== ctx.workingDir) {
+    ok(
+      `targeting the daemon's own checkout ${theme.accent(dir)} ` +
+        theme.meta(`(you invoked musterd from ${ctx.workingDir})`),
+    );
+  }
   const git = (...args: string[]): RunResult => ctx.run('git', ['-C', dir, ...args]);
 
   if (git('rev-parse', '--is-inside-work-tree').status !== 0) {
     throw new CliError(
       `${dir} is not a git checkout — \`service refresh\` rebuilds the daemon from its own source, ` +
-        `which only works when the daemon runs from a repo (it runs from ${ctx.binJs}).`,
+        `which only works when the daemon runs from a repo.`,
       1,
     );
   }

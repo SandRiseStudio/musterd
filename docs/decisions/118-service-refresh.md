@@ -27,6 +27,14 @@ Fold the dance into one guarded verb, `musterd service refresh`, that always lea
 
 Sequence:
 
+0. **Target the daemon's own checkout.** Read the daemon's real checkout back from its installed
+   LaunchAgent plist (`ProgramArguments` = `[node, binJs, 'serve', …]`; the repo root is four levels
+   up from `…/packages/cli/dist/bin.js`), **not** from where the CLI happened to be invoked. Without
+   this, running `refresh` from a seat worktree silently synced+built the *worktree* and then
+   restarted the daemon — which restarts by launchd label — onto its own **unchanged, stale** dist,
+   printing a full sequence of ✓s the whole way (issue #289). When the invoked checkout differs, the
+   verb says which checkout it is targeting and where you invoked from; with no installed plist it
+   falls back to the invoked checkout (the not-yet-installed case).
 1. **It's a checkout.** Refuse if the daemon isn't running from a git repo (a packaged install can't
    rebuild itself from source) — with a message pointing at where it *does* run from.
 2. **Don't clobber.** Refuse if the checkout has uncommitted changes (someone mid-edit) rather than
@@ -54,6 +62,10 @@ standing daemon).
 
 - Making merged work live is **one command** (`musterd service refresh`) instead of three + judgment,
   and it self-heals the "checkout stranded on a stale branch" failure by always syncing to `origin/main`.
+- **Invocation-site independent** (issue #289): `refresh` rebuilds the checkout the daemon *actually*
+  runs from — resolved from the installed plist — so running it from a seat worktree, a sibling
+  clone, or the daemon's own checkout all do the same correct thing, instead of the old silent
+  half-success that rebuilt the caller's checkout and restarted the daemon on stale code.
 - **Fail-safe ordering:** dirty-tree and live-session refusals happen before any change; a build failure
   never bounces the daemon. The worst case leaves the daemon exactly as it was.
 - It only helps a **source-run** daemon (the dogfood + self-hosted case). A future packaged/npm-global

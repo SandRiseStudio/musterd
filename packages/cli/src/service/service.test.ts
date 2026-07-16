@@ -8,6 +8,7 @@ import {
   buildPlist,
   kickstartArgs,
   parseLaunchctlPrint,
+  parsePlistProgramArguments,
   printArgs,
   SERVICE_LABEL,
   serviceSupported,
@@ -85,6 +86,47 @@ describe('buildPlist', () => {
     });
     expect(p).toContain('/a &amp; b/bin.js');
     expect(p).not.toContain('/a & b/bin.js');
+  });
+});
+
+describe('parsePlistProgramArguments (read the daemon checkout back from an installed plist)', () => {
+  it('round-trips ProgramArguments through the real buildPlist — [node, binJs, serve, …]', () => {
+    const plist = buildPlist({
+      label: SERVICE_LABEL,
+      node: '/opt/homebrew/bin/node',
+      binJs: '/Users/nick/agents/packages/cli/dist/bin.js',
+      serveArgs: ['serve', '--port', '4849'],
+      workingDir: '/Users/nick/agents',
+      stdoutPath: '/l',
+      stderrPath: '/e',
+      path: '/p',
+    });
+    expect(parsePlistProgramArguments(plist)).toEqual([
+      '/opt/homebrew/bin/node',
+      '/Users/nick/agents/packages/cli/dist/bin.js',
+      'serve',
+      '--port',
+      '4849',
+    ]);
+  });
+
+  it('XML-unescapes so a path with & round-trips', () => {
+    const plist = buildPlist({
+      label: 'x',
+      node: '/n',
+      binJs: '/a & b/packages/cli/dist/bin.js',
+      serveArgs: ['serve'],
+      workingDir: '/w',
+      stdoutPath: '/o',
+      stderrPath: '/e',
+      path: '/p',
+    });
+    expect(parsePlistProgramArguments(plist)?.[1]).toBe('/a & b/packages/cli/dist/bin.js');
+  });
+
+  it('returns null for a non-plist / no ProgramArguments', () => {
+    expect(parsePlistProgramArguments('not xml')).toBeNull();
+    expect(parsePlistProgramArguments('<plist><dict></dict></plist>')).toBeNull();
   });
 });
 
