@@ -912,7 +912,8 @@ const RAW: RawItem[] = [
     id: 'dogfood-approval-grant',
     wave: 7,
     title: 'Dogfood-mode approval — a standing grant for re-seating known agents',
-    plan: 'near-term',
+    shipped: { prs: [309] },
+    frozenBy: 146,
     category: 'human-loop',
     blurb:
       'Stop the bleeding: re-occupying a seat you already held becomes a notification, not an admin decision. Brand-new member admission stays gated. First policy of the configurable approval surface.',
