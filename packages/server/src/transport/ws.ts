@@ -15,7 +15,7 @@ import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope } from '../protocol/validate.js';
 import { appendAudit } from '../store/audit.js';
 import { consumeGrant, refreshGrant, validateGrant } from '../store/grants.js';
-import { getMemberById, getMemberByName, hashToken, markBound } from '../store/members.js';
+import { getMemberById, getMemberByName, hashToken, isHeld, markBound } from '../store/members.js';
 import { memoryEnvelope } from '../store/memory.js';
 import {
   attach,
@@ -34,7 +34,7 @@ import {
   resolveCapabilities,
   toMember,
 } from '../store/rows.js';
-import { getAgentKeyHash, requireTeam } from '../store/teams.js';
+import { getAgentKeyHash, getPolicy, requireTeam } from '../store/teams.js';
 import { recordError, recordPresenceChurn } from '../telemetry.js';
 import type { Connection } from './hub.js';
 
@@ -363,6 +363,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           }
 
           // Step 5: grant path — if frame.grant is present, validate it and OCCUPY immediately.
+          let reseated = false;
           if (frame.grant) {
             const gv = validateGrant(ctx.db, team.id, frame.grant);
             if (!gv.ok) {
@@ -413,6 +414,26 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             // Credential self-authorize (ADR 077): a human authenticated by their own mscr_ credential
             // claiming their own seat is self-authorizing — no grant, no admin-approval request. Fall
             // through to OCCUPY (symmetric with the POST /claim credential-occupy path).
+          } else if (
+            authenticatedAs === null &&
+            targetMember &&
+            targetMember.kind === 'agent' &&
+            'seat' in frame.target &&
+            isHeld(targetMember) &&
+            getPolicy(ctx.db, team.id).standing_reseat_known_agents
+          ) {
+            // Dogfood-mode re-seat (ADR 146, on ADR 145 §7). The seat-claim wall is a gate meant for
+            // *strangers* firing on *teammates*: 27 claim requests in the record, 7 expired unanswered
+            // at the 1h TTL, 7 approvals of the *same* seat in four days — which taught the workaround
+            // of self-approving `--as nick`. So when the team opts in, an agent harness (team agent key,
+            // `authenticatedAs === null`) re-claiming an **already-bound named agent seat** occupies now,
+            // as a notification — never a decision. Guards keep admission gated: a human credential can't
+            // reach here (it self-authorizes above or is refused), a **never-bound** seat (`!isHeld`)
+            // stays a real request (new-member admission), a role-pool claim stays gated (assignment,
+            // not reclaim), and the shared agent key can't auto-occupy a *human* seat (`kind === 'agent'`
+            // only). The authorization is derived from `policy + bound_at`, not a stored grant row.
+            reseated = true;
+            // Fall through to OCCUPY.
           } else {
             // Step 6: no grant → open a claim request and hold the WS open.
             const encodedTarget = 'observe' in frame.target ? null : encodeTarget(frame.target);
@@ -548,13 +569,26 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             sameWorkspacePredecessors,
           );
           if (evictionTimer) state.evictionTimer = evictionTimer;
-          appendAudit(ctx.db, team.id, {
-            actor: targetMember.name,
-            action: 'claim.occupied',
-            target: targetMember.name,
-            result: 'allow',
-            detail: { surface: frame.surface },
-          });
+          if (reseated) {
+            // Dogfood-mode re-seat (ADR 146): the durable notification-not-a-decision record. The
+            // presence-online emit above already tells the team (admins included) the seat is live; the
+            // loud, directed admin surface for asks/approvals is the next item (ask-stream, ADR 145 §3).
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'claim.reseated',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { surface: frame.surface, policy: 'standing_reseat_known_agents' },
+            });
+          } else {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'claim.occupied',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { surface: frame.surface },
+            });
+          }
           // ADR 101: the initial attestation is the first entry in the occupancy's model history —
           // the audit log IS the switch history (old → new, source), never a table.
           if (frame.model) {

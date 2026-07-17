@@ -26,6 +26,13 @@ export type AuditAction =
   | 'claim.occupied'
   | 'claim.refused'
   | 'claim.pending'
+  // ADR 146 (dogfood-approval-grant, on ADR 145 §7): an agent harness re-occupied an already-bound
+  // named seat under the `standing_reseat_known_agents` policy — the routine re-seat that used to open
+  // a `claim.pending` request and wait on an admin. `result: allow`, actor/target = the seat name,
+  // `detail` carries `{ surface, policy: 'standing_reseat_known_agents' }`. This row IS the
+  // notification-not-a-decision record: the durable audit that a known teammate re-took its own seat
+  // without an approval round-trip (the loud admin surface for it rides the ask-stream, ADR 145 §3).
+  | 'claim.reseated'
   // ADR 092: a same-workspace successor found a live predecessor (drift signal), then reaped it once
   // it proved durable (the orphaned-adapter reap; `detail.same_workspace` distinguishes it from the
   // cross-workspace newest-wins path, which does not audit).
