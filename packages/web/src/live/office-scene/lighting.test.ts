@@ -67,4 +67,11 @@ describe('computeLightEnv', () => {
     expect(computeLightEnv(36, true).daylight).toBe(computeLightEnv(12, true).daylight); // 36 → 12
     expect(computeLightEnv(-2, true).daylight).toBe(computeLightEnv(22, true).daylight); // -2 → 22
   });
+
+  it('carries the (normalized) clock the daylight was computed from — the wall clock reads it', () => {
+    // The hands and the daylight come from one number, so they can never tell different times.
+    expect(computeLightEnv(13.5, true).hours).toBe(13.5);
+    expect(computeLightEnv(36, true).hours).toBe(12);
+    expect(computeLightEnv(-2, true).hours).toBe(22);
+  });
 });
