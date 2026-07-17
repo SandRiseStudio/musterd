@@ -1472,9 +1472,12 @@ const CURL_VIS_S = 1.1;
  */
 function skelFor(pose: Pose, node: OfficeNode, t: number) {
   const seed = seedOf(node.name);
-  // Typing is gated on actually working *and* actually being at the desk — a member half-way out of their
-  // chair has better things to do, and a room with nobody typing is a room the scene can stop redrawing.
-  const typing = node.activity === 'working' && pose.sit > 0.9 ? typingBurst(seed, t) : 0;
+  // Typing is gated on `posture`, **not `activity`** — the same source of truth the seating uses. A stale
+  // member keeps its last-known `activity: working` while the server projects its posture down to `idle`,
+  // so gating on activity left it drumming an imaginary keyboard on the lounge couch. Posture puts working
+  // members at desks and idle members on the furniture, so keying typing off it means only a member the
+  // floor placed at a desk types. The `sit > 0.9` guard still holds — no typing while rising from a chair.
+  const typing = node.posture === 'working' && pose.sit > 0.9 ? typingBurst(seed, t) : 0;
   return solveSkeleton({
     phase: pose.phase,
     sit: pose.sit,
@@ -2127,7 +2130,10 @@ function drawWorkstation(
   const wx = sn ? W : Df;
   const dy = sn ? Df : W;
   const up = DESK_UP; // desk-surface height — where every prop sits (DH + ST)
-  const working = node?.activity === 'working';
+  // `posture`, not `activity` — a lit screen full of scrolling code is the strongest "this seat is working"
+  // signal in the room, so it must follow the same source of truth as placement. An idle member who spilled
+  // onto a desk, or a stale member still carrying `activity: working`, gets a dark screen like any empty desk.
+  const working = node?.posture === 'working';
   const mood = node ? deskMoodStyle(deskMoodFor(teamName, node.name)) : null;
 
   for (const [sx, sy] of [
@@ -2460,7 +2466,9 @@ export function monitorAnchors(
   const out = new Map<string, Pt>();
   for (const [name, pl] of placements) {
     if (pl.kind !== 'desk') continue;
-    if (byName.get(name)?.activity !== 'working') continue;
+    // `posture`, not `activity`: an idle member who spilled onto a desk (leisure full) or a stale member
+    // whose last-known activity is `working` must not get a lit-screen glow. Only a working member does.
+    if (byName.get(name)?.posture !== 'working') continue;
     const slot = DESK_SLOTS[pl.slot];
     if (!slot) continue;
     const f = FWD[slot.dir];
