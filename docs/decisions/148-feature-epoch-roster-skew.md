@@ -1,4 +1,4 @@
-# 147 — Feature epoch: a meaningful roster skew signal in place of the build-SHA "stale" chip
+# 148 — Feature epoch: a meaningful roster skew signal in place of the build-SHA "stale" chip
 
 - Status: accepted — 2026-07-17
 - Date: 2026-07-17

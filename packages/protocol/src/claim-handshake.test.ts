@@ -95,7 +95,7 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
     expect(ClaimFrame.safeParse({ ...base, build: 'x'.repeat(65) }).success).toBe(false);
   });
 
-  it('parses a claim carrying a feature epoch (ADR 147) — optional, non-negative int', () => {
+  it('parses a claim carrying a feature epoch (ADR 148) — optional, non-negative int', () => {
     const base = {
       type: 'claim',
       v: PROTOCOL_VERSION,

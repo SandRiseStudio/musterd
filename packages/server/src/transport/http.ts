@@ -706,7 +706,7 @@ export async function handleHttp(
         // The commit this daemon booted from (ADR 130) — lets `service status` name build skew
         // against origin/main. Omitted when not running from a git checkout.
         ...(ctx.config.buildRef ? { build: ctx.config.buildRef } : {}),
-        // The daemon's own feature epoch (ADR 147) — the compiled-in capability counter of the code it
+        // The daemon's own feature epoch (ADR 148) — the compiled-in capability counter of the code it
         // runs. The roster compares each seat's attested epoch against this to render a "behind" hint.
         epoch: FEATURE_EPOCH,
       });
@@ -1411,7 +1411,7 @@ export async function handleHttp(
           // grant-less claim that goes through approval gets its build installed by the very next
           // authed request's `x-musterd-build` ambient touch (sticky COALESCE).
           build: z.string().max(64).optional(),
-          // Feature epoch (ADR 147), mirroring the WS claim frame — the roster's skew signal.
+          // Feature epoch (ADR 148), mirroring the WS claim frame — the roster's skew signal.
           epoch: z.number().int().nonnegative().optional(),
         });
         const body = parseOrBadRequest(ClaimBody, await readJson(req));

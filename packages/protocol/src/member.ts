@@ -63,7 +63,7 @@ export const PresenceSchema = z.object({
    *  `-dirty`) the client's own `dist/build.json` stamp carries. Null/absent for unstamped or older
    *  clients. Now an operator-detail (tooltip) only: the visible roster skew signal is `epoch`, not this. */
   build: z.string().nullish(),
-  /** Client-attested feature epoch for this occupancy (ADR 147) — the monotonic capability counter its
+  /** Client-attested feature epoch for this occupancy (ADR 148) — the monotonic capability counter its
    *  dist was built against. Null/absent for older clients. The roster renders a calm "behind" hint only
    *  when this is known *and* lower than the daemon's epoch — i.e. the seat genuinely lacks later features,
    *  never on benign build drift. */

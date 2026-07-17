@@ -219,7 +219,7 @@ describe('rosterPrimaryChip — posture + offline reason (ADR 138/141)', () => {
   });
 });
 
-describe('isFeatureBehind — feature-skew hint (ADR 147)', () => {
+describe('isFeatureBehind — feature-skew hint (ADR 148)', () => {
   const seat = (over: Partial<MemberSummary>): MemberSummary =>
     ({
       name: 'ada',

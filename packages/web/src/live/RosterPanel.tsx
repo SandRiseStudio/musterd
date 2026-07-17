@@ -27,7 +27,7 @@ export function RosterPanel({
   onCollapse?: () => void;
   /** The daemon's build ref (ADR 135) — operator detail, shown in the seat's skew tooltip. */
   daemonBuild?: string | undefined;
-  /** The daemon's feature epoch (ADR 147) — a live seat below it gets a calm `behind` hint. */
+  /** The daemon's feature epoch (ADR 148) — a live seat below it gets a calm `behind` hint. */
   daemonEpoch?: number | undefined;
 }) {
   const members = [...roster].sort(rosterOrder);
@@ -73,7 +73,7 @@ function SeatRow({
 }) {
   const kind = m.kind === 'human' ? 'human' : 'agent';
   const online = m.presence !== 'offline';
-  // Feature-skew (ADR 147): a *live* seat whose attested feature epoch is below the daemon's is missing
+  // Feature-skew (ADR 148): a *live* seat whose attested feature epoch is below the daemon's is missing
   // capabilities that landed later — the one meaningful, actionable skew (reload the seat). This replaces
   // the old raw build-SHA "stale" chip, which fired an alarm on every benign drift even though genuine
   // wire-incompatibility is already refused at the handshake (so a present seat is always compatible).

@@ -367,7 +367,7 @@ describe('presence', () => {
     expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(false);
   });
 
-  it('round-trips the attested feature epoch, sticky across an ambient touch (ADR 147)', () => {
+  it('round-trips the attested feature epoch, sticky across an ambient touch (ADR 148)', () => {
     const { db, team } = freshTeam();
     const epochOf = (name: string) =>
       listPresence(db, team.id, 45_000).find((s) => s.member.name === name)?.presences[0]?.epoch;

@@ -27,7 +27,7 @@ export interface LiveState {
   liveIds: Set<string>;
   /** The daemon's build ref (ADR 130/135) — an operator detail, surfaced in the roster tooltip. */
   daemonBuild?: string | undefined;
-  /** The daemon's feature epoch (ADR 147) — the reference the roster compares member epochs against
+  /** The daemon's feature epoch (ADR 148) — the reference the roster compares member epochs against
    *  to render a "behind" hint. Undefined until /health answers (skew simply doesn't render). */
   daemonEpoch?: number | undefined;
 }
@@ -45,7 +45,7 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
   const [envelopes, setEnvelopes] = useState<Envelope[]>([]);
   // The daemon's build ref (ADR 130/135) — an operator detail (roster tooltip).
   const [daemonBuild, setDaemonBuild] = useState<string | undefined>(undefined);
-  // The daemon's feature epoch (ADR 147) — the reference the roster compares member epochs against.
+  // The daemon's feature epoch (ADR 148) — the reference the roster compares member epochs against.
   const [daemonEpoch, setDaemonEpoch] = useState<number | undefined>(undefined);
   const [roster, setRoster] = useState<MemberSummary[]>([]);
   const [status, setStatus] = useState<ConnStatus>('idle');
@@ -77,7 +77,7 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
       });
     };
 
-    // The daemon's build ref + feature epoch (ADR 135/147): one same-origin fetch per mount, best-effort
+    // The daemon's build ref + feature epoch (ADR 135/148): one same-origin fetch per mount, best-effort
     // — an unreachable daemon leaves both undefined and the roster skew hint simply never renders.
     fetch('/health', { signal: AbortSignal.timeout(2500) })
       .then((r) => r.json())

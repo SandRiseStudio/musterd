@@ -78,7 +78,7 @@ export interface PresenceRow {
    *  uncommitted build. Null for unstamped/older clients. Only changes with a fresh claim (a build
    *  can only change on process restart), so there is no heartbeat re-attest path. */
   build: string | null;
-  /** Client-attested feature epoch for this occupancy (ADR 147): the monotonic capability counter the
+  /** Client-attested feature epoch for this occupancy (ADR 148): the monotonic capability counter the
    *  connecting dist was built against. Null for older clients. Sticky across ambient heartbeats like
    *  `build`/`model`; the roster renders skew from it in place of the raw build ref. */
   epoch: number | null;

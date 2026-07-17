@@ -88,7 +88,7 @@ export const ClaimFrame = z.object({
    */
   build: z.string().max(64).optional(),
   /**
-   * The client's feature epoch (ADR 147) — the monotonic capability counter its dist was built against
+   * The client's feature epoch (ADR 148) — the monotonic capability counter its dist was built against
    * ({@link FEATURE_EPOCH}). Attested like `build`; omitted by older/unstamped clients (legal, never
    * blocks). Unlike `v` (the breaking protocol version, hard-enforced here), the epoch is a soft signal:
    * a lower epoch still connects, it just lacks later features — which the roster surfaces, not this frame.

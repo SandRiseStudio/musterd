@@ -174,7 +174,7 @@ describe('HTTP API', () => {
     expect(r.json.connections).toBe(0);
     // ADR 130: no buildRef configured → the build field is omitted, never null/empty.
     expect(r.json).not.toHaveProperty('build');
-    // ADR 147: the daemon always names its own feature epoch — the roster's skew reference.
+    // ADR 148: the daemon always names its own feature epoch — the roster's skew reference.
     expect(r.json.epoch).toBe(FEATURE_EPOCH);
   });
 

@@ -50,7 +50,7 @@ export interface McpConfig {
    * Undefined for unstamped builds; every consumer degrades to silence.
    */
   build?: string | undefined;
-  /** This adapter's feature epoch (ADR 147) — a compiled-in constant, so it always attests. The roster
+  /** This adapter's feature epoch (ADR 148) — a compiled-in constant, so it always attests. The roster
    *  uses it (not the build ref) as the visible skew signal: a seat behind the daemon's epoch lacks
    *  later features. Fixed at build time, so no back-compat guard is needed on our own clients. */
   epoch: number;

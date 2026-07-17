@@ -4,7 +4,7 @@
  * Distinct from {@link PROTOCOL_VERSION}, which is the *breaking wire contract* the handshake enforces
  * (a version mismatch is refused at connect, ADR 135 · `ws.ts`). The feature epoch is the *soft* axis: a
  * seat one epoch behind still connects and works — it simply lacks a capability that landed later (a new
- * act, a new MCP tool, a roster-affecting field). That gap is exactly what the roster surfaces (ADR 147),
+ * act, a new MCP tool, a roster-affecting field). That gap is exactly what the roster surfaces (ADR 148),
  * in place of the old raw build-SHA "stale" chip that fired on every benign drift.
  *
  * Kept in its own pure module (no Node built-ins) for the same reason `version.ts` is: the barrel
