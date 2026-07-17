@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { fitFloor } from './iso';
 import { DESK_SLOTS } from './layout';
 import { computeLightEnv } from './lighting';
-import { animatedDeskAnchors, glassColor, renderScene } from './render';
+import type { PetMode, PetState } from './pet';
+import { animatedDeskAnchors, drawDog, glassColor, renderScene } from './render';
 
 /** A no-op 2D context that records nothing — just enough surface for the scene's draw calls so we can
  * assert the whole painter's-order pass runs end to end without throwing. */
@@ -79,6 +80,20 @@ describe('renderScene draws the whole office without throwing', () => {
   it('renders through the day and the night lighting envelopes', () => {
     expect(() => renderScene(mockCtx(), fit, empty, new Map(), new Map(), 0, 'revive', computeLightEnv(12, true))).not.toThrow();
     expect(() => renderScene(mockCtx(), fit, empty, new Map(), new Map(), 0, 'revive', computeLightEnv(1, false))).not.toThrow();
+  });
+});
+
+/** Every dog pose gets painted somewhere — sleeping in the baked frame, trotting in the live loop — and a
+ * pose that throws would take the whole scene's frame down with it, not just the dog. */
+describe('drawDog paints every pose', () => {
+  const fit = fitFloor(1200, 900);
+  const modes: PetMode[] = ['sleep', 'curl', 'sit', 'stretch', 'walk'];
+
+  it.each(modes)('draws the %s pose without throwing, both facings', (mode) => {
+    for (const flip of [false, true]) {
+      const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip, path: [], seg: 0, plan: 'nap', sitFor: 5 };
+      expect(() => drawDog(mockCtx(), fit, pet, 3.2)).not.toThrow();
+    }
   });
 });
 
