@@ -413,6 +413,23 @@ describe('door staging', () => {
     expect(actors.takeDoorPulses()).toBe(1);
   });
 
+  it('counts arrivals separately from departures (the dog only gets up for arrivals)', () => {
+    const actors = createActors();
+    const one = world([node('Ada')]);
+    actors.setHomes(one.placements, one.byName, true); // first call snaps
+    expect(actors.takeArrivals()).toBe(0);
+
+    const two = world([node('Ada'), node('Bo')]);
+    actors.setHomes(two.placements, two.byName, true); // Bo arrives
+    expect(actors.takeArrivals()).toBe(1);
+    expect(actors.takeArrivals()).toBe(0); // cleared
+    actors.takeDoorPulses(); // (drain the pulse the arrival raised — the two counters read independently)
+
+    actors.setHomes(one.placements, one.byName, true); // Bo departs — a door pulse, but not an arrival
+    expect(actors.takeDoorPulses()).toBe(1);
+    expect(actors.takeArrivals()).toBe(0);
+  });
+
   it('fades an arrival in from transparent to opaque', () => {
     const actors = createActors();
     const one = world([node('Ada')]);
