@@ -441,15 +441,37 @@ function drawHead(
     }
   }
 
-  // ── the agent antenna: drawn last, so it pokes through any hat. Which is the correct joke. ──
-  // It is also the *only* tell visible from behind, so it must read at office scale: short and stubby beats
-  // long and thin, which just disappears into the floor.
-  if (node.kind === 'agent') {
-    const tip = px({ x: H.x, y: H.y + R + 8, z: H.z });
-    bone(ctx, hd.p, tip.p, 2.4 * u, acc);
-    // The LED breathes — an agent's one involuntary sign of life, readable across the room.
-    const pulse = 0.82 + 0.18 * Math.sin(t * 1.6 + seed * 6);
-    disc(ctx, tip.p, 3.4 * u * pulse, 3.2 * u * pulse, '#74e08a');
+  // ── the wisp: a curved little antenna topped with a warm firefly glow, drawn last so it pokes through any
+  // hat. Once the agents' "sign of life" (a straight mast + a green LED); now every member carries one, and
+  // it's the quirky-warm counterpart to the floating nameplate above — a mote that hovers over the head,
+  // gently drifting and breathing. It also stays the only from-behind tell, so it must read at office scale.
+  {
+    const swayDir = seed % 2 === 0 ? 1 : -1;
+    const base = px({ x: H.x, y: H.y + R - 1, z: H.z }).p; // just off the crown
+    const top = px({ x: H.x, y: H.y + R + 11, z: H.z }).p;
+    const drift = Math.sin(t * 1.05 + seed * 5) * 1.7 * u; // a firefly's idle wander
+    const tx = top.x + drift;
+    const ty = top.y - Math.abs(Math.sin(t * 0.9 + seed * 3)) * 1.3 * u; // and a gentle bob
+    // A curved stalk in the member's own hue, bowed to one side so it reads as a whimsical antenna, not a
+    // mast. The control point is offset sideways from the straight line between crown and tip.
+    const cx = (base.x + tx) / 2 + swayDir * 4.6 * u;
+    const cy = (base.y + ty) / 2;
+    ctx.strokeStyle = acc;
+    ctx.lineWidth = 1.7 * u;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(base.x, base.y);
+    ctx.quadraticCurveTo(cx, cy, tx, ty);
+    ctx.stroke();
+    // The firefly at the tip: two additive warm layers (halo + mid) glowing under a bright near-white core,
+    // breathing. Additive so it reads as *light*, not a bead — the warm counterpart to the old green LED.
+    const pulse = 0.72 + 0.28 * Math.sin(t * 1.7 + seed * 6);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    disc(ctx, { x: tx, y: ty }, 5.4 * u * pulse, 5.2 * u * pulse, 'rgba(245, 188, 92, 0.5)');
+    disc(ctx, { x: tx, y: ty }, 3.0 * u * pulse, 2.9 * u * pulse, 'rgba(255, 214, 130, 0.55)');
+    ctx.restore();
+    disc(ctx, { x: tx, y: ty }, 1.7 * u, 1.7 * u, 'rgba(255, 248, 228, 0.96)');
   }
 }
 
