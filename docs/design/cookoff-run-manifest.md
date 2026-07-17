@@ -116,8 +116,9 @@ spend authorization row in §2 — this section defines it so the definition pre
   time-to-done before the pilot (like the W3 dup-hunk thresholds, ADR 123 §7).
 - **Billed-cost roll-up** — tokens-to-done gets its public-pricing multiplier now the model is pinned
   (Sonnet 5); wire it into `score.ts` before the pilot so the tokens support number is comparable.
-- **Per-cell setup runbook** — the clone/seed/identity/permission-policy steps per cell (C2 dispatch,
-  C3 `TASKS.md` board, D musterd Goals/Lanes) — authored when the smoke rung runs.
+- **Per-cell setup runbook** — ✅ **cell D authored** (smoke rung) in
+  [`cookoff-cell-runbook.md`](cookoff-cell-runbook.md): clone/seed/identity/permission-policy +
+  Goals/Lanes seeding. A/B/C2/C3/D-res are stubbed there, to be filled at their rung.
 
 ## Related
 
