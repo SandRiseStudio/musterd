@@ -1,5 +1,5 @@
 import { drawCharacter } from './character';
-import { depth, FLOOR, project, THICK, type Fit, type Pt } from './iso';
+import { depth, FLOOR, KX, KY, project, THICK, WALL_H, type Fit, type Pt } from './iso';
 import type { PetState } from './pet';
 import {
   BEAM_LEN,
@@ -252,6 +252,56 @@ function shade(base: string, f: number): string {
   return dim(base, f);
 }
 
+// ── grounding: the diorama sits on the panel, not floating over it ──────────────────────────────────────
+/**
+ * A soft contact shadow pooled under the floor slab. Drawn first, before the floor — the opaque slab
+ * paints over its middle, leaving only the penumbra spilling past the slab's edges, so the office reads
+ * as a little model resting on the panel surface rather than a slab hanging in space. Elliptical (the
+ * iso footprint), pooled toward the front where the slab base meets the ground.
+ */
+function drawGroundShadow(ctx: CanvasRenderingContext2D, fit: Fit): void {
+  const back = project(0, 0, fit);
+  const front = project(FLOOR, FLOOR, fit);
+  const cx = fit.ox;
+  const cy = (back.y + front.y) / 2 + THICK * fit.scale * 0.9; // pooled toward the slab's front base
+  const rx = FLOOR * KX * fit.scale * 1.08;
+  const ry = FLOOR * KY * fit.scale * 1.24;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(1, ry / rx); // draw a circle, squash it to the iso ellipse
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, 'rgba(46, 30, 16, 0.30)');
+  g.addColorStop(0.6, 'rgba(46, 30, 16, 0.17)');
+  g.addColorStop(1, 'rgba(46, 30, 16, 0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, rx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * A gentle edge vignette framing the whole diorama, so the scene fades into the panel toward the corners
+ * instead of hitting a hard rectangular cut. Drawn last, in device pixels (transform reset), so it covers
+ * the panel exactly at any DPR — the same "overshoots-are-harmless" trick the night veil uses, but here we
+ * need the true panel centre, so we go through the identity transform.
+ */
+function drawVignette(ctx: CanvasRenderingContext2D): void {
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+  const cx = w / 2;
+  const cy = h / 2;
+  const diag = Math.hypot(w, h);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const g = ctx.createRadialGradient(cx, cy, diag * 0.33, cx, cy, diag * 0.62);
+  g.addColorStop(0, 'rgba(26, 17, 9, 0)');
+  g.addColorStop(1, 'rgba(26, 17, 9, 0.2)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+}
+
 // ── furniture ─────────────────────────────────────────────────────────────
 function drawFloor(ctx: CanvasRenderingContext2D, fit: Fit): void {
   const c00 = project(0, 0, fit);
@@ -329,8 +379,8 @@ function drawFloor(ctx: CanvasRenderingContext2D, fit: Fit): void {
 // depths (it is one plane) and so can't take a single depth key; nothing on the floor is ever *behind* the
 // back edges, so a backdrop that every furniture piece paints over is correct at every position.
 
-/** Wall height in screen px at scale 1 — tall enough to read as a room, short enough not to wall the view in. */
-const WALL_H = 188;
+// WALL_H (the back-wall height in screen px at scale 1) lives in iso.ts now — the fit has to reserve room
+// for it above the diamond, so it's owned there and imported here for the drawing.
 
 // The windows + beam geometry live in layout.ts (the dog's sunbeam nap spots derive from the same data).
 
@@ -2291,6 +2341,8 @@ export function renderScene(
   env: LightEnv = DAY_ENV,
   pet: PetState | null = null,
 ): SceneAnchors {
+  // Grounds the diorama on the panel surface before anything else paints (the floor covers its middle).
+  drawGroundShadow(ctx, fit);
   drawFloor(ctx, fit);
   // The room shell: back walls + windows as a backdrop (behind every item), then the daylight beams they
   // cast onto the floor (under every item). Both before the depth-sorted loop — see the walls note above.
@@ -2447,6 +2499,9 @@ export function renderScene(
     const a = project(NOOK.lx, NOOK.ly, fit);
     drawCountPill(ctx, { x: a.x, y: a.y - 52 * fit.scale }, `+${nookTotal - nookDrawn} away`, fit.scale);
   }
+
+  // Frame the whole diorama last — a soft edge vignette so the scene fades into the panel at the corners.
+  drawVignette(ctx);
 
   return { heads, bases };
 }
