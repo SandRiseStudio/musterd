@@ -93,6 +93,7 @@ function CharacterSheet() {
               kind,
               presence: 'online' as const,
               activity: 'working' as const,
+              posture: 'working' as const,
               state: null,
               color: memberColor(name, kind),
               role: '',

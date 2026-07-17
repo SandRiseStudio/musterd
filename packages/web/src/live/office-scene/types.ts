@@ -1,3 +1,4 @@
+import type { Posture } from '@musterd/protocol';
 import type { ActTone } from '../format';
 
 /** Facing on the isometric floor. S = toward the viewer (front), N = away, E/W = profiles. */
@@ -12,6 +13,12 @@ export interface OfficeNode {
   kind: 'agent' | 'human';
   presence: 'online' | 'away' | 'offline';
   activity: 'offline' | 'idle' | 'working';
+  /**
+   * The composed roster posture (ADR 138) — resolved **once, by the same `memberPosture` the roster rail
+   * uses**, and carried here so the floor can't drift from the chip. It decides both where the member is
+   * placed (desk / leisure / nook / gone — see `seating.ts`) and the colour of their name dot.
+   */
+  posture: Posture;
   state: string | null;
   /** The member's signature colour — `memberColor(name, kind)`, an `hsl()` string. */
   color: string;

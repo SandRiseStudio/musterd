@@ -351,3 +351,132 @@ export const BOOKSHELVES: Bookshelf[] = [
   { lx: SHELF_DEEP / 2, ly: 240, dir: 'E' }, // left wall, beside pod 0
   { lx: SHELF_DEEP / 2, ly: 560, dir: 'E' }, // left wall, beside pod 2
 ];
+
+// ── Leisure spots ─────────────────────────────────────────────────────────────────────────────────────
+
+export interface LeisureSpot {
+  /** Which programmed zone this belongs to — the read the spot is meant to give at a glance. */
+  zone: 'lounge' | 'huddle' | 'meeting' | 'reading';
+  lx: number;
+  ly: number;
+  dir: Dir;
+  /** Seated blend at rest: `1` folded onto the furniture, `0` standing (a reader at the shelves). */
+  sit: number;
+  /**
+   * Sort the occupant at **this furniture's** depth rather than at their own feet — the same trick that
+   * puts a desk member between `chairBase` and `chairBack` (see `renderScene`). Only needed for a piece
+   * drawn as one box that is *long* relative to a person: the couch is sorted at its centre, so a sitter
+   * on a cushion west of that centre has the lower depth key and the couch paints over them. Anchoring
+   * them here makes the couch and its occupants one composite that sorts as a unit. Applied only while
+   * actually seated — a walker sorts at their own feet like anyone else.
+   */
+  depthAt?: { lx: number; ly: number };
+}
+
+/** A chair's cushion centre sits `CHAIR_OFF` back while its occupant sits `SEAT_BACK` back, so an
+ * occupant lands this far toward the facing from the chair's own centre. Same relation as a desk. */
+const CHAIR_SEAT_FWD = CHAIR_OFF - SEAT_BACK;
+
+/**
+ * Which cushion of a couch is offered as a seat, as an offset along the couch's length.
+ *
+ * One, not three: the cushions are 34 apart, which this 2:1 iso squashes to ~27 screen units at scale 1 —
+ * narrower than an avatar. Three sitters render as one smear of overlapping heads under three stacked
+ * name labels. The couch stays a three-seater as *furniture*; it seats one, and the two armchairs facing
+ * it take the other two lounge spots. See `MIN_SPOT_GAP`.
+ *
+ * The cushion chosen is the **west** one (`+34`, away from the camera): it's the only one far enough from
+ * armchair W in screen space to clear `MIN_SPOT_GAP`. It's also the cushion that *needs* `depthAt` —
+ * being west of the couch's centre is exactly what made the couch paint over it.
+ */
+const COUCH_ALONG = [34];
+
+/** Build the seats of a couch drawn at (lx,ly) facing `dir`: one per offered cushion, in its own frame. */
+function couchSeats(zone: LeisureSpot['zone'], lx: number, ly: number, dir: Dir): LeisureSpot[] {
+  const f = FWD[dir];
+  const p: [number, number] = [-f[1], f[0]];
+  return COUCH_ALONG.map((along) => ({
+    zone,
+    // `+ f * 4` matches where `couch()` paints the cushion pads — the occupant sits on the pad rather
+    // than back inside the backrest.
+    lx: lx + p[0] * along + f[0] * 4,
+    ly: ly + p[1] * along + f[1] * 4,
+    dir,
+    sit: 1,
+    // The couch is one long box sorted at its centre; sort its occupant there too, or it paints over them.
+    depthAt: { lx, ly },
+  }));
+}
+
+/**
+ * The minimum distance between two leisure spots, in **screen** units at scale 1 — the axis that
+ * actually matters, since the 2:1 iso squashes the `ly` axis to half and can slam two spots that look
+ * comfortably apart on the floor plan into the same patch of pixels. (The break nook's right armchair and
+ * the couch's right cushion are 64 apart on the floor and 37 apart on screen: one avatar, visibly.)
+ *
+ * 52 is calibrated against what the room already draws: pairs at ~59+ read as two people sitting near
+ * each other, ~37 reads as one smeared avatar. `layout.test.ts` holds every pair to it, so a spot added
+ * to a zone can't quietly re-create the pile.
+ */
+export const MIN_SPOT_GAP = 52;
+
+/**
+ * Where an **idle** member goes (ADR 140 posture): the room's programmed leisure furniture. A member who
+ * is live but has no task in hand is not at their desk — they're on the couch, on a pouf in the huddle,
+ * at the meeting table, or browsing the shelves. Desks are then exactly the members who are *working*,
+ * which is the whole point: the floor should answer "who is actually running?" without reading a chip.
+ *
+ * Derived from the same furniture data `render.ts` draws, so an occupant lands **on** a cushion rather
+ * than beside it. Assignment is a hash-probe over this array (see `seating.ts`), so the order decides who
+ * clusters with whom on a collision: the zones are **interleaved** rather than grouped, so a probe that
+ * walks off the end of one zone lands in a different one and idle members spread across the room instead
+ * of stacking onto one couch.
+ */
+export const LEISURE_SPOTS: LeisureSpot[] = (() => {
+  const L = LOUNGE;
+  const h = HUDDLES[0]!;
+  // One on the couch, flanked by the two armchairs facing the coffee table — a lounge conversation.
+  // `armchair()` paints its cushion 5 toward the facing; each armchair is a small box centred on its own
+  // occupant, so unlike the couch it needs no `depthAt`.
+  const lounge: LeisureSpot[] = [
+    ...couchSeats('lounge', NOOK.lx + L.couch.dx, NOOK.ly + L.couch.dy, 'S'),
+    { zone: 'lounge', lx: NOOK.lx + L.chairE.dx + 5, ly: NOOK.ly + L.chairE.dy, dir: 'E', sit: 1 },
+    { zone: 'lounge', lx: NOOK.lx + L.chairW.dx - 5, ly: NOOK.ly + L.chairW.dy, dir: 'W', sit: 1 },
+  ];
+  // Poufs are backless: the occupant sits on the centre, turned toward the huddle's low table.
+  const huddle: LeisureSpot[] = [
+    { zone: 'huddle', lx: h.lx, ly: h.ly - 54, dir: 'S', sit: 1 },
+    { zone: 'huddle', lx: h.lx + 52, ly: h.ly + 32, dir: 'W', sit: 1 },
+    { zone: 'huddle', lx: h.lx - 52, ly: h.ly + 32, dir: 'E', sit: 1 },
+  ];
+  const meeting: LeisureSpot[] = MEETING.chairs.map((c) => {
+    const f = FWD[c.dir];
+    return {
+      zone: 'meeting' as const,
+      lx: MEETING.lx + c.dx + f[0] * CHAIR_SEAT_FWD,
+      ly: MEETING.ly + c.dy + f[1] * CHAIR_SEAT_FWD,
+      dir: c.dir,
+      sit: 1,
+    };
+  });
+  // A reader stands clear of the shelf's footprint, facing *back into* it — the one leisure spot that
+  // isn't a seat, so the zone doesn't read as four flavours of sitting down.
+  const reading: LeisureSpot[] = BOOKSHELVES.map((s) => {
+    const f = FWD[s.dir];
+    const back: Dir = s.dir === 'S' ? 'N' : s.dir === 'N' ? 'S' : s.dir === 'E' ? 'W' : 'E';
+    return {
+      zone: 'reading' as const,
+      lx: s.lx + f[0] * (SHELF_DEEP / 2 + 28),
+      ly: s.ly + f[1] * (SHELF_DEEP / 2 + 28),
+      dir: back,
+      sit: 0,
+    };
+  });
+  // Interleave: round-robin the zones so consecutive indices are in different parts of the room.
+  const zones = [lounge, huddle, meeting, reading];
+  const out: LeisureSpot[] = [];
+  for (let i = 0; out.length < zones.reduce((n, z) => n + z.length, 0); i++) {
+    for (const z of zones) if (z[i]) out.push(z[i]!);
+  }
+  return out;
+})();

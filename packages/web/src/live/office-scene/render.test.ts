@@ -1,14 +1,32 @@
 import { describe, expect, it } from 'vitest';
+import { homePoses } from './actors';
+import { memberColor } from '../format';
 import { fitFloor, project } from './iso';
 import { DESK_SLOTS, LOUNGE, NOOK } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
 import { animatedDeskAnchors, coffeeAnchor, drawDog, glassColor, MACHINE_H, renderScene } from './render';
+import { assignSeats } from './seating';
+import type { OfficeNode } from './types';
+
+function node(name: string, activity: OfficeNode['activity']): OfficeNode {
+  return {
+    name,
+    kind: 'agent',
+    presence: 'online',
+    activity,
+    posture: activity === 'working' ? 'working' : 'idle',
+    state: null,
+    color: memberColor(name, 'agent'),
+    role: '',
+  };
+}
 
 /** A no-op 2D context that records nothing — just enough surface for the scene's draw calls so we can
- * assert the whole painter's-order pass runs end to end without throwing. */
-function mockCtx(): CanvasRenderingContext2D {
-  const grad = { addColorStop() {} };
+ * assert the whole painter's-order pass runs end to end without throwing. `paints` collects every colour
+ * the scene assigns, so a test can check they're all ones canvas can actually parse (see below). */
+function mockCtx(paints: string[] = []): CanvasRenderingContext2D {
+  const grad = { addColorStop(_stop: number, color: string) { paints.push(color); } };
   const handler: ProxyHandler<Record<string, unknown>> = {
     get(target, prop) {
       if (prop === 'canvas') return { width: 1200, height: 900 };
@@ -17,11 +35,28 @@ function mockCtx(): CanvasRenderingContext2D {
       if (prop in target) return target[prop as string];
       return () => undefined; // every draw method is a no-op
     },
-    set() {
+    set(_target, prop, value) {
+      if ((prop === 'fillStyle' || prop === 'strokeStyle') && typeof value === 'string') paints.push(value);
       return true; // fillStyle/strokeStyle/font/etc. — accept and ignore
     },
   };
   return new Proxy({}, handler) as unknown as CanvasRenderingContext2D;
+}
+
+/**
+ * A colour string canvas can actually parse. This is not pedantry: assigning an unparseable `fillStyle`
+ * **throws nothing and changes nothing** — the context quietly keeps its previous colour, so the shape is
+ * painted in whatever the last draw left behind. The result is a solid that looks fine until an unrelated
+ * change reorders the depth sort, and then paints itself the wrong colour with no error anywhere. That is
+ * exactly how the kitchenette counter's side faces went green (`mul()` returned `rgb(…)`, which `hexRgb`
+ * parsed to `NaN`), so the guard is on the whole scene rather than the one function that regressed.
+ */
+function parseableColor(c: string): boolean {
+  if (/NaN|undefined|null/i.test(c)) return false;
+  if (/^#[0-9a-f]{3}$|^#[0-9a-f]{6}$|^#[0-9a-f]{8}$/i.test(c)) return true;
+  if (/^rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(,\s*[\d.]+\s*)?\)$/.test(c)) return true;
+  if (/^hsla?\(\s*[-\d.]+\s*,\s*[\d.]+%\s*,\s*[\d.]+%\s*(,\s*[\d.]+\s*)?\)$/.test(c)) return true;
+  return /^[a-z]+$/i.test(c); // a named colour (transparent, white, …)
 }
 
 /** The fan/coffee overlay anchors (Tier-A animated props). The key behaviour: a fan only spins and a mug
@@ -97,6 +132,25 @@ describe('renderScene draws the whole office without throwing', () => {
   it('renders through the day and the night lighting envelopes', () => {
     expect(() => renderScene(mockCtx(), fit, empty, new Map(), new Map(), 0, 'revive', computeLightEnv(12, true))).not.toThrow();
     expect(() => renderScene(mockCtx(), fit, empty, new Map(), new Map(), 0, 'revive', computeLightEnv(1, false))).not.toThrow();
+  });
+
+  it('only ever assigns colours canvas can parse', () => {
+    // The failure this catches is silent by construction — canvas keeps its previous colour rather than
+    // throwing — so nothing else in the suite can see it. Run the populated scene (members at desks *and*
+    // on the leisure furniture) so every furniture path that shades a face gets exercised.
+    const paints: string[] = [];
+    const nodes: OfficeNode[] = [
+      node('desker', 'working'),
+      node('lounger', 'idle'),
+      node('reader', 'idle'),
+    ];
+    const byName = new Map(nodes.map((n) => [n.name, n]));
+    const placements = assignSeats(nodes);
+    const poses = homePoses(placements, byName);
+    renderScene(mockCtx(paints), fit, placements, byName, poses, 1.5, 'revive', computeLightEnv(21, true));
+
+    expect(paints.length).toBeGreaterThan(50); // the pass actually ran
+    expect(paints.filter((c) => !parseableColor(c))).toEqual([]);
   });
 });
 

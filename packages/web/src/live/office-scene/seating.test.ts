@@ -1,10 +1,12 @@
 import type { MemberSummary } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { DESK_SLOTS } from './layout';
-import { assignSeats } from './seating';
+import { memberPosture } from '../format';
+import { DESK_SLOTS, LEISURE_SPOTS } from './layout';
+import { assignSeats, type Seatable } from './seating';
 
-function member(name: string, over: Partial<MemberSummary> = {}): MemberSummary {
-  return {
+/** A working member by default — desks are for members with a task in hand. */
+function member(name: string, over: Partial<MemberSummary> = {}): Seatable {
+  const m: MemberSummary = {
     id: `id-${name}`,
     team: 'ritual',
     name,
@@ -14,9 +16,11 @@ function member(name: string, over: Partial<MemberSummary> = {}): MemberSummary 
     created_at: 0,
     presence: 'online',
     presences: [],
-    activity: 'idle',
+    activity: 'working',
     ...over,
   };
+  // The real caller (`OfficeScene.computeData`) resolves posture exactly this way.
+  return { ...m, posture: memberPosture(m) };
 }
 
 function shuffle<T>(a: T[], seed: number): T[] {
@@ -73,5 +77,45 @@ describe('assignSeats', () => {
     expect(seats.get('resting')?.kind).toBe('nook');
     expect(seats.get('dnd')?.kind).toBe('nook');
     expect(seats.get('left')?.kind).toBe('gone');
+  });
+
+  it('sends idle members to the leisure furniture, not to a desk', () => {
+    const roster = [member('busy'), member('slacking', { activity: 'idle' })];
+    const seats = assignSeats(roster);
+    expect(seats.get('busy')?.kind).toBe('desk');
+    expect(seats.get('slacking')?.kind).toBe('leisure');
+  });
+
+  it('gives every idle member a distinct leisure spot (no two on one cushion)', () => {
+    const roster = Array.from({ length: LEISURE_SPOTS.length }, (_, i) =>
+      member(`m${i}`, { activity: 'idle' }),
+    );
+    const seats = assignSeats(roster);
+    const spots = new Set<number>();
+    for (const m of roster) {
+      const p = seats.get(m.name)!;
+      expect(p.kind).toBe('leisure');
+      if (p.kind === 'leisure') spots.add(p.spot);
+    }
+    expect(spots.size).toBe(LEISURE_SPOTS.length);
+  });
+
+  it('spills idle members onto desks only once the leisure furniture is full', () => {
+    const n = LEISURE_SPOTS.length + 3;
+    const roster = Array.from({ length: n }, (_, i) => member(`m${i}`, { activity: 'idle' }));
+    const seats = assignSeats(roster);
+    const kinds = roster.map((m) => seats.get(m.name)?.kind);
+    expect(kinds.filter((k) => k === 'leisure')).toHaveLength(LEISURE_SPOTS.length);
+    expect(kinds.filter((k) => k === 'desk')).toHaveLength(3);
+  });
+
+  it('never spills an idle member onto a desk a working member needs', () => {
+    // Leisure full + every desk contested: working members win the desks, the rest queue.
+    const idle = Array.from({ length: LEISURE_SPOTS.length + 6 }, (_, i) =>
+      member(`i${i}`, { activity: 'idle' }),
+    );
+    const working = Array.from({ length: DESK_SLOTS.length }, (_, i) => member(`w${i}`));
+    const seats = assignSeats([...idle, ...working]);
+    for (const m of working) expect(seats.get(m.name)?.kind).toBe('desk');
   });
 });

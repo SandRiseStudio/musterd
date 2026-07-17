@@ -5,7 +5,16 @@ import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
 
 function node(name: string, presence: OfficeNode['presence'] = 'online'): OfficeNode {
-  return { name, kind: 'human', presence, activity: 'working', state: null, color: 'hsl(200, 60%, 60%)', role: '' };
+  return {
+    name,
+    kind: 'human',
+    presence,
+    activity: 'working',
+    posture: presence === 'online' ? 'working' : presence,
+    state: null,
+    color: 'hsl(200, 60%, 60%)',
+    role: '',
+  };
 }
 function world(nodes: OfficeNode[]) {
   const placements = assignSeats(nodes);

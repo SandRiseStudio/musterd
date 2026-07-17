@@ -18,6 +18,7 @@ import {
   FWD,
   HUDDLES,
   KEYBOARD_ALONG,
+  LEISURE_SPOTS,
   LOUNGE,
   MEETING,
   NOOK,
@@ -94,10 +95,23 @@ function hexRgb(h: string): [number, number, number] {
   return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
 }
 /** Multiply a hex colour toward black — for iso side/front face shading. */
+/**
+ * Scale a hex colour's channels. **Returns hex, so its own output can be fed back in** — `box()` shades a
+ * solid's side faces by re-`dim()`ing the colour it was handed, so anything that returns a colour here is
+ * a potential input to this function.
+ *
+ * It used to return `rgb(r, g, b)`, which `hexRgb` can't parse: `parseInt('rg', 16)` is `NaN`, so a
+ * re-shaded colour came out `rgb(NaN, NaN, …)`. Canvas **silently ignores an invalid `fillStyle` and keeps
+ * the previous one** — no throw, no warning — so those faces were painted in whatever colour the last draw
+ * happened to leave behind, which changed with the depth-sort order. That's what turned the kitchenette
+ * counter's sides green once idle members moved off the desks and reordered the scene. `render.test.ts`
+ * guards it: every colour the scene assigns must be one canvas can actually parse.
+ */
 function mul(h: string, f: number): string {
   const [r, g, b] = hexRgb(h);
-  const c = (v: number) => Math.round(Math.min(255, v * f));
-  return `rgb(${c(r)}, ${c(g)}, ${c(b)})`;
+  const c = (v: number) => Math.round(Math.min(255, Math.max(0, v * f)));
+  const hex = (v: number) => c(v).toString(16).padStart(2, '0');
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
 }
 /** Darken/lighten an `hsl()` string by a lightness factor. */
 function hslL(color: string, f: number): string {
@@ -2364,15 +2378,22 @@ export function renderScene(
     const pl = placements.get(name);
     const slot = pl?.kind === 'desk' ? DESK_SLOTS[pl.slot] : undefined;
     const seated = pose.sit > 0.5 && slot;
+    const spot = pl?.kind === 'leisure' ? LEISURE_SPOTS[pl.spot] : undefined;
 
-    // A seated member's depth key comes from **the chair**, not their own feet. Their feet sit a couple of
-    // units off the chair centre, and at north/west-facing desks that tiny offset was enough to sort the
+    // A seated member's depth key comes from **the furniture**, not their own feet. Their feet sit a couple
+    // of units off the chair centre, and at north/west-facing desks that tiny offset was enough to sort the
     // cushion in *front* of them — so the chair painted over their legs. Keying off the chair puts them
     // between its base and its backrest at every facing, which is where a person in a chair belongs.
+    //
+    // A leisure spot can ask for the same treatment via `depthAt` (the couch: one long box sorted at its
+    // centre, so a sitter on a cushion west of it would be painted over). Only while actually seated — a
+    // walker sorts at their own feet, or they'd hold the couch's depth all the way across the room.
     let d = depth(pose.lx, pose.ly) + 0.1;
     if (seated) {
       const f = FWD[slot.dir];
       d = depth(slot.lx - f[0] * CHAIR_OFF, slot.ly - f[1] * CHAIR_OFF) + 0.1;
+    } else if (spot?.depthAt && pose.sit > 0.5) {
+      d = depth(spot.depthAt.lx, spot.depthAt.ly) + 0.1;
     }
     items.push({ d, fn: () => drawActor(ctx, fit, pose, node, t) });
 
