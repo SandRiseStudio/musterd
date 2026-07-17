@@ -8,6 +8,7 @@ import {
   actTone,
   formatClock,
   goalEvent,
+  isFeatureBehind,
   laneEventDetail,
   postureMeta,
   proseSegments,
@@ -215,6 +216,40 @@ describe('rosterPrimaryChip — posture + offline reason (ADR 138/141)', () => {
         offline_reason: 'unknown',
       } as MemberSummary).label,
     ).toBe('offline');
+  });
+});
+
+describe('isFeatureBehind — feature-skew hint (ADR 147)', () => {
+  const seat = (over: Partial<MemberSummary>): MemberSummary =>
+    ({
+      name: 'ada',
+      kind: 'agent',
+      presence: 'online',
+      presences: [{ surface: 'claude-code', status: 'online', last_seen_at: 0, epoch: 1 }],
+      ...over,
+    }) as MemberSummary;
+
+  it('flags a live seat whose epoch is below the daemon', () => {
+    expect(isFeatureBehind(seat({ presences: [{ epoch: 1 } as never] }), 3)).toBe(true);
+  });
+
+  it('does not flag when the seat is current (equal epoch)', () => {
+    expect(isFeatureBehind(seat({ presences: [{ epoch: 3 } as never] }), 3)).toBe(false);
+  });
+
+  it('does not flag when the seat is ahead — that is the daemon lagging, surfaced elsewhere', () => {
+    expect(isFeatureBehind(seat({ presences: [{ epoch: 4 } as never] }), 3)).toBe(false);
+  });
+
+  it('never guesses: unknown member epoch or unknown daemon epoch → not behind', () => {
+    expect(isFeatureBehind(seat({ presences: [{} as never] }), 3)).toBe(false); // member epoch absent
+    expect(isFeatureBehind(seat({ presences: [{ epoch: 1 } as never] }), undefined)).toBe(false); // daemon absent
+  });
+
+  it('excludes offline seats — a seat that is not running cannot be behind', () => {
+    expect(
+      isFeatureBehind(seat({ presence: 'offline', presences: [{ epoch: 1 } as never] }), 3),
+    ).toBe(false);
   });
 });
 

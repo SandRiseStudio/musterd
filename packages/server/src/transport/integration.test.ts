@@ -1,7 +1,12 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GENERALIST_CAPABILITIES, PROTOCOL_VERSION, type WSServerFrame } from '@musterd/protocol';
+import {
+  FEATURE_EPOCH,
+  GENERALIST_CAPABILITIES,
+  PROTOCOL_VERSION,
+  type WSServerFrame,
+} from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { openDb } from '../db/open.js';
@@ -169,6 +174,8 @@ describe('HTTP API', () => {
     expect(r.json.connections).toBe(0);
     // ADR 130: no buildRef configured → the build field is omitted, never null/empty.
     expect(r.json).not.toHaveProperty('build');
+    // ADR 147: the daemon always names its own feature epoch — the roster's skew reference.
+    expect(r.json.epoch).toBe(FEATURE_EPOCH);
   });
 
   it('health names the boot commit when the embedder passes buildRef (ADR 130)', async () => {

@@ -532,6 +532,7 @@ export class HttpClient {
       surface: frame.surface,
       ...(frame.model !== undefined ? { model: frame.model } : {}),
       ...(frame.build !== undefined ? { build: frame.build } : {}),
+      ...(frame.epoch !== undefined ? { epoch: frame.epoch } : {}),
     };
     let res: Response;
     try {

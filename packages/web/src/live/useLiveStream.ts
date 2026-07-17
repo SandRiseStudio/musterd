@@ -25,8 +25,11 @@ export interface LiveState {
   error: string | null;
   /** Ids that arrived live over the socket (vs the initial backfill) — drives the typewriter. */
   liveIds: Set<string>;
-  /** The daemon's build ref (ADR 130/135) — the reference member builds are compared against. */
+  /** The daemon's build ref (ADR 130/135) — an operator detail, surfaced in the roster tooltip. */
   daemonBuild?: string | undefined;
+  /** The daemon's feature epoch (ADR 147) — the reference the roster compares member epochs against
+   *  to render a "behind" hint. Undefined until /health answers (skew simply doesn't render). */
+  daemonEpoch?: number | undefined;
 }
 
 /**
@@ -40,8 +43,10 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
   const hooksRef = useRef(hooks);
   hooksRef.current = hooks;
   const [envelopes, setEnvelopes] = useState<Envelope[]>([]);
-  // The daemon's build ref (ADR 130/135) — the reference the roster compares member builds against.
+  // The daemon's build ref (ADR 130/135) — an operator detail (roster tooltip).
   const [daemonBuild, setDaemonBuild] = useState<string | undefined>(undefined);
+  // The daemon's feature epoch (ADR 147) — the reference the roster compares member epochs against.
+  const [daemonEpoch, setDaemonEpoch] = useState<number | undefined>(undefined);
   const [roster, setRoster] = useState<MemberSummary[]>([]);
   const [status, setStatus] = useState<ConnStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -72,12 +77,14 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
       });
     };
 
-    // The daemon's build (ADR 135): one same-origin fetch per mount, best-effort — an unreachable or
-    // provenance-less daemon leaves it undefined and the stale chips simply never render.
+    // The daemon's build ref + feature epoch (ADR 135/147): one same-origin fetch per mount, best-effort
+    // — an unreachable daemon leaves both undefined and the roster skew hint simply never renders.
     fetch('/health', { signal: AbortSignal.timeout(2500) })
       .then((r) => r.json())
-      .then((h: { build?: string }) => {
-        if (alive && h.build) setDaemonBuild(h.build);
+      .then((h: { build?: string; epoch?: number }) => {
+        if (!alive) return;
+        if (h.build) setDaemonBuild(h.build);
+        if (typeof h.epoch === 'number') setDaemonEpoch(h.epoch);
       })
       .catch(() => {});
 
@@ -134,5 +141,5 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
     };
   }, [cfg?.team, cfg?.as, cfg?.token]);
 
-  return { envelopes, roster, status, error, liveIds, daemonBuild };
+  return { envelopes, roster, status, error, liveIds, daemonBuild, daemonEpoch };
 }

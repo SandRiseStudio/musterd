@@ -3,6 +3,7 @@ import {
   accountStatusException,
   capabilityBadges,
   initial,
+  isFeatureBehind,
   memberColor,
   rosterOrder,
   rosterPrimaryChip,
@@ -19,12 +20,15 @@ export function RosterPanel({
   collapsed = false,
   onCollapse,
   daemonBuild,
+  daemonEpoch,
 }: {
   roster: MemberSummary[];
   collapsed?: boolean;
   onCollapse?: () => void;
-  /** The daemon's build ref (ADR 135) — member builds that differ get a `stale` chip. */
+  /** The daemon's build ref (ADR 135) — operator detail, shown in the seat's skew tooltip. */
   daemonBuild?: string | undefined;
+  /** The daemon's feature epoch (ADR 147) — a live seat below it gets a calm `behind` hint. */
+  daemonEpoch?: number | undefined;
 }) {
   const members = [...roster].sort(rosterOrder);
   const admins = members.filter((m) => m.capabilities?.is_admin).length;
@@ -51,20 +55,37 @@ export function RosterPanel({
           <p className="lc-roster__empty">No seats on this team yet.</p>
         )}
         {members.map((m) => (
-          <SeatRow key={m.id} m={m} daemonBuild={daemonBuild} />
+          <SeatRow key={m.id} m={m} daemonBuild={daemonBuild} daemonEpoch={daemonEpoch} />
         ))}
       </div>
     </aside>
   );
 }
 
-function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | undefined }) {
+function SeatRow({
+  m,
+  daemonBuild,
+  daemonEpoch,
+}: {
+  m: MemberSummary;
+  daemonBuild?: string | undefined;
+  daemonEpoch?: number | undefined;
+}) {
   const kind = m.kind === 'human' ? 'human' : 'agent';
   const online = m.presence !== 'offline';
-  // ADR 135: this member's occupancy runs a different build than the daemon. Never about the web
-  // bundle itself (deliberately decoupled, ADR 132) — only what teammates' runtimes attest.
+  // Feature-skew (ADR 147): a *live* seat whose attested feature epoch is below the daemon's is missing
+  // capabilities that landed later — the one meaningful, actionable skew (reload the seat). This replaces
+  // the old raw build-SHA "stale" chip, which fired an alarm on every benign drift even though genuine
+  // wire-incompatibility is already refused at the handshake (so a present seat is always compatible).
+  // The build ref stays only as operator detail in the tooltip; it is never itself the trigger.
   const memberBuild = m.presences?.[0]?.build ?? undefined;
-  const staleBuild = Boolean(memberBuild && daemonBuild && memberBuild !== daemonBuild);
+  const memberEpoch = m.presences?.[0]?.epoch ?? undefined;
+  const epochBehind = isFeatureBehind(m, daemonEpoch);
+  const skewTitle = epochBehind
+    ? `Behind on features — this seat is on epoch ${memberEpoch}, the team is on ${daemonEpoch}. ` +
+      `Reload it to pick up recent capabilities.` +
+      (memberBuild && daemonBuild ? ` (build ${memberBuild.slice(0, 7)} vs ${daemonBuild.slice(0, 7)})` : '')
+    : undefined;
   // Reclaimable (ADR 105): seat held within reclaim grace. Chip shows `reconnecting` via
   // offline_reason (ADR 141); no separate recon label.
   const reconnecting = !online && m.reclaimable === true;
@@ -96,12 +117,9 @@ function SeatRow({ m, daemonBuild }: { m: MemberSummary; daemonBuild?: string | 
               consistent; the optional role is an *additional* tag only when the seat carries one. */}
           <span className={`lc-seat__kind lc-seat__kind--${kind}`}>{kind}</span>
           {m.role && <span className="lc-seat__role">{m.role}</span>}
-          {staleBuild && (
-            <span
-              className="lc-seat__stale"
-              title={`Running build ${memberBuild!.slice(0, 7)} · daemon is ${daemonBuild!.slice(0, 7)} — this seat's dist needs a rebuild (ADR 135)`}
-            >
-              stale
+          {epochBehind && (
+            <span className="lc-seat__behind" title={skewTitle}>
+              behind
             </span>
           )}
         </div>

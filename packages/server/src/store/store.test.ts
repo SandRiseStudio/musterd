@@ -367,6 +367,30 @@ describe('presence', () => {
     expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(false);
   });
 
+  it('round-trips the attested feature epoch, sticky across an ambient touch (ADR 147)', () => {
+    const { db, team } = freshTeam();
+    const epochOf = (name: string) =>
+      listPresence(db, team.id, 45_000).find((s) => s.member.name === name)?.presences[0]?.epoch;
+
+    // Claim path: attach attests epoch 3; listPresence surfaces it on the presence entry.
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    attach(db, ada.row.id, 'claude-code', 'c1', { epoch: 3 });
+    expect(epochOf('Ada')).toBe(3);
+
+    // Ambient path: a fire-and-exit CLI touch attests epoch 2, then a later touch carrying no epoch must
+    // NOT clear it — the UPDATE's COALESCE keeps the value attested first, exactly like build/model.
+    const cy = addMember(db, team, { name: 'Cy', kind: 'agent' });
+    touchAmbientPresence(db, cy.row.id, 'cli', 45_000, { epoch: 2 });
+    expect(epochOf('Cy')).toBe(2);
+    touchAmbientPresence(db, cy.row.id, 'cli', 45_000, {});
+    expect(epochOf('Cy')).toBe(2);
+
+    // An absent epoch (older client) simply reads null — never blocks, never guesses.
+    const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
+    attach(db, bo.row.id, 'claude-code', 'c2');
+    expect(epochOf('Bo')).toBeNull();
+  });
+
   it('countLivePresences counts distinct live members across all teams, ignoring offline/held (ADR 047)', () => {
     const { db, team } = freshTeam();
     const other = createTeam(db, { slug: 'dusk' });

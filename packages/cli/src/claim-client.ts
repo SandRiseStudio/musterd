@@ -1,5 +1,6 @@
 import {
   ClaimFrame,
+  FEATURE_EPOCH,
   OccupiedFrame,
   PendingFrame,
   PROTOCOL_VERSION,
@@ -67,6 +68,9 @@ export function buildClaimFrame(input: {
     ...(input.model !== undefined ? { model: input.model } : {}),
     // Build attestation (ADR 135) — the client dist's own stamp; absent for unstamped builds.
     ...(input.build !== undefined ? { build: input.build } : {}),
+    // Feature epoch (ADR 147) — this CLI dist's compiled-in capability counter; always attested (a
+    // constant, not a stamp), so a CLI-claimed seat carries the roster's skew signal like any other.
+    epoch: FEATURE_EPOCH,
     surface: input.surface,
   });
 }

@@ -95,6 +95,24 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
     expect(ClaimFrame.safeParse({ ...base, build: 'x'.repeat(65) }).success).toBe(false);
   });
 
+  it('parses a claim carrying a feature epoch (ADR 147) — optional, non-negative int', () => {
+    const base = {
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'claude-code',
+    };
+    expect(ClaimFrame.parse({ ...base, epoch: 3 }).epoch).toBe(3);
+    expect(ClaimFrame.parse({ ...base, epoch: 0 }).epoch).toBe(0);
+    // Absent is legal (older client) — never blocks.
+    expect(ClaimFrame.parse(base).epoch).toBeUndefined();
+    // Negative or non-integer → rejected.
+    expect(ClaimFrame.safeParse({ ...base, epoch: -1 }).success).toBe(false);
+    expect(ClaimFrame.safeParse({ ...base, epoch: 1.5 }).success).toBe(false);
+  });
+
   it('parses a claim with an observe target (human credential)', () => {
     const f = ClaimFrame.parse({
       type: 'claim',

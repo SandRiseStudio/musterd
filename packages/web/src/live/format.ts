@@ -358,6 +358,24 @@ export function rosterPrimaryChip(m: MemberSummary): StatusMeta {
   return postureMeta('offline');
 }
 
+/**
+ * Feature-skew (ADR 147): is this *live* seat behind the daemon's feature epoch — running a build that
+ * predates capabilities the team now has? This is the one meaningful, actionable skew (reload the seat),
+ * and it replaces the old raw build-SHA compare that alarmed on every benign drift. Rules, all fail-quiet:
+ * - offline seats are excluded — a seat that isn't running can't be "behind";
+ * - an unknown epoch on either side (older client, /health not yet answered) → false, never a guess;
+ * - equal or ahead → false (equal is current; ahead means the *daemon* lags, surfaced elsewhere).
+ */
+export function isFeatureBehind(m: MemberSummary, daemonEpoch: number | undefined): boolean {
+  if (m.presence === 'offline') return false;
+  const memberEpoch = m.presences?.[0]?.epoch;
+  return (
+    typeof memberEpoch === 'number' &&
+    typeof daemonEpoch === 'number' &&
+    memberEpoch < daemonEpoch
+  );
+}
+
 export function offlineReasonMeta(reason: OfflineReason): StatusMeta {
   switch (reason) {
     case 'reconnecting':

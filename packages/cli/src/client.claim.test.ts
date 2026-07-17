@@ -1,3 +1,4 @@
+import { FEATURE_EPOCH } from '@musterd/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpClient } from './client.js';
 import { CliError } from './errors.js';
@@ -94,6 +95,8 @@ describe('HttpClient.claim (SPEC A.7, ADR 075/077) — status dispatch', () => {
       target: { role: 'backend' },
       grant: 'msgr_y',
       surface: 'claude-code',
+      // Feature epoch (ADR 147) — always attested by our own clients (a compiled-in constant).
+      epoch: FEATURE_EPOCH,
     });
     expect(body.type).toBeUndefined();
     expect(body.v).toBeUndefined();

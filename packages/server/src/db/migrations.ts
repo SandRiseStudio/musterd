@@ -438,6 +438,16 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // v23 — feature epoch (ADR 147). Sibling to the v17 `build` column: the client-attested monotonic
+    // capability counter (`FEATURE_EPOCH`) the connecting dist was built against. The roster renders
+    // skew from this — a seat behind the daemon's epoch lacks later features — instead of the raw build
+    // SHA, which fired a "stale" alarm on every benign drift. Nullable; older clients read null.
+    version: 23,
+    up: (db) => {
+      db.exec('ALTER TABLE presence ADD COLUMN epoch INTEGER');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

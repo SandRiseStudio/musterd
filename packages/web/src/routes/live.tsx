@@ -109,7 +109,7 @@ function LivePage() {
     recoverAttempts.current = 0;
   }, []);
 
-  const { envelopes, roster, status, error, liveIds, daemonBuild } = useLiveStream(cfg, {
+  const { envelopes, roster, status, error, liveIds, daemonBuild, daemonEpoch } = useLiveStream(cfg, {
     onCredentialInvalid: recoverObserver,
     onConnected: armRecovery,
   });
@@ -267,6 +267,7 @@ function LivePage() {
               collapsed={collapsed.roster}
               onCollapse={() => toggleCollapse('roster')}
               daemonBuild={daemonBuild}
+              daemonEpoch={daemonEpoch}
             />
             <Stream
               envelopes={envelopes}
