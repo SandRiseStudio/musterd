@@ -9,6 +9,7 @@
 import {
   AuditResponseSchema,
   LaneBoardSchema,
+  makeEnvelope,
   PROTOCOL_VERSION,
   type AuditEntry,
   type Envelope,
@@ -180,6 +181,57 @@ export async function fetchLaneBoard(
     `/teams/${encodeURIComponent(cfg.team)}/lanes${qs ? `?${qs}` : ''}`,
   );
   return LaneBoardSchema.parse(json);
+}
+
+/**
+ * Send an act from the browser as the connected seat (ADR 149 — the /live asks strip's answer path).
+ * An ordinary envelope through the member-authed `POST /messages`, so a browser answer is
+ * indistinguishable from a CLI one to the daemon (same validation, same ask lifecycle audit). Only
+ * meaningful for a **real** seat (the auto-provisioned observer is read-only by construction, ADR 063
+ * — the daemon rejects its sends); callers gate the affordance on roster membership. Returns the
+ * daemon's ack envelope so the view can fold the answer into its local timeline immediately (the
+ * firehose deliberately skips the sender, so the ack is the only copy this client will see).
+ */
+export async function sendAct(
+  cfg: LiveConfig,
+  input: {
+    act: Envelope['act'];
+    to: Envelope['to'];
+    body?: string;
+    thread?: string | null;
+    meta?: Record<string, unknown> | null;
+  },
+): Promise<Envelope> {
+  const envelope = makeEnvelope({
+    id: crypto.randomUUID(),
+    team: cfg.team,
+    from: cfg.as,
+    to: input.to,
+    body: input.body ?? '',
+    act: input.act,
+    thread: input.thread ?? null,
+    meta: input.meta ?? null,
+  });
+  const res = await fetch(`/teams/${encodeURIComponent(cfg.team)}/messages`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${cfg.token}`,
+      'content-type': 'application/json',
+      'x-musterd-surface': 'web',
+    },
+    body: JSON.stringify({ envelope }),
+  });
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const err = (json as { error?: { code?: string; message?: string } }).error;
+    throw new LiveFetchError(
+      err?.message ?? `HTTP ${res.status}`,
+      err?.code ?? `http_${res.status}`,
+      res.status,
+    );
+  }
+  return (json as { ack: Envelope }).ack;
 }
 
 /* ─── shared read-only observer seat ──────────────────────────────────────────────────────────────

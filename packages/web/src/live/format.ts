@@ -25,6 +25,10 @@ export function actTone(act: string): ActTone {
   switch (act) {
     case 'request_help':
       return 'accent';
+    // The to-human ask (ADR 147/149) is the stream's directed-at-a-person attention act — it rides the
+    // accent (attention) tone the informal `request_help` already owns; the asks strip is its loud home.
+    case 'ask':
+      return 'accent';
     case 'accept':
     case 'resolve':
     case 'lane_resolve':

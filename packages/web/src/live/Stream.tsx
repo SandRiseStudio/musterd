@@ -318,6 +318,10 @@ const ACT_GLYPH: Record<string, ReactElement> = {
   lane_handoff: <path d="M2 6h5M5.5 3.5 8 6l-2.5 2.5M8.6 2.5h1.4v7H8.6" />,
   // A declared Goal (ADR 084) — a flag planted on the plan: the umbrella its lanes advance toward.
   goal: <path d="M3 10.5V2M3 2.4h6l-1.3 2 1.3 2H3" />,
+  // The to-human ask (ADR 147/149) — a bell: a notification aimed at a person, distinct from
+  // request_help's open question mark. The loud rendering lives in the asks strip; this keeps the
+  // firehose row legible.
+  ask: <path d="M6 1.8a2.9 2.9 0 0 1 2.9 2.9v1.9l1 1.6H2.1l1-1.6V4.7A2.9 2.9 0 0 1 6 1.8zM4.9 9.6a1.15 1.15 0 0 0 2.2 0" />,
   // Steering trio (ADR 103): steer = a redirecting arrow (change of course); challenge = a raised
   // pennant (an objection to justify); defer = a skip-forward chevron (push later on the plan).
   steer: <path d="M2.7 9.6V6.2C2.7 4.7 3.9 4 5.2 4h3.8M6.9 2.1 9.2 4.2 6.9 6.3" />,

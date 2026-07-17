@@ -946,7 +946,7 @@ const RAW: RawItem[] = [
       'Deliver the ask stream where the human already lives: a Slack message naming what needs a decision, and a prominent asks/approvals element on /live. The CLI inbox demotes to a power tool.',
     detail:
       'The record’s clearest lesson: a channel the human doesn’t inhabit is a dead letter box, however good its acts — nick never once opened the CLI inbox, and the whole notification ladder carries no traffic to him. So the ask stream (`human-ask-stream`) ships *with* its surfaces, not after. Two surfaces the founder named: a Slack message telling him what to approve/decide, and a loud, prominent asks/approvals component on the /live office screen (its own panel, or on the messages/office panels). Sequenced deliberately before more acts are added — acts without a lived-in surface reproduce the dead inbox with more machinery.',
-    refs: [adr(145, 'ADR 145'), adr(35, 'ADR 035')],
+    refs: [adr(149, 'ADR 149'), adr(145, 'ADR 145'), adr(35, 'ADR 035')],
     dependsOn: ['human-ask-stream'],
   },
   {

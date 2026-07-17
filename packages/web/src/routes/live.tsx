@@ -4,6 +4,7 @@ import { Clock } from '../live/Clock';
 import liveCss from '../live/Live.css?url';
 import brandCss from '../brand/brand.css?url';
 import { MusterdWord } from '../brand/MusterdWord';
+import { AsksStrip } from '../live/AsksStrip';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
@@ -245,6 +246,9 @@ function LivePage() {
               {error} <button onClick={reset}>reset &amp; reconnect</button>
             </div>
           )}
+          {/* The asks & approvals strip (ADR 149) — above the fold, before the panels: loud is
+              *first thing seen*, not fourth panel scanned. Renders nothing until an ask exists. */}
+          <AsksStrip envelopes={envelopes} roster={roster} cfg={cfg!} />
           <div
             className={
               `lc__canvas${companion ? ' lc__canvas--companion' : ''}` +

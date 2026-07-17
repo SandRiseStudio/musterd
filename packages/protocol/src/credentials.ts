@@ -55,6 +55,14 @@ export const PolicySchema = z.object({
    * (protocol `ASK_TIER_DEFAULTS`), not a knob — held to a default rather than made infinitely tunable.
    */
   ask_fallback_to_nonadmin: z.boolean().default(false),
+  /**
+   * Slack delivery for the ask stream (ADR 149, on ADR 145 §3.2 "deliver where the human already
+   * lives"). A Slack *incoming-webhook* URL; when set, the daemon fires one fire-and-forget POST per
+   * `ask` raised — the loud reach beside the guaranteed reach (message row + admin push, ADR 147 §3).
+   * Unset (the default) = no outbound call ever. The URL is a secret: policy reads are admin-only,
+   * `team export` never serializes policy, and the CLI display masks it to its host.
+   */
+  ask_slack_webhook: z.string().url().optional(),
   /** Team-wide wake-policy defaults (ADR 131 increment 5) — per-seat enrollment overrides layer on
    *  top (`ResidencyPolicyOverrideSchema` in `residency.policy`). `parse({})` yields launch defaults. */
   residency: ResidencyPolicySchema.default({}),
