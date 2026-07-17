@@ -891,30 +891,8 @@
   transition: opacity 1200ms ease;
   will-change: opacity;
 }
-/* breathing screen-glow over a working member's monitor (positioned inline; only opacity animates so the
-   breathe never fights the positioning transform) */
-.lc-amb-glow {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 92px;
-  height: 60px;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(127, 224, 206, 0.5), rgba(127, 224, 206, 0) 72%);
-  mix-blend-mode: screen;
-  filter: blur(2px);
-  animation: lc-glow-breathe 3.6s ease-in-out infinite;
-  will-change: opacity;
-}
-@keyframes lc-glow-breathe {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 0.74;
-  }
-}
+/* (The working-monitor glow moved into the canvas — it's drawn by `screenPanel` as additive light on the
+   lit screen, so a nearer monitor occludes it. There is no `.lc-amb-glow` overlay any more.) */
 /* faint rising steam at the break-nook coffee machine */
 .lc-amb-steam {
   position: absolute;

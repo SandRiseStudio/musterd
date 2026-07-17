@@ -11,7 +11,6 @@ import {
   DARK_PALETTE,
   drawCue,
   magicAnchors,
-  monitorAnchors,
   renderScene,
   setScenePalette,
   toneColor,
@@ -143,11 +142,11 @@ export function mountOffice(
   const cues: Cue[] = [];
 
   // ── Tier-A ambient overlay (ADR 086): GPU-composited CSS life over the baked floor — a slow day-cycle
-  // wash, coffee-nook steam, and breathing monitor glows on working desks. Pure CSS, no canvas/RAF cost;
-  // off entirely under reduced-motion. Lives in its own layer between the canvas and the label overlay.
+  // wash, coffee-nook steam, and the animated desk props. Pure CSS, no canvas/RAF cost; off entirely under
+  // reduced-motion. Lives in its own layer between the canvas and the label overlay. (The working-monitor
+  // glow is *not* here — it's drawn in the canvas by `screenPanel` so a nearer monitor occludes it.)
   const ambientHost = document.createElement('div');
   ambientHost.className = 'lc-gl-ambient';
-  const glows = new Map<string, HTMLDivElement>(); // per working-member monitor glow
   let steamEl: HTMLDivElement | null = null;
   // Animated desk props (Tier-A CSS): a spinning blade over each fan and rising steam over each desk mug.
   // Fixed sets (a stable per-desk hash decides which desks have them), so these pools only reposition on
@@ -225,7 +224,6 @@ export function mountOffice(
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
     if (!reduced) {
-      syncGlows(monitorAnchors(placements, nodes, fit));
       positionSteam();
       syncDeskProps();
       syncMagic();
@@ -272,28 +270,6 @@ export function mountOffice(
     const { fans, coffees } = animatedDeskAnchors(fit, occupied);
     syncAnchorPool(fanEls, fans, 'lc-amb-fan', '<div class="lc-amb-fan__tilt"><div class="lc-amb-fan__blades"></div></div>', 'translate(-50%, -50%)');
     syncAnchorPool(deskSteamEls, coffees, 'lc-amb-steam lc-amb-steam--desk', '<i></i><i></i><i></i>', 'translate(-50%, -100%)');
-  }
-
-  /** Create/remove/position a breathing glow over each working member's monitor (Tier-A, CSS-animated). */
-  function syncGlows(anchors: Map<string, Pt>) {
-    const seen = new Set<string>();
-    for (const [name, at] of anchors) {
-      seen.add(name);
-      let el = glows.get(name);
-      if (!el) {
-        el = document.createElement('div');
-        el.className = 'lc-amb-glow';
-        ambientHost.appendChild(el);
-        glows.set(name, el);
-      }
-      el.style.transform = `translate(-50%, -50%) translate(${at.x}px, ${at.y}px)`;
-    }
-    for (const [name, el] of glows) {
-      if (!seen.has(name)) {
-        el.remove();
-        glows.delete(name);
-      }
-    }
   }
 
   function positionSteam() {
@@ -844,8 +820,7 @@ export function mountOffice(
       for (const [who, s] of [...speeches]) clearSpeech(who, s); // cancel timers + remove bubbles
       for (const el of labels.values()) el.remove();
       labels.clear();
-      glows.clear();
-      ambientHost.remove(); // removes the day-cycle wash, steam, and any monitor glows
+      ambientHost.remove(); // removes the day-cycle wash, steam, and the animated desk props
       canvas.remove();
     },
   };
