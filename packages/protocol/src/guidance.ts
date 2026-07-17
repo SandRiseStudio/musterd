@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 2;
+export const GUIDANCE_CONTENT_VERSION = 3;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -118,14 +118,20 @@ export function renderSkillBody(opts: { team: string }): string {
     '- **Approve requests you own** (admin): `musterd requests` lists pending claims; decide with the',
     '  request-decide flow (see `musterd help`).',
     '',
-    '## Owning work in a lane',
+    '## Owning work in a lane — claim before you build',
     '',
-    'Declare what you are working on so the team sees it and musterd can warn on overlap (it warns, never',
-    'blocks). `lane_open {title, surface_globs, claim:true}` / `musterd lane open "<title>" --surface',
-    '<globs> --claim` when you start; `lane_claim` to take an open lane; `lane_board` / `musterd lanes` to',
-    'see who owns what. Link a lane to a Goal with `--goal <id>` so status derives up the plan.',
-    '`musterd next` gives your orientation brief (what you carry, what to pick up); `musterd done` closes',
-    'your live lane and shows what is next.',
+    '**Claim a lane before you touch the work, not after.** On a team, an open lane is an *invitation to',
+    'claim*, not a menu to read past — a seeded board that nobody claims produces three agents all building',
+    'the same thing and throwing two-thirds of it away. So: `lane_board` / `musterd lanes` to see what is',
+    'open and who owns what, then `lane_claim` / `musterd lane claim` **the one lane you will do** before you',
+    'start editing. Open a new one with `lane_open {title, surface_globs, claim:true}` / `musterd lane open',
+    '"<title>" --surface <globs> --claim` if your work is not on the board yet.',
+    '',
+    '- **Never build in a lane a teammate already owns.** If the lane you need is claimed, coordinate —',
+    "  `team_send` the owner, take a *different* open lane, or ask them to hand off — don't duplicate it.",
+    '- Link a lane to a Goal with `--goal <id>` so status derives up the plan. `musterd next` gives your',
+    '  orientation brief (what you carry, what to pick up); `musterd done` closes your live lane and shows',
+    '  what is next. Overlap is warned, never blocked — the warning is a coordination prompt, act on it.',
     '',
     '## Handing off cleanly',
     '',
@@ -134,6 +140,30 @@ export function renderSkillBody(opts: { team: string }): string {
     "not re-derive it. Pair it with `team_send {act:'handoff'}` / `musterd send --act handoff` naming the",
     'artifact. The receiver answers with `accept`/`decline` (set `reply_to`), and — importantly — accepting',
     'is not finishing: close the thread with `resolve` when the work actually lands.',
+    '',
+    '## Asking a human (the ask stream, ADR 147)',
+    '',
+    'Humans are peers you can reach, not a wall to route around. When you need one, **raise it as an act —',
+    "do not stall silently and do not take a big action unasked.** `team_send {act:'ask'}` / `musterd send",
+    '--act ask` carries directed-to-human traffic; every ask needs a **species** (what kind) and a **tier**',
+    '(how hard it wedges). The tier owns the clock: **the send response hands you the contract** — the',
+    'timeout to wait and the policy on silence — so *you* decide when the wait is up, never a server timer.',
+    '',
+    '- **`species:approve` — before a costly / irreversible / out-of-scope action.** Pair with',
+    '  **`tier:blocking`**: an unanswered blocking ask **HOLDS** — you wait, and if the timeout elapses you',
+    "  do **not** proceed; record it with a `status_update` carrying `meta.ask_ref` + `meta.ask_outcome:'held'`.",
+    '  This is the admin gate — never edit past it on your own.',
+    '- **`species:escalate` — a true blocker or dispute only a human can settle.** Usually **`tier:standard`**.',
+    '- **`species:consult` — "which direction / does this look right."** Wanted even in full-auto; usually',
+    '  **`tier:advisory`**.',
+    '- **Below the top tier, silence is not a stop.** An unanswered `advisory`/`standard` ask **proceeds with',
+    '  a recorded risk**: pick your path and log a `status_update` with `meta.ask_ref`, `meta.ask_outcome:',
+    "  'risk_accepted'`, `meta.risk`, and `meta.chosen_approach`. Proceeding-with-risk is auditable; a silent",
+    '  stall is not.',
+    '',
+    'The human answering, deciding ("check back"), or approving rides back on the normal acts — read your',
+    'inbox at task boundaries for the reply. Species and tier are independent: a genuinely small approval can',
+    'be `standard`, but reserve `blocking` for things that truly must not proceed unattended.',
     '',
     '## Saving your memory (cross-session continuity, ADR 093)',
     '',
@@ -179,9 +209,10 @@ export function renderSkillBody(opts: { team: string }): string {
  * `.mdc` rule). `canonical` is the harness-neutral `.musterd/skill/SKILL.md` — no frontmatter. */
 export function renderSkillFrontmatter(harness: 'claude-code' | 'cursor' | 'canonical'): string {
   const description =
-    'Using the musterd coordination layer: claiming or adopting a seat, owning work in a lane, ' +
-    'handing off with a branch, waiting on the inbox without polling, and recovering from claim/identity ' +
-    'errors. Use when a musterd team interaction goes past the basic join/inbox/status loop.';
+    'Using the musterd coordination layer: claiming or adopting a seat, claiming a lane before you build, ' +
+    'handing off with a branch, raising a to-human ask (consult/escalate/approve with a tier contract), ' +
+    'waiting on the inbox without polling, and recovering from claim/identity errors. Use when a musterd ' +
+    'team interaction goes past the basic join/inbox/status loop.';
   if (harness === 'claude-code') {
     return ['---', 'name: musterd', `description: ${description}`, '---'].join('\n');
   }
