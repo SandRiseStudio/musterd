@@ -85,26 +85,37 @@ function OfficePreviewPage() {
     return new Set(raw.split(',').map((s) => s.trim()));
   });
 
+  // `?stale=<names>` reproduces a *stale* seat (ADR 135): posture projected to `idle` while its last-known
+  // `activity` still reads `working`. That split is the only case where the typing animation and placement
+  // could disagree, so it's the one worth being able to summon — the live floor reaches it on its own.
+  const [stale] = useState<Set<string>>(() => {
+    const raw = new URLSearchParams(window.location.search).get('stale');
+    return raw ? new Set(raw.split(',').map((s) => s.trim())) : new Set();
+  });
+
   const buildData = useCallback(
     (): OfficeData => ({
       nodes: POOL.filter((m) => present.has(m.name)).map((m) => {
         const isAway = away.has(m.name);
-        const activity = isAway || idle.has(m.name) ? 'idle' : m.activity;
+        const isStale = stale.has(m.name);
+        // A stale seat keeps `activity: working` but is placed by its projected `idle` posture.
+        const activity = isAway || (idle.has(m.name) && !isStale) ? 'idle' : m.activity;
+        const posture = isAway ? ('away' as const) : isStale || idle.has(m.name) ? ('idle' as const) : activity;
         return {
           name: m.name,
           kind: m.kind,
           presence: isAway ? 'away' : 'online',
           activity,
-          // The fixture has no availability axis, so posture composes straight off presence + activity:
-          // away → the nook, idle → the leisure furniture, working → a desk.
-          posture: isAway ? ('away' as const) : activity,
+          // The fixture has no availability axis, so posture composes straight off presence + activity —
+          // except a `?stale` seat, which pins posture idle while activity lags at working.
+          posture,
           state: m.state,
           color: memberColor(m.name, m.kind),
           role: '',
         };
       }),
     }),
-    [present, away, idle],
+    [present, away, idle, stale],
   );
   const dataRef = useRef(buildData);
   dataRef.current = buildData;

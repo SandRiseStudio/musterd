@@ -13,6 +13,7 @@ import {
   proseSegments,
   richLength,
   richTokens,
+  rosterOrder,
   rosterPrimaryChip,
   type RichToken,
 } from './format';
@@ -214,6 +215,34 @@ describe('rosterPrimaryChip — posture + offline reason (ADR 138/141)', () => {
         offline_reason: 'unknown',
       } as MemberSummary).label,
     ).toBe('offline');
+  });
+});
+
+describe('rosterOrder — active seats lead the rail', () => {
+  const seat = (name: string, over: Partial<MemberSummary>): MemberSummary =>
+    ({ name, kind: 'agent', presence: 'online', activity: 'idle', ...over }) as MemberSummary;
+
+  it('orders working → idle → away → offline, whatever the input order', () => {
+    const roster = [
+      seat('off', { posture: 'offline', presence: 'offline', activity: 'offline' }),
+      seat('idle', { posture: 'idle', activity: 'idle' }),
+      seat('away', { posture: 'away', activity: 'idle' }),
+      seat('work', { posture: 'working', activity: 'working' }),
+    ];
+    expect([...roster].sort(rosterOrder).map((m) => m.name)).toEqual(['work', 'idle', 'away', 'off']);
+  });
+
+  it('puts a working agent above an idle one (the reported case)', () => {
+    const working = seat('stanley', { posture: 'working', activity: 'working' });
+    const idle = seat('gptbot', { posture: 'idle', activity: 'working' }); // stale: activity lags posture
+    expect([idle, working].sort(rosterOrder).map((m) => m.name)).toEqual(['stanley', 'gptbot']);
+  });
+
+  it('breaks ties within a posture by human-before-agent, then name', () => {
+    const a = seat('zeb', { posture: 'working', activity: 'working', kind: 'human' });
+    const b = seat('abe', { posture: 'working', activity: 'working', kind: 'agent' });
+    const c = seat('cy', { posture: 'working', activity: 'working', kind: 'agent' });
+    expect([b, c, a].sort(rosterOrder).map((m) => m.name)).toEqual(['zeb', 'abe', 'cy']);
   });
 });
 

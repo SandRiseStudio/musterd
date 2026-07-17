@@ -534,11 +534,20 @@ export function formatClock(d: Date): { time: string; meridiem: string; zone: st
   };
 }
 
-/** Roster sort for the rail: online before offline, then humans before agents, then by name. */
+/** Rank postures by how active the seat is, so the rail leads with who's actually running. Working first,
+ * then idle (present, no task), then away (stepped out), then offline (gone) — the same order the chips
+ * read top to bottom. This subsumes the old online-before-offline split: offline simply ranks last. */
+const POSTURE_RANK: Record<Posture, number> = { working: 0, idle: 1, away: 2, offline: 3 };
+
+/**
+ * Roster sort for the rail: by posture (working → idle → away → offline), then humans before agents, then
+ * by name. Sorting on the composed `posture` — the same value each row's chip shows — means the list order
+ * matches what the eye reads down the chips: the working seats cluster at the top, idle below them.
+ */
 export function rosterOrder(a: MemberSummary, b: MemberSummary): number {
-  const onA = a.presence !== 'offline' ? 0 : 1;
-  const onB = b.presence !== 'offline' ? 0 : 1;
-  if (onA !== onB) return onA - onB;
+  const pA = POSTURE_RANK[memberPosture(a)];
+  const pB = POSTURE_RANK[memberPosture(b)];
+  if (pA !== pB) return pA - pB;
   const kA = a.kind === 'human' ? 0 : 1;
   const kB = b.kind === 'human' ? 0 : 1;
   if (kA !== kB) return kA - kB;
