@@ -1,6 +1,6 @@
 import { drawCharacter } from './character';
 import { depth, FLOOR, project, THICK, type Fit, type Pt } from './iso';
-import type { CatState } from './cat';
+import type { PetState } from './pet';
 import {
   BEAM_LEN,
   BEAM_SHEAR,
@@ -283,7 +283,7 @@ function drawFloor(ctx: CanvasRenderingContext2D, fit: Fit): void {
 /** Wall height in screen px at scale 1 — tall enough to read as a room, short enough not to wall the view in. */
 const WALL_H = 188;
 
-// The windows + beam geometry live in layout.ts (the cat's sunbeam nap spots derive from the same data).
+// The windows + beam geometry live in layout.ts (the dog's sunbeam nap spots derive from the same data).
 
 /**
  * The glass colour: bright sky by day (warm at golden hour via `skyTint`), a dark pane with a faint city
@@ -841,31 +841,51 @@ function drawPlant(
   }
 }
 
-// ── the office cat (behaviour in cat.ts; this is only the painter) ──────────────────────────────────────
+// ── the office dog (behaviour in pet.ts; this is only the painter) ──────────────────────────────────────
 
-const CAT = {
-  fur: '#e08a43',
-  stripe: '#c9702f',
-  cream: '#f7e9d4',
-  earIn: '#eaa98e',
-  collar: '#e3a72b', // the huddle-pouf mustard — the team cat wears the team colour
+const DOG = {
+  fur: '#dd8b46',
+  saddle: '#b4611f', // the darker back patch — internal contrast is what makes the shape read at office scale
+  cream: '#f7e9d4', // muzzle, chest, paws, tail tip
+  earIn: '#a4551a',
+  collar: '#e3a72b', // the huddle-pouf mustard — the team dog wears the team colour
+  tag: '#f6d98a',
   eye: '#3a2c1c',
+  nose: '#2e2119',
+  tongue: '#e28a86',
 } as const;
 
+/** Tail-wag rate (Hz). Fast enough to read as a wag at office scale without buzzing. */
+const WAG_HZ = 4.6;
+
 /**
- * Draw the cat at its current pose. Screen-space profile (like the members' billboarded faces): the body
- * reads side-on and `flip` mirrors it for leftward travel. Small on purpose — cat-sized next to ~40px
+ * Draw the office dog at its current pose. Screen-space profile (like the members' billboarded faces): the
+ * body reads side-on and `flip` mirrors it for leftward travel. Small on purpose — dog-sized next to ~40px
  * people — so judge it at 4× on /character-sheet, not here.
+ *
+ * Everything that makes this a *dog* rather than the cat that used to live here is in this function: ears
+ * that flop instead of pricking up, a snout out front, cream paws, and a tail that wags where the cat's
+ * curled. The behaviour machine driving it (pet.ts) never learned what species it is.
  */
-export function drawCat(ctx: CanvasRenderingContext2D, fit: Fit, cat: CatState, t: number): void {
-  const p = project(cat.lx, cat.ly, fit);
+export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, t: number): void {
+  const p = project(pet.lx, pet.ly, fit);
   const s = fit.scale;
-  const m = cat.flip ? -1 : 1;
+  const m = pet.flip ? -1 : 1;
   const px = (dx: number, dy: number): Pt => ({ x: p.x + dx * m * s, y: p.y + dy * s });
 
   ctx.save();
+  const stroke = (a: Pt, b: Pt, w: number, color: string): void => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  };
+  /** A tapered tail along a quadratic, with the cream tip every dog in this office is issued. */
   const tail = (x0: number, y0: number, cx: number, cy: number, x1: number, y1: number, w: number): void => {
-    ctx.strokeStyle = CAT.fur;
+    ctx.strokeStyle = DOG.fur;
     ctx.lineWidth = w * s;
     ctx.lineCap = 'round';
     ctx.beginPath();
@@ -875,137 +895,129 @@ export function drawCat(ctx: CanvasRenderingContext2D, fit: Fit, cat: CatState, 
     ctx.moveTo(a.x, a.y);
     ctx.quadraticCurveTo(c.x, c.y, b.x, b.y);
     ctx.stroke();
+    // The cream tip is the last stretch of the tail *restroked* at the same width, not a disc stuck on the
+    // end — a round cap plus a circle makes a bulb, and the tail reads as a balloon on a string.
+    const dx = x1 - cx;
+    const dy = y1 - cy;
+    const d = Math.hypot(dx, dy) || 1;
+    const back = px(x1 - (dx / d) * 2.4, y1 - (dy / d) * 2.4);
+    stroke(back, b, w, DOG.cream);
   };
+  /** A leg with a cream paw at the bottom — `lift` raises the foot off the floor mid-stride. */
   const leg = (x: number, lift: number, w = 2.6): void => {
     const top = px(x, -9);
     const foot = px(x, -lift);
-    ctx.strokeStyle = CAT.fur;
-    ctx.lineWidth = w * s;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(top.x, top.y);
-    ctx.lineTo(foot.x, foot.y);
-    ctx.stroke();
+    stroke(top, foot, w, DOG.fur);
+    ellipse(ctx, px(x, -lift), w * 0.5 * s, w * 0.38 * s, DOG.cream);
   };
-  const ear = (x: number, y: number, r: number): void => {
-    const a = px(x - r, y);
-    const b = px(x + r, y);
-    const tip = px(x, y - r * 1.7);
-    quad(ctx, [a, tip, b], CAT.fur);
-    const ia = px(x - r * 0.45, y - r * 0.15);
-    const ib = px(x + r * 0.45, y - r * 0.15);
-    const itip = px(x, y - r * 1.1);
-    quad(ctx, [ia, itip, ib], CAT.earIn);
+  /** A floppy ear: hangs down the side of the head and swings a little with the body. */
+  const ear = (x: number, y: number, r: number, swing = 0): void => {
+    ellipse(ctx, px(x + swing * 0.4, y + r * 0.9), r * 0.78 * s, r * 1.45 * s, DOG.fur);
+    ellipse(ctx, px(x + swing * 0.4, y + r * 0.95), r * 0.4 * s, r * 0.85 * s, DOG.earIn);
   };
-  const head = (x: number, y: number, awake: boolean): void => {
-    ear(x - 4, y - 4.5, 2.6);
-    ear(x + 3.5, y - 4.5, 2.6);
-    ellipse(ctx, px(x, y), 6.2 * s, 5.6 * s, CAT.fur);
-    ellipse(ctx, px(x + 2.6, y + 2.6), 2.2 * s, 1.7 * s, CAT.cream); // muzzle
+  /**
+   * The head, snout-first. `awake` opens the eye; a sleeping dog gets a lash line and its muzzle resting
+   * on its paws. Drawn ear-then-skull so the far ear tucks behind the head.
+   */
+  const head = (x: number, y: number, awake: boolean, swing = 0, tongue = false): void => {
+    ear(x - 3.6, y - 2.4, 2.5, swing); // far ear, behind the skull
+    ellipse(ctx, px(x, y), 5.8 * s, 5.2 * s, DOG.fur);
+    ellipse(ctx, px(x + 4.6, y + 2.2), 4.3 * s, 2.5 * s, DOG.cream); // snout, out front
+    if (tongue) ellipse(ctx, px(x + 5.4, y + 4), 1.5 * s, 1.1 * s, DOG.tongue);
+    ellipse(ctx, px(x + 8.2, y + 1.4), 1.25 * s, 1.05 * s, DOG.nose);
+    ellipse(ctx, px(x + 2.4, y - 3.4), 2.4 * s, 1.5 * s, DOG.fur); // brow, over the snout's root
     if (awake) {
-      ellipse(ctx, px(x - 1.6, y - 0.6), 0.9 * s, 1.1 * s, CAT.eye);
-      ellipse(ctx, px(x + 3.4, y - 0.6), 0.9 * s, 1.1 * s, CAT.eye);
+      ellipse(ctx, px(x + 1.4, y - 1), 1 * s, 1.15 * s, DOG.eye);
+      ellipse(ctx, px(x + 1.75, y - 1.5), 0.34 * s, 0.34 * s, '#ffffff'); // catchlight — the whole charm of a face
     } else {
-      ctx.strokeStyle = CAT.eye;
-      ctx.lineWidth = 0.8 * s;
-      for (const ex of [-1.6, 3.4]) {
-        const a = px(ex - 1, y - 0.4);
-        const b = px(ex + 1, y - 0.4);
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-      }
+      stroke(px(x + 0.4, y - 0.8), px(x + 2.4, y - 0.8), 0.8, DOG.eye);
     }
+    ear(x + 2.6, y - 2.2, 2.7, swing); // near ear, over the cheek
   };
-  const stripes = (x: number, y: number, r: number): void => {
-    ctx.strokeStyle = CAT.stripe;
-    ctx.lineWidth = 1.6 * s;
-    ctx.lineCap = 'round';
-    for (const dx of [-r * 0.45, 0.5, r * 0.55]) {
-      const a = px(x + dx, y - r * 0.55);
-      const b = px(x + dx + 1.4, y + r * 0.1);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-    }
+  /** The saddle patch across the back — the dog's one marking, and its silhouette-reader. */
+  const saddle = (x: number, y: number, rx: number, ry: number): void => {
+    ctx.save();
+    ctx.beginPath();
+    const c = px(x, y);
+    ctx.ellipse(c.x, c.y, rx * s, ry * s, 0, 0, Math.PI * 2);
+    ctx.clip();
+    ellipse(ctx, px(x - 1.5, y - ry * 0.9), rx * 0.8 * s, ry * 0.85 * s, DOG.saddle);
+    ctx.restore();
   };
   const collar = (x: number, y: number, r: number): void => {
-    ellipse(ctx, px(x, y), r * s, r * 0.42 * s, CAT.collar);
+    ellipse(ctx, px(x, y), r * s, r * 0.42 * s, DOG.collar);
+    ellipse(ctx, px(x + r * 0.15, y + r * 0.5), r * 0.24 * s, r * 0.26 * s, DOG.tag);
   };
 
-  switch (cat.mode) {
+  switch (pet.mode) {
     case 'sleep':
     case 'curl': {
-      // Curled into a bun: tail wrapped round the front, head tucked, slow breathing.
-      const settle = cat.mode === 'curl' ? Math.min(1, cat.modeT / CURL_VIS_S) : 1;
-      const breathe = 1 + 0.045 * Math.sin(t * 2.1) * settle;
-      ellipse(ctx, px(0, 1.5), 14 * s, 4.5 * s, 'rgba(0,0,0,0.14)');
-      ellipse(ctx, px(0, -6), 12 * s, 7.2 * breathe * s, CAT.fur);
-      stripes(-1, -7, 11);
-      tail(-9, -2, 0, 2.5, 9.5, -1.5, 3.2);
-      head(7, -7.5, false);
+      // Nose-to-tail comma: chin down on the front paws, tail draped round the flank (a dog flops where a
+      // cat wraps into a bun), slow breathing that damps in as the settle completes.
+      const settle = pet.mode === 'curl' ? Math.min(1, pet.modeT / CURL_VIS_S) : 1;
+      const breathe = 1 + 0.05 * Math.sin(t * 1.9) * settle;
+      ellipse(ctx, px(0, 1.5), 15 * s, 4.6 * s, 'rgba(0,0,0,0.14)');
+      tail(-9, -7, -14, 0.5, -4, 1, 2.8); // draped round the flank, behind the body — a dog flops, it doesn't wrap
+      ellipse(ctx, px(-0.5, -5.5), 12.5 * s, 6.8 * breathe * s, DOG.fur);
+      saddle(-0.5, -5.5, 12.5, 6.8 * breathe);
+      ellipse(ctx, px(7.5, -2), 3.6 * s, 1.8 * s, DOG.cream); // front paws, tucked under the chin
+      head(7, -6.5, false);
       break;
     }
     case 'sit': {
-      // Upright, tail wrapped with a flicking tip, eyes open — the supervising pose.
-      ellipse(ctx, px(0, 1.5), 12 * s, 4 * s, 'rgba(0,0,0,0.14)');
-      const flick = Math.sin(t * 3.2) * 2.4;
-      tail(-7, -3, -13, -2, -14, -6 - flick, 2.6);
-      ellipse(ctx, px(-1, -8), 8 * s, 8.5 * s, CAT.fur); // haunches
-      stripes(-2, -10, 8);
-      ellipse(ctx, px(3.5, -12), 5.2 * s, 7 * s, CAT.fur); // chest, up
-      ellipse(ctx, px(4, -9), 3 * s, 4.5 * s, CAT.cream); // chest patch
+      // Upright on the haunches, front legs straight, tail sweeping the floor behind — the supervising
+      // pose, and the one members walk past. Tongue out: a sitting dog watching you work is a happy one.
+      const wag = Math.sin(t * WAG_HZ * Math.PI * 2);
+      ellipse(ctx, px(0, 1.5), 13 * s, 4.2 * s, 'rgba(0,0,0,0.14)');
+      tail(-6.5, -6, -12, -1 + wag * 1.2, -14.5, 0.5 + wag * 2.6, 2.8); // thumping the floor
+      ellipse(ctx, px(-1.5, -7.5), 8.2 * s, 8.5 * s, DOG.fur); // haunches
+      saddle(-1.5, -7.5, 8.2, 8.5);
+      ellipse(ctx, px(3.5, -12), 5.4 * s, 7.2 * s, DOG.fur); // chest, up
+      ellipse(ctx, px(4.2, -9.5), 3 * s, 4.6 * s, DOG.cream); // chest blaze
       leg(2.2, 0.5);
       leg(5.4, 0.5);
-      collar(4.5, -18, 4.4);
-      head(5, -23, true);
+      collar(4.5, -18.5, 4.4);
+      head(5, -23, true, wag * 0.5, true);
       break;
     }
     case 'stretch': {
-      // The wake-up: front low and reaching, haunches high, tail straight up.
-      ellipse(ctx, px(0, 1.5), 15 * s, 4.5 * s, 'rgba(0,0,0,0.14)');
-      tail(-10, -16, -13, -24, -11, -27, 2.6);
-      ellipse(ctx, px(-7, -13), 7.5 * s, 7 * s, CAT.fur); // haunches, up
-      stripes(-8, -14, 7);
+      // The play-bow every dog wakes up with: front paws reaching, chest to the floor, rump high, tail up.
+      const wag = Math.sin(t * WAG_HZ * Math.PI * 2);
+      ellipse(ctx, px(0, 1.5), 16 * s, 4.6 * s, 'rgba(0,0,0,0.14)');
+      tail(-9.5, -16, -14 + wag * 2, -22, -11 + wag * 3.5, -26, 2.8);
+      ellipse(ctx, px(-7, -13), 7.8 * s, 7.2 * s, DOG.fur); // haunches, up
+      saddle(-7, -13, 7.8, 7.2);
       leg(-9, 0.5, 3);
-      ellipse(ctx, px(2, -6), 8 * s, 4.6 * s, CAT.fur); // chest sweeping low
-      const reach = px(12, -1.5);
-      const sh = px(4, -6);
-      ctx.strokeStyle = CAT.fur;
-      ctx.lineWidth = 2.6 * s;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(sh.x, sh.y);
-      ctx.lineTo(reach.x, reach.y);
-      ctx.stroke();
-      collar(9.5, -9, 4);
-      head(12.5, -12.5, true);
+      ellipse(ctx, px(2, -5.5), 8.5 * s, 4.4 * s, DOG.fur); // chest sweeping low
+      stroke(px(4, -5.5), px(13, -1.5), 2.6, DOG.fur); // front legs reaching out flat
+      ellipse(ctx, px(13, -1.5), 1.5 * s, 1 * s, DOG.cream);
+      collar(9.5, -8.5, 4);
+      head(12, -12, true, 0, true);
       break;
     }
     case 'walk': {
-      // Padding along: diagonal gait, tail carried high, slight body bob.
-      const cyc = cat.phase * Math.PI * 2;
+      // Trotting: diagonal gait off the distance-driven phase, tail carried high and wagging, ears bouncing
+      // a beat behind the body. Far legs, then body, then near legs — so it reads as four feet, not a comb.
+      const cyc = pet.phase * Math.PI * 2;
       const bob = Math.sin(cyc * 2) * 0.7;
-      ellipse(ctx, px(0, 1.5), 14 * s, 4.5 * s, 'rgba(0,0,0,0.12)');
-      tail(-10, -13 + bob, -16, -22, -13, -27 + Math.sin(t * 2.3) * 1.6, 2.6);
-      // far legs first, then body, then near legs — so the gait reads as four feet, not a comb
+      const wag = Math.sin(t * WAG_HZ * Math.PI * 2);
+      ellipse(ctx, px(0, 1.5), 14.5 * s, 4.5 * s, 'rgba(0,0,0,0.12)');
+      tail(-9.5, -13 + bob, -15 + wag * 1.6, -21, -12 + wag * 3, -25.5, 2.8);
       leg(-7 + Math.sin(cyc) * 2, -Math.max(0, Math.sin(cyc)) * 2.5 + 0.5, 2.2);
       leg(6 + Math.sin(cyc + Math.PI) * 2, -Math.max(0, Math.sin(cyc + Math.PI)) * 2.5 + 0.5, 2.2);
-      ellipse(ctx, px(0, -12.5 + bob), 11.5 * s, 6 * s, CAT.fur);
-      stripes(-1, -13.5 + bob, 10);
+      ellipse(ctx, px(0, -12.5 + bob), 11.5 * s, 6 * s, DOG.fur);
+      saddle(0, -12.5 + bob, 11.5, 6);
       leg(-6 + Math.sin(cyc + Math.PI) * 2, -Math.max(0, Math.sin(cyc + Math.PI)) * 2.5 + 0.5);
       leg(7 + Math.sin(cyc) * 2, -Math.max(0, Math.sin(cyc)) * 2.5 + 0.5);
       collar(10.5, -16.5 + bob, 4);
-      head(12.5, -21 + bob, true);
+      head(12.5, -21 + bob, true, -bob * 1.2, true);
       break;
     }
   }
   ctx.restore();
 }
 
-/** How long the settle-down takes to visually damp the breathing in from the sit (matches cat.ts CURL_S). */
+/** How long the settle-down takes to visually damp the breathing in from the sit (matches pet.ts CURL_S). */
 const CURL_VIS_S = 1.1;
 
 /**
@@ -1828,7 +1840,7 @@ export function renderScene(
   t = 0,
   teamName = 'revive',
   env: LightEnv = DAY_ENV,
-  cat: CatState | null = null,
+  pet: PetState | null = null,
 ): SceneAnchors {
   drawFloor(ctx, fit);
   // The room shell: back walls + windows as a backdrop (behind every item), then the daylight beams they
@@ -1883,8 +1895,8 @@ export function renderScene(
   items.push({ d: depth(PRINTER.lx, PRINTER.ly), fn: () => printer(ctx, fit) });
   items.push({ d: depth(ENTRANCE.lx, ENTRANCE.ly), fn: () => drawEntrance(ctx, fit) });
 
-  // The office cat sorts with everything else at its own floor position (behaviour lives in cat.ts).
-  if (cat) items.push({ d: depth(cat.lx, cat.ly) + 0.08, fn: () => drawCat(ctx, fit, cat, t) });
+  // The office dog sorts with everything else at its own floor position (behaviour lives in pet.ts).
+  if (pet) items.push({ d: depth(pet.lx, pet.ly) + 0.08, fn: () => drawDog(ctx, fit, pet, t) });
 
   for (const slot of DESK_SLOTS) {
     const name = slotMember.get(slot.id) ?? null;

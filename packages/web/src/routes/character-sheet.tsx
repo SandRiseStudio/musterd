@@ -38,7 +38,7 @@ function CharacterSheet() {
 
     void (async () => {
       // Client-only: the scene modules reach for canvas/DOM at import time.
-      const [{ drawCharacter }, { solveSkeleton, seedOf, typingBurst }, { drawCat }] = await Promise.all([
+      const [{ drawCharacter }, { solveSkeleton, seedOf, typingBurst }, { drawDog }] = await Promise.all([
         import('../live/office-scene/character'),
         import('../live/office-scene/skeleton'),
         import('../live/office-scene/render'),
@@ -51,7 +51,7 @@ function CharacterSheet() {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       // 3 blocks (seated+typing / walking / standing) × 4 facings each is too wide; instead: for each name,
       // one row of 4 facings seated, and a second sweep walking. Keep it to a readable grid.
-      // + 1 extra row at the bottom: the office cat, one cell per pose (it needs the same 4× scrutiny).
+      // + 1 extra row at the bottom: the office dog, one cell per pose (it needs the same 4× scrutiny).
       const rows = Math.ceil(NAMES.length / cols) * 3 + 1;
       const W = cols * CELL;
       const H = rows * ROW + 40;
@@ -131,9 +131,9 @@ function CharacterSheet() {
             ctx.fillText(`${name} · ${kind[0]} · ${dir} · ${mode.label}`, cx, row * ROW + ROW - 6);
           });
         });
-        // The office cat, at the same 4×: every pose, both facings for the walk.
-        const catRow = Math.ceil(NAMES.length / cols) * 3;
-        const CAT_CELLS = [
+        // The office dog, at the same 4×: every pose, both facings for the walk.
+        const petRow = Math.ceil(NAMES.length / cols) * 3;
+        const PET_CELLS = [
           { label: 'sleep', mode: 'sleep' as const, flip: false },
           { label: 'curl', mode: 'curl' as const, flip: false },
           { label: 'sit', mode: 'sit' as const, flip: false },
@@ -141,10 +141,10 @@ function CharacterSheet() {
           { label: 'walk · flipped', mode: 'walk' as const, flip: true },
           { label: 'stretch', mode: 'stretch' as const, flip: false },
         ];
-        CAT_CELLS.forEach((cell, i) => {
+        PET_CELLS.forEach((cell, i) => {
           const cx = i * CELL + CELL / 2;
-          const cy = catRow * ROW + ROW - 60;
-          drawCat(
+          const cy = petRow * ROW + ROW - 60;
+          drawDog(
             ctx,
             { ox: cx, oy: cy, scale: 3.4 },
             {
@@ -164,7 +164,7 @@ function CharacterSheet() {
           ctx.fillStyle = 'rgba(30,20,10,.72)';
           ctx.font = '11px "JetBrains Mono", monospace';
           ctx.textAlign = 'center';
-          ctx.fillText(`cat · ${cell.label}`, cx, catRow * ROW + ROW - 6);
+          ctx.fillText(`dog · ${cell.label}`, cx, petRow * ROW + ROW - 6);
         });
         raf = requestAnimationFrame(frame);
       };
