@@ -45,9 +45,19 @@ function verb(env: Envelope): string {
       return 'accepted your request';
     case 'decline':
       return 'declined your request';
+    case 'ask':
+      return askVerb(env);
     default:
       return 'messaged you';
   }
+}
+
+/** An ask names its species so the human sees what kind of decision waits (ADR 147). */
+function askVerb(env: Envelope): string {
+  const species = env.meta?.['species'];
+  if (species === 'escalate') return 'escalated to you';
+  if (species === 'approve') return 'needs your approval';
+  return 'asks what you think';
 }
 
 /** Render an envelope into an OS notification (title carries who+what, body carries the message). */

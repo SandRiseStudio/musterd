@@ -176,6 +176,10 @@ function routeEnvelopeInner(
     if (rootTs !== null && env.ts >= rootTs)
       recordLoopClosure('resolve', env.ts - rootTs, loopDims);
   }
+  // The to-human ask stream lifecycle (ADR 147). Append-only audit rows are the whole stream's trace;
+  // the daemon runs no timer — the agent owns the clock (ADR 147 §2). Shapes only, never bodies (ADR 051).
+  recordAskLifecycle(ctx, team, sender.name, outgoingEnv);
+
   // Self-reported token usage (meta.usage — ADR 082 slice 4): opt-in, harness-agnostic.
   recordTokenUsage(outgoingEnv);
 
@@ -211,6 +215,15 @@ function routeEnvelopeInner(
     message.to_kind === 'member',
   );
 
+  // The to-human ask stream's guaranteed reach (ADR 147 §3): an `ask` routes to admin humans by default.
+  // Live-push it to every admin connection on top of normal delivery — skipping admins already delivered
+  // to as recipients (and the sender) so no one is double-sent. This is what makes "escalations always
+  // technically reach the human" true even when the ask is directed at a non-admin: the durable message
+  // row is the inbox reach, this push is the loud reach. (Its loud *surface* — Slack + /live — is item 3.)
+  if (env.act === 'ask') {
+    ctx.hub.deliverToAdmins(team.id, { type: 'deliver', envelope: firehoseEnv }, skip);
+  }
+
   log.info({
     msg: 'route',
     team: team.slug,
@@ -223,4 +236,65 @@ function routeEnvelopeInner(
   });
 
   return { message, recipients, delivered };
+}
+
+/**
+ * Append the to-human ask stream's lifecycle rows (ADR 147). One row per event — the whole stream's
+ * trace lives in the audit log, not in a new table, and the daemon fires no timeout (the agent owns the
+ * clock, ADR 147 §2). The envelope is already schema-valid (`actMetaRules`), so the discriminating meta
+ * is present when its act/field is; reads stay defensive anyway. Shapes only, never bodies (ADR 051).
+ */
+function recordAskLifecycle(ctx: Ctx, team: TeamRow, actor: string, env: Envelope): void {
+  const meta = env.meta ?? {};
+  // A new ask was raised — the species/tier that set its contract, and (if directed) whom it named.
+  if (env.act === 'ask') {
+    appendAudit(ctx.db, team.id, {
+      actor,
+      action: 'ask.raised',
+      target: env.to.kind === 'member' ? env.to.name : null,
+      result: 'allow',
+      detail: { species: meta['species'], tier: meta['tier'] },
+    });
+    return;
+  }
+  // The agent's no-answer resolution (rides `status_update`, ADR 147 §4): the timeout elapsed unanswered.
+  const outcome = meta['ask_outcome'];
+  const askRef = typeof meta['ask_ref'] === 'string' ? meta['ask_ref'] : null;
+  if (outcome === 'held') {
+    appendAudit(ctx.db, team.id, {
+      actor,
+      action: 'ask.held',
+      target: askRef,
+      result: 'allow',
+      detail: { ask_ref: askRef },
+    });
+    return;
+  }
+  if (outcome === 'risk_accepted') {
+    appendAudit(ctx.db, team.id, {
+      actor,
+      action: 'ask.risk_accepted',
+      target: askRef,
+      result: 'allow',
+      // The record IS the risk-acceptance: what was risked, the approach taken, and that the human was
+      // unreachable in the window — the auditable fact ADR 145 §3.1 promised, attributable to `actor`.
+      detail: {
+        ask_ref: askRef,
+        risk: meta['risk'],
+        chosen_approach: meta['chosen_approach'],
+        human_unreachable: true,
+      },
+    });
+    return;
+  }
+  // The human "deciding — check back in ⟨until⟩" reply (rides `wait`, ADR 147 §5).
+  if (env.act === 'wait' && askRef) {
+    appendAudit(ctx.db, team.id, {
+      actor,
+      action: 'ask.deferred',
+      target: askRef,
+      result: 'allow',
+      detail: { ask_ref: askRef, until: meta['until'] },
+    });
+  }
 }

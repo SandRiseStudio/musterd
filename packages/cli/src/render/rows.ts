@@ -401,6 +401,9 @@ function ageLabel(since: number, now: number): string {
 export function isActionNeeded(env: Envelope, me: string): boolean {
   if (env.act === 'resolve') return false;
   if (env.act === 'request_help') return true;
+  // A to-human `ask` (ADR 147) is a decision waiting on a human — it flags whether it named a specific
+  // admin or went to the team by default, the recipient-side half of "escalations always reach the human".
+  if (env.act === 'ask') return true;
   return env.to.kind === 'member' && env.to.name === me;
 }
 

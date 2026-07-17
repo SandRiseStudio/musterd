@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ActSchema } from './acts.js';
+import { AskSpeciesSchema, AskTierSchema, AskOutcomeSchema } from './ask.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 /** Recipient of an envelope: a specific member, the whole team, or broadcast. */
@@ -78,6 +79,77 @@ export function actMetaRules(
         code: z.ZodIssueCode.custom,
         path: ['meta', 'goal_id'],
         message: 'act "defer" requires meta.goal_id (the Goal it reorders/defers)',
+      });
+    }
+  }
+  // `ask` (ADR 147) is the to-human stream act: it MUST carry a valid `meta.species` (which of the three
+  // kinds of directed-to-human traffic) and `meta.tier` (which derives the timeout + no-answer policy the
+  // agent runs). Both are closed enums so a surface can't send an ask the no-answer machinery can't tier.
+  if (env.act === 'ask') {
+    if (!AskSpeciesSchema.safeParse(meta['species']).success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'species'],
+        message: 'act "ask" requires meta.species (consult | escalate | approve)',
+      });
+    }
+    if (!AskTierSchema.safeParse(meta['tier']).success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'tier'],
+        message: 'act "ask" requires meta.tier (advisory | standard | blocking)',
+      });
+    }
+  }
+  // The no-answer resolution (ADR 147 §4) rides `status_update` rather than a new act: when `meta.ask_outcome`
+  // is present it MUST name the ask it resolves (`meta.ask_ref`) and be a valid outcome, and a `risk_accepted`
+  // MUST record what was risked and what the agent did — that pair IS the auditable risk-acceptance, so it is
+  // never optional. (Validated whenever the field appears, so ordinary status_updates stay unaffected.)
+  if (meta['ask_outcome'] !== undefined) {
+    if (!AskOutcomeSchema.safeParse(meta['ask_outcome']).success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'ask_outcome'],
+        message: 'meta.ask_outcome must be "held" or "risk_accepted"',
+      });
+    }
+    const askRef = meta['ask_ref'];
+    if (typeof askRef !== 'string' || askRef.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'ask_ref'],
+        message: 'meta.ask_outcome requires meta.ask_ref (the id of the ask it resolves)',
+      });
+    }
+    if (meta['ask_outcome'] === 'risk_accepted') {
+      const risk = meta['risk'];
+      const approach = meta['chosen_approach'];
+      if (typeof risk !== 'string' || risk.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['meta', 'risk'],
+          message: 'a risk_accepted outcome requires a non-empty meta.risk',
+        });
+      }
+      if (typeof approach !== 'string' || approach.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['meta', 'chosen_approach'],
+          message: 'a risk_accepted outcome requires a non-empty meta.chosen_approach',
+        });
+      }
+    }
+  }
+  // The human "deciding — check back in ⟨dur⟩" reply (ADR 147 §5) rides `wait`: when a `wait` names an ask
+  // (`meta.ask_ref`), it MUST carry `meta.until` (a duration like "1h", or "indefinite") — the clock the
+  // waiting agent extends to. A bare `wait` (no ask_ref) is the ordinary "paused" act, unaffected.
+  if (env.act === 'wait' && meta['ask_ref'] !== undefined) {
+    const until = meta['until'];
+    if (typeof until !== 'string' || until.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'until'],
+        message: 'a "deciding" wait (meta.ask_ref) requires meta.until (e.g. "1h" or "indefinite")',
       });
     }
   }

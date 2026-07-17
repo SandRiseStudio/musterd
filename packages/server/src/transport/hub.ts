@@ -114,11 +114,17 @@ export class Hub {
     return true;
   }
 
-  /** Push a frame to all admin connections on a team (P3.2 admin notifications). Returns count. */
-  deliverToAdmins(teamId: string, frame: WSServerFrame): number {
+  /**
+   * Push a frame to all admin connections on a team (P3.2 admin notifications). Returns count.
+   * `skipMemberIds` skips admins who already received the frame by another path (e.g. an ask's normal
+   * recipient delivery) so a to-human ask, ADR 147, doesn't double-send to an admin who is also a
+   * team recipient.
+   */
+  deliverToAdmins(teamId: string, frame: WSServerFrame, skipMemberIds?: Set<string>): number {
     let n = 0;
     for (const conn of this.byConn.values()) {
       if (conn.teamId !== teamId || !conn.isAdmin) continue;
+      if (skipMemberIds?.has(conn.memberId)) continue;
       conn.send(frame);
       n++;
     }
