@@ -926,7 +926,8 @@ const RAW: RawItem[] = [
     id: 'human-ask-stream',
     wave: 7,
     title: 'The to-human ask stream — tiered asks, timeouts, no-answer policy',
-    plan: 'near-term',
+    shipped: { prs: [312] },
+    frozenBy: 147,
     category: 'human-loop',
     blurb:
       'One directed-to-human stream, three species (consultative ask / escalation / approval), each carrying a tier that sets a timeout and a no-answer policy. Top tier holds; below-top proceeds with a recorded risk-acceptance. Nothing below top wedges. Harness permission prompts explicitly excluded.',
