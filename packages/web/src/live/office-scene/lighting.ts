@@ -37,6 +37,9 @@ const VEIL_MAX = 0.82;
 const VEIL_COLOR = 'rgb(15, 21, 38)';
 
 export interface LightEnv {
+  /** The office clock this envelope was computed from: hour-of-day 0..24 in PST, normalised. The wall
+   * clock reads it, so the hands and the daylight always agree — including under the `?light=HH` override. */
+  hours: number;
   /** 0 (deep night) … 1 (bright midday) — how much natural light is entering. */
   daylight: number;
   /** Overall interior light level 0..1 (natural + overhead + floor). Drives the night veil. */
@@ -95,6 +98,7 @@ export function computeLightEnv(pstHours: number, occupied: boolean): LightEnv {
   const ambient = Math.min(1, FLOOR_LIGHT + natural + overhead);
 
   return {
+    hours: h,
     daylight,
     ambient,
     overheadOn,

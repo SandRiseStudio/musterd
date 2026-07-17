@@ -363,7 +363,196 @@ function cablePts(edge: (t: number) => [number, number], fit: Fit): Pt[] {
   return out;
 }
 
+// ── back-wall dressing ────────────────────────────────────────────────────────────────────────────────
+// The walls already carry the windows and the string lights; everything hung on them lives here. It all
+// goes in the gaps the windows leave (t ∈ [0.02,0.26] · [0.48,0.56] · [0.80,0.98]) and above the
+// bookshelves (u > 0.36), so the dressing never fights the room's existing furniture or its light.
+
+const DRESS = {
+  frame: '#5b4130',
+  mat: '#f2e7d5',
+  art: ['#c2694a', '#5d7f6d', '#d2a24c'],
+  clockFace: '#f6ead2',
+  clockRim: '#4b3524',
+  tick: '#94795c',
+  hand: '#3a2a1c',
+  rope: '#8a6a4a',
+  pot: '#b9603a',
+  potRim: '#cb6f45',
+  vine: '#5f8f4b',
+} as const;
+
+/** A rectangle in wall space: `t` along the wall, `u` up it. */
+function wallRect(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  edge: (t: number) => [number, number],
+  t0: number,
+  u0: number,
+  t1: number,
+  u1: number,
+  fill: string,
+): void {
+  const pt = (t: number, u: number): Pt => wallPt(edge, t, u, fit);
+  quad(ctx, [pt(t0, u0), pt(t1, u0), pt(t1, u1), pt(t0, u1)], fill);
+}
+
+/**
+ * A disc of logical radius `r` lying flat *on* the wall. `wallPt` shears it onto the wall plane, so a
+ * circle drawn here lands on screen as the ellipse a real circle on that wall would — the radius has to be
+ * converted per axis (the wall is FLOOR long and WALL_H tall) or it comes out an egg.
+ */
+function wallDisc(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  edge: (t: number) => [number, number],
+  tc: number,
+  uc: number,
+  r: number,
+  fill: string,
+): void {
+  const pts: Pt[] = [];
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    pts.push(wallPt(edge, tc + (Math.sin(a) * r) / FLOOR, uc + (Math.cos(a) * r) / WALL_H, fit));
+  }
+  quad(ctx, pts, fill);
+}
+
+/** A framed print: frame, mat, and a block of colour. `w`/`h` in logical units. */
+function wallArt(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  edge: (t: number) => [number, number],
+  tc: number,
+  uc: number,
+  w: number,
+  h: number,
+  art: string,
+): void {
+  const dt = w / 2 / FLOOR;
+  const du = h / 2 / WALL_H;
+  wallRect(ctx, fit, edge, tc - dt, uc - du, tc + dt, uc + du, DRESS.frame);
+  wallRect(ctx, fit, edge, tc - dt * 0.84, uc - du * 0.84, tc + dt * 0.84, uc + du * 0.84, DRESS.mat);
+  wallRect(ctx, fit, edge, tc - dt * 0.58, uc - du * 0.58, tc + dt * 0.58, uc + du * 0.58, art);
+}
+
+/**
+ * The office wall clock, reading the office's own PST hour — the same number the lighting is computed
+ * from, so the hands and the daylight can never disagree (and `?light=22` moves both).
+ *
+ * Right-hand wall only, and not by taste: on the back-left wall `+t` runs *screen-left*, so a clock hung
+ * there would tell the time backwards.
+ */
+function wallClock(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  edge: (t: number) => [number, number],
+  tc: number,
+  uc: number,
+  hours: number,
+): void {
+  const R = 25;
+  wallDisc(ctx, fit, edge, tc, uc, R + 2.5, DRESS.clockRim);
+  wallDisc(ctx, fit, edge, tc, uc, R, DRESS.clockFace);
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    const t = tc + (Math.sin(a) * R * 0.8) / FLOOR;
+    const u = uc + (Math.cos(a) * R * 0.8) / WALL_H;
+    wallDisc(ctx, fit, edge, t, u, i % 3 === 0 ? 2.2 : 1.2, DRESS.tick);
+  }
+  // Hands: 12 o'clock is straight up the wall (+u), sweeping clockwise toward +t.
+  const hand = (turns: number, len: number, w: number): void => {
+    const a = turns * Math.PI * 2;
+    const c = wallPt(edge, tc, uc, fit);
+    const tip = wallPt(edge, tc + (Math.sin(a) * len) / FLOOR, uc + (Math.cos(a) * len) / WALL_H, fit);
+    ctx.strokeStyle = DRESS.hand;
+    ctx.lineWidth = w * fit.scale;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.stroke();
+  };
+  hand((hours % 12) / 12, R * 0.5, 2.4); // the hour hand creeps with the minutes, as a real one does
+  hand(hours % 1, R * 0.78, 1.5);
+  wallDisc(ctx, fit, edge, tc, uc, 2, DRESS.hand);
+}
+
+/** A planter hung off the wall on a bracket, trailing vines — the one piece of dressing with some droop. */
+function wallHanger(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  edge: (t: number) => [number, number],
+  tc: number,
+  uTop: number,
+): void {
+  const pt = (t: number, u: number): Pt => wallPt(edge, t, u, fit);
+  // Short cords: run them long and the pot swings under a narrow V that reads as a handbag, not a planter.
+  const uPot = uTop - 17 / WALL_H;
+  ctx.strokeStyle = DRESS.rope;
+  ctx.lineWidth = Math.max(0.6, 1.1 * fit.scale);
+  for (const dt of [-13 / FLOOR, 0, 13 / FLOOR]) {
+    ctx.beginPath();
+    const a = pt(tc + dt * 0.2, uTop);
+    const b = pt(tc + dt, uPot);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  ctx.beginPath(); // the bracket it all hangs from
+  const h0 = pt(tc, uTop);
+  ctx.arc(h0.x, h0.y, Math.max(0.8, 1.6 * fit.scale), 0, Math.PI * 2);
+  ctx.fillStyle = DRESS.rope;
+  ctx.fill();
+  // A bowl, drawn as the wall-space trapezoid a pot seen head-on actually is.
+  const bt = 15 / FLOOR;
+  quad(
+    ctx,
+    [pt(tc - bt, uPot), pt(tc + bt, uPot), pt(tc + bt * 0.62, uPot - 17 / WALL_H), pt(tc - bt * 0.62, uPot - 17 / WALL_H)],
+    DRESS.pot,
+  );
+  quad(ctx, [pt(tc - bt * 1.1, uPot + 3 / WALL_H), pt(tc + bt * 1.1, uPot + 3 / WALL_H), pt(tc + bt, uPot), pt(tc - bt, uPot)], DRESS.potRim);
+  for (const [dt, drop] of [
+    [-11, 34],
+    [2, 50],
+    [12, 27],
+  ] as const) {
+    ctx.strokeStyle = DRESS.vine;
+    ctx.lineWidth = Math.max(0.8, 1.7 * fit.scale);
+    ctx.lineCap = 'round';
+    const a = pt(tc + dt / FLOOR, uPot);
+    const c = pt(tc + (dt * 1.9) / FLOOR, uPot - drop / 2 / WALL_H);
+    const b = pt(tc + (dt * 1.4) / FLOOR, uPot - drop / WALL_H);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(c.x, c.y, b.x, b.y);
+    ctx.stroke();
+    ellipse(ctx, b, 3.4 * fit.scale, 2.6 * fit.scale, DRESS.vine);
+  }
+}
+
 function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void {
+  /**
+   * What each wall carries. The right wall gets the clock (it is the only one whose `+t` runs screen-right,
+   * so it is the only one a clock can be hung on) plus a print over the corner bookshelf and a pair by the
+   * corner; the left wall gets a tall print between its windows and the hanging planter. Nothing sits below
+   * u 0.36 (the bookshelves' height) or inside a window's `t` span.
+   */
+  const dress = (edge: (t: number) => [number, number]): void => {
+    // Nothing goes high near the back corner: that is where the wall is tallest on screen and the canvas
+    // crops its top edge, so anything hung up there loses the wall behind it and floats.
+    if (edge === WALL_EDGES[1]) {
+      wallArt(ctx, fit, edge, 0.15, 0.56, 60, 44, DRESS.art[1]!); // over the corner bookshelf
+      wallClock(ctx, fit, edge, 0.52, 0.62, env.hours); // dead centre, between the windows
+      wallArt(ctx, fit, edge, 0.86, 0.64, 46, 34, DRESS.art[0]!);
+      wallArt(ctx, fit, edge, 0.93, 0.53, 30, 40, DRESS.art[2]!);
+      return;
+    }
+    wallArt(ctx, fit, edge, 0.14, 0.56, 54, 42, DRESS.art[0]!);
+    wallHanger(ctx, fit, edge, 0.52, 0.76); // between the windows — where you'd really hang one
+  };
+
   const wall = (
     edge: (t: number) => [number, number],
     faceShade: number,
@@ -387,6 +576,8 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void
       quad(ctx, [pt(mid - iT * 0.35, w.u0 + iU), pt(mid + iT * 0.35, w.u0 + iU), pt(mid + iT * 0.35, w.u1 - iU), pt(mid - iT * 0.35, w.u1 - iU)], frame);
       quad(ctx, [pt(w.t0 + iT, midU - iU * 0.35), pt(w.t1 - iT, midU - iU * 0.35), pt(w.t1 - iT, midU + iU * 0.35), pt(w.t0 + iT, midU + iU * 0.35)], frame);
     }
+
+    dress(edge);
 
     // A low, slightly sagging strand of warm bulbs turns the architectural shell into a place people
     // chose to inhabit. The bulbs stay on in daylight too, but read as tiny pearl pins rather than glare.
