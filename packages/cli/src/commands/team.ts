@@ -32,7 +32,57 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
   if (sub === 'observe') return teamObserve(parsed);
   if (sub === 'remove') return teamRemove(parsed);
   if (sub === 'export') return teamExport(parsed);
-  throw new CliError('usage: musterd team <create|add|observe|remove|export> ...', 2);
+  if (sub === 'policy') return teamPolicy(parsed);
+  throw new CliError('usage: musterd team <create|add|observe|remove|export|policy> ...', 2);
+}
+
+/**
+ * `musterd team policy [--reseat-known-agents on|off]` — show or set the team governance policy
+ * (admin-only, audited `policy.change`). ADR 146: `--reseat-known-agents on` opts the team into
+ * dogfood-mode re-seat — an already-held agent seat re-occupies without an admin decision. Reads →
+ * merges the one knob → POSTs the whole policy (the residency-policy read-merge-write pattern), so
+ * setting one knob never clobbers the wake-policy defaults.
+ */
+async function teamPolicy(parsed: Parsed): Promise<number> {
+  const { team, http } = resolve(parsed.flags);
+  const { policy: current } = await http.getPolicy(team);
+
+  const raw = parsed.flags['reseat-known-agents'];
+  if (raw !== undefined) {
+    const on = raw === true || raw === 'on' || raw === 'true' || raw === 'yes';
+    const off = raw === 'off' || raw === 'false' || raw === 'no';
+    if (!on && !off)
+      throw new CliError('usage: musterd team policy --reseat-known-agents <on|off>', 2);
+    const { policy: updated } = await http.setPolicy(team, {
+      ...current,
+      standing_reseat_known_agents: on,
+    });
+    process.stdout.write(
+      success(
+        `team policy updated — ${team}: re-seat known agents ${updated.standing_reseat_known_agents ? theme.accent('on') : 'off'}`,
+      ) + '\n',
+    );
+    if (updated.standing_reseat_known_agents)
+      process.stdout.write(
+        hint('a held agent seat now re-occupies without an admin decision (new seats stay gated)') +
+          '\n',
+      );
+    return 0;
+  }
+
+  if (parsed.flags['json']) {
+    process.stdout.write(JSON.stringify(current) + '\n');
+    return 0;
+  }
+  process.stdout.write(`${theme.accent('team policy')} — ${team}\n`);
+  process.stdout.write(
+    `  re-seat known agents: ${current.standing_reseat_known_agents ? theme.accent('on') : 'off'}\n`,
+  );
+  process.stdout.write(
+    `  allow pre-issued grants: ${current.allow_pre_issued_grants ? 'on' : 'off'}\n`,
+  );
+  process.stdout.write(theme.meta('  set: musterd team policy --reseat-known-agents on') + '\n');
+  return 0;
 }
 
 async function teamCreate(parsed: Parsed): Promise<number> {

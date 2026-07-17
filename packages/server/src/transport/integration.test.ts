@@ -3065,3 +3065,54 @@ describe('tool-call telemetry ingest (ADR 144 inc 1)', () => {
     expect(audit[0]!.actor).toBe('Ada');
   });
 });
+
+describe('dogfood re-seat (ADR 146)', () => {
+  it('re-occupies a held agent seat over WS with no grant when the policy is on', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+    // First occupancy stamps the durable `bound_at` marker — the "already held it" signal.
+    const a1 = new TestWs();
+    await a1.open();
+    await a1.claim('dawn', team.json.agent_key, 'Ada', 'cli', await standingGrant(nickCred, 'Ada'));
+    a1.close();
+
+    // The team opts into dogfood-mode re-seat.
+    const pol = await post('/teams/dawn/policy', { standing_reseat_known_agents: true }, nickCred);
+    expect(pol.json.policy.standing_reseat_known_agents).toBe(true);
+
+    // A fresh session re-claims with only the team agent key — occupies immediately, no pending gate.
+    const a2 = new TestWs();
+    await a2.open();
+    const occ = await a2.claim('dawn', team.json.agent_key, 'Ada', 'cli');
+    expect(occ.type).toBe('occupied');
+    expect((occ as any).seat.name).toBe('Ada');
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    await pollUntil(() => listAudit(server.db, teamId).some((x) => x.action === 'claim.reseated'));
+    a2.close();
+  });
+
+  it('still opens a pending request for a never-bound seat even with the policy on', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+    await post('/teams/dawn/policy', { standing_reseat_known_agents: true }, nickCred);
+
+    // Ada was never occupied — admission, not a re-seat: the server opens a pending request.
+    const a = new TestWs();
+    await a.open();
+    a.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    const pending = await a.waitFor('pending');
+    expect(pending.type).toBe('pending');
+    a.close();
+  });
+});

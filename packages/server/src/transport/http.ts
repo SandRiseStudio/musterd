@@ -1628,6 +1628,56 @@ export async function handleHttp(
           });
         }
 
+        // Dogfood-mode re-seat (ADR 146, on ADR 145 §7) — the stateless mirror of the WS branch. An
+        // agent harness (team agent key, `authenticatedMember === null`) re-claiming an already-bound
+        // named agent seat occupies immediately, as a notification, not an admin decision: the
+        // seat-claim wall was a stranger-gate firing on teammates. Never-bound seats, role-pool claims,
+        // and human seats stay gated (admission is still a decision). Derived from `policy + bound_at`.
+        if (
+          authenticatedMember === null &&
+          'seat' in body.target &&
+          targetMember.kind === 'agent' &&
+          isHeld(targetMember) &&
+          getPolicy(ctx.db, team.id).standing_reseat_known_agents
+        ) {
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
+            provenance: null,
+            workspace: null,
+            driver: null,
+            model: body.model ?? null,
+            build: body.build ?? null,
+          });
+          markBound(ctx.db, targetMember.id);
+          appendAudit(ctx.db, team.id, {
+            actor: targetMember.name,
+            action: 'claim.reseated',
+            target: targetMember.name,
+            result: 'allow',
+            detail: { via: 'http', surface: body.surface, policy: 'standing_reseat_known_agents' },
+          });
+          if (body.model) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presence.id, old: null, new: body.model, source: 'claim' },
+            });
+          }
+          ctx.hub.broadcastTeam(
+            team.id,
+            { type: 'presence', member: targetMember.name, status: 'online' },
+            undefined,
+          );
+          return sendJson(res, 200, {
+            type: 'occupied',
+            seat: toMember(targetMember, team.slug),
+            presence_id: presence.id,
+            server_time: Date.now(),
+            memory: memoryEnvelope(ctx.db, targetMember.id),
+          });
+        }
+
         // Step 6: no grant → create request, return 202 pending.
         const encodedTarget =
           'seat' in body.target

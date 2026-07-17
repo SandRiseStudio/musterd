@@ -37,6 +37,16 @@ export type CredentialMint = z.infer<typeof CredentialMintSchema>;
  */
 export const PolicySchema = z.object({
   allow_pre_issued_grants: z.boolean().default(false),
+  /**
+   * Dogfood-mode re-seat (ADR 146, on the ADR 145 §7 decision). When true, an agent harness (team
+   * agent key) re-claiming an **already-bound named agent seat** occupies immediately — a notification,
+   * not an admin decision — because the seat-claim wall is a gate meant for *strangers* firing on
+   * *teammates*. Brand-new (never-bound) seats and role-pool claims stay gated, so member admission is
+   * still a real decision. The standing authorization is **derived** from `policy + bound_at`, not a
+   * stored grant row (ADR 145's "verified-ness is derived, never a second stored flag" posture). Default
+   * false — an opt-in the record demands for the dogfood team, off for every team that hasn't asked.
+   */
+  standing_reseat_known_agents: z.boolean().default(false),
   /** Team-wide wake-policy defaults (ADR 131 increment 5) — per-seat enrollment overrides layer on
    *  top (`ResidencyPolicyOverrideSchema` in `residency.policy`). `parse({})` yields launch defaults. */
   residency: ResidencyPolicySchema.default({}),

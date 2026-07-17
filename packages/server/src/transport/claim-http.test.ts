@@ -179,6 +179,81 @@ describe('POST /claim — occupancy', () => {
   });
 });
 
+describe('POST /claim — dogfood re-seat (ADR 146)', () => {
+  // Occupy a seat once so its durable `bound_at` marker is stamped — the "already held it" signal
+  // the re-seat policy keys on. Uses a standing grant + agent key (the normal agent occupy path).
+  async function bindSeat(seat: string): Promise<void> {
+    const grant = await grantFor(seat);
+    const r = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat },
+      grant,
+      surface: 'cli',
+    });
+    expect(r.status).toBe(200);
+  }
+  async function setReseatPolicy(on: boolean): Promise<void> {
+    const r = await post('/teams/dawn/policy', { standing_reseat_known_agents: on }, nickCred);
+    expect(r.status).toBe(200);
+    expect(r.json.policy.standing_reseat_known_agents).toBe(on);
+  }
+
+  it('re-occupies an already-held agent seat with no grant when the policy is on', async () => {
+    await bindSeat('Ada');
+    await setReseatPolicy(true);
+    const r = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.type).toBe('occupied');
+    expect(r.json.seat.name).toBe('Ada');
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const actions = listAudit(server.db, teamId).map((a) => a.action);
+    expect(actions).toContain('claim.reseated');
+  });
+
+  it('still gates a never-bound seat even with the policy on (admission stays a decision)', async () => {
+    await setReseatPolicy(true);
+    // Ada exists but was never occupied — this is new-member admission, not a re-seat.
+    const r = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    expect(r.status).toBe(202);
+    expect(r.json.type).toBe('pending');
+  });
+
+  it('still gates a held seat when the policy is off (default)', async () => {
+    await bindSeat('Ada');
+    // policy left at its default (off)
+    const r = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    expect(r.status).toBe(202);
+    expect(r.json.type).toBe('pending');
+  });
+
+  it('does not let the shared agent key re-seat a held human seat', async () => {
+    // Occupy nick's human seat via his credential to stamp bound_at, then try the agent key on it.
+    await post('/teams/dawn/claim', { key: nickCred, target: { seat: 'nick' }, surface: 'cli' });
+    await setReseatPolicy(true);
+    const r = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'nick' },
+      surface: 'cli',
+    });
+    // Falls through to the request lane — a human seat is never auto-occupiable via the team key.
+    expect(r.status).toBe(202);
+    expect(r.json.type).toBe('pending');
+  });
+});
+
 describe('POST /requests/{id}/decide', () => {
   async function openPending(): Promise<string> {
     const r = await post('/teams/dawn/claim', {
