@@ -6,6 +6,10 @@
 > is **cell D only** (manifest §2), so **cell D is specified in full below** and the other cells are
 > stubbed for when the ladder resumes past the smoke check-in. Everything here inherits the manifest's
 > pins (§1) unchanged — this file adds only the _mechanics_ of standing a cell up, never a new variable.
+>
+> **The cell-D procedure below is battle-tested** — it is the exact sequence that stood up the smoke
+> cell live on 2026-07-17 against `musterd` 0.2.0 / fixture kickoff `ea5c6d4`. The `⚠` notes are the
+> traps that bit during that stand-up; heed them or the cell mis-attributes commits or fails to launch.
 
 ## 0. What is identical in every cell (do not re-decide per cell)
 
@@ -16,128 +20,190 @@ drifts:
 - **Kickoff SHA** `ea5c6d4` (fixture `main` tip) — every clone starts detached-clean at this SHA
 - **Predicate set** v1 · **Scoring tool** `musterd archaeology` from product `0.2.0` @ `481b5d1`
 - **Wall-clock cap `T`** 90 min/run (proposed — the smoke cell-D build calibrates it, §4 manifest)
-- **Permission policy** — one pinned Claude Code allowlist, identical across all cells (§3 below), so
-  no cell pays an approval touch another cell avoids
+- **Permission policy** — one pinned Claude Code allowlist, identical across all cells (§1.5), so no
+  cell pays an approval touch another cell avoids
 - **Exclude globs** — frozen in the fixture's `scoring.config.json`; the runbook never edits them
+- **`main` is the graded integration branch** — the fixture's own `README.md` §Workflow and
+  `prompts/kickoff.md` both say _branch from `main`, merge back to `main`; its final state is what
+  gets graded_. **The delivered ref is `main`.** Do not invent a separate integration branch — it
+  diverges from the protocol every cell shares.
 
 The **only** knobs the cell taxonomy turns are: musterd **present/absent**, and **N=1 vs N=3**. Cell D
 is `musterd present, N=3`. Its neighbour C3 is `musterd absent, N=3` (a flat `TASKS.md` board) — the
 D↔C3 delta is exactly musterd's coordination value, so the two must differ in _nothing else_. Keep the
-clone, the identities, the permission allowlist, and the ticket text byte-identical between them.
+clone, the identities, the permission allowlist, the merge mechanic, and the ticket text byte-identical
+between them.
 
 ## 1. Cell D — the musterd cell (smoke rung) — full procedure
 
 Cell D runs **three fire-and-exit Claude Code CLI sessions** (one per seat) that coordinate through a
-**running musterd daemon**, with the 8 tickets seeded as **Goals/Lanes** rather than a flat file. Plain
-cell D is _not_ the residency variant — seats are ordinary CLI sessions, no `musterd host`, no wake
-actuator. (The residency row is **D-res**, manifest §3b — defined, not authorized, out of the smoke
-rung.)
+**dedicated musterd daemon**, with the 8 tickets seeded as **Goals/Lanes** rather than a flat file.
+Plain cell D is _not_ the residency variant — seats are ordinary CLI sessions, no `musterd host`, no
+wake actuator. (The residency row is **D-res**, manifest §3b — defined, not authorized, out of the
+smoke rung.)
 
-### 1.1 Clone the fixture — single-branch, at the kickoff SHA
+Pick a run root outside the product repo (the live smoke used `~/cookoff-run`) so the fixture history
+stays un-entangled from musterd's.
 
-A full clone would let the fixture's `reference-solution` / `abandoned/legacy-pricing` branches land in
-the archaeology window (`git rev-list --all --not <kickoff>`) and count against the run. Clone
-**only** `main`:
+### 1.1 Clone the fixture — single-branch `main`, at the kickoff SHA
+
+⚠ **The fixture's _default_ branch is `abandoned/legacy-pricing`, not `main`** — a plain `git clone`
+lands on the wrong branch. The explicit `--branch main` is load-bearing. And a **full** clone would let
+the fixture's `reference-solution` / `abandoned` branches into the archaeology window
+(`git rev-list --all --not <kickoff>`) and count against the run, so clone **only** `main`:
 
 ```sh
-git clone --single-branch --branch main \
-  git@github.com:SandRiseStudio/cookoff-scenario.git cell-D
+# SSH deploy keys are not provisioned on the run host — clone over gh's HTTPS auth:
+cd ~/cookoff-run
+gh repo clone SandRiseStudio/cookoff-scenario cell-D -- --single-branch --branch main
 cd cell-D
-git rev-parse HEAD          # MUST print ea5c6d4… — fail the run if it does not
-git checkout -b run         # agents branch/merge on top of this; kickoff stays pinned
-pnpm install && pnpm test   # baseline must be green before any agent touches it
+git rev-parse --short HEAD   # MUST print ea5c6d4 — fail the run if it does not
+git branch -a                # MUST show only main (no scoring / no abandoned)
 ```
+
+`main` is left as-is — it **is** the integration branch (§0). Do **not** cut a `run` branch.
 
 The `scoring` branch is **never** fetched into the cell — agents must not see the hidden suites. It is
 applied post-hoc from a separate checkout at scoring time (§1.7).
 
-### 1.2 Configure the three seat git identities (ADR 109)
-
-Each cell owns its own actor identities; a commit attributed to no configured actor **fails the run**
-(ADR 123 §2). Cell D's three seats — pin these into the cell's `scoring.config.json` `actors` list
-before launch (they are cell-D's own identities, **not** the fixture's `alix`/`boro`/`cyra`
-validation seats):
-
-| Seat  | git `user.name` | git `user.email`               | musterd seat |
-| ----- | --------------- | ------------------------------ | ------------ |
-| ded-1 | `cookoff-d-1`   | `cookoff-d-1@sandrise.invalid` | `dee`        |
-| ded-2 | `cookoff-d-2`   | `cookoff-d-2@sandrise.invalid` | `del`        |
-| ded-3 | `cookoff-d-3`   | `cookoff-d-3@sandrise.invalid` | `dot`        |
-
-Each seat's worktree carries its own `git config user.name/email` (ADR 109 per-worktree identity), so
-`Co-authored-by` trailers survive the squash-merge and `musterd archaeology` attributes lines to the
-right actor. Wire these via `musterd agent <seat> --path <worktree>` per seat so the binding and the
-git identity are set together.
-
-### 1.3 Stand up the musterd team + daemon
+⚠ **pnpm baseline.** The fixture pins `pnpm@10.28` via `packageManager`; drive it through `corepack`
+and set `CI=true` so it runs non-interactively (otherwise the pnpm-version mismatch tries to wipe
+`node_modules` and aborts on "no TTY"):
 
 ```sh
-musterd team create cookoff-D          # fresh team, its own daemon/db — isolated from the dogfood team
-musterd agent dee --path ./seats/dee   # provisions worktree + git identity + binding, per seat
-musterd agent del --path ./seats/del
-musterd agent dot --path ./seats/dot
-musterd status                          # 3 seats present, none working yet
+CI=true corepack pnpm install    # esbuild's "ignored build scripts" warning is benign
+CI=true corepack pnpm test       # baseline MUST be green (2 passing) before any agent touches it
 ```
 
-Isolation matters twice over: (a) a dedicated team keeps the run's coordination traffic out of the
-`revive` dogfood ledger, and (b) each seat gets its **own worktree of the `run` branch** so the three
-agents genuinely contend on shared modules (`tariff.ts`, `config.ts`, `schema.ts`, `router.ts`) the way
-the trap taxonomy intends.
+⚠ pnpm 10.28 writes a `pnpm-workspace.yaml` build-approval file on install. It is untracked, so it
+never reaches archaeology **unless an agent commits it** — add it to `.git/info/exclude` in each
+worktree as a belt-and-braces guard.
+
+### 1.2 The three seat identities (ADR 109) — set _by_ `musterd agent`, not by hand
+
+⚠ **`musterd agent <seat>` sets the git identity for you** — but only in its **default worktree mode**.
+`provisionWorkspace` (`packages/cli/src/onboard/workspace.ts`) has two paths: bare `musterd agent
+<seat>` run **inside the clone** does `git worktree add -b agent/<seat>` **and** calls
+`setSeatGitIdentity`; passing **`--path <dir>` makes a plain `mkdir` folder with no worktree and no
+identity**. Use the bare form. The identity it writes (via `git config --worktree`, guarded by
+`extensions.worktreeConfig`) is fixed by the seat name and team slug:
+
+| musterd seat | git `user.name`      | git `user.email`        | worktree / branch          |
+| ------------ | -------------------- | ----------------------- | -------------------------- |
+| `dee`        | `dee (musterd seat)` | `dee@cookoff-d.musterd` | `cell-D-dee` / `agent/dee` |
+| `del`        | `del (musterd seat)` | `del@cookoff-d.musterd` | `cell-D-del` / `agent/del` |
+| `dot`        | `dot (musterd seat)` | `dot@cookoff-d.musterd` | `cell-D-dot` / `agent/dot` |
+
+⚠ **`scoring.config.json` `actors` must list these exact strings** — `<seat> (musterd seat)` /
+`<seat>@<slug>.musterd` — not invented emails. A commit attributed to no configured actor fails the run
+(ADR 123 §2), and the identity musterd writes is what `git log` (and `musterd archaeology`) sees. ⚠ The
+team **slug must be lowercase** `[a-z0-9-]` (`cookoff-d`, not `cookoff-D`) — it becomes the email
+domain, so it is load-bearing for attribution.
+
+### 1.3 Stand up the dedicated daemon + team + seats
+
+⚠ **`musterd team create` does not isolate anything** — it writes a team row into whatever db the
+ambient daemon serves. Isolation is a **dedicated db + its own daemon on its own port**
+(`defaultDbPath()` reads `MUSTERD_DB`; the daemon binds `--port`), with every client pointed at it via
+`MUSTERD_SERVER`:
+
+```sh
+# 1. dedicated daemon — own db, own port, background it:
+MUSTERD_DB=~/cookoff-run/cookoff-d.db musterd serve --port 4870 &
+export MUSTERD_SERVER=http://127.0.0.1:4870      # every CLI/MCP call below targets THIS daemon
+curl -s $MUSTERD_SERVER/health                    # {"ok":true, db: …/cookoff-d.db}
+
+# 2. team (owner = the human; owner-gated spend, manifest §2), from inside the clone:
+cd ~/cookoff-run/cell-D
+musterd team create cookoff-d --as nick
+
+# 3. three seats — bare `agent`, run inside the clone → worktree + identity + MCP autojoin wiring:
+musterd agent dee
+musterd agent del
+musterd agent dot
+```
+
+Each `musterd agent` prints `✓ workspace …/cell-D-<seat> (git worktree on branch agent/<seat>)` and
+`✓ wired the musterd MCP server there for Claude Code (autojoin)`. The seats each get **their own
+worktree of the fixture on branch `agent/<seat>`**, so the three agents genuinely contend on the shared
+modules (`tariff.ts`, `config.ts`, `schema.ts`, `router.ts`) the trap taxonomy targets. A dedicated
+team + db also keeps the run's coordination traffic out of the dogfood ledger.
 
 ### 1.4 Seed the 8 tickets as Goals/Lanes (the cell-D work artifact)
 
 The work is held constant across cells (ADR 122): the **same `TASKS.md` text** that C3 seeds as a flat
-board, cell D seeds as one Goal per ticket with a Lane carrying its contended surface. Seed from
-`TASKS.md` verbatim — do not paraphrase, re-order, or add dependency hints the file does not already
-carry (T2 must **not** name T1; T3/T4 stay independently worded):
+board, cell D seeds as one Goal with a Lane per ticket carrying its contended surface. Seed from
+`TASKS.md` verbatim — do not paraphrase, re-order, or add dependency hints the file does not carry (T2
+must **not** name T1; T3/T4 stay independently worded). CLI syntax (`goal declare "<title>"
+--goal-id`, `lane open "<title>" --surface --goal`; view with `musterd lanes` — `lane board` is
+MCP-only):
 
 ```sh
-musterd goal declare cookoff --title "Skiff — Meridian Concord fare/booking backlog"
-# one lane per ticket; surface globs are the ONLY structure musterd adds over the flat board
-musterd lane open --goal cookoff --title "T1 canonical quoteFare"            --surface src/tariff.ts
-musterd lane open --goal cookoff --title "T2 POST /quotes price estimate"    --surface src/router.ts,src/schema.ts,src/tariff.ts
-musterd lane open --goal cookoff --title "T3 reject malformed bookings"      --surface src/schema.ts,src/router.ts
-musterd lane open --goal cookoff --title "T4 harden the booking endpoint"    --surface src/schema.ts,src/router.ts
-musterd lane open --goal cookoff --title "T5 twilight off-peak rebate"       --surface src/tariff.ts,src/config.ts
-musterd lane open --goal cookoff --title "T6 tiered loyalty rebate"          --surface src/tariff.ts,src/config.ts,src/store.ts
-musterd lane open --goal cookoff --title "T7 GET /ledger/summary"            --surface src/router.ts,src/store.ts,src/schema.ts
-musterd lane open --goal cookoff --title "T8 configurable reach fares + GET /tariff" --surface src/config.ts,src/router.ts,src/tariff.ts
+musterd goal declare "Skiff — Meridian Concord fare & booking backlog" --goal-id cookoff
+musterd lane open "T1 — Canonical fare quote (quoteFare)"       --surface src/tariff.ts,src/router.ts             --goal cookoff
+musterd lane open "T2 — Price estimates (POST /quotes)"         --surface src/router.ts,src/schema.ts,src/tariff.ts --goal cookoff
+musterd lane open "T3 — Reject malformed bookings"              --surface src/schema.ts,src/router.ts             --goal cookoff
+musterd lane open "T4 — Harden the booking endpoint"            --surface src/schema.ts,src/router.ts             --goal cookoff
+musterd lane open "T5 — Twilight rebate"                        --surface src/tariff.ts,src/config.ts             --goal cookoff
+musterd lane open "T6 — Loyalty rebate"                         --surface src/tariff.ts,src/store.ts,src/config.ts --goal cookoff
+musterd lane open "T7 — Ledger summary (GET /ledger/summary)"   --surface src/router.ts,src/store.ts,src/schema.ts --goal cookoff
+musterd lane open "T8 — Configurable reach fares (GET /tariff)" --surface src/config.ts,src/router.ts,src/tariff.ts --goal cookoff
 ```
 
-The lanes are opened **unowned** — the agents claim them. That claim/handoff/contention behaviour is
-the very signal the cell measures; seeding them pre-owned would pre-answer the coordination question.
+The lanes open **unowned** — the agents claim them. That claim/handoff/contention behaviour is the very
+signal the cell measures; seeding them pre-owned would pre-answer the coordination question.
 
 ### 1.5 Pin the Claude Code permission allowlist (identical to every other cell)
 
-The three sessions launch under one frozen allowlist so approval touches never confound the cost
-metric (manifest §1, ADR 123 §5). The allowlist grants exactly:
+The three sessions launch under one frozen allowlist so approval touches never confound the cost metric
+(manifest §1, ADR 123 §5). `musterd agent` has already written a `.claude/settings.local.json` in each
+worktree carrying the musterd hooks (`Notification`/`PostToolUse`/`SessionStart`/`SessionEnd`) — **merge
+the `permissions` block into that file, do not overwrite it**. The pinned policy grants repo
+read/edit/write + `git`/`pnpm`/`node`/`vitest` and denies network/`gh`:
 
-- repo read / edit / write **within the cell clone only**
-- `git`, `pnpm`, `node`, `vitest`
+```jsonc
+"permissions": {
+  "defaultMode": "acceptEdits",
+  "allow": [
+    "Read", "Edit", "Write", "Glob", "Grep", "TodoWrite",
+    "Bash(git:*)", "Bash(pnpm:*)", "Bash(pnpm test)", "Bash(pnpm typecheck)",
+    "Bash(node:*)", "Bash(npx vitest:*)", "Bash(vitest:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(mkdir:*)"
+  ],
+  "deny": ["Bash(gh:*)", "Bash(curl:*)", "Bash(wget:*)", "WebFetch", "WebSearch", "Bash(ssh:*)"]
+}
+```
 
-and grants **no** network, no `gh`, no shell outside those tools. Ship it as the cell's
-`.claude/settings.json` `permissions.allow` list, byte-identical in cell D and cell C3. (Cell D
-additionally has the `musterd`/`team_*` MCP surface available — that _is_ the treatment, not a
-permission asymmetry to correct.)
+Keep it **byte-identical in cell D and cell C3** (its N=3 control). If an agent stalls on a missing
+grant that is an `I1` intervention — the smoke run **calibrates** this list; widen it in both cells
+together, never one. (Cell D additionally has the `musterd`/`team_*` MCP surface available — that _is_
+the treatment, not a permission asymmetry to correct.)
 
 ### 1.6 Launch, run under the cap, capture the run window
 
-- Record the **kickoff SHA** (`ea5c6d4`) and a wall-clock start; launch the three sessions, each
-  claiming its seat (`musterd claim <seat>` on first tool call) and pulling work from the Goal board.
-- Enforce the **wall-clock cap `T`** (90 min proposed) — this is the smoke run that _calibrates_ `T`,
-  so **log the actual time-to-done** even if it runs under cap; that number feeds the pilot's `T`.
-- Log operator interventions to `interventions.log` in the I1–I6 taxonomy (ADR 123 support metric) as
-  they happen — one line per intervention, with timestamp and cause.
-- Keep the Claude Code usage `.jsonl` for each session for the tokens-to-done roll-up.
-- The **delivered ref** is the `run` branch tip after all merges — that, against the kickoff SHA, is
-  the archaeology window.
+- The task prompt is the fixture's own `prompts/kickoff.md` (identical across all cells — protocol,
+  not an intervention; the `{{DISPATCH}}` block varies only in C2). Give it to each session as its
+  opening message; the per-seat work then surfaces from the Goal board (`musterd next` / the lanes).
+- **Branch/integration topology.** Each seat commits on `agent/<seat>`; a finished ticket integrates
+  into **`main`** (the graded ref). Because `main` is checked out only in the primary `cell-D`
+  worktree, the merge runs there (`git -C ~/cookoff-run/cell-D merge agent/<seat>`), serialized by the
+  agents' lane coordination — that serialization _is_ musterd's measured contribution. ⚠ **The exact
+  merge trigger (agent-run vs operator-run) is a shared invariant with C3** — pin the same mechanic in
+  both, or the wasted-work delta is confounded.
+- Record the **kickoff SHA** (`ea5c6d4`) and a wall-clock start; launch the three Sonnet-5 sessions.
+- Enforce the **wall-clock cap `T`** (90 min proposed) — this is the run that _calibrates_ it, so
+  **log actual time-to-done** even if under cap; that number feeds the pilot's `T`.
+- Log operator interventions to `interventions.log` in the I1–I6 taxonomy (ADR 123 support metric),
+  one timestamped line each, with cause.
+- Keep each session's Claude Code usage `.jsonl` for the tokens-to-done roll-up.
+- The **delivered ref** is `main` after all merges — that, against the kickoff SHA, is the archaeology
+  window.
 
 ### 1.7 Score (no model spend — the harness is already proven, scenario doc §Validation)
 
 From a **separate** checkout that _does_ carry the `scoring` branch (never the agents' clone):
 
 ```sh
-node --experimental-strip-types score.ts --delivered <run-branch-tip> --json
+node --experimental-strip-types score.ts --delivered main --json
 ```
 
 Expect the four-metric roll-up: **headline** wasted-work % (W1–W4 + per-actor), **guardrail**
@@ -161,10 +227,11 @@ Fill them in at their rung, not before (honesty rule — no apparatus authored a
 - **Cell B** — `N=1, musterd present`. One seat on a musterd team; isolates musterd's _solo_ overhead
   (orientation/telemetry cost with nobody to coordinate with).
 - **Cell C2** — `N=3, musterd absent, dispatch`. Three sessions, work handed out by an operator
-  **dispatch** step rather than self-served — the "manager assigns" control.
+  **dispatch** step rather than self-served — the "manager assigns" control. The `{{DISPATCH}}` block
+  in `prompts/kickoff.md` is populated here, and each assignment is logged as an `I1`.
 - **Cell C3** — `N=3, musterd absent, board`. Three sessions sharing a flat **`TASKS.md` board** (no
   Goals/Lanes, no claim/handoff primitives). **This is cell D's control** — keep clone, identities,
-  ticket text, and allowlist byte-identical; the only delta is the coordination layer.
+  ticket text, allowlist, and merge mechanic byte-identical; the only delta is the coordination layer.
 - **Cell D-res** — cell D + harness residency (manifest §3b). Adds a running `musterd host`, measures
   attestation coverage / steer-lands / wake latency. Its own spend row.
 
@@ -175,4 +242,4 @@ Fill them in at their rung, not before (honesty rule — no apparatus authored a
 [`cookoff-experiment.md`](cookoff-experiment.md), [`cookoff-measurement.md`](cookoff-measurement.md),
 [ADR 122](../decisions/122-cookoff-value-experiment.md) (cell matrix + hold-work-constant),
 [ADR 123](../decisions/123-cookoff-measurement-protocol.md) (metrics + actor-attribution rule),
-[ADR 109](../decisions/109-seat-git-attribution.md) (per-seat git identity).
+[ADR 109](../decisions/109-seat-git-attribution.md) (per-seat git identity, set by `musterd agent`).
