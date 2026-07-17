@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  FEATURE_EPOCH,
   parseClaimPolicy,
   SURFACES,
   type ClaimPolicy,
@@ -49,6 +50,10 @@ export interface McpConfig {
    * Undefined for unstamped builds; every consumer degrades to silence.
    */
   build?: string | undefined;
+  /** This adapter's feature epoch (ADR 147) — a compiled-in constant, so it always attests. The roster
+   *  uses it (not the build ref) as the visible skew signal: a seat behind the daemon's epoch lacks
+   *  later features. Fixed at build time, so no back-compat guard is needed on our own clients. */
+  epoch: number;
   /** Folder claim policy (ADR 018 ladder) — what `team_join {}` / autojoin does by default. */
   claim: ClaimPolicy;
   /** Per-session connection id (the pending-presence key tuple, ADR 033). */
@@ -150,6 +155,7 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     model: declaredModel ?? binding?.model,
     modelSource,
     build: readBuildStamp(import.meta.url),
+    epoch: FEATURE_EPOCH,
     claim,
     connId: ulid(),
     claimCode: shortCode(codeSeed),

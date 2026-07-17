@@ -15,6 +15,7 @@ export interface PresenceSummary {
     driver: string | null;
     model: string | null;
     build: string | null;
+    epoch: number | null;
   }[];
 }
 
@@ -27,6 +28,8 @@ export interface AttachContext {
   model?: string | null;
   /** Client-attested build ref of the connecting dist (ADR 135); absent → null (unstamped client). */
   build?: string | null;
+  /** Client-attested feature epoch (ADR 147); absent → null (older client). The roster's skew signal. */
+  epoch?: number | null;
 }
 
 /**
@@ -57,11 +60,12 @@ export function attach(
     driver: ctx.driver ?? null,
     model: ctx.model ?? null,
     build: ctx.build ?? null,
+    epoch: ctx.epoch ?? null,
     created_at: now,
   };
   db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, build, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @build, @created_at)`,
+    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, build, epoch, created_at)
+     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @build, @epoch, @created_at)`,
   ).run(row);
   return row;
 }
@@ -180,7 +184,7 @@ export function touchAmbientPresence(
     // installs it on a fresh or blank ambient row — the fire-and-exit CLI re-attest path.
     // provenance/workspace/driver stay per-session seed and re-write normally.
     db.prepare(
-      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, model = COALESCE(?, model), build = COALESCE(?, build) WHERE id = ?',
+      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, model = COALESCE(?, model), build = COALESCE(?, build), epoch = COALESCE(?, epoch) WHERE id = ?',
     ).run(
       Date.now(),
       'online',
@@ -190,6 +194,7 @@ export function touchAmbientPresence(
       ctx.driver ?? null,
       ctx.model ?? null,
       ctx.build ?? null,
+      ctx.epoch ?? null,
       existing.id,
     );
   } else {
@@ -266,6 +271,7 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         driver: p.driver ?? null,
         model: p.model ?? null,
         build: p.build ?? null,
+        epoch: p.epoch ?? null,
       })),
     };
   });

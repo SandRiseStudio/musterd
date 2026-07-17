@@ -1,4 +1,5 @@
 export * from './version.js';
+export * from './feature-epoch.js';
 export * from './acts.js';
 export * from './ask.js';
 export * from './binding.js';
