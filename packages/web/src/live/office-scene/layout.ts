@@ -314,7 +314,7 @@ export const PLANTS: Plant[] = [
 ];
 
 /** A back-wall window, as a fraction along its wall's edge `[t0,t1]` and up the wall `[u0,u1]`.
- * Layout data (not paint): the daylight beams, and the cat's sunbeam nap spots, both derive from it. */
+ * Layout data (not paint): the daylight beams, and the dog's sunbeam nap spots, both derive from it. */
 export interface Win {
   t0: number;
   t1: number;
