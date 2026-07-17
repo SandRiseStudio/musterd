@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { fitFloor } from './iso';
-import { DESK_SLOTS } from './layout';
+import { fitFloor, project } from './iso';
+import { DESK_SLOTS, LOUNGE, NOOK } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
-import { animatedDeskAnchors, drawDog, glassColor, renderScene } from './render';
+import { animatedDeskAnchors, coffeeAnchor, drawDog, glassColor, MACHINE_H, renderScene } from './render';
 
 /** A no-op 2D context that records nothing — just enough surface for the scene's draw calls so we can
  * assert the whole painter's-order pass runs end to end without throwing. */
@@ -69,6 +69,23 @@ describe('animatedDeskAnchors', () => {
 /** The full painter's-order pass. An *empty* office still draws all 12 workstations — every chair (the
  * per-desk style variety), every monitor setup, keyboard and mouse — so this exercises the whole furniture
  * surface, including the stable per-desk chair/monitor/peripheral variation, without needing live actors. */
+/** Where the break-nook's ambient steam is born. The machine is drawn *and* anchored from the same
+ * geometry, and the two drifting apart is silent: the plume simply starts inside the machine and the
+ * espresso reads as a small fire. */
+describe('coffeeAnchor (the ambient steam source)', () => {
+  const fit = fitFloor(1200, 900);
+
+  it('sits above the machine, not inside it — steam leaves the warmer plate', () => {
+    const counterTop = project(NOOK.lx + LOUNGE.machine.dx, NOOK.ly + LOUNGE.machine.dy, fit).y - LOUNGE.counter.h * fit.scale;
+    const clearance = (counterTop - coffeeAnchor(fit).y) / fit.scale; // screen y grows downward
+    expect(clearance).toBeGreaterThanOrEqual(MACHINE_H);
+  });
+
+  it('is centred on the machine, so the plume rises off the machine and not the counter beside it', () => {
+    expect(coffeeAnchor(fit).x).toBeCloseTo(project(NOOK.lx + LOUNGE.machine.dx, NOOK.ly + LOUNGE.machine.dy, fit).x);
+  });
+});
+
 describe('renderScene draws the whole office without throwing', () => {
   const fit = fitFloor(1200, 900);
   const empty = new Map();
