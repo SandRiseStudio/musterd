@@ -940,7 +940,8 @@ const RAW: RawItem[] = [
     id: 'ask-surfaces',
     wave: 7,
     title: 'Ask surfaces — Slack delivery + a loud /live asks & approvals panel',
-    plan: 'near-term',
+    shipped: { prs: [317] },
+    frozenBy: 149,
     category: 'human-loop',
     blurb:
       'Deliver the ask stream where the human already lives: a Slack message naming what needs a decision, and a prominent asks/approvals element on /live. The CLI inbox demotes to a power tool.',
