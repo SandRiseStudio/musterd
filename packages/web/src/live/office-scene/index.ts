@@ -1,7 +1,7 @@
 import { createActors, type Actors } from './actors';
-import { petBeat, createPet, stepPet } from './pet';
+import { createPet, petBeat, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { fitFloor, project, type Fit, type Pt } from './iso';
-import { CHAIR_OFF, DESK_SLOTS, ENTRANCE, FWD } from './layout';
+import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
 import { assignSeats, type Placement } from './seating';
 import {
@@ -514,6 +514,7 @@ export function mountOffice(
     acc = 0;
     clock += dt;
     const walking = actors.step(dt);
+    if (walking) noticePassersBy(); // a sleeping dog wakes to watch whoever is walking past it
     const petActive = stepPet(pet, dt); // false once it's asleep — the pet never keeps the room awake
     for (let i = cues.length - 1; i >= 0; i--) {
       const c = cues[i]!;
@@ -561,6 +562,17 @@ export function mountOffice(
   // it and pushes the next slot out. Off entirely under reduced-motion / hidden tab.
   let ambientTimer: ReturnType<typeof setTimeout> | null = null;
   /** No real motion in flight (no walks, no cues, past the afterglow tail) — safe to inject a beat. */
+  /**
+   * The dog notices people. Called each frame something is walking: if anyone on the move passes close to
+   * the sleeping dog, it lifts its head and watches them by. Cheap by construction — it only looks at
+   * members who are actually moving, and `petNotice` bails immediately unless the dog is asleep.
+   */
+  function noticePassersBy(): void {
+    const moving: { lx: number; ly: number }[] = [];
+    for (const pose of actors.poses().values()) if (pose.moving) moving.push({ lx: pose.lx, ly: pose.ly });
+    if (moving.length) petNotice(pet, moving);
+  }
+
   /** Open-floor spots just beside each working member's chair — where the pet sits to supervise. */
   function workingSideSpots(): { lx: number; ly: number }[] {
     const out: { lx: number; ly: number }[] = [];
@@ -577,6 +589,17 @@ export function mountOffice(
       });
     }
     return out;
+  }
+
+  /**
+   * A coffee-stroll, with the dog sometimes tagging along to the nook and sitting with them while they
+   * pour. Whether the dog comes is *its* business: the stroll's own success is what's reported back, so a
+   * dog that stays put can never cost a member their walk.
+   */
+  function coffeeStroll(who: string): boolean {
+    if (!actors.ambientWalk(who)) return false;
+    if (Math.random() < 0.5) petFollow(pet, COFFEE_STAND);
+    return true;
   }
 
   function quiet(): boolean {
@@ -610,7 +633,7 @@ export function mountOffice(
         const played =
           beat < 0.7
             ? actors.gestureBeat(who, beat < 0.35 ? 1 : 2) // 1 stretch · 2 glance
-            : actors.ambientWalk(who);
+            : coffeeStroll(who);
         if (played) ensureLoop();
       }
     }
@@ -627,6 +650,9 @@ export function mountOffice(
     // Animate presence changes (walk in/out, drift) unless reduced-motion asked for stillness.
     actors.setHomes(placements, byName, !reduced);
     if (!reduced && actors.takeDoorPulses() > 0) pushDoorCue(); // the entrance "opens" as someone comes/goes
+    // Someone just walked in: the dog goes to meet them at the door. Arrivals only — nobody, dog included,
+    // gets up to see you leave. This outranks whatever nap it had planned, which is the whole point of it.
+    if (!reduced && actors.takeArrivals() > 0) petGreet(pet);
     bake();
     if (actors.active() || cues.length) ensureLoop();
     else paintResting(); // no motion → hold a still frame (Rive-aware; not the code-drawn buffer)

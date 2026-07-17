@@ -208,6 +208,9 @@ export interface Actors {
   nodes(): Map<string, OfficeNode>;
   /** How many members entered or left since the last call (clears) — drives the door-open glow. */
   takeDoorPulses(): number;
+  /** How many members *arrived* since the last call (clears) — departures don't count. The office dog
+   * greets an arrival at the door; nobody, dog included, gets up to see you leave. */
+  takeArrivals(): number;
   active(): boolean;
 }
 
@@ -226,6 +229,7 @@ export function createActors(): Actors {
   const exiting = new Set<string>();
   let initialized = false;
   let doorPulses = 0; // members that entered/left since the last takeDoorPulses()
+  let arrivals = 0; // members that entered since the last takeArrivals() — the dog's cue to go and greet
 
   function entrancePose(ref: Pose): Pose {
     return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1, ...AT_REST };
@@ -411,6 +415,7 @@ export function createActors(): Actors {
           ghosts.delete(name);
           walks.set(name, straightWalk(name, entrancePose(dest), dest, false, 'in'));
           doorPulses++;
+          arrivals++;
         } else if (!exiting.has(name)) {
           const existing = walks.get(name);
           if (existing?.ambient) {
@@ -568,6 +573,11 @@ export function createActors(): Actors {
       const out = new Map<string, OfficeNode>(ghosts);
       for (const [n, node] of live) out.set(n, node);
       return out;
+    },
+    takeArrivals() {
+      const n = arrivals;
+      arrivals = 0;
+      return n;
     },
     takeDoorPulses() {
       const n = doorPulses;

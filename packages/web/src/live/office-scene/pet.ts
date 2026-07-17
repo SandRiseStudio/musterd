@@ -1,5 +1,5 @@
 import { FLOOR } from './iso';
-import { BEAM_LEN, BEAM_SHEAR, HUDDLES, MEETING, NOOK, RECEPTION, WINDOWS } from './layout';
+import { BEAM_LEN, BEAM_SHEAR, ENTRANCE, HUDDLES, MEETING, NOOK, RECEPTION, WINDOWS } from './layout';
 import { findPath, walkable, type P } from './nav';
 
 /**
@@ -145,14 +145,122 @@ export function petBeat(pet: PetState, opts: PetBeatOpts): boolean {
     plan = rng() < 0.3 ? 'sit-then-nap' : 'nap';
     pet.sitFor = 3 + rng() * 4;
   }
-  if (!target || Math.hypot(target.lx - pet.lx, target.ly - pet.ly) < MIN_TRIP) return false;
+  return setOff(pet, target, plan, MIN_TRIP);
+}
 
+/**
+ * Route the pet to `target` and start the wake-stretch that precedes every trip. Refuses a trip shorter
+ * than `minTrip` — a dog that hauls itself up to move a foot and a half looks broken, not alive.
+ */
+function setOff(pet: PetState, target: P | null, plan: PetState['plan'], minTrip: number): boolean {
+  if (!target || Math.hypot(target.lx - pet.lx, target.ly - pet.ly) < minTrip) return false;
   pet.path = findPath({ lx: pet.lx, ly: pet.ly }, { lx: target.lx, ly: target.ly });
   pet.seg = 0;
   pet.plan = plan;
   pet.mode = 'stretch';
   pet.modeT = 0;
   return true;
+}
+
+/** Face the pet toward a point (screen-space x grows with lx − ly under the 2:1 iso). */
+function faceToward(pet: PetState, at: P): void {
+  const sx = at.lx - pet.lx - (at.ly - pet.ly);
+  if (Math.abs(sx) > 0.5) pet.flip = sx < 0;
+}
+
+/** How close a walker has to pass before the sleeping dog bothers to open an eye. */
+const NOTICE_R = 105;
+/** How long it watches a passer-by before flopping back down. */
+const NOTICE_S: [number, number] = [3, 4.5];
+/** Where the greeter waits: just inside the door, clear of the doorway itself, in preference order. */
+const GREET_IN = 64;
+function greetSpots(): P[] {
+  return [
+    { lx: ENTRANCE.lx + GREET_IN, ly: ENTRANCE.ly - GREET_IN * 0.55 },
+    { lx: ENTRANCE.lx + GREET_IN, ly: ENTRANCE.ly + GREET_IN * 0.4 },
+    { lx: ENTRANCE.lx + GREET_IN * 1.5, ly: ENTRANCE.ly },
+  ];
+}
+
+/**
+ * A member walked close by. The dog lifts its head to watch them pass, then flops back down — the whole
+ * behaviour is just `sleep → sit`, because `sit` already means *awake, wagging, watching you*, and
+ * `stepPet` already knows how to curl back up afterwards. No new pose, no new mode.
+ *
+ * This is the cheap half of the office's social pet: it costs one distance check per walker per frame and
+ * makes the room feel like it has noticed you. Only a *sleeping* dog notices — one already sitting is
+ * watching you anyway, and one mid-trip has somewhere to be.
+ */
+export function petNotice(pet: PetState, walkers: P[], rng: () => number = Math.random): boolean {
+  if (pet.mode !== 'sleep') return false;
+  let closest: P | null = null;
+  let best = NOTICE_R;
+  for (const w of walkers) {
+    const d = Math.hypot(w.lx - pet.lx, w.ly - pet.ly);
+    if (d < best) {
+      best = d;
+      closest = w;
+    }
+  }
+  if (!closest) return false;
+  faceToward(pet, closest);
+  pet.mode = 'sit';
+  pet.modeT = 0;
+  pet.sitFor = NOTICE_S[0] + rng() * (NOTICE_S[1] - NOTICE_S[0]);
+  return true;
+}
+
+/**
+ * Someone just came through the door. The dog trots over to meet them and sits by the entrance a while —
+ * the one behaviour that makes a dog a *dog* rather than a decorative cushion with legs.
+ *
+ * Unlike the ambient beat this may divert a trip already in progress: a dog on its way to a sunbeam will
+ * absolutely abandon it to greet an arrival, and that reprioritisation is the charm of the thing.
+ */
+export function petGreet(pet: PetState, rng: () => number = Math.random): boolean {
+  if (pet.mode === 'stretch' || pet.mode === 'curl') return false; // mid-transition — let it finish
+  // Just inside the door (which is on the back-left wall, so inward is +lx), beside the arrival's path
+  // rather than in it — a dog underfoot in the doorway is a different kind of office story.
+  const spot = greetSpots().find((s) => walkable(s.lx, s.ly)) ?? null;
+  pet.sitFor = 7 + rng() * 5; // a good long wait by the door — greeting is worth being late to a nap for
+  if (setOff(pet, spot, 'sit-then-nap', MIN_TRIP)) return true;
+  // No trip worth taking — it's already by the door. That's no reason to sleep through an arrival, though:
+  // sit up and watch it open. (A dog mid-trip elsewhere keeps its own plans and is left alone.)
+  if (pet.mode === 'sleep' || pet.mode === 'sit') {
+    faceToward(pet, ENTRANCE);
+    pet.mode = 'sit';
+    pet.modeT = 0;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * A member set off across the room — the dog tags along and sits with them wherever they end up. Gated on
+ * the pet being settled (a greeting outranks a stroll; a trip already underway keeps its own destination).
+ */
+export function petFollow(pet: PetState, dest: P, rng: () => number = Math.random): boolean {
+  if (pet.mode !== 'sleep' && pet.mode !== 'sit') return false;
+  const spot = besideSpot(dest);
+  pet.sitFor = 6 + rng() * 5;
+  return setOff(pet, spot, 'sit-then-nap', MIN_TRIP);
+}
+
+/** How far off a destination the dog parks itself — close enough to be *with* you, not underfoot. */
+const BESIDE_OFF = 52;
+
+/**
+ * Open floor beside `at`, hunted around a ring. A destination worth following someone to is usually a thing
+ * — the coffee machine, a desk — so the point itself is inside furniture and so, often, is the first side
+ * we try; walking the ring finds the side that's actually free. Null if the spot is boxed in entirely.
+ */
+function besideSpot(at: P): P | null {
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const p = { lx: at.lx + Math.cos(a) * BESIDE_OFF, ly: at.ly + Math.sin(a) * BESIDE_OFF };
+    if (walkable(p.lx, p.ly)) return p;
+  }
+  return null;
 }
 
 /**
