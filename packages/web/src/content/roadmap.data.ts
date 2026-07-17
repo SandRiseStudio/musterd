@@ -896,17 +896,125 @@ const RAW: RawItem[] = [
     plan: 'near-term',
     category: 'human-loop',
     blurb:
-      'A dedicated design pass that reevaluates the human’s role in musterd end-to-end — presence, steering, notification, approval, and thread-close — against the humans-as-peers thesis and what the dogfood record actually shows, before more human-loop features are built piecemeal.',
+      'The dedicated design pass that reevaluated the human’s role in musterd end-to-end — presence, steering, notification, approval, and thread-close — against the humans-as-peers thesis and what the dogfood record actually shows. Complete: it re-sequenced the human-loop backlog into the items below.',
     detail:
-      'Declared at the 2026-07-10 reprioritization. The human-loop layer shipped rung by rung (nudge → availability/urgent → tiers → interrupt line → steer/challenge/defer), each fixing a local dogfood wound — but the founding thesis (humans as peers, not approvers; Co-Gym’s 2× win from the notification protocol) has never been re-examined as a whole against how humans *actually* show up in the record: mostly as approvers and steerers, near-invisible on the roster while driving (the driver co-presence gap), and rarely as first-class doers of lanes. Scope: (1) the human presence model — driver co-presence, ambient human presence, fan-out (ADR 010/021/042/057); (2) the human’s work identity — do humans own lanes/Goals or only steer them; (3) the approval/authorization surface (request lane, authorized_by) vs the peer thesis; (4) notification/availability fit against real usage; and (5) the previously-parked **verified thread close** question (resolve as a state gate — a soft self-closed-without-counterpart signal rather than a refusal; see resolve-as-state-gate-brainstorm.md), which this item absorbs. Deliverable: a design doc + one or more ADRs that re-sequence the human-loop backlog; the driver co-presence fix builds on its answer.',
+      'Declared at the 2026-07-10 reprioritization; run 2026-07-16/17 as a founder interview (evidence mined first, stated ideals challenged against the record). Findings, from the daemon’s own store: in-band the human is an approver, not a peer (637 agent vs 6 nick acts on the dogfood team, half of the six test fixtures; 44 authorization events); agents never once sent request_help to nick; the seat-claim wall expired unanswered 7× at its 1h TTL and taught the founder to approve gated agents "--as nick"; and the human is invisible exactly while most present (MUSTERD_DRIVER absent from 903 provenance rows, 0 of ~84 lanes human-owned, the npm-publish work parked and unseeable). Diagnosis: musterd gates what the human doesn’t value and can’t see what he controls. Conclusion (ADR 145): membership is the default, authority a human-only admin overlay; a three-species to-human ask stream (consultative / escalation / approval) with per-tier timeout + no-answer policy (top tier holds, below-top proceeds with a recorded risk-acceptance, nothing below top wedges); delivery on lived-in surfaces (Slack + a loud /live panel); a human presence ladder where steering marks you working; human work identity (create/claim lanes from the web UI); and a two-stage close (ready-for-review + counterpart confirm) that absorbs the parked resolve-as-state-gate question. Deliverable landed: docs/design/human-role-reevaluation.md (with the verbatim interview as Appendix A) + ADR 145, which re-sequences the backlog into dogfood-approval-grant → human-ask-stream → ask-surfaces → human-presence-ladder → human-work-identity → two-stage-close → web-steering-console → multi-human-admin.',
     refs: [
+      doc('docs/design/human-role-reevaluation.md', 'human-role-reevaluation.md'),
       doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md'),
       doc('docs/design/research-foundation.md', 'research-foundation.md'),
-      doc('docs/design/resolve-as-state-gate-brainstorm.md', 'resolve-as-state-gate-brainstorm.md'),
-      adr(21, 'ADR 021'),
+      adr(145, 'ADR 145'),
       adr(25, 'ADR 025'),
     ],
     dependsOn: ['resolve-act', 'steering-latency-metric'],
+  },
+  {
+    id: 'dogfood-approval-grant',
+    wave: 7,
+    title: 'Dogfood-mode approval — a standing grant for re-seating known agents',
+    plan: 'near-term',
+    category: 'human-loop',
+    blurb:
+      'Stop the bleeding: re-occupying a seat you already held becomes a notification, not an admin decision. Brand-new member admission stays gated. First policy of the configurable approval surface.',
+    detail:
+      'The seat-claim wall exists because a gate meant for strangers fires on teammates: 27 claim requests in the record, 7 expired unanswered at the 1h TTL, 7 approvals of the *same* seat in four days, and a `team_join` that averages 76s because it waits on a human who isn’t looking — which taught the founder to tell the gated agent to approve itself `--as nick`, minting audit rows that read authorized_by:nick for decisions he never saw. A standing grant for re-seating a *known* agent (ADR 069/070 substrate) turns the routine case into a notification; new-member admission stays a real decision. Retiring the routine gate is what lets the remaining admin decisions insist on a real human surface (closing the --as-nick impersonation hole). Smallest correct change, shipped first because it’s the live wound.',
+    refs: [adr(145, 'ADR 145'), adr(70, 'ADRs 069–070')],
+    dependsOn: ['human-role-reevaluation', 'v03-p2-enforcement'],
+  },
+  {
+    id: 'human-ask-stream',
+    wave: 7,
+    title: 'The to-human ask stream — tiered asks, timeouts, no-answer policy',
+    plan: 'near-term',
+    category: 'human-loop',
+    blurb:
+      'One directed-to-human stream, three species (consultative ask / escalation / approval), each carrying a tier that sets a timeout and a no-answer policy. Top tier holds; below-top proceeds with a recorded risk-acceptance. Nothing below top wedges. Harness permission prompts explicitly excluded.',
+    detail:
+      'The spine of the re-founded human role (ADR 145). Directed-to-human traffic is exactly three species — consultative asks ("what do you think", wanted even in full-auto), escalations (true blockers/disputes), approvals (the admin gate). Each carries a tier; each tier sets a timeout (wait before invoking the no-answer policy) and that policy: top tier (~15m, extremely costly/destructive) *holds* — pause, keep re-notifying, never proceed; below-top (~3m scaling by importance) *proceeds with a recorded risk-acceptance* — the act records the risk, that the human was unreachable, and the chosen approach. Invariants: escalations always technically reach the human (delivery unconditional, response not); nothing below top can wedge. Routing is to admins by default, with a configurable (never automatic) fallback to non-admin humans on admin silence, on the same timeout/risk machinery. A human may answer any ask with "deciding — check back in ⟨duration/indefinitely⟩" — the human symmetric of the agent `wait` act. Excludes harness permission prompts (those stay with the harness). Supersedes the notification ladder (ADR 024/035/044) as the human-reachability path — the record shows 0 request_help ever reached nick.',
+    refs: [adr(145, 'ADR 145'), adr(103, 'ADR 103'), adr(44, 'ADR 044')],
+    dependsOn: ['human-role-reevaluation', 'steer-challenge-acts'],
+  },
+  {
+    id: 'ask-surfaces',
+    wave: 7,
+    title: 'Ask surfaces — Slack delivery + a loud /live asks & approvals panel',
+    plan: 'near-term',
+    category: 'human-loop',
+    blurb:
+      'Deliver the ask stream where the human already lives: a Slack message naming what needs a decision, and a prominent asks/approvals element on /live. The CLI inbox demotes to a power tool.',
+    detail:
+      'The record’s clearest lesson: a channel the human doesn’t inhabit is a dead letter box, however good its acts — nick never once opened the CLI inbox, and the whole notification ladder carries no traffic to him. So the ask stream (`human-ask-stream`) ships *with* its surfaces, not after. Two surfaces the founder named: a Slack message telling him what to approve/decide, and a loud, prominent asks/approvals component on the /live office screen (its own panel, or on the messages/office panels). Sequenced deliberately before more acts are added — acts without a lived-in surface reproduce the dead inbox with more machinery.',
+    refs: [adr(145, 'ADR 145'), adr(35, 'ADR 035')],
+    dependsOn: ['human-ask-stream'],
+  },
+  {
+    id: 'human-presence-ladder',
+    wave: 7,
+    title: 'The human presence ladder — steering marks you working',
+    plan: 'near-term',
+    category: 'human-loop',
+    blurb:
+      'Humans get agent-equivalent presence from signals humans emit: online (web UI open / inbox watch), working (steering, acts, or a claimed lane), idle, plus away/dnd/working-hours. Presence informs the ask-stream timeouts; absolute time still drives them. This resolves the driver co-presence gap rather than patching it.',
+    detail:
+      'Per ADR 145: online = web UI open (the /live browser tab’s observer seat becomes the human’s own) or `inbox --watch`; working = actively steering a session, doing musterd acts, or holding a claimed lane — *steering marks you working*, which is exactly the question driver-copresence-gap was blocked on ("I steer, therefore I’m online"); idle after inactivity (the human idle heuristic is an open detail); plus intentional away/dnd and working hours (already modeled, ADR 042/044). Presence *informs* the ask stream (a visibly-present admin can be waited on longer; an away one gets the Slack push immediately) but absolute time is the end driver of every timeout. Surveillance-asymmetry caution carries over: human presence is ops input, not monitoring output; need-to-know governs any derived human metric. Touches the presence model (ADR 010/021/042/057).',
+    refs: [adr(145, 'ADR 145'), adr(21, 'ADR 021'), adr(57, 'ADR 057')],
+    dependsOn: ['human-role-reevaluation'],
+  },
+  {
+    id: 'human-work-identity',
+    wave: 8,
+    title: 'Human work identity — create & claim lanes from the web UI',
+    plan: 'reserved',
+    category: 'human-loop',
+    blurb:
+      'Humans create and claim lanes/Goals from the web UI, just like agents — so blockers, human-only work (publish to npm), and self-defined human work are captured, measured, and auditable. No new work-item nouns; the writable board is the missing affordance.',
+    detail:
+      'The record: nick created 5 lanes and owns 0 of ~84 ownerships; the one work item only he can do (publish the packages to npm) has sat parked and invisible for weeks — musterd literally cannot say "the team is blocked on nick’s lane." Nothing in the schema stops it (`owner_seat: nick` is already legal; lanes already have a backlog state); the only human claim surface is the CLI he never opens. So the board becomes writable from the web UI: a human creates a work item any time and picks it up, and all such work is captured/measured/auditable like agent work. No new hierarchy nouns — ADR 098 holds (Goal → Lane). First dogfood: a real publish-to-npm lane owned by nick, aging and nudgeable. Builds on the read-only board (insight-dashboard increment 1) by adding write.',
+    refs: [adr(145, 'ADR 145'), adr(98, 'ADR 098')],
+    dependsOn: ['human-role-reevaluation', 'insight-dashboard'],
+  },
+  {
+    id: 'two-stage-close',
+    wave: 8,
+    title: 'Two-stage close — ready-for-review + counterpart confirm',
+    plan: 'reserved',
+    category: 'human-loop',
+    blurb:
+      'Split "done" into the worker’s claim (a `ready for review` lane state) and the owner’s claim (a different seat confirms before `done`; a failed review marks `unverified`). The review request rides the ask stream, so a missing reviewer degrades to self-closed-unverified — never a wedge. Absorbs the parked resolve-as-state-gate question.',
+    detail:
+      '`resolve` (ADR 025) conflates two claims — the worker’s "technically complete" and the owner’s "this is what I wanted". The founder: agent work can be technically done but not what he wanted when he reviews it with his own eyes (the agile sprint-demo acceptance moment). So the worker asserts only `ready for review`; a *different* seat (agent reviewer, or the requesting human for owner-acceptance) confirms before `done`, and a failed review marks `unverified`. The review request is an ordinary ask-stream item with a timeout, so a missing reviewer degrades to self-close-flagged-unverified rather than wedging. Keeps every settled constraint of the resolve-as-state-gate brainstorm: musterd runs no verifiers, threads can’t wedge, verified-ness is derived from a counterpart act, never a stored second flag. Rides on human-ask-stream.',
+    refs: [
+      adr(145, 'ADR 145'),
+      adr(25, 'ADR 025'),
+      doc('docs/design/resolve-as-state-gate-brainstorm.md', 'resolve-as-state-gate-brainstorm.md'),
+    ],
+    dependsOn: ['human-ask-stream', 'resolve-act'],
+  },
+  {
+    id: 'web-steering-console',
+    wave: 8,
+    title: 'Web steering console — answer consultative asks from /live',
+    plan: 'reserved',
+    category: 'human-loop',
+    blurb:
+      'Pull the steering the founder does inside each harness (approve/deny/redirect, plan feedback, "what do you think") into musterd, answerable from /live — unifying consultative asks, escalations, and approvals into one addressed-to-human stream. Harness permission prompts stay in the harness, permanently.',
+    detail:
+      'The session’s biggest idea and its biggest lift. Today the founder’s most valuable steering — the approve/deny/redirect stream, plan-mode feedback, the consultative "what do you think" — lives inside each harness (Claude Code, Cursor, Codex) separately, and musterd can’t see, route, or record any of it. This routes the *consultative* asks through the team layer: an ask an agent would have shown in its own session becomes a musterd act, renderable and answerable on /live (or Slack), recorded like everything else, with the tiered proceed-on-timeout semantics attached. It also dissolves driver co-presence from the other side — steering flows through the team, not just annotates it. Explicitly *not* harness permission prompts — those stay with the harness (the boundary the founder drew). Reserved: needs the ask stream, surfaces, and presence ladder live first, and is the heaviest build in the arc.',
+    refs: [adr(145, 'ADR 145'), adr(103, 'ADR 103')],
+    dependsOn: ['human-ask-stream', 'ask-surfaces', 'human-presence-ladder'],
+  },
+  {
+    id: 'multi-human-admin',
+    wave: 'later',
+    title: 'Multi-human admin model — the two-human dogfood',
+    plan: 'reserved',
+    category: 'human-loop',
+    blurb:
+      'The admin overlay for teams with more than one human: admins are human-only (≥1 always, creator default), a second human joins as non-admin, and a configurable fallback routes asks to non-admin humans on admin silence. Deliberately last — its open questions can’t be honestly designed with one human.',
+    detail:
+      'musterd has never had two real humans on a team — every human-kind row in the store is nick or his own browser observer, so the entire multi-human story (the "muster your agents *and humans*" pitch) is speculation with zero dogfood. ADR 145 freezes the *defaults*: admins are human-only, at least one always exists (team creator), a second human joins as non-admin (all acts + lanes, sends into the ask stream like agents, but doesn’t receive approvals/escalations by default), and a configurable — never automatic — policy may fall back to non-admin humans on admin silence, on the same timeout/risk machinery. Non-admin humans direct the same three species at admins that agents do, and wield the steering vocab (challenge/stop/wake/rescope/redirect). Deliberately deferred are the questions that need a real second human: the multi-admin race (a decision-maker designation vs a single-admin cap), the exact non-admin steering scope, and whether two humans coordinate through musterd or around it in Slack. Gated on a second-human dogfood.',
+    refs: [adr(145, 'ADR 145'), adr(42, 'ADR 042'), adr(70, 'ADRs 069–070')],
+    dependsOn: ['human-role-reevaluation', 'v03-p1-seats'],
   },
   {
     id: 'insight-dashboard',
@@ -929,8 +1037,8 @@ const RAW: RawItem[] = [
     blurb: 'Driver co-presence shipped (ADR 021) but is dormant: it only annotates the agent row ("· driven by nick") and only when MUSTERD_DRIVER is set, which `musterd agent` (unlike `init`) never writes — so a human steering an agent-provisioned seat still reads offline.',
     detail:
       'Diagnosed 2026-07-04 from the live roster (nick shows offline while actively steering) + the code: (1) `musterd agent` never writes MUSTERD_DRIVER (unlike `init`, which sets it from the saved operator identity — init.ts:404), so the "driven by" annotation never fires for agent-provisioned seats; (2) even when set, ADR 021 annotates the *agent* row, it does not give the human seat its own presence — so it does not match the expectation "I steer, therefore I am online". Fix has two parts: provision the driver link (opt-in, per workspace) so the annotation works, and decide whether steering should also mark the human seat present (closer to the driver-co-presence intent + the humans-as-peers thesis). Small, but it touches the presence model (ADR 010/042/057) — and the "should steering mean present" question is exactly what the human-role reevaluation answers first, so this builds on it.',
-    refs: [adr(21, 'ADR 021'), adr(57, 'ADR 057'), adr(42, 'ADR 042')],
-    dependsOn: ['agent-presence-touch', 'human-role-reevaluation'],
+    refs: [adr(21, 'ADR 021'), adr(57, 'ADR 057'), adr(42, 'ADR 042'), adr(145, 'ADR 145')],
+    dependsOn: ['agent-presence-touch', 'human-presence-ladder'],
   },
 
 
