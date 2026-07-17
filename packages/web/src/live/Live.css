@@ -735,6 +735,16 @@
   background: var(--lc-success);
   box-shadow: 0 0 6px color-mix(in srgb, var(--lc-success) 70%, transparent);
 }
+/* Live but holding no task (ADR 140). Amber, and *unglowed* — the green dot's halo is what reads as
+   "lit up and running" from across the panel, so an idle dot must not have one. */
+.lc-gl-label__dot--idle {
+  background: var(--lc-warn, #f4cf52);
+}
+/* Away sits between idle and offline: the same amber family (they're a person, not a cold seat) but
+   drained, so a glance separates "here but between tasks" from "stepped out". */
+.lc-gl-label__dot--away {
+  background: color-mix(in srgb, var(--lc-warn, #f4cf52) 55%, var(--lc-faint));
+}
 .lc-gl-label__dot--off {
   background: var(--lc-faint);
 }

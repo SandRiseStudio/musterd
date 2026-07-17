@@ -1,4 +1,15 @@
-import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, NOOK, NOOK_CAP, NOOK_SPOTS, SEAT_BACK, STRIP_CAP } from './layout';
+import {
+  COFFEE_STAND,
+  DESK_SLOTS,
+  ENTRANCE,
+  FWD,
+  LEISURE_SPOTS,
+  NOOK,
+  NOOK_CAP,
+  NOOK_SPOTS,
+  SEAT_BACK,
+  STRIP_CAP,
+} from './layout';
 import { findPath, type P } from './nav';
 import type { Placement } from './seating';
 import { STRIDE } from './skeleton';
@@ -72,6 +83,22 @@ export function homePoses(
         alpha: 1,
         ...AT_REST,
         sit: 1, // a desk member's home *is* the chair — they belong seated
+      });
+    } else if (pl.kind === 'leisure') {
+      const spot = LEISURE_SPOTS[pl.spot];
+      if (!spot) continue;
+      // Idle members stay full-size and keep their name label: "who is idle, and where did they go?" is
+      // exactly the read this placement exists to give, and a `small` avatar drops its label.
+      out.set(name, {
+        lx: spot.lx,
+        ly: spot.ly,
+        dir: spot.dir,
+        small: false,
+        carry: false,
+        bubble: null,
+        alpha: 1,
+        ...AT_REST,
+        sit: spot.sit,
       });
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);

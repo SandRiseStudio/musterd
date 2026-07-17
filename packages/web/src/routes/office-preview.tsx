@@ -76,22 +76,35 @@ function OfficePreviewPage() {
   });
   const [away, setAway] = useState<Set<string>>(() => new Set(['Gus']));
 
+  // `?idle=all` (or a comma list of names) forces members idle on load — the case the leisure furniture
+  // exists for, and the one that's tedious to reach by clicking. `?idle=all` empties every desk.
+  const [idle, setIdle] = useState<Set<string>>(() => {
+    const raw = new URLSearchParams(window.location.search).get('idle');
+    if (!raw) return new Set();
+    if (raw === 'all') return new Set(POOL.map((m) => m.name));
+    return new Set(raw.split(',').map((s) => s.trim()));
+  });
+
   const buildData = useCallback(
     (): OfficeData => ({
       nodes: POOL.filter((m) => present.has(m.name)).map((m) => {
         const isAway = away.has(m.name);
+        const activity = isAway || idle.has(m.name) ? 'idle' : m.activity;
         return {
           name: m.name,
           kind: m.kind,
           presence: isAway ? 'away' : 'online',
-          activity: isAway ? 'idle' : m.activity,
+          activity,
+          // The fixture has no availability axis, so posture composes straight off presence + activity:
+          // away → the nook, idle → the leisure furniture, working → a desk.
+          posture: isAway ? ('away' as const) : activity,
           state: m.state,
           color: memberColor(m.name, m.kind),
           role: '',
         };
       }),
     }),
-    [present, away],
+    [present, away, idle],
   );
   const dataRef = useRef(buildData);
   dataRef.current = buildData;
@@ -147,6 +160,7 @@ function OfficePreviewPage() {
   };
   const present2 = (n: string) => setPresent((s) => toggle(s, n));
   const away2 = (n: string) => setAway((s) => toggle(s, n));
+  const idle2 = (n: string) => setIdle((s) => toggle(s, n));
 
   return (
     <main className="lc">
@@ -169,6 +183,7 @@ function OfficePreviewPage() {
         <button className="lc__pbtn" title="Dev join / leave (walk in / out)" onClick={() => present2('Dev')}>D</button>
         <button className="lc__pbtn" title="Hana join / leave (walk in / out)" onClick={() => present2('Hana')}>H</button>
         <button className="lc__pbtn" title="Ivy away / back (drift to nook)" onClick={() => away2('Ivy')}>z</button>
+        <button className="lc__pbtn" title="Bo idle / working (walk to the lounge)" onClick={() => idle2('Bo')}>☕</button>
         <span className="lc__status lc__status--live">design preview</span>
       </header>
       <div className="lc__canvas lc__canvas--companion">

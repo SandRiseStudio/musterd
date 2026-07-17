@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { FLOOR } from './iso';
+import { FLOOR, project } from './iso';
 import {
   BOOKSHELVES,
   DESK_D,
   DESK_SLOTS,
   DESK_W,
   FWD,
+  LEISURE_SPOTS,
   MEETING,
+  MIN_SPOT_GAP,
   PODS,
   RECEPTION,
   SEAT_BACK,
@@ -74,6 +76,50 @@ describe('zone rugs', () => {
       expect(r.ly - r.d / 2).toBeGreaterThanOrEqual(0);
       expect(r.lx + r.w / 2).toBeLessThanOrEqual(FLOOR);
       expect(r.ly + r.d / 2).toBeLessThanOrEqual(FLOOR);
+    }
+  });
+});
+
+describe('LEISURE_SPOTS', () => {
+  it('keeps every pair of spots far enough apart to read as two people', () => {
+    // The guard is in **screen** space, not floor space: the 2:1 iso halves the ly axis, so two spots can
+    // be a comfortable 64 apart on the plan and 37 apart in pixels — one smeared avatar under two stacked
+    // name labels. This is the check that keeps a spot from being added back into a pile.
+    const fit = { ox: 0, oy: 0, scale: 1 };
+    for (let i = 0; i < LEISURE_SPOTS.length; i++) {
+      for (let j = i + 1; j < LEISURE_SPOTS.length; j++) {
+        const a = LEISURE_SPOTS[i]!;
+        const b = LEISURE_SPOTS[j]!;
+        const pa = project(a.lx, a.ly, fit);
+        const pb = project(b.lx, b.ly, fit);
+        const gap = Math.hypot(pa.x - pb.x, pa.y - pb.y);
+        expect(
+          gap,
+          `${a.zone}[${i}] and ${b.zone}[${j}] are ${gap.toFixed(1)} apart on screen`,
+        ).toBeGreaterThanOrEqual(MIN_SPOT_GAP);
+      }
+    }
+  });
+
+  it('offers every zone, so idle members spread instead of filling one corner', () => {
+    for (const zone of ['lounge', 'huddle', 'meeting', 'reading']) {
+      expect(LEISURE_SPOTS.some((s) => s.zone === zone)).toBe(true);
+    }
+  });
+
+  it('interleaves zones, so a probe that collides lands in a different part of the room', () => {
+    // Assignment is a hash + linear probe over this array (seating.ts). Grouped by zone, a collision
+    // walks to the seat *next door* and the room clumps; interleaved, it lands across the floor.
+    const firstFour = LEISURE_SPOTS.slice(0, 4).map((s) => s.zone);
+    expect(new Set(firstFour).size).toBe(4);
+  });
+
+  it('keeps every spot on the floor', () => {
+    for (const s of LEISURE_SPOTS) {
+      expect(s.lx).toBeGreaterThan(0);
+      expect(s.ly).toBeGreaterThan(0);
+      expect(s.lx).toBeLessThan(FLOOR);
+      expect(s.ly).toBeLessThan(FLOOR);
     }
   });
 });

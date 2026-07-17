@@ -41,6 +41,7 @@ function buildData(): OfficeData {
       kind: m.kind,
       presence: 'online' as const,
       activity: m.activity,
+      posture: m.activity === 'working' ? ('working' as const) : ('idle' as const),
       state: m.state,
       color: memberColor(m.name, m.kind),
       role: '',

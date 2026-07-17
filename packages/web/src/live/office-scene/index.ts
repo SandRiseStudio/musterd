@@ -1,3 +1,4 @@
+import type { Posture } from '@musterd/protocol';
 import { createActors, type Actors } from './actors';
 import { createPet, petBeat, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { fitFloor, project, type Fit, type Pt } from './iso';
@@ -24,6 +25,14 @@ export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode } from './types'
 
 const DPR_CAP = 2;
 const CUE_SECS = 1.5;
+
+/** Posture → the name label's dot modifier. One green: only `working` earns it. */
+const DOT_STATE: Record<Posture, 'on' | 'idle' | 'away' | 'off'> = {
+  working: 'on',
+  idle: 'idle',
+  away: 'away',
+  offline: 'off',
+};
 // Speech-bubble lifecycle (ms): hold after the text finishes typing, then the exit transition length.
 // The hold is deliberately generous (plus a per-character allowance, capped) so a bubble lingers long
 // enough to actually read — and to click through to the stream — before it drifts away.
@@ -312,9 +321,11 @@ export function mountOffice(
       el.textContent = '';
       const nameEl = document.createElement('span');
       nameEl.className = 'lc-gl-label__name';
-      // the same presence dot the roster panel leads with — green when online, dim otherwise
+      // The same dot the roster panel leads with, off the same posture: green working · amber idle ·
+      // amber-dim away · faint offline. It used to key off raw `presence`, which is only *connectedness* —
+      // so an idle member sat at a desk under a green dot and read as hard at work.
       const dot = document.createElement('span');
-      dot.className = `lc-gl-label__dot lc-gl-label__dot--${node.presence === 'online' ? 'on' : 'off'}`;
+      dot.className = `lc-gl-label__dot lc-gl-label__dot--${DOT_STATE[node.posture]}`;
       nameEl.appendChild(dot);
       nameEl.appendChild(document.createTextNode(name));
       el.appendChild(nameEl);

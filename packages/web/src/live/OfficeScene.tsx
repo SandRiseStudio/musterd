@@ -1,11 +1,15 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
 import { useEffect, useMemo, useRef } from 'react';
-import { actLabel, actTone, memberColor } from './format';
+import { actLabel, actTone, memberColor, memberPosture } from './format';
 import type { OfficeData, OfficeHandle } from './office-scene';
 import { actToEvent } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
 
-/** Roster → the office's node data (presence/activity drives who's in the room + their state). */
+/**
+ * Roster → the office's node data. `posture` is resolved here with `memberPosture` — the *same* call the
+ * roster rail's chip makes — so the floor and the rail read one value: a member the rail calls `idle` is
+ * on the couch with an amber dot, never at a desk with a green one.
+ */
 function computeData(teamName: string, roster: MemberSummary[]): OfficeData {
   return {
     teamName,
@@ -16,6 +20,7 @@ function computeData(teamName: string, roster: MemberSummary[]): OfficeData {
         kind,
         presence: m.presence,
         activity: m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle'),
+        posture: memberPosture(m),
         state: m.state ?? null,
         color: memberColor(m.name, kind),
         role: m.role,
