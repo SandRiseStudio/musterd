@@ -1172,7 +1172,7 @@
 }
 /* ADR 135: this seat's runtime attests a different build than the daemon — quiet amber, details in
    the title (both short SHAs). Same chip anatomy as reconnecting, warn-toned instead of accent. */
-/* Feature-skew hint (ADR 147): a *calm, informational* tag — a live seat is a feature epoch behind the
+/* Feature-skew hint (ADR 148): a *calm, informational* tag — a live seat is a feature epoch behind the
    team, worth a reload but not an error. Deliberately the roster's muted neutral, NOT the warn amber the
    old sha-diff "stale" chip used: it fires only on real feature drift, so it must read as an FYI, not an
    alarm. */

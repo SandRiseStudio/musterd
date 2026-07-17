@@ -28,7 +28,7 @@ export interface AttachContext {
   model?: string | null;
   /** Client-attested build ref of the connecting dist (ADR 135); absent → null (unstamped client). */
   build?: string | null;
-  /** Client-attested feature epoch (ADR 147); absent → null (older client). The roster's skew signal. */
+  /** Client-attested feature epoch (ADR 148); absent → null (older client). The roster's skew signal. */
   epoch?: number | null;
 }
 

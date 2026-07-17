@@ -381,7 +381,7 @@ export class MusterdClient {
           ...(this.config.model ? { model: this.config.model } : {}),
           // Build attestation (ADR 135): the dist this process booted from; absent when unstamped.
           ...(this.config.build ? { build: this.config.build } : {}),
-          // Feature epoch (ADR 147): compiled-in capability counter; the roster's skew signal.
+          // Feature epoch (ADR 148): compiled-in capability counter; the roster's skew signal.
           ...(this.config.epoch != null ? { epoch: this.config.epoch } : {}),
         }),
       );
