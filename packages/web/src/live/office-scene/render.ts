@@ -198,6 +198,41 @@ function box(
   quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], shade(base, 0.86));
   quad(ctx, [dn(A, hi), dn(B, hi), dn(C, hi), dn(D, hi)], base);
 }
+/**
+ * A `box` whose top footprint differs from its bottom — the shape of anything that tapers: a plant pot,
+ * a waste bin, a lampshade. Same two visible side faces and the same shading as `box`, so a frustum and a
+ * box sitting side by side read as the same material under the same light.
+ */
+function frustum(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  lx: number,
+  ly: number,
+  w0: number,
+  d0: number,
+  w1: number,
+  d1: number,
+  hPx: number,
+  base: string,
+  baseUp = 0,
+): void {
+  const at = (w: number, d: number, u: number): Pt[] =>
+    [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ].map(([sx, sy]) => {
+      const p = project(lx + (sx! * w) / 2, ly + (sy! * d) / 2, fit);
+      return { x: p.x, y: p.y - u };
+    });
+  const [A0, B0, C0, D0] = at(w0, d0, baseUp * fit.scale);
+  const [A1, B1, C1, D1] = at(w1, d1, (baseUp + hPx) * fit.scale);
+  quad(ctx, [B0!, C0!, C1!, B1!], shade(base, 0.72));
+  quad(ctx, [D0!, C0!, C1!, D1!], shade(base, 0.86));
+  quad(ctx, [A1!, B1!, C1!, D1!], base);
+}
+
 /** Face shading that also handles hsl bases (member-tinted furniture like chairs). */
 function shade(base: string, f: number): string {
   return dim(base, f);
@@ -807,6 +842,29 @@ function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
   box(ctx, fit, wx, ly, 8, 98, 10, '#6b4a2a', H);
 }
 
+const PLANT = {
+  pot: '#b9603a',
+  rim: '#cb6f45',
+  soil: '#4a3326',
+  trunk: '#7c5a3c',
+  stem: '#4e7a3c',
+  snake: '#3e6b3a',
+  snakeTip: '#6fa35a',
+  leaf: '#6e9e52',
+  leafLit: '#86b368',
+} as const;
+
+/** Planter geometry, in logical units: a tapered pot, then a rim band, then the soil the plant grows out of. */
+const POT = { base: 17, top: 25, h: 19, rimW: 27, rimH: 3.5 };
+const SOIL_UP = POT.h + POT.rimH;
+
+/**
+ * A potted plant, drawn as *one object*: a tapered planter, a rim, soil, and foliage that grows out of the
+ * soil. The parts are joined on purpose — an earlier cut hung the fiddle's leaves ~30 units above the pot
+ * with nothing in between, which read (fairly) as a stray crate on the floor with a bush hovering over it.
+ * A fiddle-leaf fig gets the bare woody trunk it has in life; a snake plant's blades rise straight from the
+ * soil. Either way, every green thing traces back to the pot it is standing in.
+ */
 function drawPlant(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -816,28 +874,52 @@ function drawPlant(
 ): void {
   const base = project(lx, ly, fit);
   const s = fit.scale;
+  const at = (dx: number, up: number): Pt => ({ x: base.x + dx * s, y: base.y - up * s });
   ellipse(ctx, { x: base.x, y: base.y + 3 * s }, 20 * s, 6 * s, 'rgba(0,0,0,0.14)');
-  box(ctx, fit, lx, ly, 24, 24, 18, '#b9603a');
-  const top = { x: base.x, y: base.y - 18 * s };
+  frustum(ctx, fit, lx, ly, POT.base, POT.base, POT.top, POT.top, POT.h, PLANT.pot);
+  box(ctx, fit, lx, ly, POT.rimW, POT.rimW, POT.rimH, PLANT.rim, POT.h);
+  ellipse(ctx, at(0, SOIL_UP), 10 * s, 5 * s, PLANT.soil);
+
   if (species === 'snake') {
+    // Blades straight out of the soil, tallest in the middle — each one starts *in* the pot.
     for (const [dx, h] of [
-      [-13, 46],
-      [-4, 56],
-      [6, 50],
-      [14, 38],
+      [-9, 46],
+      [-3, 58],
+      [4, 51],
+      [10, 39],
     ] as const) {
-      ellipse(ctx, { x: top.x + dx * s, y: top.y - (h / 2) * s }, 5.5 * s, (h / 2) * s, '#3e6b3a');
-      ellipse(ctx, { x: top.x + dx * s, y: top.y - h * s + 5 * s }, 4 * s, 6 * s, '#6fa35a');
+      ellipse(ctx, at(dx, SOIL_UP + h / 2), 5 * s, (h / 2) * s, PLANT.snake);
+      ellipse(ctx, at(dx, SOIL_UP + h - 5), 3.4 * s, 5.5 * s, PLANT.snakeTip);
     }
-  } else {
-    for (const [dx, dy, r] of [
-      [-16, -46, 17],
-      [7, -52, 16],
-      [-2, -32, 14],
-    ] as const) {
-      ellipse(ctx, { x: top.x + dx * s, y: top.y + dy * s }, r * s, (r - 2) * s, '#6e9e52');
-      ellipse(ctx, { x: top.x + (dx + 5) * s, y: top.y + (dy + 5) * s }, (r * 0.5) * s, (r * 0.4) * s, '#86b368');
-    }
+    return;
+  }
+
+  // Fiddle-leaf fig: a trunk out of the soil, leaves hung off its top — so the canopy has something to
+  // hang from. Each leaf's stem runs back to the trunk, which is what stops the blobs reading as a cloud.
+  const CROWN = 27; // where the trunk ends and the canopy starts
+  const trunkTop = at(-2, SOIL_UP + CROWN);
+  ctx.strokeStyle = PLANT.trunk;
+  ctx.lineWidth = 3 * s;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(base.x, base.y - SOIL_UP * s);
+  ctx.quadraticCurveTo(base.x + 2 * s, base.y - (SOIL_UP + CROWN * 0.55) * s, trunkTop.x, trunkTop.y);
+  ctx.stroke();
+  for (const [dx, up, r] of [
+    [10, CROWN - 7, 8.5], // one leaf slung low off the trunk — without it the plant reads as a lollipop
+    [-14, CROWN + 4, 13],
+    [11, CROWN + 10, 12],
+    [-2, CROWN + 20, 11],
+  ] as const) {
+    const c = at(dx, SOIL_UP + up);
+    ctx.strokeStyle = PLANT.stem;
+    ctx.lineWidth = 1.6 * s;
+    ctx.beginPath();
+    ctx.moveTo(trunkTop.x, trunkTop.y);
+    ctx.lineTo(c.x, c.y);
+    ctx.stroke();
+    ellipse(ctx, c, r * s, (r - 2) * s, PLANT.leaf);
+    ellipse(ctx, { x: c.x + 4 * s, y: c.y + 4 * s }, r * 0.45 * s, r * 0.36 * s, PLANT.leafLit);
   }
 }
 
