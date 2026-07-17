@@ -1863,6 +1863,34 @@ function screenPanel(
       quad(ctx, [dn(bl, lo), dn(L2, lo), dn(L2, hi), dn(bl, hi)], 'rgba(6, 20, 22, 0.22)');
       quad(ctx, [dn(R2, lo), dn(br, lo), dn(br, hi), dn(R2, hi)], 'rgba(6, 20, 22, 0.22)');
     }
+    if (working) {
+      // Light *emitted* from the lit screen: an additive bloom over the face plus a softer spill onto the
+      // desk in front of it. Drawn here, inside the workstation's own depth item, so a monitor standing in
+      // front occludes it — unlike the old DOM overlay, which always painted above the canvas and let a
+      // back-row screen's glow bleed over a nearer monitor as a floating disc. Only the camera-facing lit
+      // face (N/W) reaches this branch, so the glow only ever appears on a screen you can actually see.
+      const cw = Math.abs(br.x - bl.x); // screen face width, px
+      const chh = hi - lo; // screen face height, px
+      const cx = (bl.x + br.x) / 2;
+      const cyBottom = (bl.y + br.y) / 2 - lo; // screen's bottom edge (meets the desk)
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const bloom = ctx.createRadialGradient(cx, cyBottom - chh * 0.5, 0, cx, cyBottom - chh * 0.5, cw * 0.66);
+      bloom.addColorStop(0, 'rgba(154, 228, 240, 0.38)');
+      bloom.addColorStop(1, 'rgba(154, 228, 240, 0)');
+      ctx.fillStyle = bloom;
+      ctx.beginPath();
+      ctx.ellipse(cx, cyBottom - chh * 0.5, cw * 0.66, chh * 0.74, 0, 0, Math.PI * 2);
+      ctx.fill();
+      const spill = ctx.createRadialGradient(cx, cyBottom + chh * 0.34, 0, cx, cyBottom + chh * 0.34, cw * 0.9);
+      spill.addColorStop(0, 'rgba(122, 210, 226, 0.2)');
+      spill.addColorStop(1, 'rgba(122, 210, 226, 0)');
+      ctx.fillStyle = spill;
+      ctx.beginPath();
+      ctx.ellipse(cx, cyBottom + chh * 0.34, cw * 0.9, chh * 0.52, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
   const g = project(mx, my, fit);
   const pulse = working ? 0.85 + 0.15 * Math.sin(t * 2.1 + mx + my) : 1;
@@ -2016,14 +2044,13 @@ function deskRnd(id: number, salt: number): number {
  * coords: `along` +toward the monitor / −toward the seat, `across` +right / −left. `salt`+`prob` decide
  * per-desk presence from a stable hash. Shared by the canvas draw AND the animated-overlay anchors
  * (`animatedDeskAnchors`) so the spinning fan / coffee steam land exactly on the drawn prop. */
-const PROP_KINDS = ['coffee', 'water', 'plant', 'photo', 'lamp', 'fan'] as const;
+const PROP_KINDS = ['coffee', 'water', 'plant', 'photo', 'fan'] as const;
 type PropKind = (typeof PROP_KINDS)[number];
 const PROP_SPEC: Record<PropKind, { salt: number; prob: number; along: number; across: number }> = {
   coffee: { salt: 1, prob: 0.4, along: -4, across: -34 },
   water: { salt: 2, prob: 0.42, along: 7, across: -36 },
   plant: { salt: 3, prob: 0.46, along: 20, across: -40 },
   photo: { salt: 4, prob: 0.42, along: 20, across: 38 },
-  lamp: { salt: 5, prob: 0.4, along: 8, across: 42 },
   fan: { salt: 6, prob: 0.38, along: -10, across: 38 },
 };
 /** Whether a given desk carries a given prop — a stable per-desk hash, independent of who's seated. */
@@ -2092,18 +2119,6 @@ function deskFan(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number
   ellipse(ctx, { x: g.x, y: cy }, 2.4 * fit.scale, 1.8 * fit.scale, '#5a646e'); // hub
 }
 
-/** A desk lamp: base + slim pole + a warm glowing shade. */
-function deskLamp(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number, lit: boolean): void {
-  box(ctx, fit, ix, iy, 10, 10, 3, '#3d4650', up); // base
-  box(ctx, fit, ix, iy, 3, 3, 22, '#4a545f', up + 3); // pole
-  const g = project(ix, iy, fit);
-  const ty = g.y - (up + 26) * fit.scale;
-  // Lit when a member's at the desk and it's dark enough out (see LightEnv.lampsOn) — warm amber shade +
-  // inner glow; otherwise switched off, a cool grey shade with no glow (matches the idle fan / empty mug).
-  ellipse(ctx, { x: g.x, y: ty }, 9 * fit.scale, 5 * fit.scale, lit ? '#e9c46a' : '#aab0b8');
-  if (lit) ellipse(ctx, { x: g.x, y: ty + 2 * fit.scale }, 6 * fit.scale, 3 * fit.scale, '#fff1c2'); // warm glow
-}
-
 /** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works), plus a
  * keyboard + mouse and a deterministic mix of personal props. The task chair and the seated member are
  * NOT drawn here — the chair is its own depth item at its own footprint (see renderScene) and members are
@@ -2116,7 +2131,6 @@ function drawWorkstation(
   slot: { lx: number; ly: number; dir: Dir; id: number },
   node: OfficeNode | null,
   teamName: string,
-  env: LightEnv,
   t = 0,
 ): void {
   const { lx, ly, dir, id } = slot;
@@ -2181,9 +2195,6 @@ function drawWorkstation(
           return deskPlant(ctx, fit, ix, iy, up);
         case 'photo':
           return deskPhoto(ctx, fit, ix, iy, sn, up, PHOTOS[Math.floor(deskRnd(id, 41) * PHOTOS.length)]!);
-        case 'lamp':
-          // A lamp lights up only when someone's at the desk *and* it's dark enough out to want it on.
-          return deskLamp(ctx, fit, ix, iy, up, node != null && env.lampsOn);
         case 'fan':
           return deskFan(ctx, fit, ix, iy, up);
       }
@@ -2218,9 +2229,8 @@ function warmPool(ctx: CanvasRenderingContext2D, p: Pt, r: number, flatten: numb
  *
  *  - **The string lights emit** — each bulb (same anchors the canvas paints, see `magicAnchors`) casts a
  *    faint warm pool down the wall and onto the floor beneath it. Previously the bulbs glowed but lit nothing.
- *  - **Desk lamps** — the existing warm pool under every lit desk lamp (occupied desk, dark out).
  *  - **A personal glow per present member** — a soft warm pool that travels with each online member, so
- *    the character work (faces, cheeks, the round body) never dissolves into the veil away from a lamp.
+ *    the character work (faces, cheeks, the round body) never dissolves into the veil.
  *
  * Kept deliberately gentle: the office is meant to read *dim and cosy* after dark (the overhead fill the
  * lighting model already bakes into an occupied room is the only ceiling light — these just add warmth and
@@ -2254,13 +2264,6 @@ function drawInteriorLight(
   // to actually read against the veil (a first pass was too faint to see) while staying a warm accent.
   for (const b of magicAnchors(fit).bulbs) {
     warmPool(ctx, { x: b.x, y: b.y + 24 * fit.scale }, 52 * fit.scale, 0.95, '255, 200, 120', 0.2 * night);
-  }
-
-  // Desk lamps — a warm floor pool under each lit lamp (occupied desk).
-  for (const slot of DESK_SLOTS) {
-    if (!slotMember.has(slot.id) || !deskHasProp(slot.id, 'lamp')) continue;
-    const [ix, iy] = deskPoint(slot, PROP_SPEC.lamp.along, PROP_SPEC.lamp.across);
-    warmPool(ctx, project(ix, iy, fit), 72 * fit.scale, 0.62, '255, 200, 120', 0.42);
   }
 
   // A personal glow travelling with each present (online) member — just enough to keep the character work
@@ -2353,7 +2356,7 @@ export function renderScene(
   for (const slot of DESK_SLOTS) {
     const name = slotMember.get(slot.id) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
-    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, env, t) });
+    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, t) });
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
     // the two instead of being swallowed by a single chair box.
@@ -2451,32 +2454,6 @@ export function renderScene(
   }
 
   return { heads, bases };
-}
-
-/**
- * Screen positions of the **monitors of working members** — where the Tier-A ambient glow sits (ADR 086).
- * Matches `drawWorkstation`/`monitor`'s placement so the DOM glow lands on the screen, not floating. Only
- * desk-seated `working` members get one; the returned point is the screen face centre in panel px.
- */
-export function monitorAnchors(
-  placements: Map<string, Placement>,
-  byName: Map<string, OfficeNode>,
-  fit: Fit,
-): Map<string, Pt> {
-  const out = new Map<string, Pt>();
-  for (const [name, pl] of placements) {
-    if (pl.kind !== 'desk') continue;
-    // `posture`, not `activity`: an idle member who spilled onto a desk (leisure full) or a stale member
-    // whose last-known activity is `working` must not get a lit-screen glow. Only a working member does.
-    if (byName.get(name)?.posture !== 'working') continue;
-    const slot = DESK_SLOTS[pl.slot];
-    if (!slot) continue;
-    const f = FWD[slot.dir];
-    // monitor sits at (Df/2 - 12) toward the facing (see drawWorkstation), screen face ~78px up at scale 1
-    const s = project(slot.lx + f[0] * 22, slot.ly + f[1] * 22, fit);
-    out.set(name, { x: s.x, y: s.y - 78 * fit.scale });
-  }
-  return out;
 }
 
 /**
