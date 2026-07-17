@@ -7,7 +7,7 @@ import {
   PROTOCOL_VERSION,
   type WSServerFrame,
 } from '@musterd/protocol';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
@@ -3272,5 +3272,141 @@ describe('the to-human ask stream (ADR 147)', () => {
     expect(set.json.policy.standing_reseat_known_agents).toBe(false);
     const got = await get('/teams/dawn/policy', nickCred);
     expect(got.json.policy.ask_fallback_to_nonadmin).toBe(true);
+  });
+});
+
+describe('ask surfaces — Slack delivery (ADR 149)', () => {
+  function env(from: string, to: unknown, act: string, meta: Record<string, unknown>, id: string) {
+    return {
+      id,
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from,
+      to,
+      act,
+      body: 'need a call',
+      meta,
+      ts: Date.now(),
+    };
+  }
+
+  /** Intercept only the Slack webhook host; every other URL (the test server itself) passes through —
+   *  the daemon and these test helpers share the one global fetch. */
+  function stubSlack(handler: (body: { text: string }) => Response | Promise<Response>) {
+    const realFetch = globalThis.fetch;
+    const calls: { url: string; text: string }[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('https://hooks.slack.test/')) {
+        const body = JSON.parse(String(init?.body)) as { text: string };
+        calls.push({ url, text: body.text });
+        return handler(body);
+      }
+      return realFetch(input as never, init);
+    });
+    return calls;
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('posts a raised ask to the configured webhook and audits ask.surfaced ok:true', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+    await post(
+      '/teams/dawn/policy',
+      { ask_slack_webhook: 'https://hooks.slack.test/T/B/x' },
+      nickCred,
+    );
+    const calls = stubSlack(() => new Response('ok', { status: 200 }));
+
+    const sent = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'ask',
+          { species: 'escalate', tier: 'blocking' },
+          'ask-s1',
+        ),
+      },
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
+    expect(sent.status).toBe(201);
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    await pollUntil(() => listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced'));
+    const surfaced = listAudit(server.db, teamId).find((r) => r.action === 'ask.surfaced')!;
+    expect(JSON.parse(surfaced.detail!)).toMatchObject({ surface: 'slack', ok: true, status: 200 });
+    // The URL is a secret — the audit row must not carry it.
+    expect(surfaced.detail).not.toContain('hooks.slack.test');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.text).toContain('[dawn] Ada escalated to you');
+    expect(calls[0]!.text).toContain('blocking — holds after 15m');
+    expect(calls[0]!.text).toContain('need a call');
+  });
+
+  it('a dead webhook cannot fail the send — 201 anyway, ask.surfaced ok:false', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+    await post(
+      '/teams/dawn/policy',
+      { ask_slack_webhook: 'https://hooks.slack.test/T/B/dead' },
+      nickCred,
+    );
+    stubSlack(() => {
+      throw new Error('ECONNREFUSED');
+    });
+
+    const sent = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'ask',
+          { species: 'consult', tier: 'advisory' },
+          'ask-s2',
+        ),
+      },
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
+    expect(sent.status).toBe(201);
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    await pollUntil(() => listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced'));
+    const surfaced = listAudit(server.db, teamId).find((r) => r.action === 'ask.surfaced')!;
+    expect(JSON.parse(surfaced.detail!)).toMatchObject({ surface: 'slack', ok: false });
+  });
+
+  it('fires no outbound call and writes no ask.surfaced row when the knob is unset (default off)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+    const calls = stubSlack(() => new Response('ok', { status: 200 }));
+
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'ask',
+          { species: 'approve', tier: 'standard' },
+          'ask-s3',
+        ),
+      },
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    // The raised row proves the ask routed; give the (nonexistent) dispatch a beat, then assert silence.
+    expect(listAudit(server.db, teamId).some((r) => r.action === 'ask.raised')).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls).toHaveLength(0);
+    expect(listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced')).toBe(false);
   });
 });

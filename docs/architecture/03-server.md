@@ -50,6 +50,8 @@ src/
   protocol/
     validate.ts       // thin wrappers over @musterd/protocol schemas + error mapping
     route.ts          // routeEnvelope(): the ONE validate+persist+deliver path (WS & HTTP share it)
+  notify/
+    slack.ts          // ask-stream Slack delivery: formatAskSlackText + postSlackWebhook — the daemon's one outbound call, fire-and-forget, opt-in via policy ask_slack_webhook (ADR 149)
   transport/
     http.ts           // HTTP route table (02-protocol HTTP API); authTouch ambient presence (ADR 057) + x-musterd-model re-attest for agent seats only (ADR 119/121) + x-musterd-build for all credentials (ADR 135)
     ws.ts             // WS upgrade, handshake state machine, frame dispatch

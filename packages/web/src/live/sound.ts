@@ -58,6 +58,12 @@ const CUES: Record<string, Note[]> = {
     { freq: E4, t: 0.12, dur: 0.4, type: sine, gain: 0.09 },
   ],
   wait: [{ freq: D5, t: 0, dur: 0.46, type: sine, gain: 0.07 }],
+  // The to-human ask (ADR 147/149) — a doorbell: two clear rising strikes, brighter than
+  // request_help (this one is aimed at a person and carries a clock).
+  ask: [
+    { freq: G5, t: 0, dur: 0.3, type: tri, gain: 0.12 },
+    { freq: C6, t: 0.14, dur: 0.5, type: tri, gain: 0.13 },
+  ],
   // Steering trio (ADR 103). steer is the loudest — an assertive rising triad that grabs attention
   // (interrupt-class); challenge lifts like a spoken question; defer settles gently downward (set aside).
   steer: [

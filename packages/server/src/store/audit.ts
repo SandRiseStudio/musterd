@@ -104,7 +104,12 @@ export type AuditAction =
   | 'ask.raised'
   | 'ask.deferred'
   | 'ask.held'
-  | 'ask.risk_accepted';
+  | 'ask.risk_accepted'
+  // ADR 149 (ask-surfaces): the loud reach's attempt + outcome — one row per Slack webhook POST the
+  // daemon fired for a raised ask, detail `{ surface: 'slack', ok, status? }`. Never the URL (a
+  // secret) and never the body (delivery carries bodies; audit never does, ADR 051). Zero rows on a
+  // team that never set `ask_slack_webhook` is itself the guard metric that the default is off.
+  | 'ask.surfaced';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

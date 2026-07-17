@@ -92,4 +92,40 @@ describe('team policy command', () => {
       teamCommand(parseArgs(['policy', '--reseat-known-agents', 'maybe'])),
     ).rejects.toThrow(/on\|off/);
   });
+
+  // ADR 149: the ask stream's Slack delivery knob — a secret URL, masked on display, cleared with `off`.
+  it('sets the ask Slack webhook, masks it on display, and clears it with off', async () => {
+    const url = 'https://hooks.slack.com/services/T000/B000/secretpath';
+    const set = await capture(() => teamCommand(parseArgs(['policy', '--ask-slack-webhook', url])));
+    expect(set.code).toBe(0);
+    expect(set.out).toContain('hooks.slack.com');
+    expect(set.out).not.toContain('secretpath'); // the path is the secret — never echoed
+
+    const show = await capture(() => teamCommand(parseArgs(['policy'])));
+    expect(show.out).toContain('ask slack webhook: ');
+    expect(show.out).toContain('set → hooks.slack.com');
+    expect(show.out).not.toContain('secretpath');
+
+    await capture(() => teamCommand(parseArgs(['policy', '--ask-slack-webhook', 'off'])));
+    const cleared = await capture(() => teamCommand(parseArgs(['policy', '--json'])));
+    expect(JSON.parse(cleared.out).ask_slack_webhook).toBeUndefined();
+  });
+
+  it('setting the webhook does not clobber the other policy knobs (read-merge-write)', async () => {
+    await capture(() => teamCommand(parseArgs(['policy', '--reseat-known-agents', 'on'])));
+    await capture(() =>
+      teamCommand(parseArgs(['policy', '--ask-slack-webhook', 'https://hooks.example.com/x'])),
+    );
+    const after = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out,
+    );
+    expect(after.standing_reseat_known_agents).toBe(true);
+    expect(after.ask_slack_webhook).toBe('https://hooks.example.com/x');
+  });
+
+  it('rejects a non-https webhook value', async () => {
+    await expect(
+      teamCommand(parseArgs(['policy', '--ask-slack-webhook', 'http://plain.example.com/x'])),
+    ).rejects.toThrow(/https url \| off/);
+  });
 });

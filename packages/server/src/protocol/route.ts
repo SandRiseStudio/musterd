@@ -1,13 +1,15 @@
-import { type Envelope, modelFamily } from '@musterd/protocol';
+import { type AskSpecies, type AskTier, type Envelope, modelFamily } from '@musterd/protocol';
 import type { Ctx } from '../context.js';
 import { MusterdError } from '../errors.js';
 import { log } from '../log.js';
+import { formatAskSlackText, postSlackWebhook } from '../notify/slack.js';
 import { appendAudit } from '../store/audit.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
 import { currentAttestedModel } from '../store/presence.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
+import { getPolicy } from '../store/teams.js';
 import {
   recordActModel,
   recordDeliveryOutcome,
@@ -222,6 +224,7 @@ function routeEnvelopeInner(
   // row is the inbox reach, this push is the loud reach. (Its loud *surface* — Slack + /live — is item 3.)
   if (env.act === 'ask') {
     ctx.hub.deliverToAdmins(team.id, { type: 'deliver', envelope: firehoseEnv }, skip);
+    dispatchAskToSlack(ctx, team, sender.name, outgoingEnv);
   }
 
   log.info({
@@ -297,4 +300,35 @@ function recordAskLifecycle(ctx: Ctx, team: TeamRow, actor: string, env: Envelop
       detail: { ask_ref: askRef, until: meta['until'] },
     });
   }
+}
+
+/**
+ * The ask stream's Slack delivery (ADR 149) — the loud reach, fired beside the admin push. Opt-in via
+ * the team-policy `ask_slack_webhook` (unset = no outbound call ever) and **detached from the send
+ * path**: the POST runs fire-and-forget after persist + deliver, so a slow or dead endpoint can
+ * neither delay nor fail the send. Each attempt audits `ask.surfaced` (attempt + outcome — never the
+ * URL, never the body), so "did the loud reach fire, did the endpoint take it" is one audit query
+ * beside `ask.raised`. Best-effort like `appendAudit` itself: any failure is a recorded fact, not an
+ * error.
+ */
+function dispatchAskToSlack(ctx: Ctx, team: TeamRow, actor: string, env: Envelope): void {
+  const webhook = getPolicy(ctx.db, team.id).ask_slack_webhook;
+  if (!webhook) return;
+  const meta = env.meta ?? {};
+  const text = formatAskSlackText({
+    team: team.slug,
+    from: actor,
+    species: typeof meta['species'] === 'string' ? (meta['species'] as AskSpecies) : undefined,
+    tier: typeof meta['tier'] === 'string' ? (meta['tier'] as AskTier) : undefined,
+    body: env.body,
+  });
+  void postSlackWebhook(webhook, text).then(({ ok, status }) => {
+    appendAudit(ctx.db, team.id, {
+      actor,
+      action: 'ask.surfaced',
+      target: env.to.kind === 'member' ? env.to.name : null,
+      result: 'allow',
+      detail: { surface: 'slack', ok, ...(status !== undefined ? { status } : {}) },
+    });
+  });
 }

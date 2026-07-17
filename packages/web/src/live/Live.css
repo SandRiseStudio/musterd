@@ -2396,3 +2396,202 @@
   font-size: 10.5px;
   color: var(--lc-faint);
 }
+
+/* ─── asks & approvals strip (ADR 149) ────────────────────────────────────
+ * The loud, above-the-fold home of the to-human ask stream (ADR 147). Sits between the top bar and
+ * the panel canvas; renders nothing until an ask exists, one quiet line when none are open, and
+ * accent-bordered cards while any ask is open/held. Loud means *first thing seen*, so it never
+ * scrolls: past ~one row of cards it scrolls horizontally inside itself. */
+.lc-asks {
+  flex: none;
+  margin: var(--lc-4) var(--lc-6) 0;
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-r-lg);
+  background: color-mix(in srgb, var(--lc-ground-2) 78%, transparent);
+  padding: var(--lc-4) var(--lc-5);
+  animation: lc-fade var(--lc-med) var(--lc-ease) both;
+}
+.lc-asks--loud {
+  border-color: color-mix(in srgb, var(--lc-accent) 55%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--lc-accent) 26%, transparent),
+    0 6px 22px -12px color-mix(in srgb, var(--lc-accent) 55%, transparent);
+  animation: lc-fade var(--lc-med) var(--lc-ease) both, lc-asks-breathe 2.4s ease-in-out infinite;
+}
+@keyframes lc-asks-breathe {
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--lc-accent) 44%, transparent),
+      0 6px 26px -10px color-mix(in srgb, var(--lc-accent) 70%, transparent);
+  }
+}
+.lc-asks__head {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-4);
+  font-size: 11.5px;
+}
+.lc-asks__bell {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: var(--lc-accent);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lc-asks--loud .lc-asks__bell {
+  animation: lc-asks-ring 2.4s ease-in-out infinite;
+  transform-origin: 50% 22%;
+}
+@keyframes lc-asks-ring {
+  0%, 62%, 100% { transform: rotate(0); }
+  68% { transform: rotate(13deg); }
+  76% { transform: rotate(-11deg); }
+  84% { transform: rotate(7deg); }
+  92% { transform: rotate(-4deg); }
+}
+.lc-asks__title {
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.lc-asks__count {
+  color: var(--lc-accent);
+  font-weight: 650;
+}
+.lc-asks__quiet,
+.lc-asks__meta {
+  color: var(--lc-muted);
+}
+.lc-asks__spacer {
+  flex: 1;
+}
+.lc-asks__link {
+  color: var(--lc-muted);
+  text-decoration: none;
+  font-size: 11px;
+}
+.lc-asks__link:hover {
+  color: var(--lc-accent);
+}
+.lc-asks__error {
+  margin-top: var(--lc-3);
+  font-size: 11px;
+  color: var(--lc-danger);
+}
+.lc-asks__cards {
+  display: flex;
+  gap: var(--lc-4);
+  margin-top: var(--lc-4);
+  overflow-x: auto;
+  padding-bottom: var(--lc-1);
+}
+.lc-ask {
+  flex: 0 1 380px;
+  min-width: 260px;
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-r-md);
+  background: var(--lc-surface);
+  padding: var(--lc-4) var(--lc-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-3);
+}
+.lc-ask--open,
+.lc-ask--held {
+  border-color: color-mix(in srgb, var(--lc-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--lc-accent) 7%, var(--lc-surface));
+}
+.lc-ask__head {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-3);
+  font-size: 11.5px;
+  min-width: 0;
+}
+.lc-ask__verb {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lc-ask__tier {
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px var(--lc-3);
+  border-radius: 999px;
+  border: 1px solid var(--lc-border-2);
+  color: var(--lc-dim);
+}
+.lc-ask__tier--blocking {
+  color: var(--lc-danger);
+  border-color: color-mix(in srgb, var(--lc-danger) 45%, transparent);
+  background: color-mix(in srgb, var(--lc-danger) 9%, transparent);
+}
+.lc-ask__tier--standard {
+  color: var(--lc-accent);
+  border-color: color-mix(in srgb, var(--lc-accent) 45%, transparent);
+}
+.lc-ask__clock {
+  margin-left: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--lc-dim);
+  white-space: nowrap;
+}
+.lc-ask__clock--over {
+  color: var(--lc-danger);
+  font-weight: 650;
+}
+.lc-ask__body {
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--lc-text);
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lc-ask__body:hover {
+  color: var(--lc-accent);
+}
+.lc-ask__actions {
+  display: flex;
+  gap: var(--lc-3);
+  margin-top: auto;
+}
+.lc-ask__btn {
+  font: inherit;
+  font-size: 11px;
+  padding: var(--lc-1) var(--lc-4);
+  border-radius: 999px;
+  border: 1px solid var(--lc-border-2);
+  background: var(--lc-surface-2);
+  color: var(--lc-dim);
+  cursor: pointer;
+  transition: border-color var(--lc-fast) var(--lc-ease), color var(--lc-fast) var(--lc-ease);
+}
+.lc-ask__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.lc-ask__btn--accept:hover:not(:disabled) {
+  color: var(--lc-success);
+  border-color: color-mix(in srgb, var(--lc-success) 55%, transparent);
+}
+.lc-ask__btn--decline:hover:not(:disabled) {
+  color: var(--lc-danger);
+  border-color: color-mix(in srgb, var(--lc-danger) 55%, transparent);
+}
+.lc-ask__note {
+  font-size: 11px;
+  color: var(--lc-info);
+}

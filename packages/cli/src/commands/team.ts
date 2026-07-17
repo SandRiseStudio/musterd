@@ -37,13 +37,15 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
 }
 
 /**
- * `musterd team policy [--reseat-known-agents on|off] [--ask-fallback-to-nonadmin on|off]` — show or
- * set the team governance policy (admin-only, audited `policy.change`). ADR 146:
- * `--reseat-known-agents on` opts the team into dogfood-mode re-seat — an already-held agent seat
- * re-occupies without an admin decision. ADR 147: `--ask-fallback-to-nonadmin on` lets an
- * admin-unanswered ask fall back to non-admin humans past its tier timeout. Reads → merges the named
- * knob(s) → POSTs the whole policy (the residency-policy read-merge-write pattern), so setting one knob
- * never clobbers the wake-policy defaults.
+ * `musterd team policy [--reseat-known-agents on|off] [--ask-fallback-to-nonadmin on|off]
+ * [--ask-slack-webhook <url|off>]` — show or set the team governance policy (admin-only, audited
+ * `policy.change`). ADR 146: `--reseat-known-agents on` opts the team into dogfood-mode re-seat — an
+ * already-held agent seat re-occupies without an admin decision. ADR 147:
+ * `--ask-fallback-to-nonadmin on` lets an admin-unanswered ask fall back to non-admin humans past its
+ * tier timeout. ADR 149: `--ask-slack-webhook <url>` points the ask stream's loud reach at a Slack
+ * incoming webhook (`off` clears it); the URL is a secret, so the display masks it to its host. Reads
+ * → merges the named knob(s) → POSTs the whole policy (the residency-policy read-merge-write pattern),
+ * so setting one knob never clobbers the wake-policy defaults.
  */
 async function teamPolicy(parsed: Parsed): Promise<number> {
   const { team, http } = resolve(parsed.flags);
@@ -65,6 +67,20 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     merged.ask_fallback_to_nonadmin = askFallback;
     changed = true;
   }
+  // ADR 149: the ask stream's Slack delivery — a webhook URL, or `off` to clear it (delete the key so
+  // the daemon's "unset = no outbound call ever" default is restored, not stored as an empty string).
+  const webhook = flagStr(parsed.flags, 'ask-slack-webhook');
+  if (webhook !== undefined) {
+    if (webhook === 'off') {
+      delete merged.ask_slack_webhook;
+    } else {
+      if (!/^https:\/\//.test(webhook)) {
+        throw new CliError('usage: musterd team policy --ask-slack-webhook <https url | off>', 2);
+      }
+      merged.ask_slack_webhook = webhook;
+    }
+    changed = true;
+  }
   if (changed) {
     const { policy: updated } = await http.setPolicy(team, merged);
     process.stdout.write(
@@ -81,6 +97,14 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
       process.stdout.write(
         hint(
           'an admin-unanswered ask may now fall back to non-admin humans past its tier timeout',
+        ) + '\n',
+      );
+    if (webhook !== undefined)
+      process.stdout.write(
+        hint(
+          updated.ask_slack_webhook
+            ? `asks now also post to Slack (${maskWebhook(updated.ask_slack_webhook)})`
+            : 'Slack delivery for asks is off',
         ) + '\n',
       );
     return 0;
@@ -100,8 +124,21 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   process.stdout.write(
     `  allow pre-issued grants: ${current.allow_pre_issued_grants ? 'on' : 'off'}\n`,
   );
+  // ADR 149: the webhook URL is a secret — show only that it's set, and where it points (host).
+  process.stdout.write(
+    `  ask slack webhook: ${current.ask_slack_webhook ? theme.accent(maskWebhook(current.ask_slack_webhook)) : 'off'}\n`,
+  );
   process.stdout.write(theme.meta('  set: musterd team policy --reseat-known-agents on') + '\n');
   return 0;
+}
+
+/** Mask a webhook URL to its host — enough to recognize the destination, never the secret path. */
+function maskWebhook(url: string): string {
+  try {
+    return `set → ${new URL(url).host}`;
+  } catch {
+    return 'set';
+  }
 }
 
 /** Parse an on/off flag value to a boolean, or undefined if the flag was absent; throws on a bad value. */
