@@ -248,6 +248,26 @@ Delivery is **envelope-on-occupy / body-on-demand**: the `occupied` frame carrie
 
 — so a fresh session pays ~30 tokens and makes an informed fetch decision. Both tools require a live join (the seat is resolved from the session's occupancy). HTTP surface: `PUT`/`GET` `/teams/:slug/memory`.
 
+## Results & empty states — the audited standard (ADR 144 inc 3)
+
+Every tool result — success, empty, and error — is **action-naming**: it says what to do next, not just what happened. The standard is held by `tools/resultAudit.test.ts`, not by convention:
+
+- **Empty states name the constructive action.** `no lanes — lane_open to declare your work`, `no members yet — team_join claims your seat`, `no declared goals — team_goal_declare to add one`. An empty result that dead-ends fails the audit.
+- **Errors flow through one renderer.** Every catch block returns `errorResult(err)` (`tools/format.ts`) — held mechanically by a source scan — which appends a `repair:` line when the failure class is known (`repairHint`). The classes are evidence-based, each one a failure that stranded a real session: daemon unreachable (`musterd service status`), expired grant (re-mint + `/mcp` reload, ADR 087), superseded seat (ADR 068/092), no saved memory, unknown lane/member. Unknown errors get no hint — a wrong repair is worse than none.
+- **Invalid-input bounces get repair hints at the transport seam** (`repair.ts`). The SDK validates arguments _before_ any handler runs and returns the failure in-band (see the telemetry seam note below), so `instrumentToolRepair` patches the same `tools/call` request handler to append a deterministic repair line — parsed from the zod issues the SDK embeds, never a model in the request path (ADR 144 frozen principle). An enum typo gets the valid values plus the nearest one by edit distance (`act must be one of …; closest to what you sent is 'status_update'`); a missing field is named with its type. Telemetry stays the outer wrapper, so a repaired bounce still counts as `invalid_input` — the "does the first retry succeed" eval reads straight out of `tool_call_stats`.
+
+**Result shape is decided per tool, structured-first where a caller consumes fields** — never one shape winning by accident:
+
+| tool                                                                                  | shape                                              | why                                                                                 |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `team_send`                                                                           | text + `structuredContent {id, act, to, thread}`   | the id/thread the next call threads with                                            |
+| `lane_open/claim/handoff/update/resolve`                                              | text + `structuredContent {lane, warnings, hint?}` | the lane id every follow-up needs; the next action (e.g. branch cleanup) as a field |
+| `team_inbox_check`                                                                    | text + `structuredContent {messages[]}`            | programmatic reply targeting                                                        |
+| `team_status`, `team_members`, `lane_board`, `team_next`, `team_goals`, `team_report` | prose only                                         | read views — the agent reads them, nothing parses them                              |
+| `team_join`, `team_leave`, `team_memory_*`                                            | prose only                                         | conversational one-shots                                                            |
+
+`structuredContent` travels without an `outputSchema` (verified against SDK 1.29) — deliberately unregistered, because output schemas would ride `tools/list` and pay per-seat connect tokens the inc-2 pass just reclaimed.
+
 ## File tree `packages/mcp/src/`
 
 ```
@@ -269,6 +289,7 @@ src/
   otel.ts         // cross-runtime trace-context propagation through the envelope (ADR 011)
   telemetry.ts    // boots the shared SDK as musterd-mcp + wraps every tool in a musterd.tool.call span (ADR 089)
   toolTelemetry.ts // first-party tool-call telemetry: times/classifies every tools/call (bounces included) + attests the rendered-surface weight, batched to the daemon (ADR 144 inc 1)
+  repair.ts       // repair hints on invalid-input bounces at the same tools/call seam — deterministic, parsed from the SDK's embedded zod issues (ADR 144 inc 3)
   tools/
     join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)

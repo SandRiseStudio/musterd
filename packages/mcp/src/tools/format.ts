@@ -17,7 +17,7 @@ import { MODEL_UNKNOWN, type Envelope, type MemberSummary } from '@musterd/proto
  * Grouped by working / here / out so the reader's attention lands on the active team first.
  */
 export function formatRoster(members: MemberSummary[], me?: string): string {
-  if (members.length === 0) return 'no members';
+  if (members.length === 0) return 'no members yet — team_join claims your seat';
   const groups: Record<string, MemberSummary[]> = { working: [], here: [], out: [] };
   for (const m of members) groups[rosterGroup(m)]!.push(m);
 
@@ -106,6 +106,59 @@ export function formatMessage(env: Envelope): string {
 
 export function textResult(text: string) {
   return { content: [{ type: 'text' as const, text }] };
+}
+
+/**
+ * The known failure classes an agent can act on, mapped to their repair (ADR 144 inc 3). Every class
+ * here earned its place by stranding a real session: a matched error names the way out instead of
+ * leaving the agent to rediscover it. Deterministic string matching only — no model in the request
+ * path. Unknown errors get no hint: a wrong repair is worse than none.
+ */
+const REPAIR_CLASSES: { match: RegExp; hint: string }[] = [
+  {
+    // Transport-level connect failures (Node's fetch/undici + socket vocabulary): the daemon is down
+    // or unreachable — no tool call will work until a human restarts it.
+    match: /ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|fetch failed|socket hang up/i,
+    hint: 'the team daemon looks unreachable — no musterd tool will work until a human checks it (`musterd service status`)',
+  },
+  {
+    // The resume-token treadmill (ADR 087): the seat's grant lapsed; only a re-mint fixes it.
+    match: /grant (expired|revoked|consumed)|expired_grant/i,
+    hint: 'the seat grant needs re-minting — a human runs `musterd agent <seat> --path <this workspace>`, then reload this MCP connection (/mcp) to pick it up',
+  },
+  {
+    // ADR 068/092: another session took this seat; this one is stale, not broken.
+    match: /superseded|replaced by/i,
+    hint: 'another session took this seat — team_join to re-claim it, or team_status to see who holds it',
+  },
+  {
+    match: /no memory saved/i,
+    hint: 'nothing saved yet — team_memory_save at wrap-up writes the note the next occupant sees',
+  },
+  {
+    match: /lane .*not found|unknown lane/i,
+    hint: 'lane_board lists the live lane ids',
+  },
+  {
+    match: /unknown member|not a member|no such member/i,
+    hint: 'team_members lists valid seat names',
+  },
+];
+
+/** The repair line for a known failure class, or '' — see {@link REPAIR_CLASSES}. */
+export function repairHint(message: string): string {
+  const cls = REPAIR_CLASSES.find((c) => c.match.test(message));
+  return cls ? `\nrepair: ${cls.hint}` : '';
+}
+
+/**
+ * The one error renderer every tool's catch block uses (ADR 144 inc 3) — `error: <message>` plus the
+ * repair line when the failure class is known. Routing all errors through here is what the result
+ * audit holds mechanically: a tool that hand-rolls its error text escapes the repair classes.
+ */
+export function errorResult(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  return textResult(`error: ${message}${repairHint(message)}`);
 }
 
 /**

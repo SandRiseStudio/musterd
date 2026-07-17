@@ -3,7 +3,13 @@ import type { Envelope } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { linkReceived } from '../otel.js';
-import { buildSkewWarning, formatMessage, notReadyMessage, textResult } from './format.js';
+import {
+  buildSkewWarning,
+  errorResult,
+  formatMessage,
+  notReadyMessage,
+  textResult,
+} from './format.js';
 
 const DESCRIPTION =
   'Check unread messages addressed to you or the team, marking them read. Call at task start, ' +
@@ -37,7 +43,10 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         if (messages.length === 0) {
           // ADR 135: inbox-check is every agent's minute-0 call (the SessionStart hook routes here),
           // so a stale adapter learns about itself immediately — even on an empty inbox.
-          return textResult('no new messages' + (await buildSkewWarning(client)));
+          return textResult(
+            'no new messages — nothing waiting on you; check again at your next task boundary' +
+              (await buildSkewWarning(client)),
+          );
         }
         // Link any sender trace context (meta.otel) to our trace as causality (ADR 011 receiver).
         linkReceived(messages);
@@ -61,7 +70,7 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
           },
         };
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );

@@ -11,7 +11,7 @@ import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
 import { withTraceContext } from '../otel.js';
-import { notReadyMessage, textResult } from './format.js';
+import { errorResult, notReadyMessage, textResult } from './format.js';
 
 // Rewritten for concision + retrievability (ADR 144 inc 2): the act vocabulary is the API and
 // stays complete, one terse clause each; the plan-epoch/interrupt mechanics live in the skill.
@@ -116,9 +116,21 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
         });
         await client.sendEnvelope(envelope);
         client.markSeen(envelope.id); // don't echo our own send back via inbox
-        return textResult(`sent ${args.act} to ${args.to} (id=${envelope.id})`);
+        // Structured-first (ADR 144 inc 3): the id/thread a programmatic caller needs to keep the
+        // exchange threaded (reply_to / thread on the next send), without parsing the prose.
+        return {
+          content: [
+            { type: 'text' as const, text: `sent ${args.act} to ${args.to} (id=${envelope.id})` },
+          ],
+          structuredContent: {
+            id: envelope.id,
+            act: args.act,
+            to: args.to,
+            thread: envelope.thread,
+          },
+        };
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );

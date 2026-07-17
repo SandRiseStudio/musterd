@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MemoryEnvelope } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
-import { notReadyMessage, textResult } from './format.js';
+import { errorResult, notReadyMessage, textResult } from './format.js';
 
 /**
  * Seat memory (ADR 093): the seat's private cross-session continuity blob — the working state a
@@ -62,7 +62,7 @@ export function registerMemory(server: McpServer, client: MusterdClient): void {
           `memory saved — your next occupy of this seat will show: "${args.headline}"`,
         );
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );
@@ -77,7 +77,7 @@ export function registerMemory(server: McpServer, client: MusterdClient): void {
         const header = `memory (saved ${ago(Date.now() - mem.saved_at)} ago): ${mem.headline}`;
         return textResult(mem.body ? `${header}\n\n${mem.body}` : header);
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );

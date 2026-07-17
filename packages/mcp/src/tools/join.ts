@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ClaimConflictError, claimAndJoin, type ClaimTarget } from '../claim.js';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
-import { textResult } from './format.js';
+import { repairHint, textResult } from './format.js';
 import { memoryLine } from './memory.js';
 
 const DESCRIPTION =
@@ -92,7 +92,8 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
               `seat automatically the moment they do; call team_join again to confirm you're live.`,
           );
         }
-        return textResult(`Could not join ${config.team}: ${(err as Error).message}`);
+        const message = (err as Error).message;
+        return textResult(`Could not join ${config.team}: ${message}${repairHint(message)}`);
       }
     },
   );

@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Lane, LaneWarning, NextBrief } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
-import { textResult } from './format.js';
+import { errorResult, textResult } from './format.js';
 
 /**
  * Coordination lanes, Phase 1 (ADR 083) — declare the unit of work you own so musterd can warn
@@ -31,6 +31,23 @@ function fmtWarnings(warnings: LaneWarning[]): string {
 
 function fmtResult(prefix: string, lane: Lane, warnings: LaneWarning[]): string {
   return `${prefix}\n${fmtLane(lane)}${fmtWarnings(warnings)}`;
+}
+
+/**
+ * The lane-mutation result, structured-first (ADR 144 inc 3): the prose stays for a reading agent;
+ * the `structuredContent` carries the lane and warnings for a programmatic caller (the lane id is
+ * what every follow-up call — update, handoff, resolve — needs), with any next-action `hint` as a
+ * field rather than only buried in the text.
+ */
+function laneResult(prefix: string, lane: Lane, warnings: LaneWarning[], hint?: string) {
+  return {
+    content: [{ type: 'text' as const, text: fmtResult(prefix, lane, warnings) + (hint ?? '') }],
+    structuredContent: {
+      lane: { ...lane },
+      warnings: warnings.map((w) => ({ ...w })),
+      ...(hint ? { hint: hint.trim() } : {}),
+    },
+  };
 }
 
 /**
@@ -77,9 +94,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     async (args) => {
       try {
         const { lane, warnings } = await client.openLane(args);
-        return textResult(fmtResult('lane opened', lane, warnings));
+        return laneResult('lane opened', lane, warnings);
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );
@@ -97,9 +114,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         const { lane, warnings } = await client.updateLane(args.id, {
           owner_seat: client.member,
         });
-        return textResult(fmtResult('lane claimed', lane, warnings));
+        return laneResult('lane claimed', lane, warnings);
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );
@@ -123,7 +140,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         const body = lanes.map(fmtLane).join('\n');
         return textResult(`${body}${fmtWarnings(warnings)}`);
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );
@@ -146,9 +163,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           owner_seat: args.to,
           ...(args.branch ? { branch: args.branch } : {}),
         });
-        return textResult(fmtResult(`lane handed to ${args.to}`, lane, warnings));
+        return laneResult(`lane handed to ${args.to}`, lane, warnings);
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );
@@ -175,9 +192,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
       try {
         const { id, ...patch } = args;
         const { lane, warnings } = await client.updateLane(id, patch);
-        return textResult(fmtResult('lane updated', lane, warnings));
+        return laneResult('lane updated', lane, warnings);
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );
@@ -210,9 +227,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           state: 'done',
           ...(Object.keys(merged).length ? { merged } : {}),
         });
-        return textResult(fmtResult('lane done', lane, warnings) + branchCleanupHint(lane));
+        return laneResult('lane done', lane, warnings, branchCleanupHint(lane) || undefined);
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );
@@ -230,7 +247,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
       try {
         return textResult(fmtNext(await client.next()));
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );

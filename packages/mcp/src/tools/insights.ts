@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Report } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
-import { textResult } from './format.js';
+import { errorResult, textResult } from './format.js';
 
 /**
  * The insight report (ADR 050, server-side per ADR 084) — leadership projections over lanes + the act
@@ -194,7 +194,7 @@ export function registerInsights(server: McpServer, client: MusterdClient): void
       try {
         return textResult(fmtReport(await client.report(), args.altitude ?? 'team'));
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );

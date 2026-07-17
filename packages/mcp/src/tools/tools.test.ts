@@ -357,7 +357,9 @@ describe('team_inbox_check handler', () => {
       inboxClient({ fetchInbox: (async () => ({ messages: [], cursor: null })) as any }),
     );
     const r = await handler({ unread_only: true, limit: 50 });
-    expect(text(r)).toBe('no new messages');
+    expect(text(r)).toBe(
+      'no new messages — nothing waiting on you; check again at your next task boundary',
+    );
   });
 
   it('merges buffered + fetched, dedups by id, sorts by ts, and advances the cursor', async () => {
@@ -430,11 +432,13 @@ describe('team_members handler', () => {
 
   it('reports when a named member is missing or roster is empty', async () => {
     const empty = capture(registerMembers, { roster: (async () => ({ members: [] })) as any });
-    expect(text(await empty({}))).toBe('no members');
+    expect(text(await empty({}))).toBe('no members yet — team_join claims your seat');
     const named = capture(registerMembers, {
       roster: (async () => ({ members: [member()] })) as any,
     });
-    expect(text(await named({ name: 'Zed' }))).toBe('no member "Zed"');
+    expect(text(await named({ name: 'Zed' }))).toBe(
+      'no member "Zed" — team_status lists the roster',
+    );
   });
 
   it('returns an error result when roster throws', async () => {
@@ -532,7 +536,7 @@ describe('team_status handler', () => {
 
   it('reports no members and surfaces errors', async () => {
     const empty = capture(registerStatus, { roster: (async () => ({ members: [] })) as any });
-    expect(text(await empty({}))).toBe('no members');
+    expect(text(await empty({}))).toBe('no members yet — team_join claims your seat');
     const err = capture(registerStatus, {
       roster: (async () => {
         throw new Error('down');

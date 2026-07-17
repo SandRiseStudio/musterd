@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
-import { formatMember, textResult } from './format.js';
+import { errorResult, formatMember, textResult } from './format.js';
 
 const DESCRIPTION =
   'Detail on one member (or all): current work, model, role, presence. Use to pick who to hand ' +
@@ -19,7 +19,11 @@ export function registerMembers(server: McpServer, client: MusterdClient): void 
         const { members } = await client.roster();
         const selected = args.name ? members.filter((m) => m.name === args.name) : members;
         if (selected.length === 0) {
-          return textResult(args.name ? `no member "${args.name}"` : 'no members');
+          return textResult(
+            args.name
+              ? `no member "${args.name}" — team_status lists the roster`
+              : 'no members yet — team_join claims your seat',
+          );
         }
         // The shared member line (what they're doing, model, where) — the substance an agent decides on.
         // A member with several presences is the one case this tool must say more than the roster does:
@@ -33,7 +37,7 @@ export function registerMembers(server: McpServer, client: MusterdClient): void 
         });
         return textResult(lines.join('\n'));
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );

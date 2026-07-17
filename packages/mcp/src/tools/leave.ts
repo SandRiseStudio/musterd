@@ -10,7 +10,9 @@ const DESCRIPTION =
 export function registerLeave(server: McpServer, client: MusterdClient, config: McpConfig): void {
   server.registerTool('team_leave', { description: DESCRIPTION, inputSchema: {} }, async () => {
     if (!client.joined) {
-      return textResult(`Not joined to ${config.team} — nothing to leave.`);
+      return textResult(
+        `Not joined to ${config.team} — nothing to leave. team_join brings you online.`,
+      );
     }
     client.leave();
     return textResult(
