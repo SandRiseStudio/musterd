@@ -371,7 +371,6 @@ function cablePts(edge: (t: number) => [number, number], fit: Fit): Pt[] {
 const DRESS = {
   frame: '#5b4130',
   mat: '#f2e7d5',
-  art: ['#c2694a', '#5d7f6d', '#d2a24c'],
   clockFace: '#f6ead2',
   clockRim: '#4b3524',
   tick: '#94795c',
@@ -419,7 +418,84 @@ function wallDisc(
   quad(ctx, pts, fill);
 }
 
-/** A framed print: frame, mat, and a block of colour. `w`/`h` in logical units. */
+/**
+ * The prints' ink. Deliberately few colours, and all of them the room's own: each frame occupies only
+ * ~30–45px on screen, where a motif reads as a silhouette plus two or three flats and any further
+ * shade is just mud.
+ */
+const INK = {
+  // A dusk sand, not the near-mat cream it wants to be: against #f2e7d5 the sky has to hold its own or
+  // the print reads as shapes floating on the mat with no paper under them.
+  sky: '#e8cfa8',
+  paper: '#efe2c8',
+  terracotta: '#c2694a',
+  sage: '#5d7f6d',
+  sageDeep: '#3f5747',
+  ochre: '#d2a24c',
+  teal: '#4e7d8c',
+  plum: '#8a5a6d',
+  line: '#4b3524',
+} as const;
+
+/**
+ * The surface one print is painted on: `a` runs across the mat opening and `b` up it, both in logical
+ * units out from its centre. It is the wall-space convention `wallDisc`/`wallClock` already use, which is
+ * what keeps a motif's disc a real circle *on the wall* rather than a screen-space egg pasted over it.
+ */
+interface ArtSurface {
+  rect: (a0: number, b0: number, a1: number, b1: number, fill: string) => void;
+  disc: (a: number, b: number, r: number, fill: string) => void;
+}
+
+/** A print's composition, painted into an opening of half-width `hw` and half-height `hh`. */
+type Motif = (g: ArtSurface, hw: number, hh: number) => void;
+
+/**
+ * The four prints. Every one of them survives being mirrored, and not by luck: the back-left wall runs
+ * `+t` screen-*left*, which is the same quirk that forced the clock onto the right wall. Abstract
+ * compositions are the answer — a mirrored cairn is still a cairn, where a mirrored clock lies.
+ */
+const MOTIFS = {
+  /** A sun going down behind two bands of hill. Wants a landscape frame — the horizon is the whole idea. */
+  sunrise: (g, hw, hh) => {
+    g.rect(-hw, -hh, hw, hh, INK.sky);
+    g.disc(hw * 0.08, -hh * 0.12, hh * 0.48, INK.terracotta); // the sun sits *in* the hills, not over them
+    g.rect(-hw, -hh, hw, -hh * 0.3, INK.sage);
+    g.rect(-hw, -hh, hw, -hh * 0.62, INK.sageDeep);
+  },
+  /** A cairn of three balanced stones: the one motif whose silhouette alone carries it, so it takes the
+   * small portrait frame where nothing else would survive the size. */
+  cairn: (g, hw, hh) => {
+    g.rect(-hw, -hh, hw, hh, INK.paper);
+    g.rect(-hw, -hh, hw, -hh * 0.72, INK.line);
+    g.disc(0, -hh * 0.42, hh * 0.3, INK.terracotta);
+    g.disc(hw * 0.1, hh * 0.02, hh * 0.24, INK.teal);
+    g.disc(-hw * 0.06, hh * 0.4, hh * 0.17, INK.ochre);
+  },
+  /** Two arches, overlapping, on a ground line. */
+  arches: (g, hw, hh) => {
+    g.rect(-hw, -hh, hw, hh, INK.paper);
+    const arch = (a0: number, a1: number, top: number, fill: string): void => {
+      g.rect(a0, -hh, a1, top, fill);
+      g.disc((a0 + a1) / 2, top, (a1 - a0) / 2, fill); // the dome — its radius is half the pier's width
+    };
+    arch(hw * 0.14, hw * 0.78, -hh * 0.12, INK.teal);
+    arch(-hw * 0.72, -hw * 0.04, hh * 0.1, INK.terracotta);
+    g.rect(-hw, -hh, hw, -hh * 0.8, INK.line);
+  },
+  /** Bauhaus-ish: a cornered quarter-disc, a bar, a floating dot, a rule. The quirky one. */
+  bauhaus: (g, hw, hh) => {
+    g.rect(-hw, -hh, hw, hh, INK.paper);
+    g.disc(-hw, -hh, hh * 1.15, INK.plum); // the clip is what makes this a quarter, not a circle
+    g.rect(hw * 0.04, -hh, hw * 0.44, hh * 0.5, INK.ochre);
+    g.disc(hw * 0.62, hh * 0.34, hh * 0.32, INK.terracotta);
+    g.rect(-hw, hh * 0.7, hw, hh * 0.78, INK.line);
+  },
+} satisfies Record<string, Motif>;
+
+type MotifName = keyof typeof MOTIFS;
+
+/** A framed print: frame, mat, and a motif in the opening. `w`/`h` in logical units. */
 function wallArt(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -428,13 +504,46 @@ function wallArt(
   uc: number,
   w: number,
   h: number,
-  art: string,
+  motif: MotifName,
 ): void {
   const dt = w / 2 / FLOOR;
   const du = h / 2 / WALL_H;
   wallRect(ctx, fit, edge, tc - dt, uc - du, tc + dt, uc + du, DRESS.frame);
-  wallRect(ctx, fit, edge, tc - dt * 0.84, uc - du * 0.84, tc + dt * 0.84, uc + du * 0.84, DRESS.mat);
-  wallRect(ctx, fit, edge, tc - dt * 0.58, uc - du * 0.58, tc + dt * 0.58, uc + du * 0.58, art);
+  wallRect(ctx, fit, edge, tc - dt * 0.88, uc - du * 0.88, tc + dt * 0.88, uc + du * 0.88, DRESS.mat);
+
+  const hw = (w / 2) * 0.68; // the mat opening — a composition needs the area a lone colour block didn't
+  const hh = (h / 2) * 0.68;
+  const p = (a: number, b: number): Pt => wallPt(edge, tc + a / FLOOR, uc + b / WALL_H, fit);
+  const g: ArtSurface = {
+    rect: (a0, b0, a1, b1, fill) => quad(ctx, [p(a0, b0), p(a1, b0), p(a1, b1), p(a0, b1)], fill),
+    disc: (a, b, r, fill) => {
+      const pts: Pt[] = [];
+      for (let i = 0; i < 20; i++) {
+        const th = (i / 20) * Math.PI * 2;
+        pts.push(p(a + Math.sin(th) * r, b + Math.cos(th) * r));
+      }
+      quad(ctx, pts, fill);
+    },
+  };
+  // Clip to the opening, so a motif can run a shape straight off the edge — a sun half-under a horizon,
+  // a disc cornered into a quarter — instead of every motif having to solve that intersection itself.
+  ctx.save();
+  ctx.beginPath();
+  const corners: Array<[number, number]> = [
+    [-hw, -hh],
+    [hw, -hh],
+    [hw, hh],
+    [-hw, hh],
+  ];
+  corners.forEach(([a, b], i) => {
+    const q = p(a, b);
+    if (i === 0) ctx.moveTo(q.x, q.y);
+    else ctx.lineTo(q.x, q.y);
+  });
+  ctx.closePath();
+  ctx.clip();
+  MOTIFS[motif](g, hw, hh);
+  ctx.restore();
 }
 
 /**
@@ -543,13 +652,13 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void
     // Nothing goes high near the back corner: that is where the wall is tallest on screen and the canvas
     // crops its top edge, so anything hung up there loses the wall behind it and floats.
     if (edge === WALL_EDGES[1]) {
-      wallArt(ctx, fit, edge, 0.15, 0.56, 60, 44, DRESS.art[1]!); // over the corner bookshelf
+      wallArt(ctx, fit, edge, 0.15, 0.56, 60, 44, 'sunrise'); // over the corner bookshelf
       wallClock(ctx, fit, edge, 0.52, 0.62, env.hours); // dead centre, between the windows
-      wallArt(ctx, fit, edge, 0.86, 0.64, 46, 34, DRESS.art[0]!);
-      wallArt(ctx, fit, edge, 0.93, 0.53, 30, 40, DRESS.art[2]!);
+      wallArt(ctx, fit, edge, 0.86, 0.64, 46, 34, 'bauhaus');
+      wallArt(ctx, fit, edge, 0.93, 0.53, 30, 40, 'cairn'); // the small portrait — a stack, or nothing reads
       return;
     }
-    wallArt(ctx, fit, edge, 0.14, 0.56, 54, 42, DRESS.art[0]!);
+    wallArt(ctx, fit, edge, 0.14, 0.56, 54, 42, 'arches');
     wallHanger(ctx, fit, edge, 0.52, 0.76); // between the windows — where you'd really hang one
   };
 
@@ -871,10 +980,18 @@ function nookItems(ctx: CanvasRenderingContext2D, fit: Fit): { rug: () => void; 
   return {
     rug: () => drawRug(ctx, fit, NOOK_RUG, lx, ly, NOOK_RUG_R * 2, NOOK_RUG_R * 2),
     items: [
-      at(L.fridge.dx, L.fridge.dy, () => box(ctx, fit, lx + L.fridge.dx, ly + L.fridge.dy, L.fridge.w, L.fridge.d, L.fridge.h, '#edeff1')),
+      at(L.fridge.dx, L.fridge.dy, () => fridge(ctx, fit, lx + L.fridge.dx, ly + L.fridge.dy)),
       at(L.counter.dx, L.counter.dy, () => {
         box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy, L.counter.w, L.counter.d, L.counter.h, woodTop());
-        box(ctx, fit, lx + L.machine.dx, ly + L.machine.dy, 16, 13, 10, '#33272b', L.counter.h); // machine on top
+        coffeeMachine(ctx, fit, lx + L.machine.dx, ly + L.machine.dy, L.counter.h);
+        // What a counter actually carries beside the machine: the beans, and the mugs waiting their turn.
+        // The bag is kraft-paper warm on purpose — in dark roast brown it and the machine read as one
+        // black lump rather than two objects.
+        box(ctx, fit, lx + L.counter.dx + 18, ly + L.counter.dy + 1, 9, 8, 12, '#a97c50', L.counter.h);
+        box(ctx, fit, lx + L.counter.dx + 18, ly + L.counter.dy + 1, 9, 8, 2, '#59402f', L.counter.h + 12); // rolled top
+        for (let i = 0; i < 2; i++) {
+          frustum(ctx, fit, lx + L.counter.dx + 32, ly + L.counter.dy, 6, 6, 7, 7, 5, '#f2e7d5', L.counter.h + i * 5);
+        }
       }),
       at(L.cooler.dx, L.cooler.dy, () => watercooler(ctx, fit, lx + L.cooler.dx, ly + L.cooler.dy)),
       at(L.couch.dx, L.couch.dy, () => couch(ctx, fit, lx + L.couch.dx, ly + L.couch.dy, PAL.couch, 'S')),
@@ -885,11 +1002,53 @@ function nookItems(ctx: CanvasRenderingContext2D, fit: Fit): { rug: () => void; 
   };
 }
 
-/** A water cooler: a slim base + a tinted bottle on top (a distinct kitchenette piece). */
+/**
+ * The kitchenette's three appliances. Each was a plain block; each is now built the way the bookshelf
+ * builds its books — small boxes stood proud of the room-facing (+y) face, which is the only face detail
+ * can live on and still read at this projection.
+ *
+ * Their appliance white is warm (#e8e2d6), not the blue-grey a real office fridge is: this room is lit
+ * amber from the windows down, and a genuinely cold white in it reads as a hole punched in the wall.
+ */
+const APPLIANCE = '#e8e2d6';
+
+/** Body height of the espresso machine. `coffeeAnchor` reads it too — the ambient steam has to leave the
+ * warmer plate, so the plate's height is shared data rather than a constant repeated in two places. */
+export const MACHINE_H = 15;
+
+/** The fridge: two doors under a seam, handles, someone's note, and a crate parked on top. */
+function fridge(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
+  const f = LOUNGE.fridge;
+  const front = ly + f.d / 2; // the room-facing face — everything below is proud of it by ~1 unit
+  box(ctx, fit, lx, ly, f.w, f.d, f.h, APPLIANCE);
+  box(ctx, fit, lx, front, f.w - 4, 1.5, 1.5, '#c3b9a8', 34); // the freezer/fridge seam
+  for (const up of [38, 18]) box(ctx, fit, lx + 11, front, 2.5, 2.5, 12, '#6e6558', up); // door handles
+  box(ctx, fit, lx - 6, front, 7, 1.2, 8, '#f4cf52', 24); // a note, stuck on at eye height
+  box(ctx, fit, lx - 5, ly - 2, 15, 13, 9, '#c9744a', f.h); // a crate someone left on top
+}
+
+/** The espresso machine: a body with a warmer plate, a lit switch, a group head, and a cup under it. */
+function coffeeMachine(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, up: number): void {
+  box(ctx, fit, lx, ly, 16, 12, MACHINE_H, '#3f3236', up); // body
+  box(ctx, fit, lx, ly, 12, 8, 2, '#8e8288', up + MACHINE_H); // the warmer plate on top
+  box(ctx, fit, lx - 5, ly + 6, 2, 1.2, 2, '#f4cf52', up + 9); // the little lit switch
+  box(ctx, fit, lx + 2, ly + 6.5, 5, 2, 4, '#6a5c62', up + 5); // group head + spout
+  box(ctx, fit, lx, ly + 5, 13, 4, 1.5, '#2b2226', up); // drip tray
+  frustum(ctx, fit, lx + 2, ly + 9, 3.5, 3.5, 4.5, 4.5, 5, '#f6ead2', up + 1.5); // a cup, catching it
+}
+
+/** The water cooler: a body with a tap and a cup tube, under a bottle that tapers like a real one. */
 function watercooler(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
   const c = LOUNGE.cooler;
-  box(ctx, fit, lx, ly, c.w, c.d, c.h, '#dfe7ea'); // white body
-  box(ctx, fit, lx, ly, c.w - 6, c.d - 6, 16, '#8fd0e6', c.h); // blue bottle on top
+  const front = ly + c.d / 2;
+  box(ctx, fit, lx, ly, c.w, c.d, c.h, APPLIANCE);
+  box(ctx, fit, lx, front, 8, 3, 5, '#5f6b70', 26); // the tap block
+  box(ctx, fit, lx, front + 1, 2, 3, 2, '#8fa6ae', 24); // and its spout
+  box(ctx, fit, lx - 7, front, 3, 2, 10, '#cfd6d8', 30); // the cup tube down one side
+  // The bottle, inverted as they are: a narrow neck flaring into the body, tapering back to a flat base.
+  frustum(ctx, fit, lx, ly, 8, 8, 14, 14, 5, '#a9dcea', c.h);
+  frustum(ctx, fit, lx, ly, 14, 14, 15, 15, 12, '#8fd0e6', c.h + 5);
+  frustum(ctx, fit, lx, ly, 15, 15, 12, 12, 5, '#7cc3db', c.h + 17);
 }
 
 /** A bookshelf: a wood carcass with three shelves of colourful book spines facing into the room. */
@@ -2322,7 +2481,9 @@ export function animatedDeskAnchors(fit: Fit, occupied: Set<number>): { fans: Pt
 /** Screen position of the break-nook coffee machine (the ambient steam source, ADR 086). */
 export function coffeeAnchor(fit: Fit): Pt {
   const s = project(NOOK.lx + LOUNGE.machine.dx, NOOK.ly + LOUNGE.machine.dy, fit);
-  return { x: s.x, y: s.y - (LOUNGE.counter.h + 12) * fit.scale };
+  // Off the warmer plate, which is the machine's full height (MACHINE_H) above the counter — steam
+  // rising out of the middle of the body instead would read as the machine being on fire.
+  return { x: s.x, y: s.y - (LOUNGE.counter.h + MACHINE_H + 2) * fit.scale };
 }
 
 /** A transient act cue: a tinted ring + optional glyph (`ring`), a broadcast sweep (`wave`), or a glow
