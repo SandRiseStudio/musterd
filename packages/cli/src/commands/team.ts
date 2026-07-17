@@ -37,35 +37,51 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
 }
 
 /**
- * `musterd team policy [--reseat-known-agents on|off]` — show or set the team governance policy
- * (admin-only, audited `policy.change`). ADR 146: `--reseat-known-agents on` opts the team into
- * dogfood-mode re-seat — an already-held agent seat re-occupies without an admin decision. Reads →
- * merges the one knob → POSTs the whole policy (the residency-policy read-merge-write pattern), so
- * setting one knob never clobbers the wake-policy defaults.
+ * `musterd team policy [--reseat-known-agents on|off] [--ask-fallback-to-nonadmin on|off]` — show or
+ * set the team governance policy (admin-only, audited `policy.change`). ADR 146:
+ * `--reseat-known-agents on` opts the team into dogfood-mode re-seat — an already-held agent seat
+ * re-occupies without an admin decision. ADR 147: `--ask-fallback-to-nonadmin on` lets an
+ * admin-unanswered ask fall back to non-admin humans past its tier timeout. Reads → merges the named
+ * knob(s) → POSTs the whole policy (the residency-policy read-merge-write pattern), so setting one knob
+ * never clobbers the wake-policy defaults.
  */
 async function teamPolicy(parsed: Parsed): Promise<number> {
   const { team, http } = resolve(parsed.flags);
   const { policy: current } = await http.getPolicy(team);
 
-  const raw = parsed.flags['reseat-known-agents'];
-  if (raw !== undefined) {
-    const on = raw === true || raw === 'on' || raw === 'true' || raw === 'yes';
-    const off = raw === 'off' || raw === 'false' || raw === 'no';
-    if (!on && !off)
-      throw new CliError('usage: musterd team policy --reseat-known-agents <on|off>', 2);
-    const { policy: updated } = await http.setPolicy(team, {
-      ...current,
-      standing_reseat_known_agents: on,
-    });
+  // Read-merge-write each named knob (never clobber the wake-policy defaults). Both flags may be set
+  // in one call; onOff throws on a value that is neither on nor off.
+  const merged = { ...current };
+  let changed = false;
+  const reseat = onOff(parsed.flags['reseat-known-agents'], '--reseat-known-agents');
+  if (reseat !== undefined) {
+    merged.standing_reseat_known_agents = reseat;
+    changed = true;
+  }
+  // ADR 147: the ask stream's configurable (never automatic) fallback — an admin-unanswered ask may fall
+  // back to non-admin humans on the same timeout/risk machinery.
+  const askFallback = onOff(parsed.flags['ask-fallback-to-nonadmin'], '--ask-fallback-to-nonadmin');
+  if (askFallback !== undefined) {
+    merged.ask_fallback_to_nonadmin = askFallback;
+    changed = true;
+  }
+  if (changed) {
+    const { policy: updated } = await http.setPolicy(team, merged);
     process.stdout.write(
       success(
-        `team policy updated — ${team}: re-seat known agents ${updated.standing_reseat_known_agents ? theme.accent('on') : 'off'}`,
+        `team policy updated — ${team}: re-seat known agents ${updated.standing_reseat_known_agents ? theme.accent('on') : 'off'}, ask fallback to non-admins ${updated.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}`,
       ) + '\n',
     );
     if (updated.standing_reseat_known_agents)
       process.stdout.write(
         hint('a held agent seat now re-occupies without an admin decision (new seats stay gated)') +
           '\n',
+      );
+    if (updated.ask_fallback_to_nonadmin)
+      process.stdout.write(
+        hint(
+          'an admin-unanswered ask may now fall back to non-admin humans past its tier timeout',
+        ) + '\n',
       );
     return 0;
   }
@@ -79,10 +95,21 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     `  re-seat known agents: ${current.standing_reseat_known_agents ? theme.accent('on') : 'off'}\n`,
   );
   process.stdout.write(
+    `  ask fallback to non-admins: ${current.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}\n`,
+  );
+  process.stdout.write(
     `  allow pre-issued grants: ${current.allow_pre_issued_grants ? 'on' : 'off'}\n`,
   );
   process.stdout.write(theme.meta('  set: musterd team policy --reseat-known-agents on') + '\n');
   return 0;
+}
+
+/** Parse an on/off flag value to a boolean, or undefined if the flag was absent; throws on a bad value. */
+function onOff(raw: unknown, flag: string): boolean | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === true || raw === 'on' || raw === 'true' || raw === 'yes') return true;
+  if (raw === 'off' || raw === 'false' || raw === 'no') return false;
+  throw new CliError(`usage: musterd team policy ${flag} <on|off>`, 2);
 }
 
 async function teamCreate(parsed: Parsed): Promise<number> {

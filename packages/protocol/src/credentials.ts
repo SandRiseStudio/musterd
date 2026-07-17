@@ -47,6 +47,14 @@ export const PolicySchema = z.object({
    * false — an opt-in the record demands for the dogfood team, off for every team that hasn't asked.
    */
   standing_reseat_known_agents: z.boolean().default(false),
+  /**
+   * The to-human ask stream's one configurable behavior (ADR 147 §6, on ADR 145 §3.1). When true, an ask
+   * that admins leave unanswered past its tier timeout may fall back to non-admin humans on the same
+   * timeout/risk machinery — the "configurable (never automatic)" fallback the founder named. Default
+   * false: admin-only routing until a team opts in. The tier→timeout spectrum itself is a shipped default
+   * (protocol `ASK_TIER_DEFAULTS`), not a knob — held to a default rather than made infinitely tunable.
+   */
+  ask_fallback_to_nonadmin: z.boolean().default(false),
   /** Team-wide wake-policy defaults (ADR 131 increment 5) — per-seat enrollment overrides layer on
    *  top (`ResidencyPolicyOverrideSchema` in `residency.policy`). `parse({})` yields launch defaults. */
   residency: ResidencyPolicySchema.default({}),

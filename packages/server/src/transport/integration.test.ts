@@ -3116,3 +3116,154 @@ describe('dogfood re-seat (ADR 146)', () => {
     a.close();
   });
 });
+
+describe('the to-human ask stream (ADR 147)', () => {
+  /** Build a schema-shaped envelope for POST /messages (the harness posts raw envelopes). */
+  function env(from: string, to: unknown, act: string, meta: Record<string, unknown>, id: string) {
+    return { id, v: PROTOCOL_VERSION, team: 'dawn', from, to, act, body: '', meta, ts: Date.now() };
+  }
+
+  it('raises ask.raised carrying species+tier and lands the ask in the admin inbox', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+
+    const sent = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'ask',
+          { species: 'escalate', tier: 'blocking' },
+          'ask-1',
+        ),
+      },
+      ada,
+    );
+    expect(sent.status).toBe(201);
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const raised = listAudit(server.db, teamId).find((r) => r.action === 'ask.raised');
+    expect(raised).toBeDefined();
+    expect(JSON.parse(raised!.detail!)).toMatchObject({ species: 'escalate', tier: 'blocking' });
+
+    // The durable reach: the admin (creator) sees the ask waiting in their inbox.
+    const inbox = await get('/teams/dawn/inbox', nickCred);
+    expect(inbox.json.messages.some((m: any) => m.id === 'ask-1' && m.act === 'ask')).toBe(true);
+  });
+
+  it('pushes a member-directed ask to a live admin too (guaranteed reach, §3)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickCred); // a non-admin human
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+
+    // nick (admin) is live on WS but NOT a firehose subscriber — the only path to them is deliverToAdmins.
+    const nick = new TestWs();
+    await nick.open();
+    await nick.claim('dawn', nickCred, 'nick', 'cli');
+
+    // Ada asks a *non-admin* human — nick is not a recipient, yet must still receive it (asks route to admins).
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'member', name: 'bo' },
+          'ask',
+          { species: 'consult', tier: 'standard' },
+          'ask-2',
+        ),
+      },
+      ada,
+    );
+    const deliver = await nick.waitFor('deliver');
+    expect((deliver as any).envelope.id).toBe('ask-2');
+    expect((deliver as any).envelope.act).toBe('ask');
+    nick.close();
+  });
+
+  it('records the no-answer resolutions and the human "deciding" reply', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+
+    // Below-top ask timed out unanswered → the agent proceeds, recording what it risked.
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'status_update',
+          {
+            ask_ref: 'ask-x',
+            ask_outcome: 'risk_accepted',
+            risk: 'may re-run a migration',
+            chosen_approach: 'ran it idempotently behind a guard',
+          },
+          'res-1',
+        ),
+      },
+      ada,
+    );
+    // Top-tier ask timed out → the agent holds, does not proceed.
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'status_update',
+          { ask_ref: 'ask-y', ask_outcome: 'held' },
+          'res-2',
+        ),
+      },
+      ada,
+    );
+    // The human answers "deciding — check back in 1h" (rides `wait`).
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'nick',
+          { kind: 'member', name: 'Ada' },
+          'wait',
+          { ask_ref: 'ask-y', until: '1h' },
+          'res-3',
+        ),
+      },
+      nickCred,
+    );
+
+    const audit = listAudit(server.db, teamId);
+    const risk = audit.find((r) => r.action === 'ask.risk_accepted');
+    expect(JSON.parse(risk!.detail!)).toMatchObject({
+      ask_ref: 'ask-x',
+      risk: 'may re-run a migration',
+      chosen_approach: 'ran it idempotently behind a guard',
+      human_unreachable: true,
+    });
+    expect(audit.some((r) => r.action === 'ask.held')).toBe(true);
+    const deferred = audit.find((r) => r.action === 'ask.deferred');
+    expect(JSON.parse(deferred!.detail!)).toMatchObject({ ask_ref: 'ask-y', until: '1h' });
+  });
+
+  it('round-trips the ask_fallback_to_nonadmin team policy (default off)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    expect(team.json.policy.ask_fallback_to_nonadmin).toBe(false);
+
+    const set = await post('/teams/dawn/policy', { ask_fallback_to_nonadmin: true }, nickCred);
+    expect(set.json.policy.ask_fallback_to_nonadmin).toBe(true);
+    // Setting the ask knob must not clobber the other policy defaults (read-merge-write).
+    expect(set.json.policy.standing_reseat_known_agents).toBe(false);
+    const got = await get('/teams/dawn/policy', nickCred);
+    expect(got.json.policy.ask_fallback_to_nonadmin).toBe(true);
+  });
+});

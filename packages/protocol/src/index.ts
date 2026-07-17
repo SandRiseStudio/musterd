@@ -1,5 +1,6 @@
 export * from './version.js';
 export * from './acts.js';
+export * from './ask.js';
 export * from './binding.js';
 export * from './capabilities.js';
 export * from './audit.js';

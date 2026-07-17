@@ -10,6 +10,13 @@ import { z } from 'zod';
  * always interrupt-class, and the newest steer supersedes prior direction per ADR 017), `challenge`
  * (epistemic — "justify this or reconsider", warn-never-block, interrupts only when flagged urgent),
  * and `defer` (plan mutation on the Goal spine — names `meta.goal_id`, optional `meta.wave` target).
+ *
+ * `ask` (musterd/0.3, ADR 147 — item 2 of the human-role re-founding, ADR 145 §3.1) is the to-human
+ * stream act: directed-to-human traffic in three species (`meta.species`: consult/escalate/approve),
+ * each carrying a tier (`meta.tier`) that derives a timeout + no-answer policy the *agent* runs (top
+ * tier holds; below-top proceeds with a recorded risk-acceptance). The no-answer resolution rides
+ * `status_update` (`meta.ask_outcome`) and the human "deciding — check back" reply rides `wait`
+ * (`meta.until`), so `ask` is the only new verb — "surfaces before more acts" (ADR 145 §4).
  */
 export const ACTS = [
   'message',
@@ -23,6 +30,7 @@ export const ACTS = [
   'steer',
   'challenge',
   'defer',
+  'ask',
 ] as const;
 export type Act = (typeof ACTS)[number];
 export const ActSchema = z.enum(ACTS);

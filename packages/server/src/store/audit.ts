@@ -92,7 +92,19 @@ export type AuditAction =
   // once per session, on the first telemetry flush. detail carries `{ tools, bytes, est_tokens,
   // breakdown? }` (byte counts and tool names only, never content). Append-only like the model/
   // build attestations: the row history IS the before/after for the surface-redesign increments.
-  | 'mcp.surface_rendered';
+  | 'mcp.surface_rendered'
+  // ADR 147 (human-ask-stream, on ADR 145 §3.1): the four lifecycle rows of a to-human `ask`. These
+  // shapes only (species/tier/ask_ref/until and the risk/approach the *agent* authored), never bodies
+  // (ADR 051). `raised` = an ask was sent (detail `{ species, tier }`); `deferred` = a human replied
+  // "deciding — check back in ⟨until⟩" via `wait` (detail `{ ask_ref, until }`); `held` = a top-tier ask
+  // timed out unanswered and the agent is holding, not proceeding (detail `{ ask_ref }`); `risk_accepted`
+  // = a below-top ask timed out and the agent proceeded, recording what it risked (detail
+  // `{ ask_ref, risk, chosen_approach, human_unreachable: true }`). The raised→terminal pair is the whole
+  // stream's trace; `risk_accepted` is the auditable risk-acceptance ADR 145 §3.1 promised.
+  | 'ask.raised'
+  | 'ask.deferred'
+  | 'ask.held'
+  | 'ask.risk_accepted';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

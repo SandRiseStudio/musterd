@@ -99,6 +99,87 @@ describe('EnvelopeSchema', () => {
     expect(ok.meta).toMatchObject({ goal_id: 'insight-engine', wave: 'later' });
   });
 
+  describe('the to-human ask stream (ADR 147)', () => {
+    it('requires a valid meta.species and meta.tier on ask', () => {
+      expect(() => makeEnvelope({ ...base, act: 'ask', body: 'ship it?' })).toThrow();
+      expect(() => makeEnvelope({ ...base, act: 'ask', meta: { species: 'consult' } })).toThrow(); // missing tier
+      expect(() =>
+        makeEnvelope({ ...base, act: 'ask', meta: { species: 'bogus', tier: 'blocking' } }),
+      ).toThrow(); // bad species
+      expect(() =>
+        makeEnvelope({ ...base, act: 'ask', meta: { species: 'escalate', tier: 'huge' } }),
+      ).toThrow(); // bad tier
+      const ok = makeEnvelope({
+        ...base,
+        act: 'ask',
+        body: 'drop the prod table?',
+        meta: { species: 'approve', tier: 'blocking' },
+      });
+      expect(ok.act).toBe('ask');
+      expect(ok.meta).toMatchObject({ species: 'approve', tier: 'blocking' });
+    });
+
+    it('requires ask_ref + a non-empty risk/chosen_approach on a risk_accepted resolution', () => {
+      // ask_outcome present ⟹ ask_ref required
+      expect(() =>
+        makeEnvelope({ ...base, act: 'status_update', meta: { ask_outcome: 'risk_accepted' } }),
+      ).toThrow();
+      // risk_accepted ⟹ risk + chosen_approach required (the auditable record can't be empty)
+      expect(() =>
+        makeEnvelope({
+          ...base,
+          act: 'status_update',
+          meta: { ask_outcome: 'risk_accepted', ask_ref: 'msg-0' },
+        }),
+      ).toThrow();
+      expect(() =>
+        makeEnvelope({
+          ...base,
+          act: 'status_update',
+          meta: { ask_outcome: 'risk_accepted', ask_ref: 'msg-0', risk: 'may double-charge' },
+        }),
+      ).toThrow(); // missing chosen_approach
+      const ok = makeEnvelope({
+        ...base,
+        act: 'status_update',
+        meta: {
+          ask_outcome: 'risk_accepted',
+          ask_ref: 'msg-0',
+          risk: 'may double-charge',
+          chosen_approach: 'proceeded idempotently with a dedupe key',
+        },
+      });
+      expect(ok.meta).toMatchObject({ ask_outcome: 'risk_accepted', ask_ref: 'msg-0' });
+    });
+
+    it('allows a held resolution with just ask_ref, and rejects a bad outcome', () => {
+      const held = makeEnvelope({
+        ...base,
+        act: 'status_update',
+        meta: { ask_outcome: 'held', ask_ref: 'msg-0' },
+      });
+      expect(held.meta).toMatchObject({ ask_outcome: 'held', ask_ref: 'msg-0' });
+      expect(() =>
+        makeEnvelope({
+          ...base,
+          act: 'status_update',
+          meta: { ask_outcome: 'proceeded', ask_ref: 'msg-0' },
+        }),
+      ).toThrow();
+    });
+
+    it('requires meta.until on a "deciding" wait that names an ask, but not on a bare wait', () => {
+      expect(makeEnvelope({ ...base, act: 'wait' }).act).toBe('wait'); // bare wait unaffected
+      expect(() => makeEnvelope({ ...base, act: 'wait', meta: { ask_ref: 'msg-0' } })).toThrow(); // ask_ref ⟹ until required
+      const ok = makeEnvelope({
+        ...base,
+        act: 'wait',
+        meta: { ask_ref: 'msg-0', until: '1h' },
+      });
+      expect(ok.meta).toMatchObject({ ask_ref: 'msg-0', until: '1h' });
+    });
+  });
+
   it('rejects a wrong protocol version', () => {
     const bad = { ...makeEnvelope({ ...base, act: 'message' }), v: 'musterd/9.9' };
     expect(EnvelopeSchema.safeParse(bad).success).toBe(false);

@@ -2,6 +2,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   type Act,
   ActSchema,
+  type AskTier,
+  AskTierSchema,
+  askContract,
+  askTierHolds,
   type Envelope,
   makeEnvelope,
   type Recipient,
@@ -21,7 +25,9 @@ const DESCRIPTION =
   'ask (set reply_to to override); wait = paused; resolve = close a thread (set thread to its ' +
   'root id); steer = redirect a teammate (interrupts; newest steer wins; meta.goal_id scopes it ' +
   'to a Goal); challenge = demand justification (answered by an accept with evidence); defer = ' +
-  "re-sequence a Goal (meta.goal_id, meta.wave: a number reorders, 'later' defers). Goal-scoped " +
+  "re-sequence a Goal (meta.goal_id, meta.wave: a number reorders, 'later' defers); ask = a " +
+  'directed-to-human ask (meta.species: consult|escalate|approve, meta.tier: advisory|standard|' +
+  'blocking) — the reply tells you how long to wait and what to do if no answer comes. Goal-scoped ' +
   'steer/defer re-sequence the plan and flag lanes building against the old one.';
 
 function recipient(to: string): Recipient {
@@ -30,8 +36,9 @@ function recipient(to: string): Recipient {
   return { kind: 'member', name: to };
 }
 
-/** Acts an `accept`/`decline` can answer: a call for help, a handoff, or a `challenge` (ADR 103). */
-const ANSWERABLE = new Set<Act>(['request_help', 'handoff', 'challenge']);
+/** Acts an `accept`/`decline` can answer: a call for help, a handoff, a `challenge` (ADR 103), or a
+ *  to-human `ask` (ADR 147 — an admin accepts/declines the latest open ask without naming it). */
+const ANSWERABLE = new Set<Act>(['request_help', 'handoff', 'challenge', 'ask']);
 
 /**
  * The latest still-open request_help/handoff/challenge waiting for `me` — the act an `accept`/`decline`
@@ -46,13 +53,37 @@ async function latestOpenRequest(client: MusterdClient, me: string): Promise<Env
     for (const m of messages) if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
     const open = messages.filter((m) => {
       if (!ANSWERABLE.has(m.act)) return false;
-      const directed = m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me);
+      const directed =
+        m.act === 'request_help' || m.act === 'ask' || (m.to.kind === 'member' && m.to.name === me);
       return directed && !resolved.has(m.thread ?? m.id);
     });
     return open.sort((a, b) => b.ts - a.ts)[0];
   } catch {
     return undefined;
   }
+}
+
+/** Narrow an unknown meta.tier to a valid `AskTier` (validation already enforced it on `ask`). */
+function isAskTier(tier: unknown): tier is AskTier {
+  return AskTierSchema.safeParse(tier).success;
+}
+
+/**
+ * The agent-facing marching orders for an ask it just sent (ADR 147 §2): how long to wait, then the
+ * no-answer policy to invoke — so the sender never has to know the tier→timeout table itself.
+ */
+function askInstruction(id: string, tier: unknown): string {
+  if (!isAskTier(tier)) return 'Wait for a human reply.';
+  const { timeout_ms } = askContract(tier);
+  const mins = Math.round(timeout_ms / 60_000);
+  if (askTierHolds(tier)) {
+    return `Top tier: wait up to ${mins}m for a human answer, re-notifying; if none comes, HOLD (stay paused, do not proceed).`;
+  }
+  return (
+    `Wait up to ${mins}m for a human answer; if none comes, you may PROCEED — record it with a ` +
+    `status_update carrying meta.ask_ref='${id}', meta.ask_outcome='risk_accepted', meta.risk, and ` +
+    `meta.chosen_approach. A human may reply "deciding" (wait, meta.until) to extend your clock.`
+  );
 }
 
 export function registerSend(server: McpServer, client: MusterdClient, config: McpConfig): void {
@@ -116,17 +147,27 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
         });
         await client.sendEnvelope(envelope);
         client.markSeen(envelope.id); // don't echo our own send back via inbox
+        // The ask's tier contract (ADR 147 §2): the agent owns the clock, so the send response hands it
+        // back its marching orders — how long to wait, and the no-answer policy to invoke on silence. The
+        // top tier HOLDS (never proceed); below-top PROCEEDS with a recorded risk-acceptance
+        // (status_update, meta.ask_ref + meta.ask_outcome:'risk_accepted' + meta.risk + meta.chosen_approach).
+        const askContractText =
+          args.act === 'ask' ? askInstruction(envelope.id, meta['tier']) : null;
         // Structured-first (ADR 144 inc 3): the id/thread a programmatic caller needs to keep the
         // exchange threaded (reply_to / thread on the next send), without parsing the prose.
+        const text = askContractText
+          ? `sent ask to ${args.to} (id=${envelope.id}). ${askContractText}`
+          : `sent ${args.act} to ${args.to} (id=${envelope.id})`;
         return {
-          content: [
-            { type: 'text' as const, text: `sent ${args.act} to ${args.to} (id=${envelope.id})` },
-          ],
+          content: [{ type: 'text' as const, text }],
           structuredContent: {
             id: envelope.id,
             act: args.act,
             to: args.to,
             thread: envelope.thread,
+            ...(args.act === 'ask' && isAskTier(meta['tier'])
+              ? { ask_contract: askContract(meta['tier']) }
+              : {}),
           },
         };
       } catch (err) {
