@@ -2413,8 +2413,9 @@ export function renderScene(
 
     bases.set(name, b);
     // The label rides above the crown — higher for a standing member than a seated one, so it tracks the
-    // head through a sit rather than floating where the head used to be.
-    heads.set(name, { x: b.x, y: b.y - (pose.small ? 74 : 98 - pose.sit * 22) * fit.scale });
+    // head through a sit rather than floating where the head used to be. Lifted clear of the firefly wisp
+    // that now hovers over the head (see `drawHead`), so the name reads as a plate floating above the mote.
+    heads.set(name, { x: b.x, y: b.y - (pose.small ? 90 : 116 - pose.sit * 22) * fit.scale });
   }
 
   items.sort((a, b) => a.d - b.d);
