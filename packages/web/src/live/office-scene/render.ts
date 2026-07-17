@@ -1892,12 +1892,6 @@ function screenPanel(
       ctx.restore();
     }
   }
-  const g = project(mx, my, fit);
-  const pulse = working ? 0.85 + 0.15 * Math.sin(t * 2.1 + mx + my) : 1;
-  ctx.save();
-  ctx.globalAlpha = pulse;
-  ellipse(ctx, { x: g.x, y: g.y - (up + 10 + h) * fit.scale }, wAcross * 0.35 * fit.scale, 4 * fit.scale, working ? '#59c3a3' : '#33504c');
-  ctx.restore();
 }
 
 function monitor(
