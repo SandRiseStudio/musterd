@@ -80,6 +80,6 @@ describe('formatRoster (the agent-facing roster)', () => {
   });
 
   it('handles an empty team', () => {
-    expect(formatRoster([])).toBe('no members');
+    expect(formatRoster([])).toBe('no members yet — team_join claims your seat');
   });
 });

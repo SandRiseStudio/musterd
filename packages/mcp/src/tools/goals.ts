@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Goal } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
-import { textResult } from './format.js';
+import { errorResult, textResult } from './format.js';
 
 /**
  * Declared Goals (ADR 048's general-team seam, resolved by ADR 084) — the coarse "what this team is
@@ -35,7 +35,7 @@ export function registerGoals(server: McpServer, client: MusterdClient): void {
           return textResult('no declared goals — team_goal_declare to add one');
         return textResult(goals.map(fmtGoal).join('\n'));
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );
@@ -65,7 +65,7 @@ export function registerGoals(server: McpServer, client: MusterdClient): void {
         const { goal } = await client.declareGoal(args);
         return textResult(`goal declared\n${fmtGoal(goal)}`);
       } catch (err) {
-        return textResult(`error: ${(err as Error).message}`);
+        return errorResult(err);
       }
     },
   );

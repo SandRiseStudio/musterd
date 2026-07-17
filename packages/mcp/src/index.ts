@@ -9,6 +9,7 @@ import { MusterdClient } from './client.js';
 import { isClaimedConfig, loadMcpConfig, type McpConfig } from './config.js';
 import { observeHarnessInitialization } from './harness.js';
 import { readAndConsumeResolution, writePendingMarker } from './pending.js';
+import { instrumentToolRepair } from './repair.js';
 import { instrumentTools, recordAdapterInitialization, startMcpTelemetry } from './telemetry.js';
 import { registerGoals } from './tools/goals.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
@@ -153,6 +154,11 @@ export function buildMcpServer(
   // SDK's tools/call request handler — the only seam that sees invalid-input bounces. Installed
   // before the first registerTool (which is what makes the SDK install that handler).
   if (opts.recorder) instrumentToolTransport(server, opts.recorder);
+  // Repair hints on invalid-input bounces (ADR 144 inc 3) hook the same seam — the SDK bounces
+  // before handlers run, so this is the only place a hint can be attached. Installed after the
+  // telemetry patch, which makes telemetry the outer wrapper: it classifies the repaired result
+  // (still a bounce — the classifier is start-anchored, the repair appends at the end).
+  instrumentToolRepair(server);
   // Patched second so the deferred autojoin runs INSIDE the first tool's span — the join latency it
   // causes is attributed to the call that triggered it.
   if (opts.onFirstToolCall) armAutojoinOnFirstToolCall(server, opts.onFirstToolCall);
