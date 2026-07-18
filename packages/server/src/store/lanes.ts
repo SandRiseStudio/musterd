@@ -1,4 +1,11 @@
-import type { Lane, LaneState, LaneWarning, OpenLane, UpdateLane } from '@musterd/protocol';
+import {
+  globToRegExp,
+  type Lane,
+  type LaneState,
+  type LaneWarning,
+  type OpenLane,
+  type UpdateLane,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 
@@ -207,6 +214,32 @@ export function globsOverlap(a: string, b: string): boolean {
   const isPrefix = (short: string, long: string) =>
     short === long || long.startsWith(short === '' ? '' : short + '/') || short === '';
   return pa.length <= pb.length ? isPrefix(pa, pb) : isPrefix(pb, pa);
+}
+
+/**
+ * The first **contending** lane (claimed/active/blocked) whose declared `surface_globs` cover the given
+ * concrete path — path-vs-glob (a real match of one file against the lane's globs, `globToRegExp` in
+ * `path` flavor), NOT the cheap glob-vs-glob prefix `globsOverlap` uses. This is the read behind ADR 150
+ * Gate A: "does <seat> own a claimed lane covering this edit?" (pass `owner`), and its blocked cousin
+ * "is any seat's lane covering it?" (omit `owner`, for the denial's "owned by X" vs "claim one" copy).
+ * The path must arrive repo-relative (the hook normalizes it), matching how lanes declare their globs.
+ */
+export function laneCoveringPath(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  path: string,
+  opts: { owner?: string } = {},
+): Lane | null {
+  const lanes = listLanes(db, teamId, teamSlug, {
+    ...(opts.owner ? { owner: opts.owner } : {}),
+  }).filter((l) => CONTENDING.has(l.state));
+  for (const lane of lanes) {
+    for (const glob of lane.surface_globs) {
+      if (globToRegExp(glob, 'path').test(path)) return lane;
+    }
+  }
+  return null;
 }
 
 /**

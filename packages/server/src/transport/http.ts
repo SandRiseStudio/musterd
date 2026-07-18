@@ -1165,7 +1165,7 @@ export async function handleHttp(
         const { team, member } = authTouch(ctx, slug, req);
         assertSeatCanRead(member);
         const gateReq = parseOrBadRequest(GateCheckRequestSchema, await readJson(req));
-        const decision = adjudicateGate(ctx.db, team, member, gateReq);
+        const decision = adjudicateGate(ctx, team, member, gateReq);
         return sendJson(res, 200, decision);
       }
 

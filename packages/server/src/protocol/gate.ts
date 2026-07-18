@@ -1,6 +1,7 @@
 import { type GateCheckRequest, type GateDecision } from '@musterd/protocol';
-import type { Database } from 'better-sqlite3';
+import type { Ctx } from '../context.js';
 import { appendAudit } from '../store/audit.js';
+import { laneCoveringPath } from '../store/lanes.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 
 /**
@@ -19,7 +20,10 @@ import type { MemberRow, TeamRow } from '../store/rows.js';
  */
 
 export interface GateContext {
-  db: Database;
+  /** The full server bundle (db, hub, config). Gate A needs only `srv.db` (a lane-board read); Gate B's
+   *  deny-is-emit raises its ask through `routeEnvelope`, which needs `srv.hub`/`srv.config` for the
+   *  ADR 147/149 admin-push + Slack surfaces — hence the whole `Ctx`, not a bare `db`. */
+  srv: Ctx;
   team: TeamRow;
   /** The acting seat — the request is member-authed AS this seat, so a Gate B ask emitted here is
    *  raised "through the seat's own credential" (ADR 150). */
@@ -27,21 +31,51 @@ export interface GateContext {
   req: GateCheckRequest;
 }
 
-/** Gate A — lane-ownership (contended surface). Foundation ships the warn path; the block path (does the
- *  seat own a claimed lane whose globs cover the target?) lands in izzo's Gate A lane. Fails open until then. */
+/**
+ * Gate A — lane-ownership (ADR 150). An edit to a declared **contended surface** requires the acting
+ * seat to own a claimed lane whose `surface_globs` cover the target path. The check is one lane-board
+ * read: does this seat hold a contending lane covering `req.target`?
+ *   - **Owns it** → allow, quietly (`allowed`, no nag) — under either posture. Ownership IS the point;
+ *     a seat that claimed its lane should never be warned or blocked.
+ *   - **Doesn't own it, `warn`** → allow with the advisory (`warned`) — ADR 083 default preserved.
+ *   - **Doesn't own it, `block`** → deny with a repair string that names the reality: another seat's
+ *     lane already covers it ("owned by X — coordinate / take a different surface"), or nothing does
+ *     ("claim one first"). Claiming becomes the only path to the edit — the forcing function.
+ * `req.target` arrives repo-relative (the hook normalizes it) so it compares against lane globs, which
+ * are repo-relative by convention.
+ */
 export function gateA(ctx: GateContext): GateDecision {
+  const { db } = ctx.srv;
+  const { id: teamId, slug } = ctx.team;
+  const path = ctx.req.target;
+  const cls = ctx.req.class;
+
+  const owned = laneCoveringPath(db, teamId, slug, path, { owner: ctx.member.name });
+  if (owned) {
+    return {
+      decision: 'allow',
+      outcome: 'allowed',
+      reason: `owned: '${cls}' is covered by your lane "${owned.title}"`,
+    };
+  }
+
   if (ctx.req.posture === 'warn') {
     return {
       decision: 'allow',
       outcome: 'warned',
-      reason: `heads-up: '${ctx.req.class}' is a declared contended surface — claim a lane covering it so the team can see this edit (lane_open … --claim)`,
+      reason: `heads-up: '${cls}' is a declared contended surface and you have no claimed lane covering it — open one so the team can see this edit (lane_open "<what>" --surface ${path} --claim)`,
     };
   }
-  // block: Gate A decision not yet implemented — fail open, never strand a seat on an unfinished gate.
+
+  // block: the forcing function. Name whether someone else holds it, or it's simply unclaimed.
+  const otherLane = laneCoveringPath(db, teamId, slug, path);
+  const detail = otherLane
+    ? `it is owned by ${otherLane.owner_seat ?? 'another seat'} (lane "${otherLane.title}") — coordinate with them, take a different surface, or hand off`
+    : `no lane covers it — claim one first: lane_open "<what>" --surface ${path} --claim`;
   return {
-    decision: 'allow',
-    outcome: 'allowed',
-    reason: `gate A (lane-ownership) block path not yet implemented for '${ctx.req.class}' — allowing`,
+    decision: 'deny',
+    outcome: 'denied',
+    reason: `blocked: '${cls}' is a declared contended surface you have not claimed a lane for. ${detail}`,
   };
 }
 
@@ -71,15 +105,15 @@ export function gateB(ctx: GateContext): GateDecision {
  * decision (and, for a future Gate B, to fill an ask body) and is never persisted to audit.
  */
 export function adjudicateGate(
-  db: Database,
+  srv: Ctx,
   team: TeamRow,
   member: MemberRow,
   req: GateCheckRequest,
 ): GateDecision {
-  const ctx: GateContext = { db, team, member, req };
+  const ctx: GateContext = { srv, team, member, req };
   const decision = req.kind === 'contended-surface' ? gateA(ctx) : gateB(ctx);
   const action = req.kind === 'contended-surface' ? 'lane.gate' : 'action.gate';
-  appendAudit(db, team.id, {
+  appendAudit(srv.db, team.id, {
     actor: member.name,
     action,
     target: req.class,

@@ -1,3 +1,4 @@
+import { isAbsolute, relative } from 'node:path';
 import { type GateToolCall, matchEnforcement } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { CliError } from '../errors.js';
@@ -100,6 +101,19 @@ function emitWarn(reason: string): void {
   );
 }
 
+/**
+ * Make a tool's target path repo-relative so it compares against the class table and lane globs, which
+ * are declared repo-relative (`packages/server/src/**`). The PreToolUse hook `cd`s to the project root
+ * before running, so `process.cwd()` is that root and an absolute `file_path` under it relativizes
+ * cleanly. A path already relative, or absolute-but-outside the root (→ a leading `../`), is left as-is
+ * (the latter simply won't match a repo glob — correctly ungated).
+ */
+export function repoRelativePath(path: string): string {
+  if (!isAbsolute(path)) return path;
+  const rel = relative(process.cwd(), path);
+  return rel && !rel.startsWith('..') ? rel : path;
+}
+
 async function gateCheck(parsed: Parsed): Promise<number> {
   if (parsed.flags['stdin'] !== true) {
     throw new CliError(
@@ -109,8 +123,10 @@ async function gateCheck(parsed: Parsed): Promise<number> {
     );
   }
   try {
-    const call = parseToolCall(await readStdin());
-    if (!call) return 0; // nothing to match on → allow
+    const raw = parseToolCall(await readStdin());
+    if (!raw) return 0; // nothing to match on → allow
+    // Normalize the target path to repo-relative BEFORE matching, so class + lane globs compare cleanly.
+    const call: GateToolCall = raw.path ? { ...raw, path: repoRelativePath(raw.path) } : raw;
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
     if (!explicit || !identity) return 0; // ambient/unbound folder — no seat to gate → allow
     const { enforcement } = await http.getEnforcement(team);

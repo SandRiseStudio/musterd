@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
+import { openLane } from '../store/lanes.js';
 import { getTeamBySlug } from '../store/teams.js';
 
 /**
@@ -166,5 +167,83 @@ describe('POST /gate (ADR 150) — adjudicate + shapes-only audit', () => {
       seatHeaders('Ada'),
     );
     expect(r.status).toBe(400);
+  });
+});
+
+describe('Gate A — lane-ownership (ADR 150)', () => {
+  const team = () => getTeamBySlug(server.db, 'dawn')!;
+  const gateA = (posture: 'warn' | 'block', target: string, seat = 'Ada') =>
+    post(
+      '/teams/dawn/gate',
+      {
+        kind: 'contended-surface',
+        class: 'src/tariff.ts',
+        fingerprint: 'fp',
+        posture,
+        tool: 'Edit',
+        target,
+      },
+      seatHeaders(seat),
+    );
+
+  it('owns a claimed lane covering the path → allow, quietly (no nag), under block', async () => {
+    openLane(server.db, team().id, 'dawn', 'Ada', {
+      title: 'tariff work',
+      surface_globs: ['src/**'],
+      claim: true,
+    });
+    const r = await gateA('block', 'src/tariff.ts');
+    expect(r.json.decision).toBe('allow');
+    expect(r.json.outcome).toBe('allowed');
+    expect(r.json.reason).toContain('tariff work');
+  });
+
+  it('no lane covering the path, block → DENY with a "claim one" repair', async () => {
+    const r = await gateA('block', 'src/tariff.ts');
+    expect(r.json.decision).toBe('deny');
+    expect(r.json.outcome).toBe('denied');
+    expect(r.json.reason).toContain('claim one');
+    // The deny is recorded as a lane.gate row with result: deny.
+    const row = audits('lane.gate').at(-1)!;
+    expect(row.result).toBe('deny');
+  });
+
+  it('ANOTHER seat owns the covering lane, block → DENY naming that owner', async () => {
+    await post('/teams/dawn/members', { name: 'Bo', kind: 'agent' }, bearer(nickCred));
+    openLane(server.db, team().id, 'dawn', 'Bo', {
+      title: 'bo tariff',
+      surface_globs: ['src/tariff.ts'],
+      claim: true,
+    });
+    const r = await gateA('block', 'src/tariff.ts');
+    expect(r.json.decision).toBe('deny');
+    expect(r.json.reason).toContain('owned by Bo');
+  });
+
+  it('no lane, warn → allow with the advisory (ADR 083 default preserved)', async () => {
+    const r = await gateA('warn', 'src/tariff.ts');
+    expect(r.json.decision).toBe('allow');
+    expect(r.json.outcome).toBe('warned');
+  });
+
+  it('owns the lane, warn → quiet allow (ownership means no advisory either)', async () => {
+    openLane(server.db, team().id, 'dawn', 'Ada', {
+      title: 'ada tariff',
+      surface_globs: ['src/tariff.ts'],
+      claim: true,
+    });
+    const r = await gateA('warn', 'src/tariff.ts');
+    expect(r.json.outcome).toBe('allowed');
+  });
+
+  it('a resolved (done) lane does not count as ownership — only contending lanes cover', async () => {
+    const lane = openLane(server.db, team().id, 'dawn', 'Ada', {
+      title: 'old tariff',
+      surface_globs: ['src/**'],
+      claim: true,
+    });
+    server.db.prepare('UPDATE lanes SET state = ? WHERE id = ?').run('done', lane.id);
+    const r = await gateA('block', 'src/tariff.ts');
+    expect(r.json.decision).toBe('deny'); // done lane ≠ ownership
   });
 });
