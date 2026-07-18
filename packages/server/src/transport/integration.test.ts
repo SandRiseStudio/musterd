@@ -1,6 +1,8 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { get as httpGet, type IncomingHttpHeaders } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import {
   FEATURE_EPOCH,
   GENERALIST_CAPABILITIES,
@@ -405,6 +407,76 @@ describe('static web serving (ADR 062)', () => {
       const api = await fetch(`${b}/teams/none`);
       expect(api.status).toBe(404);
       expect((await api.json()).error.code).toBe('not_found');
+    } finally {
+      await s.close();
+    }
+  });
+
+  // Raw http client: unlike undici's fetch it never auto-decompresses, so we can assert on the exact
+  // content-encoding the daemon negotiated and diff the raw body ourselves.
+  function rawGet(
+    url: string,
+    headers: Record<string, string> = {},
+  ): Promise<{ status: number; headers: IncomingHttpHeaders; body: Buffer }> {
+    return new Promise((res, rej) => {
+      httpGet(url, { headers }, (r) => {
+        const chunks: Buffer[] = [];
+        r.on('data', (c) => chunks.push(c as Buffer));
+        r.on('end', () =>
+          res({ status: r.statusCode ?? 0, headers: r.headers, body: Buffer.concat(chunks) }),
+        );
+      }).on('error', rej);
+    });
+  }
+
+  it('compresses text assets per Accept-Encoding, caches immutably, and revalidates the shell', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-web-'));
+    const html = '<!doctype html><title>musterd live</title>';
+    writeFileSync(join(dir, 'index.html'), html);
+    mkdirSync(join(dir, 'assets'));
+    const js = `console.log(${JSON.stringify('x'.repeat(4096))})`;
+    writeFileSync(join(dir, 'assets', 'app-abc123.js'), js);
+    // A pre-compressed format must be served identity — gzipping it is wasted CPU.
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...Array(64).fill(0)]);
+    writeFileSync(join(dir, 'assets', 'logo-def456.png'), png);
+
+    const s = createServer({ db: openDb(':memory:'), port: 0, webRoot: dir });
+    const { port } = await s.listen();
+    const b = `http://127.0.0.1:${port}`;
+    try {
+      // brotli preferred when offered; the decoded bytes round-trip to the original.
+      const br = await rawGet(`${b}/assets/app-abc123.js`, { 'accept-encoding': 'gzip, br' });
+      expect(br.headers['content-encoding']).toBe('br');
+      expect(br.headers['vary']).toMatch(/accept-encoding/i);
+      expect(br.body.length).toBeLessThan(Buffer.byteLength(js));
+      expect(brotliDecompressSync(br.body).toString()).toBe(js);
+      // Content-hashed asset → cache forever.
+      expect(br.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+
+      // gzip when brotli isn't on the table.
+      const gz = await rawGet(`${b}/assets/app-abc123.js`, { 'accept-encoding': 'gzip' });
+      expect(gz.headers['content-encoding']).toBe('gzip');
+      expect(gunzipSync(gz.body).toString()).toBe(js);
+
+      // No Accept-Encoding → identity, with a real Content-Length.
+      const id = await rawGet(`${b}/assets/app-abc123.js`);
+      expect(id.headers['content-encoding']).toBeUndefined();
+      expect(id.headers['content-length']).toBe(String(Buffer.byteLength(js)));
+      expect(id.body.toString()).toBe(js);
+
+      // Binary asset is never compressed even when the client offers it.
+      const img = await rawGet(`${b}/assets/logo-def456.png`, { 'accept-encoding': 'gzip, br' });
+      expect(img.headers['content-encoding']).toBeUndefined();
+      expect(img.body.equals(png)).toBe(true);
+
+      // The app shell revalidates: weak ETag + no-cache, and If-None-Match ⇒ 304.
+      const shell = await rawGet(`${b}/`);
+      expect(shell.headers['cache-control']).toBe('no-cache');
+      const etag = shell.headers['etag'];
+      expect(etag).toMatch(/^W\//);
+      const revalidated = await rawGet(`${b}/`, { 'if-none-match': etag as string });
+      expect(revalidated.status).toBe(304);
+      expect(revalidated.body.length).toBe(0);
     } finally {
       await s.close();
     }

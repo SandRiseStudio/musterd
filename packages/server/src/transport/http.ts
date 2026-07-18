@@ -1,6 +1,7 @@
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import {
   MemberKindSchema,
   LifecycleSchema,
@@ -164,11 +165,104 @@ const CONTENT_TYPES: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-function sendFile(res: ServerResponse, file: string): void {
+/**
+ * Text-based assets worth compressing. Already-compressed formats (woff2, png, webp, …) are omitted:
+ * gzipping them burns CPU for ~0 bytes, and can even grow the payload.
+ */
+const COMPRESSIBLE = new Set([
+  '.html',
+  '.js',
+  '.mjs',
+  '.css',
+  '.json',
+  '.map',
+  '.svg',
+  '.txt',
+  '.wasm',
+]);
+
+/**
+ * Compressed-bytes cache, keyed by `enc:path:mtime:size`. The dashboard's `/assets/*` are immutable
+ * (content-hashed filenames) so their entries are effectively permanent; the mtime+size in the key
+ * busts index.html automatically on the next `pnpm build`. Small, bounded set (one web dist) — no
+ * eviction needed, and it makes brotli-11 affordable by amortizing it across every view.
+ */
+const compressCache = new Map<string, Buffer>();
+
+/** Pick the best content-coding the client will accept, preferring brotli. Null ⇒ serve identity. */
+function pickEncoding(accept: string | string[] | undefined): 'br' | 'gzip' | null {
+  const raw = Array.isArray(accept) ? accept.join(',') : (accept ?? '');
+  const a = raw.toLowerCase();
+  if (/\bbr\b/.test(a)) return 'br';
+  if (/\bgzip\b/.test(a)) return 'gzip';
+  return null;
+}
+
+function compress(file: string, enc: 'br' | 'gzip', mtimeMs: number, size: number): Buffer {
+  const key = `${enc}:${file}:${Math.round(mtimeMs)}:${size}`;
+  const hit = compressCache.get(key);
+  if (hit) return hit;
+  const raw = readFileSync(file);
+  const out =
+    enc === 'br'
+      ? brotliCompressSync(raw, {
+          params: {
+            [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+            [zlibConstants.BROTLI_PARAM_SIZE_HINT]: raw.length,
+          },
+        })
+      : gzipSync(raw, { level: 9 });
+  compressCache.set(key, out);
+  return out;
+}
+
+/**
+ * Serve a static file with content negotiation + HTTP caching. Compressible types are sent br/gzip
+ * per the client's `Accept-Encoding` (compressed bytes cached so it's paid once). Immutable assets
+ * (content-hashed `/assets/*`) get a one-year `immutable` Cache-Control; everything else (index.html,
+ * favicon) gets a weak ETag + `no-cache` and answers `If-None-Match` with a 304. The ETag is weak
+ * because the same file has multiple representations (identity/gzip/br) and a strong validator must be
+ * unique per representation; weak is exactly what a revalidation needs.
+ */
+function sendFile(
+  req: IncomingMessage,
+  res: ServerResponse,
+  file: string,
+  immutable: boolean,
+): void {
+  const stat = statSync(file);
+  const ext = extname(file).toLowerCase();
+  const type = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+  const etag = `W/"${stat.size.toString(16)}-${Math.round(stat.mtimeMs).toString(16)}"`;
+  const cacheControl = immutable ? 'public, max-age=31536000, immutable' : 'no-cache';
+
+  const inm = req.headers['if-none-match'];
+  if (inm && inm === etag) {
+    res.writeHead(304, { etag, 'cache-control': cacheControl });
+    return void res.end();
+  }
+
+  const compressible = COMPRESSIBLE.has(ext);
+  const headers: Record<string, string> = {
+    'content-type': type,
+    'cache-control': cacheControl,
+    etag,
+    ...(compressible ? { vary: 'Accept-Encoding' } : {}),
+  };
+
+  const enc = compressible ? pickEncoding(req.headers['accept-encoding']) : null;
+  if (!enc) {
+    res.writeHead(200, { ...headers, 'content-length': String(stat.size) });
+    return void createReadStream(file).pipe(res);
+  }
+
+  const body = compress(file, enc, stat.mtimeMs, stat.size);
   res.writeHead(200, {
-    'content-type': CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
+    ...headers,
+    'content-encoding': enc,
+    'content-length': String(body.length),
   });
-  createReadStream(file).pipe(res);
+  return void res.end(body);
 }
 
 /**
@@ -176,7 +270,12 @@ function sendFile(res: ServerResponse, file: string): void {
  * (a client route like `/live`) falls back to `index.html` so deep links + refresh work. Path
  * traversal is refused by resolving under `webRoot` and requiring containment.
  */
-function serveStatic(webRoot: string, pathname: string, res: ServerResponse): void {
+function serveStatic(
+  req: IncomingMessage,
+  webRoot: string,
+  pathname: string,
+  res: ServerResponse,
+): void {
   const root = resolve(webRoot);
   let target: string;
   try {
@@ -188,11 +287,14 @@ function serveStatic(webRoot: string, pathname: string, res: ServerResponse): vo
     res.writeHead(403, { 'content-type': 'text/plain' });
     return void res.end('forbidden');
   }
-  if (existsSync(target) && statSync(target).isFile()) return sendFile(res, target);
-  // SPA fallback: client routes have no file extension → serve the app shell.
+  // Content-hashed build assets are safe to cache forever; the app shell and root files are not.
+  const assetsDir = join(root, 'assets') + sep;
+  if (existsSync(target) && statSync(target).isFile())
+    return sendFile(req, res, target, target.startsWith(assetsDir));
+  // SPA fallback: client routes have no file extension → serve the app shell (never immutable).
   if (extname(target) === '') {
     const index = join(root, 'index.html');
-    if (existsSync(index)) return sendFile(res, index);
+    if (existsSync(index)) return sendFile(req, res, index, false);
   }
   res.writeHead(404, { 'content-type': 'text/plain' });
   res.end('not found');
@@ -2292,7 +2394,7 @@ export async function handleHttp(
       path !== '/health' &&
       !path.startsWith('/teams')
     ) {
-      return serveStatic(ctx.config.webRoot, path, res);
+      return serveStatic(req, ctx.config.webRoot, path, res);
     }
 
     throw new MusterdError('not_found', `no route for ${method} ${path}`);

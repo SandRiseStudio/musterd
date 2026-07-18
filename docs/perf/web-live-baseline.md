@@ -76,13 +76,21 @@ the temp daemon (`server: http://127.0.0.1:4890`) — the binding's embedded `se
   Treat **≤ ~100 ms send→pixel** as the real transport budget; the harness reports the
   CLI-bounded number (`cmdStartToFrameMs`).
 
+## Optimization log
+
+| Date       | Change                                          | Result (throttled Lighthouse)                                                                    |
+| ---------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 2026-07-18 | Finding #1: daemon br/gzip + Cache-Control/ETag | **49 → 71** · LCP 7.2 s → 4.3 s · FCP 5.5 s → 3.1 s · TBT 540 → 310 ms · transfer 1,077 → 471 KB |
+
 ## Findings, ranked by expected win
 
-1. **The daemon serves everything uncompressed with zero caching headers.** No
-   `Content-Encoding`, no `Cache-Control`, no `ETag` (see `packages/server/src/transport/http.ts`
-   static path). Every page view re-downloads 1,077 KB; gzip alone recovers **~665 KB (62%)**,
-   and immutable-hashed `/assets/*` filenames make long-TTL caching trivial. This is the single
-   biggest lever on FCP/LCP under real network conditions.
+1. **~~The daemon serves everything uncompressed with zero caching headers.~~ SHIPPED (2026-07-18).**
+   `sendFile` now negotiates brotli/gzip for text types (`Accept-Encoding`, compressed bytes cached
+   so it's paid once), sets `Cache-Control: …immutable` on content-hashed `/assets/*`, and gives the
+   app shell a weak ETag + `no-cache` that answers `If-None-Match` with a 304. Measured: entry chunk
+   320 KB → 87 KB brotli, /live transfer **1,077 KB → 467 KB (−57%)**, throttled Lighthouse **49 →
+   71**, LCP **7.2 s → 4.3 s**. Residual `uses-text-compression` (~85 KB) is the API JSON on the
+   `/teams/*` path, which does not go through `serveStatic` — a separate lever.
 2. **Entry chunk is heavy and half-unused.** `index-*.js` is 320 KB raw; Lighthouse estimates
    **154 KB of unused JS** on /live. The marketing-site code (LiquidGlass engine, Lenis, Hero,
    Roadmap) and the dashboard share one entry — route-level splitting should keep /live from
