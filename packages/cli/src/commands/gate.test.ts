@@ -1,5 +1,6 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseToolCall } from './gate.js';
+import { parseToolCall, repoRelativePath } from './gate.js';
 
 /**
  * Unit coverage for the gate hook's payload parse (ADR 150). The end-to-end adjudication is covered by
@@ -41,5 +42,20 @@ describe('parseToolCall (ADR 150 PreToolUse payload)', () => {
     expect(parseToolCall('42')).toBeNull();
     expect(parseToolCall(JSON.stringify({ tool_input: { command: 'x' } }))).toBeNull();
     expect(parseToolCall('')).toBeNull();
+  });
+});
+
+describe('repoRelativePath (ADR 150) — compare paths against repo-relative lane globs', () => {
+  it('relativizes an absolute path under cwd', () => {
+    const abs = join(process.cwd(), 'packages/server/src/x.ts');
+    expect(repoRelativePath(abs)).toBe('packages/server/src/x.ts');
+  });
+
+  it('leaves an already-relative path untouched', () => {
+    expect(repoRelativePath('src/tariff.ts')).toBe('src/tariff.ts');
+  });
+
+  it('leaves an absolute path OUTSIDE cwd as-is (a leading .. → correctly ungated)', () => {
+    expect(repoRelativePath('/etc/passwd')).toBe('/etc/passwd');
   });
 });
