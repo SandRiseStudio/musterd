@@ -62,6 +62,12 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
 ];
 const LOOP = 5600;
 
+// This dev-fixture page reads its scenario from `?n=/?idle=/?stale=` query params, but its
+// useState initializers run during SSR prerender too — where `window` is undefined. On the
+// server there are no params anyway, so resolve to an empty query there.
+const previewSearch = () =>
+  new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search);
+
 function OfficePreviewPage() {
   const hostRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
@@ -70,7 +76,7 @@ function OfficePreviewPage() {
   // `?n=<count>` starts with only the first N of the pool present — the sparse-roster case the floor plan
   // has to survive (a real team is ~5 against 12 desks, and that is when empty desks read loudest).
   const [present, setPresent] = useState<Set<string>>(() => {
-    const n = Number(new URLSearchParams(window.location.search).get('n'));
+    const n = Number(previewSearch().get('n'));
     const pool = Number.isFinite(n) && n > 0 ? POOL.slice(0, n) : POOL;
     return new Set(pool.map((m) => m.name));
   });
@@ -79,7 +85,7 @@ function OfficePreviewPage() {
   // `?idle=all` (or a comma list of names) forces members idle on load — the case the leisure furniture
   // exists for, and the one that's tedious to reach by clicking. `?idle=all` empties every desk.
   const [idle, setIdle] = useState<Set<string>>(() => {
-    const raw = new URLSearchParams(window.location.search).get('idle');
+    const raw = previewSearch().get('idle');
     if (!raw) return new Set();
     if (raw === 'all') return new Set(POOL.map((m) => m.name));
     return new Set(raw.split(',').map((s) => s.trim()));
@@ -89,7 +95,7 @@ function OfficePreviewPage() {
   // `activity` still reads `working`. That split is the only case where the typing animation and placement
   // could disagree, so it's the one worth being able to summon — the live floor reaches it on its own.
   const [stale] = useState<Set<string>>(() => {
-    const raw = new URLSearchParams(window.location.search).get('stale');
+    const raw = previewSearch().get('stale');
     return raw ? new Set(raw.split(',').map((s) => s.trim())) : new Set();
   });
 
