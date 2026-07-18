@@ -105,7 +105,8 @@ export type OfficeEvent =
   // An act, typed out over the sender's head then faded — the body when it has one, else the act label.
   // Independent of the choreography cue above; both can fire for one act. `id` (the envelope id) makes
   // the bubble a click-through to the same act in the stream panel.
-  | { kind: 'speech'; who: string; text: string; tone: ActTone; id?: string };
+  // `act` (the wire act name) lets the bubble shape act-aware — status chatter gets a tighter glance.
+  | { kind: 'speech'; who: string; text: string; tone: ActTone; id?: string; act?: string };
 
 /** The imperative handle the `OfficeScene` component drives the mounted scene through. */
 export interface OfficeHandle {

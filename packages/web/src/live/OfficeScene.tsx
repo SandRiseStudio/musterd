@@ -108,7 +108,7 @@ export function OfficeScene({
       // label so nothing on the team passes invisibly. The envelope id makes the bubble a click-through
       // to the same act in the stream panel.
       const text = e.body && e.body.trim() ? e.body : actLabel(e.act);
-      h.emit({ kind: 'speech', who: e.from, text, tone: actTone(e.act), id: e.id });
+      h.emit({ kind: 'speech', who: e.from, text, tone: actTone(e.act), id: e.id, act: e.act });
     }
   }, [envelopes, liveIds]);
 
