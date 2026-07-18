@@ -1,5 +1,5 @@
-import type { Database } from 'better-sqlite3';
 import { type GateCheckRequest, type GateDecision } from '@musterd/protocol';
+import type { Database } from 'better-sqlite3';
 import { appendAudit } from '../store/audit.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 
