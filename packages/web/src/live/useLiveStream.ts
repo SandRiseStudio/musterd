@@ -9,6 +9,7 @@ import {
   type LiveConfig,
 } from './client';
 import { firehoseSound } from './sound';
+import { capNewest } from './window';
 
 export interface LiveStreamHooks {
   /** Fired when the observer credential is stale/invalid (a 401 backfill or a WS `refused`) — the route
@@ -68,12 +69,14 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
     // Dedupe by id against the *previous array* only — the updater must stay pure (no external
     // mutation), or React StrictMode's double-invoke commits the second (empty) result. Delivery is
     // at-least-once and a backfilled message can also arrive live, so dedup is load-bearing.
+    // Capped to the newest MAX_ENVELOPES: a wall-mounted dashboard accretes live arrivals forever,
+    // and an unbounded array is a slow leak (the stream's DOM is already windowed on top of this).
     const add = (incoming: Envelope[]) => {
       setEnvelopes((prev) => {
         const have = new Set(prev.map((e) => e.id));
         const fresh = incoming.filter((e) => !have.has(e.id));
         if (fresh.length === 0) return prev;
-        return [...prev, ...fresh].sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
+        return capNewest([...prev, ...fresh].sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1)));
       });
     };
 

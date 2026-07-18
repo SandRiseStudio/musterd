@@ -82,6 +82,7 @@ the temp daemon (`server: http://127.0.0.1:4890`) — the binding's embedded `se
 | ---------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-07-18 | Finding #1: daemon br/gzip + Cache-Control/ETag    | throttled Lighthouse **49 → 71** · LCP 7.2 s → 4.3 s · FCP 5.5 s → 3.1 s · transfer 1,077 → 467 KB                                                               |
 | 2026-07-18 | Finding #5: API JSON (`/teams/*` reads) compressed | /live backfill Fetch **124 → 39 KB (−69%)** · transfer 467 → 381 KB · `uses-text-compression` audit cleared · throttled Lighthouse ~82 (median of 3), LCP ~3.6 s |
+| 2026-07-18 | Finding #3: stream DOM windowing (bounded rows)    | DOM **4,461 → 1,564** (audit 0 → 0.5) · TBT ~210 → **10–20 ms** · load long-tasks 120 ms–1 s → **53 ms** · heap 12 → 8 MB · worst frame 794 → 21 ms · score ~85  |
 
 ## Findings, ranked by expected win
 
@@ -99,10 +100,17 @@ the temp daemon (`server: http://127.0.0.1:4890`) — the binding's embedded `se
    coverage-of-framework-paths, not dead marketing code, and isn't cheaply extractable. Compression
    (finding #1) already took this chunk to 87 KB on the wire. Parking unless a concrete split target
    appears.
-3. **Backfill render causes the LCP outliers and frame hitches.** The worst runs show a ~1 s
-   long task during load and 460–790 ms worst frames in the runtime window, consistent with
-   rendering the full `GET /messages` backfill in one commit (~6,900 DOM nodes). Windowing or
-   incremental rendering of the stream would cap this. **Now the top open lever.**
+3. **~~Backfill render / stream DOM weight.~~ SHIPPED (2026-07-18).** Profiling first corrected the
+   premise: the stream's _render CPU_ was already cheap (~4 ms; the "~1 s long task" was one-run
+   variance), but its DOM was 94% of the page (4,214 of 4,490 nodes — Lighthouse `dom-size` score
+   0). Fix: the stream mounts only the newest ~60 rows (`live/window.ts` math + windowed
+   `Stream`); older history stays in memory behind a top "N earlier" pill that auto-reveals in
+   steps on scrollback with exact manual scroll anchoring (`overflow-anchor: none`), collapses
+   back at the live edge, and `scrollToMessage` became an event the stream answers by widening the
+   window before scrolling (quotes/asks/bubbles unchanged). `useLiveStream` caps memory at the
+   newest 1,000 envelopes. Typewriter, stick-to-bottom, day dividers, and the "now" marker are
+   verified preserved by a 12-check CDP behavioral suite. Deliberately no `content-visibility`:
+   its placeholder sizing corrects itself after our anchoring runs and the viewport drifts.
 4. **Fonts:** 948 KB of woff2 ships in dist across 5 families; /live pulls 7 files (~117 KB).
    Subsetting/limiting weights is a smaller but easy win.
 5. **~~API JSON responses served uncompressed.~~ SHIPPED (2026-07-18).** `sendJson` now negotiates
