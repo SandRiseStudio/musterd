@@ -17,7 +17,7 @@ import {
   type Cue,
   type ScenePalette,
 } from './render';
-import { truncateSpeech, typeCadence } from './speech';
+import { shapeSpeech, typeCadence } from './speech';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
 export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode } from './types';
@@ -36,8 +36,10 @@ const DOT_STATE: Record<Posture, 'on' | 'idle' | 'away' | 'off'> = {
 // The hold is deliberately generous (plus a per-character allowance, capped) so a bubble lingers long
 // enough to actually read — and to click through to the stream — before it drifts away.
 const SPEECH_HOLD_MS = 4200;
-const SPEECH_HOLD_PER_CHAR_MS = 30;
-const SPEECH_HOLD_MAX_MS = 7000;
+const SPEECH_HOLD_PER_CHAR_MS = 22;
+const SPEECH_HOLD_MAX_MS = 9000;
+/** Routine status pulses linger less — they arrive constantly and shouldn't own the floor. */
+const SPEECH_HOLD_MAX_STATUS_MS = 6000;
 const SPEECH_OUT_MS = 560;
 /** How far above the head anchor the bubble sits (clears the name label). */
 const SPEECH_LIFT = 26;
@@ -352,16 +354,19 @@ export function mountOffice(
    * even while the office rests; reduced-motion shows the text at once with no typewriter. When the act's
    * envelope `id` is known (and the host wired `onActClick`), the bubble is a click-through to that act
    * in the stream panel. */
-  function showSpeech(who: string, raw: string, tone: string, id?: string) {
-    const text = truncateSpeech(raw);
+  function showSpeech(who: string, raw: string, tone: string, id?: string, act?: string) {
+    const { glance, full, clamped } = shapeSpeech(raw, act);
     const head = heads.get(who);
-    if (!text || !head) return; // nothing to say, or the sender isn't on the floor (offline / capped)
+    if (!glance || !head) return; // nothing to say, or the sender isn't on the floor (offline / capped)
 
     const prev = speeches.get(who);
     if (prev) clearSpeech(who, prev);
 
     const outer = document.createElement('div');
     outer.className = 'lc-speech';
+    // Bubbles accept the pointer so hovering expands the text and pauses the fade — even before the
+    // (click-through) affordance is wired below.
+    outer.style.pointerEvents = 'auto';
     const inner = document.createElement('div');
     inner.className = 'lc-speech__inner';
     if (id && options.onActClick) {
@@ -378,6 +383,13 @@ export function mountOffice(
     const textNode = document.createTextNode('');
     textEl.appendChild(textNode);
     inner.appendChild(textEl);
+    if (clamped) {
+      // a quiet "there's more" chip — hovering the bubble reveals the full text
+      const more = document.createElement('span');
+      more.className = 'lc-speech__more';
+      more.textContent = '⋯';
+      inner.appendChild(more);
+    }
     outer.appendChild(inner);
     labelHost.appendChild(outer);
 
@@ -389,45 +401,84 @@ export function mountOffice(
     const raf = requestAnimationFrame(() => outer.classList.add('is-in'));
     s.cancels.push(() => cancelAnimationFrame(raf));
 
-    // Linger scaled to length (longer text earns a longer read), then drift away. Hovering the bubble
-    // pauses the countdown so a reader (or a click) is never raced by the fade.
-    const holdMs = Math.min(SPEECH_HOLD_MAX_MS, SPEECH_HOLD_MS + text.length * SPEECH_HOLD_PER_CHAR_MS);
-    const leave = () => {
-      let hold: ReturnType<typeof setTimeout>;
-      const begin = () => {
-        hold = setTimeout(() => {
-          outer.classList.remove('is-in');
-          outer.classList.add('is-out');
-          const rm = setTimeout(() => clearSpeech(who, s), SPEECH_OUT_MS);
-          s.cancels.push(() => clearTimeout(rm));
-        }, holdMs);
+    // Hover = "let me read this": finish any in-flight typewriter, swap to the full text, and grow the
+    // bubble smoothly. We measure the natural height after the swap and hand it to CSS as --lc-speech-h
+    // so max-height can transition (height:auto can't). The outer transform is left untouched — it
+    // updates per frame to follow a walker, so all growth happens on the inner element.
+    let expand = () => {};
+    let collapse = () => {};
+    if (clamped) {
+      expand = () => {
+        textNode.nodeValue = full;
+        outer.classList.add('is-expanded');
+        // measure on the next frame so the expanded (clamp-removed) layout has painted
+        requestAnimationFrame(() => {
+          inner.style.setProperty('--lc-speech-h', `${inner.scrollHeight}px`);
+        });
       };
-      begin();
-      outer.addEventListener('mouseenter', () => clearTimeout(hold));
-      outer.addEventListener('mouseleave', begin);
-      s.cancels.push(() => clearTimeout(hold));
+      collapse = () => {
+        outer.classList.remove('is-expanded');
+        inner.style.removeProperty('--lc-speech-h');
+        textNode.nodeValue = glance;
+      };
+    }
+
+    // The dismiss countdown: begin() arms it, and it's cancelled while hovered (below) so a reader —
+    // or a click — is never raced by the fade. Longer glances earn a longer base read.
+    const holdCap = act === 'status_update' ? SPEECH_HOLD_MAX_STATUS_MS : SPEECH_HOLD_MAX_MS;
+    const holdMs = Math.min(holdCap, SPEECH_HOLD_MS + glance.length * SPEECH_HOLD_PER_CHAR_MS);
+    let hold: ReturnType<typeof setTimeout> | undefined;
+    let counting = false; // true once the typewriter has finished and the fade timer is live
+    const begin = () => {
+      counting = true;
+      hold = setTimeout(() => {
+        outer.classList.remove('is-in');
+        outer.classList.add('is-out');
+        const rm = setTimeout(() => clearSpeech(who, s), SPEECH_OUT_MS);
+        s.cancels.push(() => clearTimeout(rm));
+      }, holdMs);
     };
+    s.cancels.push(() => clearTimeout(hold));
+
+    // typewriter state (a no-op under reduced motion — the whole glance shows at once)
+    let done = reduced;
+    let finish = () => {};
+
+    // One hover contract for the whole life of the bubble: finish any in-flight typewriter, expand to
+    // the full text, and freeze the fade. Leaving restores the glance and re-arms the countdown.
+    outer.addEventListener('mouseenter', () => {
+      if (!done) finish(); // complete the glance instantly, which also arms the countdown
+      clearTimeout(hold);
+      expand();
+    });
+    outer.addEventListener('mouseleave', () => {
+      collapse();
+      if (counting) begin();
+    });
 
     if (reduced) {
-      textNode.nodeValue = text; // no typewriter under reduced-motion — the whole line at once
-      leave();
+      textNode.nodeValue = glance;
+      begin();
       return;
     }
 
-    // typewriter: reveal one char at a time with a trailing caret, then hold + leave
     const caret = document.createElement('span');
     caret.className = 'lc-caret';
     textEl.appendChild(caret);
     let i = 0;
+    finish = () => {
+      if (done) return;
+      done = true;
+      clearInterval(iv);
+      caret.remove();
+      textNode.nodeValue = glance;
+      begin();
+    };
     const iv = setInterval(() => {
       i += 1;
-      textNode.nodeValue = text.slice(0, i);
-      if (i >= text.length) {
-        clearInterval(iv);
-        caret.remove();
-        leave();
-      }
-    }, typeCadence(text.length));
+      textNode.nodeValue = glance.slice(0, i);
+      if (i >= glance.length) finish();
+    }, typeCadence(glance.length));
     s.cancels.push(() => clearInterval(iv));
   }
 
@@ -690,7 +741,7 @@ export function mountOffice(
     }
     // Speech is legible content, not motion — it plays even under reduced-motion (typewriter off there).
     if (ev.kind === 'speech') {
-      showSpeech(ev.who, ev.text, ev.tone, ev.id);
+      showSpeech(ev.who, ev.text, ev.tone, ev.id, ev.act);
       return;
     }
     if (reduced) return;

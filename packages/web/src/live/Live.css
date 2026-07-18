@@ -770,7 +770,7 @@
 .lc-speech__inner {
   --lc-speech-tone: var(--lc-accent-bright);
   position: relative;
-  max-width: 210px;
+  max-width: 260px;
   padding: 7px 11px 8px;
   border-radius: 13px;
   background: rgba(30, 22, 17, 0.92);
@@ -786,7 +786,10 @@
   transform-origin: 50% 100%;
   transition:
     opacity 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1); /* gentle overshoot — a warm little pop */
+    transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    max-width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    max-height 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 220ms ease; /* gentle overshoot on enter — a warm little pop; smooth grow on hover */
 }
 /* the downward tail, matching the bubble body */
 .lc-speech__inner::after {
@@ -847,15 +850,62 @@
   }
 }
 .lc-speech__text {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5; /* the glance shows ~5 lines; the rest lives one hover away */
+  overflow: hidden;
   font-family: var(--font-sans, sans-serif);
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.36;
   font-weight: 500;
   letter-spacing: -0.005em;
   color: #f4ead9;
   overflow-wrap: anywhere;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+/* a quiet "there's more" chip, bottom-right, tinted with the act tone — fades as the bubble expands */
+.lc-speech__more {
+  position: absolute;
+  right: 7px;
+  bottom: 3px;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--lc-speech-tone) 78%, #f4ead9);
+  opacity: 0.85;
+  transition: opacity 160ms ease;
+  pointer-events: none;
+}
+/* ── hover-expand: the glance grows into the full text, scrollable past a viewport-relative cap ── */
+.lc-speech.is-expanded {
+  z-index: 4; /* lean in over neighbouring bubbles */
+}
+.lc-speech.is-expanded .lc-speech__inner {
+  max-width: 300px;
+  max-height: min(40vh, var(--lc-speech-h, 40vh));
+  overflow-y: auto;
+  box-shadow:
+    0 12px 30px -8px rgba(0, 0, 0, 0.8),
+    0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 62%, transparent),
+    0 4px 26px -4px color-mix(in srgb, var(--lc-speech-tone) 66%, transparent);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--lc-speech-tone) 50%, transparent) transparent;
+}
+.lc-speech.is-expanded .lc-speech__text {
+  -webkit-line-clamp: unset;
+  display: block;
+  overflow: visible;
+}
+.lc-speech.is-expanded .lc-speech__more {
+  opacity: 0;
+}
+.lc-speech.is-expanded .lc-speech__inner::-webkit-scrollbar {
+  width: 6px;
+}
+.lc-speech.is-expanded .lc-speech__inner::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--lc-speech-tone) 50%, transparent);
+  border-radius: 3px;
 }
 @media (prefers-reduced-motion: reduce) {
   /* no spring/drift — just a soft cross-fade (opacity is safe under reduced-motion) */
