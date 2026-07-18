@@ -87,6 +87,25 @@ async function req(method: string, path: string, body: unknown, auth?: Auth) {
   return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
 }
 
+/**
+ * Raw GET against the test server: unlike undici's `fetch` (which auto-decodes and hides the header)
+ * it never decompresses, so tests can assert the exact `content-encoding` and diff the raw body.
+ */
+function rawHttpGet(
+  path: string,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; headers: IncomingHttpHeaders; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    httpGet(base + path, { headers }, (r) => {
+      const chunks: Buffer[] = [];
+      r.on('data', (c) => chunks.push(c as Buffer));
+      r.on('end', () =>
+        resolve({ status: r.statusCode ?? 0, headers: r.headers, body: Buffer.concat(chunks) }),
+      );
+    }).on('error', reject);
+  });
+}
+
 /** Mint a standing seat grant (admin-authed) so an agent WS-claim occupies immediately, not pending. */
 async function standingGrant(adminAuth: Auth, seat: string): Promise<string> {
   const r = await post(
@@ -491,6 +510,55 @@ describe('static web serving (ADR 062)', () => {
     } finally {
       await s.close();
     }
+  });
+});
+
+describe('API response compression', () => {
+  it('compresses large JSON reads per Accept-Encoding and leaves small ones identity', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential as string;
+    await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+    // Seed a backfill well past the 1400-byte threshold.
+    for (let i = 0; i < 40; i++) {
+      await post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id: `m${i}`,
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from: 'nick',
+            to: { kind: 'member', name: 'bo' },
+            act: 'message',
+            body: `status update ${i} — ${'detail '.repeat(12)}`,
+            ts: 1000 + i,
+          },
+        },
+        nickTok,
+      );
+    }
+    const auth = { authorization: `Bearer ${nickTok}` };
+
+    // brotli preferred; the decoded body round-trips to the full timeline.
+    const br = await rawHttpGet('/teams/dawn/messages', { ...auth, 'accept-encoding': 'br' });
+    expect(br.status).toBe(200);
+    expect(br.headers['content-encoding']).toBe('br');
+    expect(br.headers['vary']).toMatch(/accept-encoding/i);
+    expect(JSON.parse(brotliDecompressSync(br.body).toString()).messages).toHaveLength(40);
+
+    // gzip when brotli isn't offered.
+    const gz = await rawHttpGet('/teams/dawn/messages', { ...auth, 'accept-encoding': 'gzip' });
+    expect(gz.headers['content-encoding']).toBe('gzip');
+    expect(JSON.parse(gunzipSync(gz.body).toString()).messages).toHaveLength(40);
+
+    // No Accept-Encoding → identity, and the compressed form is materially smaller.
+    const id = await rawHttpGet('/teams/dawn/messages', auth);
+    expect(id.headers['content-encoding']).toBeUndefined();
+    expect(br.body.length).toBeLessThan(id.body.length / 2);
+
+    // A small response stays identity even when compression is on the table (below threshold).
+    const health = await rawHttpGet('/health', { 'accept-encoding': 'br, gzip' });
+    expect(health.headers['content-encoding']).toBeUndefined();
   });
 });
 

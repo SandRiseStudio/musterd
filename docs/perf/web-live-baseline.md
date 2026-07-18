@@ -78,29 +78,37 @@ the temp daemon (`server: http://127.0.0.1:4890`) — the binding's embedded `se
 
 ## Optimization log
 
-| Date       | Change                                          | Result (throttled Lighthouse)                                                                    |
-| ---------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| 2026-07-18 | Finding #1: daemon br/gzip + Cache-Control/ETag | **49 → 71** · LCP 7.2 s → 4.3 s · FCP 5.5 s → 3.1 s · TBT 540 → 310 ms · transfer 1,077 → 471 KB |
+| Date       | Change                                             | Result                                                                                                                                                           |
+| ---------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-18 | Finding #1: daemon br/gzip + Cache-Control/ETag    | throttled Lighthouse **49 → 71** · LCP 7.2 s → 4.3 s · FCP 5.5 s → 3.1 s · transfer 1,077 → 467 KB                                                               |
+| 2026-07-18 | Finding #5: API JSON (`/teams/*` reads) compressed | /live backfill Fetch **124 → 39 KB (−69%)** · transfer 467 → 381 KB · `uses-text-compression` audit cleared · throttled Lighthouse ~82 (median of 3), LCP ~3.6 s |
 
 ## Findings, ranked by expected win
 
-1. **~~The daemon serves everything uncompressed with zero caching headers.~~ SHIPPED (2026-07-18).**
-   `sendFile` now negotiates brotli/gzip for text types (`Accept-Encoding`, compressed bytes cached
-   so it's paid once), sets `Cache-Control: …immutable` on content-hashed `/assets/*`, and gives the
-   app shell a weak ETag + `no-cache` that answers `If-None-Match` with a 304. Measured: entry chunk
-   320 KB → 87 KB brotli, /live transfer **1,077 KB → 467 KB (−57%)**, throttled Lighthouse **49 →
-   71**, LCP **7.2 s → 4.3 s**. Residual `uses-text-compression` (~85 KB) is the API JSON on the
-   `/teams/*` path, which does not go through `serveStatic` — a separate lever.
-2. **Entry chunk is heavy and half-unused.** `index-*.js` is 320 KB raw; Lighthouse estimates
-   **154 KB of unused JS** on /live. The marketing-site code (LiquidGlass engine, Lenis, Hero,
-   Roadmap) and the dashboard share one entry — route-level splitting should keep /live from
-   paying for the landing page.
+1. **~~The daemon serves everything uncompressed with zero caching headers.~~ SHIPPED (2026-07-18,
+   #326).** `sendFile` now negotiates brotli/gzip for text types (`Accept-Encoding`, compressed bytes
+   cached so it's paid once), sets `Cache-Control: …immutable` on content-hashed `/assets/*`, and
+   gives the app shell a weak ETag + `no-cache` that answers `If-None-Match` with a 304. Measured:
+   entry chunk 320 KB → 87 KB brotli, /live transfer **1,077 KB → 467 KB (−57%)**, throttled
+   Lighthouse **49 → 71**, LCP **7.2 s → 4.3 s**.
+2. **~~Entry chunk is heavy and half-unused.~~ INVESTIGATED — not a real lever (2026-07-18).** The
+   premise (marketing code shares the dashboard's entry) was wrong: the landing components
+   (LiquidGlass/`engine-*`, Lenis, Hero, Roadmap) already live in the `/`-only `routes-*.js` and lazy
+   chunks — /live never downloads them. The 320 KB `index-*.js` it _does_ load is the framework
+   runtime (React 19 + TanStack Router/Start) + protocol; Lighthouse's "154 KB unused" is
+   coverage-of-framework-paths, not dead marketing code, and isn't cheaply extractable. Compression
+   (finding #1) already took this chunk to 87 KB on the wire. Parking unless a concrete split target
+   appears.
 3. **Backfill render causes the LCP outliers and frame hitches.** The worst runs show a ~1 s
    long task during load and 460–790 ms worst frames in the runtime window, consistent with
    rendering the full `GET /messages` backfill in one commit (~6,900 DOM nodes). Windowing or
-   incremental rendering of the stream would cap this.
+   incremental rendering of the stream would cap this. **Now the top open lever.**
 4. **Fonts:** 948 KB of woff2 ships in dist across 5 families; /live pulls 7 files (~117 KB).
    Subsetting/limiting weights is a smaller but easy win.
+5. **~~API JSON responses served uncompressed.~~ SHIPPED (2026-07-18).** `sendJson` now negotiates
+   brotli/gzip (fast levels — dynamic bodies aren't cacheable) for responses over ~1.4 KB, encoding
+   picked once per request. The /live message backfill (`GET /teams/:slug/messages`) drops **124 KB →
+   39 KB**; Lighthouse's `uses-text-compression` residual is cleared.
 
 ## Prod-serving caveat (2026-07-17)
 
