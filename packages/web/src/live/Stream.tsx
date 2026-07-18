@@ -1,5 +1,12 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
-import { Fragment, type ReactElement, useEffect, useRef, useState } from 'react';
+import {
+  Fragment,
+  type ReactElement,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   actLabel,
   actTone,
@@ -21,6 +28,13 @@ import {
   type RichToken,
 } from './format';
 import { CollapseButton, PanelRail } from './PanelChrome';
+import {
+  INITIAL_WINDOW,
+  anchoredScrollTop,
+  expandedWindow,
+  hiddenCount,
+  windowCovering,
+} from './window';
 
 /**
  * The legible half of the split-canvas: the team's act stream. Rows arrive newest-last; the last row
@@ -42,12 +56,39 @@ export function Stream({
 }) {
   const idx = rosterIndex(roster);
   const lastId = envelopes.length ? envelopes[envelopes.length - 1]!.id : null;
-  // Index by id so a reply (meta.in_reply_to) can render a quote of the exact message it answers.
+  // Index by id over the FULL array (not the rendered window) so a reply quote can still show the
+  // text of a parent whose row is currently above the window.
   const byId = new Map(envelopes.map((e) => [e.id, e]));
 
   const scrollRef = useRef<HTMLElement>(null);
   const rowsRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
+
+  // Bounded DOM (perf lever #3): only the newest `windowSize` rows are mounted; the rest of the
+  // in-memory history hides behind the top expander and is revealed in steps as the reader scrolls
+  // back. The full `envelopes` array still feeds quotes/asks/bubbles — only the DOM is windowed.
+  const [windowSize, setWindowSize] = useState(INITIAL_WINDOW);
+  const hidden = hiddenCount(envelopes.length, windowSize);
+  const visible = envelopes.slice(hidden);
+  // Latest envelopes for the stable reveal listener (registered once, must not go stale).
+  const envelopesRef = useRef(envelopes);
+  envelopesRef.current = envelopes;
+  // Scroll correction captured at expansion time, applied after the wider window commits.
+  const anchorRef = useRef<{ top: number; height: number } | null>(null);
+  // A reveal target whose row isn't mounted yet — scrolled+flashed as soon as it exists.
+  const pendingRevealRef = useRef<string | null>(null);
+  // While a reveal's smooth scroll is in flight, the pass upward still emits scroll events inside
+  // the bottom threshold — without this hold the live-edge collapse would fire mid-scroll and
+  // unmount the row we're travelling to.
+  const revealHoldUntilRef = useRef(0);
+
+  const expand = () => {
+    const el = scrollRef.current;
+    if (el) anchorRef.current = { top: el.scrollTop, height: el.scrollHeight };
+    setWindowSize((w) => expandedWindow(w, envelopesRef.current.length));
+  };
+  const expandRef = useRef(expand);
+  expandRef.current = expand;
 
   // Follow the bottom as content grows (new rows AND text typing out) — but only while the reader is
   // already near the bottom, so scrolling up to read history is never yanked back down.
@@ -64,8 +105,81 @@ export function Stream({
 
   const onScroll = () => {
     const el = scrollRef.current;
-    if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (!el) return;
+    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    // Back at the live edge → collapse the DOM to the resting window. The removed rows are all far
+    // above the viewport, so nothing the reader sees moves (the ResizeObserver re-pins the bottom).
+    // Held off while a reveal's smooth scroll is passing through the bottom zone.
+    if (
+      atBottom.current &&
+      windowSize !== INITIAL_WINDOW &&
+      Date.now() > revealHoldUntilRef.current
+    )
+      setWindowSize(INITIAL_WINDOW);
   };
+
+  // Apply the expansion's scroll anchor before paint — the viewport stays glued to the same rows
+  // while older ones mount above it. (`overflow-anchor: none` on the scroller keeps Chrome's native
+  // anchoring from double-correcting; Safari has none, so this is the one cross-browser truth.)
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (anchorRef.current) {
+      el.scrollTop = anchoredScrollTop(anchorRef.current.top, anchorRef.current.height, el.scrollHeight);
+      anchorRef.current = null;
+    } else if (atBottom.current) {
+      el.scrollTop = el.scrollHeight; // collapse / first backfill: stay pinned to the live edge
+    }
+    const pending = pendingRevealRef.current;
+    if (pending) {
+      const row = document.getElementById(`lc-msg-${pending}`);
+      if (row) {
+        pendingRevealRef.current = null;
+        revealHoldUntilRef.current = Date.now() + 1500;
+        flashRow(row);
+      }
+    }
+  }, [windowSize, envelopes.length]);
+
+  // Auto-reveal on scrollback: when the reader approaches the top of the mounted rows, widen the
+  // window before they hit it (chunked infinite scroll). Guarded by atBottom so the initial
+  // backfill — which mounts the expander before the pin-to-bottom lands — can't fire a phantom
+  // expansion.
+  const expanderRef = useRef<HTMLButtonElement>(null);
+  const hasHidden = hidden > 0;
+  useEffect(() => {
+    const btn = expanderRef.current;
+    const root = scrollRef.current;
+    if (!btn || !root || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting) && !atBottom.current) expandRef.current();
+      },
+      { root, rootMargin: '200px 0px 0px 0px' },
+    );
+    io.observe(btn);
+    return () => io.disconnect();
+  }, [hasHidden]);
+
+  // Reveal requests (quotes, the asks strip, office bubbles): if the target row is above the
+  // window, widen the window to cover it first, then scroll+flash once it mounts.
+  useEffect(() => {
+    const onReveal = (ev: Event) => {
+      const id = (ev as CustomEvent<{ id: string }>).detail?.id;
+      if (!id) return;
+      const el = document.getElementById(`lc-msg-${id}`);
+      if (el) {
+        revealHoldUntilRef.current = Date.now() + 1500;
+        return void flashRow(el);
+      }
+      const index = envelopesRef.current.findIndex((e) => e.id === id);
+      if (index < 0) return; // not in memory (older than the backfill/cap) — nothing to jump to
+      pendingRevealRef.current = id;
+      setWindowSize((w) => windowCovering(index, envelopesRef.current.length, w));
+    };
+    window.addEventListener(REVEAL_EVENT, onReveal);
+    return () => window.removeEventListener(REVEAL_EVENT, onReveal);
+  }, []);
 
   return (
     <section
@@ -95,10 +209,18 @@ export function Stream({
             status, and resolutions, live.
           </p>
         )}
-        {envelopes.map((e, i) => {
+        {hasHidden && (
+          <button type="button" className="lc-earlier" ref={expanderRef} onClick={expand}>
+            ↑ {hidden} earlier {hidden === 1 ? 'message' : 'messages'}
+          </button>
+        )}
+        {visible.map((e, i) => {
+          const gi = hidden + i; // global index — day dividers stay correct across the window cut
           const isNow = e.id === lastId;
-          const prev = i > 0 ? envelopes[i - 1]! : null;
-          const newDay = !prev || dayKey(e.ts) !== dayKey(prev.ts);
+          const prev = gi > 0 ? envelopes[gi - 1]! : null;
+          // The first mounted row always labels its day, so a window that opens mid-day still tells
+          // the reader when they are.
+          const newDay = i === 0 || !prev || dayKey(e.ts) !== dayKey(prev.ts);
           return (
             <Fragment key={e.id}>
               {newDay && (
@@ -123,16 +245,25 @@ export function Stream({
   );
 }
 
-/** Scroll a message into view (and flash it) — used by reply quotes here and by the office's
- * speech-bubble click-through (an act bubble over a character's head navigates to its stream row). */
+/** The reveal request the stream listens for — carries the target message id. */
+const REVEAL_EVENT = 'lc:reveal-message';
+
+/**
+ * Scroll a message into view (and flash it) — used by reply quotes here and by the office's
+ * speech-bubble click-through and the asks strip. Dispatched as an event rather than a direct DOM
+ * lookup because the target row may sit above the stream's rendered window: the stream widens its
+ * window to mount the row first, then scrolls.
+ */
 export function scrollToMessage(id: string) {
-  if (typeof document === 'undefined') return;
-  const el = document.getElementById(`lc-msg-${id}`);
-  if (!el) return;
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(REVEAL_EVENT, { detail: { id } }));
+}
+
+function flashRow(el: Element) {
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   el.classList.remove('lc-row--flash');
   // reflow so the animation can re-trigger on a repeat click
-  void el.offsetWidth;
+  void (el as HTMLElement).offsetWidth;
   el.classList.add('lc-row--flash');
 }
 

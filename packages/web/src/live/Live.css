@@ -1363,6 +1363,9 @@
   background: var(--lc-ground);
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 233, 208, 0.16) transparent;
+  /* The stream does its own scroll anchoring when the window expands upward (Stream.tsx); Chrome's
+     native anchoring would double-correct the same prepend, so it's off and the JS is the one truth. */
+  overflow-anchor: none;
 }
 .lc-stream::-webkit-scrollbar {
   width: 10px;
@@ -1411,6 +1414,30 @@
   width: 100%;
   max-width: 78ch;
   margin-inline: auto;
+}
+/* The reveal-earlier pill at the top of the mounted window — mono, quiet, in the console's voice.
+   (Deliberately NO content-visibility on rows: its placeholder sizes get corrected after our scroll
+   anchoring runs and, with native overflow-anchor off, the correction drifts. The DOM window itself
+   is the render bound.) */
+.lc-earlier {
+  align-self: center;
+  margin-bottom: var(--lc-3);
+  padding: 4px 14px;
+  border: 1px solid rgba(122, 106, 86, 0.35);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lc-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease;
+}
+.lc-earlier:hover {
+  color: var(--lc-text);
+  border-color: var(--lc-accent);
 }
 .lc-empty {
   color: var(--lc-muted);
