@@ -133,10 +133,47 @@ import {
 import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
 import { recordError, recordInterruptCheck, recordSeenLatency } from '../telemetry.js';
 
+/**
+ * The content-coding negotiated for this response from its request's `Accept-Encoding`, set once at
+ * the top of `handleHttp`. Kept off the request path so `sendJson` (62 call sites, none holding `req`)
+ * can consult it without threading. A WeakMap rather than a property on `res` so we neither widen the
+ * node type nor leak past the response's lifetime.
+ */
+const negotiatedEncoding = new WeakMap<ServerResponse, 'br' | 'gzip' | null>();
+
+/**
+ * Below ~1 MTU, compression framing + CPU costs more than the bytes it saves and adds latency to the
+ * hot small responses (status, inbox-check). The big reads — the /live message backfill especially —
+ * clear this easily.
+ */
+const JSON_COMPRESS_MIN_BYTES = 1400;
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
-  res.writeHead(status, { 'content-type': 'application/json' });
-  res.end(payload);
+  const bytes = Buffer.byteLength(payload);
+  const enc = bytes >= JSON_COMPRESS_MIN_BYTES ? (negotiatedEncoding.get(res) ?? null) : null;
+  if (!enc) {
+    res.writeHead(status, { 'content-type': 'application/json', 'content-length': String(bytes) });
+    return void res.end(payload);
+  }
+  // Dynamic bodies can't be cached like static assets, so use a fast level (not static's brotli-11):
+  // gzip-6 / brotli-4 compress a ~120 KB backfill in a couple ms while still recovering most of it.
+  const buf =
+    enc === 'br'
+      ? brotliCompressSync(payload, {
+          params: {
+            [zlibConstants.BROTLI_PARAM_QUALITY]: 4,
+            [zlibConstants.BROTLI_PARAM_SIZE_HINT]: bytes,
+          },
+        })
+      : gzipSync(payload, { level: 6 });
+  res.writeHead(status, {
+    'content-type': 'application/json',
+    'content-encoding': enc,
+    vary: 'Accept-Encoding',
+    'content-length': String(buf.length),
+  });
+  res.end(buf);
 }
 
 function sendNoContent(res: ServerResponse): void {
@@ -795,6 +832,8 @@ export async function handleHttp(
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
     const method = req.method ?? 'GET';
+    // Negotiate response compression once; sendJson consults this for bodies over the size threshold.
+    negotiatedEncoding.set(res, pickEncoding(req.headers['accept-encoding']));
 
     if (method === 'GET' && path === '/health') {
       // db + schema are exposed so clients can confirm *which* database this daemon serves
