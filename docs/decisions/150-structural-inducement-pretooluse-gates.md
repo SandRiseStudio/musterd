@@ -87,23 +87,73 @@ and whether the gate _warns_ or _blocks_, is a **team-policy declaration** — o
   should own a lane (still a warn-and-coordinate, ADR 083). It gates only "you are editing a declared
   contended surface without having claimed it."
 
-### Gate B — policy-classed action→ask (agent↔human) — _stanley (to draft)_
+### Gate B — policy-classed action→ask (agent↔human) — _stanley_
 
-> **Owner: stanley.** Stub captures the agreed constraints; stanley writes the section.
+**A tool call matching a team-declared costly-action class requires an answered `approve` ask before
+it proceeds.** The gate does not _advise_ asking (the A/B shows advice loses); it **routes** the action
+through the ask stream: the deny **is** the emission, so the ask exists whether or not the agent would
+have raised one.
 
-- **Boundary constraint (load-bearing, ADR 145):** this gate covers **team-policy-declared action
-  classes only** — e.g. `merge-to-main`, `deploy`, `force-push`, `spend` — declared as command/glob
-  classes on the team policy (same declaration shape as Gate A's surface classes). It is **never
-  generic tool mediation** and **never a re-implementation of harness permission prompts** (nick's
-  line: those stay with the harness). If it would fire on an arbitrary tool call, it is out of scope.
-- **Mechanism:** PreToolUse hook on a matched action class **denies**, **emits** a
-  `species:approve tier:blocking` ask (ADR 147), and **holds** — the HOLD is ADR 147's existing
-  contract (no new daemon timer/state). **Release = the hook re-checking the `ask_ref` for an accept**
-  before permitting the action; a decline keeps it denied.
-- **To specify (stanley):** the policy declaration schema for action classes; how the hook resolves an
-  action to a class; the re-check cadence / how the agent is told to wait (the ADR 147 send-response
-  contract); audit shape (`ask.raised` → accept/decline → action proceeds/stays denied); and the
-  bypass semantics if enforcement is `warn` not `block` for that class.
+**Boundary constraint (load-bearing, ADR 145).** This gate covers **team-policy-declared action
+classes only**. The declaration is the team saying "these specific actions are team-consequential —
+the shared branch, shared infra, money." It is **never generic tool mediation** and **never a
+re-implementation of harness permission prompts** (nick's line: those stay with the harness). Two
+structural guards keep the creep out: the class table lives on the **team policy** (admin-set, audited
+`policy.change`) — never in harness settings — and a call matching **no declared class passes through
+untouched**, always. If a design change would make this gate fire on an undeclared call, it is out of
+scope by construction.
+
+- **Declaration schema:** costly-action classes ride the same policy table as Gate A's
+  contended-surface classes — one `enforcement` policy field, two class kinds. A costly-action class
+  is `{ class, match, posture }`:
+  - `class` — a short name (`merge-to-main`, `force-push`, `deploy`, `spend`) that appears in every
+    denial, ask body, and audit row — the legible unit the team declared.
+  - `match` — per tool shape: for `Bash`, a list of **command globs** matched against the normalized
+    command (first line, collapsed whitespace — e.g. `git push --force*`, `gh pr merge*`,
+    `terraform apply*`); for `Edit`/`Write`, **path globs** (e.g. a production config). First matching
+    class in declaration order wins; matching consumes only what the harness already hands a
+    PreToolUse hook (tool name + input) — the gate gains no new visibility into the session.
+  - `posture` — `warn` (default) | `block`, per class, exactly as Gate A.
+- **On match, posture `block` — deny _is_ emit:** the hook (1) **denies** the call, (2) checks for an
+  **existing open gate-ask** for the same class + action fingerprint (a hash of the normalized
+  command/path — so retries converge on ONE ask instead of spamming one per attempt), (3) if none,
+  **emits** the ask itself through the seat's own credential: `species:approve`, `tier:blocking`, body
+  naming the class and the exact action, `meta.gate = { class, fingerprint }` so a gate-emitted ask is
+  distinguishable from an agent-authored one in the record. The emission lands on every ADR 147/149
+  surface for free — admin push, the loud `/live` strip, the Slack webhook. (4) The denial's repair
+  text hands the agent its ADR 147 contract verbatim-intent: _"blocked pending human approval — ask
+  `<id>` raised (blocking: wait up to 15m; on silence HOLD, record `status_update` with
+  `meta.ask_ref` + `ask_outcome:'held'`, do NOT proceed). Do other work or re-try the action to
+  re-check; a human accept releases it."_
+- **Release — re-check on re-attempt, no timer anywhere:** the gate keeps ADR 147's clock discipline —
+  the daemon runs no timer, and neither does the hook. Each **re-attempt of the action** re-runs the
+  hook, which re-checks the ask thread: an **`accept`** (from a human seat) referencing the `ask_ref`
+  → the call passes, once-per-fingerprint standing until the policy or fingerprint changes; a
+  **`decline`** → stays denied with "declined by `<seat>` — do not re-raise; take a different
+  approach or hand off"; **no answer** → stays denied, contract restated. Re-attempting is the
+  natural agent move after a denial, so the cadence is agent-owned exactly like the ask clock itself.
+  ("Only an _admin's_ accept releases" is deliberately NOT hard-enforced here — same deferral as
+  ADR 147's approve species, gated on `multi-human-admin`; the release check requires a **human**
+  seat's accept.)
+- **Posture `warn`:** the action **proceeds** and the hook surfaces the advisory ("heads-up:
+  `merge-to-main` is a declared costly action — raise an `ask` species:approve before this when it's
+  irreversible") — no ask is emitted (an approval nobody requested is noise, and warn means the team
+  chose visibility over consent). The decision row below preserves the trace.
+- **Audit shape:** symmetric with Gate A — one **`action.gate`** decision row per intercepted call
+  (class, seat, posture, outcome: `warned` | `denied_ask_raised` | `denied_awaiting` |
+  `denied_declined` | `released`), posted through the same small daemon ingest Gate A's `lane.gate`
+  rows use (member-authed; decisions are shapes only, never command text beyond the class +
+  fingerprint). The ask lifecycle itself needs nothing new: `ask.raised` (with `meta.gate` in its
+  detail) → accept/decline → `ask.held` if the agent records the elapsed hold — all existing ADR
+  147 rows. "Which costly actions proceeded un-asked" is then one query: `action.gate` rows with
+  outcome `warned`, beside the `ask.*` rows the block posture provoked.
+- **Why it binds where guidance didn't:** the primer said "ask before costly actions" and produced 0
+  asks; the gate makes the ask **exist as a side-effect of attempting the action** — the agent's
+  cooperation is required only for the _waiting_ (which the blocking contract already governs and the
+  hold outcome makes auditable), not for the _raising_.
+- **Non-goals:** no gating of reads or undeclared calls; no interactive approval UI in the hook (the
+  human answers on the ADR 149 surfaces, not at the tool boundary); no agent-side override — release
+  paths are a human accept or an admin flipping the class posture, both audited.
 
 ### The policy model (both gates)
 
