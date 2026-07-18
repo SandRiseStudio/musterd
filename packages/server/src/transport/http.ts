@@ -24,6 +24,7 @@ import {
   OpenLaneSchema,
   UpdateLaneSchema,
   DeclareGoalSchema,
+  GateCheckRequestSchema,
   makeEnvelope,
   type Envelope,
   type LaneWarning,
@@ -40,6 +41,7 @@ import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
+import { adjudicateGate } from '../protocol/gate.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
@@ -1141,6 +1143,30 @@ export async function handleHttp(
       if (method === 'GET' && rest === '/policy') {
         const { team } = authAdmin(ctx, slug, req);
         return sendJson(res, 200, { policy: getPolicy(ctx.db, team.id) });
+      }
+
+      // ── PreToolUse enforcement gates (ADR 150 — structural inducement) ──────────────────────────
+      // The class table is member-readable (unlike the full policy, which is admin-only and carries the
+      // secret webhook): every seat's hook needs it to match tool calls CLIENT-side, and a class name +
+      // its globs are not secret. This is the ONLY policy sub-field exposed to members — the read is
+      // scoped to `enforcement` so the webhook never leaks through it.
+      if (method === 'GET' && rest === '/enforcement') {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        return sendJson(res, 200, { enforcement: getPolicy(ctx.db, team.id).enforcement });
+      }
+
+      // The gate ingest: the hook POSTs the shapes of a MATCHED tool call (never an undeclared one), the
+      // daemon adjudicates atomically (race-safe dedup/emit/release for Gate B) and records one
+      // shapes-only `lane.gate`/`action.gate` audit row. Member-authed AS the acting seat, so a Gate B
+      // ask is raised through the seat's own credential. Best-effort semantics live in the hook, not
+      // here: this route answers honestly, and the hook fails OPEN on any error (never wedge a seat).
+      if (method === 'POST' && rest === '/gate') {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        const gateReq = parseOrBadRequest(GateCheckRequestSchema, await readJson(req));
+        const decision = adjudicateGate(ctx.db, team, member, gateReq);
+        return sendJson(res, 200, decision);
       }
 
       // ── Harness residency: the wake ledger (ADR 131, increment 2) ──────────────────────────────
