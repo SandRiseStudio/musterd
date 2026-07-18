@@ -109,7 +109,19 @@ export type AuditAction =
   // daemon fired for a raised ask, detail `{ surface: 'slack', ok, status? }`. Never the URL (a
   // secret) and never the body (delivery carries bodies; audit never does, ADR 051). Zero rows on a
   // team that never set `ask_slack_webhook` is itself the guard metric that the default is off.
-  | 'ask.surfaced';
+  | 'ask.surfaced'
+  // ADR 150 (structural inducement — PreToolUse enforcement gates): one decision row per intercepted
+  // tool call that matched a declared enforcement class. `lane.gate` = Gate A (lane-ownership on a
+  // contended surface); `action.gate` = Gate B (policy-classed action→ask). Both are SHAPES ONLY —
+  // detail carries `{ class, fingerprint, posture, outcome, ...}` (the legible class name the team
+  // declared + the sha256 fingerprint), NEVER the target path or command text (ADR 051; the raw text
+  // reaches the daemon only to make the decision + fill an ask body, and dies there). `result` is
+  // `allow` when the call proceeds (warn posture, or an owned lane, or a released ask), `deny` when it
+  // was blocked. The Gate B ask lifecycle rides the existing `ask.*` rows unchanged — the deny-emit-hold
+  // is a hook behavior, not a new act. "Which costly actions proceeded un-asked" is one query:
+  // `action.gate` rows with `detail.outcome = 'warned'` beside the `ask.*` the block posture provoked.
+  | 'lane.gate'
+  | 'action.gate';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

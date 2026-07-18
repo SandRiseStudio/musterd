@@ -15,6 +15,9 @@ import {
   resolveAttestedProvenance,
   TOKEN_PREFIXES,
   type Policy,
+  type EnforcementPolicy,
+  type GateCheckRequest,
+  type GateDecision,
   RequestsResponseSchema,
   EnrollResidencyResponseSchema,
   ResidencyListResponseSchema,
@@ -497,6 +500,20 @@ export class HttpClient {
   /** Set the team governance policy — `POST /teams/:slug/policy`, admin, audited `policy.change`. */
   async setPolicy(slug: string, policy: Policy): Promise<{ policy: Policy }> {
     return (await this.request('POST', `/teams/${slug}/policy`, policy)) as { policy: Policy };
+  }
+
+  /** The enforcement class table (ADR 150) — `GET /teams/:slug/enforcement`, MEMBER-readable (unlike the
+   *  admin-only full policy). The PreToolUse hook fetches it to match tool calls client-side. */
+  async getEnforcement(slug: string): Promise<{ enforcement: EnforcementPolicy }> {
+    return (await this.request('GET', `/teams/${slug}/enforcement`)) as {
+      enforcement: EnforcementPolicy;
+    };
+  }
+
+  /** Adjudicate a matched tool call (ADR 150) — `POST /teams/:slug/gate`, member-authed as the acting
+   *  seat. The daemon decides + records a shapes-only `lane.gate`/`action.gate` row; returns allow/deny. */
+  async gateCheck(slug: string, body: GateCheckRequest): Promise<GateDecision> {
+    return (await this.request('POST', `/teams/${slug}/gate`, body)) as GateDecision;
   }
 
   /**

@@ -123,6 +123,7 @@ function removePermissions(perms: ProvisionPermissions): void {
 export const NOTIFICATION_HOOK_MARKER = 'musterd-notify-hook';
 export const SESSIONSTART_HOOK_MARKER = 'musterd-sessionstart-hook';
 export const POSTTOOLUSE_HOOK_MARKER = 'musterd-interrupt-hook';
+export const PRETOOLUSE_HOOK_MARKER = 'musterd-gate-hook';
 export const SESSION_CAPTURE_HOOK_MARKER = 'musterd-session-capture-hook';
 export const SESSION_END_HOOK_MARKER = 'musterd-session-end-hook';
 
@@ -153,6 +154,22 @@ function postToolUseHookCommand(): string {
     'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
     'command -v musterd >/dev/null 2>&1 && musterd inbox --interrupt-check 2>/dev/null || true ' +
     `# ${POSTTOOLUSE_HOOK_MARKER}`
+  );
+}
+
+function preToolUseHookCommand(): string {
+  // The PreToolUse enforcement gate (ADR 150). BEFORE an Edit/Write/Bash, pipe the hook's stdin JSON
+  // ({tool_name, tool_input}) through to `musterd gate check --stdin`, which matches it against the
+  // team's declared enforcement class table client-side and (only on a match) adjudicates server-side.
+  // Unlike the interrupt probe this HAS a matcher (Edit|Write|MultiEdit|NotebookEdit|Bash) — reads and
+  // everything else never reach the gate. `cd` + `command -v` consume no stdin so the JSON flows
+  // through untouched. Fail-open + never-failing: the CLI itself exits 0 on any error and the `|| true`
+  // is belt-and-braces, so a gate can never break a tool call (the ADR guard metric). The common case
+  // (an undeclared call) returns after one cheap loopback GET with no deny — zero friction.
+  return (
+    'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd gate check --stdin 2>/dev/null || true ' +
+    `# ${PRETOOLUSE_HOOK_MARKER}`
   );
 }
 
@@ -252,12 +269,13 @@ function upsertHook(
   event: string,
   matches: (m: ClaudeHookMatcher) => boolean,
   command: string,
+  matcher?: string,
 ): void {
   const settings = readSettingsSafe(path);
   if (settings === null) return; // present but unparseable — never clobber
   settings.hooks ??= {};
   const existing = (settings.hooks[event] ?? []).filter((m) => !matches(m));
-  existing.push({ hooks: [{ type: 'command', command }] });
+  existing.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] });
   settings.hooks[event] = existing;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
@@ -293,6 +311,15 @@ export function installMusterdHooks(): void {
     'PostToolUse',
     (m) => isMusterdHookFor(m, POSTTOOLUSE_HOOK_MARKER),
     postToolUseHookCommand(),
+  );
+  // The PreToolUse enforcement gate (ADR 150) — a DIFFERENT event + marker from the PostToolUse
+  // interrupt probe. Scoped by a matcher to the write-shaped tools it gates (reads never reach it).
+  upsertHook(
+    settingsLocalPath(),
+    'PreToolUse',
+    (m) => isMusterdHookFor(m, PRETOOLUSE_HOOK_MARKER),
+    preToolUseHookCommand(),
+    'Edit|Write|MultiEdit|NotebookEdit|Bash',
   );
   // Project-local session capture (ADR 131 §5) — a DIFFERENT concern (and marker) from the global
   // orientation SessionStart below: the capture matcher selects only capture-marked entries, so the
@@ -340,6 +367,13 @@ export function inspectClaudeHookDrift(cwd: string): string[] {
         'agent will not see urgent steering mid-loop (ADR 088). Run `musterd init` to wire it.',
     );
   }
+  if (!has('PreToolUse', PRETOOLUSE_HOOK_MARKER)) {
+    drift.push(
+      'the Claude Code PreToolUse enforcement-gate hook is missing from .claude/settings.local.json — ' +
+        "any enforcement class this team declares (ADR 150) won't be gated for this seat (it fails open, " +
+        'so nothing breaks, but a declared block is silently a no-op here). Run `musterd init` to wire it.',
+    );
+  }
   if (!has('SessionStart', SESSION_CAPTURE_HOOK_MARKER)) {
     drift.push(
       'the Claude Code SessionStart session-capture hook is missing from .claude/settings.local.json — ' +
@@ -368,6 +402,7 @@ export function removeMusterdHooks(): void {
     isMusterdHookFor(m, NOTIFICATION_HOOK_MARKER),
   );
   dropHook(settingsLocalPath(), 'PostToolUse', (m) => isMusterdHookFor(m, POSTTOOLUSE_HOOK_MARKER));
+  dropHook(settingsLocalPath(), 'PreToolUse', (m) => isMusterdHookFor(m, PRETOOLUSE_HOOK_MARKER));
   dropHook(settingsLocalPath(), 'SessionStart', (m) =>
     isMusterdHookFor(m, SESSIONSTART_HOOK_MARKER),
   );

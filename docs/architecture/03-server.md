@@ -50,6 +50,7 @@ src/
   protocol/
     validate.ts       // thin wrappers over @musterd/protocol schemas + error mapping
     route.ts          // routeEnvelope(): the ONE validate+persist+deliver path (WS & HTTP share it)
+    gate.ts           // adjudicateGate(): PreToolUse enforcement decision for a matched tool call — dispatch by kind to gateA (lane-ownership) / gateB (action→ask); warn path here, block decisions are fail-open stubs the Gate A/B lanes fill; one shapes-only lane.gate/action.gate row (ADR 150)
   notify/
     slack.ts          // ask-stream Slack delivery: formatAskSlackText + postSlackWebhook — the daemon's one outbound call, fire-and-forget, opt-in via policy ask_slack_webhook (ADR 149)
   transport/

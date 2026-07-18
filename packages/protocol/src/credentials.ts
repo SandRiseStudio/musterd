@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { EnforcementPolicySchema } from './enforcement.js';
 import { ResidencyPolicySchema } from './residency.js';
 
 /**
@@ -66,5 +67,15 @@ export const PolicySchema = z.object({
   /** Team-wide wake-policy defaults (ADR 131 increment 5) — per-seat enrollment overrides layer on
    *  top (`ResidencyPolicyOverrideSchema` in `residency.policy`). `parse({})` yields launch defaults. */
   residency: ResidencyPolicySchema.default({}),
+  /**
+   * Structural enforcement (ADR 150) — the opt-in PreToolUse gate declaration. A table of *classes* the
+   * team marked consequential enough to gate at the tool boundary (contended surfaces → Gate A
+   * lane-ownership; costly actions → Gate B action→ask). `parse({})` yields an **empty** table: no class
+   * declared means every tool call passes untouched, so the out-of-box posture stays warn-never-block
+   * (ADR 083). Not a secret — but, unlike the webhook, it carries no host, so it rides `team export` and
+   * the audit `detail` freely. The declaration is admin-set through `POST /policy` (audited
+   * `policy.change`); the hook reads it so the gate is consistent across a team's seats.
+   */
+  enforcement: EnforcementPolicySchema.default({}),
 });
 export type Policy = z.infer<typeof PolicySchema>;

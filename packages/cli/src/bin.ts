@@ -9,6 +9,7 @@ import { availabilityCommand } from './commands/availability.js';
 import { claimCommand } from './commands/claim.js';
 import { doneCommand } from './commands/done.js';
 import { fmtCommand } from './commands/fmt.js';
+import { gateCommand } from './commands/gate.js';
 import { goalCommand } from './commands/goal.js';
 import { reachabilityNudge } from './commands/helpers.js';
 import { hostCommand } from './commands/host.js';
@@ -125,7 +126,11 @@ async function instrumentedDispatch(
   rest: ReturnType<typeof parseArgs>,
 ): Promise<number> {
   const skip =
-    command === 'serve' || (command === 'inbox' && rest.flags['interrupt-check'] === true);
+    command === 'serve' ||
+    (command === 'inbox' && rest.flags['interrupt-check'] === true) ||
+    // The PreToolUse gate (ADR 150) rides every tool call like the interrupt probe — an SDK boot would
+    // blow its budget and add latency to the loop. Best-effort + fail-open; no telemetry span.
+    command === 'gate';
   if (skip || !telemetryEnabled()) return dispatch(command, rest);
   const telemetry = await startTelemetry({ serviceName: 'musterd-cli' });
   try {
@@ -213,6 +218,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return residencyCommand(rest);
     case 'session':
       return sessionCommand(rest);
+    case 'gate':
+      return gateCommand(rest);
     case 'host':
       return hostCommand(rest);
     case 'wire':

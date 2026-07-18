@@ -82,6 +82,7 @@ src/
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant + host-registry entry; status cross-checks all three stores (ADR 131)
     session.ts        // musterd session start|end --stdin (hook-driven capture → binding.session + harness-class-only attestation push) | show (the human triage view) (ADR 131 §5, inc 4)
+    gate.ts           // musterd gate check --stdin — the PreToolUse enforcement gate (hook-driven): match the tool call vs the team's class table client-side, adjudicate matches via POST /gate; fail-open (ADR 150)
     host.ts           // musterd host [--once]: the resident wake-actuator loop (notify-shaped; ADR 131 inc 3)
     serve.ts          // musterd serve [--port]
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
