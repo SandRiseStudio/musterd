@@ -1,7 +1,7 @@
 # 150 — Structural inducement: PreToolUse enforcement gates (lane-ownership + policy-classed action→ask)
 
 - Status: **draft** — 2026-07-17. Co-designed by izzo (lane-ownership gate) + stanley (action→ask
-  gate). Number provisional — pin against `origin/main` before PR (ADR-number collision trap).
+  gate). Number **150 pinned** — verified free on `origin/main` (highest is 149), 2026-07-17.
 - Date: 2026-07-17
 - Builds on: [ADR 088](088-interrupt-line-tool-boundary-inbox-check.md) (the adapter-installed
   PreToolUse/PostToolUse hook this reuses as its actuator — the one place a headless agent is reachable
