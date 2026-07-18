@@ -8,6 +8,7 @@ import {
   installMusterdHooks,
   NOTIFICATION_HOOK_MARKER,
   POSTTOOLUSE_HOOK_MARKER,
+  PRETOOLUSE_HOOK_MARKER,
   removeMusterdHooks,
   SESSION_CAPTURE_HOOK_MARKER,
   SESSION_END_HOOK_MARKER,
@@ -16,7 +17,7 @@ import {
 
 /** The Claude Code settings shape the hooks land in. */
 interface Settings {
-  hooks?: Record<string, { hooks: { type: string; command: string }[] }[]>;
+  hooks?: Record<string, { matcher?: string; hooks: { type: string; command: string }[] }[]>;
   permissions?: unknown;
   model?: string;
 }
@@ -87,6 +88,16 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     expect(pt).toContain('musterd inbox --interrupt-check');
     expect(local.hooks?.['PostToolUse']?.[0]?.matcher).toBeUndefined(); // fires on every tool
     expect(global.hooks?.['PostToolUse']).toBeUndefined(); // PostToolUse is NOT global
+
+    // The PreToolUse enforcement gate (ADR 150) is project-local, marker-tagged, matcher-scoped to
+    // write-shaped tools, and pipes the tool call into the gate CLI.
+    const pre = cmdFor(local, 'PreToolUse');
+    expect(pre).toContain(PRETOOLUSE_HOOK_MARKER);
+    expect(pre).toContain('musterd gate check --stdin');
+    expect(local.hooks?.['PreToolUse']?.[0]?.matcher).toBe(
+      'Edit|Write|MultiEdit|NotebookEdit|Bash',
+    );
+    expect(global.hooks?.['PreToolUse']).toBeUndefined(); // PreToolUse is NOT global
   });
 
   it('is idempotent — re-installing replaces in place, never stacks', () => {
@@ -94,6 +105,7 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     installMusterdHooks();
     expect(read(localPath()).hooks?.['Notification']).toHaveLength(1);
     expect(read(localPath()).hooks?.['PostToolUse']).toHaveLength(1);
+    expect(read(localPath()).hooks?.['PreToolUse']).toHaveLength(1);
     expect(read(localPath()).hooks?.['SessionStart']).toHaveLength(1);
     expect(read(localPath()).hooks?.['SessionEnd']).toHaveLength(1);
     expect(read(globalPath()).hooks?.['SessionStart']).toHaveLength(1);
@@ -106,10 +118,11 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     mkdirSync(join(cwd, '.claude'), { recursive: true });
     writeFileSync(localPath(), JSON.stringify({ hooks: { Notification: [] } }), 'utf8');
     const drift = inspectClaudeHookDrift(cwd);
-    expect(drift).toHaveLength(3);
+    expect(drift).toHaveLength(4);
     expect(drift[0]).toContain('PostToolUse interrupt hook is missing');
-    expect(drift[1]).toContain('session-capture hook is missing');
-    expect(drift[2]).toContain('SessionEnd hook is missing');
+    expect(drift[1]).toContain('PreToolUse enforcement-gate hook is missing');
+    expect(drift[2]).toContain('session-capture hook is missing');
+    expect(drift[3]).toContain('SessionEnd hook is missing');
 
     // Once init wires them, the drift clears.
     installMusterdHooks();
@@ -132,9 +145,11 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     installMusterdHooks();
     expect(cmdFor(read(localPath()), 'PostToolUse')).toContain(POSTTOOLUSE_HOOK_MARKER);
     expect(cmdFor(read(localPath()), 'SessionStart')).toContain(SESSION_CAPTURE_HOOK_MARKER);
+    expect(cmdFor(read(localPath()), 'PreToolUse')).toContain(PRETOOLUSE_HOOK_MARKER);
     removeMusterdHooks();
     const after = read(localPath());
     expect(after.hooks?.['PostToolUse']).toBeUndefined();
+    expect(after.hooks?.['PreToolUse']).toBeUndefined();
     expect(after.hooks?.['SessionStart']).toBeUndefined();
     expect(after.hooks?.['SessionEnd']).toBeUndefined();
     // The global self-gating orientation hook is machine-shared — uninstalling one folder keeps it.
