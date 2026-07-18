@@ -41,9 +41,31 @@
   --zinc-900: #18181b;
   --zinc-950: #09090b;
 
-  /* Type (brand.md §3) */
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+  /* ==========================================================================
+   * TYPE — font family config. ONE SWAP POINT for the whole web UI.
+   *
+   * Every surface reads --font-sans / --font-mono (global.css body, all *.css),
+   * and headings read --font-display, so changing the three lines below re-fonts
+   * every screen and component. Faces must be loaded in styles/global.css via
+   * @fontsource @imports before a slot can point at them.
+   *
+   * ACTIVE: the izzocam commentary-card set —
+   *   --font-sans    Fraunces      warm humanist serif, the commentary "heart"
+   *   --font-display Space Grotesk  structure & chyron labels (headings)
+   *   --font-mono    Space Mono     telemetry, timestamps, metadata
+   *
+   * TRY A DIFFERENT LOOK: comment the active trio, uncomment an alternative
+   * (or write your own). Only families @imported in global.css will render.
+   * ------------------------------------------------------------------------ */
+  --font-sans: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-display: 'Space Grotesk', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Space Mono', 'JetBrains Mono', ui-monospace, Menlo, monospace;
+
+  /* Alternative — musterd default (Inter + JetBrains Mono):
+   *   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+   *   --font-display: 'Inter', ui-sans-serif, system-ui, sans-serif;
+   *   --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+   */
 
   /* Motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);

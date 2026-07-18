@@ -10,6 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fontsource/fraunces": "^5.2.9",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "@fontsource/space-mono": "^5.2.9",
     "@musterd/protocol": "workspace:*",
     "@tanstack/react-router": "1.170.16",
     "@tanstack/react-start": "1.168.26",
