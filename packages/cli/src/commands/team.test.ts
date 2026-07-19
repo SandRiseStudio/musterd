@@ -128,4 +128,97 @@ describe('team policy command', () => {
       teamCommand(parseArgs(['policy', '--ask-slack-webhook', 'http://plain.example.com/x'])),
     ).rejects.toThrow(/https url \| off/);
   });
+
+  // ADR 150 — the enforcement class table setter (the affordance the cell-D experiment declares its
+  // block classes with).
+  const policyJson = async () =>
+    JSON.parse((await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out);
+
+  it('declares a contended-surface class (Gate A), default posture block', async () => {
+    await capture(() => teamCommand(parseArgs(['policy', '--enforce-surface', 'src/tariff.ts'])));
+    const { enforcement } = await policyJson();
+    expect(enforcement.classes).toEqual([
+      {
+        class: 'src/tariff.ts',
+        kind: 'contended-surface',
+        match: ['src/tariff.ts'],
+        posture: 'block',
+      },
+    ]);
+  });
+
+  it('comma-separates multiple surfaces; --enforce-posture applies to the set', async () => {
+    await capture(() =>
+      teamCommand(
+        parseArgs([
+          'policy',
+          '--enforce-surface',
+          'src/tariff.ts,src/config.ts',
+          '--enforce-posture',
+          'warn',
+        ]),
+      ),
+    );
+    const { enforcement } = await policyJson();
+    expect(enforcement.classes.map((c: { class: string }) => c.class)).toEqual([
+      'src/tariff.ts',
+      'src/config.ts',
+    ]);
+    expect(enforcement.classes.every((c: { posture: string }) => c.posture === 'warn')).toBe(true);
+  });
+
+  it('declares a costly-action class (Gate B) via class=glob', async () => {
+    await capture(() =>
+      teamCommand(parseArgs(['policy', '--enforce-action', 'force-push=git push --force*'])),
+    );
+    const { enforcement } = await policyJson();
+    expect(enforcement.classes[0]).toEqual({
+      class: 'force-push',
+      kind: 'costly-action',
+      match: ['git push --force*'],
+      posture: 'block',
+    });
+  });
+
+  it('upserts by class name (re-declaring replaces) and merges across calls', async () => {
+    await capture(() => teamCommand(parseArgs(['policy', '--enforce-surface', 'src/tariff.ts'])));
+    await capture(() =>
+      teamCommand(parseArgs(['policy', '--enforce-action', 'merge=gh pr merge*'])),
+    );
+    // Re-declare src/tariff.ts as warn — replaces, not duplicates.
+    await capture(() =>
+      teamCommand(
+        parseArgs(['policy', '--enforce-surface', 'src/tariff.ts', '--enforce-posture', 'warn']),
+      ),
+    );
+    const { enforcement } = await policyJson();
+    expect(enforcement.classes).toHaveLength(2);
+    const tariff = enforcement.classes.find((c: { class: string }) => c.class === 'src/tariff.ts');
+    expect(tariff.posture).toBe('warn');
+  });
+
+  it('--enforce-clear empties the table without clobbering other knobs', async () => {
+    await capture(() => teamCommand(parseArgs(['policy', '--reseat-known-agents', 'on'])));
+    await capture(() => teamCommand(parseArgs(['policy', '--enforce-surface', 'src/tariff.ts'])));
+    await capture(() => teamCommand(parseArgs(['policy', '--enforce-clear'])));
+    const after = await policyJson();
+    expect(after.enforcement.classes).toEqual([]);
+    expect(after.standing_reseat_known_agents).toBe(true); // untouched
+  });
+
+  it('rejects a bad posture and a malformed action entry', async () => {
+    await expect(
+      teamCommand(parseArgs(['policy', '--enforce-surface', 'x', '--enforce-posture', 'loud'])),
+    ).rejects.toThrow(/warn \| block/);
+    await expect(
+      teamCommand(parseArgs(['policy', '--enforce-action', 'no-equals-sign'])),
+    ).rejects.toThrow(/class.*=.*glob|force-push/);
+  });
+
+  it('the human-readable view lists declared classes', async () => {
+    await capture(() => teamCommand(parseArgs(['policy', '--enforce-surface', 'src/tariff.ts'])));
+    const show = await capture(() => teamCommand(parseArgs(['policy'])));
+    expect(show.out).toContain('enforcement:');
+    expect(show.out).toContain('src/tariff.ts');
+  });
 });
