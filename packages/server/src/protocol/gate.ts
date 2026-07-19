@@ -1,8 +1,18 @@
-import { type GateCheckRequest, type GateDecision } from '@musterd/protocol';
+import {
+  type AskSpecies,
+  ASK_TOP_TIER,
+  askContract,
+  type GateCheckRequest,
+  type GateDecision,
+  makeEnvelope,
+} from '@musterd/protocol';
+import { ulid } from 'ulid';
 import type { Ctx } from '../context.js';
 import { appendAudit } from '../store/audit.js';
+import { findGateAsk, gateAskHumanAnswer } from '../store/gateAsk.js';
 import { laneCoveringPath } from '../store/lanes.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
+import { routeEnvelope } from './route.js';
 
 /**
  * PreToolUse gate adjudication (ADR 150 — structural inducement). The daemon side of the two enforcement
@@ -79,9 +89,55 @@ export function gateA(ctx: GateContext): GateDecision {
   };
 }
 
-/** Gate B — policy-classed action→ask (costly action). Foundation ships the warn path; the block path
- *  (dedup on fingerprint → emit species:approve/tier:blocking ask → re-check for a human accept on
- *  re-attempt) lands in stanley's Gate B lane. Fails open until then. */
+/** The ADR 147 blocking-tier contract, restated verbatim-intent in the denial's repair string so the
+ *  agent sees its wait/hold obligations inside its action loop (not just in a primer it can ignore). */
+function blockingContractReason(cls: string, askId: string): string {
+  const mins = Math.round(askContract(ASK_TOP_TIER).timeout_ms / 60_000);
+  return (
+    `blocked pending human approval — '${cls}' is a declared costly action; ask ${askId} raised ` +
+    `(species:approve, tier:${ASK_TOP_TIER} — wait up to ${mins}m; on silence HOLD: record a ` +
+    `status_update with meta.ask_ref=${askId} + ask_outcome:'held', do NOT proceed). Do other work, ` +
+    `or re-try the action to re-check — a human accept releases it, a decline ends it.`
+  );
+}
+
+/** Raise the gate-ask through the acting seat's own credential (member-authed `routeEnvelope`): a
+ *  top-tier `approve` ask carrying `meta.gate = { class, fingerprint }` so re-attempts converge (dedup
+ *  reads it back) and a gate-emitted ask is distinguishable from an agent-authored one. Returns the ask
+ *  id. Reuses the one validate→persist→deliver path, so admin push (ADR 147), Slack (ADR 149), and the
+ *  `ask.raised` lifecycle row all fall out for free — the deny IS the emission. */
+function emitGateAsk(ctx: GateContext): string {
+  const { srv, team, member, req } = ctx;
+  const id = ulid();
+  const env = makeEnvelope({
+    id,
+    team: team.slug,
+    from: member.name,
+    to: { kind: 'team' },
+    act: 'ask',
+    body: `Approval needed for costly action '${req.class}': ${req.target}`,
+    meta: {
+      species: 'approve' satisfies AskSpecies,
+      tier: ASK_TOP_TIER,
+      gate: { class: req.class, fingerprint: req.fingerprint },
+    },
+  });
+  routeEnvelope(srv, team, member, env);
+  return id;
+}
+
+/**
+ * Gate B — policy-classed action→ask (ADR 150). The block path is **deny IS emit**: a denied costly
+ * action routes itself through the ADR 147 ask stream, so the ask exists whether or not the agent would
+ * have raised one. The gate keeps ADR 147's clock discipline — no daemon timer, no hook timer; each
+ * re-attempt of the action re-runs this decision:
+ *   - **warn** → allow with an advisory (`warned`), no ask — an approval nobody requested is noise.
+ *   - **block, first attempt for this fingerprint** → emit the ask, deny (`denied_ask_raised`).
+ *   - **block, re-attempt, human accepted** → allow (`released`), standing per-fingerprint.
+ *   - **block, re-attempt, human declined** → deny (`denied_declined`) — do not re-raise.
+ *   - **block, re-attempt, still unanswered** → deny (`denied_awaiting`), contract restated, no 2nd ask.
+ * Release requires a **human** accept (ADR 150 defers admin-only release to `multi-human-admin`).
+ */
 export function gateB(ctx: GateContext): GateDecision {
   if (ctx.req.posture === 'warn') {
     return {
@@ -90,11 +146,44 @@ export function gateB(ctx: GateContext): GateDecision {
       reason: `heads-up: '${ctx.req.class}' is a declared costly action — raise an ask (species:approve) before it when it's irreversible`,
     };
   }
-  // block: Gate B decision not yet implemented — fail open, never strand a seat on an unfinished gate.
+
+  const { db } = ctx.srv;
+  const existing = findGateAsk(db, ctx.team.id, ctx.req.fingerprint);
+  if (existing) {
+    // Re-attempt of an already-raised action: re-check the ask thread rather than raise a second ask.
+    const answer = gateAskHumanAnswer(db, ctx.team.id, existing.id);
+    if (answer?.act === 'accept') {
+      return {
+        decision: 'allow',
+        outcome: 'released',
+        reason: `'${ctx.req.class}' approved by ${answer.by} — proceeding (ask ${existing.id})`,
+        ask_ref: existing.id,
+      };
+    }
+    if (answer?.act === 'decline') {
+      return {
+        decision: 'deny',
+        outcome: 'denied_declined',
+        reason: `'${ctx.req.class}' declined by ${answer.by} — do not re-raise; take a different approach or hand off (ask ${existing.id})`,
+        ask_ref: existing.id,
+      };
+    }
+    // Still open, unanswered — restate the contract, do NOT emit another ask.
+    return {
+      decision: 'deny',
+      outcome: 'denied_awaiting',
+      reason: blockingContractReason(ctx.req.class, existing.id),
+      ask_ref: existing.id,
+    };
+  }
+
+  // First attempt for this fingerprint — emit the ask, then deny with the blocking contract.
+  const askId = emitGateAsk(ctx);
   return {
-    decision: 'allow',
-    outcome: 'allowed',
-    reason: `gate B (action→ask) block path not yet implemented for '${ctx.req.class}' — allowing`,
+    decision: 'deny',
+    outcome: 'denied_ask_raised',
+    reason: blockingContractReason(ctx.req.class, askId),
+    ask_ref: askId,
   };
 }
 

@@ -81,7 +81,7 @@ describe('findGateAsk (fingerprint dedup anchor)', () => {
   });
 
   it('is scoped to the team', () => {
-    const { db, team, ada } = seed();
+    const { db, team } = seed();
     const other = createTeam(db, { slug: 'other' });
     const otherAgent = addMember(db, other, { name: 'zed', kind: 'agent' }).row;
     ask(db, other, otherAgent, 'ask-x', 'fp-abc', 1_000);
