@@ -1,3 +1,4 @@
+import { canvasFont } from '../canvasFont';
 import { drawCharacter } from './character';
 import { depth, FLOOR, KX, KY, project, THICK, WALL_H, type Fit, type Pt } from './iso';
 import type { PetState } from './pet';
@@ -1170,7 +1171,7 @@ function drawQueuePad(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: n
 
 /** A small screen-space "+N …" pill — collapses the members past the queue/nook cap into one count. */
 function drawCountPill(ctx: CanvasRenderingContext2D, at: Pt, text: string, scale: number): void {
-  ctx.font = `${Math.round(12 * scale)}px "Inter", system-ui, sans-serif`;
+  ctx.font = canvasFont(Math.round(12 * scale));
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const w = ctx.measureText(text).width + 18 * scale;
@@ -1556,7 +1557,7 @@ function bubble(ctx: CanvasRenderingContext2D, x: number, y: number, glyph: '?' 
   ctx.closePath();
   ctx.fill();
   ctx.fillStyle = glyph === '!' ? '#f3776a' : '#f4cf52';
-  ctx.font = `${Math.round(13 * s)}px "Inter", system-ui, sans-serif`;
+  ctx.font = canvasFont(Math.round(13 * s));
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(glyph, x, y - h / 2);
@@ -2618,7 +2619,7 @@ export function drawCue(ctx: CanvasRenderingContext2D, cue: Cue, scale: number):
   if (cue.glyph) {
     const rise = t * 26 * scale;
     ctx.globalAlpha = Math.max(0, 1 - t * 1.1);
-    ctx.font = `${Math.round(15 * scale)}px "Inter", system-ui, sans-serif`;
+    ctx.font = canvasFont(Math.round(15 * scale));
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = cue.urgent ? '#f3776a' : color;

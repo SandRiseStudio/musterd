@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
+import { canvasFont, preloadCanvasFont } from '../live/canvasFont';
 import { memberColor } from '../live/format';
 
 /**
@@ -33,6 +34,8 @@ function CharacterSheet() {
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
+    // Warm the izzocam telemetry face (Space Mono) before the canvas paints its caption labels.
+    preloadCanvasFont(11, '--font-mono', 400);
     let raf = 0;
     let stop = false;
 
@@ -127,7 +130,7 @@ function CharacterSheet() {
               seed,
             });
             ctx.fillStyle = 'rgba(30,20,10,.72)';
-            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.font = canvasFont(11, '--font-mono', 400);
             ctx.textAlign = 'center';
             ctx.fillText(`${name} · ${kind[0]} · ${dir} · ${mode.label}`, cx, row * ROW + ROW - 6);
           });
@@ -163,7 +166,7 @@ function CharacterSheet() {
             t,
           );
           ctx.fillStyle = 'rgba(30,20,10,.72)';
-          ctx.font = '11px "JetBrains Mono", monospace';
+          ctx.font = canvasFont(11, '--font-mono', 400);
           ctx.textAlign = 'center';
           ctx.fillText(`dog · ${cell.label}`, cx, petRow * ROW + ROW - 6);
         });
