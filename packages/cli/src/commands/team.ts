@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type Binding,
+  type EnforcementClass,
+  type EnforcementPosture,
   type Lifecycle,
   type MemberKind,
   parseSeatFile,
@@ -81,6 +83,13 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     }
     changed = true;
   }
+  // ADR 150: the enforcement class table — the opt-in PreToolUse gate declaration. `--enforce-surface`
+  // (contended surfaces, Gate A) and `--enforce-action` (costly actions, Gate B) upsert classes by name
+  // (re-declaring a name replaces it); `--enforce-clear` empties the table. Posture defaults to `block`
+  // (the flag is an explicit opt-in to enforce; pass `--enforce-posture warn` for the advisory tier).
+  const enforceChanged = applyEnforcementFlags(merged, parsed);
+  if (enforceChanged) changed = true;
+
   if (changed) {
     const { policy: updated } = await http.setPolicy(team, merged);
     process.stdout.write(
@@ -107,6 +116,17 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
             : 'Slack delivery for asks is off',
         ) + '\n',
       );
+    if (enforceChanged) {
+      const n = updated.enforcement.classes.length;
+      const blocking = updated.enforcement.classes.filter((c) => c.posture === 'block').length;
+      process.stdout.write(
+        hint(
+          n === 0
+            ? 'enforcement disabled — no classes declared (warn-never-block default restored)'
+            : `enforcement: ${n} class(es) declared, ${blocking} at block — each seat's PreToolUse gate reads this`,
+        ) + '\n',
+      );
+    }
     return 0;
   }
 
@@ -128,8 +148,91 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   process.stdout.write(
     `  ask slack webhook: ${current.ask_slack_webhook ? theme.accent(maskWebhook(current.ask_slack_webhook)) : 'off'}\n`,
   );
+  // ADR 150: the enforcement class table — the opt-in PreToolUse gate declaration.
+  const classes = current.enforcement.classes;
+  if (classes.length === 0) {
+    process.stdout.write(`  enforcement: ${theme.meta('off (no classes declared)')}\n`);
+  } else {
+    process.stdout.write(`  enforcement: ${theme.accent(`${classes.length} class(es)`)}\n`);
+    for (const c of classes) {
+      const kind = c.kind === 'contended-surface' ? 'surface' : 'action';
+      const posture = c.posture === 'block' ? theme.accent('block') : 'warn';
+      process.stdout.write(`    · ${kind} ${c.class} [${c.match.join(', ')}] → ${posture}\n`);
+    }
+  }
   process.stdout.write(theme.meta('  set: musterd team policy --reseat-known-agents on') + '\n');
+  process.stdout.write(
+    theme.meta(
+      "       musterd team policy --enforce-surface 'src/tariff.ts' --enforce-posture block",
+    ) + '\n',
+  );
   return 0;
+}
+
+/**
+ * Apply the ADR 150 enforcement flags to `merged.enforcement` in place (read-merge-write). Returns true
+ * if anything changed. `--enforce-clear` empties the table; `--enforce-surface <glob[,glob…]>` declares
+ * contended-surface classes (Gate A); `--enforce-action <class=glob[;class=glob…]>` declares costly-action
+ * classes (Gate B). Classes upsert by name (re-declaring a name replaces it), so a table is built across
+ * calls. `--enforce-posture warn|block` (default block) applies to every class set in THIS invocation.
+ */
+function applyEnforcementFlags(
+  merged: { enforcement: { classes: EnforcementClass[] } },
+  parsed: Parsed,
+): boolean {
+  let changed = false;
+  if (parsed.flags['enforce-clear'] === true) {
+    merged.enforcement = { classes: [] };
+    changed = true;
+  }
+  const postureRaw = flagStr(parsed.flags, 'enforce-posture') ?? 'block';
+  if (postureRaw !== 'warn' && postureRaw !== 'block') {
+    throw new CliError('usage: --enforce-posture <warn | block> (default block)', 2);
+  }
+  const posture = postureRaw as EnforcementPosture;
+
+  const upsert = (cls: EnforcementClass): void => {
+    const classes = merged.enforcement.classes.filter((c) => c.class !== cls.class);
+    classes.push(cls);
+    merged.enforcement = { classes };
+    changed = true;
+  };
+
+  const surfaces = flagStr(parsed.flags, 'enforce-surface');
+  if (surfaces !== undefined) {
+    for (const glob of surfaces
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)) {
+      upsert({ class: glob, kind: 'contended-surface', match: [glob], posture });
+    }
+  }
+
+  const actions = flagStr(parsed.flags, 'enforce-action');
+  if (actions !== undefined) {
+    for (const entry of actions
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean)) {
+      const eq = entry.indexOf('=');
+      if (eq <= 0) {
+        throw new CliError(
+          `usage: --enforce-action '<class>=<command-glob>' (got "${entry}") — e.g. 'force-push=git push --force*'`,
+          2,
+        );
+      }
+      const name = entry.slice(0, eq).trim();
+      const glob = entry.slice(eq + 1).trim();
+      if (!name || !glob) {
+        throw new CliError(
+          `--enforce-action needs both a class name and a glob (got "${entry}")`,
+          2,
+        );
+      }
+      upsert({ class: name, kind: 'costly-action', match: [glob], posture });
+    }
+  }
+  return changed;
 }
 
 /** Mask a webhook URL to its host — enough to recognize the destination, never the secret path. */
