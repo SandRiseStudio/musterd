@@ -56,17 +56,17 @@ the temp daemon (`server: http://127.0.0.1:4890`) — the binding's embedded `se
 
 ### Bundle (vite build, raw / gzip)
 
-| Chunk                 | Raw                                         | Gzip       |
-| --------------------- | ------------------------------------------- | ---------- |
-| index (entry)         | 320 KB                                      | 100 KB     |
-| routes                | 114 KB                                      | 41 KB      |
-| dist (protocol)       | 72 KB                                       | 18 KB      |
-| render                | 38 KB                                       | 15 KB      |
-| live                  | 33 KB                                       | 11 KB      |
-| office-scene          | 25 KB                                       | 10 KB      |
-| **All JS**            | **674 KB**                                  | **216 KB** |
-| **All CSS**           | **125 KB**                                  | **38 KB**  |
-| Fonts in dist (woff2) | 948 KB total; /live loads ~117 KB (7 files) | —          |
+| Chunk                 | Raw                                                                              | Gzip       |
+| --------------------- | -------------------------------------------------------------------------------- | ---------- |
+| index (entry)         | 320 KB                                                                           | 100 KB     |
+| routes                | 114 KB                                                                           | 41 KB      |
+| dist (protocol)       | 72 KB                                                                            | 18 KB      |
+| render                | 38 KB                                                                            | 15 KB      |
+| live                  | 33 KB                                                                            | 11 KB      |
+| office-scene          | 25 KB                                                                            | 10 KB      |
+| **All JS**            | **674 KB**                                                                       | **216 KB** |
+| **All CSS**           | **125 KB**                                                                       | **38 KB**  |
+| Fonts in dist (woff2) | 838 KB → **335 KB** (Inter+JetBrains dropped, #4); /live loads ~117 KB (7 files) | —          |
 
 ### Live-data latency (event → dashboard WS frame)
 
@@ -78,11 +78,12 @@ the temp daemon (`server: http://127.0.0.1:4890`) — the binding's embedded `se
 
 ## Optimization log
 
-| Date       | Change                                             | Result                                                                                                                                                           |
-| ---------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-07-18 | Finding #1: daemon br/gzip + Cache-Control/ETag    | throttled Lighthouse **49 → 71** · LCP 7.2 s → 4.3 s · FCP 5.5 s → 3.1 s · transfer 1,077 → 467 KB                                                               |
-| 2026-07-18 | Finding #5: API JSON (`/teams/*` reads) compressed | /live backfill Fetch **124 → 39 KB (−69%)** · transfer 467 → 381 KB · `uses-text-compression` audit cleared · throttled Lighthouse ~82 (median of 3), LCP ~3.6 s |
-| 2026-07-18 | Finding #3: stream DOM windowing (bounded rows)    | DOM **4,461 → 1,564** (audit 0 → 0.5) · TBT ~210 → **10–20 ms** · load long-tasks 120 ms–1 s → **53 ms** · heap 12 → 8 MB · worst frame 794 → 21 ms · score ~85  |
+| Date       | Change                                               | Result                                                                                                                                                                                                  |
+| ---------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-18 | Finding #1: daemon br/gzip + Cache-Control/ETag      | throttled Lighthouse **49 → 71** · LCP 7.2 s → 4.3 s · FCP 5.5 s → 3.1 s · transfer 1,077 → 467 KB                                                                                                      |
+| 2026-07-18 | Finding #5: API JSON (`/teams/*` reads) compressed   | /live backfill Fetch **124 → 39 KB (−69%)** · transfer 467 → 381 KB · `uses-text-compression` audit cleared · throttled Lighthouse ~82 (median of 3), LCP ~3.6 s                                        |
+| 2026-07-18 | Finding #3: stream DOM windowing (bounded rows)      | DOM **4,461 → 1,564** (audit 0 → 0.5) · TBT ~210 → **10–20 ms** · load long-tasks 120 ms–1 s → **53 ms** · heap 12 → 8 MB · worst frame 794 → 21 ms · score ~85                                         |
+| 2026-07-18 | Finding #4: drop dead font families + izzocam canvas | dist **−503 KB** (Inter+JetBrains removed) · render-blocking `global.css` **56 → 14 KB** · office/character canvas now paint izzocam via type tokens · /live font download unchanged (7 files, ~117 KB) |
 
 ## Findings, ranked by expected win
 
@@ -111,8 +112,17 @@ the temp daemon (`server: http://127.0.0.1:4890`) — the binding's embedded `se
    newest 1,000 envelopes. Typewriter, stick-to-bottom, day dividers, and the "now" marker are
    verified preserved by a 12-check CDP behavioral suite. Deliberately no `content-visibility`:
    its placeholder sizing corrects itself after our anchoring runs and the viewport drifts.
-4. **Fonts:** 948 KB of woff2 ships in dist across 5 families; /live pulls 7 files (~117 KB).
-   Subsetting/limiting weights is a smaller but easy win.
+4. **~~Fonts.~~ SHIPPED (2026-07-18).** Two of the five families in dist — Inter (387 KB) and
+   JetBrains Mono (116 KB) — were the retired musterd-default type; the active tokens use the
+   izzocam trio (Fraunces / Space Grotesk / Space Mono), so those 503 KB were `@font-face`-registered
+   but never fetched on any page (they only sat in `var()` fallback stacks the primary always
+   resolves past). Removed their imports: **dist −503 KB**, and the render-blocking `global.css`
+   dropped **56 → 14 KB** (73 → 27 `@font-face` rules). In the same pass the two canvas painters that
+   still hard-named the old fonts — the office scene (`"Inter"`) and character sheet (`"JetBrains
+Mono"`) — now read the type tokens via `live/canvasFont.ts` (so a future re-font sweeps the canvas
+   too) and paint the already-loaded izzocam faces; /live's font download is unchanged at the same 7
+   files (~117 KB). Further glyph-subsetting of the active families would need a build step — not
+   pursued (diminishing returns; the LCP is no longer font-bound with `font-display: swap`).
 5. **~~API JSON responses served uncompressed.~~ SHIPPED (2026-07-18).** `sendJson` now negotiates
    brotli/gzip (fast levels — dynamic bodies aren't cacheable) for responses over ~1.4 KB, encoding
    picked once per request. The /live message backfill (`GET /teams/:slug/messages`) drops **124 KB →

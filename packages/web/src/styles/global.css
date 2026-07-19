@@ -16,14 +16,12 @@
 @import '@fontsource/space-mono/400.css';
 @import '@fontsource/space-mono/700.css';
 
-/* musterd default type (kept loaded so the fallback config in tokens.css works) */
-@import '@fontsource/inter/400.css';
-@import '@fontsource/inter/500.css';
-@import '@fontsource/inter/600.css';
-@import '@fontsource/inter/700.css';
-@import '@fontsource/jetbrains-mono/400.css';
-@import '@fontsource/jetbrains-mono/500.css';
-@import '@fontsource/jetbrains-mono/700.css';
+/* The musterd-default families (Inter + JetBrains Mono) are intentionally NOT loaded: the active
+ * tokens point at the izzocam trio above, so Inter/JetBrains only ever sat in var() fallback stacks
+ * (which never trigger — the primary always resolves) and were 503 KB of woff2 never fetched on any
+ * page. To switch tokens.css back to the musterd-default config, re-add
+ * `@import '@fontsource/inter/{400,500,600,700}.css'` + `@fontsource/jetbrains-mono/{400,500,700}.css`
+ * here first. */
 @import './tokens.css';
 
 *,

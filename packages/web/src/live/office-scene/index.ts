@@ -1,4 +1,5 @@
 import type { Posture } from '@musterd/protocol';
+import { preloadCanvasFont } from '../canvasFont';
 import { createActors, type Actors } from './actors';
 import { createPet, petBeat, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { fitFloor, project, type Fit, type Pt } from './iso';
@@ -119,6 +120,9 @@ export function mountOffice(
   canvas.style.display = 'block';
   host.appendChild(canvas);
   const ctx = canvas.getContext('2d')!;
+  // Warm the izzocam chyron face the canvas labels/glyphs paint in, so they land on-brand from the
+  // first cue instead of flashing the system fallback (canvas never triggers the load itself).
+  preloadCanvasFont();
 
   const buf = document.createElement('canvas');
   const bctx = buf.getContext('2d')!;
