@@ -48,6 +48,11 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # Byte budgets for the built web client (ADR 151) — guards the /live perf arc (#326–#331)
+      # against silent regression. Needs Build first (reads packages/web/dist/client).
+      - name: Perf budgets
+        run: pnpm perf:check
+
       # Lint is a gate, not a suggestion: without it, import/order and dead eslint-disables drift into
       # main between the rare manual `pnpm lint` (8 had accumulated by #248). Runs after Build because
       # the import resolver follows workspace packages to their ./dist, which does not exist pre-build.

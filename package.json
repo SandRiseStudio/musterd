@@ -13,6 +13,7 @@
     "format": "prettier --write \"**/*.{ts,js,mjs,json,md}\"",
     "format:check": "prettier --check \"packages/**/*.ts\" \"tests/**/*.ts\" \"*.{ts,json}\" && pnpm roadmap:check && pnpm roadmap-truth:check && pnpm arch-trees:check && pnpm obs-evals:check && pnpm guidance:check && pnpm vocab:check",
     "vocab:check": "node --disable-warning=ExperimentalWarning scripts/check-vocab.ts",
+    "perf:check": "node --disable-warning=ExperimentalWarning scripts/perf/check-budgets.ts",
     "guidance:check": "node --disable-warning=ExperimentalWarning scripts/check-guidance.ts",
     "roadmap:gen": "node --disable-warning=ExperimentalWarning scripts/gen-roadmap.ts",
     "roadmap:check": "node --disable-warning=ExperimentalWarning scripts/gen-roadmap.ts --check",

@@ -1,0 +1,8 @@
+{
+  "$comment": "Web UI performance budgets (ADR 151). Enforced by `pnpm perf:check` against packages/web/dist/client after a build. Raising a number is a deliberate, reviewed act: justify it in the PR and log the measured cost in docs/perf/web-live-baseline.md. Baselines set 2026-07-19 from main @ f7c7de0 (total JS gzip 223 KB, entry chunk 100 KB, CSS gzip 17.5 KB, fonts 708 KB) with ~10% headroom.",
+  "totalJsGzipBytes": 250000,
+  "maxChunkGzipBytes": 112000,
+  "totalCssGzipBytes": 20000,
+  "totalFontBytes": 760000,
+  "allowedFontFamilies": ["fraunces", "space-grotesk", "space-mono"]
+}

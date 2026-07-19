@@ -6,6 +6,11 @@ First recorded performance baseline for the /live dashboard, taken after the rec
 (ADR 149 asks strip #317, speech bubbles #321, re-font #322). All future perf-affecting changes
 should be compared against these numbers by re-running the harness.
 
+> **Enforcement (ADR 151):** byte budgets derived from this log live in `budgets.json` beside this
+> file and are enforced in CI by `pnpm perf:check`. Raising a budget happens in the PR that needs it,
+> with the measured cost appended to the optimization log below. The working contract for agents in
+> the web package is `packages/web/AGENTS.md`.
+
 ## Method (reproducible)
 
 ```sh
