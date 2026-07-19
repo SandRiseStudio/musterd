@@ -113,6 +113,10 @@ export interface OfficeHandle {
   update: (data: OfficeData) => void;
   emit: (ev: OfficeEvent) => void;
   dispose: () => void;
+  /** Park/resume the render loop while the panel is collapsed (canvas stays mounted at opacity 0).
+   * Suspended: no rAF, no ambient beats — zero draw cost for invisible pixels. Resuming re-bakes and
+   * paints one fresh frame synchronously, so re-expanding is still instant. */
+  setSuspended: (on: boolean) => void;
   /** Fire an in-place ambient gesture now on an idle desk member (`1` stretch · `2` glance), bypassing
    * the 90–180s ambient scheduler. Returns the member it played on, or null if none was eligible.
    * A design-preview / verification affordance (see office-preview); the live office uses the scheduler. */

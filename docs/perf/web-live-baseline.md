@@ -84,6 +84,35 @@ the temp daemon (`server: http://127.0.0.1:4890`) — the binding's embedded `se
 | 2026-07-18 | Finding #5: API JSON (`/teams/*` reads) compressed   | /live backfill Fetch **124 → 39 KB (−69%)** · transfer 467 → 381 KB · `uses-text-compression` audit cleared · throttled Lighthouse ~82 (median of 3), LCP ~3.6 s                                        |
 | 2026-07-18 | Finding #3: stream DOM windowing (bounded rows)      | DOM **4,461 → 1,564** (audit 0 → 0.5) · TBT ~210 → **10–20 ms** · load long-tasks 120 ms–1 s → **53 ms** · heap 12 → 8 MB · worst frame 794 → 21 ms · score ~85                                         |
 | 2026-07-18 | Finding #4: drop dead font families + izzocam canvas | dist **−503 KB** (Inter+JetBrains removed) · render-blocking `global.css` **56 → 14 KB** · office/character canvas now paint izzocam via type tokens · /live font download unchanged (7 files, ~117 KB) |
+| 2026-07-19 | Office loop: suspend while panel collapsed           | collapsed office **~18 draws/s → 0** (was full-scene repaint at `opacity: 0`) · expanded/alive unchanged (18 draws/s ambient cap, ~2.5% core) · re-expand still instant (fresh bake + one sync frame)   |
+
+## Office scene loop (measured 2026-07-19)
+
+The animation loop was already architected frugally — parks on a baked still frame when nothing
+moves, ~20 fps ambient cap for breathing/typing, full rate only for walks/cues, hidden-tab pause,
+CSS-only ambient overlays. Measured (prod daemon, 15 s windows, `clearRect` ≈ one painted frame):
+
+| State                                     | rAF/s | draws/s | JS busy              | main-thread |
+| ----------------------------------------- | ----- | ------- | -------------------- | ----------- |
+| /live, seats working ("rest" in practice) | 59    | 17.9    | 25 ms/s (~2.5% core) | ~203 ms/s   |
+| /office-preview (walk choreography)       | 59    | 58      | 78 ms/s (~7.8% core) | ~387 ms/s   |
+
+Two findings: (1) the parked state almost never engages on a working team — any `working` seat keeps
+`living()` true, so the ambient ~18 fps **full-scene** repaint runs continuously; (2) a **collapsed**
+panel (`opacity: 0`, canvas kept mounted for instant re-expand) kept that repaint running for
+invisible pixels. Shipped: `OfficeHandle.setSuspended` driven by the `collapsed` prop — parks the
+loop + ambient beats, resumes with one synchronous bake+frame (verified: 60 → collapse **0.0** →
+expand 18 draws/s, 5-check CDP suite).
+
+**Deliberately not done** (measure-first verdicts, revisit only with new evidence):
+
+- **Split-bake so breathing doesn't repaint the room** — the ambient frame redraws floor + walls +
+  furniture to animate chest-rise. A behind-actors/actors/in-front-of-actors layer split would cut
+  the ~25 ms/s to a fraction, but the painter is depth-sort-interleaved (sitters split across two
+  depth slots, ADR 133) — real surgery for ~2% of one core. Poor ROI at current cost.
+- **Lower the ambient cap** (20 → ~12 fps): halves the always-on cost with one constant
+  (`AMBIENT_FRAME_MS`), but visibly chunks the breathing/typing feel — a product call, not a perf
+  default.
 
 ## Findings, ranked by expected win
 
