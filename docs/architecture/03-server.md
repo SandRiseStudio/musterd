@@ -42,6 +42,7 @@ src/
     mast.ts           // the MAST failure detectors: timeToUnblock + stalledThreads + circularHandoffs → deriveMast (ADR 091)
     memory.ts         // seat memory: saveMemory/getMemory/memoryEnvelope/clearMemory — daemon-private continuity blob, LWW, caps (ADR 093)
     audit.ts          // append-only governance audit log: appendAudit/listAudit (+ authorized_by filter, ADR 071/127)
+    gateAsk.ts        // Gate B (ADR 150) ask-lifecycle reads: findGateAsk (fingerprint dedup — one ask per re-attempted costly action) + gateAskHumanAnswer (human-only accept/decline release); pure reads over the ADR 147 ask-stream log
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)
     residency.ts      // the wake ledger: residency enrollment + wake leases — claimWakeLeases (transactional derivation, defer-snoozed) / settleWakeLease / expireWakeLeases / recordSessionAttestation (harness-class-only, inc 4); rate policy derived from residency.* audit rows (ADR 131)
@@ -50,7 +51,7 @@ src/
   protocol/
     validate.ts       // thin wrappers over @musterd/protocol schemas + error mapping
     route.ts          // routeEnvelope(): the ONE validate+persist+deliver path (WS & HTTP share it)
-    gate.ts           // adjudicateGate(): PreToolUse enforcement decision for a matched tool call — dispatch by kind to gateA (lane-ownership) / gateB (action→ask); warn path here, block decisions are fail-open stubs the Gate A/B lanes fill; one shapes-only lane.gate/action.gate row (ADR 150)
+    gate.ts           // adjudicateGate(): PreToolUse enforcement decision for a matched tool call — dispatch by kind to gateA (lane-ownership deny) / gateB (action→ask: block = deny-IS-emit — raise a species:approve/tier:blocking ask via routeEnvelope, fingerprint dedup, human-accept release); one shapes-only lane.gate/action.gate row (ADR 150)
   notify/
     slack.ts          // ask-stream Slack delivery: formatAskSlackText + postSlackWebhook — the daemon's one outbound call, fire-and-forget, opt-in via policy ask_slack_webhook (ADR 149)
   transport/
