@@ -63,6 +63,8 @@ export function OfficeScene({
   dataRef.current = data;
   const onActClickRef = useRef(onActClick);
   onActClickRef.current = onActClick;
+  const collapsedRef = useRef(collapsed);
+  collapsedRef.current = collapsed;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -77,6 +79,7 @@ export function OfficeScene({
           onActClick: (id) => onActClickRef.current?.(id),
         });
         handle.update(dataRef.current);
+        handle.setSuspended(collapsedRef.current); // mounted while collapsed → start parked
         handleRef.current = handle;
       })
       .catch(() => {
@@ -92,6 +95,13 @@ export function OfficeScene({
   useEffect(() => {
     handleRef.current?.update(data);
   }, [data]);
+
+  // Collapsed panel (opacity 0, still mounted) → park the render loop; expanding resumes with one
+  // fresh synchronous frame, so the reopen stays instant. Measured before this: a collapsed office
+  // kept the full-scene ambient repaint running at ~18fps for pixels nobody could see.
+  useEffect(() => {
+    handleRef.current?.setSuspended(collapsed);
+  }, [collapsed]);
 
   // Play a cue for each newly *live*-arrived act (backfilled history never appears in liveIds, so it
   // doesn't replay on load). The act→choreography mapping lives in office-scene/mapping.
@@ -117,7 +127,8 @@ export function OfficeScene({
 
   return (
     <section className={`lc-office${collapsed ? ' is-collapsed' : ''}`}>
-      {/* Canvas stays mounted while collapsed so WebGL keeps running and re-expanding is instant. */}
+      {/* Canvas stays mounted while collapsed (state survives, re-expanding is instant) but the
+          render loop is SUSPENDED via setSuspended — no draw cost behind an invisible panel. */}
       <div className="lc-gl-canvas" ref={hostRef} aria-hidden="true" />
       <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
       <p className="lc-office__caption">

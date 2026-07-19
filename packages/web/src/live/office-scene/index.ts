@@ -179,6 +179,13 @@ export function mountOffice(
   // Pause the RAF loop when the tab is backgrounded (no CPU on an unseen office).
   const VISIBLE = () => document.visibilityState === 'visible';
 
+  // Suspended = the panel is collapsed (opacity: 0, still mounted). Measured before this flag: a
+  // collapsed office kept the full-scene ambient repaint running at ~18fps for invisible pixels —
+  // any `working` seat keeps `living()` true, so the "rest on a still frame" state never engages on
+  // a working team. While suspended the loop parks and ambient beats skip; `setSuspended(false)`
+  // re-bakes and paints one fresh frame immediately, so re-expanding is still instant.
+  let suspended = false;
+
   function sizeCanvases() {
     width = Math.max(1, host.clientWidth);
     height = Math.max(1, host.clientHeight);
@@ -582,7 +589,7 @@ export function mountOffice(
     // Afterglow: a brief tail past the last motion so a character eases into idle instead of freezing
     // mid-gesture — `actors.step` also reports its own blends, so a member never stops half-out of a chair.
     const settling = lastActive > 0 && now - lastActive < AFTERGLOW_MS;
-    if ((walking || cues.length || settling || alive || petActive) && !reduced && VISIBLE()) {
+    if ((walking || cues.length || settling || alive || petActive) && !reduced && !suspended && VISIBLE()) {
       raf = requestAnimationFrame(tick);
     } else {
       raf = 0;
@@ -591,7 +598,7 @@ export function mountOffice(
     }
   }
   function ensureLoop() {
-    if (!raf && !reduced && VISIBLE()) {
+    if (!raf && !reduced && !suspended && VISIBLE()) {
       last = 0;
       acc = 0;
       raf = requestAnimationFrame(tick);
@@ -658,7 +665,7 @@ export function mountOffice(
     if (disposed) return; // office torn down between the timer arming and firing — don't re-arm or wake
 
     // Only stir a calm, visible room; otherwise let this slot pass and wait for the next one.
-    if (!reduced && VISIBLE() && quiet()) {
+    if (!reduced && !suspended && VISIBLE() && quiet()) {
       // Sometimes the beat is the pet's: it wakes, stretches, pads to a fresh nap spot (a sunbeam by
       // day, a rug by night, occasionally a working member's side) and curls back up.
       if (Math.random() < 0.35 && petBeat(pet, { daylight: lightEnv.daylight, workSpots: workingSideSpots() })) {
@@ -830,6 +837,7 @@ export function mountOffice(
   ro?.observe(host);
 
   const onVisibility = () => {
+    // ensureLoop's own suspended/reduced guards apply — a collapsed office stays parked on tab-focus.
     if (document.visibilityState === 'visible' && (living() || actors.active() || cues.length)) ensureLoop();
   };
   document.addEventListener('visibilitychange', onVisibility);
@@ -853,6 +861,25 @@ export function mountOffice(
   return {
     update,
     emit,
+    setSuspended: (on: boolean) => {
+      if (on === suspended) return;
+      suspended = on;
+      if (on) {
+        // Park the loop now — no CPU behind a collapsed panel. Ambient beats self-skip via the
+        // `fireAmbient` guard; the timer keeps its cadence so nothing needs re-arming on resume.
+        cancelAnimationFrame(raf);
+        raf = 0;
+        last = 0;
+        acc = 0;
+      } else {
+        // One fresh frame immediately (light + poses may have moved while parked) → instant
+        // re-expand; the loop only re-engages if the room is actually alive.
+        refreshLightEnv();
+        bake();
+        if (living() || actors.active() || cues.length) ensureLoop();
+        else paintResting();
+      }
+    },
     pokeGesture: (kind = 1) => {
       // Same path as the ambient scheduler's gesture beat, but on demand — try idle desk members until
       // one accepts (gestureBeat rejects a small/walking/already-gesturing member).
