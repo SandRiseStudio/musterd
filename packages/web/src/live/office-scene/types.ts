@@ -44,6 +44,11 @@ export interface Pose {
   lx: number;
   ly: number;
   dir: Dir;
+  /** Continuous facing in radians on the logical floor (E=0, S=π/2 — the angles of `layout.FWD`).
+   * Eased at a turn rate by the actor system so a direction change is a swivel, never a snap; `dir`
+   * stays the quantized cardinal for the 4-way legibility reads (billboard face, monitors, labels).
+   * Absent → render by `dir` alone. */
+  heading?: number;
   small: boolean;
   carry: boolean;
   bubble: Bubble;

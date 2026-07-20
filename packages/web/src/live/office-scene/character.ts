@@ -53,8 +53,9 @@ interface Proj {
  * Project one joint. Character space (x right, y up, z forward) is rotated onto the floor by the facing,
  * added to the member's floor point, projected, then lifted by the joint's height.
  */
-function projector(lx: number, ly: number, dir: Dir, fit: Fit, s: number): (j: V3) => Proj {
-  const f = FWD[dir];
+function projector(lx: number, ly: number, dir: Dir, fit: Fit, s: number, heading?: number): (j: V3) => Proj {
+  // A continuous heading rotates the basis to any angle mid-turn; the cardinal is the resting case.
+  const f: readonly [number, number] = heading !== undefined ? [Math.cos(heading), Math.sin(heading)] : FWD[dir];
   const r: [number, number] = [f[1], -f[0]]; // the character's right, on the floor
   return (j: V3): Proj => {
     const wx = lx + (f[0] * j.z + r[0] * j.x) * s;
@@ -89,6 +90,8 @@ export interface CharacterOpts {
   dir: Dir;
   node: OfficeNode;
   skel: Skel;
+  /** Continuous facing (radians, logical floor space) — overrides `dir`'s cardinal basis mid-turn. */
+  heading?: number;
   /** Uniform size multiplier — nook/queue actors render at 0.72. */
   size: number;
   alpha: number;
@@ -121,7 +124,7 @@ export function drawCharacter(
   armsOnly = false,
 ): void {
   const { skel: k, node, dir, size } = o;
-  const px = projector(o.lx, o.ly, dir, fit, size);
+  const px = projector(o.lx, o.ly, dir, fit, size, o.heading);
   const u = fit.scale * size; // one logical unit, in screen px, at this character's size
   const look = appearanceOf(node);
   const acc = node.color; // the identity hue — the top, and only the top

@@ -27,6 +27,30 @@ import type { Bubble, Dir, OfficeNode, Pose } from './types';
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const easeInOut = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+const easeIn = (t: number): number => t * t;
+const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
+/** Velocity profile of one walk leg — see `legsAlong`, which picks these so speed is continuous. */
+type Ease = 'in' | 'out' | 'inOut' | 'linear';
+const EASE: Record<Ease, (t: number) => number> = { in: easeIn, out: easeOut, inOut: easeInOut, linear: (t) => t };
+
+/** How fast a member swivels to a new facing (radians/sec) — a quarter turn in ~0.17s, brisk but visible. */
+const TURN_RATE = 9;
+/** A cardinal's facing angle on the logical floor (E=0, S=π/2 — the angles of `layout.FWD`'s vectors). */
+const DIR_ANGLE: Record<Dir, number> = { E: 0, S: Math.PI / 2, W: Math.PI, N: -Math.PI / 2 };
+/** Shortest signed arc from angle `a` to angle `b`, in (-π, π] — so a turn never goes the long way round. */
+function arcTo(a: number, b: number): number {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+/** The nearest cardinal to a heading — the legibility reads (billboard face, labels) stay 4-way. */
+function dirOfHeading(h: number): Dir {
+  const c = Math.cos(h);
+  const s = Math.sin(h);
+  if (Math.abs(c) >= Math.abs(s)) return c >= 0 ? 'E' : 'W';
+  return s >= 0 ? 'S' : 'N';
+}
 
 /** How long a member takes to settle out of a stride, and to fold onto (or off) a chair. */
 const STRIDE_EASE = 0.18; // seconds
@@ -44,6 +68,10 @@ interface Anim {
   stride: number;
   /** Seated blend, eased 0↔1. */
   sit: number;
+  /** Continuous facing (radians, logical space; E=0, S=π/2). Turned at `TURN_RATE` toward the travel
+   * direction while walking and back to the home cardinal at rest — a direction change is a swivel,
+   * never a snap. The pose's `dir` is quantized from this for the 4-way legibility reads. */
+  head: number;
 }
 
 /** The animation fields every freshly-built pose starts from; the live values are overlaid in `posesNow`. */
@@ -145,6 +173,9 @@ interface Leg {
   dur: number;
   carry: boolean;
   bubble: Bubble;
+  /** Velocity profile across this leg. A routed run is shaped `in` → `linear`… → `out` so speed is
+   * continuous through every waypoint (see `legsAlong`); a stationary hold leg's ease is irrelevant. */
+  ease: Ease;
 }
 interface Walk {
   legs: Leg[];
@@ -173,8 +204,14 @@ function approach(target: { lx: number; ly: number }, mover: { lx: number; ly: n
   return { lx: target.lx + (dx / d) * off, ly: target.ly + (dy / d) * off };
 }
 
-/** Travel legs along a routed polyline: total duration = clamp(pathLength/speed), split per segment
- * so the walker holds one speed through waypoints instead of resetting at each turn. */
+/**
+ * Travel legs along a routed polyline, shaped so the walk is **one continuous motion**: cruise speed
+ * `v` = pathLength / clamp(pathLength/speed), interior legs run `linear` at exactly `v`, and the end
+ * legs run quadratic `in`/`out` at double duration — a quadratic's boundary slope is 2, so the eased
+ * leg meets the cruise legs at exactly `v` and position is C¹-continuous through every waypoint. The
+ * old shape (easeInOut per leg) braked to a dead stop at each string-pulled corner, which read as
+ * "walk a few steps, pause, turn, walk again".
+ */
 function legsAlong(pts: P[], speed: number, minDur: number, maxDur: number, carry: boolean): Leg[] {
   const segs: Array<{ a: P; b: P; len: number }> = [];
   let total = 0;
@@ -188,18 +225,25 @@ function legsAlong(pts: P[], speed: number, minDur: number, maxDur: number, carr
   }
   if (segs.length === 0) {
     const a = pts[0]!;
-    return [{ fx: a.lx, fy: a.ly, tx: a.lx, ty: a.ly, dir: 'S', dur: 0.1, carry, bubble: null }];
+    return [{ fx: a.lx, fy: a.ly, tx: a.lx, ty: a.ly, dir: 'S', dur: 0.1, carry, bubble: null, ease: 'inOut' }];
   }
   const dur = clamp(total / speed, minDur, maxDur);
-  return segs.map(({ a, b, len }) => ({
+  if (segs.length === 1) {
+    const { a, b } = segs[0]!;
+    return [{ fx: a.lx, fy: a.ly, tx: b.lx, ty: b.ly, dir: travelDir(a.lx, a.ly, b.lx, b.ly), dur, carry, bubble: null, ease: 'inOut' }];
+  }
+  const v = total / dur; // cruise speed the whole run holds through its waypoints
+  const last = segs.length - 1;
+  return segs.map(({ a, b, len }, i) => ({
     fx: a.lx,
     fy: a.ly,
     tx: b.lx,
     ty: b.ly,
     dir: travelDir(a.lx, a.ly, b.lx, b.ly),
-    dur: Math.max(0.08, dur * (len / total)),
+    dur: Math.max(0.08, ((i === 0 || i === last ? 2 : 1) * len) / v),
     carry,
     bubble: null,
+    ease: i === 0 ? ('in' as const) : i === last ? ('out' as const) : ('linear' as const),
   }));
 }
 
@@ -284,14 +328,34 @@ export function createActors(): Actors {
     };
   }
 
-  /** The between-frame animation state of a member, seeded from their home the first time we see them. */
+  /** The between-frame animation state of a member, seeded from their home the first time we see them
+   * (or, for a member first seen mid-walk — an arrival — from the walk's own direction of travel). */
   function animOf(name: string): Anim {
     let a = anim.get(name);
     if (!a) {
-      a = { phase: 0, stride: 0, sit: homes.get(name)?.sit ?? 0 };
+      const w = walks.get(name);
+      const leg = w?.legs[w.i];
+      const head =
+        leg && (leg.fx !== leg.tx || leg.fy !== leg.ty)
+          ? Math.atan2(leg.ty - leg.fy, leg.tx - leg.fx)
+          : DIR_ANGLE[leg?.dir ?? homes.get(name)?.dir ?? 'S'];
+      a = { phase: 0, stride: 0, sit: homes.get(name)?.sit ?? 0, head };
       anim.set(name, a);
     }
     return a;
+  }
+
+  /** The angle this member is turning toward right now: the direction of travel mid-leg, the leg's
+   * stated facing on a stationary hold, or the home cardinal at rest. */
+  function headingTarget(name: string): number | null {
+    const w = walks.get(name);
+    const leg = w?.legs[w.i];
+    if (leg) {
+      if (leg.fx !== leg.tx || leg.fy !== leg.ty) return Math.atan2(leg.ty - leg.fy, leg.tx - leg.fx);
+      return DIR_ANGLE[leg.dir];
+    }
+    const home = homes.get(name);
+    return home ? DIR_ANGLE[home.dir] : null;
   }
 
   function posesNow(): Map<string, Pose> {
@@ -307,21 +371,34 @@ export function createActors(): Actors {
         phase: a.phase,
         stride: a.stride,
         sit: a.sit,
+        heading: a.head, // still swivelling into the seat facing after a walk ends
       });
     }
     for (const [name, w] of walks) {
       const leg = w.legs[w.i]!;
-      const e = easeInOut(clamp(w.t, 0, 1));
-      // Door fade: emerge over the first third entering, dissolve over the last third leaving.
-      // Progress is whole-walk (a routed walk has several legs) so the fade never restarts mid-trip.
-      const prog = (w.i + clamp(w.t, 0, 1)) / w.legs.length;
-      const alpha =
-        w.fade === 'in' ? clamp(prog / 0.35, 0, 1) : w.fade === 'out' ? clamp((1 - prog) / 0.35, 0, 1) : 1;
       const a = animOf(name);
+      const e = EASE[leg.ease](clamp(w.t, 0, 1));
+      // Door fade: emerge over the first third entering, dissolve over the last third leaving. Progress
+      // is distance covered / total path length — the eased end legs run longer than their share of
+      // ground, so leg-index progress would distort the ramp (and it must never restart mid-trip).
+      let alpha = 1;
+      if (w.fade) {
+        let total = 0;
+        let done = 0;
+        for (let li = 0; li < w.legs.length; li++) {
+          const l = w.legs[li]!;
+          const len = Math.hypot(l.tx - l.fx, l.ty - l.fy);
+          total += len;
+          if (li < w.i) done += len;
+          else if (li === w.i) done += len * e;
+        }
+        const prog = total > 0 ? done / total : (w.i + clamp(w.t, 0, 1)) / w.legs.length;
+        alpha = w.fade === 'in' ? clamp(prog / 0.35, 0, 1) : clamp((1 - prog) / 0.35, 0, 1);
+      }
       out.set(name, {
         lx: leg.fx + (leg.tx - leg.fx) * e,
         ly: leg.fy + (leg.ty - leg.fy) * e,
-        dir: leg.dir,
+        dir: dirOfHeading(a.head), // the 4-way legibility read follows the swivel, flipping at 45°
         small: w.small,
         carry: leg.carry,
         bubble: leg.bubble,
@@ -334,6 +411,7 @@ export function createActors(): Actors {
         phase: a.phase,
         stride: a.stride,
         sit: a.sit, // eased down as they rise from the chair, so leaving a desk is a stand-up
+        heading: a.head,
       });
     }
     return out;
@@ -359,6 +437,13 @@ export function createActors(): Actors {
       // afterwards are then just this blend running in each direction.
       const seatedHome = (homes.get(name)?.sit ?? 0) > 0 && !walks.has(name);
       a.sit = toward(a.sit, seatedHome ? 1 : 0, dt / SIT_EASE);
+      // Swivel the continuous facing toward wherever this member should be looking, shortest way round.
+      const want = headingTarget(name);
+      if (want !== null) {
+        a.head += clamp(arcTo(a.head, want), -TURN_RATE * dt, TURN_RATE * dt);
+        if (a.head > Math.PI) a.head -= Math.PI * 2;
+        else if (a.head < -Math.PI) a.head += Math.PI * 2;
+      }
     }
     for (const n of [...anim.keys()]) if (!after.has(n)) anim.delete(n);
   }
@@ -370,6 +455,9 @@ export function createActors(): Actors {
       if (a.stride > 0.001) return true;
       const target = (homes.get(name)?.sit ?? 0) > 0 && !walks.has(name) ? 1 : 0;
       if (Math.abs(a.sit - target) > 0.001) return true;
+      // Mid-turn counts too — parking the loop here would bake a frame of someone facing sideways.
+      const want = headingTarget(name);
+      if (want !== null && Math.abs(arcTo(a.head, want)) > 0.02) return true;
     }
     return false;
   }
@@ -395,7 +483,7 @@ export function createActors(): Actors {
     return {
       legs: [
         ...out,
-        { fx: stand.lx, fy: stand.ly, tx: stand.lx, ty: stand.ly, dir: travelDir(stand.lx, stand.ly, target.lx, target.ly), dur: hold, carry, bubble: holdBubble },
+        { fx: stand.lx, fy: stand.ly, tx: stand.lx, ty: stand.ly, dir: travelDir(stand.lx, stand.ly, target.lx, target.ly), dur: hold, carry, bubble: holdBubble, ease: 'inOut' },
         ...back,
       ],
       i: 0,
@@ -508,7 +596,7 @@ export function createActors(): Actors {
       walks.set(from, {
         legs: [
           ...out,
-          { fx: dest.lx, fy: dest.ly, tx: dest.lx, ty: dest.ly, dir: 'N', dur: 1.6, carry: false, bubble: null }, // pause facing the machine
+          { fx: dest.lx, fy: dest.ly, tx: dest.lx, ty: dest.ly, dir: 'N', dur: 1.6, carry: false, bubble: null, ease: 'inOut' }, // pause facing the machine
           ...back,
         ],
         i: 0,
@@ -570,19 +658,31 @@ export function createActors(): Actors {
     step(dt) {
       const before = posesNow();
       for (const [name, w] of [...walks.entries()]) {
-        const leg = w.legs[w.i]!;
-        w.t += dt / leg.dur;
-        if (w.t >= 1) {
-          w.t = 0;
-          w.i++;
-          if (w.i >= w.legs.length) {
-            walks.delete(name);
-            if (exiting.has(name)) {
-              exiting.delete(name);
-              ghosts.delete(name);
-            } else {
-              startNext(name);
-            }
+        // Spend the whole frame, carrying the remainder across leg boundaries — discarding it at a
+        // boundary (the old `t += dt/dur; if (t>=1) t=0`) froze the walker for up to a frame at every
+        // waypoint, a visible hitch on top of any easing.
+        let rem = dt;
+        let done = false;
+        while (rem > 0 && !done) {
+          const leg = w.legs[w.i]!;
+          const left = (1 - w.t) * leg.dur;
+          if (rem < left) {
+            w.t += rem / leg.dur;
+            rem = 0;
+          } else {
+            rem -= left;
+            w.t = 0;
+            w.i++;
+            if (w.i >= w.legs.length) done = true;
+          }
+        }
+        if (done) {
+          walks.delete(name);
+          if (exiting.has(name)) {
+            exiting.delete(name);
+            ghosts.delete(name);
+          } else {
+            startNext(name);
           }
         }
       }

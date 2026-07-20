@@ -154,6 +154,75 @@ describe('walk choreography', () => {
   });
 });
 
+describe('locomotion smoothness', () => {
+  /** Shortest signed arc between two angles — mirror of the actor system's wrap-aware turn. */
+  const arc = (a: number, b: number): number => {
+    let d = (b - a) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  };
+
+  it('cruises at one continuous speed through waypoints — never a dead stop mid-run', () => {
+    // A populated room so the stroll routes around furniture into a multi-leg polyline.
+    const { placements, byName } = world(['Ada', 'Bo', 'Cy', 'Di', 'Ed', 'Fi'].map((n) => node(n)));
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.ambientWalk('Ada')).toBe(true);
+
+    const dt = 1 / 60;
+    let prev = actors.poses().get('Ada')!;
+    const speeds: number[] = [];
+    let guard = 0;
+    // Sample the outbound run — it ends when the walker parks at the machine (`moving` flips false).
+    while (guard++ < 4000) {
+      actors.step(dt);
+      const p = actors.poses().get('Ada')!;
+      if (!p.moving && speeds.length > 0) break;
+      if (p.moving) speeds.push(Math.hypot(p.lx - prev.lx, p.ly - prev.ly) / dt);
+      prev = p;
+    }
+    expect(speeds.length).toBeGreaterThan(20);
+
+    const vmax = Math.max(...speeds);
+    const first = speeds.findIndex((s) => s >= 0.9 * vmax);
+    const last = speeds.length - 1 - [...speeds].reverse().findIndex((s) => s >= 0.9 * vmax);
+    expect(first).toBeGreaterThanOrEqual(0);
+    // Between the ramp-in and the ramp-out the run holds cruise speed. The old per-leg easeInOut braked
+    // to ~0 at every string-pulled waypoint — exactly the "walk a few steps, pause, walk again" read.
+    for (let i = first; i <= last; i++) {
+      expect(speeds[i]!).toBeGreaterThan(0.7 * vmax);
+    }
+  });
+
+  it('swivels the facing through turns — per-frame heading change is rate-bounded, never a snap', () => {
+    const { placements, byName } = world(['Ada', 'Bo', 'Cy', 'Di', 'Ed', 'Fi'].map((n) => node(n)));
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.ambientWalk('Ada')).toBe(true);
+
+    const dt = 1 / 60;
+    let prev = actors.poses().get('Ada')!.heading;
+    expect(prev).toBeDefined();
+    let maxDelta = 0;
+    let turned = 0;
+    let guard = 0;
+    while (actors.active() && guard++ < 4000) {
+      actors.step(dt);
+      const h = actors.poses().get('Ada')!.heading;
+      expect(h).toBeDefined();
+      const d = Math.abs(arc(prev!, h!));
+      maxDelta = Math.max(maxDelta, d);
+      turned += d;
+      prev = h;
+    }
+    // TURN_RATE is 9 rad/s — one frame may turn at most 9·dt (plus float slack).
+    expect(maxDelta).toBeLessThanOrEqual(9 * dt + 1e-6);
+    // …and the trip genuinely turned (out, about-face at the machine, and back into the seat).
+    expect(turned).toBeGreaterThan(Math.PI / 2);
+  });
+});
+
 describe('ambient micro-choreography', () => {
   const settle = (a: ReturnType<typeof createActors>) => {
     let g = 0;
