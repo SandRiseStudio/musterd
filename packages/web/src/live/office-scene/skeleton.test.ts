@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { DESK_UP, SEAT_TOP } from './layout';
-import { CHAR, DESK_REACH, seedOf, solveSkeleton, STRIDE, typingBurst, type SkelInput } from './skeleton';
+import {
+  CHAR,
+  chairShift,
+  chairYaw,
+  DESK_REACH,
+  GESTURE,
+  handsInLap,
+  seedOf,
+  solveSkeleton,
+  STRIDE,
+  typingBurst,
+  type SkelInput,
+} from './skeleton';
 
 /**
  * The character rig's contract. These are the properties that make the office read as *people* rather than
@@ -142,6 +154,74 @@ describe('typing', () => {
 
   it('is seeded per member, so a room does not type in unison', () => {
     expect(typingBurst(0.1, 3)).not.toBe(typingBurst(0.8, 3));
+  });
+});
+
+describe('seated micro-beats', () => {
+  const kinds = Object.values(GESTURE);
+
+  it('every beat starts and ends at the plain seated pose — no pop on entry or exit', () => {
+    const plain = solveSkeleton(sit());
+    for (const kind of kinds) {
+      for (const gT of [0, 1]) {
+        const s = solveSkeleton(sit({ gesture: kind, gestureT: gT }));
+        expect(s.wrist[1].y).toBeCloseTo(plain.wrist[1].y, 4);
+        expect(s.head.z).toBeCloseTo(plain.head.z, 4);
+      }
+    }
+  });
+
+  it('produces finite joints across every beat window', () => {
+    for (const kind of kinds) {
+      for (const gT of [0, 0.25, 0.5, 0.75, 1]) {
+        const k = solveSkeleton(sit({ gesture: kind, gestureT: gT, t: 3 }));
+        for (const j of [k.pelvis, k.chest, k.head, ...k.ankle, ...k.wrist, ...k.knee, ...k.elbow]) {
+          expect(Number.isFinite(j.x) && Number.isFinite(j.y) && Number.isFinite(j.z)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('sip raises the right hand from the keys to the mouth mid-window', () => {
+    const rest = solveSkeleton(sit());
+    const mid = solveSkeleton(sit({ gesture: GESTURE.sip, gestureT: 0.5 }));
+    expect(mid.wrist[1].y).toBeGreaterThan(rest.wrist[1].y + 15);
+    expect(Math.abs(mid.wrist[1].y - mid.head.y)).toBeLessThan(12); // at the mouth, not the ceiling
+  });
+
+  it('chin holds a hand at the chin through the plateau', () => {
+    for (const gT of [0.3, 0.5, 0.7]) {
+      const s = solveSkeleton(sit({ gesture: GESTURE.chin, gestureT: gT }));
+      expect(Math.hypot(s.wrist[1].x - s.head.x, s.wrist[1].y - (s.head.y - 9), s.wrist[1].z - (s.head.z + 8))).toBeLessThan(3);
+    }
+  });
+
+  it('lean-back reclines the head behind the chest and drops the hands off the desk', () => {
+    const rest = solveSkeleton(sit());
+    const mid = solveSkeleton(sit({ gesture: GESTURE.lean, gestureT: 0.5 }));
+    expect(mid.head.z).toBeLessThan(rest.head.z - 2); // reclined back
+    for (const w of mid.wrist) expect(w.y).toBeLessThan(DESK_UP); // hands in the lap, below the desk
+  });
+
+  it('chair curves are zero at both ends and move mid-window', () => {
+    expect(chairShift(GESTURE.roll, 0)).toBeCloseTo(0, 6);
+    expect(chairShift(GESTURE.roll, 1)).toBeCloseTo(0, 6);
+    expect(chairShift(GESTURE.roll, 0.5)).toBeGreaterThan(8);
+    expect(chairYaw(GESTURE.swivel, 0)).toBeCloseTo(0, 6);
+    expect(chairYaw(GESTURE.swivel, 1)).toBeCloseTo(0, 6);
+    expect(Math.abs(chairYaw(GESTURE.swivel, 1 / 6))).toBeGreaterThan(0.05);
+    // …and only their own beats move them
+    expect(chairShift(GESTURE.sip, 0.5)).toBe(0);
+    expect(chairYaw(GESTURE.lean, 0.5)).toBe(0);
+  });
+
+  it('flags hands-in-lap only while a lap beat is actually engaged', () => {
+    expect(handsInLap(GESTURE.lean, 0.5)).toBe(true);
+    expect(handsInLap(GESTURE.roll, 0.5)).toBe(true);
+    expect(handsInLap(GESTURE.lean, 0)).toBe(false);
+    expect(handsInLap(GESTURE.roll, 1)).toBe(false);
+    expect(handsInLap(GESTURE.sip, 0.5)).toBe(false);
+    expect(handsInLap(GESTURE.swivel, 0.5)).toBe(false);
   });
 });
 

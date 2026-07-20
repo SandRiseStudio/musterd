@@ -8,8 +8,10 @@ import { computeLightEnv, type LightEnv } from './lighting';
 import { assignSeats, type Placement } from './seating';
 import {
   animatedDeskAnchors,
+  chairKindFor,
   coffeeAnchor,
   DARK_PALETTE,
+  deskHasProp,
   drawCue,
   magicAnchors,
   renderScene,
@@ -18,6 +20,7 @@ import {
   type Cue,
   type ScenePalette,
 } from './render';
+import { GESTURE } from './skeleton';
 import { shapeSpeech, typeCadence } from './speech';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
@@ -47,12 +50,13 @@ const SPEECH_LIFT = 26;
 /** After a real act, keep the loop alive this long so the Rive character settles into idle rather than
  * freezing mid-gesture (ADR 086 #5 afterglow) — a brief, bounded post-act tail, not a continuous loop. */
 const AFTERGLOW_MS = 2600;
-/** Ambient micro-choreography (ADR 086 Phase 2): when the room is quiet, inject a gentle coffee-stroll
- * every ~90–180s. Timer-based (not RAF), one beat at a time, always preempted by a real act. This is the
- * whole-room cadence — on a small present roster it divides down to each person, so it must read as an
- * *occasional* break, not a constant water-cooler parade (the original 15–25s looked absurd on 2 people). */
-const AMBIENT_MIN_MS = 90000;
-const AMBIENT_MAX_MS = 180000;
+/** Ambient micro-choreography (ADR 086 Phase 2): when the room is quiet, inject one idle beat (a seated
+ * micro-gesture — scratch, sip, swivel… — or a stroll) every ~30–70s. Timer-based (not RAF), one beat at
+ * a time, always preempted by a real act. This is the whole-room cadence — on a small present roster it
+ * divides down to each person. 90–180s read as a frozen room once the beat variety grew (nick's call,
+ * 2026-07); the old 15–25s water-cooler parade is still the floor to stay well above. */
+const AMBIENT_MIN_MS = 30000;
+const AMBIENT_MAX_MS = 70000;
 /** While Tier B is awake for an *ambient-only* beat, coalesce toward ~20fps: only advance+redraw once
  * this much wall time has built up. A coffee stroll is visually identical at 20fps and ~3× cheaper; real
  * acts keep 60fps because their motion is not `ambientOnly`. */
@@ -675,18 +679,40 @@ export function mountOffice(
       }
       const idle = actors.idleDeskMembers();
       const who = idle.length ? idle[Math.floor(Math.random() * idle.length)]! : null;
-      if (who) {
-        // Most beats are a cheap in-place gesture (stretch/glance); occasionally a coffee-stroll. The
-        // gesture path no-ops visually until the `.riv` exposes the `gesture` layer, then lights up.
-        const beat = Math.random();
-        const played =
-          beat < 0.7
-            ? actors.gestureBeat(who, beat < 0.35 ? 1 : 2) // 1 stretch · 2 glance
-            : coffeeStroll(who);
-        if (played) ensureLoop();
-      }
+      if (who && playAmbientBeat(who)) ensureLoop();
     }
     scheduleAmbient();
+  }
+
+  /**
+   * One ambient beat for one idle desk member: a weighted pick over the beats they can actually play —
+   * the chair beats (swivel/roll) need casters under them, a sip needs a mug on that desk — with the
+   * coffee-stroll staying in the mix at ~1 in 5. Weighted rather than uniform so the broad, always-valid
+   * beats (stretch/glance/scratch/chin/lean) carry the room and the chair theatrics stay occasional.
+   */
+  function playAmbientBeat(who: string): boolean {
+    const pl = placements.get(who);
+    const slot = pl?.kind === 'desk' ? pl.slot : null;
+    const casters = slot !== null && chairKindFor(slot) !== 'stool';
+    const mug = slot !== null && deskHasProp(slot, 'coffee');
+    const beats: Array<[number, () => boolean]> = [
+      [15, () => actors.gestureBeat(who, GESTURE.stretch)],
+      [15, () => actors.gestureBeat(who, GESTURE.glance)],
+      [14, () => actors.gestureBeat(who, GESTURE.scratch)],
+      [14, () => actors.gestureBeat(who, GESTURE.chin)],
+      [14, () => actors.gestureBeat(who, GESTURE.lean)],
+      [25, () => coffeeStroll(who)],
+    ];
+    if (mug) beats.push([14, () => actors.gestureBeat(who, GESTURE.sip)]);
+    if (casters) beats.push([9, () => actors.gestureBeat(who, GESTURE.swivel)], [5, () => actors.gestureBeat(who, GESTURE.roll)]);
+    let total = 0;
+    for (const [w] of beats) total += w;
+    let r = Math.random() * total;
+    for (const [w, play] of beats) {
+      r -= w;
+      if (r <= 0) return play();
+    }
+    return false;
   }
 
   function update(next: OfficeData) {

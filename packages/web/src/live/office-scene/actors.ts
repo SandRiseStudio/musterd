@@ -12,7 +12,7 @@ import {
 } from './layout';
 import { findPath, type P } from './nav';
 import type { Placement } from './seating';
-import { STRIDE } from './skeleton';
+import { chairShift, chairYaw, GESTURE, STRIDE } from './skeleton';
 import type { Bubble, Dir, OfficeNode, Pose } from './types';
 
 /**
@@ -55,6 +55,19 @@ function dirOfHeading(h: number): Dir {
 /** How long a member takes to settle out of a stride, and to fold onto (or off) a chair. */
 const STRIDE_EASE = 0.18; // seconds
 const SIT_EASE = 0.6; // seconds — unhurried; you can see them sit
+
+/** Each gesture beat's window, seconds. Arcs (stretch/scratch/swivel/roll) run their full curve once;
+ * plateau beats (chin/lean) hold their pose for most of the window — a think reads longer than a rub. */
+const GESTURE_DUR: Record<number, number> = {
+  [GESTURE.stretch]: 2.4,
+  [GESTURE.glance]: 2.4,
+  [GESTURE.scratch]: 2.8,
+  [GESTURE.chin]: 4.5,
+  [GESTURE.lean]: 4.0,
+  [GESTURE.sip]: 3.2,
+  [GESTURE.swivel]: 3.5,
+  [GESTURE.roll]: 3.0,
+};
 /** Move `cur` toward `target` at a constant rate (the blend is shaped by `smooth()` where it's consumed). */
 function toward(cur: number, target: number, rate: number): number {
   return cur < target ? Math.min(target, cur + rate) : Math.max(target, cur - rate);
@@ -364,14 +377,23 @@ export function createActors(): Actors {
     for (const [n, p] of homes) {
       const g = gestures.get(n);
       const a = animOf(n);
+      const gT = g ? clamp(g.t / g.dur, 0, 1) : 0;
+      // The chair beats move the member *with* the chair: swivel yaws the whole seated figure about the
+      // seat; roll-back slides body + chair straight back from the desk and home again. The painter
+      // derives the chair pieces' own motion from the same pure curves (`chairYaw`/`chairShift`).
+      const yaw = g ? chairYaw(g.kind, gT) : 0;
+      const shift = g ? chairShift(g.kind, gT) : 0;
+      const f = FWD[p.dir];
       out.set(n, {
         ...p,
+        lx: p.lx - f[0] * shift,
+        ly: p.ly - f[1] * shift,
         gesture: g?.kind ?? p.gesture,
-        gestureT: g ? clamp(g.t / g.dur, 0, 1) : 0,
+        gestureT: gT,
         phase: a.phase,
         stride: a.stride,
         sit: a.sit,
-        heading: a.head, // still swivelling into the seat facing after a walk ends
+        heading: a.head + yaw, // still swivelling into the seat facing after a walk ends
       });
     }
     for (const [name, w] of walks) {
@@ -619,7 +641,7 @@ export function createActors(): Actors {
       ) {
         return false;
       }
-      gestures.set(from, { kind, t: 0, dur: 2.4 }); // ~2.4s window — a full stretch/glance loop, then clear
+      gestures.set(from, { kind, t: 0, dur: GESTURE_DUR[kind] ?? 2.4 }); // one full beat window, then clear
       return true;
     },
     idleDeskMembers() {
