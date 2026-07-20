@@ -923,8 +923,14 @@ export function mountOffice(
     },
     pokeErrand: (kind) => {
       // The errand twin of pokeGesture: play the full fridge/water/coffee arc now, on the first idle
-      // desk member who can (a 25s fridge sequence is unverifiable if you have to wait the scheduler out).
+      // member who can (a 25s fridge sequence is unverifiable if you have to wait the scheduler out).
+      // Water keeps the scheduler's own gate — the bottle comes off *their desk*, so a deskless
+      // (leisure) member or a desk without the prop can't play it.
       for (const who of actors.idleDeskMembers()) {
+        if (kind === 'water') {
+          const pl = placements.get(who);
+          if (pl?.kind !== 'desk' || !deskHasProp(pl.slot, 'water')) continue;
+        }
         const played =
           kind === 'fridge' ? actors.errandFridge(who) : kind === 'water' ? actors.errandWater(who) : coffeeStroll(who);
         if (played) {

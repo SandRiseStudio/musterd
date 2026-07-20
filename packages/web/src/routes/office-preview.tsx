@@ -143,13 +143,28 @@ function OfficePreviewPage() {
         (window as unknown as { __office?: OfficeHandle }).__office = handle; // dev-fixture debug handle
         // `?quiet` skips the looping choreography — a still room of seated members, so an on-demand
         // gesture (pokeGesture / the 🙆👀 buttons) is the only motion. Used to verify gestures in isolation.
-        const quiet = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('quiet');
+        const search = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+        const quiet = search.has('quiet');
         if (!quiet) {
           const run = () => {
             for (const step of SCRIPT) timers.push(setTimeout(() => handleRef.current?.emit(step.ev), step.at));
           };
           run();
           loop = setInterval(run, LOOP);
+        }
+        // `?beat=fridge|water|coffee|<gesture number>` fires that beat right after mount (and again every
+        // 30s) — the only way to verify a ~25s errand headlessly, where clicking the poke buttons isn't
+        // an option and waiting out the ambient scheduler isn't either.
+        const beat = search.get('beat');
+        if (beat) {
+          const poke = () => {
+            const h = handleRef.current;
+            if (!h) return;
+            if (beat === 'fridge' || beat === 'water' || beat === 'coffee') h.pokeErrand(beat);
+            else h.pokeGesture(Number(beat) || 1);
+          };
+          timers.push(setTimeout(poke, 600));
+          loop ??= setInterval(poke, 30000);
         }
       })
       .catch(() => {});
@@ -196,6 +211,11 @@ function OfficePreviewPage() {
         <span className="lc__pbtn-sep" />
         <button className="lc__pbtn" title="ambient gesture: stretch" onClick={() => handleRef.current?.pokeGesture(1)}>🙆</button>
         <button className="lc__pbtn" title="ambient gesture: glance" onClick={() => handleRef.current?.pokeGesture(2)}>👀</button>
+        <button className="lc__pbtn" title="ambient gesture: sip" onClick={() => handleRef.current?.pokeGesture(6)}>🍵</button>
+        <button className="lc__pbtn" title="ambient gesture: swivel" onClick={() => handleRef.current?.pokeGesture(7)}>🪑</button>
+        <button className="lc__pbtn" title="errand: fridge meal" onClick={() => handleRef.current?.pokeErrand('fridge')}>🍽</button>
+        <button className="lc__pbtn" title="errand: water refill" onClick={() => handleRef.current?.pokeErrand('water')}>💧</button>
+        <button className="lc__pbtn" title="errand: coffee run" onClick={() => handleRef.current?.pokeErrand('coffee')}>☕</button>
         <span className="lc__pbtn-sep" />
         <button className="lc__pbtn" title="Dev join / leave (walk in / out)" onClick={() => present2('Dev')}>D</button>
         <button className="lc__pbtn" title="Hana join / leave (walk in / out)" onClick={() => present2('Hana')}>H</button>
