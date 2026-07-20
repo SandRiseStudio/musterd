@@ -123,6 +123,69 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
   });
 });
 
+describe('CLI ask contract parity (ADR 147 / finding 006 item 3)', () => {
+  it('hands a CLI ask-raiser the same wait/hold marching orders the MCP send returns', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+
+    // Human output carries the shared askContractText — the CLI is no longer silent about the contract.
+    const ask = await run(sendCommand, [
+      '--to',
+      '@team',
+      '--act',
+      'ask',
+      '--meta',
+      'species=approve',
+      '--meta',
+      'tier=blocking',
+      'ship the migration?',
+    ]);
+    expect(ask.code).toBe(0);
+    expect(ask.out).toContain('sent');
+    expect(ask.out).toContain('HOLD');
+    expect(ask.out).toContain("meta.ask_outcome='held'");
+    expect(ask.out).toContain('15m');
+
+    // --json is additive + id-preserving: the derived ask_contract rides alongside the envelope.
+    const askJson = await run(sendCommand, [
+      '--to',
+      '@team',
+      '--act',
+      'ask',
+      '--meta',
+      'species=approve',
+      '--meta',
+      'tier=blocking',
+      '--json',
+      'ship it?',
+    ]);
+    const parsed = JSON.parse(askJson.out);
+    expect(parsed.id).toBeTruthy();
+    expect(parsed.ask_contract).toEqual({ timeout_ms: 15 * 60_000, no_answer: 'hold' });
+
+    // A non-ask send carries no contract noise.
+    const msg = await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'working']);
+    expect(msg.out).not.toContain('HOLD');
+  });
+
+  it('a below-top tier tells the CLI ask-raiser it may proceed with a recorded risk', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    const ask = await run(sendCommand, [
+      '--to',
+      '@team',
+      '--act',
+      'ask',
+      '--meta',
+      'species=consult',
+      '--meta',
+      'tier=advisory',
+      'which direction?',
+    ]);
+    expect(ask.out).toContain('PROCEED');
+    expect(ask.out).toContain("meta.ask_outcome='risk_accepted'");
+    expect(ask.out).not.toContain('HOLD');
+  });
+});
+
 describe('comeback summary on status (ADR 024)', () => {
   it('leads status with the count of unread action-needed messages, then clears once read', async () => {
     // nick creates dawn and adds bo (the away human).

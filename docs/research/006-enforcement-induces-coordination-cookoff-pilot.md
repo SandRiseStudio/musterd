@@ -107,3 +107,19 @@ controlled comparison. No leaderboard, one lab-notebook entry.
 - Artifacts: `~/cookoff-run/run-artifacts-pilot/` (scores, session logs, usage, audit snapshots;
   `PILOT-SUMMARY.md`). The coordination-dataset seed stays gated on the flagship transcripts + the
   ADR 051 opt-in/redaction posture.
+
+## Follow-ups
+
+The ADR 147 variance datum above (hold vs route-around under the same unanswered ask) opened a small
+work package, tracked against goal `human-ask-stream`:
+
+- **Item 1 — ask-contract parity (shipped, #340).** A shared `askContractText` (protocol) now backs the
+  MCP `send` response _and_ the Gate B deny/repair string, so a gate-blocked agent and a self-raising
+  agent read identical wait/hold marching orders; the Gate B deny additionally names _what holding buys_
+  and that a local merge / alternate path bypasses the review the block exists for.
+- **Item 3 — CLI ask contract (shipped).** `musterd send --act ask` now surfaces the same contract text
+  (and a derived `ask_contract` in `--json`), closing the one ask surface that stayed silent.
+- **Item 2 — local-merge route-around scope (decision: measure-first).** See
+  [gate-b-costly-action-local-merge-scope.md](../design/gate-b-costly-action-local-merge-scope.md): don't
+  glob-enumerate; measure whether item 1's clearer deny moves the route-around rate on the next
+  enforcement D-cell before gating more.
