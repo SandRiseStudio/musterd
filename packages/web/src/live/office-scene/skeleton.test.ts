@@ -26,7 +26,7 @@ const base: SkelInput = {
   run: false,
   t: 0,
   typing: 0,
-  carry: false,
+  carry: null,
   help: false,
   gesture: 0,
   gestureT: 0,
@@ -239,7 +239,7 @@ describe('rig invariants', () => {
     const states: SkelInput[] = [
       base,
       walk(0.3),
-      walk(0.7, { run: true, carry: true }),
+      walk(0.7, { run: true, carry: 'box' }),
       sit({ typing: 1, t: 5 }),
       sit({ gesture: 1, gestureT: 0.5 }),
       sit({ gesture: 2, gestureT: 0.5 }),

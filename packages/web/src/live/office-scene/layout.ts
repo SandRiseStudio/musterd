@@ -219,6 +219,22 @@ export const NOOK_SPOTS: ReadonlyArray<{ dx: number; dy: number }> = [
  * (ADR 086 Phase 2). Clear of the lounge furniture and the seated nook cluster. */
 export const COFFEE_STAND = { lx: NOOK.lx - 74, ly: NOOK.ly - 46 };
 
+/** The kitchenette sink's spot on the counter (centre-run, between the machine and the bean bag) —
+ * shared by the counter painter and the fridge errand's plate drop-off. */
+export const SINK = { dx: -52, dy: -76 };
+
+// ── errand stand points (ADR 086 Phase 3: purposeful errands) ─────────────────────────────────────────
+// Each is where the walker *stands* during the errand's dwell, just clear of the appliance's inflated
+// nav footprint (`nav.solidRects` pads by the body radius), facing it ('N' — the kitchenette lines the
+// nook's back edge). Endpoints inside a blocked cell would get nudged by `nearestFree`, so standing
+// clear keeps the dwell exactly where the leg says it is.
+/** In front of the fridge, for the open-and-browse dwell. */
+export const FRIDGE_STAND = { lx: NOOK.lx + LOUNGE.fridge.dx, ly: NOOK.ly + LOUNGE.fridge.dy + 44 };
+/** In front of the water cooler, for the bottle-fill dwell. */
+export const COOLER_STAND = { lx: NOOK.lx + LOUNGE.cooler.dx, ly: NOOK.ly + LOUNGE.cooler.dy + 34 };
+/** In front of the counter sink, where an empty plate is set down. */
+export const SINK_STAND = { lx: NOOK.lx + SINK.dx, ly: NOOK.ly + LOUNGE.counter.dy + 38 };
+
 /** How many overflow-queue / nook avatars render individually before the rest collapse into a "+N" pill,
  * so a very large roster stays bounded instead of marching avatars off the floor. */
 export const STRIP_CAP = 6;

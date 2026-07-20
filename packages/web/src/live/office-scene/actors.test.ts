@@ -133,7 +133,7 @@ describe('walk choreography', () => {
     const back = actors.poses().get('Ada')!;
     expect(back.lx).toBeCloseTo(home.lx, 5);
     expect(back.ly).toBeCloseTo(home.ly, 5);
-    expect(back.carry).toBe(false);
+    expect(back.carry).toBeNull();
     expect(back.bubble).toBeNull();
   });
 
@@ -151,7 +151,7 @@ describe('walk choreography', () => {
     actors.setHomes(placements, byName, true);
     actors.walk('Ada', { kind: 'handoff', to: 'Bo', urgent: false });
     actors.step(0.1);
-    expect(actors.poses().get('Ada')!.carry).toBe(true);
+    expect(actors.poses().get('Ada')!.carry).toBe('box');
   });
 });
 
@@ -451,6 +451,103 @@ describe('seated micro-beat choreography', () => {
     }
     expect(maxOff).toBeGreaterThan(0.1); // it really swivelled…
     expect(actors.poses().get('Ada')!.heading!).toBeCloseTo(rest, 5); // …and came back to face the desk
+  });
+});
+
+describe('errands', () => {
+  const step = (a: ReturnType<typeof createActors>, s: number) => {
+    for (let i = 0; i < Math.round(s / 0.05); i++) a.step(0.05);
+  };
+
+  it('water errand: the bottle is in hand (desk copy hidden) only during the trip, and ends back home', () => {
+    const { placements, byName } = world([node('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const home = actors.poses().get('Ada')!;
+    expect(actors.sceneFx().bottleCarriers.size).toBe(0);
+
+    expect(actors.errandWater('Ada')).toBe(true);
+    actors.step(0.1); // inside the pick-it-up hold
+    expect(actors.sceneFx().bottleCarriers.has('Ada')).toBe(true);
+    expect(actors.poses().get('Ada')!.carry).toBe('bottle');
+
+    let guard = 0;
+    while (actors.active() && guard++ < 2000) actors.step(0.05);
+    const done = actors.poses().get('Ada')!;
+    expect(done.lx).toBeCloseTo(home.lx, 5);
+    expect(done.carry).toBeNull();
+    expect(actors.sceneFx().bottleCarriers.size).toBe(0); // bottle back on the desk
+  });
+
+  it('fridge errand: door opens, a plate is carried, the member really sits and eats, then returns empty-handed', () => {
+    const { placements, byName } = world([node('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const home = actors.poses().get('Ada')!;
+
+    expect(actors.errandFridge('Ada')).toBe(true);
+    let sawDoor = false;
+    let sawSitWithPlate = false;
+    let guard = 0;
+    while (actors.active() && guard++ < 4000) {
+      actors.step(0.05);
+      const fx = actors.sceneFx();
+      const p = actors.poses().get('Ada')!;
+      if (fx.fridgeOpen) sawDoor = true;
+      if (p.carry === 'plate' && p.sit > 0.9) sawSitWithPlate = true;
+    }
+    expect(sawDoor).toBe(true);
+    expect(sawSitWithPlate).toBe(true); // actually ate on the lounge furniture
+    const done = actors.poses().get('Ada')!;
+    expect(done.lx).toBeCloseTo(home.lx, 5);
+    expect(done.carry).toBeNull();
+    expect(actors.sceneFx().fridgeOpen).toBe(false);
+  });
+
+  it('a real act preempts an errand mid-meal: all scene effects clear next frame, member heads home', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    actors.errandFridge('Ada');
+    // run until seated with the plate (mid-meal)
+    let guard = 0;
+    while (guard++ < 2000 && !(actors.poses().get('Ada')!.carry === 'plate' && actors.poses().get('Ada')!.sit > 0.9)) {
+      actors.step(0.05);
+    }
+    expect(actors.poses().get('Ada')!.carry).toBe('plate');
+
+    expect(actors.walk('Ada', { kind: 'help', to: 'Bo', urgent: false })).toBe(true);
+    actors.step(0.05);
+    expect(actors.sceneFx().fridgeOpen).toBe(false);
+    expect(actors.poses().get('Ada')!.carry).not.toBe('plate'); // the errand's prop vanished with it
+  });
+
+  it('errands are ambient: ambientOnly stays true throughout, and eligibility guards hold', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo', 'away')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.errandFridge('Bo')).toBe(false); // nook members don't run errands
+    expect(actors.errandWater('Ada')).toBe(true);
+    expect(actors.errandWater('Ada')).toBe(false); // already busy
+    let guard = 0;
+    while (actors.active() && guard++ < 2000) {
+      expect(actors.ambientOnly()).toBe(true);
+      actors.step(0.05);
+    }
+  });
+
+  it('the coffee run pours and drinks (mug in hand at the machine) instead of standing idle', () => {
+    const { placements, byName } = world([node('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    actors.ambientWalk('Ada');
+    let sawMug = false;
+    let guard = 0;
+    while (actors.active() && guard++ < 2000) {
+      actors.step(0.05);
+      if (actors.poses().get('Ada')!.carry === 'mug') sawMug = true;
+    }
+    expect(sawMug).toBe(true);
   });
 });
 

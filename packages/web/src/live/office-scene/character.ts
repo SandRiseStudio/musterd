@@ -2,7 +2,7 @@ import { appearanceOf, type Appearance } from './appearance';
 import { project, type Fit, type Pt } from './iso';
 import { FWD } from './layout';
 import { CHAR, GESTURE, type Skel, type V3 } from './skeleton';
-import type { Dir, OfficeNode } from './types';
+import type { CarryKind, Dir, OfficeNode } from './types';
 
 /**
  * The character painter: flattens a `Skel` (3D joints, see `skeleton.ts`) onto the 2:1 iso canvas and
@@ -95,7 +95,7 @@ export interface CharacterOpts {
   /** Uniform size multiplier — nook/queue actors render at 0.72. */
   size: number;
   alpha: number;
-  carry: boolean;
+  carry: CarryKind | null;
   /** The in-place gesture playing this frame (see `GESTURE`) and its 0→1 window progress. */
   gesture?: number;
   gestureT?: number;
@@ -199,7 +199,7 @@ export function drawCharacter(
 
   if (armsOnly) {
     for (const p of [arm(0), arm(1)].sort((a, b) => a.d - b.d)) p.fn();
-    if (o.carry) drawCarry(ctx, px, k, u);
+    if (o.carry) drawCarry(ctx, px, k, u, o.carry);
     if (sipMug) drawSipMug(ctx, px, k, u, o.mug!);
     ctx.globalAlpha = prev;
     return;
@@ -260,7 +260,7 @@ export function drawCharacter(
   if (sipMug && px(k.wrist[1]).d <= px(k.head).d) drawSipMug(ctx, px, k, u, o.mug!);
   drawHead(ctx, px, k, node, look, dir, u, acc, o.t, o.seed);
   if (sipMug && px(k.wrist[1]).d > px(k.head).d) drawSipMug(ctx, px, k, u, o.mug!);
-  if (o.carry) drawCarry(ctx, px, k, u);
+  if (o.carry) drawCarry(ctx, px, k, u, o.carry);
 
   ctx.globalAlpha = prev;
 }
@@ -501,11 +501,35 @@ function drawSipMug(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel,
   disc(ctx, { x: wr.p.x, y: wr.p.y - h * 0.7 }, w / 2, w / 4.2, '#3a2416'); // the coffee surface
 }
 
-/** The handoff box, carried at the chest between the hands. */
-function drawCarry(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, u: number): void {
-  const c = px({ x: 0, y: k.chest.y - 1, z: k.chest.z + 13 });
-  ctx.fillStyle = '#b592f0';
-  ctx.fillRect(c.p.x - 11 * u, c.p.y - 9 * u, 22 * u, 17 * u);
-  ctx.fillStyle = '#8a5fd6';
-  ctx.fillRect(c.p.x - 11 * u, c.p.y - 9 * u, 22 * u, 5 * u);
+/** Whatever's being carried, at the hands that hold it: the handoff box at the chest, an errand's
+ * plate of food flat between both hands, a water bottle or mug riding the right hand. */
+function drawCarry(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, u: number, kind: CarryKind): void {
+  if (kind === 'box') {
+    const c = px({ x: 0, y: k.chest.y - 1, z: k.chest.z + 13 });
+    ctx.fillStyle = '#b592f0';
+    ctx.fillRect(c.p.x - 11 * u, c.p.y - 9 * u, 22 * u, 17 * u);
+    ctx.fillStyle = '#8a5fd6';
+    ctx.fillRect(c.p.x - 11 * u, c.p.y - 9 * u, 22 * u, 5 * u);
+    return;
+  }
+  if (kind === 'plate') {
+    // A flat plate between the hands, with something worth walking for on it.
+    const l = px(k.wrist[0]);
+    const c = { x: (l.p.x + px(k.wrist[1]).p.x) / 2, y: (l.p.y + px(k.wrist[1]).p.y) / 2 };
+    disc(ctx, { x: c.x, y: c.y - 1.5 * u }, 8.5 * u, 3.2 * u, '#f2e7d5'); // the plate
+    disc(ctx, { x: c.x, y: c.y - 3 * u }, 4.5 * u, 2.4 * u, '#c9744a'); // the food
+    return;
+  }
+  const wr = px(k.wrist[1]);
+  if (kind === 'bottle') {
+    // A mini of the desk water bottle (same blues), upright in the right hand.
+    const w = 5.5 * u;
+    const h = 12 * u;
+    ctx.fillStyle = '#bfe3f2';
+    ctx.fillRect(wr.p.x - w / 2, wr.p.y - h * 0.75, w, h);
+    ctx.fillStyle = '#5aa0c9';
+    ctx.fillRect(wr.p.x - w / 3, wr.p.y - h * 0.75 - 2 * u, (2 * w) / 3, 2 * u); // the cap
+    return;
+  }
+  drawSipMug(ctx, px, k, u, '#d6d0c6'); // 'mug': the break-nook ceramic, not a desk mug's colour
 }

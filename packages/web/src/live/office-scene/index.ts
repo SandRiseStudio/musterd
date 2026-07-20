@@ -236,7 +236,7 @@ export function mountOffice(
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
     const poses = actors.poses();
-    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv, pet);
+    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv, pet, actors.sceneFx());
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
@@ -516,7 +516,7 @@ export function mountOffice(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, pet);
+    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, pet, actors.sceneFx());
     drawCues();
     positionLabels(anchors.heads);
   }
@@ -695,14 +695,18 @@ export function mountOffice(
     const slot = pl?.kind === 'desk' ? pl.slot : null;
     const casters = slot !== null && chairKindFor(slot) !== 'stool';
     const mug = slot !== null && deskHasProp(slot, 'coffee');
+    const water = slot !== null && deskHasProp(slot, 'water');
     const beats: Array<[number, () => boolean]> = [
       [15, () => actors.gestureBeat(who, GESTURE.stretch)],
       [15, () => actors.gestureBeat(who, GESTURE.glance)],
       [14, () => actors.gestureBeat(who, GESTURE.scratch)],
       [14, () => actors.gestureBeat(who, GESTURE.chin)],
       [14, () => actors.gestureBeat(who, GESTURE.lean)],
-      [25, () => coffeeStroll(who)],
+      // The errands — real trips with a point to them, so they stay the occasional highlight:
+      [15, () => coffeeStroll(who)],
+      [7, () => actors.errandFridge(who) || actors.gestureBeat(who, GESTURE.glance)], // lounge full → cheap fallback
     ];
+    if (water) beats.push([8, () => actors.errandWater(who)]);
     if (mug) beats.push([14, () => actors.gestureBeat(who, GESTURE.sip)]);
     if (casters) beats.push([9, () => actors.gestureBeat(who, GESTURE.swivel)], [5, () => actors.gestureBeat(who, GESTURE.roll)]);
     let total = 0;
@@ -911,6 +915,19 @@ export function mountOffice(
       // one accepts (gestureBeat rejects a small/walking/already-gesturing member).
       for (const who of actors.idleDeskMembers()) {
         if (actors.gestureBeat(who, kind)) {
+          ensureLoop();
+          return who;
+        }
+      }
+      return null;
+    },
+    pokeErrand: (kind) => {
+      // The errand twin of pokeGesture: play the full fridge/water/coffee arc now, on the first idle
+      // desk member who can (a 25s fridge sequence is unverifiable if you have to wait the scheduler out).
+      for (const who of actors.idleDeskMembers()) {
+        const played =
+          kind === 'fridge' ? actors.errandFridge(who) : kind === 'water' ? actors.errandWater(who) : coffeeStroll(who);
+        if (played) {
           ensureLoop();
           return who;
         }

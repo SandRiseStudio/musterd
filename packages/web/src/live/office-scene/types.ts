@@ -50,7 +50,8 @@ export interface Pose {
    * Absent → render by `dir` alone. */
   heading?: number;
   small: boolean;
-  carry: boolean;
+  /** What's in the hands this frame: a handoff box, an errand's plate/bottle/mug — or nothing. */
+  carry: CarryKind | null;
   bubble: Bubble;
   /** Draw opacity — ramps 0→1 entering the office and 1→0 leaving (door staging); 1 otherwise. */
   alpha: number;
@@ -81,7 +82,13 @@ export interface Pose {
    * *down* and leaving is them standing *up*; a boolean here would teleport them into the chair.
    */
   sit: number;
+  /** Sort this pose at another point's depth while seated (`sit > 0.5`) — an errand sitter on the couch
+   * composite-sorts with it exactly like a leisure placement's `depthAt` (see `layout.LeisureSpot`). */
+  depthAt?: { lx: number; ly: number };
 }
+
+/** What a member can carry through a walk or a hold: the handoff box, or an errand's prop. */
+export type CarryKind = 'box' | 'plate' | 'bottle' | 'mug';
 
 /** Motion intensity == notification tier (memory: travel-intensity == notification tiers). */
 export type Tier = 'ambient' | 'needs-attn' | 'urgent';
@@ -122,8 +129,11 @@ export interface OfficeHandle {
    * Suspended: no rAF, no ambient beats — zero draw cost for invisible pixels. Resuming re-bakes and
    * paints one fresh frame synchronously, so re-expanding is still instant. */
   setSuspended: (on: boolean) => void;
-  /** Fire an in-place ambient gesture now on an idle desk member (`1` stretch · `2` glance), bypassing
-   * the 90–180s ambient scheduler. Returns the member it played on, or null if none was eligible.
+  /** Fire an in-place ambient gesture now on an idle desk member (a `GESTURE` kind), bypassing the
+   * ambient scheduler. Returns the member it played on, or null if none was eligible.
    * A design-preview / verification affordance (see office-preview); the live office uses the scheduler. */
   pokeGesture: (kind?: number) => string | null;
+  /** Fire an errand now on an idle desk member (bypassing the scheduler): the fridge meal, the water
+   * refill, or the coffee run. Same verification affordance as `pokeGesture`. */
+  pokeErrand: (kind: 'fridge' | 'water' | 'coffee') => string | null;
 }
