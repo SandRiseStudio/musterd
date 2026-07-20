@@ -1,5 +1,13 @@
 import { withTraceContext } from '@musterd/mcp';
-import { type Act, type Envelope, makeEnvelope, type Recipient } from '@musterd/protocol';
+import {
+  type Act,
+  askContract,
+  askContractText,
+  AskTierSchema,
+  type Envelope,
+  makeEnvelope,
+  type Recipient,
+} from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { flagStr, parseMeta, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
@@ -94,8 +102,20 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
 
   await http.send(team, envelope);
 
+  // The ask's tier contract (ADR 147 §2), at parity with the MCP `team_send` response: when an agent
+  // raises an `ask` from the CLI it gets the same marching orders — how long to wait, and what to do on
+  // silence — via the shared `askContractText`, so the CLI is no longer the one ask surface that stays
+  // silent about the wait/hold contract (finding 006 item 3). A valid `ask` always carries a tier
+  // (enforced by makeEnvelope above), so the narrowing here only guards a malformed meta.
+  const tier = envelope.meta?.['tier'];
+  const askTier =
+    act === 'ask' && AskTierSchema.safeParse(tier).success ? AskTierSchema.parse(tier) : null;
+
   if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify(envelope) + '\n');
+    // Additive, id-preserving: programmatic callers still read `.id`, and now get the derived contract
+    // (mirrors the MCP structured `ask_contract`) without a second round-trip to the tier table.
+    const payload = askTier ? { ...envelope, ask_contract: askContract(askTier) } : envelope;
+    process.stdout.write(JSON.stringify(payload) + '\n');
     return 0;
   }
   // Echo the sent row; resolve kinds best-effort for coloring.
@@ -108,5 +128,6 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
   }
   process.stdout.write(renderMessageRow(envelope, kindOf) + '\n');
   process.stdout.write(`${theme.ok('✓')} sent\n`);
+  if (askTier) process.stdout.write(theme.dim(askContractText(envelope.id, askTier)) + '\n');
   return 0;
 }
