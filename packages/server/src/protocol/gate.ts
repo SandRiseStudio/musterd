@@ -1,7 +1,7 @@
 import {
   type AskSpecies,
   ASK_TOP_TIER,
-  askContract,
+  askContractText,
   type GateCheckRequest,
   type GateDecision,
   makeEnvelope,
@@ -89,15 +89,19 @@ export function gateA(ctx: GateContext): GateDecision {
   };
 }
 
-/** The ADR 147 blocking-tier contract, restated verbatim-intent in the denial's repair string so the
- *  agent sees its wait/hold obligations inside its action loop (not just in a primer it can ignore). */
+/**
+ * The denial's repair string — the agent's marching orders at the point of block. Parity with the ADR 147
+ * ask contract an ask-raiser would get (the shared `askContractText`, so gate-blocked and self-raised
+ * agents read the same thing), plus the two things the deny alone must add: **what the block is for**
+ * (a human will review this consequential action) and **that routing around defeats it** — the finding-006
+ * datum that agents met a blocked push by landing the change via a local merge, pricing the hold at zero.
+ */
 function blockingContractReason(cls: string, askId: string): string {
-  const mins = Math.round(askContract(ASK_TOP_TIER).timeout_ms / 60_000);
   return (
-    `blocked pending human approval — '${cls}' is a declared costly action; ask ${askId} raised ` +
-    `(species:approve, tier:${ASK_TOP_TIER} — wait up to ${mins}m; on silence HOLD: record a ` +
-    `status_update with meta.ask_ref=${askId} + ask_outcome:'held', do NOT proceed). Do other work, ` +
-    `or re-try the action to re-check — a human accept releases it, a decline ends it.`
+    `blocked pending human approval — '${cls}' is a declared costly action your team gated for human ` +
+    `review; ask ${askId} raised (species:approve). ${askContractText(askId, ASK_TOP_TIER)} ` +
+    `Re-try the action to re-check. Landing this another way — a local merge, a different command, an ` +
+    `alternate path — bypasses the very review this block exists for; hold or hand the work off instead.`
   );
 }
 

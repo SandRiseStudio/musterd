@@ -294,6 +294,18 @@ describe('Gate B — policy-classed action→ask (ADR 150) — deny IS emit', ()
     expect(audits('action.gate').at(-1)!.result).toBe('deny');
   });
 
+  it('the deny repair string carries the ADR 147 hold contract + names the route-around (finding 006 item 1)', async () => {
+    const r = await forcePush();
+    // Parity with the ask contract (shared askContractText): the HOLD instruction + held-outcome recording.
+    expect(r.json.reason).toContain('HOLD');
+    expect(r.json.reason).toContain("meta.ask_outcome='held'");
+    expect(r.json.reason).toContain(r.json.ask_ref); // the ask id is threaded into the marching orders
+    // What the deny alone must add: what the block is for, and that routing around defeats it.
+    expect(r.json.reason).toContain('human review');
+    expect(r.json.reason).toMatch(/local merge|another way|alternate path/);
+    expect(r.json.reason).toMatch(/bypass/i);
+  });
+
   it('re-attempt while unanswered → DENY (denied_awaiting), does NOT raise a second ask (dedup)', async () => {
     const first = await forcePush();
     const r = await forcePush(); // same fingerprint, human has not answered

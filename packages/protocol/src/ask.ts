@@ -70,3 +70,31 @@ export function askTierHolds(tier: AskTier): boolean {
 export function askContract(tier: AskTier): AskContract {
   return ASK_TIER_DEFAULTS[tier];
 }
+
+/**
+ * The **agent-facing marching orders** for an ask at a given tier (ADR 147 §2/§4) — the ONE canonical
+ * phrasing of "how long to wait, then what to do on silence," so every surface that hands an agent its
+ * ask contract says the same thing. Shared by the MCP `send` response (the ask-raiser's guidance) and
+ * the ADR 150 Gate B deny/repair string (the gate raised the ask *for* the agent), so a gate-blocked
+ * agent and an ask-raising agent get identical, drift-free instructions.
+ *
+ * Top tier **holds**: wait, re-notify, then HOLD and record the held outcome — never proceed. Below-top
+ * **proceeds with a recorded risk-acceptance** on silence. Either way the clock is the agent's; the
+ * daemon runs no timer (ADR 147 §2).
+ */
+export function askContractText(id: string, tier: AskTier): string {
+  const mins = Math.round(askContract(tier).timeout_ms / 60_000);
+  if (askTierHolds(tier)) {
+    return (
+      `Top tier (${tier}): wait up to ${mins}m for a human answer, re-notifying; if none comes, HOLD — ` +
+      `stay paused, do NOT proceed, and record a status_update carrying meta.ask_ref='${id}' + ` +
+      `meta.ask_outcome='held'. A human accept releases it, a decline ends it, and a "deciding" reply ` +
+      `(wait, meta.until) extends your clock.`
+    );
+  }
+  return (
+    `Wait up to ${mins}m for a human answer; if none comes, you may PROCEED — record it with a ` +
+    `status_update carrying meta.ask_ref='${id}', meta.ask_outcome='risk_accepted', meta.risk, and ` +
+    `meta.chosen_approach. A human may reply "deciding" (wait, meta.until) to extend your clock.`
+  );
+}
