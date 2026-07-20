@@ -45,6 +45,31 @@ describe('stripNoise', () => {
   it('drops leading list bullets and blockquotes', () => {
     expect(stripNoise('- one\n- two\n> quoted')).toBe('one two quoted');
   });
+  it('unwraps a lane envelope into a speakable clause', () => {
+    expect(stripNoise('[lane] resolved "Re-font body: Fraunces → Inter"')).toBe(
+      'resolved: Re-font body: Fraunces → Inter',
+    );
+  });
+  it('unwraps a goal envelope the same way', () => {
+    expect(stripNoise('[goal] declared "Work items, board & insight layer (web)"')).toBe(
+      'declared: Work items, board & insight layer (web)',
+    );
+  });
+  it('keeps content trailing the quoted title', () => {
+    expect(stripNoise('[lane] surface overlaps "Daemon refresh" (owner miley): ROADMAP.md ∩ ROADMAP.md')).toBe(
+      'surface overlaps: Daemon refresh (owner miley): ROADMAP.md ∩ ROADMAP.md',
+    );
+  });
+  it('drops a bare envelope tag even with no known verb', () => {
+    expect(stripNoise('[lane] "cookoff run ladder" → active')).toBe('"cookoff run ladder" → active');
+  });
+  it('unwraps a whole-line quoted title with no verb', () => {
+    expect(stripNoise('"just a quoted title"')).toBe('just a quoted title');
+  });
+  it('leaves refs, paths, flags, arrows, and short hashes intact', () => {
+    const s = 'Shipped PR #343 as 17cc546: service --auto in ROADMAP.md → done';
+    expect(stripNoise(s)).toBe(s);
+  });
 });
 
 describe('shapeSpeech', () => {

@@ -21,8 +21,17 @@ export interface ShapedSpeech {
   clamped: boolean;
 }
 
+/** Lane/goal acts arrive as a machine envelope — `[lane] resolved "Title"` — which reads like a log
+ * line floating over someone's head. Unwrap it into a speakable clause (`resolved: Title`): drop the
+ * bracket tag and turn the verb's quoted argument into a colon phrase. Anything trailing the quote
+ * (e.g. `(owner miley): globs…`) is preserved. */
+const ENVELOPE_TAG = /^\[(?:lane|goal)\]\s+/i;
+const ENVELOPE_VERB = /^(resolved|opened|claimed|declared|handed|surface overlaps)\s+"([^"]+)"/i;
+
 /** Flatten an act body into speakable prose: markdown chrome off, code fences and URLs collapsed to
- * compact tokens, whitespace collapsed. A bubble is a spoken line, not a document. */
+ * compact tokens, the lane/goal envelope unwrapped, whitespace collapsed. A bubble is a spoken line,
+ * not a document. Note: `#refs`, file paths, arrows, and short hashes are left intact — they read as
+ * intentional content, not chrome, and the stream is the place to style them richly. */
 export function stripNoise(raw: string): string {
   let t = raw;
   // fenced code blocks → a compact token (the stream shows the real thing)
@@ -30,6 +39,10 @@ export function stripNoise(raw: string): string {
   // bare URLs → an arrow + hostname; markdown links keep their label
   t = t.replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, '$1');
   t = t.replace(/https?:\/\/([^\s/)>\]]+)[^\s)>\]]*/g, (_, host: string) => `↗ ${host}`);
+  // lane/goal envelope: `[lane] resolved "Title"` → `resolved: Title` (do this before emphasis-strip
+  // so the surrounding quotes are still balanced). The tag comes off even when no known verb follows.
+  t = t.replace(ENVELOPE_TAG, '');
+  t = t.replace(ENVELOPE_VERB, '$1: $2');
   // markdown chrome: headers, emphasis, inline code, blockquotes, list bullets
   t = t.replace(/^#{1,6}\s+/gm, '');
   t = t.replace(/(\*\*|__)(.*?)\1/g, '$2');
@@ -37,7 +50,10 @@ export function stripNoise(raw: string): string {
   t = t.replace(/`([^`]*)`/g, '$1');
   t = t.replace(/^\s*(?:[-*+•]|\d+[.)])\s+/gm, '');
   t = t.replace(/^\s*>\s?/gm, '');
-  return t.replace(/\s+/g, ' ').trim();
+  t = t.replace(/\s+/g, ' ').trim();
+  // a whole line still wrapped in balanced quotes (a bare quoted title with no verb) → unwrap it
+  t = t.replace(/^"([^"]+)"$/, '$1');
+  return t;
 }
 
 /** Short-truncate for a speech bubble — cut on a sentence boundary when one lands reasonably deep,
