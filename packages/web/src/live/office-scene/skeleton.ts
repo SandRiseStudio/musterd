@@ -22,6 +22,7 @@
  */
 
 import { DESK_UP, KEYBOARD_ALONG, SEAT_BACK, SEAT_TOP } from './layout';
+import type { CarryKind } from './types';
 
 export interface V3 {
   x: number;
@@ -95,6 +96,15 @@ export const GESTURE = {
   sip: 6,
   swivel: 7,
   roll: 8,
+  // Errand beats (played on a walk's hold/sit legs via `Leg.overlay`, not by the gesture scheduler):
+  /** Peering into the open fridge, one hand on the door. */
+  browse: 9,
+  /** Holding the bottle under the cooler tap, leaning in a touch. */
+  fill: 10,
+  /** Seated with a plate, the free hand cycling plate → mouth. */
+  eat: 11,
+  /** Working the espresso machine at counter height. */
+  pour: 12,
 } as const;
 
 /** An arc-shaped envelope over the gesture window: 0 → 1 → 0, zero-velocity at both ends (no pop). */
@@ -164,8 +174,9 @@ export interface SkelInput {
   t: number;
   /** Typing intensity 0→1 — hands ripple on the keys. Only meaningful while seated. */
   typing: number;
-  /** Carrying a handoff box: both forearms come up and forward to hold it at the chest. */
-  carry: boolean;
+  /** What's in the hands: the handoff box (both forearms up at the chest), an errand's plate (both
+   * hands, held low and flat), bottle or mug (one right hand, in front) — or nothing. */
+  carry: CarryKind | null;
   /** Hand up, attentive — the `request_help` hold. */
   help: boolean;
   /** In-place ambient beat: `1` stretch · `2` glance (ADR 086). */
@@ -478,14 +489,22 @@ function typingTap(t: number, seed: number, hand: number): number {
 /** Overlays ride on top of whichever base pose was solved, so a carrying walker still walks. */
 function applyOverlays(s: Skel, inp: SkelInput): void {
   const C = CHAR;
-  if (inp.carry) {
-    // Both hands forward at chest height, holding the box — the legs keep whatever they were doing.
+  if (inp.carry === 'box' || inp.carry === 'plate') {
+    // Both hands forward, holding it — at the chest for the box, lower and flatter for a plate of food.
+    const y = inp.carry === 'box' ? s.chest.y - 2 : s.chest.y - 9;
+    const z = inp.carry === 'box' ? s.chest.z + 13 : s.chest.z + 12;
+    const span = inp.carry === 'box' ? 8 : 6.5;
     for (const i of [0, 1] as const) {
       const sgn = i === 0 ? -1 : 1;
-      const hand = v(sgn * 8, s.chest.y - 2, s.chest.z + 13);
+      const hand = v(sgn * span, y, z);
       s.wrist[i] = hand;
       s.elbow[i] = ik2(s.shoulder[i], hand, C.upperArm, C.foreArm, v(sgn * 0.9, -0.6, 0));
     }
+  } else if (inp.carry === 'bottle' || inp.carry === 'mug') {
+    // One-handed: the right hand holds it out in front, low — the walk keeps its counter-swing left arm.
+    const hand = v(6, s.chest.y - 10, s.chest.z + 10);
+    s.wrist[1] = hand;
+    s.elbow[1] = ik2(s.shoulder[1], hand, C.upperArm, C.foreArm, v(0.9, -0.6, 0));
   }
   if (inp.help) {
     // The raised hand — a real reach up and slightly out, with a small wave so it reads as "over here".
@@ -563,5 +582,36 @@ function applyOverlays(s: Skel, inp: SkelInput): void {
     const a = arcEnv(inp.gestureT);
     recline(a * 0.1);
     lapHands(a);
+  } else if (inp.gesture === GESTURE.browse) {
+    // Browsing the open fridge: one hand up on the door edge, head craned a touch forward and down —
+    // the universal "what have we got" stance.
+    const a = holdEnv(inp.gestureT);
+    const door = v(10, s.chest.y + 6, s.chest.z + 9);
+    s.wrist[1] = lerp3(s.wrist[1], door, a);
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1, 0, 0.4));
+    s.head = v(s.head.x, s.head.y - a * 1.2, s.head.z + a * 2);
+  } else if (inp.gesture === GESTURE.fill) {
+    // Filling at the cooler: the bottle hand drops to the tap and holds there; a slight lean in.
+    const a = holdEnv(inp.gestureT);
+    const tap = v(2, 26, 13);
+    s.wrist[1] = lerp3(s.wrist[1], tap, a);
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(0.8, -0.6, 0.3));
+    s.head = v(s.head.x, s.head.y - a * 0.8, s.head.z + a * 1.2);
+  } else if (inp.gesture === GESTURE.eat) {
+    // Eating: the plate stays in the left hand (carry overlay put both hands under it); the right hand
+    // cycles plate → mouth at a relaxed bite rate for as long as the sit-and-eat leg lasts.
+    const a = holdEnv(inp.gestureT);
+    const bite = (Math.sin(inp.t * 4.6) + 1) / 2; // 0 at the plate → 1 at the mouth, ~0.7 Hz
+    const plate = s.wrist[1];
+    const mouth = v(2, s.head.y - 6, s.head.z + C.headR * 0.55 + 2);
+    s.wrist[1] = lerp3(plate, mouth, a * smooth(bite));
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1, -0.3, 0));
+  } else if (inp.gesture === GESTURE.pour) {
+    // Working the machine: right hand forward at counter height, a small press-and-hold.
+    const a = holdEnv(inp.gestureT);
+    const press = Math.sin(inp.t * 6) * 0.8 * a;
+    const head = v(3, 36 + press, 13);
+    s.wrist[1] = lerp3(s.wrist[1], head, a);
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(0.9, -0.5, 0.2));
   }
 }

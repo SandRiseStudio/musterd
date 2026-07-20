@@ -109,7 +109,7 @@ function CharacterSheet() {
               run: false,
               t,
               typing: mode.sit ? typingBurst(seed, t) : 0,
-              carry: false,
+              carry: null,
               help: false,
               gesture: 0,
               gestureT: 0,
@@ -125,7 +125,7 @@ function CharacterSheet() {
               skel,
               size: 1,
               alpha: 1,
-              carry: false,
+              carry: null,
               t,
               seed,
             });

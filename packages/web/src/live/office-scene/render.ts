@@ -34,6 +34,7 @@ import {
   SHELF_DEEP,
   SHELF_H,
   SHELF_LONG,
+  SINK,
   WINDOWS,
   type Bookshelf,
   type Huddle,
@@ -1038,17 +1039,22 @@ interface DepthItem {
 }
 
 /** The break-nook lounge, as depth items: the rug flat on the floor, every solid piece self-sorted. */
-function nookItems(ctx: CanvasRenderingContext2D, fit: Fit): { rug: () => void; items: DepthItem[] } {
+function nookItems(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  fridgeOpen = false,
+): { rug: () => void; items: DepthItem[] } {
   const { lx, ly } = NOOK;
   const L = LOUNGE;
   const at = (dx: number, dy: number, fn: () => void): DepthItem => ({ d: depth(lx + dx, ly + dy), fn });
   return {
     rug: () => drawRug(ctx, fit, NOOK_RUG, lx, ly, NOOK_RUG_R * 2, NOOK_RUG_R * 2),
     items: [
-      at(L.fridge.dx, L.fridge.dy, () => fridge(ctx, fit, lx + L.fridge.dx, ly + L.fridge.dy)),
+      at(L.fridge.dx, L.fridge.dy, () => fridge(ctx, fit, lx + L.fridge.dx, ly + L.fridge.dy, fridgeOpen)),
       at(L.counter.dx, L.counter.dy, () => {
         box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy, L.counter.w, L.counter.d, L.counter.h, woodTop());
         coffeeMachine(ctx, fit, lx + L.machine.dx, ly + L.machine.dy, L.counter.h);
+        counterSink(ctx, fit, lx + SINK.dx, ly + SINK.dy, L.counter.h);
         // What a counter actually carries beside the machine: the beans, and the mugs waiting their turn.
         // The bag is kraft-paper warm on purpose — in dark roast brown it and the machine read as one
         // black lump rather than two objects.
@@ -1081,15 +1087,34 @@ const APPLIANCE = '#e8e2d6';
  * warmer plate, so the plate's height is shared data rather than a constant repeated in two places. */
 export const MACHINE_H = 15;
 
-/** The fridge: two doors under a seam, handles, someone's note, and a crate parked on top. */
-function fridge(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
+/** The fridge: two doors under a seam, handles, someone's note, and a crate parked on top. While an
+ * errand browses it (`open`), the lower door swings out and the opening shows dark with a lit shelf. */
+function fridge(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, open = false): void {
   const f = LOUNGE.fridge;
   const front = ly + f.d / 2; // the room-facing face — everything below is proud of it by ~1 unit
   box(ctx, fit, lx, ly, f.w, f.d, f.h, APPLIANCE);
   box(ctx, fit, lx, front, f.w - 4, 1.5, 1.5, '#c3b9a8', 34); // the freezer/fridge seam
-  for (const up of [38, 18]) box(ctx, fit, lx + 11, front, 2.5, 2.5, 12, '#6e6558', up); // door handles
-  box(ctx, fit, lx - 6, front, 7, 1.2, 8, '#f4cf52', 24); // a note, stuck on at eye height
+  if (open) {
+    // The lower compartment stands open: a dark inset with one lit shelf line, and the door swung
+    // out as a slab perpendicular to the face, hinge at the west edge (box() can't rotate — at this
+    // scale a proud perpendicular slab *is* an open door).
+    box(ctx, fit, lx, front, f.w - 6, 1.2, 30, '#2e2a26', 3); // the dark opening
+    box(ctx, fit, lx, front, f.w - 10, 1.4, 1.6, '#f6ead2', 17); // a shelf catching the fridge light
+    box(ctx, fit, lx - f.w / 2 + 1, front + 8, 3, 16, 32, dim(APPLIANCE, 0.9), 2); // the swung door
+    box(ctx, fit, lx + 11, front, 2.5, 2.5, 12, '#6e6558', 38); // upper handle stays
+  } else {
+    for (const up of [38, 18]) box(ctx, fit, lx + 11, front, 2.5, 2.5, 12, '#6e6558', up); // door handles
+    box(ctx, fit, lx - 6, front, 7, 1.2, 8, '#f4cf52', 24); // a note, stuck on at eye height
+  }
   box(ctx, fit, lx - 5, ly - 2, 15, 13, 9, '#c9744a', f.h); // a crate someone left on top
+}
+
+/** The counter sink: an inset basin with a rim and a little gooseneck faucet — the plate drop-off. */
+function counterSink(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, up: number): void {
+  box(ctx, fit, lx, ly, 16, 12, 1.2, '#cfd6d8', up); // the rim
+  box(ctx, fit, lx, ly, 12, 8, 0.8, '#7d8a90', up + 0.4); // the basin, reading dark against the rim
+  box(ctx, fit, lx - 6, ly - 4, 1.6, 1.6, 7, '#9aa8ae', up); // faucet riser at the back corner
+  box(ctx, fit, lx - 4.5, ly - 4, 4, 1.6, 1.4, '#9aa8ae', up + 7); // …bending over the basin
 }
 
 /** The espresso machine: a body with a warmer plate, a lit switch, a group head, and a cup under it. */
@@ -2357,6 +2382,9 @@ export function renderScene(
   teamName = 'revive',
   env: LightEnv = DAY_ENV,
   pet: PetState | null = null,
+  /** Errand scene effects, derived per-frame by the actor system (`actors.sceneFx()`): an open fridge
+   * door, desks whose water bottle is currently in its owner's hand. Absent → everything at rest. */
+  fx?: { fridgeOpen: boolean; bottleCarriers: Set<string> },
 ): SceneAnchors {
   // Grounds the diorama on the panel surface before anything else paints (the floor covers its middle).
   drawGroundShadow(ctx, fit);
@@ -2395,7 +2423,7 @@ export function renderScene(
   }
   drawRug(ctx, fit, MEETING.rug, MEETING.lx, MEETING.ly, MEETING.rug.w, MEETING.rug.d);
   drawRug(ctx, fit, RECEPTION.rug, RECEPTION.rug.lx, RECEPTION.rug.ly, RECEPTION.rug.w, RECEPTION.rug.d);
-  const nook = nookItems(ctx, fit);
+  const nook = nookItems(ctx, fit, fx?.fridgeOpen ?? false);
   nook.rug();
   items.push(...nook.items);
   for (const h of HUDDLES) {
@@ -2427,7 +2455,11 @@ export function renderScene(
       ownerPose.gesture === GESTURE.sip &&
       ownerPose.gestureT > 0.12 &&
       ownerPose.gestureT < 0.95;
-    const hide = sipping ? new Set<PropKind>(['coffee']) : undefined;
+    // A prop leaves the desk while it's "in the owner's hand": the sip mug, or the errand's bottle.
+    const hidden: PropKind[] = [];
+    if (sipping) hidden.push('coffee');
+    if (name && fx?.bottleCarriers.has(name)) hidden.push('water');
+    const hide = hidden.length ? new Set<PropKind>(hidden) : undefined;
     items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, t, hide) });
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between

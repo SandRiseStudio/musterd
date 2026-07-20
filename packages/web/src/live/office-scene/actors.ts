@@ -1,19 +1,25 @@
 import {
   COFFEE_STAND,
+  COOLER_STAND,
   DESK_SLOTS,
   ENTRANCE,
+  FRIDGE_STAND,
   FWD,
   LEISURE_SPOTS,
   NOOK,
   NOOK_CAP,
   NOOK_SPOTS,
   SEAT_BACK,
+  SINK_STAND,
   STRIP_CAP,
 } from './layout';
 import { findPath, type P } from './nav';
 import type { Placement } from './seating';
 import { chairShift, chairYaw, GESTURE, STRIDE } from './skeleton';
-import type { Bubble, Dir, OfficeNode, Pose } from './types';
+import type { Bubble, CarryKind, Dir, OfficeNode, Pose } from './types';
+
+/** A leisure-spot shape (couch cushion / armchair) an errand can sit at — see `layout.LEISURE_SPOTS`. */
+type Spot = (typeof LEISURE_SPOTS)[number];
 
 /**
  * The actor system: turns a live roster + acts into moving avatars. Every present member has a *home*
@@ -119,7 +125,7 @@ export function homePoses(
         ly: slot.ly - f[1] * SEAT_BACK,
         dir: slot.dir,
         small: false,
-        carry: false,
+        carry: null,
         bubble: null,
         alpha: 1,
         ...AT_REST,
@@ -135,7 +141,7 @@ export function homePoses(
         ly: spot.ly,
         dir: spot.dir,
         small: false,
-        carry: false,
+        carry: null,
         bubble: null,
         alpha: 1,
         ...AT_REST,
@@ -152,7 +158,7 @@ export function homePoses(
         ly: NOOK.ly + spot.dy,
         dir: 'S',
         small: true,
-        carry: false,
+        carry: null,
         bubble: null,
         alpha: 1,
         ...AT_REST,
@@ -167,7 +173,7 @@ export function homePoses(
         ly: ENTRANCE.ly - 10 - pl.index * 6,
         dir: 'N',
         small: true,
-        carry: false,
+        carry: null,
         bubble: null,
         alpha: 1,
         ...AT_REST,
@@ -184,11 +190,19 @@ interface Leg {
   ty: number;
   dir: Dir;
   dur: number;
-  carry: boolean;
+  carry: CarryKind | null;
   bubble: Bubble;
   /** Velocity profile across this leg. A routed run is shaped `in` → `linear`… → `out` so speed is
    * continuous through every waypoint (see `legsAlong`); a stationary hold leg's ease is irrelevant. */
   ease: Ease;
+  /** A gesture overlay played across this leg (`GESTURE.browse/fill/eat/pour…`) — `gestureT` runs the
+   * leg's own 0→1 clock, so a dwell's beat spans exactly its dwell. */
+  overlay?: number;
+  /** Sit on furniture through this leg (an errand's couch/armchair meal): the sit blend eases to 1 and
+   * the pose composite-sorts at `sitAt.depthAt` where the spot needs it. */
+  sitAt?: Spot;
+  /** The fridge door stands open through this leg (derived per-frame by `sceneFx` — never stored). */
+  door?: boolean;
 }
 interface Walk {
   legs: Leg[];
@@ -208,6 +222,37 @@ interface Walk {
 }
 type Req = { kind: 'help' | 'handoff'; to: string; urgent: boolean };
 
+/** How fast an errand ambles — slower than an act-walk; nobody hurries to the fridge. */
+const ERRAND_SPEED = 68;
+
+/** Where a run of travel legs actually ends (the routed endpoint may differ from the asked-for point). */
+function endOf(legs: Leg[]): P {
+  const last = legs[legs.length - 1]!;
+  return { lx: last.tx, ly: last.ty };
+}
+
+/** A stationary dwell leg: stand at `at` facing `dir` for `dur`, with an errand's own flags riding it. */
+function hold(
+  at: P,
+  dir: Dir,
+  dur: number,
+  extra: { carry?: CarryKind; overlay?: number; door?: boolean },
+): Leg {
+  return {
+    fx: at.lx,
+    fy: at.ly,
+    tx: at.lx,
+    ty: at.ly,
+    dir,
+    dur,
+    carry: extra.carry ?? null,
+    bubble: null,
+    ease: 'inOut',
+    ...(extra.overlay !== undefined ? { overlay: extra.overlay } : {}),
+    ...(extra.door !== undefined ? { door: extra.door } : {}),
+  };
+}
+
 /** A point ~offset in front of `target`, on the side facing `mover` — where a visitor stands. */
 function approach(target: { lx: number; ly: number }, mover: { lx: number; ly: number }): { lx: number; ly: number } {
   const dx = mover.lx - target.lx;
@@ -225,7 +270,7 @@ function approach(target: { lx: number; ly: number }, mover: { lx: number; ly: n
  * old shape (easeInOut per leg) braked to a dead stop at each string-pulled corner, which read as
  * "walk a few steps, pause, turn, walk again".
  */
-function legsAlong(pts: P[], speed: number, minDur: number, maxDur: number, carry: boolean): Leg[] {
+function legsAlong(pts: P[], speed: number, minDur: number, maxDur: number, carry: CarryKind | null): Leg[] {
   const segs: Array<{ a: P; b: P; len: number }> = [];
   let total = 0;
   for (let i = 0; i < pts.length - 1; i++) {
@@ -266,10 +311,19 @@ export interface Actors {
   setHomes(placements: Map<string, Placement>, byName: Map<string, OfficeNode>, animate: boolean): void;
   /** Enqueue a walk to a teammate. Returns false if it can't play (mover or target not present). */
   walk(from: string, req: Req): boolean;
-  /** Enqueue an ambient coffee-stroll for a seated desk member (home → nook machine → pause → home).
+  /** Enqueue an ambient coffee run for a seated desk member (home → machine → pour → drink → home).
    * Self-generated filler, not a real act; returns false if the member can't stroll (absent, in the
    * nook/queue, exiting, or already busy). See ADR 086 Phase 2. */
   ambientWalk(from: string): boolean;
+  /** The water-bottle errand: grab the desk bottle, fill it at the cooler (~5s), bring it back. Same
+   * eligibility and preemption contract as `ambientWalk`. */
+  errandWater(from: string): boolean;
+  /** The fridge-meal errand: open the fridge, browse, carry a plate to a free lounge seat, eat, drop
+   * the empty plate at the counter sink, return. False when ineligible or the lounge is full. */
+  errandFridge(from: string): boolean;
+  /** Scene effects derived from the walks' *current* legs (never stored): whether the fridge door
+   * stands open, and whose desk water bottle is in their hand (so the desk copy hides). */
+  sceneFx(): { fridgeOpen: boolean; bottleCarriers: Set<string> };
   /** Play an in-place ambient gesture (`1` stretch · `2` glance) on a seated desk member for a short
    * window. Stationary filler, not a real act; returns false if the member can't gesture (absent, small,
    * exiting, walking, or already busy). See ADR 086 Phase 2 tail. */
@@ -316,7 +370,7 @@ export function createActors(): Actors {
   let arrivals = 0; // members that entered since the last takeArrivals() — the dog's cue to go and greet
 
   function entrancePose(ref: Pose): Pose {
-    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: false, bubble: null, alpha: 1, ...AT_REST };
+    return { lx: ENTRANCE.lx, ly: ENTRANCE.ly, dir: 'N', small: ref.small, carry: null, bubble: null, alpha: 1, ...AT_REST };
   }
   function moved(a: Pose, b: Pose): boolean {
     return Math.hypot(a.lx - b.lx, a.ly - b.ly) > 8;
@@ -333,7 +387,7 @@ export function createActors(): Actors {
     const speed = 78; // logical units/sec — an unhurried stroll across the floor
     const path = findPath({ lx: from.lx, ly: from.ly }, { lx: to.lx, ly: to.ly }, othersAt(who));
     return {
-      legs: legsAlong(path, speed, 1.8, 6, false),
+      legs: legsAlong(path, speed, 1.8, 6, null),
       i: 0,
       t: 0,
       small: exit ? from.small : to.small,
@@ -428,12 +482,16 @@ export function createActors(): Actors {
         // Travelling (not the hold leg) → `walking`; urgent walks → `run`.
         moving: leg.fx !== leg.tx || leg.fy !== leg.ty,
         run: w.run ?? false,
-        gesture: 0, // a walker never gestures — gestures are stationary idle beats
-        gestureT: 0,
+        // A leg can carry its own beat (an errand's browse/fill/eat/pour dwell), clocked by the leg —
+        // plain travel legs stay gesture-free, as before.
+        gesture: leg.overlay ?? 0,
+        gestureT: leg.overlay ? clamp(w.t, 0, 1) : 0,
         phase: a.phase,
         stride: a.stride,
-        sit: a.sit, // eased down as they rise from the chair, so leaving a desk is a stand-up
+        sit: a.sit, // eased through stands and errand sits alike (see `sitTargetOf`)
         heading: a.head,
+        // An errand sitter on the couch composite-sorts with it, exactly like a leisure placement.
+        ...(leg.sitAt?.depthAt ? { depthAt: leg.sitAt.depthAt } : {}),
       });
     }
     return out;
@@ -455,10 +513,9 @@ export function createActors(): Actors {
       // Express the walk cycle only while actually covering ground — a walker paused on a hold leg stands.
       const speed = dt > 0 ? dist / dt : 0;
       a.stride = toward(a.stride, p.moving && speed > 2 ? 1 : 0, dt / STRIDE_EASE);
-      // Sit whenever the member is home at a desk and not walking. Rising for an errand and settling back
-      // afterwards are then just this blend running in each direction.
-      const seatedHome = (homes.get(name)?.sit ?? 0) > 0 && !walks.has(name);
-      a.sit = toward(a.sit, seatedHome ? 1 : 0, dt / SIT_EASE);
+      // Sit whenever the member is home at a seat and not walking — or parked on an errand's sit leg
+      // (the couch meal). Rising and settling back are just this blend running in each direction.
+      a.sit = toward(a.sit, sitTargetOf(name), dt / SIT_EASE);
       // Swivel the continuous facing toward wherever this member should be looking, shortest way round.
       const want = headingTarget(name);
       if (want !== null) {
@@ -472,11 +529,45 @@ export function createActors(): Actors {
 
   /** True while any member is still mid-blend (settling out of a stride, sitting down, standing up). The
    * loop must keep running through it, or a member freezes half-out of their chair. */
+  /** The shared errand entry guard: only a seated desk member (not nook/queue `small`), present and
+   * idle, runs one. Returns their home + the standing crowd to route around, or null. */
+  function errandStart(from: string): { home: Pose; avoid: P[] } | null {
+    const home = homes.get(from);
+    if (!home || home.small || exiting.has(from) || walks.has(from) || pending.get(from)?.length) {
+      return null;
+    }
+    return { home, avoid: othersAt(from) };
+  }
+
+  /** A free lounge seat (couch cushion / armchair) for an errand meal: not a member's home, and not
+   * already the target of another in-flight errand's sit leg. Null when the lounge is full. */
+  function freeLoungeSpot(): Spot | null {
+    const open = LEISURE_SPOTS.filter((s) => {
+      if (s.zone !== 'lounge') return false;
+      for (const h of homes.values()) {
+        if (Math.hypot(h.lx - s.lx, h.ly - s.ly) < 20) return false;
+      }
+      for (const w of walks.values()) {
+        for (const leg of w.legs) {
+          if (leg.sitAt && Math.hypot(leg.sitAt.lx - s.lx, leg.sitAt.ly - s.ly) < 20) return false;
+        }
+      }
+      return true;
+    });
+    return open.length ? open[Math.floor(Math.random() * open.length)]! : null;
+  }
+
+  /** Where the sit blend is heading for this member: 1 seated (home seat, or an errand's sit leg). */
+  function sitTargetOf(name: string): number {
+    const w = walks.get(name);
+    if (w) return w.legs[w.i]?.sitAt ? 1 : 0;
+    return (homes.get(name)?.sit ?? 0) > 0 ? 1 : 0;
+  }
+
   function settling(): boolean {
     for (const [name, a] of anim) {
       if (a.stride > 0.001) return true;
-      const target = (homes.get(name)?.sit ?? 0) > 0 && !walks.has(name) ? 1 : 0;
-      if (Math.abs(a.sit - target) > 0.001) return true;
+      if (Math.abs(a.sit - sitTargetOf(name)) > 0.001) return true;
       // Mid-turn counts too — parking the loop here would bake a frame of someone facing sideways.
       const want = headingTarget(name);
       if (want !== null && Math.abs(arcTo(a.head, want)) > 0.02) return true;
@@ -493,7 +584,7 @@ export function createActors(): Actors {
     const start = origin ?? home;
     const a = approach(target, start);
     const speed = req.urgent ? 165 : 100; // logical units / sec — amble over, or hurry when urgent
-    const carry = req.kind === 'handoff';
+    const carry: CarryKind | null = req.kind === 'handoff' ? 'box' : null;
     const hold = req.kind === 'help' ? (req.urgent ? 0.5 : 0.75) : 0.6;
     const holdBubble: Bubble = req.kind === 'help' ? (req.urgent ? '!' : '?') : null;
     // Route both trips around furniture and standing teammates; the visitor's stand spot is wherever
@@ -501,7 +592,7 @@ export function createActors(): Actors {
     const avoid = othersAt(from);
     const out = legsAlong(findPath({ lx: start.lx, ly: start.ly }, a, avoid), speed, 1.4, 4.5, carry);
     const stand = { lx: out[out.length - 1]!.tx, ly: out[out.length - 1]!.ty };
-    const back = legsAlong(findPath(stand, { lx: home.lx, ly: home.ly }, avoid), speed, 1.4, 4.5, false);
+    const back = legsAlong(findPath(stand, { lx: home.lx, ly: home.ly }, avoid), speed, 1.4, 4.5, null);
     return {
       legs: [
         ...out,
@@ -605,20 +696,20 @@ export function createActors(): Actors {
       return true;
     },
     ambientWalk(from) {
-      const home = homes.get(from);
-      // Only a seated desk member (not nook/queue `small`), present and idle, strolls for coffee.
-      if (!home || home.small || exiting.has(from) || walks.has(from) || pending.get(from)?.length) {
-        return false;
-      }
-      const dest = COFFEE_STAND;
-      const speed = 68; // logical units/sec — a slow, unhurried amble (cheaper-reading than a real errand)
-      const avoid = othersAt(from);
-      const out = legsAlong(findPath({ lx: home.lx, ly: home.ly }, dest, avoid), speed, 1.8, 5, false);
-      const back = legsAlong(findPath(dest, { lx: home.lx, ly: home.ly }, avoid), speed, 1.8, 5, false);
+      const trip = errandStart(from);
+      if (!trip) return false;
+      const { home, avoid } = trip;
+      // The coffee run, made to *mean* something (it used to stand at the machine doing nothing): work
+      // the machine, then actually drink the cup before heading back.
+      const out = legsAlong(findPath({ lx: home.lx, ly: home.ly }, COFFEE_STAND, avoid), ERRAND_SPEED, 1.8, 5, null);
+      const stand = endOf(out);
+      const back = legsAlong(findPath(stand, { lx: home.lx, ly: home.ly }, avoid), ERRAND_SPEED, 1.8, 5, null);
       walks.set(from, {
         legs: [
           ...out,
-          { fx: dest.lx, fy: dest.ly, tx: dest.lx, ty: dest.ly, dir: 'N', dur: 1.6, carry: false, bubble: null, ease: 'inOut' }, // pause facing the machine
+          hold(stand, 'N', 1.0, { overlay: GESTURE.pour }),
+          hold(stand, 'N', 3.0, { carry: 'mug', overlay: GESTURE.sip }),
+          hold(stand, 'N', 0.35, {}), // mug set back down by the machine
           ...back,
         ],
         i: 0,
@@ -627,6 +718,78 @@ export function createActors(): Actors {
         ambient: true,
       });
       return true;
+    },
+    errandWater(from) {
+      const trip = errandStart(from);
+      if (!trip) return false;
+      const { home, avoid } = trip;
+      // Grab the bottle off the desk (the desk copy hides while it's in hand — `sceneFx`), amble to the
+      // cooler, fill for a good few seconds, come back, put it down.
+      const out = legsAlong(findPath({ lx: home.lx, ly: home.ly }, COOLER_STAND, avoid), ERRAND_SPEED, 1.8, 5, 'bottle');
+      const stand = endOf(out);
+      const back = legsAlong(findPath(stand, { lx: home.lx, ly: home.ly }, avoid), ERRAND_SPEED, 1.8, 5, 'bottle');
+      walks.set(from, {
+        legs: [
+          hold(home, home.dir, 0.45, { carry: 'bottle' }), // pick it up
+          ...out,
+          hold(stand, 'N', 5.0, { carry: 'bottle', overlay: GESTURE.fill }),
+          ...back,
+          hold(home, home.dir, 0.4, { carry: 'bottle' }), // set it back down
+        ],
+        i: 0,
+        t: 0,
+        small: false,
+        ambient: true,
+      });
+      return true;
+    },
+    errandFridge(from) {
+      const trip = errandStart(from);
+      if (!trip) return false;
+      const { home, avoid } = trip;
+      const spot = freeLoungeSpot();
+      if (!spot) return false; // every lounge seat taken — the scheduler picks another beat
+      // The full meal arc: open the fridge, browse, take a plate to the lounge, eat, leave the empty
+      // plate at the counter sink, come home. Every scene effect (open door, the plate) is derived from
+      // the *current* leg, so preemption at any step tidies up by construction.
+      const out = legsAlong(findPath({ lx: home.lx, ly: home.ly }, FRIDGE_STAND, avoid), ERRAND_SPEED, 1.8, 5, null);
+      const atFridge = endOf(out);
+      const toSeat = legsAlong(findPath(atFridge, spot, avoid), ERRAND_SPEED, 1.8, 5, 'plate');
+      const atSeat = endOf(toSeat);
+      const toSink = legsAlong(findPath(atSeat, SINK_STAND, avoid), ERRAND_SPEED, 1.8, 5, 'plate');
+      const atSink = endOf(toSink);
+      const back = legsAlong(findPath(atSink, { lx: home.lx, ly: home.ly }, avoid), ERRAND_SPEED, 1.8, 5, null);
+      walks.set(from, {
+        legs: [
+          ...out,
+          hold(atFridge, 'N', 0.5, { door: true }), // the door swings open
+          hold(atFridge, 'N', 2.2, { door: true, overlay: GESTURE.browse }),
+          hold(atFridge, 'N', 0.45, { door: true, carry: 'plate' }), // found something
+          ...toSeat,
+          { fx: spot.lx, fy: spot.ly, tx: spot.lx, ty: spot.ly, dir: spot.dir, dur: 6.5, carry: 'plate', bubble: null, ease: 'inOut', overlay: GESTURE.eat, sitAt: spot },
+          ...toSink,
+          hold(atSink, 'N', 0.5, {}), // the empty plate goes in the sink
+          ...back,
+        ],
+        i: 0,
+        t: 0,
+        small: false,
+        ambient: true,
+      });
+      return true;
+    },
+    sceneFx() {
+      // Derived fresh from the *current* legs every frame, never stored — so a preempted errand's door
+      // closes and its props return the instant `cancelAmbient` swaps the walk for a plain trip home.
+      let fridgeOpen = false;
+      const bottleCarriers = new Set<string>();
+      for (const [name, w] of walks) {
+        const leg = w.legs[w.i];
+        if (!leg) continue;
+        if (leg.door) fridgeOpen = true;
+        if (leg.carry === 'bottle') bottleCarriers.add(name);
+      }
+      return { fridgeOpen, bottleCarriers };
     },
     gestureBeat(from, kind) {
       const home = homes.get(from);
