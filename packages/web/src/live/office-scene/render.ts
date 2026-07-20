@@ -1584,6 +1584,7 @@ export function drawActor(
       lx: pose.lx,
       ly: pose.ly,
       dir: pose.dir,
+      ...(pose.heading !== undefined ? { heading: pose.heading } : {}),
       node,
       skel: skelFor(pose, node, t),
       size: pose.small ? 0.72 : 1,
