@@ -58,7 +58,7 @@ watcher, never gatekeeper) until the platform stabilizes enough to harden.
 | **Researcher**                | Landscape/prior-art sweeps, the research radar.                                                                                                                                      |
 | **Customer support**          | Triage inbound issues/questions; the human-facing voice.                                                                                                                             |
 | **Database guru**             | Schema/migration review, data integrity, query performance.                                                                                                                          |
-| **Facilitator / brainstorm**  | Human-paired diverge→converge seat. Runs design/planning sessions; never owns implementation lanes. Success = a decided direction landed as a Goal/lane/ADR — not a PR.             |
+| **Facilitator / brainstorm**  | Human-paired diverge→converge seat. Runs design/planning sessions; never owns implementation lanes. Success = a decided direction landed as a Goal/lane/ADR — not a PR.              |
 
 The library should be open-ended — these are seeds, not a closed set.
 
@@ -79,6 +79,53 @@ surface”); render tldraw / harness companion / FigJam per harness so the role 
 harness-independent (see Q5). Distinct from `no-orchestrator`: this seat helps a human decide one
 direction — it does not become the team’s mandatory dispatcher.
 
+### Seed sketch — Platform / infra guardian, as an on-call self-healing-prod agent (captured 2026-07-20)
+
+Dogfood evidence for this seed (not a product decision). It arrived paired with the first automated
+_actor_ on running infra — the daemon auto-refresher (ADR 152) — which is exactly the kind of thing
+the guardian role is meant to own and supervise. Captured here so the eventual design session starts
+from a worked picture; **nothing below is built** beyond the auto-refresher itself.
+
+- **Motivation.** ADR 152 gave the daemon hands-free currency (an interval agent that rebuilds +
+  bounces it under a quiet-period policy). An automated actor that bounces prod needs a supervisor
+  that notices when a refresh — or anything else — leaves prod unhealthy, and drives the fix. That
+  supervisor is the platform guardian.
+- **Runtime + the local constraint.** The daemon is a **local** macOS LaunchAgent on
+  `localhost:4849`. A cloud routine (the `schedule` skill) survives the Mac being off but **cannot**
+  see `localhost`, `daemon.err.log`, or a crashloop — it is blind to actual prod and can only watch
+  git/CI. So the guardian needs **local presence**. Recommended shape: a _local hybrid_ — a cheap
+  interval LaunchAgent probe that spends **no model tokens when healthy** and only wakes a headless
+  guardian session on a real incident. Migrate to ADR 131 daemon-triggered residency later (the
+  reserved "steward swap"). It reuses the whole ADR 112 steward template (charter + per-task autonomy
+  knobs + guardrails; draft PRs, never merges).
+- **Recency-awareness (a hard design rule, learned the hard way).** During the ADR 152 work a probe
+  read the _tail_ of a 9.5 MB `daemon.err.log` and reported the daemon "crashlooping now" — it wasn't;
+  `/health` was `ok`, launchctl showed `runs=1, last exit = (never exited)`, and those lines were
+  **eight days old**. The guardian must key on **recency**: live `/health`, launchctl `last exit`/`runs`,
+  and only log lines newer than the daemon's boot — never a raw log tail. Grep-over-stale-logs pages
+  someone for an incident that ended a week ago.
+- **Health / failure surface (the probe).** Recency-filtered signals, each with a live source:
+  `daemon_down` / `crashloop` (launchctl `last exit`/`runs` + `/health` unreachable + err.log newer
+  than boot); `build_skew` (`/health.build` behind `origin/main` — only when the ADR 152 auto-refresher
+  isn't already handling it); `publisher_failed` (`~/.musterd/live/build.log`); `schema_drift` /
+  `wrong_db` (`/health.schema`, `/health.db`); `error_rate` (rising `musterd.errors` / 5xx
+  `http_request` lines since boot); `presence_churn` (reaper storms). Near-term the source is direct
+  (`/health` + launchctl + fresh JSON-log tails); the missing piece is a **queryable telemetry store**
+  (today it's grep over `~/.musterd/otel-sink.log`) — that's the batond collector (ADR 082), separate.
+- **Autonomy — auto-remediate safe classes, admin-configurable.** Per-class tiers
+  `observe` / `alert` / `auto`, mirroring the steward's `propose`-vs-`auto-merge` registry. Default
+  `auto` (safe): `publisher_failed` → `service refresh --live`; a post-refresh `crashloop` → the ADR
+  152 refresh already preserved the prior build, so restart on last-known-good + alert. Default
+  `alert`/`propose` (ambiguous/unsafe): `schema_drift`, `wrong_db`, `error_rate`, an unexplained
+  daemon-down, and any code bug → a **draft** fix PR the steward way. The owner's explicit requirement:
+  **the tier per class is itself a team policy** an admin sets — wired to `musterd team policy`
+  (ADR 150 enforcement classes) + the ADR 069/070 role capabilities, so autonomy is a human-owned dial,
+  not a code change. (The ADR 152 `--mode idle|notice` knob is the first, narrow instance of this dial.)
+- **Fix-action inventory (all already exist).** Alert: `musterd notify` (OS push, ADR 035) +
+  `team_send {act:'ask'}` (in-band, chases). Roll back / refresh: `service refresh`/`restart`
+  (self-locating, guarded, build-before-bounce). Durable fix: `gh pr create --draft` under a scoped PAT
+  with `gates`/Bugbot as the seatbelt — never merges, never pushes `main`.
+
 ## Questions for the design session (deliberately unanswered here)
 
 1. **Role vs capability vs charter.** ADR 070 already separates them; what does the _assignment_ UX
@@ -98,6 +145,14 @@ direction — it does not become the team’s mandatory dispatcher.
    harness. The template _rendering_ is per-harness; the role _identity_ is not.
 6. **Humans and roles.** The human-role-reevaluation item is adjacent: do humans hold roles from the
    same library (owner, approver), and does the guardrail bind them too?
+7. **Autonomy as a policy.** The platform guardian seed wants each incident-class autonomy tier
+   (`observe`/`alert`/`auto`) set by a team admin via `musterd team policy` (ADR 150) — what's the
+   schema, the default posture, and how does it compose with the ADR 069/070 role capabilities? The
+   ADR 152 `--mode idle|notice` knob is the narrow precedent to generalize.
+8. **The local-presence + watcher→residency shape.** The guardian must run locally to see the daemon;
+   the recommended cheap-probe-wakes-a-session hybrid is a stopgap for ADR 131 daemon-triggered
+   residency. What is the migration, and where does the token-cost line sit (probe stays code; the
+   model only wakes on a recency-confirmed incident)?
 
 ## Non-goals (for the eventual design, per the owner)
 

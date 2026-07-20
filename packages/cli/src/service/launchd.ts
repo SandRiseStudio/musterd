@@ -32,6 +32,17 @@ export const LIVE_SYNC_LABEL = 'studio.sandrise.musterd-live-sync';
  */
 export const HOST_LABEL = 'studio.sandrise.musterd-host';
 
+/**
+ * The daemon auto-refresher (ADR 118/130 fast-follow): a `StartInterval` agent that runs
+ * `musterd service refresh --auto` on a poll. It is the daemon analogue of the `/live` publisher —
+ * but where the publisher swaps flat files with no restart, the daemon's code can't hot-swap, so a
+ * pickup *must* bounce the process. That makes the quiet-period policy (idle-else-notice) the whole
+ * point, and it lives in the `--auto` tick, not here. `service … --auto` targets this agent (NOT
+ * `--refresh`, which would collide with the `refresh` verb). Distinct from the daemon: it runs no
+ * server and is safe to bounce.
+ */
+export const AUTOREFRESH_LABEL = 'studio.sandrise.musterd-autorefresh';
+
 /** Is process lifecycle management implemented for this platform yet? */
 export function serviceSupported(platform: NodeJS.Platform): boolean {
   return platform === 'darwin';
@@ -180,6 +191,29 @@ export function buildHostPlist(o: Omit<PlistOpts, 'serveArgs'> & { hostArgs: str
     keepAlive: true,
     runAtLoad: true,
     throttleInterval: 10,
+  });
+}
+
+/**
+ * The auto-refresher LaunchAgent plist (ADR 118/130 fast-follow): runs `node bin.js service refresh
+ * --auto …` on load and every `intervalSeconds`, then exits — so it is `StartInterval`, NOT KeepAlive
+ * (unlike the daemon/host, which run forever). No generated script: the tick logic lives in the
+ * testable `service refresh --auto` subcommand, so the plist runs the node command directly (like the
+ * wake host). `refreshArgs` carries `['refresh', '--auto', '--mode', <mode>]`. PATH matters: the tick
+ * shells out to `git` and `pnpm` for the rebuild, and launchd's default PATH is minimal.
+ */
+export function buildAutoRefreshPlist(
+  o: Omit<PlistOpts, 'serveArgs'> & { refreshArgs: string[]; intervalSeconds: number },
+): string {
+  return renderPlist({
+    label: o.label,
+    programArguments: [o.node, o.binJs, 'service', ...o.refreshArgs],
+    workingDir: o.workingDir,
+    stdoutPath: o.stdoutPath,
+    stderrPath: o.stderrPath,
+    path: o.path,
+    runAtLoad: true,
+    startInterval: o.intervalSeconds,
   });
 }
 

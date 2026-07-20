@@ -78,9 +78,17 @@ export async function serveCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(theme.meta('reloaded roster roots (SIGHUP)') + '\n');
   });
   await new Promise<void>((resolveP) => {
-    process.on('SIGINT', () => {
+    // SIGINT (ctrl-c) and SIGTERM both shut down gracefully. SIGTERM matters for the LaunchAgent:
+    // `launchctl kickstart -k` (how `service restart`/`refresh` and the auto-refresher bounce the
+    // daemon) sends SIGTERM, which Node with no handler treats as an immediate kill — skipping
+    // `db.close()`'s checkpoint and leaving the reaper/telemetry unstopped. Draining through
+    // `server.close()` makes an unattended auto-refresh bounce a clean stop, not a hard kill.
+    const shutdown = (signal: string) => {
+      process.stdout.write(theme.meta(`shutting down (${signal})`) + '\n');
       void server.close().then(() => resolveP());
-    });
+    };
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
   });
   return 0;
 }

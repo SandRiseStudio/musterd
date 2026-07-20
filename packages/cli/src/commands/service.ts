@@ -1,12 +1,22 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, platform as osPlatform } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { flagStr, type Parsed } from '../args.js';
 import { configPath, loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { loadHostRegistry } from '../host/registry.js';
+import { osNotify } from '../notify/os.js';
 import { theme } from '../render/theme.js';
+import {
+  installAutoRefresh,
+  refreshAutoRefresh,
+  startAutoRefresh,
+  statusAutoRefresh,
+  stopAutoRefresh,
+  uninstallAutoRefresh,
+  type AutoRefreshCtx,
+} from '../service/autorefresh.js';
 import {
   installWakeHost,
   restartWakeHost,
@@ -17,6 +27,7 @@ import {
   type WakeHostCtx,
 } from '../service/host.js';
 import {
+  AUTOREFRESH_LABEL,
   HOST_LABEL,
   LIVE_LABEL,
   LIVE_SYNC_LABEL,
@@ -94,7 +105,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake] [--port <n>] [--host <h>] [--interval <s>] [--timeout <s>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto] [--port <n>] [--host <h>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -149,6 +160,63 @@ function resolveWakeCtx(run: Runner, parsed: Parsed): WakeHostCtx {
   };
 }
 
+/** The auto-refresher's mode knob: how it treats a behind-daemon that still has live sessions. */
+export type AutoRefreshMode = 'idle' | 'notice';
+const DEFAULT_AUTOREFRESH_MODE: AutoRefreshMode = 'notice';
+const DEFAULT_AUTOREFRESH_INTERVAL = 120;
+
+function parseAutoRefreshMode(parsed: Parsed): AutoRefreshMode {
+  const m = flagStr(parsed.flags, 'mode');
+  if (m === undefined) return DEFAULT_AUTOREFRESH_MODE;
+  if (m === 'idle' || m === 'notice') return m;
+  throw new CliError(`--mode must be 'idle' or 'notice' (got '${m}')`, 2);
+}
+
+/** Where the auto-refresher records the last origin/main tip it *attempted* to refresh onto, so a
+ *  build that fails against a given tip isn't re-attempted every interval (the debounce mirrors the
+ *  /live publisher's `.published-sha`). Cleared once the daemon actually reaches that tip. */
+function autoRefreshStampPath(): string {
+  return join(dirname(configPath()), 'autorefresh', '.attempted-sha');
+}
+
+/**
+ * Resolve the auto-refresher service (ADR 118/130 fast-follow) from the running process: the plist
+ * runs `node bin.js service refresh --auto --mode <mode>` on an interval. Same node/entry pair the
+ * daemon embeds. `--interval` (bare seconds, default 120) and `--mode` are baked at install — like
+ * the wake actuator's cadence. The label reads `--auto`, not `--refresh` (that's the daemon verb).
+ * PATH must carry `git` + `pnpm` (the tick shells the rebuild) on top of node.
+ */
+function resolveAutoRefreshCtx(run: Runner, parsed: Parsed): AutoRefreshCtx {
+  const binJs = resolvePath(process.argv[1] ?? '');
+  const home = dirname(configPath()); // ~/.musterd
+  const mode = parseAutoRefreshMode(parsed);
+  const interval = flagStr(parsed.flags, 'interval');
+  return {
+    uid: typeof process.getuid === 'function' ? process.getuid() : '',
+    label: AUTOREFRESH_LABEL,
+    plistPath: join(homedir(), 'Library', 'LaunchAgents', `${AUTOREFRESH_LABEL}.plist`),
+    node: process.execPath,
+    binJs,
+    refreshArgs: ['refresh', '--auto', '--mode', mode],
+    workingDir: resolvePath(binJs, '../../../..'),
+    logPath: join(home, 'autorefresh', 'refresh.log'),
+    errLogPath: join(home, 'autorefresh', 'refresh.log'),
+    // The tick shells `git` and `pnpm --dir <checkout> build`; pnpm may live in ~/Library/pnpm.
+    path: [
+      dirname(process.execPath),
+      '/opt/homebrew/bin',
+      join(homedir(), 'Library', 'pnpm'),
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+      '/usr/sbin',
+      '/sbin',
+    ].join(':'),
+    intervalSeconds: interval ? Number(interval) : DEFAULT_AUTOREFRESH_INTERVAL,
+    run,
+  };
+}
+
 function resolveLiveCtx(run: Runner): LiveCtx {
   const binJs = resolvePath(process.argv[1] ?? '');
   const repoRoot = resolvePath(binJs, '../../../..');
@@ -196,24 +264,36 @@ async function fetchHealth(): Promise<DaemonHealth> {
 }
 
 /**
+ * How many commits `origin/main` is ahead of the daemon's running `build` — the numeric core of the
+ * skew check, shared by `service status` (the human warning) and `service refresh --auto` (the
+ * decision to bounce). Fetches `origin/main` first (best-effort). Returns null when there's no verdict
+ * to give: the daemon isn't running from a checkout, the commit is unknown locally, or `origin/main`
+ * is unresolved — callers treat null as "leave it alone" (watcher, never gatekeeper).
+ */
+export function countBehind(build: string, dir: string, run: Runner): number | null {
+  // A stamped build can carry a `-dirty` suffix (ADR 135) — strip it before any git plumbing:
+  // `rev-list abc-dirty..` fails, which would silently degrade the verdict for exactly the builds
+  // most likely to be skewed.
+  const sha = build.replace(/-dirty$/, '');
+  const git = (...args: string[]): RunResult => run('git', ['-C', dir, ...args]);
+  if (git('rev-parse', '--is-inside-work-tree').status !== 0) return null;
+  git('fetch', 'origin', 'main', '--quiet'); // best-effort — offline still compares the last-known tip
+  const counted = git('rev-list', '--count', `${sha}..origin/main`);
+  if (counted.status !== 0) return null; // unknown commit / no origin/main — no verdict
+  const behind = Number(counted.stdout.trim());
+  return Number.isFinite(behind) ? behind : null;
+}
+
+/**
  * Name the running daemon's build skew against `origin/main` (ADR 130) — the detector half of
  * `service refresh`. Best-effort by design: the daemon may not run from a checkout, the fetch may be
  * offline, the commit may be unknown locally — every failure degrades to just naming the build ref.
  * `status` must never fail because of this check (watcher, never gatekeeper).
  */
 export function buildSkewNote(build: string, dir: string, run: Runner): string {
-  // A stamped build can carry a `-dirty` suffix (ADR 135) — keep it in the display (an honest "built
-  // from uncommitted edits" flag) but strip it before any git plumbing: `rev-list abc-dirty..` fails,
-  // which would silently degrade the skew verdict for exactly the builds most likely to be skewed.
-  const sha = build.replace(/-dirty$/, '');
   const short = build.slice(0, 7) + (build.endsWith('-dirty') ? '-dirty' : '');
-  const git = (...args: string[]): RunResult => run('git', ['-C', dir, ...args]);
-  if (git('rev-parse', '--is-inside-work-tree').status !== 0) return short;
-  git('fetch', 'origin', 'main', '--quiet'); // best-effort — offline still compares the last-known tip
-  const counted = git('rev-list', '--count', `${sha}..origin/main`);
-  if (counted.status !== 0) return short; // unknown commit / no origin/main — no verdict
-  const behind = Number(counted.stdout.trim());
-  if (!Number.isFinite(behind)) return short;
+  const behind = countBehind(build, dir, run);
+  if (behind === null) return short;
   if (behind === 0) return `${short} ${theme.meta('· up to date with origin/main')}`;
   return (
     `${short} · ` +
@@ -304,9 +384,14 @@ export async function serviceCommand(
     ctx?: ServiceCtx;
     liveCtx?: LiveCtx;
     wakeCtx?: WakeHostCtx;
+    autoRefreshCtx?: AutoRefreshCtx;
     health?: () => Promise<DaemonHealth>;
     /** Probe whether the daemon serves /live (injected so tests skip the network). */
     probeViewer?: (url: string) => Promise<boolean>;
+    /** Fire an OS notice (injected so the `--auto --mode notice` tick is testable). */
+    notify?: (n: { id: string; title: string; body: string }) => void;
+    /** The attempted-tip debounce store (injected in tests; defaults to a file under ~/.musterd). */
+    autoState?: { read: () => string | null; write: (sha: string) => void };
   } = {},
 ): Promise<number> {
   const sub = parsed.positionals[0];
@@ -357,6 +442,20 @@ export async function serviceCommand(
   if (parsed.flags['wake'] === true) {
     const wakeCtx = deps.wakeCtx ?? resolveWakeCtx(ctx.run, parsed);
     return wakeServiceCommand(sub, ctx, wakeCtx, parsed, ok, fail, force);
+  }
+
+  // `--auto` targets the auto-refresher (ADR 118/130 fast-follow). `refresh --auto` runs one tick
+  // (the actual work: check skew → apply the quiet-period policy → bounce if behind); every other
+  // verb manages the interval LaunchAgent that runs that tick, exactly like `--live`/`--wake`.
+  if (parsed.flags['auto'] === true) {
+    if (sub === 'refresh') {
+      const mode = parseAutoRefreshMode(parsed);
+      const notify = deps.notify ?? osNotify;
+      const autoState = deps.autoState ?? fileAutoState();
+      return autoRefreshTick(ctx, health, mode, notify, autoState, ok, fail);
+    }
+    const arCtx = deps.autoRefreshCtx ?? resolveAutoRefreshCtx(ctx.run, parsed);
+    return autoRefreshServiceCommand(sub, arCtx, parsed, ok, fail);
   }
 
   switch (sub) {
@@ -525,6 +624,199 @@ async function refreshDaemon(
   if (r.status !== 0) fail('restart', r);
   ok(`restarted the musterd daemon on ${after}`);
   return 0;
+}
+
+/** File-backed attempted-tip store for the auto-refresher debounce (§ {@link autoRefreshStampPath}). */
+function fileAutoState(): { read: () => string | null; write: (sha: string) => void } {
+  const p = autoRefreshStampPath();
+  return {
+    read: () => {
+      try {
+        return readFileSync(p, 'utf8').trim() || null;
+      } catch {
+        return null;
+      }
+    },
+    write: (sha: string) => {
+      try {
+        mkdirSync(dirname(p), { recursive: true });
+        writeFileSync(p, sha, 'utf8');
+      } catch {
+        // best-effort: a missing stamp only costs one redundant rebuild attempt, never correctness
+      }
+    },
+  };
+}
+
+/**
+ * One auto-refresh tick (`service refresh --auto`, ADR 118/130 fast-follow): decide whether the
+ * running daemon is behind `origin/main` and, if so, whether it's safe to bounce it *now* — then
+ * delegate the actual sync+build+restart to {@link refreshDaemon} (self-locates the daemon's
+ * checkout, refuses on a dirty tree, aborts before the bounce on a build failure). This is the whole
+ * quiet-period policy; the LaunchAgent just runs this on an interval.
+ *
+ *   1. **Skew** — compare the daemon's running `/health.build` to `origin/main`. Not behind → no-op
+ *      (never rebuilds/bounces a current daemon). Unreachable / unknown ref → no-op (watcher, never
+ *      gatekeeper — a dogfood daemon must never be worse off for running this).
+ *   2. **Debounce** — if we already *attempted* this exact tip and the daemon still isn't on it (a
+ *      build that failed), skip until a new commit lands, so a broken `main` doesn't rebuild every
+ *      interval forever (mirrors the /live publisher's `.published-sha`).
+ *   3. **Quiet period** — with live sessions connected: `idle` defers (retries next tick); `notice`
+ *      fires an OS notice to the operator, then force-refreshes (the announced, conscious bounce —
+ *      the team-facing announcement belongs to the future platform-guardian seat, not this schedule).
+ *      With no live sessions, refresh straight through (the ADR 047 guard passes cleanly).
+ */
+async function autoRefreshTick(
+  ctx: ServiceCtx,
+  health: () => Promise<DaemonHealth>,
+  mode: AutoRefreshMode,
+  notify: (n: { id: string; title: string; body: string }) => void,
+  autoState: { read: () => string | null; write: (sha: string) => void },
+  ok: (s: string) => void,
+  fail: (step: string, r: RunResult) => never,
+): Promise<number> {
+  const dir = daemonCheckout(ctx) ?? ctx.workingDir;
+  let health0: DaemonHealth;
+  try {
+    health0 = await health();
+  } catch {
+    ok('daemon unreachable — nothing to refresh');
+    return 0;
+  }
+  if (!health0.build) {
+    ok('daemon reports no build ref (not running from a checkout) — skipping');
+    return 0;
+  }
+  const behind = countBehind(health0.build, dir, ctx.run); // fetches origin/main
+  if (behind === null) {
+    ok('build skew unknown — skipping');
+    return 0;
+  }
+  const tip = ctx.run('git', ['-C', dir, 'rev-parse', 'origin/main']).stdout.trim();
+  if (behind === 0) {
+    if (autoState.read()) autoState.write(''); // reached tip — clear any stale attempt marker
+    ok(`daemon up to date with origin/main (${health0.build.slice(0, 7)})`);
+    return 0;
+  }
+  // Debounce: don't re-attempt a tip we already tried that didn't stick (a failed build).
+  if (tip && autoState.read() === tip) {
+    ok(
+      `already attempted ${tip.slice(0, 7)} (build did not stick) — waiting for a new commit ` +
+        `or a manual \`musterd service refresh\``,
+    );
+    return 0;
+  }
+  const s = (n: number) => (n === 1 ? '' : 's');
+  const conns = health0.connections ?? 0;
+  if (conns > 0 && mode === 'idle') {
+    ok(`${conns} live session${s(conns)} connected — deferring refresh (idle mode); will retry`);
+    return 0;
+  }
+  const force = conns > 0; // notice mode with live sessions → announced, forced bounce
+  if (force) {
+    notify({
+      id: 'musterd-autorefresh',
+      title: 'musterd auto-refresh',
+      body: `Updating the daemon to latest main (${behind} commit${s(behind)} behind); ${conns} live session${s(conns)} will briefly reconnect.`,
+    });
+    ok(`${conns} live session${s(conns)} — notified the operator, forcing the bounce`);
+  }
+  if (tip) autoState.write(tip); // mark the attempt BEFORE building, so a failed build debounces next tick
+  return refreshDaemon(ctx, health, force, ok, fail);
+}
+
+/**
+ * `musterd service <verb> --auto` — manage the daemon auto-refresher (ADR 118/130 fast-follow): a
+ * `StartInterval` agent that runs {@link autoRefreshTick} on a poll and, when the daemon is behind
+ * `origin/main`, rebuilds + bounces it under the quiet-period policy. Bouncing it drops nobody (it
+ * runs no server); the tick it schedules is what carries the live-session guard. (`refresh --auto`
+ * is handled upstream — it IS the tick, not a lifecycle op.)
+ */
+async function autoRefreshServiceCommand(
+  sub: string,
+  ctx: AutoRefreshCtx,
+  parsed: Parsed,
+  ok: (s: string) => void,
+  fail: (step: string, r: RunResult) => never,
+): Promise<number> {
+  const meta = (s: string) => process.stdout.write(theme.meta(s) + '\n');
+  const mode = ctx.refreshArgs[ctx.refreshArgs.indexOf('--mode') + 1] ?? DEFAULT_AUTOREFRESH_MODE;
+  const quiet =
+    mode === 'idle'
+      ? 'idle only — never bounces a daemon with live sessions'
+      : 'idle, else notify the operator then bounce';
+  switch (sub) {
+    case 'install': {
+      const res = installAutoRefresh(ctx);
+      if (res.status !== 0) fail('auto-refresher (bootstrap)', res);
+      ok(`installed + started the daemon auto-refresher (${theme.accent(ctx.label)})`);
+      meta(`  runs:    musterd service refresh --auto --mode ${mode}`);
+      meta(
+        `  cadence: on load + every ${ctx.intervalSeconds}s (only acts when behind origin/main)`,
+      );
+      meta(`  quiet:   ${quiet}`);
+      meta(`  logs:    ${ctx.logPath}`);
+      return 0;
+    }
+    case 'uninstall': {
+      const res = uninstallAutoRefresh(ctx);
+      ok(
+        res.removedPlist
+          ? 'stopped + removed the daemon auto-refresher'
+          : 'daemon auto-refresher was not installed — nothing to remove',
+      );
+      return 0;
+    }
+    case 'start': {
+      const r = startAutoRefresh(ctx);
+      if (r.status !== 0) fail('start (auto-refresher)', r);
+      ok('started the daemon auto-refresher');
+      return 0;
+    }
+    case 'stop': {
+      stopAutoRefresh(ctx);
+      ok('stopped the daemon auto-refresher');
+      return 0;
+    }
+    case 'restart': {
+      const r = refreshAutoRefresh(ctx);
+      if (r.status !== 0) fail('restart (auto-refresher)', r);
+      ok('restarted the daemon auto-refresher (a tick runs now)');
+      return 0;
+    }
+    case 'status': {
+      const st = statusAutoRefresh(ctx);
+      ok(
+        `daemon auto-refresher: ${st.loaded ? theme.ok(st.state ?? 'loaded') : theme.warn('not installed')}`,
+      );
+      meta(`  runs:  musterd service refresh --auto --mode ${mode} every ${ctx.intervalSeconds}s`);
+      meta(`  logs:  ${ctx.logPath}`);
+      return 0;
+    }
+    case 'logs': {
+      const follow = parsed.flags['follow'] === true || parsed.positionals.includes('-f');
+      if (!follow) {
+        const lines = tailFile(ctx.logPath, 40);
+        process.stdout.write(theme.meta(`── ${ctx.logPath} ──`) + '\n');
+        process.stdout.write(
+          (lines.length ? lines.join('\n') : '(no auto-refresh runs yet)') + '\n',
+        );
+        return 0;
+      }
+      return new Promise<number>((resolveP) => {
+        const child = spawn('tail', ['-f', ctx.logPath], { stdio: 'inherit' });
+        const stopFollow = () => {
+          child.kill();
+          resolveP(0);
+        };
+        process.on('SIGINT', stopFollow);
+        child.on('error', () => resolveP(0));
+        child.on('exit', () => resolveP(0));
+      });
+    }
+    default:
+      throw new CliError(USAGE, 2);
+  }
 }
 
 /**

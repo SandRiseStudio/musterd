@@ -52,6 +52,7 @@ src/
     manage.ts         // install/uninstall/start/stop/restart/status + log tail (injectable launchctl runner)
     live.ts           // `service --live`: the /live web-viewer bundle — generate scripts + 2 plists, worktree, bootstrap both agents (ADR 124)
     host.ts           // `service --wake`: the wake actuator (`musterd host`) as a KeepAlive LaunchAgent — residency survives reboots (ADR 131 inc 5)
+    autorefresh.ts    // `service --auto`: the daemon auto-refresher as a StartInterval LaunchAgent — runs `refresh --auto` on a poll (ADR 152)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
     doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server + claim value-coherence drift detector, read-only (ADR 060, PR #58)
