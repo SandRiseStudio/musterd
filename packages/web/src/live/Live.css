@@ -398,6 +398,20 @@
   animation: lc-fade var(--lc-med) var(--lc-ease) both;
   transition: grid-template-columns 380ms var(--lc-ease);
 }
+/* Pin each panel to its own grid track. Required because the responsive rules below hide a panel
+   with `display: none` (roster ≤1080px, office ≤880px), and a `display:none` grid item is pulled out
+   of the grid entirely — the survivors would auto-flow leftward into the wrong (often 0-width) tracks
+   (e.g. the stream collapsing into the hidden roster's rail while its own track sits empty). Explicit
+   columns keep every visible panel in its intended track no matter which siblings are hidden. */
+.lc-office {
+  grid-column: 1;
+}
+.lc-roster {
+  grid-column: 2;
+}
+.lc-stream {
+  grid-column: 3;
+}
 @keyframes lc-fade {
   from {
     opacity: 0;
