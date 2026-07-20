@@ -217,6 +217,22 @@ The smoke rung authorizes **cell D, 1 run** only (manifest §2). After the run: 
 the calibrated `T`, and the tokens→billed-cost roll-up to the owner, and **stop** — the pilot rung
 (A + D) is gated on that check-in. Do not roll into another cell without it.
 
+### 1.9 Pilot-rung traps (2026-07-20, cells A1/A2/D4/D5 — finding 006)
+
+- ⚠ **Never provision a cell while other harness sessions are live.** Claude Code rewrites
+  `~/.claude.json` (and can touch seat `.claude/settings.local.json`) concurrently; last-writer-wins
+  ate cell-D5's `mcpServers` entry and two seats' settings files while cell-D4's three sessions ran.
+  Re-verify the MCP wiring **and** each seat's settings (gate hook marker + merged allowlist)
+  immediately before launch, not at provision time.
+- ⚠ **A seat's `git clean` in the shared main worktree can delete the clone's untracked
+  `.musterd/binding.json`** — post-run CLI reads then need explicit `--server/--team/--as` flags.
+- ⚠ Gate audit rows can attribute to the **ambient human identity** when a seat runs a gated
+  command with its cwd in the shared main worktree (ADR 109-adjacent) — read `lane.gate`/
+  `action.gate` actors with that in mind.
+- Cell-A mechanics (now battle-tested): same clone/allowlist minus every musterd entry, git
+  identity set by hand (`solo-a1 (cell A)` / `solo-a1@cookoff-a.musterd`), actor added to
+  `scoring.config.json`; wrap launches in `caffeinate -i`.
+
 ## 2. Ladder-resume stubs (authored when the pilot/flagship rungs run)
 
 These inherit §0 and mirror cell D's mechanics; the manifest names their one distinguishing structure.
