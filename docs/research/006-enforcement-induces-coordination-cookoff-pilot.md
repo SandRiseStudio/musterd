@@ -1,4 +1,9 @@
-# 006 — Enforcement induces coordination where guidance cannot: the cookoff pilot
+# 006 — Enforcement induces coordination where guidance cannot: the cookoff pilot + flagship
+
+> **Update 2026-07-20 — flagship replication appended below (§ Flagship).** The pilot's open
+> question ("the D-vs-C3 delta is suggestive, not yet the controlled comparison") is now answered:
+> the uncoordinated N=3 arms (C2, C3) ran, and D vs C3 holds at ~38× less wasted-work for equal
+> correctness. Jump to [Flagship replication](#flagship-replication-2026-07-20--the-controlled-d-vs-c3-comparison).
 
 **Question.** The cookoff smoke + A/B runs left a stark negative: across six headless seats in two
 runs, **zero of eight seeded lanes were ever claimed** — every agent soloed the whole backlog, and
@@ -108,6 +113,62 @@ controlled comparison. No leaderboard, one lab-notebook entry.
   `PILOT-SUMMARY.md`). The coordination-dataset seed stays gated on the flagship transcripts + the
   ADR 051 opt-in/redaction posture.
 
+## Flagship replication (2026-07-20) — the controlled D-vs-C3 comparison
+
+The pilot lacked its own control: it compared D against the _historical_ guidance A/B, and called the
+73× waste spread "suggestive, not yet the controlled comparison." The flagship ran all five arms on a
+fresh pass of the same fixture — crucially including the **uncoordinated N=3 arms C2 and C3** that the
+pilot never ran — so D is now measured against a like-for-like trio, not a memory.
+
+**Arms (×3 runs each, Sonnet, kickoff `ea5c6d4`).** A = solo, no musterd. B = solo + musterd. C2 =
+N=3, no musterd, tickets pre-dispatched. C3 = N=3, no musterd, self-organize (a plain shared `main`,
+the honest "markdown board" alternative). D = N=3, musterd + ADR 150 enforcement (same Gate A/B
+config as the pilot). D/B built from `0ed4fd3` (item-1 clearer deny string, below, rides along).
+
+| arm | setup                         | wasted-work (mean) | acceptance (mean) |
+| --- | ----------------------------- | ------------------ | ----------------- |
+| A   | solo, no musterd              | **0.0%**           | 100%              |
+| B   | solo + musterd                | 33.3%              | 67%               |
+| C2  | N=3, no musterd (dispatch)    | 59.3%              | 46%               |
+| C3  | N=3, no musterd (self-org)    | **72.2%**          | 100%              |
+| D   | N=3, musterd + enforcement    | **1.9%**           | 100%              |
+
+Per-cell (wasted / acceptance): A `0/100·0/100·0/100` · B `0/100·0/100·100/0` · C2
+`0.8/100·77/38·100/0` · C3 `69/100·79/100·69/100` · D `5.1/100·0.7/100·0/100`.
+
+### 6. D vs C3 is the controlled result the pilot was missing — ~38× at equal correctness
+
+C3 and D differ **only** in the coordination layer, and both ship 100%-correct code. But C3 does it by
+having all three agents redundantly re-solve the backlog — **72.2%** of authored work discarded — while
+D partitions cleanly at **1.9%**. That is the pilot's headline, now against a matched control instead
+of a historical one, and it lands within the pilot's own D range (0.6–10.6%). The mechanism repeats in
+the audit: D cells fired `lane.gate` 6–11× → **all three seats claimed a lane**. C2 (dispatch) is worse
+than C3 on both axes — 59% waste **and** 46% acceptance — i.e. pre-assigning tickets without a live
+coordination substrate didn't just waste work, it shipped broken/incomplete trees in 2/3 runs.
+
+### 7. The solo denominator holds — and enforcement can strand a solo seat
+
+Arm A stays the ceiling on efficiency: 0% waste, 100% acceptance, ~18k output tokens/cell, minutes of
+wall-clock — against D's 135k–246k output tokens summed across three seats. The D-vs-solo framing is
+still dead; the sell is strictly **D vs uncoordinated N** (C2/C3), and the flagship now prices that
+comparison directly rather than by inference.
+
+New this run: **arm B surfaced a guard-metric failure (n=1).** FB3 (musterd _solo_) hit the Gate B
+`push-remote` block, raised the ask via the item-1 contract, and — headless, no human to answer —
+**held and delivered nothing** (100% wasted, 0% acceptance). Unlike the pilot's D5 hold, no teammate
+existed to land the tree, so the hold became a dead end. A block a lone seat cannot satisfy, with no
+one to unblock it, is a regression, not compliance. This is a direct input to the ADR 147 item-2
+decision (below): the clearer deny produced the intended _hold_ (not a route-around) — but a hold only
+pays off when a human or teammate is reachable.
+
+**Flagship caveats.** Still one fixture / one model / one harness; n=3 per arm — report direction and
+mechanism, not significance. B's 33% mean is one stranded cell (FB3) dragging two clean 0% cells;
+C2's spread reflects the same delivery fragility uncoordinated dispatch is prone to. FC2r1's low waste
+(0.8%) is the cell whose `kay` push-polluted the fixture remote (since contained; `main` force-reset
+to `ea5c6d4`) — its delivery was a clean single-lineage merge, so the number is genuine. Artifacts:
+`~/cookoff-run/run-artifacts-flagship/` (per-cell `score.json`, `FLAGSHIP-SUMMARY.md`). Raw-transcript
+coordination-dataset export stays gated on the ADR 051 opt-in/redaction posture.
+
 ## Follow-ups
 
 The ADR 147 variance datum above (hold vs route-around under the same unanswered ask) opened a small
@@ -122,4 +183,9 @@ work package, tracked against goal `human-ask-stream`:
 - **Item 2 — local-merge route-around scope (decision: measure-first).** See
   [gate-b-costly-action-local-merge-scope.md](../design/gate-b-costly-action-local-merge-scope.md): don't
   glob-enumerate; measure whether item 1's clearer deny moves the route-around rate on the next
-  enforcement D-cell before gating more.
+  enforcement D-cell before gating more. **Flagship datum (2026-07-20):** the D (N=3) cells never
+  tripped Gate B at all — seats coordinated via Gate A lane claims and merged locally without a
+  remote push — so the route-around question stayed unexercised at N=3. The one Gate B fire was FB3
+  (solo), which _held_ rather than routed around (see §7). One point, wrong cell type for the
+  measurement item 2 wants; the decision to measure-before-gating still stands, awaiting a D-cell
+  that actually exercises the costly action.
