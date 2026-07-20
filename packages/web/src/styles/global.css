@@ -3,25 +3,25 @@
  * loaded here. To try a family that isn't loaded yet: `pnpm add @fontsource/<name>`,
  * add its weight @imports below, then point a --font-* slot at it in tokens.css.
  *
- * ACTIVE: the izzocam commentary-card trio — Fraunces (prose/UI), Space Grotesk
- * (headings/labels), Space Mono (telemetry/timestamps).
+ * ACTIVE: Inter (prose/UI body), Space Grotesk (headings/labels),
+ * Space Mono (telemetry/timestamps). Inter is loaded latin-subset-only to
+ * keep the font budget down — add other subsets here if the UI ships them.
  */
-@import '@fontsource/fraunces/400.css';
-@import '@fontsource/fraunces/500.css';
-@import '@fontsource/fraunces/600.css';
-@import '@fontsource/fraunces/700.css';
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-700.css';
 @import '@fontsource/space-grotesk/400.css';
 @import '@fontsource/space-grotesk/500.css';
 @import '@fontsource/space-grotesk/700.css';
 @import '@fontsource/space-mono/400.css';
 @import '@fontsource/space-mono/700.css';
 
-/* The musterd-default families (Inter + JetBrains Mono) are intentionally NOT loaded: the active
- * tokens point at the izzocam trio above, so Inter/JetBrains only ever sat in var() fallback stacks
- * (which never trigger — the primary always resolves) and were 503 KB of woff2 never fetched on any
- * page. To switch tokens.css back to the musterd-default config, re-add
- * `@import '@fontsource/inter/{400,500,600,700}.css'` + `@fontsource/jetbrains-mono/{400,500,700}.css`
- * here first. */
+/* Fraunces (the former editorial-serif body face) is intentionally NOT loaded: --font-sans now
+ * points at Inter, so Fraunces only ever sat in var() fallback stacks (which never trigger — the
+ * primary always resolves) and would be woff2 never fetched on any page. To bring back a serif body,
+ * re-add `@import '@fontsource/fraunces/{400,500,600,700}.css'` here first, then repoint --font-sans
+ * in tokens.css. */
 @import './tokens.css';
 
 *,

@@ -12,7 +12,7 @@
 const FALLBACK: Record<string, string> = {
   '--font-display': '"Space Grotesk", system-ui, sans-serif',
   '--font-mono': '"Space Mono", ui-monospace, monospace',
-  '--font-sans': '"Fraunces", Georgia, serif',
+  '--font-sans': '"Inter", ui-sans-serif, system-ui, sans-serif',
 };
 
 const cache = new Map<string, string>();
