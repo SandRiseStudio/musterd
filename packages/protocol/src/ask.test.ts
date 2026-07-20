@@ -5,6 +5,7 @@ import {
   ASK_TIER_DEFAULTS,
   ASK_TOP_TIER,
   askContract,
+  askContractText,
   askTierHolds,
 } from './ask.js';
 
@@ -39,5 +40,34 @@ describe('the ask tier contract (ADR 147 §2)', () => {
 
   it('names exactly the three species the design fixes', () => {
     expect([...ASK_SPECIES]).toEqual(['consult', 'escalate', 'approve']);
+  });
+});
+
+describe('askContractText — the one canonical ask contract phrasing (ADR 147 §2/§4)', () => {
+  it('the top tier tells the agent to HOLD and record the held outcome, never proceed', () => {
+    const text = askContractText('ask-1', ASK_TOP_TIER);
+    expect(text).toContain('HOLD');
+    expect(text).toContain('do NOT proceed');
+    // The held-outcome recording (ADR 147 §4) — the part MCP's old text omitted.
+    expect(text).toContain("meta.ask_outcome='held'");
+    expect(text).toContain('ask-1'); // the ask id is threaded in
+    expect(text).toContain('15m'); // the blocking timeout, derived from ASK_TIER_DEFAULTS
+    expect(text).not.toContain('risk_accepted'); // top tier never risk-proceeds
+  });
+
+  it('a below-top tier tells the agent it may PROCEED with a recorded risk-acceptance', () => {
+    const text = askContractText('ask-2', 'advisory');
+    expect(text).toContain('PROCEED');
+    expect(text).toContain("meta.ask_outcome='risk_accepted'");
+    expect(text).toContain('meta.chosen_approach');
+    expect(text).not.toContain('HOLD');
+    expect(text).toContain('3m'); // advisory timeout
+  });
+
+  it('derives its minutes from askContract, so the text and the clock never disagree', () => {
+    for (const tier of ASK_TIERS) {
+      const mins = Math.round(askContract(tier).timeout_ms / 60_000);
+      expect(askContractText('x', tier)).toContain(`${mins}m`);
+    }
   });
 });

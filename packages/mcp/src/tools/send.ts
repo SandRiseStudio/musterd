@@ -5,7 +5,7 @@ import {
   type AskTier,
   AskTierSchema,
   askContract,
-  askTierHolds,
+  askContractText,
   type Envelope,
   makeEnvelope,
   type Recipient,
@@ -66,24 +66,6 @@ async function latestOpenRequest(client: MusterdClient, me: string): Promise<Env
 /** Narrow an unknown meta.tier to a valid `AskTier` (validation already enforced it on `ask`). */
 function isAskTier(tier: unknown): tier is AskTier {
   return AskTierSchema.safeParse(tier).success;
-}
-
-/**
- * The agent-facing marching orders for an ask it just sent (ADR 147 §2): how long to wait, then the
- * no-answer policy to invoke — so the sender never has to know the tier→timeout table itself.
- */
-function askInstruction(id: string, tier: unknown): string {
-  if (!isAskTier(tier)) return 'Wait for a human reply.';
-  const { timeout_ms } = askContract(tier);
-  const mins = Math.round(timeout_ms / 60_000);
-  if (askTierHolds(tier)) {
-    return `Top tier: wait up to ${mins}m for a human answer, re-notifying; if none comes, HOLD (stay paused, do not proceed).`;
-  }
-  return (
-    `Wait up to ${mins}m for a human answer; if none comes, you may PROCEED — record it with a ` +
-    `status_update carrying meta.ask_ref='${id}', meta.ask_outcome='risk_accepted', meta.risk, and ` +
-    `meta.chosen_approach. A human may reply "deciding" (wait, meta.until) to extend your clock.`
-  );
 }
 
 export function registerSend(server: McpServer, client: MusterdClient, config: McpConfig): void {
@@ -151,12 +133,14 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
         // back its marching orders — how long to wait, and the no-answer policy to invoke on silence. The
         // top tier HOLDS (never proceed); below-top PROCEEDS with a recorded risk-acceptance
         // (status_update, meta.ask_ref + meta.ask_outcome:'risk_accepted' + meta.risk + meta.chosen_approach).
-        const askContractText =
-          args.act === 'ask' ? askInstruction(envelope.id, meta['tier']) : null;
+        const askGuidance =
+          args.act === 'ask' && isAskTier(meta['tier'])
+            ? askContractText(envelope.id, meta['tier'])
+            : null;
         // Structured-first (ADR 144 inc 3): the id/thread a programmatic caller needs to keep the
         // exchange threaded (reply_to / thread on the next send), without parsing the prose.
-        const text = askContractText
-          ? `sent ask to ${args.to} (id=${envelope.id}). ${askContractText}`
+        const text = askGuidance
+          ? `sent ask to ${args.to} (id=${envelope.id}). ${askGuidance}`
           : `sent ${args.act} to ${args.to} (id=${envelope.id})`;
         return {
           content: [{ type: 'text' as const, text }],
