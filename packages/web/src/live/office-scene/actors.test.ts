@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createActors, homePoses, travelDir } from './actors';
 import { COFFEE_STAND, ENTRANCE, NOOK, NOOK_CAP, NOOK_RUG_R, STRIP_CAP } from './layout';
+import { GESTURE } from './skeleton';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
 
@@ -403,6 +404,53 @@ describe('ambient micro-choreography', () => {
 
     actors.setHomes(placements, byName, true); // identical roster (a poll) — must not yank Ada back
     expect(actors.ambientOnly()).toBe(true);
+  });
+});
+
+describe('seated micro-beat choreography', () => {
+  it('gesture windows vary by kind — a think outlasts a scratch', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.gestureBeat('Ada', GESTURE.chin)).toBe(true);
+    expect(actors.gestureBeat('Bo', GESTURE.scratch)).toBe(true);
+    for (let i = 0; i < 68; i++) actors.step(0.05); // 3.4s: past scratch (2.8s), inside chin (4.5s)
+    expect(actors.poses().get('Ada')!.gesture).toBe(GESTURE.chin);
+    expect(actors.poses().get('Bo')!.gesture).toBe(0);
+    for (let i = 0; i < 30; i++) actors.step(0.05); // 4.9s total: chin cleared too
+    expect(actors.poses().get('Ada')!.gesture).toBe(0);
+  });
+
+  it('roll-back slides the sitter away from home and returns them exactly', () => {
+    const { placements, byName } = world([node('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const home = actors.poses().get('Ada')!;
+    actors.gestureBeat('Ada', GESTURE.roll);
+    for (let i = 0; i < 30; i++) actors.step(0.05); // 1.5s — mid-window
+    const mid = actors.poses().get('Ada')!;
+    expect(Math.hypot(mid.lx - home.lx, mid.ly - home.ly)).toBeGreaterThan(5);
+    let guard = 0;
+    while (actors.active() && guard++ < 200) actors.step(0.05);
+    const back = actors.poses().get('Ada')!;
+    expect(back.lx).toBeCloseTo(home.lx, 5);
+    expect(back.ly).toBeCloseTo(home.ly, 5);
+  });
+
+  it('swivel yaws the heading mid-window and restores it', () => {
+    const { placements, byName } = world([node('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const rest = actors.poses().get('Ada')!.heading!;
+    actors.gestureBeat('Ada', GESTURE.swivel);
+    let maxOff = 0;
+    let guard = 0;
+    while (actors.active() && guard++ < 200) {
+      actors.step(0.05);
+      maxOff = Math.max(maxOff, Math.abs(actors.poses().get('Ada')!.heading! - rest));
+    }
+    expect(maxOff).toBeGreaterThan(0.1); // it really swivelled…
+    expect(actors.poses().get('Ada')!.heading!).toBeCloseTo(rest, 5); // …and came back to face the desk
   });
 });
 

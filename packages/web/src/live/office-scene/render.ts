@@ -43,7 +43,7 @@ import {
 import { DAY_ENV, type LightEnv } from './lighting';
 import { deskMoodFor, deskMoodStyle } from './moods';
 import type { Placement } from './seating';
-import { seedOf, solveSkeleton, typingBurst } from './skeleton';
+import { chairShift, chairYaw, GESTURE, handsInLap, seedOf, solveSkeleton, typingBurst } from './skeleton';
 import type { Dir, OfficeNode, Pose } from './types';
 
 /**
@@ -1528,7 +1528,8 @@ function skelFor(pose: Pose, node: OfficeNode, t: number) {
   // so gating on activity left it drumming an imaginary keyboard on the lounge couch. Posture puts working
   // members at desks and idle members on the furniture, so keying typing off it means only a member the
   // floor placed at a desk types. The `sit > 0.9` guard still holds — no typing while rising from a chair.
-  const typing = node.posture === 'working' && pose.sit > 0.9 ? typingBurst(seed, t) : 0;
+  // And no typing *through a gesture* — a member mid-stretch or mid-sip has their hands anywhere but the keys.
+  const typing = node.posture === 'working' && pose.sit > 0.9 && pose.gesture === 0 ? typingBurst(seed, t) : 0;
   return solveSkeleton({
     phase: pose.phase,
     sit: pose.sit,
@@ -1576,6 +1577,8 @@ export function drawActor(
   node: OfficeNode,
   t: number,
   armsOnly = false,
+  /** Mug colour while a sip beat is playing — the painter puts it in the raised hand. */
+  mug?: string,
 ): void {
   drawCharacter(
     ctx,
@@ -1590,6 +1593,9 @@ export function drawActor(
       size: pose.small ? 0.72 : 1,
       alpha: pose.alpha,
       carry: pose.carry,
+      gesture: pose.gesture,
+      gestureT: pose.gestureT,
+      ...(mug !== undefined ? { mug } : {}),
       t,
       seed: seedOf(node.name),
     },
@@ -1642,7 +1648,8 @@ const CHAIR_KINDS_BY_ID: readonly ChairKind[] = [
   'wheeled', 'exec', 'gamer', 'stool', // pod 2 (left)
 ];
 
-function chairKindFor(id: number): ChairKind {
+/** Exported for the ambient scheduler: the chair beats (swivel/roll) need casters — a stool can't. */
+export function chairKindFor(id: number): ChairKind {
   return CHAIR_KINDS_BY_ID[id % CHAIR_KINDS_BY_ID.length]!;
 }
 function chairStyleFor(id: number): ChairStyle {
@@ -2099,9 +2106,14 @@ const PROP_SPEC: Record<PropKind, { salt: number; prob: number; along: number; a
   photo: { salt: 4, prob: 0.42, along: 20, across: 38 },
   fan: { salt: 6, prob: 0.38, along: -10, across: 38 },
 };
-/** Whether a given desk carries a given prop — a stable per-desk hash, independent of who's seated. */
-function deskHasProp(id: number, kind: PropKind): boolean {
+/** Whether a given desk carries a given prop — a stable per-desk hash, independent of who's seated.
+ * Exported for the ambient scheduler: a sip beat needs a mug on that member's desk to sip from. */
+export function deskHasProp(id: number, kind: PropKind): boolean {
   return deskRnd(id, PROP_SPEC[kind].salt) < PROP_SPEC[kind].prob;
+}
+/** The mug colour a desk's coffee cup uses — one hash shared by the desk prop and the in-hand sip mug. */
+function deskMugColor(id: number): string {
+  return MUGS[Math.floor(deskRnd(id, 11) * MUGS.length)]!;
 }
 /** Desk-relative (along,across) → absolute logical point, given the desk's facing. */
 function deskPoint(slot: { lx: number; ly: number; dir: Dir }, along: number, across: number): [number, number] {
@@ -2178,6 +2190,8 @@ function drawWorkstation(
   node: OfficeNode | null,
   teamName: string,
   t = 0,
+  /** Props to skip this frame — a prop currently "in the owner's hand" (sip mug) isn't on the desk. */
+  hide?: Set<PropKind>,
 ): void {
   const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
@@ -2229,12 +2243,13 @@ function drawWorkstation(
 
   // optional personal props — each present-or-not per desk by a stable hash, at its own station
   for (const kind of PROP_KINDS) {
+    if (hide?.has(kind)) continue;
     if (!deskHasProp(id, kind) && !mood?.props.includes(kind)) continue;
     const sp = PROP_SPEC[kind];
     at(sp.along, sp.across, (ix, iy) => {
       switch (kind) {
         case 'coffee':
-          return deskCoffee(ctx, fit, ix, iy, up, MUGS[Math.floor(deskRnd(id, 11) * MUGS.length)]!, node != null);
+          return deskCoffee(ctx, fit, ix, iy, up, deskMugColor(id), node != null);
         case 'water':
           return deskWater(ctx, fit, ix, iy, up);
         case 'plant':
@@ -2404,15 +2419,32 @@ export function renderScene(
   for (const slot of DESK_SLOTS) {
     const name = slotMember.get(slot.id) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
-    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, t) });
+    const ownerPose = name ? poses.get(name) : undefined;
+    // Sip beat: while the owner's mug is in their hand, the desk copy vanishes — one mug, not two.
+    const sipping =
+      !!ownerPose &&
+      ownerPose.sit > 0.9 &&
+      ownerPose.gesture === GESTURE.sip &&
+      ownerPose.gestureT > 0.12 &&
+      ownerPose.gestureT < 0.95;
+    const hide = sipping ? new Set<PropKind>(['coffee']) : undefined;
+    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, t, hide) });
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
     // the two instead of being swallowed by a single chair box.
+    //
+    // Chair beats move the chair with its sitter: roll-back slides both pieces straight back from the
+    // desk; swivel swings the backrest around the seat centre — the same pure curves the actor system
+    // applies to the body, so chair and member can never drift apart.
     const f = FWD[slot.dir];
-    const cx = slot.lx - f[0] * CHAIR_OFF;
-    const cy = slot.ly - f[1] * CHAIR_OFF;
-    const bx = cx - f[0] * CHAIR_BACK_OFF;
-    const by = cy - f[1] * CHAIR_BACK_OFF;
+    const shift = ownerPose && ownerPose.sit > 0.9 ? chairShift(ownerPose.gesture, ownerPose.gestureT) : 0;
+    const yaw = ownerPose && ownerPose.sit > 0.9 ? chairYaw(ownerPose.gesture, ownerPose.gestureT) : 0;
+    const cx = slot.lx - f[0] * (CHAIR_OFF + shift);
+    const cy = slot.ly - f[1] * (CHAIR_OFF + shift);
+    const bdx = -f[0] * CHAIR_BACK_OFF;
+    const bdy = -f[1] * CHAIR_BACK_OFF;
+    const bx = cx + bdx * Math.cos(yaw) - bdy * Math.sin(yaw);
+    const by = cy + bdx * Math.sin(yaw) + bdy * Math.cos(yaw);
     const chairColor = node ? hslL(node.color, 0.5) : '#4a5560';
     const chairStyle = chairStyleFor(slot.id);
     items.push({ d: depth(cx, cy) - 0.2, fn: () => chairBase(ctx, fit, cx, cy, slot.dir, chairColor, chairStyle) });
@@ -2446,22 +2478,27 @@ export function renderScene(
     // centre, so a sitter on a cushion west of it would be painted over). Only while actually seated — a
     // walker sorts at their own feet, or they'd hold the couch's depth all the way across the room.
     let d = depth(pose.lx, pose.ly) + 0.1;
+    // The desk mug travels with a sipping owner — passed down so the hand mug matches the desk mug.
+    const mug = seated && pose.gesture === GESTURE.sip ? deskMugColor(slot.id) : undefined;
     if (seated) {
       const f = FWD[slot.dir];
-      d = depth(slot.lx - f[0] * CHAIR_OFF, slot.ly - f[1] * CHAIR_OFF) + 0.1;
+      // Key off the chair's *current* spot — a roll-back beat slides chair + sitter together.
+      const shift = chairShift(pose.gesture, pose.gestureT);
+      d = depth(slot.lx - f[0] * (CHAIR_OFF + shift), slot.ly - f[1] * (CHAIR_OFF + shift)) + 0.1;
     } else if (spot?.depthAt && pose.sit > 0.5) {
       d = depth(spot.depthAt.lx, spot.depthAt.ly) + 0.1;
     }
-    items.push({ d, fn: () => drawActor(ctx, fit, pose, node, t) });
+    items.push({ d, fn: () => drawActor(ctx, fit, pose, node, t, false, mug) });
 
     // Seated overlay: the desk paints over a member sitting behind it (correct — that is what a desk does
     // to your legs), but their forearms *rest on the surface*, above it, so they must paint on top of the
     // slab. One character, two depth slots: the body at the chair, the arms on the desk. Without this the
-    // hands disappear into the desk and the typing is invisible.
-    if (seated) {
+    // hands disappear into the desk and the typing is invisible. Skipped while a beat has dropped the
+    // hands into the lap — lap arms painted over the slab would float on the desk.
+    if (seated && !handsInLap(pose.gesture, pose.gestureT)) {
       items.push({
         d: depth(slot.lx, slot.ly) + 0.05,
-        fn: () => drawActor(ctx, fit, pose, node, t, true),
+        fn: () => drawActor(ctx, fit, pose, node, t, true, mug),
       });
     }
 

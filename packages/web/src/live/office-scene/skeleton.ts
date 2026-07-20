@@ -80,6 +80,57 @@ export const CHAR = {
 /** How much floor a single stride covers. The gait phase is distance/STRIDE, so feet plant, never skate. */
 export const STRIDE = 46;
 
+/**
+ * The gesture-kind registry — every in-place beat a member can play (`SkelInput.gesture`). One named
+ * source of truth for the actor system (durations), the scheduler (weights/eligibility) and the solver
+ * (overlays); `0` is "no gesture". Seated micro-beats make an idle office read as *inhabited*: nobody
+ * sits frozen at a desk for four minutes, they scratch, sip, lean back, swivel.
+ */
+export const GESTURE = {
+  stretch: 1,
+  glance: 2,
+  scratch: 3,
+  chin: 4,
+  lean: 5,
+  sip: 6,
+  swivel: 7,
+  roll: 8,
+} as const;
+
+/** An arc-shaped envelope over the gesture window: 0 → 1 → 0, zero-velocity at both ends (no pop). */
+const arcEnv = (gT: number): number => Math.sin(smooth(gT) * Math.PI);
+/** A plateau envelope: ramp in over the first ~18% of the window, hold, ramp out over the last ~18%. */
+const holdEnv = (gT: number): number => Math.min(smooth(gT / 0.18), 1, smooth((1 - gT) / 0.18));
+
+/**
+ * How far a rolling chair (and its sitter) shifts straight back from the desk through the `roll` beat —
+ * 0 at both ends, peaking mid-window. Pure, so the actor system (body offset) and the scene painter
+ * (chair pieces) derive the *same* displacement from the same pose instead of drifting apart.
+ */
+export function chairShift(gesture: number, gestureT: number): number {
+  return gesture === GESTURE.roll ? arcEnv(gestureT) * 12 : 0;
+}
+
+/**
+ * The swivel beat's yaw (radians): a gentle left-right-left oscillation that ends where it began. Added
+ * to the sitter's continuous heading by the actor system and to the chair backrest by the painter.
+ * (The hands stay near the keys — the whole figure yawing under them is what reads as a chair swivel.)
+ */
+export function chairYaw(gesture: number, gestureT: number): number {
+  return gesture === GESTURE.swivel ? Math.sin(smooth(gestureT) * 3 * Math.PI) * 0.16 : 0;
+}
+
+/**
+ * True while a seated beat has pulled the hands off the desk into the lap (blend past a threshold) —
+ * the painter's cue to skip the arms-over-desk overlay pass, which would otherwise float lap-resting
+ * arms on top of the desk slab.
+ */
+export function handsInLap(gesture: number, gestureT: number): boolean {
+  if (gesture === GESTURE.lean) return holdEnv(gestureT) > 0.15;
+  if (gesture === GESTURE.roll) return arcEnv(gestureT) > 0.15;
+  return false;
+}
+
 /** The full pose of one character, as joints in character space (x right, y up, z forward from the feet). */
 export interface Skel {
   pelvis: V3;
@@ -443,9 +494,26 @@ function applyOverlays(s: Skel, inp: SkelInput): void {
     s.wrist[1] = hand;
     s.elbow[1] = ik2(s.shoulder[1], hand, C.upperArm, C.foreArm, v(1, 0, 0.5));
   }
-  if (inp.gesture === 1) {
+  // Both hands drop off the desk into the lap — the resting posture for the recline/chair beats, where
+  // hands left on the keyboard would read as glued there while the whole body moves away from it.
+  const lapHands = (a: number): void => {
+    for (const i of [0, 1] as const) {
+      const sgn = i === 0 ? -1 : 1;
+      const lap = v(sgn * (C.hipW + 3), s.pelvis.y + 8, s.pelvis.z + 12);
+      s.wrist[i] = lerp3(s.wrist[i], lap, a);
+      s.elbow[i] = ik2(s.shoulder[i], s.wrist[i], C.upperArm, C.foreArm, v(sgn * 0.7, -1, 0));
+    }
+  };
+  // Recline the whole upper body about the pelvis (undoing the into-the-work lean and past it).
+  const recline = (ang: number): void => {
+    for (const k of ['chest', 'neck', 'head'] as const) s[k] = leanAbout(s[k], s.pelvis, -ang);
+    for (const i of [0, 1] as const) s.shoulder[i] = leanAbout(s.shoulder[i], s.pelvis, -ang);
+    s.lean -= ang;
+  };
+
+  if (inp.gesture === GESTURE.stretch) {
     // Stretch: both arms up and back, spine extends, head tips back — one slow arc in and out.
-    const a = Math.sin(smooth(inp.gestureT) * Math.PI); // 0 → 1 → 0 across the window
+    const a = arcEnv(inp.gestureT);
     for (const i of [0, 1] as const) {
       const sgn = i === 0 ? -1 : 1;
       const top = v(sgn * (C.shoulderW + 4), s.shoulder[i].y + C.upperArm + C.foreArm - 6, -6);
@@ -455,10 +523,45 @@ function applyOverlays(s: Skel, inp: SkelInput): void {
     }
     s.head = v(s.head.x, s.head.y + a * 2, s.head.z - a * 3);
     s.chest = v(s.chest.x, s.chest.y + a * 1.5, s.chest.z - a * 1.5);
-  } else if (inp.gesture === 2) {
+  } else if (inp.gesture === GESTURE.glance) {
     // Glance: the head turns away from the screen and drifts back. Cheap, and startlingly human.
-    const a = Math.sin(smooth(inp.gestureT) * Math.PI);
+    const a = arcEnv(inp.gestureT);
     s.head = v(s.head.x + a * 6, s.head.y + a * 0.5, s.head.z + a * 1.5);
     s.neck = v(s.neck.x + a * 2, s.neck.y, s.neck.z);
+  } else if (inp.gesture === GESTURE.scratch) {
+    // Scratch: right hand up to the side of the head with a quick little rub; the head tips away a touch.
+    const a = arcEnv(inp.gestureT);
+    const rub = Math.sin(inp.t * 9) * 1.2 * a;
+    const spot = v(C.headR * 0.65, s.head.y + 3 + rub, s.head.z + 1);
+    s.wrist[1] = lerp3(s.wrist[1], spot, a);
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1, 0.3, 0));
+    s.head = v(s.head.x - a * 2.5, s.head.y, s.head.z);
+  } else if (inp.gesture === GESTURE.chin) {
+    // Thinking: hand to chin, head dips slightly toward it, and *holds* — a plateau, not an arc.
+    const a = holdEnv(inp.gestureT);
+    const chin = v(2.5, s.head.y - 9, s.head.z + 8);
+    s.wrist[1] = lerp3(s.wrist[1], chin, a);
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1, -0.4, 0.3));
+    s.head = v(s.head.x, s.head.y - a * 1, s.head.z + a * 0.8);
+  } else if (inp.gesture === GESTURE.lean) {
+    // Lean back: recline past vertical, hands drop to the lap, hold, then fold back into the work.
+    const a = holdEnv(inp.gestureT);
+    recline(a * 0.28);
+    lapHands(a);
+  } else if (inp.gesture === GESTURE.sip) {
+    // Sip: reach up (the mug travels in the painter's hand), tip it — and the head — back, and return.
+    const gt = inp.gestureT;
+    const up = gt < 0.28 ? smooth(gt / 0.28) : gt > 0.72 ? 1 - smooth((gt - 0.72) / 0.28) : 1;
+    const tip = gt >= 0.28 && gt <= 0.72 ? Math.sin(((gt - 0.28) / 0.44) * Math.PI) : 0;
+    const mouth = v(2, s.head.y - 6 + tip * 1.2, s.head.z + C.headR * 0.6 + 2);
+    s.wrist[1] = lerp3(s.wrist[1], mouth, up);
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1, -0.3, 0));
+    s.head = v(s.head.x, s.head.y + tip * 0.8, s.head.z - tip * 1.2);
+  } else if (inp.gesture === GESTURE.roll) {
+    // Roll-back: the chair (and body — `chairShift`) drifts back from the desk; hands in the lap, a
+    // hint of recline, then it all rolls home.
+    const a = arcEnv(inp.gestureT);
+    recline(a * 0.1);
+    lapHands(a);
   }
 }

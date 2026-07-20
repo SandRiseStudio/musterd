@@ -1,7 +1,7 @@
 import { appearanceOf, type Appearance } from './appearance';
 import { project, type Fit, type Pt } from './iso';
 import { FWD } from './layout';
-import { CHAR, type Skel, type V3 } from './skeleton';
+import { CHAR, GESTURE, type Skel, type V3 } from './skeleton';
 import type { Dir, OfficeNode } from './types';
 
 /**
@@ -96,6 +96,11 @@ export interface CharacterOpts {
   size: number;
   alpha: number;
   carry: boolean;
+  /** The in-place gesture playing this frame (see `GESTURE`) and its 0→1 window progress. */
+  gesture?: number;
+  gestureT?: number;
+  /** Mug colour while a sip beat plays — drawn in the raised hand, matching the (hidden) desk mug. */
+  mug?: string;
   /** Scene clock (s) and the member's seed — the face's own small life: a blink, an LED pulse. */
   t: number;
   seed: number;
@@ -188,9 +193,14 @@ export function drawCharacter(
     };
   };
 
+  // The sip mug rides in the right hand through the middle of the beat (the desk copy is hidden then).
+  const sipMug =
+    o.mug !== undefined && o.gesture === GESTURE.sip && (o.gestureT ?? 0) > 0.12 && (o.gestureT ?? 0) < 0.95;
+
   if (armsOnly) {
     for (const p of [arm(0), arm(1)].sort((a, b) => a.d - b.d)) p.fn();
     if (o.carry) drawCarry(ctx, px, k, u);
+    if (sipMug) drawSipMug(ctx, px, k, u, o.mug!);
     ctx.globalAlpha = prev;
     return;
   }
@@ -245,8 +255,11 @@ export function drawCharacter(
   for (const p of parts) p.fn();
 
   // The head paints last — it is the top of the silhouette at every facing and the thing the eye reads
-  // first, so it never gets clipped by an arm.
+  // first, so it never gets clipped by an arm. The sip mug sorts against it: raised in front of the face
+  // when the sitter faces the camera, hidden behind the skull when they face away.
+  if (sipMug && px(k.wrist[1]).d <= px(k.head).d) drawSipMug(ctx, px, k, u, o.mug!);
   drawHead(ctx, px, k, node, look, dir, u, acc, o.t, o.seed);
+  if (sipMug && px(k.wrist[1]).d > px(k.head).d) drawSipMug(ctx, px, k, u, o.mug!);
   if (o.carry) drawCarry(ctx, px, k, u);
 
   ctx.globalAlpha = prev;
@@ -476,6 +489,16 @@ function drawHead(
     ctx.restore();
     disc(ctx, { x: tx, y: ty }, 1.7 * u, 1.7 * u, 'rgba(255, 248, 228, 0.96)');
   }
+}
+
+/** The little mug a sip beat raises — drawn at the right wrist in the desk mug's own colour. */
+function drawSipMug(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, u: number, color: string): void {
+  const wr = px(k.wrist[1]);
+  const w = 7.5 * u;
+  const h = 8 * u;
+  ctx.fillStyle = color;
+  ctx.fillRect(wr.p.x - w / 2, wr.p.y - h * 0.7, w, h);
+  disc(ctx, { x: wr.p.x, y: wr.p.y - h * 0.7 }, w / 2, w / 4.2, '#3a2416'); // the coffee surface
 }
 
 /** The handoff box, carried at the chest between the hands. */
