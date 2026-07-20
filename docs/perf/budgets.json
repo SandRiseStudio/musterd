@@ -4,5 +4,5 @@
   "maxChunkGzipBytes": 112000,
   "totalCssGzipBytes": 20000,
   "totalFontBytes": 760000,
-  "allowedFontFamilies": ["fraunces", "space-grotesk", "space-mono"]
+  "allowedFontFamilies": ["inter", "space-grotesk", "space-mono"]
 }
