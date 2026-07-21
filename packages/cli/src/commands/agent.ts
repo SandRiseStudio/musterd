@@ -27,7 +27,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   const name = parsed.positionals[0];
   if (!name || /\s/.test(name)) {
     throw new CliError(
-      'usage: musterd agent <name> [--role <role>] [--model <id>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]',
+      'usage: musterd agent <name> [--role <role>] [--model <id>] [--harness <claude-code|cursor|codex>] [--driver <you>] [--here | --path <dir>]',
       2,
     );
   }
@@ -37,6 +37,24 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   // runs in (MUSTERD_MODEL / ANTHROPIC_MODEL, via the shared resolver). Never a guess — undefined stays
   // honestly `unknown` (warn-never-block); the `init --check` note catches an unattested live seat.
   const model = flagStr(parsed.flags, 'model') ?? resolveAttestedModel(process.env);
+
+  // Driver co-presence (ADR 021, activated by ADR 155 Inc 1): opt-in per workspace. `--driver <you>`
+  // bakes MUSTERD_DRIVER into the seat's MCP env so the adapter reports who is steering — which makes
+  // the steering human read `working`/present on the roster instead of offline. `--driver` bare uses
+  // the acting identity (`--as`). Absent = no driver (unchanged, warn-never-block): presence is a
+  // convenience the operator grants, never inferred behind their back.
+  let driver: string | undefined;
+  const driverFlag = parsed.flags['driver'];
+  if (typeof driverFlag === 'string' && driverFlag.trim()) {
+    driver = driverFlag.trim();
+  } else if (driverFlag === true) {
+    driver = flagStr(parsed.flags, 'as');
+    if (!driver)
+      throw new CliError(
+        '`--driver` marks the human steering this seat — pass a name (`--driver <you>`) or identify yourself with `--as <you>`',
+        2,
+      );
+  }
 
   // Which harness to wire (ADR 038/085 registry — the same adapters `init` drives). Default to Claude
   // Code for back-compat; a bad id fails fast with the valid set rather than silently doing nothing.
@@ -156,6 +174,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     env: {
       MUSTERD_SURFACE: harness.surface,
       MUSTERD_AUTOJOIN: '1',
+      ...(driver ? { MUSTERD_DRIVER: driver } : {}),
     },
   };
   let mcpError: string | null = null;

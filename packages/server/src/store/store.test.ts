@@ -24,6 +24,7 @@ import {
   reattestModel,
   hasActivePresence,
   hasLivePresence,
+  listLiveDrivers,
   listPresence,
   listReclaimableMemberIds,
   presenceById,
@@ -288,6 +289,41 @@ describe('activity (two-clocks)', () => {
       state: 'refactoring auth',
       last_status_at: 100,
     });
+  });
+
+  it('listLiveDrivers: distinct drivers on live team presence; stale/other-team excluded (ADR 155)', () => {
+    const { db, team } = freshTeam();
+    const other = createTeam(db, { slug: 'dusk' });
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' }).row;
+    const lin = addMember(db, team, { name: 'Lin', kind: 'agent' }).row;
+    const far = addMember(db, other, { name: 'Rex', kind: 'agent' }).row;
+
+    attach(db, ada.id, 'claude-code', 'c1', { driver: 'nick' });
+    attach(db, lin.id, 'cli', 'c2', { driver: 'nick' }); // same driver, two seats → one entry
+    attach(db, far.id, 'cli', 'c3', { driver: 'bo' }); // other team → excluded
+
+    const drivers = listLiveDrivers(db, team.id, 60_000);
+    expect([...drivers]).toEqual(['nick']); // distinct + team-scoped
+    expect(listLiveDrivers(db, other.id, 60_000).has('bo')).toBe(true);
+    // A zero timeout makes every heartbeat stale → no live drivers (the live filter).
+    expect(listLiveDrivers(db, team.id, 0).size).toBe(0);
+  });
+
+  it('resolveActivity: steering marks you working even without your own heartbeat (ADR 155)', () => {
+    // Not live on your own, but steering a live agent seat → working, present (the driver-copresence fix).
+    expect(resolveActivity(false, null, true)).toEqual({
+      activity: 'working',
+      state: null,
+      last_status_at: null,
+    });
+    // Steering keeps your own status text as the working label when you have one.
+    expect(resolveActivity(true, { state: 'pairing on gate B', ts: 42 }, true)).toEqual({
+      activity: 'working',
+      state: 'pairing on gate B',
+      last_status_at: 42,
+    });
+    // steering defaults false — the existing two-clocks behaviour is untouched.
+    expect(resolveActivity(true, null).activity).toBe('idle');
   });
 
   it('latestStatusUpdate: takes the newest status_update, prefers meta.state, else body', () => {

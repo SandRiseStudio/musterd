@@ -101,6 +101,7 @@ import {
   clearMemberPresence,
   countLivePresences,
   hasLivePresence,
+  listLiveDrivers,
   listPresence,
   listReclaimableMemberIds,
   touchAmbientPresence,
@@ -790,19 +791,24 @@ function summarize(
   const residency = new Map(
     listResidency(ctx.db, teamId).map((r) => [r.member_id, r.resumable_at] as const),
   );
+  // Steering marks you present (ADR 155 Inc 1): the humans named as `driver` on a live agent seat.
+  // Derived here at read time — no synthetic presence row for the steering human (ADR 155 decision 1).
+  const liveDrivers = listLiveDrivers(ctx.db, teamId, ctx.config.presenceTimeoutMs);
   return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => {
-    // Two-clocks rule (M2): liveness from presence, working-label from the latest status_update.
-    const activity = resolveActivity(
-      s.status !== 'offline',
-      latestStatusUpdate(ctx.db, s.member.id),
-    );
+    // Two-clocks rule (M2): liveness from presence, working-label from the latest status_update — plus
+    // steering (ADR 155): a human steering a live agent seat reads working + present without their own
+    // heartbeat, so a driving human stops showing offline on the roster (driver-copresence-gap).
+    const steering = s.member.kind === 'human' && liveDrivers.has(s.member.name);
+    const live = s.status !== 'offline' || steering;
+    const presenceStatus = steering && s.status === 'offline' ? 'online' : s.status;
+    const activity = resolveActivity(live, latestStatusUpdate(ctx.db, s.member.id), steering);
     const member = toMember(s.member, teamSlug);
     const seesCaps = viewerIsAdmin || viewer?.id === s.member.id;
     const { capabilities: _caps, ...needToKnow } = member;
     const isReclaimable = reclaimable.has(s.member.id);
     const sticky = s.member.last_offline_reason;
     const offlineReason = resolveOfflineReason({
-      live: s.status !== 'offline',
+      live,
       reclaimable: isReclaimable,
       availability: member.availability ?? null,
       lastOfflineReason:
@@ -810,7 +816,7 @@ function summarize(
     });
     return {
       ...(seesCaps ? member : needToKnow),
-      presence: s.status,
+      presence: presenceStatus,
       presences: s.presences,
       ...activity,
       posture: resolvePosture({
