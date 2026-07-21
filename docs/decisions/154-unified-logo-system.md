@@ -1,4 +1,4 @@
-# 137 — Unified logo system: Chip + Tile marks
+# 154 — Unified logo system: Chip + Tile marks
 
 - Status: accepted
 - Date: 2026-07-13

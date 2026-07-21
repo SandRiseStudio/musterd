@@ -17,8 +17,8 @@ This file is the single source of truth from which all three Figma briefs and al
 
 - **CLI wordmark — the framed roll-call nameplate** (CLI banner; ADR 114): a rounded panel (dim borders) holding three presence dots (online · away · offline, the CLI's own glyphs), the **`musterd` brand chip** — the lowercase word reversed out of a solid mustard block — with a trailing terminal cursor (`▊`), and the tagline. Compact, bold, modern; **no multi-line letter-art** (block or outline, it reads as retro). The mark _is_ the product — `muster` = take the roll, a team present. Source of truth: `packages/cli/src/render/rows.ts` `renderBanner`. A plain lowercase `musterd` string is still the wordmark in the README header.
 - **Vector wordmark** (Figma): lowercase `musterd` set in the brand mono typeface (see §3), letter-spacing `0`, single accent dot or the `-d` rendered in accent mustard is the only permitted flourish.
-- **Brand Chip** (compact mark; ADR 137): flat rounded mustard block (`#E1AD01`), zinc-900 reversed-out lowercase **`m`**, tiny **`▊`** cursor notch. Used for favicon, MCP icons, `/live` topbar, npm/GitHub avatar. Source: `docs/design/assets/chip.svg`.
-- **Nameplate Tile** (expressive mark; ADR 137): the chip at the office scene's 2:1 isometric angle, with optional soft mustard glow on web/marketing surfaces only (ADR 037). Source: `docs/design/assets/tile.svg`.
+- **Brand Chip** (compact mark; ADR 154): flat rounded mustard block (`#E1AD01`), zinc-900 reversed-out lowercase **`m`**, tiny **`▊`** cursor notch. Used for favicon, MCP icons, `/live` topbar, npm/GitHub avatar. Source: `docs/design/assets/chip.svg`.
+- **Nameplate Tile** (expressive mark; ADR 154): the chip at the office scene's 2:1 isometric angle, with optional soft mustard glow on web/marketing surfaces only (ADR 037). Source: `docs/design/assets/tile.svg`.
 - **Never:** stylized "MusterD", camel case, a standalone icon glyph that isn't derived from the letterforms (including a lone capital **M**), gradients or 3-D on the Chip itself, drop shadows on the wordmark.
 
 ---
@@ -136,7 +136,7 @@ Secondary nouns (consistent but not in the core five): **Inbox** (a Member's dur
 
 ## 6. Reversibility note
 
-This entire identity is intentionally small: one name, one accent color, one wordmark family (wordmark + chip + tile), five terms, two typefaces, plain voice. Every choice here can be walked back without code changes beyond a palette constant and a banner string. Do not expand the brand (mascots, multi-color systems, illustration beyond the chip/tile marks) without an ADR and an explicit decision to invest. The chip and tile marks are recorded in [ADR 137](../decisions/137-unified-logo-system.md).
+This entire identity is intentionally small: one name, one accent color, one wordmark family (wordmark + chip + tile), five terms, two typefaces, plain voice. Every choice here can be walked back without code changes beyond a palette constant and a banner string. Do not expand the brand (mascots, multi-color systems, illustration beyond the chip/tile marks) without an ADR and an explicit decision to invest. The chip and tile marks are recorded in [ADR 154](../decisions/154-unified-logo-system.md).
 
 ## 7. Web surface (carve-out)
 

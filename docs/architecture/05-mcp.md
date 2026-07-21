@@ -284,7 +284,7 @@ src/
   harness.ts      // bounded MCP clientInfo capture: adapter-local harness diagnostics, never model inference (ADR 120)
   pending.ts      // pending markers (.musterd/pending/<code>.json) + resolution sidecars (ADR 034)
   binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI)
-  brand.ts        // canonical chip SVG + MCP serverInfo.icons data URI (ADR 137)
+  brand.ts        // canonical chip SVG + MCP serverInfo.icons data URI (ADR 154)
   workspace.ts    // the gracefully-degrading "where" label captured at join (ADR 014)
   otel.ts         // cross-runtime trace-context propagation through the envelope (ADR 011)
   telemetry.ts    // boots the shared SDK as musterd-mcp + wraps every tool in a musterd.tool.call span (ADR 089)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CHIP_SVG, MCP_ICONS, chipIconDataUri } from './brand.js';
 
-describe('brand (ADR 137)', () => {
+describe('brand (ADR 154)', () => {
   it('chip SVG is a mustard block with reversed m', () => {
     expect(CHIP_SVG).toContain('#E1AD01');
     expect(CHIP_SVG).toContain('#18181B');
