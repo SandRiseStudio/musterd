@@ -237,6 +237,24 @@ export function countLivePresences(db: Database, timeoutMs: number): number {
   return row?.n ?? 0;
 }
 
+/**
+ * The set of `driver` names carried by a *live* presence right now on this team (ADR 021 co-presence,
+ * activated by ADR 155 Increment 1). A driver names the human steering a live agent session; this is
+ * how the roster derives "steering marks you working" — a human whose name is in this set composes as
+ * `working`/present even without their own heartbeat, computed at read time, no synthetic presence row.
+ * Same live filter as the roster (fresh heartbeat, not a release hold), scoped to the team.
+ */
+export function listLiveDrivers(db: Database, teamId: string, timeoutMs: number): Set<string> {
+  const cutoff = Date.now() - timeoutMs;
+  const rows = db
+    .prepare<
+      [string, number],
+      { driver: string }
+    >('SELECT DISTINCT p.driver AS driver FROM presence p JOIN members m ON m.id = p.member_id WHERE m.team_id = ? AND p.driver IS NOT NULL AND p.held_until IS NULL AND p.last_seen_at > ?')
+    .all(teamId, cutoff);
+  return new Set(rows.map((r) => r.driver));
+}
+
 /** Roster presence summary for a team. A member is online if any fresh presence; else offline. */
 export function listPresence(db: Database, teamId: string, timeoutMs: number): PresenceSummary[] {
   const cutoff = Date.now() - timeoutMs;

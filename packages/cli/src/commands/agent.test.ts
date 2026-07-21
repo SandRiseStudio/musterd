@@ -94,6 +94,7 @@ describe('musterd agent <name>', () => {
     expect(entry.env.MUSTERD_AGENT_KEY).toBeUndefined(); // key lives in binding.json, not the env
     expect(entry.env.MUSTERD_CLAIM).toBeUndefined();
     expect(entry.env.MUSTERD_AUTOJOIN).toBe('1');
+    expect(entry.env.MUSTERD_DRIVER).toBeUndefined(); // opt-in: no driver unless asked (ADR 155)
 
     // The secret-free committed launch spec is written (no agent_key/grant fields).
     expect(h.saveWorkspaceSpec).toHaveBeenCalledWith(
@@ -107,6 +108,13 @@ describe('musterd agent <name>', () => {
     const specArg = h.saveWorkspaceSpec.mock.calls[0]![1] as Record<string, unknown>;
     expect(specArg.agent_key).toBeUndefined();
     expect(specArg.grant).toBeUndefined();
+  });
+
+  it('--driver <you> bakes MUSTERD_DRIVER so the adapter reports who is steering (ADR 155 Inc 1)', async () => {
+    const code = await agentCommand(parseArgs(['June', '--driver', 'nick']));
+    expect(code).toBe(0);
+    const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
+    expect(entry.env.MUSTERD_DRIVER).toBe('nick');
   });
 
   it('issues a standing grant and persists it in the binding (source of truth), not the env (ADR 077)', async () => {

@@ -160,7 +160,15 @@ class TestWs {
    * an agent seat needs a `grant` to occupy immediately (else the server opens a pending request). The
    * success frame is `occupied` (the governed successor to `welcome`).
    */
-  claim(team: string, key: string, seat: string, surface = 'cli', grant?: string, model?: string) {
+  claim(
+    team: string,
+    key: string,
+    seat: string,
+    surface = 'cli',
+    grant?: string,
+    model?: string,
+    driver?: string,
+  ) {
     this.send({
       type: 'claim',
       v: PROTOCOL_VERSION,
@@ -169,6 +177,7 @@ class TestWs {
       target: { seat },
       ...(grant ? { grant } : {}),
       ...(model ? { model } : {}),
+      ...(driver ? { driver } : {}),
       surface,
     });
     return this.waitFor('occupied');
@@ -960,6 +969,39 @@ describe('WebSocket', () => {
     expect(by('Lin').offline_reason).toBe('unknown');
 
     n.close();
+    a.close();
+  });
+
+  it('steering marks the driving human working + present without their own heartbeat (ADR 155 Inc 1)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok); // a human who never steers
+
+    // nick does NOT open his own presence. Ada connects, driven by nick.
+    const a = new TestWs();
+    await a.open();
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+      undefined,
+      'nick', // driver
+    );
+
+    const roster = await get('/teams/dawn/members', nickTok);
+    const by = (name: string) => roster.json.members.find((m: any) => m.name === name);
+    // Steering nick reads working + online, derived from Ada's live driver link — no presence row of his own.
+    expect(by('nick').activity).toBe('working');
+    expect(by('nick').presence).toBe('online');
+    expect(by('nick').posture).toBe('working');
+    expect(by('nick').offline_reason).toBeUndefined();
+    // bo, a human who is not steering anyone, still reads offline.
+    expect(by('bo').activity).toBe('offline');
+    expect(by('bo').presence).toBe('offline');
+
     a.close();
   });
 
