@@ -1,8 +1,10 @@
 # 155 — The human presence ladder: steering marks you present
 
-- Status: **proposed** — 2026-07-21. Implements the fourth backlog item ADR 145 re-sequenced
-  (`human-presence-ladder`). Number **155 pinned** — next free on `origin/main` (highest is 154), and
-  now enforced by `adr-numbers:check` (#350).
+- Status: **accepted** — 2026-07-21. The founder approved the three open decisions as proposed (derived
+  presence from the driver link; reuse the presence timeout for the idle window; present → quiet
+  full-window wait / away → loud Slack at raise). Implements the fourth backlog item ADR 145
+  re-sequenced (`human-presence-ladder`). Number **155 pinned** — next free on `origin/main` (highest is
+  154), and now enforced by `adr-numbers:check` (#350).
 - Date: 2026-07-21
 - Builds on: [ADR 145](145-human-role-refounded.md) §3.3 (the decision — a human presence ladder where
   _steering marks you working_, presence informs timeouts, absolute time still drives them),
@@ -85,14 +87,16 @@ untouched.
 - **inactivity** beyond a fixed window flips `online → idle`, derived, no new stored state. Proposed
   default: reuse the existing presence timeout rather than invent a human-specific one.
 
-### Open for the founder (ADR 145 left these open — proposing defaults, not deciding for you)
+### Decisions (founder-approved 2026-07-21)
 
-1. **Derived vs own-seat presence for steering.** Proposed: derive `working` from the driver link (no
-   second writer). The "I steer, therefore I'm online" thesis could instead want the human seat to hold
-   a real presence row while steering — a stronger claim, at the cost of a synthetic attach.
-2. **The idle window** (Increment 3). Proposed: reuse the presence timeout; open to a human-specific one.
-3. **Increment 2's modulation default.** Proposed: present → quiet full-window wait; away → eager Slack
-   at raise. The ceiling stays fixed either way.
+ADR 145 left these three open; the founder approved the proposed default for each:
+
+1. **Derived, not own-seat presence.** `working` is derived from the driver link at read time — no
+   second writer, no synthetic attach. (The "I steer, therefore I'm online" thesis is satisfied by the
+   derived read; a real own-seat presence row was considered and rejected as unnecessary machinery.)
+2. **The idle window reuses the presence timeout** (Increment 3) — no human-specific timeout invented.
+3. **Increment 2's modulation default:** present → quiet full-window wait; away → eager Slack at raise.
+   The absolute ceiling stays fixed either way. Shipped as a default, not a knob.
 
 ## Consequences
 
