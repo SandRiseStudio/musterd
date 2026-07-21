@@ -44,6 +44,7 @@ src/
     audit.ts          // append-only governance audit log: appendAudit/listAudit (+ authorized_by filter, ADR 071/127)
     gateAsk.ts        // Gate B (ADR 150) ask-lifecycle reads: findGateAsk (fingerprint dedup — one ask per re-attempted costly action) + gateAskHumanAnswer (human-only accept/decline release); pure reads over the ADR 147 ask-stream log
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
+    reachability.ts   // ADR 153 unblocker-reachable projection: adminHumanReachable (present-or-notifiable settle term) OR liveTeammateExists × teammateRouteOpen (item-2-gated route-around term); pure read of members + presence + enforcement policy, gates the top-tier hold's terminal (held vs stranded)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)
     residency.ts      // the wake ledger: residency enrollment + wake leases — claimWakeLeases (transactional derivation, defer-snoozed) / settleWakeLease / expireWakeLeases / recordSessionAttestation (harness-class-only, inc 4); rate policy derived from residency.* audit rows (ADR 131)
     roles.ts          // roles table: role defaults (capabilities + charter), projected from roles/*.toml (ADR 070)

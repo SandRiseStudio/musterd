@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 3;
+export const GUIDANCE_CONTENT_VERSION = 4;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -153,7 +153,10 @@ export function renderSkillBody(opts: { team: string }): string {
     '- **`species:approve` — before a costly / irreversible / out-of-scope action.** Pair with',
     '  **`tier:blocking`**: an unanswered blocking ask **HOLDS** — you wait, and if the timeout elapses you',
     "  do **not** proceed; record it with a `status_update` carrying `meta.ask_ref` + `meta.ask_outcome:'held'`.",
-    '  This is the admin gate — never edit past it on your own.',
+    '  This is the admin gate — never edit past it on your own. The contract may say **STRAND** instead: when',
+    '  no unblocker is reachable (no admin human present or notifiable, no live teammate with a sanctioned',
+    "  route), don't hold an empty room — record WIP on your lane's branch, release the lane to open, log",
+    "  `meta.ask_outcome:'stranded'`, and close out. Stranding is still *not proceeding*.",
     '- **`species:escalate` — a true blocker or dispute only a human can settle.** Usually **`tier:standard`**.',
     '- **`species:consult` — "which direction / does this look right."** Wanted even in full-auto; usually',
     '  **`tier:advisory`**.',

@@ -3399,6 +3399,62 @@ describe('the to-human ask stream (ADR 147)', () => {
     expect(audit.some((r) => r.action === 'ask.held')).toBe(true);
     const deferred = audit.find((r) => r.action === 'ask.deferred');
     expect(JSON.parse(deferred!.detail!)).toMatchObject({ ask_ref: 'ask-y', until: '1h' });
+
+    // ADR 153: the strand terminal — top-tier timeout with no reachable unblocker; the agent released
+    // its lane and stopped. One `ask.stranded` row carrying the reason makes the dead-end queryable.
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'status_update',
+          { ask_ref: 'ask-z', ask_outcome: 'stranded' },
+          'res-4',
+        ),
+      },
+      ada,
+    );
+    const stranded = listAudit(server.db, teamId).find((r) => r.action === 'ask.stranded');
+    expect(JSON.parse(stranded!.detail!)).toMatchObject({
+      ask_ref: 'ask-z',
+      reason: 'no_reachable_unblocker',
+    });
+  });
+
+  it('an ask ack carries the derived contract with the reachability projection (ADR 153 §1)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, undefined, team.json.token);
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+
+    const res = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'ask',
+          { species: 'approve', tier: 'blocking' },
+          'ask-r-1',
+        ),
+      },
+      ada,
+    );
+    expect(res.status).toBe(201);
+    // nick (the creator, admin human) exists but has no live presence and no loud reach is wired, and
+    // Ada is the raiser with no live teammate — provably unreachable: the FB3 shape.
+    expect(res.json.ask_contract).toMatchObject({
+      timeout_ms: 15 * 60_000,
+      no_answer: 'hold',
+      unblocker_reachable: false,
+    });
+    // A non-ask ack stays contract-free (additive — nothing rides responses that don't need it).
+    const plain = await post(
+      '/teams/dawn/messages',
+      { envelope: env('Ada', { kind: 'team' }, 'status_update', null, 'su-r-1') },
+      ada,
+    );
+    expect(plain.json.ask_contract).toBeUndefined();
   });
 
   it('round-trips the ask_fallback_to_nonadmin team policy (default off)', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ASK_OUTCOMES,
   ASK_SPECIES,
   ASK_TIERS,
   ASK_TIER_DEFAULTS,
@@ -68,6 +69,40 @@ describe('askContractText — the one canonical ask contract phrasing (ADR 147 �
     for (const tier of ASK_TIERS) {
       const mins = Math.round(askContract(tier).timeout_ms / 60_000);
       expect(askContractText('x', tier)).toContain(`${mins}m`);
+    }
+  });
+});
+
+describe('the reachability-gated hold (ADR 153)', () => {
+  it('stranded joins the terminal outcomes beside held and risk_accepted', () => {
+    expect([...ASK_OUTCOMES]).toEqual(['held', 'risk_accepted', 'stranded']);
+  });
+
+  it('top tier + provably unreachable → STRAND orders: release the lane with WIP, never proceed', () => {
+    const text = askContractText('ask-3', ASK_TOP_TIER, false);
+    expect(text).toContain('STRAND');
+    expect(text).toContain('do NOT proceed');
+    expect(text).toContain("meta.ask_outcome='stranded'");
+    expect(text).toContain('release the lane');
+    expect(text).toContain('ask-3');
+    // Both terminals are non-proceed: the strand branch never risk-proceeds either.
+    expect(text).not.toContain('risk_accepted');
+  });
+
+  it('top tier + reachable (or unknown — an older daemon) keeps the unchanged HOLD orders', () => {
+    for (const reachable of [true, undefined]) {
+      const text = askContractText('ask-4', ASK_TOP_TIER, reachable);
+      expect(text).toContain('HOLD');
+      expect(text).toContain("meta.ask_outcome='held'");
+      expect(text).not.toContain('STRAND');
+    }
+  });
+
+  it('reachability never touches below-top tiers — they proceed with risk regardless', () => {
+    for (const reachable of [true, false, undefined]) {
+      const text = askContractText('ask-5', 'standard', reachable);
+      expect(text).toContain('PROCEED');
+      expect(text).not.toContain('STRAND');
     }
   });
 });

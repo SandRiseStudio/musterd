@@ -82,6 +82,14 @@ describe('deriveAsks (ADR 149)', () => {
       }),
     ]);
     expect(risked[0]!.state).toBe('risk_accepted');
+
+    // ADR 153: a strand closes quietly — the seat freed itself, the released lane carries the WIP.
+    const stranded = deriveAsks([
+      ask('a3', 1000, 'blocking'),
+      env('s3', 'status_update', { ts: 2000, meta: { ask_ref: 'a3', ask_outcome: 'stranded' } }),
+    ]);
+    expect(stranded[0]!.state).toBe('stranded');
+    expect(askIsLoud('stranded')).toBe(false);
   });
 
   it('a human answer is terminal — a later agent outcome cannot reopen or override it', () => {

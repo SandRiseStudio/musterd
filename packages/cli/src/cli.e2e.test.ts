@@ -160,7 +160,13 @@ describe('CLI ask contract parity (ADR 147 / finding 006 item 3)', () => {
     ]);
     const parsed = JSON.parse(askJson.out);
     expect(parsed.id).toBeTruthy();
-    expect(parsed.ask_contract).toEqual({ timeout_ms: 15 * 60_000, no_answer: 'hold' });
+    // The daemon-derived contract carries the reachability projection (ADR 153): nick — an admin
+    // human made live by this very CLI session's ambient presence — is a reachable unblocker.
+    expect(parsed.ask_contract).toEqual({
+      timeout_ms: 15 * 60_000,
+      no_answer: 'hold',
+      unblocker_reachable: true,
+    });
 
     // A non-ask send carries no contract noise.
     const msg = await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'working']);

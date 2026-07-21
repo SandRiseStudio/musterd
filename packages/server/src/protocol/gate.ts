@@ -11,6 +11,7 @@ import type { Ctx } from '../context.js';
 import { appendAudit } from '../store/audit.js';
 import { findGateAsk, gateAskHumanAnswer } from '../store/gateAsk.js';
 import { laneCoveringPath } from '../store/lanes.js';
+import { unblockerReachable } from '../store/reachability.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import { routeEnvelope } from './route.js';
 
@@ -96,12 +97,23 @@ export function gateA(ctx: GateContext): GateDecision {
  * (a human will review this consequential action) and **that routing around defeats it** — the finding-006
  * datum that agents met a blocked push by landing the change via a local merge, pricing the hold at zero.
  */
-function blockingContractReason(cls: string, askId: string): string {
+function blockingContractReason(cls: string, askId: string, unblockerReachable: boolean): string {
   return (
     `blocked pending human approval — '${cls}' is a declared costly action your team gated for human ` +
-    `review; ask ${askId} raised (species:approve). ${askContractText(askId, ASK_TOP_TIER)} ` +
+    `review; ask ${askId} raised (species:approve). ${askContractText(askId, ASK_TOP_TIER, unblockerReachable)} ` +
     `Re-try the action to re-check. Landing this another way — a local merge, a different command, an ` +
     `alternate path — bypasses the very review this block exists for; hold or hand the work off instead.`
+  );
+}
+
+/** The ADR 153 reachability projection at the gate: the acting seat is the raiser, the daemon's presence
+ *  timeout is the liveness window. A pure read of team + policy state — no timer, nothing stored. */
+function gateUnblockerReachable(ctx: GateContext): boolean {
+  return unblockerReachable(
+    ctx.srv.db,
+    ctx.team.id,
+    ctx.member.name,
+    ctx.srv.config.presenceTimeoutMs,
   );
 }
 
@@ -172,21 +184,26 @@ export function gateB(ctx: GateContext): GateDecision {
         ask_ref: existing.id,
       };
     }
-    // Still open, unanswered — restate the contract, do NOT emit another ask.
+    // Still open, unanswered — restate the contract, do NOT emit another ask. Reachability is
+    // re-computed here (ADR 153 §1: re-checkable at the terminal moment), so a hold whose unblocker
+    // has since left reads strand orders on the next re-attempt.
     return {
       decision: 'deny',
       outcome: 'denied_awaiting',
-      reason: blockingContractReason(ctx.req.class, existing.id),
+      reason: blockingContractReason(ctx.req.class, existing.id, gateUnblockerReachable(ctx)),
       ask_ref: existing.id,
     };
   }
 
-  // First attempt for this fingerprint — emit the ask, then deny with the blocking contract.
+  // First attempt for this fingerprint — emit the ask, then deny with the blocking contract. The
+  // contract carries the reachability-gated terminal (ADR 153): a headless solo seat is told to STRAND
+  // (release the lane with WIP, never proceed) instead of holding a room that will never answer — the
+  // FB3 fix. Either branch is non-proceed; the wedge-guard is untouched.
   const askId = emitGateAsk(ctx);
   return {
     decision: 'deny',
     outcome: 'denied_ask_raised',
-    reason: blockingContractReason(ctx.req.class, askId),
+    reason: blockingContractReason(ctx.req.class, askId, gateUnblockerReachable(ctx)),
     ask_ref: askId,
   };
 }

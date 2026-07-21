@@ -26,6 +26,8 @@ import {
   UpdateLaneSchema,
   DeclareGoalSchema,
   GateCheckRequestSchema,
+  AskTierSchema,
+  askContract,
   makeEnvelope,
   type Envelope,
   type LaneWarning,
@@ -103,6 +105,7 @@ import {
   listReclaimableMemberIds,
   touchAmbientPresence,
 } from '../store/presence.js';
+import { unblockerReachable } from '../store/reachability.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import {
   claimWakeLeases,
@@ -1923,6 +1926,25 @@ export async function handleHttp(
           member.name,
           env.to.kind === 'member' ? env.to.name : null,
         );
+        // An `ask` ack additionally carries the derived tier contract WITH the reachability projection
+        // (ADR 153 §1): `unblocker_reachable` is a fact only the daemon can compute (admin roster +
+        // presence + enforcement policy), so it rides the send response beside the pure tier numbers the
+        // clients already derive — additive, older clients ignore it, older daemons omit it.
+        const askTier = env.act === 'ask' ? AskTierSchema.safeParse(env.meta?.['tier']) : null;
+        if (askTier?.success) {
+          return sendJson(res, 201, {
+            ack,
+            ask_contract: {
+              ...askContract(askTier.data),
+              unblocker_reachable: unblockerReachable(
+                ctx.db,
+                team.id,
+                member.name,
+                ctx.config.presenceTimeoutMs,
+              ),
+            },
+          });
+        }
         return sendJson(res, 201, { ack });
       }
 

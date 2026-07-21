@@ -105,6 +105,14 @@ export type AuditAction =
   | 'ask.deferred'
   | 'ask.held'
   | 'ask.risk_accepted'
+  // ADR 153 (reachability-gated hold): the top tier's second NON-proceed terminal. A `blocking` ask
+  // timed out unanswered AND no unblocker was reachable (no admin human present/notifiable, no live
+  // teammate with an open sanctioned route-around), so the agent stranded — recorded WIP on its lane,
+  // released it, closed the unit — instead of pinning itself on a hold that cannot pay off. Detail
+  // `{ ask_ref, reason: 'no_reachable_unblocker' }`. Guard metric: no `ask.stranded` is EVER followed
+  // by the blocked action executing — a strand that proceeds is the same wedge breach as a held that
+  // proceeds.
+  | 'ask.stranded'
   // ADR 149 (ask-surfaces): the loud reach's attempt + outcome — one row per Slack webhook POST the
   // daemon fired for a raised ask, detail `{ surface: 'slack', ok, status? }`. Never the URL (a
   // secret) and never the body (delivery carries bodies; audit never does, ADR 051). Zero rows on a

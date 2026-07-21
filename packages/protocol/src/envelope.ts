@@ -110,7 +110,7 @@ export function actMetaRules(
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['meta', 'ask_outcome'],
-        message: 'meta.ask_outcome must be "held" or "risk_accepted"',
+        message: 'meta.ask_outcome must be "held", "risk_accepted", or "stranded"',
       });
     }
     const askRef = meta['ask_ref'];
