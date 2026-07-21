@@ -877,6 +877,100 @@
   overflow-wrap: anywhere;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
 }
+/* ── rich speech tokens: the stream's rich-text vocabulary, tuned for the dark bubble ──────────
+   Prose types in char by char; these pop in whole when the reveal reaches them (display flips off
+   .is-off, which retriggers the pop animation). Each is tinted by the act's tone so a resolve's
+   chips glow green, an ask's glow mustard — the bubble feels of a piece with the act it speaks. */
+.lc-st {
+  animation: lc-st-pop 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+/* chips are atomic — inline-block so they can scale in and never break mid-token; a runaway-long
+   code span ellipsizes inside the bubble instead of overflowing it. Strong prose stays inline so
+   multi-word emphasis wraps like the sentence it's part of (it fades rather than scales). */
+.lc-st-lead,
+.lc-speech .lc-st-code,
+.lc-speech .lc-st-id,
+.lc-speech .lc-st-ref {
+  display: inline-block;
+  transform-origin: 50% 85%;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+.lc-st-strong {
+  animation-name: lc-st-fade;
+}
+@keyframes lc-st-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.lc-st.is-off {
+  display: none;
+}
+@keyframes lc-st-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6) translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+/* the lane/goal verb lead — a small spoken-aloud tag in the act's tone, before the title */
+.lc-st-lead {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.84em;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  margin-right: 4px;
+  color: color-mix(in srgb, var(--lc-speech-tone) 88%, #f4ead9);
+}
+.lc-st-lead::after {
+  content: ' ·';
+  opacity: 0.55;
+}
+/* inline code / a collapsed ULID — a soft tone-washed chip, full value on hover for ids */
+.lc-speech .lc-st-code,
+.lc-speech .lc-st-id {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.86em;
+  padding: 0.04em 0.34em 0.08em;
+  margin: 0 0.06em;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--lc-speech-tone) 17%, rgba(255, 250, 240, 0.05));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 30%, transparent);
+  color: #faf2e2;
+  white-space: nowrap;
+}
+.lc-speech .lc-st-id {
+  color: color-mix(in srgb, #f4ead9 82%, var(--lc-speech-tone));
+  cursor: default;
+}
+/* a PR/issue ref — a bright tone accent, no box; the liveliest word in the line */
+.lc-speech .lc-st-ref {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  font-weight: 650;
+  color: color-mix(in srgb, var(--lc-speech-tone) 72%, #ffe9c8);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--lc-speech-tone) 45%, transparent);
+}
+/* **strong** prose — carries the sentence's weight without shouting */
+.lc-speech .lc-st-strong {
+  font-weight: 700;
+  color: #fff6e8;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-st {
+    animation: none;
+  }
+}
+
 /* a quiet "there's more" chip, bottom-right, tinted with the act tone — fades as the bubble expands */
 .lc-speech__more {
   position: absolute;

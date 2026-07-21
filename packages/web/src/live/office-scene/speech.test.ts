@@ -4,6 +4,8 @@ import {
   GLANCE_MAX,
   GLANCE_MAX_STATUS,
   shapeSpeech,
+  speechLength,
+  speechTokens,
   stripNoise,
   truncateSpeech,
   typeCadence,
@@ -30,8 +32,8 @@ describe('truncateSpeech', () => {
 });
 
 describe('stripNoise', () => {
-  it('strips markdown headers, emphasis, and inline code', () => {
-    expect(stripNoise('## Title\n**bold** and _em_ and `code`')).toBe('Title bold and em and code');
+  it('strips headers and single-char emphasis, keeps strong/code markers for the token renderer', () => {
+    expect(stripNoise('## Title\n**bold** and _em_ and `code`')).toBe('Title **bold** and em and `code`');
   });
   it('collapses a fenced code block to a compact token', () => {
     expect(stripNoise('before\n```ts\nconst x = 1;\n```\nafter')).toBe('before ⟨code⟩ after');
@@ -69,6 +71,37 @@ describe('stripNoise', () => {
   it('leaves refs, paths, flags, arrows, and short hashes intact', () => {
     const s = 'Shipped PR #343 as 17cc546: service --auto in ROADMAP.md → done';
     expect(stripNoise(s)).toBe(s);
+  });
+});
+
+describe('speechTokens', () => {
+  it('emits a lead token for an unwrapped lane/goal verb', () => {
+    const t = speechTokens('resolved: Re-font body — calmer UI');
+    expect(t[0]).toEqual({ kind: 'lead', text: 'resolved' });
+    expect(t[1]).toEqual({ kind: 'text', text: 'Re-font body — calmer UI' });
+  });
+  it('passes plain prose through as a single text token', () => {
+    expect(speechTokens('on it — checking the deploy')).toEqual([
+      { kind: 'text', text: 'on it — checking the deploy' },
+    ]);
+  });
+  it('tokenizes refs, code, and collapses a ULID', () => {
+    const t = speechTokens('Shipped `service --auto` in #343 (lane 01KY1F9DXYVTRXH4FM2SBC23TX)');
+    expect(t).toContainEqual({ kind: 'code', text: 'service --auto' });
+    expect(t).toContainEqual({ kind: 'ref', text: '#343' });
+    expect(t).toContainEqual({
+      kind: 'id',
+      text: '01KY1F…23TX',
+      title: '01KY1F9DXYVTRXH4FM2SBC23TX',
+    });
+  });
+  it('does not mistake mid-sentence verbs for a lead', () => {
+    const t = speechTokens('I opened the door');
+    expect(t[0]!.kind).toBe('text');
+  });
+  it('speechLength counts visible chars across tokens', () => {
+    const t = speechTokens('see #343 now');
+    expect(speechLength(t)).toBe('see #343 now'.length);
   });
 });
 
