@@ -127,15 +127,19 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
           thread: thread ?? null,
           meta: metaToSend,
         });
-        await client.sendEnvelope(envelope);
+        const ackBody = await client.sendEnvelope(envelope);
         client.markSeen(envelope.id); // don't echo our own send back via inbox
         // The ask's tier contract (ADR 147 §2): the agent owns the clock, so the send response hands it
         // back its marching orders — how long to wait, and the no-answer policy to invoke on silence. The
         // top tier HOLDS (never proceed); below-top PROCEEDS with a recorded risk-acceptance
         // (status_update, meta.ask_ref + meta.ask_outcome:'risk_accepted' + meta.risk + meta.chosen_approach).
+        // The daemon's ack may carry the derived contract with `unblocker_reachable` (ADR 153) — prefer
+        // it: when provably unreachable, the top-tier orders become STRAND, not hold. Older daemons omit
+        // it and the pure local contract stands.
+        const serverContract = ackBody?.ask_contract;
         const askGuidance =
           args.act === 'ask' && isAskTier(meta['tier'])
-            ? askContractText(envelope.id, meta['tier'])
+            ? askContractText(envelope.id, meta['tier'], serverContract?.unblocker_reachable)
             : null;
         // Structured-first (ADR 144 inc 3): the id/thread a programmatic caller needs to keep the
         // exchange threaded (reply_to / thread on the next send), without parsing the prose.
@@ -150,7 +154,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
             to: args.to,
             thread: envelope.thread,
             ...(args.act === 'ask' && isAskTier(meta['tier'])
-              ? { ask_contract: askContract(meta['tier']) }
+              ? { ask_contract: serverContract ?? askContract(meta['tier']) }
               : {}),
           },
         };

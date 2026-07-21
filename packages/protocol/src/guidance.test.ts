@@ -75,6 +75,7 @@ describe('version-bump discipline (ADR 085)', () => {
     1: 'e305d9d43a9f75bb',
     2: 'c580f2a750a4c012', // + seat-memory playbook (ADR 093): save-before-handoff + memory names
     3: 'a9b0672fc52bae70', // + claim-before-build lane rule & ask-stream playbook (ADR 147 inducement)
+    4: 'c408be59e7172a1f', // + reachability-gated hold: the STRAND branch of the blocking-ask contract (ADR 153)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

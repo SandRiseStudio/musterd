@@ -273,6 +273,19 @@ function recordAskLifecycle(ctx: Ctx, team: TeamRow, actor: string, env: Envelop
     });
     return;
   }
+  // The strand terminal (ADR 153 §2): a top-tier ask with no reachable unblocker — the agent released
+  // its lane (WIP recorded on the branch) and stopped, never proceeding. One append-only row makes the
+  // dead-end queryable: "this seat legitimately could not proceed, and no unblocker existed."
+  if (outcome === 'stranded') {
+    appendAudit(ctx.db, team.id, {
+      actor,
+      action: 'ask.stranded',
+      target: askRef,
+      result: 'allow',
+      detail: { ask_ref: askRef, reason: 'no_reachable_unblocker' },
+    });
+    return;
+  }
   if (outcome === 'risk_accepted') {
     appendAudit(ctx.db, team.id, {
       actor,

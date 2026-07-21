@@ -22,11 +22,15 @@ import {
  * - `accepted` / `declined` — a human answered (`accept`/`decline` referencing the ask). Closed.
  * - `risk_accepted` — the below-top timeout elapsed and the agent proceeded, recording the risk (§4).
  *   Closed, but flagged: proceeding-without-the-human is the outcome the record watches for.
+ * - `stranded` — the top-tier timeout elapsed with NO reachable unblocker (ADR 153): the agent released
+ *   its lane (WIP on the branch) and stopped, never proceeding. Closed, but flagged: a strand is the
+ *   honest surface of "this team is missing a reachable admin for a decision it needs."
  * - `resolved` — the ask's thread was resolved without an explicit answer act. Closed.
  */
 export type AskState =
   | 'open'
   | 'held'
+  | 'stranded'
   | 'deferred'
   | 'accepted'
   | 'declined'
@@ -103,6 +107,8 @@ export function deriveAsks(envelopes: Envelope[]): AskView[] {
         ask.state = 'held';
       } else if (env.meta?.['ask_outcome'] === 'risk_accepted') {
         ask.state = 'risk_accepted';
+      } else if (env.meta?.['ask_outcome'] === 'stranded') {
+        ask.state = 'stranded';
       } else if (env.act === 'resolve') {
         ask.state = 'resolved';
         ask.answeredBy = env.from;

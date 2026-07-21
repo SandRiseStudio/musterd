@@ -1,6 +1,7 @@
 import {
   ErrorBodySchema,
   PROTOCOL_VERSION,
+  type AskContract,
   type ClaimTarget,
   type Envelope,
   type Goal,
@@ -172,8 +173,13 @@ export class MusterdClient {
     return value;
   }
 
-  sendEnvelope(envelope: Envelope) {
-    return this.request('POST', `/teams/${this.config.team}/messages`, { envelope });
+  /** POST the envelope. On an `ask`, the daemon's ack additionally carries the derived tier contract
+   *  with the reachability projection (`unblocker_reachable`, ADR 153) — a fact only the daemon can
+   *  compute; callers fall back to the pure local contract when an older daemon omits it. */
+  sendEnvelope(envelope: Envelope): Promise<{ ask_contract?: AskContract }> {
+    return this.request('POST', `/teams/${this.config.team}/messages`, { envelope }) as Promise<{
+      ask_contract?: AskContract;
+    }>;
   }
 
   roster(): Promise<{ members: MemberSummary[] }> {

@@ -31,6 +31,7 @@ import {
   type WakeLeasesResponse,
   type WakeReportBody,
   type ActDelivery,
+  type AskContract,
   type AuditResponse,
   type ClaimTarget,
   type DeclareGoal,
@@ -192,8 +193,13 @@ export class HttpClient {
   roster(slug: string): Promise<{ members: MemberSummary[] }> {
     return this.request('GET', `/teams/${slug}/members`);
   }
-  send(slug: string, envelope: Envelope) {
-    return this.request('POST', `/teams/${slug}/messages`, { envelope });
+  /** On an `ask`, the daemon's ack additionally carries the derived tier contract with the reachability
+   *  projection (`unblocker_reachable`, ADR 153); callers fall back to the pure local contract when an
+   *  older daemon omits it. */
+  send(slug: string, envelope: Envelope): Promise<{ ask_contract?: AskContract }> {
+    return this.request('POST', `/teams/${slug}/messages`, { envelope }) as Promise<{
+      ask_contract?: AskContract;
+    }>;
   }
   inbox(
     slug: string,

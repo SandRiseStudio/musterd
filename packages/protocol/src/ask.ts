@@ -37,15 +37,28 @@ export const AskTierSchema = z.enum(ASK_TIERS);
 export const ASK_NO_ANSWER = ['hold', 'proceed_with_risk'] as const;
 export type AskNoAnswer = (typeof ASK_NO_ANSWER)[number];
 
-/** The terminal no-answer outcomes an agent records (ADR 147 §4), carried on a `status_update`'s meta. */
-export const ASK_OUTCOMES = ['held', 'risk_accepted'] as const;
+/**
+ * The terminal no-answer outcomes an agent records (ADR 147 §4), carried on a `status_update`'s meta.
+ * `stranded` (ADR 153) is the top tier's second **non-proceed** terminal: the hold's timeout elapsed AND
+ * no unblocker is reachable, so the agent records its WIP on the lane, releases it, and closes its unit
+ * of work — it never executes the blocked action. Both `held` and `stranded` sit on the non-proceed side
+ * of the wedge-guard; `risk_accepted` remains the below-top-only proceed.
+ */
+export const ASK_OUTCOMES = ['held', 'risk_accepted', 'stranded'] as const;
 export type AskOutcome = (typeof ASK_OUTCOMES)[number];
 export const AskOutcomeSchema = z.enum(ASK_OUTCOMES);
 
-/** The tier contract: how long the agent waits, and what it does when the wait elapses unanswered. */
+/**
+ * The tier contract: how long the agent waits, and what it does when the wait elapses unanswered.
+ * `unblocker_reachable` (ADR 153) is a **derived, daemon-supplied** fact — never computable from the tier
+ * alone, so the pure `askContract(tier)` omits it and the daemon's send/gate responses fill it in:
+ * true iff an admin human is present-or-notifiable OR a live teammate seat exists with an open sanctioned
+ * route-around for the blocked class. It steers only the TOP tier's terminal (`held` vs `stranded`).
+ */
 export interface AskContract {
   timeout_ms: number;
   no_answer: AskNoAnswer;
+  unblocker_reachable?: boolean;
 }
 
 /**
@@ -81,9 +94,24 @@ export function askContract(tier: AskTier): AskContract {
  * Top tier **holds**: wait, re-notify, then HOLD and record the held outcome — never proceed. Below-top
  * **proceeds with a recorded risk-acceptance** on silence. Either way the clock is the agent's; the
  * daemon runs no timer (ADR 147 §2).
+ *
+ * ADR 153 gates the top tier's terminal on `unblockerReachable` (the daemon-derived contract field):
+ * reachable (or unknown — an older daemon omits it) → HOLD, unchanged; provably unreachable → STRAND,
+ * the second *non-proceed* terminal: record WIP on the lane's branch, release the lane to open, record
+ * `ask_outcome='stranded'`, close the unit of work — and still never execute the blocked action.
  */
-export function askContractText(id: string, tier: AskTier): string {
+export function askContractText(id: string, tier: AskTier, unblockerReachable?: boolean): string {
   const mins = Math.round(askContract(tier).timeout_ms / 60_000);
+  if (askTierHolds(tier) && unblockerReachable === false) {
+    return (
+      `Top tier (${tier}), and NO unblocker is reachable (no admin human present or notifiable, no live ` +
+      `teammate with a sanctioned route) — if no answer comes within ${mins}m, STRAND rather than hold: ` +
+      `do NOT proceed with the blocked action; set your lane's branch to your working branch so the WIP ` +
+      `survives, release the lane back to open, record a status_update carrying meta.ask_ref='${id}' + ` +
+      `meta.ask_outcome='stranded', and close out this unit of work. A later-arriving human or teammate ` +
+      `picks the released lane up from the board.`
+    );
+  }
   if (askTierHolds(tier)) {
     return (
       `Top tier (${tier}): wait up to ${mins}m for a human answer, re-notifying; if none comes, HOLD — ` +

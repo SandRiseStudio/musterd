@@ -4,7 +4,7 @@ import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
 import { openLane } from '../store/lanes.js';
-import { getTeamBySlug } from '../store/teams.js';
+import { getTeamBySlug, setPolicy } from '../store/teams.js';
 
 /**
  * Direct HTTP coverage for the ADR 150 enforcement foundation: the member-readable class table
@@ -304,6 +304,28 @@ describe('Gate B — policy-classed action→ask (ADR 150) — deny IS emit', ()
     expect(r.json.reason).toContain('human review');
     expect(r.json.reason).toMatch(/local merge|another way|alternate path/);
     expect(r.json.reason).toMatch(/bypass/i);
+  });
+
+  it('with NO reachable unblocker the deny carries STRAND orders, not a dead-end hold (ADR 153)', async () => {
+    // Make the room provably empty: drop the loud reach (nick, the admin human, has no live presence
+    // in this fixture) and clear any ambient presence the setup's authed requests created. Ada is the
+    // raiser, so no teammate term either — the FB3 shape.
+    setPolicy(server.db, getTeamBySlug(server.db, 'dawn')!.id, {
+      enforcement: { classes: CLASSES as never },
+    });
+    server.db.prepare('DELETE FROM presence').run();
+    const r = await forcePush();
+    expect(r.json.decision).toBe('deny'); // still non-proceed: strand is a second way of NOT proceeding
+    expect(r.json.reason).toContain('STRAND');
+    expect(r.json.reason).toContain("meta.ask_outcome='stranded'");
+    expect(r.json.reason).toContain('release the lane');
+    expect(r.json.reason).not.toContain('HOLD');
+    // Guard (ADR 153 eval): the blocked action still never executes — a re-attempt after the strand
+    // orders re-adjudicates to deny, not allow.
+    server.db.prepare('DELETE FROM presence').run();
+    const again = await forcePush();
+    expect(again.json.decision).toBe('deny');
+    expect(again.json.outcome).toBe('denied_awaiting');
   });
 
   it('re-attempt while unanswered → DENY (denied_awaiting), does NOT raise a second ask (dedup)', async () => {

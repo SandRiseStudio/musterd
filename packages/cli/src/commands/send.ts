@@ -100,7 +100,7 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
     throw new CliError(`invalid message: ${(err as Error).message}`, 3);
   }
 
-  await http.send(team, envelope);
+  const ackBody = await http.send(team, envelope);
 
   // The ask's tier contract (ADR 147 §2), at parity with the MCP `team_send` response: when an agent
   // raises an `ask` from the CLI it gets the same marching orders — how long to wait, and what to do on
@@ -114,7 +114,11 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
   if (parsed.flags['json']) {
     // Additive, id-preserving: programmatic callers still read `.id`, and now get the derived contract
     // (mirrors the MCP structured `ask_contract`) without a second round-trip to the tier table.
-    const payload = askTier ? { ...envelope, ask_contract: askContract(askTier) } : envelope;
+    // Prefer the daemon-derived contract (carries `unblocker_reachable`, ADR 153); the pure local
+    // contract stands when an older daemon omits it.
+    const payload = askTier
+      ? { ...envelope, ask_contract: ackBody?.ask_contract ?? askContract(askTier) }
+      : envelope;
     process.stdout.write(JSON.stringify(payload) + '\n');
     return 0;
   }
@@ -128,6 +132,10 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
   }
   process.stdout.write(renderMessageRow(envelope, kindOf) + '\n');
   process.stdout.write(`${theme.ok('✓')} sent\n`);
-  if (askTier) process.stdout.write(theme.dim(askContractText(envelope.id, askTier)) + '\n');
+  if (askTier)
+    process.stdout.write(
+      theme.dim(askContractText(envelope.id, askTier, ackBody?.ask_contract?.unblocker_reachable)) +
+        '\n',
+    );
   return 0;
 }
