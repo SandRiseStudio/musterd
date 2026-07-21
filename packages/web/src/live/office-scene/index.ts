@@ -21,7 +21,7 @@ import {
   type ScenePalette,
 } from './render';
 import { GESTURE } from './skeleton';
-import { shapeSpeech, typeCadence } from './speech';
+import { shapeSpeech, speechLength, speechTokens, typeCadence, type SpeechToken } from './speech';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
 export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode } from './types';
@@ -395,9 +395,54 @@ export function mountOffice(
     inner.style.setProperty('--lc-speech-tone', toneColor(tone));
     const textEl = document.createElement('span');
     textEl.className = 'lc-speech__text';
-    const textNode = document.createTextNode('');
-    textEl.appendChild(textNode);
     inner.appendChild(textEl);
+
+    // ── rich token rendering ──────────────────────────────────────────────────────────────────
+    // The bubble speaks the stream's rich-text vocabulary: **strong**, `code`, #refs, collapsed
+    // ULIDs, SHAs, plus the lane/goal lead verb — each a styled span, not a flat text dump. The
+    // typewriter reveals *across* tokens: prose slices in char by char, chips pop in whole the
+    // moment the reveal reaches them (a little beat of delight, honest to the token's atomicity).
+    const glanceTokens = speechTokens(glance);
+    const fullTokens = clamped ? speechTokens(full) : glanceTokens;
+    interface Rendered {
+      node: Text | HTMLElement;
+      text: string;
+      chip: boolean;
+    }
+    /** (Re)build textEl from tokens; `revealed` = show everything at once (hover/finish/reduced). */
+    const buildTokens = (tokens: SpeechToken[], revealed: boolean): Rendered[] => {
+      textEl.textContent = '';
+      const out: Rendered[] = [];
+      for (const t of tokens) {
+        if (t.kind === 'text') {
+          const node = document.createTextNode(revealed ? t.text : '');
+          textEl.appendChild(node);
+          out.push({ node, text: t.text, chip: false });
+        } else {
+          const el = document.createElement('span');
+          el.className = `lc-st lc-st-${t.kind}`;
+          el.textContent = t.text;
+          if (t.kind === 'id') el.title = t.title; // full ULID one hover away
+          if (!revealed) el.classList.add('is-off');
+          textEl.appendChild(el);
+          out.push({ node: el, text: t.text, chip: true });
+        }
+      }
+      return out;
+    };
+    /** Advance the reveal to `n` visible characters: prose slices, chips pop whole. */
+    const reveal = (rendered: Rendered[], n: number) => {
+      let cum = 0;
+      for (const r of rendered) {
+        const take = Math.max(0, Math.min(r.text.length, n - cum));
+        if (r.chip) {
+          if (take > 0) (r.node as HTMLElement).classList.remove('is-off');
+        } else {
+          (r.node as Text).nodeValue = r.text.slice(0, take);
+        }
+        cum += r.text.length;
+      }
+    };
     if (clamped) {
       // a quiet "there's more" chip — hovering the bubble reveals the full text
       const more = document.createElement('span');
@@ -424,7 +469,7 @@ export function mountOffice(
     let collapse = () => {};
     if (clamped) {
       expand = () => {
-        textNode.nodeValue = full;
+        buildTokens(fullTokens, true);
         outer.classList.add('is-expanded');
         // measure on the next frame so the expanded (clamp-removed) layout has painted
         requestAnimationFrame(() => {
@@ -434,7 +479,7 @@ export function mountOffice(
       collapse = () => {
         outer.classList.remove('is-expanded');
         inner.style.removeProperty('--lc-speech-h');
-        textNode.nodeValue = glance;
+        buildTokens(glanceTokens, true);
       };
     }
 
@@ -472,28 +517,30 @@ export function mountOffice(
     });
 
     if (reduced) {
-      textNode.nodeValue = glance;
+      buildTokens(glanceTokens, true);
       begin();
       return;
     }
 
+    const rendered = buildTokens(glanceTokens, false);
+    const total = speechLength(glanceTokens);
     const caret = document.createElement('span');
     caret.className = 'lc-caret';
-    textEl.appendChild(caret);
+    textEl.appendChild(caret); // unrevealed nodes are empty/hidden, so the caret rides the frontier
     let i = 0;
     finish = () => {
       if (done) return;
       done = true;
       clearInterval(iv);
       caret.remove();
-      textNode.nodeValue = glance;
+      buildTokens(glanceTokens, true);
       begin();
     };
     const iv = setInterval(() => {
       i += 1;
-      textNode.nodeValue = glance.slice(0, i);
-      if (i >= glance.length) finish();
-    }, typeCadence(glance.length));
+      reveal(rendered, i);
+      if (i >= total) finish();
+    }, typeCadence(total));
     s.cancels.push(() => clearInterval(iv));
   }
 

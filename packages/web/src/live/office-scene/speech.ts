@@ -2,6 +2,7 @@
  * Pure helpers for the ephemeral office speech bubbles — an act's body types out over the sender's head,
  * then fades. Kept separate from the DOM wiring in `index.ts` so the text-shaping logic is unit-testable.
  */
+import { richTokens, type RichToken } from '../format';
 
 /** Glance budget: what a bubble shows unhovered. Wide enough to carry the actual point of a message
  * (~5 clamped lines at the bubble width), not just its opening clause. */
@@ -43,17 +44,39 @@ export function stripNoise(raw: string): string {
   // so the surrounding quotes are still balanced). The tag comes off even when no known verb follows.
   t = t.replace(ENVELOPE_TAG, '');
   t = t.replace(ENVELOPE_VERB, '$1: $2');
-  // markdown chrome: headers, emphasis, inline code, blockquotes, list bullets
+  // markdown chrome: headers, single-char emphasis, blockquotes, list bullets. `**strong**` and
+  // `` `code` `` markers are deliberately KEPT — the bubble's token renderer (speechTokens) turns
+  // them into styled spans, matching the stream's rich-text vocabulary.
   t = t.replace(/^#{1,6}\s+/gm, '');
-  t = t.replace(/(\*\*|__)(.*?)\1/g, '$2');
-  t = t.replace(/(^|\s)[*_]([^*_]+)[*_](?=\s|[.,;:!?]|$)/g, '$1$2');
-  t = t.replace(/`([^`]*)`/g, '$1');
+  t = t.replace(/(^|\s)[*_]([^*_`]+)[*_](?=\s|[.,;:!?]|$)/g, '$1$2');
   t = t.replace(/^\s*(?:[-*+•]|\d+[.)])\s+/gm, '');
   t = t.replace(/^\s*>\s?/gm, '');
   t = t.replace(/\s+/g, ' ').trim();
   // a whole line still wrapped in balanced quotes (a bare quoted title with no verb) → unwrap it
   t = t.replace(/^"([^"]+)"$/, '$1');
   return t;
+}
+
+/* ─── rich speech tokens ─────────────────────────────────────────────────────────────────────────
+ * The bubble speaks the same rich-text vocabulary as the stream (format.ts richTokens: **strong**,
+ * `code`, #refs, collapsed ULIDs, commit SHAs), plus one bubble-only kind: the `lead` verb that
+ * stripNoise unwraps from the lane/goal envelope (`resolved: Title`). The DOM layer renders each
+ * kind as a styled span and reveals across tokens, so the typewriter survives. */
+
+export type SpeechToken = RichToken | { kind: 'lead'; text: string };
+
+const LEAD_RE = /^(resolved|opened|claimed|declared|handed|surface overlaps):\s+/i;
+
+/** Tokenize a shaped (post-stripNoise) bubble line for rich rendering. */
+export function speechTokens(text: string): SpeechToken[] {
+  const m = text.match(LEAD_RE);
+  if (!m) return richTokens(text);
+  return [{ kind: 'lead', text: m[1]! }, ...richTokens(text.slice(m[0].length))];
+}
+
+/** Total visible length of a speech-token stream — what the typewriter counts against. */
+export function speechLength(tokens: SpeechToken[]): number {
+  return tokens.reduce((n, t) => n + t.text.length, 0);
 }
 
 /** Short-truncate for a speech bubble — cut on a sentence boundary when one lands reasonably deep,
