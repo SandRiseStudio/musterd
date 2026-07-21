@@ -3556,6 +3556,9 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
       { ask_slack_webhook: 'https://hooks.slack.test/T/B/x' },
       nickCred,
     );
+    // ADR 155 Inc 2: the at-raise fire is the away-admin case — pin nick away so this test can't be
+    // flipped quiet by an incidental presence touch.
+    await post('/teams/dawn/availability', { status: 'away' }, nickCred);
     const calls = stubSlack(() => new Response('ok', { status: 200 }));
 
     const sent = await post(
@@ -3595,6 +3598,7 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
       { ask_slack_webhook: 'https://hooks.slack.test/T/B/dead' },
       nickCred,
     );
+    await post('/teams/dawn/availability', { status: 'away' }, nickCred);
     stubSlack(() => {
       throw new Error('ECONNREFUSED');
     });
@@ -3646,5 +3650,116 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(calls).toHaveLength(0);
     expect(listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced')).toBe(false);
+  });
+
+  // ── ADR 155 Increment 2: presence informs the ask clock, never the ceiling ──
+
+  it('stays quiet at raise while an admin human is present — the loud surface waits for the re-notify', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+    await post(
+      '/teams/dawn/policy',
+      { ask_slack_webhook: 'https://hooks.slack.test/T/B/x' },
+      nickCred,
+    );
+    // Make the admin PRESENT: an explicit presence row (the /presence ping) composes him working/idle.
+    await post('/teams/dawn/presence', { surface: 'web' }, nickCred);
+    const calls = stubSlack(() => new Response('ok', { status: 200 }));
+
+    const sent = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'ask',
+          { species: 'escalate', tier: 'blocking' },
+          'ask-p1',
+        ),
+      },
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
+    expect(sent.status).toBe(201);
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    expect(listAudit(server.db, teamId).some((r) => r.action === 'ask.raised')).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls).toHaveLength(0);
+    expect(listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced')).toBe(false);
+
+    // The agent's re-notify — an in-thread ask — always fires the loud surface, present admin or not:
+    // the human's silence despite presence is exactly what earns the escalation.
+    const renotify = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          ...env(
+            'Ada',
+            { kind: 'team' },
+            'ask',
+            { species: 'escalate', tier: 'blocking' },
+            'ask-p2',
+          ),
+          thread: 'ask-p1',
+        },
+      },
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
+    expect(renotify.status).toBe(201);
+    await pollUntil(() => listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced'));
+    expect(calls).toHaveLength(1);
+  });
+
+  it('the ADR 153 ceiling guard: presence never moves the tier contract — present and away yield byte-identical clocks', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickCred = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+    await post(
+      '/teams/dawn/policy',
+      { ask_slack_webhook: 'https://hooks.slack.test/T/B/x' },
+      nickCred,
+    );
+    stubSlack(() => new Response('ok', { status: 200 }));
+    await post('/teams/dawn/presence', { surface: 'web' }, nickCred);
+
+    // Present admin (fresh presence row just attached).
+    const present = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'ask',
+          { species: 'escalate', tier: 'blocking' },
+          'ask-g1',
+        ),
+      },
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
+    // Away admin: only escalation-eagerness may change, never the clock.
+    await post('/teams/dawn/availability', { status: 'away' }, nickCred);
+    const away = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: env(
+          'Ada',
+          { kind: 'team' },
+          'ask',
+          { species: 'escalate', tier: 'blocking' },
+          'ask-g2',
+        ),
+      },
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
+
+    // Byte-for-byte the shipped ADR 147 default in both worlds — a hold whose window moved with
+    // presence would be a defect (ADR 153 invariant, ADR 155 guard metric a).
+    expect(present.json.ask_contract).toEqual({
+      timeout_ms: 15 * 60_000,
+      no_answer: 'hold',
+      unblocker_reachable: true,
+    });
+    expect(away.json.ask_contract).toEqual(present.json.ask_contract);
   });
 });

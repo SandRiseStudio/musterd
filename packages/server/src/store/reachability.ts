@@ -1,8 +1,8 @@
-import { type EnforcementPolicy, matchEnforcement } from '@musterd/protocol';
+import { AvailabilitySchema, type EnforcementPolicy, matchEnforcement } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { listMembers } from './members.js';
-import { hasLivePresence } from './presence.js';
-import { resolveCapabilities } from './rows.js';
+import { hasLivePresence, listLiveDrivers } from './presence.js';
+import { type MemberRow, resolveCapabilities } from './rows.js';
 import { getPolicy } from './teams.js';
 
 /**
@@ -37,6 +37,45 @@ export function adminHumanReachable(
   if (adminHumans.length === 0) return false;
   if (getPolicy(db, teamId).ask_slack_webhook) return true;
   return adminHumans.some((m) => hasLivePresence(db, m.id, presenceTimeoutMs));
+}
+
+/** The self-set availability statuses that compose as `away` posture (ADR 044 ∩ ADR 138). */
+const AWAY_AVAILABILITY = new Set(['away', 'dnd', 'off_hours']);
+
+/** Defensive availability read off the raw row — malformed/legacy blobs degrade to implicit-available. */
+function isSelfSetAway(m: MemberRow): boolean {
+  if (!m.availability) return false;
+  try {
+    const parsed = AvailabilitySchema.safeParse(JSON.parse(m.availability)).data;
+    return parsed ? AWAY_AVAILABILITY.has(parsed.status) : false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * "Present": an admin human who composes as `working`/`idle` on the roster right now — a live
+ * presence row **or** a live driver link (steering marks you present, ADR 155 Inc 1), and no self-set
+ * `away`/`dnd`/`off_hours` (availability outranks activity, ADR 044/138). The ADR 155 Increment 2
+ * modulation input: present → the agent waits the full hold window quietly (the loud surface waits
+ * for the re-notify); not present → the loud surface fires at raise. Strictly narrower than
+ * {@link adminHumanReachable}: presence shifts only *escalation-eagerness* — which surface fires when
+ * — never a hold's absolute timeout or its `held`/`stranded` terminal (the ADR 153 ceiling).
+ */
+export function adminHumanPresent(
+  db: Database,
+  teamId: string,
+  presenceTimeoutMs: number,
+): boolean {
+  const adminHumans = listMembers(db, teamId).filter(
+    (m) => m.kind === 'human' && resolveCapabilities(m).is_admin,
+  );
+  if (adminHumans.length === 0) return false;
+  const drivers = listLiveDrivers(db, teamId, presenceTimeoutMs);
+  return adminHumans.some(
+    (m) =>
+      !isSelfSetAway(m) && (hasLivePresence(db, m.id, presenceTimeoutMs) || drivers.has(m.name)),
+  );
 }
 
 /** The representative local-merge landing command the route-around probe matches against — the item-2

@@ -3,9 +3,10 @@ import type { Database } from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { PRESENCE_TIMEOUT_MS } from '../config.js';
 import { openDb } from '../db/open.js';
-import { addMember } from './members.js';
+import { addMember, setAvailability } from './members.js';
 import { attach } from './presence.js';
 import {
+  adminHumanPresent,
   adminHumanReachable,
   liveTeammateExists,
   teammateRouteOpen,
@@ -138,5 +139,49 @@ describe('unblockerReachable (ADR 153 §1)', () => {
         ],
       }),
     ).toBe(true);
+  });
+});
+
+describe('adminHumanPresent (ADR 155 Increment 2)', () => {
+  it('false with no admin human, and false when the admin exists but is offline — even with the webhook wired', () => {
+    const { db, team } = seed();
+    expect(adminHumanPresent(db, team.id, T)).toBe(false);
+    const nick = addMember(db, team, { name: 'nick', kind: 'human' }).row;
+    makeAdmin(db, nick);
+    setPolicy(db, team.id, { ask_slack_webhook: 'https://hooks.slack.example/x' });
+    // Notifiable ≠ present: the webhook makes nick REACHABLE (the ADR 153 settle term) but eager-
+    // escalation still applies — presence is strictly narrower than reachability.
+    expect(adminHumanReachable(db, team.id, T)).toBe(true);
+    expect(adminHumanPresent(db, team.id, T)).toBe(false);
+  });
+
+  it('a live presence row composes present; self-set away/dnd/off_hours overrides it (availability outranks)', () => {
+    const { db, team } = seed();
+    const nick = addMember(db, team, { name: 'nick', kind: 'human' }).row;
+    makeAdmin(db, nick);
+    attach(db, nick.id, 'web', null);
+    expect(adminHumanPresent(db, team.id, T)).toBe(true);
+    for (const status of ['away', 'dnd', 'off_hours'] as const) {
+      setAvailability(db, nick.id, { status });
+      expect(adminHumanPresent(db, team.id, T)).toBe(false);
+    }
+    setAvailability(db, nick.id, { status: 'available' });
+    expect(adminHumanPresent(db, team.id, T)).toBe(true);
+  });
+
+  it('steering marks you present (Inc 1): a live driver link composes the admin present without their own heartbeat', () => {
+    const { db, team, raiser } = seed();
+    const nick = addMember(db, team, { name: 'nick', kind: 'human' }).row;
+    makeAdmin(db, nick);
+    expect(adminHumanPresent(db, team.id, T)).toBe(false);
+    attach(db, raiser.id, 'claude-code', null, { driver: 'nick' });
+    expect(adminHumanPresent(db, team.id, T)).toBe(true);
+  });
+
+  it('a present NON-admin human never composes (only an admin modulates the ask clock)', () => {
+    const { db, team } = seed();
+    const guest = addMember(db, team, { name: 'guest', kind: 'human' }).row;
+    attach(db, guest.id, 'web', null);
+    expect(adminHumanPresent(db, team.id, T)).toBe(false);
   });
 });
