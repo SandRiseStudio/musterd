@@ -40,6 +40,36 @@ describe('normalizeCommand', () => {
     expect(normalizeCommand('gh  pr   merge 320\n--squash')).toBe('gh pr merge 320');
     expect(normalizeCommand('  git push --force  ')).toBe('git push --force');
   });
+
+  it('lifts leading env-assignments (identity-neutral) but leaves a command word alone', () => {
+    expect(normalizeCommand('GIT_TRACE=1 git merge lane-branch')).toBe('git merge lane-branch');
+    expect(normalizeCommand('A=1 B=2 git push --force')).toBe('git push --force');
+    expect(normalizeCommand('make FOO=bar')).toBe('make FOO=bar'); // arg to make, not a prefix
+  });
+
+  it('lifts git pre-subcommand global options so the sibling-worktree form canonicalizes (ADR 153)', () => {
+    expect(normalizeCommand('git -C ../main merge lane-branch')).toBe('git merge lane-branch');
+    expect(normalizeCommand('git -c user.name=x merge lane-branch')).toBe('git merge lane-branch');
+    expect(normalizeCommand('git --git-dir=/repo/.git --work-tree /repo merge x')).toBe(
+      'git merge x',
+    );
+    expect(normalizeCommand('git -C ../main -c core.pager=cat push --force')).toBe(
+      'git push --force',
+    );
+  });
+
+  it('never touches a subcommand-owned flag (git grammar: globals precede the subcommand)', () => {
+    // `-C` here is `git commit`'s reuse-message flag, not the global directory option.
+    expect(normalizeCommand('git commit -C HEAD')).toBe('git commit -C HEAD');
+    // An unrecognized pre-subcommand token stops the scan — we never over-strip.
+    expect(normalizeCommand('git --frobnicate merge x')).toBe('git --frobnicate merge x');
+  });
+
+  it('composes env-prefix + git globals in one pass', () => {
+    expect(normalizeCommand('GIT_TRACE=1 git -C ../main merge lane-branch')).toBe(
+      'git merge lane-branch',
+    );
+  });
 });
 
 describe('globToRegExp — path vs command flavor', () => {
@@ -117,5 +147,30 @@ describe('matchEnforcement (ADR 150) — declaration-order, tool-driven flavor, 
     const b = matchEnforcement(policy, { tool: 'Bash', command: 'gh pr merge 999' })!;
     expect(a.fingerprint).toBe(gateFingerprint('merge-to-main', 'gh pr merge 320'));
     expect(a.fingerprint).not.toBe(b.fingerprint);
+  });
+
+  it('the obvious glob catches the sibling-worktree form the exercise showed slipping through (ADR 153)', () => {
+    // A class author writes the obvious `git merge*`; before normalization `git -C ../main merge …`
+    // sailed through un-gated (cell-S1 VOID probe). Now it matches, on the plain target string.
+    const p = EnforcementPolicySchema.parse({
+      classes: [
+        { class: 'local-merge', kind: 'costly-action', match: ['git merge*'], posture: 'block' },
+      ],
+    });
+    const plain = matchEnforcement(p, { tool: 'Bash', command: 'git merge lane-branch' });
+    const worktree = matchEnforcement(p, {
+      tool: 'Bash',
+      command: 'git -C ../main merge lane-branch',
+    });
+    const envPrefixed = matchEnforcement(p, {
+      tool: 'Bash',
+      command: 'GIT_TRACE=1 git -C ../main merge lane-branch',
+    });
+    expect(worktree?.cls.class).toBe('local-merge');
+    expect(envPrefixed?.cls.class).toBe('local-merge');
+    // …and all three converge on ONE fingerprint, so a retry that adds `-C` maps to the same Gate B ask.
+    expect(worktree?.target).toBe('git merge lane-branch');
+    expect(worktree?.fingerprint).toBe(plain?.fingerprint);
+    expect(envPrefixed?.fingerprint).toBe(plain?.fingerprint);
   });
 });

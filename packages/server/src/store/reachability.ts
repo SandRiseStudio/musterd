@@ -41,8 +41,16 @@ export function adminHumanReachable(
 
 /** The representative local-merge landing command the route-around probe matches against — the item-2
  *  teammate-completable path (a teammate lands the blocked push's work via a local merge). Probed, not
- *  hardcoded-open: the answer is read off the live enforcement policy every time. */
-const LOCAL_MERGE_PROBE = 'git merge lane-branch';
+ *  hardcoded-open: the answer is read off the live enforcement policy every time.
+ *
+ *  Deliberately the **worst-case sibling-worktree form** (`git -C <main> merge …`), not the plain
+ *  `git merge …`: that is the command a teammate actually runs to land the work when `main` lives in a
+ *  sibling worktree, and it is the form the ADR 153 exercise showed slipping past a `git merge*` class.
+ *  `normalizeCommand` lifts the `-C <path>` global off before matching, so this probe and a real landing
+ *  command classify identically — the derived `unblocker_reachable` agrees with real enforcement by
+ *  construction, and stays in agreement even if that normalization ever regressed (both would read the
+ *  route OPEN together, never one CLOSED while the other is OPEN). */
+const LOCAL_MERGE_PROBE = 'git -C ../main merge lane-branch';
 
 /**
  * Is the teammate route-around still open (item 2)? Today no class gates local merges, so this returns
