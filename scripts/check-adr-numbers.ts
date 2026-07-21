@@ -42,17 +42,14 @@ function headingNumber(text: string): number | null {
 }
 
 /**
- * Pre-existing collisions that predate this gate, grandfathered so the gate can land and enforce
- * uniqueness going forward (the same pragmatic carve-out as `check-obs-evals` / `check-vocab`). Each
- * is a tangled historical artifact whose clean resolution is a deliberate documentation decision, not
- * a mechanical fix to bundle into tooling:
- *   - 137: `137-roster-active-chip-reads-enabled.md` (#259, first to merge, since SUPERSEDED by ADR
- *     138) vs `137-unified-logo-system.md` (#263, still live — referenced by brand.ts and 8+ docs).
- *     Renumbering either way inverts ADR 138's "supersedes ADR 137"; needs a human call. Tracked for a
- *     follow-up renumber; NOT a licence to add new duplicates.
- * A NEW collision (any number not listed here) still fails the build — that is the whole point.
+ * Escape hatch for a pre-existing collision that a clean renumber can't yet resolve (the same
+ * pragmatic carve-out as `check-obs-evals` / `check-vocab`). Currently EMPTY: the one historical
+ * collision this gate first caught — two ADR 137s — was resolved by renumbering the unified-logo ADR
+ * to 154 (the superseded roster-chip ADR keeps 137, so ADR 138's "supersedes 137" stays intact).
+ * Add a number here only for a genuinely un-renumberable historical dup, never to wave a new one
+ * through — a NEW collision (any number not listed) fails the build, which is the whole point.
  */
-const ALLOWED_DUPLICATE_NUMBERS = new Set<number>([137]);
+const ALLOWED_DUPLICATE_NUMBERS = new Set<number>([]);
 
 const adrs = findAdrs();
 let failed = false;

@@ -3,7 +3,7 @@ type MusterdChipProps = {
   className?: string;
 };
 
-/** Compact brand chip — mustard block, reversed m, cursor notch (ADR 137). */
+/** Compact brand chip — mustard block, reversed m, cursor notch (ADR 154). */
 export function MusterdChip({ size = 16, className }: MusterdChipProps) {
   return (
     <svg

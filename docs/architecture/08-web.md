@@ -131,7 +131,7 @@ live/
     character.ts                // paints a skeleton in an appearance (facing + limb self-occlusion)
     speech.ts                   // the over-head speech-bubble text model
 components/                     // marketing surface (Hero, Roadmap, Footer, LiquidGlass, Wedge)
-brand/                          // unified marks — Chip + MusterdWord topbar lockup (ADR 137)
+brand/                          // unified marks — Chip + MusterdWord topbar lockup (ADR 154)
 ```
 
 ## Testing & verification
