@@ -7,6 +7,7 @@ import { appendAudit } from '../store/audit.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
 import { currentAttestedModel } from '../store/presence.js';
+import { adminHumanPresent } from '../store/reachability.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
 import { getPolicy } from '../store/teams.js';
@@ -323,10 +324,21 @@ function recordAskLifecycle(ctx: Ctx, team: TeamRow, actor: string, env: Envelop
  * URL, never the body), so "did the loud reach fire, did the endpoint take it" is one audit query
  * beside `ask.raised`. Best-effort like `appendAudit` itself: any failure is a recorded fact, not an
  * error.
+ *
+ * Presence informs the clock, never the ceiling (ADR 155 Increment 2): when an admin human composes
+ * *present* (`working`/`idle`), the raise stays quiet — the human already got the live admin push +
+ * inbox row, and the loud surface waits for the agent's re-notify (an in-thread `ask`, which always
+ * fires). When no admin is present (away/dnd/off_hours, or offline-but-notifiable), Slack fires at
+ * raise — sitting a local timer for a demonstrably-away human wastes the window. This shifts only
+ * *which surface fires when*: the tier's absolute timeout and the `held`/`stranded` terminals are
+ * byte-for-byte the ADR 153 contract either way. Whether the loud surface fired at raise or on
+ * re-notify is legible from the existing `ask.surfaced` timestamp beside `ask.raised` — no new trace.
  */
 function dispatchAskToSlack(ctx: Ctx, team: TeamRow, actor: string, env: Envelope): void {
   const webhook = getPolicy(ctx.db, team.id).ask_slack_webhook;
   if (!webhook) return;
+  const isRenotify = typeof env.thread === 'string' && env.thread.length > 0;
+  if (!isRenotify && adminHumanPresent(ctx.db, team.id, ctx.config.presenceTimeoutMs)) return;
   const meta = env.meta ?? {};
   const text = formatAskSlackText({
     team: team.slug,
