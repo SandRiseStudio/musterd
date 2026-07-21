@@ -113,6 +113,17 @@ scope by construction.
     `terraform apply*`); for `Edit`/`Write`, **path globs** (e.g. a production config). First matching
     class in declaration order wins; matching consumes only what the harness already hands a
     PreToolUse hook (tool name + input) — the gate gains no new visibility into the session.
+    - **Command normalization lifts identity-neutral prefixes** so a class targets the _subcommand
+      verb_ and the obvious glob works regardless of how the action is typed (`normalizeCommand`):
+      leading `NAME=val` env-assignments and git's pre-subcommand global options — `-C <path>` (a
+      sibling worktree), `-c k=v`, `--git-dir`, `--work-tree`. So `git merge*` also matches
+      `git -C ../main merge lane`. This closes the ADR 153 exercise finding: a solo strand probe evaded
+      a `git merge*` class via `git -C <path> merge`, and the reachability route-around probe (§ ADR 153) read the class CLOSED while real enforcement left it OPEN — normalization makes the two agree.
+    - **The boundary — inducement, not a sandbox:** a leading shell wrapper or chain
+      (`cd ../main && git merge`, `bash -c '…'`, a pipe) is _not_ reachable by a single command glob and
+      is left so deliberately. Under the cooperative-agent threat model a class is guidance the natural
+      command shape trips, not an escape-proof filter; the route-around probe treats such forms as an
+      open route rather than pretending to have closed them.
   - `posture` — `warn` (default) | `block`, per class, exactly as Gate A.
 - **On match, posture `block` — deny _is_ emit:** the hook (1) **denies** the call, (2) checks for an
   **existing open gate-ask** for the same class + action fingerprint (a hash of the normalized

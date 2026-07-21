@@ -117,4 +117,26 @@ describe('unblockerReachable (ADR 153 §1)', () => {
       }),
     ).toBe(true); // gates the push, not the merge route
   });
+
+  it('teammateRouteOpen: the OBVIOUS glob closes the sibling-worktree route — probe agrees with enforcement (ADR 153 exercise)', () => {
+    // The exercise author wrote the obvious `git merge*` intending to close local merges. The probe now
+    // tests the worst-case `git -C <main> merge …` form a teammate actually runs; command normalization
+    // lifts the `-C` global off, so the block class matches and the route reads CLOSED — no crossing-glob
+    // trick, no probe/enforcement disagreement.
+    expect(
+      teammateRouteOpen({
+        classes: [
+          { class: 'local-merge', kind: 'costly-action', match: ['git merge*'], posture: 'block' },
+        ],
+      }),
+    ).toBe(false);
+    // A warn-posture class of the same shape leaves the route open (posture, not match, is the switch).
+    expect(
+      teammateRouteOpen({
+        classes: [
+          { class: 'local-merge', kind: 'costly-action', match: ['git merge*'], posture: 'warn' },
+        ],
+      }),
+    ).toBe(true);
+  });
 });

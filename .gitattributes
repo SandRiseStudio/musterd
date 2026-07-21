@@ -1,0 +1,5 @@
+# TypeScript sources are text: force a textual diff even if a stray NUL byte sneaks into a file.
+# (packages/protocol/src/enforcement.ts historically carried a literal NUL as its fingerprint
+# delimiter -- now written as a unicode escape in source -- which had made git treat the whole
+# file as binary and hid its diffs from review. This keeps such files reviewable regardless.)
+*.ts diff
