@@ -801,7 +801,15 @@ function summarize(
     const steering = s.member.kind === 'human' && liveDrivers.has(s.member.name);
     const live = s.status !== 'offline' || steering;
     const presenceStatus = steering && s.status === 'offline' ? 'online' : s.status;
-    const activity = resolveActivity(live, latestStatusUpdate(ctx.db, s.member.id), steering);
+    // Humans get the ADR 155 Inc 3 idle window (reusing the presence timeout — decision 2): a human
+    // kept live by an authenticated /live tab decays working → idle once their last status_update
+    // ages past it. Agents keep the ADR 010 never-silently-revert read (window omitted).
+    const activity = resolveActivity(
+      live,
+      latestStatusUpdate(ctx.db, s.member.id),
+      steering,
+      s.member.kind === 'human' ? ctx.config.presenceTimeoutMs : undefined,
+    );
     const member = toMember(s.member, teamSlug);
     const seesCaps = viewerIsAdmin || viewer?.id === s.member.id;
     const { capabilities: _caps, ...needToKnow } = member;

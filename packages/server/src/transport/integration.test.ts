@@ -1005,6 +1005,90 @@ describe('WebSocket', () => {
     a.close();
   });
 
+  it('an authenticated /live web tab marks the human online (ADR 155 Inc 3)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+
+    // The advanced sign-in path: the browser claims nick's own seat with his mscr_ credential,
+    // surface 'web' — self-authorizing (ADR 077), fanning out like any human presence (ADR 042).
+    const tab = new TestWs();
+    await tab.open();
+    await tab.claim('dawn', nickTok, 'nick', 'web');
+
+    const roster = await get('/teams/dawn/members', nickTok);
+    const nickRow = roster.json.members.find((m: any) => m.name === 'nick');
+    expect(nickRow.presence).toBe('online');
+    expect(nickRow.presences[0].surface).toBe('web');
+    // Tab open, nothing reported → idle, not working (the ladder's online-but-no-task read).
+    expect(nickRow.activity).toBe('idle');
+    expect(nickRow.posture).toBe('idle');
+
+    tab.close();
+  });
+
+  it('a live human decays working → idle past the presence timeout; an agent does not (ADR 155 Inc 3)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    const tab = new TestWs();
+    const a = new TestWs();
+    await Promise.all([tab.open(), a.open()]);
+    await tab.claim('dawn', nickTok, 'nick', 'web');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
+
+    const status = (id: string, from: string) => ({
+      type: 'send',
+      envelope: {
+        id,
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from,
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: '',
+        meta: { state: 'shipping inc 3' },
+        ts: Date.now(),
+      },
+    });
+    tab.send(status('su-nick', 'nick'));
+    await tab.waitFor('ack');
+    a.send(status('su-ada', 'Ada'));
+    await a.waitFor('ack');
+
+    // Fresh status: both read working.
+    let roster = await get('/teams/dawn/members', nickTok);
+    const by = (r: any, name: string) => r.json.members.find((m: any) => m.name === name);
+    expect(by(roster, 'nick').activity).toBe('working');
+    expect(by(roster, 'Ada').activity).toBe('working');
+
+    // Age both statuses past the presence timeout while the presences stay live (the persistent-tab
+    // shape: heartbeats keep the human online for hours after the last thing they reported).
+    server.db
+      .prepare("UPDATE messages SET ts = ? WHERE act = 'status_update'")
+      .run(Date.now() - 60_000);
+
+    roster = await get('/teams/dawn/members', nickTok);
+    // The human decays to idle — still online, last_status_at kept, no stale working label.
+    expect(by(roster, 'nick').presence).toBe('online');
+    expect(by(roster, 'nick').activity).toBe('idle');
+    expect(by(roster, 'nick').state).toBeNull();
+    expect(by(roster, 'nick').last_status_at).not.toBeNull();
+    expect(by(roster, 'nick').posture).toBe('idle');
+    // The agent keeps the ADR 010 never-silently-revert read.
+    expect(by(roster, 'Ada').activity).toBe('working');
+    expect(by(roster, 'Ada').state).toBe('shipping inc 3');
+
+    tab.close();
+    a.close();
+  });
+
   it('sets and exposes a member’s self-declared availability on the roster (ADR 044)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

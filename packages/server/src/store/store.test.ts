@@ -326,6 +326,34 @@ describe('activity (two-clocks)', () => {
     expect(resolveActivity(true, null).activity).toBe('idle');
   });
 
+  it('resolveActivity: the idle window decays a stale working label to idle (ADR 155 Inc 3)', () => {
+    const fresh = { state: 'reviewing asks', ts: Date.now() - 1_000 };
+    const stale = { state: 'reviewing asks', ts: Date.now() - 46_000 };
+    // Within the window the status is a live task label.
+    expect(resolveActivity(true, fresh, false, 45_000)).toEqual({
+      activity: 'working',
+      state: 'reviewing asks',
+      last_status_at: fresh.ts,
+    });
+    // Past it the read decays to idle — the stale text is not worn as a task, but when they last
+    // reported stays true (last_status_at kept).
+    expect(resolveActivity(true, stale, false, 45_000)).toEqual({
+      activity: 'idle',
+      state: null,
+      last_status_at: stale.ts,
+    });
+    // Steering outranks the decay — a live driver link is a current action, not a stale report.
+    expect(resolveActivity(true, stale, true, 45_000).activity).toBe('working');
+    // No window (the agent path) keeps the ADR 010 never-silently-revert read.
+    expect(resolveActivity(true, stale)).toEqual({
+      activity: 'working',
+      state: 'reviewing asks',
+      last_status_at: stale.ts,
+    });
+    // Not live stays offline regardless of the window.
+    expect(resolveActivity(false, stale, false, 45_000).activity).toBe('offline');
+  });
+
   it('latestStatusUpdate: takes the newest status_update, prefers meta.state, else body', () => {
     const { db, team } = freshTeam();
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
