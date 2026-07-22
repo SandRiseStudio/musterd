@@ -1,6 +1,6 @@
 # 155 — The human presence ladder: steering marks you present
 
-- Status: **accepted** — 2026-07-21. The founder approved the three open decisions as proposed (derived
+- Status: accepted — 2026-07-21. The founder approved the three open decisions as proposed (derived
   presence from the driver link; reuse the presence timeout for the idle window; present → quiet
   full-window wait / away → loud Slack at raise). Implements the fourth backlog item ADR 145
   re-sequenced (`human-presence-ladder`). Number **155 pinned** — next free on `origin/main` (highest is
