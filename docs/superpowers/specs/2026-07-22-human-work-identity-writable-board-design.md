@@ -120,6 +120,34 @@ subscribe `team-all` → stream; `useLiveStream`). Inc C reuses it on `/board`:
   lane event arrives (the AsksStrip `localAnswers` converge-on-truth pattern).
 - Refresh stays as the fallback when the socket is down.
 
+## Design & branding bar (first-class requirement)
+
+The board is a human-facing surface, so it must clear musterd's aesthetic bar — **not merely be
+functional**. Every new control, form, card, rail, and transition must look and feel **magical, fun,
+warm, quirky, intuitive, smooth, sleek, responsive, beautiful, and delightful**. This is a
+requirement on par with correctness, and it is on miley to meet it.
+
+Ground it in the existing brand system — extend it, never invent a parallel one:
+
+- **Tokens & type** — `packages/web/src/styles/tokens.css` (color, spacing, radius, motion) and the
+  three-family type system (Fraunces / Space Grotesk / Space Mono; ADR 151 — no new families). Read
+  type via `src/live/canvasFont.ts` tokens where relevant; never hard-code a family.
+- **Brand marks** — `src/brand/` (MusterdWord, chip/tile, brand.css; ADR 154 unified logo system).
+- **The office as the north star for "magical/warm/quirky"** — the live office scene (ADR 079/086)
+  already sets the emotional register: calm at rest, alive on interaction, theme-aware with a light
+  default (ADR 096). The board should feel like it belongs in the same world — warm, characterful,
+  playful in its microcopy and motion, never a sterile admin table.
+- **Motion & responsiveness** — snappy optimistic writes (already in the design), smooth card
+  transitions between columns/swimlanes, tasteful micro-interactions on create/claim/resolve.
+  Reduced-motion parity is mandatory (the office honors it). Fully responsive across viewport sizes.
+- **Delight in the details** — empty states, the "New lane" moment, the waiting-on line that names a
+  human — these are the memorable beats; treat them as such.
+
+miley should invoke the **`frontend-design`**, **`impeccable`**, and **`emil-design-eng`** skills for
+this work. **The counterweight is the perf gate** (ADR 151): magical *within budget* — animation/render
+loops must stop when unseen, no heavy dependencies, no unbounded DOM. Beauty and the byte budget are
+both hard requirements; neither is spent to buy the other.
+
 ## Testing
 
 - Client fns (`createLane`/`updateLane`) unit-tested against a temp daemon (the established web-client
