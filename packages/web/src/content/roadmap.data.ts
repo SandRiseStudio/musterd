@@ -954,13 +954,14 @@ const RAW: RawItem[] = [
     id: 'human-presence-ladder',
     wave: 7,
     title: 'The human presence ladder — steering marks you working',
-    plan: 'near-term',
+    shipped: { prs: [353, 354, 355] },
+    frozenBy: 155,
     category: 'human-loop',
     blurb:
-      'Humans get agent-equivalent presence from signals humans emit: online (web UI open / inbox watch), working (steering, acts, or a claimed lane), idle, plus away/dnd/working-hours. Presence informs the ask-stream timeouts; absolute time still drives them. This resolves the driver co-presence gap rather than patching it.',
+      'Humans get agent-equivalent presence from signals humans already emit: steering marks you working, an authenticated /live tab marks you online, and a stale status decays to idle. Presence informs the ask-stream escalation-eagerness; absolute time still drives every timeout. This resolved the driver co-presence gap rather than patching it.',
     detail:
-      'Per ADR 145: online = web UI open (the /live browser tab’s observer seat becomes the human’s own) or `inbox --watch`; working = actively steering a session, doing musterd acts, or holding a claimed lane — *steering marks you working*, which is exactly the question driver-copresence-gap was blocked on ("I steer, therefore I’m online"); idle after inactivity (the human idle heuristic is an open detail); plus intentional away/dnd and working hours (already modeled, ADR 042/044). Presence *informs* the ask stream (a visibly-present admin can be waited on longer; an away one gets the Slack push immediately) but absolute time is the end driver of every timeout. Surveillance-asymmetry caution carries over: human presence is ops input, not monitoring output; need-to-know governs any derived human metric. Touches the presence model (ADR 010/021/042/057).',
-    refs: [adr(145, 'ADR 145'), adr(21, 'ADR 021'), adr(57, 'ADR 057')],
+      'Shipped as ADR 155 in three increments over primitives that already existed — no new presence state, table, or wire field, the ladder is derived composition. Increment 1 (#353): `musterd agent --driver` provisions the opt-in driver link, and a human named as `driver` on a live agent seat composes as working + online at roster read time — derived from the link, no synthetic presence row ("I steer, therefore I’m online", the exact question driver-copresence-gap was blocked on). Increment 2 (#354): presence informs the ask clock, never the ceiling — a present admin (live presence or live driver link, not self-set away/dnd/off_hours) is waited on quietly with loud Slack held for the re-notify, an away one gets Slack at raise; the ADR 153 absolute hold window is byte-identical either way, mechanized as a test. Increment 3 (#355): an authenticated /live tab (advanced sign-in claiming the member seat, surface web) reads online on the roster, and a human’s working label decays to idle once their last status_update ages past the presence timeout (the approved default — no human-specific window) while agents keep the ADR 010 never-silently-revert read. Surveillance-asymmetry held throughout: zero new human-activity audit rows; presence is ops input, not monitoring output.',
+    refs: [adr(155, 'ADR 155'), adr(145, 'ADR 145'), adr(21, 'ADR 021'), adr(57, 'ADR 057')],
     dependsOn: ['human-role-reevaluation'],
   },
   {
@@ -1035,12 +1036,12 @@ const RAW: RawItem[] = [
     id: 'driver-copresence-gap',
     wave: 7,
     title: 'Driver co-presence gap — make steering light up the human',
-    plan: 'reserved',
+    shipped: { prs: [353] },
     category: 'human-loop',
-    blurb: 'Driver co-presence shipped (ADR 021) but is dormant: it only annotates the agent row ("· driven by nick") and only when MUSTERD_DRIVER is set, which `musterd agent` (unlike `init`) never writes — so a human steering an agent-provisioned seat still reads offline.',
+    blurb: 'Closed by ADR 155 Increment 1: `musterd agent --driver` provisions the once-dormant MUSTERD_DRIVER link, and a human steering a live agent seat now composes as working + online on the roster — derived from the driver link at read time, no presence row of their own.',
     detail:
-      'Diagnosed 2026-07-04 from the live roster (nick shows offline while actively steering) + the code: (1) `musterd agent` never writes MUSTERD_DRIVER (unlike `init`, which sets it from the saved operator identity — init.ts:404), so the "driven by" annotation never fires for agent-provisioned seats; (2) even when set, ADR 021 annotates the *agent* row, it does not give the human seat its own presence — so it does not match the expectation "I steer, therefore I am online". Fix has two parts: provision the driver link (opt-in, per workspace) so the annotation works, and decide whether steering should also mark the human seat present (closer to the driver-co-presence intent + the humans-as-peers thesis). Small, but it touches the presence model (ADR 010/042/057) — and the "should steering mean present" question is exactly what the human-role reevaluation answers first, so this builds on it.',
-    refs: [adr(21, 'ADR 021'), adr(57, 'ADR 057'), adr(42, 'ADR 042'), adr(145, 'ADR 145')],
+      'Diagnosed 2026-07-04 from the live roster (nick showed offline while actively steering) + the code: (1) `musterd agent` never wrote MUSTERD_DRIVER (unlike `init`), so the ADR 021 "driven by" annotation never fired for agent-provisioned seats — the link was absent from all 903 provenance rows; (2) even when set, ADR 021 annotated the *agent* row only, giving the human no presence of their own. Both parts closed by ADR 155 Increment 1 (#353), exactly as the human-role reevaluation answered the "should steering mean present" question: `musterd agent --driver <you>` bakes the link opt-in per workspace, and the roster derives the steering human as working + online from any live agent presence carrying their name as `driver` — computed at read time (surveillance-asymmetry: no synthetic row, no new audit trail).',
+    refs: [adr(155, 'ADR 155'), adr(21, 'ADR 021'), adr(57, 'ADR 057'), adr(42, 'ADR 042'), adr(145, 'ADR 145')],
     dependsOn: ['agent-presence-touch', 'human-presence-ladder'],
   },
 
