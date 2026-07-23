@@ -104,7 +104,8 @@ export function parseArxivAtom(xml: string): RadarCandidate[] {
   const out: RadarCandidate[] = [];
   for (const entry of entries) {
     const idUrl = tagContent(entry, 'id') ?? '';
-    const idMatch = idUrl.match(/arxiv\.org\/abs\/([^\s/?#]+)/i) ?? idUrl.match(/(\d{4}\.\d{4,5})(?:v\d+)?/);
+    const idMatch =
+      idUrl.match(/arxiv\.org\/abs\/([^\s/?#]+)/i) ?? idUrl.match(/(\d{4}\.\d{4,5})(?:v\d+)?/);
     if (!idMatch) continue;
     const id = normalizeArxivId(idMatch[1]!);
     const title = tagContent(entry, 'title');
@@ -247,7 +248,7 @@ export function parseHfDailyPapers(data: unknown): RadarCandidate[] {
   const rows: HfDailyRow[] = Array.isArray(data)
     ? (data as HfDailyRow[])
     : data && typeof data === 'object' && Array.isArray((data as { results?: unknown }).results)
-      ? ((data as { results: HfDailyRow[] }).results)
+      ? (data as { results: HfDailyRow[] }).results
       : [];
   const out: RadarCandidate[] = [];
   for (const row of rows) {

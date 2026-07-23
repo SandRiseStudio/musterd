@@ -1,6 +1,6 @@
 /**
- * Research radar (ADR 056 ingest) — shared config for the M2 dry-sweep.
- * No new runtime deps; model ids / triage land in M3.
+ * Research radar (ADR 056 ingest) — shared config for dry-sweep + triage.
+ * No new runtime deps; Anthropic Messages API via fetch + ANTHROPIC_API_KEY.
  */
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, '..', '..');
 export const radarDir = join(repoRoot, 'docs', 'research', 'radar');
 export const seenPath = join(radarDir, 'seen.json');
+export const promptPath = join(radarDir, 'prompts', 'radar-v1.md');
 
 /** arXiv subject categories for the weekly sweep. */
 export const ARXIV_CATEGORIES = ['cs.MA', 'cs.AI', 'cs.HC'] as const;
@@ -58,3 +59,26 @@ export const ARXIV_MAX_RESULTS = 100;
 
 /** HF daily_papers page size. */
 export const HF_DAILY_LIMIT = 50;
+
+/** Prompt version pin — recorded on every triage report / future digest. */
+export const PROMPT_VERSION = 'radar-v1';
+
+/** Tier-1 (cheap filter) model id — recorded per run. */
+export const TIER1_MODEL = 'claude-haiku-4-5';
+
+/** Tier-2 (honest-score) model id — recorded per run. */
+export const TIER2_MODEL = 'claude-sonnet-5';
+
+/**
+ * Relevance floor (0–1). Below → verdict `ignore` (never surface).
+ * Diagnostic only — never a ranking of Members.
+ */
+export const RELEVANCE_FLOOR = 0.45;
+
+/** Max shortlist size after tier-1 (plan §9 volume cap). */
+export const SHORTLIST_MAX = 10;
+
+/** Anthropic Messages API. */
+export const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+export const ANTHROPIC_VERSION = '2023-06-01';
+export const LLM_TIMEOUT_MS = 60_000;

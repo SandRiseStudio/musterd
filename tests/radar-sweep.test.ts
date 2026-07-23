@@ -193,10 +193,11 @@ describe('runSweep (mocked fetch)', () => {
   });
 
   it('parseArgs reads flags', () => {
-    expect(parseArgs(['--json', '--since', '14', '--limit', '3'])).toEqual({
+    expect(parseArgs(['--json', '--since', '14', '--limit', '3', '--triage'])).toEqual({
       json: true,
       sinceDays: 14,
       limit: 3,
+      triage: true,
     });
   });
 });

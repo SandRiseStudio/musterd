@@ -1,6 +1,6 @@
 # Research radar — implementation plan
 
-> **Plan.** The implementation plan for the *ingest* half of musterd's research practice (ADR 056): a scheduled agent that sweeps new research, triages it for relevance, and emits an in-repo digest a human curates. Corrections via ADR + update this doc. Status: **M1–M2 landed (scaffold + dry-sweep); M3–M5 not built. 2026-06-25 / updated 2026-07-23**.
+> **Plan.** The implementation plan for the *ingest* half of musterd's research practice (ADR 056): a scheduled agent that sweeps new research, triages it for relevance, and emits an in-repo digest a human curates. Corrections via ADR + update this doc. Status: **M1–M3 landed (scaffold + dry-sweep + two-tier triage); M4–M5 not built. 2026-06-25 / updated 2026-07-23**.
 
 ## 1. Goal & scope
 
@@ -103,7 +103,7 @@ amprealize's *core* research_service stayed lean and worked; the platform around
 
 - **M1 — scaffold:** `docs/research/radar/` + empty `seen.json` + the versioned triage prompt. **Done.**
 - **M2 — ingestion:** arXiv + HF fetchers (port the Exploring Next slices) + dedup against `seen.json`; verify a dry sweep returns sane candidates. **Done** (`pnpm radar:sweep`).
-- **M3 — triage:** tier-1 filter + tier-2 honest-score + verdict ladder; verify on a hand-picked week.
+- **M3 — triage:** tier-1 filter + tier-2 honest-score + verdict ladder; verify on a hand-picked week. **Done** (`pnpm radar:sweep --triage`).
 - **M4 — emit:** digest writer (frontmatter + verdict grouping) + `seen.json` update + notify.
 - **M5 — schedule:** the weekly cloud routine; confirm cadence/command with Nick before creating it.
 
