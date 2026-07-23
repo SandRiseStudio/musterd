@@ -1,17 +1,18 @@
 # Research radar — ingest store
 
-> Standing scan/triage of new multi-agent-coordination research (ADR 056 ingest half). Design:
+> Hand-run scan/triage of new multi-agent-coordination research (ADR 056 ingest half). Design:
 > [`docs/design/research-radar-plan.md`](../../design/research-radar-plan.md).
+> M1–M3 live; weekly digest + schedule = M4–M5 (not built).
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
 | `seen.json` | Dedup ledger — arXiv / HF ids already surfaced (append on digest emit, M4) |
-| `prompts/radar-v1.md` | Versioned triage prompt (invoked in M3+) |
+| `prompts/radar-v1.md` | Versioned triage prompt (invoked by `--triage`) |
 | `<YYYY-WW>.md` | Weekly digests (M4+) — none yet |
 
-## Dry-sweep (M1–M2)
+## Run (M1–M3)
 
 Hand-runnable ingestion + optional LLM triage — fetch + dedup report; does **not** write digests,
 mark seen, or edit thesis docs:

@@ -586,8 +586,12 @@ const RAW: RawItem[] = [
     category: 'observability',
     blurb: 'A standing scan/triage of new multi-agent-coordination research, funneled into research-foundation.md — findings that change a decision graduate to an ADR.',
     detail:
-      'The ingest half of the research practice (ADR 056): keep musterd shaped by the field. A recurring agent emits a triaged digest of arXiv / HF Papers / venue work; a human decides what graduates to an ADR + roadmap item. No auto-merge of findings into the thesis.',
-    refs: [adr(56, 'ADR 056'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
+      'The ingest half of the research practice (ADR 056): keep musterd shaped by the field. **M1–M3 landed** (#359/#360): in-repo store (`docs/research/radar/`), `pnpm radar:sweep` (arXiv + HF Papers + `seen.json` dedup), and `--triage` (tier-1 Haiku filter + tier-2 Sonnet honest-score / verdict ladder). Hand-run only today — print-only, no digest file, no schedule. **Remaining M4–M5:** weekly digest emit + `seen.json` append + notify, then the cloud routine. A human still decides what graduates to `research-foundation.md` / an ADR; no auto-merge into the thesis.',
+    refs: [
+      adr(56, 'ADR 056'),
+      doc('docs/design/research-foundation.md', 'research-foundation.md'),
+      doc('docs/design/research-radar-plan.md', 'research-radar-plan.md'),
+    ],
   },
   {
     id: 'schedule-enforcement',
