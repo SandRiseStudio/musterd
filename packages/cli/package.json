@@ -1,6 +1,6 @@
 {
   "name": "@musterd/cli",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "description": "Muster your agents and humans into persistent teams. CLI + daemon launcher.",
   "license": "MIT",
   "type": "module",

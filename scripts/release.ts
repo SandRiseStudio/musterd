@@ -72,8 +72,12 @@ function publishOne(name: PublishPackageName): void {
   if (!existsSync(join(dir, 'dist'))) {
     throw new Error(`${name}: missing dist/ — build first`);
   }
-  console.log(`npm publish ${name}…`);
-  execFileSync('npm', ['publish', '--access', 'public'], { cwd: dir, stdio: 'inherit' });
+  // Must use pnpm publish — raw `npm publish` leaves `workspace:*` in the tarball (broken installs).
+  console.log(`pnpm publish ${name}…`);
+  execFileSync('pnpm', ['publish', '--access', 'public', '--no-git-checks'], {
+    cwd: dir,
+    stdio: 'inherit',
+  });
 }
 
 export function runRelease(argv: string[]): number {

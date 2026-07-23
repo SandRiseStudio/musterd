@@ -13,7 +13,7 @@ class Musterd < Formula
   desc "Muster your agents and humans into persistent teams"
   homepage "https://github.com/SandRiseStudio/musterd"
   # Version tracks @musterd/cli on npm (lockstep with other @musterd/* packages).
-  version "0.3.0"
+  version "0.3.1"
   license "MIT"
 
   depends_on "node" => ">=22"
