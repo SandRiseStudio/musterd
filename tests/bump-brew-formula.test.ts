@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { bumpBrewFormula, parseBumpArgs } from '../scripts/bump-brew-formula.ts';
+import {
+  bumpBrewFormula,
+  parseBumpArgs,
+  tarballUrl,
+} from '../scripts/bump-brew-formula.ts';
 
 describe('bump-brew-formula (ADR 156)', () => {
-  it('rewrites the version line', () => {
-    const raw = 'class Musterd < Formula\n  version "0.2.0"\nend\n';
-    expect(bumpBrewFormula(raw, '0.3.0')).toContain('version "0.3.0"');
+  it('rewrites url + sha256 for the version', () => {
+    const raw = `class Musterd < Formula
+  url "https://registry.npmjs.org/@musterd/cli/-/cli-0.2.0.tgz"
+  sha256 "aaa"
+end
+`;
+    const next = bumpBrewFormula(raw, '0.3.1', 'bbb');
+    expect(next).toContain(tarballUrl('0.3.1'));
+    expect(next).toContain('sha256 "bbb"');
   });
 
   it('parseBumpArgs requires --version', () => {
