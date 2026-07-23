@@ -28,8 +28,9 @@ a finding.
   coordination_, which nobody else publishes.
 - **Feeds:** the "MAST in the wild" thesis and the dataset ladder (ADR 056) — a per-model coordination
   leaderboard is a natural artifact.
-- **Ingest side:** the research radar (`research-radar-plan.md`) already sweeps new _research_; the model
-  cadence is the sibling for new _models_ — a new frontier release is a trigger to run the manifest.
+- **Ingest side:** the research radar (`research-radar-plan.md`) is the sibling for new _research_ —
+  M1–M3 hand-run (`pnpm radar:sweep --triage`); weekly schedule still M4–M5. The model cadence is the
+  sibling for new _models_ — a new frontier release is a trigger to run the manifest.
 
 ## Frontier non-Claude diversity seats — the "today" path for cross-family data
 
