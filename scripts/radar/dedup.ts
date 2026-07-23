@@ -43,5 +43,7 @@ export function mergeCandidates(groups: RadarCandidate[][]): RadarCandidate[] {
       }
     }
   }
-  return [...byId.values()].sort((a, b) => (a.published < b.published ? 1 : a.published > b.published ? -1 : 0));
+  return [...byId.values()].sort((a, b) =>
+    a.published < b.published ? 1 : a.published > b.published ? -1 : 0,
+  );
 }
