@@ -8,6 +8,7 @@ import { CliError } from '../errors.js';
 import { loadHostRegistry } from '../host/registry.js';
 import { osNotify } from '../notify/os.js';
 import { theme } from '../render/theme.js';
+import { MIN_NODE_MAJOR } from '../runtime.js';
 import {
   installAutoRefresh,
   refreshAutoRefresh,
@@ -469,8 +470,8 @@ export async function serviceCommand(
             `would crashloop on boot (and this command would still report success).\n\n` +
             `  ${abi}\n\n` +
             `The plist embeds the node that runs this CLI, and you are on ${process.version} — this repo ` +
-            `needs Node >=22. Put a matching node first on PATH and re-run, e.g.\n` +
-            `  export PATH="/opt/homebrew/opt/node@22/bin:$PATH" && musterd service install\n\n` +
+            `needs Node >=${MIN_NODE_MAJOR}. Put a matching node first on PATH and re-run, e.g.\n` +
+            `  export PATH="/opt/homebrew/opt/node@${MIN_NODE_MAJOR}/bin:$PATH" && musterd service install\n\n` +
             `(\`musterd service refresh\` is safe — it never rewrites the plist. \`--force\` overrides.)`,
           1,
         );
@@ -932,7 +933,7 @@ async function wakeServiceCommand(
           `refusing to install: ${ctx.node} cannot load the CLI's native modules, so the wake ` +
             `actuator would crashloop on boot.\n\n  ${abi}\n\n` +
             `Put a matching node first on PATH and re-run, e.g.\n` +
-            `  export PATH="/opt/homebrew/opt/node@22/bin:$PATH" && musterd service install --wake\n\n` +
+            `  export PATH="/opt/homebrew/opt/node@${MIN_NODE_MAJOR}/bin:$PATH" && musterd service install --wake\n\n` +
             `(\`--force\` overrides.)`,
           1,
         );

@@ -48,6 +48,7 @@ import {
 } from './render/help.js';
 import { setColorEnabled, theme } from './render/theme.js';
 import { sym } from './render/ui.js';
+import { nodeVersionTooOld } from './runtime.js';
 import { cliVersion } from './version.js';
 
 async function main(argv: string[]): Promise<number> {
@@ -60,6 +61,7 @@ async function main(argv: string[]): Promise<number> {
 
   // `--version`/`-v`/`version` print the CLI version and exit (ADR 067) — the first thing a fresh
   // agent reaches for. Checked before help so `musterd --version` isn't swallowed by the help path.
+  // Allowed on Node <22 so a bad install can still identify itself (ADR 156).
   if (
     command === 'version' ||
     command === '--version' ||
@@ -69,6 +71,13 @@ async function main(argv: string[]): Promise<number> {
   ) {
     process.stdout.write(cliVersion() + '\n');
     return 0;
+  }
+
+  // Fail fast on Node <22 before serve/service/init can load better-sqlite3 under a bad ABI (ADR 156).
+  const tooOld = nodeVersionTooOld();
+  if (tooOld) {
+    process.stderr.write(`${theme.err('✗')} ${tooOld}\n`);
+    return 1;
   }
 
   // `--help`/`-h` anywhere prints usage and exits — never runs the command (e.g. `notify --help`

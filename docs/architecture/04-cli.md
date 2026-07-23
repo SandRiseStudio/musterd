@@ -26,6 +26,7 @@ src/
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
+  runtime.ts          // Node ≥22 gate + packaged-vs-checkout detection for doctor / bin (ADR 156)
   errors.ts           // CliError(code) -> message + exit code
   help/               // the structured command catalog behind `musterd help` (ADR 113)
     catalog.ts        // pure, import-free command catalog (groups + entries) — the single source guidance:check reads

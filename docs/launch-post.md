@@ -10,7 +10,7 @@
 >
 > One human + two agents. Three surfaces. One team. Durable inboxes, typed coordination acts, explicit presence.
 >
-> npm: `npx @musterd/cli init` → https://github.com/SandRiseStudio/musterd
+> npm: `npx @musterd/cli init` · brew: `brew tap SandRiseStudio/musterd && brew install musterd` → https://github.com/SandRiseStudio/musterd
 
 ---
 
@@ -33,7 +33,7 @@ MAST found ~79% of multi-agent failures are coordination failures — not capabi
 
 **v0.2 shipped the minimal trust model**: explicit activation (sessions are dormant until they call `team_join`), single-active per member (no "3 sessions, 1 name"), and a `working` activity state so the human's watch pane shows real progress.
 
-`npx @musterd/cli init` gets you from zero to a working team in one command.
+`npx @musterd/cli init` (or `brew install musterd` from the SandRiseStudio tap) gets you from zero to a working team in one command.
 
 Tech: Node/TypeScript monorepo, SQLite + WS + HTTP, MCP adapter, MIT.
 

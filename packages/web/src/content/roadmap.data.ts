@@ -977,7 +977,7 @@ const RAW: RawItem[] = [
     blurb:
       'Humans create and claim lanes/Goals from the web UI, just like agents — so blockers, human-only work (publish to npm), and self-defined human work are captured, measured, and auditable. No new work-item nouns; the writable board is the missing affordance.',
     detail:
-      'The record: nick created 5 lanes and owns 0 of ~84 ownerships; the one work item only he can do (publish the packages to npm) has sat parked and invisible for weeks — musterd literally cannot say "the team is blocked on nick’s lane." Nothing in the schema stops it (`owner_seat: nick` is already legal; lanes already have a backlog state); the only human claim surface is the CLI he never opens. So the board becomes writable from the web UI: a human creates a work item any time and picks it up, and all such work is captured/measured/auditable like agent work. No new hierarchy nouns — ADR 098 holds (Goal → Lane). First dogfood: a real publish-to-npm lane owned by nick, aging and nudgeable. Builds on the read-only board (insight-dashboard increment 1) by adding write.',
+      'The record: nick created 5 lanes and owns 0 of ~84 ownerships; the one work item only he can do (publish the packages to npm) has sat parked and invisible for weeks — musterd literally cannot say "the team is blocked on nick’s lane." Nothing in the schema stops it (`owner_seat: nick` is already legal; lanes already have a backlog state); the only human claim surface is the CLI he never opens. So the board becomes writable from the web UI: a human creates a work item any time and picks it up, and all such work is captured/measured/auditable like agent work. No new hierarchy nouns — ADR 098 holds (Goal → Lane). First dogfood: a real publish-to-npm lane owned by nick, aging and nudgeable (release tooling now exists as `pnpm release` / ADR 156 — the remaining gate is credentials + running it). Builds on the read-only board (insight-dashboard increment 1) by adding write.',
     refs: [adr(145, 'ADR 145'), adr(98, 'ADR 098')],
     dependsOn: ['human-role-reevaluation', 'insight-dashboard'],
   },
@@ -1035,6 +1035,18 @@ const RAW: RawItem[] = [
       'The web surface for the already-shipped insight engine (server projections + GET /report + the report CLI/MCP all landed; this is the browser board they never got). ADR 104 frames it as three increments over the two existing endpoints — no board CRUD, no stored columns, the dashboard renders what the engine derives. Increment 1 shipped (PR #151): a read-only /board kanban over GET /lanes — one column per lane state (backlog/claimed/in-progress/blocked/done), cards carrying owner, Goal, branch, age, and the advisory lane-warning flag, auto-provisioning the same hidden observer seat /live uses. Remaining: increment 2 — the insight rail (throughput, cycle time, WIP, waiting-on, MAST exceptions) + Goal swimlanes over GET /report; increment 3 — live-tail so the board moves cards on the ADR 102 lane events instead of on refresh.',
     refs: [adr(104, 'ADR 104'), doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
     dependsOn: ['insight-engine', 'web-dashboard'],
+  },
+  {
+    id: 'packaging-easy-install',
+    wave: 7,
+    title: 'Packaging — npm release + Homebrew + post-install UX',
+    plan: 'near-term',
+    category: 'platform',
+    blurb:
+      'Repeatable `pnpm release` (lockstep @musterd/*, including telemetry), Homebrew npm-wrapper tap, and Node ≥22 / packaged-install honesty — so users get today’s product via brew/npm/npx. Human still runs the real npm publish + creates the tap repo (ADR 145/156).',
+    detail:
+      'Agent half (ADR 156): release script with --dry-run, engines on all five public packages, CLI Node gate + doctor packaged notes, in-repo formula at packaging/homebrew/, README quickstart. Not yet shipped as “published”: registry remains at 0.2.0 until nick runs `pnpm release` and stands up SandRiseStudio/homebrew-musterd. Do not mark this item shipped until that human checklist lands (see packaging/homebrew/README.md).',
+    refs: [adr(156, 'ADR 156'), adr(9, 'ADR 009'), adr(145, 'ADR 145'), adr(118, 'ADR 118')],
   },
   {
     id: 'driver-copresence-gap',

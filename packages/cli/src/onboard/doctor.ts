@@ -12,6 +12,7 @@ import {
 import { HttpClient } from '../client.js';
 import { findBinding, loadConfig } from '../config.js';
 import { theme } from '../render/theme.js';
+import { packagedInstallNotes } from '../runtime.js';
 import { cliBuild } from '../version.js';
 import { contentHash, strippedBody } from './guidance.js';
 import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
@@ -227,7 +228,12 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     primerManaged,
     harnesses,
     drift,
-    notes: [...guidance.notes, ...duplicateAdapters, ...modelAttestation],
+    notes: [
+      ...guidance.notes,
+      ...duplicateAdapters,
+      ...modelAttestation,
+      ...packagedInstallNotes(),
+    ],
     anyConfigured,
   };
 }
