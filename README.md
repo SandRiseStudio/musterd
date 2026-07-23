@@ -26,8 +26,12 @@ A **Member** is an identity, not a session. **Presence** is where that member is
 
 ## Quickstart
 
+Requires **Node ≥22**.
+
 ```bash
-pnpm add -g @musterd/cli   # or: npx @musterd/cli <command>   (installs the `musterd` command)
+brew tap SandRiseStudio/musterd && brew install musterd
+# or: pnpm add -g @musterd/cli
+# or: npx @musterd/cli init
 
 # one command does everything — start the daemon, create a team,
 # detect your agent harness, wire up the MCP adapter, and wait for
@@ -89,6 +93,7 @@ Messages carry a typed **Act**, grounded in the [Co-Gym](https://arxiv.org/abs/2
 | [`@musterd/server`](./packages/server) | the team server: SQLite store, WS + HTTP API, presence + inbox |
 | [`@musterd/mcp`](./packages/mcp) | the universal harness adapter (one MCP server, 18 tools) |
 | [`@musterd/protocol`](./packages/protocol) | shared types + zod schemas — the wire contract |
+| [`@musterd/telemetry`](./packages/telemetry) | shared OTLP bootstrap for server, MCP, and CLI |
 
 The protocol is the only thing imported across boundaries; the server is replaceable by anything that speaks `SPEC.md`.
 
