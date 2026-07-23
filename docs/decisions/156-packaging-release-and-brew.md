@@ -24,8 +24,9 @@ script that dry-runs safely and publishes in dependency order when they run it.
    `@musterd/protocol` → `@musterd/telemetry` → `@musterd/server` → `@musterd/mcp` → `@musterd/cli`.
 2. **`pnpm release`** (`scripts/release.ts`): refuse a dirty tree (unless `--allow-dirty`);
    `--dry-run` builds and packs without registry writes; real mode bumps versions, builds, and
-   `npm publish`es in order. **No CI publish** in this decision — credentials stay with the human
-   (ADR 145). After publish: tag `vX.Y.Z`, bump the brew formula.
+   **`pnpm publish`es** in order (rewrites `workspace:*` — never raw `npm publish`). **No CI
+   publish** in this decision — credentials stay with the human (ADR 145). After publish: tag
+   `vX.Y.Z`, bump the brew formula.
 3. **Homebrew** via custom tap **`SandRiseStudio/homebrew-musterd`**: an **npm-wrapper** formula
    that depends on Node ≥22 and installs `@musterd/cli@<version>` into the Cellar. Formula source
    of truth lives in-repo (`packaging/homebrew/musterd.rb`) and is copied to the tap. Not
@@ -43,8 +44,8 @@ installer, automated brew bump in CI.
 - A human can republish current `main` with one scripted path; agents verify with `--dry-run`.
 - Brew and npm share one artifact stream — brew tracks npm versions.
 - Packaged users get clear Node/upgrade messaging instead of a crashlooping LaunchAgent.
-- Docs (README Quickstart) list brew | npm | npx; roadmap must not claim “published” until the
-  human publish actually lands.
+- Docs (README Quickstart) list brew | npm | npx. First good registry cut is **0.3.1**
+  (0.3.0 deprecated after a raw-`npm publish` left `workspace:*` in the tarball).
 
 ## Observability & Evaluation
 

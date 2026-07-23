@@ -1040,12 +1040,12 @@ const RAW: RawItem[] = [
     id: 'packaging-easy-install',
     wave: 7,
     title: 'Packaging — npm release + Homebrew + post-install UX',
-    plan: 'near-term',
+    shipped: { prs: [362] },
     category: 'platform',
     blurb:
-      'Repeatable `pnpm release` (lockstep @musterd/*, including telemetry), Homebrew npm-wrapper tap, and Node ≥22 / packaged-install honesty — so users get today’s product via brew/npm/npx. Human still runs the real npm publish + creates the tap repo (ADR 145/156).',
+      'Shipped ADR 156: `pnpm release` (pnpm publish, lockstep @musterd/*), Homebrew npm-wrapper tap, engines Node ≥22, CLI gate + doctor packaged notes. Registry live at 0.3.1 (0.3.0 deprecated — had unreplaced workspace:*).',
     detail:
-      'Agent half (ADR 156): release script with --dry-run, engines on all five public packages, CLI Node gate + doctor packaged notes, in-repo formula at packaging/homebrew/, README quickstart. Not yet shipped as “published”: registry remains at 0.2.0 until nick runs `pnpm release` and stands up SandRiseStudio/homebrew-musterd. Do not mark this item shipped until that human checklist lands (see packaging/homebrew/README.md).',
+      'Release path uses `pnpm publish` so workspace protocol is rewritten. Tap: SandRiseStudio/homebrew-musterd. Install: brew tap SandRiseStudio/musterd && brew install musterd, or pnpm add -g @musterd/cli / npx @musterd/cli.',
     refs: [adr(156, 'ADR 156'), adr(9, 'ADR 009'), adr(145, 'ADR 145'), adr(118, 'ADR 118')],
   },
   {

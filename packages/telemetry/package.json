@@ -1,6 +1,6 @@
 {
   "name": "@musterd/telemetry",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "description": "musterd telemetry SDK: the shared OTLP bootstrap every component boots (server, MCP adapter, CLI)",
   "license": "MIT",
   "type": "module",
@@ -12,7 +12,9 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=22"
   },
