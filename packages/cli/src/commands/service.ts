@@ -218,9 +218,17 @@ function resolveAutoRefreshCtx(run: Runner, parsed: Parsed): AutoRefreshCtx {
   };
 }
 
-function resolveLiveCtx(run: Runner): LiveCtx {
+/** Exported for tests: the Cellar-trap regression (see below) needs a direct probe. */
+export function resolveLiveCtx(ctx: ServiceCtx): LiveCtx {
+  const run = ctx.run;
   const binJs = resolvePath(process.argv[1] ?? '');
-  const repoRoot = resolvePath(binJs, '../../../..');
+  // The worktree hangs off the checkout the DAEMON runs from (read back from its installed plist,
+  // like `service refresh` — issue #289), not off wherever this CLI binary happens to live: invoked
+  // via the Homebrew shim, `argv[1]` resolves into the Cellar and `install --live` would plant the
+  // worktree at …/Cellar/musterd/<v>/libexec/lib/node_modules-live — which dies on the next
+  // `brew upgrade` (observed 2026-07-24). Fall back to the invoked checkout only when no installed
+  // daemon plist resolves.
+  const repoRoot = daemonCheckout(ctx) ?? resolvePath(binJs, '../../../..');
   const home = dirname(configPath()); // ~/.musterd
   const liveDir = join(home, 'live');
   const agents = join(homedir(), 'Library', 'LaunchAgents');
@@ -432,7 +440,7 @@ export async function serviceCommand(
   // `--live` retargets every verb at the /live build-publisher (ADR 132) instead of the daemon. It runs
   // no server and drops no teammate session, so its ops skip the shared-daemon live-session guard.
   if (parsed.flags['live'] === true) {
-    const liveCtx = deps.liveCtx ?? resolveLiveCtx(ctx.run);
+    const liveCtx = deps.liveCtx ?? resolveLiveCtx(ctx);
     return liveServiceCommand(sub, liveCtx, parsed, ok, fail, deps.probeViewer ?? probeViewer);
   }
 

@@ -6,7 +6,7 @@ import { parseArgs } from '../args.js';
 import { buildPlist, LIVE_LABEL, LIVE_SYNC_LABEL, SERVICE_LABEL } from '../service/launchd.js';
 import type { LiveCtx } from '../service/live.js';
 import type { RunResult, Runner, ServiceCtx } from '../service/manage.js';
-import { serviceCommand } from './service.js';
+import { resolveLiveCtx, serviceCommand } from './service.js';
 
 describe('serviceCommand', () => {
   let dir: string;
@@ -63,6 +63,37 @@ describe('serviceCommand', () => {
 
   it('requires a subcommand', async () => {
     await expect(serviceCommand(parseArgs([]))).rejects.toThrow(/usage/);
+  });
+
+  // The 2026-07-24 Cellar trap: `install --live` invoked via the Homebrew shim derived the worktree
+  // parent from process.argv[1], planting …/Cellar/musterd/<v>/libexec/lib/node_modules-live — which
+  // dies on the next `brew upgrade`. The viewer worktree must sit beside the checkout the DAEMON
+  // runs from (read back from its installed plist), like `service refresh` (#289).
+  describe('resolveLiveCtx daemon-checkout preference', () => {
+    it('prefers the daemon checkout from the installed plist over the invoked CLI', () => {
+      writeFileSync(
+        join(dir, 'agent.plist'),
+        buildPlist({
+          label: SERVICE_LABEL,
+          node: '/opt/homebrew/bin/node',
+          binJs: '/Users/nick/agents/packages/cli/dist/bin.js',
+          serveArgs: ['serve'],
+          workingDir: '/Users/nick/agents',
+          stdoutPath: '/l',
+          stderrPath: '/e',
+          path: '/p',
+        }),
+      );
+      const live = resolveLiveCtx(ctx(recorder()));
+      expect(live.sourceRepo).toBe('/Users/nick/agents');
+      expect(live.worktree).toBe('/Users/nick/agents-live');
+    });
+
+    it('falls back to the invoked CLI checkout when no daemon plist is installed', () => {
+      const live = resolveLiveCtx(ctx(recorder())); // no plist written at ctx.plistPath
+      expect(live.worktree.endsWith('-live')).toBe(true);
+      expect(live.worktree).toBe(`${live.sourceRepo}-live`);
+    });
   });
 
   // The plist embeds process.execPath; a node that can't load better-sqlite3 crashloops the daemon while

@@ -226,6 +226,8 @@ export function buildAutoRefreshPlist(
 export interface LiveScriptOpts {
   /** The dedicated detached-on-`origin/main` viewer worktree (the build happens here). */
   worktree: string;
+  /** The checkout the worktree hangs off — used to re-create the worktree if it goes missing. */
+  sourceRepo: string;
   /** The daemon's web-root — where the built bundle is atomically published for the daemon to serve. */
   webRoot: string;
   /** Dir holding the `node`/`pnpm` binaries the build needs on PATH. */
@@ -258,9 +260,23 @@ ${GEN_HEADER}
 export PATH="${path}"
 set -u
 WORKTREE="${o.worktree}"
+SOURCE_REPO="${o.sourceRepo}"
 WEBROOT="${o.webRoot}"
 STAMP="$WEBROOT/.published-sha"
-cd "$WORKTREE" || exit 0
+# A deleted worktree must not become a silent success: the old \`cd || exit 0\` made every 60s run
+# a quiet no-op while the daemon served a stale bundle (observed for a full day, 2026-07-24).
+# Recover in place — prune the stale registration, re-add the worktree — and if that fails, say so
+# loudly and exit 1 so the log and launchd both show a real failure.
+if [ ! -e "$WORKTREE/.git" ]; then
+  echo "$(date '+%F %T') worktree missing at $WORKTREE — re-creating from $SOURCE_REPO"
+  git -C "$SOURCE_REPO" worktree prune 2>&1 || true
+  git -C "$SOURCE_REPO" fetch --quiet origin main 2>&1 || true
+  git -C "$SOURCE_REPO" worktree add --detach "$WORKTREE" origin/main 2>&1 || {
+    echo "$(date '+%F %T') worktree re-create FAILED — /live will serve a stale bundle until this is fixed"
+    exit 1
+  }
+fi
+cd "$WORKTREE" || { echo "$(date '+%F %T') cannot cd to $WORKTREE"; exit 1; }
 
 git fetch --quiet origin main 2>/dev/null || exit 0
 TIP="$(git rev-parse origin/main 2>/dev/null || true)"

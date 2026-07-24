@@ -64,6 +64,7 @@ export function writeLiveArtifacts(ctx: LiveCtx): void {
     ctx.buildScriptPath,
     buildLiveBuildScript({
       worktree: ctx.worktree,
+      sourceRepo: ctx.sourceRepo,
       webRoot: ctx.webRoot,
       nodeDir: ctx.nodeDir,
       gitDir: ctx.gitDir,

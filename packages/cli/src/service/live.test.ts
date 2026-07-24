@@ -32,6 +32,7 @@ import type { RunResult, Runner } from './manage.js';
 describe('buildLiveBuildScript', () => {
   const s = buildLiveBuildScript({
     worktree: '/Users/x/agents-live',
+    sourceRepo: '/Users/x/agents',
     webRoot: '/Users/x/.musterd/live/web',
     nodeDir: '/opt/node/bin',
     gitDir: '/opt/git/bin',
@@ -54,6 +55,18 @@ describe('buildLiveBuildScript', () => {
     expect(s).toContain('rev-parse origin/main');
     expect(s).toContain('.published-sha');
     expect(s).not.toContain('-f "$WEBROOT/index.html"');
+  });
+  it('re-creates a missing worktree from the source repo instead of silently exiting 0', () => {
+    // The 2026-07-24 failure: agents-live had been deleted, `cd || exit 0` made every 60s run a
+    // silent success, and the daemon served a stale bundle for a day.
+    expect(s).toContain('SOURCE_REPO="/Users/x/agents"');
+    expect(s).toContain('worktree prune');
+    expect(s).toMatch(/worktree add --detach "\$WORKTREE" origin\/main/);
+    expect(s).not.toContain('cd "$WORKTREE" || exit 0');
+  });
+  it('is loud on an unrecoverable worktree (exit 1 so launchd + the log show a real failure)', () => {
+    expect(s).toMatch(/worktree missing/);
+    expect(s).toMatch(/exit 1/);
   });
   it('puts node + git + pnpm on PATH (pnpm lives under $HOME/Library/pnpm)', () => {
     expect(s).toContain('/opt/node/bin');
