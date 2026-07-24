@@ -81,6 +81,31 @@ three-panel dashboard on `/live`. It sizes to its container, not to the viewport
 strap shows as many lanes as fit and collapses to the single most recently claimed one when narrow.
 Bands 1 and 2 are always present — they are the cheapest and the most orienting.
 
+## Look and feel — non-negotiable
+
+nick's standing rule: musterd's UI is magical, warm, quirky, beautiful, fast and smooth. The overlay
+is the first musterd surface many people will ever see — a stranger on a Twitch channel — so it
+carries the brand or it undermines it. Concretely, it must belong to the room rather than sit on top
+of it:
+
+- **Warm, not broadcast-white.** The palette is the office's own: mustard accent (`--mustard-500`)
+  against the dusk ground, warm floor tones, `--glow-mustard-soft` where light spills. Generic white
+  chrome on a warm isometric scene is the failure mode to avoid.
+- **Materials already in the room.** Frosted dark glass (`backdrop-filter`), hairline borders, a soft
+  warm bloom under the strap so it reads as light from the floor rather than a pasted rectangle.
+- **Type with personality.** Space Grotesk for the team and lane titles; Space Mono for owner tags
+  and ids — the quirk that makes it musterd and not a dashboard template. Three-font allowlist holds.
+- **Motion: gestural, one-shot, never a loop.** Lane chips enter staggered on `--ease-out`; a
+  resolved lane leaves with a small mustard spark before it goes. Every animation is
+  event-triggered and finite — no rAF, no interval — so idle cost stays zero and the encoder sees
+  clean 30fps.
+- **Quiet by default, alive on change.** At rest the overlay is calm and low-contrast so the office
+  stays the star; it brightens briefly when something actually happens. That contrast is what makes
+  a resting room feel alive rather than frozen.
+
+The implementation pass runs through the `frontend-design`, `impeccable` and `emil-design-eng`
+skills, per the standing rule that all musterd frontend work does.
+
 ## Disclosure — deliberate, not overlooked
 
 `/broadcast` connects with `acquireObserver`, the **full-grade** observer credential, so directed
