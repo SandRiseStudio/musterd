@@ -1,6 +1,7 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
 import { createActors, type Actors } from './actors';
+import { officeDpr, officeVisible, suspendIgnored } from './broadcast';
 import { createPet, petBeat, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD } from './layout';
@@ -110,6 +111,10 @@ export interface OfficeOptions {
   /** Called with the act's envelope id when a speech bubble is clicked — the route uses it to scroll
    * to / highlight that act in the stream panel. Bubbles without an id (or no handler) aren't clickable. */
   onActClick?: (id: string) => void;
+  /** Broadcast mode (ADR 157): this office is a *stream source*, not a viewer's panel. The loop keeps
+   * running while the tab is hidden or headless, DPR is pinned to 1 for a deterministic capture size,
+   * and suspend requests are ignored. Only `/broadcast` passes it — see ./broadcast.ts. */
+  broadcast?: boolean;
 }
 
 export function mountOffice(
@@ -118,7 +123,8 @@ export function mountOffice(
   reduced: boolean,
   options: OfficeOptions = {},
 ): OfficeHandle {
-  const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+  const broadcast = options.broadcast === true;
+  const dpr = officeDpr(broadcast, DPR_CAP);
 
   const canvas = document.createElement('canvas');
   canvas.style.display = 'block';
@@ -180,8 +186,9 @@ export function mountOffice(
   }
   let lastActive = 0; // ms timestamp of the last real act/cue — drives the afterglow tail (#5)
 
-  // Pause the RAF loop when the tab is backgrounded (no CPU on an unseen office).
-  const VISIBLE = () => document.visibilityState === 'visible';
+  // Pause the RAF loop when the tab is backgrounded (no CPU on an unseen office) — except in broadcast
+  // mode, where an unseen office is the normal case and the loop must keep feeding the capture.
+  const VISIBLE = () => officeVisible(broadcast);
 
   // Suspended = the panel is collapsed (opacity: 0, still mounted). Measured before this flag: a
   // collapsed office kept the full-scene ambient repaint running at ~18fps for invisible pixels —
@@ -939,6 +946,9 @@ export function mountOffice(
     update,
     emit,
     setSuspended: (on: boolean) => {
+      // A stream never parks (ADR 157). The broadcast route has no collapse control, so this only ever
+      // fires from a host surface that shouldn't be able to freeze the outgoing frame anyway.
+      if (suspendIgnored(broadcast, on)) return;
       if (on === suspended) return;
       suspended = on;
       if (on) {

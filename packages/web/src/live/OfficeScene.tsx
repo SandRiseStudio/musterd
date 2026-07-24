@@ -43,6 +43,8 @@ export function OfficeScene({
   collapsed = false,
   onCollapse,
   onActClick,
+  broadcast = false,
+  onReady,
 }: {
   teamName: string;
   roster: MemberSummary[];
@@ -52,6 +54,13 @@ export function OfficeScene({
   onCollapse?: () => void;
   /** Speech-bubble click-through: called with the act's envelope id (the route scrolls the stream). */
   onActClick?: (id: string) => void;
+  /** Broadcast mode (ADR 157) — only `/broadcast` sets it: the scene is a stream source, so it keeps
+   * animating unseen, pins DPR to 1, and ignores reduced-motion (the viewer of a stream is not the
+   * person whose OS preference this is). */
+  broadcast?: boolean;
+  /** Handed the scene handle once it mounts (and `null` on teardown) — the broadcast route publishes it
+   * as `window.__office` so a capturer can probe the scene. */
+  onReady?: (handle: OfficeHandle | null) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
@@ -63,6 +72,8 @@ export function OfficeScene({
   dataRef.current = data;
   const onActClickRef = useRef(onActClick);
   onActClickRef.current = onActClick;
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
   const collapsedRef = useRef(collapsed);
   collapsedRef.current = collapsed;
 
@@ -70,17 +81,24 @@ export function OfficeScene({
     const host = hostRef.current;
     const labelHost = labelRef.current;
     if (!host || !labelHost) return;
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // Reduced-motion is a *viewer's* preference, and a broadcast page has no viewer — honouring it on
+    // the capture machine would ship a frozen room to everyone watching the stream (and would drop the
+    // Tier-A ambient CSS layer with it). Stream sources render in full motion, always.
+    const reduced = broadcast
+      ? false
+      : window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let disposed = false;
     import('./office-scene')
       .then(({ mountOffice }) => {
         if (disposed || !host || !labelHost) return;
         const handle = mountOffice(host, labelHost, reduced, {
           onActClick: (id) => onActClickRef.current?.(id),
+          broadcast,
         });
         handle.update(dataRef.current);
         handle.setSuspended(collapsedRef.current); // mounted while collapsed → start parked
         handleRef.current = handle;
+        onReadyRef.current?.(handle);
       })
       .catch(() => {
         /* canvas unavailable — the warm gradient + labels stand in. */
@@ -89,8 +107,9 @@ export function OfficeScene({
       disposed = true;
       handleRef.current?.dispose();
       handleRef.current = null;
+      onReadyRef.current?.(null);
     };
-  }, []);
+  }, [broadcast]);
 
   useEffect(() => {
     handleRef.current?.update(data);
@@ -131,9 +150,13 @@ export function OfficeScene({
           render loop is SUSPENDED via setSuspended — no draw cost behind an invisible panel. */}
       <div className="lc-gl-canvas" ref={hostRef} aria-hidden="true" />
       <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
-      <p className="lc-office__caption">
-        {agents} agent{agents === 1 ? '' : 's'} · {humans} human{humans === 1 ? '' : 's'}
-      </p>
+      {/* On a stream the only chrome is the broadcast route's own overlay — the panel caption would
+          be a second, competing label in the corner. */}
+      {!broadcast && (
+        <p className="lc-office__caption">
+          {agents} agent{agents === 1 ? '' : 's'} · {humans} human{humans === 1 ? '' : 's'}
+        </p>
+      )}
       {onCollapse && (
         <div className="lc-office__collapse">
           <CollapseButton side="left" label="the office" onClick={onCollapse} />

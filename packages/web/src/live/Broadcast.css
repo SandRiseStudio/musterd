@@ -1,0 +1,118 @@
+/*
+ * musterd — broadcast mode (ADR 157). Route-local styles for /broadcast: a fixed 1920×1080 capture
+ * stage centred in a letterbox, plus the minimal on-stream overlay. Nothing here is shared with /live —
+ * this file only ships in the /broadcast lazy chunk.
+ *
+ * The stage is fixed in CSS pixels *on purpose*. The office scene sizes its canvas from
+ * `host.clientWidth/clientHeight`, and `transform: scale()` doesn't touch those, so the scene always
+ * lays out and renders at exactly 1920×1080 — the fit-to-window scale below only changes what a human
+ * previewing the page sees, never what a capture gets.
+ */
+
+.bc {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  /* Letterbox — the bars around a stage that doesn't match the window's aspect. Near-black so an
+     OBS source cropped slightly wrong reads as an intentional edge rather than a bright seam. */
+  background: #0b0a0d;
+}
+
+.bc__stage {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  flex: none; /* .lc is a flex column — the stage is a fixed box, not a flex child */
+  display: block;
+  overflow: hidden;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+/* The office fills the stage: no panel track, no border, no collapse rail. */
+.bc__stage .lc-office {
+  position: absolute;
+  inset: 0;
+  flex: none;
+  border-right: 0;
+}
+
+/* ─── the on-stream overlay (bottom-left, never interactive) ───────────── */
+
+.bc__overlay {
+  position: absolute;
+  left: 40px;
+  bottom: 36px;
+  z-index: var(--lc-z-overlay);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  pointer-events: none;
+  font-family: var(--font-display);
+}
+
+.bc__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 16px 8px 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(12, 10, 13, 0.72);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  backdrop-filter: blur(6px);
+}
+
+.bc__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--lc-muted, #7a6a56);
+}
+
+.bc__pill--live .bc__dot {
+  background: #e5484d;
+  box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.55);
+  animation: bc-pulse 2.4s var(--lc-ease, ease) infinite;
+}
+
+/* One slow breath on one 9px dot — the cheapest possible "this is live" signal, and the only motion
+   the overlay is allowed to add on top of a full-scene render loop. */
+@keyframes bc-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgba(229, 72, 77, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(229, 72, 77, 0);
+  }
+}
+
+.bc__team {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
+}
+
+.bc__error {
+  color: rgba(255, 190, 190, 0.9);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The scene itself deliberately ignores this in broadcast mode (the stream's viewers are not the
+     person who set it) — but the operator's own preview chrome can still hold still. */
+  .bc__pill--live .bc__dot {
+    animation: none;
+  }
+}
