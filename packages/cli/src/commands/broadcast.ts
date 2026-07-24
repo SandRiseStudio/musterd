@@ -220,6 +220,34 @@ export function makeFramePump(
   };
 }
 
+/**
+ * Best-effort, synchronous kill of a child's whole process group. Both children spawn
+ * `detached: true`, so each leads its own group and `kill(-pid)` reaches it plus anything it
+ * spawned. This is the backstop for the ungraceful stop: when the parent dies to an external
+ * signal, `cleanup()`'s polite stdin-close never happens — and an orphaned ffmpeg keeps holding
+ * the RTMP connection and encoding forever (observed on the first real stream; every restart
+ * needed a manual second pkill). Synchronous because one call site is `process.on('exit')`,
+ * where nothing async runs and throwing is forbidden.
+ */
+export function killGroup(
+  child: Pick<ChildProcess, 'pid' | 'exitCode' | 'signalCode' | 'kill'>,
+  signal: NodeJS.Signals = 'SIGTERM',
+  kill: (pid: number, signal: NodeJS.Signals) => unknown = process.kill,
+): void {
+  // Already reaped (exitCode/signalCode set) or never spawned → nothing to do. The guard matters:
+  // signaling a dead group is pid-reuse roulette against some innocent future process.
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal); // not a group leader after all (or the group is gone) — direct shot
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
 const CHROME_DEFAULT = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 export function chromeArgs(debugPort: number, profileDir: string): string[] {
@@ -334,9 +362,61 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     ) + '\n',
   );
 
-  const chrome = spawn(chromeBin, chromeArgs(debugPort, profile), { stdio: 'ignore' });
+  // ── Stop-path hardening ─────────────────────────────────────────────────────────────────────
+  // Handlers are installed BEFORE the children are spawned, and that ordering is the fix: the old
+  // wiring registered them only once streaming was live, so a kill during the (up to 30s) CDP
+  // connect / ready wait hit Node's default handler and orphaned both children — and a preempted
+  // parent (this box encodes video while it works) widens any spawn→register gap to tens of ms.
+  // Registered first, a signal either arrives before the spawns (nothing exists to orphan) or
+  // after (always caught). Default signal death runs no `exit` listeners, so no sweep can repair
+  // a missed signal after the fact. Three tiers:
+  //   · graceful (first SIGINT/SIGTERM/SIGHUP while live): close ffmpeg's stdin and let it
+  //     finalize the container — a hard kill leaves a file capture without a moov atom, and the
+  //     `exit` listener on ffmpeg below turns its departure into a normal return.
+  //   · forced (second signal, or any signal before frames flow): nothing worth finalizing —
+  //     group-kill both children and go.
+  //   · sweep (`process.on('exit')`): whatever path led here, no child survives the parent.
+  //     Synchronous by necessity; a no-op when the graceful path already reaped them.
+  // (The closures below reference `chrome`/`ffmpeg` before their declaration — safe: handlers
+  // only ever run on an event-loop turn, and the spawns happen in this same synchronous block.)
+  let pumpTimer: NodeJS.Timeout | undefined;
+  let live = false; // flips when the pump starts feeding ffmpeg
+  let stopping = false;
+  const forceStop = (code: number): never => {
+    killGroup(ffmpeg, 'SIGKILL');
+    killGroup(chrome, 'SIGKILL');
+    process.exit(code);
+  };
+  const gracefulStop = () => {
+    if (pumpTimer) clearInterval(pumpTimer);
+    ffmpeg.stdin?.end(); // let ffmpeg finalize the container (moov atom in file mode)
+    // If ffmpeg never exits (wedged RTMP socket), the stop must still stop. unref'd: it never
+    // holds the process open, it only fires if something else still is.
+    setTimeout(() => forceStop(1), 5000).unref();
+  };
+  const onSignal = (sig: NodeJS.Signals) => {
+    if (stopping || !live) forceStop(sig === 'SIGINT' ? 130 : 1);
+    stopping = true;
+    process.stdout.write(theme.meta(`\nstopping (${sig}) — again to force`) + '\n');
+    gracefulStop();
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  process.on('SIGHUP', onSignal);
+  process.on('exit', () => {
+    killGroup(ffmpeg);
+    killGroup(chrome);
+  });
+
+  // `detached: true` makes each child its own process-group leader, which is what lets the
+  // stop path kill *everything* it spawned with one group signal — see killGroup.
+  const chrome = spawn(chromeBin, chromeArgs(debugPort, profile), {
+    stdio: 'ignore',
+    detached: true,
+  });
   const ffmpeg: ChildProcess = spawn('ffmpeg', ffmpegArgs(opts, sink), {
     stdio: ['pipe', 'inherit', 'inherit'],
+    detached: true,
   });
   // ffmpeg closes its stdin the moment `-t <duration>` is satisfied (or its sink dies) — a pump tick
   // racing that close is an EPIPE, which on a Socket is an *emitted* error that would crash the
@@ -344,12 +424,11 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   // `exit` handler below report ffmpeg's real verdict.
   ffmpeg.stdin?.on('error', () => {});
 
-  let pumpTimer: NodeJS.Timeout | undefined;
   let exitCode = 0;
   const cleanup = () => {
     if (pumpTimer) clearInterval(pumpTimer);
     ffmpeg.stdin?.end();
-    chrome.kill();
+    killGroup(chrome);
     try {
       rmSync(profile, { recursive: true, force: true });
     } catch {
@@ -400,19 +479,14 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     // Tick at 2× frame cadence: the pump owes frames by wall clock, so the timer only needs to
     // fire *often enough* — late ticks emit catch-up frames instead of losing them.
     pumpTimer = setInterval(() => pump.tick(), Math.max(1, Math.round(500 / opts.fps)));
+    live = true; // signals now stop gracefully — there are frames worth finalizing
 
     process.stdout.write(`${theme.ok('◉ live')}\n`);
 
-    // Run until ffmpeg exits (its -t duration, its sink failing) or a signal lands.
+    // Run until ffmpeg exits (its -t duration, its sink failing) or a signal lands — the signal
+    // handlers wired above end ffmpeg's stdin, so both roads converge on ffmpeg's exit.
     exitCode = await new Promise<number>((resolve) => {
       let done = false;
-      const stop = () => {
-        process.stdout.write(theme.meta('\nstopping…') + '\n');
-        if (pumpTimer) clearInterval(pumpTimer);
-        ffmpeg.stdin?.end(); // let ffmpeg finalize the container (moov atom in file mode)
-      };
-      process.once('SIGINT', stop);
-      process.once('SIGTERM', stop);
       ffmpeg.once('exit', (code) => {
         done = true;
         if (pumpTimer) clearInterval(pumpTimer); // encoder gone — stop feeding a closed pipe
@@ -420,10 +494,13 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
       });
       chrome.once('exit', () => {
         // The frame source dying MID-stream is terminal — flush what we have and report it. After a
-        // normal end (`done`) this also fires from cleanup's own chrome.kill(); that's not an error.
+        // normal end (`done`) this also fires from cleanup's own group-kill; that's not an error.
         if (done) return;
         process.stderr.write(`${theme.err('✗')} headless Chrome exited\n`);
-        stop();
+        if (!stopping) {
+          stopping = true;
+          gracefulStop();
+        }
       });
     });
   } finally {

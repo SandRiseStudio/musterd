@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
 import {
   broadcastUrl,
   chromeArgs,
   ffmpegArgs,
+  killGroup,
   makeFramePump,
   parseOptions,
   resolveSink,
@@ -190,6 +191,54 @@ describe('makeFramePump (the drift-compensating CFR re-clock)', () => {
     expect(pump.tick()).toBe(0);
     advance(14); // 34ms total → frame 1 is now owed
     expect(pump.tick()).toBe(1);
+  });
+});
+
+describe('killGroup (the orphaned-ffmpeg backstop)', () => {
+  const fake = (
+    over: Partial<{ pid: number; exitCode: number | null; signalCode: string | null }>,
+  ) => ({
+    pid: 1234,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => true),
+    ...over,
+  });
+
+  it('signals the process GROUP (negative pid) — children spawn detached as group leaders', () => {
+    const child = fake({});
+    const kill = vi.fn(() => true as const);
+    killGroup(child, 'SIGTERM', kill);
+    expect(kill).toHaveBeenCalledWith(-1234, 'SIGTERM');
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it('skips a child that already exited, was signaled, or never spawned — no pid-reuse roulette', () => {
+    const kill = vi.fn(() => true as const);
+    killGroup(fake({ exitCode: 0 }), 'SIGTERM', kill);
+    killGroup(fake({ signalCode: 'SIGTERM' as never }), 'SIGTERM', kill);
+    killGroup(fake({ pid: undefined as never }), 'SIGTERM', kill);
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the direct child on a group-kill error (not detached, group already gone)', () => {
+    const child = fake({});
+    const kill = vi.fn(() => {
+      throw new Error('ESRCH');
+    });
+    killGroup(child, 'SIGKILL', kill);
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+  });
+
+  it('is silent when both paths fail — it runs inside process.on(exit), where throwing is forbidden', () => {
+    const child = fake({});
+    child.kill = vi.fn(() => {
+      throw new Error('ESRCH');
+    });
+    const kill = vi.fn(() => {
+      throw new Error('EPERM');
+    });
+    expect(() => killGroup(child, 'SIGTERM', kill)).not.toThrow();
   });
 });
 
