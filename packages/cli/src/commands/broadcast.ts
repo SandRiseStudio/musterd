@@ -127,6 +127,12 @@ export function ffmpegArgs(
     '-hide_banner',
     '-loglevel',
     'warning',
+    // The delivery truth, printed every 10s regardless of loglevel: frame count, fps, and `speed=`.
+    // speed < 1.0x means the pipeline is falling behind real time (the viewer-buffering failure
+    // mode); 1.0x with viewers still stalling exonerates this process entirely.
+    '-stats',
+    '-stats_period',
+    '10',
     // video: PNG frames on stdin, already constant-rate thanks to the pump
     '-f',
     'image2pipe',

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { officeDpr, officeVisible, suspendIgnored } from './broadcast';
+import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
 
 /**
  * These are the three decisions broadcast mode inverts (ADR 157). They are gates, not effects: the
@@ -54,6 +54,16 @@ describe('broadcast gates', () => {
       expect(officeDpr(false, 2)).toBe(2);
       vi.stubGlobal('window', { devicePixelRatio: 0 });
       expect(officeDpr(false, 2)).toBe(1);
+    });
+  });
+
+  describe('ambientFrameBudgetMs', () => {
+    it('broadcast renders ambient motion at full rate — 20fps-on-a-30fps-encode is cadence judder', () => {
+      expect(ambientFrameBudgetMs(true, 50)).toBe(0);
+    });
+
+    it('REGRESSION: a viewer keeps the ~20fps ambient coalescing (a measured, standing win)', () => {
+      expect(ambientFrameBudgetMs(false, 50)).toBe(50);
     });
   });
 
