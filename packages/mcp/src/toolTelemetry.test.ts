@@ -211,4 +211,56 @@ describe('tool-call telemetry end-to-end (ADR 144 inc 1)', () => {
 
     await harness.close();
   }, 15_000);
+
+  // The inc-4 claim that only an end-to-end test can make: the SDK validates before any handler
+  // runs, so a `lane`-instead-of-`id` call can ONLY succeed if coercion rewrote the arguments
+  // upstream of validation. Proving it through the real SDK (not the rule table) is the point.
+  it('coerces a mis-named argument ahead of SDK validation and reports it as coerced, not a bounce', async () => {
+    const musterd = new MusterdClient(config);
+    closers.push(() => musterd.close());
+    await musterd.join();
+
+    const recorder = new ToolCallRecorder();
+    const mcp = buildMcpServer(musterd, config, { recorder });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const harness = new Client({ name: 'test-harness', version: '0.0.0' });
+    await Promise.all([mcp.connect(serverTransport), harness.connect(clientTransport)]);
+    closers.push(() => mcp.close());
+
+    const opened = await harness.callTool({
+      name: 'lane_open',
+      arguments: { title: 'a lane to claim' },
+    });
+    const laneId = (opened.structuredContent as { lane: { id: string } }).lane.id;
+
+    // The exact shape five seats sent: the schema wants `id`, every agent guessed `lane`.
+    const claimed = await harness.callTool({ name: 'lane_claim', arguments: { lane: laneId } });
+    expect(claimed.isError ?? false).toBe(false);
+    expect(String((claimed.content as { text?: string }[])[0]?.text)).toContain('lane claimed');
+    expect((claimed.structuredContent as { lane: { owner_seat: string } }).lane.owner_seat).toBe(
+      'Ada',
+    );
+
+    await recorder.flush(musterd);
+    const report = (await fetch(base + '/teams/dawn/report', {
+      headers: { authorization: `Bearer ${nickTok}` },
+    }).then((r) => r.json())) as {
+      tool_calls: {
+        bounces: number;
+        coerced: number;
+        tools: { tool: string; calls: number; bounces: number; coerced: number }[];
+      };
+    };
+    const t = report.tool_calls;
+    expect(t.bounces).toBe(0);
+    expect(t.coerced).toBe(1);
+    const claim = t.tools.find((row) => row.tool === 'lane_claim')!;
+    expect(claim.calls).toBe(1);
+    expect(claim.coerced).toBe(1);
+    // Visible as its own class, and NOT laundered into the bounce rate: the rate has to keep
+    // meaning "cost the agent a turn", or the increment would flatter itself by construction.
+    expect(claim.bounces).toBe(0);
+
+    await harness.close();
+  }, 15_000);
 });

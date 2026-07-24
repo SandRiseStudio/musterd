@@ -268,6 +268,26 @@ Every tool result — success, empty, and error — is **action-naming**: it say
 
 `structuredContent` travels without an `outputSchema` (verified against SDK 1.29) — deliberately unregistered, because output schemas would ride `tools/list` and pay per-seat connect tokens the inc-2 pass just reclaimed.
 
+## Input coercion — deterministic forgiveness (ADR 144 inc 4)
+
+`coerce.ts` repairs near-miss arguments **before the SDK validates them**, so a mechanically-obvious mistake succeeds instead of costing the agent a turn. It is the mirror of `repair.ts`: repair explains a bounce on the way out, coercion prevents one on the way in. Same seam, opposite direction — and it has to be the seam, because the SDK validates ahead of every handler, so a handler can never see a wrong field name.
+
+Install order in `index.ts` is load-bearing: telemetry patches first (outermost — it classifies the final result), repair next, coercion last (innermost — it must rewrite `params.arguments` before validation). Every rule is a pure function of the arguments; no model in the request path.
+
+The table is **measured, never speculative** — each rule comes from a bounce observed in `tool_call_stats` joined to the harness payload that caused it (window 2026-07-15..24), and `coerce.test.ts` names the seats that sent each shape:
+
+| rule                                                          | tools                               | measured shape                                           |
+| ------------------------------------------------------------- | ----------------------------------- | -------------------------------------------------------- |
+| `lane` / `lane_id` → `id`                                     | `lane_claim/handoff/update/resolve` | ~70% of all bounces; 5 seats, 2 harnesses                |
+| `to: ["x"]` → `"x"`, `to: []` → default, `Recipient` → string | `team_send`, `lane_handoff`         | agents echo wire shapes back out of results              |
+| `text` / `content` / `message` → `body`                       | `team_send`                         | cross-harness vocabulary drift                           |
+| `"343"` / `"#343"` → `343`                                    | `lane_resolve.pr`                   | numeric string                                           |
+| `headline` ← first line of `body`                             | `team_memory_save`                  | every memory bounce: long body, missing one-line subject |
+
+**Not forgiven, deliberately:** a multi-recipient `to` (the wire carries one recipient — dropping the rest loses a message) and a non-numeric `pr` like `"local"` (attesting a PR that never existed corrupts the ADR 109 seat→PR→SHA join). Both keep their bounce and repair hint, which is the honest answer. Truncation follows the same logic: a _derived_ headline may be clipped to 120 because the body keeps every word, but an _explicit_ over-length headline bounces rather than silently losing what the caller wrote.
+
+Whitespace trimming is normalization, not repair, so it is applied silently and never counted. Everything else increments the **`coerced`** outcome (`tool-telemetry.ts`), reported beside bounces and never folded into them — the bounce rate has to keep meaning "cost the agent a turn". A `coerced` rate that stays high on one field is the evidence that would promote an alias to a rename; forgiveness without measurement is just drift.
+
 ## File tree `packages/mcp/src/`
 
 ```
@@ -290,6 +310,7 @@ src/
   telemetry.ts    // boots the shared SDK as musterd-mcp + wraps every tool in a musterd.tool.call span (ADR 089)
   toolTelemetry.ts // first-party tool-call telemetry: times/classifies every tools/call (bounces included) + attests the rendered-surface weight, batched to the daemon (ADR 144 inc 1)
   repair.ts       // repair hints on invalid-input bounces at the same tools/call seam — deterministic, parsed from the SDK's embedded zod issues (ADR 144 inc 3)
+  coerce.ts       // deterministic input coercion at the same seam, but BEFORE validation — measured alias/shape rules so near-miss input succeeds instead of bouncing (ADR 144 inc 4)
   tools/
     join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)

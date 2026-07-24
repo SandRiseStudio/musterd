@@ -19,6 +19,13 @@ import { errorResult, notReadyMessage, textResult } from './format.js';
 
 // Rewritten for concision + retrievability (ADR 144 inc 2): the act vocabulary is the API and
 // stays complete, one terse clause each; the plan-epoch/interrupt mechanics live in the skill.
+//
+// The trailing example is inc 4's `input_examples` lever, and it is spent HERE and nowhere else on
+// purpose. Examples cost surface bytes on every connect, so they only earn their place where the
+// coercion layer cannot forgive the mistake: `to`/`body` drift is now repaired silently, but
+// `ask`'s conditionally-required `meta.species`/`meta.tier` cannot be — nothing in a bare `ask`
+// says which species the caller meant, and guessing would misroute a human's attention. So the one
+// shape that must be shown is the one shape that can only be taught.
 const DESCRIPTION =
   "Send an act to a teammate, '@team', or '@broadcast'. Acts: status_update = report progress; " +
   'request_help = you are blocked; handoff = pass work; accept/decline = answer the latest open ' +
@@ -28,7 +35,9 @@ const DESCRIPTION =
   "re-sequence a Goal (meta.goal_id, meta.wave: a number reorders, 'later' defers); ask = a " +
   'directed-to-human ask (meta.species: consult|escalate|approve, meta.tier: advisory|standard|' +
   'blocking) — the reply tells you how long to wait and what to do if no answer comes. Goal-scoped ' +
-  'steer/defer re-sequence the plan and flag lanes building against the old one.';
+  'steer/defer re-sequence the plan and flag lanes building against the old one. ' +
+  'e.g. {act:"status_update",body:"…"}; an ask needs meta: ' +
+  '{act:"ask",to:"nick",body:"…",meta:{species:"consult",tier:"standard"}}.';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };

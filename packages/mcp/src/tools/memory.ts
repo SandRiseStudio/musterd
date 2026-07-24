@@ -18,6 +18,15 @@ const SAVE_DESCRIPTION =
   'One note per seat, last-write-wins. headline ≤120 chars (shown on the next occupy); body ' +
   '≤8KB. Private to this seat; never store secrets.';
 
+/**
+ * The empty state (ADR 144 inc 4). The daemon answers "nothing saved yet" with a 404, which is the
+ * right HTTP answer and the wrong MCP one: rendered through `errorResult` it became an `error:`
+ * result, so a first-ever read counted as a tool failure — inflating the very error rate the
+ * increment is measured against, and telling the agent something broke when nothing did. An absent
+ * note is an empty state, and inc 3's standard says an empty state names the next action.
+ */
+const NO_MEMORY = /no memory saved/i;
+
 const READ_DESCRIPTION =
   "Load this seat's saved memory — the full note behind the headline team_join showed. Call " +
   'when the headline looks relevant; judge staleness from its age.';
@@ -47,7 +56,11 @@ export function registerMemory(server: McpServer, client: MusterdClient): void {
     {
       description: SAVE_DESCRIPTION,
       inputSchema: {
-        headline: z.string().describe('one-line subject (≤120 chars)'),
+        // The 120-char cap is declared HERE, not only in the protocol (ADR 144 inc 4): it used to
+        // live solely in `claim-handshake.ts`, so a 121-char headline passed validation and came
+        // back as a late server error instead of a bounce with a repair hint. Every constraint the
+        // caller can violate belongs on the surface the caller is validated against.
+        headline: z.string().min(1).max(120).describe('one-line subject (≤120 chars)'),
         body: z.string().optional().describe('the full note (≤8KB); omit for headline-only'),
       },
     },
@@ -77,6 +90,11 @@ export function registerMemory(server: McpServer, client: MusterdClient): void {
         const header = `memory (saved ${ago(Date.now() - mem.saved_at)} ago): ${mem.headline}`;
         return textResult(mem.body ? `${header}\n\n${mem.body}` : header);
       } catch (err) {
+        if (NO_MEMORY.test(err instanceof Error ? err.message : String(err))) {
+          return textResult(
+            'no memory saved for this seat yet — team_memory_save {headline} at wrap-up writes the note the next occupant sees',
+          );
+        }
         return errorResult(err);
       }
     },

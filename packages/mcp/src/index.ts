@@ -6,6 +6,7 @@ import { bind } from './bind.js';
 import { MCP_ICONS } from './brand.js';
 import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
 import { MusterdClient } from './client.js';
+import { instrumentToolCoercion } from './coerce.js';
 import { isClaimedConfig, loadMcpConfig, type McpConfig } from './config.js';
 import { observeHarnessInitialization } from './harness.js';
 import { readAndConsumeResolution, writePendingMarker } from './pending.js';
@@ -159,6 +160,10 @@ export function buildMcpServer(
   // telemetry patch, which makes telemetry the outer wrapper: it classifies the repaired result
   // (still a bounce — the classifier is start-anchored, the repair appends at the end).
   instrumentToolRepair(server);
+  // Deterministic input coercion (ADR 144 inc 4) hooks the same seam once more, and is installed
+  // LAST so it wraps INNERMOST — it must rewrite the arguments before the SDK validates them, while
+  // telemetry stays outermost to classify the final result (a repaired call lands as `coerced`).
+  instrumentToolCoercion(server);
   // Patched second so the deferred autojoin runs INSIDE the first tool's span — the join latency it
   // causes is attributed to the call that triggered it.
   if (opts.onFirstToolCall) armAutojoinOnFirstToolCall(server, opts.onFirstToolCall);
