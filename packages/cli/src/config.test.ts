@@ -145,6 +145,27 @@ describe('saveBinding merge-guard + atomic write (ADR 131 inc 4)', () => {
     expect(onDisk()['session']).toEqual(newer);
   });
 
+  it('an observation-less write preserves the on-disk model observation', () => {
+    // Same clobber shape as the capture above, one field over: `musterd claim` / `musterd agent`
+    // rebuild the binding from state read before the hook observed anything. If the observation is
+    // lost here, attestation silently falls back to the stale declaration — the bug this closes.
+    const observation = { model: 'claude-opus-4-8', harness: 'claude-code', observed_at: 1 };
+    saveBinding(dir, { ...base, model_observed: observation });
+    saveBinding(dir, { ...base, model: 'grok-4.5' });
+    expect(onDisk()['model_observed']).toEqual(observation);
+    expect(onDisk()['model']).toBe('grok-4.5');
+  });
+
+  it('an explicit observation on the argument wins over the on-disk one (newest-wins)', () => {
+    saveBinding(dir, {
+      ...base,
+      model_observed: { model: 'claude-sonnet-5', harness: 'claude-code', observed_at: 1 },
+    });
+    const newer = { model: 'claude-opus-4-8', harness: 'claude-code', observed_at: 2 };
+    saveBinding(dir, { ...base, model_observed: newer });
+    expect(onDisk()['model_observed']).toEqual(newer);
+  });
+
   it('leaves no tmp file behind (atomic rename)', () => {
     saveBinding(dir, base);
     const entries = readFileSync(join(dir, '.musterd', 'binding.json'), 'utf8');

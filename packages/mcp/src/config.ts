@@ -5,6 +5,7 @@ import {
   SURFACES,
   type ClaimPolicy,
   type Provenance,
+  resolveAttestation,
   type Surface,
 } from '@musterd/protocol';
 import { readBuildStamp } from '@musterd/protocol/build-stamp';
@@ -12,8 +13,12 @@ import { ulid } from 'ulid';
 import { findBinding, findWorkspaceSpec, resolveBindingDir } from './binding.js';
 import { resolveDriver, resolveModel, resolveProvenance, resolveWorkspace } from './workspace.js';
 
-/** Where this adapter obtained its model declaration. `unknown` remains legal and warn-only. */
-export type ModelSource = 'environment' | 'binding' | 'unknown';
+/**
+ * Where this adapter obtained its model. `observed` (a harness probe, hook-written) outranks both
+ * declarations, because a declaration is a snapshot and snapshots rot. `unknown` remains legal and
+ * warn-only.
+ */
+export type ModelSource = 'observed' | 'environment' | 'binding' | 'unknown';
 
 export interface McpConfig {
   server: string;
@@ -41,8 +46,10 @@ export interface McpConfig {
   /** Harness-attested model id for this occupancy (ADR 101). Attested, never verified; absent ⇒
    *  the server renders `unknown` and never blocks. */
   model?: string | undefined;
-  /** The declaration tier that supplied `model`, never inferred from MCP `clientInfo` (ADR 120). */
+  /** The tier that supplied `model`, never inferred from MCP `clientInfo` (ADR 120). */
   modelSource: ModelSource;
+  /** Set when an observation contradicted a declaration — the tripwire signal. Never blocks. */
+  modelDrift?: { declared: string; observed: string } | undefined;
   /**
    * This adapter dist's own build ref (ADR 135) — the `dist/build.json` stamp read once at load, so
    * the *running process* reports the code it booted with (a rebuilt dist under a live session still
@@ -127,12 +134,15 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
       ? parseClaimPolicy(env['MUSTERD_CLAIM'])
       : (binding?.claim ?? spec?.claim ?? { mode: 'chat' });
   const workspace = resolveWorkspace(env);
-  const declaredModel = resolveModel(env);
-  const modelSource: ModelSource = declaredModel
-    ? 'environment'
-    : binding?.model
-      ? 'binding'
-      : 'unknown';
+  // Attestation, ordered by KIND of claim: an observation (what the harness was seen running, written
+  // by the SessionStart hook) outranks any declaration; env still beats binding.json within the
+  // declared tier. This inverts the defect where a wire-time snapshot baked into the env sat above
+  // every later observation and could never be corrected.
+  const attestation = resolveAttestation({
+    observed: binding?.model_observed,
+    env: resolveModel(env),
+    binding: binding?.model,
+  });
   // A seat-mode session gets a stable disambiguation code (ADR 087) keyed by what makes it the same
   // seat across relaunches: team + workspace + seat name + surface. Role/chat sessions keep a fresh
   // per-process code (see shortCode). `connId` stays a fresh ulid — it's the transport/hub identity and
@@ -148,12 +158,12 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     provenance: resolveProvenance(env),
     workspace,
     driver: resolveDriver(env),
-    // Attestation ladder (ADR 101), mirroring the identity ladder above: an env declaration
-    // (MUSTERD_MODEL / ANTHROPIC_MODEL) wins, else the model persisted in binding.json at provisioning
-    // — so a `musterd agent --model`-provisioned seat attests by default without the env being set.
     // Never from the committed spec (a model is a per-machine choice, not shared). Absent ⇒ `unknown`.
-    model: declaredModel ?? binding?.model,
-    modelSource,
+    model: attestation.model,
+    modelSource: attestation.source,
+    ...(attestation.drift && attestation.declared !== undefined && attestation.model !== undefined
+      ? { modelDrift: { declared: attestation.declared, observed: attestation.model } }
+      : {}),
     build: readBuildStamp(import.meta.url),
     epoch: FEATURE_EPOCH,
     claim,
