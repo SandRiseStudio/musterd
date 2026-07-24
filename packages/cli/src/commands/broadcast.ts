@@ -113,7 +113,8 @@ export function keychainLookup(service: string): Promise<string | null> {
 }
 
 /**
- * The ffmpeg invocation, as pure data. Input 0 is the PNG frame pipe at the pump's constant rate;
+ * The ffmpeg invocation, as pure data. Input 0 is the image frame pipe (JPEG — see the screencast
+ * format note below) at the pump's constant rate;
  * input 1 is silent audio — RTMP ingests (Twitch included) reject a video-only stream, and muxing
  * silence is cheaper than explaining that in a runbook. Keyframe every 2s (`-g 2*fps`), the spacing
  * Twitch asks for. File mode keeps the same encode so a local proof exercises the streaming path.
@@ -133,7 +134,7 @@ export function ffmpegArgs(
     '-stats',
     '-stats_period',
     '10',
-    // video: PNG frames on stdin, already constant-rate thanks to the pump
+    // video: image frames on stdin (codec sniffed per-frame), already constant-rate via the pump
     '-f',
     'image2pipe',
     '-framerate',
@@ -374,7 +375,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
 
     const pump = makeFramePump((png) => {
       // Write unconditionally while the pipe is open — Node buffers past the kernel pipe when
-      // ffmpeg is briefly behind, and PNG frames are small enough that the window is bounded. The
+      // ffmpeg is briefly behind, and JPEG frames are small enough that the window is bounded. The
       // one wrong move is *dropping* frames: image2pipe timestamps are frame-count, so a dropped
       // frame permanently slows the video timeline (the stall the pump exists to prevent).
       if (ffmpeg.stdin?.writable) ffmpeg.stdin.write(png);
@@ -383,8 +384,15 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
       pump.frame(Buffer.from(String(p['data']), 'base64'));
       void cdp.send('Page.screencastFrameAck', { sessionId: p['sessionId'] });
     });
+    // JPEG, and this is load-bearing: Chrome encodes screencast frames on the compositor thread,
+    // and 1080p PNG is so expensive there that delivery measured 4.7fps — a slideshow the pump then
+    // padded with duplicates (the residual stutter after the cadence fixes). JPEG@85 measured
+    // 35.3fps at ~181KB/frame on the same scene. Visually lossless here (flat colors, no gradients
+    // worth 9× the bytes), and ffmpeg's image2pipe sniffs the codec per-frame, so nothing else
+    // changes.
     await cdp.send('Page.startScreencast', {
-      format: 'png',
+      format: 'jpeg',
+      quality: 85,
       maxWidth: 1920,
       maxHeight: 1080,
       everyNthFrame: 1,
