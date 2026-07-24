@@ -4,6 +4,9 @@ import { actLabel, actTone, memberColor, memberPosture } from './format';
 import type { OfficeData, OfficeHandle } from './office-scene';
 import { actToEvent } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
+import type { ConnStatus } from './client';
+import { OfficeOverlay } from './OfficeOverlay';
+import { presentCount, type WorkingOnEntry } from './workingOn';
 
 /**
  * Roster → the office's node data. `posture` is resolved here with `memberPosture` — the *same* call the
@@ -44,6 +47,8 @@ export function OfficeScene({
   onCollapse,
   onActClick,
   broadcast = false,
+  lanes = [],
+  status = 'idle',
   onReady,
 }: {
   teamName: string;
@@ -58,6 +63,10 @@ export function OfficeScene({
    * animating unseen, pins DPR to 1, and ignores reduced-motion (the viewer of a stream is not the
    * person whose OS preference this is). */
   broadcast?: boolean;
+  /** The working-on strap's lanes, already derived by the route (see `workingOn`). */
+  lanes?: WorkingOnEntry[];
+  /** Connection state, for the overlay's honest LIVE/CONNECTING signal. */
+  status?: ConnStatus;
   /** Handed the scene handle once it mounts (and `null` on teardown) — the broadcast route publishes it
    * as `window.__office` so a capturer can probe the scene. */
   onReady?: (handle: OfficeHandle | null) => void;
@@ -150,12 +159,15 @@ export function OfficeScene({
           render loop is SUSPENDED via setSuspended — no draw cost behind an invisible panel. */}
       <div className="lc-gl-canvas" ref={hostRef} aria-hidden="true" />
       <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
-      {/* On a stream the only chrome is the broadcast route's own overlay — the panel caption would
-          be a second, competing label in the corner. */}
-      {!broadcast && (
-        <p className="lc-office__caption">
-          {agents} agent{agents === 1 ? '' : 's'} · {humans} human{humans === 1 ? '' : 's'}
-        </p>
+      {/* The office's own chrome, identical on /live and /broadcast by construction — the whole point
+          of the shared component. Collapsed, the panel is a rail with nowhere to put it. */}
+      {!collapsed && (
+        <OfficeOverlay
+          teamName={teamName}
+          present={presentCount(roster)}
+          lanes={lanes}
+          status={status}
+        />
       )}
       {onCollapse && (
         <div className="lc-office__collapse">

@@ -520,7 +520,6 @@
    office/roster panels don't scroll, so a soft opacity fade is enough there. */
 .lc-office.is-collapsed .lc-gl-canvas,
 .lc-office.is-collapsed .lc-gl-labels,
-.lc-office.is-collapsed .lc-office__caption,
 .lc-office.is-collapsed .lc-office__collapse,
 .lc-roster.is-collapsed .lc-roster__head,
 .lc-roster.is-collapsed .lc-roster__rows {
@@ -1205,6 +1204,9 @@
   }
 }
 
+
+/* Retained for /office-preview's own caption. The live office no longer renders one: the shared
+   OfficeOverlay owns that corner, and the roster rail already names every member and their kind. */
 .lc-office__caption {
   position: absolute;
   left: var(--lc-8);
@@ -2779,4 +2781,208 @@
 .lc-ask__note {
   font-size: 11px;
   color: var(--lc-info);
+}
+
+/* ─── the office overlay (shared by /live and /broadcast) ─────────────────
+   Broadcast chrome, not dashboard chrome: this sits over a rendered canvas that a stranger may land
+   on mid-stream, so its whole job is to answer "what am I looking at" in about three seconds — the
+   team, that it is live, who is in the room, and which lanes are moving.
+
+   Three rules hold it together:
+   · One scrim does all the legibility work. No backdrop-filter anywhere in this block — a blur per
+     chip is a per-frame GPU readback over a 1920×1080 canvas encoded at 30fps, forever, and the
+     gradient below already earns the contrast.
+   · Its inks are theme-independent. The overlay never sits on the page surface, only on a scrim that
+     is dark in both themes, so --text/--text-dim (which flip under data-theme="light") would go
+     invisible here. The cream matches the scene's own dark-theme --ink.
+   · Motion is transform/opacity only, and finite except for one 7px dot. Nothing in here repaints. */
+
+.lc-ov {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--lc-z-overlay);
+  pointer-events: none;
+  container-type: inline-size;
+  /* Light spilling off the office floor, not a pasted rectangle. */
+  background: linear-gradient(
+    to top,
+    rgba(9, 9, 11, 0.82) 0%,
+    rgba(9, 9, 11, 0.55) 46%,
+    rgba(9, 9, 11, 0) 100%
+  );
+}
+
+/* The padding lives one level in: `cqw`/`cqh` resolve against an ANCESTOR container, so a container
+   cannot size itself by its own query units. */
+.lc-ov__inner {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 0.55cqw, 14px);
+  padding: clamp(20px, 1.7cqw, 34px) clamp(16px, 2.2cqw, 40px) clamp(14px, 1.6cqw, 30px);
+}
+
+.lc-ov__id {
+  display: flex;
+  align-items: center;
+  gap: clamp(9px, 0.65cqw, 14px);
+  font-family: var(--font-display);
+}
+
+/* The musterd mark — a stranger's only brand anchor on a stream with no page around it. */
+.lc-ov__mark {
+  flex: none;
+  width: clamp(8px, 0.5cqw, 11px);
+  height: clamp(8px, 0.5cqw, 11px);
+  border-radius: 3px;
+  background: var(--mustard-500);
+  box-shadow: 0 0 14px var(--glow-mustard-soft);
+}
+
+.lc-ov__team {
+  color: #f8efe1;
+  font-size: clamp(15px, 1.35cqw, 26px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
+}
+
+.lc-ov__sig {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: rgba(248, 239, 225, 0.62);
+  font-family: var(--font-mono);
+  font-size: clamp(9px, 0.6cqw, 12px);
+  letter-spacing: 0.16em;
+}
+
+.lc-ov__sig.is-live {
+  color: rgba(248, 239, 225, 0.82);
+}
+
+.lc-ov__dot {
+  position: relative;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--zinc-500);
+}
+
+.lc-ov__sig.is-live .lc-ov__dot {
+  background: var(--danger);
+}
+
+/* One slow breath on one dot — the whole motion budget for the resting state, and the only loop in
+   the overlay. It is a scaling ring, not an animated box-shadow: spread animation repaints every
+   frame, a transform/opacity pseudo-element composites. */
+.lc-ov__sig.is-live .lc-ov__dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid var(--danger);
+  animation: lc-ov-breathe 2.4s var(--ease-out) infinite;
+}
+
+@keyframes lc-ov-breathe {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(3.4);
+  }
+}
+
+.lc-ov__present {
+  color: rgba(248, 239, 225, 0.62);
+  font-family: var(--font-mono);
+  font-size: clamp(9px, 0.6cqw, 12px);
+}
+
+.lc-ov__present-unit {
+  opacity: 0.66;
+}
+
+/* The lane stack. One lane per line, seat tag then title — musterd's own unit of work, laid out the
+   way it is spoken. A wrapping row of chips loses the seat→work pairing at phone size. */
+.lc-ov__strap {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(3px, 0.2cqw, 7px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lc-ov__lane {
+  display: flex;
+  align-items: baseline;
+  gap: clamp(8px, 0.7cqw, 16px);
+  max-width: min(100%, 62ch);
+  animation: lc-ov-enter 320ms var(--ease-out) both;
+}
+
+.lc-ov__owner {
+  flex: none;
+  min-width: 7ch;
+  color: rgba(248, 239, 225, 0.56);
+  font-family: var(--font-mono);
+  font-size: clamp(10px, 0.68cqw, 13px);
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+}
+
+/* The freshest lane — the one that moved most recently — is the only place the strap spends colour. */
+.lc-ov__lane.is-fresh .lc-ov__owner {
+  color: var(--mustard-300);
+}
+
+.lc-ov__lane.is-blocked .lc-ov__owner {
+  color: var(--warning);
+}
+
+.lc-ov__title {
+  overflow: hidden;
+  color: rgba(248, 239, 225, 0.78);
+  font-family: var(--font-display);
+  font-size: clamp(12px, 1cqw, 19px);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+}
+
+.lc-ov__lane.is-fresh .lc-ov__title {
+  color: rgba(248, 239, 225, 0.94);
+}
+
+@keyframes lc-ov-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Narrow container (the /live office column): the strap keeps the freshest lane only. */
+@container (max-width: 520px) {
+  .lc-ov__lane:not(:first-child) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-ov__sig.is-live .lc-ov__dot::after,
+  .lc-ov__lane {
+    animation: none;
+  }
 }
