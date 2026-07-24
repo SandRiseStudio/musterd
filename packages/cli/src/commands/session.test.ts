@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import type { Binding } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
-import { captureSession, sessionCommand } from './session.js';
+import {
+  captureSession,
+  OBSERVATION_REFRESH_MS,
+  refreshModelObservation,
+  sessionCommand,
+} from './session.js';
 
 /**
  * Session capture (ADR 131 §5, inc 4) — the workspace-anchoring and never-fail contracts. All
@@ -202,6 +207,184 @@ describe('musterd session (capture)', () => {
       const t = transcript(wsA, 'claude-opus-4-8');
       await captureSession('start', { session_id: 'sid-1', cwd: wsA }); // no transcript on start
       await captureSession('end', { session_id: 'sid-1', transcript_path: t, cwd: wsA });
+      expect(readBinding(wsA).model_observed).toBeUndefined();
+    });
+  });
+
+  /**
+   * The refresh (ADR 158 follow-up). The shipped defect: SessionStart observes a transcript that has
+   * no assistant turn yet, so the observation never lands and the never-erase fallback pins a
+   * carry-forward that cannot self-correct. These pin the moment the observation is actually made.
+   */
+  describe('model observation — refresh at the tool boundary', () => {
+    const transcript = (ws: string, model: string, name = 't.jsonl'): string => {
+      const p = join(ws, name);
+      writeFileSync(p, JSON.stringify({ message: { role: 'assistant', model } }) + '\n', 'utf8');
+      return p;
+    };
+
+    it('lands the observation SessionStart could not make (the shipped defect)', async () => {
+      // Exactly the live shape: capture names a transcript that does not exist yet…
+      const t = join(wsA, 't.jsonl');
+      await captureSession('start', { session_id: 'sid-1', transcript_path: t, cwd: wsA });
+      expect(readBinding(wsA).model_observed).toBeUndefined();
+
+      // …then the harness writes its first assistant turn, and the next tool boundary sees it.
+      transcript(wsA, 'claude-opus-5');
+      expect(refreshModelObservation(wsA)).toBe('claude-opus-5');
+      const a = readBinding(wsA);
+      expect(a.model_observed).toMatchObject({ model: 'claude-opus-5', harness: 'claude-code' });
+      expect(a.model_observed!.observed_at).toBeGreaterThanOrEqual(a.session!.started_at);
+      expect(a.model).toBe('claude-test-1'); // the declaration is still untouched
+    });
+
+    it('replaces a carry-forward observed BEFORE this session began (the live incident)', () => {
+      // Seat ryder, verbatim: attesting claude-opus-4-8 from an hour-old observation while the
+      // transcript of the running session is 100% claude-opus-5.
+      const startedAt = Date.now() - 60_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'sid-1',
+            transcript_path: join(wsA, 't.jsonl'),
+            started_at: startedAt,
+          },
+          model_observed: {
+            model: 'claude-opus-4-8',
+            harness: 'claude-code',
+            observed_at: startedAt - 3_600_000,
+          },
+        }),
+      );
+      transcript(wsA, 'claude-opus-5');
+      expect(refreshModelObservation(wsA)).toBe('claude-opus-5');
+      expect(readBinding(wsA).model_observed?.model).toBe('claude-opus-5');
+    });
+
+    it('is a no-op while the observation is current — no re-read, no rewrite', () => {
+      const observedAt = Date.now() - 1_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'sid-1',
+            transcript_path: join(wsA, 't.jsonl'),
+            started_at: observedAt - 1,
+          },
+          model_observed: {
+            model: 'claude-opus-5',
+            harness: 'claude-code',
+            observed_at: observedAt,
+          },
+        }),
+      );
+      transcript(wsA, 'a-model-it-must-not-read');
+      expect(refreshModelObservation(wsA)).toBeUndefined();
+      expect(readBinding(wsA).model_observed?.observed_at).toBe(observedAt); // untouched
+    });
+
+    it('catches a mid-session model switch once the observation ages out', () => {
+      const startedAt = Date.now() - OBSERVATION_REFRESH_MS - 60_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'sid-1',
+            transcript_path: join(wsA, 't.jsonl'),
+            started_at: startedAt,
+          },
+          model_observed: {
+            model: 'claude-opus-5',
+            harness: 'claude-code',
+            // observed within this session, but longer ago than the refresh interval
+            observed_at: Date.now() - OBSERVATION_REFRESH_MS - 1,
+          },
+        }),
+      );
+      transcript(wsA, 'claude-sonnet-5'); // the human ran /model mid-run
+      expect(refreshModelObservation(wsA)).toBe('claude-sonnet-5');
+      expect(readBinding(wsA).model_observed?.model).toBe('claude-sonnet-5');
+    });
+
+    it('KEEPS a prior observation when the transcript yields nothing', () => {
+      const startedAt = Date.now() - 60_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'sid-1',
+            transcript_path: join(wsA, 'gone.jsonl'),
+            started_at: startedAt,
+          },
+          model_observed: {
+            model: 'claude-opus-5',
+            harness: 'claude-code',
+            observed_at: startedAt - 1_000,
+          },
+        }),
+      );
+      expect(refreshModelObservation(wsA)).toBeUndefined();
+      expect(readBinding(wsA).model_observed?.model).toBe('claude-opus-5'); // never erased
+    });
+
+    it('leaves an ENDED session alone — what it last attested is the truth about it', () => {
+      const startedAt = Date.now() - 60_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'sid-1',
+            transcript_path: join(wsA, 't.jsonl'),
+            started_at: startedAt,
+            ended_at: startedAt + 1_000,
+          },
+          model_observed: {
+            model: 'claude-opus-5',
+            harness: 'claude-code',
+            observed_at: startedAt - 1_000,
+          },
+        }),
+      );
+      transcript(wsA, 'claude-sonnet-5');
+      expect(refreshModelObservation(wsA)).toBeUndefined();
+      expect(readBinding(wsA).model_observed?.model).toBe('claude-opus-5');
+    });
+
+    it('never touches a sibling worktree, and never throws on a bare/unbound folder', () => {
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'sid-1',
+            transcript_path: transcript(wsA, 'claude-opus-5'),
+            started_at: Date.now() - 60_000,
+          },
+        }),
+      );
+      expect(refreshModelObservation(wsA)).toBe('claude-opus-5');
+      expect(readBinding(wsB).model_observed).toBeUndefined(); // the ADR 018 clobber, again
+
+      const bare = mkdtempSync(join(tmpdir(), 'musterd-session-bare-'));
+      expect(() => refreshModelObservation(bare)).not.toThrow();
+      expect(refreshModelObservation(bare)).toBeUndefined();
+      rmSync(bare, { recursive: true, force: true });
+    });
+
+    it('does not observe a session with no captured transcript path', () => {
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: { harness: 'claude-code', id: 'sid-1', started_at: Date.now() - 60_000 },
+        }),
+      );
+      expect(refreshModelObservation(wsA)).toBeUndefined();
       expect(readBinding(wsA).model_observed).toBeUndefined();
     });
   });

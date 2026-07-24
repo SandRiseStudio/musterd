@@ -135,14 +135,14 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
       : (binding?.claim ?? spec?.claim ?? { mode: 'chat' });
   const workspace = resolveWorkspace(env);
   // Attestation, ordered by KIND of claim: an observation (what the harness was seen running, written
-  // by the SessionStart hook) outranks any declaration; env still beats binding.json within the
+  // by the session-capture hooks) outranks any declaration; env still beats binding.json within the
   // declared tier. This inverts the defect where a wire-time snapshot baked into the env sat above
   // every later observation and could never be corrected.
-  const attestation = resolveAttestation({
-    observed: binding?.model_observed,
-    env: resolveModel(env),
-    binding: binding?.model,
-  });
+  //
+  // Boot-time value only — at adapter boot the session's transcript has no assistant turn yet, so
+  // this usually resolves to a declaration or a previous session's observation. `refreshAttestation`
+  // is what makes it true; see there.
+  const attestation = attestationFor(binding, env);
   // A seat-mode session gets a stable disambiguation code (ADR 087) keyed by what makes it the same
   // seat across relaunches: team + workspace + seat name + surface. Role/chat sessions keep a fresh
   // per-process code (see shortCode). `connId` stays a fresh ulid — it's the transport/hub identity and
@@ -171,6 +171,59 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     claimCode: shortCode(codeSeed),
     bindingDir: resolveBindingDir(process.cwd(), env),
   };
+}
+
+/** The attestation ladder, shared by the boot resolve and the live refresh so the two cannot drift. */
+function attestationFor(
+  binding: ReturnType<typeof findBinding>,
+  env: NodeJS.ProcessEnv,
+): ReturnType<typeof resolveAttestation> {
+  return resolveAttestation({
+    observed: binding?.model_observed,
+    env: resolveModel(env),
+    binding: binding?.model,
+  });
+}
+
+/**
+ * Re-resolve the attested model from the binding on disk, mutating `config` in place. Returns true
+ * when the attested model actually changed.
+ *
+ * The other half of the ADR 158 follow-up. The hook-side refresh corrects `binding.model_observed`
+ * mid-session, but the adapter resolved its attestation once, in `main()`, at a moment when the
+ * transcript was still empty — so a corrected observation sat on disk while the roster kept
+ * reporting the boot-time value for the entire session. Measured on seat `ryder`: `binding.json`
+ * read `claude-opus-5` and the roster read `claude-opus-4-8` at the same instant.
+ *
+ * Rides the 15s heartbeat, which already re-affirms the model precisely so "a mid-occupancy switch
+ * or an attestation the claim missed lands without a reconnect" (ADR 101) — that path was correct
+ * all along and merely had nothing new to say. The server no-ops an unchanged model, so a steady
+ * session costs one small JSON read per heartbeat and no wire churn.
+ *
+ * Never throws: an unreadable binding leaves the existing attestation exactly as it stands.
+ */
+export function refreshAttestation(
+  config: McpConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  try {
+    const binding = findBinding(config.bindingDir ?? process.cwd(), env);
+    const next = attestationFor(binding, env);
+    // Never trade a real attestation for `unknown`: a binding that momentarily fails to read must
+    // not blank the roster. Same never-erase rule the observation itself follows.
+    if (next.model === undefined) return false;
+    if (next.model === config.model && next.source === config.modelSource) return false;
+    config.model = next.model;
+    config.modelSource = next.source;
+    if (next.drift && next.declared !== undefined) {
+      config.modelDrift = { declared: next.declared, observed: next.model };
+    } else {
+      delete config.modelDrift;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Does this session already hold a seat (it has occupied one — the resolved `member` is set)? */

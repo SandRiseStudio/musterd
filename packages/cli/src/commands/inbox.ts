@@ -6,6 +6,7 @@ import { wsBase, type Identity } from '../config.js';
 import { isActionNeeded, renderInbox, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { kindLookup, resolve, resolveRead } from './helpers.js';
+import { refreshModelObservation } from './session.js';
 
 /** Block-until-message exit code on timeout — mirrors coreutils `timeout(1)` so shell loops can tell
  *  "no message yet" from a real failure. Zero is reserved for "a directed act woke me". */
@@ -135,6 +136,11 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
  * the predicate, the capability gate, the composed line, and the audit/telemetry — the CLI just prints.
  */
 async function interruptCheck(parsed: Parsed): Promise<number> {
+  // The tool boundary is also the first moment the running model is *knowable* — the transcript now
+  // carries an assistant turn, which it did not when SessionStart observed (ADR 158 follow-up). Runs
+  // before the env/identity gates below: the observation is local and is owed even to a seat whose
+  // daemon is unreachable or whose nudges are muted. Self-guarded, silent, never throws.
+  refreshModelObservation();
   if (process.env['MUSTERD_NO_NUDGE'] === '1') return 0;
   try {
     const { http, team, identity, explicit } = resolveRead(parsed.flags);

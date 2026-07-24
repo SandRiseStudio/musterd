@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeEnvelope } from '@musterd/protocol';
@@ -146,5 +146,45 @@ describe('inbox command', () => {
 
   it('rejects a negative --limit', async () => {
     await expect(inboxCommand(parseArgs(['--limit', '-3']))).resolves.toBe(2);
+  });
+
+  /**
+   * ADR 158 follow-up: the tool boundary is where the running model becomes knowable, so the
+   * PostToolUse probe carries the refresh. Wiring test — the observation logic itself is pinned in
+   * session.test.ts; what matters here is that the hook actually reaches it.
+   */
+  it('--interrupt-check refreshes the model observation from the live transcript', async () => {
+    const transcript = join(dir, 't.jsonl');
+    writeFileSync(
+      transcript,
+      JSON.stringify({ message: { role: 'assistant', model: 'claude-opus-5' } }) + '\n',
+      'utf8',
+    );
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        server: serverUrl,
+        team: 'dawn',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'Ada' },
+        model: 'claude-declared-1',
+        session: {
+          harness: 'claude-code',
+          id: 'sid-1',
+          transcript_path: transcript,
+          started_at: Date.now() - 60_000,
+        },
+      }) + '\n',
+    );
+
+    await capture(() => inboxCommand(parseArgs(['--interrupt-check'])));
+
+    const after = JSON.parse(readFileSync(join(dir, '.musterd', 'binding.json'), 'utf8')) as {
+      model: string;
+      model_observed?: { model: string };
+    };
+    expect(after.model_observed?.model).toBe('claude-opus-5');
+    expect(after.model).toBe('claude-declared-1'); // observed over declared, never instead of
   });
 });
