@@ -41,7 +41,13 @@ export default defineConfig({
   },
   plugins: [
     tanstackStart({
-      prerender: { enabled: true, crawlLinks: true },
+      // retryCount: the plugin's default is 0, which turns ONE transient fetch failure against the
+      // crawl's own localhost server into a failed build. Under machine load (a live stream encode,
+      // 2026-07-24) that killed `service refresh` mid-flight — and a transient build failure also
+      // strands the auto-refresher, whose debounce skips the failed tip until the NEXT commit lands.
+      // Three retries a second apart absorb a busy machine; a page that fails four times is a real
+      // bug and still fails the build (failOnError stays default-true).
+      prerender: { enabled: true, crawlLinks: true, retryCount: 3, retryDelay: 1000 },
       pages: [{ path: '/' }],
     }),
     viteReact(),
