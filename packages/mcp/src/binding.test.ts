@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveBindingDir, saveBinding } from './binding.js';
-import { loadMcpConfig } from './config.js';
+import { loadMcpConfig, refreshAttestation } from './config.js';
 
 let dir: string;
 let bindingPath: string;
@@ -355,5 +355,82 @@ describe('saveBinding merge-guard — the hook-written model observation', () =>
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * ADR 158 §7, adapter half. The adapter resolves its attestation once, in `main()`, before the
+ * transcript carries an assistant turn — so a hook that corrects `model_observed` mid-session was
+ * writing to a file nobody re-read. Measured live: binding.json said `claude-opus-5` while the
+ * roster said `claude-opus-4-8`.
+ */
+describe('refreshAttestation (the observation the adapter re-reads)', () => {
+  const write = (over: Record<string, unknown>): void => {
+    writeFileSync(
+      bindingPath,
+      JSON.stringify({
+        server: 'http://localhost:9999',
+        team: 'lab',
+        agent_key: 'mskey_from_file',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'Ui' },
+        ...over,
+      }),
+    );
+  };
+
+  it('picks up an observation written after boot, and reports the change', () => {
+    write({ model: 'claude-declared-1' });
+    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    expect(cfg.model).toBe('claude-declared-1');
+    expect(cfg.modelSource).toBe('binding');
+
+    // The hook lands the real observation mid-session.
+    write({
+      model: 'claude-declared-1',
+      model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 2 },
+    });
+    expect(refreshAttestation(cfg, { MUSTERD_BINDING: bindingPath })).toBe(true);
+    expect(cfg.model).toBe('claude-opus-5');
+    expect(cfg.modelSource).toBe('observed');
+    // The declaration it disagrees with is still surfaced as drift, not silently repaired.
+    expect(cfg.modelDrift).toEqual({ declared: 'claude-declared-1', observed: 'claude-opus-5' });
+  });
+
+  it('is a no-op — and reports no change — when the observation is unchanged', () => {
+    write({ model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 2 } });
+    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    expect(cfg.model).toBe('claude-opus-5');
+    expect(refreshAttestation(cfg, { MUSTERD_BINDING: bindingPath })).toBe(false);
+    expect(cfg.model).toBe('claude-opus-5');
+  });
+
+  it('tracks a mid-session model switch to a NEW observation', () => {
+    write({ model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 2 } });
+    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    write({ model_observed: { model: 'claude-sonnet-5', harness: 'claude-code', observed_at: 3 } });
+    expect(refreshAttestation(cfg, { MUSTERD_BINDING: bindingPath })).toBe(true);
+    expect(cfg.model).toBe('claude-sonnet-5');
+  });
+
+  it('never trades a real attestation for unknown when the binding goes unreadable', () => {
+    write({ model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 2 } });
+    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    rmSync(bindingPath, { force: true });
+    expect(refreshAttestation(cfg, { MUSTERD_BINDING: bindingPath })).toBe(false);
+    expect(cfg.model).toBe('claude-opus-5'); // the roster never blanks on a bad read
+  });
+
+  it('keeps env above the binding declaration, and the observation above env', () => {
+    write({ model: 'claude-declared-1' });
+    const env = { MUSTERD_BINDING: bindingPath, MUSTERD_MODEL: 'claude-from-env' };
+    const cfg = loadMcpConfig(env);
+    expect(cfg.model).toBe('claude-from-env');
+    write({
+      model: 'claude-declared-1',
+      model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 2 },
+    });
+    expect(refreshAttestation(cfg, env)).toBe(true);
+    expect(cfg.model).toBe('claude-opus-5'); // observed outranks the env declaration (ADR 158 §1)
   });
 });

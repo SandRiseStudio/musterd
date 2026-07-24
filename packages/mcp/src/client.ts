@@ -15,7 +15,7 @@ import {
   type WSServerFrame,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
-import type { McpConfig } from './config.js';
+import { refreshAttestation, type McpConfig } from './config.js';
 
 function wsBase(server: string): string {
   return server.replace(/^http/, 'ws');
@@ -370,6 +370,8 @@ export class MusterdClient {
     this.ws = ws;
     ws.on('open', () => {
       this.backoff = 1000;
+      // A reconnect is a second chance to attest truthfully — re-read before claiming (ADR 158 §7).
+      refreshAttestation(this.config);
       // v0.3 (ADR 075/078): present the team agent key + a claim target (replaces `hello {token}`).
       ws.send(
         JSON.stringify({
@@ -414,7 +416,10 @@ export class MusterdClient {
         if (frame.grant) this.config.grant = frame.grant;
         ws.send(JSON.stringify({ type: 'subscribe', scope: 'team' }));
         this.heartbeat = setInterval(() => {
-          if (ws.readyState === ws.OPEN)
+          if (ws.readyState === ws.OPEN) {
+            // Re-read the observation off disk first (ADR 158 §7): the hook corrects it mid-session,
+            // long after this adapter resolved its boot-time attestation.
+            refreshAttestation(this.config);
             ws.send(
               JSON.stringify({
                 type: 'heartbeat',
@@ -424,6 +429,7 @@ export class MusterdClient {
                 ...(this.config.model ? { model: this.config.model } : {}),
               }),
             );
+          }
         }, 15_000);
         this.heartbeat.unref?.();
         this.pendingJoin?.resolve();

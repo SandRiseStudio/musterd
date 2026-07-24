@@ -135,9 +135,35 @@ Two limits emerged while building the guard, and the design was narrowed to matc
 `assertEntryIdentity` therefore throws on a **secret** mismatch (a genuine cross-run identity leak
 with no benign reading) and is called from the doctor, not from `buildEntry`.
 
+### 7. Observation happens at the tool boundary, not at SessionStart
+
+Increment 1 observed only in the SessionStart capture, and that was the wrong moment — caught in
+dogfood the session after this ADR merged. The `transcript_path` a SessionStart hook is handed names
+the **new** session's transcript, which carries no assistant turn yet, so `observeModel` returned
+`undefined` on every fresh session. The §4 never-erase rule then did exactly what it promised and kept
+the prior observation, which meant the observation was never made and the carry-forward never expired.
+
+Measured on seat `ryder`: the roster attested `claude-opus-4-8` from an observation timestamped 64
+minutes before the session began, while both of the seat's most recent transcripts were 100%
+`claude-opus-5` — and the probe returned `claude-opus-5` correctly when run against either. The parse
+was right; only the timing was wrong. The stale declaration this ADR set out to kill had simply moved
+one field over, from `model` to `model_observed`.
+
+So the observation now also runs at the **tool boundary**, on the PostToolUse interrupt hook (ADR 088)
+— the first moment the running model is knowable, and a probe that already fires there. It re-reads
+when the stored observation predates the session (the carry-forward) or has aged past
+`OBSERVATION_REFRESH_MS`; the second case is what lets a mid-session `/model` switch surface at all,
+which the backwards-walking read in `readModelFromTranscript` was always written to support and a
+once-per-session observation quietly discarded. Cost is a bounded 256 KiB tail read at most once every
+five minutes per seat, skipped entirely while the observation is current.
+
+The never-erase, never-clobber, and never-fail contracts carry over unchanged, plus one more: an
+**ended** session is not re-observed. What it last attested is the truth about it.
+
 ## Consequences
 
-- A wrong model self-heals within one tool call instead of surviving weeks, with no human edit.
+- A wrong model self-heals within one tool call of the session starting instead of surviving weeks,
+  with no human edit — and a mid-session model switch self-heals within five minutes.
 - Claude Code seats gain real attestation without anyone setting an env var; Cursor seats are
   honestly `unknown` until Cursor exposes something to read.
 - `unknown` may become _more_ common than under the old bake, and that is the point: constraint A is

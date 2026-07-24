@@ -157,6 +157,10 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
   // a transcript that is missing or has moved format — leaves any PRIOR observation in place rather
   // than erasing it. Losing a good observation to one bad read would re-open the very lie this
   // closes: the roster would silently fall back to a stale declaration.
+  //
+  // Expect this to observe NOTHING on a fresh session: the transcript named here is the new one, and
+  // it carries no assistant turn yet. `refreshModelObservation` below is what actually lands the
+  // observation, at the first tool boundary — this call only catches a resumed transcript.
   const observed = event === 'start' ? observeModelFor(CAPTURE_HARNESS, payload) : undefined;
   const model_observed = observed
     ? { model: observed, harness: CAPTURE_HARNESS, observed_at: Date.now() }
@@ -177,6 +181,71 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
     } catch {
       // unreachable daemon / auth drift — the local capture stands; `residency status` names drift
     }
+  }
+}
+
+/**
+ * How long an observation stands before the next tool boundary re-reads the transcript. Bounds two
+ * opposite failures: too short and every tool call pays a 256 KiB tail read; too long and a
+ * mid-session `/model` switch attests the old model for the rest of the run.
+ */
+export const OBSERVATION_REFRESH_MS = 5 * 60_000;
+
+/**
+ * Re-observe the running model from the captured transcript (ADR 158 follow-up).
+ *
+ * SessionStart is the wrong and only moment `captureSession` observes: the transcript it is handed
+ * is the *new* session's, which has no assistant turn yet, so `observeModel` returns `undefined`
+ * every single time and the deliberate never-erase fallback pins the previous observation forever.
+ * Two lies come out of that, and this closes both:
+ *
+ * - **The carry-forward.** A seat that switched models between sessions attests the old one for the
+ *   whole new session — the stale declaration ADR 158 set out to kill, relocated one field over.
+ * - **The mid-session switch.** `readModelFromTranscript` walks backwards precisely so a run that
+ *   switched models attests the one it is running *now*; observing once, at the start, threw that away.
+ *
+ * Runs at the tool boundary (the PostToolUse interrupt hook), where the transcript is guaranteed to
+ * carry at least one assistant turn. Cheap by construction: a bounded tail read, at most once per
+ * `OBSERVATION_REFRESH_MS`, skipped entirely once the observation is current. Never throws and never
+ * erases — same hook contract as capture. Returns the newly written model, or `undefined` for "no
+ * change", which is the overwhelmingly common path.
+ */
+export function refreshModelObservation(dirHint?: string): string | undefined {
+  try {
+    const dir = dirHint ?? findWorkspaceDir();
+    if (!dir) return undefined;
+    const binding = findBinding(dir, {});
+    // Only a live captured session has a transcript worth re-reading. An ended one is over: whatever
+    // it last attested is the truth about it, and a stale re-read would only muddy that.
+    const session = binding?.session;
+    if (!binding || !session?.transcript_path || session.ended_at !== undefined) return undefined;
+
+    const prior = binding.model_observed;
+    // Current already? Two ways to be stale: observed before this session began (the carry-forward),
+    // or simply old enough that a mid-run switch could have happened since.
+    const now = Date.now();
+    const current =
+      prior !== undefined &&
+      prior.observed_at >= session.started_at &&
+      now - prior.observed_at < OBSERVATION_REFRESH_MS;
+    if (current) return undefined;
+
+    // The harness that captured the session owns the parse — a codex-captured session must not be
+    // read with Claude Code's eyes.
+    const harness = session.harness;
+    const observed = observeModelFor(harness, {
+      transcript_path: session.transcript_path,
+      session_id: session.id,
+    });
+    if (!observed) return undefined; // unreadable / moved format — the prior observation stands
+
+    saveBinding(dir, {
+      ...binding,
+      model_observed: { model: observed, harness, observed_at: now },
+    });
+    return observed;
+  } catch {
+    return undefined; // rides a hook: a refresh must never fail the tool call it hangs off
   }
 }
 
