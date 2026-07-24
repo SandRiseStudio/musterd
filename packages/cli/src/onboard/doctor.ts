@@ -197,6 +197,21 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       );
     }
   }
+  // The attestation tripwire. The original (#273) fired only on an *absent* declaration, so a
+  // confidently WRONG one was indistinguishable from a correct one — the mode that poisons ADR 056
+  // diversity conclusions while looking perfectly healthy, and the reason a seat could attest
+  // `grok-4.5` for weeks while running `claude-opus-4-8`. Compare the two tiers and name the knob
+  // that lies, plus where it lives, so the fix is obvious instead of a hunt down the ladder.
+  const observedModel = binding?.model_observed;
+  if (observedModel && binding?.model && binding.model !== observedModel.model) {
+    drift.push(
+      `this workspace declares model "${binding.model}" but its ${observedModel.harness} session was ` +
+        `observed running "${observedModel.model}" — the observation is what gets attested; remove or ` +
+        `correct the stale declaration in .musterd/binding.json (and check for a baked MUSTERD_MODEL ` +
+        `in the harness MCP entry, which provisioning no longer writes).`,
+    );
+  }
+
   const installed = harnesses.filter((h) => h.installed);
   const anyConfigured = installed.some((h) => h.configured);
 

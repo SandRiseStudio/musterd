@@ -128,6 +128,56 @@ describe('inspectProvisioning', () => {
     const r = await inspectProvisioning('/x');
     expect(r.drift).toEqual([]);
   });
+
+  // The tripwire the #273 one was missing: it fired only on an ABSENT declaration, so a confidently
+  // WRONG one looked identical to a correct one — the mode that poisons diversity conclusions while
+  // looking healthy.
+  it('flags a declaration contradicted by an observation, naming both and where the stale one lives', async () => {
+    h.primer = 'managed';
+    h.binding = {
+      claim: { mode: 'seat', name: 'Miley' },
+      model: 'grok-4.5',
+      model_observed: { model: 'claude-opus-4-8', harness: 'claude-code', observed_at: 1 },
+    };
+    h.harnesses = [harness('Claude Code', true, true)];
+    const r = await inspectProvisioning('/x');
+    const line = r.drift.find((d) => d.includes('claude-opus-4-8'));
+    expect(line).toBeDefined();
+    expect(line).toContain('grok-4.5');
+    expect(line).toContain('binding.json');
+  });
+
+  it('is quiet when the observation agrees with the declaration', async () => {
+    h.primer = 'managed';
+    h.binding = {
+      claim: { mode: 'seat', name: 'Miley' },
+      model: 'claude-opus-4-8',
+      model_observed: { model: 'claude-opus-4-8', harness: 'claude-code', observed_at: 1 },
+    };
+    h.harnesses = [harness('Claude Code', true, true)];
+    const r = await inspectProvisioning('/x');
+    expect(r.drift).toEqual([]);
+  });
+
+  it('is quiet when there is an observation but nothing was ever declared', async () => {
+    // Nothing to contradict: the seat attests the observation and is not drifting.
+    h.primer = 'managed';
+    h.binding = {
+      claim: { mode: 'seat', name: 'Miley' },
+      model_observed: { model: 'claude-opus-4-8', harness: 'claude-code', observed_at: 1 },
+    };
+    h.harnesses = [harness('Claude Code', true, true)];
+    const r = await inspectProvisioning('/x');
+    expect(r.drift).toEqual([]);
+  });
+
+  it('is quiet when a declaration exists but nothing has been observed yet', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' }, model: 'grok-4.5' };
+    h.harnesses = [harness('Claude Code', true, true)];
+    const r = await inspectProvisioning('/x');
+    expect(r.drift).toEqual([]);
+  });
 });
 
 describe('inspectProvisioning — duplicate adapters (ADR 092)', () => {
