@@ -1,7 +1,7 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
 import { createActors, type Actors } from './actors';
-import { officeDpr, officeVisible, suspendIgnored } from './broadcast';
+import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
 import { createPet, petBeat, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD } from './layout';
@@ -613,7 +613,7 @@ export function mountOffice(
     const capped = noRealMotion && cues.length === 0 && !inAfterglow;
     acc += last ? now - last : 1000 / 60;
     last = now;
-    if (capped && acc < AMBIENT_FRAME_MS) {
+    if (capped && acc < ambientFrameBudgetMs(broadcast, AMBIENT_FRAME_MS)) {
       raf = requestAnimationFrame(tick); // too soon for the next ambient frame — keep the loop, skip the draw
       return;
     }

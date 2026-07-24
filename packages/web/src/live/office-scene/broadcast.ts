@@ -39,3 +39,15 @@ export function officeDpr(broadcast: boolean, cap: number): number {
 export function suspendIgnored(broadcast: boolean, on: boolean): boolean {
   return broadcast && on;
 }
+
+/**
+ * The ambient idle-FPS budget (ADR 086 Phase 2): a viewer's office coalesces ambient-only motion
+ * toward ~20fps (visually identical, ~3× cheaper — a measured, standing win). But a *broadcast* is
+ * resampled to an exact 30fps encode, and 20fps content on a 30fps timeline is textbook cadence
+ * judder: every third frame duplicates, an evenly-paced stutter on every viewer's player (observed
+ * on the first live Twitch stream). Broadcast renders ambient at full rate — the capture machine is
+ * the one place that cost buys smoothness for everyone watching.
+ */
+export function ambientFrameBudgetMs(broadcast: boolean, capMs: number): number {
+  return broadcast ? 0 : capMs;
+}
