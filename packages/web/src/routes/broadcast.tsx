@@ -7,6 +7,8 @@ import { OfficeScene } from '../live/OfficeScene';
 import { acquireObserver, forgetObserver, type LiveConfig } from '../live/client';
 import type { OfficeHandle } from '../live/office-scene';
 import { useLiveStream } from '../live/useLiveStream';
+import { useWorkingOn } from '../live/useWorkingOn';
+import { workingOn } from '../live/workingOn';
 
 export const Route = createFileRoute('/broadcast')({
   head: () => ({
@@ -79,6 +81,11 @@ function BroadcastPage() {
     onCredentialInvalid: recoverObserver,
   });
 
+  // The working-on strap's lanes. Three is what fits the stage without the strap competing with the
+  // office for a stranger's attention.
+  const board = useWorkingOn(cfg, envelopes);
+  const lanes = workingOn(board, 3);
+
   // Connect from the URL only — no form, no localStorage team memory. A stream source is launched by a
   // URL (an OBS source, a headless capturer), so the URL is the whole configuration.
   useEffect(() => {
@@ -126,38 +133,18 @@ function BroadcastPage() {
             roster={roster}
             envelopes={envelopes}
             liveIds={liveIds}
+            lanes={lanes}
+            status={status}
             broadcast
             onReady={onSceneReady}
           />
         )}
-        <BroadcastOverlay team={team} live={status === 'live'} error={error} />
+        {/* Operator diagnostics, not stream chrome: the two states where there is no office to look
+            at. A misconfigured OBS source must say so rather than show an empty black stage. */}
+        {(!team || error) && (
+          <p className="bc__note">{team ? error : 'no team — add ?team=<slug> to the URL'}</p>
+        )}
       </div>
     </main>
-  );
-}
-
-/**
- * The minimal on-stream chrome: team name and a LIVE pill, bottom-left, never interactive. Deliberately
- * plain — a designed overlay (ticker, act captions, brand frame) is a follow-up lane, and shipping a
- * half-designed one now would only be something to undo.
- */
-function BroadcastOverlay({
-  team,
-  live,
-  error,
-}: {
-  team: string | null;
-  live: boolean;
-  error: string | null;
-}) {
-  return (
-    <div className="bc__overlay" aria-hidden="true">
-      <span className={`bc__pill${live ? ' bc__pill--live' : ''}`}>
-        <i className="bc__dot" />
-        {live ? 'LIVE' : 'CONNECTING'}
-      </span>
-      <span className="bc__team">{team ?? 'no team — add ?team=<slug>'}</span>
-      {error && <span className="bc__error">{error}</span>}
-    </div>
   );
 }

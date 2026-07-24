@@ -8,7 +8,7 @@ import { AsksStrip } from '../live/AsksStrip';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
-import type { LiveConfig, ConnStatus } from '../live/client';
+import type { LiveConfig } from '../live/client';
 import {
   provisionObserver,
   loadObserver,
@@ -19,6 +19,8 @@ import {
 } from '../live/client';
 import { firehoseSound } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
+import { useWorkingOn } from '../live/useWorkingOn';
+import { workingOn } from '../live/workingOn';
 
 export const Route = createFileRoute('/live')({
   head: () => ({
@@ -114,6 +116,11 @@ function LivePage() {
     onCredentialInvalid: recoverObserver,
     onConnected: armRecovery,
   });
+
+  // The office overlay's working-on strap. Derived here (not in the scene) so both routes hand the
+  // scene the same already-projected shape.
+  const board = useWorkingOn(cfg, envelopes);
+  const lanes = workingOn(board, 3);
 
   const watch = async (explicit?: string) => {
     setFormError(null);
@@ -226,14 +233,15 @@ function LivePage() {
   return (
     <main className="lc">
       <header className="lc__topbar">
+        {/* Operator chrome only. The team name and the connection/present signal moved into the
+            office overlay, which carries them over the scene on both /live and /broadcast — repeating
+            them a few inches above was the duplication nick asked us to drop (2026-07-24). */}
         <MusterdWord />
-        {connected && <span className="lc__team">/ {cfg!.team}</span>}
         <span className="lc__spacer" />
         {connected && <WatchLinkButton cfg={cfg!} />}
         {connected && <CompanionToggle on={companion} onToggle={toggleCompanion} />}
         {connected && <SoundToggle />}
         <Clock />
-        <StatusPill status={status} live={roster.filter((m) => m.presence !== 'offline').length} />
       </header>
 
       {!connected ? (
@@ -270,6 +278,8 @@ function LivePage() {
               envelopes={envelopes}
               liveIds={liveIds}
               collapsed={collapsed.office}
+              lanes={lanes}
+              status={status}
               onCollapse={() => toggleCollapse('office')}
               onActClick={onActClick}
             />
@@ -408,22 +418,6 @@ function CompanionToggle({ on, onToggle }: { on: boolean; onToggle: () => void }
       </svg>
     </button>
   );
-}
-
-function StatusPill({ status, live }: { status: ConnStatus; live: number }) {
-  const label =
-    status === 'live'
-      ? `${live} live`
-      : status === 'connecting'
-        ? 'connecting…'
-        : status === 'reconnecting'
-          ? 'reconnecting…'
-          : status === 'error'
-            ? 'error'
-            : status === 'closed'
-              ? 'disconnected'
-              : 'idle';
-  return <span className={`lc__status lc__status--${status}`}>{label}</span>;
 }
 
 function ConnectForm({

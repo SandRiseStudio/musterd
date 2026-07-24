@@ -520,7 +520,6 @@
    office/roster panels don't scroll, so a soft opacity fade is enough there. */
 .lc-office.is-collapsed .lc-gl-canvas,
 .lc-office.is-collapsed .lc-gl-labels,
-.lc-office.is-collapsed .lc-office__caption,
 .lc-office.is-collapsed .lc-office__collapse,
 .lc-roster.is-collapsed .lc-roster__head,
 .lc-roster.is-collapsed .lc-roster__rows {
@@ -1205,6 +1204,9 @@
   }
 }
 
+
+/* Retained for /office-preview's own caption. The live office no longer renders one: the shared
+   OfficeOverlay owns that corner, and the roster rail already names every member and their kind. */
 .lc-office__caption {
   position: absolute;
   left: var(--lc-8);
