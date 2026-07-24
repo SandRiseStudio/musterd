@@ -97,10 +97,31 @@ cwd}` into `musterd session start --stdin`, which writes `binding.session` under
 
 ### 4.3 Why `model_observed` is a separate field
 
-Collapsing the observation onto `binding.model` would destroy the comparison the tripwire is built
-on — you cannot detect `observed ≠ declared` after overwriting one with the other. Keeping them
-apart also leaves `binding.model` meaning exactly what it means today, so no existing consumer has to
-re-interpret a field.
+The tripwire alone does not settle this. `declared` has two sources, so if an observation overwrote
+`binding.model`, the `observed ≠ env` comparison would survive — the exact bug in §1 (a stale value
+baked into the MCP entry) would still be caught. Three sharper reasons decide it:
+
+1. **Observations would self-launder into declarations.** Session 1 observes `claude-opus-4-8` and
+   writes it to `binding.model`. Session 2 boots, observes nothing (transcript not yet written, or a
+   harness with no probe), and reads that value as a _declaration_ — though it is really the previous
+   session's observation wearing a declaration's clothes. The field's epistemic status becomes
+   unknowable, which is precisely the question we could not answer about `grok-4.5`, recreated one
+   level down.
+2. **It would destroy the rot metric.** §8 makes the `observed ≠ declared` rate the health signal for
+   how often provisioning snapshots rot. If observations overwrite declarations, every mismatch is
+   silently repaired _in the record_ the instant it is detected: the roster reads correct, and the
+   evidence that a knob was stale is gone. Trend-to-zero becomes unmeasurable.
+3. **It would put three writer semantics in one slot.** `saveBinding`'s merge guard exists because
+   two writers clobbering one field caused the ADR 101 model-wipe. A single field would add a third
+   —human declaration, hook observation, adapter rebuild — behind a guard built for two.
+
+Against that, a single field buys one less key in a 0600 local file. It buys no consumer
+simplification: the resolver must distinguish the tiers regardless, so both values exist in memory
+either way. The only question is whether the file preserves the distinction or destroys it at rest.
+
+This also matches house style. ADR 135 keeps build attestation (`x-musterd-build`) in its own field
+rather than merging it into "things the client claims about itself," and `binding.session` got its own
+field for the same reason: different writers, different lifecycles, different trust.
 
 ## 5. Data flow
 
