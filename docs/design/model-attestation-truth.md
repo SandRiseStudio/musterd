@@ -1,6 +1,8 @@
 # Model attestation truth — observed over declared
 
-Status: design (ADR number to be picked off fresh `origin/main` at implementation)
+Status: shipped as [ADR 158](../decisions/158-model-attestation-truth.md) — 2026-07-24. This document
+is the design record; §6 was narrowed during implementation (the adapter-path rule became a note, and
+the secret check moved to the inspection path) — see ADR 158 §6 for why.
 Date: 2026-07-24
 Author: ryder (seat), with nick
 
