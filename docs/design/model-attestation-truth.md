@@ -113,7 +113,7 @@ baked into the MCP entry) would still be caught. Three sharper reasons decide it
    evidence that a knob was stale is gone. Trend-to-zero becomes unmeasurable.
 3. **It would put three writer semantics in one slot.** `saveBinding`'s merge guard exists because
    two writers clobbering one field caused the ADR 101 model-wipe. A single field would add a third
-   —human declaration, hook observation, adapter rebuild — behind a guard built for two.
+   — human declaration, hook observation, adapter rebuild — behind a guard built for two.
 
 Against that, a single field buys one less key in a 0600 local file. It buys no consumer
 simplification: the resolver must distinguish the tiers regardless, so both values exist in memory
