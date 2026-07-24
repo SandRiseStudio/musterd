@@ -1,4 +1,5 @@
-import { basename, relative, resolve, sep } from 'node:path';
+import { existsSync, readdirSync, type Dirent } from 'node:fs';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
 /**
  * The provisioning identity guard.
@@ -10,8 +11,16 @@ import { basename, relative, resolve, sep } from 'node:path';
  * different provisioning run. That is what planted the stale model the observed-attestation tier
  * exists to correct; fixing only the precedence ladder would leave the planting mechanism intact.
  *
- * This is the one place musterd **blocks** rather than warns. The failure is silent, cross-seat, and
- * survived weeks undetected, while the cost of a refusal is re-running one provisioning command.
+ * **Where this runs, and why not at write time.** `buildEntry` derives an entry's env *from* the same
+ * binding it is written beside, so at write time the two always agree and a comparison there is
+ * tautological. The mismatch appears LATER: Claude Code keys its local MCP config by **repo root**,
+ * so every seat worktree of one repo shares a single entry (ADR 143), and the next seat's
+ * provisioning overwrites it while this workspace's `binding.json` stays as it was. So these checks
+ * belong to the **inspection** path — comparing an entry a harness reports back against the binding
+ * of the workspace it is supposed to serve — which is where the doctor calls them.
+ *
+ * `assertEntryIdentity` throws because a secret mismatch is a genuine cross-run identity leak with
+ * no benign reading. The adapter path gets a note instead: see {@link foreignAdapterNote}.
  */
 export class EntryIdentityError extends Error {
   override name = 'EntryIdentityError';
@@ -45,28 +54,15 @@ export function isInside(child: string, parent: string): boolean {
 }
 
 /**
- * Throw {@link EntryIdentityError} if this MCP entry does not belong to the workspace it is being
- * written for: an adapter path inside a *sibling seat's* worktree, or secrets from another
- * provisioning run. Silent on everything else.
+ * Throw {@link EntryIdentityError} if this MCP entry carries **secrets** belonging to a different
+ * provisioning run than the workspace it is being written for. Silent on everything else.
+ *
+ * Scope note: the adapter *path* is deliberately NOT a refusal — see {@link foreignAdapterNote}.
  */
 export function assertEntryIdentity(
   entry: { args: string[]; env: Record<string, string> },
   opts: EntryIdentityOpts,
 ): void {
-  const adapter = entry.args[entry.args.length - 1];
-  if (adapter) {
-    for (const sibling of opts.siblingDirs ?? []) {
-      if (isInside(adapter, sibling) && !isInside(adapter, opts.workspaceDir)) {
-        throw new EntryIdentityError(
-          `refusing to wire ${basename(opts.workspaceDir)}: the adapter path ${adapter} lives inside ` +
-            `another seat's workspace (${basename(sibling)}, at ${sibling}). This seat would launch ` +
-            `${basename(sibling)}'s adapter forever, inheriting its provisioning. Re-run from ` +
-            `${opts.workspaceDir}, or wire a shared install.`,
-        );
-      }
-    }
-  }
-
   const entryGrant = entry.env['MUSTERD_GRANT'];
   if (entryGrant && opts.binding?.grant && entryGrant !== opts.binding.grant) {
     throw new EntryIdentityError(
@@ -83,4 +79,66 @@ export function assertEntryIdentity(
         `workspace's binding — it belongs to a different team or provisioning run.`,
     );
   }
+}
+
+/**
+ * A note (never a refusal) when an entry's adapter lives inside a *different seat's* workspace —
+ * the shape found in the wild: ryder's entry launching `agents-miley/packages/mcp/dist/index.js`.
+ *
+ * This is a **staleness and fragility** problem, not an identity leak. The adapter anchors identity
+ * on its cwd, walking up to that folder's `binding.json` (`mcp/config.ts`), so whose *copy* of the
+ * binary runs never decided which seat it claims — the baked env did, which is why the secrets above
+ * refuse and this does not. What a foreign path does cost: the seat silently runs another checkout's
+ * build (skew you cannot see from here), and its MCP server breaks outright if that folder moves.
+ *
+ * It cannot be a refusal because it is indistinguishable from the canonical flow: provisioning is
+ * normally run FROM another checkout (`/Users/nick/agents`, itself a bound seat), and
+ * `resolveMcpLaunch()` resolves the adapter relative to the running CLI either way. Blocking on the
+ * path would refuse musterd's own provisioning workflow while still not proving anything about
+ * identity.
+ *
+ * Returns undefined when the adapter is inside the target workspace, in a shared/global install, or
+ * anywhere that is not a known sibling seat worktree.
+ */
+export function foreignAdapterNote(
+  entry: { args: string[] },
+  opts: { workspaceDir: string; siblingDirs?: string[] | undefined },
+): string | undefined {
+  const adapter = entry.args[entry.args.length - 1];
+  if (!adapter || isInside(adapter, opts.workspaceDir)) return undefined;
+  for (const sibling of opts.siblingDirs ?? []) {
+    if (isInside(adapter, sibling)) {
+      return (
+        `the musterd MCP entry for ${basename(opts.workspaceDir)} launches its adapter from ` +
+        `${adapter}, inside another seat's workspace (${basename(sibling)}) — this seat runs that ` +
+        `checkout's build, and breaks if it moves. Re-run \`musterd init\` here, or wire a shared ` +
+        `install, to make the entry self-contained.`
+      );
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Sibling seat worktrees of `workspaceDir`: directories beside it that hold their own
+ * `.musterd/binding.json`. This is the dogfood layout (`agents-ryder`, `agents-miley`, … beside each
+ * other), which is exactly where cross-seat wiring goes wrong. Best-effort: an unreadable parent
+ * yields none, and none means the checks above simply stay quiet.
+ */
+export function siblingWorkspaces(workspaceDir: string): string[] {
+  const parent = dirname(resolve(workspaceDir));
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(parent, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const dir = join(parent, e.name);
+    if (isInside(dir, workspaceDir)) continue; // the workspace itself
+    if (existsSync(join(dir, '.musterd', 'binding.json'))) out.push(dir);
+  }
+  return out;
 }
