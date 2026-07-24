@@ -164,24 +164,51 @@ export function ffmpegArgs(
 
 /**
  * The constant-frame-rate pump. CDP screencast frames arrive only when pixels change; the encoder
- * needs one every 1000/fps ms regardless, so the pump re-emits the latest frame on a fixed clock —
- * a rested office becomes a perfectly still (and perfectly valid) stream. Pure: callers wire the
- * clock and the sink, tests drive it by hand.
+ * needs one every 1000/fps ms regardless, so the pump re-emits the latest frame on a clock — a
+ * rested office becomes a perfectly still (and perfectly valid) stream.
+ *
+ * **Drift-compensating**, and this is load-bearing: image2pipe synthesizes timestamps from frame
+ * *count*, so every tick the interval timer fires late (Node under load fires late and never makes
+ * up) is a frame the video timeline falls behind wall clock. A stream 5% short of frames plays 5%
+ * slower than real time — the viewer's buffer drains and the player stalls on a fast connection
+ * (the first live Twitch run found exactly this). So `tick` doesn't emit one frame per call; it
+ * emits however many frames wall clock says are owed since the first one. Pure: the clock is
+ * injected, tests drive it by hand.
  */
-export function makeFramePump(write: (png: Buffer) => void): {
+export function makeFramePump(
+  write: (png: Buffer) => void,
+  fps: number,
+  now: () => number = () => performance.now(),
+): {
   frame: (png: Buffer) => void;
-  tick: () => boolean;
+  tick: () => number;
 } {
   let latest: Buffer | null = null;
+  let start = -1; // wall-clock ms of the first emitted frame — the timeline's epoch
+  let emitted = 0;
+  /** Late by more than this → a suspend/SIGSTOP-sized gap. Re-anchor instead of fast-forwarding
+   * thousands of catch-up frames through the encoder in one burst. */
+  const MAX_CATCHUP = fps; // 1 second
   return {
     frame: (png) => {
       latest = png;
     },
-    /** Emit the newest frame; false while nothing has arrived yet (don't encode a black lie). */
+    /** Emit every frame owed since the epoch; returns how many went out (0 while nothing has
+     * arrived yet — don't encode a black lie). */
     tick: () => {
-      if (!latest) return false;
-      write(latest);
-      return true;
+      if (!latest) return 0;
+      if (start < 0) start = now();
+      const owed = Math.floor(((now() - start) * fps) / 1000) + 1 - emitted;
+      if (owed <= 0) return 0;
+      const n = Math.min(owed, MAX_CATCHUP);
+      if (owed > MAX_CATCHUP) {
+        // The process itself was paused (laptop lid, debugger, SIGSTOP) — skip the dead air:
+        // re-anchor the epoch so the (emitted + n)th frame is the one due exactly now.
+        start = now() - (emitted + n - 1) * (1000 / fps);
+      }
+      for (let i = 0; i < n; i++) write(latest);
+      emitted += n;
+      return n;
     },
   };
 }
@@ -340,10 +367,12 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     await waitBroadcastReady(cdp, 30_000);
 
     const pump = makeFramePump((png) => {
-      // Backpressure by drop, not by buffer: if ffmpeg is briefly behind, skipping a duplicate
-      // frame is invisible; an unbounded write queue is an OOM with extra steps.
+      // Write unconditionally while the pipe is open — Node buffers past the kernel pipe when
+      // ffmpeg is briefly behind, and PNG frames are small enough that the window is bounded. The
+      // one wrong move is *dropping* frames: image2pipe timestamps are frame-count, so a dropped
+      // frame permanently slows the video timeline (the stall the pump exists to prevent).
       if (ffmpeg.stdin?.writable) ffmpeg.stdin.write(png);
-    });
+    }, opts.fps);
     cdp.on('Page.screencastFrame', (p) => {
       pump.frame(Buffer.from(String(p['data']), 'base64'));
       void cdp.send('Page.screencastFrameAck', { sessionId: p['sessionId'] });
@@ -354,7 +383,9 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
       maxHeight: 1080,
       everyNthFrame: 1,
     });
-    pumpTimer = setInterval(() => pump.tick(), Math.round(1000 / opts.fps));
+    // Tick at 2× frame cadence: the pump owes frames by wall clock, so the timer only needs to
+    // fire *often enough* — late ticks emit catch-up frames instead of losing them.
+    pumpTimer = setInterval(() => pump.tick(), Math.max(1, Math.round(500 / opts.fps)));
 
     process.stdout.write(`${theme.ok('◉ live')}\n`);
 
