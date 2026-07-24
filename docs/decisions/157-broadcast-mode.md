@@ -1,8 +1,10 @@
 # 157 — Broadcast mode: the office as a stream source
 
-- Status: accepted — 2026-07-24. Increment 1 (the page mode) is implemented in this PR; Increment 2
-  (a `musterd broadcast` capturer) is **designed but gated** — see the exit condition below. Number
-  **157 pinned** — next free on `origin/main` (highest is 156), enforced by `adr-numbers:check` (#350).
+- Status: accepted — 2026-07-24. Increment 1 (the page mode) landed in #365; Increment 2 (the
+  `musterd broadcast` capturer) was originally **gated** behind ≥2 real OBS streams, but nick waived
+  the gate the same day ("keep moving so we don't have to rely on OBS") and it is now **built** —
+  see the Increment 2 section. Number **157 pinned** — next free on `origin/main` (highest is 156),
+  enforced by `adr-numbers:check` (#350).
 - Date: 2026-07-24
 - Builds on: [ADR 079](079-live-isometric-office.md) / [ADR 086](086-ambient-office-life.md) /
   [ADR 133](133-procedural-character-skeleton.md) (the office scene this streams),
@@ -118,29 +120,36 @@ overhead, not new code: once `broadcast.tsx` also imports `client.ts` / `format.
 chunk. Duplicating them per route would have been worse in aggregate; +2.0 KB site-wide for a whole
 new route is the trade.
 
-### Increment 2 — `musterd broadcast` (designed, **gated**, not built)
+### Increment 2 — `musterd broadcast` (**built 2026-07-24; the OBS gate was waived**)
 
-Increment 1 still needs a human to run OBS. The end state is one command that streams the office
-with no GUI in the loop:
+As originally accepted, this increment was gated behind ≥2 real OBS streams on Increment 1. Nick
+waived that gate the same day — the point of the arc is streaming _without_ a GUI in the loop, and
+he chose not to spend two evenings proving OBS adequate before replacing it. The design shipped as
+sketched:
 
-- **CLI, not daemon.** `packages/cli/src/commands/broadcast.ts`, dispatched from `bin.ts`, supervised
-  the way `service` supervises (a LaunchAgent for the unattended case). The daemon must **not** spawn
-  it — ADR 131's residency model is explicit that the daemon supervises and never spawns processes.
+- **CLI, not daemon.** `packages/cli/src/commands/broadcast.ts`, dispatched from `bin.ts`. The
+  daemon does **not** spawn it — ADR 131's residency model is explicit that the daemon supervises
+  and never spawns processes. It runs foreground (`serve` posture, Ctrl-C to stop); LaunchAgent
+  supervision is deferred until unattended streaming actually wants it.
 - **Headless Chromium** on `/broadcast?team=…`, launched with `--headless=new
---window-size=1920,1080 --force-device-scale-factor=1`, driven over CDP exactly as
-  `scripts/perf/live-baseline.mjs` already does. Wait for `window.__broadcastReady` before encoding —
-  "the page loaded" and "the page is streaming a real team" are different states.
-- **CDP screencast → ffmpeg → RTMPS.** `Page.startScreencast` frames pumped at a constant 30 fps
-  (CFR: screencast is change-driven, and a rested office legitimately emits no frames — the encoder
-  still needs a steady clock), piped to `ffmpeg`: `h264_videotoolbox` on the laptop, `libx264` if it
-  ever moves to a scale-to-zero Fly machine.
-- **The stream key is a secret**, so it comes from the environment or the macOS Keychain and never
-  from musterd config, which is committed and exported to git (ADR 058).
+--window-size=1920,1080 --force-device-scale-factor=1`, driven over CDP (the
+  `scripts/perf/live-baseline.mjs` pattern). It waits on `window.__broadcastReady` before encoding —
+  "the page loaded" and "the page is streaming a real team" are different states, and a dead daemon
+  fails fast instead of streaming a blank page.
+- **CDP screencast → CFR pump → ffmpeg.** `Page.startScreencast` is change-driven and a rested
+  office legitimately emits no frames, so a pure pump (`makeFramePump`) re-emits the latest frame on
+  a fixed 1000/fps clock — a still room becomes a still, valid stream. Backpressure is drop-not-queue
+  (a skipped duplicate frame is invisible; an unbounded buffer is an OOM). ffmpeg encodes
+  `h264_videotoolbox` on macOS / `libx264` elsewhere, muxes a silent audio track (RTMP ingests
+  reject video-only), keyframes every 2 s (Twitch's ask), and writes one of exactly three sinks:
+  `--out <file.mp4>` (the no-key proof mode, same encode path), `--twitch`, or `--rtmp <url>`
+  (any provider, verbatim).
+- **The stream key is a secret**: `MUSTERD_STREAM_KEY` or the macOS Keychain item
+  `musterd-stream-key` — never a flag (argv leaks into shell history and `ps`) and never musterd
+  config, which is committed and exported to git (ADR 058).
 
-**Gate:** build Increment 2 only after **≥2 real streams on Increment 1** show unacceptable laptop
-impact or reliability problems. The plausible outcome is that an OBS browser source plus
-VideoToolbox is simply fine, in which case Increment 2 is a CLI, a supervisor and a frame pump that
-exist to replace a working thing.
+The pure parts (option parsing, sink/key resolution, ffmpeg argv, the pump, the Chrome argv) are
+exported and unit-tested; the runtime shell around them is thin by design.
 
 ## Consequences
 
@@ -188,10 +197,18 @@ broadcast connects as an ordinary observer and appears in the existing observer 
    animation continues and that `musterd status` shows **no new human online** — the ADR 155 hazard,
    checked against the daemon rather than against the code.
 
-**Experiment** — the gate on Increment 2 is the experiment, and it is pre-registered: run **≥2 real
-streams** on Increment 1 and record, per stream, laptop thermals/CPU while encoding, dropped-frame
-count from OBS's own stats, and every operator intervention (a reconnect, a reload, a re-frame).
-Increment 2 is justified if either the machine is unusable while streaming or interventions are
-needed more than once per stream; otherwise this ADR closes at Increment 1 and the capturer stays
-unbuilt. The measure that would falsify the whole approach is subtler and worth naming: if nobody
-watches, the bottleneck was never the render pipeline, and no amount of capture engineering fixes it.
+**Experiment** — the original pre-registered gate (≥2 OBS streams before building Increment 2) was
+waived by nick on 2026-07-24, so the question it would have answered — "is OBS adequate?" — goes
+unanswered by choice. The measurement plan transfers to the capturer itself: per real stream, record
+laptop thermals/CPU while encoding, ffmpeg's own dropped/duplicated frame counts, and every operator
+intervention (a restart, a reconnect). Those numbers decide the two deferred pieces — LaunchAgent
+supervision (justified by interventions) and a scale-to-zero Fly encoder (justified by thermals).
+The measure that would falsify the whole approach is subtler and worth naming: if nobody watches,
+the bottleneck was never the render pipeline, and no amount of capture engineering fixes it.
+
+**Increment 2 eval, run at build time (2026-07-24):** 16 unit tests over the exported pure parts
+(option/sink/key resolution incl. the no-key failure, ffmpeg argv contract — image2pipe rate, silent
+audio, 2 s keyframes, flv-vs-faststart per sink, codec swap —, pump semantics: silent-before-first,
+duplicate-when-rested, newest-wins), plus the end-to-end proof: `musterd broadcast --team revive
+--out proof.mp4 --duration 10` against the live daemon captured a playable 10 s 1920×1080 H.264 at
+30 fps with the office visibly animating.
