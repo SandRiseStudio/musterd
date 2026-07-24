@@ -205,10 +205,14 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
       description:
         'Mark a lane done — clears its warnings and releases its surface. If its branch landed, ' +
         'attest the merge: pass pr, sha, and authorized_by so the audit log joins your seat to ' +
-        'the landed SHA and the authorizing human.',
+        'the landed SHA and the authorizing human. Landed without a PR? Omit pr and pass sha alone.',
       inputSchema: {
         id: z.string().describe('lane id'),
-        pr: z.number().int().optional().describe('landed PR number'),
+        // `pr` is the PR *number*. Callers reached for `pr:"local"` to mean "merged without a PR";
+        // the description now names the real answer (omit it), and coercion accepts "343"/"#343"
+        // but deliberately not a non-numeric word — attesting a PR that never existed would
+        // corrupt the seat→PR→SHA audit join (ADR 109) that this field exists to feed.
+        pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
         sha: z.string().optional().describe('squash-merge SHA on main'),
         authorized_by: z
           .string()

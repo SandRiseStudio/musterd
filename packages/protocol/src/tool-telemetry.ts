@@ -9,8 +9,11 @@ import { z } from 'zod';
  */
 
 /** The outcome classes the report engine aggregates by. `invalid_input` is the bounce class —
- * the harness's arguments failed the tool's input schema, so the handler never ran. */
-export const TOOL_CALL_OUTCOMES = ['ok', 'error', 'invalid_input'] as const;
+ * the harness's arguments failed the tool's input schema, so the handler never ran. `coerced` is a
+ * success that only happened because the inc-4 coercion layer repaired the arguments first: it
+ * counts as a win over `invalid_input`, and as the standing measure of how often agents still guess
+ * a field wrong. Watching it is what keeps deterministic forgiveness from hiding a surface defect. */
+export const TOOL_CALL_OUTCOMES = ['ok', 'error', 'invalid_input', 'coerced'] as const;
 export const ToolCallOutcomeSchema = z.enum(TOOL_CALL_OUTCOMES);
 export type ToolCallOutcome = z.infer<typeof ToolCallOutcomeSchema>;
 
@@ -79,6 +82,9 @@ export const ToolUsageRowSchema = z.object({
   bounces: z.number().int(),
   /** bounces / calls; null when the tool saw no calls in the window. */
   bounce_rate: z.number().nullable(),
+  /** Calls that only succeeded because coercion repaired their arguments (ADR 144 inc 4) — the
+   * bounces we now absorb, and the live measure of a field agents keep guessing wrong. */
+  coerced: z.number().int(),
   avg_duration_ms: z.number().nullable(),
   max_duration_ms: z.number().nullable(),
   /** Calls per caller role — "which tools does each role actually call". Unroled seats count
@@ -106,6 +112,8 @@ export const ToolCallMetricsSchema = z.object({
   window_days: z.number().int(),
   calls: z.number().int(),
   bounces: z.number().int(),
+  /** Team-wide coerced calls over the window — bounces the inc-4 layer absorbed. */
+  coerced: z.number().int(),
   /** Sorted by calls, descending. */
   tools: z.array(ToolUsageRowSchema),
   /** Latest attested weight per seat (not window-bound — an attestation, like `presence.build`). */

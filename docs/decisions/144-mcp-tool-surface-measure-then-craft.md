@@ -98,6 +98,38 @@ confusion, not taste. No model in the request path: the server-side conforming-a
 deterministic layer now; the model-in-the-path variant stays a researchable extension (§ Observability
 & Evaluation).
 
+**Decided from increment-1 data (2026-07-24).** 853 calls over 2026-07-15..24 (26 bounces, 10 errors),
+each bounce joined to the harness payload that produced it. The findings and the calls they forced:
+
+- **No split, no merge.** Nothing in the data shows confusion _between_ tools — no bounce was a caller
+  reaching for the wrong tool, and `team_send`'s nine acts produced exactly one act-shaped failure
+  (a missing conditional `meta.species`). The default holds: coarse + well-described. Revisit only on
+  measured cross-tool confusion.
+- **Coercion belongs at the transport seam, not "in handlers" as this section assumed.** The SDK
+  validates arguments before any handler runs, so a handler cannot see — let alone forgive — a wrong
+  field name. `coerce.ts` therefore rewrites `params.arguments` ahead of validation, mirroring
+  `repair.ts` on the way out.
+- **Alias, don't rename.** `lane`/`lane_id` sent where the schema wants `id` is ~70% of all bounces,
+  from five seats across two harnesses, including one seat that hit it on its first day — a standing
+  tax, not a habit. The cause is our own vocabulary (results and prose say "lane"). Aliasing keeps the
+  surface stable for every connected agent and doc; the new `coerced` outcome measures whether the
+  wrong guess persists, which is what would justify renaming later. Renaming first would be the guess.
+- **Two shapes stay unforgiven, on purpose.** A multi-recipient `to` (the wire carries one recipient;
+  silently dropping the rest loses a message) and a non-numeric `pr` such as `"local"` (attesting a PR
+  that never existed corrupts the ADR 109 seat→PR→SHA join). Both keep bounce + repair hint. The real
+  gap `pr:"local"` exposed — no way to attest a local merge — is answered in prose: omit `pr`, pass `sha`.
+- **Constraints must live on the surface the caller is validated against.** `team_memory_save.headline`
+  capped at 120 only in the protocol, so a 121-char headline passed validation and returned a _late
+  server error_ instead of a bounce with a hint. Declared on the tool schema now.
+- **`input_examples` are spent only where coercion cannot reach.** Examples cost bytes on every
+  connect, so the one worked example added is `ask`'s conditionally-required `meta` — the one shape
+  that can only be taught, because nothing in a bare `ask` says which species the caller meant.
+  Measured cost of the whole increment: **+250 B / +63 est tokens per seat (+2.2%)**, against the
+  1,766 B increment 2 saved.
+- **An empty state is not an error.** A first-ever `team_memory_read` returned the daemon's 404 through
+  `errorResult`, counting a normal empty state as a tool failure — inflating the very error rate this
+  arc is measured against. Fixed at the MCP layer; the HTTP 404 stands.
+
 ### 5. Scope by role (increment 5)
 
 The adapter renders only the tools a seat's role can meaningfully use — an observer never loads acting
@@ -154,7 +186,12 @@ it lands, the only cost precedent in the ledger is `residency.wake_cost` — the
 
 **Eval** — headline: **rendered-surface weight per seat** (bytes/est-tokens at connect) and
 **invalid-input bounce rate per tool** (bounces per hundred calls, and whether the first retry after a
-repair hint succeeds). Secondary: **action-naming coverage** — an audited checklist over all tools ×
+repair hint succeeds). From increment 4, a third headline instrument: the **coerced rate per tool** —
+calls that only succeeded because the coercion layer repaired their arguments. It is deliberately _not_
+folded into the bounce rate (which must keep meaning "cost the agent a turn"), because forgiveness we
+cannot see is indistinguishable from a surface that never had the defect. A coerced rate that stays
+high on one field is the evidence that would promote an alias to a rename in a later increment; one
+that decays says the surface taught itself. Secondary: **action-naming coverage** — an audited checklist over all tools ×
 {success, empty, error} results, brought to and held at 100%. Dataset: the dogfood team's live tool
 calls. Baseline: captured by increment 1 before increment 2 touches anything; the hand-measured
 description-region weights in the contract doc (~2.9K/~1.7K/~1.3K chars) are the provisional numbers it

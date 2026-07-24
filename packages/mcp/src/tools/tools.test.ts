@@ -608,14 +608,30 @@ describe('team_memory handlers (ADR 093)', () => {
     expect(out).toContain('tests red in ws.test.ts');
   });
 
-  it('read reports a seat with nothing saved via the server not_found', async () => {
+  // An absent note is an EMPTY STATE, not a failure (ADR 144 inc 4). The daemon's 404 is the right
+  // HTTP answer, but rendering it through errorResult made a first-ever read count as a tool error
+  // — inflating the error rate the increment is measured against. Empty states name the next action.
+  it('read presents a seat with nothing saved as an empty state, not an error', async () => {
     const handlers = captureAll(registerMemory, {
       joined: true,
       readMemory: (async () => {
         throw new Error('no memory saved for this seat');
       }) as any,
     });
-    expect(text(await handlers['team_memory_read']!({}))).toContain('no memory saved');
+    const out = await handlers['team_memory_read']!({});
+    expect(text(out)).toContain('no memory saved for this seat yet');
+    expect(text(out)).toContain('team_memory_save'); // names the next action
+    expect(text(out).startsWith('error:')).toBe(false); // would classify as `error` in telemetry
+  });
+
+  it('read still surfaces a real failure as an error', async () => {
+    const handlers = captureAll(registerMemory, {
+      joined: true,
+      readMemory: (async () => {
+        throw new Error('daemon unreachable');
+      }) as any,
+    });
+    expect(text(await handlers['team_memory_read']!({})).startsWith('error:')).toBe(true);
   });
 });
 

@@ -346,12 +346,17 @@ async function toolsReport(parsed: Parsed): Promise<number> {
     w(theme.meta('  no tool calls recorded yet — they land as adapters flush (~30s)') + '\n');
   } else {
     const rate = t.calls > 0 ? ` · bounce ${pct(t.bounces / t.calls)}` : '';
-    w(`  ${theme.accent(String(t.calls))} calls · ${t.bounces} bounces${rate}\n\n`);
+    // Coerced calls are reported beside bounces, never folded into them: they are the mistakes the
+    // inc-4 layer absorbed, and keeping them visible is what stops silent forgiveness from reading
+    // as a surface that never had the defect (ADR 144 inc 4).
+    const absorbed = t.coerced > 0 ? ` · ${t.coerced} coerced` : '';
+    w(`  ${theme.accent(String(t.calls))} calls · ${t.bounces} bounces${rate}${absorbed}\n\n`);
     for (const row of t.tools) {
       const bounce =
         row.bounces > 0
           ? ` · ${theme.warn(`${row.bounces} bounce${row.bounces === 1 ? '' : 's'} (${pct(row.bounce_rate ?? 0)})`)}`
           : '';
+      const coerced = row.coerced > 0 ? ` · ${theme.meta(`${row.coerced} coerced`)}` : '';
       const errors = row.errors > 0 ? ` · ${row.errors} error${row.errors === 1 ? '' : 's'}` : '';
       const lat =
         row.avg_duration_ms === null
@@ -361,7 +366,9 @@ async function toolsReport(parsed: Parsed): Promise<number> {
         .sort((a, b) => b[1] - a[1])
         .map(([role, n]) => `${role} ${n}`)
         .join(', ');
-      w(`  ${row.tool} — ${row.calls} call${row.calls === 1 ? '' : 's'}${bounce}${errors}${lat}\n`);
+      w(
+        `  ${row.tool} — ${row.calls} call${row.calls === 1 ? '' : 's'}${bounce}${coerced}${errors}${lat}\n`,
+      );
       if (roles) w(theme.meta(`    by role: ${roles}`) + '\n');
     }
   }

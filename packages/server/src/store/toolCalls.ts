@@ -126,6 +126,7 @@ export function deriveToolCallMetrics(
     calls: number;
     errors: number;
     bounces: number;
+    coerced: number;
     total_ms: number;
     max_ms: number;
     by_role: Record<string, number>;
@@ -136,11 +137,22 @@ export function deriveToolCallMetrics(
     if (!acc)
       byTool.set(
         r.tool,
-        (acc = { calls: 0, errors: 0, bounces: 0, total_ms: 0, max_ms: 0, by_role: {} }),
+        (acc = {
+          calls: 0,
+          errors: 0,
+          bounces: 0,
+          coerced: 0,
+          total_ms: 0,
+          max_ms: 0,
+          by_role: {},
+        }),
       );
     acc.calls += r.calls;
     if (r.outcome === 'error') acc.errors += r.calls;
     if (r.outcome === 'invalid_input') acc.bounces += r.calls;
+    // A coerced call succeeded, so it counts in `calls` and NOT in `bounces` — the bounce rate has
+    // to keep meaning "cost the agent a turn", or inc 4 would flatter itself by construction.
+    if (r.outcome === 'coerced') acc.coerced += r.calls;
     acc.total_ms += r.total_duration_ms;
     acc.max_ms = Math.max(acc.max_ms, r.max_duration_ms);
     const role = r.role ?? 'unroled';
@@ -154,6 +166,7 @@ export function deriveToolCallMetrics(
       errors: a.errors,
       bounces: a.bounces,
       bounce_rate: a.calls > 0 ? a.bounces / a.calls : null,
+      coerced: a.coerced,
       avg_duration_ms: a.calls > 0 ? Math.round(a.total_ms / a.calls) : null,
       max_duration_ms: a.calls > 0 ? a.max_ms : null,
       by_role: a.by_role,
@@ -198,6 +211,7 @@ export function deriveToolCallMetrics(
     window_days: WINDOW_DAYS,
     calls: tools.reduce((n, t) => n + t.calls, 0),
     bounces: tools.reduce((n, t) => n + t.bounces, 0),
+    coerced: tools.reduce((n, t) => n + t.coerced, 0),
     tools,
     surface,
   };
