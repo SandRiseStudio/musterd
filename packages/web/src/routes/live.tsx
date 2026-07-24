@@ -157,6 +157,13 @@ function LivePage() {
     const params = new URLSearchParams(window.location.search);
     const urlTeam = params.get('team');
     const urlAs = params.get('as');
+    // `/live?team=…&broadcast=1` is an alias for the broadcast render mode (ADR 157) — the spec URL
+    // people will guess and type. Hand it straight to /broadcast, which is a different route by
+    // design: it has no advanced-seat path, so streaming can't attach a phantom human presence.
+    if (params.get('broadcast') === '1' && urlTeam) {
+      window.location.replace(`/broadcast?team=${encodeURIComponent(urlTeam)}`);
+      return;
+    }
     const watchTok = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('w');
     if (urlTeam && urlAs && watchTok) {
       setTeam(urlTeam);
