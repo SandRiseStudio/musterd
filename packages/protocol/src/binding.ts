@@ -66,6 +66,31 @@ export const SessionCaptureSchema = z.object({
 
 export type SessionCapture = z.infer<typeof SessionCaptureSchema>;
 
+/**
+ * A model **observation** — what a harness was seen running this session, as opposed to `model`,
+ * which is what a human or a config *declares*. Written ONLY by the SessionStart hook (`musterd
+ * session start --stdin`) via the per-harness `observeModel` probe; per-machine like `session`, so
+ * it is kept out of the committed `workspace.json`.
+ *
+ * Deliberately NOT merged into `model`. An observation that overwrote a declaration would launder
+ * itself into one on the next session — the field's epistemic status becomes unknowable, which is
+ * precisely the question nobody could answer about the seat that attested `grok-4.5` for weeks while
+ * running `claude-opus-4-8`. Keeping the tiers apart is also what leaves the `observed ≠ declared`
+ * tripwire something to compare.
+ *
+ * Attested, never verified (ADR 101); absent ⇒ fall through to the declared tier.
+ */
+export const ModelObservationSchema = z.object({
+  /** The model id the harness reported. */
+  model: z.string().min(1).max(120),
+  /** Harness class that produced it (`claude-code`, `codex`) — matches the residency vocabulary. */
+  harness: z.string().min(1).max(40),
+  /** Epoch ms of the observation; newest-wins against a prior one. */
+  observed_at: z.number().int(),
+});
+
+export type ModelObservation = z.infer<typeof ModelObservationSchema>;
+
 /** The full workspace binding — the secret-free {@link WorkspaceSpecSchema} plus the two secrets. */
 export const BindingSchema = WorkspaceSpecSchema.extend({
   /** Team agent join key (mskey_, ADR 075/076). Optional — absent for chat/human folders; enforced present at claim time for seat/role auto-claim. */
@@ -81,6 +106,10 @@ export const BindingSchema = WorkspaceSpecSchema.extend({
   /** The captured harness session (ADR 131 §5) — see {@link SessionCaptureSchema} for the strict
    *  local-only contract. Hook-written; per-machine like `model`, so kept out of `workspace.json`. */
   session: SessionCaptureSchema.optional(),
+  /** The hook-**observed** model (see {@link ModelObservationSchema}) — outranks the declared `model`
+   *  above at attestation time, because a declaration is a snapshot and snapshots rot. Hook-written
+   *  and per-machine like `session`, so kept out of `workspace.json`. */
+  model_observed: ModelObservationSchema.optional(),
 });
 
 export type Binding = z.infer<typeof BindingSchema>;
