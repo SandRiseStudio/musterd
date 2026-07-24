@@ -2,10 +2,10 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { HARNESSES } from './index.js';
 import { claudeCode } from './claudeCode.js';
 import { codex } from './codex.js';
 import { cursor } from './cursor.js';
+import { HARNESSES } from './index.js';
 
 function transcriptWith(model: string): string {
   const p = join(mkdtempSync(join(tmpdir(), 'musterd-obs-')), 't.jsonl');

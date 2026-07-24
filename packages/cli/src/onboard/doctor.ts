@@ -14,6 +14,7 @@ import { findBinding, loadConfig } from '../config.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
 import { cliBuild } from '../version.js';
+import { foreignAdapterNote, siblingWorkspaces } from './entryGuard.js';
 import { contentHash, strippedBody } from './guidance.js';
 import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
 import { HARNESSES } from './harnesses/index.js';
@@ -195,6 +196,40 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
           `seat than the musterd CLI in this folder. Run \`musterd init\` to re-sync (it no longer ` +
           `bakes the claim, so binding.json becomes the single source of truth).`,
       );
+    }
+    // A legacy baked MUSTERD_MODEL. Provisioning stopped emitting it, but entries written before that
+    // still carry one at the TOP of the adapter's ladder, where no observation can correct it — the
+    // exact shape that had a seat attesting `grok-4.5` for weeks while running `claude-opus-4-8`.
+    if (d.registeredModel !== undefined) {
+      drift.push(
+        `${h.label}'s musterd server bakes MUSTERD_MODEL=${d.registeredModel} — a wire-time snapshot ` +
+          `that outranks what the harness is actually running, and that no later observation can ` +
+          `correct. Run \`musterd init\` here to rewrite the entry without it.`,
+      );
+    }
+    // A grant from a different provisioning run. This is the cross-seat leak: Claude Code keys local
+    // MCP config by repo root, so every seat worktree shares one entry (ADR 143) and the next seat's
+    // provisioning overwrites it. Reported here rather than refused at write time, where the entry is
+    // built from the same binding it is compared against and the check could never fire.
+    if (
+      d.registeredGrant !== undefined &&
+      binding?.grant !== undefined &&
+      d.registeredGrant !== binding.grant
+    ) {
+      drift.push(
+        `${h.label}'s musterd server carries a grant that does not match .musterd/binding.json — it ` +
+          `belongs to a different provisioning run, so this folder's harness entry was written for ` +
+          `another seat. Re-run \`musterd init\` here (or \`musterd agent <seat> --path ${cwd}\`).`,
+      );
+    }
+    // An adapter inside a sibling seat's workspace: a note, not a refusal — identity comes from cwd,
+    // so what this costs is running another checkout's build and breaking if that folder moves.
+    if (d.registeredArgs !== undefined) {
+      const note = foreignAdapterNote(
+        { args: d.registeredArgs },
+        { workspaceDir: cwd, siblingDirs: siblingWorkspaces(cwd) },
+      );
+      if (note !== undefined) drift.push(note);
     }
   }
   // The attestation tripwire. The original (#273) fired only on an *absent* declaration, so a

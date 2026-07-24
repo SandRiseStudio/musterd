@@ -43,7 +43,7 @@ describe('assertEntryIdentity', () => {
         workspaceDir: ryder,
         binding: { grant: 'msgr_mine' },
       }),
-    ).toThrow(/grant/);
+    ).toThrow(EntryIdentityError);
   });
 
   it('refuses an agent key belonging to a different team or run', () => {

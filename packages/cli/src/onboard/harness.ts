@@ -16,6 +16,20 @@ export interface DetectResult {
    * tools to a stale seat after a re-claim). Undefined ⇒ not baked / not readable ⇒ nothing to check.
    */
   registeredClaim?: string;
+  /**
+   * The `MUSTERD_MODEL` baked into this harness's registered musterd server, if any and readable.
+   * Provisioning no longer emits it, so a present value is a **legacy snapshot** sitting at the top
+   * of the adapter's ladder, where no observation can correct it — the doctor flags it for removal.
+   */
+  registeredModel?: string;
+  /**
+   * The `MUSTERD_GRANT` baked into the registered server, if readable. Compared against the
+   * workspace's own binding: a mismatch means the shared, repo-root-keyed entry (ADR 143) was
+   * overwritten by a different seat's provisioning run.
+   */
+  registeredGrant?: string;
+  /** The registered launch args, so the doctor can spot an adapter inside another seat's workspace. */
+  registeredArgs?: string[];
 }
 
 export interface ConfigureResult {

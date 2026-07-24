@@ -4,13 +4,13 @@ import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
+import { HARNESSES } from '../onboard/harnesses/index.js';
 import { clock, theme } from '../render/theme.js';
 import {
   LOCAL_SESSION_LIVE_MS,
   localSessionLiveness,
   type LocalSessionLiveness,
 } from '../session/liveness.js';
-import { HARNESSES } from '../onboard/harnesses/index.js';
 import { findWorkspaceDir } from './helpers.js';
 
 /**

@@ -46,6 +46,17 @@ function harness(label: string, installed: boolean, configured: boolean, registe
   };
 }
 
+/** A harness whose registered entry we can inspect — the read-back the poisoned-entry sweep needs. */
+function harnessWithEntry(
+  label: string,
+  extra: { registeredModel?: string; registeredArgs?: string[]; registeredGrant?: string },
+) {
+  return {
+    label,
+    detect: async () => ({ installed: true, configured: true, detail: label, ...extra }),
+  };
+}
+
 describe('inspectProvisioning', () => {
   beforeEach(() => {
     h.harnesses = [];
@@ -175,6 +186,45 @@ describe('inspectProvisioning', () => {
     h.primer = 'managed';
     h.binding = { claim: { mode: 'seat', name: 'Miley' }, model: 'grok-4.5' };
     h.harnesses = [harness('Claude Code', true, true)];
+    const r = await inspectProvisioning('/x');
+    expect(r.drift).toEqual([]);
+  });
+
+  // Entries written before the unbake still carry a snapshot at the TOP of the adapter's ladder,
+  // where no observation can correct it. The guard stops new ones; this finds the existing ones.
+  it('flags a registered MUSTERD_MODEL as a legacy baked snapshot, with the removal command', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    h.harnesses = [harnessWithEntry('Claude Code', { registeredModel: 'grok-4.5' })];
+    const r = await inspectProvisioning('/x');
+    const line = r.drift.find((d) => d.includes('MUSTERD_MODEL'));
+    expect(line).toBeDefined();
+    expect(line).toContain('grok-4.5');
+    expect(line).toContain('musterd init');
+  });
+
+  it('flags a registered grant belonging to a different provisioning run', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' }, grant: 'msgr_mine' };
+    h.harnesses = [harnessWithEntry('Claude Code', { registeredGrant: 'msgr_someone_else' })];
+    const r = await inspectProvisioning('/x');
+    expect(r.drift.find((d) => d.includes('grant'))).toBeDefined();
+  });
+
+  it('is quiet when the registered grant matches the binding', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' }, grant: 'msgr_mine' };
+    h.harnesses = [harnessWithEntry('Claude Code', { registeredGrant: 'msgr_mine' })];
+    const r = await inspectProvisioning('/x');
+    expect(r.drift).toEqual([]);
+  });
+
+  it('is quiet about a normal entry with no baked model and matching secrets', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    h.harnesses = [
+      harnessWithEntry('Claude Code', { registeredArgs: ['/x/packages/mcp/dist/i.js'] }),
+    ];
     const r = await inspectProvisioning('/x');
     expect(r.drift).toEqual([]);
   });
