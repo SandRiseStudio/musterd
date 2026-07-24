@@ -30,11 +30,19 @@ describe('mcpEntry', () => {
     expect(buildMcpEnv(binding)['MUSTERD_CLAIM']).toBeUndefined();
   });
 
-  it('emits MUSTERD_MODEL only when a model is declared (ADR 101 — attest by default, never a guess)', () => {
-    // Undeclared → absent, so the seat honestly stays `unknown` (warn-never-block).
+  it('NEVER emits MUSTERD_MODEL, declared or not (a snapshot must not outrank an observation)', () => {
+    // This assertion is the REVERSE of what it was. Baking a declared model looked like "attest by
+    // default instead of rotting to unknown", but the baked env is the top rung of the adapter's
+    // ladder: the copy outranked every later observation and could never be corrected, so one seat
+    // attested `grok-4.5` for weeks while running `claude-opus-4-8`. A model is a harness fact, so
+    // it now comes from an observation (the SessionStart probe) or `binding.model` — never frozen
+    // into harness config at wire time.
     expect(buildMcpEnv(binding)['MUSTERD_MODEL']).toBeUndefined();
-    // Declared → baked, so the seat attests by default instead of rotting to `unknown`.
-    expect(buildMcpEnv({ ...binding, model: 'grok-4.5' })['MUSTERD_MODEL']).toBe('grok-4.5');
+    expect(
+      buildMcpEnv({ ...binding, model: 'grok-4.5' } as typeof binding & { model: string })[
+        'MUSTERD_MODEL'
+      ],
+    ).toBeUndefined();
   });
 
   it('resolves a runnable launch command for the adapter', () => {
