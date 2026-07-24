@@ -6,6 +6,7 @@ import { agentCommand } from './commands/agent.js';
 import { archaeologyCommand } from './commands/archaeology.js';
 import { auditCommand } from './commands/audit.js';
 import { availabilityCommand } from './commands/availability.js';
+import { broadcastCommand } from './commands/broadcast.js';
 import { claimCommand } from './commands/claim.js';
 import { doneCommand } from './commands/done.js';
 import { fmtCommand } from './commands/fmt.js';
@@ -179,6 +180,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return serveCommand(rest);
     case 'service':
       return serviceCommand(rest);
+    case 'broadcast':
+      return broadcastCommand(rest);
     case 'team':
       return teamCommand(rest);
     case 'join':

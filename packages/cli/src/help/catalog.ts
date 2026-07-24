@@ -127,6 +127,22 @@ export const CATALOG: readonly CommandEntry[] = [
       '`musterd service install` instead.',
   },
   {
+    name: 'broadcast',
+    signature:
+      '--team <slug> (--out <file.mp4> | --twitch | --rtmp <url>) [--server <url>] [--fps 30] [--bitrate 4500k] [--duration <s>] [--encoder videotoolbox|libx264]',
+    summary: 'stream the animated office — headless capture of /broadcast, no OBS',
+    group: 'setup',
+    primary: false,
+    detail:
+      'ADR 157 Increment 2: capture the /broadcast render mode (always-animating office, fixed ' +
+      '1920×1080) with headless Chrome and encode it with ffmpeg — to a local file (`--out`, the ' +
+      'no-key proof mode), to Twitch (`--twitch`), or to any RTMP(S) ingest (`--rtmp`). The Twitch ' +
+      'stream key is a secret: set MUSTERD_STREAM_KEY or a macOS Keychain item (service ' +
+      '`musterd-stream-key`) — never a flag, never musterd config. Needs Chrome and ffmpeg on the ' +
+      'machine. Foreground process, Ctrl-C to stop; waits for the page’s readiness probe before ' +
+      'encoding, so a dead daemon fails fast instead of streaming a blank page.',
+  },
+  {
     name: 'service',
     signature:
       '<install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake] [--port <n>] [--host <h>] [--interval <s>] [--timeout <s>] [--follow] [--force]',
