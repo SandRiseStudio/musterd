@@ -216,6 +216,59 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
     expect(config.model).toBeUndefined();
     expect(config.modelSource).toBe('unknown');
   });
+
+  /** A binding carrying both tiers: what a config DECLARES vs what a hook OBSERVED. */
+  function bindingWithTiers(declared: string | undefined, observed: string | undefined): string {
+    const p = join(dir, 'binding-tiers.json');
+    writeFileSync(
+      p,
+      JSON.stringify({
+        server: 'http://localhost:9999',
+        team: 'lab',
+        agent_key: 'mskey_from_file',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'Ui' },
+        ...(declared !== undefined ? { model: declared } : {}),
+        ...(observed !== undefined
+          ? { model_observed: { model: observed, harness: 'claude-code', observed_at: 1 } }
+          : {}),
+      }),
+    );
+    return p;
+  }
+
+  it('attests the OBSERVATION over a stale env declaration (the incident shape)', () => {
+    const config = loadMcpConfig({
+      MUSTERD_BINDING: bindingWithTiers('grok-4.5', 'claude-opus-4-8'),
+      MUSTERD_MODEL: 'grok-4.5',
+    });
+    expect(config.model).toBe('claude-opus-4-8');
+    expect(config.modelSource).toBe('observed');
+    expect(config.modelDrift).toEqual({ declared: 'grok-4.5', observed: 'claude-opus-4-8' });
+  });
+
+  it('attests the observation over a stale binding declaration too', () => {
+    const config = loadMcpConfig({
+      MUSTERD_BINDING: bindingWithTiers('grok-4.5', 'claude-opus-4-8'),
+    });
+    expect(config.model).toBe('claude-opus-4-8');
+    expect(config.modelSource).toBe('observed');
+  });
+
+  it('reports no drift when the observation agrees with the declaration', () => {
+    const config = loadMcpConfig({
+      MUSTERD_BINDING: bindingWithTiers('claude-opus-4-8', 'claude-opus-4-8'),
+    });
+    expect(config.modelSource).toBe('observed');
+    expect(config.modelDrift).toBeUndefined();
+  });
+
+  it('still honours a declaration when nothing was observed', () => {
+    const config = loadMcpConfig({ MUSTERD_BINDING: bindingWithTiers('grok-4.5', undefined) });
+    expect(config.model).toBe('grok-4.5');
+    expect(config.modelSource).toBe('binding');
+    expect(config.modelDrift).toBeUndefined();
+  });
 });
 
 describe('saveBinding merge-guard (ADR 131 inc 4 — the adapter must not clobber a hook capture)', () => {
@@ -240,6 +293,65 @@ describe('saveBinding merge-guard (ADR 131 inc 4 — the adapter must not clobbe
       ) as Record<string, unknown>;
       expect(after['session']).toEqual(capture);
       expect(after['model']).toBe('claude-test-1');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('saveBinding merge-guard — the hook-written model observation', () => {
+  it('a boot-time persist preserves the observation the SessionStart hook just wrote', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-obs-'));
+    try {
+      const boot = {
+        server: 'http://s1',
+        team: 'lab',
+        surface: 'claude-code' as const,
+        claim: { mode: 'seat' as const, name: 'Ui' },
+        agent_key: 'mskey_1',
+      };
+      const observation = { model: 'claude-opus-4-8', harness: 'claude-code', observed_at: 1 };
+      // The hook observes what the harness is running…
+      saveBinding(ws, { ...boot, model_observed: observation });
+      // …then the adapter's autojoin persists the binding it built from boot-time config, which can
+      // never carry an observation. Without the guard this wiped it moments after it was written —
+      // the exact reason hand-editing binding.json could never fix a stale model.
+      saveBinding(ws, { ...boot, model: 'grok-4.5' });
+      const after = JSON.parse(
+        readFileSync(join(ws, '.musterd', 'binding.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      expect(after['model_observed']).toEqual(observation);
+      expect(after['model']).toBe('grok-4.5'); // the declaration is still the caller's to set
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  it('an explicit observation on the argument wins over the on-disk one (newest-wins)', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-obs2-'));
+    try {
+      const boot = {
+        server: 'http://s1',
+        team: 'lab',
+        surface: 'claude-code' as const,
+        claim: { mode: 'seat' as const, name: 'Ui' },
+      };
+      saveBinding(ws, {
+        ...boot,
+        model_observed: { model: 'claude-sonnet-5', harness: 'claude-code', observed_at: 1 },
+      });
+      saveBinding(ws, {
+        ...boot,
+        model_observed: { model: 'claude-opus-4-8', harness: 'claude-code', observed_at: 2 },
+      });
+      const after = JSON.parse(
+        readFileSync(join(ws, '.musterd', 'binding.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      expect(after['model_observed']).toEqual({
+        model: 'claude-opus-4-8',
+        harness: 'claude-code',
+        observed_at: 2,
+      });
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

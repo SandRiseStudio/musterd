@@ -16,6 +16,20 @@ export interface DetectResult {
    * tools to a stale seat after a re-claim). Undefined ⇒ not baked / not readable ⇒ nothing to check.
    */
   registeredClaim?: string;
+  /**
+   * The `MUSTERD_MODEL` baked into this harness's registered musterd server, if any and readable.
+   * Provisioning no longer emits it, so a present value is a **legacy snapshot** sitting at the top
+   * of the adapter's ladder, where no observation can correct it — the doctor flags it for removal.
+   */
+  registeredModel?: string;
+  /**
+   * The `MUSTERD_GRANT` baked into the registered server, if readable. Compared against the
+   * workspace's own binding: a mismatch means the shared, repo-root-keyed entry (ADR 143) was
+   * overwritten by a different seat's provisioning run.
+   */
+  registeredGrant?: string;
+  /** The registered launch args, so the doctor can spot an adapter inside another seat's workspace. */
+  registeredArgs?: string[];
 }
 
 export interface ConfigureResult {
@@ -87,6 +101,14 @@ export interface HarnessGuidance {
   commandsDir?: string;
 }
 
+/** What a harness gets to work with when observing its own session's model. */
+export interface ModelObservationInput {
+  /** Absolute transcript/rollout path as the harness reported it on hook stdin, if it reports one. */
+  transcript_path?: string | undefined;
+  /** The harness session id, for harnesses that key their own logs by it. */
+  session_id?: string | undefined;
+}
+
 /** A pluggable onboarding adapter for one agent harness. */
 export interface Harness {
   id: string;
@@ -111,4 +133,19 @@ export interface Harness {
    * listed permission entries this harness added. Best-effort — a missing entry is a no-op.
    */
   unprovision?: (plan: UnprovisionPlan, scope?: 'local' | 'shared') => Promise<void>;
+  /**
+   * Observe the model this harness is *actually* running for the current session. An observation
+   * outranks any declaration (`resolveAttestation`), so this is the tier that stops a wire-time
+   * snapshot from lying forever — the defect that had one seat attesting `grok-4.5` for weeks while
+   * it ran `claude-opus-4-8`.
+   *
+   * **Even contract.** Every harness declares this slot with the same signature, the same
+   * never-throw rule, and the same `undefined` degradation. The fidelity *behind* the slot differs
+   * because harnesses differ in what they expose — that is a property of the harness, not a
+   * difference in musterd's guarantees. `undefined` means "this harness cannot tell us right now",
+   * which falls back to the declared tier and is reported honestly rather than guessed at.
+   *
+   * MUST NOT throw: this runs inside a hook, and a hook must never fail.
+   */
+  observeModel?: (payload: ModelObservationInput) => string | undefined;
 }

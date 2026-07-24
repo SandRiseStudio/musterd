@@ -47,4 +47,39 @@ describe('WorkspaceSpec / Binding schemas', () => {
     const committed = WorkspaceSpecSchema.parse({ ...spec, session }) as Record<string, unknown>;
     expect(committed['session']).toBeUndefined();
   });
+
+  describe('model_observed', () => {
+    const observation = {
+      model: 'claude-opus-4-8',
+      harness: 'claude-code',
+      observed_at: 1784911286433,
+    };
+
+    it('round-trips a full observation on Binding', () => {
+      const full = BindingSchema.parse({ ...spec, model_observed: observation });
+      expect(full.model_observed).toEqual(observation);
+    });
+
+    it('is optional — an existing binding without it still parses', () => {
+      expect(BindingSchema.parse(spec).model_observed).toBeUndefined();
+    });
+
+    it('coexists with a contradicting declaration — the tripwire needs both kept apart', () => {
+      const full = BindingSchema.parse({
+        ...spec,
+        model: 'grok-4.5',
+        model_observed: observation,
+      });
+      expect(full.model).toBe('grok-4.5');
+      expect(full.model_observed?.model).toBe('claude-opus-4-8');
+    });
+
+    it('is STRIPPED from WorkspaceSpec — an observation is per-machine, never committed', () => {
+      const committed = WorkspaceSpecSchema.parse({
+        ...spec,
+        model_observed: observation,
+      }) as Record<string, unknown>;
+      expect(committed['model_observed']).toBeUndefined();
+    });
+  });
 });

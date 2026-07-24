@@ -48,6 +48,7 @@ src/
       claudeCode.ts   // backend #1: resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to the fresh `claude -p` spawn in the same lease (pre-minted --session-id, reply-only allowedTools, mandatory watchdog, no skip-permissions ever) (ADR 131 §5)
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
     liveness.ts       // localSessionLiveness(workspace): binding.session + transcript stat → none|live|resumable|gc-expired; shared by the host's local-session guard and `session show`
+    transcript-model.ts // readModelFromTranscript(path): the ONLY module that knows a harness transcript's on-disk shape — newest assistant turn's model, bounded tail, never throws (ADR 158)
   service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)
     launchd.ts        // pure: plist generation (daemon + /live + wake-actuator agents) + launchctl argv builders + status parsing (platform seam)
     manage.ts         // install/uninstall/start/stop/restart/status + log tail (injectable launchctl runner)
@@ -60,7 +61,8 @@ src/
     workspace.ts      // provisionWorkspace(name): git worktree / sibling folder for an isolated agent seat (ADR 065)
     guard.ts          // inspectInitTarget(cwd): pure folder-suitability heuristics → warnings (ADR 020)
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
-    mcpEntry.ts       // resolve how to launch @musterd/mcp + build the binding env
+    mcpEntry.ts       // resolve how to launch @musterd/mcp + build the binding env (never bakes MUSTERD_MODEL/MUSTERD_CLAIM — a snapshot must not outrank a live observation, ADR 158)
+    entryGuard.ts     // assertEntryIdentity (throws on cross-run secrets) + foreignAdapterNote + siblingWorkspaces — inspection-path checks for an entry written for another seat (ADR 158 §6)
     manifest.ts       // provision manifest read/write (ADR 030) — records what init wrote, for uninstall
     guidance.ts       // writeGuidance/removeGuidance: skill + slash-command files per harness, content-stamped (ADR 085)
     pending.ts        // client-side pending-presence markers (ADR 033)

@@ -46,6 +46,13 @@ export const cursor: Harness = {
     commandsDir: '.cursor/commands',
   },
 
+  // Cursor runs no hooks and exposes no per-session record we can read, so there is nothing to
+  // observe. The slot is declared anyway — that is the even contract — and returns `undefined`: a
+  // visible, declared gap that falls back to the declared tier, never a pretence of knowledge.
+  // Ignores any `transcript_path` a caller passes: Cursor does not produce one, so a path arriving
+  // here belongs to some other harness and must not be read as if it were Cursor's.
+  observeModel: () => undefined,
+
   async detect() {
     const installed = existsSync(join(homedir(), '.cursor'));
     const configured = hasMusterd(projectConfigPath()) || hasMusterd(globalConfigPath());

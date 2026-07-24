@@ -4,6 +4,7 @@ import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
+import { HARNESSES } from '../onboard/harnesses/index.js';
 import { clock, theme } from '../render/theme.js';
 import {
   LOCAL_SESSION_LIVE_MS,
@@ -103,6 +104,21 @@ async function captureCommand(event: 'start' | 'end', parsed: Parsed): Promise<n
 }
 
 /**
+ * Ask the harness that owns this capture what model it is actually running. Never throws: a probe
+ * failure must not fail a hook, and `undefined` simply falls through to the declared tier.
+ */
+function observeModelFor(harnessId: string, payload: HookPayload): string | undefined {
+  try {
+    return HARNESSES.find((h) => h.id === harnessId)?.observeModel?.({
+      ...(payload.transcript_path ? { transcript_path: payload.transcript_path } : {}),
+      ...(payload.session_id ? { session_id: payload.session_id } : {}),
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The capture itself, stdin-free (exported for tests + the e2e harness): resolve the workspace,
  * write/annotate `binding.session`, then push the harness-class-only attestation best-effort.
  */
@@ -135,7 +151,18 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
     if (!binding.session || binding.session.id !== payload.session_id) return;
     session = { ...binding.session, ended_at: Date.now() };
   }
-  saveBinding(dir, { ...binding, session });
+
+  // The model observation. Additive and best-effort: only SessionStart observes (SessionEnd is
+  // advisory and may fire long after the model is knowable), and a harness that cannot observe — or
+  // a transcript that is missing or has moved format — leaves any PRIOR observation in place rather
+  // than erasing it. Losing a good observation to one bad read would re-open the very lie this
+  // closes: the roster would silently fall back to a stale declaration.
+  const observed = event === 'start' ? observeModelFor(CAPTURE_HARNESS, payload) : undefined;
+  const model_observed = observed
+    ? { model: observed, harness: CAPTURE_HARNESS, observed_at: Date.now() }
+    : binding.model_observed;
+
+  saveBinding(dir, { ...binding, session, ...(model_observed ? { model_observed } : {}) });
 
   // The resumable attestation (harness class only), best-effort AFTER the durable local write:
   // a dead daemon must never fail the hook, and capture is complete without it.

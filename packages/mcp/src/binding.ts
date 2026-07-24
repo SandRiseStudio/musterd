@@ -156,6 +156,12 @@ function readWorkspaceSpec(path: string): WorkspaceSpec | null {
  * `musterd` resolves to the seat this session just claimed (ADR 018's single source of truth). Holds
  * a token → 0600. Mirrors the CLI's `saveBinding`; the shared `BindingSchema` locks the shape.
  *
+ * Merge-guard on the **hook-written** fields — `session` and `model_observed`. Both are written by a
+ * hook and neither can appear in boot-time config, so a caller rebuilding from boot config always
+ * omits them; without the guard every autojoin would erase them moments after the hook wrote them.
+ * `model_observed` matters especially: lose it and attestation silently falls back to the stale
+ * declaration, which is precisely the failure this ADR closes.
+ *
  * Merge-guard on `session` (ADR 131 §5, increment 4): `persistBinding` rebuilds the binding from
  * boot-time config, and on every wake the SessionStart hook writes `binding.session` moments before
  * this adapter's first-tool-call autojoin persists — without the guard, every wake's capture would
@@ -170,10 +176,15 @@ export function saveBinding(dir: string, binding: Binding): string {
   mkdirSync(bindingDir, { recursive: true });
   const p = join(bindingDir, BINDING_FILE);
   const onDisk = readBinding(p);
-  const merged: Binding =
-    binding.session === undefined && onDisk?.session !== undefined
-      ? { ...binding, session: onDisk.session }
-      : binding;
+  const merged: Binding = {
+    ...binding,
+    ...(binding.session === undefined && onDisk?.session !== undefined
+      ? { session: onDisk.session }
+      : {}),
+    ...(binding.model_observed === undefined && onDisk?.model_observed !== undefined
+      ? { model_observed: onDisk.model_observed }
+      : {}),
+  };
   const tmp = `${p}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   try {

@@ -21,10 +21,6 @@ export interface AgentBinding {
   claim: ClaimPolicy;
   /** Optional pre-issued grant (msgr_) → `MUSTERD_GRANT`, skips the approval lane. */
   grant?: string;
-  /** Optional harness-attested model id (ADR 101) → `MUSTERD_MODEL`, so the seat attests by default
-   *  instead of rotting to `unknown`. Only a *declared* value is baked (never a guess — a stale/wrong
-   *  model is worse than none). Mirrors the `binding.json` model field the adapter also reads. */
-  model?: string;
 }
 
 /** The env that binds an MCP session to its claim (05-mcp.md; v0.3 ADR 075 — agent key + claim).
@@ -37,14 +33,22 @@ export interface AgentBinding {
  * updated by a re-claim: the CLI would resolve the new seat while the MCP tools stayed pinned to the
  * old one (the exact drift this omission removes). binding.json is the single source of truth; the
  * `MUSTERD_CLAIM` env stays a supported *manual* override (headless/CI with no binding.json), it
- * just isn't materialized by default provisioning. */
+ * just isn't materialized by default provisioning.
+ *
+ * The same reasoning retired `MUSTERD_MODEL`, and model is the *worse* field to snapshot. A claim
+ * only changes when musterd acts, so a stale copy is at least explicable; a model changes when the
+ * **harness** changes, with no musterd action at all, so a baked copy begins rotting the moment it is
+ * written — and it sat at the TOP of that same ladder, where no later observation could correct it.
+ * One seat attested `grok-4.5` for weeks while running `claude-opus-4-8`, and every repair (editing
+ * binding.json, re-sending with the right value) silently lost to the baked env. The model now comes
+ * from an *observation* (the SessionStart hook's `observeModel` probe) or else `binding.model`;
+ * `MUSTERD_MODEL` stays a supported *manual* override, it just isn't materialized by provisioning. */
 export function buildMcpEnv(b: AgentBinding): Record<string, string> {
   return {
     MUSTERD_SERVER: b.server,
     MUSTERD_TEAM: b.team,
     ...(b.agent_key !== undefined ? { MUSTERD_AGENT_KEY: b.agent_key } : {}),
     ...(b.grant !== undefined ? { MUSTERD_GRANT: b.grant } : {}),
-    ...(b.model !== undefined ? { MUSTERD_MODEL: b.model } : {}),
     MUSTERD_SURFACE: b.surface,
   };
 }

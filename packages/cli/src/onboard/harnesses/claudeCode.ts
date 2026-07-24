@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
+import { readModelFromTranscript } from '../../session/transcript-model.js';
 import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
 
 const exec = promisify(execFile);
@@ -429,6 +430,11 @@ export const claudeCode: Harness = {
     commandsDir: '.claude/commands',
   },
 
+  // Claude Code hands its hooks a `transcript_path`, and the newest assistant turn in that file
+  // carries the real model id — the highest-fidelity probe of the three harnesses.
+  observeModel: (payload) =>
+    payload.transcript_path ? readModelFromTranscript(payload.transcript_path) : undefined,
+
   async detect() {
     const bin = await resolveClaudeBin();
     if (!bin) {
@@ -444,11 +450,19 @@ export const claudeCode: Harness = {
     // Read back a legacy baked `MUSTERD_CLAIM` (older provisioning materialized it) so the doctor can
     // catch it drifting from binding.json. `claude mcp get` prints env as `    MUSTERD_CLAIM=<value>`.
     const claimMatch = got.ok ? /MUSTERD_CLAIM=(\S+)/.exec(got.out) : null;
+    // Same read-back, for the entry fields that can now disagree with this workspace: a legacy baked
+    // model, a grant from another provisioning run, and the adapter path (`  Args: <path>`).
+    const modelMatch = got.ok ? /MUSTERD_MODEL=(\S+)/.exec(got.out) : null;
+    const grantMatch = got.ok ? /MUSTERD_GRANT=(\S+)/.exec(got.out) : null;
+    const argsMatch = got.ok ? /^\s*Args:\s*(.+)$/m.exec(got.out) : null;
     return {
       installed: true,
       configured: got.ok,
       detail: `claude ${ver.out.trim().split(' ')[0] ?? ''}${where}`.trim(),
       ...(claimMatch ? { registeredClaim: claimMatch[1] } : {}),
+      ...(modelMatch ? { registeredModel: modelMatch[1] } : {}),
+      ...(grantMatch ? { registeredGrant: grantMatch[1] } : {}),
+      ...(argsMatch?.[1] ? { registeredArgs: argsMatch[1].trim().split(/\s+/) } : {}),
     };
   },
 

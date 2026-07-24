@@ -123,4 +123,86 @@ describe('musterd session (capture)', () => {
     await expect(sessionCommand(parseArgs(['end']))).rejects.toMatchObject({ exitCode: 2 });
     await expect(sessionCommand(parseArgs(['bogus']))).rejects.toMatchObject({ exitCode: 2 });
   });
+
+  describe('model observation', () => {
+    const transcript = (ws: string, model: string): string => {
+      const p = join(ws, 't.jsonl');
+      writeFileSync(p, JSON.stringify({ message: { role: 'assistant', model } }) + '\n', 'utf8');
+      return p;
+    };
+
+    it('records what the harness is running, WITHOUT touching the declaration', async () => {
+      // The incident shape: binding declares one model, the harness runs another.
+      writeBinding(wsA, bindingOf({ model: 'grok-4.5' }));
+      await captureSession('start', {
+        session_id: 'sid-1',
+        transcript_path: transcript(wsA, 'claude-opus-4-8'),
+        cwd: wsA,
+      });
+      const a = readBinding(wsA);
+      expect(a.model_observed).toMatchObject({
+        model: 'claude-opus-4-8',
+        harness: 'claude-code',
+      });
+      expect(a.model_observed!.observed_at).toBeGreaterThan(0);
+      // The declaration survives untouched — that is what leaves the tripwire something to compare.
+      expect(a.model).toBe('grok-4.5');
+    });
+
+    it('leaves no observation when the transcript yields nothing, and still captures', async () => {
+      await captureSession('start', {
+        session_id: 'sid-1',
+        transcript_path: join(wsA, 'nope.jsonl'),
+        cwd: wsA,
+      });
+      const a = readBinding(wsA);
+      expect(a.model_observed).toBeUndefined();
+      expect(a.session?.id).toBe('sid-1'); // the capture itself still succeeded
+    });
+
+    it('KEEPS a prior observation when a later session observes nothing', async () => {
+      // Losing a good observation to an unreadable transcript would re-open the lie.
+      await captureSession('start', {
+        session_id: 'sid-1',
+        transcript_path: transcript(wsA, 'claude-opus-4-8'),
+        cwd: wsA,
+      });
+      await captureSession('start', {
+        session_id: 'sid-2',
+        transcript_path: join(wsA, 'gone.jsonl'),
+        cwd: wsA,
+      });
+      expect(readBinding(wsA).model_observed?.model).toBe('claude-opus-4-8');
+    });
+
+    it('a newer observation replaces an older one (newest-wins)', async () => {
+      await captureSession('start', {
+        session_id: 'sid-1',
+        transcript_path: transcript(wsA, 'claude-sonnet-5'),
+        cwd: wsA,
+      });
+      await captureSession('start', {
+        session_id: 'sid-2',
+        transcript_path: transcript(wsA, 'claude-opus-4-8'),
+        cwd: wsA,
+      });
+      expect(readBinding(wsA).model_observed?.model).toBe('claude-opus-4-8');
+    });
+
+    it('observes only the workspace the payload names, never the process cwd sibling', async () => {
+      await captureSession('start', {
+        session_id: 'sid-1',
+        transcript_path: transcript(wsA, 'claude-opus-4-8'),
+        cwd: wsA,
+      });
+      expect(readBinding(wsB).model_observed).toBeUndefined();
+    });
+
+    it('SessionEnd does not write an observation (start is the observing event)', async () => {
+      const t = transcript(wsA, 'claude-opus-4-8');
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA }); // no transcript on start
+      await captureSession('end', { session_id: 'sid-1', transcript_path: t, cwd: wsA });
+      expect(readBinding(wsA).model_observed).toBeUndefined();
+    });
+  });
 });

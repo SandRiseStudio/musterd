@@ -153,6 +153,9 @@ export function identityFromEnv(
  *
  * Two hardenings for session capture (ADR 131 §5, increment 4), mirrored in the MCP adapter's
  * `saveBinding`:
+ * - **Merge-guard on `model_observed`.** Same shape, one field over: the observation is hook-written,
+ *   so `musterd claim` / `musterd agent` / an autojoin persist all omit it. Losing it silently falls
+ *   attestation back to the stale declaration — the failure the observed tier exists to end.
  * - **Merge-guard on `session`.** The capture is hook-written, but most callers rebuild the binding
  *   from state read long before (the ADR 101 model-wipe precedent: every autojoin/reclaim persist
  *   silently dropped `model` until it was carried through) — on a wake, the SessionStart hook
@@ -168,10 +171,15 @@ export function saveBinding(dir: string, binding: Binding): string {
   mkdirSync(bindingDir, { recursive: true });
   const p = join(bindingDir, BINDING_FILE);
   const onDisk = readBinding(p);
-  const merged: Binding =
-    binding.session === undefined && onDisk?.session !== undefined
-      ? { ...binding, session: onDisk.session }
-      : binding;
+  const merged: Binding = {
+    ...binding,
+    ...(binding.session === undefined && onDisk?.session !== undefined
+      ? { session: onDisk.session }
+      : {}),
+    ...(binding.model_observed === undefined && onDisk?.model_observed !== undefined
+      ? { model_observed: onDisk.model_observed }
+      : {}),
+  };
   const tmp = `${p}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   try {

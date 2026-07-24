@@ -1,4 +1,5 @@
 import { PROVENANCES, type Provenance } from './acts.js';
+import type { ModelObservation } from './binding.js';
 
 /**
  * Model attestation helpers (ADR 101). musterd is the model-agnostic coordination layer, so *which
@@ -53,4 +54,60 @@ export function modelFamily(model: string | null | undefined): string {
   if (normalized === '' || normalized === MODEL_UNKNOWN) return MODEL_UNKNOWN;
   const match = normalized.match(/^[a-z]+/);
   return match ? match[0] : MODEL_UNKNOWN;
+}
+
+/** Which tier supplied the attested model. `observed` outranks both declarations. */
+export type AttestationSource = 'observed' | 'environment' | 'binding' | 'unknown';
+
+export interface AttestationInput {
+  /** The hook-written observation for this workspace, if a harness probe produced one. */
+  observed?: ModelObservation | undefined;
+  /** The env declaration, already resolved via {@link resolveAttestedModel}. */
+  env?: string | undefined;
+  /** The persisted declaration (`binding.model`). */
+  binding?: string | undefined;
+}
+
+export interface AttestationResult {
+  /** What to attest. `undefined` ⇒ `unknown` (legal, never blocks). */
+  model: string | undefined;
+  source: AttestationSource;
+  /** True when an observation contradicts a declaration — the tripwire signal. */
+  drift: boolean;
+  /** The declared value that lost to an observation, for the tripwire message. */
+  declared?: string | undefined;
+}
+
+/**
+ * Resolve what this session should attest, ordered by **kind of claim**: an observation (what a
+ * harness was *seen* running this session) always beats a declaration (what a human or a config
+ * *says* it runs), which beats `unknown`. Within the declared tier the ADR 018 env-first ladder still
+ * holds: `MUSTERD_MODEL`/`ANTHROPIC_MODEL` over `binding.model`.
+ *
+ * This inverts the defect it exists for. Provisioning used to bake a wire-time snapshot into the env
+ * — the TOP rung — so a guess outranked every later observation and nothing downstream could correct
+ * it; one seat attested `grok-4.5` for weeks while running `claude-opus-4-8`. A declaration is a
+ * snapshot and snapshots rot, so an observation must win.
+ *
+ * `drift` is true only when an observation and a declaration disagree. That is the tripwire signal,
+ * and the rate at which it fires measures how often provisioning snapshots rot. A seat that declares
+ * nothing is not drifting — it is merely unattested, which is honest.
+ */
+export function resolveAttestation(input: AttestationInput): AttestationResult {
+  const declared = input.env ?? input.binding;
+  if (input.observed) {
+    return {
+      model: input.observed.model,
+      source: 'observed',
+      drift: declared !== undefined && declared !== input.observed.model,
+      declared,
+    };
+  }
+  if (input.env) {
+    return { model: input.env, source: 'environment', drift: false, declared: undefined };
+  }
+  if (input.binding) {
+    return { model: input.binding, source: 'binding', drift: false, declared: undefined };
+  }
+  return { model: undefined, source: 'unknown', drift: false, declared: undefined };
 }
