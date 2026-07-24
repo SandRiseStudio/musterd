@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
+import { readModelFromTranscript } from '../../session/transcript-model.js';
 import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
 
 const exec = promisify(execFile);
@@ -428,6 +429,11 @@ export const claudeCode: Harness = {
     frontmatter: 'claude-code',
     commandsDir: '.claude/commands',
   },
+
+  // Claude Code hands its hooks a `transcript_path`, and the newest assistant turn in that file
+  // carries the real model id — the highest-fidelity probe of the three harnesses.
+  observeModel: (payload) =>
+    payload.transcript_path ? readModelFromTranscript(payload.transcript_path) : undefined,
 
   async detect() {
     const bin = await resolveClaudeBin();

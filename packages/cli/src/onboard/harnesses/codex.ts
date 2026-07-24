@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { readModelFromTranscript } from '../../session/transcript-model.js';
 import type { Harness, ProvisionPlan, UnprovisionPlan } from '../harness.js';
 import type { McpServerEntry } from '../mcpEntry.js';
 import { hasServer, removeServers, upsertServer, type CodexServer } from './codexToml.js';
@@ -44,6 +45,12 @@ export const codex: Harness = {
   surface: 'codex',
   // No `guidance` (ADR 085): Codex has no project-level skill/rule or slash-command mechanism, so it
   // relies on the harness-neutral `.musterd/skill/SKILL.md` (always written) that the primer points at.
+
+  // Codex rollout logs are JSONL carrying the same `message.model` shape, so the shared reader
+  // handles both. A `musterd host`-spawned Codex seat is authoritative from its spawn arguments and
+  // never needs this path; a hand-launched one gets whatever its rollout log reports, or `undefined`.
+  observeModel: (payload) =>
+    payload.transcript_path ? readModelFromTranscript(payload.transcript_path) : undefined,
 
   async detect() {
     const installed = existsSync(join(homedir(), '.codex'));

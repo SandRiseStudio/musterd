@@ -87,6 +87,14 @@ export interface HarnessGuidance {
   commandsDir?: string;
 }
 
+/** What a harness gets to work with when observing its own session's model. */
+export interface ModelObservationInput {
+  /** Absolute transcript/rollout path as the harness reported it on hook stdin, if it reports one. */
+  transcript_path?: string | undefined;
+  /** The harness session id, for harnesses that key their own logs by it. */
+  session_id?: string | undefined;
+}
+
 /** A pluggable onboarding adapter for one agent harness. */
 export interface Harness {
   id: string;
@@ -111,4 +119,19 @@ export interface Harness {
    * listed permission entries this harness added. Best-effort — a missing entry is a no-op.
    */
   unprovision?: (plan: UnprovisionPlan, scope?: 'local' | 'shared') => Promise<void>;
+  /**
+   * Observe the model this harness is *actually* running for the current session. An observation
+   * outranks any declaration (`resolveAttestation`), so this is the tier that stops a wire-time
+   * snapshot from lying forever — the defect that had one seat attesting `grok-4.5` for weeks while
+   * it ran `claude-opus-4-8`.
+   *
+   * **Even contract.** Every harness declares this slot with the same signature, the same
+   * never-throw rule, and the same `undefined` degradation. The fidelity *behind* the slot differs
+   * because harnesses differ in what they expose — that is a property of the harness, not a
+   * difference in musterd's guarantees. `undefined` means "this harness cannot tell us right now",
+   * which falls back to the declared tier and is reported honestly rather than guessed at.
+   *
+   * MUST NOT throw: this runs inside a hook, and a hook must never fail.
+   */
+  observeModel?: (payload: ModelObservationInput) => string | undefined;
 }
