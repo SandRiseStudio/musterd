@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  bumpBrewFormula,
-  parseBumpArgs,
-  tarballUrl,
-} from '../scripts/bump-brew-formula.ts';
+import { bumpBrewFormula, parseBumpArgs, tarballUrl } from '../scripts/bump-brew-formula.ts';
 
 describe('bump-brew-formula (ADR 156)', () => {
   it('rewrites url + sha256 for the version', () => {
