@@ -304,6 +304,11 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   const ffmpeg: ChildProcess = spawn('ffmpeg', ffmpegArgs(opts, sink), {
     stdio: ['pipe', 'inherit', 'inherit'],
   });
+  // ffmpeg closes its stdin the moment `-t <duration>` is satisfied (or its sink dies) — a pump tick
+  // racing that close is an EPIPE, which on a Socket is an *emitted* error that would crash the
+  // process. It's the normal end-of-stream handshake here, not a failure: swallow it and let the
+  // `exit` handler below report ffmpeg's real verdict.
+  ffmpeg.stdin?.on('error', () => {});
 
   let pumpTimer: NodeJS.Timeout | undefined;
   let exitCode = 0;
@@ -322,6 +327,15 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     const cdp = await connectCdp(debugPort);
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
+    // `--window-size` is the *window*; even headless, the viewport comes up short of it (~88px of
+    // phantom window chrome → 1920×992 frames). The emulation override pins the viewport itself, so
+    // the screencast delivers exactly the 1920×1080 stage.
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 1920,
+      height: 1080,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
     await cdp.send('Page.navigate', { url });
     await waitBroadcastReady(cdp, 30_000);
 
@@ -346,6 +360,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
 
     // Run until ffmpeg exits (its -t duration, its sink failing) or a signal lands.
     exitCode = await new Promise<number>((resolve) => {
+      let done = false;
       const stop = () => {
         process.stdout.write(theme.meta('\nstopping…') + '\n');
         if (pumpTimer) clearInterval(pumpTimer);
@@ -353,9 +368,15 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
       };
       process.once('SIGINT', stop);
       process.once('SIGTERM', stop);
-      ffmpeg.once('exit', (code) => resolve(code ?? 1));
+      ffmpeg.once('exit', (code) => {
+        done = true;
+        if (pumpTimer) clearInterval(pumpTimer); // encoder gone — stop feeding a closed pipe
+        resolve(code ?? 1);
+      });
       chrome.once('exit', () => {
-        // The frame source dying mid-stream is terminal — flush what we have and report it.
+        // The frame source dying MID-stream is terminal — flush what we have and report it. After a
+        // normal end (`done`) this also fires from cleanup's own chrome.kill(); that's not an error.
+        if (done) return;
         process.stderr.write(`${theme.err('✗')} headless Chrome exited\n`);
         stop();
       });
