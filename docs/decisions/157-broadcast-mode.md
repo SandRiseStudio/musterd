@@ -212,3 +212,34 @@ audio, 2 s keyframes, flv-vs-faststart per sink, codec swap —, pump semantics:
 duplicate-when-rested, newest-wins), plus the end-to-end proof: `musterd broadcast --team revive
 --out proof.mp4 --duration 10` against the live daemon captured a playable 10 s 1920×1080 H.264 at
 30 fps with the office visibly animating.
+
+### First real stream — findings (2026-07-24, Twitch, ~1h with restarts)
+
+The first live run stuttered for viewers, and debugging it live peeled **three stacked defects**,
+each with a distinct signature. Recorded here because each is a general trap for anyone building a
+frame pipeline on these APIs:
+
+1. **Pump drift (#367).** One frame per `setInterval` tick — but Node fires late ticks under load
+   and never makes up, and image2pipe timestamps are frame-_count_, so every lost tick permanently
+   slowed the video timeline below real time. Viewers' buffers drained on a 200 Mbps uplink.
+   Signature: unpredictable stalls; ffmpeg fed at ~55 % of real time. Fix: compute frames _owed_
+   from wall clock, emit catch-up duplicates (capped 1 s; longer gaps re-anchor).
+2. **Ambient cadence judder (#368).** The office coalesces ambient-only motion toward ~20 fps
+   (ADR 086's viewer-cost win); resampled onto a 30 fps encode that duplicates every third frame.
+   Signature: _evenly paced_ stutter, identical on every device. Fix: `ambientFrameBudgetMs` drops
+   the cap under broadcast only — viewers keep the 20 fps coalescing, regression-tested.
+3. **PNG screencast starvation (#369), the dominant one.** Chrome encodes screencast frames on the
+   compositor thread, and 1080p PNG tops out at **4.7 fps delivered** — the "30 fps" stream was a
+   five-frame slideshow padded with duplicates. Measured head-to-head on the live scene:
+   `png 4.7 fps @ ~1605 KB/frame` vs `jpeg@85 35.3 fps @ ~181 KB/frame`. Fix: screencast JPEG@85
+   (visually lossless on this flat-color art; image2pipe sniffs the codec per frame).
+
+After all three: `speed=1x` locked, frame-exact 30 fps, timeline within 0.3 s of wall clock over
+minutes, and the operator (nick) reports the player smooth on laptop + phone. Steady-state cost on
+the M-series laptop: ffmpeg ~50–100 % of one core, headless Chrome ~25–135 %, encoder output
+~600–750 kbit/s against a 3000k cap (the scene compresses far below normal streaming bitrates —
+viewer bandwidth, not laptop capacity, sets the practical bitrate). Diagnostic instrumentation kept:
+ffmpeg `-stats` every 10 s prints frame/fps/`speed=` — `speed < 1x` is the pipeline falling behind;
+`1x` with viewers still stalling exonerates the send side. Interventions this stream: three restarts,
+all to deploy the fixes above — none since. LaunchAgent supervision and the Fly encoder both remain
+unjustified by this run.
