@@ -116,31 +116,80 @@ describe('ffmpegArgs', () => {
   });
 });
 
-describe('makeFramePump (the CFR re-clock)', () => {
-  it('holds silent until the first frame — never encodes a black lie', () => {
+describe('makeFramePump (the drift-compensating CFR re-clock)', () => {
+  const harness = (fps: number) => {
     const out: Buffer[] = [];
-    const pump = makeFramePump((b) => out.push(b));
-    expect(pump.tick()).toBe(false);
+    let clock = 0;
+    const pump = makeFramePump(
+      (b) => out.push(b),
+      fps,
+      () => clock,
+    );
+    return { out, pump, advance: (ms: number) => (clock += ms) };
+  };
+
+  it('holds silent until the first frame — never encodes a black lie', () => {
+    const { out, pump, advance } = harness(30);
+    expect(pump.tick()).toBe(0);
+    advance(1000);
+    expect(pump.tick()).toBe(0);
     expect(out).toHaveLength(0);
   });
 
-  it('re-emits the latest frame every tick — a rested office is a still, valid stream', () => {
-    const out: Buffer[] = [];
-    const pump = makeFramePump((b) => out.push(b));
+  it('emits exactly fps frames per second of wall clock, duplicating a rested office', () => {
+    const { out, pump, advance } = harness(30);
+    pump.frame(Buffer.from('f1'));
+    expect(pump.tick()).toBe(1); // t=0 → frame 0
+    for (let i = 0; i < 30; i++) {
+      advance(1000 / 30);
+      pump.tick();
+    }
+    expect(out).toHaveLength(31); // 1s of video at 30fps, plus the epoch frame
+    expect(new Set(out.map(String))).toEqual(new Set(['f1']));
+  });
+
+  it('CATCH-UP: a late tick emits every frame owed, so the video timeline never falls behind wall clock', () => {
+    const { out, pump, advance } = harness(30);
     pump.frame(Buffer.from('f1'));
     pump.tick();
+    advance(334); // the timer fired ~10 frames late (a loaded laptop) — this was the Twitch stall
+    expect(pump.tick()).toBe(10);
+    expect(out).toHaveLength(11);
+  });
+
+  it('a process-level pause (lid close, SIGSTOP) re-anchors instead of bursting minutes of frames', () => {
+    const { out, pump, advance } = harness(30);
+    pump.frame(Buffer.from('f1'));
     pump.tick();
-    pump.tick(); // no new frames arrived — the pump duplicates
-    expect(out.map(String)).toEqual(['f1', 'f1', 'f1']);
+    advance(60_000); // a minute of dead air — 1800 owed
+    expect(pump.tick()).toBe(30); // capped at 1s of catch-up
+    // and the timeline is re-anchored: the next frame is owed one frame-interval later, not 1769 at once
+    advance(1000 / 30);
+    expect(pump.tick()).toBe(1);
+    expect(out).toHaveLength(32);
   });
 
   it('a newer frame replaces the old one between ticks (no backlog, no queue)', () => {
-    const out: Buffer[] = [];
-    const pump = makeFramePump((b) => out.push(b));
+    const { out, pump, advance } = harness(30);
     pump.frame(Buffer.from('f1'));
     pump.frame(Buffer.from('f2')); // f1 was never ticked out — it is simply gone
     pump.tick();
-    expect(out.map(String)).toEqual(['f2']);
+    advance(1000 / 30);
+    pump.frame(Buffer.from('f3'));
+    pump.tick();
+    expect(out.map(String)).toEqual(['f2', 'f3']);
+  });
+
+  it('an on-time cadence never double-emits (owed stays 0 between frame boundaries)', () => {
+    const { pump, advance } = harness(30);
+    pump.frame(Buffer.from('f1'));
+    pump.tick();
+    advance(10); // timer ticking faster than the frame interval
+    expect(pump.tick()).toBe(0);
+    advance(10);
+    expect(pump.tick()).toBe(0);
+    advance(14); // 34ms total → frame 1 is now owed
+    expect(pump.tick()).toBe(1);
   });
 });
 
