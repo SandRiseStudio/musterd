@@ -274,6 +274,18 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   drift.push(...guidance.drift);
   const duplicateAdapters = await inspectDuplicateAdapters(binding);
   const modelAttestation = await inspectModelAttestation(binding);
+  // ADR 160: label coverage is per-surface, and some harnesses have no writable session list at
+  // all. Say so plainly (a note, never drift — there is nothing to fix) instead of pretending.
+  const sidebarless = HARNESSES.filter(
+    (h) => !h.guidance?.sessionsSkillPath && harnesses.find((s) => s.label === h.label)?.configured,
+  );
+  const labelNotes =
+    sidebarless.length > 0
+      ? [
+          `${sidebarless.map((h) => h.label).join(' + ')}: seat labels reach the terminal tab only — ` +
+            `no writable session list for a sidebar sweep (ADR 160).`,
+        ]
+      : [];
   return {
     primerManaged,
     harnesses,
@@ -282,6 +294,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       ...guidance.notes,
       ...duplicateAdapters,
       ...modelAttestation,
+      ...labelNotes,
       ...packagedInstallNotes(),
     ],
     anyConfigured,

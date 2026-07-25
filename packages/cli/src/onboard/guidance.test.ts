@@ -143,3 +143,37 @@ describe('guidanceTargets', () => {
     expect(targets).toContain('.claude/commands/musterd-standup.md');
   });
 });
+
+describe('label-sessions guidance unit (ADR 160)', () => {
+  it('writes the label-sessions skill for Claude Code (the only sessionsSkillPath declarer), stamped', () => {
+    const dir = tmp();
+    const res = writeGuidance(dir, [claudeCode, cursor, codex], { team: 'dawn' });
+    const rel = '.claude/skills/musterd-label-sessions/SKILL.md';
+    expect(res.files).toContain(rel);
+    const text = readFileSync(join(dir, rel), 'utf8');
+    expect(parseContentStamp(text)?.version).toBe(GUIDANCE_CONTENT_VERSION);
+    expect(text).toContain('name: musterd-label-sessions');
+    expect(text).toContain('resolve-labels --stdin');
+    // Cursor/Codex declare no sessionsSkillPath — no sibling unit appears for them.
+    expect(res.files.filter((f) => f.includes('label-sessions'))).toEqual([rel]);
+  });
+
+  it('is enumerated by guidanceTargets and removed by removeGuidance (dir pruned)', () => {
+    const dir = tmp();
+    writeGuidance(dir, [claudeCode], { team: 'dawn' });
+    const rel = '.claude/skills/musterd-label-sessions/SKILL.md';
+    expect(guidanceTargets([claudeCode])).toContain(rel);
+    const { removed } = removeGuidance(dir, [claudeCode]);
+    expect(removed).toContain(rel);
+    expect(existsSync(join(dir, '.claude/skills/musterd-label-sessions'))).toBe(false);
+  });
+
+  it('never clobbers a stampless user-authored file at the label-sessions path', () => {
+    const dir = tmp();
+    const rel = '.claude/skills/musterd-label-sessions/SKILL.md';
+    write(dir, rel, '# my own sweep\n');
+    const res = writeGuidance(dir, [claudeCode], { team: 'dawn' });
+    expect(res.skipped).toContain(rel);
+    expect(readFileSync(join(dir, rel), 'utf8')).toBe('# my own sweep\n');
+  });
+});

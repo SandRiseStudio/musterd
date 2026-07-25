@@ -428,6 +428,9 @@ export const claudeCode: Harness = {
     skillPath: '.claude/skills/musterd/SKILL.md',
     frontmatter: 'claude-code',
     commandsDir: '.claude/commands',
+    // ADR 160: only Claude Code sessions can list + rename each other (the desktop app's
+    // session-management tools), so only this harness carries the label-sessions skill.
+    sessionsSkillPath: '.claude/skills/musterd-label-sessions/SKILL.md',
   },
 
   // Claude Code hands its hooks a `transcript_path`, and the newest assistant turn in that file

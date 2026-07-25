@@ -1,8 +1,17 @@
-import { dirname } from 'node:path';
-import { bindingSeat, type SessionCapture } from '@musterd/protocol';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
+import {
+  SEAT_CHIP,
+  bindingSeat,
+  capitalizeSeat,
+  parseSeatLabel,
+  renderSeatLabel,
+  type SessionCapture,
+} from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
-import { findBinding, saveBinding } from '../config.js';
+import { findBinding, findWorkspaceSpec, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { clock, theme } from '../render/theme.js';
@@ -37,9 +46,10 @@ import { findWorkspaceDir } from './helpers.js';
 export async function sessionCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
   if (sub === 'start' || sub === 'end') return captureCommand(sub, parsed);
+  if (sub === 'resolve-labels') return resolveLabelsCommand(parsed);
   if (sub === 'show' || sub === undefined) return showCommand(parsed);
   throw new CliError(
-    'usage: musterd session start --stdin | end --stdin | show  ' +
+    'usage: musterd session start --stdin | end --stdin | resolve-labels --stdin | show  ' +
       '(start/end are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
     2,
   );
@@ -247,6 +257,184 @@ export function refreshModelObservation(dirHint?: string): string | undefined {
   } catch {
     return undefined; // rides a hook: a refresh must never fail the tool call it hangs off
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// `session resolve-labels` — the sidebar-sweep decision engine (ADR 160, surface 2)
+// ---------------------------------------------------------------------------------------------
+
+/** One row of the harness's session list, parsed leniently — unknown fields ignored. */
+export interface SessionRow {
+  sessionId?: string;
+  title?: string;
+  cwd?: string;
+  isArchived?: boolean;
+  /** ISO timestamp of last activity — the degraded stand-in for `createdAt` (see below). */
+  lastActivityAt?: string;
+}
+
+export interface ResolveLabelsResult {
+  apply: { session_id: string; seat: string; title: string }[];
+  skipped: Record<string, number>;
+}
+
+/**
+ * A brand-new session's title is still a first guess off the opening prompt; wait for the harness's
+ * real auto-title before pinning a prefix on it.
+ */
+const LABEL_MIN_AGE_MS = 120_000;
+
+/**
+ * Where Claude Code Desktop keeps its own session records (`createdAt`, `titleSource`). Undocumented
+ * and version-fragile, so strictly best-effort enrichment: `MUSTERD_CCD_SESSIONS_DIR` overrides, and
+ * every read degrades to the session row itself. The worst failure is a mis-dated label or a missed
+ * skip — never corruption, since the original title always survives as the label's suffix.
+ */
+function ccdSessionsDir(env: NodeJS.ProcessEnv): string {
+  return (
+    env['MUSTERD_CCD_SESSIONS_DIR'] ??
+    join(homedir(), 'Library', 'Application Support', 'Claude', 'claude-code-sessions')
+  );
+}
+
+/** The desktop app's record for a session: created-at (ms) + who last set the title. */
+function ccdMeta(dir: string, sessionId: string): { createdAt?: number; titleSource?: string } {
+  try {
+    for (const org of readdirSync(dir)) {
+      const orgDir = join(dir, org);
+      let inner: string[];
+      try {
+        inner = readdirSync(orgDir);
+      } catch {
+        continue;
+      }
+      for (const proj of inner) {
+        const p = join(orgDir, proj, `${sessionId}.json`);
+        if (!existsSync(p)) continue;
+        const rec = JSON.parse(readFileSync(p, 'utf8')) as {
+          createdAt?: number;
+          titleSource?: string;
+        };
+        return {
+          ...(rec.createdAt !== undefined ? { createdAt: rec.createdAt } : {}),
+          ...(rec.titleSource !== undefined ? { titleSource: rec.titleSource } : {}),
+        };
+      }
+    }
+  } catch {
+    // dir missing/moved — degrade to the session row
+  }
+  return {};
+}
+
+/**
+ * The seat behind a session's cwd, or null when it is not a seat workspace. The committed
+ * `workspace.json` claim is authoritative (walk-up, so a session parked in a subfolder still
+ * resolves); an `agents-<name>` folder without a seat claim (role/chat binding) falls back to the
+ * folder suffix rather than dropping the session.
+ */
+function seatForCwd(cwd: string | undefined): string | null {
+  if (!cwd) return null;
+  const spec = findWorkspaceSpec(cwd);
+  if (spec?.claim?.mode === 'seat') return spec.claim.name;
+  const m = /^agents[-_](.+)$/.exec(basename(cwd.replace(/\/+$/, '')));
+  return m ? m[1]! : null;
+}
+
+/**
+ * The pure sweep decision: which sessions get which titles, and why the rest were skipped. The
+ * caller (a harness-side agent, via the label-sessions guidance skill) applies the renames — this
+ * engine never writes anything. Invariants, proven by the personal sweep this productizes:
+ *
+ * - `titleSource: "user"` is inviolable — a human's own words outrank the sweep, always.
+ * - Idempotent via `parseSeatLabel`: fully-labeled rows skip; seat-prefixed-but-chipless rows (a
+ *   pre-chip sweep's work) get the chip prepended with their ORIGINAL timestamp text kept —
+ *   re-rendering would re-date history.
+ * - Freshness gates on `createdAt`, and — unlike the python original, which skipped the gate on
+ *   its fallback branch — also on `lastActivityAt` when the app's record is unreadable.
+ */
+export function resolveLabels(
+  sessions: SessionRow[],
+  opts: { now?: number; env?: NodeJS.ProcessEnv } = {},
+): ResolveLabelsResult {
+  const now = opts.now ?? Date.now();
+  const dir = ccdSessionsDir(opts.env ?? process.env);
+  const apply: ResolveLabelsResult['apply'] = [];
+  const skipped: Record<string, number> = {};
+  const skip = (reason: string): void => {
+    skipped[reason] = (skipped[reason] ?? 0) + 1;
+  };
+
+  for (const s of sessions) {
+    const title = (s.title ?? '').trim();
+    if (s.isArchived) {
+      skip('archived');
+      continue;
+    }
+    if (!title || !s.sessionId) {
+      skip('no-title-yet');
+      continue;
+    }
+    const seat = seatForCwd(s.cwd);
+    if (!seat) {
+      skip('not-a-seat');
+      continue;
+    }
+    const meta = ccdMeta(dir, s.sessionId);
+    if (meta.titleSource === 'user') {
+      skip('hand-named');
+      continue;
+    }
+    const parse = parseSeatLabel(title, seat);
+    if (parse.chipped && parse.seated) {
+      skip('already-labeled');
+      continue;
+    }
+    if (parse.seated) {
+      // Pre-chip label: prepend the chip, keep the original "(Fri 3p)" text — never re-date.
+      apply.push({
+        session_id: s.sessionId,
+        seat: capitalizeSeat(seat),
+        title: `${SEAT_CHIP} ${parse.bare}`,
+      });
+      continue;
+    }
+    const createdMs =
+      meta.createdAt ?? (s.lastActivityAt ? Date.parse(s.lastActivityAt) : undefined);
+    if (createdMs === undefined || Number.isNaN(createdMs)) {
+      skip('no-timestamp');
+      continue;
+    }
+    if (now - createdMs < LABEL_MIN_AGE_MS) {
+      skip('too-fresh');
+      continue;
+    }
+    apply.push({
+      session_id: s.sessionId,
+      seat: capitalizeSeat(seat),
+      title: renderSeatLabel(seat, createdMs, parse.bare, now),
+    });
+  }
+
+  return { apply, skipped };
+}
+
+/** The stdin wrapper: harness session-list JSON in, `{apply, skipped}` JSON out. */
+async function resolveLabelsCommand(parsed: Parsed): Promise<number> {
+  if (parsed.flags['stdin'] !== true) {
+    throw new CliError('usage: musterd session resolve-labels --stdin  (session-list JSON in)', 2);
+  }
+  const raw = await readStdin();
+  let sessions: SessionRow[];
+  try {
+    const data: unknown = JSON.parse(raw);
+    if (!Array.isArray(data)) throw new Error('not an array');
+    sessions = data as SessionRow[];
+  } catch {
+    throw new CliError('resolve-labels: stdin must be a JSON array of session rows', 2);
+  }
+  process.stdout.write(JSON.stringify(resolveLabels(sessions), null, 1) + '\n');
+  return 0;
 }
 
 async function showCommand(parsed: Parsed): Promise<number> {
