@@ -3,7 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
-import { buildPlist, LIVE_LABEL, LIVE_SYNC_LABEL, SERVICE_LABEL } from '../service/launchd.js';
+import {
+  buildHostPlist,
+  buildPlist,
+  HOST_LABEL,
+  LIVE_LABEL,
+  LIVE_SYNC_LABEL,
+  SERVICE_LABEL,
+} from '../service/launchd.js';
 import type { LiveCtx } from '../service/live.js';
 import type { RunResult, Runner, ServiceCtx } from '../service/manage.js';
 import { resolveLiveCtx, serviceCommand } from './service.js';
@@ -336,6 +343,136 @@ describe('serviceCommand', () => {
     ).toBe(false);
     expect(out).toContain("targeting the daemon's own checkout");
     expect(out).toContain('/Users/nick/agents-stanley'); // names where you invoked from
+  });
+
+  // The currency gap this closes: `refresh` rebuilds the WHOLE checkout but used to restart only the
+  // daemon, so the wake actuator kept running whatever code it booted with until a human remembered
+  // `musterd service restart --wake`.
+  it('refresh also bounces the wake actuator when it runs from the same checkout', async () => {
+    writeFileSync(
+      join(dir, 'agent.plist'),
+      buildPlist({
+        label: SERVICE_LABEL,
+        node: '/opt/homebrew/bin/node',
+        binJs: '/Users/nick/agents/packages/cli/dist/bin.js',
+        serveArgs: ['serve'],
+        workingDir: '/Users/nick/agents',
+        stdoutPath: '/l',
+        stderrPath: '/e',
+        path: '/p',
+      }),
+    );
+    writeFileSync(
+      join(dir, `${HOST_LABEL}.plist`),
+      buildHostPlist({
+        label: HOST_LABEL,
+        node: '/opt/homebrew/bin/node',
+        binJs: '/Users/nick/agents/packages/cli/dist/bin.js', // same checkout
+        hostArgs: ['--interval', '60'],
+        workingDir: '/Users/nick/agents',
+        stdoutPath: '/l',
+        stderrPath: '/e',
+        path: '/p',
+      }),
+    );
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: ctx(refreshRunner()),
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    const kicked = calls.filter(
+      (x) => x.cmd === 'launchctl' && x.args.join(' ').includes(HOST_LABEL),
+    );
+    expect(kicked.length).toBe(1);
+    expect(out).toContain('restarted the wake actuator');
+  });
+
+  it('leaves a wake actuator installed from a different checkout alone', async () => {
+    writeFileSync(
+      join(dir, 'agent.plist'),
+      buildPlist({
+        label: SERVICE_LABEL,
+        node: '/opt/homebrew/bin/node',
+        binJs: '/Users/nick/agents/packages/cli/dist/bin.js',
+        serveArgs: ['serve'],
+        workingDir: '/Users/nick/agents',
+        stdoutPath: '/l',
+        stderrPath: '/e',
+        path: '/p',
+      }),
+    );
+    writeFileSync(
+      join(dir, `${HOST_LABEL}.plist`),
+      buildHostPlist({
+        label: HOST_LABEL,
+        node: '/opt/homebrew/bin/node',
+        binJs: '/Users/other/clone/packages/cli/dist/bin.js', // NOT the checkout we rebuilt
+        hostArgs: [],
+        workingDir: '/Users/other/clone',
+        stdoutPath: '/l',
+        stderrPath: '/e',
+        path: '/p',
+      }),
+    );
+    const { code } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: ctx(refreshRunner()),
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(calls.some((x) => x.cmd === 'launchctl' && x.args.join(' ').includes(HOST_LABEL))).toBe(
+      false,
+    );
+  });
+
+  it('a sibling that will not bounce does not fail the refresh that already succeeded', async () => {
+    writeFileSync(
+      join(dir, 'agent.plist'),
+      buildPlist({
+        label: SERVICE_LABEL,
+        node: '/opt/homebrew/bin/node',
+        binJs: '/Users/nick/agents/packages/cli/dist/bin.js',
+        serveArgs: ['serve'],
+        workingDir: '/Users/nick/agents',
+        stdoutPath: '/l',
+        stderrPath: '/e',
+        path: '/p',
+      }),
+    );
+    writeFileSync(
+      join(dir, `${HOST_LABEL}.plist`),
+      buildHostPlist({
+        label: HOST_LABEL,
+        node: '/opt/homebrew/bin/node',
+        binJs: '/Users/nick/agents/packages/cli/dist/bin.js',
+        hostArgs: [],
+        workingDir: '/Users/nick/agents',
+        stdoutPath: '/l',
+        stderrPath: '/e',
+        path: '/p',
+      }),
+    );
+    const base = refreshRunner();
+    const runner: Runner = (cmd, args) => {
+      if (cmd === 'launchctl' && args.join(' ').includes(HOST_LABEL)) {
+        return { status: 1, stdout: '', stderr: 'no such process' };
+      }
+      return base(cmd, args);
+    };
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: ctx(runner),
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0); // the daemon refresh stands
+    expect(out).toContain('could not restart the wake actuator');
   });
 
   it('refresh falls back to the invoked checkout when no plist is installed', async () => {

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
 import {
   broadcastUrl,
+  daemonRebuilt,
   chromeArgs,
   ffmpegArgs,
   killGroup,
@@ -351,9 +352,13 @@ describe('the stall watermark', () => {
     expect(() => makeEncoderFeed(null, vi.fn())(Buffer.alloc(8))).not.toThrow();
   });
 
-  it('is a real ceiling, not a formality — 64MB is ~12s of video at the measured frame size', () => {
-    expect(STALL_BYTES).toBe(64 * 1024 * 1024);
-    expect(STALL_BYTES / 181_000 / 30).toBeLessThan(15);
+  it('leaves enough slack for a loaded machine, and still bounds the queue', () => {
+    // Sized from a measured capture: the queue climbed ~4.7MB/s under load (ffmpeg draining almost
+    // nothing), and a 64MB ceiling ended a healthy stream within seconds. What must hold is that the
+    // queue is bounded at all — that is what stops the process buffering into a hung event loop.
+    const secondsOfSlack = STALL_BYTES / 181_000 / 30;
+    expect(secondsOfSlack).toBeGreaterThan(30); // survives a monorepo build running alongside
+    expect(secondsOfSlack).toBeLessThan(120); // but a stream this far behind is not worth saving
   });
 });
 
@@ -377,5 +382,31 @@ describe('ffmpeg terminates when the video pipe does', () => {
       target: 'rtmps://example/app/key',
     });
     expect(args).toContain('-shortest');
+  });
+});
+
+describe('daemonRebuilt (staying current with main)', () => {
+  it('restarts once the daemon has moved to a different commit', () => {
+    expect(daemonRebuilt('aaa111', 'bbb222')).toBe(true);
+  });
+
+  it('sits still while the daemon has not moved', () => {
+    expect(daemonRebuilt('aaa111', 'aaa111')).toBe(false);
+  });
+
+  it('compares the daemon against itself, so a branch build does not restart forever', () => {
+    // The trap this shape avoids: comparing *our* stamp to the daemon's. A dev streaming their own
+    // work-in-progress never matches the daemon and never will, so that comparison would tear the
+    // stream down every single poll. The baseline is the daemon's build as we found it.
+    const branchBuildRunningAgainstAStableDaemon = daemonRebuilt('daemon-sha', 'daemon-sha');
+    expect(branchBuildRunningAgainstAStableDaemon).toBe(false);
+  });
+
+  it('stays silent when either side is unstamped — never restart on a guess', () => {
+    // ADR 135: a published tarball or stripped dist has no build.json, and reading "unknown" as
+    // "changed" is how you build a restart loop.
+    expect(daemonRebuilt(undefined, 'bbb222')).toBe(false);
+    expect(daemonRebuilt('aaa111', undefined)).toBe(false);
+    expect(daemonRebuilt(undefined, undefined)).toBe(false);
   });
 });

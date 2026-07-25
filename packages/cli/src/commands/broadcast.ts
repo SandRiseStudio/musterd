@@ -265,11 +265,20 @@ export function killGroup(
  * fired, and even `SIGTERM` was swallowed, because a listener means it is delivered *through* the
  * loop. Only `SIGKILL` remained.
  *
- * 64 MB is ~12 s of video at the measured frame size. Past that the encoder is not behind, it is
- * gone — and a stream twelve seconds in arrears is worthless anyway, so the honest move is to stop
- * feeding it and end the run loudly rather than buffer toward a hang.
+ * **256 MB, ~47 s of video at the measured ~181 KB/frame.** Sized from a real capture, not a guess,
+ * and the measurement was a surprise worth writing down: on a *loaded* machine this pipeline does not
+ * sustain 30 fps at all. Instrumenting a live run showed the queue climbing 7.9 → 23.6 → 38.0 →
+ * 55.8 MB in twelve seconds — ~4.7 MB/s, which is essentially the entire input rate, i.e. ffmpeg was
+ * draining almost nothing. That is the `speed < 1x` condition ADR 157 already names as the thing to
+ * watch, and it is the most likely reading of what actually killed the 11-hour stream.
+ *
+ * So the ceiling is deliberately generous rather than tight: a full monorepo build running alongside
+ * must not end a stream, and 12 s of slack (the first value tried) ended one within seconds. What it
+ * still guarantees is the thing that matters — the queue is *bounded*, so the process can no longer
+ * buffer its way into a hung event loop. Past the mark the encoder is not behind, it is gone, and a
+ * stream three quarters of a minute in arrears is not worth saving.
  */
-export const STALL_BYTES = 64 * 1024 * 1024;
+export const STALL_BYTES = 256 * 1024 * 1024;
 
 /** The bit of a writable stream this policy needs — so a test can stand one up without a real pipe. */
 export interface EncoderPipe {
@@ -302,6 +311,44 @@ export function makeEncoderFeed(
 
 /** How long a single CDP call may go unanswered before we stop waiting on a socket that may be dead. */
 const CDP_TIMEOUT_MS = 15_000;
+
+/** How often a live stream checks whether the code under it has moved. Well inside the ADR 152
+ * auto-refresher's 120s tick, so a rebuild is picked up on the next poll rather than the next hour. */
+const BUILD_POLL_MS = 60_000;
+
+/**
+ * Has the daemon been rebuilt *since this stream started*?
+ *
+ * The comparison is against the daemon's build **as observed at startup**, not against this
+ * process's own stamp. That distinction is the whole design:
+ *
+ * - Comparing our stamp to the daemon's would restart forever for anyone running a branch build,
+ *   because those two never match and never will. A dev streaming their own work-in-progress would
+ *   get a stream that tears itself down every minute.
+ * - Comparing the daemon to *itself over time* asks the question that actually matters: the ADR 152
+ *   auto-refresher rebuilds the shared checkout and bounces the daemon, so the moment its build ref
+ *   changes is precisely the moment this process's `dist` went stale underneath it.
+ *
+ * Pure SHA inequality, no git — and silence whenever either side is unstamped, per ADR 135: a
+ * published tarball or stripped dist has no `build.json`, and reading "unknown" as "changed" is how
+ * you build a restart loop.
+ */
+export function daemonRebuilt(baseline: string | undefined, current: string | undefined): boolean {
+  if (!baseline || !current) return false;
+  return baseline !== current;
+}
+
+/** The daemon's current build ref (ADR 130's `/health.build`), or undefined if it can't be read. */
+async function fetchDaemonBuild(server: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(`${server.replace(/\/$/, '')}/health`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    return ((await res.json()) as { build?: string }).build;
+  } catch {
+    return undefined; // unreachable or unparseable — a watcher never acts on a guess
+  }
+}
 
 /** Profile directories older than this are from runs that are long over — see `sweepStaleProfiles`. */
 const PROFILE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -507,8 +554,14 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   // (The closures below reference `chrome`/`ffmpeg` before their declaration — safe: handlers
   // only ever run on an event-loop turn, and the spawns happen in this same synchronous block.)
   let pumpTimer: NodeJS.Timeout | undefined;
+  let buildTimer: NodeJS.Timeout | undefined;
   let live = false; // flips when the pump starts feeding ffmpeg
   let stopping = false;
+  /** Set when the stop in flight is a build pickup, not an ending — see the build watch below. */
+  let restarting = false;
+  let checking = false; // one health poll at a time
+  /** The daemon's build as we found it — the reference the watch compares against. */
+  let baselineBuild: string | undefined;
   const forceStop = (code: number): never => {
     killGroup(ffmpeg, 'SIGKILL');
     killGroup(chrome, 'SIGKILL');
@@ -532,7 +585,8 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     if (stalled) return;
     stalled = true;
     process.stderr.write(
-      `${theme.err('✗')} encoder stopped draining (>${Math.round(STALL_BYTES / 1024 / 1024)}MB queued) — ending the stream\n`,
+      `${theme.err('✗')} the encoder is not keeping up — ${Math.round(STALL_BYTES / 1024 / 1024)}MB of frames queued and growing. ` +
+        `Ending the stream rather than buffering into a hang; try a lower --fps or --bitrate.\n`,
     );
     forceStop(1);
   };
@@ -614,6 +668,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   let cdp: Cdp | undefined;
   const cleanup = () => {
     if (pumpTimer) clearInterval(pumpTimer);
+    if (buildTimer) clearInterval(buildTimer);
     ffmpeg.stdin?.end();
     cdp?.close(); // an open DevTools socket is a live handle; nothing else closes it
     killGroup(chrome);
@@ -671,7 +726,44 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     pumpTimer = setInterval(() => pump.tick(), Math.max(1, Math.round(500 / opts.fps)));
     live = true; // signals now stop gracefully — there are frames worth finalizing
 
-    process.stdout.write(`${theme.ok('◉ live')}\n`);
+    baselineBuild = await fetchDaemonBuild(opts.server);
+    process.stdout.write(
+      `${theme.ok('◉ live')}${baselineBuild ? theme.meta(`  ${baselineBuild.slice(0, 7)}`) : ''}\n`,
+    );
+
+    /**
+     * Stay current with `main`.
+     *
+     * A stream is the one musterd surface that can run for a day, and this one ran 11 hours showing
+     * an office that was a merged PR out of date — the daemon and `/live` both refresh themselves,
+     * the encoder had nothing. A long-lived Node process cannot hot-swap its own code, so picking up
+     * a rebuild means starting again: tear the stream down cleanly and re-exec, which is the same
+     * conclusion ADR 152 reached for the daemon.
+     *
+     * The restart is deliberately *not* a page reload. Reloading would keep the RTMP session alive
+     * and never interrupt viewers, but it only refreshes the web bundle — the capture pipeline in
+     * this process would stay stale, which is half a fix wearing the costume of a whole one.
+     */
+    buildTimer = setInterval(() => {
+      if (checking || stopping || restarting) return;
+      checking = true;
+      void (async () => {
+        try {
+          const daemon = await fetchDaemonBuild(opts.server);
+          if (!daemonRebuilt(baselineBuild, daemon)) return;
+          process.stdout.write(
+            theme.meta(
+              `\ndaemon rebuilt (${baselineBuild?.slice(0, 7)} → ${daemon?.slice(0, 7)}) — restarting the stream on the new code`,
+            ) + '\n',
+          );
+          restarting = true;
+          gracefulStop(); // ffmpeg finalizes and exits → the await below returns → we re-exec
+        } finally {
+          checking = false;
+        }
+      })();
+    }, BUILD_POLL_MS);
+    buildTimer.unref(); // never the reason this process stays alive
 
     // The frame source dying MID-stream is terminal — flush what we have and report it. After the
     // encoder has already exited this also fires from cleanup's own group-kill; not an error.
@@ -688,6 +780,17 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     exitCode = await ffmpegExit;
   } finally {
     cleanup();
+  }
+  if (restarting) {
+    // Only *after* cleanup: the old ffmpeg has finalized and released the ingest, so the replacement
+    // isn't a second publisher on the same stream key — which the sink would reject.
+    process.stdout.write(theme.meta('restarting…') + '\n');
+    spawn(process.execPath, process.argv.slice(1), {
+      detached: true,
+      stdio: 'inherit',
+      env: process.env,
+    }).unref();
+    return 0;
   }
   if (exitCode === 0) process.stdout.write(`${theme.ok('✓')} broadcast ended cleanly\n`);
   return exitCode === 0 ? 0 : 1;

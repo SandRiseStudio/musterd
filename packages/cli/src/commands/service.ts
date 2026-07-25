@@ -30,6 +30,7 @@ import {
 import {
   AUTOREFRESH_LABEL,
   HOST_LABEL,
+  kickstartArgs,
   LIVE_LABEL,
   LIVE_SYNC_LABEL,
   parsePlistProgramArguments,
@@ -567,6 +568,42 @@ function daemonCheckout(ctx: ServiceCtx): string | null {
   return resolvePath(binJs, '../../../..');
 }
 
+/**
+ * Bounce the other long-lived agents that run from the same checkout the daemon does.
+ *
+ * `refreshDaemon` rebuilds the **whole** checkout with `pnpm --dir <dir> build`, but then restarts
+ * only its own label — so every other KeepAlive process started from that same `dist` keeps running
+ * the code it booted with, indefinitely. The wake actuator has always had this problem: the fix was
+ * documented as "run `musterd service restart --wake` by hand", which is a currency policy that
+ * depends on somebody remembering.
+ *
+ * Only agents that are (a) installed and (b) resolve to *this* checkout are touched, so a plist
+ * pointing at some other clone is left alone. The auto-refresher is deliberately not in the list: it
+ * is a `StartInterval` tick that exits, so every firing already runs the newest code. Neither is the
+ * `/live` publisher, which lives in its own worktree and re-syncs on its own poll.
+ */
+function bounceSiblings(ctx: ServiceCtx, dir: string, ok: (s: string) => void): void {
+  const siblings: Array<{ label: string; what: string }> = [
+    { label: HOST_LABEL, what: 'wake actuator' },
+  ];
+  for (const { label, what } of siblings) {
+    // Beside the daemon's own plist — derived, not `homedir()`, so a test can point the whole set at
+    // a temp dir the way every other lifecycle op here is injected.
+    const path = join(dirname(ctx.plistPath), `${label}.plist`);
+    const xml = ctx.readFile?.(path);
+    if (!xml) continue; // not installed
+    const binJs = parsePlistProgramArguments(xml)?.[1];
+    if (!binJs || resolvePath(binJs, '../../../..') !== dir) continue; // some other checkout
+    const r = ctx.run('launchctl', kickstartArgs(ctx.uid, label));
+    // Advisory: a sibling that won't bounce must not fail the daemon refresh that already succeeded.
+    ok(
+      r.status === 0
+        ? `restarted the ${what}`
+        : theme.meta(`could not restart the ${what} — run \`musterd service restart --wake\``),
+    );
+  }
+}
+
 async function refreshDaemon(
   ctx: ServiceCtx,
   health: () => Promise<DaemonHealth>,
@@ -632,6 +669,8 @@ async function refreshDaemon(
   const r = restart(ctx);
   if (r.status !== 0) fail('restart', r);
   ok(`restarted the musterd daemon on ${after}`);
+  // The rebuild above is checkout-wide, so anything else running from it is now stale too.
+  bounceSiblings(ctx, dir, ok);
   return 0;
 }
 
