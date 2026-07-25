@@ -122,6 +122,42 @@ export interface AgentPlistOpts {
 
 /** The shared LaunchAgent XML template. Every dynamic value is XML-escaped — a path with `&` can't
  * break the doc. Keys are emitted in a fixed order; optional ones are elided when unset. */
+/**
+ * Rewrite a version-pinned Homebrew node path to the stable symlink beside it, when the two resolve
+ * to the same binary. `/opt/homebrew/Cellar/node@22/22.22.0/bin/node` becomes
+ * `/opt/homebrew/opt/node@22/bin/node`.
+ *
+ * **Why this exists.** `install` embeds `process.execPath`, which under Homebrew is a path with the
+ * exact version in it. When Homebrew upgrades the formula, that directory goes away and every plist
+ * still naming it becomes unloadable — launchd reports `EX_CONFIG` (78) and throttles, and because
+ * `launchctl print` still says "loaded", nothing announces it. On 2026-07-25 both the wake actuator
+ * and the auto-refresher were found dead this way, silently, since a `node@22` upgrade two days
+ * earlier: the old binary was still on disk but its `libsimdjson` dylib had been removed with the
+ * upgrade, so it failed at dyld load. The daemon survived only because a `service install` had
+ * happened to run since.
+ *
+ * **Why the `opt/<formula>` link and not `bin/node`.** `/opt/homebrew/opt/node@22/bin/node` follows
+ * the formula, so it tracks 22.22 → 22.23 and keeps the same major — which keeps `better-sqlite3`'s
+ * native ABI valid. `/opt/homebrew/bin/node` follows whatever `node` is currently linked, which on
+ * this machine is **node 26**: embedding that would swap the ABI out from under the daemon, the
+ * exact crashloop the `install` ABI guard exists to prevent.
+ *
+ * The `resolve` check is the safety rail: the rewrite only happens when the stable path resolves to
+ * the binary we are actually running, so this can never quietly point an agent at a different node.
+ * Injected rather than imported so this module stays free of filesystem side effects.
+ */
+export function stableNodePath(exec: string, resolve: (p: string) => string): string {
+  const m = /^(.*)\/Cellar\/([^/]+)\/[^/]+\/(.*)$/.exec(exec);
+  if (!m) return exec; // not a Cellar path (nvm, system node, a container) — nothing to stabilise
+  const candidate = `${m[1]}/opt/${m[2]}/${m[3]}`;
+  try {
+    if (resolve(candidate) === resolve(exec)) return candidate;
+  } catch {
+    /* no such link, or unreadable — keep the concrete path we know works */
+  }
+  return exec;
+}
+
 function renderPlist(o: AgentPlistOpts): string {
   const programArgs = o.programArguments
     .map((a) => `    <string>${xmlEscape(a)}</string>`)
@@ -365,6 +401,14 @@ export interface LaunchctlStatus {
   loaded: boolean;
   pid: number | null;
   state: string | null;
+  /**
+   * The agent's last exit code, when launchctl reports one. A non-zero value on an agent that is
+   * "loaded" is the shape a silent death takes: `state = spawn scheduled` reads like health, and the
+   * only thing distinguishing it from a working agent is this number. `78` (EX_CONFIG) is the one to
+   * know — launchd could not execute the program at all, which is what a stale Homebrew node path
+   * produces after an upgrade.
+   */
+  lastExit: number | null;
 }
 
 /**
@@ -372,14 +416,37 @@ export interface LaunchctlStatus {
  * pass `loaded: false` via `ok=false` and this returns the not-loaded shape without scanning.
  */
 export function parseLaunchctlPrint(stdout: string, ok: boolean): LaunchctlStatus {
-  if (!ok) return { loaded: false, pid: null, state: null };
+  if (!ok) return { loaded: false, pid: null, state: null, lastExit: null };
   const pidMatch = stdout.match(/\bpid = (\d+)/);
   // Capture the whole state value ("running", "waiting", "not running") — not just the first token,
   // which truncated an interval agent's "not running" to a misleading "not".
   const stateMatch = stdout.match(/\bstate = ([^\n]+)/);
+  const exitMatch = stdout.match(/\blast exit code = (\d+)/);
   return {
     loaded: true,
     pid: pidMatch ? Number(pidMatch[1]) : null,
     state: stateMatch ? stateMatch[1]!.trim() : null,
+    lastExit: exitMatch ? Number(exitMatch[1]) : null,
   };
+}
+
+/**
+ * A human-readable warning when a "loaded" agent is in fact dead, or null when it looks fine.
+ *
+ * The failure this exists for is quiet by construction: launchd keeps a crash-looping agent
+ * *loaded*, so `status` reported health while the wake actuator and auto-refresher had been unable
+ * to start for two days. An agent with no pid and a non-zero last exit is not running, whatever the
+ * state string says.
+ */
+export function agentFailureNote(st: LaunchctlStatus, programExists?: boolean): string | null {
+  if (!st.loaded) return null;
+  if (programExists === false) {
+    return 'its plist names a program that no longer exists — reinstall to re-point it (a Homebrew upgrade moves the node path)';
+  }
+  if (st.pid === null && st.lastExit !== null && st.lastExit !== 0) {
+    return st.lastExit === 78
+      ? 'launchd cannot execute it (EX_CONFIG 78) — usually a stale node path after an upgrade; reinstall'
+      : `not running — last exit code ${st.lastExit}`;
+  }
+  return null;
 }

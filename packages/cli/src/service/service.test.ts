@@ -7,7 +7,10 @@ import {
   bootstrapArgs,
   buildPlist,
   kickstartArgs,
+  agentFailureNote,
   parseLaunchctlPrint,
+  stableNodePath,
+  type LaunchctlStatus,
   parsePlistProgramArguments,
   printArgs,
   SERVICE_LABEL,
@@ -144,11 +147,21 @@ describe('launchctl argv builders', () => {
 describe('parseLaunchctlPrint', () => {
   it('extracts pid + state when loaded', () => {
     const out = '\tstate = running\n\tpid = 48456\n\tprogram = /node\n';
-    expect(parseLaunchctlPrint(out, true)).toEqual({ loaded: true, pid: 48456, state: 'running' });
+    expect(parseLaunchctlPrint(out, true)).toEqual({
+      loaded: true,
+      pid: 48456,
+      state: 'running',
+      lastExit: null,
+    });
   });
 
   it('reports not-loaded when print failed', () => {
-    expect(parseLaunchctlPrint('', false)).toEqual({ loaded: false, pid: null, state: null });
+    expect(parseLaunchctlPrint('', false)).toEqual({
+      loaded: false,
+      pid: null,
+      state: null,
+      lastExit: null,
+    });
   });
 
   it('handles a loaded-but-not-running agent (no pid line)', () => {
@@ -156,7 +169,95 @@ describe('parseLaunchctlPrint', () => {
       loaded: true,
       pid: null,
       state: 'waiting',
+      lastExit: null,
     });
+  });
+
+  it('reads the last exit code — the only thing separating a dead agent from a healthy one', () => {
+    // Real `launchctl print` output from the wake actuator on 2026-07-25, after a Homebrew node
+    // upgrade retired the versioned path its plist named. Note `state = spawn scheduled`: launchd
+    // keeps a crash-looping agent loaded, so nothing else here says it is broken.
+    const out = '\tstate = spawn scheduled\n\truns = 1\n\tlast exit code = 78: EX_CONFIG\n';
+    expect(parseLaunchctlPrint(out, true)).toEqual({
+      loaded: true,
+      pid: null,
+      state: 'spawn scheduled',
+      lastExit: 78,
+    });
+  });
+});
+
+describe('agentFailureNote (a loaded agent that is actually dead)', () => {
+  const st = (over: Partial<LaunchctlStatus> = {}): LaunchctlStatus => ({
+    loaded: true,
+    pid: 123,
+    state: 'running',
+    lastExit: null,
+    ...over,
+  });
+
+  it('says nothing about a healthy agent', () => {
+    expect(agentFailureNote(st())).toBeNull();
+    expect(agentFailureNote(st({ pid: null, state: 'waiting' }))).toBeNull(); // an interval tick between runs
+  });
+
+  it('says nothing about an agent that was never loaded', () => {
+    expect(agentFailureNote(st({ loaded: false, pid: null }))).toBeNull();
+  });
+
+  it('names the upgrade when the plist points at a program that is gone', () => {
+    const note = agentFailureNote(st(), false);
+    expect(note).toMatch(/no longer exists/);
+    expect(note).toMatch(/reinstall/);
+  });
+
+  it('calls out EX_CONFIG specifically — it is the shape a stale node path takes', () => {
+    const note = agentFailureNote(st({ pid: null, state: 'spawn scheduled', lastExit: 78 }));
+    expect(note).toMatch(/EX_CONFIG/);
+    expect(note).toMatch(/reinstall/);
+  });
+
+  it('still reports a plain non-zero exit it does not recognise', () => {
+    expect(agentFailureNote(st({ pid: null, lastExit: 1 }))).toMatch(/last exit code 1/);
+  });
+
+  it('does not cry wolf over a running agent whose previous run exited non-zero', () => {
+    // A pid means it is up now; the old exit code is history, not a fault.
+    expect(agentFailureNote(st({ pid: 999, lastExit: 78 }))).toBeNull();
+  });
+});
+
+describe('stableNodePath (surviving a Homebrew upgrade)', () => {
+  const CELLAR = '/opt/homebrew/Cellar/node@22/22.23.1/bin/node';
+  const OPT = '/opt/homebrew/opt/node@22/bin/node';
+
+  it('prefers the formula symlink when it resolves to the same binary', () => {
+    // The link follows 22.22 → 22.23, so the plist keeps working across a patch upgrade.
+    expect(stableNodePath(CELLAR, (p) => (p === OPT ? CELLAR : p))).toBe(OPT);
+  });
+
+  it('keeps the concrete path when the symlink points somewhere else', () => {
+    // The safety rail: never silently re-point an agent at a different node. On this machine
+    // /opt/homebrew/bin/node is node 26, and swapping ABI under better-sqlite3 is the crashloop the
+    // install guard exists to prevent.
+    expect(
+      stableNodePath(CELLAR, (p) => (p === OPT ? '/opt/homebrew/Cellar/node/26.5.0/bin/node' : p)),
+    ).toBe(CELLAR);
+  });
+
+  it('keeps the concrete path when there is no symlink at all', () => {
+    expect(
+      stableNodePath(CELLAR, (p) => {
+        if (p === OPT) throw new Error('ENOENT');
+        return p;
+      }),
+    ).toBe(CELLAR);
+  });
+
+  it('leaves a non-Homebrew node alone (nvm, system, a container)', () => {
+    for (const p of ['/usr/local/bin/node', '/Users/x/.nvm/versions/node/v22.1.0/bin/node']) {
+      expect(stableNodePath(p, (q) => q)).toBe(p);
+    }
   });
 });
 
@@ -250,7 +351,7 @@ describe('lifecycle ops', () => {
       stdout: '\tpid = 7\n\tstate = running\n',
       stderr: '',
     }));
-    expect(status(ctx)).toEqual({ loaded: true, pid: 7, state: 'running' });
+    expect(status(ctx)).toEqual({ loaded: true, pid: 7, state: 'running', lastExit: null });
   });
 
   it('tailFile returns [] when missing and the last N lines otherwise', () => {
