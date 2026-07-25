@@ -8,6 +8,8 @@ import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { claimCommand } from '../commands/claim.js';
 import {
+  findBinding,
+  findWorkspaceSpec,
   loadConfig,
   rememberIdentity,
   saveBinding,
@@ -16,9 +18,10 @@ import {
   type Config,
 } from '../config.js';
 import { renderBanner } from '../render/rows.js';
-import { paint as pc } from '../render/theme.js';
+import { paint as pc, theme } from '../render/theme.js';
+import { sym } from '../render/ui.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
-import { writeGuidance } from './guidance.js';
+import { CANONICAL_SKILL_PATH, writeGuidance } from './guidance.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
 import { writeProvisionManifest } from './manifest.js';
@@ -45,6 +48,58 @@ export async function cachedTeamLive(server: string, team: string, key: string):
     .inbox(team, { limit: 1 })
     .then(() => true)
     .catch(() => false);
+}
+
+/**
+ * The team this folder already belongs to (ADR 161), from its own `.musterd/` — the gitignored
+ * binding first, the committed workspace spec as fallback (a fresh clone knows its team before it
+ * has a credential). Null when the folder is unbound, which is init's genuine first-run case.
+ */
+function folderTeamHere(dir: string = process.cwd()): string | null {
+  return findBinding(dir)?.team ?? findWorkspaceSpec(dir)?.team ?? null;
+}
+
+/**
+ * `musterd init --refresh-guidance` (ADR 161): rewrite the stamped skill/command files and nothing
+ * else. No team resolution, no member mint, no binding write, no MCP entry — so it is safe in a
+ * live seat's worktree, which plain `init` is not. This exists because the doctor's guidance-drift
+ * line used to say "run `musterd init`", pointing at the one command that also re-mints identity:
+ * a cosmetic version bump should never route a human through an identity-rewriting flow.
+ */
+export function runRefreshGuidance(dir: string = process.cwd()): number {
+  const team = folderTeamHere(dir);
+  if (!team) {
+    process.stderr.write(
+      `${theme.warn(sym.warn)} no musterd binding here — run \`musterd init\` to set this folder up first\n`,
+    );
+    return 1;
+  }
+  // Refresh only the harnesses this folder already carries guidance for; adding a harness's files
+  // is provisioning, which is `init`'s job, not a refresh's.
+  const present = HARNESSES.filter(
+    (h) => h.guidance && existsSync(join(dir, h.guidance.skillPath)),
+  );
+  // `writeGuidance` always writes the canonical `.musterd/skill/SKILL.md` — correct for init, wrong
+  // here: a folder with no guidance at all would sprout one file from a command that promises only
+  // to refresh. Caught live running this in a seat worktree that had never been provisioned. Refuse
+  // instead, and name the command that legitimately creates it.
+  if (present.length === 0 && !existsSync(join(dir, CANONICAL_SKILL_PATH))) {
+    process.stdout.write(
+      `${theme.meta('no musterd guidance in this folder to refresh — `musterd init` provisions it')}\n`,
+    );
+    return 0;
+  }
+  const res = writeGuidance(dir, present, { team });
+  process.stdout.write(
+    `${theme.ok(sym.ok)} guidance refreshed to v${res.contentVersion} — ${res.files.length} file(s)\n`,
+  );
+  for (const f of res.files) process.stdout.write(`  ${theme.meta(f)}\n`);
+  if (res.skipped.length > 0) {
+    process.stdout.write(
+      `${theme.meta(`skipped ${res.skipped.length} user-authored file(s): ${res.skipped.join(', ')}`)}\n`,
+    );
+  }
+  return 0;
 }
 
 function bail(): never {
@@ -132,6 +187,17 @@ export async function runInit(): Promise<number> {
   // 2) Team -----------------------------------------------------------------
   let team: string;
   let creatorToken: string;
+  // The folder's OWN team outranks the globally-cached one (ADR 161). `config.current` is just the
+  // last team this machine touched — in a bound worktree it is routinely something else entirely
+  // (a finished experiment's team), and treating it as the primary is what let init offer to CREATE
+  // A NEW TEAM while standing in a folder whose binding.json plainly named a live one. Creating a
+  // team there mints a new member and repoints a live seat's binding: the loudest possible failure
+  // for the quietest possible reason.
+  const folderTeam = folderTeamHere();
+  const folderKey = folderTeam ? config.identities[folderTeam]?.key : undefined;
+  const folderLive =
+    folderTeam && folderKey ? await cachedTeamLive(server, folderTeam, folderKey) : false;
+
   const existing = config.current && config.identities[config.current];
   // Only offer to reuse the cached team if it's actually live on *this* daemon. A wiped/replaced db
   // or a different server makes the saved team+token stale; offering it would fail mid-flow (the
@@ -139,7 +205,65 @@ export async function runInit(): Promise<number> {
   const cachedLive = existing
     ? await cachedTeamLive(server, config.current!, config.identities[config.current!]!.key)
     : false;
-  if (existing && cachedLive) {
+
+  if (folderTeam && folderLive) {
+    // This folder already belongs to a live team — that is the default, and creating a new one is
+    // the deliberate alternative rather than the fallback.
+    const pick = guard(
+      await p.select({
+        message: 'Which team?',
+        options: [
+          { value: folderTeam, label: folderTeam, hint: "this folder's team" },
+          ...(existing && cachedLive && config.current !== folderTeam
+            ? [
+                {
+                  value: config.current!,
+                  label: config.current!,
+                  hint: 'last used on this machine',
+                },
+              ]
+            : []),
+          { value: '__new__', label: 'Create a new team' },
+        ],
+      }),
+    );
+    if (pick === '__new__') {
+      ({ team, creatorToken } = await createTeam(config, server));
+    } else {
+      team = pick;
+      creatorToken = config.identities[team]!.key;
+    }
+  } else if (folderTeam && !folderLive) {
+    // Bound folder, but no usable credential for its team here (or the team is gone from this
+    // daemon). Creating a team would silently repoint this folder, so say what is actually wrong
+    // and name the paths that do NOT touch identity.
+    p.log.warn(
+      pc.yellow(
+        `This folder is bound to team "${folderTeam}", but this machine has no working credential ` +
+          `for it${folderKey ? ' on this daemon' : ''} — so init cannot set up a member on it here. ` +
+          `Creating a new team below would repoint this folder away from "${folderTeam}".`,
+      ),
+    );
+    p.note(
+      [
+        `${pc.yellow('musterd init --refresh-guidance')}  refresh the skill/command files only (no identity changes)`,
+        `${pc.yellow('musterd wire')}                     re-wire the MCP server from this folder's workspace.json`,
+        `${pc.yellow('musterd agent <seat> --path .')}    re-mint this seat's binding`,
+      ].join('\n'),
+      'Safe alternatives',
+    );
+    const go = guard(
+      await p.confirm({
+        message: `Create a different team here anyway, repointing this folder away from "${folderTeam}"?`,
+        initialValue: false,
+      }),
+    );
+    if (!go) {
+      p.outro(pc.yellow('No changes made.'));
+      return 0;
+    }
+    ({ team, creatorToken } = await createTeam(config, server));
+  } else if (existing && cachedLive) {
     p.log.info(
       pc.dim(
         'A team is a standing roster, not a project — reuse the same team across folders to keep agents talking.',

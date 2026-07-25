@@ -35,6 +35,7 @@ const BOOLEAN_FLAGS = new Set([
   'wake',
   'enforce-clear',
   'no-title',
+  'refresh-guidance',
 ]);
 
 export function parseArgs(argv: string[]): Parsed {
