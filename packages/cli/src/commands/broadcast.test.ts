@@ -1,11 +1,25 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
 import {
   broadcastUrl,
+  clearRunState,
   daemonRebuilt,
+  liveRunState,
+  pidAlive,
+  readRunState,
+  writeRunState,
+  type RunState,
   chromeArgs,
   ffmpegArgs,
   killGroup,
@@ -408,5 +422,78 @@ describe('daemonRebuilt (staying current with main)', () => {
     expect(daemonRebuilt(undefined, 'bbb222')).toBe(false);
     expect(daemonRebuilt('aaa111', undefined)).toBe(false);
     expect(daemonRebuilt(undefined, undefined)).toBe(false);
+  });
+});
+
+describe('run state (finding a stream without hunting PIDs)', () => {
+  function statePath(): string {
+    return join(mkdtempSync(join(tmpdir(), 'runstate-')), 'current.json');
+  }
+  const base = (over: Partial<RunState> = {}): RunState => ({
+    pid: process.pid,
+    startedAt: Date.now(),
+    team: 'revive',
+    sink: 'rtmp',
+    server: 'http://127.0.0.1:4849',
+    ...over,
+  });
+
+  it('round-trips what an operator needs to identify the stream', () => {
+    const p = statePath();
+    writeRunState(base({ build: 'abc1234' }), p);
+    const read = readRunState(p);
+    expect(read?.team).toBe('revive');
+    expect(read?.pid).toBe(process.pid);
+    expect(read?.build).toBe('abc1234');
+  });
+
+  it('never records the sink target — for --twitch that string embeds the stream key', () => {
+    const p = statePath();
+    writeRunState(base(), p);
+    expect(readFileSync(p, 'utf8')).not.toContain('rtmps://');
+    expect(readRunState(p)?.sink).toBe('rtmp');
+  });
+
+  it('reports a live stream, and forgets one whose process is gone', () => {
+    const p = statePath();
+    writeRunState(base(), p); // our own pid — definitely alive
+    expect(liveRunState(p)?.team).toBe('revive');
+
+    writeRunState(base({ pid: 0x7ffffff0 }), p); // a pid that is not running
+    expect(liveRunState(p)).toBeNull();
+    expect(existsSync(p)).toBe(false); // and the stale record is tidied away
+  });
+
+  it('only lets a process retract its own claim — the restart hand-off depends on it', () => {
+    // On a build restart the replacement is spawned while the old process is still alive, so both
+    // exist at once. An unconditional unlink in the old process's exit handler would delete the NEW
+    // stream's record and leave it unfindable by --status/--stop.
+    const p = statePath();
+    const replacementPid = process.pid + 1;
+    writeRunState(base({ pid: replacementPid }), p); // the replacement has claimed it
+
+    clearRunState(process.pid, p); // the outgoing process tidies up
+    expect(readRunState(p)?.pid).toBe(replacementPid); // ...and does not clobber the newcomer
+
+    clearRunState(replacementPid, p); // its own claim, though, it may drop
+    expect(existsSync(p)).toBe(false);
+  });
+
+  it('survives a missing or corrupt record rather than failing a stream over bookkeeping', () => {
+    expect(readRunState(join(tmpdir(), 'definitely-not-here-xyz.json'))).toBeNull();
+    const p = statePath();
+    writeFileSync(p, 'not json at all');
+    expect(readRunState(p)).toBeNull();
+    expect(liveRunState(p)).toBeNull();
+  });
+
+  it('pidAlive asks without signalling — kill(pid, 0) must send nothing', () => {
+    const kill = vi.fn();
+    expect(pidAlive(1234, kill)).toBe(true);
+    expect(kill).toHaveBeenCalledWith(1234, 0);
+    const dead = vi.fn(() => {
+      throw new Error('ESRCH');
+    });
+    expect(pidAlive(1234, dead)).toBe(false);
   });
 });

@@ -129,7 +129,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'broadcast',
     signature:
-      '--team <slug> (--out <file.mp4> | --twitch | --rtmp <url>) [--server <url>] [--fps 30] [--bitrate 4500k] [--duration <s>] [--encoder videotoolbox|libx264]',
+      '--team <slug> (--out <file.mp4> | --twitch | --rtmp <url>) [--server <url>] [--fps 30] [--bitrate 4500k] [--duration <s>] [--encoder videotoolbox|libx264] | --status | --stop',
     summary: 'stream the animated office — headless capture of /broadcast, no OBS',
     group: 'setup',
     primary: false,
@@ -139,7 +139,9 @@ export const CATALOG: readonly CommandEntry[] = [
       'no-key proof mode), to Twitch (`--twitch`), or to any RTMP(S) ingest (`--rtmp`). The Twitch ' +
       'stream key is a secret: set MUSTERD_STREAM_KEY or a macOS Keychain item (service ' +
       '`musterd-stream-key`) — never a flag, never musterd config. Needs Chrome and ffmpeg on the ' +
-      'machine. Foreground process, Ctrl-C to stop; waits for the page’s readiness probe before ' +
+      'machine. Foreground process, Ctrl-C to stop — or `--stop` from anywhere, which is what you ' +
+      'want once a build restart has replaced it with a detached process. `--status` says whether ' +
+      'anything is streaming and on which build. Waits for the page’s readiness probe before ' +
       'encoding, so a dead daemon fails fast instead of streaming a blank page. Restarts itself on ' +
       'the new code when the daemon is rebuilt under it (ADR 159), and ends the stream rather than ' +
       'buffering without limit if the encoder stops keeping up.',

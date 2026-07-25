@@ -1,9 +1,18 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { Parsed } from '../args.js';
+import { configPath } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 
@@ -391,6 +400,89 @@ export function sweepStaleProfiles(
   return removed;
 }
 
+/**
+ * What a live stream records about itself, so it can be found without `ps | grep`.
+ *
+ * The incident this comes from had no terminal at all: the process's parent was `launchd`, so the
+ * documented "Ctrl-C to stop" was not merely inconvenient, it was unavailable. The build restart
+ * (ADR 159) makes that the *normal* state rather than an accident — the replacement is spawned
+ * detached, so after the first restart there is no foreground process to interrupt.
+ */
+export interface RunState {
+  pid: number;
+  startedAt: number;
+  team: string;
+  /** `file` or `rtmp` — never the target, which for `--twitch` embeds the stream key. */
+  sink: 'file' | 'rtmp';
+  server: string;
+  /** The daemon build this stream is pinned to, when known. */
+  build?: string;
+}
+
+export function runStatePath(): string {
+  return join(dirname(configPath()), 'broadcast', 'current.json');
+}
+
+export function writeRunState(state: RunState, path: string = runStatePath()): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(state, null, 2));
+  } catch {
+    /* best-effort bookkeeping — never fail a stream over it */
+  }
+}
+
+export function readRunState(path: string = runStatePath()): RunState | null {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as RunState;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clear the record — **only if it still names `pid`**.
+ *
+ * The guard is load-bearing, not defensive habit. On a build restart the replacement is spawned
+ * while this process is still alive, so both exist at once; an unconditional unlink in the old
+ * process's exit handler would delete the *new* stream's record and leave it unfindable. Standard
+ * pidfile discipline: you may only retract your own claim.
+ */
+export function clearRunState(pid: number, path: string = runStatePath()): void {
+  try {
+    if (readRunState(path)?.pid !== pid) return;
+    rmSync(path, { force: true });
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+/** Is that process still there? `kill(pid, 0)` signals nothing and only asks the question. */
+export function pidAlive(
+  pid: number,
+  kill: (p: number, s: number) => unknown = process.kill,
+): boolean {
+  try {
+    kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The recorded stream, if one is genuinely running. A record naming a dead pid is a run that ended
+ * without tidying up (an external `SIGKILL`, a power cut) — report nothing and clear it, so a stale
+ * file can never make `--stop` signal a pid the OS has since handed to something else.
+ */
+export function liveRunState(path: string = runStatePath()): RunState | null {
+  const state = readRunState(path);
+  if (!state) return null;
+  if (pidAlive(state.pid)) return state;
+  clearRunState(state.pid, path);
+  return null;
+}
+
 const CHROME_DEFAULT = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 export function chromeArgs(debugPort: number, profileDir: string): string[] {
@@ -512,7 +604,68 @@ async function waitBroadcastReady(cdp: Cdp, timeoutMs: number): Promise<void> {
   );
 }
 
+/** How long `--stop` waits for a graceful exit before saying so. */
+const STOP_WAIT_MS = 12_000;
+
+/** `musterd broadcast --status` — is anything streaming, and on which build? */
+function statusVerb(): number {
+  const state = liveRunState();
+  if (!state) {
+    process.stdout.write(theme.meta('no broadcast running') + '\n');
+    return 0;
+  }
+  const mins = Math.round((Date.now() - state.startedAt) / 60_000);
+  process.stdout.write(
+    `${theme.ok('◉ live')} ${state.team} ${theme.meta(
+      `· ${state.sink} · pid ${state.pid} · up ${mins}m` +
+        (state.build ? ` · ${state.build.slice(0, 7)}` : ''),
+    )}\n`,
+  );
+  return 0;
+}
+
+/**
+ * `musterd broadcast --stop` — the affordance the incident needed and did not have.
+ *
+ * `SIGTERM` rather than `SIGINT`: both take the same graceful path, and `SIGTERM` is what a
+ * supervisor would send, so the one documented stop works whether the stream is in a terminal, was
+ * orphaned, or is a detached replacement from a build restart.
+ */
+async function stopVerb(): Promise<number> {
+  const state = liveRunState();
+  if (!state) {
+    process.stdout.write(theme.meta('no broadcast running') + '\n');
+    return 0;
+  }
+  process.stdout.write(theme.meta(`stopping broadcast (pid ${state.pid})…`) + '\n');
+  try {
+    process.kill(state.pid, 'SIGTERM');
+  } catch {
+    throw new CliError(`could not signal pid ${state.pid} — is it yours?`, 1);
+  }
+  const deadline = Date.now() + STOP_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (!pidAlive(state.pid)) {
+      clearRunState(state.pid);
+      process.stdout.write(`${theme.ok('✓')} stopped\n`);
+      return 0;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  // Deliberately not escalating to SIGKILL: that skips the container finalize, and after ADR 159 a
+  // stream that ignores SIGTERM is a bug worth seeing rather than papering over.
+  process.stderr.write(
+    `${theme.err('✗')} pid ${state.pid} did not stop within ${STOP_WAIT_MS / 1000}s — still running\n`,
+  );
+  return 1;
+}
+
 export async function broadcastCommand(parsed: Parsed): Promise<number> {
+  // The two read-only verbs come first: neither needs a sink or a --team, and both must work when
+  // the stream they are asking about belongs to some other terminal (or to none at all).
+  if (parsed.flags['status'] === true) return statusVerb();
+  if (parsed.flags['stop'] === true) return stopVerb();
+
   const opts = parseOptions(parsed.flags);
   if (!opts.team) throw new CliError('which team? — pass --team <slug>', 2);
   const sink = await resolveSink(opts, keychainLookup);
@@ -610,6 +763,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     } catch {
       /* Chrome may still hold a handle; the next run's startup sweep will get it */
     }
+    clearRunState(process.pid); // only if it is still ours — see clearRunState
   });
 
   // `detached: true` makes each child its own process-group leader, which is what lets the
@@ -727,6 +881,14 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     live = true; // signals now stop gracefully — there are frames worth finalizing
 
     baselineBuild = await fetchDaemonBuild(opts.server);
+    writeRunState({
+      pid: process.pid,
+      startedAt: Date.now(),
+      team: opts.team,
+      sink: sink.kind,
+      server: opts.server,
+      ...(baselineBuild ? { build: baselineBuild } : {}),
+    });
     process.stdout.write(
       `${theme.ok('◉ live')}${baselineBuild ? theme.meta(`  ${baselineBuild.slice(0, 7)}`) : ''}\n`,
     );
@@ -785,6 +947,9 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     // Only *after* cleanup: the old ffmpeg has finalized and released the ingest, so the replacement
     // isn't a second publisher on the same stream key — which the sink would reject.
     process.stdout.write(theme.meta('restarting…') + '\n');
+    // Release the claim *before* the replacement starts, so its own `writeRunState` is not then
+    // deleted by this process's exit handler. Both are briefly alive; only one may hold the record.
+    clearRunState(process.pid);
     spawn(process.execPath, process.argv.slice(1), {
       detached: true,
       stdio: 'inherit',
