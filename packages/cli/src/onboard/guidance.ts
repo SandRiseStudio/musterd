@@ -5,6 +5,8 @@ import {
   GUIDANCE_CONTENT_VERSION,
   parseContentStamp,
   renderContentStamp,
+  renderLabelSessionsFrontmatter,
+  renderLabelSessionsSkill,
   renderSkillBody,
   renderSkillFrontmatter,
   renderSlashCommand,
@@ -129,6 +131,18 @@ export function writeGuidance(
     const g = h.guidance;
     if (!g) continue;
     writeOne(dir, g.skillPath, skillFile(g.frontmatter, opts.team), force, written, skipped);
+    if (g.sessionsSkillPath) {
+      // ADR 160: the label-sessions skill — a separate unit, only for harnesses whose sessions can
+      // list/rename each other (the canonical body stays harness-neutral, so it never merges in).
+      writeOne(
+        dir,
+        g.sessionsSkillPath,
+        `${renderLabelSessionsFrontmatter()}\n\n${renderLabelSessionsSkill()}`,
+        force,
+        written,
+        skipped,
+      );
+    }
     if (g.commandsDir) {
       for (const name of SLASH_COMMANDS) {
         writeOne(
@@ -154,6 +168,7 @@ export function guidanceTargets(harnesses: Harness[]): string[] {
     const g = h.guidance;
     if (!g) continue;
     paths.add(g.skillPath);
+    if (g.sessionsSkillPath) paths.add(g.sessionsSkillPath);
     if (g.commandsDir)
       for (const n of SLASH_COMMANDS) paths.add(join(g.commandsDir, `musterd-${n}.md`));
   }
@@ -177,7 +192,11 @@ export function removeGuidance(dir: string, harnesses: Harness[]): { removed: st
   }
   // Tidy musterd-owned dirs left empty (best-effort; leave shared dirs like .claude/commands alone
   // if the user has other files there).
-  for (const rel of ['.claude/skills/musterd', '.musterd/skill']) {
+  for (const rel of [
+    '.claude/skills/musterd',
+    '.claude/skills/musterd-label-sessions',
+    '.musterd/skill',
+  ]) {
     const abs = join(dir, rel);
     try {
       if (existsSync(abs) && readdirSync(abs).length === 0)

@@ -99,6 +99,10 @@ export interface HarnessGuidance {
   /** Dir for slash-command prompt files (one `.md` per command), relative to the binding folder.
    * Omit when the harness has no project-level slash-command support. */
   commandsDir?: string;
+  /** Path for the **label-sessions** skill (ADR 160) — declared only by harnesses whose sessions can
+   * list and rename each other through agent-side tools (Claude Code Desktop today). Omit when the
+   * harness has no writable session list; those get terminal-tab titles only. */
+  sessionsSkillPath?: string;
 }
 
 /** What a harness gets to work with when observing its own session's model. */

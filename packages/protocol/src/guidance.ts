@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 4;
+export const GUIDANCE_CONTENT_VERSION = 5;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -57,6 +57,7 @@ export const SKILL_CLI_COMMANDS = [
   'notify',
   'unbind',
   'reclaim',
+  'session',
 ] as const;
 
 /** The content-stamp prefix. A full stamp reads: `<!-- musterd:content v1 sha256:abcd1234 -->`. */
@@ -206,6 +207,65 @@ export function renderSkillBody(opts: { team: string }): string {
     `- MCP tools: ${SKILL_MCP_TOOLS.map((n) => `\`${n}\``).join(', ')}`,
     `- CLI commands: ${SKILL_CLI_COMMANDS.map((n) => `\`musterd ${n}\``).join(', ')}`,
     '',
+  ].join('\n');
+}
+
+/**
+ * The **label-sessions** skill (ADR 160, surface 2) — a second, deliberately separate guidance unit.
+ * It is NOT part of {@link renderSkillBody}: the canonical musterd skill is harness-neutral by
+ * contract, and this one can only work where the hosting harness exposes session-list/rename tools
+ * to the agent (Claude Code Desktop today, via `HarnessGuidance.sessionsSkillPath`). The decision
+ * logic lives in `musterd session resolve-labels` — the skill's job is only: gather, pipe, apply.
+ *
+ * The harness tool names below (`list_sessions`, `set_session_title`) are the desktop app's own and
+ * deliberately NOT in {@link SKILL_MCP_TOOLS} — that list is CI-checked against @musterd/mcp's
+ * registered tools, which these are not.
+ */
+export function renderLabelSessionsSkill(): string {
+  return [
+    '# Label seat sessions in the sidebar',
+    '',
+    'Prefix other seat sessions’ sidebar titles with the musterd chip, their seat, and their',
+    'start time — `\u{1F536} Miley (Fri 3p) - Daemon refresh` — so a human can tell which session',
+    'belongs to which seat. Run this at session start in a seat worktree, or when asked to label',
+    'or tidy session titles.',
+    '',
+    '**A session can never rename itself** — the rename tool refuses the current session. Sessions',
+    'label *each other*: the one you are in stays bare until the next session’s sweep. That is',
+    'expected — never report it as a problem.',
+    '',
+    '## The sweep',
+    '',
+    '1. List the user’s sessions with the harness session-list tool (in Claude Code Desktop:',
+    '   `list_sessions` from the session-management server, limit 40).',
+    '2. Write that JSON array to a temp file and pipe it through the decision engine:',
+    '   `musterd session resolve-labels --stdin < sessions.json`.',
+    '   It returns `{"apply": [{session_id, seat, title}], "skipped": {reason: count}}`. All',
+    '   filtering and formatting live there — do not second-guess it or hand-craft titles.',
+    '3. For each `apply` entry, call the harness rename tool (`set_session_title`) with exactly that',
+    '   `session_id` and `title`. Independent calls — issue them in parallel.',
+    '4. Report one line: `labeled 3 sessions (Miley ×2, Izzo ×1)`. If `apply` is empty and this ran',
+    '   automatically, say nothing at all; if the user asked, say `nothing to label`.',
+    '',
+    '## What the engine guarantees (so you do not re-derive it)',
+    '',
+    '- Only sessions in musterd seat worktrees; other repos are never touched.',
+    '- A title the user typed (`titleSource: "user"`) is never overwritten.',
+    '- Idempotent: labeled rows skip; pre-chip labels get the chip without re-dating.',
+    '- Brand-new sessions are skipped until their auto-title settles.',
+    '',
+  ].join('\n');
+}
+
+/** Frontmatter for {@link renderLabelSessionsSkill} on a harness that gates skills on a description. */
+export function renderLabelSessionsFrontmatter(): string {
+  return [
+    '---',
+    'name: musterd-label-sessions',
+    'description: Label musterd seat sessions in the app sidebar with the musterd chip, seat name, ' +
+      'and start time (e.g. "\u{1F536} Miley (Fri 3p) - Office overlay"). Use at the start of a session ' +
+      'in a musterd seat worktree, and when the user asks to label, rename, or tidy session titles.',
+    '---',
   ].join('\n');
 }
 

@@ -502,7 +502,7 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'session',
-    signature: 'show [--json]  |  start --stdin | end --stdin',
+    signature: 'show [--json]  |  start --stdin | end --stdin  |  resolve-labels --stdin',
     summary: 'this workspace’s captured harness session — what a wake would resume (ADR 131)',
     group: 'admin',
     detail:
@@ -511,7 +511,9 @@ export const CATALOG: readonly CommandEntry[] = [
       'gitignored .musterd/binding.json — the id and transcript path never leave this machine; the ' +
       'daemon gets a harness-class-only attestation (presence-neutral, never claims). A wake then ' +
       'upgrades from fresh to `--resume`, and a live local session defers the wake entirely. ' +
-      '`show` is the human view: what is captured here, is it live, would a wake resume or defer.',
+      '`show` is the human view: what is captured here, is it live, would a wake resume or defer. ' +
+      '`resolve-labels` is the sidebar-sweep decision engine (ADR 160): session-list JSON in, ' +
+      '`{apply, skipped}` out — the label-sessions skill pipes through it and applies the renames.',
     examples: ['musterd session show', 'musterd session show --json'],
   },
   {

@@ -8,6 +8,7 @@ import {
   captureSession,
   OBSERVATION_REFRESH_MS,
   refreshModelObservation,
+  resolveLabels,
   sessionCommand,
 } from './session.js';
 
@@ -387,5 +388,131 @@ describe('musterd session (capture)', () => {
       expect(refreshModelObservation(wsA)).toBeUndefined();
       expect(readBinding(wsA).model_observed).toBeUndefined();
     });
+  });
+});
+
+/**
+ * The sidebar-sweep decision engine (ADR 160 surface 2). Hermetic: seat workspaces and the desktop
+ * app's session-record dir are both temp fixtures (MUSTERD_CCD_SESSIONS_DIR); nothing touches the
+ * real ~/Library path. The caller applies renames — resolveLabels itself must never write.
+ */
+describe('musterd session resolve-labels (ADR 160)', () => {
+  const CHIP = '\u{1F536}';
+  const NOW = Date.UTC(2026, 6, 25, 19, 0);
+  let seatWs: string; // a seat worktree (workspace.json claim seat:miley)
+  let plainWs: string; // a non-seat repo
+  let ccdDir: string; // fixture stand-in for the app's session-record dir
+  const dirs: string[] = [];
+
+  const spec = (name: string) => ({
+    server: 'http://127.0.0.1:1',
+    team: 'dawn',
+    surface: 'claude-code',
+    claim: { mode: 'seat', name },
+  });
+
+  /** Write the app-side record the enrichment path reads: <dir>/<org>/<proj>/<id>.json. */
+  const writeCcdRecord = (id: string, rec: object): void => {
+    const proj = join(ccdDir, 'org', 'proj');
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, `${id}.json`), JSON.stringify(rec));
+  };
+
+  const makeDir = (prefix: string): string => {
+    const d = mkdtempSync(join(tmpdir(), prefix));
+    dirs.push(d);
+    return d;
+  };
+
+  beforeEach(() => {
+    seatWs = makeDir('musterd-labels-seat-');
+    mkdirSync(join(seatWs, '.musterd'), { recursive: true });
+    writeFileSync(join(seatWs, '.musterd', 'workspace.json'), JSON.stringify(spec('miley')));
+    plainWs = makeDir('musterd-labels-plain-');
+    ccdDir = makeDir('musterd-labels-ccd-');
+  });
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  const run = (rows: object[]) =>
+    resolveLabels(rows as never, { now: NOW, env: { MUSTERD_CCD_SESSIONS_DIR: ccdDir } });
+
+  it('labels an untouched seat session from the app record createdAt', () => {
+    writeCcdRecord('s1', { createdAt: NOW - 3_600_000, titleSource: 'auto' });
+    const res = run([{ sessionId: 's1', title: 'Daemon refresh', cwd: seatWs }]);
+    expect(res.apply).toHaveLength(1);
+    expect(res.apply[0]!.title.startsWith(`${CHIP} Miley (`)).toBe(true);
+    expect(res.apply[0]!.title.endsWith(') - Daemon refresh')).toBe(true);
+    expect(res.skipped).toEqual({});
+  });
+
+  it('covers every skip reason', () => {
+    writeCcdRecord('hand', { createdAt: NOW - 3_600_000, titleSource: 'user' });
+    writeCcdRecord('done', { createdAt: NOW - 3_600_000, titleSource: 'auto' });
+    writeCcdRecord('fresh', { createdAt: NOW - 30_000, titleSource: 'auto' });
+    const res = run([
+      { sessionId: 'a', title: 'x', cwd: seatWs, isArchived: true },
+      { sessionId: 'b', title: '   ', cwd: seatWs },
+      { sessionId: 'c', title: 'x', cwd: plainWs },
+      { sessionId: 'hand', title: 'My own words', cwd: seatWs },
+      { sessionId: 'done', title: `${CHIP} Miley (Fri 3p) - x`, cwd: seatWs },
+      { sessionId: 'fresh', title: 'First guess', cwd: seatWs },
+      { sessionId: 'nometa', title: 'No timestamps anywhere', cwd: seatWs },
+    ]);
+    expect(res.apply).toEqual([]);
+    expect(res.skipped).toEqual({
+      archived: 1,
+      'no-title-yet': 1,
+      'not-a-seat': 1,
+      'hand-named': 1,
+      'already-labeled': 1,
+      'too-fresh': 1,
+      'no-timestamp': 1,
+    });
+  });
+
+  it('upgrades a pre-chip label by prepending the chip, KEEPING the original timestamp text', () => {
+    const res = run([{ sessionId: 's', title: 'Miley (Mon 2p) - MCP list', cwd: seatWs }]);
+    expect(res.apply).toEqual([
+      { session_id: 's', seat: 'Miley', title: `${CHIP} Miley (Mon 2p) - MCP list` },
+    ]);
+  });
+
+  it('degrades to lastActivityAt when the app record is unreadable — and STILL freshness-gates it (the python original skipped the gate here)', () => {
+    const res = run([
+      {
+        sessionId: 'old',
+        title: 'Old enough',
+        cwd: seatWs,
+        lastActivityAt: new Date(NOW - 3_600_000).toISOString(),
+      },
+      {
+        sessionId: 'young',
+        title: 'Too new',
+        cwd: seatWs,
+        lastActivityAt: new Date(NOW - 30_000).toISOString(),
+      },
+    ]);
+    expect(res.apply.map((a) => a.session_id)).toEqual(['old']);
+    expect(res.skipped).toEqual({ 'too-fresh': 1 });
+  });
+
+  it('falls back to the agents-<name> folder suffix when the workspace has no seat claim', () => {
+    const parent = makeDir('musterd-labels-parent-');
+    const suffixWs = join(parent, 'agents-izzo');
+    mkdirSync(suffixWs, { recursive: true });
+    writeCcdRecord('s', { createdAt: NOW - 3_600_000, titleSource: 'auto' });
+    const res = run([{ sessionId: 's', title: 'Check messages', cwd: suffixWs }]);
+    expect(res.apply).toHaveLength(1);
+    expect(res.apply[0]!.title).toContain('Izzo (');
+  });
+
+  it('a chip for a DIFFERENT seat is relabeled for the owning seat, not skipped', () => {
+    writeCcdRecord('s', { createdAt: NOW - 3_600_000, titleSource: 'auto' });
+    const res = run([{ sessionId: 's', title: `${CHIP} Ryder (Thu 9a) - x`, cwd: seatWs }]);
+    // chipped-but-not-seated: falls through to a full relabel under the cwd's real seat.
+    expect(res.apply).toHaveLength(1);
+    expect(res.apply[0]!.title).toContain('Miley (');
   });
 });
