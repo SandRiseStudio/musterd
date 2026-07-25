@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir, platform as osPlatform } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { flagStr, type Parsed } from '../args.js';
@@ -33,9 +33,11 @@ import {
   kickstartArgs,
   LIVE_LABEL,
   LIVE_SYNC_LABEL,
+  agentFailureNote,
   parsePlistProgramArguments,
   SERVICE_LABEL,
   serviceSupported,
+  stableNodePath,
 } from '../service/launchd.js';
 import {
   installLive,
@@ -65,6 +67,32 @@ const spawnRunner: Runner = (cmd, args): RunResult => {
   return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 };
 
+/**
+ * The node an agent's plist should name. `process.execPath` under Homebrew carries the exact version,
+ * which stops resolving the moment the formula upgrades — see `stableNodePath` for the outage that
+ * taught us. Every plist this CLI writes goes through here.
+ */
+function agentNode(): string {
+  return stableNodePath(process.execPath, (p) => realpathSync(p));
+}
+
+/**
+ * Whether the program an installed plist names still exists on disk. `undefined` when the plist can't
+ * be read at all (nothing to say). This is the direct form of the failure `agentFailureNote` reports:
+ * a Homebrew upgrade retires the versioned node path and every plist still naming it goes unloadable.
+ */
+function agentProgramExists(plistPath: string): boolean | undefined {
+  let xml: string;
+  try {
+    xml = readFileSync(plistPath, 'utf8');
+  } catch {
+    return undefined;
+  }
+  const program = parsePlistProgramArguments(xml)?.[0];
+  if (!program) return undefined;
+  return existsSync(program);
+}
+
 /** Where the LaunchAgent plist lives (user domain — no root). */
 function plistPath(): string {
   return join(homedir(), 'Library', 'LaunchAgents', `${SERVICE_LABEL}.plist`);
@@ -78,7 +106,7 @@ function plistPath(): string {
  * Exported so `musterd reload` can resolve the same service identity to find the daemon's pid.
  */
 export function resolveCtx(serveArgs: string[]): ServiceCtx {
-  const node = process.execPath;
+  const node = agentNode();
   const binJs = resolvePath(process.argv[1] ?? '');
   // repo root: …/packages/cli/dist/bin.js → up four. Best-effort; cwd doesn't affect the db (homedir).
   const workingDir = resolvePath(binJs, '../../../..');
@@ -141,7 +169,7 @@ function resolveWakeCtx(run: Runner, parsed: Parsed): WakeHostCtx {
     uid: typeof process.getuid === 'function' ? process.getuid() : '',
     label: HOST_LABEL,
     plistPath: join(homedir(), 'Library', 'LaunchAgents', `${HOST_LABEL}.plist`),
-    node: process.execPath,
+    node: agentNode(),
     binJs,
     hostArgs,
     workingDir: resolvePath(binJs, '../../../..'),
@@ -197,7 +225,7 @@ function resolveAutoRefreshCtx(run: Runner, parsed: Parsed): AutoRefreshCtx {
     uid: typeof process.getuid === 'function' ? process.getuid() : '',
     label: AUTOREFRESH_LABEL,
     plistPath: join(homedir(), 'Library', 'LaunchAgents', `${AUTOREFRESH_LABEL}.plist`),
-    node: process.execPath,
+    node: agentNode(),
     binJs,
     refreshArgs: ['refresh', '--auto', '--mode', mode],
     workingDir: resolvePath(binJs, '../../../..'),
@@ -837,6 +865,8 @@ async function autoRefreshServiceCommand(
       ok(
         `daemon auto-refresher: ${st.loaded ? theme.ok(st.state ?? 'loaded') : theme.warn('not installed')}`,
       );
+      const autoDead = agentFailureNote(st, agentProgramExists(ctx.plistPath));
+      if (autoDead) process.stdout.write(`  ${theme.err('✗')} ${autoDead}\n`);
       meta(`  runs:  musterd service refresh --auto --mode ${mode} every ${ctx.intervalSeconds}s`);
       meta(`  logs:  ${ctx.logPath}`);
       return 0;
@@ -1030,6 +1060,8 @@ async function wakeServiceCommand(
         ? theme.ok(`loaded${s.pid ? ` · pid ${s.pid}` : ''}${s.state ? ` · ${s.state}` : ''}`)
         : theme.warn('not loaded');
       process.stdout.write(`${theme.accent(ctx.label)}  ${line}\n`);
+      const wakeDead = agentFailureNote(s, agentProgramExists(ctx.plistPath));
+      if (wakeDead) process.stdout.write(`  ${theme.err('✗')} ${wakeDead}\n`);
       meta(`  plist:    ${ctx.plistPath}`);
       meta(`  registry: ${registrySummary()}`);
       meta(`  logs:     ${ctx.logPath}`);
@@ -1119,10 +1151,13 @@ async function renderStatus(
     // daemon may be down or unreachable — reflected below
   }
 
+  const dead = agentFailureNote(st, agentProgramExists(ctx.plistPath));
   const loaded = st.loaded
     ? theme.ok(`loaded${st.pid ? ` · pid ${st.pid}` : ''}${st.state ? ` · ${st.state}` : ''}`)
     : theme.warn('not loaded');
   process.stdout.write(`${theme.accent(ctx.label)}  ${loaded}\n`);
+  // A crash-looping agent stays "loaded", so the state line alone reads like health. Say it plainly.
+  if (dead) process.stdout.write(`  ${theme.err('✗')} ${dead}\n`);
   process.stdout.write(theme.meta(`  plist:  ${ctx.plistPath}`) + '\n');
   process.stdout.write(
     `  ${theme.meta('health:')} ${
