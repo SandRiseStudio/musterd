@@ -88,7 +88,10 @@ function inspectGuidance(cwd: string): { drift: string[]; notes: string[] } {
     if (stamp.version < GUIDANCE_CONTENT_VERSION) {
       drift.push(
         `the musterd skill in ${rel} is v${stamp.version}, current is v${GUIDANCE_CONTENT_VERSION} — ` +
-          `run \`musterd init\` to refresh it.`,
+          // ADR 161: point at the refresh that touches ONLY guidance files. Plain `init` also mints
+          // members and rewrites bindings, which is the wrong blast radius for a version bump —
+          // and in a live seat's worktree, actively dangerous.
+          `run \`musterd init --refresh-guidance\` to refresh it.`,
       );
     } else if (contentHash(strippedBody(text)) !== stamp.hash) {
       notes.push(

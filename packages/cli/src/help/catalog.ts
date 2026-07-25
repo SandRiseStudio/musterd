@@ -95,15 +95,23 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Setup & daemon ─────────────────────────────────────────────────────────────────────────
   {
     name: 'init',
-    signature: '[--check [--fix]]',
+    signature: '[--check [--fix]] [--refresh-guidance]',
     summary: 'interactive first-run setup — wire this folder to musterd',
     group: 'setup',
     primary: true,
     detail:
       'Interactive first-run setup (recommended). Registers the MCP server, writes the primer, and ' +
       'gets this folder onto a team. `--check` reports provisioning drift without writing; add `--fix` ' +
-      'to repair it by re-running init.',
-    examples: ['musterd init', 'musterd init --check', 'musterd init --check --fix'],
+      'to repair it by re-running init. `--refresh-guidance` rewrites only the stamped skill/command ' +
+      'files — no prompts, no member mint, no binding rewrite — so it is safe in a live seat’s ' +
+      'workspace, which the full flow is not (ADR 161). In an already-bound folder the full flow ' +
+      'defaults to that folder’s own team, never the last team this machine happened to use.',
+    examples: [
+      'musterd init',
+      'musterd init --check',
+      'musterd init --check --fix',
+      'musterd init --refresh-guidance',
+    ],
   },
   {
     name: 'wire',

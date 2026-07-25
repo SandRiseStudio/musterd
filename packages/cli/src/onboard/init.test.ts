@@ -1,9 +1,9 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // vi.mock calls below are hoisted above these imports, so init.js resolves the mocked deps.
-import { cachedTeamLive, missingGitignoreEntries, runInit } from './init.js';
+import { cachedTeamLive, missingGitignoreEntries, runInit, runRefreshGuidance } from './init.js';
 
 // Shared, hoisted test doubles the mock factories below close over.
 const h = vi.hoisted(() => {
@@ -24,6 +24,12 @@ const h = vi.hoisted(() => {
     id: 'claude-code',
     label: 'Claude Code',
     surface: 'claude-code',
+    guidance: {
+      skillPath: '.claude/skills/musterd/SKILL.md',
+      frontmatter: 'claude-code' as const,
+      commandsDir: '.claude/commands',
+      sessionsSkillPath: '.claude/skills/musterd-label-sessions/SKILL.md',
+    },
     detect: vi.fn(async () => ({ installed: true, configured: false, detail: 'claude 1.0' })),
     configure: vi.fn(async () => ({
       target: 'claude mcp (scope: local)',
@@ -58,7 +64,11 @@ const h = vi.hoisted(() => {
   const claimQueue: Array<
     { state: 'occupied' } | { state: 'refused'; code: string; message: string }
   > = [];
-  return { confirmQueue, selectQueue, textQueue, http, harness, config, claimQueue };
+  const box: { folderBinding: { team: string } | null; folderSpec: { team: string } | null } = {
+    folderBinding: null,
+    folderSpec: null,
+  };
+  return { confirmQueue, selectQueue, textQueue, http, harness, config, claimQueue, ...box };
 });
 
 vi.mock('@clack/prompts', () => ({
@@ -105,7 +115,8 @@ vi.mock('../config.js', () => ({
   rememberIdentity: vi.fn((cfg: { knownIdentities: unknown[] }, si: unknown) => {
     cfg.knownIdentities.push(si);
   }),
-  findBinding: vi.fn(() => null),
+  findBinding: vi.fn(() => h.folderBinding),
+  findWorkspaceSpec: vi.fn(() => h.folderSpec),
   wsBase: vi.fn((server: string) => server.replace(/^http/, 'ws')),
 }));
 
@@ -124,6 +135,8 @@ beforeEach(() => {
   h.selectQueue.length = 0;
   h.textQueue.length = 0;
   h.claimQueue.length = 0;
+  h.folderBinding = null;
+  h.folderSpec = null;
   Object.assign(h.config, {
     server: 'http://localhost:4849',
     current: undefined,
@@ -242,6 +255,92 @@ describe('runInit — team selection', () => {
     h.selectQueue.push('watch'); // intent
     expect(await runInit()).toBe(0);
     expect(h.http.createTeam).toHaveBeenCalled();
+  });
+});
+
+describe("runInit — the folder's own team outranks the machine cache (ADR 161)", () => {
+  it("offers the folder's team as the default, even when config.current names another live team", async () => {
+    h.folderBinding = { team: 'revive' };
+    h.config.current = 'dawn';
+    h.config.identities['dawn'] = { name: 'nick', key: 'mscr_dawn', surface: 'cli' };
+    h.config.identities['revive'] = { name: 'nick', key: 'mscr_revive', surface: 'cli' };
+    h.http.inbox.mockResolvedValue({ messages: [] }); // both teams probe live
+    h.selectQueue.push('revive'); // which team? → the folder's own
+    h.selectQueue.push('watch');
+    expect(await runInit()).toBe(0);
+    expect(h.http.createTeam).not.toHaveBeenCalled();
+  });
+
+  it('REFUSES by default when the folder names a team this machine cannot reach — the near-miss that motivated this', async () => {
+    // The live shape: bound to revive, but config.current is a dead experiment team and there is no
+    // credential for revive. Pre-ADR this fell straight through to "name your team".
+    h.folderBinding = { team: 'revive' };
+    h.config.current = 'cookoff-gb2';
+    h.config.identities['cookoff-gb2'] = { name: 'nick', key: 'mscr_dead', surface: 'cli' };
+    h.http.inbox.mockRejectedValue(new Error('no such team'));
+    h.confirmQueue.push(false); // "create a different team here anyway?" → no
+    expect(await runInit()).toBe(0);
+    expect(h.http.createTeam).not.toHaveBeenCalled();
+  });
+
+  it('still allows it on an explicit yes, so the escape hatch survives', async () => {
+    h.folderBinding = { team: 'revive' };
+    h.config.current = undefined;
+    h.http.inbox.mockRejectedValue(new Error('no such team'));
+    h.confirmQueue.push(true); // yes, repoint this folder
+    h.textQueue.push('fresh', 'nick', '');
+    h.selectQueue.push('watch');
+    expect(await runInit()).toBe(0);
+    expect(h.http.createTeam).toHaveBeenCalled();
+  });
+
+  it('falls back to the workspace spec when there is no binding yet (fresh clone)', async () => {
+    h.folderSpec = { team: 'revive' };
+    h.config.identities['revive'] = { name: 'nick', key: 'mscr_revive', surface: 'cli' };
+    h.http.inbox.mockResolvedValue({ messages: [] });
+    h.selectQueue.push('revive');
+    h.selectQueue.push('watch');
+    expect(await runInit()).toBe(0);
+    expect(h.http.createTeam).not.toHaveBeenCalled();
+  });
+});
+
+describe('runRefreshGuidance — guidance only, never identity (ADR 161)', () => {
+  it('refuses in an unbound folder rather than guessing a team', () => {
+    expect(runRefreshGuidance(cwd)).toBe(1);
+  });
+
+  it('writes stamped guidance for a harness already present, and touches nothing else', () => {
+    h.folderBinding = { team: 'revive' };
+    // Seed the harness's skill file so the refresh treats it as present (a refresh never PROVISIONS).
+    mkdirSync(join(cwd, '.claude', 'skills', 'musterd'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.claude', 'skills', 'musterd', 'SKILL.md'),
+      'old\n<!-- musterd:content v1 sha256:abcd1234 -->\n',
+    );
+    expect(runRefreshGuidance(cwd)).toBe(0);
+    const written = readFileSync(join(cwd, '.claude', 'skills', 'musterd', 'SKILL.md'), 'utf8');
+    expect(written).toContain('musterd:content v');
+    // The identity/config surfaces stay untouched — that is the whole point of the flag.
+    expect(existsSync(join(cwd, '.musterd', 'binding.json'))).toBe(false);
+    expect(h.harness.configure).not.toHaveBeenCalled();
+    expect(h.http.createTeam).not.toHaveBeenCalled();
+    expect(h.http.addMember).not.toHaveBeenCalled();
+  });
+
+  it('does not add guidance for a harness the folder does not already carry', () => {
+    h.folderBinding = { team: 'revive' };
+    expect(runRefreshGuidance(cwd)).toBe(0);
+    expect(existsSync(join(cwd, '.claude', 'skills', 'musterd', 'SKILL.md'))).toBe(false);
+  });
+
+  it('writes NOTHING at all in a folder with no guidance — not even the canonical skill (caught live)', () => {
+    // writeGuidance always emits the canonical file, which is right for init and wrong for a
+    // refresh: an unprovisioned worktree would sprout a file from a command that promises only to
+    // refresh. Observed for real against agents-izzo before this guard existed.
+    h.folderBinding = { team: 'revive' };
+    expect(runRefreshGuidance(cwd)).toBe(0);
+    expect(existsSync(join(cwd, '.musterd', 'skill', 'SKILL.md'))).toBe(false);
   });
 });
 

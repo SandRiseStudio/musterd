@@ -1,6 +1,6 @@
 import type { Parsed } from '../args.js';
 import { runCheckBuild, runInitDoctor } from '../onboard/doctor.js';
-import { runInit } from '../onboard/init.js';
+import { runInit, runRefreshGuidance } from '../onboard/init.js';
 import { theme } from '../render/theme.js';
 
 /**
@@ -8,8 +8,13 @@ import { theme } from '../render/theme.js';
  * `musterd init --check` — read-only provisioning drift check (ADR 060); no prompts, no writes.
  * `musterd init --check --fix` — diagnose, then repair any drift by re-running init (ADR 087: one
  *   command diagnoses *and* fixes, instead of the check telling you to run a second command).
+ * `musterd init --refresh-guidance` — rewrite the stamped skill/command files only (ADR 161); no
+ *   prompts, no identity changes, safe in a live seat's worktree.
  */
 export async function initCommand(parsed: Parsed): Promise<number> {
+  // Guidance-only refresh: deliberately checked before `--check`, so `--check --refresh-guidance`
+  // means "fix the guidance", never "run the whole interactive flow".
+  if (parsed.flags['refresh-guidance']) return runRefreshGuidance();
   // `--check-build` (ADR 135): the hook-cheap freshness probe — one health fetch, one line on
   // mismatch, always exit 0. Kept separate from `--check` (which reads manifests + runs git).
   if (parsed.flags['check-build']) return runCheckBuild();
