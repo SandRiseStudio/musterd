@@ -666,3 +666,93 @@ describe('door staging', () => {
     expect(actors.poses().get('Bo')!.alpha).toBe(1); // seated, fully opaque
   });
 });
+
+describe('the phone call', () => {
+  it('stands up, keeps the phone at the ear the whole way round, and sits back down', () => {
+    const { placements, byName } = world([node('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const home = actors.poses().get('Ada')!;
+
+    expect(actors.errandPhone('Ada')).toBe(true);
+    let sawWalkingOnPhone = false;
+    let sawStanding = false;
+    let farthest = 0;
+    let guard = 0;
+    while (actors.active() && guard++ < 6000) {
+      actors.step(0.05);
+      const p = actors.poses().get('Ada')!;
+      if (p.sit < 0.5) sawStanding = true;
+      // The whole point of the beat: the pose survives the walk cycle. A caller whose arm only comes up
+      // while standing still is somebody checking their phone, not somebody on a call.
+      if (p.moving && p.carry === 'phone' && p.gesture === GESTURE.call) sawWalkingOnPhone = true;
+      farthest = Math.max(farthest, Math.hypot(p.lx - home.lx, p.ly - home.ly));
+    }
+    expect(sawStanding).toBe(true);
+    expect(sawWalkingOnPhone).toBe(true);
+    expect(farthest).toBeGreaterThan(120); // actually went wandering, not a lap of the desk
+
+    const done = actors.poses().get('Ada')!;
+    expect(done.lx).toBeCloseTo(home.lx, 5);
+    expect(done.ly).toBeCloseTo(home.ly, 5);
+    expect(done.carry).toBeNull(); // phone back in the pocket
+  });
+
+  it('will not pull a member out of the nook or off another errand', () => {
+    const { placements, byName } = world([node('Bo', 'away')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.errandPhone('Bo')).toBe(false);
+  });
+});
+
+describe('neighbour conversations', () => {
+  /** A full desk row: enough working members that at least one pod row fills up side by side. */
+  function fullRoom() {
+    const nodes = Array.from({ length: 12 }, (_, i) => node('N' + String(i).padStart(2, '0')));
+    const { placements, byName } = world(nodes);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    return actors;
+  }
+
+  it('finds side-by-side desk pairs to offer', () => {
+    const actors = fullRoom();
+    const pairs = actors.deskNeighbours();
+    expect(pairs.length).toBeGreaterThan(0);
+    // Each pair really is one desk apart and facing the same way.
+    for (const [a, b] of pairs) {
+      const pa = actors.poses().get(a)!;
+      const pb = actors.poses().get(b)!;
+      expect(pa.dir).toBe(pb.dir);
+      expect(Math.hypot(pa.lx - pb.lx, pa.ly - pb.ly)).toBeLessThan(130);
+    }
+  });
+
+  it('turns both of them toward each other and leaves them seated the whole time', () => {
+    const actors = fullRoom();
+    const [a, b] = actors.deskNeighbours()[0]!;
+    const before = actors.poses().get(a)!.dir;
+    expect(actors.deskChat(a, b)).toBe(true);
+
+    let minSit = 1;
+    let turned = false;
+    let guard = 0;
+    while (actors.active() && guard++ < 1200) {
+      actors.step(0.05);
+      const pa = actors.poses().get(a)!;
+      minSit = Math.min(minSit, pa.sit);
+      if (pa.dir !== before) turned = true;
+    }
+    expect(turned).toBe(true); // they actually swivelled to face each other
+    expect(minSit).toBeGreaterThan(0.9); // and never got out of the chair to do it
+    expect(actors.poses().get(a)!.dir).toBe(before); // back to the monitor afterwards
+  });
+
+  it('offers nobody who is already busy', () => {
+    const actors = fullRoom();
+    const [a, b] = actors.deskNeighbours()[0]!;
+    actors.deskChat(a, b);
+    expect(actors.deskNeighbours().some(([x, y]) => x === a || y === a)).toBe(false);
+  });
+});

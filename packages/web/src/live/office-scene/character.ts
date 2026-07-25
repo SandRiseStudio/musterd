@@ -521,6 +521,16 @@ function drawCarry(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, 
     return;
   }
   const wr = px(k.wrist[1]);
+  if (kind === 'phone') {
+    // A phone, held at whatever the pose has done with the right hand — which on a call is the ear.
+    const w = 4.2 * u;
+    const h = 8 * u;
+    ctx.fillStyle = '#2b2b31';
+    ctx.fillRect(wr.p.x - w / 2, wr.p.y - h * 0.55, w, h);
+    ctx.fillStyle = '#6f7d8c'; // the lit screen edge, so it isn't a featureless black chip
+    ctx.fillRect(wr.p.x - w / 2 + u * 0.6, wr.p.y - h * 0.55 + u * 0.7, w - u * 1.2, h - u * 1.6);
+    return;
+  }
   if (kind === 'bottle') {
     // A mini of the desk water bottle (same blues), upright in the right hand.
     const w = 5.5 * u;

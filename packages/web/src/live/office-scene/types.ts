@@ -88,7 +88,7 @@ export interface Pose {
 }
 
 /** What a member can carry through a walk or a hold: the handoff box, or an errand's prop. */
-export type CarryKind = 'box' | 'plate' | 'bottle' | 'mug';
+export type CarryKind = 'box' | 'plate' | 'bottle' | 'mug' | 'phone';
 
 /** Motion intensity == notification tier (memory: travel-intensity == notification tiers). */
 export type Tier = 'ambient' | 'needs-attn' | 'urgent';
@@ -134,6 +134,6 @@ export interface OfficeHandle {
    * A design-preview / verification affordance (see office-preview); the live office uses the scheduler. */
   pokeGesture: (kind?: number) => string | null;
   /** Fire an errand now on an idle desk member (bypassing the scheduler): the fridge meal, the water
-   * refill, or the coffee run. Same verification affordance as `pokeGesture`. */
-  pokeErrand: (kind: 'fridge' | 'water' | 'coffee') => string | null;
+   * refill, the coffee run, or a phone call. Same verification affordance as `pokeGesture`. */
+  pokeErrand: (kind: 'fridge' | 'water' | 'coffee' | 'phone') => string | null;
 }

@@ -105,6 +105,8 @@ export const GESTURE = {
   eat: 11,
   /** Working the espresso machine at counter height. */
   pour: 12,
+  /** Phone to the ear, held for the length of a call. */
+  call: 13,
 } as const;
 
 /** An arc-shaped envelope over the gesture window: 0 → 1 → 0, zero-velocity at both ends (no pop). */
@@ -606,6 +608,15 @@ function applyOverlays(s: Skel, inp: SkelInput): void {
     const mouth = v(2, s.head.y - 6, s.head.z + C.headR * 0.55 + 2);
     s.wrist[1] = lerp3(plate, mouth, a * smooth(bite));
     s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1, -0.3, 0));
+  } else if (inp.gesture === GESTURE.call) {
+    // On the phone: the right hand comes up to the ear and stays there for the whole call, the head
+    // tipped a touch into it. A held pose rather than an arc — this one has to survive a walk cycle and
+    // still read as a call from across the room, with no sound and no speech bubble to help it.
+    const a = holdEnv(inp.gestureT);
+    const ear = v(C.headR * 0.95, s.head.y - 0.5, s.head.z + C.headR * 0.2);
+    s.wrist[1] = lerp3(s.wrist[1], ear, a);
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1.3, -0.2, -0.3));
+    s.head = v(s.head.x + a * 0.7, s.head.y, s.head.z);
   } else if (inp.gesture === GESTURE.pour) {
     // Working the machine: right hand forward at counter height, a small press-and-hold.
     const a = holdEnv(inp.gestureT);
