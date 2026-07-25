@@ -138,3 +138,43 @@ stream, while still making the queue _bounded_, which is the property that stops
 else on the box and read `speed=`. If it sits below 1× there too, the input rate is wrong and the
 answer is a lower default fps or a cheaper frame path, not a bigger buffer. Until that is measured,
 the stall watchdog is a diagnostic, not a fix.
+
+### Findings, 2026-07-25 — the experiment above, run
+
+**Yes, it holds 1× when the machine is quiet.** A 60 s capture at the default 30 fps with no build
+running (load ~3.9) took **60.61 s of wall clock for 60.000 s of media — 0.99×**, exactly 1800
+frames, no stall. So the pipeline is not inherently too slow, and the 0.81× recorded above was
+contention, not a ceiling. The hypothesis that the input rate is simply wrong is **falsified**.
+
+**But `speed=` cannot answer the headroom question, and that is worth knowing before anyone reads it
+that way again.** The pump feeds ffmpeg on a wall clock, so for a live source `speed` is pinned at
+≈1× by construction — it can only ever report _whether_ the encoder kept up, never by how much it
+could have. Captures at 30, 20 and 15 fps on the same quiet machine all returned ~1.0× (elapsed
+60.61 s / 60.40 s / 59.10 s for 60 s of media), which reads like "fps makes no difference" and means
+nothing of the sort.
+
+**The margin is the queue growth rate, and there fps matters entirely.** Interleaved runs — 30, 15,
+30, 15, alternating so drifting load cannot favour either — under the 30–40 load this machine
+routinely carries when other sessions build:
+
+| fps | load at start | final `speed` | stalled |
+| --- | ------------- | ------------- | ------- |
+| 30  | 31.9          | 0.227×        | **yes** |
+| 15  | 35.3          | 0.489×        | no      |
+| 30  | 35.3          | 0.197×        | **yes** |
+| 15  | 39.9          | 0.692×        | no      |
+
+30 fps stalled on both attempts; 15 fps stalled on neither. The mechanism is arithmetic rather than
+mysterious: halving the frame rate halves the bytes offered per second (~5.4 → ~2.7 MB/s), so the
+queue fills at half the rate and a contention spike of a given length no longer reaches the ceiling.
+
+**What this settles, and what it does not.** The stall watchdog is doing exactly what it should: on
+this machine, at this frame rate, under this load, a stream genuinely cannot keep up, and ending
+loudly beats hanging. What is _not_ settled is the product call — whether a smoother 30 fps stream
+that dies under contention is preferable to a 15 fps one that survives it. That is a taste decision
+about the artifact, not an engineering one, so the default stays at 30 fps until its owner says
+otherwise. `--fps 15` is the lever, and it works.
+
+One caveat on the stall path: it takes the force stop rather than the graceful one, so a file capture
+that stalls has no moov atom. That is deliberate — the stall condition _is_ "the encoder is not
+draining", so waiting for it to finalize is waiting for the hang this whole change removed.
