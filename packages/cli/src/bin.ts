@@ -48,6 +48,7 @@ import {
   renderHelpJson,
 } from './render/help.js';
 import { setColorEnabled, theme } from './render/theme.js';
+import { emitTerminalTitle, terminalTitleFor } from './render/title.js';
 import { sym } from './render/ui.js';
 import { nodeVersionTooOld } from './runtime.js';
 import { cliVersion } from './version.js';
@@ -120,6 +121,10 @@ async function main(argv: string[]): Promise<number> {
   // Best-effort — never fails the command, never touches stdout (keeps --json/pipes clean).
   const nudge = await reachabilityNudge(command, rest);
   if (nudge) process.stderr.write(nudge + '\n');
+  // Seat tab title (ADR 160): retitle the hosting terminal after every acting command, so any
+  // terminal-hosted harness that shells out to musterd labels itself. Best-effort; /dev/tty only.
+  const title = terminalTitleFor(command, rest);
+  if (title) emitTerminalTitle(title);
   return code;
 }
 
