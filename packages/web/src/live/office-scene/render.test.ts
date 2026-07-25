@@ -5,9 +5,17 @@ import { fitFloor, project } from './iso';
 import { DESK_SLOTS, LOUNGE, NOOK } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
-import { animatedDeskAnchors, coffeeAnchor, drawDog, glassColor, MACHINE_H, renderScene } from './render';
+import {
+  actorSortAnchor,
+  animatedDeskAnchors,
+  coffeeAnchor,
+  drawDog,
+  glassColor,
+  MACHINE_H,
+  renderScene,
+} from './render';
 import { assignSeats } from './seating';
-import type { OfficeNode } from './types';
+import type { OfficeNode, Pose } from './types';
 
 function node(name: string, activity: OfficeNode['activity']): OfficeNode {
   return {
@@ -162,9 +170,29 @@ describe('drawDog paints every pose', () => {
 
   it.each(modes)('draws the %s pose without throwing, both facings', (mode) => {
     for (const flip of [false, true]) {
-      const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip, path: [], seg: 0, plan: 'nap', sitFor: 5 };
+      const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55 };
       expect(() => drawDog(mockCtx(), fit, pet, 3.2)).not.toThrow();
     }
+  });
+
+  /**
+   * The dog is white with black patches, and both halves of that have to survive every pose. A coat
+   * that loses its markings in one pose is the failure worth catching: the patches are what carry the
+   * silhouette on a warm floor, so a pose painted in flat white is a dog-shaped hole in the room.
+   */
+  it.each(modes)('gives the %s pose both a white coat and black markings', (mode) => {
+    const paints: string[] = [];
+    const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip: false, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55 };
+    drawDog(mockCtx(paints), fit, pet, 3.2);
+    const lum = (hex: string) => {
+      const m = /^#([0-9a-f]{6})$/i.exec(hex);
+      if (!m) return null;
+      const n = parseInt(m[1]!, 16);
+      return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    };
+    const lums = paints.map(lum).filter((l): l is number => l !== null);
+    expect(lums.some((l) => l > 0.85)).toBe(true); // the coat
+    expect(lums.some((l) => l < 0.25)).toBe(true); // the markings
   });
 });
 
@@ -186,5 +214,72 @@ describe('glassColor (windows track the day cycle)', () => {
     const [dr, , db] = rgb(glassColor(computeLightEnv(6.5, true))); // dawn ramp
     const [nr, , nb] = rgb(glassColor(computeLightEnv(12, true))); // noon
     expect(dr! - db!).toBeGreaterThan(nr! - nb!);
+  });
+});
+
+describe('where an actor sorts against the furniture', () => {
+  const slot = DESK_SLOTS[0]!;
+  const couch = { lx: NOOK.lx + LOUNGE.couch.dx, ly: NOOK.ly + LOUNGE.couch.dy };
+  const cushion = { lx: couch.lx + 34, ly: couch.ly + 4 };
+
+  function pose(over: Partial<Pose>): Pose {
+    return {
+      lx: slot.lx,
+      ly: slot.ly,
+      dir: slot.dir,
+      small: false,
+      carry: null,
+      bubble: null,
+      alpha: 1,
+      moving: false,
+      run: false,
+      gesture: 0,
+      gestureT: 0,
+      phase: 0,
+      stride: 0,
+      sit: 0,
+      ...over,
+    };
+  }
+
+  it('sits a desk member at their chair, not at their feet', () => {
+    const a = actorSortAnchor(pose({ sit: 1 }), slot, undefined);
+    expect(a.seatedAtDesk).toBe(true);
+    // the chair is CHAIR_OFF behind the desk, i.e. not the pose's own position
+    expect(Math.hypot(a.lx - slot.lx, a.ly - slot.ly)).toBeGreaterThan(30);
+  });
+
+  it('sorts an errand diner at the couch, never at the desk they came from', () => {
+    // The bug: this member's *placement* is still their desk while an errand has sat them on the
+    // lounge couch. Keying off the placement sorted them across the room and the office painted over
+    // them — they vanished for the length of the meal.
+    const p = pose({ ...cushion, sit: 1, depthAt: couch });
+    const a = actorSortAnchor(p, slot, undefined);
+    expect(a.seatedAtDesk).toBe(false);
+    expect(a.lx).toBe(couch.lx);
+    expect(a.ly).toBe(couch.ly);
+  });
+
+  it('sorts a member at their own feet while the sit blend eases off after standing', () => {
+    // The same bug's other face: `sit` eases down rather than switching, so just after getting up the
+    // walker still read as seated — and was still sorted at that distant desk, sliding through the
+    // lounge furniture on the way out.
+    const p = pose({ lx: cushion.lx + 40, ly: cushion.ly + 40, sit: 0.7 });
+    const a = actorSortAnchor(p, slot, undefined);
+    expect(a.seatedAtDesk).toBe(false);
+    expect(a.lx).toBe(p.lx);
+    expect(a.ly).toBe(p.ly);
+  });
+
+  it('sorts a standing member at their feet even while at their own desk', () => {
+    const a = actorSortAnchor(pose({ sit: 0 }), slot, undefined);
+    expect(a.seatedAtDesk).toBe(false);
+    expect(a.lx).toBe(slot.lx);
+  });
+
+  it('still honours a leisure placement that asks to sort with its furniture', () => {
+    const p = pose({ ...cushion, sit: 1 });
+    const a = actorSortAnchor(p, undefined, { depthAt: couch });
+    expect(a.lx).toBe(couch.lx);
   });
 });

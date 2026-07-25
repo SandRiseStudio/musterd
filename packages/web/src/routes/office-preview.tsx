@@ -152,7 +152,7 @@ function OfficePreviewPage() {
           run();
           loop = setInterval(run, LOOP);
         }
-        // `?beat=fridge|water|coffee|<gesture number>` fires that beat right after mount (and again every
+        // `?beat=fridge|water|coffee|phone|<gesture number>` fires that beat right after mount (and again every
         // 30s) — the only way to verify a ~25s errand headlessly, where clicking the poke buttons isn't
         // an option and waiting out the ambient scheduler isn't either.
         const beat = search.get('beat');
@@ -160,7 +160,7 @@ function OfficePreviewPage() {
           const poke = () => {
             const h = handleRef.current;
             if (!h) return;
-            if (beat === 'fridge' || beat === 'water' || beat === 'coffee') h.pokeErrand(beat);
+            if (beat === 'fridge' || beat === 'water' || beat === 'coffee' || beat === 'phone') h.pokeErrand(beat);
             else h.pokeGesture(Number(beat) || 1);
           };
           timers.push(setTimeout(poke, 600));
@@ -216,6 +216,7 @@ function OfficePreviewPage() {
         <button className="lc__pbtn" title="errand: fridge meal" onClick={() => handleRef.current?.pokeErrand('fridge')}>🍽</button>
         <button className="lc__pbtn" title="errand: water refill" onClick={() => handleRef.current?.pokeErrand('water')}>💧</button>
         <button className="lc__pbtn" title="errand: coffee run" onClick={() => handleRef.current?.pokeErrand('coffee')}>☕</button>
+        <button className="lc__pbtn" title="errand: phone call (stand, pace, return)" onClick={() => handleRef.current?.pokeErrand('phone')}>📞</button>
         <span className="lc__pbtn-sep" />
         <button className="lc__pbtn" title="Dev join / leave (walk in / out)" onClick={() => present2('Dev')}>D</button>
         <button className="lc__pbtn" title="Hana join / leave (walk in / out)" onClick={() => present2('Hana')}>H</button>

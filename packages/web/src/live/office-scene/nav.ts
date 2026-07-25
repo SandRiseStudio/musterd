@@ -122,10 +122,73 @@ const centre = (c: number): P => ({
   ly: Math.floor(c / N) * CELL + CELL / 2,
 });
 
-/** Nearest free cell to `p` (spiral out) — start/goal may sit inside furniture (a desk seat). */
+/**
+ * The room proper: the largest connected region of free cells, flooded once off the static grid.
+ *
+ * Furniture pushed against a wall leaves slivers of free floor that nothing can walk to — the gap
+ * between the meeting table's south chairs and the floor edge was one. Those slivers are free cells,
+ * so a plain nearest-free search will happily nudge an endpoint into one, and every route to or from
+ * that endpoint is then unroutable. Knowing which cells are *the room* makes the nudge land on floor
+ * a body can actually stand on.
+ */
+let mainRegion: Uint8Array | null = null;
+function room(): Uint8Array {
+  if (mainRegion) return mainRegion;
+  const g = grid();
+  const seen = new Int32Array(N * N).fill(-1);
+  let bestId = -1;
+  let bestSize = 0;
+  let id = 0;
+  const stack: number[] = [];
+  for (let c0 = 0; c0 < N * N; c0++) {
+    if (g[c0] === 1 || seen[c0] !== -1) continue;
+    let size = 0;
+    stack.push(c0);
+    seen[c0] = id;
+    while (stack.length) {
+      const c = stack.pop()!;
+      size++;
+      const cx = c % N;
+      const cy = (c - cx) / N;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const x = cx + dx;
+          const y = cy + dy;
+          if (x < 0 || y < 0 || x >= N || y >= N) continue;
+          const nc = y * N + x;
+          if (g[nc] === 1 || seen[nc] !== -1) continue;
+          // Match A*'s no-corner-cutting rule, so the region reflects where a body can really go.
+          if (dx !== 0 && dy !== 0 && (g[cy * N + x] === 1 || g[y * N + cx] === 1)) continue;
+          seen[nc] = id;
+          stack.push(nc);
+        }
+      }
+    }
+    if (size > bestSize) {
+      bestSize = size;
+      bestId = id;
+    }
+    id++;
+  }
+  const out = new Uint8Array(N * N);
+  for (let c = 0; c < N * N; c++) if (seen[c] === bestId) out[c] = 1;
+  mainRegion = out;
+  return out;
+}
+
+/**
+ * Nearest free cell to `p` (spiral out) — start/goal may sit inside furniture (a desk seat).
+ *
+ * Prefers cells in the room's main region: a sliver of floor sealed behind furniture is free but
+ * useless, and nudging onto one is what stranded a route entirely. Falls back to any free cell if the
+ * main region somehow offers none, and to `p`'s own cell if even that fails.
+ */
 function nearestFree(p: P, blocked: (c: number) => boolean): number {
   const cx = Math.min(N - 1, Math.max(0, Math.floor(p.lx / CELL)));
   const cy = Math.min(N - 1, Math.max(0, Math.floor(p.ly / CELL)));
+  const main = room();
+  let fallback = -1;
   for (let r = 0; r < N; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
@@ -134,17 +197,27 @@ function nearestFree(p: P, blocked: (c: number) => boolean): number {
         const y = cy + dy;
         if (x < 0 || y < 0 || x >= N || y >= N) continue;
         const c = y * N + x;
-        if (!blocked(c)) return c;
+        if (blocked(c)) continue;
+        if (main[c] === 1) return c;
+        if (fallback < 0) fallback = c;
       }
     }
   }
-  return cy * N + cx;
+  return fallback >= 0 ? fallback : cy * N + cx;
 }
 
-/** Straight-line clearance between two points (samples the grid) — used for string-pulling. */
+/**
+ * Straight-line clearance between two points (samples the grid) — used for string-pulling.
+ *
+ * The sample step has to be *well* under one cell, not merely under it. At `CELL / 3` a segment could
+ * pass diagonally through the corner of a blocked cell entirely between two samples, and the
+ * string-pull would then accept it — which is how walkers came to clip the corners of desks and
+ * plants by a few units. `CELL / 8` is ~1.9 logical units, comfortably finer than any footprint, and
+ * this runs once per errand rather than per frame, so the extra samples are free.
+ */
 function clear(a: P, b: P, blocked: (c: number) => boolean): boolean {
   const d = Math.hypot(b.lx - a.lx, b.ly - a.ly);
-  const steps = Math.max(1, Math.ceil(d / (CELL / 3)));
+  const steps = Math.max(1, Math.ceil(d / (CELL / 8)));
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const lx = a.lx + (b.lx - a.lx) * t;
@@ -158,7 +231,20 @@ function clear(a: P, b: P, blocked: (c: number) => boolean): boolean {
 /**
  * Route from → to around the furniture (and around `avoid` — other members' standing spots, softened
  * near the endpoints so a seat neighbour never walls off a seat). Returns a waypoint polyline whose
- * ends are the *exact* endpoints; a straight [from, to] when routing is unnecessary or impossible.
+ * ends are the *exact* endpoints.
+ *
+ * **A blocked straight line is never an answer.** This used to `return [from, to]` whenever A* failed,
+ * which turned an unroutable trip into a glide straight through the furniture — the "walking through
+ * the fridge" bug. The failure was not rare: a seat whose surroundings are solid gets nudged by
+ * `nearestFree` to the nearest *free* cell, which can itself be a sealed pocket (the meeting table's
+ * south chairs sat in one), and A* then legitimately finds nothing.
+ *
+ * So when the goal is unreachable we walk as far as the room allows instead: A* exhausting its open
+ * set means it expanded the whole reachable component, so the cell it explored that lies closest to
+ * the goal is the best honest destination. The exact endpoint is still appended as the final hop —
+ * that hop is what "sitting down on the chair you walked up to" is made of, and it is short by
+ * construction as long as every seat has open floor beside it. `nav.test.ts` holds that invariant, so
+ * a layout change that seals a seat fails a test rather than quietly resurrecting the glide.
  */
 export function findPath(from: P, to: P, avoid: P[] = []): P[] {
   const g = grid();
@@ -183,7 +269,9 @@ export function findPath(from: P, to: P, avoid: P[] = []): P[] {
 
   const start = g[cellOf(from)] === 1 || soft.has(cellOf(from)) ? nearestFree(from, blocked) : cellOf(from);
   const goal = g[cellOf(to)] === 1 || soft.has(cellOf(to)) ? nearestFree(to, blocked) : cellOf(to);
-  if (start === goal) return [from, to];
+  // Both endpoints nudge to the same free cell (two seats sharing one patch of floor). The straight
+  // line is blocked or we'd have returned already, so step through that cell rather than across.
+  if (start === goal) return [from, centre(start), to];
 
   // A* (8-connected, no corner cutting), octile heuristic.
   const open = new Map<number, number>(); // cell → f
@@ -241,10 +329,24 @@ export function findPath(from: P, to: P, avoid: P[] = []): P[] {
       }
     }
   }
-  if (!found) return [from, to]; // walled in — degrade to the old straight glide rather than strand
+  // Unreachable goal: A* drained its open set, so `gScore` now holds every cell reachable from the
+  // start. Aim at whichever of those lies closest to the target instead of gliding through the walls.
+  let end = goal;
+  if (!found) {
+    let best = Infinity;
+    for (const c of gScore.keys()) {
+      const p = centre(c);
+      const d = Math.hypot(p.lx - to.lx, p.ly - to.ly);
+      if (d < best) {
+        best = d;
+        end = c;
+      }
+    }
+    if (best === Infinity) return [from, to]; // start itself is walled in — nothing to route around
+  }
 
-  const cells: number[] = [goal];
-  for (let c = goal; came.has(c); ) {
+  const cells: number[] = [end];
+  for (let c = end; came.has(c); ) {
     c = came.get(c)!;
     cells.push(c);
   }

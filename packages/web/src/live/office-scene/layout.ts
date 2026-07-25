@@ -269,19 +269,36 @@ export const HUDDLES: Huddle[] = [
   },
 ];
 
-/** The meeting table in the front corner: a long table with four chairs, on its own rug. */
+/**
+ * The meeting table in the front corner: a long table with four chairs, on its own rug.
+ *
+ * **Chairs down one long side and one at each end**, not two down each side — because the front strip
+ * of floor is shallower than a both-sides table needs. Between the pod rugs (which reach ly 685) and
+ * the floor's edge at 900 there are ~215 units, and seating two rows with a body-width aisle behind
+ * each wants ~240. The old both-sides arrangement fitted only by giving its south row no floor to
+ * stand on: those two chairs were seats nobody could walk to, and a member placed in one slid through
+ * the table to reach it. Ends instead, shifted west for room to pull the east chair out — same four
+ * seats, all of them approachable, and a head seat at each end reads more like a meeting anyway.
+ */
 export const MEETING = {
-  lx: 740,
+  lx: 700,
   ly: 800,
   w: 170,
   d: 92,
   h: 30,
-  /** Chair centres, as offsets — two down each long side. */
+  /**
+   * Chair centres, as offsets — two along the room side, one at each head.
+   *
+   * The side pair sits tucked in toward the middle and the heads are pushed well out, so that the
+   * near-side chair and the near head don't collapse into one another on screen. The 2:1 iso squashes
+   * `ly`, and a side chair diagonally adjacent to a head reads as a single smeared avatar long before
+   * the floor plan suggests it would (`MIN_SPOT_GAP`, held by layout.test.ts).
+   */
   chairs: [
-    { dx: -52, dy: -72, dir: 'S' as Dir },
-    { dx: 52, dy: -72, dir: 'S' as Dir },
-    { dx: -52, dy: 72, dir: 'N' as Dir },
-    { dx: 52, dy: 72, dir: 'N' as Dir },
+    { dx: -40, dy: -80, dir: 'S' as Dir },
+    { dx: 40, dy: -80, dir: 'S' as Dir },
+    { dx: -124, dy: 0, dir: 'E' as Dir },
+    { dx: 124, dy: 0, dir: 'W' as Dir },
   ],
   chairSize: 36,
   rug: { w: 300, d: 196, shape: 'rect', weave: 'stripes', fill: '#9aa886', mark: '#7e8c6b' },
@@ -326,7 +343,11 @@ export const PLANTS: Plant[] = [
   { lx: 380, ly: 870, species: 'fiddle' },
   { lx: 110, ly: 380, species: 'fiddle' }, // left flank, between the huddle and the wall
   { lx: 830, ly: 330, species: 'snake' }, // right flank, under the nook shelf
-  { lx: 830, ly: 870, species: 'fiddle' }, // front corner, past the meeting table
+  // Front corner, past the meeting table. Kept clear of the aisle the east head chair is pulled out
+  // into (that chair's occupant stands around lx 842 to sit down), so the corner stays decoration
+  // rather than a wall. A plant that fences off a seat is how the meeting corner got into trouble
+  // once already.
+  { lx: 872, ly: 878, species: 'fiddle' },
 ];
 
 /** A back-wall window, as a fraction along its wall's edge `[t0,t1]` and up the wall `[u0,u1]`.
@@ -465,6 +486,10 @@ export const LEISURE_SPOTS: LeisureSpot[] = (() => {
     { zone: 'huddle', lx: h.lx + 52, ly: h.ly + 32, dir: 'W', sit: 1 },
     { zone: 'huddle', lx: h.lx - 52, ly: h.ly + 32, dir: 'E', sit: 1 },
   ];
+  // All four meeting chairs are seats — see MEETING for why they sit along one side and the two ends
+  // rather than down both sides. `nav.test.ts` holds every offered spot to having open floor beside it,
+  // so an arrangement that walls a chair in fails a test rather than shipping as a seat nobody can
+  // walk to.
   const meeting: LeisureSpot[] = MEETING.chairs.map((c) => {
     const f = FWD[c.dir];
     return {

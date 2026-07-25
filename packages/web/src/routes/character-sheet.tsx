@@ -162,6 +162,7 @@ function CharacterSheet() {
               seg: 0,
               plan: 'nap',
               sitFor: 99,
+              speed: 55,
             },
             t,
           );

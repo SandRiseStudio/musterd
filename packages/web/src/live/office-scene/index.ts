@@ -2,7 +2,7 @@ import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
 import { createActors, type Actors } from './actors';
 import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
-import { createPet, petBeat, petFollow, petGreet, petNotice, stepPet } from './pet';
+import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
@@ -731,6 +731,18 @@ export function mountOffice(
         scheduleAmbient();
         return;
       }
+      // Sometimes the beat belongs to a *pair* rather than a person: two neighbours turn and talk. It
+      // has to be chosen here, above the per-member pick, because it is the one beat with two subjects
+      // — routed through `playAmbientBeat` it could only ever move one of them.
+      const pairs = actors.deskNeighbours();
+      if (pairs.length && Math.random() < 0.22) {
+        const [a, b] = pairs[Math.floor(Math.random() * pairs.length)]!;
+        if (actors.deskChat(a, b)) {
+          ensureLoop();
+          scheduleAmbient();
+          return;
+        }
+      }
       const idle = actors.idleDeskMembers();
       const who = idle.length ? idle[Math.floor(Math.random() * idle.length)]! : null;
       if (who && playAmbientBeat(who)) ensureLoop();
@@ -758,7 +770,19 @@ export function mountOffice(
       [14, () => actors.gestureBeat(who, GESTURE.lean)],
       // The errands — real trips with a point to them, so they stay the occasional highlight:
       [15, () => coffeeStroll(who)],
-      [7, () => actors.errandFridge(who) || actors.gestureBeat(who, GESTURE.glance)], // lounge full → cheap fallback
+      [9, () => actors.errandPhone(who)], // gets up, takes a call, paces, comes back
+      // A meal is the one errand the dog cares about: it drops whatever it was doing and follows the
+      // plate to the lounge to sit and stare at it. Not every time — a dog that never misses a meal is
+      // a mechanism, and the beat reads better when you notice it happening rather than expect it.
+      [
+        7,
+        () => {
+          const seat = actors.errandFridge(who);
+          if (!seat) return actors.gestureBeat(who, GESTURE.glance); // lounge full → cheap fallback
+          if (Math.random() < 0.65) petBeg(pet, seat);
+          return true;
+        },
+      ],
     ];
     if (water) beats.push([8, () => actors.errandWater(who)]);
     if (mug) beats.push([14, () => actors.gestureBeat(who, GESTURE.sip)]);
@@ -989,7 +1013,13 @@ export function mountOffice(
           if (pl?.kind !== 'desk' || !deskHasProp(pl.slot, 'water')) continue;
         }
         const played =
-          kind === 'fridge' ? actors.errandFridge(who) : kind === 'water' ? actors.errandWater(who) : coffeeStroll(who);
+          kind === 'fridge'
+            ? actors.errandFridge(who)
+            : kind === 'water'
+              ? actors.errandWater(who)
+              : kind === 'phone'
+                ? actors.errandPhone(who)
+                : coffeeStroll(who);
         if (played) {
           ensureLoop();
           return who;

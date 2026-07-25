@@ -7,12 +7,14 @@ import {
   petFollow,
   petGreet,
   petNotice,
+  petBeg,
+  PET_DASH,
   PET_SPEED,
   stepPet,
   STRETCH_S,
   type PetState,
 } from './pet';
-import { COFFEE_STAND, ENTRANCE } from './layout';
+import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK } from './layout';
 import { walkable } from './nav';
 
 /** A tiny deterministic LCG so behaviour tests never depend on Math.random. */
@@ -47,11 +49,22 @@ function runUntil(pet: PetState, mode: PetState['mode'], maxS = 120): number {
 
 describe('napSpots', () => {
   it('only offers spots on open floor', () => {
+    // Rugs, sunbeams and the floor beside each desk — never inside the furniture. The desk-side spots
+    // are filtered against the same grid, so a pod parked against a wall just offers fewer of them.
     for (const daylight of [0, 0.5, 1]) {
       const spots = napSpots(daylight);
       expect(spots.length).toBeGreaterThan(0);
       for (const s of spots) expect(walkable(s.lx, s.ly)).toBe(true);
     }
+  });
+
+  it('offers a spot at somebody\'s desk, not only the rugs', () => {
+    // The dog napping at a desk is the beat that makes the room feel worked in rather than decorated.
+    const spots = napSpots(1);
+    const nearADesk = spots.some((s) =>
+      DESK_SLOTS.some((d) => Math.hypot(d.lx - s.lx, d.ly - s.ly) < 90),
+    );
+    expect(nearADesk).toBe(true);
   });
 
   it('weights the window sunbeams up by day and down at night', () => {
@@ -185,6 +198,11 @@ describe('petNotice (the dog watches you walk past)', () => {
 describe('petGreet (someone came through the door)', () => {
   it('sets off for the entrance and plans a good long wait there', () => {
     const pet = createPet(lcg(3));
+    // Park it deliberately far from the door rather than wherever the seeded nap-spot draw lands: the
+    // behaviour under test is "walks over to greet", and a dog that happens to start beside the
+    // entrance correctly takes the no-trip-needed branch instead.
+    pet.lx = NOOK.lx;
+    pet.ly = NOOK.ly + 96;
     expect(petGreet(pet, lcg(2))).toBe(true);
     expect(pet.mode).toBe('stretch');
     expect(pet.plan).toBe('sit-then-nap');
@@ -197,6 +215,8 @@ describe('petGreet (someone came through the door)', () => {
   it('abandons a nap trip already in flight — a greeting outranks a sunbeam', () => {
     const pet = wakePet();
     runUntil(pet, 'walk');
+    pet.lx = NOOK.lx; // mid-trip and well across the room from the door
+    pet.ly = NOOK.ly + 96;
     expect(petGreet(pet, lcg(2))).toBe(true);
     const end = pet.path[pet.path.length - 1]!;
     expect(Math.hypot(end.lx - ENTRANCE.lx, end.ly - ENTRANCE.ly)).toBeLessThan(120);
@@ -236,5 +256,70 @@ describe('petFollow (tagging along on a coffee run)', () => {
     const path = pet.path;
     expect(petFollow(pet, COFFEE_STAND, lcg(4))).toBe(false);
     expect(pet.path).toBe(path);
+  });
+});
+
+describe('petBeg (somebody is carrying food to the lounge)', () => {
+  const seat = { lx: NOOK.lx + 40, ly: NOOK.ly + 6 };
+
+  it('sets off for the meal and plans to sit through the whole thing', () => {
+    const pet = createPet(lcg(3));
+    pet.lx = 120; // across the room from the lounge
+    pet.ly = 620;
+    expect(petBeg(pet, seat, lcg(4))).toBe(true);
+    expect(pet.plan).toBe('sit-then-nap');
+    // A meal is a long stare, not the glance it gives a passer-by.
+    expect(pet.sitFor).toBeGreaterThan(12);
+    const end = pet.path[pet.path.length - 1]!;
+    expect(Math.hypot(end.lx - seat.lx, end.ly - seat.ly)).toBeLessThan(90);
+    expect(walkable(end.lx, end.ly)).toBe(true);
+  });
+
+  it('just sits up and stares when it is already next to the food', () => {
+    const pet = createPet(lcg(3));
+    pet.lx = seat.lx + 30;
+    pet.ly = seat.ly + 20;
+    expect(petBeg(pet, seat, lcg(4))).toBe(true);
+    expect(pet.mode).toBe('sit');
+    expect(pet.path).toEqual([]);
+  });
+
+  it('lets a stretch finish rather than snapping out of it', () => {
+    const pet = wakePet();
+    expect(pet.mode).toBe('stretch');
+    expect(petBeg(pet, seat, lcg(4))).toBe(false);
+  });
+});
+
+describe('zoomies', () => {
+  /** Force the beat down the zoomies branch: the first draw decides it (< 0.12). */
+  function dashRng(): () => number {
+    let n = 0;
+    return () => (n++ === 0 ? 0.01 : Math.random());
+  }
+
+  it('tears a multi-corner lap at dash speed and still ends up asleep', () => {
+    const pet = createPet(lcg(3));
+    expect(petBeat(pet, { daylight: 1, rng: dashRng() })).toBe(true);
+    expect(pet.speed).toBe(PET_DASH);
+    // A lap, not a hop: several corners strung together.
+    expect(pet.path.length).toBeGreaterThan(3);
+    runUntil(pet, 'walk');
+    runUntil(pet, 'sleep', 240); // and it always winds down again — no permanently awake dog
+    expect(stepPet(pet, 1 / 60)).toBe(false);
+  });
+
+  it('routes the lap around the furniture like any other trip', () => {
+    const pet = createPet(lcg(3));
+    petBeat(pet, { daylight: 1, rng: dashRng() });
+    for (const p of pet.path) expect(walkable(p.lx, p.ly)).toBe(true);
+  });
+
+  it('goes back to a walking pace on the next ordinary trip', () => {
+    const pet = createPet(lcg(3));
+    petBeat(pet, { daylight: 1, rng: dashRng() });
+    runUntil(pet, 'sleep', 240);
+    for (let i = 0; i < 40 && pet.mode === 'sleep'; i++) petBeat(pet, { daylight: 1, rng: lcg(21 + i) });
+    expect(pet.speed).toBe(PET_SPEED);
   });
 });
