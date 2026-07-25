@@ -320,7 +320,9 @@ export interface Actors {
   errandWater(from: string): boolean;
   /** The fridge-meal errand: open the fridge, browse, carry a plate to a free lounge seat, eat, drop
    * the empty plate at the counter sink, return. False when ineligible or the lounge is full. */
-  errandFridge(from: string): boolean;
+  /** Returns the lounge seat the meal is headed for (so the dog knows where to go beg), or null if the
+   * errand couldn't start — the lounge is full, or this member isn't a seated desk member. */
+  errandFridge(from: string): Spot | null;
   /** Scene effects derived from the walks' *current* legs (never stored): whether the fridge door
    * stands open, and whose desk water bottle is in their hand (so the desk copy hides). */
   sceneFx(): { fridgeOpen: boolean; bottleCarriers: Set<string> };
@@ -745,10 +747,10 @@ export function createActors(): Actors {
     },
     errandFridge(from) {
       const trip = errandStart(from);
-      if (!trip) return false;
+      if (!trip) return null;
       const { home, avoid } = trip;
       const spot = freeLoungeSpot();
-      if (!spot) return false; // every lounge seat taken — the scheduler picks another beat
+      if (!spot) return null; // every lounge seat taken — the scheduler picks another beat
       // The full meal arc: open the fridge, browse, take a plate to the lounge, eat, leave the empty
       // plate at the counter sink, come home. Every scene effect (open door, the plate) is derived from
       // the *current* leg, so preemption at any step tidies up by construction.
@@ -776,7 +778,7 @@ export function createActors(): Actors {
         small: false,
         ambient: true,
       });
-      return true;
+      return spot;
     },
     sceneFx() {
       // Derived fresh from the *current* legs every frame, never stored — so a preempted errand's door

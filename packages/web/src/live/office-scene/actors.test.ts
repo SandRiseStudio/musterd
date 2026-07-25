@@ -485,7 +485,7 @@ describe('errands', () => {
     actors.setHomes(placements, byName, true);
     const home = actors.poses().get('Ada')!;
 
-    expect(actors.errandFridge('Ada')).toBe(true);
+    expect(actors.errandFridge('Ada')).not.toBeNull();
     let sawDoor = false;
     let sawSitWithPlate = false;
     let guard = 0;
@@ -526,7 +526,7 @@ describe('errands', () => {
     const { placements, byName } = world([node('Ada'), node('Bo', 'away')]);
     const actors = createActors();
     actors.setHomes(placements, byName, true);
-    expect(actors.errandFridge('Bo')).toBe(false); // nook members don't run errands
+    expect(actors.errandFridge('Bo')).toBeNull(); // nook members don't run errands
     expect(actors.errandWater('Ada')).toBe(true);
     expect(actors.errandWater('Ada')).toBe(false); // already busy
     let guard = 0;

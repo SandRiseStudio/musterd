@@ -1,5 +1,18 @@
 import { FLOOR } from './iso';
-import { BEAM_LEN, BEAM_SHEAR, ENTRANCE, HUDDLES, MEETING, NOOK, RECEPTION, WINDOWS } from './layout';
+import {
+  BEAM_LEN,
+  BEAM_SHEAR,
+  DESK_D,
+  DESK_SLOTS,
+  DESK_W,
+  ENTRANCE,
+  HUDDLES,
+  MEETING,
+  NOOK,
+  PODS,
+  RECEPTION,
+  WINDOWS,
+} from './layout';
 import { findPath, walkable, type P } from './nav';
 
 /**
@@ -37,10 +50,19 @@ export interface PetState {
   plan: 'nap' | 'sit-then-nap';
   /** How long the arrival sit lasts (seconds), when the plan includes one. */
   sitFor: number;
+  /**
+   * Travel speed for the current trip, logical units/s. A field rather than a constant so a lap of
+   * zoomies can be a *fast* version of the walk it already knows, instead of a second gait to write
+   * and keep in sync. The painter reads gait phase from distance travelled, so a higher speed turns
+   * the legs over faster for free.
+   */
+  speed: number;
 }
 
 /** Walking speed, logical units/s — an unhurried pad, slower than the members. */
 export const PET_SPEED = 55;
+/** Zoomies pace. Fast enough to read as a tear around the room, not so fast it teleports. */
+export const PET_DASH = 165;
 /** One full gait cycle per this much ground covered. */
 const STRIDE = 30;
 /** Wake-up stretch and settle-down curl durations (seconds). */
@@ -80,7 +102,38 @@ export function napSpots(daylight: number): PetSpot[] {
   out.push({ lx: RECEPTION.rug.lx - 60, ly: RECEPTION.rug.ly - 40, w: rugW }); // reception rug
   out.push({ lx: MEETING.lx - 110, ly: MEETING.ly + 40, w: rugW }); // meeting rug, off the table's end
   for (const h of HUDDLES) out.push({ lx: h.lx + 58, ly: h.ly - 42, w: rugW }); // huddle rug, between poufs
-  return out.filter((s) => walkable(s.lx, s.ly));
+  // Every candidate so far is checked against the nav grid, so the dog never beds down inside furniture.
+  return [...out, ...deskSpots(sunny ? 0.28 : 0.55)].filter((s) => walkable(s.lx, s.ly));
+}
+
+/**
+ * Naps at somebody's feet — the floor just outside a desk's outer edge, which is where an office dog
+ * actually ends up: near a person, out from under the chair.
+ *
+ * *Beside* rather than *under*, because under is not available. A pod's two rows sit footprint to
+ * footprint across their shared screen gap, so a desk's front edge has no floor at all, and its back
+ * edge is where the chair and its occupant are. The outer flank is the aisle — open, reachable, and
+ * still visibly "at Ada's desk" rather than adrift in the middle of the room.
+ *
+ * Candidates are filtered against the nav grid like every other spot: a pod parked near a wall or a
+ * bookshelf simply offers fewer of them rather than offering one inside the furniture.
+ */
+function deskSpots(w: number): PetSpot[] {
+  const byId = new Map(PODS.map((p) => [p.id, p]));
+  const out: PetSpot[] = [];
+  for (const slot of DESK_SLOTS) {
+    const pod = byId.get(slot.pod);
+    if (!pod) continue;
+    const ns = pod.axis === 'ns';
+    // Across the pod is x for an `ns` pod and y for an `ew` one; step outward from the pod's centre.
+    const half = (ns ? DESK_W : DESK_D) / 2;
+    const off = half + 26;
+    const away = ns ? Math.sign(slot.lx - pod.cx) : Math.sign(slot.ly - pod.cy);
+    const lx = ns ? slot.lx + away * off : slot.lx;
+    const ly = ns ? slot.ly : slot.ly + away * off;
+    if (walkable(lx, ly)) out.push({ lx, ly, w });
+  }
+  return out;
 }
 
 /** A fresh pet, asleep on its favourite rug (or the first walkable spot the room offers). */
@@ -98,6 +151,7 @@ export function createPet(rng: () => number = Math.random): PetState {
     seg: 0,
     plan: 'nap',
     sitFor: 0,
+    speed: PET_SPEED,
   };
 }
 
@@ -118,6 +172,9 @@ export interface PetBeatOpts {
 export function petBeat(pet: PetState, opts: PetBeatOpts): boolean {
   if (pet.mode !== 'sleep' && pet.mode !== 'sit') return false;
   const rng = opts.rng ?? Math.random;
+
+  // Every so often the beat is pure nonsense instead of a destination.
+  if (rng() < 0.12 && zoomies(pet, rng)) return true;
 
   let target: P | null = null;
   let plan: PetState['plan'] = 'nap';
@@ -159,7 +216,67 @@ function setOff(pet: PetState, target: P | null, plan: PetState['plan'], minTrip
   pet.plan = plan;
   pet.mode = 'stretch';
   pet.modeT = 0;
+  pet.speed = PET_SPEED;
   return true;
+}
+
+/** How many corners a lap of zoomies takes before the dog flops back down. */
+const DASH_LEGS: [number, number] = [3, 5];
+/** How far apart those corners have to be — a lap of tiny hops is a twitch, not a tear. */
+const DASH_MIN_LEG = 170;
+
+/**
+ * Zoomies: a fast, pointless lap of the room, ending wherever it ends.
+ *
+ * The one behaviour with no destination and no reason, which is exactly why the room needs it — every
+ * other trip the dog makes is *for* something (a sunbeam, the door, someone working), and an animal
+ * that only ever moves with purpose reads as a machine. Routed on the same nav grid as everything
+ * else, so a tearing dog still goes around the furniture rather than through it.
+ */
+function zoomies(pet: PetState, rng: () => number): boolean {
+  const legs = DASH_LEGS[0] + Math.floor(rng() * (DASH_LEGS[1] - DASH_LEGS[0] + 1));
+  const path: P[] = [{ lx: pet.lx, ly: pet.ly }];
+  let at: P = { lx: pet.lx, ly: pet.ly };
+  for (let i = 0; i < legs; i++) {
+    let hop: P | null = null;
+    for (let tries = 0; tries < 24 && !hop; tries++) {
+      const p = { lx: rng() * FLOOR, ly: rng() * FLOOR };
+      if (walkable(p.lx, p.ly) && Math.hypot(p.lx - at.lx, p.ly - at.ly) > DASH_MIN_LEG) hop = p;
+    }
+    if (!hop) break;
+    // Route each corner properly and splice the waypoints in, so the lap follows the aisles.
+    path.push(...findPath(at, hop).slice(1));
+    at = hop;
+  }
+  if (path.length < 3) return false;
+  pet.path = path;
+  pet.seg = 0;
+  pet.plan = 'nap';
+  pet.mode = 'stretch';
+  pet.modeT = 0;
+  pet.speed = PET_DASH;
+  return true;
+}
+
+/**
+ * Somebody is carrying food to the lounge. The dog abandons whatever it had planned, follows them to
+ * the seat and sits facing it for the length of the meal — the least dignified and most doglike thing
+ * it does. Interrupts a trip in progress for the same reason greeting the door does: a dog that
+ * finishes its errand before noticing your sandwich is not a dog.
+ */
+export function petBeg(pet: PetState, seat: P, rng: () => number = Math.random): boolean {
+  if (pet.mode === 'stretch' || pet.mode === 'curl') return false; // mid-transition — let it finish
+  const spot = besideSpot(seat);
+  pet.sitFor = 14 + rng() * 8; // the length of a meal, near enough
+  if (setOff(pet, spot, 'sit-then-nap', MIN_TRIP)) return true;
+  // Already parked next to the food. Sit up and stare at it, which is the whole behaviour anyway.
+  if (pet.mode === 'sleep' || pet.mode === 'sit') {
+    faceToward(pet, seat);
+    pet.mode = 'sit';
+    pet.modeT = 0;
+    return true;
+  }
+  return false;
 }
 
 /** Face the pet toward a point (screen-space x grows with lx − ly under the 2:1 iso). */
@@ -279,7 +396,7 @@ export function stepPet(pet: PetState, dt: number): boolean {
       }
       return true;
     case 'walk': {
-      let travel = PET_SPEED * dt;
+      let travel = pet.speed * dt;
       while (travel > 0 && pet.seg < pet.path.length - 1) {
         const next = pet.path[pet.seg + 1]!;
         const dx = next.lx - pet.lx;

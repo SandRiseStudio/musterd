@@ -2,7 +2,7 @@ import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
 import { createActors, type Actors } from './actors';
 import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
-import { createPet, petBeat, petFollow, petGreet, petNotice, stepPet } from './pet';
+import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
@@ -758,7 +758,18 @@ export function mountOffice(
       [14, () => actors.gestureBeat(who, GESTURE.lean)],
       // The errands — real trips with a point to them, so they stay the occasional highlight:
       [15, () => coffeeStroll(who)],
-      [7, () => actors.errandFridge(who) || actors.gestureBeat(who, GESTURE.glance)], // lounge full → cheap fallback
+      // A meal is the one errand the dog cares about: it drops whatever it was doing and follows the
+      // plate to the lounge to sit and stare at it. Not every time — a dog that never misses a meal is
+      // a mechanism, and the beat reads better when you notice it happening rather than expect it.
+      [
+        7,
+        () => {
+          const seat = actors.errandFridge(who);
+          if (!seat) return actors.gestureBeat(who, GESTURE.glance); // lounge full → cheap fallback
+          if (Math.random() < 0.65) petBeg(pet, seat);
+          return true;
+        },
+      ],
     ];
     if (water) beats.push([8, () => actors.errandWater(who)]);
     if (mug) beats.push([14, () => actors.gestureBeat(who, GESTURE.sip)]);
