@@ -1,5 +1,5 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -162,6 +162,11 @@ export function ffmpegArgs(
     'aac',
     '-b:a',
     '128k',
+    // End when the *video* pipe ends. `anullsrc` is an infinite source, so without this ffmpeg keeps
+    // muxing silence after stdin closes and never exits — which made the graceful stop unreachable:
+    // every Ctrl-C fell through to the 5s force-kill, and a file capture lost its moov atom because
+    // the container was never finalized. The stop path was only ever as graceful as this flag.
+    '-shortest',
   ];
   if (opts.duration > 0) args.push('-t', String(opts.duration));
   if (sink.kind === 'file') args.push('-movflags', '+faststart', '-y', sink.target);
@@ -248,6 +253,97 @@ export function killGroup(
   }
 }
 
+/**
+ * How much unwritten video may pile up in ffmpeg's stdin before we call the encoder wedged.
+ *
+ * The pump deliberately writes without waiting for drain — dropping a frame permanently slows the
+ * `image2pipe` timeline, which is the stall the pump exists to prevent. That trade is right while
+ * ffmpeg is *briefly* behind. It is catastrophic when ffmpeg stops draining altogether (a wedged
+ * RTMPS ingest): at ~181 KB/frame × 30 fps the queue grows ~5.4 MB/s with no ceiling, and hours of
+ * that is what took the event loop down — the heap into GC thrash, and with the loop no longer
+ * turning, `SIGCHLD` went unreaped (children stuck `<defunct>`), the unref'd force-stop timer never
+ * fired, and even `SIGTERM` was swallowed, because a listener means it is delivered *through* the
+ * loop. Only `SIGKILL` remained.
+ *
+ * 64 MB is ~12 s of video at the measured frame size. Past that the encoder is not behind, it is
+ * gone — and a stream twelve seconds in arrears is worthless anyway, so the honest move is to stop
+ * feeding it and end the run loudly rather than buffer toward a hang.
+ */
+export const STALL_BYTES = 64 * 1024 * 1024;
+
+/** The bit of a writable stream this policy needs — so a test can stand one up without a real pipe. */
+export interface EncoderPipe {
+  writable: boolean;
+  writableLength: number;
+  write: (chunk: Buffer) => unknown;
+}
+
+/**
+ * The pump's write policy, as a function rather than a closure buried in the command — so the rule
+ * that ends the hang is the same code a test can drive.
+ *
+ * Deliberately still does **not** wait for drain: dropping a frame permanently slows the
+ * `image2pipe` timeline, which is the stall the pump exists to prevent, so riding a brief backlog is
+ * correct. What it adds is a ceiling on "brief".
+ */
+export function makeEncoderFeed(
+  stdin: EncoderPipe | null | undefined,
+  onStall: () => void,
+): (frame: Buffer) => void {
+  return (frame) => {
+    if (!stdin?.writable) return;
+    if (stdin.writableLength > STALL_BYTES) {
+      onStall();
+      return;
+    }
+    stdin.write(frame);
+  };
+}
+
+/** How long a single CDP call may go unanswered before we stop waiting on a socket that may be dead. */
+const CDP_TIMEOUT_MS = 15_000;
+
+/** Profile directories older than this are from runs that are long over — see `sweepStaleProfiles`. */
+const PROFILE_TTL_MS = 6 * 60 * 60 * 1000;
+
+const PROFILE_PREFIX = 'musterd-broadcast-';
+
+/**
+ * Delete Chrome profile directories left behind by earlier runs.
+ *
+ * Every run gets its own `mkdtemp` profile, and `cleanup()` removes it — but only on the path where
+ * the command returns normally. Every forced stop calls `process.exit()`, and an external `SIGKILL`
+ * skips JS entirely, so those runs leak. They are not small: each is ~150 MB of Chrome's own model
+ * store, component cache and Safe Browsing database, re-downloaded because each run starts from a
+ * virgin profile. The incident that prompted this left 23 of them, 837 MB.
+ *
+ * Sweeping at startup is what recovers ground already lost — a fix that only stops *new* leaks would
+ * never clear the existing pile. Age-gated so it can never touch a concurrent run's live profile.
+ */
+export function sweepStaleProfiles(
+  dir: string = tmpdir(),
+  ttlMs: number = PROFILE_TTL_MS,
+  now: number = Date.now(),
+): number {
+  let removed = 0;
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith(PROFILE_PREFIX)) continue;
+      const full = join(dir, name);
+      try {
+        if (now - statSync(full).mtimeMs < ttlMs) continue;
+        rmSync(full, { recursive: true, force: true });
+        removed++;
+      } catch {
+        /* raced with another sweep, or not ours to delete — skip it */
+      }
+    }
+  } catch {
+    /* no temp dir to read — nothing to sweep */
+  }
+  return removed;
+}
+
 const CHROME_DEFAULT = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 export function chromeArgs(debugPort: number, profileDir: string): string[] {
@@ -296,6 +392,18 @@ async function connectCdp(debugPort: number): Promise<Cdp> {
     { res: (v: Record<string, unknown>) => void; rej: (e: Error) => void }
   >();
   const handlers = new Map<string, (params: Record<string, unknown>) => void>();
+  /**
+   * Fail everything in flight. Without this, a `pending` entry could only ever be settled by a reply
+   * — so if Chrome died mid-handshake, every `await cdp.send(...)` parked forever. That is why
+   * `waitBroadcastReady`'s "30s timeout" was not a timeout at all: its deadline is only tested
+   * between settled awaits, and none of them ever settled.
+   */
+  const failAll = (err: Error): void => {
+    for (const p of [...pending.values()]) p.rej(err);
+    pending.clear();
+  };
+  ws.onclose = () => failAll(new CliError('the Chrome DevTools socket closed', 1));
+  ws.onerror = () => failAll(new CliError('the Chrome DevTools socket errored', 1));
   ws.onmessage = (e) => {
     const m = JSON.parse(String(e.data)) as {
       id?: number;
@@ -314,10 +422,24 @@ async function connectCdp(debugPort: number): Promise<Cdp> {
     }
   };
   return {
+    // Every call is time-boxed. A socket that goes quiet without closing (Chrome swapped out, the
+    // compositor wedged) is indistinguishable from a slow reply until a deadline says otherwise.
     send: (method, params = {}) =>
       new Promise((res, rej) => {
         const id = ++msgId;
-        pending.set(id, { res, rej });
+        const timer = setTimeout(() => {
+          if (pending.delete(id)) rej(new CliError(`Chrome did not answer ${method} in time`, 1));
+        }, CDP_TIMEOUT_MS);
+        pending.set(id, {
+          res: (v) => {
+            clearTimeout(timer);
+            res(v);
+          },
+          rej: (e) => {
+            clearTimeout(timer);
+            rej(e);
+          },
+        });
         ws.send(JSON.stringify({ id, method, params }));
       }),
     on: (method, fn) => void handlers.set(method, fn),
@@ -351,7 +473,9 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
 
   const chromeBin = process.env['CHROME_BIN'] ?? CHROME_DEFAULT;
   const debugPort = 9222 + Math.floor(Math.random() * 500);
-  const profile = mkdtempSync(join(tmpdir(), 'musterd-broadcast-'));
+  // Clear other runs' leavings before adding our own — see `sweepStaleProfiles`.
+  const swept = sweepStaleProfiles();
+  const profile = mkdtempSync(join(tmpdir(), PROFILE_PREFIX));
 
   process.stdout.write(`${theme.accent('broadcast')} — ${opts.team}  ${theme.meta(url)}\n`);
   process.stdout.write(
@@ -361,6 +485,9 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
         (opts.duration ? ` · ${opts.duration}s` : ' · Ctrl-C to stop'),
     ) + '\n',
   );
+  if (swept > 0) {
+    process.stdout.write(theme.meta(`swept ${swept} stale capture profile(s)`) + '\n');
+  }
 
   // ── Stop-path hardening ─────────────────────────────────────────────────────────────────────
   // Handlers are installed BEFORE the children are spawned, and that ordering is the fix: the old
@@ -394,6 +521,21 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     // holds the process open, it only fires if something else still is.
     setTimeout(() => forceStop(1), 5000).unref();
   };
+  /**
+   * The encoder has stopped draining. Stop feeding it and end the run — do **not** wait politely for
+   * ffmpeg to finalize, because a wedged sink is precisely the case where it never will, and the
+   * graceful path's 5s backstop is `unref()`'d, so it only fires if the loop is still healthy. Going
+   * straight to the force path is what guarantees this terminates.
+   */
+  let stalled = false;
+  const onStall = () => {
+    if (stalled) return;
+    stalled = true;
+    process.stderr.write(
+      `${theme.err('✗')} encoder stopped draining (>${Math.round(STALL_BYTES / 1024 / 1024)}MB queued) — ending the stream\n`,
+    );
+    forceStop(1);
+  };
   const onSignal = (sig: NodeJS.Signals) => {
     if (stopping || !live) forceStop(sig === 'SIGINT' ? 130 : 1);
     stopping = true;
@@ -406,6 +548,14 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   process.on('exit', () => {
     killGroup(ffmpeg);
     killGroup(chrome);
+    // The profile has to be removed here, not only in `cleanup()`. Every forced stop reaches
+    // `process.exit()` without unwinding the `try`, so `cleanup()` never ran on exactly the paths
+    // that leak. Synchronous by necessity — nothing async runs in an exit handler.
+    try {
+      rmSync(profile, { recursive: true, force: true });
+    } catch {
+      /* Chrome may still hold a handle; the next run's startup sweep will get it */
+    }
   });
 
   // `detached: true` makes each child its own process-group leader, which is what lets the
@@ -424,10 +574,48 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   // `exit` handler below report ffmpeg's real verdict.
   ffmpeg.stdin?.on('error', () => {});
 
+  /**
+   * Both children's exits are captured **here**, next to the spawns — not at the point we finally
+   * want to await them.
+   *
+   * The old code registered `ffmpeg.once('exit')` after `connectCdp` (≤10s of polling) and
+   * `waitBroadcastReady` (≤30s), so a child that died inside that window emitted `exit` with nobody
+   * listening. `once` does not replay: the promise then never resolved, the `finally` never ran, and
+   * the command hung holding a profile directory. A bad stream key does exactly that.
+   */
+  const ffmpegExit = new Promise<number>((resolve) => {
+    ffmpeg.once('exit', (code) => {
+      if (pumpTimer) clearInterval(pumpTimer); // encoder gone — stop feeding a closed pipe
+      resolve(code ?? 1);
+    });
+  });
+  const chromeExit = new Promise<void>((resolve) => chrome.once('exit', () => resolve()));
+  /** Either child dying *before* the stream is live is terminal, and must beat the startup awaits. */
+  const diedDuringStartup = new Promise<never>((_, reject) => {
+    void ffmpegExit.then((code) => {
+      if (!live) {
+        reject(
+          new CliError(
+            `ffmpeg exited (code ${code}) before the first frame — check the sink is reachable`,
+            1,
+          ),
+        );
+      }
+    });
+    void chromeExit.then(() => {
+      if (!live) reject(new CliError('headless Chrome exited before the page was ready', 1));
+    });
+  });
+  // A losing racer's rejection is still "handled" by the race, but if startup wins outright this
+  // promise may reject later with nobody looking — claim it so Node doesn't call it unhandled.
+  diedDuringStartup.catch(() => {});
+
   let exitCode = 0;
+  let cdp: Cdp | undefined;
   const cleanup = () => {
     if (pumpTimer) clearInterval(pumpTimer);
     ffmpeg.stdin?.end();
+    cdp?.close(); // an open DevTools socket is a live handle; nothing else closes it
     killGroup(chrome);
     try {
       rmSync(profile, { recursive: true, force: true });
@@ -437,31 +625,33 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   };
 
   try {
-    const cdp = await connectCdp(debugPort);
-    await cdp.send('Page.enable');
-    await cdp.send('Runtime.enable');
-    // `--window-size` is the *window*; even headless, the viewport comes up short of it (~88px of
-    // phantom window chrome → 1920×992 frames). The emulation override pins the viewport itself, so
-    // the screencast delivers exactly the 1920×1080 stage.
-    await cdp.send('Emulation.setDeviceMetricsOverride', {
-      width: 1920,
-      height: 1080,
-      deviceScaleFactor: 1,
-      mobile: false,
-    });
-    await cdp.send('Page.navigate', { url });
-    await waitBroadcastReady(cdp, 30_000);
+    // Race the whole startup sequence against either child dying: every await below can otherwise
+    // outlive the thing it is waiting for.
+    await Promise.race([
+      (async () => {
+        cdp = await connectCdp(debugPort);
+        await cdp.send('Page.enable');
+        await cdp.send('Runtime.enable');
+        // `--window-size` is the *window*; even headless, the viewport comes up short of it (~88px of
+        // phantom window chrome → 1920×992 frames). The emulation override pins the viewport itself, so
+        // the screencast delivers exactly the 1920×1080 stage.
+        await cdp.send('Emulation.setDeviceMetricsOverride', {
+          width: 1920,
+          height: 1080,
+          deviceScaleFactor: 1,
+          mobile: false,
+        });
+        await cdp.send('Page.navigate', { url });
+        await waitBroadcastReady(cdp, 30_000);
+      })(),
+      diedDuringStartup,
+    ]);
+    const page = cdp!;
 
-    const pump = makeFramePump((png) => {
-      // Write unconditionally while the pipe is open — Node buffers past the kernel pipe when
-      // ffmpeg is briefly behind, and JPEG frames are small enough that the window is bounded. The
-      // one wrong move is *dropping* frames: image2pipe timestamps are frame-count, so a dropped
-      // frame permanently slows the video timeline (the stall the pump exists to prevent).
-      if (ffmpeg.stdin?.writable) ffmpeg.stdin.write(png);
-    }, opts.fps);
-    cdp.on('Page.screencastFrame', (p) => {
+    const pump = makeFramePump(makeEncoderFeed(ffmpeg.stdin, onStall), opts.fps);
+    page.on('Page.screencastFrame', (p) => {
       pump.frame(Buffer.from(String(p['data']), 'base64'));
-      void cdp.send('Page.screencastFrameAck', { sessionId: p['sessionId'] });
+      void page.send('Page.screencastFrameAck', { sessionId: p['sessionId'] });
     });
     // JPEG, and this is load-bearing: Chrome encodes screencast frames on the compositor thread,
     // and 1080p PNG is so expensive there that delivery measured 4.7fps — a slideshow the pump then
@@ -469,7 +659,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     // 35.3fps at ~181KB/frame on the same scene. Visually lossless here (flat colors, no gradients
     // worth 9× the bytes), and ffmpeg's image2pipe sniffs the codec per-frame, so nothing else
     // changes.
-    await cdp.send('Page.startScreencast', {
+    await page.send('Page.startScreencast', {
       format: 'jpeg',
       quality: 85,
       maxWidth: 1920,
@@ -483,26 +673,19 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
 
     process.stdout.write(`${theme.ok('◉ live')}\n`);
 
-    // Run until ffmpeg exits (its -t duration, its sink failing) or a signal lands — the signal
-    // handlers wired above end ffmpeg's stdin, so both roads converge on ffmpeg's exit.
-    exitCode = await new Promise<number>((resolve) => {
-      let done = false;
-      ffmpeg.once('exit', (code) => {
-        done = true;
-        if (pumpTimer) clearInterval(pumpTimer); // encoder gone — stop feeding a closed pipe
-        resolve(code ?? 1);
-      });
-      chrome.once('exit', () => {
-        // The frame source dying MID-stream is terminal — flush what we have and report it. After a
-        // normal end (`done`) this also fires from cleanup's own group-kill; that's not an error.
-        if (done) return;
-        process.stderr.write(`${theme.err('✗')} headless Chrome exited\n`);
-        if (!stopping) {
-          stopping = true;
-          gracefulStop();
-        }
-      });
+    // The frame source dying MID-stream is terminal — flush what we have and report it. After the
+    // encoder has already exited this also fires from cleanup's own group-kill; not an error.
+    void chromeExit.then(() => {
+      if (ffmpeg.exitCode !== null || ffmpeg.signalCode !== null) return;
+      process.stderr.write(`${theme.err('✗')} headless Chrome exited\n`);
+      if (!stopping) {
+        stopping = true;
+        gracefulStop();
+      }
     });
+    // Run until ffmpeg exits — its -t duration, its sink failing, a signal ending its stdin, or the
+    // stall watchdog above. Every road converges here.
+    exitCode = await ffmpegExit;
   } finally {
     cleanup();
   }

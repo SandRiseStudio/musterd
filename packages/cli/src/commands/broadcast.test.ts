@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
 import {
@@ -8,6 +11,10 @@ import {
   makeFramePump,
   parseOptions,
   resolveSink,
+  makeEncoderFeed,
+  STALL_BYTES,
+  sweepStaleProfiles,
+  type EncoderPipe,
 } from './broadcast.js';
 
 describe('broadcast parseOptions', () => {
@@ -249,5 +256,126 @@ describe('chromeArgs', () => {
     expect(args).toContain('--window-size=1920,1080');
     expect(args).toContain('--force-device-scale-factor=1');
     expect(args).toContain('--remote-debugging-port=9333');
+  });
+});
+
+describe('sweepStaleProfiles (the 837MB the incident left behind)', () => {
+  function tmp(): string {
+    return mkdtempSync(join(tmpdir(), 'sweep-test-'));
+  }
+  const HOUR = 60 * 60 * 1000;
+
+  it('removes capture profiles older than the TTL', () => {
+    const dir = tmp();
+    const old = join(dir, 'musterd-broadcast-aaaaaa');
+    mkdirSync(old);
+    writeFileSync(join(old, 'big'), 'x');
+    utimesSync(old, new Date(0), new Date(0));
+
+    expect(sweepStaleProfiles(dir, 6 * HOUR, Date.now())).toBe(1);
+    expect(existsSync(old)).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('leaves a live run alone — a fresh profile belongs to a broadcast still running', () => {
+    const dir = tmp();
+    const fresh = join(dir, 'musterd-broadcast-bbbbbb');
+    mkdirSync(fresh);
+
+    expect(sweepStaleProfiles(dir, 6 * HOUR, Date.now())).toBe(0);
+    expect(existsSync(fresh)).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('never touches anything that is not ours', () => {
+    const dir = tmp();
+    const other = join(dir, 'someone-elses-tmpdir');
+    mkdirSync(other);
+    utimesSync(other, new Date(0), new Date(0));
+
+    expect(sweepStaleProfiles(dir, 6 * HOUR, Date.now())).toBe(0);
+    expect(existsSync(other)).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('is silent when the temp dir cannot be read — a sweep must never fail a run', () => {
+    expect(() => sweepStaleProfiles(join(tmpdir(), 'definitely-not-here-xyz'))).not.toThrow();
+  });
+});
+
+/**
+ * The watermark that ends the hang. These drive the real pump against a stdin stand-in whose
+ * `writableLength` we control, which is the whole mechanism: the old code wrote regardless, so a
+ * sink that stopped draining grew the queue ~5.4MB/s until the event loop starved.
+ */
+describe('the stall watermark', () => {
+  function pipe(over: Partial<EncoderPipe> = {}) {
+    return { writable: true, writableLength: 0, write: vi.fn(), ...over } as EncoderPipe & {
+      write: ReturnType<typeof vi.fn>;
+    };
+  }
+
+  it('keeps writing while the encoder is merely behind', () => {
+    const stdin = pipe({ writableLength: STALL_BYTES - 1 });
+    const onStall = vi.fn();
+    makeEncoderFeed(stdin, onStall)(Buffer.alloc(8));
+    expect(stdin.write).toHaveBeenCalledTimes(1);
+    expect(onStall).not.toHaveBeenCalled();
+  });
+
+  it('stops feeding once the queue passes the mark — the buffer cannot run away', () => {
+    const stdin = pipe({ writableLength: STALL_BYTES + 1 });
+    const onStall = vi.fn();
+    const feed = makeEncoderFeed(stdin, onStall);
+    // Drive it through the real pump, the way the command does: ten seconds of owed frames.
+    let t = 0;
+    const pump = makeFramePump(feed, 30, () => t);
+    pump.frame(Buffer.alloc(8));
+    for (let i = 1; i <= 10; i++) {
+      t = i * 1000;
+      pump.tick();
+    }
+    expect(stdin.write).not.toHaveBeenCalled();
+    expect(onStall).toHaveBeenCalled();
+  });
+
+  it('writes nothing at all once the pipe is closed', () => {
+    const stdin = pipe({ writable: false });
+    const onStall = vi.fn();
+    makeEncoderFeed(stdin, onStall)(Buffer.alloc(8));
+    expect(stdin.write).not.toHaveBeenCalled();
+    expect(onStall).not.toHaveBeenCalled(); // a closed pipe is an ending, not a stall
+  });
+
+  it('tolerates a child that never got a stdin', () => {
+    expect(() => makeEncoderFeed(null, vi.fn())(Buffer.alloc(8))).not.toThrow();
+  });
+
+  it('is a real ceiling, not a formality — 64MB is ~12s of video at the measured frame size', () => {
+    expect(STALL_BYTES).toBe(64 * 1024 * 1024);
+    expect(STALL_BYTES / 181_000 / 30).toBeLessThan(15);
+  });
+});
+
+describe('ffmpeg terminates when the video pipe does', () => {
+  it('passes -shortest, or the infinite silent audio keeps it alive forever', () => {
+    // The graceful stop closes stdin and gives ffmpeg 5s to finalize. `anullsrc` never ends, so
+    // without -shortest ffmpeg outlives that window every time: Ctrl-C always fell through to the
+    // force-kill and a file capture came out with no moov atom. This flag is what makes the whole
+    // graceful path reachable.
+    const args = ffmpegArgs(parseOptions({ team: 't', out: 'x.mp4' }, 'darwin'), {
+      kind: 'file',
+      target: 'x.mp4',
+    });
+    expect(args).toContain('-shortest');
+    expect(args).toContain('anullsrc=r=44100:cl=stereo');
+  });
+
+  it('passes it for a stream sink too — a wedged ingest is where it matters most', () => {
+    const args = ffmpegArgs(parseOptions({ team: 't', twitch: true }, 'darwin'), {
+      kind: 'rtmp',
+      target: 'rtmps://example/app/key',
+    });
+    expect(args).toContain('-shortest');
   });
 });
