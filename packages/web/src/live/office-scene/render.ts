@@ -2367,6 +2367,60 @@ function drawInteriorLight(
 }
 
 /**
+ * How far from a desk's centre still counts as being *in* its chair. The chair sits `CHAIR_OFF` back
+ * from the desk, and an occupant a little forward of that; beyond this radius a member is somewhere
+ * else in the room, whatever their seating placement says.
+ */
+const AT_DESK_R = CHAIR_OFF + 28;
+
+/**
+ * Where a member's avatar sorts in the painter's order this frame — the floor point whose depth keys
+ * them against the furniture.
+ *
+ * Three cases, in order:
+ *
+ * 1. **Sitting at their own desk** → the chair, not their feet. Their feet land a couple of units off
+ *    the chair centre, and at north/west-facing desks that offset was enough to sort the cushion in
+ *    *front* of them, so the chair painted over their legs. Keying off the chair puts them between its
+ *    base and its backrest at every facing, which is where a person in a chair belongs. The chair's
+ *    *current* spot, so a roll-back beat slides chair and sitter together.
+ * 2. **Sitting on something that sorts as one big box** → that box's centre, via `depthAt`. The pose
+ *    carries it for an errand's sit leg (actors.ts lifts it off the leg); a leisure *placement* carries
+ *    it for a member whose home is that seat. The couch needs it either way — one long box sorted at
+ *    its centre paints over a sitter on a cushion west of that centre.
+ * 3. **Anything else** → their own feet.
+ *
+ * Case 1 is why this is a function rather than two lines inline. `sit > 0.5 && placement.kind ===
+ * 'desk'` looks like "sitting at their desk" and is not: an errand sits a walker down on the lounge
+ * couch while their placement is still their desk, so a member eating on the couch was sorted at a
+ * desk on the far side of the room and the room painted over them — they simply vanished until they
+ * stood up. The same test has a second face, because the sit blend eases *down* rather than switching:
+ * for a moment after standing, a member walking away from the couch still read as seated and still
+ * sorted at that distant desk, which is a body sliding through the lounge furniture.
+ *
+ * So "seated at my desk" has to mean actually being at that desk, which is what `atOwnDesk` measures.
+ */
+export function actorSortAnchor(
+  pose: Pose,
+  slot: { lx: number; ly: number; dir: Dir } | undefined,
+  spot: { depthAt?: { lx: number; ly: number } } | undefined,
+): { lx: number; ly: number; seatedAtDesk: boolean } {
+  const atOwnDesk = !!slot && Math.hypot(pose.lx - slot.lx, pose.ly - slot.ly) < AT_DESK_R;
+  if (pose.sit > 0.5 && atOwnDesk && slot) {
+    const f = FWD[slot.dir];
+    const shift = chairShift(pose.gesture, pose.gestureT);
+    return {
+      lx: slot.lx - f[0] * (CHAIR_OFF + shift),
+      ly: slot.ly - f[1] * (CHAIR_OFF + shift),
+      seatedAtDesk: true,
+    };
+  }
+  const sitAt = pose.depthAt ?? spot?.depthAt;
+  if (pose.sit > 0.5 && sitAt) return { lx: sitAt.lx, ly: sitAt.ly, seatedAtDesk: false };
+  return { lx: pose.lx, ly: pose.ly, seatedAtDesk: false };
+}
+
+/**
  * Draw the whole office in painter's order, returning per-member screen anchors. Desks are drawn empty;
  * each present member is drawn as a free actor at its current `poses` entry (home seat when idle, or
  * interpolated mid-walk), so seated and walking members depth-sort against desks the same way.
@@ -2498,28 +2552,12 @@ export function renderScene(
     const b = project(pose.lx, pose.ly, fit);
     const pl = placements.get(name);
     const slot = pl?.kind === 'desk' ? DESK_SLOTS[pl.slot] : undefined;
-    const seated = pose.sit > 0.5 && slot;
     const spot = pl?.kind === 'leisure' ? LEISURE_SPOTS[pl.spot] : undefined;
-
-    // A seated member's depth key comes from **the furniture**, not their own feet. Their feet sit a couple
-    // of units off the chair centre, and at north/west-facing desks that tiny offset was enough to sort the
-    // cushion in *front* of them — so the chair painted over their legs. Keying off the chair puts them
-    // between its base and its backrest at every facing, which is where a person in a chair belongs.
-    //
-    // A leisure spot can ask for the same treatment via `depthAt` (the couch: one long box sorted at its
-    // centre, so a sitter on a cushion west of it would be painted over). Only while actually seated — a
-    // walker sorts at their own feet, or they'd hold the couch's depth all the way across the room.
-    let d = depth(pose.lx, pose.ly) + 0.1;
+    const anchor = actorSortAnchor(pose, slot, spot);
+    const seated = anchor.seatedAtDesk && slot;
+    const d = depth(anchor.lx, anchor.ly) + 0.1;
     // The desk mug travels with a sipping owner — passed down so the hand mug matches the desk mug.
     const mug = seated && pose.gesture === GESTURE.sip ? deskMugColor(slot.id) : undefined;
-    if (seated) {
-      const f = FWD[slot.dir];
-      // Key off the chair's *current* spot — a roll-back beat slides chair + sitter together.
-      const shift = chairShift(pose.gesture, pose.gestureT);
-      d = depth(slot.lx - f[0] * (CHAIR_OFF + shift), slot.ly - f[1] * (CHAIR_OFF + shift)) + 0.1;
-    } else if (spot?.depthAt && pose.sit > 0.5) {
-      d = depth(spot.depthAt.lx, spot.depthAt.ly) + 0.1;
-    }
     items.push({ d, fn: () => drawActor(ctx, fit, pose, node, t, false, mug) });
 
     // Seated overlay: the desk paints over a member sitting behind it (correct — that is what a desk does

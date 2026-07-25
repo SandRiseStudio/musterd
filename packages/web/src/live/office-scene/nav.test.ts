@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { DESK_SLOTS, ENTRANCE, FWD, HUDDLES, NOOK, NOOK_RUG_R, NOOK_SPOTS, SEAT_BACK } from './layout';
+import {
+  COFFEE_STAND,
+  COOLER_STAND,
+  DESK_SLOTS,
+  ENTRANCE,
+  FRIDGE_STAND,
+  FWD,
+  HUDDLES,
+  LEISURE_SPOTS,
+  NOOK,
+  NOOK_RUG_R,
+  NOOK_SPOTS,
+  SEAT_BACK,
+  SINK_STAND,
+} from './layout';
 import { findPath, walkable } from './nav';
 
 describe('the floor plan stays navigable', () => {
@@ -91,5 +105,108 @@ describe('walkability grid', () => {
     const path = findPath(seat, out);
     expect(path[0]).toEqual(seat);
     expect(path[path.length - 1]).toEqual(out);
+  });
+});
+
+/**
+ * Nobody walks through the furniture.
+ *
+ * The older guard above checks that each *waypoint* is on open floor, which a two-point straight glide
+ * passes trivially: its only waypoints are the endpoints. That is how the real bug hid — `findPath`
+ * returned `[from, to]` whenever A* failed, and a member strolled the length of the room through a
+ * meeting table. These walk the segments instead.
+ *
+ * Sampling tolerance: footprints are inflated by the body radius, so a line clipping a cell corner by a
+ * unit or two leaves the drawn body still clear of the drawn furniture. What must never happen is real
+ * penetration — a *run* of blocked samples. `MAX_GRAZE` is the width of the run we forgive.
+ */
+const SAMPLE = 2;
+const MAX_GRAZE = 6;
+
+/**
+ * The longest unbroken run of blocked samples *in the interior* of a route, in logical units.
+ *
+ * Runs touching either end are excluded rather than measured: a trip legitimately starts inside the
+ * desk you are getting up from and ends inside the chair you are sitting down on. Only a stretch that
+ * begins and ends on open floor is a walker passing through something.
+ */
+function deepestPenetration(path: { lx: number; ly: number }[]): number {
+  let worst = 0;
+  let run = 0;
+  let seenFree = false;
+  for (let s = 0; s < path.length - 1; s++) {
+    const a = path[s]!;
+    const b = path[s + 1]!;
+    const d = Math.hypot(b.lx - a.lx, b.ly - a.ly);
+    const steps = Math.max(1, Math.ceil(d / SAMPLE));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      if (walkable(a.lx + (b.lx - a.lx) * t, a.ly + (b.ly - a.ly) * t)) {
+        // The run just ended on open floor — it was interior, so it counts.
+        if (seenFree) worst = Math.max(worst, run);
+        run = 0;
+        seenFree = true;
+      } else if (seenFree) {
+        run += d / steps;
+      }
+    }
+  }
+  return worst; // any run still open at the end touches the destination — not a pass-through
+}
+
+describe('routes never pass through furniture', () => {
+  const errands: [string, { lx: number; ly: number }][] = [
+    ['fridge', FRIDGE_STAND],
+    ['cooler', COOLER_STAND],
+    ['sink', SINK_STAND],
+    ['coffee', COFFEE_STAND],
+  ];
+
+  it('from every desk to every errand stand point', () => {
+    const bad: string[] = [];
+    for (const slot of DESK_SLOTS) {
+      for (const [name, to] of errands) {
+        const deep = deepestPenetration(findPath({ lx: slot.lx, ly: slot.ly }, to));
+        if (deep > MAX_GRAZE) bad.push(`desk ${slot.id} → ${name}: ${deep.toFixed(0)} units through solid`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('between every offered leisure spot and the kitchenette', () => {
+    const bad: string[] = [];
+    for (let i = 0; i < LEISURE_SPOTS.length; i++) {
+      const s = LEISURE_SPOTS[i]!;
+      const there = deepestPenetration(findPath(FRIDGE_STAND, { lx: s.lx, ly: s.ly }));
+      const back = deepestPenetration(findPath({ lx: s.lx, ly: s.ly }, SINK_STAND));
+      const deep = Math.max(there, back);
+      if (deep > MAX_GRAZE) bad.push(`spot ${i} (${s.zone}): ${deep.toFixed(0)} units through solid`);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('offers no seat without open floor beside it', () => {
+    // Every route's last leg steps from open floor onto the cushion, and that step is the one segment
+    // allowed to cross a footprint — it is what sitting down *is*. It stays a step rather than a slide
+    // only while the seat has walkable floor near it. The meeting table's south chairs did not: walled
+    // in by the table on one side and the floor's edge on the other, the nearest floor a body could
+    // stand on was 140 units away, and "sitting down" became a walk through the table.
+    const bad: string[] = [];
+    for (let i = 0; i < LEISURE_SPOTS.length; i++) {
+      const s = LEISURE_SPOTS[i]!;
+      let nearest = Infinity;
+      for (let a = 0; a < 16; a++) {
+        for (const r of [30, 45, 60]) {
+          const th = (a / 16) * Math.PI * 2;
+          const lx = s.lx + Math.cos(th) * r;
+          const ly = s.ly + Math.sin(th) * r;
+          if (walkable(lx, ly)) nearest = Math.min(nearest, r);
+        }
+      }
+      // A chair seats its occupant ~`CHAIR_OFF` back from where they stood to sit, so floor within 60
+      // is what a real approach looks like.
+      if (nearest === Infinity) bad.push(`spot ${i} (${s.zone}): no walkable floor within 60 units`);
+    }
+    expect(bad).toEqual([]);
   });
 });
