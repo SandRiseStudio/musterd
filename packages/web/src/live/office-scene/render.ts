@@ -1366,16 +1366,23 @@ function drawPlant(
 // ── the office dog (behaviour in pet.ts; this is only the painter) ──────────────────────────────────────
 
 const DOG = {
-  fur: '#dd8b46',
-  saddle: '#b4611f', // the darker back patch — internal contrast is what makes the shape read at office scale
-  cream: '#f7e9d4', // muzzle, chest, paws, tail tip
-  earIn: '#a4551a',
+  fur: '#f1ece2', // warm white — the floor is warm, and a pure white dog reads as a hole in it
+  patch: '#332e2a', // soft near-black; true #000 goes flat and lifts out of the room's palette
+  cream: '#fdfaf4', // muzzle, chest, paws, tail tip — a shade brighter than the coat, so it still separates
+  earIn: '#8a6a62',
   collar: '#e3a72b', // the huddle-pouf mustard — the team dog wears the team colour
   tag: '#f6d98a',
-  eye: '#3a2c1c',
-  nose: '#2e2119',
+  eye: '#2a2320',
+  nose: '#241d19',
   tongue: '#e28a86',
 } as const;
+
+/**
+ * How much bigger than its original build the dog is drawn. Applied to the whole figure by scaling the
+ * unit multiplier once, so every radius, stroke width and offset in this painter moves together and the
+ * proportions can't drift.
+ */
+const DOG_SIZE = 1.25;
 
 /** Tail-wag rate (Hz). Fast enough to read as a wag at office scale without buzzing. */
 const WAG_HZ = 4.6;
@@ -1388,10 +1395,16 @@ const WAG_HZ = 4.6;
  * Everything that makes this a *dog* rather than the cat that used to live here is in this function: ears
  * that flop instead of pricking up, a snout out front, cream paws, and a tail that wags where the cat's
  * curled. The behaviour machine driving it (pet.ts) never learned what species it is.
+ *
+ * The coat is white with black patches, which on a warm floor is a stronger silhouette than a solid
+ * mid-tone ever was: the patches carry the shape, so the dog stays legible at office scale instead of
+ * relying on its outline against whatever it happens to be standing on.
  */
 export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, t: number): void {
   const p = project(pet.lx, pet.ly, fit);
-  const s = fit.scale;
+  // The one place the dog's size is set: every offset and radius below is in these units, so scaling
+  // here scales the whole animal without touching a single pose.
+  const s = fit.scale * DOG_SIZE;
   const m = pet.flip ? -1 : 1;
   const px = (dx: number, dy: number): Pt => ({ x: p.x + dx * m * s, y: p.y + dy * s });
 
@@ -1407,7 +1420,7 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
   };
   /** A tapered tail along a quadratic, with the cream tip every dog in this office is issued. */
   const tail = (x0: number, y0: number, cx: number, cy: number, x1: number, y1: number, w: number): void => {
-    ctx.strokeStyle = DOG.fur;
+    ctx.strokeStyle = DOG.patch;
     ctx.lineWidth = w * s;
     ctx.lineCap = 'round';
     ctx.beginPath();
@@ -1432,9 +1445,10 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
     stroke(top, foot, w, DOG.fur);
     ellipse(ctx, px(x, -lift), w * 0.5 * s, w * 0.38 * s, DOG.cream);
   };
-  /** A floppy ear: hangs down the side of the head and swings a little with the body. */
+  /** A floppy ear: hangs down the side of the head and swings a little with the body. Both are black —
+   * on a white dog the ears are the markings that read first, at any size. */
   const ear = (x: number, y: number, r: number, swing = 0): void => {
-    ellipse(ctx, px(x + swing * 0.4, y + r * 0.9), r * 0.78 * s, r * 1.45 * s, DOG.fur);
+    ellipse(ctx, px(x + swing * 0.4, y + r * 0.9), r * 0.78 * s, r * 1.45 * s, DOG.patch);
     ellipse(ctx, px(x + swing * 0.4, y + r * 0.95), r * 0.4 * s, r * 0.85 * s, DOG.earIn);
   };
   /**
@@ -1444,26 +1458,62 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
   const head = (x: number, y: number, awake: boolean, swing = 0, tongue = false): void => {
     ear(x - 3.6, y - 2.4, 2.5, swing); // far ear, behind the skull
     ellipse(ctx, px(x, y), 5.8 * s, 5.2 * s, DOG.fur);
+    // The eye patch — one dark side to the face, clipped to the skull so it can't spill onto the snout.
+    // A white dog needs it: without a marking up here the head is a blank oval and the whole animal
+    // loses its expression at office scale.
+    ctx.save();
+    ctx.beginPath();
+    const skull = px(x, y);
+    ctx.ellipse(skull.x, skull.y, 5.8 * s, 5.2 * s, 0, 0, Math.PI * 2);
+    ctx.clip();
+    ellipse(ctx, px(x + 0.4, y - 1.4), 3.4 * s, 3.8 * s, DOG.patch);
+    ctx.restore();
     ellipse(ctx, px(x + 4.6, y + 2.2), 4.3 * s, 2.5 * s, DOG.cream); // snout, out front
     if (tongue) ellipse(ctx, px(x + 5.4, y + 4), 1.5 * s, 1.1 * s, DOG.tongue);
     ellipse(ctx, px(x + 8.2, y + 1.4), 1.25 * s, 1.05 * s, DOG.nose);
-    ellipse(ctx, px(x + 2.4, y - 3.4), 2.4 * s, 1.5 * s, DOG.fur); // brow, over the snout's root
+    ellipse(ctx, px(x + 2.4, y - 3.4), 2.4 * s, 1.5 * s, DOG.patch); // brow — reads as the patch's top edge
+    // The eye sits *on* the patch, so it gets a pale rim: a dark eye on dark fur is no eye at all.
     if (awake) {
+      ellipse(ctx, px(x + 1.4, y - 1), 1.55 * s, 1.7 * s, DOG.cream);
       ellipse(ctx, px(x + 1.4, y - 1), 1 * s, 1.15 * s, DOG.eye);
       ellipse(ctx, px(x + 1.75, y - 1.5), 0.34 * s, 0.34 * s, '#ffffff'); // catchlight — the whole charm of a face
     } else {
-      stroke(px(x + 0.4, y - 0.8), px(x + 2.4, y - 0.8), 0.8, DOG.eye);
+      ellipse(ctx, px(x + 1.4, y - 0.8), 1.7 * s, 1 * s, DOG.cream);
+      stroke(px(x + 0.5, y - 0.8), px(x + 2.3, y - 0.8), 0.8, DOG.eye);
     }
     ear(x + 2.6, y - 2.2, 2.7, swing); // near ear, over the cheek
   };
-  /** The saddle patch across the back — the dog's one marking, and its silhouette-reader. */
-  const saddle = (x: number, y: number, rx: number, ry: number): void => {
+  /**
+   * Black patches, clipped to whichever body ellipse the pose just drew — so a marking always sits *on*
+   * the dog instead of floating beside it, whatever shape the pose folded it into.
+   *
+   * Blob placement is in fractions of the body's own radii rather than absolute units, which is what
+   * lets the same three markings ride a curled comma, an upright sit and a trotting flank and stay
+   * recognisably the same dog. They are deliberately off-centre and different sizes: three tidy blobs
+   * read as a pattern, three scruffy ones read as an animal.
+   */
+  const patches = (x: number, y: number, rx: number, ry: number): void => {
     ctx.save();
     ctx.beginPath();
     const c = px(x, y);
     ctx.ellipse(c.x, c.y, rx * s, ry * s, 0, 0, Math.PI * 2);
     ctx.clip();
-    ellipse(ctx, px(x - 1.5, y - ry * 0.9), rx * 0.8 * s, ry * 0.85 * s, DOG.saddle);
+    // Over the back and shoulders — the big one, and the marking that carries the silhouette.
+    ellipse(ctx, px(x - rx * 0.16, y - ry * 0.68), rx * 0.68 * s, ry * 0.92 * s, DOG.patch);
+    // Hip, thrown the other way so the two never merge into one stripe down the spine.
+    ellipse(ctx, px(x - rx * 0.66, y + ry * 0.18), rx * 0.36 * s, ry * 0.6 * s, DOG.patch);
+    // A small one low on the flank: the bit of asymmetry that stops it reading as two-tone.
+    ellipse(ctx, px(x + rx * 0.44, y + ry * 0.42), rx * 0.19 * s, ry * 0.28 * s, DOG.patch);
+    ctx.restore();
+  };
+  /** A single patch clipped to a smaller part (the chest), for the same reason. */
+  const patchOn = (x: number, y: number, rx: number, ry: number): void => {
+    ctx.save();
+    ctx.beginPath();
+    const c = px(x, y);
+    ctx.ellipse(c.x, c.y, rx * s, ry * s, 0, 0, Math.PI * 2);
+    ctx.clip();
+    ellipse(ctx, px(x - rx * 0.5, y - ry * 0.45), rx * 0.62 * s, ry * 0.5 * s, DOG.patch);
     ctx.restore();
   };
   const collar = (x: number, y: number, r: number): void => {
@@ -1481,7 +1531,7 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       ellipse(ctx, px(0, 1.5), 15 * s, 4.6 * s, 'rgba(0,0,0,0.14)');
       tail(-9, -7, -14, 0.5, -4, 1, 2.8); // draped round the flank, behind the body — a dog flops, it doesn't wrap
       ellipse(ctx, px(-0.5, -5.5), 12.5 * s, 6.8 * breathe * s, DOG.fur);
-      saddle(-0.5, -5.5, 12.5, 6.8 * breathe);
+      patches(-0.5, -5.5, 12.5, 6.8 * breathe);
       ellipse(ctx, px(7.5, -2), 3.6 * s, 1.8 * s, DOG.cream); // front paws, tucked under the chin
       head(7, -6.5, false);
       break;
@@ -1493,9 +1543,11 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       ellipse(ctx, px(0, 1.5), 13 * s, 4.2 * s, 'rgba(0,0,0,0.14)');
       tail(-6.5, -6, -12, -1 + wag * 1.2, -14.5, 0.5 + wag * 2.6, 2.8); // thumping the floor
       ellipse(ctx, px(-1.5, -7.5), 8.2 * s, 8.5 * s, DOG.fur); // haunches
-      saddle(-1.5, -7.5, 8.2, 8.5);
+      patches(-1.5, -7.5, 8.2, 8.5);
       ellipse(ctx, px(3.5, -12), 5.4 * s, 7.2 * s, DOG.fur); // chest, up
-      ellipse(ctx, px(4.2, -9.5), 3 * s, 4.6 * s, DOG.cream); // chest blaze
+      // A patch over the shoulder rather than the old cream blaze, which is invisible now the coat is
+      // white. It also separates the chest from the haunches, which would otherwise merge into one blob.
+      patchOn(3.5, -12, 5.4, 7.2);
       leg(2.2, 0.5);
       leg(5.4, 0.5);
       collar(4.5, -18.5, 4.4);
@@ -1508,7 +1560,7 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       ellipse(ctx, px(0, 1.5), 16 * s, 4.6 * s, 'rgba(0,0,0,0.14)');
       tail(-9.5, -16, -14 + wag * 2, -22, -11 + wag * 3.5, -26, 2.8);
       ellipse(ctx, px(-7, -13), 7.8 * s, 7.2 * s, DOG.fur); // haunches, up
-      saddle(-7, -13, 7.8, 7.2);
+      patches(-7, -13, 7.8, 7.2);
       leg(-9, 0.5, 3);
       ellipse(ctx, px(2, -5.5), 8.5 * s, 4.4 * s, DOG.fur); // chest sweeping low
       stroke(px(4, -5.5), px(13, -1.5), 2.6, DOG.fur); // front legs reaching out flat
@@ -1528,7 +1580,7 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       leg(-7 + Math.sin(cyc) * 2, -Math.max(0, Math.sin(cyc)) * 2.5 + 0.5, 2.2);
       leg(6 + Math.sin(cyc + Math.PI) * 2, -Math.max(0, Math.sin(cyc + Math.PI)) * 2.5 + 0.5, 2.2);
       ellipse(ctx, px(0, -12.5 + bob), 11.5 * s, 6 * s, DOG.fur);
-      saddle(0, -12.5 + bob, 11.5, 6);
+      patches(0, -12.5 + bob, 11.5, 6);
       leg(-6 + Math.sin(cyc + Math.PI) * 2, -Math.max(0, Math.sin(cyc + Math.PI)) * 2.5 + 0.5);
       leg(7 + Math.sin(cyc) * 2, -Math.max(0, Math.sin(cyc)) * 2.5 + 0.5);
       collar(10.5, -16.5 + bob, 4);

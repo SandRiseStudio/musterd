@@ -174,6 +174,26 @@ describe('drawDog paints every pose', () => {
       expect(() => drawDog(mockCtx(), fit, pet, 3.2)).not.toThrow();
     }
   });
+
+  /**
+   * The dog is white with black patches, and both halves of that have to survive every pose. A coat
+   * that loses its markings in one pose is the failure worth catching: the patches are what carry the
+   * silhouette on a warm floor, so a pose painted in flat white is a dog-shaped hole in the room.
+   */
+  it.each(modes)('gives the %s pose both a white coat and black markings', (mode) => {
+    const paints: string[] = [];
+    const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip: false, path: [], seg: 0, plan: 'nap', sitFor: 5 };
+    drawDog(mockCtx(paints), fit, pet, 3.2);
+    const lum = (hex: string) => {
+      const m = /^#([0-9a-f]{6})$/i.exec(hex);
+      if (!m) return null;
+      const n = parseInt(m[1]!, 16);
+      return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    };
+    const lums = paints.map(lum).filter((l): l is number => l !== null);
+    expect(lums.some((l) => l > 0.85)).toBe(true); // the coat
+    expect(lums.some((l) => l < 0.25)).toBe(true); // the markings
+  });
 });
 
 /** The window glass reads from the same PST lighting as the beams and the veil — bright sky by day, a
