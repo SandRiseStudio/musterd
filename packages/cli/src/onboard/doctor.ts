@@ -282,6 +282,16 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const sidebarless = HARNESSES.filter(
     (h) => !h.guidance?.sessionsSkillPath && harnesses.find((s) => s.label === h.label)?.configured,
   );
+  // ADR 162: the binding registry only grows — nothing prunes an entry when its folder is deleted.
+  // Warn-only and cheap (one stat per entry), and only worth saying once it is actually noisy.
+  const staleBindings = Object.keys(loadConfig().bindings).filter((f) => !existsSync(f));
+  const registryNotes =
+    staleBindings.length >= 5
+      ? [
+          `${staleBindings.length} binding-registry entries name folders that no longer exist — ` +
+            `run \`musterd init --prune-bindings\` to review, \`--apply\` to remove. Credentials are untouched.`,
+        ]
+      : [];
   const labelNotes =
     sidebarless.length > 0
       ? [
@@ -297,6 +307,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       ...guidance.notes,
       ...duplicateAdapters,
       ...modelAttestation,
+      ...registryNotes,
       ...labelNotes,
       ...packagedInstallNotes(),
     ],

@@ -7,6 +7,7 @@ import type { DetectResult } from './harness.js';
 // Hoisted mock state: the harnesses the doctor inspects + the primer classification + the folder
 // binding (findBinding) so we can exercise the baked-claim-vs-binding.json value-coherence check.
 const h = vi.hoisted(() => ({
+  bindings: {} as Record<string, { team: string; seat: string; surface: string }>,
   harnesses: [] as { label: string; detect: () => Promise<DetectResult> }[],
   primer: 'managed' as 'none' | 'unmarked' | 'managed',
   binding: null as Record<string, unknown> | null,
@@ -20,7 +21,11 @@ vi.mock('./harnesses/index.js', () => ({
   },
 }));
 vi.mock('./primer.js', () => ({ classifyPrimerTarget: () => h.primer }));
-vi.mock('../config.js', () => ({ findBinding: () => h.binding }));
+vi.mock('../config.js', () => ({
+  findBinding: () => h.binding,
+  // ADR 162: the doctor reads the binding registry to note stale entries.
+  loadConfig: () => ({ bindings: h.bindings }),
+}));
 vi.mock('../client.js', () => ({
   HttpClient: class {
     async roster() {
@@ -62,6 +67,7 @@ describe('inspectProvisioning', () => {
     h.harnesses = [];
     h.primer = 'managed';
     h.binding = null;
+    h.bindings = {};
   });
 
   it('flags the headline drift: primer present but no server registered', async () => {
@@ -485,5 +491,40 @@ describe('build skew (ADR 135) — warn-only freshness, never drift', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe('binding-registry staleness note (ADR 162)', () => {
+  beforeEach(() => {
+    h.harnesses = [harness('Claude Code', true, true)];
+    h.primer = 'managed';
+    h.binding = null;
+    h.bindings = {};
+  });
+
+  it('notes the count once stale entries are actually noisy, and names the fix', async () => {
+    for (let i = 0; i < 6; i++) {
+      h.bindings[join(tmpdir(), `musterd-doctor-gone-${i}`)] = {
+        team: 'dawn',
+        seat: 'scout',
+        surface: 'claude-code',
+      };
+    }
+    const r = await inspectProvisioning('/x');
+    const note = r.notes.find((n) => n.includes('binding-registry'));
+    expect(note).toContain('6 binding-registry entries');
+    expect(note).toContain('--prune-bindings');
+    expect(r.drift).toEqual([]); // warn-only, never exit-1
+  });
+
+  it('stays quiet below the threshold, and for folders that exist', async () => {
+    h.bindings[join(tmpdir(), 'musterd-doctor-gone-solo')] = {
+      team: 'dawn',
+      seat: 'scout',
+      surface: 'claude-code',
+    };
+    h.bindings[tmpdir()] = { team: 'revive', seat: 'stanley', surface: 'claude-code' };
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.find((n) => n.includes('binding-registry'))).toBeUndefined();
   });
 });

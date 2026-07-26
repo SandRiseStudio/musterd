@@ -1,6 +1,9 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Binding, MemberSummary } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { liveBindingClobber } from './guard.js';
+import { liveBindingClobber, nameBoundElsewhere } from './guard.js';
 
 /** A folder binding whose seat is `name`. */
 const boundTo = (name: string): Binding => ({
@@ -63,5 +66,29 @@ describe('liveBindingClobber (ADR 066/105)', () => {
 
   it('does not clobber when the bound seat is not on the roster', () => {
     expect(liveBindingClobber(boundTo('Ghost'), [member({ name: 'Ada' })], 'Bob')).toBeNull();
+  });
+});
+
+describe('nameBoundElsewhere — a vanished folder is not a collision (ADR 162)', () => {
+  it('ignores a registry entry whose folder no longer exists', () => {
+    const gone = join(tmpdir(), 'musterd-guard-gone-does-not-exist');
+    expect(
+      nameBoundElsewhere('scout', tmpdir(), {
+        [gone]: { team: 'dawn', seat: 'scout', surface: 'claude-code' },
+      }),
+    ).toBeNull();
+  });
+
+  it('still reports a real collision in a folder that IS there', () => {
+    const live = mkdtempSync(join(tmpdir(), 'musterd-guard-live-'));
+    try {
+      expect(
+        nameBoundElsewhere('scout', tmpdir(), {
+          [live]: { team: 'revive', seat: 'scout', surface: 'claude-code' },
+        }),
+      ).toEqual({ folder: live, team: 'revive' });
+    } finally {
+      rmSync(live, { recursive: true, force: true });
+    }
   });
 });
