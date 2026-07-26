@@ -1,5 +1,6 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import {
+  appendFileSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -8,13 +9,14 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { loadavg, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { Parsed } from '../args.js';
 import { configPath } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { cpuOfTree, makePerfRecorder } from './broadcast-perf.js';
 
 /**
  * `musterd broadcast` — ADR 157 Increment 2: stream the office with no GUI in the loop.
@@ -316,6 +318,79 @@ export function makeEncoderFeed(
     }
     stdin.write(frame);
   };
+}
+
+/** How often the capture-perf recorder samples the pipeline, when it is switched on at all. */
+const PERF_SAMPLE_MS = 1000;
+
+/**
+ * Wire up capture-perf recording, or return `undefined` — the normal case.
+ *
+ * Switched on only by `MUSTERD_BROADCAST_PERF=<path.jsonl>`, so a stream nobody is measuring pays
+ * nothing: no CDP round-trips, no `ps` fork per second, no file handle. That is the `?beat=`
+ * precedent — instrumentation ships, inert, rather than living on a branch that rots.
+ *
+ * Every probe is best-effort. A measurement harness must never be the reason a live stream dies, so
+ * a failed office eval or a `ps` that races a process exit degrades that field to `undefined` and the
+ * capture carries on.
+ */
+function startPerfRecording(
+  page: Cdp,
+  ffmpeg: ChildProcess,
+  chrome: ChildProcess,
+  emitted: () => number,
+): { frame: (bytes: number) => void; tick: () => Promise<void> } | undefined {
+  const out = process.env['MUSTERD_BROADCAST_PERF'];
+  if (!out) return undefined;
+  const started = Date.now();
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, ''); // truncate: one file per capture, never an append of two runs' numbers
+  process.stdout.write(theme.meta(`  perf → ${out}\n`));
+  return makePerfRecorder({
+    queueBytes: () => ffmpeg.stdin?.writableLength ?? 0,
+    emitted,
+    office: async () => {
+      try {
+        const r = await page.send('Runtime.evaluate', {
+          expression: 'JSON.stringify(window.__office?.stats?.() ?? null)',
+          returnByValue: true,
+        });
+        const raw = (r['result'] as { value?: unknown } | undefined)?.value;
+        const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : null;
+        if (!parsed || typeof parsed !== 'object') return undefined;
+        const { ticks, draws } = parsed as { ticks?: unknown; draws?: unknown };
+        if (typeof ticks !== 'number' || typeof draws !== 'number') return undefined;
+        return { ticks, draws };
+      } catch {
+        return undefined; // scene not mounted yet, or the socket went away mid-capture
+      }
+    },
+    cpu: async () => {
+      try {
+        const ps = await new Promise<string>((resolve, reject) => {
+          execFile('ps', ['-Ao', 'pid,ppid,pcpu'], (err, stdout) =>
+            err ? reject(err) : resolve(stdout),
+          );
+        });
+        return {
+          chrome: chrome.pid ? cpuOfTree(ps, chrome.pid) : 0,
+          ffmpeg: ffmpeg.pid ? cpuOfTree(ps, ffmpeg.pid) : 0,
+          self: cpuOfTree(ps, process.pid),
+        };
+      } catch {
+        return { chrome: 0, ffmpeg: 0, self: 0 };
+      }
+    },
+    load1: () => loadavg()[0] ?? 0,
+    now: () => Date.now() - started,
+    write: (s) => {
+      try {
+        appendFileSync(out, `${JSON.stringify(s)}\n`);
+      } catch {
+        /* a full or vanished disk must not take the stream down with it */
+      }
+    },
+  });
 }
 
 /** How long a single CDP call may go unanswered before we stop waiting on a socket that may be dead. */
@@ -708,6 +783,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   // only ever run on an event-loop turn, and the spawns happen in this same synchronous block.)
   let pumpTimer: NodeJS.Timeout | undefined;
   let buildTimer: NodeJS.Timeout | undefined;
+  let perfTimer: NodeJS.Timeout | undefined;
   let live = false; // flips when the pump starts feeding ffmpeg
   let stopping = false;
   /** Set when the stop in flight is a build pickup, not an ending — see the build watch below. */
@@ -823,6 +899,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   const cleanup = () => {
     if (pumpTimer) clearInterval(pumpTimer);
     if (buildTimer) clearInterval(buildTimer);
+    if (perfTimer) clearInterval(perfTimer);
     ffmpeg.stdin?.end();
     cdp?.close(); // an open DevTools socket is a live handle; nothing else closes it
     killGroup(chrome);
@@ -858,8 +935,14 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     const page = cdp!;
 
     const pump = makeFramePump(makeEncoderFeed(ffmpeg.stdin, onStall), opts.fps);
+    // Capture-perf instrumentation — dark unless MUSTERD_BROADCAST_PERF names a JSONL path.
+    // See broadcast-perf.ts for why queue *growth*, not ffmpeg's `speed=`, is the margin metric.
+    let emitted = 0;
+    const perf = startPerfRecording(page, ffmpeg, chrome, () => emitted);
     page.on('Page.screencastFrame', (p) => {
-      pump.frame(Buffer.from(String(p['data']), 'base64'));
+      const frame = Buffer.from(String(p['data']), 'base64');
+      perf?.frame(frame.byteLength);
+      pump.frame(frame);
       void page.send('Page.screencastFrameAck', { sessionId: p['sessionId'] });
     });
     // JPEG, and this is load-bearing: Chrome encodes screencast frames on the compositor thread,
@@ -877,7 +960,16 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     });
     // Tick at 2× frame cadence: the pump owes frames by wall clock, so the timer only needs to
     // fire *often enough* — late ticks emit catch-up frames instead of losing them.
-    pumpTimer = setInterval(() => pump.tick(), Math.max(1, Math.round(500 / opts.fps)));
+    pumpTimer = setInterval(
+      () => {
+        emitted += pump.tick();
+      },
+      Math.max(1, Math.round(500 / opts.fps)),
+    );
+    if (perf) {
+      perfTimer = setInterval(() => void perf.tick(), PERF_SAMPLE_MS);
+      perfTimer.unref(); // measurement never holds the stream open
+    }
     live = true; // signals now stop gracefully — there are frames worth finalizing
 
     baselineBuild = await fetchDaemonBuild(opts.server);

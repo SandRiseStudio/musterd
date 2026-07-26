@@ -91,6 +91,7 @@ src/
     host.ts           // musterd host [--once]: the resident wake-actuator loop (notify-shaped; ADR 131 inc 3)
     serve.ts          // musterd serve [--port]
     broadcast.ts      // musterd broadcast --team … (--out|--twitch|--rtmp): headless-Chrome capture of /broadcast → CFR frame pump → ffmpeg (VideoToolbox/libx264) → file or RTMPS; stream key from env/Keychain only (ADR 157 inc 2)
+    broadcast-perf.ts // capture-pipeline instrumentation, dark unless MUSTERD_BROADCAST_PERF names a JSONL path: screencast fps/bytes, canvas draw rate, ffmpeg queue depth (its *slope* is the margin metric — `speed=` is pinned ≈1× for a live source), per-tree CPU + load; summarized by scripts/perf/broadcast-baseline.mjs
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
     team.ts           // team create / team add / team remove / team export (ADR 058 db→file migration)
     fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files (ADR 058 guard 2)
