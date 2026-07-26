@@ -102,6 +102,54 @@ export function runRefreshGuidance(dir: string = process.cwd()): number {
   return 0;
 }
 
+/**
+ * `musterd init --prune-bindings` (ADR 162): drop registry entries whose folder no longer exists.
+ *
+ * The ADR 020 registry records where each member is bound, keyed by absolute folder path, and
+ * nothing removes an entry when the folder is deleted — `removeBinding` only fires for a deliberate
+ * `unbind` in a folder that still exists. So the registry only grows, and every stale row is a
+ * candidate false "that name is already bound elsewhere" warning.
+ *
+ * Credentials are deliberately NOT touched: `identities`/`agentKeys` are the only copy of a minted
+ * key, and a team being unreachable right now (daemon down, wrong server) is not evidence it is
+ * dead. This prunes what can be re-derived, never what cannot.
+ */
+export function runPruneBindings(opts: { apply?: boolean } = {}): number {
+  const config = loadConfig();
+  const stale = Object.keys(config.bindings).filter((folder) => !existsSync(folder));
+  const total = Object.keys(config.bindings).length;
+
+  if (stale.length === 0) {
+    process.stdout.write(
+      `${theme.ok(sym.ok)} binding registry is clean — ${total} entr${total === 1 ? 'y' : 'ies'}, all present\n`,
+    );
+    return 0;
+  }
+  const byTeam = new Map<string, number>();
+  for (const f of stale) {
+    const t = config.bindings[f]?.team ?? '?';
+    byTeam.set(t, (byTeam.get(t) ?? 0) + 1);
+  }
+  const summary = [...byTeam.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => `${t} ×${n}`)
+    .join(', ');
+
+  if (!opts.apply) {
+    process.stdout.write(
+      `${theme.warn(sym.warn)} ${stale.length} of ${total} registry entr${stale.length === 1 ? 'y names a folder' : 'ies name folders'} that no longer exist${stale.length === 1 ? 's' : ''} (${summary})\n` +
+        `${theme.meta('re-run with --apply to remove them; credentials are never touched')}\n`,
+    );
+    return 0;
+  }
+  for (const f of stale) delete config.bindings[f];
+  saveConfig(config);
+  process.stdout.write(
+    `${theme.ok(sym.ok)} pruned ${stale.length} stale registry entr${stale.length === 1 ? 'y' : 'ies'} (${summary}) — ${Object.keys(config.bindings).length} left\n`,
+  );
+  return 0;
+}
+
 function bail(): never {
   p.cancel('Onboarding cancelled — run `musterd init` any time.');
   process.exit(130);

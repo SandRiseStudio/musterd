@@ -317,8 +317,20 @@ describe('cross-folder name-reuse (nameBoundElsewhere)', () => {
   });
 
   it('flags a name bound in a different folder, returning that folder + team', () => {
-    const hit = nameBoundElsewhere('Ada', '/work/api', reg('/work/web', 'Ada', 'dawn'));
-    expect(hit).toEqual({ folder: '/work/web', team: 'dawn' });
+    // The folder must actually EXIST: a registry entry outlives the folder it names, and ADR 162
+    // makes a vanished folder a non-collision (warning about a deleted path is unactionable).
+    const other = mkdtempSync(join(tmpdir(), 'musterd-reuse-'));
+    try {
+      const hit = nameBoundElsewhere('Ada', '/work/api', reg(other, 'Ada', 'dawn'));
+      expect(hit).toEqual({ folder: other, team: 'dawn' });
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores an entry whose folder is gone (ADR 162)', () => {
+    const gone = join(tmpdir(), 'musterd-reuse-never-existed');
+    expect(nameBoundElsewhere('Ada', '/work/api', reg(gone, 'Ada', 'dawn'))).toBeNull();
   });
 
   it('ignores the same folder (a re-run here is heuristic 2, not name reuse)', () => {

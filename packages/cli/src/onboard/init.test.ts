@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // vi.mock calls below are hoisted above these imports, so init.js resolves the mocked deps.
-import { cachedTeamLive, missingGitignoreEntries, runInit, runRefreshGuidance } from './init.js';
+import {
+  cachedTeamLive,
+  missingGitignoreEntries,
+  runInit,
+  runPruneBindings,
+  runRefreshGuidance,
+} from './init.js';
 
 // Shared, hoisted test doubles the mock factories below close over.
 const h = vi.hoisted(() => {
@@ -142,6 +148,7 @@ beforeEach(() => {
     current: undefined,
     identities: {},
     bindings: {},
+    agentKeys: {},
   });
   h.http.createTeam.mockResolvedValue({
     token: 'tok-creator',
@@ -341,6 +348,41 @@ describe('runRefreshGuidance — guidance only, never identity (ADR 161)', () =>
     h.folderBinding = { team: 'revive' };
     expect(runRefreshGuidance(cwd)).toBe(0);
     expect(existsSync(join(cwd, '.musterd', 'skill', 'SKILL.md'))).toBe(false);
+  });
+});
+
+describe('runPruneBindings — the registry only grows (ADR 162)', () => {
+  it('reports stale entries without touching them, and removes them only with --apply', () => {
+    const gone = join(tmpdir(), 'musterd-gone-does-not-exist');
+    h.config.bindings[gone] = { team: 'dawn', seat: 'scout', surface: 'claude-code' };
+    h.config.bindings[cwd] = { team: 'revive', seat: 'stanley', surface: 'claude-code' };
+
+    // Dry run: reports, changes nothing.
+    expect(runPruneBindings()).toBe(0);
+    expect(Object.keys(h.config.bindings)).toContain(gone);
+
+    // --apply: drops the dead folder, keeps the live one.
+    expect(runPruneBindings({ apply: true })).toBe(0);
+    expect(Object.keys(h.config.bindings)).toEqual([cwd]);
+  });
+
+  it('never touches credentials, even when every binding is stale', () => {
+    h.config.bindings[join(tmpdir(), 'musterd-gone-1')] = {
+      team: 'dawn',
+      seat: 'scout',
+      surface: 'claude-code',
+    };
+    h.config.identities['cookoff-gb2'] = { name: 'nick', key: 'mscr_keep', surface: 'cli' };
+    h.config.agentKeys['cookoff-gb2'] = 'mskey_keep';
+    expect(runPruneBindings({ apply: true })).toBe(0);
+    expect(h.config.identities['cookoff-gb2']).toBeDefined();
+    expect(h.config.agentKeys['cookoff-gb2']).toBe('mskey_keep');
+  });
+
+  it('says so plainly when the registry is already clean', () => {
+    h.config.bindings[cwd] = { team: 'revive', seat: 'stanley', surface: 'claude-code' };
+    expect(runPruneBindings({ apply: true })).toBe(0);
+    expect(Object.keys(h.config.bindings)).toEqual([cwd]);
   });
 });
 

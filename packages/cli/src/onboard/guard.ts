@@ -137,9 +137,13 @@ export function nameBoundElsewhere(
 ): { folder: string; team: string } | null {
   const here = resolve(cwd);
   for (const [folder, ref] of Object.entries(bindings)) {
-    if (ref.seat === name && resolve(folder) !== here) {
-      return { folder, team: ref.team };
-    }
+    if (ref.seat !== name || resolve(folder) === here) continue;
+    // A registry entry outlives the folder it names — nothing prunes it when a project is deleted
+    // (ADR 162). Warning "already bound in <folder>" about a folder that no longer exists is a lie
+    // the human cannot act on, so a vanished folder is not a collision. Cheap: one stat, and only
+    // for entries that already matched the name.
+    if (!existsSync(folder)) continue;
+    return { folder, team: ref.team };
   }
   return null;
 }
