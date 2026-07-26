@@ -138,8 +138,13 @@ sketched:
   fails fast instead of streaming a blank page.
 - **CDP screencast → CFR pump → ffmpeg.** `Page.startScreencast` is change-driven and a rested
   office legitimately emits no frames, so a pure pump (`makeFramePump`) re-emits the latest frame on
-  a fixed 1000/fps clock — a still room becomes a still, valid stream. Backpressure is drop-not-queue
-  (a skipped duplicate frame is invisible; an unbounded buffer is an OOM). ffmpeg encodes
+  a fixed 1000/fps clock — a still room becomes a still, valid stream. Backpressure is
+  **queue-then-give-up, not drop** — this paragraph originally said drop-not-queue, on the theory
+  that "a skipped duplicate frame is invisible". #367 disproved that: `image2pipe` synthesizes
+  timestamps from frame _count_, so a dropped frame does not vanish, it permanently slows the
+  timeline against wall clock, and the viewer's buffer drains. So the pump rides a backlog rather
+  than dropping (`makeEncoderFeed`), bounded at `STALL_BYTES` — past which the encoder is not behind,
+  it is gone, and the ADR 159 watchdog ends the stream instead of buffering into a hang. ffmpeg encodes
   `h264_videotoolbox` on macOS / `libx264` elsewhere, muxes a silent audio track (RTMP ingests
   reject video-only), keyframes every 2 s (Twitch's ask), and writes one of exactly three sinks:
   `--out <file.mp4>` (the no-key proof mode, same encode path), `--twitch`, or `--rtmp <url>`

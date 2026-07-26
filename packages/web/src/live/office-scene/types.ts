@@ -136,4 +136,19 @@ export interface OfficeHandle {
   /** Fire an errand now on an idle desk member (bypassing the scheduler): the fridge meal, the water
    * refill, the coffee run, or a phone call. Same verification affordance as `pokeGesture`. */
   pokeErrand: (kind: 'fridge' | 'water' | 'coffee' | 'phone') => string | null;
+  /** Cumulative render counters, for a capture harness probing the scene from CDP (see
+   * `scripts/perf/broadcast-baseline.mjs`). `ticks` counts rAF callbacks, `draws` counts the ones that
+   * actually painted — under broadcast today those are equal, which is the waste the capture-perf work
+   * is measuring. Two integer increments per frame; not gated, because gating costs more than it saves. */
+  stats: () => OfficeStats;
+}
+
+/** @see OfficeHandle.stats */
+export interface OfficeStats {
+  /** rAF callbacks entered since the scene mounted. */
+  ticks: number;
+  /** Frames actually painted (`ticks` minus the ones coalesced away by the ambient FPS budget). */
+  draws: number;
+  /** `performance.now()` when the scene mounted — the denominator for a rate. */
+  since: number;
 }

@@ -25,7 +25,7 @@ import { GESTURE } from './skeleton';
 import { shapeSpeech, speechLength, speechTokens, typeCadence, type SpeechToken } from './speech';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
-export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode } from './types';
+export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, OfficeStats } from './types';
 
 const DPR_CAP = 2;
 const CUE_SECS = 1.5;
@@ -603,7 +603,14 @@ export function mountOffice(
   let last = 0;
   let acc = 0; // wall time accrued since the last drawn frame — coalesced under the ambient FPS cap
   let wasActive = false;
+  // Render counters for a capture harness (OfficeHandle.stats). Under broadcast `ticks === draws`,
+  // because ambientFrameBudgetMs returns 0 — the scene paints at full rAF while an encoder downstream
+  // consumes 30fps. Making that gap measurable rather than inferred is the point.
+  let ticks = 0;
+  let draws = 0;
+  const since = performance.now();
   function tick(now: number) {
+    ticks++;
     // Idle-FPS cap (ADR 086 Phase 2): when the only motion is ambient — a coffee-stroll beat, or just a
     // room of people breathing and typing at their desks — don't redraw every frame; accrue wall time and
     // coalesce toward ~20fps. Real acts and cues keep the full frame rate. `dt` accumulates either way, so
@@ -617,6 +624,7 @@ export function mountOffice(
       raf = requestAnimationFrame(tick); // too soon for the next ambient frame — keep the loop, skip the draw
       return;
     }
+    draws++;
     const dt = Math.min(0.05, acc / 1000);
     acc = 0;
     clock += dt;
@@ -969,6 +977,7 @@ export function mountOffice(
   return {
     update,
     emit,
+    stats: () => ({ ticks, draws, since }),
     setSuspended: (on: boolean) => {
       // A stream never parks (ADR 157). The broadcast route has no collapse control, so this only ever
       // fires from a host surface that shouldn't be able to freeze the outgoing frame anyway.
