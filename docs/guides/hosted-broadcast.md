@@ -28,18 +28,31 @@
 
    Note the machine's MagicDNS name (`tailscale status` — e.g. `nicks-air.tailnet-name.ts.net`).
 
-2. **A tailnet auth key for the box** — admin console → Settings → Keys → generate an **ephemeral,
+2. **Allow the tailnet host on the daemon.** The ADR 040 upgrade gate accepts a WebSocket only from
+   a loopback `Host`, the bound host, or `MUSTERD_ALLOWED_HOSTS` — and the capture page is served
+   over the tailnet address, so without this the firehose upgrade is refused with
+   `ws_upgrade_rejected: host not allowed` and the page never reaches `live`. Add the tailnet IP and
+   name to the daemon's environment (both, since either may end up in `Host`) and restart it:
+
+   ```sh
+   MUSTERD_ALLOWED_HOSTS=100.x.y.z,your-box.tailnet-name.ts.net
+   ```
+
+   > This is a real daemon change. An earlier draft of the design claimed topology B needed none;
+   > the first live run disproved it.
+
+3. **A tailnet auth key for the box** — admin console → Settings → Keys → generate an **ephemeral,
    reusable** key (ephemeral: dead nodes vanish from the tailnet; reusable: every stream is a fresh
    node). Consider a tag with an ACL that only allows reaching the daemon's port.
 
-3. **The Fly app + secrets:**
+4. **The Fly app + secrets:**
 
    ```sh
    fly apps create musterd-broadcast --org personal
    fly secrets set -a musterd-broadcast TS_AUTHKEY=<key> MUSTERD_STREAM_KEY=<twitch key> --stage
    ```
 
-4. **Build the image** (repeat only after broadcast-relevant code changes):
+5. **Build the image** (repeat only after broadcast-relevant code changes):
 
    ```sh
    scripts/broadcast/live.sh build
