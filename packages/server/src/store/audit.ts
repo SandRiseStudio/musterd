@@ -129,7 +129,19 @@ export type AuditAction =
   // is a hook behavior, not a new act. "Which costly actions proceeded un-asked" is one query:
   // `action.gate` rows with `detail.outcome = 'warned'` beside the `ask.*` the block posture provoked.
   | 'lane.gate'
-  | 'action.gate';
+  | 'action.gate'
+  // ADR 163 (actor attestation): who did it, never whether it was allowed. These rows are NOT gate
+  // decisions — they carry no posture and no outcome, because nothing about them can change whether a
+  // call proceeds. That is exactly why they may fire on UNDECLARED calls where `lane.gate`/`action.gate`
+  // may not (ADR 150 §Gate B as amended by 163: the boundary governs mediation, not observation).
+  // `actor.subagent_write` = a write-shaped tool call carrying an `agent_id`, i.e. a subagent wrote
+  // under its parent seat's identity; detail `{ actor_id, actor_type, tool, target }`. Reads never fire.
+  // `actor.subagent_spawn` = a subagent was spawned at all; detail `{ spawn_type, spawn_model? }` —
+  // the DENOMINATOR the write count is read against. `result` is always `allow`: an observer never
+  // denies. NOTE the write count is a LOWER BOUND — Bash write-shape is a heuristic command match, so
+  // a subagent writing via `python -c` or an MCP filesystem tool produces no row (ADR 163 recall arm).
+  | 'actor.subagent_write'
+  | 'actor.subagent_spawn';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

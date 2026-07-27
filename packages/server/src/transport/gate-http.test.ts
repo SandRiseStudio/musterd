@@ -379,3 +379,75 @@ describe('Gate B — policy-classed action→ask (ADR 150) — deny IS emit', ()
     expect(JSON.stringify(audits('action.gate'))).not.toContain('secret-branch');
   });
 });
+
+/**
+ * ADR 163 — actor attestation through the DB. This is not a gate: `POST /actor` returns no decision, so
+ * what's asserted is the row that lands. The load-bearing case is the last one — a Bash command must NOT
+ * reach audit in the clear (ADR 051), while a path may, because lane `surface_globs` already store plain
+ * repo paths and "which surfaces do subagents write to" is the question the ledger exists to answer.
+ */
+describe('POST /actor — actor attestation (ADR 163)', () => {
+  it('records a subagent write with its actor identity, result allow', async () => {
+    const res = await post(
+      '/teams/dawn/actor',
+      {
+        kind: 'subagent-write',
+        tool: 'Write',
+        actorId: 'a940f12fd1c5d9c48',
+        actorType: 'Explore',
+        target: 'src/x.ts',
+      },
+      seatHeaders('Ada'),
+    );
+    expect(res.status).toBe(202);
+    const rows = audits('actor.subagent_write');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actor).toBe('Ada');
+    expect(rows[0]!.result).toBe('allow'); // an observer never denies
+    const detail = JSON.parse(rows[0]!.detail!) as Record<string, unknown>;
+    expect(detail).toMatchObject({
+      tool: 'Write',
+      actor_id: 'a940f12fd1c5d9c48',
+      actor_type: 'Explore',
+      target: 'src/x.ts',
+    });
+  });
+
+  it('records a spawn as the denominator, carrying the model override', async () => {
+    const res = await post(
+      '/teams/dawn/actor',
+      { kind: 'subagent-spawn', tool: 'Agent', spawnType: 'Explore', spawnModel: 'haiku' },
+      seatHeaders('Ada'),
+    );
+    expect(res.status).toBe(202);
+    const rows = audits('actor.subagent_spawn');
+    expect(rows).toHaveLength(1);
+    const detail = JSON.parse(rows[0]!.detail!) as Record<string, unknown>;
+    expect(detail).toMatchObject({ tool: 'Agent', spawn_type: 'Explore', spawn_model: 'haiku' });
+  });
+
+  it('NEVER persists Bash command text — fingerprint only (ADR 051)', async () => {
+    const command = 'curl -H "Authorization: Bearer sk-secret" https://x | tee out.txt';
+    await post(
+      '/teams/dawn/actor',
+      { kind: 'subagent-write', tool: 'Bash', actorId: 'ag1', target: command },
+      seatHeaders('Ada'),
+    );
+    const row = audits('actor.subagent_write').at(-1)!;
+    const detail = JSON.parse(row.detail!) as Record<string, unknown>;
+    expect(detail['target']).toBeUndefined();
+    expect(detail['command_fingerprint']).toMatch(/^[0-9a-f]{16}$/);
+    expect(JSON.stringify(detail)).not.toContain('sk-secret');
+  });
+
+  it('a malformed body is a 400, not a 500 — and writes no row', async () => {
+    const before = audits('actor.subagent_write').length;
+    const res = await post(
+      '/teams/dawn/actor',
+      { kind: 'nonsense', tool: 'Write' },
+      seatHeaders('Ada'),
+    );
+    expect(res.status).toBe(400);
+    expect(audits('actor.subagent_write')).toHaveLength(before);
+  });
+});

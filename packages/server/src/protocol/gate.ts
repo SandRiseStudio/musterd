@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import {
+  type ActorAttestation,
   type AskSpecies,
   ASK_TOP_TIER,
   askContractText,
@@ -238,4 +240,51 @@ export function adjudicateGate(
     },
   });
   return decision;
+}
+
+/**
+ * Record an actor attestation (ADR 163). **Not a gate** — it returns nothing, decides nothing, and
+ * always records `result: 'allow'`, because an observer that could deny would be back under the ADR 150
+ * declared-class boundary in full. One row per call; the hook only sends write-shaped subagent calls and
+ * spawns, so reads never reach here.
+ *
+ * **What is persisted, and why the split.** A path-shaped target (`src/x.ts`) is stored in the clear:
+ * lane `surface_globs` already hold plain repo-relative paths, so a path is not the sensitive class, and
+ * "which surfaces do subagents write to" is the question the ledger exists to answer. A `Bash` command is
+ * NOT stored — command text is exactly what ADR 051 protects (it can carry tokens, URLs, secrets), and
+ * ADR 150's gate rows already refuse it. Commands are reduced to a sha256 fingerprint, which still
+ * de-duplicates repeat attempts without retaining the text. ADR 163 §Mechanism says "target" loosely;
+ * this is the careful reading of it.
+ */
+export function recordActorAttestation(
+  srv: Ctx,
+  team: TeamRow,
+  member: MemberRow,
+  att: ActorAttestation,
+): void {
+  const isSpawn = att.kind === 'subagent-spawn';
+  appendAudit(srv.db, team.id, {
+    actor: member.name,
+    action: isSpawn ? 'actor.subagent_spawn' : 'actor.subagent_write',
+    target: att.actorType ?? att.spawnType ?? null,
+    result: 'allow',
+    detail: {
+      tool: att.tool,
+      ...(att.actorId ? { actor_id: att.actorId } : {}),
+      ...(att.actorType ? { actor_type: att.actorType } : {}),
+      ...(att.spawnType ? { spawn_type: att.spawnType } : {}),
+      ...(att.spawnModel ? { spawn_model: att.spawnModel } : {}),
+      // Path in the clear; command as a fingerprint only (see the doc comment above).
+      ...(att.target === undefined
+        ? {}
+        : att.tool === 'Bash'
+          ? {
+              command_fingerprint: createHash('sha256')
+                .update(att.target)
+                .digest('hex')
+                .slice(0, 16),
+            }
+          : { target: att.target }),
+    },
+  });
 }

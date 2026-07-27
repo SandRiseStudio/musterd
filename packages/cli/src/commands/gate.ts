@@ -1,6 +1,7 @@
 import { isAbsolute, relative } from 'node:path';
-import { type GateToolCall, matchEnforcement } from '@musterd/protocol';
+import { type GateToolCall, isWriteShaped, matchEnforcement } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
+import type { HttpClient } from '../client.js';
 import { CliError } from '../errors.js';
 import { resolveRead } from './helpers.js';
 
@@ -70,7 +71,24 @@ export function parseToolCall(raw: string): GateToolCall | null {
           ? input['notebook_path']
           : undefined;
     const command = typeof input['command'] === 'string' ? input['command'] : undefined;
-    return { tool, ...(path ? { path } : {}), ...(command ? { command } : {}) };
+    // ADR 163 — the payload ENVELOPE, not the tool input. `agent_id`/`agent_type` are present only on a
+    // subagent's own tool calls and absent on the parent seat's; measured on Claude Code 2.1.220. On a
+    // spawn call (`tool_name: Agent`) the requested type + `model:` override live in tool_input instead,
+    // and carry no agent_id — the two halves share no key, which is why nothing joins them here.
+    const actorId = typeof o['agent_id'] === 'string' ? o['agent_id'] : undefined;
+    const actorType = typeof o['agent_type'] === 'string' ? o['agent_type'] : undefined;
+    const spawnType =
+      typeof input['subagent_type'] === 'string' ? input['subagent_type'] : undefined;
+    const spawnModel = typeof input['model'] === 'string' ? input['model'] : undefined;
+    return {
+      tool,
+      ...(path ? { path } : {}),
+      ...(command ? { command } : {}),
+      ...(actorId ? { actorId } : {}),
+      ...(actorType ? { actorType } : {}),
+      ...(spawnType ? { spawnType } : {}),
+      ...(spawnModel ? { spawnModel } : {}),
+    };
   } catch {
     return null;
   }
@@ -114,6 +132,38 @@ export function repoRelativePath(path: string): string {
   return rel && !rel.startsWith('..') ? rel : path;
 }
 
+/**
+ * Decide whether this call deserves an actor row, and fire it off (ADR 163, increment 1). Two shapes
+ * qualify and nothing else:
+ *
+ * - a **spawn** (`tool_name: Agent`) — the denominator: how much fan-out is happening at all;
+ * - a **write-shaped call carrying `actorId`** — a subagent wrote under its parent seat's identity.
+ *
+ * Reads never qualify, which is the point: nick's rule blesses read-only fan-out, and an `Explore`
+ * sweep's hundreds of reads would swamp the ledger for nothing. Returns immediately — the promise is
+ * intentionally floated, and `recordActor` swallows its own errors.
+ */
+export function attest(http: HttpClient, team: string, call: GateToolCall): void {
+  if (call.tool === 'Agent') {
+    if (call.spawnType === undefined && call.spawnModel === undefined) return;
+    void http.recordActor(team, {
+      kind: 'subagent-spawn',
+      tool: call.tool,
+      ...(call.spawnType ? { spawnType: call.spawnType } : {}),
+      ...(call.spawnModel ? { spawnModel: call.spawnModel } : {}),
+    });
+    return;
+  }
+  if (call.actorId === undefined || !isWriteShaped(call)) return;
+  void http.recordActor(team, {
+    kind: 'subagent-write',
+    tool: call.tool,
+    actorId: call.actorId,
+    ...(call.actorType ? { actorType: call.actorType } : {}),
+    ...((call.path ?? call.command) ? { target: call.path ?? call.command } : {}),
+  });
+}
+
 async function gateCheck(parsed: Parsed): Promise<number> {
   if (parsed.flags['stdin'] !== true) {
     throw new CliError(
@@ -129,6 +179,11 @@ async function gateCheck(parsed: Parsed): Promise<number> {
     const call: GateToolCall = raw.path ? { ...raw, path: repoRelativePath(raw.path) } : raw;
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
     if (!explicit || !identity) return 0; // ambient/unbound folder — no seat to gate → allow
+    // ADR 163 — actor attestation, BEFORE the class table and independent of it. Deliberately not
+    // awaited: nothing downstream reads the result, and an observer on the critical path would be the
+    // latency tax the ADR's guard metric forbids. Fires on undeclared calls by design (ADR 150 §Gate B
+    // as amended) — it cannot change whether the call proceeds, so it is not mediation.
+    attest(http, team, call);
     const { enforcement } = await http.getEnforcement(team);
     const match = matchEnforcement(enforcement, call);
     if (!match) return 0; // undeclared call → allow, no daemon round-trip (the common case)

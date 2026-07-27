@@ -104,6 +104,19 @@ export interface GateToolCall {
   path?: string;
   /** Raw command for `Bash` (normalized before matching). */
   command?: string;
+  /** ADR 163 — present ONLY when the call comes from a subagent's own tool use, absent for the parent
+   *  seat's calls. The one field that distinguishes the two: everything else in the payload
+   *  (`session_id`, `transcript_path`, `cwd`, `prompt_id`) is identical by construction. */
+  actorId?: string;
+  /** ADR 163 — the subagent's declared type (`Explore`, …), alongside `actorId`. */
+  actorType?: string;
+  /** ADR 163 — on a *spawn* call (`tool_name: Agent`), the subagent type being requested. The spawn
+   *  call carries this and `spawnModel` but NO `actorId`; the resulting subagent's own calls carry
+   *  `actorId` but no model. The two halves share no key — hence no join in increment 1. */
+  spawnType?: string;
+  /** ADR 163 — on a spawn call, the `model:` override if one was passed. The only place a subagent's
+   *  model is ever visible. */
+  spawnModel?: string;
 }
 
 /** A class match: the class, the concrete target that matched (path or normalized command), and the
@@ -272,4 +285,73 @@ export function matchEnforcement(
     }
   }
   return null;
+}
+
+/* ─────────────────────────── ADR 163 — actor attestation ─────────────────────────── */
+
+/**
+ * Actor attestation (ADR 163) is **not a third gate**. A gate answers _may this proceed_; this answers
+ * only _who did it_. It has no posture, no class table, no deny path — it cannot change whether a call
+ * proceeds, which is precisely why it is exempt from the declared-class boundary above (ADR 150 §Gate B,
+ * as amended): the creep that guard prevents requires the power to say no.
+ *
+ * The two rows are asymmetric on purpose. A **write** row says a subagent wrote; a **spawn** row says
+ * fan-out happened at all, and is the denominator the write count is read against. Increment 1 records
+ * both and joins neither — the spawn call carries the `model:` override but no `actorId`, the subagent's
+ * own calls carry `actorId` but no model, and nothing links them.
+ */
+export const ACTOR_ATTESTATION_KINDS = ['subagent-write', 'subagent-spawn'] as const;
+export type ActorAttestationKind = (typeof ACTOR_ATTESTATION_KINDS)[number];
+
+/**
+ * The `POST /actor` body — shapes only (ADR 051), like every gate row. Never file content, never the
+ * subagent's prompt. `target` is the same repo-relative path or normalized command the matcher would
+ * see, carried so "which surfaces do subagents write to" is answerable without storing anything richer.
+ */
+export const ActorAttestationSchema = z.object({
+  kind: z.enum(ACTOR_ATTESTATION_KINDS),
+  tool: z.string().min(1),
+  /** Subagent identity — present on `subagent-write`, absent on `subagent-spawn` (the spawn call has none). */
+  actorId: z.string().min(1).optional(),
+  actorType: z.string().min(1).optional(),
+  /** Path or normalized command the write targeted. */
+  target: z.string().optional(),
+  /** Spawn-only: the requested subagent type and `model:` override, if any. */
+  spawnType: z.string().min(1).optional(),
+  spawnModel: z.string().min(1).optional(),
+});
+export type ActorAttestation = z.infer<typeof ActorAttestationSchema>;
+
+/** Tools whose call IS a write, with no inspection needed. */
+const WRITE_SHAPED_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+
+/**
+ * Bash commands that betray a write. **This is a heuristic on a command string, and its recall is
+ * deliberately unmeasured here** — a subagent writing via `python -c`, an unusual redirect, or an MCP
+ * filesystem tool produces no match at all. That is why ADR 163's headline metric is a **lower bound,
+ * not a rate**, and why a separate recall arm exists to put an error bar on it. Do not add cleverness
+ * to this list expecting completeness; add it, then re-measure recall.
+ */
+const BASH_WRITE_PATTERNS: RegExp[] = [
+  /(^|[^>])>>?[^>]/, //  shell redirection into a file (`… > f`, `… >> f`)
+  /\btee\b/,
+  /\bsed\b[^|]*\s-i\b/,
+  /\b(rm|mv|cp|mkdir|touch|truncate|install|chmod|chown|ln)\b/,
+  /\bgit\s+(commit|push|merge|rebase|apply|checkout|switch|restore|reset|clean|rm|mv|tag)\b/,
+  /\b(npm|pnpm|yarn)\s+(install|add|remove|link|publish)\b/,
+  /\bdd\b/,
+  /\bpatch\b/,
+];
+
+/**
+ * Is this call write-shaped (ADR 163)? Reads must never fire — nick's read/write asymmetry blesses
+ * read-only fan-out explicitly, and an `Explore` sweep's hundreds of reads would swamp the ledger for
+ * nothing. Path-shaped write tools are exact; `Bash` is the heuristic documented above.
+ */
+export function isWriteShaped(call: GateToolCall): boolean {
+  if (WRITE_SHAPED_TOOLS.has(call.tool)) return true;
+  if (call.tool !== 'Bash') return false;
+  const command = call.command?.trim();
+  if (!command) return false;
+  return BASH_WRITE_PATTERNS.some((re) => re.test(command));
 }

@@ -16,6 +16,7 @@ import {
   TOKEN_PREFIXES,
   type Policy,
   type EnforcementPolicy,
+  type ActorAttestation,
   type GateCheckRequest,
   type GateDecision,
   RequestsResponseSchema,
@@ -520,6 +521,20 @@ export class HttpClient {
    *  seat. The daemon decides + records a shapes-only `lane.gate`/`action.gate` row; returns allow/deny. */
   async gateCheck(slug: string, body: GateCheckRequest): Promise<GateDecision> {
     return (await this.request('POST', `/teams/${slug}/gate`, body)) as GateDecision;
+  }
+
+  /**
+   * Record an actor attestation (ADR 163) — `POST /teams/:slug/actor`, member-authed as the acting seat.
+   * Unlike `gateCheck` there is **no decision to await**: nothing downstream reads the result, so the
+   * caller must treat this as fire-and-forget. Swallows every error by design — an observer that can
+   * fail a tool call is a regression, not an instrument.
+   */
+  async recordActor(slug: string, body: ActorAttestation): Promise<void> {
+    try {
+      await this.request('POST', `/teams/${slug}/actor`, body);
+    } catch {
+      // Deliberately silent: attribution is strictly less critical than the call it rides on.
+    }
   }
 
   /**
