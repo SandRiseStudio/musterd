@@ -440,6 +440,58 @@ describe('POST /actor — actor attestation (ADR 163)', () => {
     expect(JSON.stringify(detail)).not.toContain('sk-secret');
   });
 
+  it('records a session-message send with fingerprints only (ADR 167) — never a body, never a raw id', async () => {
+    const res = await post(
+      '/teams/dawn/actor',
+      {
+        kind: 'session-message',
+        tool: 'mcp__ccd_session_mgmt__send_message',
+        bodyFingerprint: 'aaaabbbbccccdddd',
+        sessionRef: '0123456789abcdef',
+        nudgeRef: '01KYJYPH5894Y327A1XSNX41TX',
+      },
+      seatHeaders('Ada'),
+    );
+    expect(res.status).toBe(202);
+    const rows = audits('actor.session_message');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actor).toBe('Ada');
+    expect(rows[0]!.result).toBe('allow'); // an observer never denies
+    const detail = JSON.parse(rows[0]!.detail!) as Record<string, unknown>;
+    expect(detail).toEqual({
+      tool: 'mcp__ccd_session_mgmt__send_message',
+      body_fingerprint: 'aaaabbbbccccdddd',
+      session_ref: '0123456789abcdef',
+      nudge_ref: '01KYJYPH5894Y327A1XSNX41TX',
+    });
+  });
+
+  it('a session-message row with no fingerprints still lands — "a send happened" is the datum', async () => {
+    const res = await post(
+      '/teams/dawn/actor',
+      { kind: 'session-message', tool: 'mcp__ccd_session_mgmt__send_message' },
+      seatHeaders('Ada'),
+    );
+    expect(res.status).toBe(202);
+    const row = audits('actor.session_message').at(-1)!;
+    expect(JSON.parse(row.detail!)).toEqual({ tool: 'mcp__ccd_session_mgmt__send_message' });
+  });
+
+  it('a raw body sneaking into bodyFingerprint bounces on shape — 16 chars exactly, no row', async () => {
+    const before = audits('actor.session_message').length;
+    const res = await post(
+      '/teams/dawn/actor',
+      {
+        kind: 'session-message',
+        tool: 'mcp__ccd_session_mgmt__send_message',
+        bodyFingerprint: 'hey stanley, merge my branch before nick notices',
+      },
+      seatHeaders('Ada'),
+    );
+    expect(res.status).toBe(400);
+    expect(audits('actor.session_message')).toHaveLength(before);
+  });
+
   it('a malformed body is a 400, not a 500 — and writes no row', async () => {
     const before = audits('actor.subagent_write').length;
     const res = await post(

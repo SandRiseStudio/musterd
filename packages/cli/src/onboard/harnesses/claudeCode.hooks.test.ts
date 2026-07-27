@@ -10,6 +10,7 @@ import {
   POSTTOOLUSE_HOOK_MARKER,
   PRETOOLUSE_HOOK_MARKER,
   removeMusterdHooks,
+  SESSIONMSG_HOOK_MARKER,
   SESSION_CAPTURE_HOOK_MARKER,
   SESSION_END_HOOK_MARKER,
   SESSIONSTART_HOOK_MARKER,
@@ -98,6 +99,14 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
       'Edit|Write|MultiEdit|NotebookEdit|Bash',
     );
     expect(global.hooks?.['PreToolUse']).toBeUndefined(); // PreToolUse is NOT global
+
+    // The session-messaging observer (ADR 167) — a SECOND PreToolUse entry, own marker, exact-tool
+    // matcher, same gate CLI (which recognizes the tool and emits an attestation, never a deny).
+    expect(local.hooks?.['PreToolUse']).toHaveLength(2);
+    const smsg = local.hooks?.['PreToolUse']?.[1];
+    expect(smsg?.hooks?.[0]?.command).toContain(SESSIONMSG_HOOK_MARKER);
+    expect(smsg?.hooks?.[0]?.command).toContain('musterd gate check --stdin');
+    expect(smsg?.matcher).toBe('mcp__ccd_session_mgmt__send_message');
   });
 
   it('is idempotent — re-installing replaces in place, never stacks', () => {
@@ -105,7 +114,7 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     installMusterdHooks();
     expect(read(localPath()).hooks?.['Notification']).toHaveLength(1);
     expect(read(localPath()).hooks?.['PostToolUse']).toHaveLength(1);
-    expect(read(localPath()).hooks?.['PreToolUse']).toHaveLength(1);
+    expect(read(localPath()).hooks?.['PreToolUse']).toHaveLength(2); // gate + sessionmsg observer
     expect(read(localPath()).hooks?.['SessionStart']).toHaveLength(1);
     expect(read(localPath()).hooks?.['SessionEnd']).toHaveLength(1);
     expect(read(globalPath()).hooks?.['SessionStart']).toHaveLength(1);
@@ -118,11 +127,12 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     mkdirSync(join(cwd, '.claude'), { recursive: true });
     writeFileSync(localPath(), JSON.stringify({ hooks: { Notification: [] } }), 'utf8');
     const drift = inspectClaudeHookDrift(cwd);
-    expect(drift).toHaveLength(4);
+    expect(drift).toHaveLength(5);
     expect(drift[0]).toContain('PostToolUse interrupt hook is missing');
     expect(drift[1]).toContain('PreToolUse enforcement-gate hook is missing');
-    expect(drift[2]).toContain('session-capture hook is missing');
-    expect(drift[3]).toContain('SessionEnd hook is missing');
+    expect(drift[2]).toContain('session-messaging observer hook is missing');
+    expect(drift[3]).toContain('session-capture hook is missing');
+    expect(drift[4]).toContain('SessionEnd hook is missing');
 
     // Once init wires them, the drift clears.
     installMusterdHooks();

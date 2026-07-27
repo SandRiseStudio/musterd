@@ -167,3 +167,87 @@ describe('attest (ADR 163) — which calls earn a row', () => {
     ]);
   });
 });
+
+/**
+ * ADR 167 — the session-messaging observer. The load-bearing property is REDUCTION AT PARSE TIME: the
+ * raw body and raw target session id exist only inside `parseToolCall`'s frame, so every assertion here
+ * checks both what IS on the object (16-hex fingerprints, an extracted ULID) and what is NOT (the raw
+ * values, anywhere).
+ */
+describe('parseToolCall + attest — session-message observation (ADR 167)', () => {
+  const SEND = 'mcp__ccd_session_mgmt__send_message';
+
+  function spy(): { calls: unknown[]; http: HttpClient } {
+    const calls: unknown[] = [];
+    const http = {
+      recordActor: (_team: string, body: unknown) => {
+        calls.push(body);
+        return Promise.resolve();
+      },
+    } as unknown as HttpClient;
+    return { calls, http };
+  }
+
+  it('reduces body and session id to sha256-16 at parse time — the raw values are never kept', () => {
+    const body = 'secret payload with a token ghp_abc123';
+    const session = '4ebb058f-9602-4d54-83d2-de786af80d88';
+    const call = parseToolCall(
+      JSON.stringify({ tool_name: SEND, tool_input: { message: body, session_id: session } }),
+    );
+    expect(call?.tool).toBe(SEND);
+    expect(call?.bodyFingerprint).toMatch(/^[0-9a-f]{16}$/);
+    expect(call?.sessionRef).toMatch(/^[0-9a-f]{16}$/);
+    // Nothing on the object carries the raw values — the property the whole observer rests on.
+    expect(JSON.stringify(call)).not.toContain('secret');
+    expect(JSON.stringify(call)).not.toContain(session);
+  });
+
+  it('extracts a ULID from the body as nudgeRef; none present → no field', () => {
+    const withUlid = parseToolCall(
+      JSON.stringify({
+        tool_name: SEND,
+        tool_input: {
+          message: 'musterd: stanley sent you a handoff (01KYJYPH5894Y327A1XSNX41TX) — check inbox',
+          session_id: 's',
+        },
+      }),
+    );
+    expect(withUlid?.nudgeRef).toBe('01KYJYPH5894Y327A1XSNX41TX');
+    const without = parseToolCall(
+      JSON.stringify({
+        tool_name: SEND,
+        tool_input: { message: 'hey, look at lane.ts', session_id: 's' },
+      }),
+    );
+    expect(without?.nudgeRef).toBeUndefined();
+  });
+
+  it('attest records kind session-message with fingerprints only', () => {
+    const { calls, http } = spy();
+    const call = parseToolCall(
+      JSON.stringify({ tool_name: SEND, tool_input: { message: 'ping', session_id: 'abc' } }),
+    );
+    expect(call).not.toBeNull();
+    if (call) attest(http, 't', call);
+    expect(calls).toHaveLength(1);
+    const rec = calls[0] as Record<string, string>;
+    expect(rec['kind']).toBe('session-message');
+    expect(rec['tool']).toBe(SEND);
+    expect(rec['bodyFingerprint']).toMatch(/^[0-9a-f]{16}$/);
+    expect(rec['sessionRef']).toMatch(/^[0-9a-f]{16}$/);
+    expect(JSON.stringify(rec)).not.toContain('ping');
+    expect(JSON.stringify(rec)).not.toContain('abc');
+  });
+
+  it('an unrecognized input shape still earns a row — "a send happened" is itself the datum', () => {
+    const { calls, http } = spy();
+    attest(http, 't', { tool: SEND });
+    expect(calls).toEqual([{ kind: 'session-message', tool: SEND }]);
+  });
+
+  it('list_sessions-style reads on the same server never reach attest with a session-message row', () => {
+    const { calls, http } = spy();
+    attest(http, 't', { tool: 'mcp__ccd_session_mgmt__list_sessions' });
+    expect(calls).toEqual([]);
+  });
+});

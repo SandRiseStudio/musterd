@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { CCD_SEND_MESSAGE_TOOL } from '@musterd/protocol';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
 import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
@@ -125,6 +126,7 @@ export const NOTIFICATION_HOOK_MARKER = 'musterd-notify-hook';
 export const SESSIONSTART_HOOK_MARKER = 'musterd-sessionstart-hook';
 export const POSTTOOLUSE_HOOK_MARKER = 'musterd-interrupt-hook';
 export const PRETOOLUSE_HOOK_MARKER = 'musterd-gate-hook';
+export const SESSIONMSG_HOOK_MARKER = 'musterd-sessionmsg-hook';
 export const SESSION_CAPTURE_HOOK_MARKER = 'musterd-session-capture-hook';
 export const SESSION_END_HOOK_MARKER = 'musterd-session-end-hook';
 
@@ -171,6 +173,19 @@ function preToolUseHookCommand(): string {
     'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
     'command -v musterd >/dev/null 2>&1 && musterd gate check --stdin 2>/dev/null || true ' +
     `# ${PRETOOLUSE_HOOK_MARKER}`
+  );
+}
+
+function sessionMsgHookCommand(): string {
+  // The session-messaging observer (ADR 167). Same command as the ADR 150 gate — `gate check`
+  // recognizes the tool name and emits an emit-only attestation instead of matching the class table —
+  // but a SEPARATE entry with its own marker and matcher, so the gate entry's meaning ("the
+  // enforcement gate over write-shaped tools") stays truthful and each concern installs/uninstalls/
+  // drift-checks alone. Observe-only by construction: the CLI path for this tool never emits a deny.
+  return (
+    'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd gate check --stdin 2>/dev/null || true ' +
+    `# ${SESSIONMSG_HOOK_MARKER}`
   );
 }
 
@@ -324,6 +339,16 @@ export function installMusterdHooks(): void {
     preToolUseHookCommand(),
     'Edit|Write|MultiEdit|NotebookEdit|Bash',
   );
+  // The session-messaging observer (ADR 167) — a SECOND PreToolUse entry with its own marker and an
+  // exact-tool matcher, coexisting with the gate entry above exactly as the two SessionStart entries
+  // below coexist. Emit-only: it logs the harness's session-to-session sends, never blocks one.
+  upsertHook(
+    settingsLocalPath(),
+    'PreToolUse',
+    (m) => isMusterdHookFor(m, SESSIONMSG_HOOK_MARKER),
+    sessionMsgHookCommand(),
+    CCD_SEND_MESSAGE_TOOL,
+  );
   // Project-local session capture (ADR 131 §5) — a DIFFERENT concern (and marker) from the global
   // orientation SessionStart below: the capture matcher selects only capture-marked entries, so the
   // two SessionStart hooks coexist (global orients, local captures) without absorbing each other.
@@ -377,6 +402,13 @@ export function inspectClaudeHookDrift(cwd: string): string[] {
         'so nothing breaks, but a declared block is silently a no-op here). Run `musterd init` to wire it.',
     );
   }
+  if (!has('PreToolUse', SESSIONMSG_HOOK_MARKER)) {
+    drift.push(
+      'the Claude Code PreToolUse session-messaging observer hook is missing from ' +
+        ".claude/settings.local.json — this seat's use of the harness's session-to-session messaging " +
+        "won't be logged (ADR 167; observe-only, nothing breaks). Run `musterd init` to wire it.",
+    );
+  }
   if (!has('SessionStart', SESSION_CAPTURE_HOOK_MARKER)) {
     drift.push(
       'the Claude Code SessionStart session-capture hook is missing from .claude/settings.local.json — ' +
@@ -406,6 +438,7 @@ export function removeMusterdHooks(): void {
   );
   dropHook(settingsLocalPath(), 'PostToolUse', (m) => isMusterdHookFor(m, POSTTOOLUSE_HOOK_MARKER));
   dropHook(settingsLocalPath(), 'PreToolUse', (m) => isMusterdHookFor(m, PRETOOLUSE_HOOK_MARKER));
+  dropHook(settingsLocalPath(), 'PreToolUse', (m) => isMusterdHookFor(m, SESSIONMSG_HOOK_MARKER));
   dropHook(settingsLocalPath(), 'SessionStart', (m) =>
     isMusterdHookFor(m, SESSIONSTART_HOOK_MARKER),
   );
