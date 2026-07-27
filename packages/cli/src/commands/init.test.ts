@@ -5,9 +5,22 @@ import { parseArgs } from '../args.js';
 const h = vi.hoisted(() => ({
   runInitDoctor: vi.fn(async () => 0),
   runInit: vi.fn(async () => 0),
+  wireCommand: vi.fn(async () => 0),
+  repair: 'init' as 'wire' | 'init' | undefined,
 }));
-vi.mock('../onboard/doctor.js', () => ({ runInitDoctor: h.runInitDoctor }));
+vi.mock('../onboard/doctor.js', () => ({
+  runInitDoctor: h.runInitDoctor,
+  inspectProvisioning: async () => ({
+    primerManaged: true,
+    harnesses: [],
+    drift: ['x'],
+    notes: [],
+    anyConfigured: true,
+    ...(h.repair !== undefined ? { repair: h.repair } : {}),
+  }),
+}));
 vi.mock('../onboard/init.js', () => ({ runInit: h.runInit }));
+vi.mock('./wire.js', () => ({ wireCommand: h.wireCommand }));
 
 const { initCommand } = await import('./init.js');
 
@@ -42,6 +55,25 @@ describe('musterd init dispatch (ADR 087 — --check --fix)', () => {
     const code = await initCommand(parseArgs(['--check', '--fix']));
     expect(code).toBe(0);
     expect(h.runInit).not.toHaveBeenCalled(); // nothing to repair
+  });
+
+  it('repairs entry-only drift with `wire`, never full onboarding (ADR 165)', async () => {
+    // `runInit` mints a member and trips the already-bound guard; on a repo-root-shared entry it also
+    // repairs this seat by taking the slot from whoever holds it. `wire` is the headless rewrite.
+    h.repair = 'wire';
+    h.runInitDoctor.mockResolvedValueOnce(1);
+    await initCommand(parseArgs(['--check', '--fix']));
+    expect(h.wireCommand).toHaveBeenCalledOnce();
+    expect(h.runInit).not.toHaveBeenCalled();
+    h.repair = 'init';
+  });
+
+  it('falls back to full onboarding when the drift needs it', async () => {
+    h.repair = 'init';
+    h.runInitDoctor.mockResolvedValueOnce(1);
+    await initCommand(parseArgs(['--check', '--fix']));
+    expect(h.runInit).toHaveBeenCalledOnce();
+    expect(h.wireCommand).not.toHaveBeenCalled();
   });
 
   it('`init --check --fix --json` stays a pure read-only report (no repair intermixed)', async () => {

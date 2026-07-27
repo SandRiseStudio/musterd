@@ -18,26 +18,12 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
  * provisioning overwrites it while this workspace's `binding.json` stays as it was. So these checks
  * belong to the **inspection** path — comparing an entry a harness reports back against the binding
  * of the workspace it is supposed to serve — which is where the doctor calls them.
- *
- * `assertEntryIdentity` throws because a secret mismatch is a genuine cross-run identity leak with
- * no benign reading. The adapter path gets a note instead: see {@link foreignAdapterNote}.
  */
-export class EntryIdentityError extends Error {
-  override name = 'EntryIdentityError';
-}
 
-export interface EntryIdentityOpts {
-  /** Absolute path of the workspace this entry is being written for. */
-  workspaceDir: string;
-  /** The binding that workspace holds, if any — its secrets must match the entry's. */
-  binding?: { agent_key?: string | undefined; grant?: string | undefined } | undefined;
-  /**
-   * Known sibling seat worktrees to reject adapter paths into. Only a *known* sibling is a refusal:
-   * a global install or an unrelated checkout stays legal, because this guard exists to stop
-   * cross-seat leakage, not to police unusual layouts.
-   */
-  siblingDirs?: string[] | undefined;
-}
+// ADR 165 removed `assertEntryIdentity`, which compared the harness entry's baked secrets against
+// binding.json. The entry no longer carries secrets, so there is nothing to compare; the doctor now
+// flags any baked secret on presence instead. (It was already dead code — ADR 158 §6 said the doctor
+// called it, and the doctor re-implemented half of it inline. The agent_key half never ran at all.)
 
 /**
  * Is `child` inside `parent` (or the same path)? Path-segment aware, so `/a/bc` is NOT inside `/a/b`
@@ -51,34 +37,6 @@ export function isInside(child: string, parent: string): boolean {
   const rel = relative(resolve(parent), resolve(child));
   if (rel === '') return true;
   return !rel.startsWith('..') && !rel.startsWith(sep) && !/^[A-Za-z]:/.test(rel);
-}
-
-/**
- * Throw {@link EntryIdentityError} if this MCP entry carries **secrets** belonging to a different
- * provisioning run than the workspace it is being written for. Silent on everything else.
- *
- * Scope note: the adapter *path* is deliberately NOT a refusal — see {@link foreignAdapterNote}.
- */
-export function assertEntryIdentity(
-  entry: { args: string[]; env: Record<string, string> },
-  opts: EntryIdentityOpts,
-): void {
-  const entryGrant = entry.env['MUSTERD_GRANT'];
-  if (entryGrant && opts.binding?.grant && entryGrant !== opts.binding.grant) {
-    throw new EntryIdentityError(
-      `refusing to wire ${basename(opts.workspaceDir)}: the entry carries a grant that does not match ` +
-        `this workspace's binding — it belongs to a different provisioning run. Re-mint with ` +
-        `\`musterd agent <seat> --path ${opts.workspaceDir}\`.`,
-    );
-  }
-
-  const entryKey = entry.env['MUSTERD_AGENT_KEY'];
-  if (entryKey && opts.binding?.agent_key && entryKey !== opts.binding.agent_key) {
-    throw new EntryIdentityError(
-      `refusing to wire ${basename(opts.workspaceDir)}: the entry's agent key does not match this ` +
-        `workspace's binding — it belongs to a different team or provisioning run.`,
-    );
-  }
 }
 
 /**

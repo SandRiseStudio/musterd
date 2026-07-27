@@ -107,7 +107,9 @@ describe('claudeCode.configure', () => {
     onExec(() => ({ stdout: '' })); // every exec (version probe, remove, add) succeeds
     const r = await (await load()).configure(entry, binding);
     expect(r.target).toContain('claude mcp');
-    expect(r.scope).toContain('this folder only');
+    // ADR 165 corrected the scope string: "this folder only" was the exact false belief ADR 143
+    // documents — Claude Code keys local scope by repo ROOT, so the entry is family-shared.
+    expect(r.scope).toContain('every git worktree of this repo shares this one entry');
     expect(r.activation.startsWith('in the Claude Code extension')).toBe(true);
 
     // The add invocation carries -s local, the -e env pairs, and the runnable command.
