@@ -179,11 +179,16 @@ may still linger as a process, harmless and holding nothing.
 
 ## Observability & Evaluation
 
-**Emit.** A new audit row `presence.session_ended` on the seat, with `detail: { rung, age_ms,
+**Traces.** A new audit row `presence.session_ended` on the seat, with `detail: { rung, age_ms,
 session_id }` — written when the adapter releases or exits under rungs 2–4 (rung 1 is the existing
 clean path). The rung is the point: it tells us which signal is actually load-bearing in the field.
+Until increment 2 lands that row, the only trace is the adapter's stderr line and the seat going
+offline — enough to confirm the ladder fires, not enough to count rungs.
 
-**Evaluation questions, each answerable from that row:**
+**Eval — dataset and baseline.** The dataset is every `presence.session_ended` row over a dogfood
+week, joined to the presence rows for the same seats. The **baseline** is the pre-fix measurement,
+n=1 and stark: one seat, 12h36m falsely `working`, one misrouted `lane_handoff`. Three questions,
+each answerable from that dataset:
 
 1. _Does the ladder fire at all, and on which rung?_ Count rows by `rung` over a dogfood week. If
    rung 4 dominates, `ended_at` is unreliable in practice and rung 3 is decoration. If rung 2
@@ -197,9 +202,12 @@ clean path). The rung is the point: it tells us which signal is actually load-be
 **Guardrail.** No seat may lose presence while its transcript is being written. Regression test:
 a seat whose transcript is touched every tick never leaves through rungs 2–4.
 
-**Baseline.** The pre-fix number is n=1 and stark: one seat, 12h36m falsely `working`, one
-misrouted handoff. Any recurrence after this ships is a failure of rung 4's horizon, not of the
-model.
+**Experiment.** None is warranted, and that is a deliberate call rather than an omission: there is
+no arm to compare against. The control condition — presence attested by a process — is the measured
+defect, and running it deliberately means knowingly telling teammates a dead seat is working. The
+one tunable worth an experiment is `SESSION_STALE_MS`, and it is better fitted from the
+false-positive rate in question 2 than from a split-arm trial. Revisit only if question 1 shows
+rung 4 carrying the load, which would make the horizon a live parameter rather than a backstop.
 
 ## Consequences
 
