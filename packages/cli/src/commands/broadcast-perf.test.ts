@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   cpuOfTree,
+  cpuTotal,
   makePerfRecorder,
+  QUIET_EXTERNAL_CPU_MAX,
   QUIET_LOAD_MAX,
   slope,
   summarize,
@@ -18,7 +20,7 @@ const sample = (over: Partial<PerfSample> = {}): PerfSample => ({
   queueBytes: 0,
   emitted: 30,
   load1: 1,
-  cpu: { chrome: 100, ffmpeg: 40, self: 5 },
+  cpu: { chrome: 100, ffmpeg: 40, pipeline: 150, other: 20 },
   ...over,
 });
 
@@ -64,29 +66,61 @@ describe('summarize', () => {
     expect(s.durationSec).toBe(2);
   });
 
-  it('exposes the draw-to-delivered ratio the plan is hunting', () => {
-    // the suspected state today: the page paints at full rAF (~60) while Chrome delivers ~35
+  it('measures wasted painting against frames that reach the encoder, not deliveries', () => {
+    // The state measured 2026-07-26: the page paints at full rAF (60), Chrome's screencast delivers
+    // all 60, and the pump hands only 30 to ffmpeg. Dividing draws by *deliveries* reports 1.0 and
+    // hides the waste; the honest denominator is the CFR stream the encoder actually consumes.
     const s = summarize([
-      sample({ t: 0, deliveredFps: 35, drawFps: 60 }),
-      sample({ t: 1000, deliveredFps: 35, drawFps: 60 }),
+      sample({ t: 0, deliveredFps: 60, drawFps: 60, emitted: 0 }),
+      sample({ t: 2000, deliveredFps: 60, drawFps: 60, emitted: 60 }), // 60 frames over 2s = 30fps
     ]);
-    expect(s.drawsPerDeliveredFrame).toBeCloseTo(60 / 35, 5);
+    expect(s.encodedFps).toBeCloseTo(30, 5);
+    expect(s.drawsPerEncodedFrame).toBeCloseTo(2, 5);
   });
 
   it('leaves the draw ratio undefined when the office probe never landed', () => {
     const s = summarize([sample({ t: 0 }), sample({ t: 1000 })]);
     expect(s.meanDrawFps).toBeUndefined();
-    expect(s.drawsPerDeliveredFrame).toBeUndefined();
+    expect(s.drawsPerEncodedFrame).toBeUndefined();
   });
 
-  it('flags a contaminated run so a lucky number cannot enter the record', () => {
-    const quiet = summarize([sample({ load1: 0.8 }), sample({ load1: 1.2 })]);
-    expect(quiet.contaminated).toBe(false);
+  it('reports the CLI’s own cost, not the tree that contains its children', () => {
+    // `pipeline` is cpuOfTree(cli pid) and chrome/ffmpeg are its children, so presenting all three
+    // as peers double-counts — the mistake that made the CLI look like the most expensive component.
+    const s = summarize([sample({ cpu: { chrome: 121, ffmpeg: 13, pipeline: 147, other: 10 } })]);
+    expect(s.meanCpu.cli).toBeCloseTo(13, 5);
+    expect(s.meanCpu.pipeline).toBeCloseTo(147, 5);
+  });
 
-    // one spike is enough — the previous session's numbers were ruined exactly this way
-    const noisy = summarize([sample({ load1: 0.8 }), sample({ load1: QUIET_LOAD_MAX + 0.1 })]);
-    expect(noisy.contaminated).toBe(true);
-    expect(noisy.peakLoad1).toBeCloseTo(QUIET_LOAD_MAX + 0.1, 5);
+  it('never reports a negative CLI cost when sampling skew makes the parts exceed the tree', () => {
+    const s = summarize([sample({ cpu: { chrome: 121, ffmpeg: 13, pipeline: 130, other: 0 } })]);
+    expect(s.meanCpu.cli).toBe(0);
+  });
+
+  it('judges contamination by other processes, not by load the capture itself creates', () => {
+    // The capture occupies ~1.5 cores, so load1 clears QUIET_LOAD_MAX on its own and the old gate
+    // could never pass while measuring the thing it gated. External CPU is the honest signal.
+    const busySelf = summarize([
+      sample({
+        load1: QUIET_LOAD_MAX + 0.7,
+        cpu: { chrome: 121, ffmpeg: 13, pipeline: 147, other: 12 },
+      }),
+    ]);
+    expect(busySelf.contaminated).toBe(false);
+
+    const busyOthers = summarize([
+      sample({
+        load1: 0.4,
+        cpu: { chrome: 121, ffmpeg: 13, pipeline: 147, other: QUIET_EXTERNAL_CPU_MAX + 1 },
+      }),
+    ]);
+    expect(busyOthers.contaminated).toBe(true);
+  });
+
+  it('still records load so a reader can see the machine it ran on', () => {
+    const s = summarize([sample({ load1: 0.8 }), sample({ load1: 2.4 })]);
+    expect(s.peakLoad1).toBeCloseTo(2.4, 5);
+    expect(s.meanLoad1).toBeCloseTo(1.6, 5);
   });
 
   it('survives an empty capture rather than reporting NaN', () => {
@@ -97,6 +131,26 @@ describe('summarize', () => {
     expect(s.meanDeliveredFps).toBe(0);
     expect(s.peakQueueMb).toBe(0);
     expect(s.contaminated).toBe(false);
+    expect(s.encodedFps).toBe(0);
+    expect(s.drawsPerEncodedFrame).toBeUndefined();
+  });
+});
+
+describe('cpuTotal', () => {
+  const ps = [
+    '  PID  PPID %CPU',
+    '    1     0  0.0',
+    '  100     1 12.5',
+    '  101   100 68.0',
+    '  200     1 40.0',
+  ].join('\n');
+
+  it('sums every process, which is what makes "everyone else" derivable', () => {
+    expect(cpuTotal(ps)).toBeCloseTo(12.5 + 68 + 40, 5);
+  });
+
+  it('ignores the header rather than parsing it as a process', () => {
+    expect(cpuTotal('  PID  PPID %CPU')).toBe(0);
   });
 });
 
@@ -110,7 +164,7 @@ describe('makePerfRecorder', () => {
       queueBytes: () => 0,
       emitted: () => 0,
       office: async () => ({ ticks: draws, draws }),
-      cpu: async () => ({ chrome: 0, ffmpeg: 0, self: 0 }),
+      cpu: async () => ({ chrome: 0, ffmpeg: 0, pipeline: 0, other: 0 }),
       load1: () => 0.5,
       now: () => t,
       write: (s) => out.push(s),
@@ -161,7 +215,7 @@ describe('makePerfRecorder', () => {
       queueBytes: () => 4096,
       emitted: () => 30,
       office: async () => undefined, // scene not up, or the CDP eval threw
-      cpu: async () => ({ chrome: 1, ffmpeg: 2, self: 3 }),
+      cpu: async () => ({ chrome: 1, ffmpeg: 2, pipeline: 6, other: 4 }),
       load1: () => 0.5,
       now: () => 1000,
       write: (s) => out.push(s),

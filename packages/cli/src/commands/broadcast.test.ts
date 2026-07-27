@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
 import {
   broadcastUrl,
+  screencastEveryNthFrame,
   clearRunState,
   daemonRebuilt,
   liveRunState,
@@ -72,6 +73,34 @@ describe('broadcastUrl', () => {
     expect(broadcastUrl('https://box.example', 'my team')).toBe(
       'https://box.example/broadcast?team=my%20team',
     );
+  });
+});
+
+describe('screencastEveryNthFrame', () => {
+  it('delivers at the encode rate on a 60Hz compositor — 30fps takes every second frame', () => {
+    expect(screencastEveryNthFrame(30)).toBe(2);
+  });
+
+  it('never skips when the encode wants everything the compositor produces', () => {
+    expect(screencastEveryNthFrame(60)).toBe(1);
+    expect(screencastEveryNthFrame(120)).toBe(1); // asking for more than exists is still "every frame"
+  });
+
+  it('skips harder for a slow encode', () => {
+    expect(screencastEveryNthFrame(15)).toBe(4);
+    expect(screencastEveryNthFrame(20)).toBe(3);
+  });
+
+  it('floors rather than rounds, so delivery never lands under the encode rate', () => {
+    // 25fps: 60/25 = 2.4. Rounding to 2 delivers 30/s (a surplus the pump discards); rounding to 3
+    // would deliver 20/s and the pump would pad the shortfall with duplicate frames.
+    expect(screencastEveryNthFrame(25)).toBe(2);
+  });
+
+  it('falls back to every frame on a nonsense rate rather than computing a divide-by-zero', () => {
+    expect(screencastEveryNthFrame(0)).toBe(1);
+    expect(screencastEveryNthFrame(-5)).toBe(1);
+    expect(screencastEveryNthFrame(Number.NaN)).toBe(1);
   });
 });
 

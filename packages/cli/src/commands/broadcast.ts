@@ -16,7 +16,7 @@ import type { Parsed } from '../args.js';
 import { configPath } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
-import { cpuOfTree, makePerfRecorder } from './broadcast-perf.js';
+import { cpuOfTree, cpuTotal, makePerfRecorder } from './broadcast-perf.js';
 
 /**
  * `musterd broadcast` — ADR 157 Increment 2: stream the office with no GUI in the loop.
@@ -84,6 +84,37 @@ export function parseOptions(
     );
   }
   return opts;
+}
+
+/**
+ * Assumed compositor rate, in Hz. Chrome's screencast fires per *composited* frame, not on a clock,
+ * so this is the only way to reason about `everyNthFrame` — and it is an assumption, not a reading.
+ */
+const COMPOSITOR_HZ = 60;
+
+/**
+ * How many composited frames Chrome should skip between screencast deliveries.
+ *
+ * **This is where Chrome's cost actually lives.** Each delivered frame is JPEG-encoded on the
+ * compositor thread (see the `startScreencast` call for why JPEG and not PNG), so delivering ~60/s to
+ * feed a 30fps encode pays for the encode twice and throws half away. Measured 2026-07-27 over three
+ * 40s captures on a live-room fixture:
+ *
+ * | arm                          | delivered/s | chrome % | unique frames /1200 |
+ * | ---------------------------- | ----------- | -------- | ------------------- |
+ * | everyNthFrame 1              | 57.5        | 139.8    | 995                 |
+ * | everyNthFrame 2              | 30.0        | 90.7     | 971                 |
+ *
+ * −35% of Chrome for −2.4% of unique frames. (The same table killed the draw-rate cap that was tried
+ * first: capping the canvas saved 3.9 points and cost 77 unique frames. The painting was never the
+ * expense.)
+ *
+ * Clamped to ≥1: an fps at or above the compositor rate must not skip frames, and a nonsense fps must
+ * not produce 0 (which CDP reads as "every frame" anyway, but by accident rather than by intent).
+ */
+export function screencastEveryNthFrame(fps: number, compositorHz = COMPOSITOR_HZ): number {
+  if (!Number.isFinite(fps) || fps <= 0) return 1;
+  return Math.max(1, Math.floor(compositorHz / fps));
 }
 
 /** The Inc 1 page this captures — observer-only by construction (ADR 157), so a stream can never
@@ -372,13 +403,18 @@ function startPerfRecording(
             err ? reject(err) : resolve(stdout),
           );
         });
+        // Chrome and ffmpeg are spawned by this process, so `pipeline` (the tree from our own pid)
+        // already contains both — they are not peers of it. Everything else on the box is `other`,
+        // and that is what decides whether the run was contaminated.
+        const pipeline = cpuOfTree(ps, process.pid);
         return {
           chrome: chrome.pid ? cpuOfTree(ps, chrome.pid) : 0,
           ffmpeg: ffmpeg.pid ? cpuOfTree(ps, ffmpeg.pid) : 0,
-          self: cpuOfTree(ps, process.pid),
+          pipeline,
+          other: Math.max(0, cpuTotal(ps) - pipeline),
         };
       } catch {
-        return { chrome: 0, ffmpeg: 0, self: 0 };
+        return { chrome: 0, ffmpeg: 0, pipeline: 0, other: 0 };
       }
     },
     load1: () => loadavg()[0] ?? 0,
@@ -956,7 +992,9 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
       quality: 85,
       maxWidth: 1920,
       maxHeight: 1080,
-      everyNthFrame: 1,
+      // Deliver at the encode rate, not at every composited frame — the JPEG encode above is the
+      // single largest cost in the pipeline, and feeding 60/s into a 30fps encode pays for it twice.
+      everyNthFrame: screencastEveryNthFrame(opts.fps),
     });
     // Tick at 2× frame cadence: the pump owes frames by wall clock, so the timer only needs to
     // fire *often enough* — late ticks emit catch-up frames instead of losing them.

@@ -9,14 +9,15 @@
  * with the same tested code the recorder uses (packages/cli/dist — run `pnpm build` first). Prints a
  * row ready to paste into the baseline table.
  *
- * **This refuses to run on a busy machine.** Every number in the session that produced this plan was
- * contaminated: load swung between 5 and 63 as other agents built, and one lucky run under that noise
- * is exactly what made the JPEG-quality hypothesis briefly look like a win. Pass `--force` to record
- * anyway; the summary is stamped `contaminated` either way.
+ * **This refuses to *start* on a busy machine** (load1 vs `QUIET_LOAD_MAX`), because before a capture
+ * runs, load describes other people's work. Whether a *finished* run was contaminated is judged from
+ * external CPU instead — the capture's own ~1.5 cores push load past any sane bar on their own, so a
+ * load-based verdict failed every run including the quiet ones. Pass `--force` to start anyway.
  *
  * Usage:
  *   node scripts/perf/broadcast-baseline.mjs --label "1080p30 (today)" [--fps 30] [--secs 60]
- *     [--team revive] [--server http://127.0.0.1:4849] [--jsonl <path>] [--json out.json] [--force]
+ *     [--encoder videotoolbox|libx264] [--team revive] [--server http://127.0.0.1:4849]
+ *     [--jsonl <path>] [--json out.json] [--force]
  *
  * The capture writes video to a temp .mp4 that is deleted on exit — this harness measures the
  * pipeline, it does not keep the footage.
@@ -38,6 +39,10 @@ const FPS = Number(flag('fps', '30'));
 const SECS = Number(flag('secs', '60'));
 const TEAM = flag('team', 'revive');
 const SERVER = flag('server', 'http://127.0.0.1:4849');
+// Left unset the CLI picks per platform (videotoolbox on darwin, libx264 elsewhere). Setting it is
+// how one machine measures both: hardware encode is nearly free, software encode is not, and the gap
+// is what sizing a Linux box turns on.
+const ENCODER = flag('encoder');
 const JSON_OUT = flag('json');
 const FORCE = has('force');
 
@@ -91,6 +96,7 @@ const proc = spawn(
     String(SECS),
     '--out',
     mp4,
+    ...(ENCODER ? ['--encoder', ENCODER] : []),
   ],
   {
     env: { ...process.env, MUSTERD_BROADCAST_PERF: jsonl },
@@ -119,20 +125,23 @@ const n = (v, d = 1) => (v === undefined ? '—' : v.toFixed(d));
 const kbPerSec = s.queueGrowthBytesPerSec / 1024;
 
 console.log(`
-  ${LABEL}
+  ${LABEL}${ENCODER ? ` · ${ENCODER}` : ''}
   ─────────────────────────────────────────────────────────
-  samples             ${s.samples} over ${n(s.durationSec)}s
   delivered fps       ${n(s.meanDeliveredFps)}   (${n(s.meanKbPerFrame)} KB/frame)
   canvas draw fps     ${n(s.meanDrawFps)}
-  draws / delivered   ${n(s.drawsPerDeliveredFrame, 2)}   ← ~2 means the page paints twice per captured frame
+  encoded fps         ${n(s.encodedFps)}
+  draws / encoded     ${n(s.drawsPerEncodedFrame, 2)}   ← ~2 means every second painted frame is discarded
   queue growth        ${n(kbPerSec)} KB/s   ← THE MARGIN METRIC (flat ≈ headroom; speed= is not this)
   peak queue          ${n(s.peakQueueMb, 2)} MB
-  cpu %               chrome ${n(s.meanCpu.chrome)} · ffmpeg ${n(s.meanCpu.ffmpeg)} · cli ${n(s.meanCpu.self)}
-  load1               mean ${n(s.meanLoad1, 2)} · peak ${n(s.peakLoad1, 2)}
-  ${s.contaminated ? '⚠ CONTAMINATED — load exceeded the quiet bar; do not put this in the table' : '✓ quiet throughout'}
+  cpu % (of a core)   chrome ${n(s.meanCpu.chrome)} · ffmpeg ${n(s.meanCpu.ffmpeg)} · cli ${n(s.meanCpu.cli)}
+                      pipeline ${n(s.meanCpu.pipeline)} total (contains the three above)
+  other processes     ${n(s.meanCpu.other)}%   ← what contamination is judged on
+  load1               mean ${n(s.meanLoad1, 2)} · peak ${n(s.peakLoad1, 2)}   (context; the capture dominates it)
+  samples             ${s.samples} over ${n(s.durationSec)}s
+  ${s.contaminated ? '⚠ CONTAMINATED — other processes were busy; do not put this in the table' : '✓ quiet throughout'}
 
   table row:
-  | ${LABEL} | ${n(s.meanDeliveredFps)} | ${n(s.meanDrawFps)} | ${n(s.drawsPerDeliveredFrame, 2)} | ${n(kbPerSec)} KB/s | ${n(s.peakQueueMb, 2)} MB | ${n(s.meanCpu.chrome)} | ${n(s.meanLoad1, 2)} |
+  | ${LABEL} | ${ENCODER ?? 'default'} | ${n(s.meanDeliveredFps)} | ${n(s.meanDrawFps)} | ${n(s.encodedFps)} | ${n(s.drawsPerEncodedFrame, 2)} | ${n(kbPerSec)} KB/s | ${n(s.meanCpu.chrome)} | ${n(s.meanCpu.ffmpeg)} | ${n(s.meanCpu.pipeline)} | ${n(s.meanCpu.other)} |
 `);
 
 if (JSON_OUT) {
