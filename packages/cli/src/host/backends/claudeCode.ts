@@ -311,11 +311,32 @@ function runAttempt(
 function resumeLadder(
   liveness: LocalSessionLiveness,
   transcriptMaxBytes: number,
-): { id: string } | { skip: string | null } {
+): { id: string; via: 'slot' | 'enumerated' } | { skip: string | null } {
   if (liveness.state === 'none') return { skip: null }; // the pre-capture world — quiet fresh
+  const slot = slotRung(liveness, transcriptMaxBytes);
+  if ('id' in slot) return { ...slot, via: 'slot' };
+  // ADR 166 increment 3 — the resume question, split from the guard. When the slot cannot name a
+  // usable resume target but enumeration judged this workspace resumable, resume the enumerated
+  // newest session instead of paying for a full-price fresh spawn (the phantom-slot compounding
+  // failure in the ADR's Context). Anything short of a confident target still degrades to fresh —
+  // the resume question's cheap failure direction.
+  const e = liveness.enumerated;
+  if (liveness.state === 'resumable' && e?.id !== undefined && e.bytes !== undefined) {
+    if (e.bytes > transcriptMaxBytes)
+      return {
+        skip: `newest transcript is ${(e.bytes / 1_048_576).toFixed(1)} MiB (hygiene bound ${(transcriptMaxBytes / 1_048_576).toFixed(1)} MiB)`,
+      };
+    return { id: e.id, via: 'enumerated' };
+  }
+  return slot;
+}
+
+/** The slot capture's rung — the pre-increment-3 checks, unchanged in order and wording. */
+function slotRung(
+  liveness: LocalSessionLiveness,
+  transcriptMaxBytes: number,
+): { id: string } | { skip: string } {
   const s = liveness.session;
-  // Post-flip (ADR 166 inc 2) the verdict can be enumerated while the slot is empty: session files
-  // exist but nothing captured one to resume. Resume stays slot-fed until increment 3 splits it.
   if (!s) return { skip: 'no captured session to resume (verdict was enumerated)' };
   if (s.harness !== 'claude-code') return { skip: `captured harness is "${s.harness}"` };
   if (liveness.state === 'gc-expired') return { skip: 'capture past the 30d GC horizon' };
@@ -347,9 +368,12 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       }
 
       // Defensive re-check of the loop's local-session guard: this backend must never spawn —
-      // fresh OR resume — beside a live local session, regardless of caller.
+      // fresh OR resume — beside a live local session, regardless of caller. ADR 166 increment 3:
+      // the guard question resolves disagreement toward LIVE — if EITHER the enumerated verdict or
+      // the demoted slot says a session is live here, refuse. A wrongly-refused wake costs a delay;
+      // a wrongly-permitted one costs money and displaces presence (ADR 068).
       const liveness = (deps.readSession ?? localSessionLiveness)(spec.workspace);
-      if (liveness.state === 'live') {
+      if (liveness.state === 'live' || liveness.slotState === 'live') {
         return {
           outcome: { occupied: false, deferred: true, reason: 'local-session-live' },
           settled: Promise.resolve(undefined),
@@ -390,6 +414,10 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       if ('skip' in rung) {
         if (rung.skip) ctx.log(`resume skipped for ${seat}: ${rung.skip} — fresh spawn`);
       } else {
+        if (rung.via === 'enumerated')
+          ctx.log(
+            `resume target for ${seat} from enumeration (${rung.id}) — the slot named nothing usable`,
+          );
         const attempt = runAttempt(
           deps,
           bin,

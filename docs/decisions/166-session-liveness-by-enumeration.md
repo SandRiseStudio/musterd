@@ -157,6 +157,16 @@ asymmetry argument that corrected ADR 164, applied before it bites rather than a
    17 sessions — a spawn the slot would have permitted beside a live session), 0 in the inverse
    flip-blocking direction. Post-flip the same sweep reads that case as **caught**, 0 demoted.
 3. **Split** the guard question from the resume question, each failing in its cheap direction.
+   _Shipped (increment 3)._ The **guard** resolves disagreement toward live: the backend defers when
+   _either_ the enumerated verdict or the demoted slot (`slotState`) says `live` — a wrongly-refused
+   wake costs a delay, the cheap direction. The **resume** ladder keeps preferring a usable slot
+   capture, but when the slot names nothing usable (empty, foreign harness, missing transcript) and
+   enumeration judged the workspace `resumable`, it resumes the enumerated newest session — closing
+   the compounding failure from the Context, where a phantom slot forced a full-price fresh spawn.
+   Anything short of a confident target (no enumerated id/bytes, over the hygiene bound) still
+   degrades to fresh, the resume question's cheap direction. Evidence-of-absence (`none` with an
+   empty enumeration) still spawns quietly — only _conflict_ resolves toward live; refusing on a
+   genuinely-empty workspace would break fresh-first for every new worktree.
 4. **Retire the slot** for enumerating harnesses — gated on every supported harness having an
    enumerator, not scheduled here.
 

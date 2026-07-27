@@ -394,6 +394,137 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
   });
 });
 
+/**
+ * ADR 166 increment 3 — the guard and resume questions split, each failing in its cheap direction:
+ * guard unsure ⇒ assume live (refuse, costs a delay); resume unsure ⇒ assume nothing (fresh).
+ */
+describe('claudeCodeBackend.wake — split guard/resume (ADR 166 inc 3)', () => {
+  it('GUARD: a demoted conflict (slot live, enumeration disagrees) still defers — either side saying live refuses', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () =>
+        resumable({
+          state: 'resumable',
+          source: 'enumerated',
+          slotState: 'live',
+          disagreed: true,
+          demoted: true,
+        }),
+    });
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: true })),
+    );
+    expect(calls).toHaveLength(0);
+    expect(actuation.outcome).toMatchObject({
+      occupied: false,
+      deferred: true,
+      reason: 'local-session-live',
+    });
+    await actuation.settled;
+  });
+
+  it('RESUME: an empty slot with an enumerated resumable newest resumes THAT id (no full-price fresh)', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => ({
+        state: 'resumable',
+        source: 'enumerated',
+        slotState: 'none',
+        disagreed: true,
+        enumerated: {
+          state: 'resumable',
+          id: 'enum-5678',
+          mtime: Date.now() - 20 * 60_000,
+          bytes: 2048,
+          count: 3,
+        },
+      }),
+    });
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const actuation = await backend.wake(spec(), context);
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('enum-5678');
+    expect(actuation.outcome).toEqual({ occupied: true, session: 'resumed' });
+    expect(context.lines.join('\n')).toMatch(/from enumeration/);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('RESUME: a foreign-harness slot no longer forces fresh when enumeration names a resumable newest', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () =>
+        resumable({
+          source: 'enumerated',
+          slotState: 'resumable',
+          session: { ...resumable().session!, harness: 'codex' },
+          enumerated: {
+            state: 'resumable',
+            id: 'enum-9012',
+            mtime: Date.now() - 20 * 60_000,
+            bytes: 2048,
+            count: 1,
+          },
+        }),
+    });
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const actuation = await backend.wake(spec(), context);
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('enum-9012');
+    expect(actuation.outcome.session).toBe('resumed');
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('RESUME: an enumerated newest over the hygiene bound degrades to fresh with a named skip', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => ({
+        state: 'resumable' as const,
+        source: 'enumerated' as const,
+        enumerated: {
+          state: 'resumable' as const,
+          id: 'enum-big',
+          mtime: Date.now() - 20 * 60_000,
+          bytes: RESUME_TRANSCRIPT_MAX_BYTES + 1,
+          count: 1,
+        },
+      }),
+    });
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const actuation = await backend.wake(spec(), context);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args).not.toContain('--resume');
+    expect(actuation.outcome.session).toBe('fresh');
+    expect(context.lines.join('\n')).toMatch(/newest transcript .*hygiene bound/);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('RESUME: a usable slot capture still wins over enumeration (inc 3 changes the fallback, not the preference)', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () =>
+        resumable({
+          source: 'enumerated',
+          enumerated: {
+            state: 'resumable',
+            id: 'enum-other',
+            mtime: Date.now() - 20 * 60_000,
+            bytes: 2048,
+            count: 2,
+          },
+        }),
+    });
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('cap-1234');
+    child.exit(0);
+    await actuation.settled;
+  });
+});
+
 describe('parseRunSummary (completion telemetry, never verification)', () => {
   it('reads cost/duration from --output-format json stdout', () => {
     const out = JSON.stringify({
