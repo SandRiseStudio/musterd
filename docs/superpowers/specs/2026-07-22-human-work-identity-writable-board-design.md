@@ -1,6 +1,6 @@
 # Human work identity — the writable board (item 5)
 
-**Date:** 2026-07-22
+**Date:** 2026-07-22 (refreshed 2026-07-27 against the post-ADR-156 world — see "Staleness refresh")
 **Author:** stanley (design); **implementation owner: miley** (all `packages/web`)
 **Refs:** ADR 104 (work-items board & insight layer), ADR 145 (human role refounded), ADR 149
 (AsksStrip write precedent), ADR 098 (Goal→Lane vocabulary), ADR 151 (web perf gate)
@@ -8,11 +8,25 @@
 
 ## Problem
 
-The record: nick created 5 lanes and owns **0 of ~84 ownerships**; the one work item only he can do —
-publish the packages to npm — has sat parked and invisible for weeks. musterd literally cannot say
-"the team is blocked on nick's lane." Nothing in the schema stops human-owned work (`owner_seat: nick`
-is already legal; lanes already have a backlog state) — the only human claim surface is the CLI he
-never opens.
+The record: nick created 5 lanes and owns **0 of ~84 ownerships**; the work items only he can do sit
+parked and invisible. musterd literally cannot say "the team is blocked on nick's lane." Nothing in
+the schema stops human-owned work (`owner_seat: nick` is already legal; lanes already have a backlog
+state) — the only human claim surface is the CLI he never opens.
+
+> **Staleness refresh (2026-07-27, miley — verified against the tree, nick confirmed the dogfood
+> swap).** The original dogfood — "publish the packages to npm" — is moot: ADR 156 shipped and the
+> registry is live at 0.3.1 (Homebrew tap up). The *shape* survives; the subject changes. The new
+> dogfood is **the launch post** — ROADMAP names it the only remaining launch-tail item, explicitly
+> human-authored: real, parked, nick-only. Everything else re-verified: the backend contract is
+> intact (`POST /lanes` now at `packages/server/src/transport/http.ts:2077`, `PATCH /lanes/:id`
+> :2090, `GET /report` :2032 — the line refs below drifted, the contract did not); the ADR 158/163–
+> 166 identity-attestation wave is MCP/CLI-side and does not touch member-authed web writes; and one
+> tailwind landed: HTTP `authTouch` emits presence honoring `x-musterd-surface` (ADR 155), so nick
+> signing in on `/board` also marks him **present on the ladder** — write + presence in one act.
+> One promise is softened: musterd has **no** nudge/"raise this again later" primitive yet (design
+> lane 01KYJXGW63, opened at nick's request; stanley's ADR 167 ccd delivery rail is its likely
+> transport) — the lane *ages and is visible to the waiting-on rail* today; "nudgeable" arrives with
+> that primitive, not with this board.
 
 And "the board" itself is one-third built. It is a distinct roadmap item, `insight-dashboard` (ADR
 104), scoped as **three increments**, of which only increment 1 shipped:
@@ -32,9 +46,10 @@ increments, write first (which ships the nick dogfood early).
 - **No new work-item nouns.** ADR 098 holds (Goal → Lane). The board renders what the daemon derives;
   it is never a second store.
 - **No board CRUD backend work.** The backend is already complete: `POST /teams/:slug/lanes`
-  (http.ts:2044) and `PATCH /teams/:slug/lanes/:id` (http.ts:2057) are member-authed via `authTouch`;
-  `openLane` stamps `owner_seat = creator` when `claim:true` (store/lanes.ts); `GET /report`
-  (http.ts:1999) is member-authed. This item is **web write + web render only**.
+  (transport/http.ts:2077) and `PATCH /teams/:slug/lanes/:id` (transport/http.ts:2090) are
+  member-authed via `authTouch`; `openLane` stamps `owner_seat = creator` when `claim:true`
+  (store/lanes.ts); `GET /report` (transport/http.ts:2032) is member-authed. This item is **web
+  write + web render only**.
 - **No smoother human sign-in _in this pass_.** See "Deferred / follow-up threads" — nick explicitly
   wants the `mscr_`-paste sign-in improved later, tracked as its own thread, not the headline.
 - **No interactive Slack buttons, no multi-human admin** — out of scope, tracked elsewhere.
@@ -79,10 +94,12 @@ All write controls render **only** when signed in as a real member (observer see
 Lane states (from `LaneStateSchema`): `open` (backlog) / `claimed` / `active` (in-progress) /
 `blocked` / `done` / `abandoned`.
 
-**The nick dogfood is the create path alone:** New lane → title "publish packages to npm", claim-it
-on → a real `owner_seat: nick` lane in `claimed`, which ages and is nudgeable, so the insight rail's
-waiting-on can finally read "the team is blocked on nick's lane." The rest of the lifecycle rounds the
-board out so it is not create-only; every operation is a thin `PATCH` the backend already handles.
+**The nick dogfood is the create path alone:** New lane → title "write the launch post", claim-it
+on → a real `owner_seat: nick` lane in `claimed`, which ages and is visible to the waiting-on rail,
+so the insight rail can finally read "the team is blocked on nick's lane." (A *nudge* on that aging
+lane waits on the deferred-wake primitive — lane 01KYJXGW63 — not on this board.) The rest of the
+lifecycle rounds the board out so it is not create-only; every operation is a thin `PATCH` the
+backend already handles.
 
 ## Insight rail + Goal swimlanes (Inc B)
 
@@ -155,8 +172,9 @@ both hard requirements; neither is spent to buy the other.
 - Write-gating tested observer-vs-member: an observer sees no write controls and the daemon rejects
   its sends; a rostered member sees them and succeeds.
 - **Acceptance = the dogfood, end-to-end:** nick, signed in on the web as himself, creates the
-  publish-to-npm lane; it appears owned by `nick`; it ages; the insight rail's waiting-on / blocked
-  names him.
+  launch-post lane; it appears owned by `nick`; it ages; the insight rail's waiting-on / blocked
+  names him. (Bonus assertion, free since ADR 155: his authed board session attaches a web presence
+  row — the ladder sees him.)
 
 ## Perf (packages/web/AGENTS.md, ADR 151)
 
