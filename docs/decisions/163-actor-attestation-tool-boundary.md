@@ -226,7 +226,7 @@ count**, never a headline number alone.
   expose no equivalent today. Fail-open means other harnesses silently degrade to current behavior —
   correct, but it means the ledger covers Claude Code seats only, and any cross-harness claim from
   this data is invalid. If the field disappears in a future version the ledger goes quiet rather than
-  wrong; the guard against _that_ is the subagent-write rate itself, which dropping abruptly to zero
+  wrong; the guard against _that_ is the subagent-write count itself, which dropping abruptly to zero
   should be read as instrumentation failure before it is read as compliance.
 - **Costs one POST per subagent write.** Reads and parent-seat calls are untouched, so the hot path
   is unchanged for the overwhelming majority of tool calls.
