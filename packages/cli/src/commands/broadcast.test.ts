@@ -16,6 +16,8 @@ import {
   screencastEveryNthFrame,
   clearRunState,
   daemonRebuilt,
+  RESTART_EXIT_CODE,
+  supervised,
   liveRunState,
   pidAlive,
   readRunState,
@@ -511,6 +513,33 @@ describe('daemonRebuilt (staying current with main)', () => {
     expect(daemonRebuilt(undefined, 'bbb222')).toBe(false);
     expect(daemonRebuilt('aaa111', undefined)).toBe(false);
     expect(daemonRebuilt(undefined, undefined)).toBe(false);
+  });
+});
+
+describe('supervised restart (how the stream restarts, not whether)', () => {
+  // The bug this pins: ADR 159's detached-replacement-then-exit is right on a laptop and fatal in a
+  // container, where entrypoint.sh `exec`s us so this process IS the machine's main process — Fly's
+  // init saw exit 0 and destroyed the VM one second after the replacement started streaming. Both
+  // hosted runs on 2026-07-27 died this way. Under a supervisor we must NOT fork; we exit 75 and let
+  // it run us again on the rebuilt code.
+  it('is off by default, so the laptop keeps ADR 159’s detached restart', () => {
+    expect(supervised({})).toBe(false);
+    expect(supervised({ MUSTERD_BROADCAST_SUPERVISED: '' })).toBe(false);
+    // Explicit opt-out must read as off, not as "the string is truthy".
+    expect(supervised({ MUSTERD_BROADCAST_SUPERVISED: '0' })).toBe(false);
+  });
+
+  it('is on for any other value the entrypoint might set', () => {
+    expect(supervised({ MUSTERD_BROADCAST_SUPERVISED: '1' })).toBe(true);
+    expect(supervised({ MUSTERD_BROADCAST_SUPERVISED: 'true' })).toBe(true);
+  });
+
+  it('signals restart with EX_TEMPFAIL, distinct from success and from failure', () => {
+    // The entrypoint keys the machine's whole lifetime off this: 75 loops, anything else ends the
+    // box. Colliding with 0 or 1 would either strand a machine or kill it on every restart.
+    expect(RESTART_EXIT_CODE).toBe(75);
+    expect(RESTART_EXIT_CODE).not.toBe(0);
+    expect(RESTART_EXIT_CODE).not.toBe(1);
   });
 });
 

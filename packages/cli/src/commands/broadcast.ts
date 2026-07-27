@@ -489,6 +489,33 @@ export function daemonRebuilt(baseline: string | undefined, current: string | un
   return baseline !== current;
 }
 
+/**
+ * The exit code that asks a supervisor to run us again on the new code (`EX_TEMPFAIL`).
+ *
+ * ADR 159 restarts a stale stream by spawning a **detached** replacement and letting this process
+ * return 0. That is right on a laptop — the shell prompt comes back while the stream continues — and
+ * it is fatal in a container, because there the parent is not merely a parent: `entrypoint.sh`
+ * `exec`s it, so it *is* the machine's main process. Fly's init sees `Main child exited normally
+ * with code: 0`, runs cleanup, and destroys the VM (`--restart no` + `--rm`) — taking the
+ * one-second-old detached replacement with it. Observed live twice on 2026-07-27; both hosted runs
+ * died this way, at 4 and 6 minutes, the second killed by a **docs-only** merge (the ADR 152
+ * auto-refresher bounces the daemon for any commit, and any daemon bounce trips the currency check).
+ *
+ * The process model is the container's business, so the container supervises: under
+ * `MUSTERD_BROADCAST_SUPERVISED` we do not fork at all, we exit with this code and the entrypoint
+ * loop runs a genuinely fresh process. That keeps ADR 159 §4's actual decision intact — a full
+ * restart on new code, not a page reload, which the ADR rejected as "half a fix wearing the costume
+ * of a whole one" (reloading refreshes the web bundle while this process's capture pipeline stays
+ * stale). Only the *mechanism* is environment-specific, and now it says so.
+ */
+export const RESTART_EXIT_CODE = 75;
+
+/** Is something outside this process willing to run us again? See `RESTART_EXIT_CODE`. */
+export function supervised(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env['MUSTERD_BROADCAST_SUPERVISED'];
+  return v !== undefined && v !== '' && v !== '0';
+}
+
 /** The daemon's current build ref (ADR 130's `/health.build`), or undefined if it can't be read. */
 async function fetchDaemonBuild(server: string): Promise<string | undefined> {
   try {
@@ -1127,6 +1154,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     // Release the claim *before* the replacement starts, so its own `writeRunState` is not then
     // deleted by this process's exit handler. Both are briefly alive; only one may hold the record.
     clearRunState(process.pid);
+    if (supervised()) return RESTART_EXIT_CODE;
     spawn(process.execPath, process.argv.slice(1), {
       detached: true,
       stdio: 'inherit',
