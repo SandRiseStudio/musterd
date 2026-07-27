@@ -14,9 +14,11 @@
 
 ## Context
 
-musterd installs six Claude Code hooks. Five are project-local (`.claude/settings.local.json`); one —
-the orientation `SessionStart` — is written to `~/.claude/settings.json`, a single **machine-wide**
-entry. That placement is correct and deliberate: the hook's "spec present but MCP not registered"
+musterd installs a set of Claude Code hooks — six at the time of writing, seven once ADR 167
+increment 1 lands its session-messaging `PreToolUse` entry, and the count is expected to keep
+growing, which is part of the point. All but one are project-local
+(`.claude/settings.local.json`); the exception — the orientation `SessionStart` — is written to
+`~/.claude/settings.json`, a single **machine-wide** entry. That placement is correct and deliberate: the hook's "spec present but MCP not registered"
 branch must reach folders provisioning has never touched, and its content carries zero per-seat
 state, so it satisfies the ADR 165 shared-slot invariant.
 
@@ -94,6 +96,12 @@ musterd-authored hook against the command **this build would generate**, and rep
 
 The global hook is machine-shared, so every folder's doctor reports it; that is one machine-level
 fact repeated, not N problems, and the line says so.
+
+The comparison is driven off the **marker table**, not a hand-maintained list of checks, so a hook
+added later is covered the day it is added rather than the day someone remembers to extend the
+doctor. ADR 167's session-messaging `PreToolUse` entry is the first beneficiary and the reason this
+is stated as a requirement: a presence-only doctor that must be extended per hook is exactly how the
+gap reappears.
 
 ### What this does not do
 
