@@ -1,0 +1,11 @@
+# Build context for scripts/perf/broadcast-bench.Dockerfile. The image builds from source, so it
+# wants the tree — but never the host's installed dependencies (wrong platform for better-sqlite3'
+# native binding) or the history.
+node_modules
+**/node_modules
+.git
+**/dist
+**/.turbo
+**/.vite
+coverage
+*.log

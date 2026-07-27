@@ -594,9 +594,18 @@ export function liveRunState(path: string = runStatePath()): RunState | null {
   return null;
 }
 
-const CHROME_DEFAULT = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const CHROME_MACOS = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const CHROME_LINUX = '/usr/bin/chromium';
 
-export function chromeArgs(debugPort: number, profileDir: string): string[] {
+export function chromeDefault(platform: NodeJS.Platform = process.platform): string {
+  return platform === 'darwin' ? CHROME_MACOS : CHROME_LINUX;
+}
+
+export function chromeArgs(
+  debugPort: number,
+  profileDir: string,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
   return [
     '--headless=new',
     `--remote-debugging-port=${debugPort}`,
@@ -606,6 +615,11 @@ export function chromeArgs(debugPort: number, profileDir: string): string[] {
     // The Inc 1 contract: a 1920×1080 window at DPR 1 captures the stage 1:1.
     '--window-size=1920,1080',
     '--force-device-scale-factor=1',
+    // A rented capture box runs this as root in a container, where Chrome's setuid sandbox refuses
+    // to start at all, and where /dev/shm is 64MB — small enough that the compositor falls back to
+    // disk mid-capture. Both are container facts, not Linux facts, but every Linux host this runs on
+    // is a container, and neither flag costs anything on a machine whose only job is the capture.
+    ...(platform === 'darwin' ? [] : ['--no-sandbox', '--disable-dev-shm-usage']),
     'about:blank',
   ];
 }
@@ -782,7 +796,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   const sink = await resolveSink(opts, keychainLookup);
   const url = broadcastUrl(opts.server, opts.team);
 
-  const chromeBin = process.env['CHROME_BIN'] ?? CHROME_DEFAULT;
+  const chromeBin = process.env['CHROME_BIN'] ?? chromeDefault();
   const debugPort = 9222 + Math.floor(Math.random() * 500);
   // Clear other runs' leavings before adding our own — see `sweepStaleProfiles`.
   const swept = sweepStaleProfiles();
