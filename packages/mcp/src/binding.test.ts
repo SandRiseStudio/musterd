@@ -434,3 +434,56 @@ describe('refreshAttestation (the observation the adapter re-reads)', () => {
     expect(cfg.model).toBe('claude-opus-5'); // observed outranks the env declaration (ADR 158 §1)
   });
 });
+
+describe('empty env — the ADR 165 shared-entry contract', () => {
+  it('resolves server, team, surface, agent_key and grant from binding.json alone', () => {
+    // Provisioning writes an entry with NO env (ADR 165), because the entry is shared by every seat
+    // worktree of the repo. Everything must therefore come off disk. If this breaks, seats stop
+    // being able to claim at all — this is the test that makes the strip safe.
+    const wsDir = mkdtempSync(join(tmpdir(), 'musterd-adr165-'));
+    mkdirSync(join(wsDir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(wsDir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        server: 'http://localhost:4849',
+        team: 'revive',
+        agent_key: 'mskey_from_disk',
+        grant: 'msgr_from_disk',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'izzo' },
+      }),
+    );
+    vi.spyOn(process, 'cwd').mockReturnValue(wsDir);
+    try {
+      const cfg = loadMcpConfig({});
+      expect(cfg.server).toBe('http://localhost:4849');
+      expect(cfg.team).toBe('revive');
+      expect(cfg.agent_key).toBe('mskey_from_disk');
+      expect(cfg.grant).toBe('msgr_from_disk');
+      expect(cfg.surface).toBe('claude-code');
+      expect(cfg.claim).toEqual({ mode: 'seat', name: 'izzo' });
+    } finally {
+      rmSync(wsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('still honours an explicit env override — the names are manual, not removed', () => {
+    const wsDir = mkdtempSync(join(tmpdir(), 'musterd-adr165-ovr-'));
+    mkdirSync(join(wsDir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(wsDir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        server: 'http://localhost:4849',
+        team: 'revive',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'izzo' },
+      }),
+    );
+    vi.spyOn(process, 'cwd').mockReturnValue(wsDir);
+    try {
+      expect(loadMcpConfig({ MUSTERD_TEAM: 'other' }).team).toBe('other');
+    } finally {
+      rmSync(wsDir, { recursive: true, force: true });
+    }
+  });
+});
