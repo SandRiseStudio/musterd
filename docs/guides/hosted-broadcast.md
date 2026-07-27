@@ -10,9 +10,12 @@
 
 - **The daemon stays where it is**, loopback-bound. `tailscale serve` forwards it onto the tailnet,
   so nothing about the daemon or its LaunchAgent changes.
-- **The rented machine is a Fly Machine whose main process is the stream.** Starting a stream boots
-  it; ending the stream (stop, Ctrl-C semantics, the ADR 159 stall watchdog, `--duration`) exits the
-  process and `--rm` destroys the machine — billing tracks streamed hours (~$10–12/mo at ~90h).
+- **The rented machine's main process is the entrypoint's supervisor loop**, and the stream runs
+  inside it. Ending the stream (stop, Ctrl-C semantics, the ADR 159 stall watchdog, `--duration`)
+  exits the loop, and `--rm` destroys the machine — billing tracks streamed hours (~$10–12/mo
+  at ~90h). The loop exists for one case: ADR 159 restarts a stream when the daemon is rebuilt
+  under it, and on a laptop it does that by leaving a detached replacement and exiting. Here that
+  exit _is_ the machine's exit, so the stream signals `75` instead and the loop runs it again.
 - **No Docker on the operator's machine** — images build on Fly's remote builders.
 - **Secrets are Fly secrets** (`TS_AUTHKEY`, `MUSTERD_STREAM_KEY`), set by the operator directly so
   they never pass through an agent, a script argument, or the repo.
@@ -108,6 +111,14 @@ the ffmpeg stats line every 10s).
 
 ## Failure modes, recorded
 
+- **A merge to `main` used to end the stream** (fixed 2026-07-27, but worth knowing the shape). The
+  ADR 152 auto-refresher rebuilds the daemon for _any_ commit; ADR 159 then restarts the stream on
+  the new code by spawning a detached replacement and exiting — correct on a laptop, fatal here,
+  because `entrypoint.sh` `exec`'d the stream so its exit destroyed the VM one second after the
+  replacement began streaming. Both of the first two hosted runs died this way, at 4 and 6 minutes;
+  the second was ended by a **docs-only** merge. The entrypoint now supervises instead of `exec`ing.
+  If you see a machine end within seconds of a merge, check that the running image contains the
+  loop — an image built before this change still has the old `exec`.
 - **The laptop sleeps mid-stream** → Chrome loses the page, the ADR 159 watchdog ends the stream,
   the machine destroys itself. Accepted in the spec; the trigger to revisit topology A (move the
   daemon).

@@ -66,13 +66,53 @@ curl -sf --max-time 2 "$SERVER/health" >/dev/null || {
 timeout 15 "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage \
   --user-data-dir=/tmp/chrome-warm about:blank >/dev/null 2>&1 || true
 
-# The measured passing configuration — change it in the spec before changing it here.
-# shellcheck disable=SC2086
-exec node /app/packages/cli/dist/bin.js broadcast \
-  --team "$TEAM" \
-  --server "$SERVER" \
-  --twitch \
-  --resolution 720p \
-  --fps 25 \
-  --encoder libx264 \
-  ${BROADCAST_ARGS:-}
+# This loop is the whole reason the entrypoint no longer `exec`s the stream.
+#
+# ADR 159 keeps a long-lived stream current: when the daemon is rebuilt underneath it, the stream
+# restarts on the new code. On a laptop it does that by spawning a DETACHED replacement and exiting,
+# so the shell prompt returns. Under `exec` here, that same move killed the machine — this process
+# is the VM's main process, so its exit made Fly's init tear the box down one second after the
+# replacement started streaming. Both hosted runs on 2026-07-27 died that way (4 min and 6 min; the
+# second was ended by a docs-only merge, since the ADR 152 auto-refresher bounces the daemon for any
+# commit at all).
+#
+# So the container supervises instead: MUSTERD_BROADCAST_SUPERVISED tells the stream not to fork but
+# to exit RESTART_EXIT_CODE (75), and we run it again. Bash stays the main process throughout, so the
+# machine's lifetime is the LOOP's lifetime, not one stream generation's — and the replacement is a
+# genuinely fresh `node` on the rebuilt dist, which is what ADR 159 §4 decided (a full restart, not a
+# page reload).
+#
+# Any other exit code still ends the machine, so `stream stop`, --duration, the stall watchdog and a
+# real failure all keep tearing the box down exactly as before — billing still tracks streamed hours.
+export MUSTERD_BROADCAST_SUPERVISED=1
+RESTART_EXIT_CODE=75
+
+# A restart loop needs a floor: if the daemon is flapping its build ref, a stream that relaunches
+# instantly would spin and bill for nothing while never showing a viewer a frame.
+RESTART_MIN_INTERVAL=10
+
+while :; do
+  started=$SECONDS
+  # The measured passing configuration — change it in the spec before changing it here.
+  set +e
+  # BROADCAST_ARGS is a flag STRING ("--duration 14400"), so the splitting is the point.
+  # shellcheck disable=SC2086
+  node /app/packages/cli/dist/bin.js broadcast \
+    --team "$TEAM" \
+    --server "$SERVER" \
+    --twitch \
+    --resolution 720p \
+    --fps 25 \
+    --encoder libx264 \
+    ${BROADCAST_ARGS:-}
+  code=$?
+  set -e
+
+  [ "$code" -eq "$RESTART_EXIT_CODE" ] || exit "$code"
+
+  elapsed=$((SECONDS - started))
+  if [ "$elapsed" -lt "$RESTART_MIN_INTERVAL" ]; then
+    sleep $((RESTART_MIN_INTERVAL - elapsed))
+  fi
+  echo "▸ restarting the stream on the rebuilt daemon code (ran ${elapsed}s)"
+done
