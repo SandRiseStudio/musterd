@@ -93,15 +93,24 @@ walk-up rule that decided which binding the `SessionStart` hook wrote to. Measur
 689 transcripts, 664 attributable, ~256 ms for a full scan, memoised for a second so a fleet sweep is
 one scan. A transcript with no recorded `cwd` stays **unattributed** rather than guessed at.
 
-A new **optional** capability on the `Harness` interface (`packages/cli/src/onboard/harness.ts`),
-sitting beside the existing optional `observeModel`:
+**What increment 1 actually shipped, which is not what this section first described.** The plan was
+an optional `enumerateSessions?` on the `Harness` interface, beside `observeModel`. It shipped instead
+as a standalone module, `packages/cli/src/session/enumerate.ts`, called directly by
+`localSessionLiveness`:
 
 ```ts
-enumerateSessions?: (workspace: string) => SessionFile[]; // { id, path, mtime, bytes }
+enumerateClaudeSessions(workspace, home?, now?): SessionFile[] | undefined; // { id, path, mtime, bytes }
 ```
 
-Claude Code implements it by listing its projects directory for the slugified workspace path. The id
-is the basename; the mtime is liveness; the byte count feeds the existing context-hygiene bound.
+The harness seam is deferred to the increment that needs it. Attribution turned out to be a property
+of the _transcript_ (its recorded `cwd`) rather than of the harness's naming, so a single scanner
+serves every harness that writes transcripts at all, and there is nothing per-harness to dispatch on
+until a harness appears that stores sessions somewhere else entirely. Adding the interface slot now
+would have been a seam with one implementation and no second caller — and the ADR would still have
+been describing something that did not exist.
+
+`undefined` means **"cannot tell"** and `[]` means "genuinely none"; the id is the transcript's
+basename, the mtime is liveness, and the byte count feeds the existing context-hygiene bound.
 
 `ended_at` becomes redundant rather than wrong: a transcript that stopped being written is not live,
 and resumability is already judged by the GC horizon. Nothing distinguishes a cleanly-ended session
