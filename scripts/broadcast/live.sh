@@ -18,9 +18,13 @@
 set -euo pipefail
 
 APP="${BROADCAST_APP:-musterd-broadcast}"
-IMAGE="registry.fly.io/$APP:capture"
 AIR="${MUSTERD_AIR_ADDR:-}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# `build` records the digest it pushed and `start` runs exactly that. Running the `:capture` tag
+# instead looked equivalent and was not: a rebuilt tag resolved to the PREVIOUS digest, and two
+# machines silently streamed month-old code while the fix sat in the registry. A digest cannot be
+# stale by construction.
+DIGEST_FILE="$ROOT/scripts/broadcast/.image-digest"
 
 live_machine() {
   fly machine list -a "$APP" --json 2>/dev/null |
@@ -29,15 +33,21 @@ live_machine() {
 
 case "${1:-}" in
   build)
-    # --build-only pushes to the app registry without creating machines; `start` references the tag.
+    # --build-only pushes to the app registry without creating machines.
     # The config is only there to satisfy validation — see hosted.fly.toml.
-    (cd "$ROOT" && fly deploy . -a "$APP" -c scripts/broadcast/hosted.fly.toml \
-      --build-only --push --remote-only --image-label capture)
+    out="$(cd "$ROOT" && fly deploy . -a "$APP" -c scripts/broadcast/hosted.fly.toml \
+      --build-only --push --remote-only --image-label capture 2>&1 | tee /dev/stderr)"
+    digest="$(printf '%s' "$out" | grep -oE 'capture@sha256:[a-f0-9]{64}' | tail -1 | cut -d@ -f2-)"
+    [ -n "$digest" ] || { echo "✗ could not read the pushed digest from the build output" >&2; exit 1; }
+    printf '%s\n' "$digest" >"$DIGEST_FILE"
+    echo "▸ built $digest — recorded for \`start\`"
     ;;
   start)
     [ -n "$AIR" ] || { echo "✗ set MUSTERD_AIR_ADDR to the Air's tailnet name (e.g. nicks-air.tailnet.ts.net)" >&2; exit 2; }
     existing="$(live_machine)"
     [ -z "$existing" ] || { echo "already live (machine $existing) — live.sh stop first" >&2; exit 1; }
+    [ -s "$DIGEST_FILE" ] || { echo "✗ no built image recorded — run \`live.sh build\` first" >&2; exit 2; }
+    IMAGE="registry.fly.io/$APP:capture@$(cat "$DIGEST_FILE")"
     fly machine run "$IMAGE" -a "$APP" \
       --vm-size performance-4x \
       --region sjc \

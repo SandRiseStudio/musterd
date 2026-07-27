@@ -263,8 +263,12 @@ operator guide `docs/guides/hosted-broadcast.md`.
 
 Decisions inside, all downstream of earlier ones:
 
-- **The daemon stays loopback-bound; `tailscale serve` forwards :4849 onto the tailnet.** Topology B
-  with zero daemon changes — the ADR 040 bind guard never comes into play.
+- **The daemon stays loopback-bound; `tailscale serve` forwards :4849 onto the tailnet.** The ADR 040
+  *bind* guard never comes into play. **"Zero daemon changes" was wrong** and the first live run
+  disproved it: the ADR 040 *upgrade* gate refuses a WebSocket whose `Host` is neither loopback, the
+  bound host, nor in `MUSTERD_ALLOWED_HOSTS` — and the capture page is served over the tailnet
+  address. The daemon must allow-list the tailnet IP and name, which is a config change plus a
+  restart. Everything downstream (observer provisioning, the page, the encoder) works untouched.
 - **Machine lifetime = stream lifetime**, literally: the entrypoint `exec`s the broadcast, `--rm`
   destroys the machine when it exits, so stop / watchdog / `--duration` all end billing too.
 - **Secrets are Fly secrets set by the operator only** (`TS_AUTHKEY` ephemeral+reusable,
