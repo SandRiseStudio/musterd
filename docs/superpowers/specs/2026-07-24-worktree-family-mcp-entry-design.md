@@ -1,6 +1,6 @@
 # Worktree-family MCP entry — per-seat identity in a per-repo-root config slot
 
-Design for lane `01KYAWFCGG7YZ80H1RWEF4CXQ1`. Follow-up to ADR 143 and ADR 158; ships as ADR 159 —
+Design for lane `01KYAWFCGG7YZ80H1RWEF4CXQ1`. Follow-up to ADR 143 and ADR 158; ships as ADR 164 —
 next free number as of `main` at `fdb617e`, to be re-checked against `origin/main` before the PR opens
 (parallel branches have collided on ADR numbers twice; `pnpm adr-numbers:check` gates it).
 
