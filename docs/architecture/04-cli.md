@@ -59,12 +59,12 @@ src/
     autorefresh.ts    // `service --auto`: the daemon auto-refresher as a StartInterval LaunchAgent — runs `refresh --auto` on a poll (ADR 152)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
-    doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server + claim value-coherence drift detector, read-only (ADR 060, PR #58)
+    doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server drift detector, read-only (ADR 060); baked entry secrets flagged on PRESENCE, report.repair routes --fix to `wire` (entry drift, headless, repairs the repo-root-shared family) vs full init (ADR 165)
     workspace.ts      // provisionWorkspace(name): git worktree / sibling folder for an isolated agent seat (ADR 065)
     guard.ts          // inspectInitTarget(cwd): pure folder-suitability heuristics → warnings (ADR 020)
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
-    mcpEntry.ts       // resolve how to launch @musterd/mcp + build the binding env (never bakes MUSTERD_MODEL/MUSTERD_CLAIM — a snapshot must not outrank a live observation, ADR 158)
-    entryGuard.ts     // assertEntryIdentity (throws on cross-run secrets) + foreignAdapterNote + siblingWorkspaces — inspection-path checks for an entry written for another seat (ADR 158 §6)
+    mcpEntry.ts       // resolve how to launch @musterd/mcp; buildMcpEnv returns {} — the repo-root-shared entry carries NO per-seat state, everything resolves from binding.json/workspace.json (ADR 158/165)
+    entryGuard.ts     // foreignAdapterNote + siblingWorkspaces + isInside — inspection-path checks for an adapter launched from another seat's checkout (assertEntryIdentity removed by ADR 165: no secrets in the entry, nothing to compare)
     manifest.ts       // provision manifest read/write (ADR 030) — records what init wrote, for uninstall
     guidance.ts       // writeGuidance/removeGuidance: skill + slash-command files per harness, content-stamped (ADR 085)
     pending.ts        // client-side pending-presence markers (ADR 033)
@@ -81,7 +81,7 @@ src/
     engine.ts         // pure predicate-set-v1 classifier: W3 dup → W1 abandoned → W2 clobbered → W4 churn
     git.ts            // RepoFacts extractor over git plumbing; actor identity = ADR 109 attribution
   commands/
-    init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report
+    init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report; --check --fix → `wire` for entry drift, full init otherwise (ADR 165)
     wire.ts           // musterd wire: headless MCP register from the committed .musterd/workspace.json (ADR 080)
     agent.ts          // musterd agent <name> [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness, via the ADR 038 registry) + standing grant + committed workspace.json (ADR 065/080/116)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)

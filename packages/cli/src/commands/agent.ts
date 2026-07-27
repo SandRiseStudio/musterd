@@ -171,8 +171,11 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   const entry = {
     command: launch.command,
     args: launch.args,
+    // Seat-agnostic by construction (ADR 143, completed by ADR 165): this entry is keyed by repo root
+    // and therefore shared by every seat worktree. `MUSTERD_SURFACE` came out with the rest — it is in
+    // binding.json. AUTOJOIN/DRIVER are still here and still repo-root-global; that is a known,
+    // recorded gap (ADR 165 increment 2), not an oversight.
     env: {
-      MUSTERD_SURFACE: harness.surface,
       MUSTERD_AUTOJOIN: '1',
       ...(driver ? { MUSTERD_DRIVER: driver } : {}),
     },

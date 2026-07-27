@@ -54,7 +54,12 @@ function harness(label: string, installed: boolean, configured: boolean, registe
 /** A harness whose registered entry we can inspect — the read-back the poisoned-entry sweep needs. */
 function harnessWithEntry(
   label: string,
-  extra: { registeredModel?: string; registeredArgs?: string[]; registeredGrant?: string },
+  extra: {
+    registeredModel?: string;
+    registeredArgs?: string[];
+    registeredGrant?: string;
+    registeredAgentKey?: string;
+  },
 ) {
   return {
     label,
@@ -206,23 +211,45 @@ describe('inspectProvisioning', () => {
     const line = r.drift.find((d) => d.includes('MUSTERD_MODEL'));
     expect(line).toBeDefined();
     expect(line).toContain('grok-4.5');
-    expect(line).toContain('musterd init');
+    expect(line).toContain('musterd wire');
   });
 
-  it('flags a registered grant belonging to a different provisioning run', async () => {
-    h.primer = 'managed';
-    h.binding = { claim: { mode: 'seat', name: 'Miley' }, grant: 'msgr_mine' };
-    h.harnesses = [harnessWithEntry('Claude Code', { registeredGrant: 'msgr_someone_else' })];
-    const r = await inspectProvisioning('/x');
-    expect(r.drift.find((d) => d.includes('grant'))).toBeDefined();
-  });
-
-  it('is quiet when the registered grant matches the binding', async () => {
+  // INVERTED by ADR 165. This used to fire only on a MISMATCH, which missed the common case: the
+  // entry is shared by every worktree of the repo, so a grant that happens to match THIS folder's
+  // binding is still a per-seat credential sitting in a slot every sibling reads.
+  it("flags a baked grant even when it matches this folder's binding", async () => {
     h.primer = 'managed';
     h.binding = { claim: { mode: 'seat', name: 'Miley' }, grant: 'msgr_mine' };
     h.harnesses = [harnessWithEntry('Claude Code', { registeredGrant: 'msgr_mine' })];
     const r = await inspectProvisioning('/x');
-    expect(r.drift).toEqual([]);
+    const line = r.drift.find((d) => d.includes('MUSTERD_GRANT'));
+    expect(line).toBeDefined();
+    expect(line).toContain('musterd wire');
+  });
+
+  it("flags a baked agent key — a sibling seat's team credential, not just a grant", async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    h.harnesses = [harnessWithEntry('Claude Code', { registeredAgentKey: 'mskey_someone' })];
+    const r = await inspectProvisioning('/x');
+    expect(r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'))).toBeDefined();
+  });
+
+  it('marks entry-only drift as headlessly repairable', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' }, grant: 'msgr_mine' };
+    h.harnesses = [harnessWithEntry('Claude Code', { registeredGrant: 'msgr_mine' })];
+    const r = await inspectProvisioning('/x');
+    expect(r.repair).toBe('wire');
+  });
+
+  it('does not claim headless repair when the drift needs full onboarding', async () => {
+    // No primer + a configured harness ⇒ the "server wired, no primer" drift, which `wire` cannot fix.
+    h.primer = 'none';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    h.harnesses = [harnessWithEntry('Claude Code', {})];
+    const r = await inspectProvisioning('/x');
+    expect(r.repair).toBe('init');
   });
 
   it('is quiet about a normal entry with no baked model and matching secrets', async () => {

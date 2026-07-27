@@ -134,6 +134,8 @@ Two limits emerged while building the guard, and the design was narrowed to matc
 
 `assertEntryIdentity` therefore throws on a **secret** mismatch (a genuine cross-run identity leak
 with no benign reading) and is called from the doctor, not from `buildEntry`.
+(Corrected by ADR 165: it never was — the doctor re-implemented the grant comparison inline and the
+agent_key half never ran. ADR 165 removed the function and made a baked secret drift on presence.)
 
 ### 7. Observation happens at the tool boundary, not at SessionStart
 

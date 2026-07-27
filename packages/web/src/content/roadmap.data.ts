@@ -303,6 +303,18 @@ const RAW: RawItem[] = [
     dependsOn: ['verify-provisioning', 'agent-workspace'],
   },
   {
+    id: 'worktree-family-entry',
+    title: 'Worktree-family MCP entry — a shared slot carries no per-seat state',
+    shipped: { prs: [400] },
+    category: 'harness',
+    blurb:
+      'Claude Code keys local MCP config by repo root, so every seat worktree shares one entry — which used to carry the last provisioner’s credentials. It now carries nothing: identity and secrets resolve from each worktree’s own binding.json.',
+    detail:
+      'The shared entry baked MUSTERD_AGENT_KEY + MUSTERD_GRANT — per-seat credentials the adapter ranks above binding.json — so whichever seat provisioned last left every sibling presenting its secret at claim time, and the doctor’s remedy (run `musterd init` here) repaired the running seat by stealing the slot from whoever held it (the expired_grant cascade). buildMcpEnv now returns {}; all five names (server/team/surface/agent_key/grant) stay supported as manual overrides and resolve from binding.json / workspace.json, pinned by a binding-only-resolution contract test and a byte-identical-sibling-entries regression. The doctor flags any baked secret on PRESENCE (a matching grant is still the credential every sibling reads) and `init --check --fix` routes entry drift to `musterd wire` — headless, no member minted, and one run repairs the whole family. Side benefit: Cursor/Codex configs live in the working tree, so the plaintext team key stops landing in repo-tracked files. Deferred increment 2: MUSTERD_AUTOJOIN/MUSTERD_DRIVER are still family-global (a --driver flag marks every worktree as driven), its own lane.',
+    refs: [adr(165, 'ADR 165'), adr(143, 'ADR 143'), adr(158, 'ADR 158')],
+    dependsOn: ['agent-workspace', 'committed-launch-spec'],
+  },
+  {
     id: 'claim-on-first-use',
     title: 'Claim on first use',
     shipped: { legacy: true },

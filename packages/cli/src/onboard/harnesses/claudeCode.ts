@@ -457,6 +457,7 @@ export const claudeCode: Harness = {
     // model, a grant from another provisioning run, and the adapter path (`  Args: <path>`).
     const modelMatch = got.ok ? /MUSTERD_MODEL=(\S+)/.exec(got.out) : null;
     const grantMatch = got.ok ? /MUSTERD_GRANT=(\S+)/.exec(got.out) : null;
+    const agentKeyMatch = got.ok ? /MUSTERD_AGENT_KEY=(\S+)/.exec(got.out) : null;
     const argsMatch = got.ok ? /^\s*Args:\s*(.+)$/m.exec(got.out) : null;
     return {
       installed: true,
@@ -465,6 +466,7 @@ export const claudeCode: Harness = {
       ...(claimMatch ? { registeredClaim: claimMatch[1] } : {}),
       ...(modelMatch ? { registeredModel: modelMatch[1] } : {}),
       ...(grantMatch ? { registeredGrant: grantMatch[1] } : {}),
+      ...(agentKeyMatch ? { registeredAgentKey: agentKeyMatch[1] } : {}),
       ...(argsMatch?.[1] ? { registeredArgs: argsMatch[1].trim().split(/\s+/) } : {}),
     };
   },
@@ -499,7 +501,7 @@ export const claudeCode: Harness = {
     return {
       target: 'claude mcp (scope: local)',
       activation: activationHint(),
-      scope: `wired into this folder only (${process.cwd()}) — another project needs its own \`musterd init\`, and a second agent needs its own folder`,
+      scope: `wired for this repo (${process.cwd()}) — Claude Code keys local scope by repo ROOT, so every git worktree of this repo shares this one entry; it carries no per-seat state (ADR 165), so that sharing is harmless. Another project needs its own \`musterd init\`, and a second agent needs its own folder.`,
     };
   },
 
