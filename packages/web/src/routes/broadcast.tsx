@@ -55,6 +55,14 @@ function BroadcastPage() {
   const [team, setTeam] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
+  // The capture's encode rate, so the scene can paint at it rather than at full rAF. Read once — a
+  // stream's URL is its whole configuration and never changes under it. 0 = absent or junk, which
+  // leaves the scene painting every frame.
+  const [streamFps] = useState(() => {
+    if (typeof window === 'undefined') return 0;
+    const raw = Number(new URLSearchParams(window.location.search).get('fps'));
+    return Number.isFinite(raw) && raw > 0 ? raw : 0;
+  });
 
   // A stream has no operator to click "reconnect": if the observer credential goes stale (daemon reset,
   // 24h observer TTL — ADR 064), drop it and mint a fresh one. `recovering` is a one-at-a-time guard,
@@ -136,6 +144,7 @@ function BroadcastPage() {
             lanes={lanes}
             status={status}
             broadcast
+            streamFps={streamFps}
             onReady={onSceneReady}
           />
         )}

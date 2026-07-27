@@ -1,7 +1,7 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
 import { createActors, type Actors } from './actors';
-import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
+import { frameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD } from './layout';
@@ -115,6 +115,11 @@ export interface OfficeOptions {
    * running while the tab is hidden or headless, DPR is pinned to 1 for a deterministic capture size,
    * and suspend requests are ignored. Only `/broadcast` passes it — see ./broadcast.ts. */
   broadcast?: boolean;
+  /**
+   * The encode rate the capture will resample to, from `?fps=` on the broadcast URL. Under broadcast
+   * the scene paints at exactly this rate; 0 (unknown) keeps the old paint-everything behaviour.
+   */
+  streamFps?: number;
 }
 
 export function mountOffice(
@@ -124,6 +129,7 @@ export function mountOffice(
   options: OfficeOptions = {},
 ): OfficeHandle {
   const broadcast = options.broadcast === true;
+  const streamFps = Number.isFinite(options.streamFps) ? Math.max(0, options.streamFps ?? 0) : 0;
   const dpr = officeDpr(broadcast, DPR_CAP);
 
   const canvas = document.createElement('canvas');
@@ -603,9 +609,9 @@ export function mountOffice(
   let last = 0;
   let acc = 0; // wall time accrued since the last drawn frame — coalesced under the ambient FPS cap
   let wasActive = false;
-  // Render counters for a capture harness (OfficeHandle.stats). Under broadcast `ticks === draws`,
-  // because ambientFrameBudgetMs returns 0 — the scene paints at full rAF while an encoder downstream
-  // consumes 30fps. Making that gap measurable rather than inferred is the point.
+  // Render counters for a capture harness (OfficeHandle.stats). Under broadcast with a known
+  // `streamFps`, `draws` should sit at that rate while `ticks` stays at full rAF — the gap between
+  // them is the work this cap stopped doing. With `streamFps` unknown the two converge, as before.
   let ticks = 0;
   let draws = 0;
   const since = performance.now();
@@ -617,11 +623,13 @@ export function mountOffice(
     // the walk maths stay correct with fewer samples.
     const inAfterglow = lastActive > 0 && now - lastActive < AFTERGLOW_MS;
     const noRealMotion = actors.ambientOnly() || !actors.active();
-    const capped = noRealMotion && cues.length === 0 && !inAfterglow;
+    const ambientOnly = noRealMotion && cues.length === 0 && !inAfterglow;
     acc += last ? now - last : 1000 / 60;
     last = now;
-    if (capped && acc < ambientFrameBudgetMs(broadcast, AMBIENT_FRAME_MS)) {
-      raf = requestAnimationFrame(tick); // too soon for the next ambient frame — keep the loop, skip the draw
+    // Under broadcast this budget applies during walks and cues too, not only ambient stretches —
+    // painting above the encode rate is discarded downstream whatever the room is doing.
+    if (acc < frameBudgetMs({ broadcast, streamFps, ambientOnly, ambientCapMs: AMBIENT_FRAME_MS })) {
+      raf = requestAnimationFrame(tick); // too soon for the next frame — keep the loop, skip the draw
       return;
     }
     draws++;

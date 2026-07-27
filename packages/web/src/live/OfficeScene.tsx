@@ -47,6 +47,7 @@ export function OfficeScene({
   onCollapse,
   onActClick,
   broadcast = false,
+  streamFps = 0,
   lanes = [],
   status = 'idle',
   onReady,
@@ -63,6 +64,9 @@ export function OfficeScene({
    * animating unseen, pins DPR to 1, and ignores reduced-motion (the viewer of a stream is not the
    * person whose OS preference this is). */
   broadcast?: boolean;
+  /** The capture's encode rate (`?fps=`). Under broadcast the scene paints at exactly this instead of
+   * at full rAF; 0 means unknown, which keeps it painting everything. */
+  streamFps?: number;
   /** The working-on strap's lanes, already derived by the route (see `workingOn`). */
   lanes?: WorkingOnEntry[];
   /** Connection state, for the overlay's honest LIVE/CONNECTING signal. */
@@ -103,6 +107,7 @@ export function OfficeScene({
         const handle = mountOffice(host, labelHost, reduced, {
           onActClick: (id) => onActClickRef.current?.(id),
           broadcast,
+          streamFps,
         });
         handle.update(dataRef.current);
         handle.setSuspended(collapsedRef.current); // mounted while collapsed → start parked
@@ -118,7 +123,7 @@ export function OfficeScene({
       handleRef.current = null;
       onReadyRef.current?.(null);
     };
-  }, [broadcast]);
+  }, [broadcast, streamFps]);
 
   useEffect(() => {
     handleRef.current?.update(data);
