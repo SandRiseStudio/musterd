@@ -106,6 +106,10 @@ const MAX_ISSUES = 3;
  */
 export function bounceRepair(text: string): string {
   if (!BOUNCE_RE.test(text)) return '';
+  // A bounce that already carries its own repair line wrote a better one than this can: the
+  // unknown-key check in `coerce.ts` knows the valid key set, while there is no zod issue here to
+  // parse — appending would only add a generic second hint under a specific first one.
+  if (text.includes('\nrepair: ')) return '';
   const issues = parseIssues(text);
   const hints = issues?.slice(0, MAX_ISSUES).map(hintForIssue) ?? [];
   const body = hints.length ? hints.join('; ') : 'check the fields against the tool input schema';

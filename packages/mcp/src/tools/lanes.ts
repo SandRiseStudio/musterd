@@ -174,7 +174,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_update',
     {
       description:
-        'Update a lane: state (active/blocked/done/…), surface, dependencies, branch, detail. ' +
+        'Update a lane: state (active/blocked/done/…), surface_globs, depends_on, branch, detail. ' +
         'Going active re-runs contention checks.',
       inputSchema: {
         id: z.string().describe('lane id'),

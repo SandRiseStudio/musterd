@@ -263,4 +263,75 @@ describe('tool-call telemetry end-to-end (ADR 144 inc 1)', () => {
 
     await harness.close();
   }, 15_000);
+
+  // The regression this pins (reproduced 2026-07-27): `lane_update {surface:[…]}` came back a
+  // SUCCESS with `surface_globs: []` — zod strips keys it doesn't know, so a near-miss field name
+  // was a silent no-op and the seat believed it had declared a surface it had not. Only an
+  // end-to-end test can make the claim, because the drop happens inside SDK validation.
+  it('forgives `surface` and bounces a truly unknown key instead of silently dropping it', async () => {
+    const musterd = new MusterdClient(config);
+    closers.push(() => musterd.close());
+    await musterd.join();
+
+    const recorder = new ToolCallRecorder();
+    const mcp = buildMcpServer(musterd, config, { recorder });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const harness = new Client({ name: 'test-harness', version: '0.0.0' });
+    await Promise.all([mcp.connect(serverTransport), harness.connect(clientTransport)]);
+    closers.push(() => mcp.close());
+
+    // (a) the natural name now lands on the real field, all the way through to the stored lane.
+    const opened = await harness.callTool({
+      name: 'lane_open',
+      arguments: {
+        title: 'a lane with a surface',
+        surface: ['packages/mcp/src/**'],
+        claim: true,
+      },
+    });
+    expect(opened.isError ?? false).toBe(false);
+    const lane = (opened.structuredContent as { lane: { id: string; surface_globs: string[] } })
+      .lane;
+    expect(lane.surface_globs).toEqual(['packages/mcp/src/**']);
+
+    const updated = await harness.callTool({
+      name: 'lane_update',
+      arguments: { id: lane.id, surface: ['packages/cli/src/**'] },
+    });
+    expect(
+      (updated.structuredContent as { lane: { surface_globs: string[] } }).lane.surface_globs,
+    ).toEqual(['packages/cli/src/**']);
+
+    // (b) a key no alias can explain stops the call, loudly, with the valid set — never a success
+    // that quietly ignored what the caller asked for.
+    const stray = await harness.callTool({
+      name: 'lane_update',
+      arguments: { id: lane.id, surfase_globs: ['packages/web/**'] },
+    });
+    expect(stray.isError).toBe(true);
+    const text = String((stray.content as { text?: string }[])[0]?.text);
+    expect(text).toContain('unrecognized argument key');
+    expect(text).toContain("did you mean 'surface_globs'");
+    expect(text).toContain('lane_update accepts:');
+    // Exactly one repair line — the specific one, not a generic one stacked on top.
+    expect(text.match(/\nrepair: /g)).toHaveLength(1);
+
+    // And the lane is untouched: a bounce changes nothing, unlike the silent drop it replaces.
+    const board = await harness.callTool({ name: 'lane_board', arguments: { mine: true } });
+    expect(String((board.content as { text?: string }[])[0]?.text)).toContain(
+      'packages/cli/src/**',
+    );
+
+    await recorder.flush(musterd);
+    const report = (await fetch(base + '/teams/dawn/report', {
+      headers: { authorization: `Bearer ${nickTok}` },
+    }).then((r) => r.json())) as {
+      tool_calls: { tools: { tool: string; bounces: number; coerced: number }[] };
+    };
+    const update = report.tool_calls.tools.find((row) => row.tool === 'lane_update')!;
+    expect(update.coerced).toBe(1); // the forgiven `surface`
+    expect(update.bounces).toBe(1); // the unknown key — measured like any other schema failure
+
+    await harness.close();
+  }, 15_000);
 });
