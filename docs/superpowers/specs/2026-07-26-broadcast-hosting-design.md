@@ -90,10 +90,10 @@ for an hour and running the real capture**, at a cost of roughly €0.20.
 
 | run | machine                | encoder        | answers                                                |
 | --- | ---------------------- | -------------- | ------------------------------------------------------ |
-| A   | the Air (already due)  | `videotoolbox` | today's true baseline — the #369 draws/delivered question |
-| B   | the Air                | `libx264`      | what losing hardware encode costs, on known hardware      |
-| C   | Hetzner CAX (ARM), 1 h | `libx264`      | does Ampere hold 1080p30, and does Chromium run at all    |
-| D   | Fly Performance, 1 h   | `libx264`      | the same on x86 dedicated, for the price comparison       |
+| D   | Fly Performance, 1 h   | `libx264`      | **first** — x86 dedicated sizing, and the draws/delivered question on a machine where delivered is not depressed by contention |
+| C   | Hetzner CAX (ARM), 1 h | `libx264`      | does Ampere hold 1080p30, and does Chromium run at all; gated on an account existing |
+| A   | the Air (opportunistic)| `videotoolbox` | the local baseline — today's true numbers on the machine as it actually is |
+| B   | the Air (opportunistic)| `libx264`      | what losing hardware encode costs, on known hardware      |
 
 **Pass/fail is queue growth, not CPU%.** The harness already treats `queueGrowthBytesPerSec` as the
 margin metric: flat means the encoder is keeping up, rising means it is wedging regardless of how the
@@ -103,12 +103,44 @@ among those that pass, choose on price.
 **Harness change required:** `scripts/perf/broadcast-baseline.mjs` builds its argv explicitly and has
 no `--encoder` passthrough. Adding one is the only code change in this increment.
 
-**Gate:** runs A and B inherit the existing quiet-machine discipline (`QUIET_LOAD_MAX = 2.0`, rows
-stamped `contaminated` otherwise). They are blocked on the same quiet window the capture-perf lane is
-waiting for.
+### Rent quiet — the rented runs come first (amended 2026-07-26)
 
-Runs A and B also split Chrome's cost from the encode's, which sizes C and D rather than guessing at
-them.
+The original ordering assumed A and B would come first, on a quiet Air. That assumption does not
+survive contact with the machine: its floor at the start of the session was already **5.5**, before
+any build, against a bar of 2.0. On an 8-core laptop running Spotlight, a browser, Claude Code and a
+dozen MCP servers, **the bar may describe a machine nick does not own.**
+
+So the order inverts. **A rented box is quiet by construction** — nothing else runs on it — and it
+costs cents. C and D run first; A and B demote to opportunistic, taken whenever the Air is genuinely
+idle. If that never happens we lose the local baseline, but not the decision.
+
+Two consequences follow:
+
+- **The daemon runs on the rented box for the measurement**, using the temp-daemon recipe from the
+  `/live` perf work (`MUSTERD_DB` copy + `MUSTERD_PORT`). Daemon, Chrome and ffmpeg all local to one
+  quiet machine means **Increment 0 needs no Tailscale at all** — the overlay moves to Increment 1
+  where it belongs.
+- **The fixture is synthetic, not a copy of the real team.** Seeding a team with a representative
+  number of seats keeps the benchmark reproducible and, more importantly, keeps real message content
+  off a rented machine. Copying the live DB would have been easier and is rejected on both counts.
+
+**Sequencing note:** the Fly MCP server is authenticated to nick's personal org, so **run D can be
+done immediately**. There is no Hetzner account or `hcloud` CLI on this machine, so **run C is gated
+on nick creating one** — and is only load-bearing if the ARM price advantage is worth pursuing after
+D lands.
+
+### On not moving the gate
+
+`QUIET_LOAD_MAX = 2.0` is an absolute number on an 8-core machine, chosen reactively (the harness
+comment records load "swung between 5 and 63" during the contaminated session). A better gate would
+likely normalize per core and check *stability* rather than level — a steady load of 5 supports a
+sounder comparison than one swinging 1→9, because variance within and between runs is what actually
+corrupts these numbers.
+
+**That change is not being made here.** Loosening a gate because it keeps returning no is precisely
+the failure the gate exists to prevent, and renting quiet removes the pressure to do it. If the
+threshold is ever revised it should be because per-core normalization is *more correct*, argued on its
+own merits and recorded — not because a red light was inconvenient.
 
 ## Increment 1 — provision
 
