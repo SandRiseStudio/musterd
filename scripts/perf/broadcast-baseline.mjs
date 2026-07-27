@@ -16,7 +16,8 @@
  *
  * Usage:
  *   node scripts/perf/broadcast-baseline.mjs --label "1080p30 (today)" [--fps 30] [--secs 60]
- *     [--encoder videotoolbox|libx264] [--team revive] [--server http://127.0.0.1:4849]
+ *     [--encoder videotoolbox|libx264] [--resolution 720p|1080p] [--team revive]
+ *     [--server http://127.0.0.1:4849]
  *     [--jsonl <path>] [--json out.json] [--force]
  *
  * The capture writes video to a temp .mp4 that is deleted on exit — this harness measures the
@@ -43,6 +44,8 @@ const SERVER = flag('server', 'http://127.0.0.1:4849');
 // how one machine measures both: hardware encode is nearly free, software encode is not, and the gap
 // is what sizing a Linux box turns on.
 const ENCODER = flag('encoder');
+// The 720p arm (hosting spec): a quarter of the pixels on the same serial render thread.
+const RESOLUTION = flag('resolution');
 const JSON_OUT = flag('json');
 const FORCE = has('force');
 
@@ -97,6 +100,7 @@ const proc = spawn(
     '--out',
     mp4,
     ...(ENCODER ? ['--encoder', ENCODER] : []),
+    ...(RESOLUTION ? ['--resolution', RESOLUTION] : []),
   ],
   {
     env: { ...process.env, MUSTERD_BROADCAST_PERF: jsonl },

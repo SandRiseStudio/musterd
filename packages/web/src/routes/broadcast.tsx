@@ -23,9 +23,19 @@ export const Route = createFileRoute('/broadcast')({
 });
 
 /** The capture stage, in CSS pixels. DPR is pinned to 1 in broadcast mode, so this is also the exact
- * pixel size of the canvas backing store — a 1920×1080 OBS browser source captures 1:1. */
-const STAGE_W = 1920;
-const STAGE_H = 1080;
+ * pixel size of the canvas backing store — a browser source at the stage size captures 1:1.
+ *
+ * `?h=720` shrinks the stage itself (16:9, so 1280×720) rather than CSS-scaling a 1080p render:
+ * a transform leaves the backing store at 1920×1080 and the room paying full raster cost, which is
+ * exactly the serial-thread cost the 720p arm exists to remove (hosting spec, run D). Two rungs
+ * only — this is a capture contract, not a slider. */
+const STAGE_HEIGHTS = [720, 1080] as const;
+function stageSize(): { w: number; h: number } {
+  const raw =
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('h');
+  const h = STAGE_HEIGHTS.find((s) => s === Number(raw)) ?? 1080;
+  return { w: (h * 16) / 9, h };
+}
 
 /** Hooks a capturer (or a headless check) probes — see ADR 157 "Observability & Evaluation". */
 interface BroadcastWindow {
@@ -55,6 +65,9 @@ function BroadcastPage() {
   const [team, setTeam] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
+  // Read once per page load — a stream source's URL is its whole configuration, and it never
+  // changes under a running capture.
+  const [stage] = useState(stageSize);
 
   // A stream has no operator to click "reconnect": if the observer credential goes stale (daemon reset,
   // 24h observer TTL — ADR 064), drop it and mint a fresh one. `recovering` is a one-at-a-time guard,
@@ -103,16 +116,16 @@ function BroadcastPage() {
   }, []);
 
   // Fit the fixed stage into whatever window we were opened at. `transform: scale()` doesn't change
-  // `clientWidth`, so the scene still lays out — and renders — at exactly 1920×1080 however small the
-  // preview window is. At a 1920×1080 browser source this is a no-op scale of 1.
+  // `clientWidth`, so the scene still lays out — and renders — at exactly the stage size however
+  // small the preview window is. At a matching browser source this is a no-op scale of 1.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const fit = () =>
-      setScale(Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H, 1));
+      setScale(Math.min(window.innerWidth / stage.w, window.innerHeight / stage.h, 1));
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, []);
+  }, [stage]);
 
   // Health hooks for a capturer: `__office` is the live scene handle, `__broadcastReady` flips true once
   // the firehose is actually connected — "the page loaded" and "the page is streaming a real team" are
@@ -126,7 +139,10 @@ function BroadcastPage() {
 
   return (
     <main className="bc">
-      <div className="bc__stage lc" style={{ transform: `scale(${scale})` }}>
+      <div
+        className="bc__stage lc"
+        style={{ width: stage.w, height: stage.h, transform: `scale(${scale})` }}
+      >
         {team && (
           <OfficeScene
             teamName={team}

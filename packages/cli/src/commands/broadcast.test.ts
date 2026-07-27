@@ -23,6 +23,7 @@ import {
   type RunState,
   chromeArgs,
   chromeDefault,
+  stagePixels,
   ffmpegArgs,
   killGroup,
   makeFramePump,
@@ -74,6 +75,22 @@ describe('broadcastUrl', () => {
     expect(broadcastUrl('https://box.example', 'my team')).toBe(
       'https://box.example/broadcast?team=my%20team',
     );
+  });
+
+  it('sizes the page stage for 720p and leaves the 1080p contract URL untouched', () => {
+    expect(broadcastUrl('http://127.0.0.1:4849', 'revive', '720p')).toBe(
+      'http://127.0.0.1:4849/broadcast?team=revive&h=720',
+    );
+    expect(broadcastUrl('http://127.0.0.1:4849', 'revive', '1080p')).toBe(
+      'http://127.0.0.1:4849/broadcast?team=revive',
+    );
+  });
+});
+
+describe('stagePixels', () => {
+  it('is 16:9 exactly at both rungs', () => {
+    expect(stagePixels('1080p')).toEqual({ width: 1920, height: 1080 });
+    expect(stagePixels('720p')).toEqual({ width: 1280, height: 720 });
   });
 });
 
@@ -311,6 +328,11 @@ describe('chromeArgs', () => {
     const darwin = chromeArgs(9333, '/tmp/profile', 'darwin');
     expect(darwin).not.toContain('--no-sandbox');
     expect(darwin).not.toContain('--disable-dev-shm-usage');
+  });
+
+  it('sizes the window to the stage — the 720p rung shrinks the render, not just the encode', () => {
+    const args = chromeArgs(9333, '/tmp/profile', 'linux', stagePixels('720p'));
+    expect(args).toContain('--window-size=1280,720');
   });
 
   it('keeps about:blank last so the flags are never read as a URL', () => {
