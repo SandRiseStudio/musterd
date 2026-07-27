@@ -103,8 +103,18 @@ export function parseOptions(
 /**
  * Assumed compositor rate, in Hz. Chrome's screencast fires per *composited* frame, not on a clock,
  * so this is the only way to reason about `everyNthFrame` — and it is an assumption, not a reading.
+ *
+ * The assumption is a platform fact, not a constant. On macOS (GPU compositing) the office
+ * composites at a true 60Hz — delivery landed on exactly `fps` every measured run. On the Linux
+ * boxes this ships to there is no GPU: compositing is software on one serial thread and measured
+ * 20Hz at 1080p / ~26Hz at 720p (Fly performance-4x, 2026-07-27). Deriving `everyNthFrame` from 60
+ * there threw away half the frames the box could actually produce: 720p30 delivered 14fps under
+ * `everyNthFrame: 2` and 26.5fps under `1`, at identical render cost. Assuming 30 keeps the
+ * skip-derivation honest on hardware that never had 60 composited frames to skip.
  */
-const COMPOSITOR_HZ = 60;
+export function compositorHz(platform: NodeJS.Platform = process.platform): number {
+  return platform === 'darwin' ? 60 : 30;
+}
 
 /**
  * How many composited frames Chrome should skip between screencast deliveries.
@@ -126,9 +136,9 @@ const COMPOSITOR_HZ = 60;
  * Clamped to ≥1: an fps at or above the compositor rate must not skip frames, and a nonsense fps must
  * not produce 0 (which CDP reads as "every frame" anyway, but by accident rather than by intent).
  */
-export function screencastEveryNthFrame(fps: number, compositorHz = COMPOSITOR_HZ): number {
+export function screencastEveryNthFrame(fps: number, hz = compositorHz()): number {
   if (!Number.isFinite(fps) || fps <= 0) return 1;
-  return Math.max(1, Math.floor(compositorHz / fps));
+  return Math.max(1, Math.floor(hz / fps));
 }
 
 /** The Inc 1 page this captures — observer-only by construction (ADR 157), so a stream can never

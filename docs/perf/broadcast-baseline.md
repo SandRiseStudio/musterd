@@ -76,6 +76,20 @@ holds ~20 Hz, not 60, because one Chrome thread pegs a core while three idle (fa
 ~10 fps padded to 30 with duplicates). Single-thread speed, not cores, is the capture's real
 requirement; more/bigger cloud does not help, and `--disable-gpu` moves nothing.
 
+The 720p arm (same box, same fixture, after PR #407 added `--resolution`):
+
+| Config | delivered fps | draw fps | encoded | queue growth | chrome % | ffmpeg % |
+| --- | --- | --- | --- | --- | --- | --- |
+| fly 720p30, skip-from-60Hz | 14.0 | 27.6 | 30.0 | −1.3 KB/s | 132.9 | 41.3 |
+| fly 720p30, every frame | 26.5 | 25.1 | 30.0 | −1.6 KB/s | 209.4 | 58.0 |
+| **fly 720p25, every frame** | **27.4** | 26.4 | **25.0** | 0.0 KB/s (peak 0.00 MB) | 211.8 | 49.7 |
+
+Two findings: 720p halves both Chrome's raster and ffmpeg's encode; and `everyNthFrame` derived
+from an assumed 60Hz compositor was discarding half of a ~26Hz software compositor's frames —
+delivery 14 → 26.5 at identical render cost when the skip was removed. `compositorHz()` is now a
+platform fact (60 darwin / 30 elsewhere). **720p25 is the first configuration that passes on
+rentable hardware**: delivery above the encode rate, flat-zero queue.
+
 (The Air's own opportunistic `libx264` arm was contaminated — other processes 266% — and is recorded
 only directionally: ffmpeg ~102%, queue +502 KB/s, delivered 22.4. The Air cannot software-encode
 1080p30 either.)
