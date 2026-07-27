@@ -19,7 +19,9 @@ adapter-start diagnostic and appears as a warn-only `musterd init --check` note 
 
 ## How a session binds to a Member (identity bootstrapping)
 
-The MCP server process is configured (via env, set by whoever registers the MCP server in the harness) with:
+The MCP server process **can** be configured via env (set by whoever registers the MCP server in the
+harness) — but note that since ADR 165 default provisioning writes NONE of these; see "The entry
+carries no per-seat state" below. The full set of manual overrides:
 
 ```
 MUSTERD_SERVER   = http://localhost:4849
@@ -51,7 +53,19 @@ deliberately does **not** bake the seat into the env: `buildMcpEnv` omits `MUSTE
 `musterd claim <name>` — which rewrites `binding.json` — is followed by the adapter on its next launch
 rather than being shadowed by a frozen env copy that outranks the file. (`MUSTERD_CLAIM` still works as a
 manual override for binding-less/CI folders — it just isn't written by `init`/`agent`/`wire`.) Env is kept first-class for host-injection and hosted/no-filesystem
-setups. **Identity is optional** (claim-on-first-use, ADR 032): only the **team** is required to load —
+setups.
+
+### The entry carries no per-seat state (ADR 165)
+
+Claude Code keys local-scope MCP config by **repo root**, so every git worktree of a repo shares one
+`musterd` entry. A shared slot may hold only what is identical across everything sharing it, so the
+entry holds nothing: no server, team, surface, agent key or grant. The adapter resolves all of them
+from `.musterd/binding.json`, found by walking up from **cwd** — the one signal that is genuinely
+per-worktree — falling back to the committed `workspace.json` for the non-secret fields.
+
+All of `MUSTERD_SERVER`, `MUSTERD_TEAM`, `MUSTERD_SURFACE`, `MUSTERD_AGENT_KEY`, `MUSTERD_GRANT`,
+`MUSTERD_CLAIM` and `MUSTERD_MODEL` remain supported **manual** overrides for headless/CI use.
+Provisioning simply never writes them. See ADR 143 and ADR 165. **Identity is optional** (claim-on-first-use, ADR 032): only the **team** is required to load —
 the `agent_key` may be absent, leaving the session a pending presence that claims a seat on first use
 (`team_join` / `musterd claim`, which writes the resolved seat back into binding.json).
 
