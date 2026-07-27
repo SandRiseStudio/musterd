@@ -1,69 +1,109 @@
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { claudeProjectDir, enumerateClaudeSessions } from './enumerate.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { enumerateClaudeSessions, resetSessionScan } from './enumerate.js';
 
-function fakeHome(): string {
-  return mkdtempSync(join(tmpdir(), 'adr166-'));
-}
-
-function seed(
-  home: string,
-  workspace: string,
-  files: { id: string; ageMin: number; bytes?: number }[],
-): void {
-  const dir = claudeProjectDir(workspace, home);
-  mkdirSync(dir, { recursive: true });
-  for (const f of files) {
-    const p = join(dir, `${f.id}.jsonl`);
-    writeFileSync(p, 'x'.repeat(f.bytes ?? 10));
-    const t = new Date(Date.now() - f.ageMin * 60_000);
-    utimesSync(p, t, t);
-  }
-}
-
-describe('claudeProjectDir (ADR 166)', () => {
-  it('slugifies the absolute workspace path — every slash becomes a dash', () => {
-    expect(claudeProjectDir('/Users/nick/agents-miley', '/home')).toBe(
-      '/home/.claude/projects/-Users-nick-agents-miley',
-    );
-  });
-
-  it('resolves a relative workspace before slugifying', () => {
-    expect(claudeProjectDir('.', '/home')).toContain('/home/.claude/projects/-');
-  });
-});
-
+/**
+ * ADR 166. Attribution is by the transcript's RECORDED `cwd` walked up to a workspace — never by
+ * decoding the projects directory name, which the fleet sweep proved is an inconsistent encoding.
+ */
 describe('enumerateClaudeSessions (ADR 166)', () => {
-  it('returns undefined — "cannot tell" — when the harness keeps no directory here', () => {
-    // Load-bearing: a missing directory must never be laundered into "no sessions", because the
-    // wake guard's safe answer when unsure is `live` (refuse to spawn).
-    expect(enumerateClaudeSessions('/Users/nick/nowhere', fakeHome())).toBeUndefined();
+  let home: string;
+  let ws: string;
+
+  /** A workspace is anything with a .musterd/binding.json on the walk-up — the same rule the hook used. */
+  const workspace = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'adr166-ws-'));
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(join(dir, '.musterd', 'binding.json'), '{}');
+    return dir;
+  };
+
+  /** Write a transcript into an ARBITRARY projects directory — the name is deliberately not derived
+   *  from the cwd, because production's naming is not derivable either. */
+  const transcript = (
+    projectDirName: string,
+    id: string,
+    opts: { cwd?: string; ageMin?: number; padFirstLine?: boolean } = {},
+  ): void => {
+    const dir = join(home, '.claude', 'projects', projectDirName);
+    mkdirSync(dir, { recursive: true });
+    const p = join(dir, `${id}.jsonl`);
+    const first = opts.padFirstLine
+      ? JSON.stringify({ type: 'summary', pad: 'x'.repeat(200_000) })
+      : JSON.stringify({ type: 'summary' });
+    const second = opts.cwd ? JSON.stringify({ type: 'user', cwd: opts.cwd }) : '';
+    writeFileSync(p, `${first}\n${second}\n`);
+    const t = new Date(Date.now() - (opts.ageMin ?? 0) * 60_000);
+    utimesSync(p, t, t);
+  };
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'adr166-home-'));
+    ws = workspace();
+    resetSessionScan();
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true });
+    resetSessionScan();
   });
 
-  it('returns [] for a real but empty directory — that is evidence, not ignorance', () => {
-    const home = fakeHome();
-    seed(home, '/ws', []);
-    expect(enumerateClaudeSessions('/ws', home)).toEqual([]);
+  it('returns undefined — "cannot tell" — when there is no projects tree', () => {
+    // Load-bearing: never laundered into "no sessions". The guard's safe answer when unsure is live.
+    expect(enumerateClaudeSessions(ws, join(home, 'nope'))).toBeUndefined();
   });
 
-  it('lists every transcript, newest write first, with id from the basename', () => {
-    const home = fakeHome();
-    seed(home, '/ws', [
-      { id: 'old-session', ageMin: 600 },
-      { id: 'live-session', ageMin: 1 },
-      { id: 'middle-session', ageMin: 60 },
-    ]);
-    const out = enumerateClaudeSessions('/ws', home);
-    expect(out?.map((f) => f.id)).toEqual(['live-session', 'middle-session', 'old-session']);
-    expect(out?.[0]?.bytes).toBe(10);
+  it('returns [] when the tree exists but holds nothing for this workspace', () => {
+    transcript('some-other-project', 's1', { cwd: '/elsewhere' });
+    expect(enumerateClaudeSessions(ws, home)).toEqual([]);
+  });
+
+  it('attributes by recorded cwd, NOT by the directory name', () => {
+    // The directory name is deliberate nonsense; only the recorded cwd should matter.
+    transcript('totally-unrelated-name', 'mine', { cwd: ws });
+    expect(enumerateClaudeSessions(ws, home)?.map((f) => f.id)).toEqual(['mine']);
+  });
+
+  it('finds a session running in a SUBDIRECTORY of the workspace — the bug the sweep caught', () => {
+    // The live /Users/nick/agents session ran in .claude-worktrees/<name>; walk-up says it belongs
+    // to the workspace, so enumeration must see it or it demotes a live session.
+    const sub = join(ws, '.claude-worktrees', 'inspiring-swartz-922195');
+    mkdirSync(sub, { recursive: true });
+    transcript('-slug-that-does-not-decode', 'worktree-session', { cwd: sub });
+    expect(enumerateClaudeSessions(ws, home)?.map((f) => f.id)).toEqual(['worktree-session']);
+  });
+
+  it('does not claim a transcript whose cwd belongs to a different workspace', () => {
+    const other = workspace();
+    transcript('d1', 'theirs', { cwd: other });
+    transcript('d2', 'ours', { cwd: ws });
+    expect(enumerateClaudeSessions(ws, home)?.map((f) => f.id)).toEqual(['ours']);
+    rmSync(other, { recursive: true, force: true });
+  });
+
+  it('leaves a transcript with no recorded cwd unattributed rather than guessing', () => {
+    transcript('d1', 'no-cwd', {});
+    expect(enumerateClaudeSessions(ws, home)).toEqual([]);
+  });
+
+  it('leaves a transcript unattributed when cwd is past the probe window', () => {
+    // 200 KB of first line pushes cwd beyond the 64 KiB probe: unattributable, not misattributed.
+    transcript('d1', 'buried', { cwd: ws, padFirstLine: true });
+    expect(enumerateClaudeSessions(ws, home)).toEqual([]);
+  });
+
+  it('sorts newest write first', () => {
+    transcript('d1', 'old', { cwd: ws, ageMin: 600 });
+    transcript('d2', 'fresh', { cwd: ws, ageMin: 1 });
+    transcript('d3', 'middle', { cwd: ws, ageMin: 60 });
+    expect(enumerateClaudeSessions(ws, home)?.map((f) => f.id)).toEqual(['fresh', 'middle', 'old']);
   });
 
   it('ignores non-transcript files', () => {
-    const home = fakeHome();
-    seed(home, '/ws', [{ id: 'a', ageMin: 1 }]);
-    writeFileSync(join(claudeProjectDir('/ws', home), 'notes.txt'), 'x');
-    expect(enumerateClaudeSessions('/ws', home)?.map((f) => f.id)).toEqual(['a']);
+    transcript('d1', 'a', { cwd: ws });
+    writeFileSync(join(home, '.claude', 'projects', 'd1', 'notes.txt'), 'x');
+    expect(enumerateClaudeSessions(ws, home)?.map((f) => f.id)).toEqual(['a']);
   });
 });

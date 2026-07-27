@@ -12,6 +12,9 @@ import { LOCAL_SESSION_LIVE_MS, localSessionLiveness, RESUME_GC_HORIZON_MS } fro
  */
 describe('localSessionLiveness', () => {
   let ws: string;
+  /** These test the SLOT. A null enumerator keeps them hermetic — no real ~/.claude scan, no
+   *  dependence on what sessions happen to exist on the machine running the suite. */
+  const noEnum = () => undefined;
 
   const write = (session?: SessionCapture): void => {
     const binding: Binding = {
@@ -41,15 +44,15 @@ describe('localSessionLiveness', () => {
   });
 
   it('no binding / no capture ⇒ none (the pre-capture world)', () => {
-    expect(localSessionLiveness(ws).state).toBe('none');
+    expect(localSessionLiveness(ws, Date.now(), noEnum).state).toBe('none');
     write();
-    expect(localSessionLiveness(ws).state).toBe('none');
+    expect(localSessionLiveness(ws, Date.now(), noEnum).state).toBe('none');
   });
 
   it('no ended_at + freshly-touched transcript ⇒ live (a crash never wrote ended_at either)', () => {
     const p = transcript(1_000);
     write({ harness: 'claude-code', id: 's1', transcript_path: p, started_at: Date.now() });
-    const v = localSessionLiveness(ws);
+    const v = localSessionLiveness(ws, Date.now(), noEnum);
     expect(v.state).toBe('live');
     expect(v.transcriptBytes).toBeGreaterThan(0);
   });
@@ -63,7 +66,7 @@ describe('localSessionLiveness', () => {
       started_at: Date.now() - 60_000,
       ended_at: Date.now(),
     });
-    expect(localSessionLiveness(ws).state).toBe('resumable');
+    expect(localSessionLiveness(ws, Date.now(), noEnum).state).toBe('resumable');
   });
 
   it('no ended_at + stale transcript ⇒ resumable (crashed or idle, not live)', () => {
@@ -74,7 +77,7 @@ describe('localSessionLiveness', () => {
       transcript_path: p,
       started_at: Date.now() - 3_600_000,
     });
-    expect(localSessionLiveness(ws).state).toBe('resumable');
+    expect(localSessionLiveness(ws, Date.now(), noEnum).state).toBe('resumable');
   });
 
   it('capture past the GC horizon ⇒ gc-expired (resume would fail; go fresh)', () => {
@@ -85,7 +88,7 @@ describe('localSessionLiveness', () => {
       transcript_path: p,
       started_at: Date.now() - RESUME_GC_HORIZON_MS - 1_000,
     });
-    expect(localSessionLiveness(ws).state).toBe('gc-expired');
+    expect(localSessionLiveness(ws, Date.now(), noEnum).state).toBe('gc-expired');
   });
 
   it('a missing transcript file is never live; the capture stays resumable for the ladder to judge', () => {
@@ -95,7 +98,7 @@ describe('localSessionLiveness', () => {
       transcript_path: join(ws, 'gone.jsonl'),
       started_at: Date.now(),
     });
-    const v = localSessionLiveness(ws);
+    const v = localSessionLiveness(ws, Date.now(), noEnum);
     expect(v.state).toBe('resumable');
     expect(v.transcriptBytes).toBeUndefined();
   });
