@@ -5,7 +5,7 @@
 - Date: 2026-07-17
 - Builds on: [ADR 088](088-interrupt-line-tool-boundary-inbox-check.md) (the adapter-installed
   PreToolUse/PostToolUse hook this reuses as its actuator — the one place a headless agent is reachable
-  mid-task), [ADR 083](083-lanes-warn-not-block.md) (lanes warn, never block — the default this ADR
+  mid-task), [ADR 083](083-lanes-phase1-intent-dependency.md) (lanes warn, never block — the default this ADR
   preserves and makes escalatable), [ADR 147](147-human-ask-stream.md) (the `ask` species/tier/hold
   contract the action→ask gate routes through, adding no new daemon state), [ADR 145](145-human-role-refounded.md)
   §6 (opt-in policy posture; and §-boundary: harness permission prompts stay with the harness),
