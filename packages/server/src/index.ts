@@ -107,10 +107,14 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
         handler,
       ) as unknown as Server)
     : createHttpServer(handler);
-  attachWsServer(ctx, http);
+  // Keep the handle: `close()` MUST be able to terminate live WS clients. Discarding it is what hung
+  // the daemon on 2026-07-27 — see the close() comment below.
+  const wss = attachWsServer(ctx, http);
   let stopReaper: (() => void) | null = null;
   let stopWatcher: (() => void) | null = null;
   let stopTelemetry: (() => Promise<void>) | null = null;
+  /** One shared shutdown promise, so a second signal joins the first instead of racing it. */
+  let closing: Promise<void> | null = null;
   let boundPort = config.port;
 
   // (Re)start the roster watcher for the current `ctx.rosterRoots`. Reused by listen() and reload().
@@ -182,18 +186,37 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
       startWatching();
       log.info({ msg: 'reconcile_reload', teams: summary.length, roots: ctx.rosterRoots.length });
     },
+    /**
+     * Stop the daemon. **Must always complete**, including with agents connected — on 2026-07-27 it
+     * did not, and the whole team's coordination layer stayed down with no auto-recovery: the process
+     * survived SIGTERM, so launchd's KeepAlive never fired and every sanctioned bounce path
+     * (`service restart`/`refresh`, the 2-minute auto-refresher) could wedge it.
+     *
+     * The trap: `http.closeAllConnections()` cannot reach a WebSocket. `ws` runs in `noServer` mode
+     * behind an `upgrade` listener, and Node **detaches** an upgraded socket from the HTTP server's
+     * connection tracking — so those sockets are the WS server's to close, and `http.close()` waits
+     * on them forever if nobody does. Terminating the clients is therefore not a tidy-up, it is the
+     * thing that lets the process exit.
+     *
+     * Idempotent: production saw two `SIGTERM`s land, the second while the first close was pending.
+     */
     close() {
-      return new Promise((resolve) => {
+      if (closing) return closing;
+      closing = new Promise((resolve) => {
         stopReaper?.();
         stopWatcher?.();
         void stopTelemetry?.();
+        // Kill the upgraded sockets FIRST — http.close() below never settles while they live.
+        for (const client of wss.clients) client.terminate();
+        wss.close();
         http.close(() => {
           if (!opts.db) db.close();
           resolve();
         });
-        // Force-close lingering keep-alive/WS sockets so tests exit promptly.
+        // Force-close lingering keep-alive (non-upgraded) sockets so tests exit promptly.
         http.closeAllConnections?.();
       });
+      return closing;
     },
   };
 }
