@@ -16,7 +16,7 @@ import type { Parsed } from '../args.js';
 import { configPath } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
-import { cpuOfTree, makePerfRecorder } from './broadcast-perf.js';
+import { cpuOfTree, cpuTotal, makePerfRecorder } from './broadcast-perf.js';
 
 /**
  * `musterd broadcast` — ADR 157 Increment 2: stream the office with no GUI in the loop.
@@ -372,13 +372,18 @@ function startPerfRecording(
             err ? reject(err) : resolve(stdout),
           );
         });
+        // Chrome and ffmpeg are spawned by this process, so `pipeline` (the tree from our own pid)
+        // already contains both — they are not peers of it. Everything else on the box is `other`,
+        // and that is what decides whether the run was contaminated.
+        const pipeline = cpuOfTree(ps, process.pid);
         return {
           chrome: chrome.pid ? cpuOfTree(ps, chrome.pid) : 0,
           ffmpeg: ffmpeg.pid ? cpuOfTree(ps, ffmpeg.pid) : 0,
-          self: cpuOfTree(ps, process.pid),
+          pipeline,
+          other: Math.max(0, cpuTotal(ps) - pipeline),
         };
       } catch {
-        return { chrome: 0, ffmpeg: 0, self: 0 };
+        return { chrome: 0, ffmpeg: 0, pipeline: 0, other: 0 };
       }
     },
     load1: () => loadavg()[0] ?? 0,

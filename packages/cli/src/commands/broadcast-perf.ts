@@ -37,12 +37,16 @@ export interface PerfSample {
   ticks?: number;
   /** Canvas frames actually painted, cumulative. Under broadcast this equals `ticks` today. */
   draws?: number;
-  /** `draws` as a rate over this interval — the suspected waste when it sits ~2× `deliveredFps`. */
+  /** `draws` as a rate over this interval — the waste shows against `emitted`, not `deliveredFps`. */
   drawFps?: number;
-  /** 1-minute load average. Recorded so contamination is visible in the data, not inferred later. */
+  /** 1-minute load average. Context only: the capture's own ~1.5 cores dominate it. @see cpu.other */
   load1: number;
-  /** Percent CPU by process tree: the capture's own Chrome, its ffmpeg, and this process. */
-  cpu: { chrome: number; ffmpeg: number; self: number };
+  /**
+   * Percent CPU. `chrome` and `ffmpeg` are **children of this process**, so `pipeline` — the whole
+   * tree — already contains both; they are not three peers to be added up. `other` is everything on
+   * the machine that is not us, and it is the only one of these that can say a run was contaminated.
+   */
+  cpu: { chrome: number; ffmpeg: number; pipeline: number; other: number };
 }
 
 /** What `summarize` reports over a whole capture. */
@@ -53,31 +57,52 @@ export interface PerfSummary {
   meanDeliveredFps: number;
   meanKbPerFrame: number;
   meanDrawFps: number | undefined;
+  /** Rate of CFR frames the pump handed the encoder — the stream's real output rate. */
+  encodedFps: number;
   /**
-   * Painted frames per frame that actually reached the encoder. ~2 means the page is being drawn
-   * twice for every frame captured — the plan's candidate #1.
+   * Painted frames per frame that actually reached the encoder. ~2 means the page is drawn twice for
+   * every frame that is kept — the plan's candidate #1.
+   *
+   * The denominator is {@link encodedFps}, deliberately. An earlier version divided by
+   * `meanDeliveredFps`, but Chrome's screencast delivers every painted frame, so that ratio was
+   * pinned near 1.00 and read as "no waste" while half of every frame's work was being discarded one
+   * stage later. Measured 2026-07-26: 60 painted, 60 delivered, 30 encoded.
    */
-  drawsPerDeliveredFrame: number | undefined;
+  drawsPerEncodedFrame: number | undefined;
   /** **The margin metric.** Flat (≈0) = the encoder is keeping up with room to spare. */
   queueGrowthBytesPerSec: number;
   /** Largest backlog seen, MB — context for the growth rate. */
   peakQueueMb: number;
   meanLoad1: number;
   peakLoad1: number;
-  meanCpu: { chrome: number; ffmpeg: number; self: number };
-  /** True when load was high enough that these numbers should not be trusted. @see QUIET_LOAD_MAX */
+  /** `cli` is `pipeline` minus its children — the CLI's own frame plumbing, floored at zero. */
+  meanCpu: { chrome: number; ffmpeg: number; cli: number; pipeline: number; other: number };
+  /** True when *other* processes were busy enough that these numbers should not be trusted. */
   contaminated: boolean;
 }
 
 /**
- * The load average above which a measurement is not worth taking.
+ * The load average above which it is not worth *starting* a capture.
  *
- * Every number in the previous session was contaminated — load swung between 5 and 63 as other
- * sessions built, and one lucky run under that noise is exactly what made the JPEG-quality hypothesis
- * briefly look like a win. This box has 10 cores; a run at ≤2 is a quiet machine, and past that the
- * harness says so rather than letting a plausible-looking table into the record.
+ * Checked **before** a run, when load1 still describes other people's work. It cannot be used to
+ * judge a finished run: see {@link QUIET_EXTERNAL_CPU_MAX}.
  */
 export const QUIET_LOAD_MAX = 2.0;
+
+/**
+ * Percent CPU by processes that are not this capture, above which a run is contaminated.
+ *
+ * This replaces a load-average test that could never pass. Measured 2026-07-26 on an 8-core M3: every
+ * run began under the load bar (1.52, 1.84, 1.73) and finished stamped contaminated, because the
+ * capture's own ~1.5 cores drove load1 to 2.4–2.7 on its own. **The gate was failing on the workload
+ * it existed to measure**, and no amount of waiting for a quieter laptop could have fixed it.
+ *
+ * External CPU has no such feedback loop. The threat this guards against is other agents building —
+ * which showed up as load swinging between 5 and 63, i.e. many whole cores. 150% is comfortably above
+ * a desktop's idle background (a compositor and a browser, ~80–100% on the machine this was tuned on)
+ * and far below anything that would distort a measurement.
+ */
+export const QUIET_EXTERNAL_CPU_MAX = 150;
 
 /** Least-squares slope of y over x. The queue-growth estimator; 0 for fewer than two points. */
 export function slope(points: readonly { x: number; y: number }[]): number {
@@ -112,26 +137,38 @@ export function summarize(samples: readonly PerfSample[]): PerfSummary {
   const meanDeliveredFps = mean(samples.map((s) => s.deliveredFps));
   const meanDrawFps = drawFps.length ? mean(drawFps) : undefined;
   const loads = samples.map((s) => s.load1);
+  // `emitted` is cumulative, so the encoder's rate is the span's delta over the span — not a mean of
+  // per-sample values, which would weight a short first interval the same as a long one.
+  const encodedFps =
+    samples.length < 2 || durationSec <= 0
+      ? 0
+      : (samples[samples.length - 1]!.emitted - samples[0]!.emitted) / durationSec;
+  const meanChrome = mean(samples.map((s) => s.cpu.chrome));
+  const meanFfmpeg = mean(samples.map((s) => s.cpu.ffmpeg));
+  const meanPipeline = mean(samples.map((s) => s.cpu.pipeline));
   return {
     samples: samples.length,
     durationSec,
     meanDeliveredFps,
     meanKbPerFrame: mean(samples.map((s) => s.kbPerFrame)),
     meanDrawFps,
-    drawsPerDeliveredFrame:
-      meanDrawFps !== undefined && meanDeliveredFps > 0
-        ? meanDrawFps / meanDeliveredFps
-        : undefined,
+    encodedFps,
+    drawsPerEncodedFrame:
+      meanDrawFps !== undefined && encodedFps > 0 ? meanDrawFps / encodedFps : undefined,
     queueGrowthBytesPerSec: slope(samples.map((s) => ({ x: s.t / 1000, y: s.queueBytes }))),
     peakQueueMb: Math.max(0, ...samples.map((s) => s.queueBytes)) / 1024 / 1024,
     meanLoad1: mean(loads),
     peakLoad1: Math.max(0, ...loads),
     meanCpu: {
-      chrome: mean(samples.map((s) => s.cpu.chrome)),
-      ffmpeg: mean(samples.map((s) => s.cpu.ffmpeg)),
-      self: mean(samples.map((s) => s.cpu.self)),
+      chrome: meanChrome,
+      ffmpeg: meanFfmpeg,
+      // Floored: chrome/ffmpeg and the tree total come from one ps snapshot but are summed
+      // separately, so rounding can put the parts marginally above the whole.
+      cli: Math.max(0, meanPipeline - meanChrome - meanFfmpeg),
+      pipeline: meanPipeline,
+      other: mean(samples.map((s) => s.cpu.other)),
     },
-    contaminated: loads.some((l) => l > QUIET_LOAD_MAX),
+    contaminated: samples.some((s) => s.cpu.other > QUIET_EXTERNAL_CPU_MAX),
   };
 }
 
@@ -143,8 +180,8 @@ export interface PerfProbes {
   emitted: () => number;
   /** `window.__office.stats()` over CDP; undefined when the probe fails or the scene isn't up yet. */
   office: () => Promise<{ ticks: number; draws: number } | undefined>;
-  /** Percent CPU per tree. */
-  cpu: () => Promise<{ chrome: number; ffmpeg: number; self: number }>;
+  /** Percent CPU per tree, plus everything that is not us. @see PerfSample.cpu */
+  cpu: () => Promise<{ chrome: number; ffmpeg: number; pipeline: number; other: number }>;
   /** 1-minute load average. */
   load1: () => number;
   /** Milliseconds since capture start. */
@@ -228,5 +265,20 @@ export function cpuOfTree(psOutput: string, root: number): number {
     for (const k of kids.get(pid) ?? []) walk(k);
   };
   walk(root);
+  return total;
+}
+
+/**
+ * Sum `%CPU` across every process in the same `ps` output.
+ *
+ * Subtracting the capture's own tree from this is what yields "everyone else" — the only signal that
+ * can call a run contaminated without being inflated by the capture itself. @see QUIET_EXTERNAL_CPU_MAX
+ */
+export function cpuTotal(psOutput: string): number {
+  let total = 0;
+  for (const line of psOutput.trim().split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+([\d.]+)/.exec(line);
+    if (m) total += Number(m[3]);
+  }
   return total;
 }
