@@ -16,7 +16,7 @@
  * machine; `stream` runs that same capture on a **rented** one and manages its lifetime. Different
  * failure modes, different preconditions, so a different verb.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import type { Parsed } from '../args.js';
 import {
@@ -163,35 +163,51 @@ function renderCheck(c: Check): string {
  * `-c hosted.fly.toml` is not optional either — `--build-only` still validates an app config, and a
  * fresh app has no machines to infer one from.
  */
-function buildVerb(a: {
+async function buildVerb(a: {
   exec: Exec;
   app: string;
   repoRoot: string | null;
   out: (s: string) => void;
-}): number {
+}): Promise<number> {
   const root = requireRepo(a.repoRoot);
   a.out(theme.meta('building on fly remote builders…') + '\n');
-  const r = spawnSync(
-    'fly',
-    [
-      'deploy',
-      '.',
-      '-a',
-      a.app,
-      '-c',
-      'scripts/broadcast/hosted.fly.toml',
-      '--build-only',
-      '--push',
-      '--remote-only',
-      '--image-label',
-      'capture',
-    ],
-    { cwd: root, encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] },
-  );
-  const stdout = r.stdout ?? '';
-  process.stdout.write(stdout);
-  if (r.status !== 0) throw new CliError('fly build failed — see the output above', 1);
-  const digest = parsePushedDigest(stdout);
+  // BOTH streams are scanned for the digest, and that is not defensive coding — flyctl prints the
+  // `capture@sha256:…` line on stderr, so watching stdout alone found nothing and the guard below
+  // refused every build. (live.sh got this right with `2>&1 | tee /dev/stderr`; porting it, I kept
+  // the tee and lost the redirect.) Streamed through as it arrives rather than captured and dumped,
+  // because a remote build runs for minutes and silence reads as a hang.
+  const combined = await new Promise<{ code: number; text: string }>((resolve) => {
+    const child = spawn(
+      'fly',
+      [
+        'deploy',
+        '.',
+        '-a',
+        a.app,
+        '-c',
+        'scripts/broadcast/hosted.fly.toml',
+        '--build-only',
+        '--push',
+        '--remote-only',
+        '--image-label',
+        'capture',
+      ],
+      { cwd: root, stdio: ['inherit', 'pipe', 'pipe'] },
+    );
+    let text = '';
+    child.stdout?.on('data', (d: Buffer) => {
+      text += d.toString();
+      process.stdout.write(d);
+    });
+    child.stderr?.on('data', (d: Buffer) => {
+      text += d.toString();
+      process.stderr.write(d);
+    });
+    child.on('error', () => resolve({ code: 127, text }));
+    child.on('close', (code) => resolve({ code: code ?? 1, text }));
+  });
+  if (combined.code !== 0) throw new CliError('fly build failed — see the output above', 1);
+  const digest = parsePushedDigest(combined.text);
   if (!digest) {
     throw new CliError(
       'the build succeeded but no digest appeared in its output — refusing to record a tag ' +
