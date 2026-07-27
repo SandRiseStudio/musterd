@@ -458,6 +458,8 @@ export const claudeCode: Harness = {
     const modelMatch = got.ok ? /MUSTERD_MODEL=(\S+)/.exec(got.out) : null;
     const grantMatch = got.ok ? /MUSTERD_GRANT=(\S+)/.exec(got.out) : null;
     const agentKeyMatch = got.ok ? /MUSTERD_AGENT_KEY=(\S+)/.exec(got.out) : null;
+    const autojoinMatch = got.ok ? /MUSTERD_AUTOJOIN=(\S+)/.exec(got.out) : null;
+    const driverMatch = got.ok ? /MUSTERD_DRIVER=(\S+)/.exec(got.out) : null;
     const argsMatch = got.ok ? /^\s*Args:\s*(.+)$/m.exec(got.out) : null;
     return {
       installed: true,
@@ -467,6 +469,8 @@ export const claudeCode: Harness = {
       ...(modelMatch ? { registeredModel: modelMatch[1] } : {}),
       ...(grantMatch ? { registeredGrant: grantMatch[1] } : {}),
       ...(agentKeyMatch ? { registeredAgentKey: agentKeyMatch[1] } : {}),
+      ...(autojoinMatch ? { registeredAutojoin: autojoinMatch[1] } : {}),
+      ...(driverMatch ? { registeredDriver: driverMatch[1] } : {}),
       ...(argsMatch?.[1] ? { registeredArgs: argsMatch[1].trim().split(/\s+/) } : {}),
     };
   },

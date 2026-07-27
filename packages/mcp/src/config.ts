@@ -41,8 +41,13 @@ export interface McpConfig {
   provenance: Provenance;
   /** The gracefully-degrading "where" label, resolved once at load. */
   workspace: string;
-  /** The human driving this session, if one is (driver co-presence, ADR 021). */
+  /** The human driving this session, if one is (driver co-presence, ADR 021). Env > binding.json
+   *  (ADR 165 inc 2) — per-worktree state, never the repo-root-shared harness entry. */
   driver?: string | undefined;
+  /** Join-on-launch (ADR 032/165): should a session with a concrete identity `join()` immediately?
+   *  `MUSTERD_AUTOJOIN` env wins ('1' on, anything else off — an explicit off must beat the binding),
+   *  else `binding.autojoin`, else false (dormant until an explicit join). */
+  autojoin: boolean;
   /** Harness-attested model id for this occupancy (ADR 101). Attested, never verified; absent ⇒
    *  the server renders `unknown` and never blocks. */
   model?: string | undefined;
@@ -157,7 +162,13 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     surface,
     provenance: resolveProvenance(env),
     workspace,
-    driver: resolveDriver(env),
+    // Per-worktree fields moved out of the shared harness entry (ADR 165 inc 2): env stays the
+    // manual override (headless/CI), the binding is what provisioning writes.
+    driver: resolveDriver(env) ?? binding?.driver,
+    autojoin:
+      env['MUSTERD_AUTOJOIN'] !== undefined
+        ? env['MUSTERD_AUTOJOIN'] === '1'
+        : (binding?.autojoin ?? false),
     // Never from the committed spec (a model is a per-machine choice, not shared). Absent ⇒ `unknown`.
     model: attestation.model,
     modelSource: attestation.source,

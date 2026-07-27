@@ -66,7 +66,8 @@ stops: its per-claimant store is harness-specific, this one's (`binding.json`) i
    the regression test binds. `MUSTERD_GRANT` outlived `MUSTERD_CLAIM`'s removal precisely because no
    single place recorded the rule.
 2. **`musterd agent` drops `MUSTERD_SURFACE` too** (it is in `binding.json`). `MUSTERD_AUTOJOIN` and
-   `MUSTERD_DRIVER` stay — deliberately, as increment 2's recorded gap (below).
+   `MUSTERD_DRIVER` stayed at ship time — deliberately, as increment 2's recorded gap (below, since
+   closed).
 3. **The doctor flags a baked secret on PRESENCE, not on mismatch.** The old grant check fired only
    on mismatch, which missed the common case: the entry is shared, so a grant matching _this_ folder
    is still the credential every sibling reads. `MUSTERD_AGENT_KEY` is now read back and flagged the
@@ -99,13 +100,30 @@ re-implemented the grant comparison inline, and the `agent_key` half never ran a
 removes the function and replaces the comparison with presence-flagging; the stale claim in ADR 158
 is annotated in place.
 
-### Deferred: increment 2 (`MUSTERD_AUTOJOIN` / `MUSTERD_DRIVER`)
+### Increment 2 (`MUSTERD_AUTOJOIN` / `MUSTERD_DRIVER`) — closed 2026-07-27
 
-Both are still baked by `musterd agent` into the shared slot and read only from `process.env`. So
-`musterd agent X --driver nick` currently marks **every** worktree in the family as driven by nick —
-corrupting ADR 155 driver co-presence — and forces autojoin family-wide against the tools-only
-default that `wire` documents. Fixing needs new `Binding` fields plus an adapter fallback; that is
-its own lane, recorded here so the gap is a decision rather than an oversight.
+Deferred at ship time: both were still baked by `musterd agent` into the shared slot and read only
+from `process.env`, so `musterd agent X --driver nick` marked **every** worktree in the family as
+driven by nick — corrupting ADR 155 driver co-presence — and forced autojoin family-wide against the
+tools-only default that `wire` documents.
+
+Closed by lane `01KYJN5BR76SJYHM0KNJ449A33` (izzo), following the sketch above:
+
+- `Binding` gains per-machine `autojoin?: boolean` and `driver?: string` — like `model`/`session`,
+  kept out of the committed `workspace.json` (a shared repo cloned by many must never have every
+  clone auto-claim, and a driver is a per-machine fact).
+- The adapter resolves both on the standard ladder (`MUSTERD_AUTOJOIN`/`MUSTERD_DRIVER` env >
+  `binding.json`, default off). Both names remain supported **manual** overrides for headless/CI,
+  exactly as decision 1 kept the other five; an explicit env value beats the binding in both
+  directions (`MUSTERD_AUTOJOIN=0` turns a provisioned-on worktree off).
+- `musterd agent` writes `autojoin: true` (+ `driver` under `--driver`) into the target worktree's
+  binding; `wire --autojoin` writes `binding.autojoin`, and a re-wire carries `autojoin`/`driver`
+  forward like `model`; `init`'s prompt lands in the binding. **No writer materializes either env
+  name**, so the shared entry is fully empty for every provisioning path and the `sharedEntry`
+  regression covers the `agent` path too.
+- The doctor flags a baked `MUSTERD_AUTOJOIN`/`MUSTERD_DRIVER` **on presence** as `wire`-repairable
+  entry drift, same as the secrets — pre-existing entries do not fix themselves (the live family
+  entry carried `MUSTERD_AUTOJOIN=1` at this increment's ship time) and now get named on sight.
 
 ## Consequences
 
@@ -123,7 +141,8 @@ its own lane, recorded here so the gap is a decision rather than an oversight.
   so running MCP servers keep their old env until relaunched (the ADR 143 recovery step, unchanged).
 - **The scope string stops lying.** `configure` used to claim "wired into this folder only" — the
   exact false belief ADR 143 documents. It now states the family-shared reality.
-- **Increment 2's gap is live until its lane runs** (driver/autojoin family-bleed, above).
+- **Increment 2's gap is closed** (driver/autojoin family-bleed, above) — but like the secrets,
+  entries baked before it persist until a `wire`/`init` rewrite; the doctor flags them on presence.
 
 ## Observability & Evaluation
 

@@ -249,6 +249,26 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
           `secrets, and because the entry is shared, one run repairs every seat in the family.`,
       );
     }
+    // Per-worktree POLICY in the shared slot (ADR 165 inc 2) — not secrets, but the same family-bleed
+    // shape: a baked autojoin forces join-on-launch for every sibling worktree, and a baked driver
+    // marks the whole family as driven by one human (corrupting ADR 155 driver co-presence).
+    // Provisioning now writes both to .musterd/binding.json instead; flagged on presence.
+    if (d.registeredAutojoin !== undefined) {
+      entryDrift.push(
+        `${h.label}'s musterd server bakes MUSTERD_AUTOJOIN=${d.registeredAutojoin} — join-on-launch ` +
+          `policy in an entry every worktree of this repo shares, so it applies family-wide instead of ` +
+          `per seat. Provisioning now records it in .musterd/binding.json; run \`musterd wire\` here to ` +
+          `rewrite the entry without it (one run repairs the family).`,
+      );
+    }
+    if (d.registeredDriver !== undefined) {
+      entryDrift.push(
+        `${h.label}'s musterd server bakes MUSTERD_DRIVER=${d.registeredDriver} — a driver in the ` +
+          `repo-root-shared entry marks EVERY sibling worktree as driven by ${d.registeredDriver}, ` +
+          `corrupting driver co-presence (ADR 155). Provisioning now records the driver in ` +
+          `.musterd/binding.json; run \`musterd wire\` here to rewrite the entry without it.`,
+      );
+    }
     // An adapter inside a sibling seat's workspace: a note, not a refusal — identity comes from cwd,
     // so what this costs is running another checkout's build and breaking if that folder moves.
     if (d.registeredArgs !== undefined) {

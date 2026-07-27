@@ -435,10 +435,14 @@ describe('runInit — add-agent happy path', () => {
     expect(h.harness.configure).toHaveBeenCalled();
     // primer written to AGENTS.md in the (temp) cwd
     expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).toContain('## Your musterd team');
-    // autojoin baked into the env passed to configure
+    // autojoin/driver go into binding.json, never the repo-root-shared entry (ADR 165 inc 2)
     const entry = h.harness.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env['MUSTERD_AUTOJOIN']).toBe('1');
-    expect(entry.env['MUSTERD_DRIVER']).toBe('nick');
+    expect(entry.env['MUSTERD_AUTOJOIN']).toBeUndefined();
+    expect(entry.env['MUSTERD_DRIVER']).toBeUndefined();
+    const { saveBinding } = await import('../config.js');
+    const binding = vi.mocked(saveBinding).mock.calls[0]![1] as Record<string, unknown>;
+    expect(binding['autojoin']).toBe(true);
+    expect(binding['driver']).toBe('nick');
   });
 
   it('declining the connect step prints manual setup and exits 0', async () => {

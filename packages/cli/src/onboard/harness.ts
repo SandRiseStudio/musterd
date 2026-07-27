@@ -36,6 +36,18 @@ export interface DetectResult {
    * its grant. Provisioning no longer emits it (ADR 165).
    */
   registeredAgentKey?: string;
+  /**
+   * The `MUSTERD_AUTOJOIN` baked into the registered server, if readable. Provisioning no longer
+   * emits it (ADR 165 inc 2): join-on-launch is per-worktree policy (`binding.autojoin`), so a baked
+   * value forces the whole worktree family on (or off) at once. Drift on presence.
+   */
+  registeredAutojoin?: string;
+  /**
+   * The `MUSTERD_DRIVER` baked into the registered server, if readable. Provisioning no longer emits
+   * it (ADR 165 inc 2): a driver in the shared slot marks EVERY sibling worktree as driven by that
+   * human, corrupting ADR 155 driver co-presence. Drift on presence.
+   */
+  registeredDriver?: string;
   /** The registered launch args, so the doctor can spot an adapter inside another seat's workspace. */
   registeredArgs?: string[];
 }

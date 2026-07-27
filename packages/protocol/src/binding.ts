@@ -110,6 +110,18 @@ export const BindingSchema = WorkspaceSpecSchema.extend({
    *  above at attestation time, because a declaration is a snapshot and snapshots rot. Hook-written
    *  and per-machine like `session`, so kept out of `workspace.json`. */
   model_observed: ModelObservationSchema.optional(),
+  /** Join-on-launch for THIS worktree (ADR 165 increment 2). Written by `musterd agent` (always) and
+   *  `musterd wire --autojoin`; read by the adapter under the `MUSTERD_AUTOJOIN` env override. Lives
+   *  here rather than the harness MCP entry because that entry is keyed by repo root and shared by
+   *  every sibling worktree — a slot that may carry only what is identical across all of them.
+   *  Per-workspace policy, so kept out of the committed `workspace.json` (a shared repo cloned by
+   *  many must never have every clone auto-claim). Absent ⇒ dormant until an explicit join. */
+  autojoin: z.boolean().optional(),
+  /** The human steering this worktree's sessions (driver co-presence, ADR 021/155), written by
+   *  `musterd agent --driver`. Same shared-slot argument as `autojoin`: baked into the entry it marked
+   *  the WHOLE family as driven. Per-machine, kept out of `workspace.json`; `MUSTERD_DRIVER` env stays
+   *  the manual override above it. */
+  driver: z.string().min(1).max(80).optional(),
 });
 
 export type Binding = z.infer<typeof BindingSchema>;
