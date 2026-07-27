@@ -58,6 +58,28 @@ interleaved rather than trusting a single capture.
 being painted roughly twice for every frame that reaches the encoder, and the plan's candidate #1 is
 live. If it does not hold, candidate #1 is dead and the next lever is 720p.
 
+## Rented hardware (Increment 0 run D — Fly `performance-4x`, sjc, 2026-07-27)
+
+Full context and verdict in the hosting spec
+(`docs/superpowers/specs/2026-07-26-broadcast-hosting-design.md`). Method: the same harness against
+a 6-seat synthetic fixture (`scripts/perf/broadcast-bench-fixture.sh`), daemon local to the box, all
+runs quiet.
+
+| Config | delivered fps | draw fps | encoded | queue growth | chrome % | ffmpeg % | pipeline % |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| fly 1080p30 libx264 | 10.2 | 19.2 | 30.0 | 0.5 KB/s | 177.4 | 80.7 | 267.9 |
+| fly 1080p30 repeat | 10.6 | 20.8 | 30.0 | −1.1 KB/s | — | — | — |
+| fly 1080p30 `--disable-gpu` | 10.3 | 20.2 | 30.0 | −0.3 KB/s | 186.5 | 85.4 | 282.1 |
+
+Readings: `libx264` on a dedicated x86 core is ~0.85 core with a flat queue (fine); the compositor
+holds ~20 Hz, not 60, because one Chrome thread pegs a core while three idle (fatal — delivery is
+~10 fps padded to 30 with duplicates). Single-thread speed, not cores, is the capture's real
+requirement; more/bigger cloud does not help, and `--disable-gpu` moves nothing.
+
+(The Air's own opportunistic `libx264` arm was contaminated — other processes 266% — and is recorded
+only directionally: ffmpeg ~102%, queue +502 KB/s, delivered 22.4. The Air cannot software-encode
+1080p30 either.)
+
 ## Hypotheses already measured and rejected
 
 Recorded so nobody re-chases them. Three died before this harness existed, two of them after being

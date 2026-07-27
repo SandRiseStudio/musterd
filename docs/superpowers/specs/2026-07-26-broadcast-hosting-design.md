@@ -180,6 +180,52 @@ is oversized.
 cannot compare configurations across separate runs. Four runs of an *identical* config gave
 971 / 861 / 644 / 637 — the count tracks how much the room happened to animate, not the config.
 
+### Run D happened — and the box fails on the render, not the encode (amended 2026-07-27)
+
+One hour of Fly `performance-4x` (4 dedicated x86 cores, 8 GB, sjc) answered both remaining
+questions, one of them in a direction that changes the plan. Three 45–60s captures against a
+6-seat synthetic fixture (`scripts/perf/broadcast-bench-fixture.sh`), all quiet, all agreeing:
+
+| run | delivered fps | draw fps | encoded | queue growth | chrome % | ffmpeg % |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1080p30 | 10.2 | 19.2 | 30.0 | 0.5 KB/s | 177.4 | 80.7 |
+| 1080p30 repeat | 10.6 | 20.8 | 30.0 | −1.1 KB/s | — | — |
+| 1080p30 + `--disable-gpu` | 10.3 | 20.2 | 30.0 | −0.3 KB/s | 186.5 | 85.4 |
+
+- **Q1 (libx264 cost): answered, and it is fine.** ~0.85 of a core at 1080p30 with a flat queue.
+  Software encode was never going to be the problem on a dedicated core.
+- **Q2 (compositor Hz): answered, and it kills this machine class.** The compositor composites at
+  ~20 Hz, not 60 — the canvas draws 19–21 fps, screencast delivery lands at ~10 fps, and the pump
+  pads to a nominal 30 with duplicates. The stream would encode "30fps" of ~10 fps content.
+- **The bottleneck is one pegged core.** During capture one Chrome thread sits at 99.9% while three
+  cores idle; `--disable-gpu` (software compositor instead of SwiftShader GL) moves nothing. The
+  office render + composite + JPEG path is serial, and a Fly/EPYC core is ~3× too slow for it where
+  the M3 is not. **Renting more cores cannot fix a serial bottleneck** — a bigger Fly box buys
+  nothing.
+- The Air's own `libx264` arm (run B, taken opportunistically, contaminated but directional): ffmpeg
+  ~102%, queue +502 KB/s, delivered 22.4 — the Air can't do software encode either, which no longer
+  matters given the above.
+
+**Consequence: "rent a small Linux VM" is dead as specified.** The capture's real requirement was
+never cores or RAM — it is single-thread speed (or a GPU) for the render. The surviving options,
+none of which this increment decides:
+
+1. **Stay on the Air** — the only measured configuration that holds 1080p30. The RAM/thermal
+   concerns in _Problem_ stand, but they are now the cheapest problem on the table.
+2. **A GPU or high-clock cloud box** — changes the cost class the spec was written to avoid
+   (hours of GPU rental, or the few providers selling >4 GHz dedicated cores).
+3. **Shrink the render** — 720p halves the pixel work but needs the capture contract changed
+   (the 1920×1080 window is pinned by Inc 1 of ADR 157), and quality on stream is the product.
+4. **Hetzner CAX (run C)** — still unrun, but ARM server cores are slower single-thread than EPYC;
+   nothing in these numbers suggests it passes. Only worth the hour if someone wants the coffin nail.
+
+The rig survives for whoever measures next: `scripts/perf/broadcast-bench.Dockerfile` +
+`broadcast-bench.fly.toml` (deploy-by-hand measurement box) and
+`broadcast-bench-fixture.sh` (synthetic animated team). Total spend for the hour: well under a
+dollar. The one code change it forced is real and keeps: Chrome on any containerised Linux needs
+`--no-sandbox --disable-dev-shm-usage` (and a `/usr/bin/chromium` default), or it cannot start at
+all — the spec's "no code change required" row was wrong in the way only running it finds.
+
 ## Increment 1 — provision
 
 Only after Increment 0's remaining questions are answered. Pick the box from the passing candidates,

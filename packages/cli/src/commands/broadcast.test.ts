@@ -22,6 +22,7 @@ import {
   writeRunState,
   type RunState,
   chromeArgs,
+  chromeDefault,
   ffmpegArgs,
   killGroup,
   makeFramePump,
@@ -300,6 +301,27 @@ describe('chromeArgs', () => {
     expect(args).toContain('--window-size=1920,1080');
     expect(args).toContain('--force-device-scale-factor=1');
     expect(args).toContain('--remote-debugging-port=9333');
+  });
+
+  it('adds the container flags off darwin, and never on it', () => {
+    const linux = chromeArgs(9333, '/tmp/profile', 'linux');
+    expect(linux).toContain('--no-sandbox');
+    expect(linux).toContain('--disable-dev-shm-usage');
+
+    const darwin = chromeArgs(9333, '/tmp/profile', 'darwin');
+    expect(darwin).not.toContain('--no-sandbox');
+    expect(darwin).not.toContain('--disable-dev-shm-usage');
+  });
+
+  it('keeps about:blank last so the flags are never read as a URL', () => {
+    expect(chromeArgs(9333, '/tmp/profile', 'linux').at(-1)).toBe('about:blank');
+  });
+});
+
+describe('chromeDefault', () => {
+  it('points at Chromium off darwin — the macOS .app path does not exist there', () => {
+    expect(chromeDefault('darwin')).toMatch(/Google Chrome/);
+    expect(chromeDefault('linux')).toBe('/usr/bin/chromium');
   });
 });
 

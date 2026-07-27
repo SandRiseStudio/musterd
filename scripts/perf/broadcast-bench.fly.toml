@@ -1,0 +1,20 @@
+# Increment 0 run D — the measurement box. Deployed by hand, destroyed after the numbers are taken:
+#
+#   fly deploy -c scripts/perf/broadcast-bench.fly.toml --remote-only
+#   fly ssh console -a musterd-bench
+#   … measure …
+#   fly apps destroy musterd-bench
+#
+# No services: nothing listens for the outside world, the box exists to be ssh'd into. auto_stop is
+# irrelevant for the same reason — its lifetime is the session's.
+app = "musterd-bench"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "broadcast-bench.Dockerfile"
+
+[[vm]]
+  size = "performance-4x"
+
+[[restart]]
+  policy = "never"
