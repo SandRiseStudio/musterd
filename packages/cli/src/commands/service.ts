@@ -33,6 +33,7 @@ import {
   kickstartArgs,
   LIVE_LABEL,
   LIVE_SYNC_LABEL,
+  SWEEP_LABEL,
   agentFailureNote,
   parsePlistProgramArguments,
   SERVICE_LABEL,
@@ -60,6 +61,16 @@ import {
   type Runner,
   type ServiceCtx,
 } from '../service/manage.js';
+import {
+  DEFAULT_SWEEP_INTERVAL,
+  installSweep,
+  refreshSweep,
+  startSweep,
+  statusSweep,
+  stopSweep,
+  uninstallSweep,
+  type SweepCtx,
+} from '../service/sweep.js';
 
 /** Shell out to `launchctl` synchronously, capturing output and never throwing on a non-zero exit. */
 const spawnRunner: Runner = (cmd, args): RunResult => {
@@ -135,7 +146,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto] [--port <n>] [--host <h>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep] [--port <n>] [--host <h>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -207,6 +218,36 @@ function parseAutoRefreshMode(parsed: Parsed): AutoRefreshMode {
  *  /live publisher's `.published-sha`). Cleared once the daemon actually reaches that tip. */
 function autoRefreshStampPath(): string {
   return join(dirname(configPath()), 'autorefresh', '.attempted-sha');
+}
+
+/**
+ * Resolve the ADR 166 liveness sweep from the running process. The plist runs the research script
+ * out of the CHECKOUT this CLI was launched from — deliberately the daemon's own checkout on a
+ * dogfood machine, because the auto-refresher already keeps that one built and the sweep imports
+ * `packages/cli/dist`: running anywhere else would measure with an artifact production is not
+ * using. `--interval` (bare seconds) is baked at install, like the other interval agents.
+ */
+function resolveSweepCtx(run: Runner, parsed: Parsed): SweepCtx {
+  const binJs = resolvePath(process.argv[1] ?? '');
+  const home = dirname(configPath()); // ~/.musterd
+  const checkout = resolvePath(binJs, '../../../..');
+  const interval = flagStr(parsed.flags, 'interval');
+  return {
+    uid: typeof process.getuid === 'function' ? process.getuid() : '',
+    label: SWEEP_LABEL,
+    plistPath: join(homedir(), 'Library', 'LaunchAgents', `${SWEEP_LABEL}.plist`),
+    node: agentNode(),
+    scriptPath: join(checkout, 'scripts', 'research', 'adr-166-slot-sweep.ts'),
+    // Clean runs stay silent so the log holds findings only; a demoted case always speaks.
+    scriptArgs: ['--quiet'],
+    workingDir: checkout,
+    logPath: join(home, 'research', 'sweep.log'),
+    errLogPath: join(home, 'research', 'sweep.log'),
+    // The sweep shells out to nothing — node alone is enough, plus the usual dirs for safety.
+    path: [dirname(process.execPath), '/opt/homebrew/bin', '/usr/bin', '/bin'].join(':'),
+    intervalSeconds: interval ? Number(interval) : DEFAULT_SWEEP_INTERVAL,
+    run,
+  };
 }
 
 /**
@@ -423,6 +464,7 @@ export async function serviceCommand(
     liveCtx?: LiveCtx;
     wakeCtx?: WakeHostCtx;
     autoRefreshCtx?: AutoRefreshCtx;
+    sweepCtx?: SweepCtx;
     health?: () => Promise<DaemonHealth>;
     /** Probe whether the daemon serves /live (injected so tests skip the network). */
     probeViewer?: (url: string) => Promise<boolean>;
@@ -494,6 +536,14 @@ export async function serviceCommand(
     }
     const arCtx = deps.autoRefreshCtx ?? resolveAutoRefreshCtx(ctx.run, parsed);
     return autoRefreshServiceCommand(sub, arCtx, parsed, ok, fail);
+  }
+
+  // `--sweep` targets the ADR 166 liveness sweep. Same posture as `--live`/`--auto`: read-only, no
+  // server, no teammate session dropped, so no live-session guard and no ABI guard (it loads the
+  // CLI's JS, not its native modules).
+  if (parsed.flags['sweep'] === true) {
+    const sweepCtx = deps.sweepCtx ?? resolveSweepCtx(ctx.run, parsed);
+    return sweepServiceCommand(sub, sweepCtx, parsed, ok, fail);
   }
 
   switch (sub) {
@@ -878,6 +928,107 @@ async function autoRefreshServiceCommand(
         process.stdout.write(theme.meta(`── ${ctx.logPath} ──`) + '\n');
         process.stdout.write(
           (lines.length ? lines.join('\n') : '(no auto-refresh runs yet)') + '\n',
+        );
+        return 0;
+      }
+      return new Promise<number>((resolveP) => {
+        const child = spawn('tail', ['-f', ctx.logPath], { stdio: 'inherit' });
+        const stopFollow = () => {
+          child.kill();
+          resolveP(0);
+        };
+        process.on('SIGINT', stopFollow);
+        child.on('error', () => resolveP(0));
+        child.on('exit', () => resolveP(0));
+      });
+    }
+    default:
+      throw new CliError(USAGE, 2);
+  }
+}
+
+/**
+ * `musterd service <verb> --sweep` — manage the ADR 166 liveness sweep: a `StartInterval` agent
+ * that runs the fleet sweep and appends one JSONL row per run. It is the only thing watching
+ * `demoted` after increment 2's flip, so leaving it unscheduled left the guardrail unobserved.
+ * Read-only and bounce-safe: nothing long-lived is stopped, no seat or lane is touched.
+ */
+async function sweepServiceCommand(
+  sub: string,
+  ctx: SweepCtx,
+  parsed: Parsed,
+  ok: (s: string) => void,
+  fail: (step: string, r: RunResult) => never,
+): Promise<number> {
+  const meta = (s: string) => process.stdout.write(theme.meta(s) + '\n');
+  switch (sub) {
+    case 'install': {
+      if (!existsSync(ctx.scriptPath))
+        throw new CliError(
+          `refusing to install: the sweep script is not at ${ctx.scriptPath}. ` +
+            `The agent runs it out of the checkout this CLI was launched from — run \`musterd service ` +
+            `install --sweep\` from a full checkout, not a published package.`,
+          2,
+        );
+      const res = installSweep(ctx);
+      if (res.status !== 0) fail('liveness sweep (bootstrap)', res);
+      ok(`installed + started the ADR 166 liveness sweep (${theme.accent(ctx.label)})`);
+      meta(`  runs:    ${ctx.scriptPath} ${ctx.scriptArgs.join(' ')}`);
+      meta(
+        `  cadence: on load + every ${ctx.intervalSeconds}s ` +
+          `(a demotion persists ≥600s, so ≤600s cannot miss one)`,
+      );
+      meta(`  reports: a demoted workspace shows in \`musterd report\`; a repeat fires an OS push`);
+      meta(`  logs:    ${ctx.logPath} (findings only — a clean run is silent)`);
+      return 0;
+    }
+    case 'uninstall': {
+      const res = uninstallSweep(ctx);
+      ok(
+        res.removedPlist
+          ? 'stopped + removed the liveness sweep (the JSONL series is kept)'
+          : 'liveness sweep was not installed — nothing to remove',
+      );
+      return 0;
+    }
+    case 'start': {
+      const r = startSweep(ctx);
+      if (r.status !== 0) fail('start (liveness sweep)', r);
+      ok('started the liveness sweep');
+      return 0;
+    }
+    case 'stop': {
+      stopSweep(ctx);
+      ok('stopped the liveness sweep');
+      return 0;
+    }
+    case 'restart': {
+      const r = refreshSweep(ctx);
+      if (r.status !== 0) fail('restart (liveness sweep)', r);
+      ok('restarted the liveness sweep (a sweep runs now)');
+      return 0;
+    }
+    case 'status': {
+      const st = statusSweep(ctx);
+      ok(
+        `liveness sweep: ${st.loaded ? theme.ok(st.state ?? 'loaded') : theme.warn('not installed')}`,
+      );
+      const dead = agentFailureNote(st, agentProgramExists(ctx.plistPath));
+      if (dead) process.stdout.write(`  ${theme.err('✗')} ${dead}\n`);
+      meta(`  runs:  ${ctx.scriptPath} every ${ctx.intervalSeconds}s`);
+      meta(`  logs:  ${ctx.logPath}`);
+      return 0;
+    }
+    case 'logs': {
+      const follow = parsed.flags['follow'] === true || parsed.positionals.includes('-f');
+      const lines = tailFile(ctx.logPath, 40);
+      if (!follow) {
+        process.stdout.write(theme.meta(`── ${ctx.logPath} ──`) + '\n');
+        // "No findings" is the healthy state here, unlike the other agents' logs — say so, rather
+        // than leaving an empty tail to read as "the agent never ran".
+        process.stdout.write(
+          (lines.length ? lines.join('\n') : '(no findings logged — a clean sweep is silent)') +
+            '\n',
         );
         return 0;
       }

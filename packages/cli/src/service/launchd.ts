@@ -43,6 +43,16 @@ export const HOST_LABEL = 'studio.sandrise.musterd-host';
  */
 export const AUTOREFRESH_LABEL = 'studio.sandrise.musterd-autorefresh';
 
+/**
+ * The ADR 166 liveness sweep: a `StartInterval` agent that runs
+ * `scripts/research/adr-166-slot-sweep.ts` over the binding registry and appends one JSONL row per
+ * run. It exists because the flip (increment 2) left `demoted` — enumeration wrongly judging a live
+ * seat not-live — watched by nothing but a script a human had to remember to type. Read-only: no
+ * seat, no daemon, no lane, which is why it is safe on a timer at all. `service … --sweep` targets
+ * it.
+ */
+export const SWEEP_LABEL = 'studio.sandrise.musterd-sweep';
+
 /** Is process lifecycle management implemented for this platform yet? */
 export function serviceSupported(platform: NodeJS.Platform): boolean {
   return platform === 'darwin';
@@ -244,6 +254,39 @@ export function buildAutoRefreshPlist(
   return renderPlist({
     label: o.label,
     programArguments: [o.node, o.binJs, 'service', ...o.refreshArgs],
+    workingDir: o.workingDir,
+    stdoutPath: o.stdoutPath,
+    stderrPath: o.stderrPath,
+    path: o.path,
+    runAtLoad: true,
+    startInterval: o.intervalSeconds,
+  });
+}
+
+/**
+ * The ADR 166 liveness-sweep plist. Like the auto-refresher it is `StartInterval`, not KeepAlive —
+ * one pass over the registry (~1s, read-only) and exit. Unlike it, the program is the research
+ * script itself rather than a CLI verb: ADR 166 names that script as the primary instrument, and
+ * running exactly the thing the ADR points at is what keeps the prose true. `scriptArgs` carries
+ * `['--quiet']` so a clean run logs nothing and the log holds findings only.
+ */
+export function buildSweepPlist(
+  o: Omit<PlistOpts, 'serveArgs' | 'binJs'> & {
+    /** Absolute path to `scripts/research/adr-166-slot-sweep.ts`. */
+    scriptPath: string;
+    scriptArgs: string[];
+    intervalSeconds: number;
+  },
+): string {
+  return renderPlist({
+    label: o.label,
+    // Type-stripping the .ts source needs the flag on Node 22; harmless on 24+.
+    programArguments: [
+      o.node,
+      '--disable-warning=ExperimentalWarning',
+      o.scriptPath,
+      ...o.scriptArgs,
+    ],
     workingDir: o.workingDir,
     stdoutPath: o.stdoutPath,
     stderrPath: o.stderrPath,

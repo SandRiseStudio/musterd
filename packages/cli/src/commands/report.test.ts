@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { makeEnvelope } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { ulid } from 'ulid';
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig } from '../config.js';
+import { sweepSeriesPath } from '../session/sweep-series.js';
 import { goalCommand } from './goal.js';
 import { reportCommand } from './report.js';
 import { teamCommand } from './team.js';
@@ -37,6 +38,13 @@ describe('report command', () => {
     delete process.env['MUSTERD_SERVER'];
     delete process.env['MUSTERD_CONFIG'];
   });
+
+  /** Write the ADR 166 sweep series where `report` reads it (under this test's MUSTERD_CONFIG). */
+  function writeSweep(rows: Record<string, unknown>[]): void {
+    const path = sweepSeriesPath();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+  }
 
   async function capture(fn: () => Promise<number>): Promise<{ code: number; out: string }> {
     const chunks: string[] = [];
@@ -73,6 +81,39 @@ describe('report command', () => {
     expect(res.out).toContain('milestones');
     expect(res.out).toContain('exceptions');
     expect(res.out).toContain('none — on track');
+  });
+
+  it('says nothing about liveness when the sweep has never run or found nothing', async () => {
+    // Silence at zero is the design: ADR 166's target for this metric is zero, and a line printed
+    // on every report stops reading as an exception.
+    const clean = await capture(() => reportCommand(parseArgs([])));
+    expect(clean.out).not.toContain('liveness');
+    writeSweep([{ at: Date.now(), demoted: 0, workspaces: [] }]);
+    const still = await capture(() => reportCommand(parseArgs([])));
+    expect(still.out).not.toContain('liveness');
+  });
+
+  it('surfaces a demoted workspace on both team and exec, and marks a confirmed repeat', async () => {
+    writeSweep([
+      { at: Date.now() - 600_000, demoted: 1, workspaces: [{ workspace: '/w/a', demoted: true }] },
+      {
+        at: Date.now(),
+        demoted: 2,
+        workspaces: [
+          { workspace: '/w/a', demoted: true },
+          { workspace: '/w/b', demoted: true },
+        ],
+      },
+    ]);
+    const team = await capture(() => reportCommand(parseArgs([])));
+    expect(team.out).toContain('liveness-demoted (confirmed)');
+    expect(team.out).toContain('repeat  /w/a');
+    expect(team.out).toContain('first  /w/b');
+
+    const exec = await capture(() => reportCommand(parseArgs(['--altitude', 'exec'])));
+    expect(exec.out).toContain('liveness-demoted');
+    // It is an exception, so the all-clear must not also print.
+    expect(exec.out).not.toContain('none — on track');
   });
 
   it('--json emits the raw report', async () => {

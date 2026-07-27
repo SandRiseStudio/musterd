@@ -50,6 +50,7 @@ src/
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
     liveness.ts       // localSessionLiveness(workspace): binding.session + transcript stat → none|live|resumable|gc-expired; shared by the host's local-session guard and `session show`; also carries the ADR 166 inc-1 SHADOW judgement (computed, never acted on)
     enumerate.ts      // ADR 166: ask the harness what sessions it HAS — scans ~/.claude/projects and attributes each transcript by its RECORDED cwd walked up to a workspace (never by decoding the directory name, an inconsistent encoding); undefined = "cannot tell" (never laundered into "none")
+    sweep-series.ts   // ADR 166 follow-through: the one path + row shape for the slot-sweep's append-only JSONL, plus the repeat gate (a workspace demoted by two consecutive runs) read by `report` and by the sweep itself
     transcript-model.ts // readModelFromTranscript(path): the ONLY module that knows a harness transcript's on-disk shape — newest assistant turn's model, bounded tail, never throws (ADR 158)
   service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)
     launchd.ts        // pure: plist generation (daemon + /live + wake-actuator agents) + launchctl argv builders + status parsing (platform seam)
@@ -57,6 +58,7 @@ src/
     live.ts           // `service --live`: the /live web-viewer bundle — generate scripts + 2 plists, worktree, bootstrap both agents (ADR 124)
     host.ts           // `service --wake`: the wake actuator (`musterd host`) as a KeepAlive LaunchAgent — residency survives reboots (ADR 131 inc 5)
     autorefresh.ts    // `service --auto`: the daemon auto-refresher as a StartInterval LaunchAgent — runs `refresh --auto` on a poll (ADR 152)
+    sweep.ts          // `service --sweep`: the ADR 166 liveness sweep as a StartInterval LaunchAgent — read-only, every 5 min (≤ the 10-min window a demotion persists for, so it cannot miss one)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
     doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server drift detector, read-only (ADR 060); baked entry secrets flagged on PRESENCE, report.repair routes --fix to `wire` (entry drift, headless, repairs the repo-root-shared family) vs full init (ADR 165)

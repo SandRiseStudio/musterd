@@ -190,7 +190,14 @@ as written would have stalled the increment **silently** — an instrument that 
 working while producing nothing, which is this ADR family's recurring failure.
 
 The primary instrument is therefore a **fleet sweep** (`scripts/research/adr-166-slot-sweep.ts`):
-every workspace in the binding registry, both judgements, on a schedule. It is a **proxy and is
+every workspace in the binding registry, both judgements, on a schedule — `musterd service install
+--sweep`, a read-only `StartInterval` LaunchAgent, every 5 minutes. **The cadence is derived, not
+chosen.** A `demoted` case persists for at least `LOCAL_SESSION_LIVE_MS` (10 minutes) from the last
+touch of the slot's transcript, so any interval ≤10 minutes cannot miss an instance; sampling slower
+would leave "target: zero" unfalsifiable rather than merely unproven. A cloud routine — the shape
+`docs/design/research-radar-plan.md` chose for its own sweep, to survive the machine being off —
+cannot be used here: this sweep reads the local binding registry and the local harness transcripts,
+so it must run where they are. It is a **proxy and is
 labelled as one** — it measures how often the slot is wrong _at rest_, while the cost lands at wake
 time. The proxy is tight because the guard calls exactly this function, but it cannot say whether
 wakes _correlate_ with phantoms, so it bounds the error rate the guard is exposed to, not the rate at
@@ -223,6 +230,16 @@ session for a workspace that had one).
    **zero** such cases surviving the flip.
 3. _Does enumeration ever demote a live seat?_ The inverse error, and the one that would make this
    worse than what it replaces. Target: **zero**; any instance blocks the flip.
+
+**What a finding does.** A metric whose target is zero needs no dashboard — it needs an exception
+that reaches someone. So: every run appends to `~/.musterd/research/adr-166-slot-sweep.jsonl`; a
+clean run is **silent** (a line printed at zero is wallpaper within a week, and the exception stops
+reading as one); a `demoted` case logs loudly and exits non-zero, so launchd's log and any wrapper
+see a real failure rather than a quiet no-op; it then shows in `musterd report` (team and exec) until
+it clears. Only a workspace demoted by **two consecutive runs** fires an OS notification. That gate
+is affordable because demotion is **structural, not transient**: both judgements share one clock and
+one 10-minute threshold, so a session that merely goes quiet mid-sweep makes *both* say not-live and
+produces no disagreement at all. A real finding therefore repeats, and confirming costs one interval.
 
 **Guardrail.** No workspace whose transcript is being written may be judged not-live. Regression
 test: a workspace with a freshly-touched transcript reads `live` regardless of what the slot holds —
