@@ -128,6 +128,7 @@ import {
 } from '../store/rows.js';
 import { staleLaneWarnings } from '../store/staleness.js';
 import {
+  archiveTeam,
   createTeam,
   getAgentKeyHash,
   getPolicy,
@@ -1266,6 +1267,22 @@ export async function handleHttp(
           result: 'allow',
         });
         return sendJson(res, 200, { ok: true });
+      }
+
+      // Soft-archive the team (the inverse of POST /teams). Admin-only + audited: archiving pulls the
+      // team off every surface at once (requireTeam treats archived as gone), so it carries the same
+      // authority bar as the other governance writes. Auth resolves BEFORE the archive lands, so the
+      // admin of a live team can always reach this; a second call 404s on auth ("team is archived").
+      if (method === 'POST' && rest === '/archive') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const { archived_at } = archiveTeam(ctx.db, slug);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'team.archive',
+          target: slug,
+          result: 'allow',
+        });
+        return sendJson(res, 200, { ok: true, team: slug, archived_at });
       }
 
       if (method === 'POST' && rest === '/agent-key/rotate') {

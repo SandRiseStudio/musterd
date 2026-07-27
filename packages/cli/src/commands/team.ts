@@ -33,9 +33,13 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
   if (sub === 'add') return teamAdd(parsed);
   if (sub === 'observe') return teamObserve(parsed);
   if (sub === 'remove') return teamRemove(parsed);
+  if (sub === 'archive') return teamArchive(parsed);
   if (sub === 'export') return teamExport(parsed);
   if (sub === 'policy') return teamPolicy(parsed);
-  throw new CliError('usage: musterd team <create|add|observe|remove|export|policy> ...', 2);
+  throw new CliError(
+    'usage: musterd team <create|add|observe|remove|archive|export|policy> ...',
+    2,
+  );
 }
 
 /**
@@ -421,6 +425,30 @@ async function teamRemove(parsed: Parsed): Promise<number> {
     success(`removed ${theme.memberName(res.member, res.kind)} from ${team}`) + '\n',
   );
   process.stdout.write(theme.meta('off the roster; message history is kept') + '\n');
+  return 0;
+}
+
+/**
+ * Soft-archive a team (the inverse of `team create`). Admin-only + audited `team.archive`: sets
+ * `archived_at`, so the team drops off status/rosters and refuses auth while its history survives —
+ * the sanctioned cleanup for a junk/finished team instead of SQL against the daemon's db. The slug is
+ * always explicit (never the ambient bound team) so a fat-fingered bare `team archive` can't take
+ * down the team you're working on; auth still needs an admin identity for THAT team (its creator
+ * credential is in the vault from `team create` — name it with `--as` if you're bound elsewhere).
+ */
+async function teamArchive(parsed: Parsed): Promise<number> {
+  const slug = parsed.positionals[1];
+  if (!slug) throw new CliError('usage: musterd team archive <slug> [--as <admin>]', 2);
+  const { http } = resolve({ ...parsed.flags, team: slug });
+  const res = await http.archiveTeam(slug);
+  if (parsed.flags['json']) {
+    process.stdout.write(JSON.stringify(res) + '\n');
+    return 0;
+  }
+  process.stdout.write(success(`archived team "${slug}"`) + '\n');
+  process.stdout.write(
+    theme.meta('off every roster and status surface; history is kept (soft archive)') + '\n',
+  );
   return 0;
 }
 

@@ -18,8 +18,14 @@ export function createTeam(
       `invalid team slug "${input.slug}" (use [a-z0-9-], 1..32)`,
     );
   }
-  if (getTeamBySlug(db, input.slug)) {
-    throw new MusterdError('conflict', `team "${input.slug}" already exists`);
+  const existing = getTeamBySlug(db, input.slug);
+  if (existing) {
+    throw new MusterdError(
+      'conflict',
+      existing.archived_at
+        ? `team "${input.slug}" already exists (archived) — its history keeps the slug`
+        : `team "${input.slug}" already exists`,
+    );
   }
   const now = Date.now();
   const row: TeamRow = {
@@ -44,10 +50,15 @@ export function getTeamBySlug(db: Database, slug: string): TeamRow | undefined {
   return db.prepare<[string], TeamRow>('SELECT * FROM teams WHERE slug = ?').get(slug);
 }
 
-/** Like getTeamBySlug but throws not_found. */
+/**
+ * Like getTeamBySlug but throws not_found. An archived team is invisible here too: every team-scoped
+ * route (auth, roster, status, ws join, claim) resolves through this, so soft-archiving a team makes
+ * it drop off every surface at once while its rows (history, audit, provenance) survive in the db.
+ */
 export function requireTeam(db: Database, slug: string): TeamRow {
   const t = getTeamBySlug(db, slug);
   if (!t) throw new MusterdError('not_found', `no team "${slug}"`);
+  if (t.archived_at) throw new MusterdError('not_found', `team "${slug}" is archived`);
   return t;
 }
 
@@ -114,11 +125,18 @@ export function updateTeam(
   ).run(fields.display, fields.defaultLifecycle, Date.now(), id);
 }
 
-export function archiveTeam(db: Database, slug: string): void {
-  const t = requireTeam(db, slug);
-  db.prepare('UPDATE teams SET archived_at = ?, updated_at = ? WHERE id = ?').run(
-    Date.now(),
-    Date.now(),
-    t.id,
-  );
+/**
+ * Soft-archive a team (the inverse of `team create`): sets `archived_at`, which requireTeam treats as
+ * gone — the team drops off status/rosters and refuses auth, but every row is kept. Resolves the slug
+ * directly (not via requireTeam) so the error for an already-archived team names the real state.
+ */
+export function archiveTeam(db: Database, slug: string): { archived_at: number } {
+  const t = getTeamBySlug(db, slug);
+  if (!t) throw new MusterdError('not_found', `no team "${slug}"`);
+  if (t.archived_at) {
+    throw new MusterdError('conflict', `team "${slug}" is already archived`);
+  }
+  const now = Date.now();
+  db.prepare('UPDATE teams SET archived_at = ?, updated_at = ? WHERE id = ?').run(now, now, t.id);
+  return { archived_at: now };
 }

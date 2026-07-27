@@ -223,7 +223,9 @@ export function diversityFlags(db: Database, teamId: string, now: number): Diver
  * `diversityFlags` scan is windowed + capped.
  */
 export function countDiversityFlags(db: Database, now: number = Date.now()): number {
-  const teams = db.prepare<[], { id: string }>('SELECT id FROM teams').all();
+  const teams = db
+    .prepare<[], { id: string }>('SELECT id FROM teams WHERE archived_at IS NULL')
+    .all();
   return teams.reduce((n, t) => n + diversityFlags(db, t.id, now).length, 0);
 }
 
@@ -236,7 +238,12 @@ export function countDiversityFlagsByTeam(
   db: Database,
   now: number = Date.now(),
 ): { team: string; count: number }[] {
-  const teams = db.prepare<[], { id: string; slug: string }>('SELECT id, slug FROM teams').all();
+  const teams = db
+    .prepare<
+      [],
+      { id: string; slug: string }
+    >('SELECT id, slug FROM teams WHERE archived_at IS NULL')
+    .all();
   return teams
     .map((t) => ({ team: t.slug, count: diversityFlags(db, t.id, now).length }))
     .filter((r) => r.count > 0);

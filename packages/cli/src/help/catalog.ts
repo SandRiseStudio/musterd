@@ -222,8 +222,8 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Team & seats ───────────────────────────────────────────────────────────────────────────
   {
     name: 'team',
-    signature: '<create|add|remove|export> …',
-    summary: 'create a team, add/remove members, export the roster to git',
+    signature: '<create|add|remove|archive|export> …',
+    summary: 'create a team, add/remove members, archive a team, export the roster to git',
     group: 'team',
     primary: true,
     detail:
@@ -231,6 +231,7 @@ export const CATALOG: readonly CommandEntry[] = [
       '  create <slug> [--as <you>] [--role <role>] [--display <name>]\n' +
       '  add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]\n' +
       '  remove <name>                soft-remove a member (history is kept)\n' +
+      '  archive <slug> [--as <admin>]  soft-archive a whole team — off status/rosters, history kept (admin)\n' +
       '  export <slug>                move the roster onto git-tracked .musterd/ files (ADR 058)',
     examples: [
       'musterd team create acme --as nick',

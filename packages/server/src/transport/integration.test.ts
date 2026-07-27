@@ -2066,6 +2066,45 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(anon.status).toBe(401);
   });
 
+  it('POST /archive soft-archives: admin-only, audited, then the team is invisible everywhere', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // A non-admin seat is refused; the team is untouched.
+    const denied = await post('/teams/dawn/archive', {}, { key: team.json.agent_key, seat: 'Ada' });
+    expect(denied.status).toBe(403);
+    expect(getTeamBySlug(server.db, 'dawn')!.archived_at).toBeNull();
+
+    // The admin archives — audited, archived_at lands.
+    const ok = await post('/teams/dawn/archive', {}, nickTok);
+    expect(ok.status).toBe(200);
+    expect(ok.json).toMatchObject({ ok: true, team: 'dawn' });
+    expect(getTeamBySlug(server.db, 'dawn')!.archived_at).toBe(ok.json.archived_at);
+    expect(auditRows('dawn').some((r) => r.action === 'team.archive' && r.actor === 'nick')).toBe(
+      true,
+    );
+
+    // Every team-scoped surface now reads the team as gone — status, roster, even re-auth.
+    const status = await get('/teams/dawn');
+    expect(status.status).toBe(404);
+    expect(status.json.error.message).toContain('archived');
+    const roster = await get('/teams/dawn/members');
+    expect(roster.status).toBe(404);
+    // A second archive can't re-auth (requireTeam refuses) — the state is named, not a stack trace.
+    const again = await post('/teams/dawn/archive', {}, nickTok);
+    expect(again.status).toBe(404);
+    expect(again.json.error.message).toContain('archived');
+
+    // The slug stays taken: history keeps it, and the conflict says why.
+    const recreate = await post('/teams', {
+      slug: 'dawn',
+      creator: { name: 'eve', kind: 'human' },
+    });
+    expect(recreate.status).toBe(409);
+    expect(recreate.json.error.message).toContain('archived');
+  });
+
   it('can_flag_urgent: an allowed seat keeps urgent + is audited; a denied seat is downgraded, not rejected', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
