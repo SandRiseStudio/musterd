@@ -401,6 +401,13 @@ export function resolveLabels(
     // always one a human typed, so the rows most in need of upgrading were the ones permanently
     // skipped — and hand-renaming, the workaround for an unlabeled sidebar, silently opted a
     // session out of ever being labeled again.
+    //
+    // MEASURED CEILING (2026-07-27): on Claude Code Desktop this narrowing is inert, because the
+    // app's own rename tool refuses a user-titled session and reports success anyway. Our guard was
+    // redundant with the harness's. What survives is the non-user case (an earlier sweep's output,
+    // or an auto-title that leads with the seat) plus the dated/subject/boundary fixes below. Keep
+    // the narrowing — it is right, and other surfaces may not have the app's guard — but do not
+    // expect it to reclaim a row a human renamed by hand.
     if (meta.titleSource === 'user' && !parse.seated) {
       skip('hand-named');
       continue;

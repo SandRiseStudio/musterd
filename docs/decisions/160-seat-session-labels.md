@@ -122,6 +122,27 @@ returned correct labels on demand. Two defects in how the decision met the world
    touching a human-typed title at all, so a loose prefix match (seat `miley` claiming "Mileystone
    planning") would license overwriting words the sweep has no business touching.
 
+   **Correction, same day — the narrowing is inert on this harness, and the reason matters.** The
+   first live sweep after the fix applied 5 of 18 renames. The 13 refusals correlate _exactly_ with
+   `titleSource: user`: the desktop app enforces "a title the human typed wins" **inside its own
+   rename tool**, and reports success anyway ("Renamed … (If the user had renamed it themselves,
+   their title is kept)") — a soft no-op an agent cannot detect from the reply. So defect 2 was
+   never solely musterd's to fix: our guard was redundant with the app's, and removing ours changes
+   nothing a human can see. Hand-renamed rows are permanently the human's, by the app's rule.
+
+   What the narrowing still buys is real but small: seat-prefixed titles that are _not_ user-typed
+   (an earlier sweep's output, an auto-title that happens to lead with the seat) now gain the chip
+   and stamp instead of being skipped, and the `dated`/`subject`/boundary work fixes genuine
+   defects — a re-render no longer produces `🔶 Miley (Sun 9p) - Miley - x`, and seat `miley` no
+   longer claims "Mileystone planning". The user-facing consequence is a **workflow** one, not a
+   code one: **do not hand-rename a seat session you want labeled** — the app will honour your title
+   forever after. Let the sweep name it; rename only what you want to own.
+
+   The measurable lesson for this ADR's own method: the sweep's `apply` list is a _proposal_, and
+   nothing in the pipeline reads back whether the harness accepted it. The engine's output contract
+   (§Observability) therefore cannot see this class of failure at all. A future increment that wants
+   the sidebar to be trustworthy has to diff the list after applying, not count what it asked for.
+
 ### What is deliberately not built
 
 - **No musterd-side session registry.** The roster already answers seat→work; only window→seat is
@@ -170,6 +191,13 @@ returned correct labels on demand. Two defects in how the decision met the world
   in two days. An output contract cannot observe its own trigger. The standing check is therefore
   the sidebar itself: chipped rows should accumulate; if a day's seat sessions are all bare, the
   trigger is gone, not the engine. Post-fix on the same live input: 2 applied, 0 `hand-named`.
+
+  **And the counts still lied, one layer up.** The first real sweep proposed 18 renames and the app
+  accepted 5 — the 13 refusals being exactly the `titleSource: user` rows, silently, with a success
+  reply (see the correction in the amendment). `resolve-labels` reports what it _proposed_; nothing
+  reports what _landed_. So the standing check is the sidebar, never the sweep's own output: list
+  sessions again after applying and count chips. A metric that cannot see the acceptor is not an
+  observability contract for the effect — it is one for the intent.
 
 - **Eval.** Dataset: the captured `list_sessions` snapshot of this machine's 29 real sessions (seat
   worktrees, hand-named rows, non-seat repos), checked in as the `resolve-labels` test fixture.
