@@ -219,14 +219,55 @@ describe('isWriteShaped (ADR 163)', () => {
     }
   });
 
-  it('MISSES writes through indirection — the documented recall gap, not a bug to fix here', () => {
+  it('MISSES writes through indirection — the MEASURED recall gap, not a bug to fix here', () => {
     // Each of these really does write, and produces no row. This is why ADR 163's headline is a LOWER
-    // BOUND and why a separate recall arm exists to put an error bar on it. If a future change makes
-    // one of these pass, re-measure recall rather than deleting the case.
-    expect(isWriteShaped({ tool: 'Bash', command: 'python -c \'open("f","w").write("x")\'' })).toBe(
-      false,
-    );
-    expect(isWriteShaped({ tool: 'Bash', command: 'node build.js' })).toBe(false);
+    // BOUND. The error bar is now measured: recall 21/31 = 68%, 0 false positives, finding 008
+    // (`docs/research/008-subagent-write-detector-recall.md`, reproduce with
+    // `node scripts/research/adr-163-recall.ts`). If a future change makes one of these pass,
+    // RE-RUN THAT HARNESS and update the number rather than deleting the case — the count is cited
+    // with the recall figure attached, so a silent improvement makes every prior citation wrong.
+    //
+    // The misses are structural, in four groups. One representative of each is pinned here; ground
+    // truth for all of them was measured by sandbox tree-hash, not asserted.
+    const measuredMisses = [
+      'python -c \'open("f","w").write("x")\'', // interpreter indirection
+      'node build.js', //                          delegation to a build script
+      'tar -xf bundle.tar', //                     archive extraction
+      'sort seed.txt -o sorted.txt', //            in-place via the tool's own flag, no redirect
+    ];
+    for (const command of measuredMisses) {
+      expect(isWriteShaped({ tool: 'Bash', command }), command).toBe(false);
+    }
+  });
+
+  it('does NOT miss tee, sed -i or heredocs — ADR 163 originally claimed it did', () => {
+    // Finding 008 corrected the ADR: three of the five shapes it named as blind spots are caught.
+    // Pinned so the correction cannot silently regress back into the pessimistic claim.
+    const caught = [
+      'echo hi | tee out.txt',
+      "sed -i '' s/a/b/ f.ts",
+      'cat > heredoc.txt <<EOF\nhello\nEOF',
+      'cat <<EOF > heredoc2.txt\nhello\nEOF',
+    ];
+    for (const command of caught) {
+      expect(isWriteShaped({ tool: 'Bash', command }), command).toBe(true);
+    }
+  });
+
+  it('never fires on a read by a binary whose writes it does catch — 0/15 false positives', () => {
+    // The measured asymmetry that makes the count trustworthy as far as it goes: same tools, no write.
+    const reads = [
+      "awk '{print}' seed.txt", // vs `awk … > f`, which is caught
+      'sort seed.txt', //           vs `sort -o`, which is missed anyway
+      'python3 -c \'print(open("seed.txt").read())\'',
+      "node -e 'console.log(1)'",
+      'git status',
+      'git diff',
+      'git log --oneline',
+    ];
+    for (const command of reads) {
+      expect(isWriteShaped({ tool: 'Bash', command }), command).toBe(false);
+    }
   });
 
   it('a Bash call with no command is not a write', () => {
