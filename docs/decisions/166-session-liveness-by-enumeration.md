@@ -1,0 +1,186 @@
+# 166 — Session liveness by enumeration: ask the harness what it has, don't keep a slot
+
+- Status: draft — 2026-07-27. Authored by stanley (lane `01KYJF8QAFHDSM79Z08766BY68`).
+  Number **166 pinned** — 164 is the highest on `origin/main`, and **165 is reserved** by izzo's
+  open PR #400 (worktree-family MCP entry). That ADR number has already collided three times; taking
+  166 rather than the nominally-free 165 is deliberate.
+- Date: 2026-07-27
+- Builds on: [ADR 131](131-harness-residency-wake-ledger-host.md) §5 increment 4 (`binding.session`,
+  the capture this ADR demotes), [ADR 164](164-session-attested-presence.md) (which recorded this
+  defect as its explicit non-fix), ADR 165 (izzo, PR #400 — spec merged ahead of its ADR file;
+  the shared-slot shape argument whose test this ADR answers), [ADR 068](068-workspace-scoped-displacement.md)
+  (what a wrongly-permitted spawn costs), [ADR 057](057-ambient-agent-presence.md) (liveness from
+  real artifacts, not assertions).
+
+## Context
+
+`binding.session` is one slot per workspace, written unconditionally by the `SessionStart` hook. It
+means _"the most recent session **started** here"_. Every consumer reads it as _"**the** session"_.
+
+Those are different claims whenever more than one session has ever started in a workspace — which is
+routine, because `claude -p` one-shots, resumes, and tooling runs all start sessions.
+
+### Measured, twice, an hour apart
+
+| workspace        | the slot says                                                | the truth                                           |
+| ---------------- | ------------------------------------------------------------ | --------------------------------------------------- |
+| `agents-miley`   | capture `c2c6c365`, 2s lifetime, transcript never written    | session `40930804` alive since the previous evening |
+| `agents-stanley` | capture `4aea2026`, `ended_at` set, transcript never written | session `079ec165` alive and writing                |
+
+The second one is the seat that was investigating the first. Two independent instances inside one
+hour is not a rare edge case, and the second arrived while this ADR's author was watching for it.
+
+### What the wrong answer costs
+
+`localSessionLiveness()` is the sole input to the wake backend's defensive rule — _"this backend must
+never spawn, fresh OR resume, beside a live local session, regardless of caller"_
+(`packages/cli/src/host/backends/claudeCode.ts:348`). Probed directly, `agents-stanley` returns
+`resumable`: **no live local session**, for a workspace whose session is alive.
+
+Both failure modes then compound:
+
+1. The guard permits a spawn beside a live session — ADR 131 wake spend, and the newcomer displaces
+   presence under ADR 068.
+2. `resumeLadder` reads the same phantom, finds its transcript missing, and skips resume — so the
+   spawn it just wrongly permitted is a **fresh, full-price** one rather than a resume.
+
+The mechanism meant to prevent an expensive mistake selects the most expensive version of it.
+
+### The shape, and the test it has to pass
+
+izzo's ADR 165 names the pattern this shares with the worktree-family MCP entry: _one shared slot,
+many legitimate claimants, and the obvious repair — make the slot mine — steals it from whoever holds
+it._ Her remedy is **empty the slot, do not partition it**, because partitioning needs a key the
+writer does not have at write time.
+
+She was explicit that the remedy might not transfer, and set the test: _does `binding.session` have
+an equivalent already-authoritative per-claimant fallback?_ If not, the analogy stops at the
+diagnosis.
+
+**It does.** The harness already keeps one file per session, named after that session, in a directory
+derivable from the workspace path alone: `~/.claude/projects/<slug>/<session-id>.jsonl`, where the
+slug is the absolute path with `/` → `-` (verified for `agents-miley`, `agents-stanley`, `agents`).
+Its mtime _is_ liveness. It needs no key the writer lacks, because the harness names the file after
+the session it belongs to.
+
+Measured across four worktrees at the same instant: **enumeration 4/4 correct, the slot 2/4 wrong.**
+
+## Problem
+
+Liveness is read from a slot that records a different question than the one being asked, when the
+harness is already maintaining the correct answer on disk, per session, enumerable without a key.
+
+## Decision
+
+**Ask the harness what sessions it has, rather than keeping a slot that claims to know.**
+
+`localSessionLiveness(workspace)` derives its judgement by enumerating the harness's own per-session
+transcripts. `binding.session` stops being the source of truth.
+
+### Mechanism
+
+A new **optional** capability on the `Harness` interface (`packages/cli/src/onboard/harness.ts`),
+sitting beside the existing optional `observeModel`:
+
+```ts
+enumerateSessions?: (workspace: string) => SessionFile[]; // { id, path, mtime, bytes }
+```
+
+Claude Code implements it by listing its projects directory for the slugified workspace path. The id
+is the basename; the mtime is liveness; the byte count feeds the existing context-hygiene bound.
+
+`ended_at` becomes redundant rather than wrong: a transcript that stopped being written is not live,
+and resumability is already judged by the GC horizon. Nothing distinguishes a cleanly-ended session
+from a crashed one in today's behaviour either — both read `resumable`.
+
+### Where this is weaker than ADR 165, stated plainly
+
+izzo can empty her slot outright. **This one cannot**, and pretending otherwise would be the same
+overreach this lane's sibling ADR was corrected for twice.
+
+Enumeration is **harness-specific**. Claude Code has a per-session transcript store; Codex and Cursor
+may not. So a harness with no enumerator keeps today's slot-based judgement, unchanged, with today's
+risk. The slot is **demoted to a fallback for harnesses that cannot enumerate**, not deleted. Only
+once every supported harness enumerates does the strong form of izzo's remedy become available, and
+that is a later ADR with evidence behind it, not a promise made here.
+
+### The two questions are not one question
+
+Today one verdict feeds two consumers whose failure directions are **opposite**:
+
+| consumer          | question                           | safe answer when unsure   |
+| ----------------- | ---------------------------------- | ------------------------- |
+| the spawn guard   | is a session live here?            | **yes** — refuse to spawn |
+| the resume ladder | is there a session worth resuming? | **no** — go fresh         |
+
+Collapsing them into one enum is why "no live session" and "nothing to resume" get answered by the
+same phantom. A wrongly-refused wake costs a delay; a wrongly-permitted one costs money and
+displaces a live seat. The judgements split so each can be wrong in its cheap direction — the same
+asymmetry argument that corrected ADR 164, applied before it bites rather than after.
+
+### Increments
+
+1. **Enumerate in shadow.** Ship `enumerateSessions` and compute both judgements on every wake
+   decision. **Act on the old one.** Log the pair and whether they disagreed.
+2. **Flip**, once increment 1 shows the disagreement rate and its direction.
+3. **Split** the guard question from the resume question, each failing in its cheap direction.
+4. **Retire the slot** for enumerating harnesses — gated on every supported harness having an
+   enumerator, not scheduled here.
+
+Shadow-first is not caution for its own sake. This lane's sibling ADR shipped two designs that looked
+correct, passed their tests, and were wrong about live sessions in ways only a live probe caught. The
+cheap way to find the third one is to run the new judgement against real wakes without letting it
+decide anything.
+
+## Observability & Evaluation
+
+**Traces.** The wake decision's audit detail gains `liveness_source` (`enumerated` | `slot`), both
+verdicts while increment 1 is in shadow, and `liveness_disagreed`. The disagreement flag is the whole
+point: it is the only signal that says how often the slot is lying in production rather than in the
+two cases someone happened to look at.
+
+**Eval — dataset and baseline.** The dataset is every wake decision over a dogfood week joined to its
+paired judgements. The **baseline** is measured, not assumed: across four live worktrees at one
+instant, the slot was wrong **2 of 4** times, both in the dangerous direction (reporting no live
+session for a workspace that had one).
+
+1. _How often does the slot lie, on real wake decisions?_ Count `liveness_disagreed`. If it is near
+   zero over a week, the two hand-caught cases were coincidence and increments 2–4 need re-arguing.
+2. _Does it lie in the dangerous direction?_ Split disagreements by which side said `live`.
+   Slot-says-not-live-but-enumeration-says-live is the money-losing case. Target for increment 2:
+   **zero** such cases surviving the flip.
+3. _Does enumeration ever demote a live seat?_ The inverse error, and the one that would make this
+   worse than what it replaces. Target: **zero**; any instance blocks the flip.
+
+**Guardrail.** No workspace whose transcript is being written may be judged not-live. Regression
+test: a workspace with a freshly-touched transcript reads `live` regardless of what the slot holds —
+including when the slot holds an ended foreign capture, which is the `agents-stanley` shape exactly.
+
+**Experiment.** Increment 1 **is** the experiment, and a real one: shadow mode is a paired within-run
+comparison of two judgements against the same wake decisions, with the incumbent acting. It needs no
+separate arm because both conditions are computed for every decision, and it risks nothing because
+the challenger cannot act until it has evidence.
+
+## Consequences
+
+- Wake decisions stop being fooled by a foreign capture — the guard sees live sessions, and resume
+  targets the session that actually exists rather than skipping to an expensive fresh spawn.
+- `binding.session` survives as a fallback with a narrowed, honest meaning. The hook keeps writing
+  it; nothing that can enumerate will read it.
+- A harness without an enumerator keeps today's risk. That is a stated limit, not an oversight, and
+  it is why the slot is not deleted here.
+- One more optional method on `Harness`, one filesystem listing per judgement — the same order of
+  cost as the `stat` it replaces.
+- ADR 164's adapter ladder is unaffected: it already treats the binding as a hint, re-adopting rather
+  than trusting a changed id.
+
+## Related
+
+- ADR 165 (izzo, PR #400) — the shared-slot shape and the empty-don't-partition remedy. This ADR answers its transfer test affirmatively, with
+  the harness-specific limit noted above.
+- [ADR 164](164-session-attested-presence.md) — recorded this as its explicit non-fix; its
+  dormant-over-exit asymmetry is the reasoning reused here.
+- [ADR 131](131-harness-residency-wake-ledger-host.md) §5 — where the capture and the wake ledger
+  came from.
+- [ADR 068](068-workspace-scoped-displacement.md) — why spawning beside a live session is not merely
+  wasteful.
