@@ -1,4 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { closestOption } from './repair.js';
 
 /**
  * Deterministic input coercion (ADR 144 increment 4) — the "deterministic forgiveness" principle:
@@ -141,11 +142,19 @@ function clip(s: string, max: number): string {
  * renaming the parameter) keeps the surface stable for every connected agent and every doc, and the
  * `coerced` counter now measures whether the wrong guess persists — if it does, a later increment
  * can rename on evidence. That is the measure-then-craft order; renaming first would be the guess.
+ *
+ * `surface` → `surface_globs` has the same cause and a worse symptom: `fmtLane` renders a lane as
+ * `surface=[…]` and the tool description said "state, surface, dependencies", so `surface` is the
+ * name the surface itself teaches — while the schema wants `surface_globs`. Unlike a wrong lane id
+ * that bounces, an unknown key was *dropped* by the schema and the call SUCCEEDED with an empty
+ * surface, so the caller believed it had declared paths it had not (reproduced 2026-07-27). The
+ * alias makes the natural name work; {@link unknownKeys} makes every other near-miss loud.
  */
 const RULES: Record<string, Rule[]> = {
   lane_claim: [alias('lane', 'id'), alias('lane_id', 'id')],
   lane_handoff: [alias('lane', 'id'), alias('lane_id', 'id'), recipientShape('to')],
-  lane_update: [alias('lane', 'id'), alias('lane_id', 'id')],
+  lane_open: [alias('surface', 'surface_globs')],
+  lane_update: [alias('lane', 'id'), alias('lane_id', 'id'), alias('surface', 'surface_globs')],
   lane_resolve: [alias('lane', 'id'), alias('lane_id', 'id'), numericString('pr')],
   team_send: [
     recipientShape('to'),
@@ -186,6 +195,60 @@ export function coerceToolArgs(
 }
 
 /**
+ * STRICTNESS (the other half of forgiveness). A zod object strips keys it doesn't know, so a
+ * near-miss the alias table doesn't cover is not an error at all: the SDK validates the call,
+ * silently discards the key, and the handler succeeds having ignored what the caller asked for.
+ * That is strictly worse than a bounce — the caller gets a success result and a false belief (the
+ * reproduced case: `lane_update {surface:[…]}` returned `surface_globs=[]`, twice, with no signal).
+ *
+ * So after coercion has had its say, an argument key that no registered field accepts stops the
+ * call here, in the same in-band bounce shape the SDK uses, carrying the ADR 144 inc-3 repair line
+ * (nearest valid key + the full valid set). Order matters: aliases run first, so a forgiven name
+ * never reaches this check — forgiveness where the meaning is knowable, a loud bounce where it is
+ * not, and never a silent drop.
+ *
+ * The known-key sets are captured from the tools' own `inputSchema` shapes at registration
+ * ({@link instrumentToolCoercion} patches `registerTool`), never from a hand-kept list — a second
+ * list would drift from the schemas, which is the very failure this fixes.
+ */
+const SCHEMA_KEYS = new Map<string, Set<string>>();
+
+/** Argument keys `tool` doesn't accept, in call order. Empty when the tool is unknown here (a tool
+ * with no captured schema is not something this layer may judge) or every key is valid. */
+export function unknownKeys(tool: string, args: Record<string, unknown>): string[] {
+  const known = SCHEMA_KEYS.get(tool);
+  if (!known) return [];
+  return Object.keys(args).filter((k) => !known.has(k));
+}
+
+/**
+ * The bounce text for unknown keys: the SDK's own start-anchored prefix (so `toolTelemetry.ts`
+ * classes it `invalid_input` like any other schema failure) plus a ready-made repair line naming
+ * the nearest valid field and the full valid set. The repair is written here rather than left to
+ * `repair.ts` because there is no zod issue to parse — nothing bounced; we did.
+ */
+export function unknownKeyBounce(tool: string, unknown: string[], known: Set<string>): string {
+  const valid = [...known];
+  const named = unknown
+    .map((k) => {
+      const near = closestOption(k, valid);
+      return `'${k}'${near ? ` (did you mean '${near}'?)` : ''}`;
+    })
+    .join(', ');
+  const plural = unknown.length > 1 ? 's' : '';
+  return (
+    `Input validation error: unrecognized argument key${plural} for ${tool}: ${named}\n` +
+    `repair: remove or rename ${named}; ${tool} accepts: ${valid.length ? valid.join(', ') : '(no arguments)'} — ` +
+    `fix and retry the same call`
+  );
+}
+
+/** The in-band error result the SDK returns for a validation failure, same shape, ours. */
+function bounceResult(text: string) {
+  return { content: [{ type: 'text' as const, text }], isError: true };
+}
+
+/**
  * Requests whose arguments this layer repaired. A WeakSet keyed on the request object is what makes
  * the handoff to telemetry concurrency-safe: several `tools/call` requests can be in flight, and
  * each carries its own identity, so no shared "last coerced" flag can be attributed to the wrong
@@ -209,6 +272,7 @@ export function wasCoerced(request: unknown): boolean {
  * passes straight through to the SDK untouched. Coercion must never be the reason a call fails.
  */
 export function instrumentToolCoercion(server: McpServer): void {
+  captureSchemaKeys(server);
   const inner = server.server;
   const original = inner.setRequestHandler.bind(inner) as (
     schema: unknown,
@@ -227,15 +291,24 @@ export function instrumentToolCoercion(server: McpServer): void {
         const args = params?.arguments;
         if (
           typeof tool === 'string' &&
-          RULES[tool] &&
           typeof args === 'object' &&
           args !== null &&
           !Array.isArray(args)
         ) {
-          const { args: fixed, applied } = coerceToolArgs(tool, args as Record<string, unknown>);
-          if (applied.length > 0) {
-            params!.arguments = fixed;
-            if (typeof request === 'object' && request !== null) coercedRequests.add(request);
+          if (RULES[tool]) {
+            const { args: fixed, applied } = coerceToolArgs(tool, args as Record<string, unknown>);
+            if (applied.length > 0) {
+              params!.arguments = fixed;
+              if (typeof request === 'object' && request !== null) coercedRequests.add(request);
+            }
+          }
+          // Strictness runs on the POST-coercion arguments: an alias has already become its real
+          // field, so only a key with no knowable meaning gets here — and it stops the call rather
+          // than being dropped into a false success.
+          const current = (params!.arguments ?? {}) as Record<string, unknown>;
+          const stray = unknownKeys(tool, current);
+          if (stray.length > 0) {
+            return bounceResult(unknownKeyBounce(tool, stray, SCHEMA_KEYS.get(tool)!));
           }
         }
       } catch {
@@ -244,6 +317,37 @@ export function instrumentToolCoercion(server: McpServer): void {
       return handler(request, extra);
     };
     return original(schema, wrapped);
+  };
+}
+
+/**
+ * Learn each tool's accepted argument keys from the `inputSchema` shape it registers with. Patching
+ * `registerTool` (rather than reading SDK internals) keeps the source of truth exactly where the
+ * schema is written, so a field added, renamed, or removed updates the strict check in the same
+ * edit. Registration keys are per-server; a rebuilt server re-registers the same names, so a plain
+ * overwrite is right. Best-effort, like everything at this seam: an unreadable config registers the
+ * tool untouched and simply leaves it unjudged.
+ */
+function captureSchemaKeys(server: McpServer): void {
+  const original = server.registerTool.bind(server) as (
+    name: string,
+    config: unknown,
+    cb: unknown,
+  ) => unknown;
+  (server as { registerTool: unknown }).registerTool = (
+    name: string,
+    config: unknown,
+    cb: unknown,
+  ) => {
+    try {
+      const shape = (config as { inputSchema?: unknown } | undefined)?.inputSchema;
+      if (typeof shape === 'object' && shape !== null && !Array.isArray(shape)) {
+        SCHEMA_KEYS.set(name, new Set(Object.keys(shape)));
+      }
+    } catch {
+      // leave the tool unjudged rather than fail its registration
+    }
+    return original(name, config, cb);
   };
 }
 

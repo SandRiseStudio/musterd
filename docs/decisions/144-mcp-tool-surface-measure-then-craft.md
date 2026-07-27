@@ -130,6 +130,25 @@ each bounce joined to the harness payload that produced it. The findings and the
   `errorResult`, counting a normal empty state as a tool failure — inflating the very error rate this
   arc is measured against. Fixed at the MCP layer; the HTTP 404 stands.
 
+**Amended 2026-07-27 — forgiveness needs strictness behind it.** "Tighten input schemas" was read as
+prose; it is load-bearing. A zod object strips keys it does not know, so a near-miss field name the
+alias table did not cover was never a bounce at all: `lane_update {surface:[…]}` returned **success**
+with `surface_globs: []`, twice, and the seat believed it had declared a surface it had not. A silent
+no-op is worse than a hard error — the caller gets a success result and a false belief, and no
+counter anywhere records it. Two calls, in this order:
+
+- **Alias the name our own surface teaches.** `fmtLane` renders `surface=[…]` and `lane_update`'s
+  description said "state, surface, dependencies" while the schema wanted `surface_globs` — the same
+  self-inflicted vocabulary gap as `lane`/`id`. Aliased, and the description now names the real
+  field. (Audit of the other tools: no second description-vs-schema mismatch.)
+- **Unknown top-level keys bounce, with the inc-3 repair line.** After coercion has had its say, an
+  argument key no registered field accepts stops the call in the SDK's own bounce shape, naming the
+  nearest valid key and the full valid set — so it is counted as `invalid_input` like any other
+  schema failure. The known-key sets are captured from the tools' own `inputSchema` shapes at
+  registration, never a hand-kept list, because a second list would drift from the schemas, which is
+  the failure being fixed. Forgiveness where the meaning is mechanically knowable, a loud bounce
+  where it is not, and never a silent drop.
+
 ### 5. Scope by role (increment 5)
 
 The adapter renders only the tools a seat's role can meaningfully use — an observer never loads acting

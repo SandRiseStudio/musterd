@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { coerceToolArgs } from './coerce.js';
+import { coerceToolArgs, unknownKeyBounce } from './coerce.js';
+import { bounceRepair } from './repair.js';
 
 /**
  * Every case here is a shape observed in live telemetry between 2026-07-15 and 2026-07-24 (the
@@ -41,6 +42,56 @@ describe('lane id aliases', () => {
     const { args, applied } = coerceToolArgs('lane_claim', { id: 'real', lane: 'stale' });
     expect(args).toEqual({ id: 'real', lane: 'stale' });
     expect(applied).toEqual([]);
+  });
+});
+
+describe('lane surface alias', () => {
+  // Reproduced 2026-07-27: `lane_open`+`lane_update` with `surface:[…]` returned SUCCESS both times
+  // with `surface_globs: []` — the schema dropped the key, so the seat believed it had declared a
+  // surface it had not. `surface` is the name our own render (`surface=[…]`) and the tool
+  // description taught, so the natural guess now works.
+  it('accepts `surface` for `surface_globs` on lane_open and lane_update', () => {
+    for (const tool of ['lane_open', 'lane_update']) {
+      const { args, applied } = coerceToolArgs(tool, { surface: ['packages/mcp/src/**'] });
+      expect(args).toEqual({ surface_globs: ['packages/mcp/src/**'] });
+      expect(applied).toEqual(['surface→surface_globs']);
+    }
+  });
+
+  it('lets an explicit surface_globs win', () => {
+    const { args, applied } = coerceToolArgs('lane_update', {
+      id: 'x',
+      surface_globs: ['real/**'],
+      surface: ['stale/**'],
+    });
+    expect(args['surface_globs']).toEqual(['real/**']);
+    expect(applied).toEqual([]);
+  });
+});
+
+describe('unknown-key bounce text', () => {
+  const known = new Set(['id', 'state', 'detail', 'surface_globs', 'depends_on', 'branch']);
+
+  it('bounces in the SDK-anchored shape so telemetry still classes it invalid_input', () => {
+    const text = unknownKeyBounce('lane_update', ['surface_glob'], known);
+    expect(text.startsWith('Input validation error:')).toBe(true);
+  });
+
+  it('names the nearest valid key and the full valid set', () => {
+    const text = unknownKeyBounce('lane_update', ['surface_glob'], known);
+    expect(text).toContain("'surface_glob' (did you mean 'surface_globs'?)");
+    expect(text).toContain('lane_update accepts: id, state, detail, surface_globs');
+    expect(text).toContain('fix and retry the same call');
+  });
+
+  it('suggests nothing when nothing is close — a wrong suggestion is worse than none', () => {
+    expect(unknownKeyBounce('lane_update', ['zzzzzzzzzz'], known)).not.toContain('did you mean');
+  });
+
+  it('carries its own repair line, so repair.ts leaves it alone', () => {
+    const text = unknownKeyBounce('lane_update', ['surface_glob'], known);
+    expect(text).toContain('\nrepair: ');
+    expect(bounceRepair(text)).toBe('');
   });
 });
 
