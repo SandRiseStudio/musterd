@@ -124,9 +124,34 @@ Three changes, all client-side except the ingest:
 Rows post through the same member-authed daemon ingest the `lane.gate` / `action.gate` rows use, and
 carry **shapes only** (ADR 051) — never file content, never the subagent's prompt.
 
-### The model join, and its stated limits
+**Emission is fire-and-forget, off the critical path.** Unlike `gateCheck`, attribution has no
+decision to await — nothing downstream reads its result, and the tool call's outcome does not depend
+on it. The row is therefore emitted **without awaiting the response**, under a hard timeout, and its
+failure is **unobservable to the tool call**. An implementer must not `await` the POST into the hot
+path: that would convert an observer into a latency tax on every subagent write, which is the guard
+metric below.
 
-The daemon reconstructs "which model wrote this" by joining `actor.subagent_spawn` →
+**Nested subagents are out of scope, not solved.** `agent_id` presence cleanly separates sidechain
+from parent, which is all this ADR relies on. Whether a subagent spawning a subagent yields a
+distinct `agent_id` per level or collapses depth is **untested** — nothing here should be read as
+claiming one-level ancestry is recoverable.
+
+### Increments
+
+**Increment 1 (this ADR's commitment): `actor.subagent_write`.** The write ledger alone answers the
+question the CLAUDE.md rule needs answered, and is worth landing on its own.
+
+**Increment 2 (conditional): `actor.subagent_spawn` + the model join.** The spawn row earns its place
+immediately as a **denominator** — how much fan-out happens at all, writing or not — so it ships with
+increment 1. The **join** does not: it only has anything to join for subagents that write, i.e.
+exactly the population the rule says should not exist. If increment 1 reports near zero, the join has
+no subject; if it reports a lot, we have a worse problem than model attribution. So the join,
+`model_attribution`, and its experiment arm are **gated on increment 1's number** rather than built
+speculatively.
+
+### The model join, and its stated limits (increment 2)
+
+The daemon would reconstruct "which model wrote this" by joining `actor.subagent_spawn` →
 `actor.subagent_write` on `(session, agent_type)` in spawn order. This is **best-effort and
 ambiguous when two subagents of the same type run concurrently under different model overrides.**
 
@@ -145,31 +170,44 @@ cannot record, it must still not wedge the tool call.
 ## Observability & Evaluation
 
 **Traces** — two new audit rows at the existing ADR 088 hook seam, no new instrument and no daemon
-scheduler: `actor.subagent_write` (seat, `agent_id`, `agent_type`, tool, target, `model_attribution`)
-and `actor.subagent_spawn` (declared `subagent_type`, `model` override). They sit beside the
+scheduler: `actor.subagent_write` (seat, `agent_id`, `agent_type`, tool, target; plus
+`model_attribution` in increment 2) and `actor.subagent_spawn` (declared `subagent_type`, `model`
+override). They sit beside the
 `lane.gate` / `action.gate` rows and join to ADR 109 git attribution through the acting seat, so
 "which commits contain subagent-authored writes" becomes one query rather than an unanswerable
 question.
 
-**Eval** — headline: **subagent-write rate**, the fraction of write-shaped tool calls on the dogfood
-team carrying an `agent_id`. **Dataset:** the dogfood team's own audit stream from the first full
-week after landing. **Baseline: 0 — not because the rate is zero, but because it is currently
-unmeasurable**; that is the finding this ADR exists to convert into a number, and the baseline must
-be reported as "unknown" rather than "none". Secondary: **model-join yield** (share of subagent
-writes resolving to `joined` rather than `ambiguous`/`unknown`) — the honest ceiling on how much ADR
-101/158 attestation this recovers. Guard metric (must **not** move): **added latency per write-shaped
-call**, and zero increase in gate-caused tool failures — an attribution path that wedges a write is a
-regression outright.
+**Eval** — headline: **subagent-write count**, the number of write-shaped tool calls on the dogfood
+team carrying an `agent_id`. **This is a lower bound, not a rate** — see the recall problem below;
+report it as "at least N" and never as a compliance percentage. **Dataset:** the dogfood team's own
+audit stream from the first full week after landing. **Baseline: 0 — not because the count is zero,
+but because it is currently unmeasurable**; the baseline must be reported as "unknown" rather than
+"none". Secondary: **detector recall** (arm 2 below) — without it the headline cannot be interpreted
+in either direction. Guard metric (must **not** move): **added latency per write-shaped call** (the
+fire-and-forget emission above is how this is protected), and zero increase in gate-caused tool
+failures — an attribution path that wedges a write is a regression outright.
 
-**Experiment** — pre-registered, two arms, both cheap because the apparatus already exists.
-(1) **Compliance arm:** does the shipped CLAUDE.md rule actually hold? Run the dogfood team a week
-with attribution on and count `actor.subagent_write` rows. Finding 006 predicts guidance-only
-compliance near zero; if the subagent-write rate is in fact ~0, the guidance is working and no
-enforcement is warranted — a result that would **retire** the pressure for a blocking gate rather
-than justify one. (2) **Join-fidelity arm:** deliberately spawn two same-type subagents concurrently
-under different models and confirm the join reports `ambiguous` rather than picking one — a test that
-the honesty mechanism fires, not that the join succeeds. Honesty caveat inherited from ADR 150: **n
-is small; report the mechanism beside every count**, never a headline rate alone.
+**The recall problem, stated up front.** Write-shape for `Bash` is a **heuristic match on the command
+string**, and ADR 153 / PR #349 already measured how much such matching misses — `git -C ../main
+merge` slipped a `git merge*` class until `normalizeCommand` was added. A subagent that writes via
+`python -c`, a heredoc, `tee`, `sed -i`, or an MCP filesystem tool produces **no `actor.subagent_write`
+row at all**. So a null result is ambiguous between "the rule holds" and "the instrument is blind" —
+the same failure mode flagged in §Consequences for the `agent_id` field disappearing.
+
+**Experiment** — pre-registered, three arms, all cheap because the apparatus already exists.
+(1) **Compliance arm:** run the dogfood team a week with attribution on and count
+`actor.subagent_write` rows. **What this arm can and cannot establish:** a non-zero count
+**confirms** the rule is being broken and how often, at minimum. A near-zero count **does not
+establish compliance** and explicitly **does not retire the case for a blocking gate** — it is
+consistent with a blind detector, and may only be read alongside arm (2). (2) **Recall arm (runs
+first, gates the interpretation of arm 1):** deliberately have a subagent write through 3–4
+non-obvious paths — `python -c`, a heredoc, `tee`, an MCP filesystem tool — and count how many
+produce rows. This converts the floor into a number with a known error bar, and is the difference
+between an instrument and a guess. (3) **Join-fidelity arm (increment 2 only, gated on arm 1):**
+spawn two same-type subagents concurrently under different models and confirm the join reports
+`ambiguous` rather than picking one — a test that the honesty mechanism fires, not that the join
+succeeds. Honesty caveat inherited from ADR 150: **n is small; report the mechanism beside every
+count**, never a headline number alone.
 
 ## Consequences
 

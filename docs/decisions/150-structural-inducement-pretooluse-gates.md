@@ -103,6 +103,16 @@ structural guards keep the creep out: the class table lives on the **team policy
 untouched**, always. If a design change would make this gate fire on an undeclared call, it is out of
 scope by construction.
 
+**Amended by [ADR 163](163-actor-attestation-tool-boundary.md) (2026-07-26) — narrowly.** The
+constraint above is about **mediation**, not observation. Read literally it also forbids
+attribution-only mechanisms that fire on undeclared calls, which ADR 163 needs in order to make
+subagent writes measurable at all. The amended rule: _no call may be **mediated** — allowed, denied,
+delayed, or routed to an ask — without matching a declared class; a mechanism that **cannot change
+whether the call proceeds** is exempt, precisely because it is outcome-free._ The creep this guard
+exists to prevent (musterd becoming a second permission-prompt system) requires the power to say no,
+so an observer cannot drift into it. Anything that gains a deny path is back under the constraint in
+full.
+
 - **Declaration schema:** costly-action classes ride the same policy table as Gate A's
   contended-surface classes — one `enforcement` policy field, two class kinds. A costly-action class
   is `{ class, match, posture }`:
