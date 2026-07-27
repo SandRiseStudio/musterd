@@ -161,6 +161,16 @@ Once adopted, two verdicts follow, both definitive:
 Before adoption, only rungs 1 and 2 apply — an un-adopted adapter never demotes itself on evidence
 about somebody else's session.
 
+### Increments
+
+1. **The ladder** — `SessionAttestation` (a pure judgement over an injected binding read, `stat`, and
+   `ppid`) wired into the existing heartbeat tick, with `orphan → exit` and `stale → dormant`.
+   Adapter-only; no server change, no wire change.
+2. **The audit row** — `presence.session_ended`, which needs a client→server path that does not
+   exist today. Deferred deliberately: increment 1 removes the lie, and until it has run in the
+   field there is nothing to count. Until then the release is visible on stderr and, indirectly, as
+   the seat going offline.
+
 ### What this does not do
 
 It does not reap orphaned processes as a class, does not change how the daemon computes presence,
