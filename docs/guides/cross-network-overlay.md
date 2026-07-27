@@ -5,7 +5,7 @@
 > the team on an overlay network and point every member at the daemon's overlay address.
 >
 > This is **Topology B** from `../design/deployment-topology.md` (§3), the decided near-term answer for
-> cross-network teams (ADR 039). For the *why* — the one-team-one-daemon invariant and why the overlay
+> cross-network teams (ADR 039). For the _why_ — the one-team-one-daemon invariant and why the overlay
 > does the networking musterd deliberately doesn't — read that design doc; this guide is the recipe.
 
 ## The idea in one paragraph
@@ -48,13 +48,34 @@ musterd serve --host "$DAEMON_ADDR"
 > **⚠️ Do not bind `0.0.0.0` in plaintext.** `0.0.0.0` exposes the daemon on **every** interface,
 > including any public one — in plaintext, with no transport auth of its own. Bind the **specific
 > overlay address**, and let the overlay be the only network that can reach the port. (musterd already
-> *refuses* a non-loopback bind without TLS or an explicit proxy acknowledgement — `assertBindSecurity`,
+> _refuses_ a non-loopback bind without TLS or an explicit proxy acknowledgement — `assertBindSecurity`,
 > ADR 040 / `../design/deployment-topology.md` §5: configure `MUSTERD_TLS_CERT`/`KEY` or pass
 > `--insecure-trust-proxy`. Binding the specific overlay address is still the recommendation.)
 
 If your overlay terminates encryption for you (Tailscale, WireGuard, a TLS tunnel), the link between
 members and the daemon is already encrypted and mutually authenticated by the overlay — that is exactly
 what lets musterd carry no TLS of its own in this topology.
+
+### 2b. Allow-list the overlay host on the daemon (or every member gets a silent 403)
+
+The ADR 040 upgrade gate accepts a WebSocket only when its `Host` header is loopback, the bound host,
+or listed in `MUSTERD_ALLOWED_HOSTS`. A member dialling `http://daemon-box.tailnet.ts.net:4849` sends
+**that name** as its `Host` — so unless you allow-list it, every member's upgrade is `403`-ed while
+plain HTTP keeps working. Bake it into the daemon's LaunchAgent:
+
+```bash
+musterd service install --allowed-hosts "$DAEMON_ADDR,daemon-box.tailnet.ts.net"
+```
+
+Comma-separated; names and/or IPs, and list **both** if members may use either. The value is preserved
+across later `musterd service install` runs, so you set it once; pass `--allowed-hosts ""` to clear it.
+`musterd service status` prints the effective list.
+
+> **This is the failure that looks like nothing.** The daemon logs
+> `ws_upgrade_rejected — host not allowed`, but the member just never attaches, and every surface
+> downstream reports it as something
+> else ("the page never reported ready", "everyone offline"). If members can `curl /health` but cannot
+> attach, this is almost always why.
 
 ### 3. Point every member at the daemon's overlay address
 
@@ -80,12 +101,29 @@ Run this checklist before you trust the team:
 
 1. **Reachability** — from a member's machine, confirm the daemon's `host:port` is reachable over the
    overlay:
+
    ```bash
    curl "http://$DAEMON_ADDR:4849/health"   # → {"ok":true,"v":...,"db":...,"schema":...}
    ```
+
    `/health` needs no token; a clean JSON response means the overlay path works end to end.
+
+   **`/health` passing is not enough** — it is plain HTTP and never crosses the ADR 040 upgrade gate,
+   so it returns a cheerful `200` on a daemon that will refuse every member's WebSocket. Test the
+   upgrade itself, with the `Host` your members actually send:
+
+   ```bash
+   curl -sS -o /dev/null -w '%{http_code}\n' \
+     -H "Host: $DAEMON_ADDR" -H 'Upgrade: websocket' -H 'Connection: Upgrade' \
+     "http://$DAEMON_ADDR:4849/ws"
+   ```
+
+   `403` means the host is **not** allow-listed — go back to step 2b. `400` is the **pass**: the gate
+   let it through and the handshake then failed because `curl` sends no `Sec-WebSocket-Key`. Verified
+   against a live daemon: allow-listed host → `400`, unlisted host → `403`.
+
 2. **One daemon, one db** — the `db` field in `/health` is the database the daemon is actually serving.
-   Every member hitting the *same* `DAEMON_ADDR` is on the *same* team store. (A daemon accidentally
+   Every member hitting the _same_ `DAEMON_ADDR` is on the _same_ team store. (A daemon accidentally
    serving the wrong db reads as "everyone offline" — ADR 016.)
 3. **Presence** — have two members on two machines run `musterd status`; each should see the other in the
    roster once both are attached.
@@ -94,7 +132,7 @@ Run this checklist before you trust the team:
    You can sanity-check this by sending to a member who is briefly offline and confirming the message
    appears in their `inbox` when they return. No message is lost to a dropped link.
 
-## What this guide is *not*
+## What this guide is _not_
 
 - **Not `0.0.0.0` in plaintext on a public network.** See the warning in step 2. If you have no overlay
   and must bind a routable address directly, you want **Topology A** (secured off-loopback bind with TLS)

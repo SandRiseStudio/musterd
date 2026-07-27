@@ -36,6 +36,8 @@ export interface ServiceCtx {
   stdoutPath: string;
   stderrPath: string;
   path: string;
+  /** Extra daemon env baked into the plist (`MUSTERD_ALLOWED_HOSTS`, ADR 040). Merged with PATH. */
+  env?: Record<string, string>;
   run: Runner;
   /** Blocking sleep between bootstrap retries; injected so tests don't actually wait. */
   sleep?: (ms: number) => void;
@@ -59,6 +61,7 @@ function plist(ctx: ServiceCtx): string {
     stdoutPath: ctx.stdoutPath,
     stderrPath: ctx.stderrPath,
     path: ctx.path,
+    ...(ctx.env ? { env: ctx.env } : {}),
   });
 }
 
