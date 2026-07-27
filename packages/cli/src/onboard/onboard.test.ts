@@ -18,16 +18,30 @@ const binding = {
 };
 
 describe('mcpEntry', () => {
-  it('builds the v0.3 claim-binding env (ADR 075) — no baked MUSTERD_CLAIM', () => {
-    // The claim is intentionally NOT emitted: it changes on re-claim and the adapter reads it from
-    // binding.json (the single source of truth). Baking it froze a copy that outranked binding.json.
-    expect(buildMcpEnv(binding)).toEqual({
-      MUSTERD_SERVER: 'http://localhost:4849',
-      MUSTERD_TEAM: 'dawn',
-      MUSTERD_AGENT_KEY: 'mskey_secret',
-      MUSTERD_SURFACE: 'cursor',
-    });
-    expect(buildMcpEnv(binding)['MUSTERD_CLAIM']).toBeUndefined();
+  it('emits NO per-seat state — the entry is shared by every worktree of the repo (ADR 165)', () => {
+    // Claude Code keys local-scope MCP config by REPO ROOT, so all `agents-*` seat worktrees share
+    // ONE entry. Anything per-seat in it is a single global slot the next provisioning run overwrites
+    // — and `MUSTERD_GRANT`/`MUSTERD_AGENT_KEY` are *credentials*, which the adapter ranks ABOVE
+    // binding.json, so the loser presents a sibling's secret at claim time. The adapter resolves all
+    // of these from `.musterd/binding.json` (found by walking up from cwd) or the committed
+    // `workspace.json`, both of which are genuinely per-worktree.
+    expect(buildMcpEnv(binding)).toEqual({});
+  });
+
+  it('keeps the env names working as manual overrides — it just stops materializing them', () => {
+    // Regression guard on intent: this task removed the *writer*, not the reader. If someone later
+    // "restores" any of these to the entry, the shared-slot defect returns.
+    for (const k of [
+      'MUSTERD_SERVER',
+      'MUSTERD_TEAM',
+      'MUSTERD_AGENT_KEY',
+      'MUSTERD_GRANT',
+      'MUSTERD_SURFACE',
+      'MUSTERD_CLAIM',
+      'MUSTERD_MODEL',
+    ]) {
+      expect(buildMcpEnv(binding)[k]).toBeUndefined();
+    }
   });
 
   it('NEVER emits MUSTERD_MODEL, declared or not (a snapshot must not outrank an observation)', () => {
@@ -49,7 +63,7 @@ describe('mcpEntry', () => {
     const entry = buildEntry(binding);
     expect(entry.command).toBe(process.execPath);
     expect(entry.args[0]).toMatch(/index\.(js|ts)$/);
-    expect(entry.env['MUSTERD_CLAIM']).toBeUndefined();
+    expect(entry.env).toEqual({});
   });
 });
 
@@ -75,7 +89,8 @@ describe('cursor harness', () => {
 
     const written = JSON.parse(readFileSync(join(cwd, '.cursor', 'mcp.json'), 'utf8'));
     expect(written.mcpServers.musterd.command).toBe(process.execPath);
-    expect(written.mcpServers.musterd.env.MUSTERD_TEAM).toBe('dawn');
+    // ADR 165: the written entry carries no per-seat state — team comes from binding/workspace.
+    expect(written.mcpServers.musterd.env).toEqual({});
 
     const after = await cursor.detect();
     expect(after.configured).toBe(true);

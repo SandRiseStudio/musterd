@@ -78,12 +78,10 @@ describe('musterd wire', () => {
     const { code } = await run([]);
     expect(code).toBe(0);
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_TEAM).toBe('bravo');
-    expect(entry.env.MUSTERD_AGENT_KEY).toBe('mskey_fromconfig');
-    // claim is not baked into the MCP env — the adapter reads it from binding.json / workspace.json
-    expect(entry.env.MUSTERD_CLAIM).toBeUndefined();
-    // tools only by default — no autojoin
-    expect(entry.env.MUSTERD_AUTOJOIN).toBeUndefined();
+    // ADR 165: the entry is shared by every worktree of the repo, so it carries NO per-seat state —
+    // no team, no key, no claim. The resolved key's destination is binding.json (asserted below),
+    // which is per-worktree and what the adapter actually reads.
+    expect(entry.env).toEqual({});
     // binding.json materialized with the resolved key
     expect(readBinding().agent_key).toBe('mskey_fromconfig');
   });
@@ -125,8 +123,9 @@ describe('musterd wire', () => {
     process.env['MUSTERD_AGENT_KEY'] = 'mskey_env';
     const flagRun = await run(['--key', 'mskey_flag']);
     expect(flagRun.code).toBe(0);
-    const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_AGENT_KEY).toBe('mskey_flag');
+    // Precedence is unchanged (--key > env > config); what changed is WHERE the winner lands.
+    // ADR 165: never the shared entry env — binding.json, which is per-worktree.
+    expect(readBinding().agent_key).toBe('mskey_flag');
   });
 
   it('registers keyless + warns when no key is available anywhere', async () => {

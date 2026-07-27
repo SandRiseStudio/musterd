@@ -90,7 +90,9 @@ describe('musterd agent <name>', () => {
     // identical for every seat, and therefore harmless.
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
     expect(entry.env.MUSTERD_BINDING).toBeUndefined();
-    expect(entry.env.MUSTERD_SURFACE).toBe('claude-code');
+    // ADR 165 completed what the comment above began: surface came out with the rest — it lives in
+    // binding.json. AUTOJOIN stays (repo-root-global by design; increment 2's recorded gap).
+    expect(entry.env.MUSTERD_SURFACE).toBeUndefined();
     expect(entry.env.MUSTERD_AGENT_KEY).toBeUndefined(); // key lives in binding.json, not the env
     expect(entry.env.MUSTERD_CLAIM).toBeUndefined();
     expect(entry.env.MUSTERD_AUTOJOIN).toBe('1');
@@ -159,7 +161,7 @@ describe('musterd agent <name>', () => {
       expect.objectContaining({ surface: 'cursor' }),
     );
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_SURFACE).toBe('cursor');
+    expect(entry.env.MUSTERD_SURFACE).toBeUndefined(); // ADR 165: surface is in binding.json
   });
 
   it('--harness codex wires the Codex surface', async () => {
@@ -170,7 +172,7 @@ describe('musterd agent <name>', () => {
       expect.objectContaining({ surface: 'codex' }),
     );
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_SURFACE).toBe('codex');
+    expect(entry.env.MUSTERD_SURFACE).toBeUndefined(); // ADR 165: surface is in binding.json
   });
 
   it('defaults to the claude-code harness when --harness is omitted', async () => {

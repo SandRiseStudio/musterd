@@ -42,15 +42,28 @@ export interface AgentBinding {
  * One seat attested `grok-4.5` for weeks while running `claude-opus-4-8`, and every repair (editing
  * binding.json, re-sending with the right value) silently lost to the baked env. The model now comes
  * from an *observation* (the SessionStart hook's `observeModel` probe) or else `binding.model`;
- * `MUSTERD_MODEL` stays a supported *manual* override, it just isn't materialized by provisioning. */
-export function buildMcpEnv(b: AgentBinding): Record<string, string> {
-  return {
-    MUSTERD_SERVER: b.server,
-    MUSTERD_TEAM: b.team,
-    ...(b.agent_key !== undefined ? { MUSTERD_AGENT_KEY: b.agent_key } : {}),
-    ...(b.grant !== undefined ? { MUSTERD_GRANT: b.grant } : {}),
-    MUSTERD_SURFACE: b.surface,
-  };
+ * `MUSTERD_MODEL` stays a supported *manual* override, it just isn't materialized by provisioning.
+ *
+ * ADR 165 finished the job for the rest. The same argument applies with more force to the remaining
+ * fields, because of WHERE this entry lives: Claude Code keys local-scope MCP config by **repo root**,
+ * so every `agents-*` seat worktree of one repo shares a SINGLE entry. A shared slot may hold only what
+ * is identical across every seat sharing it — and `MUSTERD_AGENT_KEY`/`MUSTERD_GRANT` are per-seat
+ * *credentials* that the adapter ranks ABOVE binding.json (`packages/mcp/src/config.ts`), so whichever
+ * seat provisioned last left every sibling presenting its secret at claim time. `MUSTERD_SERVER`,
+ * `MUSTERD_TEAM` and `MUSTERD_SURFACE` are merely redundant, but they made the entry differ between
+ * writers (`init`/`wire` baked them, `agent` never did), which is what turned overwriting the slot into
+ * theft rather than a no-op.
+ *
+ * So the entry now carries NOTHING. Identity and secrets come from `.musterd/binding.json`, which the
+ * adapter finds by walking up from **cwd** — a signal that is genuinely per-worktree — falling back to
+ * the committed `workspace.json` for the non-secret fields. All five names remain supported *manual*
+ * overrides; provisioning simply stops materializing them.
+ *
+ * This function is deliberately kept rather than inlined as `{}` at its call sites: it is the one place
+ * the reason is written down, and the place the regression test binds. `MUSTERD_GRANT` outlived
+ * `MUSTERD_CLAIM`'s removal precisely because no single place recorded the rule. */
+export function buildMcpEnv(_b: AgentBinding): Record<string, string> {
+  return {};
 }
 
 /**

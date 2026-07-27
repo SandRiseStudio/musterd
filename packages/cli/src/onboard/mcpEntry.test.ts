@@ -25,18 +25,13 @@ describe('buildMcpEnv', () => {
     expect(buildMcpEnv(base)).not.toHaveProperty('MUSTERD_CLAIM');
   });
 
-  it('still bakes the fields that are NOT observable and cannot drift out from under us', () => {
+  it('bakes NOTHING — the slot is shared by the whole worktree family (ADR 165)', () => {
+    // This test used to assert the OPPOSITE: that server/team/surface/key/grant "cannot drift out
+    // from under us" and were safe to bake. That premise was wrong in exactly one way that matters:
+    // the entry is keyed by repo root, so it is one slot shared by every seat worktree, and a per-seat
+    // credential in a shared slot means the last writer's secret is presented by every sibling at
+    // claim time. Zero-sum, not stale. Everything now resolves from binding.json / workspace.json.
     const env = buildMcpEnv({ ...base, agent_key: 'mskey_x', grant: 'msgr_y' });
-    expect(env.MUSTERD_SERVER).toBe('http://127.0.0.1:4849');
-    expect(env.MUSTERD_TEAM).toBe('revive');
-    expect(env.MUSTERD_SURFACE).toBe('claude-code');
-    expect(env.MUSTERD_AGENT_KEY).toBe('mskey_x');
-    expect(env.MUSTERD_GRANT).toBe('msgr_y');
-  });
-
-  it('omits the optional secrets when the folder has none (a keyless chat folder)', () => {
-    const env = buildMcpEnv(base);
-    expect(env).not.toHaveProperty('MUSTERD_AGENT_KEY');
-    expect(env).not.toHaveProperty('MUSTERD_GRANT');
+    expect(env).toEqual({});
   });
 });

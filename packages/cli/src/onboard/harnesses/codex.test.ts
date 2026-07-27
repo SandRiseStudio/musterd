@@ -36,7 +36,8 @@ describe('codex.configure', () => {
 
     const toml = readFileSync(cfgPath(), 'utf8');
     expect(hasServer(toml, 'musterd')).toBe(true);
-    expect(toml).toContain('MUSTERD_TEAM = "dawn"');
+    // ADR 165: no per-seat state reaches the written config — team resolves from binding/workspace.
+    expect(toml).not.toContain('MUSTERD_TEAM');
 
     const after = await codex.detect();
     expect(after.configured).toBe(true);
