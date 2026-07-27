@@ -142,6 +142,16 @@ export type AuditAction =
   // a subagent writing via `python -c` or an MCP filesystem tool produces no row (ADR 163 recall arm).
   | 'actor.subagent_write'
   | 'actor.subagent_spawn'
+  // ADR 167 (harness-native session messaging): a seat called the harness's own session-to-session
+  // send (`ccd_session_mgmt.send_message`) — the identityless side channel, now ledger-visible. Same
+  // observer family as the two ADR 163 rows above: no posture, no outcome, `result` always `allow`.
+  // Detail is SHAPES ONLY, reduced client-side: `{ tool, body_fingerprint?, session_ref?, nudge_ref?,
+  // nudge?, verbatim? }` — the body and the raw target session id never reach the daemon at all (ADR
+  // 051/128, and the SessionCapture never-crosses-the-wire contract). `nudge_ref` is a ULID the body
+  // carried; when it resolves to a real message the row is a sanctioned delivery-rail relay
+  // (`nudge: true`, with `verbatim` saying whether the composed line was relayed unmodified — ADR 167
+  // increment 2); rows without it are the organic/side-channel population increment 1 exists to count.
+  | 'actor.session_message'
   // The inverse of team create: an admin soft-archived the whole team (`POST /teams/:slug/archive`).
   // target = the slug. The row lands in the archived team's own log — readable again only at the db
   // (requireTeam refuses archived teams), but the history survives, which is the point of soft.

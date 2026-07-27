@@ -262,6 +262,25 @@ export function recordActorAttestation(
   member: MemberRow,
   att: ActorAttestation,
 ): void {
+  // ADR 167 — a seat used the harness's session-to-session send. Everything sensitive was reduced to
+  // sha256-16 client-side (body AND target session id — stricter than the Bash split below, because a
+  // session message is another agent's incoming context and a session id is contractually
+  // machine-local), so this row records exactly what arrived and nothing needed redacting here.
+  if (att.kind === 'session-message') {
+    appendAudit(srv.db, team.id, {
+      actor: member.name,
+      action: 'actor.session_message',
+      target: null,
+      result: 'allow',
+      detail: {
+        tool: att.tool,
+        ...(att.bodyFingerprint ? { body_fingerprint: att.bodyFingerprint } : {}),
+        ...(att.sessionRef ? { session_ref: att.sessionRef } : {}),
+        ...(att.nudgeRef ? { nudge_ref: att.nudgeRef } : {}),
+      },
+    });
+    return;
+  }
   const isSpawn = att.kind === 'subagent-spawn';
   appendAudit(srv.db, team.id, {
     actor: member.name,

@@ -1,5 +1,12 @@
 import { isAbsolute, relative } from 'node:path';
-import { type GateToolCall, isWriteShaped, matchEnforcement } from '@musterd/protocol';
+import {
+  CCD_SEND_MESSAGE_TOOL,
+  extractUlid,
+  type GateToolCall,
+  isWriteShaped,
+  matchEnforcement,
+  textFingerprint,
+} from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import type { HttpClient } from '../client.js';
 import { CliError } from '../errors.js';
@@ -80,6 +87,17 @@ export function parseToolCall(raw: string): GateToolCall | null {
     const spawnType =
       typeof input['subagent_type'] === 'string' ? input['subagent_type'] : undefined;
     const spawnModel = typeof input['model'] === 'string' ? input['model'] : undefined;
+    // ADR 167 — the harness session-messaging send. The raw body and raw target session id are reduced
+    // to sha256-16 HERE, inside this frame, and never assigned onto the returned object: what the rest
+    // of the pipeline never holds, it cannot leak (the body is another agent's incoming context, ADR
+    // 128). Lenient like everything else — a shape change in the tool input degrades to a
+    // fingerprint-less attestation, never a failure.
+    const isSessionMsg = tool === CCD_SEND_MESSAGE_TOOL;
+    const body =
+      isSessionMsg && typeof input['message'] === 'string' ? input['message'] : undefined;
+    const targetSession =
+      isSessionMsg && typeof input['session_id'] === 'string' ? input['session_id'] : undefined;
+    const nudgeRef = body ? extractUlid(body) : undefined;
     return {
       tool,
       ...(path ? { path } : {}),
@@ -88,6 +106,9 @@ export function parseToolCall(raw: string): GateToolCall | null {
       ...(actorType ? { actorType } : {}),
       ...(spawnType ? { spawnType } : {}),
       ...(spawnModel ? { spawnModel } : {}),
+      ...(body ? { bodyFingerprint: textFingerprint(body) } : {}),
+      ...(targetSession ? { sessionRef: textFingerprint(targetSession) } : {}),
+      ...(nudgeRef ? { nudgeRef } : {}),
     };
   } catch {
     return null;
@@ -133,17 +154,31 @@ export function repoRelativePath(path: string): string {
 }
 
 /**
- * Decide whether this call deserves an actor row, and fire it off (ADR 163, increment 1). Two shapes
- * qualify and nothing else:
+ * Decide whether this call deserves an actor row, and fire it off (ADR 163, increment 1; ADR 167 adds
+ * the third shape). Three shapes qualify and nothing else:
  *
  * - a **spawn** (`tool_name: Agent`) — the denominator: how much fan-out is happening at all;
- * - a **write-shaped call carrying `actorId`** — a subagent wrote under its parent seat's identity.
+ * - a **write-shaped call carrying `actorId`** — a subagent wrote under its parent seat's identity;
+ * - a **harness session-message send** (ADR 167) — a seat used the identityless side channel.
  *
  * Reads never qualify, which is the point: nick's rule blesses read-only fan-out, and an `Explore`
  * sweep's hundreds of reads would swamp the ledger for nothing. Returns immediately — the promise is
  * intentionally floated, and `recordActor` swallows its own errors.
  */
 export function attest(http: HttpClient, team: string, call: GateToolCall): void {
+  // ADR 167 — a seat used the harness's session-to-session send. Observation only, fingerprints only
+  // (already reduced at parse time); fires even when the input shape was unrecognized, because "a send
+  // happened" is itself the datum the side-channel ledger exists for.
+  if (call.tool === CCD_SEND_MESSAGE_TOOL) {
+    void http.recordActor(team, {
+      kind: 'session-message',
+      tool: call.tool,
+      ...(call.bodyFingerprint ? { bodyFingerprint: call.bodyFingerprint } : {}),
+      ...(call.sessionRef ? { sessionRef: call.sessionRef } : {}),
+      ...(call.nudgeRef ? { nudgeRef: call.nudgeRef } : {}),
+    });
+    return;
+  }
   if (call.tool === 'Agent') {
     if (call.spawnType === undefined && call.spawnModel === undefined) return;
     void http.recordActor(team, {

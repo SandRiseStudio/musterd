@@ -117,6 +117,13 @@ export interface GateToolCall {
   /** ADR 163 — on a spawn call, the `model:` override if one was passed. The only place a subagent's
    *  model is ever visible. */
   spawnModel?: string;
+  /** ADR 167 — on a `ccd_session_mgmt.send_message` call, the body/target already reduced to sha256-16
+   *  AT PARSE TIME (plus any ULID the body carried). The raw body and raw session id are deliberately
+   *  never stored on this object at all: they exist only inside `parseToolCall`'s frame, so no later
+   *  code path can leak what was never kept. */
+  bodyFingerprint?: string;
+  sessionRef?: string;
+  nudgeRef?: string;
 }
 
 /** A class match: the class, the concrete target that matched (path or normalized command), and the
@@ -299,8 +306,16 @@ export function matchEnforcement(
  * fan-out happened at all, and is the denominator the write count is read against. Increment 1 records
  * both and joins neither — the spawn call carries the `model:` override but no `actorId`, the subagent's
  * own calls carry `actorId` but no model, and nothing links them.
+ *
+ * ADR 167 adds a third kind, `session-message`: a seat used the harness's own session-to-session
+ * messaging (`ccd_session_mgmt.send_message`) — an identityless channel the ledger otherwise never
+ * sees. Same exemption, same reason: the reporter still cannot say no.
  */
-export const ACTOR_ATTESTATION_KINDS = ['subagent-write', 'subagent-spawn'] as const;
+export const ACTOR_ATTESTATION_KINDS = [
+  'subagent-write',
+  'subagent-spawn',
+  'session-message',
+] as const;
 export type ActorAttestationKind = (typeof ACTOR_ATTESTATION_KINDS)[number];
 
 /**
@@ -319,8 +334,43 @@ export const ActorAttestationSchema = z.object({
   /** Spawn-only: the requested subagent type and `model:` override, if any. */
   spawnType: z.string().min(1).optional(),
   spawnModel: z.string().min(1).optional(),
+  /** `session-message`-only (ADR 167), all computed CLIENT-side so the raw values never cross the wire:
+   *  the message body reduced to sha256-16 — stricter than the Bash pattern (where the raw command
+   *  crosses and the server fingerprints) because a session message is another agent's incoming context
+   *  (ADR 128), not the sender's own command line. */
+  bodyFingerprint: z.string().length(16).optional(),
+  /** `session-message`-only: the target harness session id reduced to sha256-16 — raw session ids never
+   *  cross the wire (the `SessionCaptureSchema` contract, ADR 131 §5), but "same target as last time?"
+   *  stays answerable. */
+  sessionRef: z.string().length(16).optional(),
+  /** `session-message`-only: a ULID found in the body, if any — the key ADR 167's nudge-confirmation
+   *  derives on (a sanctioned relay carries the nudged message's id; organic use carries none). */
+  nudgeRef: z
+    .string()
+    .regex(/^[0-9A-HJKMNP-TV-Z]{26}$/)
+    .optional(),
 });
 export type ActorAttestation = z.infer<typeof ActorAttestationSchema>;
+
+/* ─────────────────────────── ADR 167 — session-message observation ─────────────────────────── */
+
+/** The harness tool ADR 167 observes: Claude Code Desktop's session-to-session send. One exact name —
+ *  `list_sessions` is a read (reads need no provenance, the ADR 163 line) and `set_session_title` is
+ *  ADR 160's governed surface already. */
+export const CCD_SEND_MESSAGE_TOOL = 'mcp__ccd_session_mgmt__send_message';
+
+/** sha256-16 of an arbitrary text — the shapes-only reduction ADR 167 applies to a session message's
+ *  body and target session id client-side. Sibling of `gateFingerprint`, minus the class prefix: here
+ *  there is no class table, just "never the raw value" (ADR 051/128). */
+export function textFingerprint(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
+
+/** First ULID in a text, or undefined — how a relayed nudge self-identifies (ADR 167): the daemon put
+ *  the nudged message's id in the composed line, so its presence in a sent body is the join key. */
+export function extractUlid(text: string): string | undefined {
+  return /[0-9A-HJKMNP-TV-Z]{26}/.exec(text)?.[0];
+}
 
 /** Tools whose call IS a write, with no inspection needed. */
 const WRITE_SHAPED_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
