@@ -34,17 +34,17 @@ export const ADOPT_SETTLE_MS = 60_000;
 /**
  * What the ladder concluded.
  *  - `live` — no evidence against us (including "cannot tell"). Keep heartbeating.
- *  - `orphan` — definitive: the session that spawned us is gone. Exit the process.
- *  - `stale` — probabilistic: the transcript has gone quiet past the horizon. Go **dormant**
- *    (release presence, keep tools registered); ADR 108 autojoin re-occupies on the next tool call.
- *    Deliberately not an exit — exiting on a merely-idle session would strand it with no musterd
- *    tools until the harness restarts.
+ *  - `dormant` — this seat has no running session to vouch for it: release presence, keep the tools
+ *    registered, and let ADR 108 autojoin re-occupy on the next tool call. **Every rung but one ends
+ *    here**, because dormancy is recoverable and an exit is not.
+ *  - `exit` — the process that spawned us is provably gone, so there is nothing left to recover for.
+ *    Only `ppid` reaches this.
  */
-export type SessionVerdict = 'live' | 'orphan' | 'stale';
+export type SessionVerdict = 'live' | 'dormant' | 'exit';
 
 /** Which signal fired, for the audit detail — the point of the ladder is knowing which rung carries
  *  the weight in the field. (`stdin` is the pre-existing teardown and never surfaces here.) */
-export type SessionRung = 'ppid' | 'successor' | 'ended' | 'stale';
+export type SessionRung = 'ppid' | 'ended' | 'stale';
 
 export interface SessionJudgement {
   verdict: SessionVerdict;
@@ -151,7 +151,7 @@ export class SessionAttestation {
   check(now = Date.now()): SessionJudgement {
     // Rung 2 — re-parented to init/launchd: whatever spawned us is gone. Independent of the binding,
     // so it applies even before adoption.
-    if (this.ppid() === 1) return { verdict: 'orphan', rung: 'ppid' };
+    if (this.ppid() === 1) return { verdict: 'exit', rung: 'ppid' };
 
     const session = this.readSession(this.bindingDir);
     if (!session) return { verdict: 'live' };
@@ -162,14 +162,22 @@ export class SessionAttestation {
       this.adopted = session.id;
     }
 
-    // A different session now owns this workspace — we are a reload orphan. Locally-derived twin of
-    // the ADR 092 `same_workspace` takeover.
-    if (session.id !== this.adopted)
-      return { verdict: 'orphan', rung: 'successor', session_id: this.adopted };
+    // A different session id now sits in the binding. This is NOT evidence that we are an orphan —
+    // measured on `agents-miley`, a foreign 2-second capture (transcript never even written) landed
+    // in the binding while that workspace's real session, alive since the previous evening, kept
+    // working. Treating that as a takeover would have killed a live session's adapter. The genuine
+    // reload-orphan case is already caught server-side by the ADR 092 `same_workspace` frame, which
+    // knows what this file cannot. So: re-adopt and carry on serving the workspace.
+    if (session.id !== this.adopted) {
+      if (!this.looksAlive(session, now)) return { verdict: 'live', session_id: this.adopted };
+      this.adopted = session.id;
+    }
 
-    // Rung 3 — the advisory SessionEnd hook fired for our own session.
+    // Rung 3 — the advisory SessionEnd hook fired for our own session. Dormant, not exit: the app
+    // may be alive and about to open another session, and a dormant adapter comes back on its next
+    // tool call while an exited one is gone until the harness restarts.
     if (session.ended_at !== undefined)
-      return { verdict: 'orphan', rung: 'ended', session_id: this.adopted };
+      return { verdict: 'dormant', rung: 'ended', session_id: this.adopted };
 
     // Rung 4 — the crash backstop, the only rung that catches a session that died without a hook.
     if (!session.transcript_path) return { verdict: 'live', session_id: this.adopted };
@@ -177,7 +185,7 @@ export class SessionAttestation {
     if (mtime === undefined) return { verdict: 'live', session_id: this.adopted };
     const age = now - mtime;
     if (age > this.staleMs)
-      return { verdict: 'stale', rung: 'stale', age_ms: age, session_id: this.adopted };
+      return { verdict: 'dormant', rung: 'stale', age_ms: age, session_id: this.adopted };
     return { verdict: 'live', age_ms: age, session_id: this.adopted };
   }
 }

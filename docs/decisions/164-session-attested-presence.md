@@ -107,17 +107,24 @@ still wrong.
 Four rungs, evaluated on the tick that already re-reads the binding off disk for model
 re-attestation (ADR 158 §7) — so the added cost is one `stat` per 15 seconds per seat.
 
-| #   | Signal                                                            | Certainty     | Action            |
-| --- | ----------------------------------------------------------------- | ------------- | ----------------- |
-| 1   | stdin EOF / transport close                                       | definitive    | exit (**exists**) |
-| 2   | `process.ppid === 1` — re-parented, the spawning host is gone     | definitive    | exit              |
-| 3   | `binding.session.ended_at` set **for our own session id**         | definitive    | exit              |
-| 4   | transcript mtime older than `SESSION_STALE_MS`, `ended_at` absent | probabilistic | **go dormant**    |
+| #   | Signal                                                            | Action            |
+| --- | ----------------------------------------------------------------- | ----------------- |
+| 1   | stdin EOF / transport close                                       | exit (**exists**) |
+| 2   | `process.ppid === 1` — re-parented, nothing spawned us any more   | exit              |
+| 3   | `binding.session.ended_at` set **for our own session id**         | **go dormant**    |
+| 4   | transcript mtime older than `SESSION_STALE_MS`, `ended_at` absent | **go dormant**    |
 
-Rungs 1–3 admit no false positive: the host is provably gone, so the adapter exits and its presence
-times out 45s later. Rung 4 is the crash/orphan backstop — the only rung that would have caught
-`izzo` — and it _can_ be wrong about a session that is merely idle for a long time, because a
-transcript is appended per message and a seat waiting on a human writes nothing.
+**Only rung 2 exits.** That is a correction, not the original design, and the reason is worth
+stating plainly: this ADR's first two attempts both classified a signal as "definitive" and both
+were wrong about a session that was in fact alive. Exiting is unrecoverable — a live session is left
+with no musterd tools until the harness restarts — while dormancy costs nothing, because ADR 108
+autojoin re-occupies on the very next tool call. When the asymmetry is that lopsided, confidence
+should not be spent. Rung 2 keeps its exit only because a re-parented process has nothing left to
+recover _for_.
+
+Rung 4 is the crash/orphan backstop — the only rung that would have caught `izzo` — and it _can_ be
+wrong about a session that is merely idle for a long time, because a transcript is appended per
+message and a seat waiting on a human writes nothing.
 
 That false positive is bounded on purpose. Rung 4 **must not exit the process**; it calls the
 existing `leave()` (back to dormant: presence released, tools stay registered), and ADR 108 autojoin
@@ -168,12 +175,26 @@ Adoption is therefore two rules, neither depending on `started_at`:
   look again next tick. Without this, an adapter in a hookless workspace would adopt a corpse and
   promptly execute itself.
 
-Once adopted, two verdicts follow, both definitive:
+### A different session id is not a takeover
 
-- the binding's `session.id` differs from the adopted one ⇒ a **successor session** owns this
-  workspace and we are a reload orphan ⇒ exit. (This is the same conclusion ADR 092's
-  `same_workspace` takeover already reaches, arrived at locally instead of via the server.)
-- the adopted session carries `ended_at` ⇒ rung 3 ⇒ exit.
+An earlier draft read a changed `session.id` as a **successor** — a new session had claimed the
+workspace, so this adapter must be a reload orphan, and it exited. Checking the real fleet before
+trusting that killed it:
+
+- `agents-miley`'s binding recorded session `c2c6c365`, lifetime **2 seconds**, `ended_at` set, and
+  a `transcript_path` naming a file that was never written.
+- Meanwhile that workspace's actual session — `40930804`, whose first transcript entry lands in the
+  same second its adapter started, the previous evening — was alive and had been appended to
+  fifteen minutes earlier.
+
+A foreign, short-lived capture can therefore sit in the binding while the real session works. Under
+the successor rule, that adapter would have exited and taken a live session's tools with it. So a
+changed id now means **re-adopt** (and a changed id that is already dead is ignored outright — we
+keep the session we had). The genuine reload-orphan case is not lost: ADR 092's `same_workspace`
+takeover already catches it server-side, where the daemon knows things this file cannot.
+
+The lesson generalises past this rung, and is why only rung 2 still exits: the binding is a hint
+about sessions, not a registry of them.
 
 Before adoption, only rungs 1 and 2 apply — an un-adopted adapter never demotes itself on evidence
 about somebody else's session.
@@ -223,15 +244,20 @@ a seat whose transcript is touched every tick never leaves through rungs 2–4.
 driven over stdio against an isolated daemon on a copy of the real database, with **stdin held open
 throughout** so the pre-existing teardown could not be what fired:
 
-| staged rung | result                                                                                         |
-| ----------- | ---------------------------------------------------------------------------------------------- |
-| `stale`     | released 15s after the transcript went quiet; adapter **still running** (dormant, as designed) |
-| `ended`     | released on the next tick; adapter exited 0                                                    |
-| `successor` | released on the next tick; adapter exited 0                                                    |
+| staged death             | required outcome                      | observed                                         |
+| ------------------------ | ------------------------------------- | ------------------------------------------------ |
+| transcript goes quiet    | release presence, **keep running**    | released, adapter still running                  |
+| `SessionEnd` for our own | release presence, **keep running**    | released, adapter still running                  |
+| foreign capture appears  | **stay online** — re-adopt, not fatal | stayed online through the full watch, re-adopted |
 
-Each run first held presence through 75 seconds of live heartbeats, so the release is attributable
-to the staged death and not to drift. `ppid` is covered by unit test only — staging a re-parent
-means orphaning a process the probe still needs to observe.
+Each run first held presence through 75 seconds of live heartbeats, so a release is attributable to
+the staged death and not to drift, and the foreign-capture run had to survive an equally long watch
+afterwards. `ppid` is covered by unit test only — staging a re-parent means orphaning the process
+the probe still needs to observe.
+
+Three probe rounds, three different answers, two of them failures that changed the design: the first
+found the ladder inert, the second found a "definitive" rung that would have killed a live session.
+The table above is the third.
 
 **Experiment.** None is warranted, and that is a deliberate call rather than an omission: there is
 no arm to compare against. The control condition — presence attested by a process — is the measured

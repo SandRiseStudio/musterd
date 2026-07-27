@@ -358,11 +358,11 @@ export class MusterdClient {
   /**
    * The ADR 164 ladder, run on the heartbeat tick. Returns true when this tick must NOT heartbeat.
    *
-   * `orphan` is definitive (re-parented, superseded, or SessionEnd fired for our own session): drop
-   * presence and exit through the same clean path a reload takeover uses. `stale` is the
-   * probabilistic backstop — go dormant only, because a session that is merely thinking for an hour
-   * must be able to come back on its next tool call (ADR 108 autojoin) rather than be stranded
-   * without tools. Never throws: any failure to judge leaves the heartbeat alone.
+   * Almost everything ends in `dormant` — presence released, tools still registered, ADR 108
+   * autojoin re-occupying on the next tool call. Dormancy is recoverable and an exit is not, and a
+   * live probe showed how easily a "definitive" signal can be wrong about a session that is in fact
+   * alive. Only `exit` (the process re-parented, so nothing spawned us any more) tears the process
+   * down. Never throws: any failure to judge leaves the heartbeat alone.
    */
   private attestSession(): boolean {
     let verdict;
@@ -379,7 +379,7 @@ export class MusterdClient {
       `musterd: session no longer live (${verdict.rung}) — releasing seat presence\n`,
     );
     this.leave();
-    if (verdict.verdict === 'orphan') this.onReplaced?.();
+    if (verdict.verdict === 'exit') this.onReplaced?.();
     return true;
   }
 
