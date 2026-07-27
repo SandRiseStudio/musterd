@@ -35,6 +35,7 @@ import {
   LIVE_SYNC_LABEL,
   SWEEP_LABEL,
   agentFailureNote,
+  parsePlistEnvironment,
   parsePlistProgramArguments,
   SERVICE_LABEL,
   serviceSupported,
@@ -146,7 +147,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep] [--port <n>] [--host <h>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -343,6 +344,133 @@ async function fetchHealth(): Promise<DaemonHealth> {
 }
 
 /**
+ * The daemon env for this install: whatever the installed plist already carries, with
+ * `--allowed-hosts` applied on top when passed.
+ *
+ * THE PRESERVATION RULE IS THE POINT. `install` rewrites the plist from scratch every time, so
+ * without reading the old one back, a routine `musterd service install` months later would silently
+ * drop an allow-list somebody set once — and the failure it causes (a WS upgrade 403 that surfaces
+ * only as "the page never reported ready") points nowhere near the cause. Read-back also means this
+ * adopts the hand-edited value already on the real machine instead of clobbering it.
+ *
+ * PATH is excluded: it is regenerated from the running process on every install and must not be
+ * pinned to whatever an older install happened to compute.
+ */
+export function resolveDaemonEnv(
+  existingPlist: string | null,
+  allowedHosts: string | undefined,
+): Record<string, string> {
+  const prior = existingPlist ? parsePlistEnvironment(existingPlist) : null;
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(prior ?? {})) if (k !== 'PATH') env[k] = v;
+  if (allowedHosts !== undefined) {
+    // Normalise: split on commas, trim, drop empties. `--allowed-hosts ''` clears the list, which is
+    // the only way to undo one without editing the plist by hand.
+    const hosts = allowedHosts
+      .split(',')
+      .map((h) => h.trim())
+      .filter((h) => h !== '');
+    if (hosts.length > 0) env['MUSTERD_ALLOWED_HOSTS'] = hosts.join(',');
+    else delete env['MUSTERD_ALLOWED_HOSTS'];
+  }
+  return env;
+}
+
+/** Sleep between `/health` polls. Async (unlike the launchctl retry's blocking sleep) — we are
+ *  already in an async command and awaiting a fetch. */
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Wait for the daemon to answer `/health` after a bounce, or give up.
+ *
+ * WHY THIS EXISTS. Every restart path used to report success off the **launchctl** exit code, which
+ * says only "launchd accepted the command" — not "the daemon is serving". On 2026-07-27 a
+ * hand-rolled `bootout` + `bootstrap` silently did not take and left the daemon down ~2 minutes with
+ * the whole team offline and no error surfaced anywhere. A ✓ that cannot distinguish a running
+ * daemon from a dead one is worse than no ✓, because it stops the operator looking.
+ *
+ * Returns the health payload, or null if it never came back within the budget. Never throws — the
+ * caller decides how loud to be, since `install` and `refresh` want different repair text.
+ */
+export async function awaitDaemon(
+  health: () => Promise<DaemonHealth>,
+  opts: { tries?: number; delayMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<DaemonHealth | null> {
+  const tries = opts.tries ?? 20;
+  const delayMs = opts.delayMs ?? 500;
+  const sleep = opts.sleep ?? delay;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await health();
+    } catch {
+      // Not up yet (connection refused, or /health not serving) — launchd boots asynchronously,
+      // so the first poll failing is normal, not a verdict.
+    }
+    if (i < tries - 1) await sleep(delayMs);
+  }
+  return null;
+}
+
+/**
+ * Confirm the daemon came back after a bounce, or fail with the exact command that restores it.
+ * `what` names the operation for the message ("install", "restart", "refresh").
+ *
+ * Deliberately a hard failure rather than a warning: the operator is standing right there, and the
+ * whole team is offline until someone acts. The restore incantation is spelled out because the one
+ * time this happened, recovering it took reading a plist path out of a source file.
+ */
+async function verifyDaemonUp(
+  ctx: ServiceCtx,
+  health: () => Promise<DaemonHealth>,
+  what: string,
+  ok: (s: string) => void,
+  sleep?: (ms: number) => Promise<void>,
+): Promise<DaemonHealth | null> {
+  // BASELINE FIRST — this is what makes the check honest. `/health` being unreachable can mean the
+  // daemon is down, or merely that this CLI cannot see it (a daemon bound off-loopback, a `server`
+  // pointing elsewhere — the very overlay case this lane is about). Only a daemon that answered
+  // BEFORE the bounce and not after is evidence of an outage. Without a baseline we say so and warn,
+  // rather than hard-failing a working system: the pre-existing "fail open when health is
+  // unreachable" contract stays intact exactly where it was meant to apply.
+  const wasUp = await health().then(
+    () => true,
+    () => false,
+  );
+  // The long budget buys a booting daemon time before we accuse it of being down. With no baseline
+  // we can only ever warn, so a long wait buys nothing but latency on every no-daemon install.
+  const up = await awaitDaemon(health, {
+    ...(sleep ? { sleep } : {}),
+    ...(wasUp ? {} : { tries: 4 }),
+  });
+  if (!up && !wasUp) {
+    process.stdout.write(
+      `  ${theme.warn('?')} ${theme.meta(
+        `could not confirm the daemon after ${what} — /health was unreachable before it too, ` +
+          `so this may be a daemon this CLI cannot see rather than one that is down. ` +
+          `Check with \`musterd service status\`.`,
+      )}\n`,
+    );
+    return null;
+  }
+  if (!up) {
+    throw new CliError(
+      `${what} reported success but the daemon stopped answering /health — it was up before this ` +
+        `bounce and is not now, so it is DOWN and every seat on this machine is offline until it ` +
+        `is back.\n\n` +
+        `  launchctl bootstrap gui/${String(ctx.uid)} ${ctx.plistPath}\n\n` +
+        `Then check ${ctx.stderrPath} for why it failed to boot. ` +
+        `(launchd accepting the command is not the same as the daemon serving — that gap is what ` +
+        `this check exists to close.)`,
+      1,
+    );
+  }
+  ok(`daemon answered /health${up.build ? ` on ${up.build.slice(0, 7)}` : ''}`);
+  return up;
+}
+
+/**
  * How many commits `origin/main` is ahead of the daemon's running `build` — the numeric core of the
  * skew check, shared by `service status` (the human warning) and `service refresh --auto` (the
  * decision to bounce). Fetches `origin/main` first (best-effort). Returns null when there's no verdict
@@ -472,6 +600,8 @@ export async function serviceCommand(
     notify?: (n: { id: string; title: string; body: string }) => void;
     /** The attempted-tip debounce store (injected in tests; defaults to a file under ~/.musterd). */
     autoState?: { read: () => string | null; write: (sha: string) => void };
+    /** Sleep between post-bounce `/health` polls (injected so tests never actually wait). */
+    sleep?: (ms: number) => Promise<void>;
   } = {},
 ): Promise<number> {
   const sub = parsed.positionals[0];
@@ -496,7 +626,16 @@ export async function serviceCommand(
   // `--live` build-publisher publishes into. Inert until populated (serveStatic 404s the UI; API is
   // unaffected — ADR 062), so this is safe on every daemon, viewer installed or not.
   serveArgs.push('--web-root', liveWebRoot());
-  const ctx = deps.ctx ?? resolveCtx(serveArgs);
+  const ctx0 = deps.ctx ?? resolveCtx(serveArgs);
+  // Carry the daemon env on the ctx so `install`'s plist write picks it up. Resolved for every verb
+  // (cheap, one file read) so `status` can report the effective allow-list too.
+  const ctx: ServiceCtx = {
+    ...ctx0,
+    env: resolveDaemonEnv(
+      ctx0.readFile?.(ctx0.plistPath) ?? null,
+      flagStr(parsed.flags, 'allowed-hosts'),
+    ),
+  };
   const health = deps.health ?? fetchHealth;
   const force = parsed.flags['force'] === true;
 
@@ -570,7 +709,12 @@ export async function serviceCommand(
       process.stdout.write(theme.meta(`  plist: ${ctx.plistPath}`) + '\n');
       process.stdout.write(theme.meta(`  node:  ${ctx.node}`) + '\n');
       process.stdout.write(theme.meta(`  serve: ${ctx.binJs} ${ctx.serveArgs.join(' ')}`) + '\n');
+      if (ctx.env?.['MUSTERD_ALLOWED_HOSTS'])
+        process.stdout.write(
+          theme.meta(`  hosts: ${ctx.env['MUSTERD_ALLOWED_HOSTS']} (ADR 040 allow-list)`) + '\n',
+        );
       process.stdout.write(theme.meta(`  logs:  ${ctx.stdoutPath}`) + '\n');
+      await verifyDaemonUp(ctx, health, 'install', ok, deps.sleep);
       return 0;
     }
     case 'uninstall': {
@@ -600,10 +744,11 @@ export async function serviceCommand(
       const r = restart(ctx);
       if (r.status !== 0) fail('restart', r);
       ok('restarted the musterd daemon');
+      await verifyDaemonUp(ctx, health, 'restart', ok, deps.sleep);
       return 0;
     }
     case 'refresh':
-      return refreshDaemon(ctx, health, force, ok, fail);
+      return refreshDaemon(ctx, health, force, ok, fail, deps.sleep);
     case 'status':
       return renderStatus(ctx, health);
     case 'logs': {
@@ -688,6 +833,7 @@ async function refreshDaemon(
   force: boolean,
   ok: (s: string) => void,
   fail: (step: string, r: RunResult) => never,
+  sleep?: (ms: number) => Promise<void>,
 ): Promise<number> {
   // The checkout the daemon ACTUALLY runs from — read back from its installed plist, not derived
   // from where this CLI was invoked. `restart` already cycles the daemon by launchd label, but the
@@ -747,6 +893,9 @@ async function refreshDaemon(
   const r = restart(ctx);
   if (r.status !== 0) fail('restart', r);
   ok(`restarted the musterd daemon on ${after}`);
+  // Confirm it is actually serving before claiming the refresh worked — a rebuilt dist that fails to
+  // boot (a bad native module, a bad merge) looks identical to success at the launchctl layer.
+  await verifyDaemonUp(ctx, health, 'refresh', ok, sleep);
   // The rebuild above is checkout-wide, so anything else running from it is now stale too.
   bounceSiblings(ctx, dir, ok);
   return 0;
@@ -1317,6 +1466,15 @@ async function renderStatus(
         : theme.err('unreachable') + theme.meta(` · ${server}`)
     }\n`,
   );
+  // The ADR 040 allow-list, so a broken overlay is diagnosable without reading a plist. Labelled
+  // plist-derived on purpose: this is what someone WROTE, not what the running daemon enforces, and
+  // the two can disagree (a plist edited after the last bounce). `musterd stream doctor` settles it
+  // empirically by attempting a real upgrade — trust that over this line when they conflict.
+  const hosts = ctx.env?.['MUSTERD_ALLOWED_HOSTS'];
+  if (hosts)
+    process.stdout.write(
+      `  ${theme.meta('hosts:')}  ${hosts} ${theme.meta('(plist-derived; ADR 040 allow-list)')}\n`,
+    );
   // Build provenance + skew (ADR 130): the running daemon names its commit; we name the gap.
   if (health?.build) {
     process.stdout.write(

@@ -92,6 +92,25 @@ export function parsePlistProgramArguments(xml: string): string[] | null {
   return strings.length > 0 ? strings : null;
 }
 
+/**
+ * The `EnvironmentVariables` dict of an installed plist, or null when it has none. Used by
+ * `service install` to PRESERVE a value nobody re-passed: the plist is rewritten from scratch on
+ * every install, so without reading it back, one `musterd service install` would silently drop an
+ * allow-list someone set weeks ago and break the overlay with a ✓ printed.
+ *
+ * Deliberately tolerant of hand-authored plists (PlistBuddy, a text editor) — the machine this
+ * lands on has exactly that shape today, and a parser that only understood our own output would
+ * "preserve" nothing on the one plist that most needs preserving.
+ */
+export function parsePlistEnvironment(xml: string): Record<string, string> | null {
+  const block = xml.match(/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/);
+  if (!block) return null;
+  const out: Record<string, string> = {};
+  for (const m of block[1]!.matchAll(/<key>([\s\S]*?)<\/key>\s*<string>([\s\S]*?)<\/string>/g))
+    out[xmlUnescape(m[1]!)] = xmlUnescape(m[2]!);
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 export interface PlistOpts {
   label: string;
   /** Absolute node binary (the one running the CLI — `process.execPath`). */
@@ -105,6 +124,12 @@ export interface PlistOpts {
   stderrPath: string;
   /** PATH for child shellouts (osascript/notify-send/tail live here); launchd's default is minimal. */
   path: string;
+  /**
+   * Extra daemon environment baked into the plist. `MUSTERD_ALLOWED_HOSTS` is the first customer
+   * (ADR 040): reaching the daemon over a Tailscale overlay needs the tailnet host allow-listed, and
+   * before this the only way to set it was editing the plist by hand.
+   */
+  env?: Record<string, string>;
 }
 
 /**
@@ -120,6 +145,8 @@ export interface AgentPlistOpts {
   stderrPath: string;
   /** `EnvironmentVariables > PATH`; omit for an agent whose script sets its own PATH. */
   path?: string;
+  /** Extra daemon environment, merged into the same dict as PATH (`MUSTERD_ALLOWED_HOSTS`, ADR 040). */
+  env?: Record<string, string>;
   /** Relaunch on any exit (the daemon + the KeepAlive viewer server); default false. */
   keepAlive?: boolean;
   /** Start at load/login; default true. */
@@ -183,9 +210,21 @@ function renderPlist(o: AgentPlistOpts): string {
     parts.push(`  <key>StartInterval</key>\n  <integer>${o.startInterval}</integer>`);
   if (typeof o.throttleInterval === 'number')
     parts.push(`  <key>ThrottleInterval</key>\n  <integer>${o.throttleInterval}</integer>`);
-  if (o.path)
+  // PATH and any extra env share ONE EnvironmentVariables dict: launchd keeps the last key of a
+  // duplicated one, so emitting two dicts would silently drop PATH and leave the daemon's shellouts
+  // with launchd's minimal default. PATH first, then the rest in sorted order so the plist is
+  // byte-stable across installs (a re-install that reorders keys reads as a spurious change).
+  const envEntries: [string, string][] = [
+    ...(o.path ? ([['PATH', o.path]] as [string, string][]) : []),
+    ...Object.entries(o.env ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+  ];
+  if (envEntries.length > 0)
     parts.push(
-      `  <key>EnvironmentVariables</key>\n  <dict>\n    <key>PATH</key>\n    <string>${xmlEscape(o.path)}</string>\n  </dict>`,
+      `  <key>EnvironmentVariables</key>\n  <dict>\n` +
+        envEntries
+          .map(([k, v]) => `    <key>${xmlEscape(k)}</key>\n    <string>${xmlEscape(v)}</string>`)
+          .join('\n') +
+        `\n  </dict>`,
     );
   parts.push(`  <key>StandardOutPath</key>\n  <string>${xmlEscape(o.stdoutPath)}</string>`);
   parts.push(`  <key>StandardErrorPath</key>\n  <string>${xmlEscape(o.stderrPath)}</string>`);
@@ -212,6 +251,7 @@ export function buildPlist(o: PlistOpts): string {
     stdoutPath: o.stdoutPath,
     stderrPath: o.stderrPath,
     path: o.path,
+    ...(o.env ? { env: o.env } : {}),
     keepAlive: true,
     runAtLoad: true,
     throttleInterval: 10,
