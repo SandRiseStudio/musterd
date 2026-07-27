@@ -28,9 +28,9 @@ const ours: SessionCapture = {
 };
 
 describe('SessionAttestation (ADR 164)', () => {
-  it('re-parenting to init is definitive, even before any session is adopted', () => {
+  it('re-parenting to init is the one rung that exits, even before adoption', () => {
     const a = make(undefined, { ppid: 1 });
-    expect(a.check(T0)).toEqual({ verdict: 'orphan', rung: 'ppid' });
+    expect(a.check(T0)).toEqual({ verdict: 'exit', rung: 'ppid' });
     expect(a.adoptedSession).toBeNull();
   });
 
@@ -85,25 +85,45 @@ describe('SessionAttestation (ADR 164)', () => {
     expect(a.adoptedSession).toBe('sess-ours');
   });
 
-  it('a successor session in the workspace means we are a reload orphan', () => {
+  it('a different session id in the binding is RE-ADOPTED, never treated as a takeover', () => {
+    // Measured on agents-miley: a foreign 2-second capture landed in the binding while that
+    // workspace's real session, alive since the previous evening, kept working. Exiting on that
+    // would kill a live session's adapter. The genuine reload-orphan case is the server's job.
     let session = ours;
+    let mtime = SETTLED;
     const a = new SessionAttestation({
       bindingDir: '/ws',
       readSession: () => session,
-      statMtime: () => SETTLED,
+      statMtime: () => mtime,
       ppid: () => 4242,
       processStart: T0,
     });
     expect(a.check(SETTLED).verdict).toBe('live');
-    session = { ...ours, id: 'sess-next', started_at: SETTLED + 10_000 };
-    expect(a.check(SETTLED + 11_000)).toEqual({
-      verdict: 'orphan',
-      rung: 'successor',
-      session_id: 'sess-ours',
-    });
+    session = { ...ours, id: 'sess-foreign', started_at: SETTLED + 10_000 };
+    mtime = SETTLED + 10_000;
+    expect(a.check(SETTLED + 11_000).verdict).toBe('live');
+    expect(a.adoptedSession).toBe('sess-foreign');
   });
 
-  it('SessionEnd on our own adopted session exits', () => {
+  it('a dead foreign capture is ignored outright — we keep the session we had', () => {
+    let session = ours;
+    let mtime = SETTLED;
+    const a = new SessionAttestation({
+      bindingDir: '/ws',
+      readSession: () => session,
+      statMtime: () => mtime,
+      ppid: () => 4242,
+      processStart: T0,
+    });
+    expect(a.check(SETTLED).verdict).toBe('live');
+    // The agents-miley shape exactly: a foreign capture that is already ended.
+    session = { ...ours, id: 'sess-foreign', ended_at: SETTLED + 1_000 };
+    mtime = SETTLED;
+    expect(a.check(SETTLED + 11_000).verdict).toBe('live');
+    expect(a.adoptedSession).toBe('sess-ours');
+  });
+
+  it('SessionEnd on our own adopted session goes dormant — recoverable, not an exit', () => {
     let session = ours;
     const a = new SessionAttestation({
       bindingDir: '/ws',
@@ -115,7 +135,7 @@ describe('SessionAttestation (ADR 164)', () => {
     expect(a.check(SETTLED).verdict).toBe('live');
     session = { ...ours, ended_at: SETTLED + 5_000 };
     expect(a.check(SETTLED + 6_000)).toEqual({
-      verdict: 'orphan',
+      verdict: 'dormant',
       rung: 'ended',
       session_id: 'sess-ours',
     });
@@ -133,7 +153,7 @@ describe('SessionAttestation (ADR 164)', () => {
     expect(a.check(SETTLED).verdict).toBe('live'); // adopts while alive
     const now = SETTLED + 12 * 3_600_000; // 12h of silence, transcript never touched again
     expect(a.check(now)).toMatchObject({
-      verdict: 'stale',
+      verdict: 'dormant',
       rung: 'stale',
       session_id: 'sess-ours',
     });
