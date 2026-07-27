@@ -134,20 +134,27 @@ its entry-drift lines now name the exact baked variable (`MUSTERD_GRANT`, `MUSTE
 of `musterd init --check --json` across the family.
 
 **Eval** — headline: **baked-secret count across the worktree family**, measured by running the
-doctor in every `agents-*` worktree. Baseline at ship time: ≥1 (the shared entry at
-`/Users/nick/agents` carried a grant; the machine sweep in Task 7 records the exact figure). Target
-after one `musterd wire` run: **0**, and it stays 0 because provisioning no longer writes secrets —
-verified by the byte-identical-entries regression test on every CI run. Guard metric (must not
-move): **claim success from a freshly-provisioned worktree** — the empty-env fallback contract test
-is the proxy; if binding-only resolution breaks, provisioning is emitting entries that cannot claim,
-which is a worse defect than the one repaired.
+doctor in every `agents-*` worktree. **Baseline, measured at ship time (2026-07-27, all 12 bound
+worktrees + `/Users/nick/agents`): 0** — lower than the incident-era expectation of ≥1, because the
+slot's last writer was `musterd agent`, which has been seat-agnostic since ADR 143 (the entry
+carried only `MUSTERD_SURFACE` + `MUSTERD_AUTOJOIN`, no secrets). The zero is fragile before this
+ADR: one `init`/`wire` run from any worktree would have re-baked that seat's credentials into the
+slot. After this ADR the zero is structural — provisioning cannot write secrets — verified by the
+byte-identical-entries regression test on every CI run. Guard metric (must not move): **claim
+success from a freshly-provisioned worktree** — the empty-env fallback contract test is the proxy;
+if binding-only resolution breaks, provisioning is emitting entries that cannot claim, which is a
+worse defect than the one repaired.
 
-**Experiment** — the family sweep, cheap and already scripted into Task 7: run `musterd init
---check` in every sibling worktree before and after one `musterd wire`. Expected: every pre-run
-report that flags entry drift classifies it `repair: 'wire'`; after ONE wire run in ONE worktree,
-every sibling's report is clean — the single-run-repairs-the-family claim, tested on the machine
-that produced the incident. A sibling still dirty after the run falsifies the shared-slot model and
-reopens the lane.
+**Experiment** — the family sweep, run at ship time: `musterd init --check --json` in every bound
+worktree. Result: **no worktree classifies its drift `repair: 'wire'`** (all remaining drift is
+`init`-class: the foreign-adapter staleness note — the shared entry launches
+`/Users/nick/agents`' build — missing hooks, and per-seat model declarations). Consequence for the
+verification as pre-registered: the before/after `wire` half was **deliberately not run** — with
+zero baked secrets there is nothing for it to prove, and running `wire` from a live seat's worktree
+would have _regressed_ the family (dropped `MUSTERD_AUTOJOIN` and repointed the shared adapter path
+at this worktree's build). The single-run-repairs-the-family claim therefore rests on the doctor's
+classification logic and its tests rather than a live demonstration; the next legacy-poisoned entry
+this fleet encounters is the natural live test, and the doctor now names it on sight.
 
 ## Impact worth recording
 
