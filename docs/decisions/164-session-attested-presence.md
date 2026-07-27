@@ -279,6 +279,29 @@ rung 4 carrying the load, which would make the horizon a live parameter rather t
   schema change, no server change beyond the audit row.
 - Orphaned MCP processes remain possible; they simply stop being able to misrepresent a seat.
 
+### Known limit: what this does NOT fix
+
+Verifying this ADR surfaced a separate, pre-existing defect, recorded here so nobody reads
+`binding.session` as sound on the strength of this work.
+
+**`binding.session` is a single last-write-wins slot.** `captureSession('start')` writes it
+unconditionally, so the slot means "the most recent session _started_ in this workspace" while every
+consumer reads it as "the live session". Measured on `agents-miley`: a 2-second capture, its
+transcript never written, sitting in the slot while that workspace's real session — alive since the
+previous evening — kept working.
+
+This ADR's ladder is deliberately robust to it (re-adopt rather than treat as a takeover; never
+adopt a corpse), so **presence is protected**. The **wake guard is not**. The Claude Code wake
+backend's rule — "never spawn, fresh or resume, beside a live local session" — takes
+`localSessionLiveness` as its only input, and that reads the same slot: probed directly,
+`agents-miley` returns `resumable` (no live session) while its session is alive. A phantom capture
+therefore lets the host spawn a session into a worktree that already has one — real wake cost, and
+the newcomer displaces presence under ADR 068.
+
+Out of scope here, and tracked as its own lane rather than patched blind: the fix is a schema
+question (captures keyed by session id vs. refusing to clobber a live capture vs. a smarter writer),
+and it deserves the same design-first treatment this one got.
+
 ## Related
 
 - [ADR 057](057-ambient-agent-presence.md) — ambient presence from real actions. An open socket is not an
