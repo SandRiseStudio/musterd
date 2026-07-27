@@ -46,6 +46,7 @@ import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { adjudicateGate, recordActorAttestation } from '../protocol/gate.js';
+import { deliveryHintFor } from '../protocol/nudge.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
@@ -1978,6 +1979,16 @@ export async function handleHttp(
         // presence + enforcement policy), so it rides the send response beside the pure tier numbers the
         // clients already derive — additive, older clients ignore it, older daemons omit it.
         const askTier = env.act === 'ask' ? AskTierSchema.safeParse(env.meta?.['tier']) : null;
+        // The delivery hint (ADR 167 §2): a directed act to a live recipient invites the SENDER — the
+        // one party reliably holding the harness's session-send tool — to relay a daemon-composed
+        // one-line nudge. Same additive contract as `ask_contract` above; null (the common case) means
+        // the ack is exactly what it was before the ADR.
+        const hint = deliveryHintFor(
+          ctx.db,
+          result.message,
+          member.name,
+          ctx.config.presenceTimeoutMs,
+        );
         if (askTier?.success) {
           return sendJson(res, 201, {
             ack,
@@ -1990,9 +2001,10 @@ export async function handleHttp(
                 ctx.config.presenceTimeoutMs,
               ),
             },
+            ...(hint ? { delivery_hint: hint } : {}),
           });
         }
-        return sendJson(res, 201, { ack });
+        return sendJson(res, 201, { ack, ...(hint ? { delivery_hint: hint } : {}) });
       }
 
       // ── Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } board. All

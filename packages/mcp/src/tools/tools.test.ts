@@ -183,6 +183,45 @@ describe('team_send handler', () => {
     expect(text(r)).toContain('sent handoff to Lin');
   });
 
+  it('surfaces a delivery_hint verbatim in text + structuredContent; absent hint leaves both bare (ADR 167)', async () => {
+    const hint = {
+      recipient_live: true,
+      rail: 'ccd_session',
+      nudge_text:
+        'musterd: stanley sent you a handoff (01AAAAAAAAAAAAAAAAAAAAAAAA) — run team_inbox_check.',
+      nudge_fingerprint: 'aaaabbbbccccdddd',
+    };
+    const handler = capture(
+      registerSend,
+      {
+        joined: true,
+        lastJoinError: null,
+        sendEnvelope: (async () => ({ delivery_hint: hint })) as any,
+        markSeen: vi.fn(),
+      },
+      config,
+    );
+    const r = await handler({ to: 'Lin', act: 'handoff', body: 'take this' });
+    expect(text(r)).toContain('VERBATIM');
+    expect(text(r)).toContain(hint.nudge_text); // quoted whole, so the model can relay it unmodified
+    expect((r as any).structuredContent.delivery_hint).toEqual(hint);
+
+    // Older daemon / no hint → byte-identical to the pre-ADR response shape.
+    const bare = capture(
+      registerSend,
+      {
+        joined: true,
+        lastJoinError: null,
+        sendEnvelope: (async () => undefined) as any,
+        markSeen: vi.fn(),
+      },
+      config,
+    );
+    const r2 = await bare({ to: 'Lin', act: 'handoff', body: 'take this' });
+    expect(text(r2)).not.toContain('VERBATIM');
+    expect((r2 as any).structuredContent.delivery_hint).toBeUndefined();
+  });
+
   it('maps @team / @broadcast recipients', async () => {
     const sent: Envelope[] = [];
     const handler = capture(

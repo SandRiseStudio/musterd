@@ -9,6 +9,7 @@ export * from './grants.js';
 export * from './requests.js';
 export * from './residency.js';
 export * from './enforcement.js';
+export * from './deliveryHint.js';
 export * from './credentials.js';
 export * from './claim.js';
 export * from './claim-handshake.js';
