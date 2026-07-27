@@ -155,7 +155,29 @@ export const CATALOG: readonly CommandEntry[] = [
       'anything is streaming and on which build. Waits for the page’s readiness probe before ' +
       'encoding, so a dead daemon fails fast instead of streaming a blank page. Restarts itself on ' +
       'the new code when the daemon is rebuilt under it (ADR 159), and ends the stream rather than ' +
-      'buffering without limit if the encoder stops keeping up.',
+      'buffering without limit if the encoder stops keeping up. This runs the capture on THIS ' +
+      'machine — to run it on a rented one instead, see `musterd stream`.',
+  },
+  {
+    name: 'stream',
+    signature:
+      '<doctor|build|start|stop|status> [--app <name>] [--team <slug>] [--args <flags>] [--json]',
+    summary: 'run the broadcast on a rented machine — hosted capture, one verb',
+    group: 'setup',
+    primary: false,
+    detail:
+      'The hosted half of `musterd broadcast`: the same capture runs on a Fly Machine whose lifetime ' +
+      'is the stream’s lifetime (`--rm` destroys it when the stream ends, so billing tracks streamed ' +
+      'hours), reaching this machine’s loopback-bound daemon over a Tailscale overlay. `doctor` is ' +
+      'the one to run first — it checks every precondition (tailscale up, `serve` forwarding the ' +
+      'daemon’s port, the daemon accepting the tailnet `Host` on the ADR 040 upgrade gate, flyctl ' +
+      'authed, app, both secrets, image built) and prints the exact repair for each, because all of ' +
+      'them otherwise fail as the same unhelpful "the broadcast page never reported ready". `build` ' +
+      'pushes the capture image on Fly’s remote builders and records the pushed DIGEST — `start` runs ' +
+      'that digest, never the tag, because a rebuilt tag can resolve to the previous image. `start` ' +
+      'discovers the tailnet address itself. Secrets stay the operator’s: musterd checks that ' +
+      'TS_AUTHKEY and MUSTERD_STREAM_KEY are set and never reads, prints, or accepts their values.',
+    examples: ['musterd stream doctor', 'musterd stream build', 'musterd stream start'],
   },
   {
     name: 'service',
