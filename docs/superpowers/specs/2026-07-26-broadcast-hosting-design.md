@@ -142,11 +142,50 @@ the failure the gate exists to prevent, and renting quiet removes the pressure t
 threshold is ever revised it should be because per-core normalization is *more correct*, argued on its
 own merits and recorded — not because a red light was inconvenient.
 
+### Increment 0 is largely DONE — on the laptop after all (amended 2026-07-27)
+
+The amendment above concluded the Air could not measure this and quiet had to be rented. **That was
+wrong, and the fix was to change what was measured rather than where.** Two moves did it:
+
+- **Measure ratios, not absolutes.** Under the old code `ticks === draws` by construction, so
+  `draws < ticks` is proof the cap engaged — and a ratio cannot be distorted by a busy machine.
+- **Drive a live-room fixture.** The office loop parks on an idle room, so a temp daemon over a
+  `.backup` copy renders a static scene and measures nothing. A loop posting acts every ~3s keeps
+  seats working. (An earlier attempt compared a live room to a static one and looked like a result.)
+
+Everything the local arms could answer is answered, and it changed the plan (PR #393):
+
+| question | answer |
+|---|---|
+| draws/delivered — is the double-paint real? | Yes: 60 painted, 60 delivered, **30 encoded**. |
+| Is candidate #1 (draw-rate cap) worth building? | **No — reverted.** ~4 points of CPU, inside the run-to-run spread. The painting was never the expense. |
+| Where does Chrome's cost actually live? | The **JPEG encode of every composited frame**. `everyNthFrame` derived from `--fps` took Chrome 139.8% → 92.9% (n=4). |
+
+**The sizing number moved twice, downward both times.** The pipeline was reported as ~2.8 cores
+(a tree total misread as a leaf), then measured at ~1.7, and after the screencast fix it is
+**~1.2 cores with hardware encode** (`pipeline 120.3%`). Anything sized against the earlier figures
+is oversized.
+
+**What still needs rented hardware**, and it is now a much smaller question:
+
+- **`libx264` cost on the target box.** Unchanged in kind: this Mac never pays for its own encode, so
+  ffmpeg's ~15% here says nothing about software encode on an Ampere or x86 core.
+- **The compositor-Hz assumption.** `everyNthFrame` counts *composited* frames, so the shipped
+  derivation assumes ~60Hz. It held here (delivery landed on 30.0 every run). A slower box could
+  composite below 2× the encode rate, and delivery would fall *under* fps with the pump padding the
+  shortfall with duplicates. **This must be re-checked on the rented candidate**, and it is now the
+  main reason to rent at all.
+
+**A metric that did not survive, recorded so it is not re-derived:** `mpdecimate` unique-frame counts
+cannot compare configurations across separate runs. Four runs of an *identical* config gave
+971 / 861 / 644 / 637 — the count tracks how much the room happened to animate, not the config.
+
 ## Increment 1 — provision
 
-Only after Increment 0 yields numbers. Pick the box from the passing candidates, join it to the
-tailnet, install the stream key, and reduce going live to a single command. Detail deferred — writing
-it now would be designing against estimates, which is the thing this spec exists to avoid.
+Only after Increment 0's remaining questions are answered. Pick the box from the passing candidates,
+join it to the tailnet, install the stream key, and reduce going live to a single command. Detail
+deferred — writing it now would be designing against estimates, which is the thing this spec exists
+to avoid.
 
 ## Risks recorded, not solved
 
