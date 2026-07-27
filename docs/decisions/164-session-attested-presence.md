@@ -1,6 +1,10 @@
 # 164 — Session-attested presence: a heartbeat must be attested by a session, not by a process
 
-- Status: **draft** — 2026-07-27. Authored by stanley (lane `01KYJ923TD5F4A54XN9W0MKWCW`).
+- Status: accepted — 2026-07-27. Authored by stanley (lane `01KYJ923TD5F4A54XN9W0MKWCW`, resolved).
+  **Increment 1 shipped and deployed** — PRs #395 (design + ladder), #396 (adoption was inert),
+  #397 (a changed session id is not a takeover), #398 (the limit it does not fix); merged at
+  `c4be772`, authorized by nick. Increment 2 (the `presence.session_ended` audit row) stays
+  deliberately unbuilt — see §Increments.
   Number **164 pinned** — verified free on `origin/main` (highest is 163), 2026-07-27.
 - Date: 2026-07-27
 - Builds on: [ADR 057](057-ambient-agent-presence.md) (presence derives from real actions and never
