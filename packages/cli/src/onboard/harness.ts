@@ -23,11 +23,19 @@ export interface DetectResult {
    */
   registeredModel?: string;
   /**
-   * The `MUSTERD_GRANT` baked into the registered server, if readable. Compared against the
-   * workspace's own binding: a mismatch means the shared, repo-root-keyed entry (ADR 143) was
-   * overwritten by a different seat's provisioning run.
+   * The `MUSTERD_GRANT` baked into the registered server, if readable. Provisioning no longer emits it
+   * (ADR 165): the entry is keyed by repo root and shared by every seat worktree, so a per-seat grant
+   * in it is a credential every sibling reads. A present value is therefore drift **on presence**, not
+   * on mismatch.
    */
   registeredGrant?: string;
+  /**
+   * The `MUSTERD_AGENT_KEY` baked into the registered server, if readable. Same story as
+   * {@link registeredGrant} and strictly worse: the agent key is the *team* credential, so a stale one
+   * in the shared slot means a seat may boot authenticating as a sibling rather than merely carrying
+   * its grant. Provisioning no longer emits it (ADR 165).
+   */
+  registeredAgentKey?: string;
   /** The registered launch args, so the doctor can spot an adapter inside another seat's workspace. */
   registeredArgs?: string[];
 }

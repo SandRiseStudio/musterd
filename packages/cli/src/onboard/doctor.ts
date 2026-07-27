@@ -49,6 +49,17 @@ export interface DoctorReport {
   harnesses: HarnessState[];
   /** Actionable drift lines (empty ⇒ healthy). Exit-1. */
   drift: string[];
+  /**
+   * How this drift can be repaired, when there is any. `'wire'` ⇒ every line is *entry* drift: the
+   * harness MCP entry disagrees with `.musterd/binding.json`, which `musterd wire` rewrites headlessly.
+   * `'init'` ⇒ at least one line needs full onboarding (a missing primer, missing hooks, stale
+   * guidance). Absent ⇒ no drift.
+   *
+   * This exists so `--fix` can stop prescribing `musterd init` for entry drift. On a repo-root-shared
+   * entry (ADR 143) that remedy is actively harmful: it repairs the running seat by taking the slot
+   * from whoever holds it, and it mints a member and trips the already-bound guard on the way.
+   */
+  repair?: 'wire' | 'init';
   /** Warn-only notes (locally-edited guidance) — surfaced but never exit-1 (ADR 085). */
   notes: string[];
   /** True when at least one installed harness has the musterd server registered. */
@@ -174,6 +185,10 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const binding = findBinding(cwd);
   const boundClaim = binding?.claim ? formatClaimPolicy(binding.claim) : undefined;
   const drift: string[] = [];
+  // Entry drift: the shared harness entry disagrees with this folder's binding.json. Tracked
+  // separately from `drift` so `--fix` can route it to `musterd wire` (headless, whole-family)
+  // instead of `musterd init` (mints a member, trips the bound guard, steals the shared slot).
+  const entryDrift: string[] = [];
 
   const harnesses: HarnessState[] = [];
   let claudeConfigured = false;
@@ -193,10 +208,10 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       boundClaim !== undefined &&
       d.registeredClaim !== boundClaim
     ) {
-      drift.push(
+      entryDrift.push(
         `${h.label}'s musterd server has a baked MUSTERD_CLAIM=${d.registeredClaim} but ` +
           `.musterd/binding.json claims ${boundClaim} — the team_* tools will resolve a different ` +
-          `seat than the musterd CLI in this folder. Run \`musterd init\` to re-sync (it no longer ` +
+          `seat than the musterd CLI in this folder. Run \`musterd wire\` to re-sync (it no longer ` +
           `bakes the claim, so binding.json becomes the single source of truth).`,
       );
     }
@@ -204,25 +219,34 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // still carry one at the TOP of the adapter's ladder, where no observation can correct it — the
     // exact shape that had a seat attesting `grok-4.5` for weeks while running `claude-opus-4-8`.
     if (d.registeredModel !== undefined) {
-      drift.push(
+      entryDrift.push(
         `${h.label}'s musterd server bakes MUSTERD_MODEL=${d.registeredModel} — a wire-time snapshot ` +
           `that outranks what the harness is actually running, and that no later observation can ` +
-          `correct. Run \`musterd init\` here to rewrite the entry without it.`,
+          `correct. Run \`musterd wire\` here to rewrite the entry without it.`,
       );
     }
-    // A grant from a different provisioning run. This is the cross-seat leak: Claude Code keys local
-    // MCP config by repo root, so every seat worktree shares one entry (ADR 143) and the next seat's
-    // provisioning overwrites it. Reported here rather than refused at write time, where the entry is
-    // built from the same binding it is compared against and the check could never fire.
-    if (
-      d.registeredGrant !== undefined &&
-      binding?.grant !== undefined &&
-      d.registeredGrant !== binding.grant
-    ) {
-      drift.push(
-        `${h.label}'s musterd server carries a grant that does not match .musterd/binding.json — it ` +
-          `belongs to a different provisioning run, so this folder's harness entry was written for ` +
-          `another seat. Re-run \`musterd init\` here (or \`musterd agent <seat> --path ${cwd}\`).`,
+    // Per-seat SECRETS in a slot shared by every seat worktree of this repo (ADR 143/165). Flagged on
+    // PRESENCE, not on mismatch: the entry is keyed by repo root, so a grant that matches *this*
+    // folder is still the credential every sibling worktree reads — and it outranks their own
+    // binding.json in the adapter's ladder. Provisioning no longer writes either one.
+    for (const [name, value, why] of [
+      [
+        'MUSTERD_GRANT',
+        d.registeredGrant,
+        'so a sibling seat presents this grant at claim time and gets denied or sent to approval',
+      ],
+      [
+        'MUSTERD_AGENT_KEY',
+        d.registeredAgentKey,
+        'so a sibling seat may authenticate with this team key rather than its own',
+      ],
+    ] as const) {
+      if (value === undefined) continue;
+      entryDrift.push(
+        `${h.label}'s musterd server bakes ${name} — a per-seat secret in an entry Claude Code keys ` +
+          `by repo ROOT, which every git worktree of this repo shares, ${why}. ` +
+          `Run \`musterd wire\` here: it rewrites the entry from .musterd/binding.json without ` +
+          `secrets, and because the entry is shared, one run repairs every seat in the family.`,
       );
     }
     // An adapter inside a sibling seat's workspace: a note, not a refusal — identity comes from cwd,
@@ -299,10 +323,16 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
             `no writable session list for a sidebar sweep (ADR 160).`,
         ]
       : [];
+  // Entry drift is repairable headlessly; anything else needs full onboarding. Classify BEFORE
+  // merging so the distinction survives into `--fix`.
+  const repair: 'wire' | 'init' | undefined =
+    drift.length > 0 ? 'init' : entryDrift.length > 0 ? 'wire' : undefined;
+  drift.push(...entryDrift);
   return {
     primerManaged,
     harnesses,
     drift,
+    ...(repair !== undefined ? { repair } : {}),
     notes: [
       ...guidance.notes,
       ...duplicateAdapters,
