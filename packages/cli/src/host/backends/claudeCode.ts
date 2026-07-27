@@ -313,7 +313,10 @@ function resumeLadder(
   transcriptMaxBytes: number,
 ): { id: string } | { skip: string | null } {
   if (liveness.state === 'none') return { skip: null }; // the pre-capture world — quiet fresh
-  const s = liveness.session!;
+  const s = liveness.session;
+  // Post-flip (ADR 166 inc 2) the verdict can be enumerated while the slot is empty: session files
+  // exist but nothing captured one to resume. Resume stays slot-fed until increment 3 splits it.
+  if (!s) return { skip: 'no captured session to resume (verdict was enumerated)' };
   if (s.harness !== 'claude-code') return { skip: `captured harness is "${s.harness}"` };
   if (liveness.state === 'gc-expired') return { skip: 'capture past the 30d GC horizon' };
   if (!s.transcript_path || liveness.transcriptBytes === undefined)

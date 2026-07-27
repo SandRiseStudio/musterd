@@ -144,8 +144,18 @@ asymmetry argument that corrected ADR 164, applied before it bites rather than a
 ### Increments
 
 1. **Enumerate in shadow.** Ship `enumerateSessions` and compute both judgements on every wake
-   decision. **Act on the old one.** Log the pair and whether they disagreed.
-2. **Flip**, once increment 1 shows the disagreement rate and its direction.
+   decision. **Act on the old one.** Log the pair and whether they disagreed. _Shipped (#403, #406)._
+2. **Flip**, once increment 1 shows the disagreement rate and its direction. _Shipped (increment 2)._
+   `localSessionLiveness` returns the enumerated verdict as `state` (`source: 'enumerated'`) whenever
+   the harness can enumerate; the slot's counter-verdict is recorded as `slotState` so disagreement
+   stays observable, and a `demoted` flag marks the flip-blocking direction (slot says live,
+   enumeration disagrees — eval item 3). Harnesses that cannot enumerate keep the slot verdict
+   unchanged (`source: 'slot'`). The slot capture still rides along as resume material — the resume
+   ladder stays slot-fed until increment 3 splits the questions; an enumerated verdict over an empty
+   slot skips resume rather than crashing. Flip evidence at the moment of flipping: sweep 23
+   judgeable, 2 disagreed, 1 dangerous (`agents-izzo`: slot `resumable`, enumeration `live` across
+   17 sessions — a spawn the slot would have permitted beside a live session), 0 in the inverse
+   flip-blocking direction. Post-flip the same sweep reads that case as **caught**, 0 demoted.
 3. **Split** the guard question from the resume question, each failing in its cheap direction.
 4. **Retire the slot** for enumerating harnesses — gated on every supported harness having an
    enumerator, not scheduled here.
@@ -179,13 +189,17 @@ which it is bitten. Wake-decision counts remain the confirming dataset, read ove
 First corrected sweep: **23 judgeable, 3 disagreed, 2 in the dangerous direction** — and on
 inspection the slot is wrong in all three, including a case it cannot see at all.
 
-**A third defect, found by the sweep and belonging to ADR 165.** One disagreement was a session
-running in a nested worktree that has its **own** `binding.json`: the child's slot was empty and the
-**parent's** slot held the child's session. Cause: `captureSession` prefers `MUSTERD_BINDING` over the
-session's actual `cwd`, and that variable is materialized into the repo-root-keyed MCP entry every
-worktree shares — izzo's ADR 165 defect, surfacing here as cross-workspace misattribution. Her plan to
-stop materializing those variables removes this class outright. Enumeration is already immune, because
-it attributes by recorded `cwd`.
+**A third pattern, found by the sweep — corrected 2026-07-27 after verification.** This section
+first blamed `captureSession`'s `MUSTERD_BINDING` preference, materialized into the shared MCP entry
+(ADR 165). **That cause is wrong, twice over:** izzo's sweep measured that the shared entry carries
+no `MUSTERD_BINDING`, and inspecting both observed instances shows the same, simpler mechanism —
+each session ran in a nested worktree that had **no** `.musterd/binding.json` **at capture time** (one
+created its binding 86 seconds later; the other never had one), so `findWorkspaceDir`'s walk-up
+correctly continued to the parent workspace and captured there. Not a bug: the walk-up doing what it
+is specified to do for a workspace-less directory. It is consistent, too — enumeration attributes
+transcripts through the same `findWorkspaceDir` walk-up, so both judgements agree on where such a
+session belongs. The residual oddity (a parent slot describing a nested worktree's session) stops
+mattering for enumerating harnesses once the slot no longer decides liveness (increment 2).
 
 **Eval — dataset and baseline.** The dataset is every wake decision over a dogfood week joined to its
 paired judgements. The **baseline** is measured, not assumed: across four live worktrees at one

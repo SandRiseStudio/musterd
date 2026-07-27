@@ -105,10 +105,12 @@ describe('localSessionLiveness', () => {
 });
 
 /**
- * ADR 166 increment 1. The challenger is computed and recorded; the incumbent still decides. These
- * tests exist to prove the shadow is INERT as much as to prove it is right.
+ * ADR 166 increment 2 — THE FLIP. When the harness can enumerate, the enumerated judgement decides
+ * and the slot is demoted to resume material plus a recorded counter-verdict. The guardrail from the
+ * ADR: no workspace whose transcript is being written may be judged not-live, regardless of what the
+ * slot holds — including an ended foreign capture (the agents-stanley shape exactly).
  */
-describe('shadow judgement (ADR 166 increment 1)', () => {
+describe('the flip (ADR 166 increment 2)', () => {
   let ws: string;
   const NOW = 1_700_000_000_000;
 
@@ -139,26 +141,26 @@ describe('shadow judgement (ADR 166 increment 1)', () => {
     rmSync(ws, { recursive: true, force: true });
   });
 
-  it('is absent when the harness cannot enumerate — nothing to compare, nothing to learn', () => {
+  it("falls back to the slot when the harness cannot enumerate — unchanged, with today's risk", () => {
     phantomSlot();
     const out = localSessionLiveness(ws, NOW, () => undefined);
-    expect(out.shadow).toBeUndefined();
     expect(out.state).toBe('resumable');
+    expect(out.source).toBe('slot');
+    expect(out.enumerated).toBeUndefined();
+    expect(out.slotState).toBeUndefined();
   });
 
-  it('flags the DANGEROUS disagreement: slot says not-live while a transcript is being written', () => {
-    phantomSlot();
+  it('GUARDRAIL: a transcript being written reads live, whatever the slot holds (agents-stanley shape)', () => {
+    phantomSlot(); // ended foreign capture, transcript never written — the slot says resumable
     const out = localSessionLiveness(ws, NOW, () => [
       { id: 'real-079ec165', path: '/t/real.jsonl', mtime: NOW - 5_000, bytes: 100 },
     ]);
-    expect(out.state).toBe('resumable'); // the INCUMBENT still decides — the shadow decides nothing
-    expect(out.shadow).toMatchObject({
-      state: 'live',
-      id: 'real-079ec165',
-      disagreed: true,
-      dangerous: true,
-      count: 1,
-    });
+    expect(out.state).toBe('live'); // the enumerated judgement DECIDES now
+    expect(out.source).toBe('enumerated');
+    expect(out.enumerated).toMatchObject({ state: 'live', id: 'real-079ec165', count: 1 });
+    expect(out.slotState).toBe('resumable');
+    expect(out.disagreed).toBe(true);
+    expect(out.session?.id).toBe('foreign-4aea2026'); // resume material still rides along
   });
 
   it('liveness is ANY session still being written, not merely the newest', () => {
@@ -167,23 +169,47 @@ describe('shadow judgement (ADR 166 increment 1)', () => {
       { id: 'newer-but-dead', path: '/t/a.jsonl', mtime: NOW - 40 * 60_000, bytes: 10 },
       { id: 'older-but-live', path: '/t/b.jsonl', mtime: NOW - 5_000, bytes: 10 },
     ]);
-    expect(out.shadow?.state).toBe('live');
-    expect(out.shadow?.count).toBe(2);
+    expect(out.state).toBe('live');
+    expect(out.enumerated?.count).toBe(2);
   });
 
-  it('agreement carries no dangerous flag', () => {
+  it('agreement records no disagreement and no demotion', () => {
     phantomSlot();
     const out = localSessionLiveness(ws, NOW, () => [
       { id: 'quiet', path: '/t/q.jsonl', mtime: NOW - 40 * 60_000, bytes: 10 },
     ]);
-    expect(out.shadow).toMatchObject({ state: 'resumable', disagreed: false });
-    expect(out.shadow?.dangerous).toBeUndefined();
+    expect(out).toMatchObject({ state: 'resumable', source: 'enumerated', disagreed: false });
+    expect(out.demoted).toBeUndefined();
   });
 
   it('an empty directory is evidence (none), not ignorance (undefined)', () => {
     phantomSlot();
     const out = localSessionLiveness(ws, NOW, () => []);
-    expect(out.shadow).toMatchObject({ state: 'none', count: 0, disagreed: true });
-    expect(out.shadow?.dangerous).toBeUndefined();
+    expect(out).toMatchObject({ state: 'none', source: 'enumerated', disagreed: true });
+    expect(out.enumerated).toMatchObject({ state: 'none', count: 0 });
+  });
+
+  it('flags demotion — slot says live, enumeration disagrees (the flip-blocking direction, watched)', () => {
+    // A live-by-slot capture whose transcript is fresh, but enumeration sees only a stale session:
+    // enumeration would demote a session the slot believes is live. Target zero in the fleet; the
+    // flag exists so the sweep can see any instance.
+    const p = join(ws, 'slot.jsonl');
+    writeFileSync(p, '{"type":"turn"}\n');
+    const t = (NOW - 1_000) / 1000;
+    utimesSync(p, t, t);
+    const binding: Binding = {
+      server: 'http://127.0.0.1:1',
+      team: 'dawn',
+      surface: 'claude-code',
+      claim: { mode: 'seat', name: 'scout' },
+      agent_key: 'mskey_test',
+      session: { harness: 'claude-code', id: 's1', transcript_path: p, started_at: NOW - 60_000 },
+    };
+    mkdirSync(join(ws, '.musterd'), { recursive: true });
+    writeFileSync(join(ws, '.musterd', 'binding.json'), JSON.stringify(binding) + '\n');
+    const out = localSessionLiveness(ws, NOW, () => [
+      { id: 'stale', path: '/t/s.jsonl', mtime: NOW - 40 * 60_000, bytes: 10 },
+    ]);
+    expect(out).toMatchObject({ state: 'resumable', slotState: 'live', demoted: true });
   });
 });
