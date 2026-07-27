@@ -32,12 +32,18 @@ interface WorkspaceSample {
   workspace: string;
   seat?: string;
   slot: string;
+  /** The enumerated verdict — since increment 2 this is also the ACTED-ON verdict. The field keeps
+   *  its pre-flip name so the JSONL series stays one series. */
   shadow?: string;
   /** How many sessions the harness actually has here. The slot can only ever describe one. */
   count?: number;
   disagreed?: boolean;
-  /** The money-losing direction: slot says no live session, enumeration says there is one. */
+  /** The direction that was money-losing pre-flip: slot says no live session, enumeration says
+   *  there is one. Post-flip the guard acts on enumeration, so this is a case CAUGHT, not a risk. */
   dangerous?: boolean;
+  /** Post-flip watch metric (ADR 166 eval item 3): slot says live, enumeration disagrees —
+   *  enumeration may be demoting a live seat. Any instance is a finding. */
+  demoted?: boolean;
 }
 
 function registryWorkspaces(home = homedir()): { path: string; seat?: string }[] {
@@ -60,6 +66,7 @@ export function sweep(now = Date.now()): {
   judged: number;
   disagreed: number;
   dangerous: number;
+  demoted: number;
 } {
   const rows: WorkspaceSample[] = [];
   for (const { path, seat } of registryWorkspaces()) {
@@ -69,16 +76,19 @@ export function sweep(now = Date.now()): {
     } catch {
       continue; // a workspace that has been deleted out from under the registry — not a datum
     }
+    // Post-flip shape (ADR 166 inc 2): v.state IS the enumerated verdict when source==='enumerated',
+    // and the slot's counter-verdict lives in v.slotState.
     rows.push({
       workspace: path,
       ...(seat ? { seat } : {}),
-      slot: v.state,
-      ...(v.shadow
+      slot: v.source === 'enumerated' ? (v.slotState ?? 'none') : v.state,
+      ...(v.source === 'enumerated' && v.enumerated
         ? {
-            shadow: v.shadow.state,
-            count: v.shadow.count,
-            disagreed: v.shadow.disagreed,
-            ...(v.shadow.dangerous ? { dangerous: true } : {}),
+            shadow: v.state,
+            count: v.enumerated.count,
+            disagreed: v.disagreed ?? false,
+            ...(v.disagreed && v.state === 'live' ? { dangerous: true } : {}),
+            ...(v.demoted ? { demoted: true } : {}),
           }
         : {}),
     });
@@ -92,6 +102,7 @@ export function sweep(now = Date.now()): {
     judged: judged.length,
     disagreed: judged.filter((r) => r.disagreed).length,
     dangerous: judged.filter((r) => r.dangerous).length,
+    demoted: judged.filter((r) => r.demoted).length,
   };
 }
 
@@ -105,11 +116,11 @@ if (process.argv[1]?.endsWith('adr-166-slot-sweep.ts')) {
   } else {
     process.stdout.write(
       `sweep ${new Date(s.at).toISOString()} — ${s.judged} judgeable, ` +
-        `${s.disagreed} disagreed, ${s.dangerous} DANGEROUS\n`,
+        `${s.disagreed} disagreed, ${s.dangerous} caught-by-flip, ${s.demoted} DEMOTED\n`,
     );
     for (const r of s.workspaces.filter((r) => r.disagreed)) {
       process.stdout.write(
-        `  ${r.dangerous ? 'DANGEROUS' : 'disagreed'}  ${r.workspace}` +
+        `  ${r.demoted ? 'DEMOTED' : r.dangerous ? 'caught' : 'disagreed'}  ${r.workspace}` +
           `  slot=${r.slot} shadow=${r.shadow} sessions=${String(r.count)}\n`,
       );
     }

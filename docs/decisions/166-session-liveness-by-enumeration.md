@@ -144,8 +144,18 @@ asymmetry argument that corrected ADR 164, applied before it bites rather than a
 ### Increments
 
 1. **Enumerate in shadow.** Ship `enumerateSessions` and compute both judgements on every wake
-   decision. **Act on the old one.** Log the pair and whether they disagreed.
-2. **Flip**, once increment 1 shows the disagreement rate and its direction.
+   decision. **Act on the old one.** Log the pair and whether they disagreed. _Shipped (#403, #406)._
+2. **Flip**, once increment 1 shows the disagreement rate and its direction. _Shipped (increment 2)._
+   `localSessionLiveness` returns the enumerated verdict as `state` (`source: 'enumerated'`) whenever
+   the harness can enumerate; the slot's counter-verdict is recorded as `slotState` so disagreement
+   stays observable, and a `demoted` flag marks the flip-blocking direction (slot says live,
+   enumeration disagrees — eval item 3). Harnesses that cannot enumerate keep the slot verdict
+   unchanged (`source: 'slot'`). The slot capture still rides along as resume material — the resume
+   ladder stays slot-fed until increment 3 splits the questions; an enumerated verdict over an empty
+   slot skips resume rather than crashing. Flip evidence at the moment of flipping: sweep 23
+   judgeable, 2 disagreed, 1 dangerous (`agents-izzo`: slot `resumable`, enumeration `live` across
+   17 sessions — a spawn the slot would have permitted beside a live session), 0 in the inverse
+   flip-blocking direction. Post-flip the same sweep reads that case as **caught**, 0 demoted.
 3. **Split** the guard question from the resume question, each failing in its cheap direction.
 4. **Retire the slot** for enumerating harnesses — gated on every supported harness having an
    enumerator, not scheduled here.

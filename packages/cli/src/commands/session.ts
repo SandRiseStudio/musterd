@@ -437,9 +437,25 @@ async function resolveLabelsCommand(parsed: Parsed): Promise<number> {
   return 0;
 }
 
+/** The acted-on verdict line, with its source (ADR 166: enumerated decides when available). */
+function writeVerdict(liveness: LocalSessionLiveness): 0 {
+  const verdicts: Record<LocalSessionLiveness['state'], string> = {
+    live: `live — a local session is working here (transcript touched < ${LOCAL_SESSION_LIVE_MS / 60_000} min ago); a wake would defer`,
+    resumable: 'resumable — a wake would try `--resume` first (fresh on any failure)',
+    'gc-expired': 'gc-expired — past the harness GC horizon; a wake runs fresh',
+    none: 'none',
+  };
+  process.stdout.write(
+    `  ${theme.accent(verdicts[liveness.state])} ${theme.meta(`(judged by ${liveness.source === 'enumerated' ? 'session files' : 'the captured slot'})`)}\n`,
+  );
+  return 0;
+}
+
 async function showCommand(parsed: Parsed): Promise<number> {
   const dir = findWorkspaceDir();
-  const liveness: LocalSessionLiveness = dir ? localSessionLiveness(dir) : { state: 'none' };
+  const liveness: LocalSessionLiveness = dir
+    ? localSessionLiveness(dir)
+    : { state: 'none', source: 'slot' };
 
   if (parsed.flags['json']) {
     process.stdout.write(JSON.stringify({ workspace: dir, ...liveness }) + '\n');
@@ -452,6 +468,17 @@ async function showCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
   process.stdout.write(`${theme.accent('session')} — ${dir}\n`);
+  // ADR 166 inc 2: the verdict can be enumerated with no slot capture at all — say what the
+  // harness's own session files show before (or instead of) describing the capture.
+  if (liveness.source === 'enumerated' && liveness.enumerated) {
+    const e = liveness.enumerated;
+    process.stdout.write(
+      `  ${theme.meta('sessions')} ${e.count} on disk` +
+        (e.id !== undefined ? `  ${theme.meta('newest')} ${e.id}` : '') +
+        (e.mtime !== undefined ? ` (touched ${clock(e.mtime)})` : '') +
+        '\n',
+    );
+  }
   const s = liveness.session;
   if (!s) {
     process.stdout.write(
@@ -460,7 +487,7 @@ async function showCommand(parsed: Parsed): Promise<number> {
           'or run `musterd init --check` if hooks may be missing',
       ) + '\n',
     );
-    return 0;
+    return writeVerdict(liveness);
   }
   process.stdout.write(
     `  ${theme.meta('harness')} ${s.harness}  ${theme.meta('id')} ${s.id}\n` +
@@ -479,13 +506,7 @@ async function showCommand(parsed: Parsed): Promise<number> {
       `  ${theme.meta('transcript')} ${s.transcript_path} (${size}) ${touched}\n`,
     );
   }
-  const verdicts: Record<LocalSessionLiveness['state'], string> = {
-    live: `live — a local session is working here (transcript touched < ${LOCAL_SESSION_LIVE_MS / 60_000} min ago); a wake would defer`,
-    resumable: 'resumable — a wake would try `--resume` first (fresh on any failure)',
-    'gc-expired': 'gc-expired — past the harness GC horizon; a wake runs fresh',
-    none: 'none',
-  };
-  process.stdout.write(`  ${theme.accent(verdicts[liveness.state])}\n`);
+  writeVerdict(liveness);
   // `--seat`-style flags are meaningless here; nudge a confused caller toward the right verb.
   if (flagStr(parsed.flags, 'seat')) {
     process.stdout.write(
