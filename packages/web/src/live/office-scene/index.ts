@@ -63,6 +63,10 @@ const AMBIENT_MAX_MS = 70000;
  * acts keep 60fps because their motion is not `ambientOnly`. */
 const AMBIENT_FRAME_MS = 50;
 
+/** Half a 60Hz frame — the tolerance that stops an exact-multiple frame budget undershooting by a
+ * whole tick. See its use in `tick`. */
+const HALF_FRAME_MS = 1000 / 120;
+
 /** How often the office re-reads the PST clock so the lighting tracks the real sun (the sun moves slowly —
  * once a minute is plenty, and a rebake only happens when the veil/lamp state actually crosses a step). */
 const LIGHT_TICK_MS = 60000;
@@ -628,7 +632,14 @@ export function mountOffice(
     last = now;
     // Under broadcast this budget applies during walks and cues too, not only ambient stretches —
     // painting above the encode rate is discarded downstream whatever the room is doing.
-    if (acc < frameBudgetMs({ broadcast, streamFps, ambientOnly, ambientCapMs: AMBIENT_FRAME_MS })) {
+    //
+    // The tolerance is load-bearing, not defensive habit. rAF fires on the display interval, so a
+    // 30fps budget is exactly two 60Hz ticks — and 2 × 16.666… lands a float-hair *under* 33.333…,
+    // so a bare `<` waits a third tick. Measured before this line existed: 22.5fps drawn against a
+    // 30fps encode, i.e. an undershoot that would reintroduce the cadence judder the cap exists to
+    // avoid. Half a 60Hz frame snaps the comparison to the nearest achievable tick boundary.
+    const budget = frameBudgetMs({ broadcast, streamFps, ambientOnly, ambientCapMs: AMBIENT_FRAME_MS });
+    if (acc + HALF_FRAME_MS < budget) {
       raf = requestAnimationFrame(tick); // too soon for the next frame — keep the loop, skip the draw
       return;
     }
