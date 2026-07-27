@@ -189,15 +189,24 @@ The never-erase, never-clobber, and never-fail contracts carry over unchanged, p
   across all seats instead of discovered one at a time.
 
 **Eval.** _Dataset:_ the seat roster — every live occupancy, its attested model, and its tier —
-joined with `occupancy.model_attested` history and a doctor sweep across the twelve seat worktrees on
-the dogfood machine. _Baseline, measured directly at time of writing (n=1 workspace):_ the
-originating workspace carried a baked `MUSTERD_MODEL`, a grant from another provisioning run, and an
-adapter path into a sibling seat — none of which any existing check reported. _Metric:_ the
-`observed ≠ declared` tripwire rate, which measures how often provisioning snapshots rot. _Target:_
-trends to zero as legacy entries are rewritten; a non-zero rate afterwards means something is writing
-declarations again. _Counter-metric:_ the share of Claude Code seats attesting `unknown` — a rise
-means the transcript format moved and `transcript-model.ts` needs updating. Degradation is therefore
-visible rather than silent, which is the point of preferring `unknown` to a stale value.
+joined with `occupancy.model_attested` history and a doctor sweep across the seat worktrees on the
+dogfood machine. \_Baseline, measured via a fleet sweep of all thirteen worktrees (2026-07-27,
+`binding.model` vs `binding.model_observed` read directly off each `.musterd/binding.json`): four
+Claude Code seats (ryder, izzo, miley, stanley) carry both tiers and agree 4/4 — zero tripwire hits,
+the target this metric was built to reach. Two Cursor seats (compo, wanderer) declare a model with no
+observed tier, the honest §3 gap for a harness with nothing to probe. Five seats (dolly, gptbot,
+grokbot, help, kimi) carry neither field, having sat unlaunched since this pass — absence, not a
+mismatch. The originating incident's workspace (`ryder`: a baked `MUSTERD_MODEL`, a grant from
+another provisioning run, an adapter path into a sibling seat — none of which any pre-158 check
+reported) is inside this same sweep and no longer reproduces: its declaration now matches its
+observation.
+
+_Metric:_ the `observed ≠ declared` tripwire rate, which measures how often provisioning
+snapshots rot. _Target:_ trends to zero as legacy entries are rewritten — met on this sweep (0/4 among
+seats with both tiers); a non-zero rate on a later sweep means something is writing declarations
+again. _Counter-metric:_ the share of Claude Code seats attesting `unknown` — a rise means the
+transcript format moved and `transcript-model.ts` needs updating; none did on this sweep. Degradation
+is therefore visible rather than silent, which is the point of preferring `unknown` to a stale value.
 
 **Experiment.** No A/B is warranted: this is a correctness fix against a known-wrong baseline, so a
 holdout arm would deliberately keep seats lying to the ADR 056 diversity research this feeds.
