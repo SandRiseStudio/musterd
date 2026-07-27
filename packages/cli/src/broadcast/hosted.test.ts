@@ -206,6 +206,12 @@ describe('runChecks', () => {
     expect(c.state).toBe('fail');
     expect(c.fix).toContain('musterd service status');
     expect(c.fix).not.toContain('--allowed-hosts');
+    // Reports what it OBSERVED (no answer), never a cause it could not distinguish. "Down" and
+    // "unreachable from here" look identical to this probe; claiming the first would be a check
+    // asserting more than its evidence, which is the failure mode doctor exists to end.
+    expect(c.fix).toMatch(/no answer/);
+    expect(c.fix).toMatch(/unreachable from here/);
+    expect(c.fix).not.toMatch(/daemon is not answering/);
   });
 
   it('names the missing secret and never asks for a value it could print', async () => {
