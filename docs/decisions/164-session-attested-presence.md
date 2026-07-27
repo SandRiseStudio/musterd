@@ -128,7 +128,7 @@ live session with no musterd tools until the harness restarts; that is why the r
 
 ### Thresholds
 
-- `SESSION_STALE_MS` = **60 minutes**, overridable by env. Deliberately far more generous than the
+- `SESSION_STALE_MS` = **60 minutes**. Deliberately far more generous than the
   existing `LOCAL_SESSION_LIVE_MS` (10 min), which guards a wake decision where a false "live"
   merely fails to upgrade. Here a false positive costs a real seat its presence, so the horizon is
   sized to a long human deliberation, not a short one. Every observed lie exceeded it by an order of
@@ -145,11 +145,28 @@ Rungs 3 and 4 are judgements about **our own** session, and the adapter does not
 avoid a hook-vs-adapter boot race. This ADR brings the adapter in, so it must handle that race
 rather than inherit it.
 
-The adapter **adopts** a session id, once, on the first tick where the binding shows a session whose
-`started_at` is **not earlier than the adapter's own process start** (minus a small clock skew). It
-never adopts an older one. This matters: at boot the adapter routinely sees the _previous_ session's
-capture, because `SessionStart` has not written yet. An adapter that pinned that id would then watch
-it be replaced and conclude — exactly backwards — that itself was the orphan.
+At boot the adapter routinely sees the _previous_ session's capture, because `SessionStart` has not
+written yet. An adapter that pinned that id would then watch it be replaced and conclude — exactly
+backwards — that itself was the orphan.
+
+**The first attempt at a fence was wrong, and a live probe caught it.** It adopted only a capture
+whose `started_at` was no earlier than the adapter's own process start. The probe drove a real
+adapter against an isolated daemon, killed the session the way a crash does, and the seat stayed
+online: the adapter had never adopted anything, so no rung could fire. The fence assumed the harness
+writes the hook _after_ spawning the MCP server; when that order is reversed, the capture always
+looks too old and the ladder is **silently inert**. An inert safety mechanism that reports nothing is
+worse than none, because it looks like it works.
+
+Adoption is therefore two rules, neither depending on `started_at`:
+
+- **Settle first.** Adopt nothing for the first 60 seconds of _process_ life, by which point the
+  hook has written in either order. (The process's start, not the ladder object's — the ladder is
+  constructed lazily on the first heartbeat, minutes in.)
+- **Never adopt a corpse.** After settling, adopt the capture on disk only if it still looks alive:
+  no `ended_at`, transcript not already stale. A dead capture belongs to somebody else, or to a
+  workspace whose hooks never ran; either way it is not evidence about us, so keep failing open and
+  look again next tick. Without this, an adapter in a hookless workspace would adopt a corpse and
+  promptly execute itself.
 
 Once adopted, two verdicts follow, both definitive:
 
@@ -201,6 +218,20 @@ each answerable from that dataset:
 
 **Guardrail.** No seat may lose presence while its transcript is being written. Regression test:
 a seat whose transcript is touched every tick never leaves through rungs 2–4.
+
+**Verified live, 2026-07-27.** Not simulated in tests — a real MCP adapter (`packages/mcp/dist`)
+driven over stdio against an isolated daemon on a copy of the real database, with **stdin held open
+throughout** so the pre-existing teardown could not be what fired:
+
+| staged rung | result                                                                                         |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| `stale`     | released 15s after the transcript went quiet; adapter **still running** (dormant, as designed) |
+| `ended`     | released on the next tick; adapter exited 0                                                    |
+| `successor` | released on the next tick; adapter exited 0                                                    |
+
+Each run first held presence through 75 seconds of live heartbeats, so the release is attributable
+to the staged death and not to drift. `ppid` is covered by unit test only — staging a re-parent
+means orphaning a process the probe still needs to observe.
 
 **Experiment.** None is warranted, and that is a deliberate call rather than an omission: there is
 no arm to compare against. The control condition — presence attested by a process — is the measured

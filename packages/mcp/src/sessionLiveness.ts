@@ -25,8 +25,11 @@ import { findBinding } from './binding.js';
  *  an order of magnitude (804 min, 1341 min). */
 export const SESSION_STALE_MS = 60 * 60_000;
 
-/** Tolerance when deciding whether a capture belongs to *this* process — see `adopt` below. */
-const ADOPT_SKEW_MS = 5_000;
+/**
+ * How long after process start to wait before adopting a session — see `adopt` below. Long enough
+ * for the `SessionStart` hook to have written, in either hook-vs-adapter order.
+ */
+export const ADOPT_SETTLE_MS = 60_000;
 
 /**
  * What the ladder concluded.
@@ -62,6 +65,7 @@ export interface SessionAttestationDeps {
   /** When this process started — the fence that stops us adopting a predecessor's session. */
   processStart?: number;
   staleMs?: number;
+  settleMs?: number;
 }
 
 function defaultReadSession(dir: string): SessionCapture | undefined {
@@ -89,9 +93,22 @@ function defaultStatMtime(path: string): number | undefined {
  * so bringing it in means handling that race rather than inheriting it. At boot the adapter
  * routinely sees the *previous* session's capture, because `SessionStart` has not written yet. An
  * adapter that pinned that id would watch it be replaced and conclude, exactly backwards, that it
- * was itself the orphan. So we **adopt** once, and only a capture that started no earlier than this
- * process. Before adoption only the `ppid` rung applies: an un-adopted adapter never demotes itself
- * on evidence about somebody else's session.
+ * was itself the orphan.
+ *
+ * Adoption is therefore two rules, both learned from a live probe that the first design failed:
+ *
+ *  - **Settle first.** Adopt nothing for `ADOPT_SETTLE_MS` after *process* start, by which point the
+ *    hook has written in either order. Comparing `started_at` against process start instead —
+ *    the first attempt — is not a fence but a coin flip: the harness may run the hook before or
+ *    after it spawns us, and when it loses, the adapter adopts nothing, forever, in total silence.
+ *    An inert safety mechanism that reports nothing is worse than none.
+ *  - **Never adopt a corpse.** After settling, adopt the capture on disk only if it still looks
+ *    alive — no `ended_at`, transcript not already stale. A dead capture is somebody else's, or a
+ *    workspace whose hooks are not installed; either way it is not evidence about us, so we keep
+ *    failing open and look again next tick.
+ *
+ * Before adoption only the `ppid` rung applies: an un-adopted adapter never demotes itself on
+ * evidence about somebody else's session.
  */
 export class SessionAttestation {
   private adopted: string | null = null;
@@ -101,19 +118,34 @@ export class SessionAttestation {
   private readonly ppid: () => number;
   private readonly processStart: number;
   private readonly staleMs: number;
+  private readonly settleMs: number;
 
   constructor(deps: SessionAttestationDeps) {
     this.bindingDir = deps.bindingDir;
     this.readSession = deps.readSession ?? defaultReadSession;
     this.statMtime = deps.statMtime ?? defaultStatMtime;
     this.ppid = deps.ppid ?? (() => process.ppid);
-    this.processStart = deps.processStart ?? Date.now();
+    // The PROCESS's start, not this object's: the ladder is constructed lazily on the first
+    // heartbeat tick, minutes into a session, and dating the settle window from there would keep
+    // re-arming it on every reconnect.
+    this.processStart = deps.processStart ?? Date.now() - Math.round(process.uptime() * 1000);
     this.staleMs = deps.staleMs ?? SESSION_STALE_MS;
+    this.settleMs = deps.settleMs ?? ADOPT_SETTLE_MS;
   }
 
   /** The session id this adapter has claimed as its own, or null before adoption. */
   get adoptedSession(): string | null {
     return this.adopted;
+  }
+
+  /** Adoption-time sanity: a capture already ended, or already quiet past the horizon, is a corpse
+   *  — somebody else's session, or a workspace whose hooks never ran. Not evidence about us. */
+  private looksAlive(session: SessionCapture, now: number): boolean {
+    if (session.ended_at !== undefined) return false;
+    if (!session.transcript_path) return true; // unknowable, and unknowable is not dead
+    const mtime = this.statMtime(session.transcript_path);
+    if (mtime === undefined) return true;
+    return now - mtime <= this.staleMs;
   }
 
   check(now = Date.now()): SessionJudgement {
@@ -125,9 +157,9 @@ export class SessionAttestation {
     if (!session) return { verdict: 'live' };
 
     if (this.adopted === null) {
-      if (session.started_at >= this.processStart - ADOPT_SKEW_MS) this.adopted = session.id;
-      // Either we just adopted it, or it predates us and is not ours to judge.
-      if (this.adopted === null) return { verdict: 'live' };
+      if (now - this.processStart < this.settleMs) return { verdict: 'live' }; // still settling
+      if (!this.looksAlive(session, now)) return { verdict: 'live' }; // never adopt a corpse
+      this.adopted = session.id;
     }
 
     // A different session now owns this workspace — we are a reload orphan. Locally-derived twin of
