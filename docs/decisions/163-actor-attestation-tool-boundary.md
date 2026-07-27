@@ -198,20 +198,59 @@ failures — an attribution path that wedges a write is a regression outright.
 **The recall problem, stated up front.** Write-shape for `Bash` is a **heuristic match on the command
 string**, and ADR 153 / PR #349 already measured how much such matching misses — `git -C ../main
 merge` slipped a `git merge*` class until `normalizeCommand` was added. A subagent that writes via
-`python -c`, a heredoc, `tee`, `sed -i`, or an MCP filesystem tool produces **no `actor.subagent_write`
+`python -c`, a script, a build tool, or an MCP filesystem tool produces **no `actor.subagent_write`
 row at all**. So a null result is ambiguous between "the rule holds" and "the instrument is blind" —
 the same failure mode flagged in §Consequences for the `agent_id` field disappearing.
+
+**MEASURED — recall is 68%, and the misses are concentrated.** Finding
+[008](../research/008-subagent-write-detector-recall.md) ran a 40-command corpus with ground truth
+measured by sandbox tree-hash (contents + mode + symlinks) rather than asserted: **21/31 = 67.7%
+recall on executed commands, 27/40 = 67.5% combined, and 0 false positives across 15 true reads.**
+Cite the headline as _"at least N, detector recall 68% (0 FP)"_. **Do not invert 68% into a volume
+estimate** — the corpus is hand-built and unweighted, so it measures the detector across a spread of
+shapes, not against real traffic.
+
+The misses fall into four structural groups, not a scatter: **interpreter indirection** (`python3 -c`,
+`python3 f.py`, `node -e`, `node build.js`), **delegation** (`bash script.sh`, `make target`),
+**archive extraction** (`tar -xf`, `unzip`), and **in-place via a tool's own flag** (`sort -o`,
+`rsync`); inspected-only adds **outward writes** (`gh pr create`, `curl -X POST`, `curl -o`). The
+detector sees command names it knows and redirection syntax; it cannot see a write that is the runtime
+behaviour of an interpreted program, one delegated to a script or build, or one passed as an argument.
+**That is the shape of "an agent writes a program then runs it"** — a most-travelled path, so the
+blindness is concentrated on exactly the behaviour this ADR cares about. Consequence for reading arm 1:
+a near-zero count sits against a concentrated blind spot, and closing these four groups is a better
+next move than reading the zero.
+
+**Correction to this ADR's own examples.** The paragraph above originally listed `tee`, `sed -i` and a
+heredoc among the shapes that produce no row. Measured, **all three are caught** (`tee` and `sed -i`
+are explicit patterns; a heredoc's redirect is visible in both `cat > f <<EOF` and `cat <<EOF > f`).
+This ADR was pessimistic about shapes it does catch while silent about the four groups that actually
+leak. `python -c` is confirmed a miss.
+
+**MCP filesystem writes are outside the instrument, not merely missed.** `isWriteShaped` matches
+`WRITE_SHAPED_TOOLS` by exact name plus the `Bash` heuristic, so a write through an MCP server's own
+file tool is structurally invisible and has **no denominator** — the population of such tools is
+open-ended and per-install. Not folded into the 68%; a count cannot bound it.
 
 **Experiment** — pre-registered, three arms, all cheap because the apparatus already exists.
 (1) **Compliance arm:** run the dogfood team a week with attribution on and count
 `actor.subagent_write` rows. **What this arm can and cannot establish:** a non-zero count
 **confirms** the rule is being broken and how often, at minimum. A near-zero count **does not
 establish compliance** and explicitly **does not retire the case for a blocking gate** — it is
-consistent with a blind detector, and may only be read alongside arm (2). (2) **Recall arm (runs
-first, gates the interpretation of arm 1):** deliberately have a subagent write through 3–4
-non-obvious paths — `python -c`, a heredoc, `tee`, an MCP filesystem tool — and count how many
-produce rows. This converts the floor into a number with a known error bar, and is the difference
-between an instrument and a guess. (3) **Join-fidelity arm (increment 2 only, gated on arm 1):**
+consistent with a blind detector, and may only be read alongside arm (2). (2) **Recall arm — RUN, see finding
+[008](../research/008-subagent-write-detector-recall.md); result 68%, 0 FP, folded in above.** As
+pre-registered this arm said to _"deliberately have a subagent write through 3–4 non-obvious paths."_
+**That was not runnable and was deliberately not run:** spawning a subagent that writes is precisely
+what the team's operating rule forbids, so the arm would have broken the rule whose compliance arm 1
+measures, and seeded that week's audit stream with deliberate violations indistinguishable from real
+ones. Recorded as a pre-registration defect rather than quietly re-scoped.
+
+What ran instead measures **detector recall** — a pure function of the command string, which is the
+quantity this ADR actually cites — over a 40-command corpus with ground truth measured by sandbox
+tree-hash. **Still unmeasured: pipeline recall** (does the hook fire, does `agent_id` arrive, does the
+row land) beyond the paths inc 1's integration tests already cover. A future arm must prove the
+pipeline **without a writing subagent** — most plausibly by driving the actor endpoint directly with
+synthetic `agent_id` payloads. Until then the 68% bounds the matcher, not the plumbing. (3) **Join-fidelity arm (increment 2 only, gated on arm 1):**
 spawn two same-type subagents concurrently under different models and confirm the join reports
 `ambiguous` rather than picking one — a test that the honesty mechanism fires, not that the join
 succeeds. Honesty caveat inherited from ADR 150: **n is small; report the mechanism beside every
