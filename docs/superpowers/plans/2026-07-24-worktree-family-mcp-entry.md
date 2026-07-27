@@ -1,4 +1,4 @@
-# Worktree-family MCP entry (ADR 164) Implementation Plan
+# Worktree-family MCP entry (ADR 165) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -18,7 +18,7 @@
 - `pnpm lint` is a **separate gate** from `pnpm format:check` — run both before pushing.
 - `ROADMAP.md` is never prettier-formatted and is always edited last.
 - Every ADR ≥ 060 requires an `## Observability & Evaluation` section, enforced by a doc gate.
-- ADR numbers are gated by `pnpm adr-numbers:check` for both uniqueness and H1-matches-filename. **Re-check `origin/main` for the highest ADR number immediately before Task 6** — this plan was written against 159, which miley took for long-lived-process currency (#380); it is now 164, and parallel branches have collided twice already.
+- ADR numbers are gated by `pnpm adr-numbers:check` for both uniqueness and H1-matches-filename. **Re-check `origin/main` for the highest ADR number immediately before Task 6** — this plan was written against 159, which miley took for long-lived-process currency (#380), then renumbered to 164, which stanley took for session-attested presence (#395); it is now 165, and parallel branches have collided **three times**. Treat the number as unresolved until Task 6 actually runs.
 - The five env names being removed remain **supported manual overrides**. Do not remove any adapter-side read of them. This change stops _materializing_ them, nothing else.
 
 ---
@@ -39,7 +39,7 @@
 | `packages/cli/src/onboard/entryGuard.test.ts`                | Modify                         | Delete the `assertEntryIdentity` describe block                                                                                     |
 | `packages/cli/src/onboard/sharedEntry.test.ts`               | **Create**                     | The family regression: two sibling worktrees produce byte-identical entries                                                         |
 | `packages/mcp/src/config.test.ts`                            | Modify                         | Pin the binding-only resolution the strip depends on                                                                                |
-| `docs/decisions/164-*.md`                                    | **Create**                     | ADR                                                                                                                                 |
+| `docs/decisions/165-*.md`                                    | **Create**                     | ADR                                                                                                                                 |
 | `docs/architecture/05-mcp.md`, `docs/architecture/04-cli.md` | Modify                         | Document the invariant + the `wire` repair                                                                                          |
 | `packages/web/src/content/roadmap.data.ts`, `ROADMAP.md`     | Modify                         | Roadmap entry                                                                                                                       |
 
@@ -63,7 +63,7 @@
 In `packages/cli/src/onboard/onboard.test.ts`, replace the `it('builds the v0.3 claim-binding env …')` block at lines 21-31 with:
 
 ```ts
-it('emits NO per-seat state — the entry is shared by every worktree of the repo (ADR 164)', () => {
+it('emits NO per-seat state — the entry is shared by every worktree of the repo (ADR 165)', () => {
   // Claude Code keys local-scope MCP config by REPO ROOT, so all `agents-*` seat worktrees share
   // ONE entry. Anything per-seat in it is a single global slot the next provisioning run overwrites
   // — and `MUSTERD_GRANT`/`MUSTERD_AGENT_KEY` are *credentials*, which the adapter ranks ABOVE
@@ -120,7 +120,7 @@ Then extend the doc-comment directly above it (which currently ends at line 45 e
 
 ```
  *
- * ADR 164 finished the job for the rest. The same argument applies with more force to the remaining
+ * ADR 165 finished the job for the rest. The same argument applies with more force to the remaining
  * fields, because of WHERE this entry lives: Claude Code keys local-scope MCP config by **repo root**,
  * so every `agents-*` seat worktree of one repo shares a SINGLE entry. A shared slot may hold only what
  * is identical across every seat sharing it — and `MUSTERD_AGENT_KEY`/`MUSTERD_GRANT` are per-seat
@@ -148,10 +148,10 @@ In `packages/cli/src/commands/agent.ts`, replace the `entry` object at lines 171
 const entry = {
   command: launch.command,
   args: launch.args,
-  // Seat-agnostic by construction (ADR 143, completed by ADR 164): this entry is keyed by repo root
+  // Seat-agnostic by construction (ADR 143, completed by ADR 165): this entry is keyed by repo root
   // and therefore shared by every seat worktree. `MUSTERD_SURFACE` came out with the rest — it is in
   // binding.json. AUTOJOIN/DRIVER are still here and still repo-root-global; that is a known,
-  // recorded gap (ADR 164 increment 2), not an oversight.
+  // recorded gap (ADR 165 increment 2), not an oversight.
   env: {
     MUSTERD_AUTOJOIN: '1',
     ...(driver ? { MUSTERD_DRIVER: driver } : {}),
@@ -179,7 +179,7 @@ Expected: PASS. If `claudeCodeProvision.test.ts` or `claudeCode.test.ts` assert 
 
 ```bash
 git add packages/cli/src/onboard/mcpEntry.ts packages/cli/src/commands/agent.ts packages/cli/src/onboard/onboard.test.ts
-git commit -m "fix(onboard): the shared MCP entry carries no per-seat state (ADR 164)
+git commit -m "fix(onboard): the shared MCP entry carries no per-seat state (ADR 165)
 
 Claude Code keys local-scope MCP config by repo root, so all agents-*
 worktrees share one entry. init/wire baked MUSTERD_AGENT_KEY + MUSTERD_GRANT
@@ -221,12 +221,12 @@ The file already builds temp workspaces for binding resolution. Reuse whatever h
 Append to `packages/mcp/src/config.test.ts`:
 
 ```ts
-describe('empty env — the ADR 164 shared-entry contract', () => {
+describe('empty env — the ADR 165 shared-entry contract', () => {
   it('resolves server, team, surface, agent_key and grant from binding.json alone', () => {
-    // Provisioning writes an entry with NO env (ADR 164), because the entry is shared by every seat
+    // Provisioning writes an entry with NO env (ADR 165), because the entry is shared by every seat
     // worktree of the repo. Everything must therefore come off disk. If this breaks, seats stop
     // being able to claim at all — this is the test that makes the strip safe.
-    const dir = mkdtempSync(join(tmpdir(), 'musterd-adr164-'));
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-adr165-'));
     mkdirSync(join(dir, '.musterd'), { recursive: true });
     writeFileSync(
       join(dir, '.musterd', 'binding.json'),
@@ -255,7 +255,7 @@ describe('empty env — the ADR 164 shared-entry contract', () => {
   });
 
   it('still honours an explicit env override — the names are manual, not removed', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'musterd-adr164-ovr-'));
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-adr165-ovr-'));
     mkdirSync(join(dir, '.musterd'), { recursive: true });
     writeFileSync(
       join(dir, '.musterd', 'binding.json'),
@@ -299,7 +299,7 @@ Expected: PASS immediately — this pins existing behaviour rather than driving 
 
 ```bash
 git add packages/mcp/src/config.test.ts
-git commit -m "test(mcp): pin binding-only resolution — the contract ADR 164's strip depends on
+git commit -m "test(mcp): pin binding-only resolution — the contract ADR 165's strip depends on
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
@@ -328,7 +328,7 @@ import { describe, expect, it } from 'vitest';
 import { buildEntry, buildMcpEnv } from './mcpEntry.js';
 
 /**
- * The ADR 143 / ADR 164 invariant, as an executable rule.
+ * The ADR 143 / ADR 165 invariant, as an executable rule.
  *
  * Claude Code keys local-scope MCP config by REPO ROOT. Every `agents-*` seat is a git worktree of the
  * same repo, so all of them share ONE `musterd` entry — provisioning any seat overwrites the entry
@@ -385,7 +385,7 @@ Expected: PASS (Task 1 already emptied the env). To confirm the test has teeth, 
 
 ```bash
 git add packages/cli/src/onboard/sharedEntry.test.ts
-git commit -m "test(onboard): sibling worktrees must produce byte-identical MCP entries (ADR 164)
+git commit -m "test(onboard): sibling worktrees must produce byte-identical MCP entries (ADR 165)
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
@@ -430,7 +430,7 @@ function harnessWithEntry(
 Replace the two grant tests at lines 206-220 with:
 
 ```ts
-// INVERTED by ADR 164. This used to fire only on a MISMATCH, which missed the common case: the
+// INVERTED by ADR 165. This used to fire only on a MISMATCH, which missed the common case: the
 // entry is shared by every worktree of the repo, so a grant that happens to match THIS folder's
 // binding is still a per-seat credential sitting in a slot every sibling reads.
 it('flags a baked grant even when it matches this folder’s binding', async () => {
@@ -490,7 +490,7 @@ In `packages/cli/src/onboard/harness.ts`, replace the `registeredGrant` doc-bloc
 ```ts
   /**
    * The `MUSTERD_GRANT` baked into the registered server, if readable. Provisioning no longer emits it
-   * (ADR 164): the entry is keyed by repo root and shared by every seat worktree, so a per-seat grant
+   * (ADR 165): the entry is keyed by repo root and shared by every seat worktree, so a per-seat grant
    * in it is a credential every sibling reads. A present value is therefore drift **on presence**, not
    * on mismatch.
    */
@@ -499,7 +499,7 @@ In `packages/cli/src/onboard/harness.ts`, replace the `registeredGrant` doc-bloc
    * The `MUSTERD_AGENT_KEY` baked into the registered server, if readable. Same story as
    * {@link registeredGrant} and strictly worse: the agent key is the *team* credential, so a stale one
    * in the shared slot means a seat may boot authenticating as a sibling rather than merely carrying
-   * its grant. Provisioning no longer emits it (ADR 164).
+   * its grant. Provisioning no longer emits it (ADR 165).
    */
   registeredAgentKey?: string;
 ```
@@ -521,7 +521,7 @@ and add to the returned object after the `registeredGrant` spread on line 464:
 While here, correct the false scope string at line 499. It currently claims per-folder scope, which is the exact belief ADR 143 documents as wrong:
 
 ```ts
-      scope: `wired for this repo (${process.cwd()}) — Claude Code keys local scope by repo ROOT, so every git worktree of this repo shares this one entry; it carries no per-seat state (ADR 164), so that sharing is harmless. Another project needs its own \`musterd init\`, and a second agent needs its own folder.`,
+      scope: `wired for this repo (${process.cwd()}) — Claude Code keys local scope by repo ROOT, so every git worktree of this repo shares this one entry; it carries no per-seat state (ADR 165), so that sharing is harmless. Another project needs its own \`musterd init\`, and a second agent needs its own folder.`,
 ```
 
 - [ ] **Step 5: Add the `repair` field to the report**
@@ -561,7 +561,7 @@ if (d.registeredModel !== undefined) {
       `correct. Run \`musterd wire\` here to rewrite the entry without it.`,
   );
 }
-// Per-seat SECRETS in a slot shared by every seat worktree of this repo (ADR 143/164). Flagged on
+// Per-seat SECRETS in a slot shared by every seat worktree of this repo (ADR 143/165). Flagged on
 // PRESENCE, not on mismatch: the entry is keyed by repo root, so a grant that matches *this*
 // folder is still the credential every sibling worktree reads — and it outranks their own
 // binding.json in the adapter's ladder. Provisioning no longer writes either one.
@@ -795,7 +795,7 @@ In `packages/cli/src/onboard/entryGuard.ts`, delete `EntryIdentityError` (line 2
 Add this note at the top of the file, below the imports:
 
 ```ts
-// ADR 164 removed `assertEntryIdentity`, which compared the harness entry's baked secrets against
+// ADR 165 removed `assertEntryIdentity`, which compared the harness entry's baked secrets against
 // binding.json. The entry no longer carries secrets, so there is nothing to compare; the doctor now
 // flags any baked secret on presence instead. (It was already dead code — ADR 158 §6 said the doctor
 // called it, and the doctor re-implemented half of it inline. The agent_key half never ran at all.)
@@ -840,11 +840,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: ADR 164 and docs
+### Task 6: ADR 165 and docs
 
 **Files:**
 
-- Create: `docs/decisions/164-<slug>.md`
+- Create: `docs/decisions/165-<slug>.md`
 - Modify: `docs/decisions/158-model-attestation-truth.md` (correct the §6 claim)
 - Modify: `docs/architecture/05-mcp.md`, `docs/architecture/04-cli.md`
 - Modify: `packages/web/src/content/roadmap.data.ts`, then `ROADMAP.md` last
@@ -860,11 +860,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 git fetch origin --quiet && git ls-tree --name-only origin/main docs/decisions/ | sed 's|.*/||; s/-.*//' | sort -n | tail -3
 ```
 
-If 164 is taken on `origin/main`, use the next free number and use it consistently in the filename, the H1 and every reference below. `pnpm adr-numbers:check` gates both uniqueness and H1-matches-filename.
+If 165 is taken on `origin/main`, use the next free number and use it consistently in the filename, the H1 and every reference below. `pnpm adr-numbers:check` gates both uniqueness and H1-matches-filename.
 
 - [ ] **Step 2: Write the ADR**
 
-Create `docs/decisions/164-worktree-family-mcp-entry.md`. The H1 must be exactly `# 164. Worktree-family MCP entry — a shared slot carries no per-seat state` (filename slug and H1 must agree).
+Create `docs/decisions/165-worktree-family-mcp-entry.md`. The H1 must be exactly `# 165. Worktree-family MCP entry — a shared slot carries no per-seat state` (filename slug and H1 must agree).
 
 Required sections: `## Status` (accepted, 2026-07-24), `## Context`, `## Decision`, `## Consequences`, and — mandatory for ADRs ≥ 060, gated in CI — `## Observability & Evaluation`.
 
@@ -873,15 +873,15 @@ Source the content from `docs/superpowers/specs/2026-07-24-worktree-family-mcp-e
 - **Observed impact:** the `agent_key` half means a seat may have been booting with a _sibling's team agent key_, not only a sibling's grant — broader than the lane's original framing.
 - **Side benefit:** `init` builds one entry for whichever harness is chosen, and Cursor/Codex write their configs _inside the working tree_ (`.cursor/mcp.json`, `.codex/config.toml`, both flagged via `secretPath`). Emptying the env therefore also stops writing the plaintext team agent key into repo-tracked files for those harnesses. `secretPath` is deliberately left in place — role provisioning still writes other servers there.
 - **Deferred increment 2:** `MUSTERD_AUTOJOIN` and `MUSTERD_DRIVER` are still baked by `musterd agent` into the shared slot and are read only from `process.env`. So `musterd agent X --driver nick` currently marks **every** worktree in the family as driven by nick, corrupting ADR 155 driver co-presence, and forces autojoin on family-wide against the default `wire` documents. Fixing needs new `Binding` fields plus adapter fallback — its own lane.
-- **Correction to ADR 158 §6:** it stated the doctor calls `assertEntryIdentity`. It never did; the doctor re-implemented the grant half inline and the agent_key half never ran. ADR 164 deletes the function.
+- **Correction to ADR 158 §6:** it stated the doctor calls `assertEntryIdentity`. It never did; the doctor re-implemented the grant half inline and the agent_key half never ran. ADR 165 deletes the function.
 
 - [ ] **Step 3: Correct the ADR 158 claim**
 
 In `docs/decisions/158-model-attestation-truth.md` §6, append to the sentence claiming the doctor calls `assertEntryIdentity`:
 
 ```
-(Corrected by ADR 164: it never did — the doctor re-implemented the grant comparison inline and the
-agent_key half never ran. ADR 164 removed the function and made a baked secret drift on presence.)
+(Corrected by ADR 165: it never did — the doctor re-implemented the grant comparison inline and the
+agent_key half never ran. ADR 165 removed the function and made a baked secret drift on presence.)
 ```
 
 - [ ] **Step 4: Update architecture docs**
@@ -899,7 +899,7 @@ per-worktree — falling back to the committed `workspace.json` for the non-secr
 
 All of `MUSTERD_SERVER`, `MUSTERD_TEAM`, `MUSTERD_SURFACE`, `MUSTERD_AGENT_KEY`, `MUSTERD_GRANT`,
 `MUSTERD_CLAIM` and `MUSTERD_MODEL` remain supported **manual** overrides for headless/CI use.
-Provisioning simply never writes them. See ADR 143 and ADR 164.
+Provisioning simply never writes them. See ADR 143 and ADR 165.
 ```
 
 In `docs/architecture/04-cli.md`, find the `musterd init --check` description and add:
@@ -920,7 +920,7 @@ Add an entry to `packages/web/src/content/roadmap.data.ts` following the shape o
 - [ ] **Step 6: Format and run the gates**
 
 ```bash
-pnpm exec prettier --write docs/decisions/164-worktree-family-mcp-entry.md docs/decisions/158-model-attestation-truth.md docs/architecture/05-mcp.md docs/architecture/04-cli.md packages/web/src/content/roadmap.data.ts
+pnpm exec prettier --write docs/decisions/165-worktree-family-mcp-entry.md docs/decisions/158-model-attestation-truth.md docs/architecture/05-mcp.md docs/architecture/04-cli.md packages/web/src/content/roadmap.data.ts
 pnpm adr-numbers:check && pnpm vocab:check && pnpm guidance:check
 pnpm build && pnpm typecheck && pnpm test && pnpm lint && pnpm format:check
 ```
@@ -931,7 +931,7 @@ Expected: all PASS. `pnpm lint` is a separate gate from `format:check` — both 
 
 ```bash
 git add docs/ packages/web/src/content/roadmap.data.ts ROADMAP.md
-git commit -m "docs(adr-164): worktree-family MCP entry — a shared slot carries no per-seat state
+git commit -m "docs(adr-165): worktree-family MCP entry — a shared slot carries no per-seat state
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
@@ -969,7 +969,7 @@ Rewriting the entry affects **every** live seat on the machine. Even though the 
 Post to the team and wait for acknowledgement before writing:
 
 ```bash
-node packages/cli/dist/bin.js send --act status_update 'About to rewrite the shared repo-root MCP entry (ADR 164) — it becomes seat-agnostic, no secrets. Live sessions should /mcp reload afterwards. Speak up in the next few minutes if you are mid-claim.'
+node packages/cli/dist/bin.js send --act status_update 'About to rewrite the shared repo-root MCP entry (ADR 165) — it becomes seat-agnostic, no secrets. Live sessions should /mcp reload afterwards. Speak up in the next few minutes if you are mid-claim.'
 ```
 
 Then run the repair:
@@ -998,7 +998,7 @@ Expected: no worktree reports `wire`. Before this change, every seat but the slo
 
 ```bash
 git push -u origin feat/worktree-family-mcp-entry
-gh pr create --title "fix(onboard): the repo-root-shared MCP entry carries no per-seat state (ADR 164)" --body "$(cat <<'EOF'
+gh pr create --title "fix(onboard): the repo-root-shared MCP entry carries no per-seat state (ADR 165)" --body "$(cat <<'EOF'
 ## Summary
 
 Claude Code keys local-scope MCP config by **repo root**, so all thirteen `agents-*` seat worktrees share one `musterd` entry. `init`/`wire` baked `MUSTERD_AGENT_KEY` and `MUSTERD_GRANT` into it — credentials the adapter ranks *above* `binding.json` — while `agent` has written a deliberately seat-agnostic entry since ADR 143. Two writers, opposite policies, one slot: the last one won, and every other seat presented a sibling's credential at claim time.

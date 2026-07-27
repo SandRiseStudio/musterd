@@ -1,8 +1,9 @@
 # Worktree-family MCP entry — per-seat identity in a per-repo-root config slot
 
-Design for lane `01KYAWFCGG7YZ80H1RWEF4CXQ1`. Follow-up to ADR 143 and ADR 158; ships as ADR 164 —
-next free number as of `main` at `fdb617e`, to be re-checked against `origin/main` before the PR opens
-(parallel branches have collided on ADR numbers twice; `pnpm adr-numbers:check` gates it).
+Design for lane `01KYAWFCGG7YZ80H1RWEF4CXQ1`. Follow-up to ADR 143 and ADR 158; ships as ADR 165 —
+next free number as of `origin/main` at `c4be772`, to be re-checked before the PR that lands the ADR
+(parallel branches have collided on this ADR's number three times — 159 → 164 → 165;
+`pnpm adr-numbers:check` gates it).
 
 ## Problem
 
@@ -46,6 +47,28 @@ ADR 143 established this and applied it to `MUSTERD_BINDING`. ADR 158 applied it
 copy that outranks binding.json and can never be updated."_ `MUSTERD_GRANT` and `MUSTERD_AGENT_KEY` have
 that identical property **and** are per-seat secrets. Strictly worse than the two already removed, and
 still present.
+
+### The shape generalizes beyond this slot
+
+One shared slot, many legitimate claimants, and the obvious repair — make the slot mine — steals it
+from whoever holds it. Recorded here because it is not specific to the MCP entry:
+
+- **This lane** (`01KYAWFCGG`): the Claude Code MCP entry, keyed by repo root, shared by every seat
+  worktree. Claimants are seats; the theft is presenting a sibling's credential at claim time.
+- **`binding.session`** (stanley, lane `01KYJF8QAF`; recorded as ADR 164's explicit non-fix in #398):
+  a single last-write-wins slot, so a stale capture defeats the wake guard's
+  never-spawn-beside-a-live-session rule. Claimants are sessions of one seat.
+
+**The resolution that works here is not "partition the slot" but "empty it."** Making the slot
+per-claimant requires a key the writer does not have at write time — `musterd agent` cannot know which
+worktree will claim, and the wake guard cannot know which session will outlive it. Making it carry only
+what is identical across all claimants needs no such key, and the per-claimant file (`binding.json`, walked
+up from cwd) already exists and is already authoritative. A slot that holds nothing contested cannot be
+stolen, and cannot go stale.
+
+Whether `binding.session` has an equivalent "already authoritative per-claimant file" to fall back on is
+the open question on stanley's side; if it does not, the analogy stops at the diagnosis and the remedy
+does not transfer.
 
 ## Decision
 
