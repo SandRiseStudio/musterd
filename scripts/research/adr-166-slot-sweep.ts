@@ -17,16 +17,36 @@
  * phantoms (they may: both cluster on busy workspaces), so the sweep bounds the error rate the guard
  * is exposed to, not the rate at which it is actually bitten.
  *
- * Read-only. Touches no seat, no daemon, no lane. Append-only JSONL so samples accumulate across runs.
+ * Read-only over the fleet. Touches no seat, no daemon, no lane — which is the property that makes
+ * it safe to run on a timer. Append-only JSONL so samples accumulate across runs.
  *
- *   node --disable-warning=ExperimentalWarning scripts/research/adr-166-slot-sweep.ts [--out <path>] [--json]
+ * SCHEDULED (ADR 166 follow-through): `musterd service install --sweep` runs this every 5 minutes.
+ * The cadence is derived, not chosen by taste — a `demoted` case persists for at least
+ * `LOCAL_SESSION_LIVE_MS` (10 min) from the last touch of the slot's transcript, so any interval
+ * ≤10 min cannot miss an instance and 5 min leaves margin for launchd drift and sleep. Sampling
+ * slower would make ADR 166's "target: zero" claim unfalsifiable rather than merely unproven.
+ *
+ * ESCALATION. Zero demoted is silent — the target is zero, so an always-on line is wallpaper.
+ * A hit logs loudly and exits non-zero (so the launchd log and any wrapper both see a real
+ * failure), and shows up in `musterd report` until it clears. Only a workspace demoted by two
+ * consecutive runs fires an OS push: demotion is structural rather than transient (both judgements
+ * share one clock and one threshold, so a session going quiet mid-sweep makes *both* say not-live
+ * and produces no disagreement), so a real finding repeats and the confirm costs one interval.
+ *
+ *   node --disable-warning=ExperimentalWarning scripts/research/adr-166-slot-sweep.ts [--out <path>] [--json] [--quiet]
  */
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 // Imports the BUILT cli — the same artifact the wake guard loads, so the sweep cannot drift from
 // what production actually judges. Run `pnpm build` first.
+import { osNotify } from '../../packages/cli/dist/notify/os.js';
 import { localSessionLiveness } from '../../packages/cli/dist/session/liveness.js';
+import {
+  readSweepSeries,
+  repeatedDemotions,
+  sweepSeriesPath,
+} from '../../packages/cli/dist/session/sweep-series.js';
 
 interface WorkspaceSample {
   workspace: string;
@@ -108,21 +128,43 @@ export function sweep(now = Date.now()): {
 
 if (process.argv[1]?.endsWith('adr-166-slot-sweep.ts')) {
   const outIdx = process.argv.indexOf('--out');
-  const out = outIdx > -1 ? process.argv[outIdx + 1] : undefined;
+  // Defaults to the canonical series (shared with `musterd report` via one exported constant) so a
+  // scheduled run and a hand-run land in the SAME file — two series is how a repeat goes unnoticed.
+  const out = outIdx > -1 ? process.argv[outIdx + 1] : sweepSeriesPath();
+  // Read before appending: the last row is the previous run, the other half of the repeat test.
+  const previous = readSweepSeries(out).pop();
+
   const s = sweep();
-  if (out) appendFileSync(out, JSON.stringify(s) + '\n');
+  mkdirSync(dirname(out), { recursive: true });
+  appendFileSync(out, JSON.stringify(s) + '\n');
+
+  const repeated = repeatedDemotions(previous, s);
   if (process.argv.includes('--json')) {
-    process.stdout.write(JSON.stringify(s, null, 1) + '\n');
-  } else {
-    process.stdout.write(
+    process.stdout.write(JSON.stringify({ ...s, repeated }, null, 1) + '\n');
+  } else if (!process.argv.includes('--quiet') || s.demoted > 0) {
+    // --quiet keeps a clean scheduled run out of the log entirely; a finding always speaks.
+    const line =
       `sweep ${new Date(s.at).toISOString()} — ${s.judged} judgeable, ` +
-        `${s.disagreed} disagreed, ${s.dangerous} caught-by-flip, ${s.demoted} DEMOTED\n`,
-    );
+      `${s.disagreed} disagreed, ${s.dangerous} caught-by-flip, ${s.demoted} DEMOTED\n`;
+    (s.demoted > 0 ? process.stderr : process.stdout).write(line);
     for (const r of s.workspaces.filter((r) => r.disagreed)) {
-      process.stdout.write(
-        `  ${r.demoted ? 'DEMOTED' : r.dangerous ? 'caught' : 'disagreed'}  ${r.workspace}` +
-          `  slot=${r.slot} shadow=${r.shadow} sessions=${String(r.count)}\n`,
+      (r.demoted ? process.stderr : process.stdout).write(
+        `  ${r.demoted ? (repeated.includes(r.workspace) ? 'DEMOTED(repeat)' : 'DEMOTED') : r.dangerous ? 'caught' : 'disagreed'}` +
+          `  ${r.workspace}  slot=${r.slot} shadow=${r.shadow} sessions=${String(r.count)}\n`,
       );
     }
   }
+
+  if (repeated.length > 0) {
+    // A confirmed case: enumeration has demoted the same live workspace twice running. This is the
+    // one direction ADR 166 says would make the flip worse than what it replaced, so it earns the
+    // away-human channel (ADR 035/024) rather than waiting to be read.
+    osNotify({
+      id: `adr166-demoted-${String(s.at)}`,
+      title: 'musterd — liveness demoted (ADR 166)',
+      body: `${repeated.length} workspace(s) judged not-live while the slot says live: ${repeated.join(', ')}`,
+    });
+  }
+  // Non-zero on a finding so launchd's log and any wrapper see a real failure, never a quiet no-op.
+  if (s.demoted > 0) process.exitCode = 1;
 }

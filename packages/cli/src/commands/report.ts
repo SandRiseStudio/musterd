@@ -2,6 +2,7 @@ import type { ActDelivery, Goal, Report } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
+import { latestFinding, readSweepSeries, type SweepFinding } from '../session/sweep-series.js';
 import { resolve } from './helpers.js';
 
 /**
@@ -74,7 +75,25 @@ function renderCoordination(r: Report, w: (s: string) => void): void {
     );
 }
 
-function render(r: Report, altitude: Altitude): void {
+/**
+ * The ADR 166 liveness finding (eval item 3) — enumeration demoting a seat the slot calls live, the
+ * one error direction that would make the post-flip judgement worse than the slot it replaced.
+ * Rendered ONLY when the newest sweep found one: target is zero, so a line printed at zero would be
+ * wallpaper within a week and the exception would stop reading as an exception. `repeated` means the
+ * preceding run demoted the same workspace — a confirmed case, not a first sighting.
+ */
+function renderLiveness(f: SweepFinding, w: (s: string) => void): void {
+  const confirmed = f.repeated.length > 0;
+  w(
+    `  ${theme.warn(confirmed ? 'liveness-demoted (confirmed)' : 'liveness-demoted')} — ` +
+      `${f.demoted} workspace${f.demoted === 1 ? '' : 's'} judged not-live while the slot says live ` +
+      `${theme.meta(`(ADR 166 eval 3, target zero · ${ago(Date.now() - f.at)} ago)`)}\n`,
+  );
+  for (const ws of f.workspaces)
+    w(`    ${f.repeated.includes(ws) ? theme.warn('repeat') : theme.meta('first')}  ${ws}\n`);
+}
+
+function render(r: Report, altitude: Altitude, liveness?: SweepFinding): void {
   const w = process.stdout.write.bind(process.stdout);
   const c = goalCounts(r.goals);
   w(
@@ -101,11 +120,13 @@ function render(r: Report, altitude: Altitude): void {
     if (r.goals.every((g) => g.status === 'planned'))
       w(theme.meta('  nothing in flight yet') + '\n');
     w(`\n${theme.accent('exceptions')}:\n`);
-    const hasExceptions = r.blocked.length > 0 || r.waiting_on.length > 0 || r.coordination.flag;
+    const hasExceptions =
+      r.blocked.length > 0 || r.waiting_on.length > 0 || r.coordination.flag || liveness != null;
     for (const b of r.blocked) w(`  ${theme.warn('blocked')} "${b.title}"\n`);
     if (r.waiting_on.length > 0) renderWaitingOn(r, w);
     if (r.coordination.flag)
       w(`  ${theme.warn('coordination-density')} — mostly broadcast journal, little exchange\n`);
+    if (liveness) renderLiveness(liveness, w);
     if (!hasExceptions) w(theme.meta('  none — on track') + '\n');
     return;
   }
@@ -124,6 +145,10 @@ function render(r: Report, altitude: Altitude): void {
   }
   w(`\n${theme.accent('waiting on')}:\n`);
   renderWaitingOn(r, w);
+  if (liveness) {
+    w(`\n${theme.accent('liveness')}:\n`);
+    renderLiveness(liveness, w);
+  }
 }
 
 /** Wake metrics (ADR 131 inc 5) — the always-on claim's instrument panel. */
@@ -401,6 +426,8 @@ export async function reportCommand(parsed: Parsed): Promise<number> {
       'usage: musterd report [delivery [<id>] | coordination | residency | tools] [--altitude ic|team|exec] [--json]',
       2,
     );
-  render(report, raw);
+  // Read off the local sweep series, not the server projection: the finding is a machine-local
+  // measurement about this fleet's bindings and transcripts, and no daemon can see it.
+  render(report, raw, latestFinding(readSweepSeries()));
   return 0;
 }
