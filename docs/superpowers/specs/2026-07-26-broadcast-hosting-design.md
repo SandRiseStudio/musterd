@@ -254,12 +254,29 @@ is honest. Pipeline total ~2.8 cores, so `performance-4x` is also the right size
 `libx264`.** nick has the 720p-vs-1080p quality samples; his eyeball is the last gate before the
 tailnet + stream-key work.
 
-## Increment 1 — provision
+## Increment 1 — provision (built 2026-07-27; nick approved 720p quality)
 
-Only after Increment 0's remaining questions are answered. Pick the box from the passing candidates,
-join it to the tailnet, install the stream key, and reduce going live to a single command. Detail
-deferred — writing it now would be designing against estimates, which is the thing this spec exists
-to avoid.
+The passing configuration from Increment 0, made runnable: `scripts/broadcast/hosted.Dockerfile`
+(chromium + ffmpeg + tailscale + the CLI, entrypoint = the stream), `scripts/broadcast/live.sh`
+(`build | start | status | stop` — remote builds, `fly machine run --rm`, SIGINT stop), and the
+operator guide `docs/guides/hosted-broadcast.md`.
+
+Decisions inside, all downstream of earlier ones:
+
+- **The daemon stays loopback-bound; `tailscale serve` forwards :4849 onto the tailnet.** Topology B
+  with zero daemon changes — the ADR 040 bind guard never comes into play.
+- **Machine lifetime = stream lifetime**, literally: the entrypoint `exec`s the broadcast, `--rm`
+  destroys the machine when it exits, so stop / watchdog / `--duration` all end billing too.
+- **Secrets are Fly secrets set by the operator only** (`TS_AUTHKEY` ephemeral+reusable,
+  `MUSTERD_STREAM_KEY`). They never pass through an agent, argv, or the repo. This is the "stream
+  key leaves the Keychain" risk from below, resolved as recorded: the provider's secret store was
+  the strongest option offered.
+- **The entrypoint fails loud before going live** — tailnet up and a daemon `/health` probe gate the
+  stream, because a stream that opens on a black stage is worse than one that refuses to start.
+
+Remaining operator steps (credentials — deliberately not automatable by an agent): install Tailscale
+on the Air + `tailscale serve`, mint the auth key, `fly apps create` + `fly secrets set`, then
+`live.sh build` once.
 
 ## Risks recorded, not solved
 
