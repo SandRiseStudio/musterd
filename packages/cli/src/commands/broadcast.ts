@@ -88,11 +88,8 @@ export function parseOptions(
 
 /** The Inc 1 page this captures — observer-only by construction (ADR 157), so a stream can never
  * attach a phantom human presence (ADR 155). */
-export function broadcastUrl(server: string, team: string, fps?: number): string {
-  const base = `${server.replace(/\/$/, '')}/broadcast?team=${encodeURIComponent(team)}`;
-  // `fps` lets the page paint at exactly the rate we will encode instead of at full rAF. Omitted when
-  // unknown, and the page then keeps painting everything — see frameBudgetMs.
-  return fps && fps > 0 ? `${base}&fps=${encodeURIComponent(String(fps))}` : base;
+export function broadcastUrl(server: string, team: string): string {
+  return `${server.replace(/\/$/, '')}/broadcast?team=${encodeURIComponent(team)}`;
 }
 
 /**
@@ -752,7 +749,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   const opts = parseOptions(parsed.flags);
   if (!opts.team) throw new CliError('which team? — pass --team <slug>', 2);
   const sink = await resolveSink(opts, keychainLookup);
-  const url = broadcastUrl(opts.server, opts.team, opts.fps);
+  const url = broadcastUrl(opts.server, opts.team);
 
   const chromeBin = process.env['CHROME_BIN'] ?? CHROME_DEFAULT;
   const debugPort = 9222 + Math.floor(Math.random() * 500);

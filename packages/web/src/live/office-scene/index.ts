@@ -1,7 +1,7 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
 import { createActors, type Actors } from './actors';
-import { frameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
+import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD } from './layout';
@@ -63,10 +63,6 @@ const AMBIENT_MAX_MS = 70000;
  * acts keep 60fps because their motion is not `ambientOnly`. */
 const AMBIENT_FRAME_MS = 50;
 
-/** Half a 60Hz frame — the tolerance that stops an exact-multiple frame budget undershooting by a
- * whole tick. See its use in `tick`. */
-const HALF_FRAME_MS = 1000 / 120;
-
 /** How often the office re-reads the PST clock so the lighting tracks the real sun (the sun moves slowly —
  * once a minute is plenty, and a rebake only happens when the veil/lamp state actually crosses a step). */
 const LIGHT_TICK_MS = 60000;
@@ -119,11 +115,6 @@ export interface OfficeOptions {
    * running while the tab is hidden or headless, DPR is pinned to 1 for a deterministic capture size,
    * and suspend requests are ignored. Only `/broadcast` passes it — see ./broadcast.ts. */
   broadcast?: boolean;
-  /**
-   * The encode rate the capture will resample to, from `?fps=` on the broadcast URL. Under broadcast
-   * the scene paints at exactly this rate; 0 (unknown) keeps the old paint-everything behaviour.
-   */
-  streamFps?: number;
 }
 
 export function mountOffice(
@@ -133,7 +124,6 @@ export function mountOffice(
   options: OfficeOptions = {},
 ): OfficeHandle {
   const broadcast = options.broadcast === true;
-  const streamFps = Number.isFinite(options.streamFps) ? Math.max(0, options.streamFps ?? 0) : 0;
   const dpr = officeDpr(broadcast, DPR_CAP);
 
   const canvas = document.createElement('canvas');
@@ -613,9 +603,9 @@ export function mountOffice(
   let last = 0;
   let acc = 0; // wall time accrued since the last drawn frame — coalesced under the ambient FPS cap
   let wasActive = false;
-  // Render counters for a capture harness (OfficeHandle.stats). Under broadcast with a known
-  // `streamFps`, `draws` should sit at that rate while `ticks` stays at full rAF — the gap between
-  // them is the work this cap stopped doing. With `streamFps` unknown the two converge, as before.
+  // Render counters for a capture harness (OfficeHandle.stats). Under broadcast `ticks === draws`,
+  // because ambientFrameBudgetMs returns 0 — the scene paints at full rAF while an encoder downstream
+  // consumes 30fps. Making that gap measurable rather than inferred is the point.
   let ticks = 0;
   let draws = 0;
   const since = performance.now();
@@ -627,20 +617,11 @@ export function mountOffice(
     // the walk maths stay correct with fewer samples.
     const inAfterglow = lastActive > 0 && now - lastActive < AFTERGLOW_MS;
     const noRealMotion = actors.ambientOnly() || !actors.active();
-    const ambientOnly = noRealMotion && cues.length === 0 && !inAfterglow;
+    const capped = noRealMotion && cues.length === 0 && !inAfterglow;
     acc += last ? now - last : 1000 / 60;
     last = now;
-    // Under broadcast this budget applies during walks and cues too, not only ambient stretches —
-    // painting above the encode rate is discarded downstream whatever the room is doing.
-    //
-    // The tolerance is load-bearing, not defensive habit. rAF fires on the display interval, so a
-    // 30fps budget is exactly two 60Hz ticks — and 2 × 16.666… lands a float-hair *under* 33.333…,
-    // so a bare `<` waits a third tick. Measured before this line existed: 22.5fps drawn against a
-    // 30fps encode, i.e. an undershoot that would reintroduce the cadence judder the cap exists to
-    // avoid. Half a 60Hz frame snaps the comparison to the nearest achievable tick boundary.
-    const budget = frameBudgetMs({ broadcast, streamFps, ambientOnly, ambientCapMs: AMBIENT_FRAME_MS });
-    if (acc + HALF_FRAME_MS < budget) {
-      raf = requestAnimationFrame(tick); // too soon for the next frame — keep the loop, skip the draw
+    if (capped && acc < ambientFrameBudgetMs(broadcast, AMBIENT_FRAME_MS)) {
+      raf = requestAnimationFrame(tick); // too soon for the next ambient frame — keep the loop, skip the draw
       return;
     }
     draws++;

@@ -41,34 +41,13 @@ export function suspendIgnored(broadcast: boolean, on: boolean): boolean {
 }
 
 /**
- * Minimum milliseconds between painted frames right now — 0 meaning "paint every rAF".
- *
- * Two different budgets, for two different reasons:
- *
- * **A viewer** coalesces *ambient-only* motion toward ~20fps (ADR 086 Phase 2 — visually identical,
- * ~3× cheaper, a measured standing win) and paints at full rate whenever something real is moving.
- *
- * **A broadcast** paints at exactly the encode rate, always — moving or not. The earlier version
- * returned 0 here, i.e. full rAF forever, because 20fps content resampled onto a 30fps encode is
- * textbook cadence judder: every third frame duplicates, an evenly-paced stutter on every viewer's
- * player (observed on the first live Twitch stream). That reasoning was right about *20*, and it was
- * then applied to every rate. Measured 2026-07-26: the page painted 60fps, Chrome's screencast
- * delivered all 60, and the pump handed exactly 30 to ffmpeg — **half of every frame's render work
- * was discarded**, and Chrome was the most expensive process in the pipeline at ~140% of a core.
- *
- * Painting at the encode rate keeps the property that mattered: content and timeline are 1:1, so
- * there is no duplicated frame and no judder. On a 60Hz rAF a 30fps budget lands on every second
- * tick, which is phase-stable rather than a beat frequency.
- *
- * `streamFps` of 0 means the rate is unknown (an older CLI, or a hand-typed URL); the safe answer is
- * the old behaviour — paint everything — because judder is worse than cost.
+ * The ambient idle-FPS budget (ADR 086 Phase 2): a viewer's office coalesces ambient-only motion
+ * toward ~20fps (visually identical, ~3× cheaper — a measured, standing win). But a *broadcast* is
+ * resampled to an exact 30fps encode, and 20fps content on a 30fps timeline is textbook cadence
+ * judder: every third frame duplicates, an evenly-paced stutter on every viewer's player (observed
+ * on the first live Twitch stream). Broadcast renders ambient at full rate — the capture machine is
+ * the one place that cost buys smoothness for everyone watching.
  */
-export function frameBudgetMs(opts: {
-  broadcast: boolean;
-  streamFps: number;
-  ambientOnly: boolean;
-  ambientCapMs: number;
-}): number {
-  if (opts.broadcast) return opts.streamFps > 0 ? 1000 / opts.streamFps : 0;
-  return opts.ambientOnly ? opts.ambientCapMs : 0;
+export function ambientFrameBudgetMs(broadcast: boolean, capMs: number): number {
+  return broadcast ? 0 : capMs;
 }

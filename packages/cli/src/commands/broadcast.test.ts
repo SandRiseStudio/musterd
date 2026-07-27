@@ -73,17 +73,6 @@ describe('broadcastUrl', () => {
       'https://box.example/broadcast?team=my%20team',
     );
   });
-
-  it('passes the encode rate through so the page can paint at it instead of at full rAF', () => {
-    expect(broadcastUrl('http://127.0.0.1:4849', 'revive', 30)).toBe(
-      'http://127.0.0.1:4849/broadcast?team=revive&fps=30',
-    );
-  });
-
-  it('omits fps when it is absent or nonsensical, leaving the page painting everything', () => {
-    expect(broadcastUrl('http://x', 'r', 0)).toBe('http://x/broadcast?team=r');
-    expect(broadcastUrl('http://x', 'r')).toBe('http://x/broadcast?team=r');
-  });
 });
 
 describe('resolveSink (stream-key resolution)', () => {
