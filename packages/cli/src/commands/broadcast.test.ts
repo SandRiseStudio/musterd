@@ -23,6 +23,7 @@ import {
   type RunState,
   chromeArgs,
   chromeDefault,
+  compositorHz,
   stagePixels,
   ffmpegArgs,
   killGroup,
@@ -96,29 +97,44 @@ describe('stagePixels', () => {
 
 describe('screencastEveryNthFrame', () => {
   it('delivers at the encode rate on a 60Hz compositor — 30fps takes every second frame', () => {
-    expect(screencastEveryNthFrame(30)).toBe(2);
+    expect(screencastEveryNthFrame(30, 60)).toBe(2);
   });
 
   it('never skips when the encode wants everything the compositor produces', () => {
-    expect(screencastEveryNthFrame(60)).toBe(1);
-    expect(screencastEveryNthFrame(120)).toBe(1); // asking for more than exists is still "every frame"
+    expect(screencastEveryNthFrame(60, 60)).toBe(1);
+    expect(screencastEveryNthFrame(120, 60)).toBe(1); // asking for more than exists is still "every frame"
   });
 
   it('skips harder for a slow encode', () => {
-    expect(screencastEveryNthFrame(15)).toBe(4);
-    expect(screencastEveryNthFrame(20)).toBe(3);
+    expect(screencastEveryNthFrame(15, 60)).toBe(4);
+    expect(screencastEveryNthFrame(20, 60)).toBe(3);
   });
 
   it('floors rather than rounds, so delivery never lands under the encode rate', () => {
     // 25fps: 60/25 = 2.4. Rounding to 2 delivers 30/s (a surplus the pump discards); rounding to 3
     // would deliver 20/s and the pump would pad the shortfall with duplicate frames.
-    expect(screencastEveryNthFrame(25)).toBe(2);
+    expect(screencastEveryNthFrame(25, 60)).toBe(2);
   });
 
   it('falls back to every frame on a nonsense rate rather than computing a divide-by-zero', () => {
-    expect(screencastEveryNthFrame(0)).toBe(1);
-    expect(screencastEveryNthFrame(-5)).toBe(1);
-    expect(screencastEveryNthFrame(Number.NaN)).toBe(1);
+    expect(screencastEveryNthFrame(0, 60)).toBe(1);
+    expect(screencastEveryNthFrame(-5, 60)).toBe(1);
+    expect(screencastEveryNthFrame(Number.NaN, 60)).toBe(1);
+  });
+
+  it('never skips on a software compositor — it has no surplus frames to throw away', () => {
+    // Measured on Fly performance-4x (2026-07-27): the compositor holds ~20-26Hz there, and
+    // deriving the skip from 60 delivered 14fps where 1 delivered 26.5 at identical render cost.
+    expect(screencastEveryNthFrame(30, compositorHz('linux'))).toBe(1);
+    expect(screencastEveryNthFrame(25, compositorHz('linux'))).toBe(1);
+    expect(screencastEveryNthFrame(15, compositorHz('linux'))).toBe(2);
+  });
+});
+
+describe('compositorHz', () => {
+  it('is a platform fact: 60 with GPU compositing (darwin), 30 for headless software rasterizers', () => {
+    expect(compositorHz('darwin')).toBe(60);
+    expect(compositorHz('linux')).toBe(30);
   });
 });
 

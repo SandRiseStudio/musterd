@@ -226,6 +226,34 @@ dollar. The one code change it forced is real and keeps: Chrome on any container
 `--no-sandbox --disable-dev-shm-usage` (and a `/usr/bin/chromium` default), or it cannot start at
 all — the spec's "no code change required" row was wrong in the way only running it finds.
 
+### Option 3 chosen and measured — 720p25 passes on the same box (amended 2026-07-27)
+
+nick picked **option 3 (shrink the render)** from the list above. Two changes made it real, and a
+second rented hour on the identical machine class (Fly `performance-4x`) turned the verdict around:
+
+- **`--resolution 720p`** (PR #407) sizes the whole path — the page's stage itself via `?h=720`
+  (a CSS-scaled 1080p render would keep paying the raster cost the rung exists to remove), Chrome's
+  window, the viewport override, and the screencast bounds. 1080p stays the ADR 157 default.
+- **`everyNthFrame` stopped assuming 60Hz off darwin.** The skip derivation counts *composited*
+  frames; this box composites at ~20–26Hz, so `floor(60/fps)=2` threw away half the frames it could
+  actually produce. Same render cost, delivery 14 → 26.5fps. `compositorHz()` is now a platform
+  fact: 60 on darwin (measured true), 30 elsewhere.
+
+| run (performance-4x, libx264) | delivered | draws | encoded | queue |
+| --- | --- | --- | --- | --- |
+| 720p30, skip-from-60Hz | 14.0 | 27.6 | 30.0 | flat |
+| 720p30, every frame | 26.5 | 25.1 | 30.0 | flat |
+| **720p25, every frame** | **27.4** | 26.4 | **25.0** | **0.00 MB peak** |
+
+**720p25 delivers above its encode rate with a flat-zero queue — the first passing configuration on
+rentable hardware.** 720p30 lands at ~26 delivered (~12% duplicate padding); acceptable, but 25fps
+is honest. Pipeline total ~2.8 cores, so `performance-4x` is also the right size — at the intended
+~90h/month of process-lifetime billing that is roughly **$10–12/month**, plus ~$4 egress.
+
+**Increment 1 therefore provisions: Fly `performance-4x` · `--resolution 720p --fps 25` ·
+`libx264`.** nick has the 720p-vs-1080p quality samples; his eyeball is the last gate before the
+tailnet + stream-key work.
+
 ## Increment 1 — provision
 
 Only after Increment 0's remaining questions are answered. Pick the box from the passing candidates,
