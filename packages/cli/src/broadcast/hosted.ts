@@ -328,9 +328,17 @@ export async function runChecks(ctx: DoctorCtx): Promise<Check[]> {
         : rejected.length > 0
           ? `403 for ${rejected.join(', ')} (ws_upgrade_rejected: host not allowed)`
           : `${hosts.join(', ')} accepted`,
+      // Phrased as an observation, not a diagnosis. All this check saw is that no answer came back,
+      // and "the daemon is down" and "this CLI cannot see it" are different conditions that look
+      // identical from here — the distinction stanley's ADR 040 service work turned on (#422: only
+      // was-up-then-not is an outage, so his bounce takes a baseline probe first). The probe aims at
+      // loopback today, where down is nearly always the right reading; the moment doctor is pointed
+      // at a daemon across the overlay it would not be, and a check that states a cause it did not
+      // observe is the exact failure this command exists to end. Whoever adds that capability wants
+      // his baseline, not this sentence.
       ...(unreachable
         ? {
-            fix: `the daemon is not answering — \`musterd service status\`, then \`musterd service start\``,
+            fix: `no answer from the daemon — it may be down, or unreachable from here. Check with \`musterd service status\`, then \`musterd service start\``,
           }
         : rejected.length > 0
           ? {
