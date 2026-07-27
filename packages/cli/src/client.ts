@@ -277,6 +277,10 @@ export class HttpClient {
   ): Promise<{ ok: boolean; member: string; kind: MemberKind }> {
     return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(member)}/remove`);
   }
+  /** Soft-archive a team — `POST /teams/:slug/archive`, admin, audited `team.archive`. */
+  archiveTeam(slug: string): Promise<{ ok: boolean; team: string; archived_at: number }> {
+    return this.request('POST', `/teams/${encodeURIComponent(slug)}/archive`);
+  }
   /**
    * The governance audit log (ADR 071) — admin-only `GET /teams/:slug/audit`. Newest-first, capped;
    * `limit` (1..500) and `before` (<ms-epoch>) page older entries. The response is parsed through

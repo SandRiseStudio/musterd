@@ -141,7 +141,11 @@ export type AuditAction =
   // denies. NOTE the write count is a LOWER BOUND — Bash write-shape is a heuristic command match, so
   // a subagent writing via `python -c` or an MCP filesystem tool produces no row (ADR 163 recall arm).
   | 'actor.subagent_write'
-  | 'actor.subagent_spawn';
+  | 'actor.subagent_spawn'
+  // The inverse of team create: an admin soft-archived the whole team (`POST /teams/:slug/archive`).
+  // target = the slug. The row lands in the archived team's own log — readable again only at the db
+  // (requireTeam refuses archived teams), but the history survives, which is the point of soft.
+  | 'team.archive';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

@@ -94,7 +94,7 @@ src/
     broadcast.ts      // musterd broadcast --team … (--out|--twitch|--rtmp): headless-Chrome capture of /broadcast → CFR frame pump → ffmpeg (VideoToolbox/libx264) → file or RTMPS; stream key from env/Keychain only (ADR 157 inc 2)
     broadcast-perf.ts // capture-pipeline instrumentation, dark unless MUSTERD_BROADCAST_PERF names a JSONL path: screencast fps/bytes, canvas draw rate, ffmpeg queue depth (its *slope* is the margin metric — `speed=` is pinned ≈1× for a live source), per-tree CPU + load; summarized by scripts/perf/broadcast-baseline.mjs
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
-    team.ts           // team create / team add / team remove / team export (ADR 058 db→file migration)
+    team.ts           // team create / add / remove / archive / export (ADR 058 db→file migration)
     fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files (ADR 058 guard 2)
     join.ts           // join
     send.ts           // send
@@ -225,6 +225,10 @@ Runs the daemon as a background **service** so it survives a closed terminal/ses
 ### `musterd team remove <name>`
 
 `POST /teams/:slug/members/:name/remove`. **Soft-removes** a member from the roster (ADR 019) — the sanctioned way to clear a mistaken or stale member instead of editing the daemon's DB. Sets `left_at` via the existing `leaveMember`, so the member drops off every list/auth/route path (all filter `left_at IS NULL`) while its message history + provenance survive; any live session is dropped (same mechanism as reclaim) so the seat frees immediately. Idempotent — removing an already-removed member is a clean `not_found`, never an error stack. Removal is admin-gated (ADR 071 `is_admin`). Reactivating a removed/offline member is the claim/request lane (ADR 077): re-declare or claim the seat via `musterd init`'s "activate an existing member", `musterd claim <name>`, or `musterd agent`. Output: `✓ removed <member> from <team> — off the roster; message history is kept`. Errors: unknown/already-removed member → `not_found` (exit 6).
+
+### `musterd team archive <slug> [--as <admin>]`
+
+`POST /teams/:slug/archive`. The **inverse of `team create`**, which until now had none: the sanctioned way to retire a junk or finished team instead of running SQL against the daemon's DB. **Soft** — sets `archived_at` on the team row, which `requireTeam` treats as gone, so the team drops off `status`, the rosters, and every team-scoped auth path at once while its members, messages, lanes, and audit rows all survive. Admin-gated (ADR 071 `is_admin`) and audited (`team.archive`), like the other governance writes: archiving pulls the whole team off every surface, so it carries the same authority bar. The slug is always explicit — never the ambient bound team — so a mistyped bare invocation can't take down the team you are working in. The slug stays taken (history keeps it), so re-creating an archived slug is a `conflict` that names the archived state. Output: `✓ archived team "<slug>" — off every roster and status surface; history is kept (soft archive)`. Errors: unknown slug → `not_found` (exit 6); an already-archived team → `not_found` ("team is archived", since auth itself can no longer resolve it); a non-admin seat → `forbidden`.
 
 ### `musterd team export <slug>`
 
