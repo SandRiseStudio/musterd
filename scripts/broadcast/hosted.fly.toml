@@ -1,0 +1,16 @@
+# Config for BUILDING the hosted capture image. It is never deployed from: `live.sh build` passes
+# --build-only, and `live.sh start` creates the machine with `fly machine run` so that each stream is
+# its own machine with its own lifetime.
+#
+# It exists because `fly deploy --build-only` still validates an app config, and an app with no
+# machines has none to infer one from ("could not create a fly.toml from any machines").
+app = "musterd-broadcast"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "hosted.Dockerfile"
+
+# No [[services]]: nothing listens for the outside world. The capture dials OUT to the daemon over
+# the tailnet and to Twitch over RTMPS.
+[[vm]]
+  size = "performance-4x"
