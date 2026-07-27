@@ -248,9 +248,12 @@ ones. Recorded as a pre-registration defect rather than quietly re-scoped.
 What ran instead measures **detector recall** — a pure function of the command string, which is the
 quantity this ADR actually cites — over a 40-command corpus with ground truth measured by sandbox
 tree-hash. **Still unmeasured: pipeline recall** (does the hook fire, does `agent_id` arrive, does the
-row land) beyond the paths inc 1's integration tests already cover. A future arm must prove the
-pipeline **without a writing subagent** — most plausibly by driving the actor endpoint directly with
-synthetic `agent_id` payloads. Until then the 68% bounds the matcher, not the plumbing. (3) **Join-fidelity arm (increment 2 only, gated on arm 1):**
+row land) beyond the paths inc 1's integration tests already cover. **That gap is deferred, not
+intrinsic:** the obstacle is only that seeded rows would be indistinguishable from real ones, which is a
+labelling problem — a `synthetic: true` marker in the audit detail, or a fixture team the analysis
+excludes by construction, separates them at read time and lets a subagent be spawned deliberately for
+measurement. A later increment. Until it runs, **the 68% bounds the matcher, not the plumbing**, and no
+count may be read end-to-end. (3) **Join-fidelity arm (increment 2 only, gated on arm 1):**
 spawn two same-type subagents concurrently under different models and confirm the join reports
 `ambiguous` rather than picking one — a test that the honesty mechanism fires, not that the join
 succeeds. Honesty caveat inherited from ADR 150: **n is small; report the mechanism beside every

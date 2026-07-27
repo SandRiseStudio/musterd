@@ -95,10 +95,16 @@ indistinguishable from real ones.
 So what is measured here is **detector recall** — a pure function of the command string, which is what
 the ADR actually cites — and **not** end-to-end pipeline recall (does the hook fire, does `agent_id`
 arrive, does the row land). Those are covered by inc 1's integration tests for the paths they cover, and
-unmeasured beyond that. **This is a real, named gap, not a completed arm.** It is worth recording that
-the experiment as pre-registered was not runnable under this team's own constraints; a future version
-needs a design that proves the pipeline without a writing subagent — most plausibly by driving the hook
-endpoint directly with synthetic payloads carrying an `agent_id`.
+unmeasured beyond that. **This is a real, named gap, not a completed arm.**
+
+**The gap is measurable later, and should not be filed as intrinsic** (stanley's correction to an
+overstatement in the first draft of this finding). The blocker is not that a writing subagent is
+unusable — it is that its rows would be **indistinguishable from real ones** in the stream arm 1 reads.
+Contamination is a labelling problem, not a physical one: a `synthetic: true` marker in the audit
+detail, or a fixture team the analysis excludes by construction, makes seeded and real rows separable at
+read time. With that in place a subagent can be spawned deliberately, under the rule's own exception for
+measurement, and pipeline recall becomes an ordinary number. That is a later increment; until it runs,
+**the 68% bounds the matcher, not the plumbing**, and no count may be read end-to-end.
 
 **2. MCP filesystem tools.** `isWriteShaped` matches `WRITE_SHAPED_TOOLS` by exact name plus the `Bash`
 heuristic, so a write through an MCP server's own file tool (`mcp__…__create_file`,
