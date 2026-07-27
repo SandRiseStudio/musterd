@@ -300,6 +300,7 @@ src/
   config.ts       // env > binding.json > workspace.json -> { server, team, agent_key?, grant?, surface, claim, connId, claimCode }; validates; + build (own dist stamp, ADR 135)
   client.ts       // HTTP + background WS client; join()/leave()/close(); `joined`/`claimed`;
                   //   setIdentity() (late claim); addMember() (tokenless mint); buffers live while joined
+  sessionLiveness.ts // the ADR 164 ladder: judges OUR OWN harness session on the heartbeat tick (ppid / successor / ended_at / transcript staleness) so a process that outlived its session stops attesting presence; fails open
   claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() + adoptIdentity() (live claim, ADR 034)
   harness.ts      // bounded MCP clientInfo capture: adapter-local harness diagnostics, never model inference (ADR 120)
   pending.ts      // pending markers (.musterd/pending/<code>.json) + resolution sidecars (ADR 034)

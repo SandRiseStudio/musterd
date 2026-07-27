@@ -16,6 +16,7 @@ import {
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
 import { refreshAttestation, type McpConfig } from './config.js';
+import { SessionAttestation } from './sessionLiveness.js';
 
 function wsBase(server: string): string {
   return server.replace(/^http/, 'ws');
@@ -31,6 +32,8 @@ export class MusterdClient {
   private seen = new Set<string>();
   private ws: WebSocket | null = null;
   private heartbeat: NodeJS.Timeout | null = null;
+  /** The ADR 164 session ladder, created lazily on the first heartbeat tick. */
+  private session: SessionAttestation | null = null;
   private backoff = 1000;
   private closed = false;
   /** True while the member should hold presence — gates reconnect, cleared by leave()/close(). */
@@ -352,6 +355,34 @@ export class MusterdClient {
     return null; // `chat` — assign-in-chat, no auto-claim target
   }
 
+  /**
+   * The ADR 164 ladder, run on the heartbeat tick. Returns true when this tick must NOT heartbeat.
+   *
+   * `orphan` is definitive (re-parented, superseded, or SessionEnd fired for our own session): drop
+   * presence and exit through the same clean path a reload takeover uses. `stale` is the
+   * probabilistic backstop — go dormant only, because a session that is merely thinking for an hour
+   * must be able to come back on its next tool call (ADR 108 autojoin) rather than be stranded
+   * without tools. Never throws: any failure to judge leaves the heartbeat alone.
+   */
+  private attestSession(): boolean {
+    let verdict;
+    try {
+      this.session ??= new SessionAttestation({
+        bindingDir: this.config.bindingDir ?? process.cwd(),
+      });
+      verdict = this.session.check();
+    } catch {
+      return false; // fail open — an unjudgeable session is not evidence of a dead one
+    }
+    if (verdict.verdict === 'live') return false;
+    process.stderr.write(
+      `musterd: session no longer live (${verdict.rung}) — releasing seat presence\n`,
+    );
+    this.leave();
+    if (verdict.verdict === 'orphan') this.onReplaced?.();
+    return true;
+  }
+
   /** Release the seat (back to dormant). The server keeps a 45s reclaim grace; tools stay registered. */
   leave(): void {
     this.wantPresence = false;
@@ -417,6 +448,10 @@ export class MusterdClient {
         ws.send(JSON.stringify({ type: 'subscribe', scope: 'team' }));
         this.heartbeat = setInterval(() => {
           if (ws.readyState === ws.OPEN) {
+            // Attest the SESSION before asserting presence (ADR 164). A heartbeat vouches for a
+            // session, not for the process sending it; an adapter that outlived its harness must
+            // stop claiming the seat rather than hold it `working` forever.
+            if (this.attestSession()) return;
             // Re-read the observation off disk first (ADR 158 §7): the hook corrects it mid-session,
             // long after this adapter resolved its boot-time attestation.
             refreshAttestation(this.config);
