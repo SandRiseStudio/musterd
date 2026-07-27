@@ -49,8 +49,21 @@ const OptionsSchema = z.object({
   rtmp: z.string().min(1).optional(),
   twitch: z.boolean().default(false),
   encoder: z.enum(['videotoolbox', 'libx264']),
+  /** The capture stage. 1080p is the ADR 157 contract and stays the default; 720p exists because
+   * the hosting spec's run D showed the render is serial and single-thread-bound — a quarter of the
+   * pixels is the one lever that changes what hardware can hold the stream. */
+  resolution: z.enum(['720p', '1080p']).default('1080p'),
 });
 export type BroadcastOptions = z.infer<typeof OptionsSchema>;
+
+/** Stage pixels for a resolution rung (16:9 exactly — the scene bakes to the canvas it gets). */
+export function stagePixels(resolution: BroadcastOptions['resolution']): {
+  width: number;
+  height: number;
+} {
+  const height = resolution === '720p' ? 720 : 1080;
+  return { width: (height * 16) / 9, height };
+}
 
 export function parseOptions(
   flags: Record<string, string | boolean>,
@@ -75,6 +88,7 @@ export function parseOptions(
     twitch: flags['twitch'] === true,
     // VideoToolbox is the whole point on the laptop (hardware encode); libx264 elsewhere.
     encoder: str('encoder') ?? (platform === 'darwin' ? 'videotoolbox' : 'libx264'),
+    resolution: str('resolution'),
   });
   const sinks = [opts.out, opts.rtmp, opts.twitch ? 'twitch' : undefined].filter(Boolean).length;
   if (sinks !== 1) {
@@ -119,8 +133,15 @@ export function screencastEveryNthFrame(fps: number, compositorHz = COMPOSITOR_H
 
 /** The Inc 1 page this captures — observer-only by construction (ADR 157), so a stream can never
  * attach a phantom human presence (ADR 155). */
-export function broadcastUrl(server: string, team: string): string {
-  return `${server.replace(/\/$/, '')}/broadcast?team=${encodeURIComponent(team)}`;
+export function broadcastUrl(
+  server: string,
+  team: string,
+  resolution: BroadcastOptions['resolution'] = '1080p',
+): string {
+  // `h` sizes the page's stage itself. Without it a 720p window would CSS-scale a 1080p render and
+  // keep paying the full raster cost — the exact cost the 720p rung exists to remove.
+  const h = resolution === '1080p' ? '' : `&h=${stagePixels(resolution).height}`;
+  return `${server.replace(/\/$/, '')}/broadcast?team=${encodeURIComponent(team)}${h}`;
 }
 
 /**
@@ -605,6 +626,7 @@ export function chromeArgs(
   debugPort: number,
   profileDir: string,
   platform: NodeJS.Platform = process.platform,
+  stage: { width: number; height: number } = { width: 1920, height: 1080 },
 ): string[] {
   return [
     '--headless=new',
@@ -612,8 +634,8 @@ export function chromeArgs(
     `--user-data-dir=${profileDir}`,
     '--no-first-run',
     '--disable-extensions',
-    // The Inc 1 contract: a 1920×1080 window at DPR 1 captures the stage 1:1.
-    '--window-size=1920,1080',
+    // The Inc 1 contract: a stage-sized window at DPR 1 captures the stage 1:1.
+    `--window-size=${stage.width},${stage.height}`,
     '--force-device-scale-factor=1',
     // A rented capture box runs this as root in a container, where Chrome's setuid sandbox refuses
     // to start at all, and where /dev/shm is 64MB — small enough that the compositor falls back to
@@ -794,7 +816,8 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   const opts = parseOptions(parsed.flags);
   if (!opts.team) throw new CliError('which team? — pass --team <slug>', 2);
   const sink = await resolveSink(opts, keychainLookup);
-  const url = broadcastUrl(opts.server, opts.team);
+  const url = broadcastUrl(opts.server, opts.team, opts.resolution);
+  const stage = stagePixels(opts.resolution);
 
   const chromeBin = process.env['CHROME_BIN'] ?? chromeDefault();
   const debugPort = 9222 + Math.floor(Math.random() * 500);
@@ -894,7 +917,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
 
   // `detached: true` makes each child its own process-group leader, which is what lets the
   // stop path kill *everything* it spawned with one group signal — see killGroup.
-  const chrome = spawn(chromeBin, chromeArgs(debugPort, profile), {
+  const chrome = spawn(chromeBin, chromeArgs(debugPort, profile, process.platform, stage), {
     stdio: 'ignore',
     detached: true,
   });
@@ -972,8 +995,8 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
         // phantom window chrome → 1920×992 frames). The emulation override pins the viewport itself, so
         // the screencast delivers exactly the 1920×1080 stage.
         await cdp.send('Emulation.setDeviceMetricsOverride', {
-          width: 1920,
-          height: 1080,
+          width: stage.width,
+          height: stage.height,
           deviceScaleFactor: 1,
           mobile: false,
         });
@@ -1004,8 +1027,8 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     await page.send('Page.startScreencast', {
       format: 'jpeg',
       quality: 85,
-      maxWidth: 1920,
-      maxHeight: 1080,
+      maxWidth: stage.width,
+      maxHeight: stage.height,
       // Deliver at the encode rate, not at every composited frame — the JPEG encode above is the
       // single largest cost in the pipeline, and feeding 60/s into a 30fps encode pays for it twice.
       everyNthFrame: screencastEveryNthFrame(opts.fps),
