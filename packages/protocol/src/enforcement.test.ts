@@ -4,6 +4,7 @@ import {
   EnforcementPolicySchema,
   gateFingerprint,
   globToRegExp,
+  isWriteShaped,
   matchEnforcement,
   normalizeCommand,
 } from './enforcement.js';
@@ -172,5 +173,64 @@ describe('matchEnforcement (ADR 150) — declaration-order, tool-driven flavor, 
     expect(worktree?.target).toBe('git merge lane-branch');
     expect(worktree?.fingerprint).toBe(plain?.fingerprint);
     expect(envPrefixed?.fingerprint).toBe(plain?.fingerprint);
+  });
+});
+
+/**
+ * ADR 163 — actor attestation. `isWriteShaped` is the read/write asymmetry in one function: reads must
+ * never fire (an `Explore` sweep's hundreds of reads would swamp the ledger), writes must. The Bash arm
+ * is an explicitly-incomplete heuristic — these tests pin what it DOES catch and, just as importantly,
+ * document a miss it does not, so nobody reads the resulting count as a rate.
+ */
+describe('isWriteShaped (ADR 163)', () => {
+  it('path-shaped write tools are writes', () => {
+    for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) {
+      expect(isWriteShaped({ tool, path: 'src/x.ts' })).toBe(true);
+    }
+  });
+
+  it('reads are never writes — the whole read/write asymmetry', () => {
+    expect(isWriteShaped({ tool: 'Read', path: 'src/x.ts' })).toBe(false);
+    expect(isWriteShaped({ tool: 'Grep' })).toBe(false);
+    expect(isWriteShaped({ tool: 'Glob', path: '**/*.ts' })).toBe(false);
+    expect(isWriteShaped({ tool: 'Bash', command: 'cat src/x.ts' })).toBe(false);
+    expect(isWriteShaped({ tool: 'Bash', command: 'ls -la' })).toBe(false);
+    expect(isWriteShaped({ tool: 'Bash', command: 'grep -rn foo src/' })).toBe(false);
+  });
+
+  it('catches the obvious Bash write shapes', () => {
+    const writes = [
+      'echo hi > out.txt',
+      'echo hi >> out.txt',
+      'echo hi | tee out.txt',
+      "sed -i '' s/a/b/ f.ts",
+      'rm -rf build',
+      'mv a b',
+      'cp a b',
+      'mkdir -p x',
+      'touch f',
+      'git commit -m x',
+      'git push origin main',
+      'pnpm install',
+      'patch -p1 < x.diff',
+    ];
+    for (const command of writes) {
+      expect(isWriteShaped({ tool: 'Bash', command }), command).toBe(true);
+    }
+  });
+
+  it('MISSES writes through indirection — the documented recall gap, not a bug to fix here', () => {
+    // Each of these really does write, and produces no row. This is why ADR 163's headline is a LOWER
+    // BOUND and why a separate recall arm exists to put an error bar on it. If a future change makes
+    // one of these pass, re-measure recall rather than deleting the case.
+    expect(isWriteShaped({ tool: 'Bash', command: 'python -c \'open("f","w").write("x")\'' })).toBe(
+      false,
+    );
+    expect(isWriteShaped({ tool: 'Bash', command: 'node build.js' })).toBe(false);
+  });
+
+  it('a Bash call with no command is not a write', () => {
+    expect(isWriteShaped({ tool: 'Bash' })).toBe(false);
+    expect(isWriteShaped({ tool: 'Bash', command: '   ' })).toBe(false);
   });
 });

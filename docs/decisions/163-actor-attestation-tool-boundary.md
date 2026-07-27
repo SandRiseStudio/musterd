@@ -124,6 +124,14 @@ Three changes, all client-side except the ingest:
 Rows post through the same member-authed daemon ingest the `lane.gate` / `action.gate` rows use, and
 carry **shapes only** (ADR 051) — never file content, never the subagent's prompt.
 
+**"Target" splits by tool, and the split is load-bearing** (tightened during increment 1; the looser
+wording above meant only this). A **path** target is stored in the clear: lane `surface_globs` already
+hold plain repo-relative paths, so a path is not the sensitive class, and "which surfaces do subagents
+write to" is the question the ledger exists to answer. A **`Bash` command is never stored** — command
+text is exactly what ADR 051 protects, since it can carry tokens, URLs, and secrets, and ADR 150's
+gate rows already refuse it. Commands reduce to a truncated sha256 `command_fingerprint`, which still
+collapses repeat attempts without retaining the text.
+
 **Emission is fire-and-forget, off the critical path.** Unlike `gateCheck`, attribution has no
 decision to await — nothing downstream reads its result, and the tool call's outcome does not depend
 on it. The row is therefore emitted **without awaiting the response**, under a hard timeout, and its

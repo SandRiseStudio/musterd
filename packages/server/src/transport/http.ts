@@ -25,6 +25,7 @@ import {
   OpenLaneSchema,
   UpdateLaneSchema,
   DeclareGoalSchema,
+  ActorAttestationSchema,
   GateCheckRequestSchema,
   AskTierSchema,
   askContract,
@@ -44,7 +45,7 @@ import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
-import { adjudicateGate } from '../protocol/gate.js';
+import { adjudicateGate, recordActorAttestation } from '../protocol/gate.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
@@ -1325,6 +1326,21 @@ export async function handleHttp(
         const gateReq = parseOrBadRequest(GateCheckRequestSchema, await readJson(req));
         const decision = adjudicateGate(ctx, team, member, gateReq);
         return sendJson(res, 200, decision);
+      }
+
+      // ── Actor attestation (ADR 163) — who did it, never whether it was allowed ──────────────────
+      // The hook POSTs this for a write-shaped call carrying an `agent_id` (a subagent wrote under its
+      // parent seat's identity) or for a spawn (the denominator). It is NOT a gate: there is no
+      // decision to return, so the response is an empty 202 and the hook never awaits it — an observer
+      // on the critical path would be the latency tax ADR 163's guard metric forbids. Fires on
+      // UNDECLARED calls by design, which the amended ADR 150 §Gate B boundary permits precisely
+      // because nothing here can change whether the call proceeds.
+      if (method === 'POST' && rest === '/actor') {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        const att = parseOrBadRequest(ActorAttestationSchema, await readJson(req));
+        recordActorAttestation(ctx, team, member, att);
+        return sendJson(res, 202, {});
       }
 
       // ── Harness residency: the wake ledger (ADR 131, increment 2) ──────────────────────────────
