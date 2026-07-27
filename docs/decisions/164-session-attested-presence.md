@@ -137,8 +137,29 @@ live session with no musterd tools until the harness restarts; that is why the r
   unstattable transcript all mean _no judgement_ — keep heartbeating. `miley`'s missing transcript
   is the live case; harnesses that keep no transcript at all must never be demoted by rung 4. Only
   rungs 1–3 apply there.
-- Rung 3 must compare the binding's `session.id` to **our own** captured id. A newer session in the
-  same workspace writing its own `ended_at` must not tear down an unrelated adapter.
+
+### Which session is ours — and the boot race
+
+Rungs 3 and 4 are judgements about **our own** session, and the adapter does not have a session id:
+`binding.session` is written by the hooks, and ADR 131 deliberately kept the adapter out of it to
+avoid a hook-vs-adapter boot race. This ADR brings the adapter in, so it must handle that race
+rather than inherit it.
+
+The adapter **adopts** a session id, once, on the first tick where the binding shows a session whose
+`started_at` is **not earlier than the adapter's own process start** (minus a small clock skew). It
+never adopts an older one. This matters: at boot the adapter routinely sees the _previous_ session's
+capture, because `SessionStart` has not written yet. An adapter that pinned that id would then watch
+it be replaced and conclude — exactly backwards — that itself was the orphan.
+
+Once adopted, two verdicts follow, both definitive:
+
+- the binding's `session.id` differs from the adopted one ⇒ a **successor session** owns this
+  workspace and we are a reload orphan ⇒ exit. (This is the same conclusion ADR 092's
+  `same_workspace` takeover already reaches, arrived at locally instead of via the server.)
+- the adopted session carries `ended_at` ⇒ rung 3 ⇒ exit.
+
+Before adoption, only rungs 1 and 2 apply — an un-adopted adapter never demotes itself on evidence
+about somebody else's session.
 
 ### What this does not do
 
