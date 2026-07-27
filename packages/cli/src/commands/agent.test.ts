@@ -90,13 +90,10 @@ describe('musterd agent <name>', () => {
     // identical for every seat, and therefore harmless.
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
     expect(entry.env.MUSTERD_BINDING).toBeUndefined();
-    // ADR 165 completed what the comment above began: surface came out with the rest — it lives in
-    // binding.json. AUTOJOIN stays (repo-root-global by design; increment 2's recorded gap).
-    expect(entry.env.MUSTERD_SURFACE).toBeUndefined();
-    expect(entry.env.MUSTERD_AGENT_KEY).toBeUndefined(); // key lives in binding.json, not the env
-    expect(entry.env.MUSTERD_CLAIM).toBeUndefined();
-    expect(entry.env.MUSTERD_AUTOJOIN).toBe('1');
-    expect(entry.env.MUSTERD_DRIVER).toBeUndefined(); // opt-in: no driver unless asked (ADR 155)
+    // ADR 165 + increment 2 completed what the comment above began: the shared entry carries
+    // NOTHING. Surface/key/claim live in binding.json; autojoin/driver (the last two baked names)
+    // moved there too — the entry env is fully empty for the agent path.
+    expect(entry.env).toEqual({});
 
     // The secret-free committed launch spec is written (no agent_key/grant fields).
     expect(h.saveWorkspaceSpec).toHaveBeenCalledWith(
@@ -112,11 +109,22 @@ describe('musterd agent <name>', () => {
     expect(specArg.grant).toBeUndefined();
   });
 
-  it('--driver <you> bakes MUSTERD_DRIVER so the adapter reports who is steering (ADR 155 Inc 1)', async () => {
+  it('--driver <you> records the driver in binding.json, never the shared entry (ADR 155/165 inc 2)', async () => {
     const code = await agentCommand(parseArgs(['June', '--driver', 'nick']));
     expect(code).toBe(0);
+    // The entry is repo-root-shared: a driver baked there marked EVERY sibling worktree as driven.
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_DRIVER).toBe('nick');
+    expect(entry.env.MUSTERD_DRIVER).toBeUndefined();
+    const binding = h.saveBinding.mock.calls[0]![1] as Record<string, unknown>;
+    expect(binding.driver).toBe('nick');
+  });
+
+  it('writes autojoin into the binding (per-worktree), not the shared entry (ADR 165 inc 2)', async () => {
+    const code = await agentCommand(parseArgs(['June']));
+    expect(code).toBe(0);
+    const binding = h.saveBinding.mock.calls[0]![1] as Record<string, unknown>;
+    expect(binding.autojoin).toBe(true);
+    expect(binding.driver).toBeUndefined(); // opt-in: no driver unless asked (ADR 155)
   });
 
   it('issues a standing grant and persists it in the binding (source of truth), not the env (ADR 077)', async () => {

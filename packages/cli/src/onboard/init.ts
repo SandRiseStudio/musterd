@@ -518,6 +518,26 @@ export async function runInit(): Promise<number> {
   // rotting to `unknown` (the diversity flag is inert on unattested chains). Only a *declared* value is
   // captured — never a guess; unset stays honestly `unknown` and the `init --check` note fires.
   const model = resolveAttestedModel(process.env);
+
+  // Explicit activation (M3): the agent is dormant until it joins. Offer one-keystroke auto-join
+  // on launch for the common solo case; either way a second session as this member is refused cleanly.
+  // Asked BEFORE the binding is built because the answer lives there now (ADR 165 inc 2): the harness
+  // entry is keyed by repo root and shared across worktrees, so per-worktree join policy may not be
+  // baked into it.
+  const autojoin = guard(
+    await p.confirm({
+      message: `Have ${pc.cyan(name)} join the team automatically on launch? ${pc.dim('(otherwise it stays offline until it joins on its own)')}`,
+      initialValue: true,
+    }),
+  );
+
+  // Driver co-presence (ADR 021): the operator running init is the human who will drive this agent,
+  // so record their name in the binding (ADR 165 inc 2 — per-worktree, never the shared entry). The
+  // adapter sends it on `hello` and the roster renders `driven by <name>` instead of showing the
+  // driving human offline. Best-effort: only when a saved operator identity exists; the human can
+  // always override via `MUSTERD_DRIVER`.
+  const driver = config.current ? config.identities[config.current]?.name?.trim() : undefined;
+
   const binding = {
     server,
     team,
@@ -525,6 +545,8 @@ export async function runInit(): Promise<number> {
     surface: chosen.surface,
     claim: { mode: 'seat' as const, name },
     ...(model !== undefined ? { model } : {}),
+    ...(autojoin ? { autojoin: true } : {}),
+    ...(driver ? { driver } : {}),
   };
   const entry = buildEntry(binding);
 
@@ -557,23 +579,6 @@ export async function runInit(): Promise<number> {
   } catch (err) {
     p.log.warn(`Couldn't write .musterd/workspace.json (${(err as Error).message}).`);
   }
-
-  // Explicit activation (M3): the agent is dormant until it joins. Offer one-keystroke auto-join
-  // on launch for the common solo case; either way a second session as this member is refused cleanly.
-  const autojoin = guard(
-    await p.confirm({
-      message: `Have ${pc.cyan(name)} join the team automatically on launch? ${pc.dim('(otherwise it stays offline until it joins on its own)')}`,
-      initialValue: true,
-    }),
-  );
-  if (autojoin) entry.env['MUSTERD_AUTOJOIN'] = '1';
-
-  // Driver co-presence (ADR 021): the operator running init is the human who will drive this agent,
-  // so bake their name into the agent's MCP env. The adapter sends it on `hello` and the roster
-  // renders `driven by <name>` instead of showing the driving human offline. Best-effort: only when
-  // a saved operator identity exists; the human can always override via `MUSTERD_DRIVER`.
-  const driver = config.current ? config.identities[config.current]?.name?.trim() : undefined;
-  if (driver) entry.env['MUSTERD_DRIVER'] = driver;
 
   const write = guard(
     await p.confirm({

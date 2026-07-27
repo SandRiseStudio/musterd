@@ -467,6 +467,61 @@ describe('empty env — the ADR 165 shared-entry contract', () => {
     }
   });
 
+  it('resolves autojoin and driver from binding.json under an empty env (inc 2)', () => {
+    const wsDir = mkdtempSync(join(tmpdir(), 'musterd-adr165-inc2-'));
+    mkdirSync(join(wsDir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(wsDir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        server: 'http://localhost:4849',
+        team: 'revive',
+        agent_key: 'mskey_from_disk',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'izzo' },
+        autojoin: true,
+        driver: 'nick',
+      }),
+    );
+    vi.spyOn(process, 'cwd').mockReturnValue(wsDir);
+    try {
+      const cfg = loadMcpConfig({});
+      expect(cfg.autojoin).toBe(true);
+      expect(cfg.driver).toBe('nick');
+    } finally {
+      rmSync(wsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps MUSTERD_AUTOJOIN / MUSTERD_DRIVER as manual overrides above the binding (inc 2)', () => {
+    // A binding opted in, but the env explicitly turns autojoin OFF and renames the driver —
+    // the headless/CI override must beat the provisioned state in both directions.
+    writeFileSync(
+      bindingPath,
+      JSON.stringify({
+        server: 'http://localhost:9999',
+        team: 'lab',
+        agent_key: 'mskey_from_file',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'Ui' },
+        autojoin: true,
+        driver: 'nick',
+      }),
+    );
+    const cfg = loadMcpConfig({
+      MUSTERD_BINDING: bindingPath,
+      MUSTERD_AUTOJOIN: '0',
+      MUSTERD_DRIVER: 'someone-else',
+    });
+    expect(cfg.autojoin).toBe(false);
+    expect(cfg.driver).toBe('someone-else');
+  });
+
+  it('defaults to dormant, no driver, when neither env nor binding says otherwise', () => {
+    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    expect(cfg.autojoin).toBe(false);
+    expect(cfg.driver).toBeUndefined();
+  });
+
   it('still honours an explicit env override — the names are manual, not removed', () => {
     const wsDir = mkdtempSync(join(tmpdir(), 'musterd-adr165-ovr-'));
     mkdirSync(join(wsDir, '.musterd'), { recursive: true });

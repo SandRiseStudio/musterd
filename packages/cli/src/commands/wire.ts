@@ -3,7 +3,7 @@ import { flagStr, type Parsed } from '../args.js';
 import { findBinding, findWorkspaceSpec, loadConfig, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { claudeCode } from '../onboard/harnesses/claudeCode.js';
-import { buildMcpEnv, resolveMcpLaunch } from '../onboard/mcpEntry.js';
+import { buildEntry } from '../onboard/mcpEntry.js';
 import { theme } from '../render/theme.js';
 
 /**
@@ -14,10 +14,11 @@ import { theme } from '../render/theme.js';
  * is what lets a fresh clone/worktree self-wire without an interactive `init` (the ADR-060 non-goal,
  * unblocked by the committed spec).
  *
- * "Wire" = make the `team_*` tools available, NOT claim a seat: it does **not** set `MUSTERD_AUTOJOIN`
- * by default, so a shared repo cloned by many never has every clone auto-claim the same seat — the
+ * "Wire" = make the `team_*` tools available, NOT claim a seat: it does **not** enable autojoin by
+ * default, so a shared repo cloned by many never has every clone auto-claim the same seat — the
  * session stays dormant until it joins explicitly (`team_join` / `musterd claim`). `--autojoin` opts a
- * personal worktree into claim-on-launch. The spec's `claim` policy still tells the adapter *which*
+ * personal worktree into claim-on-launch, written to `binding.autojoin` (per-worktree, ADR 165 inc 2 —
+ * never the repo-root-shared entry). The spec's `claim` policy still tells the adapter *which*
  * seat to occupy when it does join.
  */
 export async function wireCommand(parsed: Parsed): Promise<number> {
@@ -51,15 +52,9 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
     ...(agentKey !== undefined ? { agent_key: agentKey } : {}),
     ...(grant !== undefined ? { grant } : {}),
   };
-  const launch = resolveMcpLaunch();
-  const entry = {
-    command: launch.command,
-    args: launch.args,
-    env: {
-      ...buildMcpEnv(agentBinding),
-      ...(autojoin ? { MUSTERD_AUTOJOIN: '1' } : {}),
-    },
-  };
+  // The shared entry carries nothing (ADR 165, completed by inc 2) — `--autojoin` is per-worktree
+  // state and goes into binding.json below, never into the repo-root-shared slot.
+  const entry = buildEntry(agentBinding);
 
   let mcpError: string | null = null;
   try {
@@ -74,7 +69,11 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
   // A re-wire must not forget what the seat attests: the model is a per-machine declaration that lives
   // only in the gitignored binding (never the committed spec), so re-deriving the binding from the spec
   // would drop it (ADR 101). Carry the existing declaration forward.
-  const priorModel = findBinding()?.model;
+  const prior = findBinding();
+  // `--autojoin` opts this worktree in; otherwise keep what the binding already says (a re-wire must
+  // not silently flip a seat provisioned by `musterd agent` back to dormant). Driver is per-machine
+  // state like model — carry it forward the same way (ADR 165 inc 2).
+  const bindingAutojoin = autojoin || prior?.autojoin === true;
   const binding: Binding = {
     server,
     team,
@@ -82,7 +81,9 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
     claim,
     ...(agentKey !== undefined ? { agent_key: agentKey } : {}),
     ...(grant !== undefined ? { grant } : {}),
-    ...(priorModel !== undefined ? { model: priorModel } : {}),
+    ...(prior?.model !== undefined ? { model: prior.model } : {}),
+    ...(bindingAutojoin ? { autojoin: true } : {}),
+    ...(prior?.driver !== undefined ? { driver: prior.driver } : {}),
   };
   saveBinding(process.cwd(), binding);
 
@@ -95,7 +96,7 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
         member: seat,
         mcpRegistered: mcpError === null,
         keyResolved: agentKey !== undefined,
-        autojoin,
+        autojoin: bindingAutojoin,
       }) + '\n',
     );
     return 0;
@@ -107,7 +108,7 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
     );
     const target = seat ? `as ${theme.memberName(seat, 'agent')}` : `(assign a seat in chat)`;
     process.stdout.write(
-      autojoin
+      bindingAutojoin
         ? `${theme.dim(`this session will come online ${seat ? target : ''} automatically on launch.`)}\n`
         : `${theme.dim(`the team_* tools are available — join when ready (team_join / musterd claim ${seat ?? '<name>'}). Reload the session to pick up the tools.`)}\n`,
     );

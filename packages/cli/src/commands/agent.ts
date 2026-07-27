@@ -3,7 +3,7 @@ import { flagStr, type Parsed } from '../args.js';
 import { loadConfig, saveBinding, saveWorkspaceSpec } from '../config.js';
 import { CliError } from '../errors.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
-import { resolveMcpLaunch } from '../onboard/mcpEntry.js';
+import { buildEntry } from '../onboard/mcpEntry.js';
 import { provisionWorkspace } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
@@ -39,7 +39,7 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
   const model = flagStr(parsed.flags, 'model') ?? resolveAttestedModel(process.env);
 
   // Driver co-presence (ADR 021, activated by ADR 155 Inc 1): opt-in per workspace. `--driver <you>`
-  // bakes MUSTERD_DRIVER into the seat's MCP env so the adapter reports who is steering — which makes
+  // writes `driver` into the seat's binding.json so the adapter reports who is steering — which makes
   // the steering human read `working`/present on the roster instead of offline. `--driver` bare uses
   // the acting identity (`--as`). Absent = no driver (unchanged, warn-never-block): presence is a
   // convenience the operator grants, never inferred behind their back.
@@ -131,6 +131,11 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     claim: { mode: 'seat', name },
     ...(grant !== undefined ? { grant } : {}),
     ...(model !== undefined ? { model } : {}),
+    // Per-worktree, NOT the shared harness entry (ADR 165 inc 2): the entry is keyed by repo root
+    // and shared by every sibling worktree, so autojoin/driver baked there applied family-wide —
+    // `--driver nick` marked every seat on the machine as driven by nick (ADR 155 corruption).
+    autojoin: true,
+    ...(driver ? { driver } : {}),
   };
   saveBinding(ws.dir, binding);
   // Also write the secret-free committed launch spec (ADR: committed launch spec) so this worktree
@@ -167,19 +172,11 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
     claim: { mode: 'seat', name } as const,
     ...(grant !== undefined ? { grant } : {}),
   };
-  const launch = resolveMcpLaunch();
-  const entry = {
-    command: launch.command,
-    args: launch.args,
-    // Seat-agnostic by construction (ADR 143, completed by ADR 165): this entry is keyed by repo root
-    // and therefore shared by every seat worktree. `MUSTERD_SURFACE` came out with the rest — it is in
-    // binding.json. AUTOJOIN/DRIVER are still here and still repo-root-global; that is a known,
-    // recorded gap (ADR 165 increment 2), not an oversight.
-    env: {
-      MUSTERD_AUTOJOIN: '1',
-      ...(driver ? { MUSTERD_DRIVER: driver } : {}),
-    },
-  };
+  // Seat-agnostic by construction (ADR 143, completed by ADR 165 + increment 2): this entry is keyed
+  // by repo root and therefore shared by every seat worktree, so it carries NOTHING — autojoin and
+  // driver, the last two baked names, now live in binding.json like everything else. `buildMcpEnv`
+  // is where the rule is written down and where the sharedEntry regression binds.
+  const entry = buildEntry(agentBinding);
   let mcpError: string | null = null;
   const prevCwd = process.cwd();
   try {

@@ -36,9 +36,10 @@ export function resolveProvenance(env: NodeJS.ProcessEnv = process.env): Provena
 
 /**
  * Driver co-presence (ADR 021): the human steering this session, read from `MUSTERD_DRIVER`
- * (capped at 80 chars). `init` bakes the operator's name into the agent's MCP env, so the roster
- * can render `driven by nick` instead of showing the driving human offline. Undefined when unset
- * — the adapter authenticates only as the agent and never invents a driver it wasn't told about.
+ * (capped at 80 chars) — the manual override tier; provisioning writes `binding.driver` instead
+ * (ADR 165 inc 2) and `loadMcpConfig` falls back to it. The roster renders `driven by nick`
+ * instead of showing the driving human offline. Undefined when unset — the adapter authenticates
+ * only as the agent and never invents a driver it wasn't told about.
  */
 export function resolveDriver(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const raw = env['MUSTERD_DRIVER']?.trim();

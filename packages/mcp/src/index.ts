@@ -183,7 +183,8 @@ export function buildMcpServer(
 /**
  * The session autojoin (claim-on-first-use, ADR 032) — deferred to the first tool call by
  * `armAutojoinOnFirstToolCall` so a health probe never fires it. Fires ⇔ a default claim exists: a
- * session with a concrete identity just `join()`s (today's `MUSTERD_AUTOJOIN=1` path); a pending
+ * session with a concrete identity just `join()`s when `config.autojoin` says so (resolved
+ * `MUSTERD_AUTOJOIN` env > `binding.autojoin`, ADR 165 inc 2); a pending
  * session with a `seat`/`role` folder policy auto-claims that seat and occupies it. A `chat` policy
  * never auto-claims — the session stays a pending presence until a human names it. Best-effort: a
  * failure is reported to stderr and leaves the session pending/dormant rather than crashing the
@@ -192,7 +193,7 @@ export function buildMcpServer(
 export async function autojoin(client: MusterdClient, config: McpConfig): Promise<void> {
   try {
     if (isClaimedConfig(config)) {
-      if (process.env['MUSTERD_AUTOJOIN'] === '1') await client.join();
+      if (config.autojoin) await client.join();
       return;
     }
     const target: ClaimTarget | null =

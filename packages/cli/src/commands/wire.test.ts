@@ -109,12 +109,27 @@ describe('musterd wire', () => {
     expect(readBinding().model).toBeUndefined();
   });
 
-  it('--autojoin opts into claim-on-launch', async () => {
+  it('--autojoin opts into claim-on-launch via the binding, never the shared entry (ADR 165 inc 2)', async () => {
     writeSpec(SPEC);
     writeConfig({ bravo: 'mskey_x' });
     await run(['--autojoin']);
     const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_AUTOJOIN).toBe('1');
+    expect(entry.env.MUSTERD_AUTOJOIN).toBeUndefined();
+    expect(readBinding().autojoin).toBe(true);
+  });
+
+  it('a re-wire without --autojoin keeps the binding opted in (never silently flips a seat dormant)', async () => {
+    writeSpec(SPEC);
+    writeConfig({ bravo: 'mskey_x' });
+    writeFileSync(
+      join(cwd, BINDING_DIR, BINDING_FILE),
+      JSON.stringify({ ...SPEC, agent_key: 'mskey_x', autojoin: true, driver: 'nick' }),
+      'utf8',
+    );
+    await run([]);
+    // autojoin + driver are per-worktree state like model — a re-wire carries them forward.
+    expect(readBinding().autojoin).toBe(true);
+    expect(readBinding().driver).toBe('nick');
   });
 
   it('--key overrides the config key; env is the middle precedence', async () => {
