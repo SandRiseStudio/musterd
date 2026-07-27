@@ -189,13 +189,17 @@ which it is bitten. Wake-decision counts remain the confirming dataset, read ove
 First corrected sweep: **23 judgeable, 3 disagreed, 2 in the dangerous direction** — and on
 inspection the slot is wrong in all three, including a case it cannot see at all.
 
-**A third defect, found by the sweep and belonging to ADR 165.** One disagreement was a session
-running in a nested worktree that has its **own** `binding.json`: the child's slot was empty and the
-**parent's** slot held the child's session. Cause: `captureSession` prefers `MUSTERD_BINDING` over the
-session's actual `cwd`, and that variable is materialized into the repo-root-keyed MCP entry every
-worktree shares — izzo's ADR 165 defect, surfacing here as cross-workspace misattribution. Her plan to
-stop materializing those variables removes this class outright. Enumeration is already immune, because
-it attributes by recorded `cwd`.
+**A third pattern, found by the sweep — corrected 2026-07-27 after verification.** This section
+first blamed `captureSession`'s `MUSTERD_BINDING` preference, materialized into the shared MCP entry
+(ADR 165). **That cause is wrong, twice over:** izzo's sweep measured that the shared entry carries
+no `MUSTERD_BINDING`, and inspecting both observed instances shows the same, simpler mechanism —
+each session ran in a nested worktree that had **no** `.musterd/binding.json` **at capture time** (one
+created its binding 86 seconds later; the other never had one), so `findWorkspaceDir`'s walk-up
+correctly continued to the parent workspace and captured there. Not a bug: the walk-up doing what it
+is specified to do for a workspace-less directory. It is consistent, too — enumeration attributes
+transcripts through the same `findWorkspaceDir` walk-up, so both judgements agree on where such a
+session belongs. The residual oddity (a parent slot describing a nested worktree's session) stops
+mattering for enumerating harnesses once the slot no longer decides liveness (increment 2).
 
 **Eval — dataset and baseline.** The dataset is every wake decision over a dogfood week joined to its
 paired judgements. The **baseline** is measured, not assumed: across four live worktrees at one
