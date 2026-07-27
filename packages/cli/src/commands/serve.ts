@@ -83,9 +83,35 @@ export async function serveCommand(parsed: Parsed): Promise<number> {
     // daemon) sends SIGTERM, which Node with no handler treats as an immediate kill — skipping
     // `db.close()`'s checkpoint and leaving the reaper/telemetry unstopped. Draining through
     // `server.close()` makes an unattended auto-refresh bounce a clean stop, not a hard kill.
+    //
+    // **A stop must always finish.** On 2026-07-27 a graceful close hung on live agent WebSockets:
+    // the daemon logged this line, released its port, and never exited — so launchd's KeepAlive saw a
+    // live process, never restarted it, and the team's coordination layer stayed down until a human
+    // noticed. `server.close()` no longer hangs (it terminates WS clients), but the watchdog below is
+    // deliberate defense in depth: **coming back up outranks shutting down cleanly.** A skipped
+    // db checkpoint is recoverable — WAL replays — whereas a wedged daemon is not self-healing, and
+    // every unattended bounce path (`service restart`/`refresh`, the auto-refresher) rides this path.
+    const FORCE_EXIT_AFTER_MS = 10_000;
+    let stopping = false;
     const shutdown = (signal: string) => {
+      // A second signal means someone is insisting — the conventional graceful-then-forced contract.
+      if (stopping) {
+        process.stdout.write(theme.meta(`forced exit (${signal})`) + '\n');
+        process.exit(0);
+      }
+      stopping = true;
       process.stdout.write(theme.meta(`shutting down (${signal})`) + '\n');
-      void server.close().then(() => resolveP());
+      const forced = setTimeout(() => {
+        process.stdout.write(
+          theme.meta(`close stalled ${FORCE_EXIT_AFTER_MS}ms — forcing exit`) + '\n',
+        );
+        process.exit(0);
+      }, FORCE_EXIT_AFTER_MS);
+      forced.unref(); // never let the watchdog itself hold the loop open on a clean stop
+      void server.close().then(() => {
+        clearTimeout(forced);
+        resolveP();
+      });
     };
     process.on('SIGINT', () => shutdown('SIGINT'));
     process.on('SIGTERM', () => shutdown('SIGTERM'));
