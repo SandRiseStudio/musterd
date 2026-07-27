@@ -346,10 +346,16 @@ function seatForCwd(cwd: string | undefined): string | null {
  * caller (a harness-side agent, via the label-sessions guidance skill) applies the renames — this
  * engine never writes anything. Invariants, proven by the personal sweep this productizes:
  *
- * - `titleSource: "user"` is inviolable — a human's own words outrank the sweep, always.
- * - Idempotent via `parseSeatLabel`: fully-labeled rows skip; seat-prefixed-but-chipless rows (a
- *   pre-chip sweep's work) get the chip prepended with their ORIGINAL timestamp text kept —
- *   re-rendering would re-date history.
+ * - `titleSource: "user"` is inviolable for a title in the human's OWN terms — their words outrank
+ *   the sweep, always. Narrowed (ADR 160 amendment): a title the human already wrote in seat form
+ *   ("Miley - fix(x)") says what the sweep says, so it is completed — chip and timestamp added,
+ *   their words carried through verbatim — rather than skipped. The original ordering ran this
+ *   guard before the seat parse, which made the upgrade branch below unreachable for exactly the
+ *   rows that needed it and turned hand-renaming into a permanent opt-out.
+ * - Idempotent via `parseSeatLabel`: fully-labeled rows skip; seat-prefixed rows that already carry
+ *   a stamp (a pre-chip sweep's work) get the chip prepended with their ORIGINAL timestamp text
+ *   kept — re-rendering would re-date history; seat-prefixed rows with no stamp are re-rendered
+ *   around their subject, which is what gives a hand-named row its missing time.
  * - Freshness gates on `createdAt`, and — unlike the python original, which skipped the gate on
  *   its fallback branch — also on `lastActivityAt` when the app's record is unreadable.
  */
@@ -381,16 +387,25 @@ export function resolveLabels(
       continue;
     }
     const meta = ccdMeta(dir, s.sessionId);
-    if (meta.titleSource === 'user') {
-      skip('hand-named');
-      continue;
-    }
     const parse = parseSeatLabel(title, seat);
     if (parse.chipped && parse.seated) {
       skip('already-labeled');
       continue;
     }
-    if (parse.seated) {
+    // The user-title guard, NARROWED (ADR 160 amendment). "A title the user typed is never
+    // overwritten" still holds for anything the human wrote in their own terms. But a title the
+    // human already wrote in *seat form* — "Miley - fix(broadcast)" — states exactly what this
+    // sweep states; completing it (chip, timestamp, their words verbatim) is finishing their
+    // sentence, not overruling it. The guard used to run BEFORE the seat parse, which made the
+    // chip-upgrade branch below unreachable in practice: a chipless seat-prefixed title is almost
+    // always one a human typed, so the rows most in need of upgrading were the ones permanently
+    // skipped — and hand-renaming, the workaround for an unlabeled sidebar, silently opted a
+    // session out of ever being labeled again.
+    if (meta.titleSource === 'user' && !parse.seated) {
+      skip('hand-named');
+      continue;
+    }
+    if (parse.seated && parse.dated) {
       // Pre-chip label: prepend the chip, keep the original "(Fri 3p)" text — never re-date.
       apply.push({
         session_id: s.sessionId,
@@ -412,7 +427,9 @@ export function resolveLabels(
     apply.push({
       session_id: s.sessionId,
       seat: capitalizeSeat(seat),
-      title: renderSeatLabel(seat, createdMs, parse.bare, now),
+      // `subject`, not `bare`: a hand-seated title ("Miley - fix(x)") must not be re-seated into
+      // "🔶 Miley (Sun 9p) - Miley - fix(x)". For an unseated title the two are identical.
+      title: renderSeatLabel(seat, createdMs, parse.subject, now),
     });
   }
 

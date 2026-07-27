@@ -45,6 +45,8 @@ One shared module owns the format so every surface agrees:
 - Terminal titles: `🔶 stanley · <workspace folder>` — no timestamp; a tab is live, not history.
 - `parseSeatLabel` — the three-state idempotency predicate every sweep uses: fully labeled (skip),
   seat-prefixed but chipless (prepend the chip, _keep the original timestamp_), untouched (label).
+  _(Amended 2026-07-27 to four states: the chipless case splits on whether a stamp is already there
+  — see the amendment below.)_
 
 ### Surface 1 — terminal tab titles (CLI postamble, harness-neutral)
 
@@ -85,6 +87,41 @@ touched (a human's own words outrank the sweep, always); sessions younger than t
 skipped (their auto-title is still a first guess); the sweep is idempotent via `parseSeatLabel`;
 non-seat folders are out of scope by construction.
 
+> **Amended 2026-07-27.** The first invariant was too broad and cost the feature its reach: it is now
+> scoped to titles in the human's _own terms_. A hand-typed title already in seat form is completed
+> rather than skipped. See the amendment below.
+
+### Amendment 2026-07-27 — the sweep needed a trigger, and the guard was in the wrong order
+
+Measured two days after shipping: only 3 of ~21 seat sessions in the sidebar carried the chip, all
+from 2026-07-24/25. The engine was never broken — `resolve-labels` on live session data still
+returned correct labels on demand. Two defects in how the decision met the world:
+
+1. **No trigger.** Surface 2 is agent behavior, and nothing invoked it. The skill says "run at
+   session start", but the only thing that speaks at session start is the SessionStart hook, whose
+   text named only `team_inbox_check`. So labeling depended on an agent spontaneously deciding to
+   sweep — which happened while the feature was new and stopped when attention moved on. The skill's
+   own text already assumed a trigger that was never built ("if `apply` is empty and this ran
+   automatically, say nothing at all"). **Fix:** the SessionStart hook now names the sweep. Hooks are
+   matched by marker, not content, so existing seats keep the old text until a `musterd init`
+   rewrite — the same staleness ADR 165 records for the MCP entry.
+
+2. **"`titleSource: user` is inviolable" was too broad, and its guard ran too early.** The guard sat
+   _before_ the seat parse, which made the pre-chip upgrade branch unreachable in practice: a
+   chipless seat-prefixed title is almost always one a human typed. The human-visible effect was
+   perverse — hand-renaming a session, the natural workaround for an unlabeled sidebar, silently
+   opted that session out of ever being labeled again, so the workaround consumed the feature.
+
+   **The invariant is narrowed, not dropped.** A title in the human's own terms is still never
+   overwritten. But a title the human already wrote in _seat form_ (`Miley - fix(x)`) states what
+   the sweep states; completing it — chip and timestamp added, their words carried through verbatim
+   — finishes their sentence rather than overruling it. Concretely: `parseSeatLabel` gains `dated`
+   (a seated title that already carries a stamp keeps it, never re-dated) and `subject` (so a
+   re-render does not restate the seat), and `seated` now requires a word boundary after the seat
+   name. That last point is load-bearing rather than cosmetic: `seated` is now what licenses
+   touching a human-typed title at all, so a loose prefix match (seat `miley` claiming "Mileystone
+   planning") would license overwriting words the sweep has no business touching.
+
 ### What is deliberately not built
 
 - **No musterd-side session registry.** The roster already answers seat→work; only window→seat is
@@ -92,6 +129,11 @@ non-seat folders are out of scope by construction.
 - **No Cursor/Codex sidebar writes.** Their stores are closed (facts 3–4); `musterd init --check`
   says so plainly instead of pretending: terminal titles only for those harnesses.
 - **No Windows terminal titling in v1** (no `/dev/tty`; conhost/WT is a different mechanism).
+- **No labeling for sessions in the harness's own scratch worktrees** (`<repo>/.claude/worktrees/…`,
+  three of them live on 2026-07-27). `seatForCwd` resolves a seat from an `agents-<seat>` folder or
+  a committed `workspace.json`; neither identifies the seat that spawned an ephemeral worktree, and
+  the repo-root spec would attribute all of them to one seat. A wrong label is worse than none, so
+  they stay `not-a-seat` until something actually records which seat opened them.
 
 ## Consequences
 
@@ -120,6 +162,15 @@ non-seat folders are out of scope by construction.
   `too-fresh`, `not-a-seat`, …) on every run, and the applying agent reports the one-line summary
   in-band. A sweep that suddenly applies zero with rising `hand-named` or `not-a-seat` counts is the
   drift signal that the desktop app's record format moved.
+
+  **Measured 2026-07-27 (the amendment's own evidence).** That signal fired and nobody was reading
+  it: `apply: []` with `hand-named: 2, not-a-seat: 2, already-labeled: 1` on a live sample, and 3 of
+  ~21 seat sessions chipped. The counts were exactly right and diagnosed the wrong-order guard on
+  sight — the gap was that the sweep's output is only produced when a sweep RUNS, and none had run
+  in two days. An output contract cannot observe its own trigger. The standing check is therefore
+  the sidebar itself: chipped rows should accumulate; if a day's seat sessions are all bare, the
+  trigger is gone, not the engine. Post-fix on the same live input: 2 applied, 0 `hand-named`.
+
 - **Eval.** Dataset: the captured `list_sessions` snapshot of this machine's 29 real sessions (seat
   worktrees, hand-named rows, non-seat repos), checked in as the `resolve-labels` test fixture.
   Baseline: the personal `resolve.py` sweep's decisions on that same input — 9 applied / 7

@@ -49,7 +49,10 @@ export function renderSeatLabel(
   subject: string,
   nowMs: number,
 ): string {
-  return `${SEAT_CHIP} ${capitalizeSeat(seat)} (${formatLabelWhen(createdMs, nowMs)}) - ${subject}`;
+  const stem = `${SEAT_CHIP} ${capitalizeSeat(seat)} (${formatLabelWhen(createdMs, nowMs)})`;
+  // A title that was nothing but the seat name leaves no subject to carry; a dangling " - " reads
+  // as a truncated title, so drop the separator rather than render one.
+  return subject.trim() ? `${stem} - ${subject}` : stem;
 }
 
 /**
@@ -64,22 +67,56 @@ export function renderTerminalTitle(seat: string, subject?: string): string {
 export interface SeatLabelParse {
   /** Title starts with the chip. */
   chipped: boolean;
-  /** Title (after any chip) starts with the seat's name — some sweep has labeled it. */
+  /** Title (after any chip) opens with the seat's name — some sweep, or a human, has seated it. */
   seated: boolean;
+  /**
+   * A `seated` title that also carries a parenthesized stamp right after the seat
+   * (`Miley (Fri 3p) - …`). Distinguishes a pre-chip *sweep* label, which must keep its original
+   * timestamp, from a human's bare `Miley - …`, which has no timestamp to preserve and wants one.
+   * False whenever `seated` is false.
+   */
+  dated: boolean;
   /** The title with any leading chip stripped — what a chip-prepending upgrade should keep. */
   bare: string;
+  /**
+   * For a `seated` title, the part after the seat (and any stamp and separator) — the human's own
+   * words, which a re-label must carry through verbatim. Equals `bare` when not seated.
+   */
+  subject: string;
+}
+
+/** Escape a seat name for use inside a RegExp — seats are free-form strings from a binding. */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
- * The idempotency predicate for sweeps, distinguishing the three states a title can be in:
- * fully labeled (`chipped && seated` — skip), labeled by a pre-chip sweep (`seated` only — prepend
- * the chip to `bare`, preserving the original timestamp rather than re-dating it), or untouched
- * (label from scratch). Seat match is case-insensitive because bindings are lowercase and labels
- * are capitalized.
+ * The idempotency predicate for sweeps, distinguishing the states a title can be in:
+ * fully labeled (`chipped && seated` — skip), labeled by a pre-chip sweep (`seated && dated` —
+ * prepend the chip to `bare`, preserving the original timestamp rather than re-dating it), seated
+ * by hand with no stamp (`seated && !dated` — re-render around `subject` so the row gains chip and
+ * time while keeping the human's words), or untouched (label from scratch). Seat match is
+ * case-insensitive because bindings are lowercase and labels are capitalized.
+ *
+ * `seated` requires a **boundary** after the seat name — end of string, whitespace, or a separator
+ * — so seat `miley` does not claim the title "Mileystone planning". That precision matters beyond
+ * tidiness: `seated` is what lets a sweep touch a human-typed title at all (ADR 160, narrowed), so
+ * a loose match here would license overwriting words the sweep has no business touching.
  */
 export function parseSeatLabel(title: string, seat: string): SeatLabelParse {
   const chipped = title.startsWith(SEAT_CHIP);
   const bare = chipped ? title.slice(SEAT_CHIP.length).replace(/^\s+/, '') : title;
-  const seated = bare.toLowerCase().startsWith(seat.toLowerCase());
-  return { chipped, seated, bare };
+  // seat, boundary, optional "(stamp)", optional "-"/"·"/":" separator, then the human's subject.
+  const m = new RegExp(
+    `^${escapeRe(seat)}(?=$|[\\s\\-–—(·:])\\s*(?:\\(([^)]*)\\)\\s*)?(?:[-–—·:]\\s*)?(.*)$`,
+    'i',
+  ).exec(bare);
+  if (!m) return { chipped, seated: false, dated: false, bare, subject: bare };
+  return {
+    chipped,
+    seated: true,
+    dated: m[1] !== undefined,
+    bare,
+    subject: (m[2] ?? '').trim(),
+  };
 }
