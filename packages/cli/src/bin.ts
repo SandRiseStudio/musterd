@@ -34,6 +34,7 @@ import { serveCommand } from './commands/serve.js';
 import { serviceCommand } from './commands/service.js';
 import { sessionCommand } from './commands/session.js';
 import { statusCommand } from './commands/status.js';
+import { streamCommand } from './commands/stream.js';
 import { teamCommand } from './commands/team.js';
 import { unbindCommand } from './commands/unbind.js';
 import { uninstallCommand } from './commands/uninstall.js';
@@ -187,6 +188,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return serviceCommand(rest);
     case 'broadcast':
       return broadcastCommand(rest);
+    case 'stream':
+      return streamCommand(rest);
     case 'team':
       return teamCommand(rest);
     case 'join':

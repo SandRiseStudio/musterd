@@ -38,6 +38,8 @@ src/
     title.ts          // terminal-tab seat title (ADR 160): pure terminalTitleFor decision + best-effort /dev/tty OSC-0 writer, called from the bin.ts postamble
     help.ts           // the pretty grouped/per-command/JSON help renderers + did-you-mean (ADR 113)
     credentials.ts    // v0.3 mint/env renderers: credentialEnv (SPEC A.9) + shown-once agent key / human credential / grant / team-create blocks (ADR 075/076; live post-P3 cutover)
+  broadcast/          // the hosted half of `musterd broadcast` — run the capture on a rented machine
+    hosted.ts         // `musterd stream doctor`'s precondition ladder + the tailscale/fly JSON parsers, all injected: checks are EMPIRICAL (the allow-list one attempts a real WS upgrade against the RUNNING daemon with the tailnet Host, rather than reading the plist) because every precondition here fails as the same "page never reported ready"
   notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)
     os.ts             // OS push notification (macOS/Linux/Windows)
     select.ts         // pick which away human to nudge
@@ -94,6 +96,7 @@ src/
     host.ts           // musterd host [--once]: the resident wake-actuator loop (notify-shaped; ADR 131 inc 3)
     serve.ts          // musterd serve [--port]
     broadcast.ts      // musterd broadcast --team … (--out|--twitch|--rtmp): headless-Chrome capture of /broadcast → CFR frame pump → ffmpeg (VideoToolbox/libx264) → file or RTMPS; stream key from env/Keychain only (ADR 157 inc 2)
+    stream.ts         // musterd stream doctor|build|start|stop|status: the one-verb hosted broadcast, absorbing scripts/broadcast/live.sh — `doctor` prints the exact repair per failed precondition; `build` records the pushed DIGEST and `start` runs that (a rebuilt tag can resolve to the previous image) and discovers the tailnet address itself; secrets stay operator-set, presence-checked only
     broadcast-perf.ts // capture-pipeline instrumentation, dark unless MUSTERD_BROADCAST_PERF names a JSONL path: screencast fps/bytes, canvas draw rate, ffmpeg queue depth (its *slope* is the margin metric — `speed=` is pinned ≈1× for a live source), per-tree CPU + load; summarized by scripts/perf/broadcast-baseline.mjs
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
     team.ts           // team create / add / remove / archive / export (ADR 058 db→file migration)
