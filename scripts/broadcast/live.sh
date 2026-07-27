@@ -30,7 +30,8 @@ live_machine() {
 case "${1:-}" in
   build)
     # --build-only pushes to the app registry without creating machines; `start` references the tag.
-    (cd "$ROOT" && fly deploy . -a "$APP" --dockerfile scripts/broadcast/hosted.Dockerfile \
+    # The config is only there to satisfy validation — see hosted.fly.toml.
+    (cd "$ROOT" && fly deploy . -a "$APP" -c scripts/broadcast/hosted.fly.toml \
       --build-only --push --remote-only --image-label capture)
     ;;
   start)
