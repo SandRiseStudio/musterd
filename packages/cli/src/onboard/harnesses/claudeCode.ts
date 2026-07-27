@@ -197,7 +197,9 @@ function sessionStartHookCommand(): string {
     "`musterd init --check` to confirm), then reload this session.'; fi; else " +
     "echo 'You are on a musterd team (your seat auto-claims on your first team_* tool call). Run " +
     'team_inbox_check now to join and see anything waiting. Only call team_join if a tool says you ' +
-    "are not joined.'; fi; " +
+    'are not joined. Then run the musterd-label-sessions skill once to label the other seat ' +
+    'sessions in the sidebar; this session stays unlabeled by design, because a session cannot ' +
+    "rename itself.'; fi; " +
     // ADR 135 freshness probe: one line when this checkout's CLI dist differs from the daemon, so a
     // stale worktree learns at minute 0 instead of after an hour of "but I merged it". Guarded (only
     // when `musterd` resolves), read-only, ≤2s, and never failing — the hook contract stays intact.

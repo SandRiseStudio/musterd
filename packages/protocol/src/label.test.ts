@@ -40,6 +40,11 @@ describe('renderSeatLabel / renderTerminalTitle', () => {
     );
   });
 
+  it('drops the separator when there is no subject to carry (never a dangling " - ")', () => {
+    const friday3pm = new Date(2026, 6, 24, 15, 0).getTime();
+    expect(renderSeatLabel('miley', friday3pm, '   ', NOW)).toBe(`${SEAT_CHIP} Miley (Fri 3p)`);
+  });
+
   it('renders the terminal title lowercase, with and without a subject', () => {
     expect(renderTerminalTitle('stanley', 'agents-stanley')).toBe(
       `${SEAT_CHIP} stanley · agents-stanley`,
@@ -79,5 +84,52 @@ describe('parseSeatLabel — the three sweep states', () => {
 
   it('seat match is case-insensitive (bindings are lowercase, labels capitalized)', () => {
     expect(parseSeatLabel('miley - something', 'Miley').seated).toBe(true);
+  });
+
+  // `dated` is what separates a pre-chip SWEEP label (has a stamp, must never be re-dated) from a
+  // human's bare "Miley - x" (no stamp, and the missing time is the whole point of relabeling it).
+  it('a seated title WITH a stamp is dated, and its subject excludes seat and stamp', () => {
+    const p = parseSeatLabel('Miley (Mon 2p) - MCP list', 'miley');
+    expect(p).toMatchObject({ seated: true, dated: true, subject: 'MCP list' });
+  });
+
+  it('a seated title WITHOUT a stamp is undated, and its subject drops the seat prefix', () => {
+    const p = parseSeatLabel('Miley - fix(broadcast): three things', 'miley');
+    expect(p).toMatchObject({
+      seated: true,
+      dated: false,
+      subject: 'fix(broadcast): three things',
+    });
+  });
+
+  it('tolerates a missing space before the separator ("Ryder- x", as typed by hand)', () => {
+    expect(parseSeatLabel('Ryder- ADR-158 model attestation PR', 'ryder')).toMatchObject({
+      seated: true,
+      dated: false,
+      subject: 'ADR-158 model attestation PR',
+    });
+  });
+
+  // `seated` licenses touching a human-typed title, so a loose prefix match would license
+  // overwriting words the sweep has no business touching. A boundary is required after the seat.
+  it('requires a word boundary — seat "miley" does not claim "Mileystone planning"', () => {
+    expect(parseSeatLabel('Mileystone planning', 'miley')).toMatchObject({
+      seated: false,
+      dated: false,
+      subject: 'Mileystone planning',
+    });
+  });
+
+  it('a title that merely mentions the seat later is not seated', () => {
+    expect(parseSeatLabel("Reviewing Miley's PR", 'miley').seated).toBe(false);
+  });
+
+  it('a bare seat name is seated with an empty subject', () => {
+    expect(parseSeatLabel('Miley', 'miley')).toMatchObject({ seated: true, subject: '' });
+  });
+
+  it('a seat name with regex metacharacters is matched literally, not as a pattern', () => {
+    expect(parseSeatLabel('a.c - x', 'a.c').seated).toBe(true);
+    expect(parseSeatLabel('abc - x', 'a.c').seated).toBe(false);
   });
 });

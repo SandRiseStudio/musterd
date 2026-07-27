@@ -472,6 +472,45 @@ describe('musterd session resolve-labels (ADR 160)', () => {
     });
   });
 
+  // The regression this lane exists for. A human who renames a session by hand — the workaround
+  // for an unlabeled sidebar — used to opt that session out of labeling PERMANENTLY, because the
+  // titleSource guard ran before the seat parse. A hand-typed title in seat form says exactly what
+  // the sweep says, so it is completed rather than skipped.
+  it('COMPLETES a hand-named title that is already in seat form: chip + time, words verbatim', () => {
+    writeCcdRecord('s', { createdAt: NOW - 3_600_000, titleSource: 'user' });
+    const res = run([
+      { sessionId: 's', title: 'Miley - fix(broadcast): three things', cwd: seatWs },
+    ]);
+    expect(res.skipped['hand-named']).toBeUndefined();
+    expect(res.apply).toHaveLength(1);
+    const title = res.apply[0]!.title;
+    expect(title.startsWith(`${CHIP} Miley (`)).toBe(true);
+    expect(title.endsWith(') - fix(broadcast): three things')).toBe(true);
+    // the seat is not restated inside the subject
+    expect(title).not.toContain('- Miley -');
+  });
+
+  it('adds only the chip to a hand-named seat title that already carries a stamp (never re-dates)', () => {
+    writeCcdRecord('s', { createdAt: NOW - 3_600_000, titleSource: 'user' });
+    const res = run([{ sessionId: 's', title: 'Miley (Mon 2p) - MCP list', cwd: seatWs }]);
+    expect(res.apply).toEqual([
+      { session_id: 's', seat: 'Miley', title: `${CHIP} Miley (Mon 2p) - MCP list` },
+    ]);
+  });
+
+  // The other half of the narrowing: everything NOT in seat form stays inviolable.
+  it('still never touches a hand-named title written in the human OWN terms', () => {
+    writeCcdRecord('a', { createdAt: NOW - 3_600_000, titleSource: 'user' });
+    writeCcdRecord('b', { createdAt: NOW - 3_600_000, titleSource: 'user' });
+    const res = run([
+      { sessionId: 'a', title: 'Do not rename this', cwd: seatWs },
+      // mentions the seat, but not as a prefix — not the sweep's sentence to finish
+      { sessionId: 'b', title: "Reviewing Miley's PR", cwd: seatWs },
+    ]);
+    expect(res.apply).toEqual([]);
+    expect(res.skipped).toEqual({ 'hand-named': 2 });
+  });
+
   it('upgrades a pre-chip label by prepending the chip, KEEPING the original timestamp text', () => {
     const res = run([{ sessionId: 's', title: 'Miley (Mon 2p) - MCP list', cwd: seatWs }]);
     expect(res.apply).toEqual([
