@@ -71,7 +71,7 @@ export interface ShadowJudgement {
 function enumeratedLiveness(
   workspace: string,
   now: number,
-  enumerate: typeof enumerateClaudeSessions,
+  enumerate: (workspace: string) => ReturnType<typeof enumerateClaudeSessions>,
 ): Omit<ShadowJudgement, 'disagreed'> | undefined {
   const files = enumerate(workspace);
   if (files === undefined) return undefined;
@@ -93,7 +93,8 @@ function enumeratedLiveness(
 export function localSessionLiveness(
   workspace: string,
   now = Date.now(),
-  enumerate: typeof enumerateClaudeSessions = enumerateClaudeSessions,
+  enumerate: (workspace: string) => ReturnType<typeof enumerateClaudeSessions> = (w) =>
+    enumerateClaudeSessions(w),
 ): LocalSessionLiveness {
   const incumbent = slotLiveness(workspace, now);
   const challenger = enumeratedLiveness(workspace, now, enumerate);

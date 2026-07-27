@@ -49,7 +49,7 @@ src/
       claudeCode.ts   // backend #1: resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to the fresh `claude -p` spawn in the same lease (pre-minted --session-id, reply-only allowedTools, mandatory watchdog, no skip-permissions ever) (ADR 131 §5)
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
     liveness.ts       // localSessionLiveness(workspace): binding.session + transcript stat → none|live|resumable|gc-expired; shared by the host's local-session guard and `session show`; also carries the ADR 166 inc-1 SHADOW judgement (computed, never acted on)
-    enumerate.ts      // ADR 166: ask the harness what sessions it HAS — lists ~/.claude/projects/<slugified-workspace>/*.jsonl; undefined = "cannot tell" (never laundered into "none")
+    enumerate.ts      // ADR 166: ask the harness what sessions it HAS — scans ~/.claude/projects and attributes each transcript by its RECORDED cwd walked up to a workspace (never by decoding the directory name, an inconsistent encoding); undefined = "cannot tell" (never laundered into "none")
     transcript-model.ts // readModelFromTranscript(path): the ONLY module that knows a harness transcript's on-disk shape — newest assistant turn's model, bounded tail, never throws (ADR 158)
   service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)
     launchd.ts        // pure: plist generation (daemon + /live + wake-actuator agents) + launchctl argv builders + status parsing (platform seam)

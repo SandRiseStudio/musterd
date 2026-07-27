@@ -79,6 +79,20 @@ transcripts. `binding.session` stops being the source of truth.
 
 ### Mechanism
 
+**Amended 2026-07-27 after increment 1 — attribution is by recorded `cwd`, not by directory name.**
+The shipped mechanism first decoded Claude Code's `~/.claude/projects/<slug>` directory name back
+into a path (slashes → dashes). The fleet sweep killed that on its first run: a live session was
+invisible because it ran in a nested worktree whose slug is `-Users-nick-agents--claude-worktrees-…`
+— the dot replaced — while `.claude` and `.pnpm` elsewhere in the same tree **keep** their dots. The
+encoding is undocumented and not self-consistent, so decoding it is a guess, and this guess would
+have demoted a live session: the exact defect this ADR exists to fix, reproduced inside its own fix.
+
+Attribution now uses what the harness _records_ rather than how it _names_. Every transcript entry
+carries a `cwd`; a transcript belongs to the workspace `findWorkspaceDir` resolves from it — the same
+walk-up rule that decided which binding the `SessionStart` hook wrote to. Measured on the live tree:
+689 transcripts, 664 attributable, ~256 ms for a full scan, memoised for a second so a fleet sweep is
+one scan. A transcript with no recorded `cwd` stays **unattributed** rather than guessed at.
+
 A new **optional** capability on the `Harness` interface (`packages/cli/src/onboard/harness.ts`),
 sitting beside the existing optional `observeModel`:
 
@@ -138,6 +152,31 @@ decide anything.
 verdicts while increment 1 is in shadow, and `liveness_disagreed`. The disagreement flag is the whole
 point: it is the only signal that says how often the slot is lying in production rather than in the
 two cases someone happened to look at.
+
+**Amended — the pre-registered dataset is too sparse to gate on.** This ADR said to flip "once
+increment 1 shows the disagreement rate ... on real wake decisions". Measured afterwards: the daemon
+has recorded **31 wake leases in total, 1–3 per day**, and a disagreement is only observable when a
+wake lands on a workspace that happens to hold a phantom. That reaches useful n in months. The gate
+as written would have stalled the increment **silently** — an instrument that looks like it is
+working while producing nothing, which is this ADR family's recurring failure.
+
+The primary instrument is therefore a **fleet sweep** (`scripts/research/adr-166-slot-sweep.ts`):
+every workspace in the binding registry, both judgements, on a schedule. It is a **proxy and is
+labelled as one** — it measures how often the slot is wrong _at rest_, while the cost lands at wake
+time. The proxy is tight because the guard calls exactly this function, but it cannot say whether
+wakes _correlate_ with phantoms, so it bounds the error rate the guard is exposed to, not the rate at
+which it is bitten. Wake-decision counts remain the confirming dataset, read over months.
+
+First corrected sweep: **23 judgeable, 3 disagreed, 2 in the dangerous direction** — and on
+inspection the slot is wrong in all three, including a case it cannot see at all.
+
+**A third defect, found by the sweep and belonging to ADR 165.** One disagreement was a session
+running in a nested worktree that has its **own** `binding.json`: the child's slot was empty and the
+**parent's** slot held the child's session. Cause: `captureSession` prefers `MUSTERD_BINDING` over the
+session's actual `cwd`, and that variable is materialized into the repo-root-keyed MCP entry every
+worktree shares — izzo's ADR 165 defect, surfacing here as cross-workspace misattribution. Her plan to
+stop materializing those variables removes this class outright. Enumeration is already immune, because
+it attributes by recorded `cwd`.
 
 **Eval — dataset and baseline.** The dataset is every wake decision over a dogfood week joined to its
 paired judgements. The **baseline** is measured, not assumed: across four live worktrees at one
