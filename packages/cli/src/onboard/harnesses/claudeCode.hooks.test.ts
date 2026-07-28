@@ -205,6 +205,96 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     expect(cmdFor(read(localPath()), 'Notification')).toContain(NOTIFICATION_HOOK_MARKER);
   });
 
+  // ADR 168's three pre-registered arms. The baseline these replace is precise and damning: on a
+  // machine provably carrying the stale pre-#421 orientation text, the doctor scored ZERO detections
+  // against a known positive, because it only ever asked "is an entry with our marker present?".
+  describe('ADR 168 — hook content, not presence', () => {
+    /** Rewrite the installed global hook's command, preserving the marker (so it stays "ours"). */
+    const setGlobalCommand = (command: string) => {
+      const s = read(globalPath());
+      s.hooks!['SessionStart']![0]!.hooks[0]!.command = command;
+      writeFileSync(globalPath(), JSON.stringify(s), 'utf8');
+    };
+
+    it('arm 1 — replays the incident: a stale machine-wide hook is caught, and named as stale', () => {
+      installMusterdHooks();
+      expect(inspectClaudeHookDrift(cwd)).toEqual([]); // current → silent
+
+      // The exact shape of the #421 regression: same marker, older TEXT. Presence checking called
+      // this healthy; that clean result WAS the defect.
+      setGlobalCommand(
+        `grep -q musterd:start AGENTS.md && echo "old orientation, no label sweep" ` +
+          `# ${SESSIONSTART_HOOK_MARKER} e1`,
+      );
+      const drift = inspectClaudeHookDrift(cwd);
+      expect(drift).toHaveLength(1);
+      expect(drift[0]).toContain('present but STALE');
+      expect(drift[0]).toContain('every folder on this machine');
+      expect(drift[0]).toContain('musterd init');
+    });
+
+    it('arm 2 — reverses the polarity: a NEWER hook blames the checkout, and forbids init', () => {
+      installMusterdHooks();
+      setGlobalCommand(`echo 'orientation from the future' # ${SESSIONSTART_HOOK_MARKER} e999`);
+      const drift = inspectClaudeHookDrift(cwd);
+      expect(drift).toHaveLength(1);
+      // The repair must point at the CHECKOUT, not at init — getting this backwards is precisely
+      // what re-bakes the shared slot.
+      expect(drift[0]).toContain('this checkout is behind');
+      expect(drift[0]).toContain('do NOT run');
+      expect(drift[0]).not.toContain('present but STALE');
+    });
+
+    it('arm 3 — proves the refusal: a lower-epoch build leaves a newer hook byte-identical', () => {
+      installMusterdHooks();
+      const future = `echo 'orientation from the future' # ${SESSIONSTART_HOOK_MARKER} e999`;
+      setGlobalCommand(future);
+      const before = readFileSync(globalPath(), 'utf8');
+
+      const warnings = installMusterdHooks(); // this build is epoch 3 — must refuse
+
+      // The only assertion that can prove the mechanism: nothing happened.
+      expect(readFileSync(globalPath(), 'utf8')).toBe(before);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('refused');
+      expect(warnings[0]).toContain('e999'.slice(1)); // names the newer epoch it protected
+      // …and the local hooks still install normally: the refusal is scoped to the shared slot.
+      expect(cmdFor(read(localPath()), 'PostToolUse')).toContain(POSTTOOLUSE_HOOK_MARKER);
+    });
+
+    it('catches a stale PROJECT-LOCAL hook too, without inventing an absence line', () => {
+      installMusterdHooks();
+      const s = read(localPath());
+      s.hooks!['PostToolUse']![0]!.hooks[0]!.command = `echo stale # ${POSTTOOLUSE_HOOK_MARKER}`;
+      writeFileSync(localPath(), JSON.stringify(s), 'utf8');
+      const drift = inspectClaudeHookDrift(cwd);
+      expect(drift).toHaveLength(1);
+      expect(drift[0]).toContain(POSTTOOLUSE_HOOK_MARKER);
+      expect(drift[0]).toContain('present but');
+      expect(drift[0]).not.toContain('missing'); // it is there — just wrong
+    });
+
+    it('guard metric — a freshly installed fleet reports ZERO drift (no incidental-text matching)', () => {
+      // The honest failure mode is noise: if the comparison matched whitespace or quoting rather
+      // than generation, this would be nonzero on a machine where everything is current.
+      installMusterdHooks();
+      expect(inspectClaudeHookDrift(cwd)).toEqual([]);
+      installMusterdHooks(); // and again — idempotent installs stay silent
+      expect(inspectClaudeHookDrift(cwd)).toEqual([]);
+    });
+
+    it('an unstamped hook is legal — treated as the oldest generation, never an error', () => {
+      installMusterdHooks();
+      // A hook written before ADR 168 carries no `eN`. It must read as stale (epoch 0 < ours) and
+      // prescribe `init`, NOT be mistaken for a newer build or throw.
+      setGlobalCommand(`grep -q musterd:start AGENTS.md # ${SESSIONSTART_HOOK_MARKER}`);
+      const drift = inspectClaudeHookDrift(cwd);
+      expect(drift).toHaveLength(1);
+      expect(drift[0]).toContain('present but STALE');
+      expect(drift[0]).toContain('installed epoch 0');
+    });
+  });
+
   it('removal reverses the local Notification hook and preserves the user’s own hooks', () => {
     installMusterdHooks();
     // Add a user-owned Notification hook alongside musterd's.

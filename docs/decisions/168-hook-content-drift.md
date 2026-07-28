@@ -154,6 +154,31 @@ than the fleet.
 fleet — the comparison narrows to the epoch stamp alone and stops diffing hook text entirely. Results
 land in this section, following ADR 158's precedent of replacing an anecdote with a fleet number.
 
+### Result — 2026-07-27, implementation (`izzo/adr-168-impl`)
+
+All three arms pass as unit tests, and — the part that matters — **five of the six new assertions
+fail against the pre-change code**, so they measure the defect rather than restating the
+implementation. (The sixth is the guard metric, which asserts the _absence_ of noise and correctly
+passes both before and after.)
+
+Arm 1 also reproduced **live on this machine**, unprompted, on the first read-only `musterd init
+--check`:
+
+```
+✗ the machine-wide Claude Code SessionStart orientation hook (~/.claude/settings.json) does not
+  match what this build would write (installed epoch 0, this build 3) — it is present but STALE
+```
+
+That is the ADR's baseline turning over in one step: the same doctor that scored 0 detections
+against a known positive now names it, with the epochs that prove it. `installed epoch 0` is the
+unstamped hook this ADR predicted — written before the stamp existed, and until now indistinguishable
+from current text.
+
+One deliberate non-action worth recording: the obvious next move was to run `musterd init` here and
+clear the line. Doing that from an unmerged branch build would have rewritten the machine-wide hook
+for every folder from code that had not landed — the precise hazard this ADR exists to prevent. The
+repair waits for the merged build.
+
 ## Consequences
 
 - A hook downgrade becomes loud instead of silent, and the doctor stops reporting a stale machine-wide
