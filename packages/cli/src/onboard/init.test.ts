@@ -74,7 +74,18 @@ const h = vi.hoisted(() => {
     folderBinding: null,
     folderSpec: null,
   };
-  return { confirmQueue, selectQueue, textQueue, http, harness, config, claimQueue, ...box };
+  const claimKeys: (string | undefined)[] = [];
+  return {
+    confirmQueue,
+    selectQueue,
+    textQueue,
+    http,
+    harness,
+    config,
+    claimQueue,
+    claimKeys,
+    ...box,
+  };
 });
 
 vi.mock('@clack/prompts', () => ({
@@ -95,10 +106,12 @@ vi.mock('../client.js', () => ({
   // Fakes `musterd claim`'s live WS handshake for init.ts's "existing member" branch: consumes one
   // queued outcome and fires the matching callback on the next microtask (mirrors a real WS reply).
   watchClaim: (opts: {
+    key?: string;
     target: { seat?: string; role?: string };
     onOccupied?: (seat: { name: string }, presenceId: string) => void;
     onRefused?: (code: string, message: string, claimable: string[], hint: string) => void;
   }) => {
+    h.claimKeys.push(opts.key);
     const outcome = h.claimQueue.shift() ?? { state: 'occupied' as const };
     queueMicrotask(() => {
       if (outcome.state === 'occupied') {
@@ -141,6 +154,7 @@ beforeEach(() => {
   h.selectQueue.length = 0;
   h.textQueue.length = 0;
   h.claimQueue.length = 0;
+  h.claimKeys.length = 0;
   h.folderBinding = null;
   h.folderSpec = null;
   Object.assign(h.config, {
@@ -402,6 +416,39 @@ describe('runInit — intent branches', () => {
     expect(await runInit()).toBe(0);
     // No new member is minted — reactivating an existing one is a claim, not an add.
     expect(h.http.addMember).not.toHaveBeenCalled();
+  });
+
+  it('"activate an existing member" authenticates as the SEAT when the vault knows it', async () => {
+    // install-topology §6(a): handing the shared team key to any target is what wrote the dead
+    // binding at /Users/nick/agents — the team key cannot act as a human seat, so the claim landed
+    // and every request after it 403'd. L1 now refuses that claim outright, which would turn this
+    // into a loud failure while the credential that works sat in the vault the whole time.
+    h.config.agentKeys['dawn'] = 'mskey_team';
+    h.config.knownIdentities.push({
+      team: 'dawn',
+      name: 'Miley',
+      key: 'mscr_miley',
+      surface: 'cli',
+    });
+    h.textQueue.push('dawn', 'nick', '');
+    h.selectQueue.push('existing');
+    h.textQueue.push('Miley');
+    h.claimQueue.push({ state: 'occupied' });
+
+    expect(await runInit()).toBe(0);
+    expect(h.claimKeys).toEqual(['mscr_miley']);
+  });
+
+  it('"activate an existing member" still falls back to the team key when the vault has nothing', async () => {
+    // The legitimate agent-seat activation must not change shape.
+    h.config.agentKeys['dawn'] = 'mskey_team';
+    h.textQueue.push('dawn', 'nick', '');
+    h.selectQueue.push('existing');
+    h.textQueue.push('scout');
+    h.claimQueue.push({ state: 'occupied' });
+
+    expect(await runInit()).toBe(0);
+    expect(h.claimKeys).toEqual(['mskey_team']);
   });
 
   it('"activate an existing member" surfaces a refusal instead of dead-ending', async () => {

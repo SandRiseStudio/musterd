@@ -43,6 +43,18 @@ export async function initCommand(parsed: Parsed): Promise<number> {
       // Sending entry drift to `runInit` was actively harmful: it repaired the running seat by taking
       // the shared slot from whoever held it, who then hit `expired_grant` on wake.
       const { repair } = await inspectProvisioning(process.cwd());
+      // Identity drift (the dead binding, install-topology §6(a)) is the one thing `--fix` will not
+      // do for you. Both repairs are the caller's call, not a tool's: a rebind changes who this
+      // folder acts as, and a re-issue invalidates a credential another person may be holding. And
+      // the generic remedy below is `musterd init` — the command that wrote the dead binding in the
+      // first place. So the check names the exact command (it is already in the drift line) and
+      // stops, rather than doing something plausible.
+      if (repair === 'identity') {
+        process.stdout.write(
+          `\n${theme.meta('--fix cannot repair a seat-identity problem: both remedies change who this folder is, or invalidate someone’s credential. Run the command named above.')}\n`,
+        );
+        return code;
+      }
       if (repair === 'wire') {
         process.stdout.write(
           `\n${theme.meta("entry drift — running `musterd wire` to rewrite this folder's MCP entry from binding.json…")}\n\n`,

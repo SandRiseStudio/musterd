@@ -446,6 +446,18 @@ export async function runInit(): Promise<number> {
           `approve it (${pc.yellow('musterd requests decide <id> --approve')}) while this waits.`,
       ),
     );
+    // Authenticate as the SEAT when this machine knows how to (ADR 059), and only fall back to the
+    // shared team key. Handing `agentKeys[team]` to any target is what wrote the dead binding at
+    // `/Users/nick/agents` on 2026-07-26: the team key cannot act as a human seat, so the claim
+    // succeeded and every request after it 403'd. L1 (#457) now refuses that claim outright, which
+    // turns the silent poisoning into a loud failure — but a loud failure is still the wrong answer
+    // when the credential that *would* have worked was sitting in the vault the whole time.
+    // Preferring the seat's own key is also strictly more correct for agent targets, whose vault
+    // entry holds the team key anyway, so nothing legitimate changes shape.
+    const seatKey = config.knownIdentities.find(
+      (i) => i.team === team && i.name === target && i.key,
+    )?.key;
+    const key = seatKey ?? config.agentKeys[team];
     try {
       await claimCommand(
         parseArgs([
@@ -454,7 +466,7 @@ export async function runInit(): Promise<number> {
           team,
           '--server',
           server,
-          ...(config.agentKeys[team] ? ['--key', config.agentKeys[team]!] : []),
+          ...(key ? ['--key', key] : []),
           '--timeout',
           '90',
         ]),

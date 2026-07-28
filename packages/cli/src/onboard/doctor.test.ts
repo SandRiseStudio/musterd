@@ -13,6 +13,8 @@ const h = vi.hoisted(() => ({
   binding: null as Record<string, unknown> | null,
   roster: { members: [] as any[] },
   rosterThrows: false,
+  agentKeys: {} as Record<string, string>,
+  knownIdentities: [] as { team: string; name: string; key: string; surface: string }[],
 }));
 
 vi.mock('./harnesses/index.js', () => ({
@@ -24,7 +26,12 @@ vi.mock('./primer.js', () => ({ classifyPrimerTarget: () => h.primer }));
 vi.mock('../config.js', () => ({
   findBinding: () => h.binding,
   // ADR 162: the doctor reads the binding registry to note stale entries.
-  loadConfig: () => ({ bindings: h.bindings }),
+  loadConfig: () => ({
+    bindings: h.bindings,
+    // install-topology §6(a): the dead-binding check reads the team key it holds + the ADR 059 vault.
+    agentKeys: h.agentKeys,
+    knownIdentities: h.knownIdentities,
+  }),
 }));
 vi.mock('../client.js', () => ({
   HttpClient: class {
@@ -368,6 +375,119 @@ describe('inspectProvisioning — model attestation (ADR 120)', () => {
     expect(report.notes).toContainEqual(
       expect.stringContaining('MCP model declaration is unknown'),
     );
+  });
+});
+
+/**
+ * The dead binding (install-topology §6(a)): a folder claiming a HUMAN seat while carrying the TEAM
+ * AGENT KEY. It occupies once and then 403s forever, which is the state `/Users/nick/agents` was in
+ * for two days. L1 (#457) stopped new ones being written; this check finds the ones already on disk.
+ *
+ * Three properties matter more than the happy path: it must not fire on the legitimate agent case
+ * (every agent worktree has exactly this key), it must not invent a verdict when the roster is
+ * unreachable (seat kind is only knowable there), and it must not route `--fix` at `musterd init` —
+ * the command that wrote it.
+ */
+describe('inspectProvisioning — the dead binding (install-topology §6(a))', () => {
+  beforeEach(() => {
+    h.harnesses = [];
+    h.primer = 'none';
+    h.bindings = {};
+    h.rosterThrows = false;
+    h.agentKeys = { dawn: 'mskey_team' };
+    h.knownIdentities = [];
+    h.binding = {
+      server: 'http://x',
+      team: 'dawn',
+      agent_key: 'mskey_team',
+      surface: 'cli',
+      claim: { mode: 'seat', name: 'nick' },
+    };
+    h.roster = { members: [{ name: 'nick', kind: 'human' }] };
+  });
+
+  it('reports a human seat bound with the team agent key as drift, not a note', async () => {
+    const report = await inspectProvisioning('/ws');
+
+    expect(report.drift).toContainEqual(
+      expect.stringContaining('the binding carries the team agent key'),
+    );
+    expect(report.drift.join(' ')).toContain('/ws/.musterd/binding.json');
+    expect(report.repair).toBe('identity');
+  });
+
+  it('names the rebind when this machine still holds their credential', async () => {
+    h.knownIdentities = [{ team: 'dawn', name: 'nick', key: 'mscr_still_here', surface: 'cli' }];
+
+    const report = await inspectProvisioning('/ws');
+
+    expect(report.drift.join(' ')).toContain('musterd join dawn --as nick');
+    // The destructive verb must NOT be suggested when nothing needs re-issuing.
+    expect(report.drift.join(' ')).not.toContain('musterd team credential');
+  });
+
+  it('names the re-issue when it holds nothing usable — a vault entry of the team key is nothing', async () => {
+    // The vault can hold the team key for this seat (that is how the dead binding got written in the
+    // first place). Treating it as a credential would send the reader to a rebind that cannot work.
+    h.knownIdentities = [{ team: 'dawn', name: 'nick', key: 'mskey_team', surface: 'cli' }];
+
+    const report = await inspectProvisioning('/ws');
+
+    expect(report.drift.join(' ')).toContain('musterd team credential nick');
+    expect(report.drift.join(' ')).not.toContain('musterd join');
+  });
+
+  it('stays silent for an agent seat holding the same key — that is the correct shape', async () => {
+    h.roster = { members: [{ name: 'nick', kind: 'agent' }] };
+
+    const report = await inspectProvisioning('/ws');
+
+    expect(report.drift).toEqual([]);
+    expect(report.repair).toBeUndefined();
+  });
+
+  it('stays silent for an observer — hidden from the roster, and claimed with the team key by design', async () => {
+    // ADR 063 observers never appear in the roster at all, so an absent name is not a verdict.
+    h.roster = { members: [] };
+
+    const report = await inspectProvisioning('/ws');
+
+    expect(report.drift).toEqual([]);
+    expect(report.repair).toBeUndefined();
+  });
+
+  it('stays silent when the binding carries a real seat credential', async () => {
+    h.binding = { ...(h.binding as object), agent_key: 'mscr_mine' };
+
+    const report = await inspectProvisioning('/ws');
+
+    expect(report.drift).toEqual([]);
+  });
+
+  it('cannot verify with the daemon down: an honest note, never drift and never silence', async () => {
+    h.rosterThrows = true;
+
+    const report = await inspectProvisioning('/ws');
+
+    expect(report.drift).toEqual([]);
+    expect(report.notes).toContainEqual(expect.stringContaining(`couldn't verify seat "nick"`));
+    // Says what the abstention costs, rather than leaving the reader to assume health (ADR 173).
+    expect(report.notes.join(' ')).toContain('correct for an agent seat and dead for a human one');
+  });
+
+  it('does not run the check at all when the folder has no fixed-seat binding', async () => {
+    h.binding = {
+      server: 'http://x',
+      team: 'dawn',
+      agent_key: 'mskey_team',
+      surface: 'cli',
+      claim: { mode: 'role', role: 'backend' },
+    };
+
+    const report = await inspectProvisioning('/ws');
+
+    expect(report.drift).toEqual([]);
+    expect(report.notes.join(' ')).not.toContain('verify seat');
   });
 });
 

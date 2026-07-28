@@ -6,7 +6,7 @@ const h = vi.hoisted(() => ({
   runInitDoctor: vi.fn(async () => 0),
   runInit: vi.fn(async () => 0),
   wireCommand: vi.fn(async () => 0),
-  repair: 'init' as 'wire' | 'init' | undefined,
+  repair: 'init' as 'wire' | 'init' | 'identity' | undefined,
 }));
 vi.mock('../onboard/doctor.js', () => ({
   runInitDoctor: h.runInitDoctor,
@@ -74,6 +74,19 @@ describe('musterd init dispatch (ADR 087 — --check --fix)', () => {
     await initCommand(parseArgs(['--check', '--fix']));
     expect(h.runInit).toHaveBeenCalledOnce();
     expect(h.wireCommand).not.toHaveBeenCalled();
+  });
+
+  it('refuses to auto-repair a dead binding — both remedies are the human’s call', async () => {
+    // install-topology §6(a): a rebind changes who this folder acts as, and a re-issue invalidates
+    // somebody’s live credential. The generic remedy is worse still — `musterd init` is the command
+    // that WROTE the dead binding. So --fix names the command and stops.
+    h.repair = 'identity';
+    h.runInitDoctor.mockResolvedValueOnce(1);
+    const code = await initCommand(parseArgs(['--check', '--fix']));
+    expect(code).toBe(1); // the drift stands, unrepaired and visible
+    expect(h.runInit).not.toHaveBeenCalled();
+    expect(h.wireCommand).not.toHaveBeenCalled();
+    h.repair = 'init';
   });
 
   it('`init --check --fix --json` stays a pure read-only report (no repair intermixed)', async () => {
