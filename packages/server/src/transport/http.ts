@@ -2849,6 +2849,60 @@ export async function handleHttp(
         return sendJson(res, 200, { ok: true, member: member.name });
       }
 
+      /* ─── human credential rotate-in-place ─────────────────────────────────────────────────────
+       * `credential_hash` is one column and `mintCredential` overwrites it, so before this route a
+       * human who lost their `mscr_` was unrecoverable short of DB surgery — the state the founder's
+       * own dogfood team was in, which made ADR 170's premise ("the CLI already holds your
+       * credential") false on the very machine it shipped from.
+       *
+       * Rotate-in-place, mirroring the agent-key rotate: mint, audit, shown once, the old secret dead
+       * at the next claim (live sessions ride out — same as `key.rotate`). The two-credential schema
+       * ADR 170 deferred stays deferred; "I lost it" is exactly what rotation serves.
+       *
+       * The bar is `authProvision` (localhost unauthenticated, admin credential off-host — ADR 134),
+       * NOT admin-only, and that is the load-bearing call rather than a shortcut: the primary caller
+       * has lost the very credential admin auth would demand, so admin-only is circular precisely
+       * when the admin is the one locked out. Re-minting for an existing human is not a more powerful
+       * act than minting for a new one, which already sits at this bar. The residual risk — any local
+       * process can rotate any human's credential — is ADR 134's accepted boundary, and rotation is
+       * self-announcing: an audit row lands and the old secret stops working.
+       *
+       * Humans only. An agent seat authenticates with the team agent key (ADR 069/075) and has no
+       * credential to lose; minting one for it would manufacture exactly the human-seat authority the
+       * claim-kind guard refuses.
+       */
+      const credentialRotateMatch = rest.match(/^\/members\/([^/]+)\/credential\/rotate$/);
+      if (method === 'POST' && credentialRotateMatch) {
+        const team = requireTeam(ctx.db, slug);
+        authProvision(ctx, slug, req);
+        const targetName = decodeURIComponent(credentialRotateMatch[1]!);
+        const target = getMemberByName(ctx.db, team.id, targetName);
+        if (!target || target.left_at !== null) {
+          throw new MusterdError('not_found', `no member "${targetName}" in ${slug}`);
+        }
+        if (target.kind !== 'human') {
+          throw new MusterdError(
+            'bad_request',
+            `"${target.name}" is an agent seat — agents authenticate with the team agent key, not a ` +
+              `per-seat credential, so there is nothing here to rotate (POST /teams/${slug}/agent-key/rotate rotates the key).`,
+          );
+        }
+        const { credential } = mintCredential(ctx.db, target.id);
+        // Attribute honestly: an off-host caller is an authenticated admin (authProvision just proved
+        // it); a loopback caller is anonymous by design, so the actor is null and `via` says where the
+        // authority came from. `detail` never carries the secret or its hash.
+        appendAudit(ctx.db, team.id, {
+          actor: tryAuth(ctx, slug, req)?.name ?? null,
+          action: 'credential.rotate',
+          target: target.name,
+          result: 'allow',
+          detail: {
+            via: isLocalPeer(req.socket.remoteAddress, ctx.config.trustProxy) ? 'local' : 'admin',
+          },
+        });
+        return sendJson(res, 200, { member: target.name, credential });
+      }
+
       // Soft-remove a member from the roster (ADR 019): set left_at so it drops off every
       // list/auth/route path (all filter `left_at IS NULL`) while message history + provenance
       // survive. Idempotent — an already-left member 404s rather than erroring. Admin-gated (ADR 071,

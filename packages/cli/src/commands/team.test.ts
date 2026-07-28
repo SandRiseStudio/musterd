@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
@@ -220,5 +220,115 @@ describe('team policy command', () => {
     const show = await capture(() => teamCommand(parseArgs(['policy'])));
     expect(show.out).toContain('enforcement:');
     expect(show.out).toContain('src/tariff.ts');
+  });
+});
+
+/**
+ * `musterd team credential <name>` — the lost-credential recovery verb (§6(b) of install-topology).
+ *
+ * The behaviours worth pinning are the local repairs, because they are what makes the rotate usable
+ * with nothing pasted: the vault + active identity + the folder binding all go stale the instant the
+ * server re-mints, and a rotate for *someone else* must leave every one of them alone.
+ */
+describe('team credential command', () => {
+  let server: RunningServer;
+  let dir: string;
+
+  beforeEach(async () => {
+    server = createServer({ db: openDb(':memory:'), port: 0 });
+    const { port } = await server.listen();
+    process.env['MUSTERD_SERVER'] = `http://127.0.0.1:${port}`;
+    dir = mkdtempSync(join(tmpdir(), 'musterd-cred-'));
+    process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
+    vi.spyOn(process, 'cwd').mockReturnValue(dir);
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await server.close();
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env['MUSTERD_SERVER'];
+    delete process.env['MUSTERD_CONFIG'];
+  });
+
+  async function capture(fn: () => Promise<number>): Promise<{ code: number; out: string }> {
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: never) => {
+      chunks.push(String(c));
+      return true;
+    });
+    try {
+      return { code: await fn(), out: chunks.join('') };
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  const readConfig = () =>
+    JSON.parse(readFileSync(process.env['MUSTERD_CONFIG'] as string, 'utf8'));
+  const readBinding = () => JSON.parse(readFileSync(join(dir, '.musterd', 'binding.json'), 'utf8'));
+
+  it('re-issues my own credential and repairs the vault, the active identity, and this binding', async () => {
+    const before = readConfig();
+    const lost = before.identities.dawn.key as string;
+
+    const res = await capture(() =>
+      teamCommand(parseArgs(['credential', 'nick', '--team', 'dawn', '--json'])),
+    );
+    expect(res.code).toBe(0);
+    const out = JSON.parse(res.out);
+    expect(out.credential).toMatch(/^mscr_/);
+    expect(out.credential).not.toBe(lost);
+    expect(out.repaired).toEqual({ identity: true, binding: true });
+
+    const after = readConfig();
+    expect(after.identities.dawn.key).toBe(out.credential);
+    expect(after.knownIdentities.find((i: any) => i.name === 'nick').key).toBe(out.credential);
+    // …and the binding, which is what `musterd board` reads to sign this human in (ADR 170).
+    expect(readBinding().agent_key).toBe(out.credential);
+  });
+
+  it('prints the credential once, and says what it rewrote', async () => {
+    const res = await capture(() =>
+      teamCommand(parseArgs(['credential', 'nick', '--team', 'dawn'])),
+    );
+    expect(res.out).toMatch(/mscr_/);
+    expect(res.out).toMatch(/shown once/i);
+    expect(res.out).toMatch(/saved identity/i);
+    expect(res.out).toMatch(/musterd board/);
+  });
+
+  it("rotating someone else's credential touches nothing local", async () => {
+    await capture(() => teamCommand(parseArgs(['add', 'Lin', '--kind', 'human'])));
+    const before = readConfig();
+    const beforeBinding = readBinding();
+
+    const res = await capture(() =>
+      teamCommand(parseArgs(['credential', 'Lin', '--team', 'dawn', '--json'])),
+    );
+    const out = JSON.parse(res.out);
+    expect(out.member).toBe('Lin');
+    expect(out.repaired).toEqual({ identity: false, binding: false });
+    // Lin was never a local identity, so nothing was created for her and nick's stayed put.
+    expect(readConfig()).toEqual(before);
+    expect(readBinding()).toEqual(beforeBinding);
+  });
+
+  it('refuses an agent seat with the daemon reason, and writes nothing locally', async () => {
+    await capture(() => teamCommand(parseArgs(['add', 'Ada', '--kind', 'agent'])));
+    const before = readConfig();
+    await expect(
+      capture(() => teamCommand(parseArgs(['credential', 'Ada', '--team', 'dawn', '--json']))),
+    ).rejects.toThrow(/agent seat/i);
+    expect(readConfig()).toEqual(before);
+  });
+
+  it('needs a name and a team', async () => {
+    // The verb's own usage line, not the subcommand-dispatch one — otherwise this passes even when
+    // `credential` isn't a verb at all.
+    await expect(capture(() => teamCommand(parseArgs(['credential'])))).rejects.toThrow(
+      /usage: musterd team credential <name>/,
+    );
   });
 });

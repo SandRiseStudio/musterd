@@ -2,8 +2,9 @@
 
 **Status:** design accepted by nick 2026-07-28 (this session); implementation lanes open, unclaimed.
 **Author:** miley, from the 2026-07-28 dogfood session that surfaced every gap below, live.
-**Companion ADRs:** two ride the implementing PRs — the _credential re-issue_ ADR (increment 3) and
-the _team home_ ADR (increment 4). Numbers are picked at landing time against origin/main; ADR 171
+**Companion ADRs:** two ride the implementing PRs — the _credential re-issue_ ADR (increment 3,
+landed as [ADR 174](../decisions/174-human-credential-recovery.md)) and the _team home_ ADR
+(increment 4, still to be numbered). Numbers are picked at landing time against origin/main; ADR 171
 was taken by a different decision (#448) between this doc's drafting and its first commit, which is
 the collision trap doing its job.
 
@@ -238,7 +239,7 @@ founder dogfood soonest and should go first after the bug fix):
 | ------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | L-claim-kind  | `packages/server/src/transport/{http,ws}.ts`                                 | §6(a): the kind guard on both claim surfaces; through-DB tests incl. no-request-row-leak, role-resolution, ADR 077/146 regressions |
 | L-doctor      | `packages/cli/src/onboard/init.ts`                                           | §6(a) companions: the mismatch diagnostic + 'existing'-intent key preference                                                       |
-| L-credential  | `packages/server/src/transport/http.ts`, `packages/cli/src/commands/team.ts` | §6(b): rotate route + `team credential` verb + its ADR                                                                             |
+| L-credential  | `packages/server/src/transport/http.ts`, `packages/cli/src/commands/team.ts` | §6(b): rotate route + `team credential` verb + its ADR — **shipped as [ADR 174](../decisions/174-human-credential-recovery.md)**   |
 | L-team-home   | `packages/cli/src/{config.ts,commands/human.ts}`                             | §4–5: `teamHome` key + `musterd human` + its ADR; acceptance = `stageSigninHandoff` succeeds from a fresh home                     |
 | L-project     | `packages/{cli,mcp,server}` lane-open paths                                  | §7: derivation + overrides + the contention-semantics note                                                                         |
 | L-docs-settle | `docs/**`                                                                    | architecture trees, migration-bootstrap cross-link, primer/guides mention of the agent/human verb pair                             |

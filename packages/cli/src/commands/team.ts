@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type Binding,
+  bindingSeat,
   type EnforcementClass,
   type EnforcementPosture,
   type Lifecycle,
@@ -15,6 +16,7 @@ import {
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import {
+  findBinding,
   loadConfig,
   recordRosterHome,
   rememberIdentity,
@@ -25,19 +27,20 @@ import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 import { hint, success } from '../render/ui.js';
 import { writeSeatFile } from '../roster.js';
-import { resolve } from './helpers.js';
+import { findWorkspaceDir, resolve } from './helpers.js';
 
 export async function teamCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
   if (sub === 'create') return teamCreate(parsed);
   if (sub === 'add') return teamAdd(parsed);
   if (sub === 'observe') return teamObserve(parsed);
+  if (sub === 'credential') return teamCredential(parsed);
   if (sub === 'remove') return teamRemove(parsed);
   if (sub === 'archive') return teamArchive(parsed);
   if (sub === 'export') return teamExport(parsed);
   if (sub === 'policy') return teamPolicy(parsed);
   throw new CliError(
-    'usage: musterd team <create|add|observe|remove|archive|export|policy> ...',
+    'usage: musterd team <create|add|observe|credential|remove|archive|export|policy> ...',
     2,
   );
 }
@@ -404,6 +407,107 @@ async function teamObserve(parsed: Parsed): Promise<number> {
     hint(`open /live and connect:  team ${team}   as ${name}   token ${res.token}`) + '\n',
   );
   return 0;
+}
+
+/**
+ * `musterd team credential <name>` — re-issue a human's `mscr_` credential, shown once.
+ *
+ * The recovery verb for the state that has no other exit: `credential_hash` is one column and
+ * minting overwrites it, so a human who lost their credential could not authenticate, could not
+ * `musterd board`, and could not even be re-added (`POST /members` conflicts on a live member).
+ *
+ * Deliberately identity-free — it resolves the team like `team export` (flags/config, no `resolve()`)
+ * because requiring an active identity would be circular: the caller's problem IS that they have
+ * none. The daemon holds the real bar (localhost, or an admin credential off-host).
+ *
+ * When the local machine already knows this (team, name), the rotate repairs what it knows in the
+ * same breath — the vault entry, the team's active identity, and the cwd binding's key — so ADR
+ * 170's `musterd board` works immediately afterwards with nothing pasted anywhere. Rotating
+ * *someone else's* credential touches none of that: it is a secret for another person, not a
+ * sign-in for this machine.
+ */
+async function teamCredential(parsed: Parsed): Promise<number> {
+  const name = parsed.positionals[1];
+  if (!name)
+    throw new CliError('usage: musterd team credential <name> [--team <slug>] [--server <url>]', 2);
+  const config = loadConfig();
+  const server = flagStr(parsed.flags, 'server') ?? config.server;
+  const team = flagStr(parsed.flags, 'team') ?? config.current;
+  if (!team) throw new CliError('no team — pass --team <slug> or set a current team', 2);
+  const http = new HttpClient({ server });
+  const res = await http.rotateCredential(team, name);
+
+  const repaired = repairLocalCredential(config, team, res.member, res.credential);
+
+  if (parsed.flags['json']) {
+    process.stdout.write(
+      JSON.stringify({ member: res.member, credential: res.credential, repaired }) + '\n',
+    );
+    return 0;
+  }
+  process.stdout.write(
+    success(`re-issued ${theme.memberName(res.member, 'human')}'s credential for ${team}`) + '\n',
+  );
+  process.stdout.write(
+    theme.meta('the previous one stops working at their next claim — shown once, store it now:') +
+      '\n',
+  );
+  process.stdout.write(`  ${res.credential}\n`);
+  if (repaired.identity || repaired.binding) {
+    // Say exactly what was rewritten: this command hands out a secret, so silent local writes would
+    // be the wrong kind of convenience.
+    const where = [
+      ...(repaired.identity ? ['this machine’s saved identity'] : []),
+      ...(repaired.binding ? ['this folder’s binding'] : []),
+    ].join(' + ');
+    process.stdout.write(theme.meta(`updated ${where} — nothing to paste`) + '\n');
+    process.stdout.write(hint('open the board signed in: musterd board') + '\n');
+  } else {
+    process.stdout.write(
+      hint(`hand it over: musterd join ${team} --as ${res.member} --key <the line above>`) + '\n',
+    );
+  }
+  return 0;
+}
+
+/**
+ * Repair what this machine holds for `(team, name)` after a rotate — the vault entry (ADR 059), the
+ * team's active identity slot, and the workspace binding when it names that same seat. Every write
+ * is conditional on the seat already being known here: a rotate must never *create* a local identity
+ * for someone, only refresh one that already existed and just went stale.
+ *
+ * Exported for tests; returns what it actually changed so the caller can say so.
+ */
+export function repairLocalCredential(
+  config: ReturnType<typeof loadConfig>,
+  team: string,
+  name: string,
+  credential: string,
+): { identity: boolean; binding: boolean } {
+  let identity = false;
+  const known = config.knownIdentities.find((i) => i.team === team && i.name === name);
+  if (known) {
+    rememberIdentity(config, { ...known, key: credential });
+    identity = true;
+  }
+  const active = config.identities[team];
+  if (active && active.name === name) {
+    config.identities[team] = { ...active, key: credential };
+    identity = true;
+  }
+  if (identity) saveConfig(config);
+
+  // The binding is per-folder and holds the seat's bearer secret in `agent_key` (for a human folder
+  // that is their mscr_ — see helpers.gather). Rewrite it only when this folder is bound to the very
+  // seat that rotated, and only for the same team.
+  let binding = false;
+  const dir = findWorkspaceDir();
+  const current = dir ? findBinding(dir) : null;
+  if (dir && current && current.team === team && bindingSeat(current) === name) {
+    saveBinding(dir, { ...current, agent_key: credential });
+    binding = true;
+  }
+  return { identity, binding };
 }
 
 /**
