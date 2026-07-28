@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { CCD_SEND_MESSAGE_TOOL } from '@musterd/protocol';
+import { CCD_SEND_MESSAGE_TOOL, FEATURE_EPOCH } from '@musterd/protocol';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
 import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
@@ -219,8 +219,26 @@ function sessionStartHookCommand(): string {
     // stale worktree learns at minute 0 instead of after an hour of "but I merged it". Guarded (only
     // when `musterd` resolves), read-only, ≤2s, and never failing — the hook contract stays intact.
     'command -v musterd >/dev/null 2>&1 && musterd init --check-build 2>/dev/null || true ' +
-    `# ${SESSIONSTART_HOOK_MARKER}`
+    // ADR 168: the epoch stamp. This hook is ONE machine-wide entry, so whichever checkout runs
+    // `init` last writes it for every folder — and until this stamp, an older checkout's rewrite was
+    // indistinguishable from the current text. The stamp makes the generation readable, so a writer
+    // can refuse to downgrade and the doctor can tell "stale hook" from "behind checkout".
+    `# ${SESSIONSTART_HOOK_MARKER} ${epochTag(FEATURE_EPOCH)}`
   );
+}
+
+/** The `eN` generation tag written into a musterd hook's marker comment (ADR 168). */
+function epochTag(epoch: number): string {
+  return `e${String(epoch)}`;
+}
+
+/**
+ * The generation stamped on an installed hook command, or `0` for an unstamped one. Unstamped is
+ * legal and means "written before ADR 168" — the oldest possible generation, never an error.
+ */
+export function hookEpochOf(command: string): number {
+  const m = /#\s*musterd-[a-z-]+\s+e(\d+)\b/.exec(command);
+  return m?.[1] ? Number(m[1]) : 0;
 }
 
 function sessionCaptureHookCommand(): string {
@@ -281,6 +299,14 @@ function readSettingsSafe(path: string): ClaudeSettings | null {
  * every entry `matches` selects (our prior install and/or an absorbed recipe) and append `command`,
  * leaving all other hooks untouched. Best-effort + non-clobbering: silently skips if the file exists
  * but won't parse. Preserves every other key in the settings object.
+ *
+ * **The downgrade guard (ADR 168).** If an entry we are about to replace carries a HIGHER epoch stamp
+ * than `command` does, a newer build wrote it and this one would be silently reverting it — for every
+ * folder at once, when the file is the machine-wide one. So leave it alone and return a warning
+ * instead. Deliberately asymmetric: the newer generation wins regardless of which checkout runs last.
+ * Equal or lower epochs overwrite exactly as before, so the common path is untouched.
+ *
+ * Returns a warning line when it refused, else `undefined`.
  */
 function upsertHook(
   path: string,
@@ -288,16 +314,108 @@ function upsertHook(
   matches: (m: ClaudeHookMatcher) => boolean,
   command: string,
   matcher?: string,
-): void {
+): string | undefined {
   const settings = readSettingsSafe(path);
   if (settings === null) return; // present but unparseable — never clobber
   settings.hooks ??= {};
+  const present = (settings.hooks[event] ?? []).filter(matches);
+  const installedEpoch = Math.max(
+    0,
+    ...present.flatMap((m) => m.hooks.map((h) => hookEpochOf(h.command))),
+  );
+  const ours = hookEpochOf(command);
+  if (installedEpoch > ours) {
+    return (
+      `refused to rewrite the Claude Code ${event} hook in ${path}: it was written by a NEWER musterd ` +
+      `(epoch ${String(installedEpoch)}), and this build is epoch ${String(ours)} — installing it here ` +
+      'would downgrade every folder on this machine (ADR 168). The hook was left untouched. Update ' +
+      'this checkout (`git pull` + `pnpm build`, or `musterd service refresh`) and re-run.'
+    );
+  }
   const existing = (settings.hooks[event] ?? []).filter((m) => !matches(m));
   existing.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] });
   settings.hooks[event] = existing;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  return undefined;
 }
+
+/**
+ * One musterd-authored **project-local** hook: everything both the installer and the doctor need to
+ * know about it.
+ *
+ * This table is the single source for both (ADR 168). The doctor used to carry a hand-written check
+ * per hook, so a hook added later was covered only when someone remembered to extend it — and a hook
+ * whose *text* changed was never covered at all. Driving both off one table means a new entry is
+ * installed and health-checked by the same act of adding it here.
+ */
+interface LocalHookSpec {
+  marker: string;
+  event: string;
+  command: () => string;
+  matcher?: string;
+  /**
+   * What the seat loses while this hook is missing — the drift line's "so what". Optional: a hook
+   * without one is still **content**-checked, it just isn't reported when absent. Only `Notification`
+   * omits it, preserving the pre-ADR-168 absence-drift set exactly; widening that set is a separate
+   * question from this one, and bundling it here would have quietly changed what `init --check` says.
+   */
+  missing?: string;
+}
+
+const LOCAL_HOOKS: readonly LocalHookSpec[] = [
+  {
+    marker: NOTIFICATION_HOOK_MARKER,
+    event: 'Notification',
+    command: notificationHookCommand,
+  },
+  {
+    marker: POSTTOOLUSE_HOOK_MARKER,
+    event: 'PostToolUse',
+    command: postToolUseHookCommand,
+    missing:
+      'the Claude Code PostToolUse interrupt hook is missing from .claude/settings.local.json — a busy ' +
+      'agent will not see urgent steering mid-loop (ADR 088). Run `musterd init` to wire it.',
+  },
+  {
+    marker: PRETOOLUSE_HOOK_MARKER,
+    event: 'PreToolUse',
+    command: preToolUseHookCommand,
+    matcher: 'Edit|Write|MultiEdit|NotebookEdit|Bash',
+    missing:
+      'the Claude Code PreToolUse enforcement-gate hook is missing from .claude/settings.local.json — ' +
+      "any enforcement class this team declares (ADR 150) won't be gated for this seat (it fails open, " +
+      'so nothing breaks, but a declared block is silently a no-op here). Run `musterd init` to wire it.',
+  },
+  {
+    marker: SESSIONMSG_HOOK_MARKER,
+    event: 'PreToolUse',
+    command: sessionMsgHookCommand,
+    matcher: CCD_SEND_MESSAGE_TOOL,
+    missing:
+      'the Claude Code PreToolUse session-messaging observer hook is missing from ' +
+      ".claude/settings.local.json — this seat's use of the harness's session-to-session messaging " +
+      "won't be logged (ADR 167; observe-only, nothing breaks). Run `musterd init` to wire it.",
+  },
+  {
+    marker: SESSION_CAPTURE_HOOK_MARKER,
+    event: 'SessionStart',
+    command: sessionCaptureHookCommand,
+    missing:
+      'the Claude Code SessionStart session-capture hook is missing from .claude/settings.local.json — ' +
+      'wakes will run fresh-only, never resuming this seat’s transcript (ADR 131 §5). Run `musterd ' +
+      'init` to wire it.',
+  },
+  {
+    marker: SESSION_END_HOOK_MARKER,
+    event: 'SessionEnd',
+    command: sessionEndHookCommand,
+    missing:
+      'the Claude Code SessionEnd hook is missing from .claude/settings.local.json — captured sessions ' +
+      'will never be marked ended, so the local-session guard leans on transcript staleness alone ' +
+      '(ADR 131 §5). Run `musterd init` to wire it.',
+  },
+];
 
 /** Remove musterd's hook entry for `event` from the settings file at `path` (exact, non-clobbering). */
 function dropHook(path: string, event: string, matches: (m: ClaudeHookMatcher) => boolean): void {
@@ -317,59 +435,32 @@ function dropHook(path: string, event: string, matches: (m: ClaudeHookMatcher) =
  * Install musterd's Claude Code hooks: the project-local `Notification` hook, and the global
  * self-gating `SessionStart` verify hook (absorbing any hand-pasted recipe). Best-effort per hook.
  */
-export function installMusterdHooks(): void {
-  upsertHook(
-    settingsLocalPath(),
-    'Notification',
-    (m) => isMusterdHookFor(m, NOTIFICATION_HOOK_MARKER),
-    notificationHookCommand(),
-  );
-  upsertHook(
-    settingsLocalPath(),
-    'PostToolUse',
-    (m) => isMusterdHookFor(m, POSTTOOLUSE_HOOK_MARKER),
-    postToolUseHookCommand(),
-  );
-  // The PreToolUse enforcement gate (ADR 150) — a DIFFERENT event + marker from the PostToolUse
-  // interrupt probe. Scoped by a matcher to the write-shaped tools it gates (reads never reach it).
-  upsertHook(
-    settingsLocalPath(),
-    'PreToolUse',
-    (m) => isMusterdHookFor(m, PRETOOLUSE_HOOK_MARKER),
-    preToolUseHookCommand(),
-    'Edit|Write|MultiEdit|NotebookEdit|Bash',
-  );
-  // The session-messaging observer (ADR 167) — a SECOND PreToolUse entry with its own marker and an
-  // exact-tool matcher, coexisting with the gate entry above exactly as the two SessionStart entries
-  // below coexist. Emit-only: it logs the harness's session-to-session sends, never blocks one.
-  upsertHook(
-    settingsLocalPath(),
-    'PreToolUse',
-    (m) => isMusterdHookFor(m, SESSIONMSG_HOOK_MARKER),
-    sessionMsgHookCommand(),
-    CCD_SEND_MESSAGE_TOOL,
-  );
-  // Project-local session capture (ADR 131 §5) — a DIFFERENT concern (and marker) from the global
-  // orientation SessionStart below: the capture matcher selects only capture-marked entries, so the
-  // two SessionStart hooks coexist (global orients, local captures) without absorbing each other.
-  upsertHook(
-    settingsLocalPath(),
-    'SessionStart',
-    (m) => isMusterdHookFor(m, SESSION_CAPTURE_HOOK_MARKER),
-    sessionCaptureHookCommand(),
-  );
-  upsertHook(
-    settingsLocalPath(),
-    'SessionEnd',
-    (m) => isMusterdHookFor(m, SESSION_END_HOOK_MARKER),
-    sessionEndHookCommand(),
-  );
-  upsertHook(
+export function installMusterdHooks(): string[] {
+  const warnings: string[] = [];
+  // Every project-local hook comes off the one table (ADR 168), so adding an entry there installs it
+  // AND health-checks it. Each carries its own marker, so entries sharing an event coexist rather
+  // than absorbing each other: the two PreToolUse hooks (ADR 150 gate + ADR 167 observer) and the
+  // two SessionStart hooks (local capture + the global orientation below) each live side by side.
+  for (const spec of LOCAL_HOOKS) {
+    const warning = upsertHook(
+      settingsLocalPath(),
+      spec.event,
+      (m) => isMusterdHookFor(m, spec.marker),
+      spec.command(),
+      spec.matcher,
+    );
+    if (warning) warnings.push(warning);
+  }
+  // The machine-wide orientation hook — the one an older checkout could silently downgrade for every
+  // folder at once, and so the only one carrying an epoch stamp and a refusal (ADR 168).
+  const globalWarning = upsertHook(
     globalSettingsPath(),
     'SessionStart',
     isMusterdSessionStart,
     sessionStartHookCommand(),
   );
+  if (globalWarning) warnings.push(globalWarning);
+  return warnings;
 }
 
 /**
@@ -386,44 +477,65 @@ export function inspectClaudeHookDrift(cwd: string): string[] {
   if (!existsSync(path)) return []; // no local settings yet — the bare-folder drift already covers it
   const settings = readSettingsSafe(path);
   if (!settings) return []; // present but unparseable — never invent drift from a file we can't read
-  const has = (event: string, marker: string): boolean =>
-    (settings.hooks?.[event] ?? []).some((m) => isMusterdHookFor(m, marker));
   const drift: string[] = [];
-  if (!has('PostToolUse', POSTTOOLUSE_HOOK_MARKER)) {
-    drift.push(
-      'the Claude Code PostToolUse interrupt hook is missing from .claude/settings.local.json — a busy ' +
-        'agent will not see urgent steering mid-loop (ADR 088). Run `musterd init` to wire it.',
-    );
+  const installedFor = (spec: LocalHookSpec): string | undefined =>
+    (settings.hooks?.[spec.event] ?? [])
+      .filter((m) => isMusterdHookFor(m, spec.marker))
+      .flatMap((m) => m.hooks.map((h) => h.command))
+      .find((c) => c.includes(spec.marker));
+  for (const spec of LOCAL_HOOKS) {
+    const installed = installedFor(spec);
+    if (installed === undefined) {
+      if (spec.missing) drift.push(spec.missing);
+      continue;
+    }
+    // Present — but presence was never the question (ADR 168). A hook's value is entirely in its
+    // text, so compare against what THIS build would write.
+    if (installed !== spec.command()) {
+      drift.push(
+        `the Claude Code ${spec.event} hook \`${spec.marker}\` in .claude/settings.local.json was ` +
+          'written by a different musterd build and no longer matches this one — it is present but ' +
+          'STALE, which no presence check can see (ADR 168). Run `musterd init` here to rewrite it.',
+      );
+    }
   }
-  if (!has('PreToolUse', PRETOOLUSE_HOOK_MARKER)) {
-    drift.push(
-      'the Claude Code PreToolUse enforcement-gate hook is missing from .claude/settings.local.json — ' +
-        "any enforcement class this team declares (ADR 150) won't be gated for this seat (it fails open, " +
-        'so nothing breaks, but a declared block is silently a no-op here). Run `musterd init` to wire it.',
-    );
-  }
-  if (!has('PreToolUse', SESSIONMSG_HOOK_MARKER)) {
-    drift.push(
-      'the Claude Code PreToolUse session-messaging observer hook is missing from ' +
-        ".claude/settings.local.json — this seat's use of the harness's session-to-session messaging " +
-        "won't be logged (ADR 167; observe-only, nothing breaks). Run `musterd init` to wire it.",
-    );
-  }
-  if (!has('SessionStart', SESSION_CAPTURE_HOOK_MARKER)) {
-    drift.push(
-      'the Claude Code SessionStart session-capture hook is missing from .claude/settings.local.json — ' +
-        'wakes will run fresh-only, never resuming this seat’s transcript (ADR 131 §5). Run `musterd ' +
-        'init` to wire it.',
-    );
-  }
-  if (!has('SessionEnd', SESSION_END_HOOK_MARKER)) {
-    drift.push(
-      'the Claude Code SessionEnd hook is missing from .claude/settings.local.json — captured sessions ' +
-        'will never be marked ended, so the local-session guard leans on transcript staleness alone ' +
-        '(ADR 131 §5). Run `musterd init` to wire it.',
-    );
-  }
+  drift.push(...inspectGlobalSessionStartDrift());
   return drift;
+}
+
+/**
+ * Drift for the **machine-wide** orientation `SessionStart` hook (ADR 168).
+ *
+ * Deliberately reported from every folder: there is no machine-level surface to report it on, and one
+ * true line repeated beats a missing one. The two outcomes prescribe *opposite* repairs, which is the
+ * whole reason presence checking was insufficient — a stale hook wants `init` run here, a hook from a
+ * newer build wants this checkout updated and `init` NOT run, because running it is what would
+ * re-bake the shared slot.
+ */
+function inspectGlobalSessionStartDrift(): string[] {
+  const settings = readSettingsSafe(globalSettingsPath());
+  if (!settings) return []; // absent or unparseable — say nothing rather than invent drift
+  const installed = (settings.hooks?.['SessionStart'] ?? [])
+    .filter(isMusterdSessionStart)
+    .flatMap((m) => m.hooks.map((h) => h.command))
+    .find((c) => c.includes(SESSIONSTART_HOOK_MARKER));
+  if (installed === undefined) return []; // never installed here — not this check's business
+  if (installed === sessionStartHookCommand()) return [];
+  const theirs = hookEpochOf(installed);
+  if (theirs > FEATURE_EPOCH) {
+    return [
+      `the machine-wide Claude Code SessionStart orientation hook (~/.claude/settings.json) was written ` +
+        `by a NEWER musterd (epoch ${String(theirs)}) than this checkout (epoch ${String(FEATURE_EPOCH)}). ` +
+        'The hook is fine — this checkout is behind. Update it (`git pull` + `pnpm build`); do NOT run ' +
+        '`musterd init` here, which would downgrade the hook for every folder on this machine (ADR 168).',
+    ];
+  }
+  return [
+    'the machine-wide Claude Code SessionStart orientation hook (~/.claude/settings.json) does not match ' +
+      `what this build would write (installed epoch ${String(theirs)}, this build ${String(FEATURE_EPOCH)}) ` +
+      '— it is present but STALE, so every folder on this machine is running older orientation text ' +
+      '(ADR 168). Run `musterd init` to rewrite it.',
+  ];
 }
 
 /**
@@ -533,14 +645,16 @@ export const claudeCode: Harness = {
     // wiring the server): the ADR 053 Notification hook (a blocked agent's inbox reaches it) and the
     // ADR 060 SessionStart hook (verify-before-orient: a provisioned folder whose server later went
     // missing self-reports the drift instead of claiming a false "auto-joined").
+    let hookWarnings: string[] = [];
     try {
-      installMusterdHooks();
+      hookWarnings = installMusterdHooks();
     } catch {
       /* non-fatal — the server is what matters; the hooks are additive reachability/orientation aids */
     }
     return {
       target: 'claude mcp (scope: local)',
       activation: activationHint(),
+      ...(hookWarnings.length > 0 ? { warnings: hookWarnings } : {}),
       scope: `wired for this repo (${process.cwd()}) — Claude Code keys local scope by repo ROOT, so every git worktree of this repo shares this one entry; it carries no per-seat state (ADR 165), so that sharing is harmless. Another project needs its own \`musterd init\`, and a second agent needs its own folder.`,
     };
   },

@@ -66,6 +66,13 @@ export interface ConfigureResult {
    * `-s local` config in `~/.claude.json`), where there is nothing to accidentally commit.
    */
   secretPath?: string;
+  /**
+   * Things that went deliberately un-done during configure, which the user must see (ADR 168). The
+   * first case: a hook this build declined to write because a NEWER musterd wrote the installed one,
+   * so installing ours would downgrade every folder on the machine. A refusal nobody is told about is
+   * indistinguishable from a silent failure — which is the exact class of bug this ADR exists to end.
+   */
+  warnings?: string[];
 }
 
 /** A named MCP server entry to provision (a role's `tools.mcp_servers`); secrets stay `${ENV}`. */

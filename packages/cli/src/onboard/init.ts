@@ -599,6 +599,9 @@ export async function runInit(): Promise<number> {
     activation = result.activation;
     sc.stop(`${chosen.label} configured ${pc.dim(`(${result.target})`)}`);
     if (result.scope) p.log.info(pc.dim(result.scope));
+    // Anything configure deliberately did NOT do (ADR 168) — e.g. a hook left alone because a newer
+    // musterd wrote it. Loud on purpose: a silent refusal reads exactly like a silent failure.
+    for (const w of result.warnings ?? []) p.log.warn(pc.yellow(w));
     if (result.secretPath) await warnSecretConfig(result.secretPath);
   } catch (err) {
     sc.stop(pc.red(`Could not configure ${chosen.label}: ${(err as Error).message}`));
