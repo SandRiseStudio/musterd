@@ -887,6 +887,22 @@ describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
     expect(updateLane).toHaveBeenCalledWith('lane1', { state: 'done' });
   });
 
+  /**
+   * The adapter runs in the seat's own workspace, so it — not the daemon — is what knows the repo.
+   * `MUSTERD_PROJECT` stands in for the derivation here; the derivation itself is covered in
+   * `@musterd/protocol`'s project tests (including the worktree case).
+   */
+  it('lane_open stamps the derived project, and an explicit project still wins', async () => {
+    const openLane = vi.fn(async () => ({ lane: lane(), warnings: [] }));
+    const handlers = captureAll(registerLanes, { openLane } as Partial<MusterdClient>);
+    process.env['MUSTERD_PROJECT'] = 'derived';
+    await handlers['lane_open']!({ title: 'a' });
+    await handlers['lane_open']!({ title: 'b', project: 'explicit' });
+    delete process.env['MUSTERD_PROJECT'];
+    expect(openLane).toHaveBeenNthCalledWith(1, { title: 'a', project: 'derived' });
+    expect(openLane).toHaveBeenNthCalledWith(2, { title: 'b', project: 'explicit' });
+  });
+
   it('omits the hint for a branchless lane', async () => {
     const updateLane = vi.fn(async () => ({ lane: lane({ branch: null }), warnings: [] }));
     const handlers = captureAll(registerLanes, { updateLane } as Partial<MusterdClient>);

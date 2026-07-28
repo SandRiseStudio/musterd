@@ -15,6 +15,15 @@ import { GoalSchema } from './goals.js';
  * success-terminal state; verified-ness is *derived* from the closing act's author vs the owner
  * at close time (pinned in the `lane.closed` audit row), never stored.
  */
+/**
+ * The unscoped project — what a lane opened outside a git repo carries, and what every lane opened
+ * before derivation existed carries. It is deliberately **wildcard** in the overlap check: an
+ * unscoped lane contends with every project, and every project contends with it. A warning system
+ * should fail toward a false positive, and this is what keeps a mixed-era board honest — legacy
+ * lanes keep warning against everything, and the noise disappears on its own as they close.
+ */
+export const DEFAULT_PROJECT = 'default';
+
 export const LaneStateSchema = z.enum([
   'open',
   'claimed',
@@ -140,6 +149,12 @@ export type OpenLane = z.infer<typeof OpenLaneSchema>;
 export const UpdateLaneSchema = z.object({
   state: LaneStateSchema.optional(),
   detail: z.string().optional(),
+  /**
+   * Re-scope this lane's surface-space. `project` is stamped at open from the opener's workspace, so
+   * a lane opened from the wrong checkout (or before derivation existed) had no way back — and an
+   * immutable field with no escape hatch makes a mis-stamp permanent.
+   */
+  project: z.string().optional(),
   surface_globs: z.array(z.string()).optional(),
   depends_on: z.array(z.string()).optional(),
   branch: z.string().optional(),

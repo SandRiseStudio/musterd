@@ -1,6 +1,7 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
@@ -65,6 +66,33 @@ describe('lane commands', () => {
     expect(res.out).toContain('lane opened');
     expect(res.out).toContain('wire the thing');
     expect(res.out).toContain('src/a.ts');
+  });
+
+  /**
+   * The derivation (design doc §7): `project` is stamped client-side, because the daemon's cwd is
+   * the daemon's. A non-git folder — every other test here — stays on the `'default'` floor.
+   */
+  it('open derives project from the repo, MUSTERD_PROJECT overrides, --project wins', async () => {
+    const board = async () => {
+      const out = await capture(() => lanesCommand(parseArgs(['--json'])));
+      const { lanes } = JSON.parse(out.out) as { lanes: { title: string; project: string }[] };
+      return (t: string) => lanes.find((l) => l.title === t)!.project;
+    };
+
+    await capture(() => laneCommand(parseArgs(['open', 'no-git'])));
+    expect((await board())('no-git')).toBe('default');
+
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir, stdio: 'ignore' });
+    await capture(() => laneCommand(parseArgs(['open', 'in-repo'])));
+    expect((await board())('in-repo')).toBe(basename(dir));
+
+    process.env['MUSTERD_PROJECT'] = 'declared';
+    await capture(() => laneCommand(parseArgs(['open', 'via-env'])));
+    await capture(() => laneCommand(parseArgs(['open', 'via-flag', '--project', 'explicit'])));
+    delete process.env['MUSTERD_PROJECT'];
+    const at = await board();
+    expect(at('via-env')).toBe('declared');
+    expect(at('via-flag')).toBe('explicit');
   });
 
   it('open --claim assigns the lane to the caller', async () => {

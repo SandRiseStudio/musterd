@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process';
 import { basename, relative } from 'node:path';
 import { PROVENANCES, resolveAttestedModel, type Provenance } from '@musterd/protocol';
+import { gitOutput, gitToplevel } from '@musterd/protocol/project';
 
 /**
  * The "where"-on-attach seed (human-agent-dynamics §2; ADR 014). A gracefully-degrading workspace
@@ -65,24 +65,10 @@ interface GitContext {
 }
 
 function gitContext(cwd: string): GitContext | null {
-  const top = git(['rev-parse', '--show-toplevel'], cwd);
+  const top = gitToplevel(cwd);
   if (!top) return null;
-  const branchRaw = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  const branchRaw = gitOutput(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
   const branch = branchRaw && branchRaw !== 'HEAD' ? branchRaw : '';
   const subpath = relative(top, cwd);
   return { branch, subpath: subpath === '' || subpath.startsWith('..') ? '' : subpath };
-}
-
-/** Run a git command, returning trimmed stdout or null if git is absent / cwd isn't a repo. */
-function git(args: string[], cwd: string): string | null {
-  try {
-    return execFileSync('git', args, {
-      cwd,
-      timeout: 2000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf8',
-    }).trim();
-  } catch {
-    return null;
-  }
 }

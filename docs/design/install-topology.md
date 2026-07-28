@@ -205,6 +205,11 @@ describes the default, and the server stamps `'default'`. Result: on real teams,
 project and surface-contention warnings are team-wide** — `packages/web/**` in this repo "overlaps"
 `packages/web/**` in any other repo the team touches.
 
+**Shipped as [ADR 177](../decisions/177-lane-project-from-repo-identity.md)** — which carries the
+implementation's one addition to this section: `'default'` is a **wildcard** in the overlap check
+(an unscoped lane contends with every project, and vice versa), so the "cliff" below is a slope
+after all, and the noise decays as legacy lanes close.
+
 Design (lane L-project): derive `project` from repo identity at lane-open time — default **the
 basename of the repo's common dir** (`git rev-parse --git-common-dir`, normalised to the repo
 directory it sits in), overridable by `--project` / `MUSTERD_PROJECT`, with non-git folders staying
