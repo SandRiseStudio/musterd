@@ -1,8 +1,11 @@
 # 169 — Two-stage close: ready-for-review, cross-family confirm, derived verified-ness
 
-- Status: proposed — 2026-07-28. Authored by ryder (lane `01KYK42KRP99AY9FEABA54CQT5`). Design
+- Status: accepted — 2026-07-28. Authored by ryder (lane `01KYK42KRP99AY9FEABA54CQT5`). Design
   approved by nick this session, including the cross-model-family reviewer requirement and the
   risk-tiered human-first routing. Number **169** — next free above ADR 168 at branch time.
+  Accepted once increments 1–4 landed (#436 the ADR, #437 the state + derived verified-ness, #440
+  the `lane_ready` verbs, #442 the board surface); increment 5 is parked with its blocker recorded
+  in §5 and does not hold the decision open.
 - Date: 2026-07-28
 - Builds on: [ADR 145](145-human-role-refounded.md) §6 (the design contract this implements),
   [ADR 025](025-resolve-act-thread-close.md) (the `resolve` act whose two claims this splits),
@@ -161,7 +164,8 @@ approval covers that session, not forever. This ships as its own increment at th
 If the plumbing proves too thin, increments 1–4 stand alone and this section remains the
 documented follow-up lane — the degradation path covers the gap honestly in the meantime.
 
-**Status 2026-07-28: earned, unbuilt, and blocked on arm availability — not on worth.** The
+**Increment 5 as of 2026-07-28 — earned, unbuilt, and blocked on arm availability, not on worth.**
+(Phrased so it cannot be mistaken for this ADR's own Status line above, which is `accepted`.) The
 amendment below settles the worth question in the affirmative (the no-candidate rate earns this
 increment without waiting on a catch rate). What stops it is narrower and more mundane: on this
 machine there is currently **no cross-family reviewer to spin up**. Surveyed the day the amendment
