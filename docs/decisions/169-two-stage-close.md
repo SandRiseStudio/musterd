@@ -197,24 +197,49 @@ below that means the picker leaked a same-family review). _Counter-metric:_ the 
 timeout rate — if nearly all _routed_ asks expire unanswered, the tier or the routing is wrong
 and the feature is adding a 5 m tax with no review.
 
-**Why the denominator is routed asks, not lanes marked ready** (added 2026-07-28 from the first
-live data). The two metrics above are the same number under the original definition, and that
-made the headline metric unreadable. A catch rate of zero has two opposite causes — reviewers
-looked and found nothing (rubber-stamping: the feature IS decorative), or no reviewer was ever
-eligible so nothing was reviewed (the feature was never exercised) — and retiring the feature is
-the right response to only the first. The first two live uses of `lane_ready` were both the
-second case: miley's and ryder's lanes went `ready_for_review → done` in 8.5 s and 13.0 s on a
-fleet whose live seats were all Claude-family, so `pickReviewCounterpart` had nobody to route to
-and correctly degraded. Splitting the two apart is also what keeps the counter-metric honest: it
-would otherwise have read a 100% ask-timeout rate against **zero asks sent**, indicting the tier
-choice and the picker for what is really an empty candidate pool.
+**Correction — the original inference was unsound, not merely incomplete** (2026-07-28, from the
+first live data; recorded at the ADR author's request rather than quietly patched). As first
+written, this section said a persistent zero catch rate means review is rubber-stamping and the
+feature is decorative. That inference is **invalid on any fleet where the candidate pool can be
+empty**, and this fleet is one: a zero has two opposite causes — reviewers looked and found
+nothing (rubber-stamping: the feature IS decorative), or no reviewer was ever eligible so nothing
+was reviewed (the feature was never exercised) — and retiring the feature is the right response
+to only the first. As written it would have retired a feature that had never once run. The
+counter-metric failed the same way: it would have read a 100% ask-timeout rate against **zero
+asks sent**, indicting the tier choice and the picker for what is a _staffing_ fact — a
+counter-metric pointing at the wrong subsystem.
+
+The evidence is the first three uses of `lane_ready`, all of which degraded with no candidate:
+miley's lane at 8.5 s, ryder's at 13.0 s, and the lane that produced this amendment, which
+returned `no eligible cross-family counterpart is live`. **3 of 3, zero asks routed**, on a fleet
+whose live seats are all Claude-family by construction.
+
+**The no-candidate rate is a first-class metric, and it is what earns increment 5.** Increment 5
+(spin up an ephemeral cross-family reviewer) was parked pending the catch rate — but the
+dependency runs the other way, and having it backwards is what deadlocked the plan: the catch
+rate _cannot_ move until an eligible reviewer exists, which is precisely what increment 5 builds.
+Increment 5 never needed the catch rate. It needed proof the candidate pool is empty **in
+practice**, which the no-candidate rate supplies immediately, without a single review happening.
+So it is not a caveat beside the headline number: it is the number that earns the increment, and
+only once the increment lands can the catch rate become a statement about reviewing rather than
+about staffing.
 
 That split needed instrumentation, not just arithmetic. The ready edge is the only place that
 knows whether a counterpart was found, so it now records the outcome (`reviewer` + `route`, or
 `no_candidate: true`) in the `lane.ready_for_review` detail, and the close edge derives
 `reason: no_candidate` from it instead of labelling every owner-close a `review_timeout` — a
 label that asserts somebody was asked and did not answer. Legacy rows that recorded neither keep
-the old label rather than having a verdict invented about the past.
+the old label rather than having a verdict invented about the past; a backfill there would have
+been fabricating data to make a metric look coherent.
+
+**A practice this produced, worth keeping.** The lane carrying that fix was not closed while the
+daemon still ran the pre-fix build — closing then would have written the exact wrong audit row
+onto the lane that exists to prevent it, and the log's first `no_candidate` row would have been a
+`review_timeout`. The close waited for the ADR 152 auto-refresher to bounce the daemon onto the
+merged build, so the row is correct by construction. This is the same non-action ADR 168 records
+("the repair waits for the merged build"), arrived at independently on a different surface, which
+is what makes it a rule rather than a coincidence: **when a change alters what gets written to a
+durable log, do not write to that log from a build that predates the change.**
 
 _Reading the numbers requires an admin credential:_ `GET /audit` is admin-only, so an agent seat
 cannot compute any of this for itself. That is deliberate (the log carries governance rows) but
