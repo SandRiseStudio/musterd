@@ -3154,18 +3154,23 @@
   cursor: default;
 }
 
-/* ─── asks & approvals strip (ADR 149) ────────────────────────────────────
- * The loud, above-the-fold home of the to-human ask stream (ADR 147). Sits between the top bar and
- * the panel canvas; renders nothing until an ask exists, one quiet line when none are open, and
- * accent-bordered cards while any ask is open/held. Loud means *first thing seen*, so it never
- * scrolls: past ~one row of cards it scrolls horizontally inside itself. */
+/* ─── asks & approvals rail (ADR 149) ─────────────────────────────────────
+ * The above-the-fold home of the to-human ask stream (ADR 147). Renders nothing until an ask exists,
+ * then costs the canvas exactly ONE LINE — for good. The rail answers the most urgent ask in place
+ * (who, what, the tier clock, accept/decline); everything else lives in a sheet that floats OVER the
+ * canvas, so opening it never reflows the office/roster/stream.
+ *
+ * Same footprint at every tier, deliberately: a blocking ask does not earn extra room, it earns a
+ * hotter colour, a faster pulse, and a clock that has already run out. Space is the one thing the
+ * canvas cannot lend back. */
 .lc-asks {
+  position: relative;
+  z-index: var(--lc-z-overlay);
   flex: none;
   margin: var(--lc-4) var(--lc-6) 0;
   border: 1px solid var(--lc-border);
-  border-radius: var(--lc-r-lg);
-  background: color-mix(in srgb, var(--lc-ground-2) 78%, transparent);
-  padding: var(--lc-4) var(--lc-5);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lc-ground-2) 88%, transparent);
   animation: lc-fade var(--lc-med) var(--lc-ease) both;
 }
 .lc-asks--loud {
@@ -3173,7 +3178,9 @@
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--lc-accent) 26%, transparent),
     0 6px 22px -12px color-mix(in srgb, var(--lc-accent) 55%, transparent);
-  animation: lc-fade var(--lc-med) var(--lc-ease) both, lc-asks-breathe 2.4s ease-in-out infinite;
+  animation:
+    lc-fade var(--lc-med) var(--lc-ease) both,
+    lc-asks-breathe 2.4s ease-in-out infinite;
 }
 @keyframes lc-asks-breathe {
   50% {
@@ -3182,15 +3189,23 @@
       0 6px 26px -10px color-mix(in srgb, var(--lc-accent) 70%, transparent);
   }
 }
-.lc-asks__head {
+/* The one line. 30px of chrome, whatever is happening behind it. */
+.lc-asks__rail {
   display: flex;
   align-items: center;
   gap: var(--lc-4);
+  height: 30px;
+  padding: 0 var(--lc-3) 0 var(--lc-5);
   font-size: 11.5px;
+  min-width: 0;
+  /* Backstop: whatever the viewport does to the shrink chain, the rail stays one clean line and
+     never spills past its own pill. */
+  overflow: hidden;
 }
 .lc-asks__bell {
   width: 13px;
   height: 13px;
+  flex: none;
   fill: none;
   stroke: var(--lc-accent);
   stroke-width: 1.1;
@@ -3202,46 +3217,244 @@
   transform-origin: 50% 22%;
 }
 @keyframes lc-asks-ring {
-  0%, 62%, 100% { transform: rotate(0); }
-  68% { transform: rotate(13deg); }
-  76% { transform: rotate(-11deg); }
-  84% { transform: rotate(7deg); }
-  92% { transform: rotate(-4deg); }
+  0%,
+  62%,
+  100% {
+    transform: rotate(0);
+  }
+  68% {
+    transform: rotate(13deg);
+  }
+  76% {
+    transform: rotate(-11deg);
+  }
+  84% {
+    transform: rotate(7deg);
+  }
+  92% {
+    transform: rotate(-4deg);
+  }
 }
-.lc-asks__title {
-  font-weight: 650;
-  letter-spacing: 0.01em;
+.lc-asks__who,
+.lc-asks__verb,
+.lc-asks__tier,
+.lc-asks__quick,
+.lc-asks__meta,
+.lc-asks__link,
+.lc-asks__rail .lc-ask__clock {
+  flex: none;
 }
-.lc-asks__count {
+/* Name + verb + a gist of the body, all on one line: the rail says what it is without opening. */
+.lc-asks__lead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lc-3);
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--lc-text);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: color var(--lc-fast) var(--lc-ease);
+}
+.lc-asks__lead:hover {
   color: var(--lc-accent);
-  font-weight: 650;
 }
-.lc-asks__quiet,
-.lc-asks__meta {
+.lc-asks__lead--quiet {
+  cursor: default;
   color: var(--lc-muted);
 }
-.lc-asks__spacer {
-  flex: 1;
+.lc-asks__lead--quiet:hover {
+  color: var(--lc-muted);
+}
+.lc-asks__lead b {
+  flex: none;
+  font-weight: 650;
+}
+.lc-asks__gist {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--lc-muted);
+}
+/* Tier + clock sit inline on the rail; inside a card the clock is pushed right by margin auto. */
+.lc-asks__rail .lc-ask__clock {
+  margin-left: 0;
+}
+/* Answer the loudest one without opening anything — the whole point of a rail. */
+.lc-asks__quick {
+  display: flex;
+  gap: var(--lc-2);
+}
+.lc-asks__meta {
+  color: var(--lc-muted);
+  white-space: nowrap;
 }
 .lc-asks__link {
   color: var(--lc-muted);
   text-decoration: none;
   font-size: 11px;
+  padding-right: var(--lc-3);
+}
+/* Both rail buttons ARE `.lc-ask__btn` — same pill, same press-back, same accept/decline hover
+   colours. Only the shape differs, so only the shape is declared here. */
+.lc-asks__icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+}
+.lc-asks__icon svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lc-asks__spacer {
+  flex: 1;
+}
+.lc-asks__more {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-2);
+  flex: none;
+}
+.lc-asks__more:hover {
+  color: var(--lc-accent);
+  border-color: color-mix(in srgb, var(--lc-accent) 55%, transparent);
+}
+.lc-asks__restcount {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--lc-accent);
+  font-weight: 650;
+}
+.lc-asks__chev {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--lc-med) var(--lc-ease);
+}
+.is-open .lc-asks__chev {
+  transform: rotate(180deg);
 }
 .lc-asks__link:hover {
   color: var(--lc-accent);
 }
 .lc-asks__error {
-  margin-top: var(--lc-3);
+  padding: 0 var(--lc-5) var(--lc-3);
   font-size: 11px;
   color: var(--lc-danger);
+}
+/* The sheet floats: absolute, so expanding costs the canvas nothing it had. Kept mounted and
+   transitioned (not keyframed) so a fast open→close retargets from where it is instead of
+   restarting — the rail is a thing you poke at repeatedly. */
+.lc-asks__sheet {
+  position: absolute;
+  top: calc(100% + var(--lc-3));
+  left: 0;
+  right: 0;
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 34%, var(--lc-border));
+  border-radius: var(--lc-r-lg);
+  background: color-mix(in srgb, var(--lc-ground-2) 94%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 18px 48px -22px rgba(60, 40, 20, 0.55);
+  padding: var(--lc-5);
+  transform-origin: top center;
+  /* closed: near-there, not nowhere — nothing in the world appears from nothing */
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  visibility: hidden;
+  transition:
+    opacity 120ms var(--lc-ease),
+    transform 120ms var(--lc-ease),
+    visibility 0s linear 120ms;
+}
+.lc-asks__sheet[data-open] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  transition:
+    opacity var(--lc-med) var(--lc-ease-quart),
+    transform var(--lc-med) var(--lc-ease-quart),
+    visibility 0s;
 }
 .lc-asks__cards {
   display: flex;
   gap: var(--lc-4);
-  margin-top: var(--lc-4);
   overflow-x: auto;
   padding-bottom: var(--lc-1);
+}
+/* Cards arrive in sequence, closest first — reads as one motion instead of a flash of four. */
+.lc-asks__sheet[data-open] .lc-ask {
+  animation: lc-ask-in var(--lc-med) var(--lc-ease-quart) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+@keyframes lc-ask-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+/* Narrow: the rail sheds context before it sheds the answer. The gist goes first, then the
+   settled/deciding counts, then the seat-approvals link — accept/decline are the last to leave. */
+@media (max-width: 900px) {
+  .lc-asks__gist {
+    display: none;
+  }
+}
+@media (max-width: 720px) {
+  .lc-asks__meta,
+  .lc-asks__link {
+    display: none;
+  }
+  .lc-asks__rail {
+    gap: var(--lc-3);
+  }
+}
+/* Phone: the name, the clock, and the two answers. Nothing else earns the width — the tier pill goes
+   too, because a clock reading "timed out — agent holding" in danger red has already said it. */
+@media (max-width: 560px) {
+  .lc-asks__verb,
+  .lc-asks__restcount,
+  .lc-asks__tier {
+    display: none;
+  }
+  .lc-asks__more {
+    padding: 2px var(--lc-3);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-asks--loud,
+  .lc-asks--loud .lc-asks__bell {
+    animation: none;
+  }
+  .lc-asks__sheet,
+  .lc-asks__sheet[data-open] {
+    transition:
+      opacity 120ms linear,
+      visibility 0s;
+    transform: none;
+  }
+  .lc-asks__sheet[data-open] .lc-ask {
+    animation: none;
+  }
 }
 .lc-ask {
   flex: 0 1 380px;

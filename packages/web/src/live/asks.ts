@@ -1,5 +1,6 @@
 import {
   ASK_TIER_DEFAULTS,
+  askTierHolds,
   AskSpeciesSchema,
   AskTierSchema,
   type AskSpecies,
@@ -116,4 +117,23 @@ export function deriveAsks(envelopes: Envelope[]): AskView[] {
     }
   }
   return [...asks.values()].reverse();
+}
+
+const TIER_WEIGHT = { blocking: 0, standard: 1, advisory: 2 } as const;
+
+/**
+ * Which open ask matters most — the order the rail leads with and the sheet lists in.
+ *
+ * A stopped teammate outranks a ticking clock: nothing is moving until a human answers. But "the
+ * clock ran out" is not the same as "stopped" — only a holding tier holds (ADR 147 §4). A standard
+ * ask that times out means the agent *proceeded*, which is the tier working as designed; ranking it
+ * above a blocking ask that still has time would put a decision already made ahead of one waiting to
+ * be. So: actually-stuck first, then tier, then the clock, soonest first.
+ */
+export function byUrgency(a: AskView, b: AskView, now: number = Date.now()): number {
+  const stuck = (x: AskView) =>
+    x.state === 'held' || (x.deadline <= now && askTierHolds(x.tier)) ? 0 : 1;
+  if (stuck(a) !== stuck(b)) return stuck(a) - stuck(b);
+  if (TIER_WEIGHT[a.tier] !== TIER_WEIGHT[b.tier]) return TIER_WEIGHT[a.tier] - TIER_WEIGHT[b.tier];
+  return a.deadline - b.deadline;
 }

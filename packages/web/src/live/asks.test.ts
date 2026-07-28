@@ -1,6 +1,6 @@
 import { ASK_TIER_DEFAULTS, PROTOCOL_VERSION, type Envelope } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { askIsLoud, deriveAsks } from './asks';
+import { askIsLoud, byUrgency, deriveAsks } from './asks';
 
 /** A minimal timeline envelope — the derivation reads act/meta/thread/ts/id/from only. */
 function env(
@@ -125,5 +125,51 @@ describe('deriveAsks (ADR 149)', () => {
       env('r1', 'resolve', { from: 'ada', ts: 2000, thread: 'a1' }),
     ]);
     expect(a!.state).toBe('resolved');
+  });
+});
+
+describe('byUrgency — which ask the rail leads with', () => {
+  const view = (
+    tier: 'advisory' | 'standard' | 'blocking',
+    deadline: number,
+    state: 'open' | 'held' = 'open',
+  ) => ({ tier, deadline, state }) as unknown as Parameters<typeof byUrgency>[0];
+
+  const NOW = 1_000_000;
+
+  it('puts a held ask above everything — nothing is moving until a human answers', () => {
+    const held = view('standard', NOW - 1, 'held');
+    const live = view('blocking', NOW + 60_000);
+    expect([live, held].sort((a, b) => byUrgency(a, b, NOW))[0]).toBe(held);
+  });
+
+  it('treats an elapsed BLOCKING ask as stuck — its tier holds', () => {
+    const elapsed = view('blocking', NOW - 1);
+    const live = view('blocking', NOW + 60_000);
+    expect([live, elapsed].sort((a, b) => byUrgency(a, b, NOW))[0]).toBe(elapsed);
+  });
+
+  it('does NOT treat an elapsed STANDARD ask as stuck — that agent proceeded', () => {
+    // The regression this exists for: ranking by "clock ran out" alone put a decision already made
+    // above one still waiting to be made.
+    const elapsedStandard = view('standard', NOW - 1);
+    const liveBlocking = view('blocking', NOW + 60_000);
+    expect([elapsedStandard, liveBlocking].sort((a, b) => byUrgency(a, b, NOW))[0]).toBe(
+      liveBlocking,
+    );
+  });
+
+  it('ranks by tier before clock — a blocking ask outranks a sooner advisory one', () => {
+    const advisorySoon = view('advisory', NOW + 5_000);
+    const blockingLater = view('blocking', NOW + 600_000);
+    expect([advisorySoon, blockingLater].sort((a, b) => byUrgency(a, b, NOW))[0]).toBe(
+      blockingLater,
+    );
+  });
+
+  it('falls back to the soonest deadline within a tier', () => {
+    const later = view('standard', NOW + 90_000);
+    const sooner = view('standard', NOW + 30_000);
+    expect([later, sooner].sort((a, b) => byUrgency(a, b, NOW))[0]).toBe(sooner);
   });
 });
