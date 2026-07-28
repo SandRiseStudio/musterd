@@ -111,3 +111,69 @@ export function resolveAttestation(input: AttestationInput): AttestationResult {
   }
   return { model: undefined, source: 'unknown', drift: false, declared: undefined };
 }
+
+/**
+ * The team's model-family posture (ADR 172) — a **derived, never stored** statement about who is
+ * attesting what, right now. A musterd agent is not bound to a model: a seat is a name, and what it
+ * runs can change between sessions, so family comes only from live attestations and the posture is
+ * only ever a snapshot stamped with `computed_at`.
+ *
+ * Three states, deliberately not two. `unknown` (fewer than 2 agents attesting a known family) is a
+ * different fact from `monoculture` (≥2 attesting, all one family): collapsing them would read
+ * "everyone HERE is claude" as "everyone ON THE TEAM is claude" — the same absent-vs-unknown
+ * conflation the `no_candidate` close reason exists to prevent one level down (ADR 169).
+ *
+ * Humans are counted beside the posture, never inside it. Human review is its own requirement class
+ * (the ADR 169 risk route), not a diversity substitute: one live human must not make an all-claude
+ * agent fleet read `diverse`, because a human's presence does not decorrelate the agents' mistakes
+ * (ADR 056).
+ */
+export const FAMILY_POSTURE_STATES = ['diverse', 'monoculture', 'unknown'] as const;
+export type FamilyPostureState = (typeof FAMILY_POSTURE_STATES)[number];
+
+export interface FamilyPosture {
+  state: FamilyPostureState;
+  /** Live agents attesting a KNOWN family — the posture's denominator. */
+  attesting: number;
+  /** family → count among attesting agents, e.g. `{ claude: 3 }`. */
+  families: Record<string, number>;
+  /** Live agents attesting `unknown` — present, but they cannot prove anything (ADR 158). */
+  unattested: number;
+  /** Enrolled agents with no live presence — the remedy list: monoculture is fixed by WAKING one. */
+  wake_pool: string[];
+  /** Live humans. Beside the posture, not in it (see above). */
+  humans_live: number;
+  /** When this snapshot was taken — a posture without a timestamp masquerades as a durable fact. */
+  computed_at: number;
+}
+
+/**
+ * One bounded human/agent-readable line for a posture — used where the posture rides an act or a
+ * response and must not balloon (e.g. the `lane_ready` no-candidate sanction). Never one entry per
+ * seat: the wake pool truncates at three names.
+ */
+export function describeFamilyPosture(p: FamilyPosture): string {
+  const pool =
+    p.wake_pool.length === 0
+      ? ''
+      : `; idle & enrollable: ${p.wake_pool.slice(0, 3).join(', ')}${
+          p.wake_pool.length > 3 ? ` +${String(p.wake_pool.length - 3)}` : ''
+        }`;
+  const humans = p.humans_live > 0 ? `; ${String(p.humans_live)} human(s) live` : '';
+  if (p.state === 'unknown') {
+    const why =
+      p.attesting === 0
+        ? 'no agents attesting a known family'
+        : `only ${String(p.attesting)} agent attesting a known family`;
+    return `unknown — ${why}${pool}${humans}`;
+  }
+  const families = Object.entries(p.families)
+    .sort((a, b) => b[1] - a[1])
+    .map(([f, n]) => `${f}×${String(n)}`)
+    .join(', ');
+  if (p.state === 'monoculture') {
+    const family = Object.keys(p.families)[0] ?? MODEL_UNKNOWN;
+    return `monoculture — ${String(p.attesting)} agents attesting, all ${family}${pool}${humans}`;
+  }
+  return `diverse — ${families}${pool}${humans}`;
+}

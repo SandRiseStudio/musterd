@@ -2942,6 +2942,11 @@ describe('two-stage close (ADR 169)', () => {
 
     const ready = await soloPatch({ state: 'ready_for_review' });
     expect(ready.json.review.self_close_sanctioned).toBe(true); // nobody to ask
+    // ADR 172: the sanction says WHY nobody was eligible — the derived family posture. A team of
+    // one human has zero attesting agents, so the honest state is `unknown`, never `monoculture`.
+    expect(ready.json.review.family_posture.state).toBe('unknown');
+    expect(ready.json.review.family_posture.attesting).toBe(0);
+    expect(typeof ready.json.review.posture_hint).toBe('string');
     await soloPatch({ state: 'done' });
 
     const rows = await auditRowsFor(solTok, 'solo', 'lane.closed');
@@ -2953,6 +2958,10 @@ describe('two-stage close (ADR 169)', () => {
     const readyRows = await auditRowsFor(solTok, 'solo', 'lane.ready_for_review');
     const r0 = readyRows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
     expect(r0.detail.no_candidate).toBe(true);
+    // ADR 172: the audit row carries the posture compactly (wake_pool as a COUNT, not names), so a
+    // series of no_candidate rows is analyzable later without replaying presence history.
+    expect(r0.detail.family_posture.state).toBe('unknown');
+    expect(r0.detail.family_posture.wake_pool).toBe(0);
     expect(r0.detail.reviewer).toBeUndefined();
   });
 

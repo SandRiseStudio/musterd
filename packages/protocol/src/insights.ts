@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { GoalSchema } from './goals.js';
+import { FAMILY_POSTURE_STATES, type FamilyPosture } from './model.js';
 import { ToolCallMetricsSchema } from './tool-telemetry.js';
 
 /**
@@ -268,6 +269,20 @@ export type WakeMetrics = z.infer<typeof WakeMetricsSchema>;
  * pick what to emphasise per altitude (ic = the board, team = the digest, exec = milestones+exceptions);
  * the engine computes everything once. `generated_ts` stamps when the projection was taken.
  */
+/**
+ * Wire schema for the family posture (ADR 172). Typed against the {@link FamilyPosture} interface
+ * (model.ts) so the schema and the type cannot drift apart silently.
+ */
+export const FamilyPostureSchema: z.ZodType<FamilyPosture> = z.object({
+  state: z.enum(FAMILY_POSTURE_STATES),
+  attesting: z.number().int(),
+  families: z.record(z.string(), z.number().int()),
+  unattested: z.number().int(),
+  wake_pool: z.array(z.string()),
+  humans_live: z.number().int(),
+  computed_at: z.number().int(),
+});
+
 export const ReportSchema = z.object({
   team: z.string(),
   generated_ts: z.number().int(),
@@ -295,5 +310,9 @@ export const ReportSchema = z.object({
   /** Tool-call telemetry (ADR 144 inc 1). Optional for back-compat with pre-inc-1 daemons — the
    *  server always sets it. */
   tool_calls: ToolCallMetricsSchema.optional(),
+  /** Model-family posture snapshot (ADR 172) — derived at projection time, never stored. Optional
+   *  for back-compat with pre-172 daemons — the server sets it whenever it knows its presence
+   *  timeout. */
+  family_posture: FamilyPostureSchema.optional(),
 });
 export type Report = z.infer<typeof ReportSchema>;

@@ -35,6 +35,7 @@ import {
   type LaneWarning,
   type MemberSummary,
   type Provenance,
+  describeFamilyPosture,
   resolvePosture,
   resolveOfflineReason,
   type OfflineReason,
@@ -121,7 +122,12 @@ import {
   settleWakeLease,
   toResidency,
 } from '../store/residency.js';
-import { pickReviewCounterpart, verifiedCloses, workerFamily } from '../store/review.js';
+import {
+  pickReviewCounterpart,
+  teamFamilyPosture,
+  verifiedCloses,
+  workerFamily,
+} from '../store/review.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import {
   hasFullMessageVisibility,
@@ -2192,7 +2198,11 @@ export async function handleHttp(
       // rendering concern for the surfaces; the engine computes everything once.
       if (method === 'GET' && rest === '/report') {
         const { team, member: _member } = authTouch(ctx, slug, req);
-        return sendJson(res, 200, deriveReport(ctx.db, team.id, team.slug));
+        return sendJson(
+          res,
+          200,
+          deriveReport(ctx.db, team.id, team.slug, Date.now(), ctx.config.presenceTimeoutMs),
+        );
       }
 
       // Tool-call telemetry ingest (ADR 144 inc 1): the adapter's batched flush of its own MCP
@@ -2343,6 +2353,12 @@ export async function handleHttp(
           // counterpart nothing was ever asked. That conflation would make ADR 169's counter-metric
           // ("if nearly all review asks expire unanswered, the tier or the routing is wrong")
           // indict the tier and the picker for an empty candidate pool.
+          // ADR 172: when nobody is eligible, record WHY nobody was — the derived family posture.
+          // Without it a run of no_candidate rows says "the pool was empty" but not what the pool
+          // looked like, and the remedy (wake an enrolled seat vs. enroll one) is undecidable later.
+          const posture = pick
+            ? undefined
+            : teamFamilyPosture(ctx.db, team.id, ctx.config.presenceTimeoutMs);
           appendAudit(ctx.db, team.id, {
             actor: member.name,
             action: 'lane.ready_for_review',
@@ -2353,6 +2369,16 @@ export async function handleHttp(
               owner: lane.owner_seat,
               ...(lane.merged ? { merged: lane.merged } : {}),
               ...(pick ? { reviewer: pick.reviewer, route: pick.route } : { no_candidate: true }),
+              ...(posture
+                ? {
+                    family_posture: {
+                      state: posture.state,
+                      attesting: posture.attesting,
+                      families: posture.families,
+                      wake_pool: posture.wake_pool.length,
+                    },
+                  }
+                : {}),
             },
           });
           if (pick) {
@@ -2376,7 +2402,15 @@ export async function handleHttp(
             );
             review = { reviewer: pick.reviewer, route: pick.route };
           } else {
-            review = { self_close_sanctioned: true };
+            // The sanction carries the posture so the degradation is legible at the point it is
+            // read: not just "nobody was eligible" but what the team looked like and who could be
+            // woken to change it (ADR 172). One bounded line — this lands in the worker's context.
+            review = {
+              self_close_sanctioned: true,
+              ...(posture
+                ? { family_posture: posture, posture_hint: describeFamilyPosture(posture) }
+                : {}),
+            };
           }
         }
         // ADR 169: a reviewer moving a ready_for_review lane back to a live state is the review
