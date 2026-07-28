@@ -205,7 +205,7 @@ describes the default, and the server stamps `'default'`. Result: on real teams,
 project and surface-contention warnings are team-wide** — `packages/web/**` in this repo "overlaps"
 `packages/web/**` in any other repo the team touches.
 
-**Shipped as [ADR 177](../decisions/177-lane-project-from-repo-identity.md)** — which carries the
+**Shipped as [ADR 178](../decisions/178-lane-project-from-repo-identity.md)** — which carries the
 implementation's one addition to this section: `'default'` is a **wildcard** in the overlap check
 (an unscoped lane contends with every project, and vice versa), so the "cliff" below is a slope
 after all, and the noise decays as legacy lanes close.

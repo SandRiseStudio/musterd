@@ -1,8 +1,8 @@
-# 177 — Lane `project` derives from repo identity, and the derivation is worktree-invariant
+# 178 — Lane `project` derives from repo identity, and the derivation is worktree-invariant
 
 - Status: accepted — 2026-07-28. Authored by stanley, implementing install-topology lane L5
   (`docs/design/install-topology.md` §7) and **overriding the rule that section specified**. Number
-  **177** — verified free on `origin/main` (highest is 176) at branch time.
+  **178** — verified free on `origin/main` (highest is 177; 177 was taken by #477 between this branch opening and its gate run, which is the collision trap doing its job) at branch time.
 - Date: 2026-07-28
 - Builds on: [ADR 083](083-coordination-lanes.md) (lanes, `project`, and the two warn-only checks —
   the field this ADR finally populates), [ADR 065](065-agent-workspace.md) (one worktree per seat —
