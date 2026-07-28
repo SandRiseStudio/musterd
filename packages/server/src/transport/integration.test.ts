@@ -2976,6 +2976,25 @@ describe('two-stage close (ADR 169)', () => {
     expect(l2.json.warnings.map((w: { kind: string }) => w.kind)).toContain('surface_overlap');
   });
 
+  it('GET /lanes annotates done lanes with the derived close verdict (inc 4)', async () => {
+    const { nickTok, ada } = await setup();
+    // Lane A confirmed by nick; lane B self-closed by ada; lane C still live.
+    const a = await post('/teams/dawn/lanes', { title: 'confirmed', claim: true }, ada);
+    await patchLane(a.json.lane.id, { state: 'ready_for_review' }, ada);
+    await patchLane(a.json.lane.id, { state: 'done' }, nickTok);
+    const b = await post('/teams/dawn/lanes', { title: 'selfclosed', claim: true }, ada);
+    await patchLane(b.json.lane.id, { state: 'done' }, ada);
+    const c = await post('/teams/dawn/lanes', { title: 'live', claim: true }, ada);
+
+    const board = await get('/teams/dawn/lanes', nickTok);
+    const byId = Object.fromEntries(
+      board.json.lanes.map((l: { id: string; verified?: boolean }) => [l.id, l.verified]),
+    );
+    expect(byId[a.json.lane.id]).toBe(true);
+    expect(byId[b.json.lane.id]).toBe(false);
+    expect(byId[c.json.lane.id]).toBeUndefined(); // live lane: no verdict to annotate
+  });
+
   it('a seat with an unknown model family is never picked as the cross-family reviewer', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential as string;

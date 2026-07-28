@@ -121,7 +121,7 @@ import {
   settleWakeLease,
   toResidency,
 } from '../store/residency.js';
-import { pickReviewCounterpart, workerFamily } from '../store/review.js';
+import { pickReviewCounterpart, verifiedCloses, workerFamily } from '../store/review.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import {
   hasFullMessageVisibility,
@@ -2067,7 +2067,13 @@ export async function handleHttp(
           ...boardWarnings(ctx.db, team.id, team.slug, lanes),
           ...staleLaneWarnings(ctx.db, team.id, team.slug).filter((w) => shown.has(w.subject)),
         ];
-        return sendJson(res, 200, { lanes, warnings });
+        // ADR 169: annotate done lanes with the derived verified-ness of their close — read from the
+        // lane.closed audit rows, never stored on the lane. Absent = unknown (pre-169 closes).
+        const verdicts = verifiedCloses(ctx.db, team.id);
+        const annotated = lanes.map((l) =>
+          l.state === 'done' && verdicts.has(l.id) ? { ...l, verified: verdicts.get(l.id)! } : l,
+        );
+        return sendJson(res, 200, { lanes: annotated, warnings });
       }
 
       // The orientation brief (ADR 049/084) — derived floor over the daemon's own lane/act state.

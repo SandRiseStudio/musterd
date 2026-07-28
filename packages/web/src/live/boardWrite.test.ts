@@ -42,24 +42,42 @@ describe('laneActions — the verb-legality table', () => {
     expect(laneActions(lane({ owner_seat: 'stanley', state: 'active' }), 'nick')).toEqual([]);
   });
 
-  it('my claimed lane: start, hand off, done, abandon', () => {
+  it('my claimed lane: start, hand off, ready, abandon (done became the two-stage entry, ADR 169)', () => {
     const actions = laneActions(lane({ owner_seat: 'nick', state: 'claimed' }), 'nick');
-    expect(actions.map((a) => a.kind)).toEqual(['start', 'handoff', 'done', 'abandon']);
+    expect(actions.map((a) => a.kind)).toEqual(['start', 'handoff', 'ready', 'abandon']);
     expect(actions.find((a) => a.kind === 'start')!.patch).toEqual({ state: 'active' });
   });
 
-  it('my active lane: block, hand off, done, abandon', () => {
+  it('my active lane: block, hand off, ready, abandon', () => {
     const actions = laneActions(lane({ owner_seat: 'nick', state: 'active' }), 'nick');
-    expect(actions.map((a) => a.kind)).toEqual(['block', 'handoff', 'done', 'abandon']);
+    expect(actions.map((a) => a.kind)).toEqual(['block', 'handoff', 'ready', 'abandon']);
     expect(actions.find((a) => a.kind === 'block')!.patch).toEqual({ state: 'blocked' });
-    expect(actions.find((a) => a.kind === 'done')!.patch).toEqual({ state: 'done' });
+    expect(actions.find((a) => a.kind === 'ready')!.patch).toEqual({ state: 'ready_for_review' });
   });
 
-  it('my blocked lane: unblock, hand off, done, abandon', () => {
+  it('my blocked lane: unblock, hand off, ready, abandon', () => {
     const actions = laneActions(lane({ owner_seat: 'nick', state: 'blocked' }), 'nick');
-    expect(actions.map((a) => a.kind)).toEqual(['unblock', 'handoff', 'done', 'abandon']);
+    expect(actions.map((a) => a.kind)).toEqual(['unblock', 'handoff', 'ready', 'abandon']);
     expect(actions.find((a) => a.kind === 'unblock')!.patch).toEqual({ state: 'active' });
     expect(actions.find((a) => a.kind === 'abandon')!.patch).toEqual({ state: 'abandoned' });
+  });
+
+  it("ready_for_review flips the verbs to the COUNTERPART: confirm + send back (ADR 169's one exception)", () => {
+    const inReview = lane({ owner_seat: 'ada', state: 'ready_for_review' });
+    const reviewer = laneActions(inReview, 'nick');
+    expect(reviewer.map((a) => a.kind)).toEqual(['confirm', 'sendback']);
+    expect(reviewer.find((a) => a.kind === 'confirm')!.patch).toEqual({ state: 'done' });
+    expect(reviewer.find((a) => a.kind === 'sendback')!.patch).toEqual({ state: 'active' });
+  });
+
+  it('ready_for_review offers the owner only the degradation self-close + abandon (never a wedge)', () => {
+    const mine = laneActions(lane({ owner_seat: 'nick', state: 'ready_for_review' }), 'nick');
+    expect(mine.map((a) => a.kind)).toEqual(['done', 'abandon']);
+    expect(mine.find((a) => a.kind === 'done')!.patch).toEqual({ state: 'done' });
+  });
+
+  it('ready_for_review offers an observer nothing', () => {
+    expect(laneActions(lane({ owner_seat: 'ada', state: 'ready_for_review' }), null)).toEqual([]);
   });
 
   it('terminal lanes offer nothing, even to their owner', () => {

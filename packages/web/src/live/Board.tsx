@@ -24,6 +24,7 @@ const COLUMNS: ReadonlyArray<{ key: LaneState; label: string; tone: string }> = 
   { key: 'claimed', label: 'Claimed', tone: 'lane' },
   { key: 'active', label: 'In progress', tone: 'lane' },
   { key: 'blocked', label: 'Blocked', tone: 'danger' },
+  { key: 'ready_for_review', label: 'In review', tone: 'lane' },
   { key: 'done', label: 'Done', tone: 'success' },
 ];
 
@@ -37,7 +38,7 @@ const EMPTY_COPY: Record<LaneState, string> = {
   claimed: "No one's picked anything up.",
   active: 'Nothing in flight.',
   blocked: 'Nothing stuck. Good sign.',
-  ready_for_review: '', // no column yet (ADR 169 inc 4 adds it)
+  ready_for_review: 'Nothing awaiting eyes.',
   done: 'Nothing shipped yet — soon.',
   abandoned: '', // no column
 };
@@ -48,7 +49,10 @@ const ACTION_LABEL: Record<LaneAction['kind'], string> = {
   block: 'stuck',
   unblock: 'unstick',
   handoff: 'hand off',
+  ready: 'ready',
   done: 'done',
+  confirm: 'confirm',
+  sendback: 'send back',
   abandon: 'let it go',
 };
 
@@ -119,7 +123,11 @@ export function Board({
         const was = prev.get(lane.id);
         if (was === lane.state) continue;
         landed.add(lane.id);
-        if (lane.state === 'done' && was !== undefined) flourished.add(lane.id);
+        // The warm flourish fires on a CONFIRMED close only (ADR 169, miley's call): a counterpart
+        // said "this is what I wanted". A self-close lands like any other move — no celebration for
+        // an unverified close, and no beat at all on merely reaching ready_for_review.
+        if (lane.state === 'done' && was !== undefined && lane.verified === true)
+          flourished.add(lane.id);
       }
     }
     return { landed, flourished };
@@ -333,6 +341,16 @@ function LaneCard({
           </span>
         )}
         {lane.goal_id && <span className="lc-card__chip lc-card__chip--goal">{lane.goal_id}</span>}
+        {lane.state === 'done' && lane.verified === true && (
+          <span className="lc-card__chip lc-card__chip--verified" title="Confirmed by a counterpart">
+            ✓ confirmed
+          </span>
+        )}
+        {lane.state === 'done' && lane.verified === false && (
+          <span className="lc-card__chip lc-card__chip--unverified" title="Self-closed — no counterpart confirm">
+            unverified
+          </span>
+        )}
         {lane.branch && <span className="lc-card__chip lc-card__chip--branch">{lane.branch}</span>}
       </div>
       {lane.state === 'blocked' && lane.detail && (

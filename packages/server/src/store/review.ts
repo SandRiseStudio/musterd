@@ -51,6 +51,31 @@ export function workerFamily(db: Database, teamId: string, worker: string): stri
   return m ? memberFamily(db, m) : MODEL_UNKNOWN;
 }
 
+/**
+ * The board's verified annotation (ADR 169): lane id → whether its latest `lane.closed` audit row
+ * derived `verified: true`. One indexed query per board read; lanes with no close row (pre-169
+ * history, non-terminal lanes) are simply absent — the projection says nothing rather than guessing.
+ */
+export function verifiedCloses(db: Database, teamId: string): Map<string, boolean> {
+  const rows = db
+    .prepare<
+      [string],
+      { target: string | null; detail: string | null }
+    >("SELECT target, detail FROM audit WHERE team_id = ? AND action = 'lane.closed' ORDER BY ts")
+    .all(teamId);
+  const out = new Map<string, boolean>();
+  for (const r of rows) {
+    if (!r.target || !r.detail) continue;
+    try {
+      const d = JSON.parse(r.detail) as { verified?: boolean };
+      if (typeof d.verified === 'boolean') out.set(r.target, d.verified); // newest row wins
+    } catch {
+      /* a malformed detail annotates nothing */
+    }
+  }
+  return out;
+}
+
 export function pickReviewCounterpart(
   db: Database,
   teamId: string,
