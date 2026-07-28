@@ -171,3 +171,42 @@ The shared daemon (:4849) was serving build `40065c5` — **14 commits behind ma
 asks strip / speech bubbles / re-font. This baseline was taken against a fresh-main build on a
 temp daemon instead. Any perf numbers eyeballed against the shared daemon are stale until a
 `musterd service refresh`.
+
+## Budget raise — total JS gzip 250,000 → 258,000 bytes (2026-07-28, main @ 2846ccf)
+
+**Measured.** Total JS gzip **241.3 KB** before #483, **243.3 KB** after — the office polish (room
+tone engine, dog gait rework, contrast tokens) cost **2.0 KB JS + 0.1 KB CSS**. That left **0.8 KB**
+under the 244.1 KiB ceiling: the next change of any size would have failed the gate on arrival.
+
+The 2026-07-19 baseline was set at 223 KB actual against a 250,000-byte budget — ~12% headroom. Nine
+days of shipped features consumed it. Nothing here was a decision anyone made; the headroom simply
+ran out. Raising to 258,000 restores ~6%: enough that a small change is not blocked, tight enough
+that a real feature still earns the ADR 151 conversation rather than sliding in.
+
+This is the **same shape as the CSS raise logged above on 2026-07-28** (main measured 99.3% of the
+CSS budget *before* that change landed). Two budgets hitting their ceiling in the same week is the
+signal worth reading: the 2026-07-19 numbers were set with a fixed headroom that ordinary shipping
+consumes in about a fortnight, so they want a periodic review rather than a raise per PR.
+
+### Finding: this budget cannot be satisfied by lazy-loading
+
+`scripts/perf/check-budgets.ts` sums the gzip of **every** `.js` under `dist/client`, lazy chunks
+included. So code-splitting cannot reduce `totalJsGzipBytes` — it can only raise it slightly, by the
+per-chunk overhead. Measured, not reasoned: splitting the default-off room-tone engine into its own
+chunk moved **1.3 KB** out of the live route's initial payload and moved the gate the *wrong* way,
+**243.3 → 243.7 KB**. That split was reverted — 0.5% off initial load did not justify an extra module
+boundary and a round-trip.
+
+It matters because `perf:check`'s own failure message tells you to "shrink the change (lazy-load,
+…)", and the first remedy it names provably cannot move the number it enforces. Two honest readings,
+and choosing between them is an ADR 151 decision, not a drive-by:
+
+1. **Total shipped JS is the right metric** — it tracks how much code the product carries, which is
+   what actually rots. Then the failure message should stop recommending lazy-loading, and splitting
+   should be justified against the Lighthouse baseline instead.
+2. **Initial payload is the right metric** — what a viewer downloads before the page is interactive.
+   Then the budget wants splitting into `initialJsGzipBytes` (entry + route chunk) alongside a looser
+   `totalJsGzipBytes`, and the current advice becomes correct.
+
+Until that is settled, treat `totalJsGzipBytes` as a *code-volume* budget and do not reach for
+code-splitting to satisfy it.

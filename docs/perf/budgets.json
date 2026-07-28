@@ -1,6 +1,6 @@
 {
-  "$comment": "Web UI performance budgets (ADR 151). Enforced by `pnpm perf:check` against packages/web/dist/client after a build. Raising a number is a deliberate, reviewed act: justify it in the PR and log the measured cost in docs/perf/web-live-baseline.md. Baselines set 2026-07-19 from main @ f7c7de0 (total JS gzip 223 KB, entry chunk 100 KB, CSS gzip 17.5 KB, fonts 708 KB) with ~10% headroom.",
-  "totalJsGzipBytes": 250000,
+  "$comment": "Web UI performance budgets (ADR 151). Enforced by `pnpm perf:check` against packages/web/dist/client after a build. Raising a number is a deliberate, reviewed act: justify it in the PR and log the measured cost in docs/perf/web-live-baseline.md. Baselines set 2026-07-19 from main @ f7c7de0 (total JS gzip 223 KB, entry chunk 100 KB, CSS gzip 17.5 KB, fonts 708 KB) with ~10% headroom. totalJsGzipBytes raised 250000 -> 258000 on 2026-07-28 (main @ 2846ccf, actual 243.3 KB): nine days of features (223 -> 243.3 KB) had eaten the headroom down to 0.8 KB, which blocks the next small change without that ever having been a reviewed decision. 258000 restores ~6% - room for a small feature, still tight enough that a real one earns this conversation. NOTE that this budget sums EVERY .js in dist/client, lazy chunks included, so code-splitting cannot reduce it - see the 2026-07-28 entry in web-live-baseline.md.",
+  "totalJsGzipBytes": 258000,
   "maxChunkGzipBytes": 112000,
   "totalCssGzipBytes": 22000,
   "totalFontBytes": 760000,
