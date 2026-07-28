@@ -83,7 +83,7 @@ Both multiplicities are first-class, and they are independent:
   - `init`'s team menu offers only _this folder's team / the machine's current team / create new_ —
     wiring a second repo to a known non-current team has no interactive path, and the fallback it
     does offer (create a new team) is the destructive one. The menu must offer the teams the vault
-    already knows. (Lane L-init-picker.)
+    already knows. (Part of lane L-docs-settle, §9.)
   - Lanes carry a `project` field that **nothing populates** — every lane on every team is
     `project='default'`, which silently makes surface-contention checks team-wide instead of
     per-repo. See §7. (Lane L-project.)
