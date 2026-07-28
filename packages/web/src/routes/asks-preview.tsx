@@ -99,6 +99,28 @@ const SCENES: Record<string, Envelope[]> = {
       (i + 1) * 45_000,
     );
   }),
+  'one deciding (deferred)': ((): Envelope[] => {
+    // The `wait` has to point at the ask's real id, which `ask()` mints — so build it, then refer to it.
+    const pending = ask(
+      'ryder',
+      'consult',
+      'standard',
+      'Should the roster show model family at all?',
+      3 * 60_000,
+    );
+    const deciding = {
+      id: '01KYPREVIEWWAIT00000000001',
+      team: 'revive',
+      from: 'nick',
+      to: { kind: 'member', name: 'ryder' },
+      act: 'wait',
+      body: 'deciding — check back in 1h',
+      thread: null,
+      ts: NOW - 30_000,
+      meta: { ask_ref: pending.id, until: '1h' },
+    } as unknown as Envelope;
+    return [pending, deciding];
+  })(),
   'timed out — agent holding': [
     ask(
       'izzo',

@@ -170,6 +170,7 @@ export function AsksStrip({
                   onClick={() => void answer(lead, 'accept')}
                   title={`approve — ${lead.env.from}`}
                 >
+                  <CheckIcon />
                   Approve
                 </button>
                 <button
@@ -179,6 +180,7 @@ export function AsksStrip({
                   onClick={() => void answer(lead, 'decline')}
                   title={`deny — ${lead.env.from}`}
                 >
+                  <CrossIcon />
                   Deny
                 </button>
               </span>
@@ -204,7 +206,9 @@ export function AsksStrip({
             onClick={() => setOpen((v) => !v)}
           >
             {rest > 0 && <span className="lc-asks__restcount">+{rest}</span>}
-            {open ? 'close' : rest > 0 ? 'see all' : 'details'}
+            <span className="lc-asks__morelabel">
+              {open ? 'close' : rest > 0 ? 'see all' : 'details'}
+            </span>
             <ChevronIcon />
           </button>
         )}
@@ -264,26 +268,30 @@ function AskCard({
   const open = askIsLoud(ask.state);
   return (
     <article className={`lc-ask lc-ask--${ask.state}`} style={style}>
-      <div className="lc-ask__head">
-        <span className="lc-chip__avatar" style={{ background: memberColor(from, kind) }}>
-          {initial(from)}
-        </span>
-        <span className="lc-ask__verb">
-          <b>{from}</b> {SPECIES_VERB[ask.species]}
-        </span>
-        <span className={`lc-ask__tier lc-ask__tier--${ask.tier}`}>{ask.tier}</span>
-        <AskClock ask={ask} />
+      {/* Left column: who + what, stacked. The clock and the actions get their own columns so that
+          down a list of twenty, every clock and every button lands on the same vertical line. */}
+      <div className="lc-ask__main">
+        <div className="lc-ask__head">
+          <span className="lc-chip__avatar" style={{ background: memberColor(from, kind) }}>
+            {initial(from)}
+          </span>
+          <span className="lc-ask__verb">
+            <b>{from}</b> {SPECIES_VERB[ask.species]}
+          </span>
+          <span className={`lc-ask__tier lc-ask__tier--${ask.tier}`}>{ask.tier}</span>
+        </div>
+        {ask.env.body && (
+          <button
+            type="button"
+            className="lc-ask__body"
+            onClick={() => scrollToMessage(ask.env.id)}
+            title="Jump to this ask in the stream"
+          >
+            {ask.env.body}
+          </button>
+        )}
       </div>
-      {ask.env.body && (
-        <button
-          type="button"
-          className="lc-ask__body"
-          onClick={() => scrollToMessage(ask.env.id)}
-          title="Jump to this ask in the stream"
-        >
-          {ask.env.body}
-        </button>
-      )}
+      <AskClock ask={ask} />
       {open && canAnswer && (
         <div className="lc-ask__actions">
           <button
@@ -292,6 +300,7 @@ function AskCard({
             className="lc-ask__btn lc-ask__btn--accept"
             onClick={() => onAnswer('accept')}
           >
+            <CheckIcon />
             Approve
           </button>
           <button
@@ -300,15 +309,17 @@ function AskCard({
             className="lc-ask__btn lc-ask__btn--decline"
             onClick={() => onAnswer('decline')}
           >
+            <CrossIcon />
             Deny
           </button>
           <button
             type="button"
             disabled={busy}
-            className="lc-ask__btn"
+            className="lc-ask__btn lc-ask__btn--later"
             onClick={() => onAnswer('deciding')}
+            title="Tell them you are deciding — the clock stops, they check back in an hour"
           >
-            deciding — check back in 1h
+            Deciding — 1h
           </button>
         </div>
       )}
@@ -323,23 +334,46 @@ function AskCard({
 
 /** The tier clock: time left until the agent invokes its no-answer policy, or what elapsing meant. */
 function AskClock({ ask }: { ask: AskView }) {
-  if (ask.state === 'held')
-    return <span className="lc-ask__clock lc-ask__clock--over">timed out — agent holding</span>;
+  if (ask.state === 'held') return <Elapsed holding />;
   if (ask.state !== 'open') return null;
   const left = ask.deadline - Date.now();
-  if (left <= 0) {
-    return (
-      <span className="lc-ask__clock lc-ask__clock--over">
-        {askTierHolds(ask.tier) ? 'timed out — agent holding' : 'timed out'}
-      </span>
-    );
-  }
+  if (left <= 0) return <Elapsed holding={askTierHolds(ask.tier)} />;
   const m = Math.floor(left / 60_000);
   const s = Math.floor((left % 60_000) / 1000);
   return (
     <span className="lc-ask__clock">
       {m}:{String(s).padStart(2, '0')} left
     </span>
+  );
+}
+
+/**
+ * The clock, after it has run out. "agent holding" is the part that matters and the part that costs
+ * width, so it is dropped on a phone rather than truncated — a clock reading "timed out" in danger
+ * red on a blocking ask has already told you the agent stopped, and the row below spells it out.
+ */
+function Elapsed({ holding }: { holding: boolean }) {
+  return (
+    <span className="lc-ask__clock lc-ask__clock--over">
+      timed out
+      {holding && <span className="lc-ask__holding"> — agent holding</span>}
+    </span>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg className="lc-ask__glyph" viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M2.6 6.3 4.9 8.6 9.4 3.7" />
+    </svg>
+  );
+}
+
+function CrossIcon() {
+  return (
+    <svg className="lc-ask__glyph" viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M3.4 3.4 8.6 8.6M8.6 3.4 3.4 8.6" />
+    </svg>
   );
 }
 
