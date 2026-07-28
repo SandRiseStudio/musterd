@@ -6,7 +6,7 @@ import { actToEvent } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
 import type { ConnStatus } from './client';
 import { OfficeOverlay } from './OfficeOverlay';
-import { presentCount, type WorkingOnEntry } from './workingOn';
+import { presentCount, type RoomEntry } from './workingOn';
 
 /**
  * Roster → the office's node data. `posture` is resolved here with `memberPosture` — the *same* call the
@@ -47,7 +47,7 @@ export function OfficeScene({
   onCollapse,
   onActClick,
   broadcast = false,
-  lanes = [],
+  entries = [],
   status = 'idle',
   onReady,
 }: {
@@ -63,8 +63,9 @@ export function OfficeScene({
    * animating unseen, pins DPR to 1, and ignores reduced-motion (the viewer of a stream is not the
    * person whose OS preference this is). */
   broadcast?: boolean;
-  /** The working-on strap's lanes, already derived by the route (see `workingOn`). */
-  lanes?: WorkingOnEntry[];
+  /** The overlay's reel — everyone in the room and what they are on, already derived by the route
+   * (see `roomEntries`). */
+  entries?: RoomEntry[];
   /** Connection state, for the overlay's honest LIVE/CONNECTING signal. */
   status?: ConnStatus;
   /** Handed the scene handle once it mounts (and `null` on teardown) — the broadcast route publishes it
@@ -165,8 +166,10 @@ export function OfficeScene({
         <OfficeOverlay
           teamName={teamName}
           present={presentCount(roster)}
-          lanes={lanes}
+          entries={entries}
           status={status}
+          // Steerable on the dashboard, a passive chyron on the stream: `/broadcast` has no cursor.
+          interactive={!broadcast}
         />
       )}
       {onCollapse && (

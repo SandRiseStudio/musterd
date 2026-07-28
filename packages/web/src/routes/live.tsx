@@ -5,11 +5,7 @@ import liveCss from '../live/Live.css?url';
 import brandCss from '../brand/brand.css?url';
 import { MusterdWord } from '../brand/MusterdWord';
 import { AsksStrip } from '../live/AsksStrip';
-import {
-  MemberSignInFields,
-  MemberSignInToggle,
-  type AdvancedState,
-} from '../live/MemberSignIn';
+import { MemberSignInFields, MemberSignInToggle, type AdvancedState } from '../live/MemberSignIn';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
@@ -25,7 +21,7 @@ import {
 import { firehoseSound } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
 import { useWorkingOn } from '../live/useWorkingOn';
-import { workingOn } from '../live/workingOn';
+import { roomEntries } from '../live/workingOn';
 
 export const Route = createFileRoute('/live')({
   head: () => ({
@@ -117,15 +113,18 @@ function LivePage() {
     recoverAttempts.current = 0;
   }, []);
 
-  const { envelopes, roster, status, error, liveIds, daemonBuild, daemonEpoch } = useLiveStream(cfg, {
-    onCredentialInvalid: recoverObserver,
-    onConnected: armRecovery,
-  });
+  const { envelopes, roster, status, error, liveIds, daemonBuild, daemonEpoch } = useLiveStream(
+    cfg,
+    {
+      onCredentialInvalid: recoverObserver,
+      onConnected: armRecovery,
+    },
+  );
 
-  // The office overlay's working-on strap. Derived here (not in the scene) so both routes hand the
-  // scene the same already-projected shape.
+  // The office overlay's reel: everyone in the room and what they are on. Derived here (not in the
+  // scene) so both routes hand the scene the same already-projected shape.
   const board = useWorkingOn(cfg, envelopes);
-  const lanes = workingOn(board, 3);
+  const entries = roomEntries(roster, board);
 
   const watch = async (explicit?: string) => {
     setFormError(null);
@@ -267,7 +266,7 @@ function LivePage() {
             </div>
           )}
           {/* The asks & approvals strip (ADR 149) — above the fold, before the panels: loud is
-              *first thing seen*, not fourth panel scanned. Renders nothing until an ask exists. */}
+           *first thing seen*, not fourth panel scanned. Renders nothing until an ask exists. */}
           <AsksStrip envelopes={envelopes} roster={roster} cfg={cfg!} />
           <div
             className={
@@ -283,7 +282,7 @@ function LivePage() {
               envelopes={envelopes}
               liveIds={liveIds}
               collapsed={collapsed.office}
-              lanes={lanes}
+              entries={entries}
               status={status}
               onCollapse={() => toggleCollapse('office')}
               onActClick={onActClick}
@@ -447,8 +446,8 @@ function ConnectForm({
       <div className="lc-form__card">
         <h1 className="lc-form__title">Watch the team, live</h1>
         <p className="lc-form__sub">
-          Enter a team to stream all of its communication. A hidden read-only observer seat is created
-          for you — watching never shows you on the roster.
+          Enter a team to stream all of its communication. A hidden read-only observer seat is
+          created for you — watching never shows you on the roster.
         </p>
         <label className="lc-form__field">
           <span>Team</span>
@@ -466,7 +465,11 @@ function ConnectForm({
 
         {error && <p className="lc-form__error">{error}</p>}
 
-        <button className="lc-form__connect" disabled={!team.trim() || provisioning} onClick={onWatch}>
+        <button
+          className="lc-form__connect"
+          disabled={!team.trim() || provisioning}
+          onClick={onWatch}
+        >
           {provisioning && <span className="lc-spinner" aria-hidden="true" />}
           {provisioning ? 'Provisioning…' : 'Watch live'}
         </button>

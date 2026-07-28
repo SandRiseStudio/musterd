@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Lane, LaneBoard, MemberSummary } from '@musterd/protocol';
-import { invalidatesLanes, presentCount, workingOn } from './workingOn';
+import { memberColor } from './format';
+import { invalidatesLanes, presentCount, roomEntries } from './workingOn';
 
 function lane(over: Partial<Lane>): Lane {
   return {
@@ -26,58 +27,123 @@ function lane(over: Partial<Lane>): Lane {
 }
 const board = (lanes: Lane[]): LaneBoard => ({ lanes, warnings: [] });
 
-describe('workingOn', () => {
-  it('returns nothing when the board has not loaded', () => {
-    expect(workingOn(null, 3)).toEqual([]);
+function member(over: Partial<MemberSummary>): MemberSummary {
+  return {
+    name: 'miley',
+    kind: 'agent',
+    presence: 'online',
+    activity: 'working',
+    posture: 'working',
+    state: null,
+    last_status_at: null,
+    ...over,
+  } as MemberSummary;
+}
+
+describe('roomEntries', () => {
+  it('is the roster, not the board — a member with no lane is still in the room', () => {
+    const result = roomEntries([member({ name: 'a' }), member({ name: 'b' })], board([]));
+    expect(result.map((r) => r.name)).toEqual(['a', 'b']);
+    expect(result.every((r) => r.title === null && r.source === null)).toBe(true);
   });
 
-  it('keeps only owned, in-flight lanes', () => {
-    const result = workingOn(
+  it('leaves offline members out — offline is the only absence (ADR 010)', () => {
+    const result = roomEntries(
+      [member({ name: 'here' }), member({ name: 'gone', presence: 'offline' })],
+      board([]),
+    );
+    expect(result.map((r) => r.name)).toEqual(['here']);
+  });
+
+  it('prefers a claimed lane over a self-reported line, and says which it used', () => {
+    const result = roomEntries(
+      [member({ name: 'a', state: 'poking at it' })],
+      board([lane({ owner_seat: 'a', title: 'ship it', state: 'active' })]),
+    );
+    expect(result[0]).toMatchObject({ title: 'ship it', source: 'lane', laneState: 'active' });
+  });
+
+  it('falls back to the status line, marked as reported rather than owned', () => {
+    const result = roomEntries([member({ name: 'a', state: 'poking at it' })], board([]));
+    expect(result[0]).toMatchObject({ title: 'poking at it', source: 'status', laneState: null });
+  });
+
+  // A board that has not arrived is not a board with nothing on it: the reel must still show the
+  // room, or it blanks on every reconnect.
+  it('still fills the reel when the lane board has not loaded', () => {
+    const result = roomEntries([member({ name: 'a', state: 'poking at it' })], null);
+    expect(result[0]).toMatchObject({ title: 'poking at it', source: 'status' });
+  });
+
+  it('orders lane owners, then reporters, then the quiet', () => {
+    const result = roomEntries(
+      [
+        member({ name: 'quiet' }),
+        member({ name: 'reporter', state: 'looking at logs', last_status_at: 5 }),
+        member({ name: 'owner' }),
+      ],
+      board([lane({ owner_seat: 'owner' })]),
+    );
+    expect(result.map((r) => r.name)).toEqual(['owner', 'reporter', 'quiet']);
+  });
+
+  it('orders lane owners by lane recency, and the quiet alphabetically', () => {
+    const result = roomEntries(
+      [
+        member({ name: 'zed' }),
+        member({ name: 'old' }),
+        member({ name: 'abe' }),
+        member({ name: 'new' }),
+      ],
       board([
-        lane({ id: 'A', state: 'claimed' }),
-        lane({ id: 'B', state: 'active' }),
-        lane({ id: 'C', state: 'blocked' }),
-        lane({ id: 'D', state: 'done' }),
-        lane({ id: 'E', state: 'abandoned' }),
-        lane({ id: 'F', state: 'claimed', owner_seat: null }),
+        lane({ id: 'A', owner_seat: 'old', claimed_at: 100 }),
+        lane({ id: 'B', owner_seat: 'new', claimed_at: 300 }),
       ]),
-      10,
     );
-    expect(result.map((r) => r.id)).toEqual(['A', 'B', 'C']);
+    expect(result.map((r) => r.name)).toEqual(['new', 'old', 'abe', 'zed']);
   });
 
-  it('orders most recently claimed first', () => {
-    const result = workingOn(
+  it('shows the freshest of several lanes and counts the rest', () => {
+    const result = roomEntries(
+      [member({ name: 'a' })],
       board([
-        lane({ id: 'old', claimed_at: 100 }),
-        lane({ id: 'new', claimed_at: 300 }),
-        lane({ id: 'mid', claimed_at: 200 }),
+        lane({ id: 'A', owner_seat: 'a', title: 'stale', claimed_at: 1 }),
+        lane({ id: 'B', owner_seat: 'a', title: 'fresh', claimed_at: 9 }),
+        lane({ id: 'C', owner_seat: 'a', title: 'also', claimed_at: 5 }),
       ]),
-      10,
     );
-    expect(result.map((r) => r.id)).toEqual(['new', 'mid', 'old']);
+    expect(result[0]).toMatchObject({ title: 'fresh', moreLanes: 2 });
   });
 
-  it('falls back to updated_at when a lane has never been claimed', () => {
-    const result = workingOn(
+  it('ignores lanes that are history rather than work', () => {
+    const result = roomEntries(
+      [member({ name: 'a' })],
       board([
-        lane({ id: 'claimed', claimed_at: 100, updated_at: 100 }),
-        lane({ id: 'unclaimed-but-active', claimed_at: null, updated_at: 500 }),
+        lane({ id: 'A', owner_seat: 'a', state: 'done' }),
+        lane({ id: 'B', owner_seat: 'a', state: 'abandoned' }),
+        lane({ id: 'C', owner_seat: null, state: 'active' }),
       ]),
-      10,
     );
-    expect(result[0]!.id).toBe('unclaimed-but-active');
+    expect(result[0]).toMatchObject({ title: null, source: null, moreLanes: 0 });
   });
 
-  it('caps at the limit', () => {
-    const lanes = [1, 2, 3, 4, 5].map((n) => lane({ id: `L${n}`, claimed_at: n }));
-    expect(workingOn(board(lanes), 2).map((r) => r.id)).toEqual(['L5', 'L4']);
+  it('carries the identity hue the floor paints each member with', () => {
+    const byName = new Map(
+      roomEntries(
+        [member({ name: 'stanley', kind: 'agent' }), member({ name: 'nick', kind: 'human' })],
+        board([]),
+      ).map((e) => [e.name, e]),
+    );
+    const agent = byName.get('stanley');
+    const human = byName.get('nick');
+    expect(agent!.color).toBe(memberColor('stanley', 'agent'));
+    expect(human!.color).toBe(memberColor('nick', 'human'));
+    // Agent hues live in 150°-280°, human hues wrap 320°-70° — the two families must not collide.
+    expect(agent!.color).not.toBe(human!.color);
   });
 
-  it('projects only what the overlay renders', () => {
-    expect(workingOn(board([lane({ id: 'A', title: 'ship it', owner_seat: 'stanley' })]), 1)).toEqual(
-      [{ id: 'A', title: 'ship it', owner: 'stanley', state: 'claimed' }],
-    );
+  it('treats a blank status line as no line at all', () => {
+    expect(roomEntries([member({ name: 'a', state: '   ' })], board([]))[0]!.source).toBeNull();
   });
 });
 
@@ -86,9 +152,9 @@ describe('presentCount', () => {
     ({ name, kind: 'agent', presence }) as MemberSummary;
 
   it('counts everyone not offline', () => {
-    expect(presentCount([member('a', 'online'), member('b', 'offline'), member('c', 'online')])).toBe(
-      2,
-    );
+    expect(
+      presentCount([member('a', 'online'), member('b', 'offline'), member('c', 'online')]),
+    ).toBe(2);
   });
 
   it('is zero for an empty roster', () => {

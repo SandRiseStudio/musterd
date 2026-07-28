@@ -8,7 +8,7 @@ import { acquireObserver, forgetObserver, type LiveConfig } from '../live/client
 import type { OfficeHandle } from '../live/office-scene';
 import { useLiveStream } from '../live/useLiveStream';
 import { useWorkingOn } from '../live/useWorkingOn';
-import { workingOn } from '../live/workingOn';
+import { roomEntries } from '../live/workingOn';
 
 export const Route = createFileRoute('/broadcast')({
   head: () => ({
@@ -94,10 +94,10 @@ function BroadcastPage() {
     onCredentialInvalid: recoverObserver,
   });
 
-  // The working-on strap's lanes. Three is what fits the stage without the strap competing with the
-  // office for a stranger's attention.
+  // The overlay's reel: everyone in the room and what they are on. Uncapped — the stream's chyron
+  // cycles one at a time, so the roster costs dwell time rather than stage area.
   const board = useWorkingOn(cfg, envelopes);
-  const lanes = workingOn(board, 3);
+  const entries = roomEntries(roster, board);
 
   // Connect from the URL only — no form, no localStorage team memory. A stream source is launched by a
   // URL (an OBS source, a headless capturer), so the URL is the whole configuration.
@@ -149,7 +149,7 @@ function BroadcastPage() {
             roster={roster}
             envelopes={envelopes}
             liveIds={liveIds}
-            lanes={lanes}
+            entries={entries}
             status={status}
             broadcast
             onReady={onSceneReady}

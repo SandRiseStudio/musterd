@@ -4,6 +4,8 @@ import liveCss from '../live/Live.css?url';
 import brandCss from '../brand/brand.css?url';
 import { MusterdWord } from '../brand/MusterdWord';
 import { memberColor } from '../live/format';
+import { OfficeOverlay } from '../live/OfficeOverlay';
+import type { RoomEntry } from '../live/workingOn';
 import type { OfficeData, OfficeEvent, OfficeHandle } from '../live/office-scene';
 
 export const Route = createFileRoute('/office-preview')({
@@ -23,7 +25,12 @@ export const Route = createFileRoute('/office-preview')({
    drifts to the nook. Design fixture; also how the motion is verified in a real browser. */
 
 type Kind = 'agent' | 'human';
-type Mock = { name: string; kind: Kind; activity: OfficeData['nodes'][number]['activity']; state: string | null };
+type Mock = {
+  name: string;
+  kind: Kind;
+  activity: OfficeData['nodes'][number]['activity'];
+  state: string | null;
+};
 
 const POOL: Mock[] = [
   { name: 'Ada', kind: 'human', activity: 'working', state: 'reviewing the isometric office' },
@@ -40,27 +47,139 @@ const POOL: Mock[] = [
 // A looping choreography script (ms offset → event), so the room is always alive on the preview.
 const SCRIPT: { at: number; ev: OfficeEvent }[] = [
   { at: 200, ev: { kind: 'walk-help', from: 'Ada', to: 'Bo', tier: 'needs-attn' } },
-  { at: 300, ev: { kind: 'speech', who: 'Cy', text: 'anyone seen the flaky seating test? it fails ~1 in 5 for me', tone: 'accent' } },
+  {
+    at: 300,
+    ev: {
+      kind: 'speech',
+      who: 'Cy',
+      text: 'anyone seen the flaky seating test? it fails ~1 in 5 for me',
+      tone: 'accent',
+    },
+  },
   { at: 500, ev: { kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' } },
   { at: 1100, ev: { kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' } },
   { at: 1800, ev: { kind: 'megaphone', from: 'Ivy' } },
-  { at: 2000, ev: { kind: 'speech', who: 'Ivy', text: 'shipping the character rig — hair variety is in review', tone: 'status' } },
+  {
+    at: 2000,
+    ev: {
+      kind: 'speech',
+      who: 'Ivy',
+      text: 'shipping the character rig — hair variety is in review',
+      tone: 'status',
+    },
+  },
   { at: 2400, ev: { kind: 'screen-pulse', who: 'Hana', tone: 'status' } },
-  { at: 2500, ev: { kind: 'speech', who: 'Hana', text: 'profiling the render loop', tone: 'status' } },
+  {
+    at: 2500,
+    ev: { kind: 'speech', who: 'Hana', text: 'profiling the render loop', tone: 'status' },
+  },
   { at: 3000, ev: { kind: 'walk-handoff', from: 'Bo', to: 'Ivy', label: 'render.ts' } },
   { at: 3600, ev: { kind: 'resolve', who: 'Fen' } },
-  { at: 3700, ev: { kind: 'speech', who: 'Fen', text: 'fixed — resolving the thread', tone: 'success' } },
+  {
+    at: 3700,
+    ev: { kind: 'speech', who: 'Fen', text: 'fixed — resolving the thread', tone: 'success' },
+  },
   { at: 4200, ev: { kind: 'note', from: 'Ada', to: 'Cy', tone: 'info' } },
   // Steering trio (ADR 103): a challenge questions a direction, an interrupt-class steer redirects it,
   // and a defer pushes a Goal later — a board-wide pulse.
   { at: 4700, ev: { kind: 'challenge', from: 'Dev', to: 'Bo', urgent: false } },
-  { at: 4800, ev: { kind: 'speech', who: 'Dev', text: 'why render.ts before the seating fix? can you justify the order?', tone: 'challenge' } },
+  {
+    at: 4800,
+    ev: {
+      kind: 'speech',
+      who: 'Dev',
+      text: 'why render.ts before the seating fix? can you justify the order?',
+      tone: 'challenge',
+    },
+  },
   { at: 5600, ev: { kind: 'steer', from: 'Ada', to: 'Hana', urgent: true } },
-  { at: 5700, ev: { kind: 'speech', who: 'Ada', text: 'change of plan — drop the profiling, the deploy is what matters now', tone: 'steer' } },
+  {
+    at: 5700,
+    ev: {
+      kind: 'speech',
+      who: 'Ada',
+      text: 'change of plan — drop the profiling, the deploy is what matters now',
+      tone: 'steer',
+    },
+  },
   { at: 6600, ev: { kind: 'defer', who: 'Cy' } },
-  { at: 6700, ev: { kind: 'speech', who: 'Cy', text: 'deferring the firehose Goal to next wave', tone: 'lane' } },
+  {
+    at: 6700,
+    ev: {
+      kind: 'speech',
+      who: 'Cy',
+      text: 'deferring the firehose Goal to next wave',
+      tone: 'lane',
+    },
+  },
 ];
 const LOOP = 5600;
+
+/* The overlay's fixture reel — real-shaped titles (long, ADR-numbered, the kind that actually
+   truncate) plus the quiet cases, so the card is designed against the worst entry and not a tidy
+   one. `?reel=<n>` trims the list; `?reel=0` is the empty room. */
+const REEL: RoomEntry[] = [
+  {
+    name: 'Ivy',
+    kind: 'human',
+    color: memberColor('Ivy', 'human'),
+    posture: 'working',
+    title: 'ADR 169 inc 5 — spin-up/spin-down ephemeral cross-family reviewer',
+    source: 'lane',
+    laneState: 'active',
+    moreLanes: 0,
+  },
+  {
+    name: 'Bo',
+    kind: 'agent',
+    color: memberColor('Bo', 'agent'),
+    posture: 'working',
+    title: 'MCP RC 2026-07-28 readiness — seam canaries, version truth, ADR',
+    source: 'lane',
+    laneState: 'claimed',
+    moreLanes: 1,
+  },
+  {
+    name: 'Hana',
+    kind: 'agent',
+    color: memberColor('Hana', 'agent'),
+    posture: 'working',
+    title: 'Harness residency increment 6 — native backend reference row',
+    source: 'lane',
+    laneState: 'blocked',
+    moreLanes: 0,
+  },
+  {
+    name: 'Cy',
+    kind: 'human',
+    color: memberColor('Cy', 'human'),
+    posture: 'working',
+    title: 'wiring the firehose subscribe',
+    source: 'status',
+    laneState: null,
+    moreLanes: 0,
+  },
+  {
+    name: 'Dev',
+    kind: 'agent',
+    color: memberColor('Dev', 'agent'),
+    posture: 'idle',
+    title: null,
+    source: null,
+    laneState: null,
+    moreLanes: 0,
+  },
+  {
+    name: 'Gus',
+    kind: 'human',
+    color: memberColor('Gus', 'human'),
+    posture: 'away',
+    title: null,
+    source: null,
+    laneState: null,
+    moreLanes: 0,
+  },
+];
 
 // This dev-fixture page reads its scenario from `?n=/?idle=/?stale=` query params, but its
 // useState initializers run during SSR prerender too — where `window` is undefined. On the
@@ -99,6 +218,13 @@ function OfficePreviewPage() {
     return raw ? new Set(raw.split(',').map((s) => s.trim())) : new Set();
   });
 
+  // `?reel=<0..6>` sizes the overlay's reel — 1 is the no-rail/no-nav case, 0 the empty room.
+  const [reelCount] = useState(() => {
+    const raw = previewSearch().get('reel');
+    const n = Number(raw);
+    return raw !== null && Number.isFinite(n) ? Math.max(0, Math.min(REEL.length, n)) : REEL.length;
+  });
+
   const buildData = useCallback(
     (): OfficeData => ({
       nodes: POOL.filter((m) => present.has(m.name)).map((m) => {
@@ -106,7 +232,11 @@ function OfficePreviewPage() {
         const isStale = stale.has(m.name);
         // A stale seat keeps `activity: working` but is placed by its projected `idle` posture.
         const activity = isAway || (idle.has(m.name) && !isStale) ? 'idle' : m.activity;
-        const posture = isAway ? ('away' as const) : isStale || idle.has(m.name) ? ('idle' as const) : activity;
+        const posture = isAway
+          ? ('away' as const)
+          : isStale || idle.has(m.name)
+            ? ('idle' as const)
+            : activity;
         return {
           name: m.name,
           kind: m.kind,
@@ -143,11 +273,15 @@ function OfficePreviewPage() {
         (window as unknown as { __office?: OfficeHandle }).__office = handle; // dev-fixture debug handle
         // `?quiet` skips the looping choreography — a still room of seated members, so an on-demand
         // gesture (pokeGesture / the 🙆👀 buttons) is the only motion. Used to verify gestures in isolation.
-        const search = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+        const search =
+          typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search)
+            : new URLSearchParams();
         const quiet = search.has('quiet');
         if (!quiet) {
           const run = () => {
-            for (const step of SCRIPT) timers.push(setTimeout(() => handleRef.current?.emit(step.ev), step.at));
+            for (const step of SCRIPT)
+              timers.push(setTimeout(() => handleRef.current?.emit(step.ev), step.at));
           };
           run();
           loop = setInterval(run, LOOP);
@@ -160,7 +294,8 @@ function OfficePreviewPage() {
           const poke = () => {
             const h = handleRef.current;
             if (!h) return;
-            if (beat === 'fridge' || beat === 'water' || beat === 'coffee' || beat === 'phone') h.pokeErrand(beat);
+            if (beat === 'fridge' || beat === 'water' || beat === 'coffee' || beat === 'phone')
+              h.pokeErrand(beat);
             else h.pokeGesture(Number(beat) || 1);
           };
           timers.push(setTimeout(poke, 600));
@@ -200,34 +335,157 @@ function OfficePreviewPage() {
         <MusterdWord />
         <span className="lc__team">/ office preview</span>
         <span className="lc__spacer" />
-        <button className="lc__pbtn" title="request help (walk-over)" onClick={() => fire({ kind: 'walk-help', from: 'Ada', to: 'Bo', tier: 'needs-attn' })}>?</button>
-        <button className="lc__pbtn" title="urgent help (run)" onClick={() => fire({ kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' })}>!</button>
-        <button className="lc__pbtn" title="handoff (carry box)" onClick={() => fire({ kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' })}>↦</button>
-        <button className="lc__pbtn" title="broadcast (megaphone)" onClick={() => fire({ kind: 'megaphone', from: 'Ivy' })}>📣</button>
+        <button
+          className="lc__pbtn"
+          title="request help (walk-over)"
+          onClick={() => fire({ kind: 'walk-help', from: 'Ada', to: 'Bo', tier: 'needs-attn' })}
+        >
+          ?
+        </button>
+        <button
+          className="lc__pbtn"
+          title="urgent help (run)"
+          onClick={() => fire({ kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' })}
+        >
+          !
+        </button>
+        <button
+          className="lc__pbtn"
+          title="handoff (carry box)"
+          onClick={() => fire({ kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' })}
+        >
+          ↦
+        </button>
+        <button
+          className="lc__pbtn"
+          title="broadcast (megaphone)"
+          onClick={() => fire({ kind: 'megaphone', from: 'Ivy' })}
+        >
+          📣
+        </button>
         <span className="lc__pbtn-sep" />
-        <button className="lc__pbtn" title="steer (interrupt-class redirect)" onClick={() => fire({ kind: 'steer', from: 'Ada', to: 'Dev', urgent: true })}>↪</button>
-        <button className="lc__pbtn" title="challenge (justify?)" onClick={() => fire({ kind: 'challenge', from: 'Cy', to: 'Bo', urgent: false })}>🤔</button>
-        <button className="lc__pbtn" title="defer (plan mutation → board pulse)" onClick={() => fire({ kind: 'defer', who: 'Fen' })}>»</button>
+        <button
+          className="lc__pbtn"
+          title="steer (interrupt-class redirect)"
+          onClick={() => fire({ kind: 'steer', from: 'Ada', to: 'Dev', urgent: true })}
+        >
+          ↪
+        </button>
+        <button
+          className="lc__pbtn"
+          title="challenge (justify?)"
+          onClick={() => fire({ kind: 'challenge', from: 'Cy', to: 'Bo', urgent: false })}
+        >
+          🤔
+        </button>
+        <button
+          className="lc__pbtn"
+          title="defer (plan mutation → board pulse)"
+          onClick={() => fire({ kind: 'defer', who: 'Fen' })}
+        >
+          »
+        </button>
         <span className="lc__pbtn-sep" />
-        <button className="lc__pbtn" title="ambient gesture: stretch" onClick={() => handleRef.current?.pokeGesture(1)}>🙆</button>
-        <button className="lc__pbtn" title="ambient gesture: glance" onClick={() => handleRef.current?.pokeGesture(2)}>👀</button>
-        <button className="lc__pbtn" title="ambient gesture: sip" onClick={() => handleRef.current?.pokeGesture(6)}>🍵</button>
-        <button className="lc__pbtn" title="ambient gesture: swivel" onClick={() => handleRef.current?.pokeGesture(7)}>🪑</button>
-        <button className="lc__pbtn" title="errand: fridge meal" onClick={() => handleRef.current?.pokeErrand('fridge')}>🍽</button>
-        <button className="lc__pbtn" title="errand: water refill" onClick={() => handleRef.current?.pokeErrand('water')}>💧</button>
-        <button className="lc__pbtn" title="errand: coffee run" onClick={() => handleRef.current?.pokeErrand('coffee')}>☕</button>
-        <button className="lc__pbtn" title="errand: phone call (stand, pace, return)" onClick={() => handleRef.current?.pokeErrand('phone')}>📞</button>
+        <button
+          className="lc__pbtn"
+          title="ambient gesture: stretch"
+          onClick={() => handleRef.current?.pokeGesture(1)}
+        >
+          🙆
+        </button>
+        <button
+          className="lc__pbtn"
+          title="ambient gesture: glance"
+          onClick={() => handleRef.current?.pokeGesture(2)}
+        >
+          👀
+        </button>
+        <button
+          className="lc__pbtn"
+          title="ambient gesture: sip"
+          onClick={() => handleRef.current?.pokeGesture(6)}
+        >
+          🍵
+        </button>
+        <button
+          className="lc__pbtn"
+          title="ambient gesture: swivel"
+          onClick={() => handleRef.current?.pokeGesture(7)}
+        >
+          🪑
+        </button>
+        <button
+          className="lc__pbtn"
+          title="errand: fridge meal"
+          onClick={() => handleRef.current?.pokeErrand('fridge')}
+        >
+          🍽
+        </button>
+        <button
+          className="lc__pbtn"
+          title="errand: water refill"
+          onClick={() => handleRef.current?.pokeErrand('water')}
+        >
+          💧
+        </button>
+        <button
+          className="lc__pbtn"
+          title="errand: coffee run"
+          onClick={() => handleRef.current?.pokeErrand('coffee')}
+        >
+          ☕
+        </button>
+        <button
+          className="lc__pbtn"
+          title="errand: phone call (stand, pace, return)"
+          onClick={() => handleRef.current?.pokeErrand('phone')}
+        >
+          📞
+        </button>
         <span className="lc__pbtn-sep" />
-        <button className="lc__pbtn" title="Dev join / leave (walk in / out)" onClick={() => present2('Dev')}>D</button>
-        <button className="lc__pbtn" title="Hana join / leave (walk in / out)" onClick={() => present2('Hana')}>H</button>
-        <button className="lc__pbtn" title="Ivy away / back (drift to nook)" onClick={() => away2('Ivy')}>z</button>
-        <button className="lc__pbtn" title="Bo idle / working (walk to the lounge)" onClick={() => idle2('Bo')}>☕</button>
+        <button
+          className="lc__pbtn"
+          title="Dev join / leave (walk in / out)"
+          onClick={() => present2('Dev')}
+        >
+          D
+        </button>
+        <button
+          className="lc__pbtn"
+          title="Hana join / leave (walk in / out)"
+          onClick={() => present2('Hana')}
+        >
+          H
+        </button>
+        <button
+          className="lc__pbtn"
+          title="Ivy away / back (drift to nook)"
+          onClick={() => away2('Ivy')}
+        >
+          z
+        </button>
+        <button
+          className="lc__pbtn"
+          title="Bo idle / working (walk to the lounge)"
+          onClick={() => idle2('Bo')}
+        >
+          ☕
+        </button>
         <span className="lc__status lc__status--live">design preview</span>
       </header>
       <div className="lc__canvas lc__canvas--companion">
         <section className="lc-office">
           <div className="lc-gl-canvas" ref={hostRef} aria-hidden="true" />
           <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
+          {/* The real shared chrome, not a mock of it — the overlay is scene furniture, so the design
+              fixture is where its cycle, truncation and empty state get looked at. */}
+          <OfficeOverlay
+            teamName="revive"
+            present={present.size}
+            entries={REEL.slice(0, reelCount)}
+            status="live"
+            interactive
+          />
           <p className="lc-office__caption">office choreography preview</p>
         </section>
       </div>
