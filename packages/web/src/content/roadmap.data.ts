@@ -887,10 +887,8 @@ const RAW: RawItem[] = [
   {
     id: 'harness-residency',
     frozenBy: 131,
-    building: 'increment 6 — the native backend, owner-gated',
-    wave: 8,
+    shipped: { prs: [236, 240, 244, 255, 257, 269, 271, 274] },
     title: 'musterd gives any harness residency (resume the offline)',
-    plan: 'near-term',
     category: 'harness',
     blurb:
       'The offline rung: a seat binding holds the harness session id, so the daemon can resurrect an exited session on a directed act — turning a turn-scoped harness into an always-on one.',
@@ -965,15 +963,13 @@ const RAW: RawItem[] = [
   {
     id: 'cookoff-value-experiment',
     frozenBy: 122,
-    building: 'the raw-transcript dataset export, gated on ADR 051 consent/redaction',
-    wave: 6,
+    shipped: { prs: [209, 210, 212, 214, 217, 338, 345] },
     title: 'cookoff — the controlled experiment that proves musterd’s value',
-    plan: 'near-term',
     category: 'observability',
     blurb:
       'The commercial crux: a sellable, defensible number for coordinated-vs-siloed agents on the same task — one reusable instrument (the cookoff scenario) that also answers the model and harness questions by varying a different term.',
     detail:
-      'Design frozen 2026-07-10 (ADR 122 / ADR 123): a five-cell matrix (A single agent · B one musterd agent · C2 human-dispatch · C3 markdown-board DIY-musterd · D N musterd agents) over one bespoke fixture, holding everything fixed except the coordination medium and N. Headline = wasted-work %, supports = interventions- and tokens-to-done, guardrail = hidden acceptance-test pass rate (no LLM judge on the headline). The apparatus is BUILT: prep froze the measurement protocol (PR #210 — predicate set v1 W3→W1→W2→W4 + I1–I6 interventions), `musterd archaeology` is the git-only wasted-work reference collector (PR #212), the "Skiff" scenario repo carries 8 trap tickets + hidden suites + scoring harness in its own repo (PR #214, kickoff `ea5c6d4`), and the run manifest pins the ladder (PR #217 — Sonnet 5 / Claude Code / N=3, smoke-only spend authorized). Next is the run ladder itself: smoke (1×D) → pilot (A+D) → flagship (5 cells × 3–5), each rung gating the next. Every flagship run is a labeled coordination transcript — the experiment produces the coordination-traces dataset as a byproduct (ADR 122 flywheel). The smoke rung already corrected one design assumption: finding 001’s ≈37% is a forensic proxy, not a reproducible calibration gate (single-actor history) — the reproducible anchor is the fixture’s multi-seat reference-solution (12.2%).',
+      'Design frozen 2026-07-10 (ADR 122 / ADR 123): a five-cell matrix (A single agent · B one musterd agent · C2 human-dispatch · C3 markdown-board DIY-musterd · D N musterd agents) over one bespoke fixture, holding everything fixed except the coordination medium and N. Headline = wasted-work %, supports = interventions- and tokens-to-done, guardrail = hidden acceptance-test pass rate (no LLM judge on the headline). The apparatus is BUILT: prep froze the measurement protocol (PR #210 — predicate set v1 W3→W1→W2→W4 + I1–I6 interventions), `musterd archaeology` is the git-only wasted-work reference collector (PR #212), the "Skiff" scenario repo carries 8 trap tickets + hidden suites + scoring harness in its own repo (PR #214, kickoff `ea5c6d4`), and the run manifest pins the ladder (PR #217 — Sonnet 5 / Claude Code / N=3, smoke-only spend authorized). The run ladder then completed: smoke → pilot (#338) → flagship (#345), each rung gating the next, and both rungs published as finding 006. The flagship replicates the pilot at scale — coordinated N=3 wasted 1.9% against uncoordinated N=3 at 72%, roughly 38x less redundancy at equal correctness — and the sell is D-vs-uncoordinated-N, never D-vs-solo, since solo A wasted 0% and was cheapest. Every flagship run is a labeled coordination transcript — the experiment produces the coordination-traces dataset as a byproduct (ADR 122 flywheel). The smoke rung already corrected one design assumption: finding 001’s ≈37% is a forensic proxy, not a reproducible calibration gate (single-actor history) — the reproducible anchor is the fixture’s multi-seat reference-solution (12.2%).',
     refs: [
       adr(122, 'ADR 122'),
       adr(123, 'ADR 123'),
@@ -1012,10 +1008,8 @@ const RAW: RawItem[] = [
   {
     id: 'human-role-reevaluation',
     frozenBy: 145,
-    building: 'the re-sequenced backlog items it produced are still landing',
-    wave: 7,
+    shipped: { prs: [306] },
     title: 'Re-found the human role — human↔agent coordination, reevaluated whole',
-    plan: 'near-term',
     category: 'human-loop',
     blurb:
       'The dedicated design pass that reevaluated the human’s role in musterd end-to-end — presence, steering, notification, approval, and thread-close — against the humans-as-peers thesis and what the dogfood record actually shows. Complete: it re-sequenced the human-loop backlog into the items below.',
@@ -1147,14 +1141,12 @@ const RAW: RawItem[] = [
   {
     id: 'insight-dashboard',
     frozenBy: 104,
-    building: 'increment 3 — live-tail so the board moves on lane events, not on refresh',
-    wave: 7,
+    shipped: { prs: [151, 435, 439] },
     title: 'Work items, board & insight layer (web)',
-    plan: 'near-term',
     category: 'insights',
     blurb: 'The kanban-style board and team analytics rendered in the web dashboard — a thin surface over the insight engine, never a second store.',
     detail:
-      'The web surface for the already-shipped insight engine (server projections + GET /report + the report CLI/MCP all landed; this is the browser board they never got). ADR 104 frames it as three increments over the two existing endpoints — no board CRUD, no stored columns, the dashboard renders what the engine derives. Increment 1 shipped (PR #151): a read-only /board kanban over GET /lanes — one column per lane state (backlog/claimed/in-progress/blocked/done), cards carrying owner, Goal, branch, age, and the advisory lane-warning flag, auto-provisioning the same hidden observer seat /live uses. Remaining: increment 2 — the insight rail (throughput, cycle time, WIP, waiting-on, MAST exceptions) + Goal swimlanes over GET /report; increment 3 — live-tail so the board moves cards on the ADR 102 lane events instead of on refresh.',
+      'The web surface for the already-shipped insight engine (server projections + GET /report + the report CLI/MCP all landed; this is the browser board they never got). ADR 104 frames it as three increments over the two existing endpoints — no board CRUD, no stored columns, the dashboard renders what the engine derives. Increment 1 shipped (PR #151): a read-only /board kanban over GET /lanes — one column per lane state (backlog/claimed/in-progress/blocked/done), cards carrying owner, Goal, branch, age, and the advisory lane-warning flag, auto-provisioning the same hidden observer seat /live uses. Increments 2 and 3 then landed under the writable-board arc rather than this item\'s banner, which is why this stayed marked unbuilt: the insight rail over GET /report plus the columns-versus-Goals swimlane toggle (#439), and the live read — one fetch, then a re-fetch only when a lane act arrives over the firehose, no polling (#435).',
     refs: [adr(104, 'ADR 104'), doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
     dependsOn: ['insight-engine', 'web-dashboard'],
   },
@@ -1292,10 +1284,8 @@ const RAW: RawItem[] = [
   {
     id: 'tool-call-telemetry',
     frozenBy: 144,
-    building: 'the ledger/report aggregates beyond ADR 144 increment 1',
-    wave: 'later',
+    shipped: { prs: [286] },
     title: 'Tool-call telemetry — which tools get used, and what they cost',
-    plan: 'reserved',
     category: 'observability',
     blurb:
       'musterd records coordination acts, never tool calls. Emit a per-tool-call event — tool name, latency, error, caller role, estimated schema weight — so we can see how the MCP surface is actually used and what it costs.',
@@ -1313,7 +1303,7 @@ const RAW: RawItem[] = [
   {
     id: 'mcp-tool-surface',
     frozenBy: 144,
-    building: 'increment 4 — schemas and tool shape, wanting live bounce data',
+    building: 'increments 5 (scope by role) and 6 (discovery, conditional) — 1–4 landed',
     wave: 'later',
     title: 'musterd’s MCP server, examined — names, descriptions, schemas, results & discovery',
     plan: 'reserved',
