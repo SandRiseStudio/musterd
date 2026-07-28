@@ -85,13 +85,28 @@ Roster/web surfacing is deferred — it belongs to the web owner (standing rule)
 this lane deliberately avoids. The picker itself is unchanged: it already applies the same rules
 per-seat; the posture aggregates them, it does not re-decide them.
 
-### Pre-registered, not decided here
+### Pre-registered, then decided the same day
 
-- **The risk-route fall-through.** `pickReviewCounterpart` currently lets a risky lane fall through
-  to agent review when no human/admin is live. Under the framing this ADR records — human review as
-  a _requirement class_ for certain lanes, separate from agent review — that fall-through may
-  undersell the requirement. Changing it is ADR 169 semantics, not posture, and is left as the next
-  open question there.
+- **The risk-route fall-through — DECIDED by nick, 2026-07-28: human review is required.** This was
+  drafted as an open question; nick resolved it before the ADR merged, so the decision lands here
+  with it. A risky lane (any declared `risk` tag — user-facing / expensive / destructive /
+  prod-touching) now requires a **human** review, and an agent is not a substitute:
+  - `pickReviewCounterpart` no longer falls through to cross-family agents when no human/admin is
+    live — the pick is null, and the response says so before the worker chooses
+    (`human_review_required`, `close_records: 'human_review_missed'`), with the posture attached so
+    the situation is legible.
+  - The ask to a live human rides the **blocking tier** (15 m hold, ADR 147/153 reachability-gated)
+    instead of standard's 5 m proceed-with-risk. The tier is where "required" has teeth without a
+    wedge.
+  - The close derives `human_review_missed` — a requirement with no one to meet it — as distinct
+    from `no_candidate`, the sanctioned empty-pool degradation. The two must not share a label for
+    the same reason `no_candidate` was split from `review_timeout`.
+  - Even a **verified** close can miss the requirement: an agent counterpart's confirm on a risky
+    lane is a real review (`verified: true`, `counterpart_confirm`) but not the human one the risk
+    demanded, so the close row additionally carries `human_review_missed: true`. Without this flag,
+    routing an agent around the null pick would quietly satisfy a requirement it does not meet.
+  - Never a wedge, still: nothing blocks the close. The requirement has a record, not a lock — the
+    ADR 145 line this whole arc holds.
 - **ADR 169 inc 5** (spin-up ephemeral cross-family reviewer) stays parked. This posture makes its
   evidence legible (the wake pool and the no-candidate series), and makes its cheap form obvious
   (wake an enrolled seat before renting a foreign model); the ask-gated spend design remains a

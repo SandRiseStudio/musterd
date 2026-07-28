@@ -3125,6 +3125,95 @@ describe('two-stage close (ADR 169)', () => {
     void nickTok;
   });
 
+  it('a risky lane with no live human does NOT fall through to agent review (ADR 172)', async () => {
+    // A live cross-family agent exists — gee attests gpt — and would have been picked before
+    // ADR 172. Human review is a requirement class for risky work, not a preference: the agent is
+    // not a substitute, so no ask is routed and the response says what a close will be recorded as.
+    const team = await post('/teams', { slug: 'risky', creator: { name: 'boss', kind: 'human' } });
+    const bossTok = team.json.human_credential as string;
+    // Enroll agents without flipping the human present — every authed call touches presence, so
+    // the member-adds ride x-musterd-no-touch (the notifier's opt-out, ADR 057).
+    for (const name of ['ada', 'gee']) {
+      await fetch(base + '/teams/risky/members', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${bossTok}`,
+          'x-musterd-no-touch': '1',
+        },
+        body: JSON.stringify({ name, kind: 'agent' }),
+      });
+    }
+    const ada: Auth = { key: team.json.agent_key, seat: 'ada' };
+    const gee: Auth = { key: team.json.agent_key, seat: 'gee' };
+    await fetch(base + '/teams/risky/inbox', {
+      headers: { ...authHeaders(ada), 'x-musterd-model': 'claude-opus-5' },
+    });
+    await fetch(base + '/teams/risky/inbox', {
+      headers: { ...authHeaders(gee), 'x-musterd-model': 'gpt-5.2-codex' },
+    });
+    const mk = await fetch(base + '/teams/risky/lanes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...authHeaders(ada) },
+      body: JSON.stringify({ title: 'prod deploy', risk: ['production'], claim: true }),
+    });
+    const laneId = ((await mk.json()) as any).lane.id as string;
+    const patch = async (body: unknown, auth: Auth) => {
+      const r = await fetch(base + `/teams/risky/lanes/${laneId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', ...authHeaders(auth) },
+        body: JSON.stringify(body),
+      });
+      return { status: r.status, json: (await r.json()) as Record<string, any> };
+    };
+
+    const ready = await patch({ state: 'ready_for_review' }, ada);
+    expect(ready.json.review.reviewer).toBeUndefined(); // gee is live + cross-family — and NOT picked
+    expect(ready.json.review.human_review_required).toBe(true);
+    expect(ready.json.review.close_records).toBe('human_review_missed');
+    expect(ready.json.review.self_close_sanctioned).toBeUndefined(); // this is not the sanction
+
+    // The close is still possible (never a wedge) — and the record says what was missed.
+    const closed = await patch({ state: 'done' }, ada);
+    expect(closed.status).toBe(200);
+    const rows = await auditRowsFor(bossTok, 'risky', 'lane.closed');
+    const row = rows.find((r: any) => r.detail.lane === laneId)!;
+    expect(row.detail.reason).toBe('human_review_missed');
+    expect(row.detail.verified).toBe(false);
+  });
+
+  it('a risky lane routes to the live human at the BLOCKING tier — required, not preferred', async () => {
+    const { nickTok, ada } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'drop the old table', risk: ['destructive'], claim: true },
+      ada,
+    );
+    const ready = await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
+    expect(ready.json.review.reviewer).toBe('nick');
+    expect(ready.json.review.tier).toBe('blocking'); // ADR 172; non-risky review asks stay standard
+    void nickTok;
+  });
+
+  it('an agent confirm on a risky lane is verified but flagged human_review_missed (ADR 172)', async () => {
+    const { nickTok, ada, gee } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'prod config change', risk: ['production'], claim: true },
+      ada,
+    );
+    await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
+    // gee (an agent) confirms. That is a real cross-seat review — verified — but the risk tag
+    // demanded a HUMAN's judgment, and the record must not let the agent confirm satisfy it.
+    const closed = await patchLane(lane.json.lane.id, { state: 'done' }, gee);
+    expect(closed.status).toBe(200);
+    const rows = await auditRows(nickTok, 'lane.closed');
+    const row = rows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
+    expect(row.detail.verified).toBe(true);
+    expect(row.detail.reason).toBe('counterpart_confirm');
+    expect(row.detail.human_review_missed).toBe(true);
+  });
+
   it('no eligible counterpart → no ask, self-close sanctioned (never a wedge)', async () => {
     // A team of exactly one: the worker is the only live seat.
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'solo', kind: 'human' } });

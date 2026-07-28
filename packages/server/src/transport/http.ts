@@ -52,7 +52,7 @@ import { deliveryHintFor } from '../protocol/nudge.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
-import { appendAudit, hasInterruptRaised, listAudit, reviewWasRouted } from '../store/audit.js';
+import { appendAudit, hasInterruptRaised, listAudit, reviewRouting } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import { actDelivery, crossedBySeen } from '../store/delivery.js';
 import { listGoals } from '../store/goals.js';
@@ -2371,6 +2371,10 @@ export async function handleHttp(
           // counterpart nothing was ever asked. That conflation would make ADR 169's counter-metric
           // ("if nearly all review asks expire unanswered, the tier or the routing is wrong")
           // indict the tier and the picker for an empty candidate pool.
+          // ADR 172: a declared risk tag makes HUMAN review a requirement, not a preference — the
+          // picker no longer substitutes an agent when no human/admin is live, and the ready row
+          // records the requirement so the close edge can derive `human_review_missed`.
+          const humanRequired = lane.risk.length > 0;
           // ADR 172: when nobody is eligible, record WHY nobody was — the derived family posture.
           // Without it a run of no_candidate rows says "the pool was empty" but not what the pool
           // looked like, and the remedy (wake an enrolled seat vs. enroll one) is undecidable later.
@@ -2387,6 +2391,7 @@ export async function handleHttp(
               owner: lane.owner_seat,
               ...(lane.merged ? { merged: lane.merged } : {}),
               ...(pick ? { reviewer: pick.reviewer, route: pick.route } : { no_candidate: true }),
+              ...(humanRequired ? { human_required: true } : {}),
               ...(posture
                 ? {
                     family_posture: {
@@ -2408,7 +2413,10 @@ export async function handleHttp(
               `[lane] review requested: "${lane.title}" — confirm (move the lane to done) or send it back to active with a note`,
               {
                 species: 'approve',
-                tier: 'standard',
+                // ADR 172: a risky lane's human review is a requirement, so its ask carries the
+                // holding tier (15m, ADR 147/153 reachability-gated) rather than standard's 5m
+                // proceed-with-risk — the tier is where "required" has teeth without a wedge.
+                tier: humanRequired ? 'blocking' : 'standard',
                 lane_review: {
                   lane: lane.id,
                   title: lane.title,
@@ -2418,7 +2426,23 @@ export async function handleHttp(
                 },
               },
             );
-            review = { reviewer: pick.reviewer, route: pick.route };
+            review = {
+              reviewer: pick.reviewer,
+              route: pick.route,
+              tier: humanRequired ? 'blocking' : 'standard',
+            };
+          } else if (humanRequired) {
+            // ADR 172: a risky lane with no live human/admin. NOT the sanctioned self-close — the
+            // requirement stands; closing now is possible (never a wedge) but will be recorded as
+            // `human_review_missed`, and the response says so before the worker chooses.
+            review = {
+              human_review_required: true,
+              no_human_live: true,
+              close_records: 'human_review_missed',
+              ...(posture
+                ? { family_posture: posture, posture_hint: describeFamilyPosture(posture) }
+                : {}),
+            };
           } else {
             // The sanction carries the posture so the degradation is legible at the point it is
             // read: not just "nobody was eligible" but what the team looked like and who could be
@@ -2461,6 +2485,18 @@ export async function handleHttp(
           const ownerAtClose = before.owner_seat;
           const verified =
             lane.state === 'done' && ownerAtClose !== null && member.name !== ownerAtClose;
+          // ADR 169/172: what the ready edge recorded — routed-or-not, and whether the lane's risk
+          // made a human review REQUIRED. Read once; feeds both the reason and the missed flag.
+          const routing =
+            before.state === 'ready_for_review'
+              ? reviewRouting(ctx.db, team.id, lane.id)
+              : { routed: undefined as boolean | undefined, human_required: false };
+          // ADR 172: even a verified close can miss the requirement — an agent counterpart
+          // confirming a risky lane is a real review, but not the HUMAN one the risk demanded.
+          const humanReviewMissed =
+            routing.human_required &&
+            lane.state === 'done' &&
+            !(member.kind === 'human' || resolveCapabilities(member).is_admin);
           appendAudit(ctx.db, team.id, {
             actor: member.name,
             action: 'lane.closed',
@@ -2480,13 +2516,21 @@ export async function handleHttp(
                     : before.state === 'ready_for_review'
                       ? // A timeout means somebody was asked and did not answer. When the picker
                         // found nobody, no ask was ever sent, and calling that a timeout is simply
-                        // false — it is the sanctioned no-candidate degradation. `undefined` (a
-                        // lane that entered review before the routing outcome was recorded) keeps
-                        // the old label rather than inventing a verdict about the past.
-                        reviewWasRouted(ctx.db, team.id, lane.id) === false
-                        ? 'no_candidate'
+                        // false. Two no-ask shapes (ADR 172): an empty cross-family pool is the
+                        // sanctioned `no_candidate` degradation; a risky lane whose REQUIRED human
+                        // was never live is `human_review_missed` — a requirement with no one to
+                        // meet it, not a shrug. `undefined` routing (a lane that entered review
+                        // before the outcome was recorded) keeps the old label rather than
+                        // inventing a verdict about the past.
+                        routing.routed === false
+                        ? routing.human_required
+                          ? 'human_review_missed'
+                          : 'no_candidate'
                         : 'review_timeout'
                       : 'self_close',
+              // ADR 172: flagged even on a verified close — an agent counterpart's confirm on a
+              // risky lane is a real review, but not the human one the risk tag demanded.
+              ...(humanReviewMissed ? { human_review_missed: true } : {}),
               worker_family: ownerAtClose ? workerFamily(ctx.db, team.id, ownerAtClose) : null,
               ...(verified ? { reviewer_family: workerFamily(ctx.db, team.id, member.name) } : {}),
               // Approximation: entering review was this lane's last update before the close.
