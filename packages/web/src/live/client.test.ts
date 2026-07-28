@@ -120,6 +120,8 @@ describe('createLane / updateLane (the writable board, item 5)', () => {
     depends_on: [],
     branch: null,
     goal_id: null,
+    risk: [],
+    merged: null,
     state: 'claimed',
     created_by: 'nick',
     created_at: 1,
