@@ -668,6 +668,31 @@
   height: 100% !important;
   display: block;
 }
+/* ─── scene chrome: the paper set ─────────────────────────────────────────
+   Everything the office lays OVER itself — the reel card, the speech bubbles, the name chips — is
+   cut from one warm card stock. It used to be near-black-brown, which read as a dark-theme panel
+   dropped onto a sunlit room (nick, 2026-07-28: "we need these to be more warm").
+
+   Pinned in both themes AND at every hour, deliberately. Two forces would otherwise pull it apart:
+   · The page theme flips --lc-text/--ink, so theme-following chrome inverts under data-theme.
+   · The room itself runs a time-of-day night veil (office-scene/lighting.ts) from noon daylight to
+     near-dark, which no theme token knows about.
+   Paper survives both: in daylight it reads as paper on a desk, after dark as something lamplit.
+   A surface that tracked either signal would glare at midnight or dissolve at noon. */
+.lc-ov,
+.lc-gl-labels {
+  --lc-paper: #f8ecd6;
+  --lc-paper-2: #f0dfc0;
+  --lc-paper-ink: #2b1f13;
+  /* Softer inks are the SAME hue at lower alpha, never a grey — grey on warm paper reads dirty. */
+  --lc-paper-dim: rgba(43, 31, 19, 0.72);
+  --lc-paper-muted: rgba(43, 31, 19, 0.66); /* 4.65:1 on --lc-paper-2 — the AA floor, measured */
+  --lc-paper-edge: rgba(120, 78, 42, 0.28);
+  --lc-paper-edge-2: rgba(120, 78, 42, 0.44);
+  /* The floor takes the shadow, so it is brown-black, not neutral black. */
+  --lc-paper-cast: rgba(58, 34, 12, 0.34);
+}
+
 .lc-gl-labels {
   position: absolute;
   inset: 0;
@@ -689,14 +714,17 @@
 .lc-gl-label__name {
   padding: 1px 6px;
   border-radius: 5px;
-  background: rgba(13, 9, 6, 0.58);
-  border: 1px solid rgba(255, 238, 210, 0.1);
+  /* A name chip rides on someone's head across a busy floor, so it stays the QUIET member of the
+     paper family: paper at partial opacity, not a full card. Loud enough to read, never a row of
+     labels competing with the room. */
+  background: color-mix(in srgb, var(--lc-paper) 86%, transparent);
+  border: 1px solid var(--lc-paper-edge);
   font-family: var(--font-mono, monospace);
   font-size: 10.5px;
   font-weight: 550;
   letter-spacing: -0.015em;
-  color: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 1px 7px -3px rgba(0, 0, 0, 0.55);
+  color: var(--lc-paper-ink);
+  box-shadow: 0 1px 7px -3px var(--lc-paper-cast);
 }
 .lc-gl-label.is-offline .lc-gl-label__name {
   color: var(--lc-dim);
@@ -745,13 +773,14 @@
   max-width: 260px;
   padding: 7px 11px 8px;
   border-radius: 13px;
-  background: rgba(30, 22, 17, 0.92);
-  -webkit-backdrop-filter: blur(7px);
-  backdrop-filter: blur(7px);
+  background: linear-gradient(180deg, var(--lc-paper) 0%, var(--lc-paper-2) 100%);
+  /* No backdrop-filter. It was here to buy contrast for a translucent dark bubble; opaque paper
+     needs none — and this element renders on the /broadcast 1920x1080 30fps capture, where a blur
+     is a per-frame GPU readback forever (the same rule the reel card block states). */
   box-shadow:
-    0 8px 22px -8px rgba(0, 0, 0, 0.72),
-    0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 34%, transparent),
-    0 3px 18px -5px color-mix(in srgb, var(--lc-speech-tone) 48%, transparent);
+    0 8px 22px -8px var(--lc-paper-cast),
+    0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 52%, var(--lc-paper-edge)),
+    0 3px 18px -5px color-mix(in srgb, var(--lc-speech-tone) 40%, transparent);
   /* hidden initial state — the JS toggles .is-in on the next frame so this paints first */
   opacity: 0;
   transform: translateY(7px) scale(0.9);
@@ -772,7 +801,7 @@
   transform: translateX(-50%);
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
-  border-top: 6px solid rgba(30, 22, 17, 0.92);
+  border-top: 6px solid var(--lc-paper-2);
 }
 .lc-speech.is-in .lc-speech__inner {
   opacity: 1;
@@ -799,9 +828,9 @@
 .lc-speech.is-clickable:hover .lc-speech__inner {
   transform: translateY(-2px) scale(1.03);
   box-shadow:
-    0 10px 26px -8px rgba(0, 0, 0, 0.78),
-    0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 60%, transparent),
-    0 3px 22px -4px color-mix(in srgb, var(--lc-speech-tone) 62%, transparent);
+    0 10px 26px -8px var(--lc-paper-cast),
+    0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 78%, var(--lc-paper-edge)),
+    0 3px 22px -4px color-mix(in srgb, var(--lc-speech-tone) 55%, transparent);
 }
 /* the soft acknowledge pulse the moment a bubble is clicked (focus hands off to the stream flash) */
 .lc-speech.is-picked .lc-speech__inner {
@@ -810,15 +839,15 @@
 @keyframes lc-speech-picked {
   0% {
     box-shadow:
-      0 8px 22px -8px rgba(0, 0, 0, 0.72),
+      0 8px 22px -8px var(--lc-paper-cast),
       0 0 0 2px var(--lc-speech-tone),
       0 0 30px -2px var(--lc-speech-tone);
   }
   100% {
     box-shadow:
-      0 8px 22px -8px rgba(0, 0, 0, 0.72),
-      0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 34%, transparent),
-      0 3px 18px -5px color-mix(in srgb, var(--lc-speech-tone) 48%, transparent);
+      0 8px 22px -8px var(--lc-paper-cast),
+      0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 52%, var(--lc-paper-edge)),
+      0 3px 18px -5px color-mix(in srgb, var(--lc-speech-tone) 40%, transparent);
   }
 }
 .lc-speech__text {
@@ -831,14 +860,21 @@
   line-height: 1.36;
   font-weight: 500;
   letter-spacing: -0.005em;
-  color: #f4ead9;
+  color: var(--lc-paper-ink);
   overflow-wrap: anywhere;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
 }
-/* ── rich speech tokens: the stream's rich-text vocabulary, tuned for the dark bubble ──────────
+/* ── rich speech tokens: the stream's rich-text vocabulary, tuned for the PAPER bubble ─────────
+   Every colour here mixes against `--lc-paper-ink` rather than a cream literal, so re-tuning the
+   bubble's stock is two token values instead of eight scattered hex codes.
+
+   The tone hues are NOT changed: `toneColor()` also feeds the canvas cues (screen pulses, walk
+   trails), so darkening it there would repaint the room. Instead each tone is darkened toward the
+   ink *for text use only* — same hue, enough value to carry on paper — while the border ring keeps
+   the tone at full strength, where brightness is exactly what you want.
+
    Prose types in char by char; these pop in whole when the reveal reaches them (display flips off
    .is-off, which retriggers the pop animation). Each is tinted by the act's tone so a resolve's
-   chips glow green, an ask's glow mustard — the bubble feels of a piece with the act it speaks. */
+   chips read green, an ask's mustard — the bubble feels of a piece with the act it speaks. */
 .lc-st {
   animation: lc-st-pop 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -887,7 +923,7 @@
   font-weight: 700;
   letter-spacing: 0.03em;
   margin-right: 4px;
-  color: color-mix(in srgb, var(--lc-speech-tone) 88%, #f4ead9);
+  color: color-mix(in srgb, var(--lc-speech-tone) 52%, var(--lc-paper-ink));
 }
 .lc-st-lead::after {
   content: ' ·';
@@ -901,13 +937,13 @@
   padding: 0.04em 0.34em 0.08em;
   margin: 0 0.06em;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--lc-speech-tone) 17%, rgba(255, 250, 240, 0.05));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 30%, transparent);
-  color: #faf2e2;
+  background: color-mix(in srgb, var(--lc-speech-tone) 20%, rgba(255, 250, 240, 0.55));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 42%, transparent);
+  color: var(--lc-paper-ink);
   white-space: nowrap;
 }
 .lc-speech .lc-st-id {
-  color: color-mix(in srgb, #f4ead9 82%, var(--lc-speech-tone));
+  color: color-mix(in srgb, var(--lc-paper-dim) 82%, var(--lc-speech-tone));
   cursor: default;
 }
 /* a PR/issue ref — a bright tone accent, no box; the liveliest word in the line */
@@ -915,13 +951,13 @@
   font-family: var(--font-mono, monospace);
   font-size: 0.9em;
   font-weight: 650;
-  color: color-mix(in srgb, var(--lc-speech-tone) 72%, #ffe9c8);
-  text-shadow: 0 0 8px color-mix(in srgb, var(--lc-speech-tone) 45%, transparent);
+  color: color-mix(in srgb, var(--lc-speech-tone) 46%, var(--lc-paper-ink));
+  /* No glow: a bloom that reads as light on a dark bubble reads as a smudge on paper. */
 }
 /* **strong** prose — carries the sentence's weight without shouting */
 .lc-speech .lc-st-strong {
   font-weight: 700;
-  color: #fff6e8;
+  color: #170f07; /* a shade past the body ink — emphasis by depth, the paper equivalent of brighter */
 }
 @media (prefers-reduced-motion: reduce) {
   .lc-st {
@@ -3606,14 +3642,19 @@
   z-index: var(--lc-z-overlay);
   pointer-events: none;
   container-type: inline-size;
-  /* The card's own accent set, pinned to the DUSK values in both themes. `--danger`, `--warning` and
-     the mustards all darken under data-theme="light" so they can carry ink on cream — correct
-     everywhere except here, where they would sit on a dark card and go muddy (light `--warning` is
-     #b8860b, barely 4.4:1 against this fill). Scene chrome is its own lighting condition. */
-  --lc-ov-live: #f3776a;
-  --lc-ov-warn: #f59e0b;
-  --lc-ov-accent: #f4cf52;
-  --lc-ov-mark: #e1ad01;
+  /* The card's own accent set, pinned in both themes — but to the INK-ON-CREAM values, not the dusk
+     ones. This flipped when the card became paper: the dusk set (#f4cf52, #f59e0b) was chosen to
+     glow on a near-black fill, and on card stock those same values wash out to ~2.4:1. Same
+     principle as before, opposite answer — scene chrome is its own lighting condition, and its
+     lighting condition changed. */
+  --lc-ov-live: #b23325; /* 4.72:1 */
+  --lc-ov-warn: #7d5605; /* 5.00:1 — the `blocked` word, so it is held to a text ratio */
+  /* Split, because one mustard cannot serve both jobs on paper: the rail is a non-text UI fill
+     (3:1 suffices and the brighter value reads as a progress bar), while `+N` is text and is not
+     exempt. Measured on --lc-paper-2. */
+  --lc-ov-accent: #a8790a; /* 2.96:1 — FILLS ONLY (the rail sweep) */
+  --lc-ov-accent-ink: #7d5605; /* 5.00:1 — anything that is read as text */
+  --lc-ov-mark: #c9970b;
 }
 
 /* The card sizes and insets itself in container units — `cqw` resolves against an ANCESTOR container,
@@ -3633,12 +3674,12 @@
   /* The extra bottom padding is the rail's lane — the text must not sit on top of it. */
   padding: clamp(10px, 0.8cqw, 19px) clamp(13px, 1.05cqw, 24px) clamp(14px, 1.1cqw, 25px);
   border-radius: clamp(11px, 0.8cqw, 16px);
-  /* Warm ink, not neutral black — the card is cut from the same dusk the room is lit by. */
-  background: linear-gradient(180deg, rgba(44, 32, 22, 0.9) 0%, rgba(19, 14, 10, 0.93) 100%);
-  /* A drop shadow seats it on the floor; the inset hairline is the light catching its top edge. */
+  background: linear-gradient(180deg, var(--lc-paper) 0%, var(--lc-paper-2) 100%);
+  /* A drop shadow seats it on the floor; the hairline is the card's own cut edge. On paper the
+     top-edge highlight inverts — light stock needs a defining border, not a lighter lip. */
   box-shadow:
-    0 18px 44px -20px rgba(0, 0, 0, 0.78),
-    inset 0 1px 0 rgba(255, 238, 214, 0.1);
+    0 18px 44px -20px var(--lc-paper-cast),
+    inset 0 0 0 1px var(--lc-paper-edge);
   animation: lc-ov-card-in 480ms var(--ease-out) both;
 }
 
@@ -3656,11 +3697,10 @@
   height: clamp(7px, 0.42cqw, 10px);
   border-radius: 3px;
   background: var(--lc-ov-mark);
-  box-shadow: 0 0 14px rgba(225, 173, 1, 0.18);
 }
 
 .lc-ov__team {
-  color: #f8efe1;
+  color: var(--lc-paper-ink);
   font-size: clamp(13px, 0.95cqw, 21px);
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -3670,14 +3710,14 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: rgba(248, 239, 225, 0.5);
+  color: var(--lc-paper-muted);
   font-family: var(--font-mono);
   font-size: clamp(8px, 0.5cqw, 11px);
   letter-spacing: 0.16em;
 }
 
 .lc-ov__sig.is-live {
-  color: rgba(248, 239, 225, 0.72);
+  color: var(--lc-paper-dim);
 }
 
 .lc-ov__dot {
@@ -3720,7 +3760,7 @@
    one fact that changes on its own, so it gets its own edge rather than jostling the wordmark. */
 .lc-ov__present {
   margin-left: auto;
-  color: rgba(248, 239, 225, 0.5);
+  color: var(--lc-paper-muted);
   font-family: var(--font-mono);
   font-size: clamp(8px, 0.5cqw, 11px);
   white-space: nowrap;
@@ -3750,8 +3790,8 @@
 .lc-ov.is-interactive .lc-ov__card:focus-visible {
   transform: translateY(-2px);
   box-shadow:
-    0 22px 50px -20px rgba(0, 0, 0, 0.82),
-    inset 0 1px 0 rgba(255, 238, 214, 0.14);
+    0 22px 50px -20px var(--lc-paper-cast),
+    inset 0 0 0 1px var(--lc-paper-edge-2);
 }
 
 .lc-ov.is-interactive .lc-ov__card:focus-visible {
@@ -3775,7 +3815,7 @@
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: rgba(248, 239, 225, 0.62);
+  color: var(--lc-paper-dim);
   font-family: var(--font-display);
   /* The chevron glyph is small inside its em box, so it is sized and weighted up to read as a
      control rather than punctuation. */
@@ -3789,12 +3829,12 @@
 }
 
 .lc-ov__step:hover {
-  background: rgba(248, 239, 225, 0.1);
-  color: #f8efe1;
+  background: color-mix(in srgb, var(--lc-paper-ink) 9%, transparent);
+  color: var(--lc-paper-ink);
 }
 
 .lc-ov__step:active {
-  background: rgba(248, 239, 225, 0.16);
+  background: color-mix(in srgb, var(--lc-paper-ink) 15%, transparent);
 }
 
 .lc-ov__step:focus-visible {
@@ -3806,7 +3846,7 @@
    (twelve segments are hard to count; "4/12" never is). Tabular so stepping doesn't jiggle. */
 .lc-ov__count {
   min-width: 4ch;
-  color: rgba(248, 239, 225, 0.72);
+  color: var(--lc-paper-dim);
   font-family: var(--font-mono);
   font-size: clamp(8px, 0.5cqw, 11px);
   font-variant-numeric: tabular-nums;
@@ -3837,7 +3877,7 @@
   gap: 6px;
   max-width: 11ch;
   overflow: hidden;
-  color: rgba(248, 239, 225, 0.66);
+  color: var(--lc-paper-dim);
   font-family: var(--font-mono);
   font-size: clamp(9px, 0.58cqw, 12px);
   letter-spacing: 0.03em;
@@ -3853,13 +3893,17 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  /* The fill stays the member's EXACT `memberColor` — that identity match with their body on the
+     floor is the dot's whole job, so it is not darkened for contrast. The ring does that work
+     instead: same hue, deepened, so a 62%-lightness pastel still holds an edge on paper. */
   background: var(--lc-ov-seat, var(--lc-ov-accent));
-  box-shadow: 0 0 9px color-mix(in srgb, var(--lc-ov-seat, var(--lc-ov-accent)) 45%, transparent);
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--lc-ov-seat, var(--lc-ov-accent)) 55%, var(--lc-paper-ink));
 }
 
 .lc-ov__now.is-blocked .lc-ov__seat {
   background: var(--lc-ov-warn);
-  box-shadow: 0 0 9px color-mix(in srgb, var(--lc-ov-warn) 45%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lc-ov-warn) 55%, var(--lc-paper-ink));
 }
 
 /* Blocked is written as well as coloured — act meaning never rests on hue alone. */
@@ -3876,22 +3920,21 @@
 .lc-ov__src,
 .lc-ov__more {
   flex: none;
-  color: rgba(248, 239, 225, 0.38);
+  color: var(--lc-paper-muted);
   font-family: var(--font-mono);
   font-size: clamp(8px, 0.48cqw, 10px);
   letter-spacing: 0.04em;
 }
 
 .lc-ov__more {
-  color: var(--lc-ov-accent);
-  opacity: 0.7;
+  color: var(--lc-ov-accent-ink);
 }
 
 .lc-ov__title {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: rgba(248, 239, 225, 0.95);
+  color: var(--lc-paper-ink);
   font-family: var(--font-display);
   font-size: clamp(12px, 0.82cqw, 18px);
   font-weight: 500;
@@ -3903,7 +3946,7 @@
 /* An empty board is a fact about the team, not a missing component — so it says so, in the room's
    own voice, rather than collapsing the card to a lone wordmark. */
 .lc-ov__now.is-quiet .lc-ov__title {
-  color: rgba(248, 239, 225, 0.44);
+  color: var(--lc-paper-muted);
   font-weight: 400;
 }
 
@@ -3927,11 +3970,11 @@
   flex: 1 1 0;
   overflow: hidden;
   border-radius: 1px;
-  background: rgba(248, 239, 225, 0.11);
+  background: color-mix(in srgb, var(--lc-paper-ink) 13%, transparent);
 }
 
 .lc-ov__seg.is-past {
-  background: rgba(248, 239, 225, 0.24);
+  background: color-mix(in srgb, var(--lc-paper-ink) 28%, transparent);
 }
 
 .lc-ov__fill {
