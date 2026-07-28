@@ -21,7 +21,7 @@ import { renderBanner } from '../render/rows.js';
 import { paint as pc, theme } from '../render/theme.js';
 import { sym } from '../render/ui.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
-import { CANONICAL_SKILL_PATH, writeGuidance } from './guidance.js';
+import { CANONICAL_SKILL_PATH, establishedHarnesses, writeGuidance } from './guidance.js';
 import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
 import { writeProvisionManifest } from './manifest.js';
@@ -75,10 +75,9 @@ export function runRefreshGuidance(dir: string = process.cwd()): number {
     return 1;
   }
   // Refresh only the harnesses this folder already carries guidance for; adding a harness's files
-  // is provisioning, which is `init`'s job, not a refresh's.
-  const present = HARNESSES.filter(
-    (h) => h.guidance && existsSync(join(dir, h.guidance.skillPath)),
-  );
+  // is provisioning, which is `init`'s job, not a refresh's. Shared with the doctor's expected set
+  // (ADR 171) so the two cannot disagree about what this command will write.
+  const present = establishedHarnesses(dir, HARNESSES);
   // `writeGuidance` always writes the canonical `.musterd/skill/SKILL.md` — correct for init, wrong
   // here: a folder with no guidance at all would sprout one file from a command that promises only
   // to refresh. Caught live running this in a seat worktree that had never been provisioned. Refuse

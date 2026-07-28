@@ -458,6 +458,162 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
   });
 });
 
+/**
+ * ADR 171 — the expected set, not the receipt.
+ *
+ * The pre-171 doctor iterated the manifest's recorded file list, so a guidance file added to the
+ * templates AFTER a folder was provisioned was never expected and therefore could never be missed:
+ * the ADR 167 nudge-relay skill was absent from 8 of 8 dogfood worktrees and drew 0 drift lines.
+ * Arm 1 below is that incident; arms 2-4 are the guards that keep the wider expected set from
+ * inventing drift, and they are expected to pass both before and after (see the ADR).
+ */
+describe('inspectProvisioning — guidance expected-set drift (ADR 171)', () => {
+  beforeEach(() => {
+    h.harnesses = [];
+    h.primer = 'managed';
+    h.binding = null;
+    h.bindings = {};
+  });
+
+  function tmp(): string {
+    return mkdtempSync(join(tmpdir(), 'musterd-doctor-171-'));
+  }
+
+  /** A configured harness that declares guidance placement — the thing `guidanceTargets` reads. */
+  function harnessWithGuidance(label: string, guidance: Record<string, string>, configured = true) {
+    return {
+      label,
+      guidance: { frontmatter: 'claude-code', ...guidance },
+      detect: async () => ({ installed: true, configured, detail: label }),
+    };
+  }
+
+  /** Provision a folder with ONLY the canonical skill written + recorded — the pre-171 shape. */
+  function provisionCanonicalOnly(dir: string): void {
+    const g = writeGuidance(dir, [], { team: 'dawn' });
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: g.files, contentVersion: g.contentVersion },
+    });
+  }
+
+  // ARM 1 — the incident. Fails against pre-171 code, which is the point.
+  it('flags a guidance file added after this folder was provisioned', async () => {
+    const dir = tmp();
+    provisionCanonicalOnly(dir);
+    // A skill this build would write, that postdates the manifest — never recorded, never on disk.
+    h.harnesses = [
+      harnessWithGuidance('Claude Code', {
+        skillPath: '.musterd/skill/SKILL.md', // already written by provisionCanonicalOnly
+        nudgeSkillPath: '.claude/skills/musterd-nudge-relay/SKILL.md',
+      }),
+    ];
+    const r = await inspectProvisioning(dir);
+    expect(
+      r.drift.some((d) => d.includes('musterd-nudge-relay') && d.includes('--refresh-guidance')),
+    ).toBe(true);
+  });
+
+  // ARM 2 — guard: a user's own file at a managed path is theirs, not drift.
+  it('treats a stampless file at an expected path as a note, never drift', async () => {
+    const dir = tmp();
+    provisionCanonicalOnly(dir);
+    const rel = '.claude/skills/musterd-nudge-relay/SKILL.md';
+    const abs = join(dir, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'my own notes, no musterd stamp\n');
+    h.harnesses = [
+      harnessWithGuidance('Claude Code', {
+        skillPath: '.musterd/skill/SKILL.md',
+        nudgeSkillPath: rel,
+      }),
+    ];
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('musterd-nudge-relay'))).toBe(false);
+    expect(r.notes.some((n) => n.includes('musterd-nudge-relay'))).toBe(true);
+  });
+
+  // ARM 3 — guard: expectation is scoped to harnesses wired HERE, mirroring the hook check.
+  it('expects nothing from a harness that is not configured in this folder', async () => {
+    const dir = tmp();
+    provisionCanonicalOnly(dir);
+    h.harnesses = [
+      harnessWithGuidance('Cursor', { skillPath: '.cursor/rules/musterd.mdc' }, false),
+    ];
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('.cursor'))).toBe(false);
+  });
+
+  // ARM 5 — the regression this ADR's own first implementation shipped, caught by its guard metric
+  // on a live seat. `init` writes guidance for the ONE harness chosen at provisioning time, and
+  // `--refresh-guidance` refuses to add a new harness's files (that is provisioning, not a refresh).
+  // So expecting guidance from every CONFIGURED harness produced four drift lines on a real folder
+  // that the prescribed command provably could not clear. Expectation must track what the repair
+  // writes, which is `establishedHarnesses` — presence of the skill file, not detection of the tool.
+  it('expects nothing from a configured harness this folder was never provisioned with', async () => {
+    const dir = tmp();
+    provisionCanonicalOnly(dir);
+    h.harnesses = [
+      // Configured — the tool is installed and the musterd server is registered — but its guidance
+      // was never written here, so `--refresh-guidance` would not write it either.
+      harnessWithGuidance('Cursor', {
+        skillPath: '.cursor/rules/musterd.mdc',
+        commandsDir: '.cursor/commands',
+      }),
+    ];
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('.cursor'))).toBe(false);
+  });
+
+  // ARM 4 — guard: musterd retiring a path is not the folder's problem.
+  it('is silent about a recorded path this build no longer writes', async () => {
+    const dir = tmp();
+    const g = writeGuidance(dir, [], { team: 'dawn' });
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      // A path musterd used to write and no longer does — absent on disk, and that is correct.
+      guidance: {
+        files: [...g.files, '.claude/skills/musterd-retired/SKILL.md'],
+        contentVersion: g.contentVersion,
+      },
+    });
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('musterd-retired'))).toBe(false);
+  });
+
+  // GUARD METRIC — one line per surface for one fact. Six identical-in-substance lines for a single
+  // version bump is the noise failure mode ADR 168 pre-registered against its own instrument.
+  it('collapses a fleet-wide version bump into one line, not one per file', async () => {
+    const dir = tmp();
+    const stale = ['.musterd/skill/SKILL.md', '.claude/commands/musterd-standup.md'];
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: stale, contentVersion: 0 },
+    });
+    for (const rel of stale) {
+      const abs = join(dir, rel);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
+    }
+    h.harnesses = [
+      harnessWithGuidance('Claude Code', {
+        skillPath: '.musterd/skill/SKILL.md',
+        commandsDir: '.claude/commands',
+      }),
+    ];
+    const r = await inspectProvisioning(dir);
+    const versionLines = r.drift.filter((d) => d.includes('v0') && d.includes('current is'));
+    expect(versionLines).toHaveLength(1);
+    expect(versionLines[0]).toContain('2 musterd guidance files');
+  });
+});
+
 describe('build skew (ADR 135) — warn-only freshness, never drift', () => {
   const sha = (c: string) => c.repeat(40);
   // A temp non-git dir as repoDir keeps the origin/main comparison silent, isolating check (a).

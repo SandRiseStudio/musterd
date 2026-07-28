@@ -15,7 +15,8 @@ import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
 import { cliBuild } from '../version.js';
 import { foreignAdapterNote, siblingWorkspaces } from './entryGuard.js';
-import { contentHash, strippedBody } from './guidance.js';
+import { contentHash, establishedHarnesses, guidanceTargets, strippedBody } from './guidance.js';
+import type { Harness } from './harness.js';
 import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
 import { HARNESSES } from './harnesses/index.js';
 import { readProvisionManifest } from './manifest.js';
@@ -67,20 +68,45 @@ export interface DoctorReport {
 }
 
 /**
- * Guidance-file drift (ADR 085): compare each skill/command file the manifest recorded against the
- * current template. A file whose stamped version trails `GUIDANCE_CONTENT_VERSION`, or that has gone
- * missing, is actionable **drift** (re-run init). A file hand-edited since musterd wrote it (its body
- * no longer hashes to its own stamp) is a warn-only **note** — musterd won't silently clobber it.
+ * Guidance-file drift (ADR 085, re-anchored by ADR 171).
+ *
+ * The set inspected is what **this build would write** into this folder — `guidanceTargets` over the
+ * harnesses established here — not the set the manifest recorded at provisioning time. That
+ * distinction is the whole of ADR 171: a receipt can confirm a change or a deletion, but it is
+ * structurally incapable of noticing an *addition*, so every guidance file added after a folder was
+ * provisioned was invisible to this check. Measured before the change: the ADR 167 nudge-relay skill
+ * was absent from 8 of 8 dogfood worktrees and drew zero drift lines.
+ *
+ * The manifest is still read, for two narrower jobs: its presence says this folder was provisioned
+ * at all (an unprovisioned folder claims nothing, so there is nothing to check), and its file list
+ * distinguishes a file that has *gone missing* from one that never arrived. It remains the exact
+ * removal set for uninstall (ADR 030) — it just stops being the health check's source of truth.
+ *
+ * Expectation is scoped by `establishedHarnesses` — the same predicate `--refresh-guidance` uses to
+ * decide what it will rewrite. Sharing it is load-bearing: the doctor must expect exactly what the
+ * repair it prescribes would write, or it emits drift no command can clear.
  */
-function inspectGuidance(cwd: string): { drift: string[]; notes: string[] } {
+function inspectGuidance(cwd: string, harnesses: Harness[]): { drift: string[]; notes: string[] } {
   const drift: string[] = [];
   const notes: string[] = [];
   const recorded = readProvisionManifest(cwd)?.guidance;
   if (!recorded) return { drift, notes }; // pre-085 / never written — nothing claimed, nothing to check
-  for (const rel of recorded.files) {
+  const wasRecorded = new Set(recorded.files);
+  // Stale files are counted, not listed: one version bump used to emit one line PER FILE — six
+  // identical-in-substance lines for a single fact on a real seat. ADR 168 pre-registered "becomes
+  // noise" as a failure mode of its own instrument; ADR 171 §2 pays that debt. The remedy is
+  // identical for every file, so the file list is not actionable and the count is.
+  const staleByVersion = new Map<number, number>();
+  for (const rel of guidanceTargets(establishedHarnesses(cwd, harnesses))) {
     const abs = join(cwd, rel);
     if (!existsSync(abs)) {
-      drift.push(`the musterd skill file ${rel} is gone — run \`musterd init\` to restore it.`);
+      drift.push(
+        wasRecorded.has(rel)
+          ? `the musterd skill file ${rel} is gone — run \`musterd init --refresh-guidance\` to restore it.`
+          : `the musterd guidance file ${rel} is missing — it was added to musterd after this folder ` +
+              `was provisioned, so nothing here has ever written it (ADR 171). Run ` +
+              `\`musterd init --refresh-guidance\` to install it.`,
+      );
       continue;
     }
     let text: string;
@@ -91,25 +117,37 @@ function inspectGuidance(cwd: string): { drift: string[]; notes: string[] } {
     }
     const stamp = parseContentStamp(text);
     if (!stamp) {
+      // Never drift: a stampless file is the user's, whether they edited ours into anonymity or
+      // authored their own at a path we would otherwise write. `writeOne` already refuses to clobber
+      // it, so the honest report is a note about what musterd is declining to do.
       notes.push(
-        `${rel} no longer carries a musterd stamp — treating it as yours (will not overwrite).`,
+        wasRecorded.has(rel)
+          ? `${rel} no longer carries a musterd stamp — treating it as yours (will not overwrite).`
+          : `${rel} is a file of your own at a path musterd would otherwise write — leaving it alone.`,
       );
       continue;
     }
     if (stamp.version < GUIDANCE_CONTENT_VERSION) {
-      drift.push(
-        `the musterd skill in ${rel} is v${stamp.version}, current is v${GUIDANCE_CONTENT_VERSION} — ` +
-          // ADR 161: point at the refresh that touches ONLY guidance files. Plain `init` also mints
-          // members and rewrites bindings, which is the wrong blast radius for a version bump —
-          // and in a live seat's worktree, actively dangerous.
-          `run \`musterd init --refresh-guidance\` to refresh it.`,
-      );
+      staleByVersion.set(stamp.version, (staleByVersion.get(stamp.version) ?? 0) + 1);
     } else if (contentHash(strippedBody(text)) !== stamp.hash) {
       notes.push(
         `${rel} has local edits — this is a musterd-managed file, so \`musterd init\` will replace them ` +
           `on the next run. Put your own guidance in AGENTS.md (around the markers) to keep it.`,
       );
     }
+  }
+  // A recorded path that is no longer expected is a file musterd RETIRED. Deliberately silent: not
+  // every absence is drift, and a doctor that nags about a path musterd itself stopped writing
+  // teaches people to stop reading it.
+  for (const [version, count] of [...staleByVersion].sort((a, b) => a[0] - b[0])) {
+    drift.push(
+      `${count === 1 ? '1 musterd guidance file is' : `${String(count)} musterd guidance files are`} ` +
+        `v${String(version)}, current is v${String(GUIDANCE_CONTENT_VERSION)} — ` +
+        // ADR 161: point at the refresh that touches ONLY guidance files. Plain `init` also mints
+        // members and rewrites bindings, which is the wrong blast radius for a version bump —
+        // and in a live seat's worktree, actively dangerous.
+        `run \`musterd init --refresh-guidance\` to refresh them.`,
+    );
   }
   return { drift, notes };
 }
@@ -317,7 +355,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   // committed), so a provisioned folder can silently lose it. Check it only when Claude Code has the
   // server wired here — the only harness with a PostToolUse hook today.
   if (claudeConfigured) drift.push(...inspectClaudeHookDrift(cwd));
-  const guidance = inspectGuidance(cwd);
+  const guidance = inspectGuidance(cwd, HARNESSES);
   drift.push(...guidance.drift);
   const duplicateAdapters = await inspectDuplicateAdapters(binding);
   const modelAttestation = await inspectModelAttestation(binding);

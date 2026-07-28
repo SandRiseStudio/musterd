@@ -404,7 +404,7 @@ const LOCAL_HOOKS: readonly LocalHookSpec[] = [
     missing:
       'the Claude Code SessionStart session-capture hook is missing from .claude/settings.local.json — ' +
       'wakes will run fresh-only, never resuming this seat’s transcript (ADR 131 §5). Run `musterd ' +
-      'init` to wire it.',
+      'init --refresh-hooks` to wire it.',
   },
   {
     marker: SESSION_END_HOOK_MARKER,
@@ -495,7 +495,8 @@ export function inspectClaudeHookDrift(cwd: string): string[] {
       drift.push(
         `the Claude Code ${spec.event} hook \`${spec.marker}\` in .claude/settings.local.json was ` +
           'written by a different musterd build and no longer matches this one — it is present but ' +
-          'STALE, which no presence check can see (ADR 168). Run `musterd init` here to rewrite it.',
+          'STALE, which no presence check can see (ADR 168). Run `musterd init --refresh-hooks` ' +
+          'here to rewrite it.',
       );
     }
   }
