@@ -837,3 +837,80 @@ describe('deriveWakeMetrics (ADR 131 inc 5) — latency, answer rate, cost, budg
     expect(report.wake!.window_days).toBe(7);
   });
 });
+
+describe('deriveReviewMetrics (ADR 169) — the review eval, without an admin credential', () => {
+  /** One audit row of the two-stage-close shape. */
+  const row = (
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    action: 'lane.ready_for_review' | 'lane.closed' | 'lane.review_sent_back',
+    detail: Record<string, unknown>,
+  ) => appendAudit(db, teamId, { actor: 'ada', action, target: 'lane-x', result: 'allow', detail });
+
+  it('separates a routed review from a no-counterpart degradation — the whole point', () => {
+    const { db, team } = seed();
+    // Two lanes entered review: one found a counterpart, one did not.
+    row(db, team.id, 'lane.ready_for_review', {
+      lane: 'a',
+      reviewer: 'gee',
+      route: 'cross_family',
+    });
+    row(db, team.id, 'lane.ready_for_review', { lane: 'b', no_candidate: true });
+    row(db, team.id, 'lane.closed', { lane: 'a', reason: 'counterpart_confirm', verified: true });
+    row(db, team.id, 'lane.closed', { lane: 'b', reason: 'no_candidate', verified: false });
+
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.ready).toBe(2);
+    expect(m.routed).toBe(1);
+    expect(m.no_candidate).toBe(1);
+    expect(m.closed.counterpart_confirm).toBe(1);
+    expect(m.closed.no_candidate).toBe(1);
+    // The catch rate a consumer computes is sent_back/routed — 0/1 here, an honest zero over a real
+    // denominator. Over lanes-marked-ready it would read 0/2 and mean nothing.
+    expect(m.sent_back).toBe(0);
+  });
+
+  it('counts a review catch, and keeps timeout distinct from no-counterpart', () => {
+    const { db, team } = seed();
+    row(db, team.id, 'lane.ready_for_review', {
+      lane: 'a',
+      reviewer: 'gee',
+      route: 'cross_family',
+    });
+    row(db, team.id, 'lane.review_sent_back', { lane: 'a', reviewer: 'gee', owner: 'ada' });
+    row(db, team.id, 'lane.ready_for_review', {
+      lane: 'b',
+      reviewer: 'gee',
+      route: 'cross_family',
+    });
+    row(db, team.id, 'lane.closed', { lane: 'b', reason: 'review_timeout', verified: false });
+
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.sent_back).toBe(1);
+    expect(m.routed).toBe(2);
+    expect(m.closed.review_timeout).toBe(1);
+    expect(m.closed.no_candidate).toBe(0); // a timeout is NOT a missing counterpart
+  });
+
+  it('legacy rows abstain from the routed/no-candidate split rather than being guessed', () => {
+    const { db, team } = seed();
+    // Written before the routing outcome was recorded (pre-#450): neither field present.
+    row(db, team.id, 'lane.ready_for_review', { lane: 'a', owner: 'ada' });
+    row(db, team.id, 'lane.closed', { lane: 'a', verified: false }); // and no reason at all
+
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.ready).toBe(1);
+    expect(m.routed).toBe(0);
+    expect(m.no_candidate).toBe(0); // counted in neither — we do not know
+    expect(m.closed.total).toBe(1);
+    expect(m.closed.self_close).toBe(1); // a reasonless close is the legacy single-stage shape
+  });
+
+  it('is zero-shaped on a team that has never used review', () => {
+    const { db, team } = seed();
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.ready).toBe(0);
+    expect(m.closed.total).toBe(0);
+    expect(m.window_ms).toBeGreaterThan(0);
+  });
+});

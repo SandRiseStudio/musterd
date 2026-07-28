@@ -229,6 +229,52 @@ export const WakeSeatCostSchema = z.object({
 export type WakeSeatCost = z.infer<typeof WakeSeatCostSchema>;
 
 /**
+ * Two-stage close metrics (ADR 169 O&E, via ADR 052's reachability amendment) — the review lifecycle
+ * as **counts**, so the eval its own ADR pre-registered is computable without an admin credential.
+ *
+ * The dataset was `lane.closed` / `lane.ready_for_review` / `lane.review_sent_back` audit rows, and
+ * `GET /audit` is admin-only — so the seats expected to analyse those numbers could not read them.
+ * Measured 2026-07-28: 14 of 112 gated ADRs name the audit log as their eval dataset and none note
+ * that it needs an admin. The fix is this projection, never a widening of the audit read: counts of
+ * lane lifecycle transitions leak nothing the team cannot already see (every one of these events is
+ * broadcast as a `lane_state` act as it happens), while the audit log itself keeps carrying claim
+ * refusals, grants, key rotation and policy changes behind the admin boundary.
+ *
+ * `routed` vs `no_candidate` is the split that makes the headline number readable: a catch rate over
+ * lanes-marked-ready cannot tell "reviewers looked and found nothing" (rubber-stamping — the feature
+ * is decorative) from "no reviewer was ever eligible" (never exercised), and those want opposite
+ * responses. Rates are deliberately NOT precomputed here: a consumer that wants one can divide, and
+ * a stored rate would go stale against its own counts.
+ */
+export const ReviewMetricsSchema = z.object({
+  /** Window the counts cover, in ms — the report's `generated_ts` minus this is the lower bound. */
+  window_ms: z.number().int().nonnegative(),
+  /** Lanes that entered `ready_for_review` in the window (every stage-one claim). */
+  ready: z.number().int().nonnegative(),
+  /** …of those, how many actually routed a review ask to a counterpart. The catch-rate denominator. */
+  routed: z.number().int().nonnegative(),
+  /** …and how many found no eligible counterpart, so no ask was ever sent (the ADR 172 posture
+   *  explains WHY; this is just how often). */
+  no_candidate: z.number().int().nonnegative(),
+  /** Reviews where a counterpart sent the lane back — the review catch, the thing being measured. */
+  sent_back: z.number().int().nonnegative(),
+  /** Every terminal close in the window, by derived reason (ADR 169 §3). */
+  closed: z.object({
+    total: z.number().int().nonnegative(),
+    /** Closed by a different seat after review — the only `verified: true` shape. */
+    counterpart_confirm: z.number().int().nonnegative(),
+    /** Owner closed after a review WAS routed and went unanswered. */
+    review_timeout: z.number().int().nonnegative(),
+    /** Owner closed where no counterpart existed — sanctioned, and not a timeout. */
+    no_candidate: z.number().int().nonnegative(),
+    /** Closed straight from a live state, never entering review (today's default path). */
+    self_close: z.number().int().nonnegative(),
+    abandoned: z.number().int().nonnegative(),
+  }),
+});
+export type ReviewMetrics = z.infer<typeof ReviewMetricsSchema>;
+
+/**
  * Wake metrics (ADR 131 O&E, increment 5) — the headline pair (wake latency: directed-act ts →
  * woken seat's first authenticated act; answer rate: woken acts reaching `answered` in the ADR 090
  * ledger) plus the operational wake economics. Derived from `residency.*` audit rows joined to the
@@ -314,5 +360,9 @@ export const ReportSchema = z.object({
    *  for back-compat with pre-172 daemons — the server sets it whenever it knows its presence
    *  timeout. */
   family_posture: FamilyPostureSchema.optional(),
+  /** Two-stage close metrics (ADR 169) — the review lifecycle as counts, so its eval is computable
+   *  without an admin credential (ADR 052 amendment). Optional for back-compat with pre-169
+   *  daemons — the server always sets it. */
+  review: ReviewMetricsSchema.optional(),
 });
 export type Report = z.infer<typeof ReportSchema>;
