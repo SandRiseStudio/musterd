@@ -1,8 +1,11 @@
 # 168 — Hooks are content, not presence: stamp the shared hook and refuse the downgrade
 
-- Status: proposed — 2026-07-27. Authored by izzo (lane `01KYJYRGXQJ10PWHKN2NNTNQX5`, opened by izzo
+- Status: accepted — 2026-07-27. Authored by izzo (lane `01KYJYRGXQJ10PWHKN2NNTNQX5`, opened by izzo
   2026-07-27 while rolling out the ADR 160 label-sweep trigger). Number **168** — next free above
-  ADR 167 (stanley, #427) at branch time.
+  ADR 167 (stanley, #427) at branch time. Shipped in three parts: the decision (#430), the
+  stamp/refuse/compare implementation (#434), and `--refresh-hooks` (#438, lane
+  `01KYK50W2TT4FSBS2VYBS3H1NB`) — the delivery mechanism the follow-through found missing. Rolled
+  out across all 8 provisioned worktrees the same day.
 - Date: 2026-07-27
 - Builds on: [ADR 165](165-worktree-family-mcp-entry.md) (the shared-slot shape this applies to the
   hook axis, and the precedent of flagging a stale shared slot _on presence_),
