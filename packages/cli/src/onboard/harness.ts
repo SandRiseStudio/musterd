@@ -169,6 +169,26 @@ export interface Harness {
    */
   unprovision?: (plan: UnprovisionPlan, scope?: 'local' | 'shared') => Promise<void>;
   /**
+   * Rewrite **only** this harness's musterd hooks in a folder already provisioned for it — no
+   * prompts, no member mint, no binding write, no MCP re-registration (ADR 168, sibling to
+   * `--refresh-guidance` / ADR 161).
+   *
+   * This slot exists because hook *delivery* had no safe carrier. A hook's text changes whenever a
+   * capability does, and a hook added later (the ADR 150 gate, the ADR 167 observer) reaches an
+   * existing seat only by re-provisioning it — but full `init` is interactive, re-mints identity, and
+   * re-points the worktree-family MCP entry (ADR 165). So every seat sat behind: measured 2026-07-27,
+   * the ADR 167 observer was installed in 0 of 13 worktrees and the ADR 150 gate in 2 of 13, meaning
+   * a declared enforcement class was silently a no-op nearly everywhere.
+   *
+   * `applies` reports whether the folder already carries this harness's provisioning — a refresh may
+   * update what is there, never create a first install (that is `init`'s job). Returns the files it
+   * wrote plus any warnings (e.g. an ADR 168 downgrade refusal).
+   */
+  refreshHooks?: {
+    applies: (dir: string) => boolean;
+    run: (dir: string) => { files: string[]; warnings: string[] };
+  };
+  /**
    * Observe the model this harness is *actually* running for the current session. An observation
    * outranks any declaration (`resolveAttestation`), so this is the tier that stops a wire-time
    * snapshot from lying forever — the defect that had one seat attesting `grok-4.5` for weeks while

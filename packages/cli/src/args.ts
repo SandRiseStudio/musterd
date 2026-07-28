@@ -36,6 +36,7 @@ const BOOLEAN_FLAGS = new Set([
   'enforce-clear',
   'no-title',
   'refresh-guidance',
+  'refresh-hooks',
   'prune-bindings',
   'apply',
 ]);

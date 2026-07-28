@@ -27,8 +27,8 @@ interface ClaudeSettings {
   permissions?: { allow?: string[]; ask?: string[]; deny?: string[] };
   hooks?: Record<string, ClaudeHookMatcher[]>;
 }
-function settingsLocalPath(): string {
-  return join(process.cwd(), '.claude', 'settings.local.json');
+function settingsLocalPath(dir: string = process.cwd()): string {
+  return join(dir, '.claude', 'settings.local.json');
 }
 function readSettings(path: string): ClaudeSettings {
   try {
@@ -375,7 +375,7 @@ const LOCAL_HOOKS: readonly LocalHookSpec[] = [
     command: postToolUseHookCommand,
     missing:
       'the Claude Code PostToolUse interrupt hook is missing from .claude/settings.local.json — a busy ' +
-      'agent will not see urgent steering mid-loop (ADR 088). Run `musterd init` to wire it.',
+      'agent will not see urgent steering mid-loop (ADR 088). Run `musterd init --refresh-hooks` to wire it.',
   },
   {
     marker: PRETOOLUSE_HOOK_MARKER,
@@ -385,7 +385,7 @@ const LOCAL_HOOKS: readonly LocalHookSpec[] = [
     missing:
       'the Claude Code PreToolUse enforcement-gate hook is missing from .claude/settings.local.json — ' +
       "any enforcement class this team declares (ADR 150) won't be gated for this seat (it fails open, " +
-      'so nothing breaks, but a declared block is silently a no-op here). Run `musterd init` to wire it.',
+      'so nothing breaks, but a declared block is silently a no-op here). Run `musterd init --refresh-hooks` to wire it.',
   },
   {
     marker: SESSIONMSG_HOOK_MARKER,
@@ -395,7 +395,7 @@ const LOCAL_HOOKS: readonly LocalHookSpec[] = [
     missing:
       'the Claude Code PreToolUse session-messaging observer hook is missing from ' +
       ".claude/settings.local.json — this seat's use of the harness's session-to-session messaging " +
-      "won't be logged (ADR 167; observe-only, nothing breaks). Run `musterd init` to wire it.",
+      "won't be logged (ADR 167; observe-only, nothing breaks). Run `musterd init --refresh-hooks` to wire it.",
   },
   {
     marker: SESSION_CAPTURE_HOOK_MARKER,
@@ -413,7 +413,7 @@ const LOCAL_HOOKS: readonly LocalHookSpec[] = [
     missing:
       'the Claude Code SessionEnd hook is missing from .claude/settings.local.json — captured sessions ' +
       'will never be marked ended, so the local-session guard leans on transcript staleness alone ' +
-      '(ADR 131 §5). Run `musterd init` to wire it.',
+      '(ADR 131 §5). Run `musterd init --refresh-hooks` to wire it.',
   },
 ];
 
@@ -435,7 +435,7 @@ function dropHook(path: string, event: string, matches: (m: ClaudeHookMatcher) =
  * Install musterd's Claude Code hooks: the project-local `Notification` hook, and the global
  * self-gating `SessionStart` verify hook (absorbing any hand-pasted recipe). Best-effort per hook.
  */
-export function installMusterdHooks(): string[] {
+export function installMusterdHooks(dir: string = process.cwd()): string[] {
   const warnings: string[] = [];
   // Every project-local hook comes off the one table (ADR 168), so adding an entry there installs it
   // AND health-checks it. Each carries its own marker, so entries sharing an event coexist rather
@@ -443,7 +443,7 @@ export function installMusterdHooks(): string[] {
   // two SessionStart hooks (local capture + the global orientation below) each live side by side.
   for (const spec of LOCAL_HOOKS) {
     const warning = upsertHook(
-      settingsLocalPath(),
+      settingsLocalPath(dir),
       spec.event,
       (m) => isMusterdHookFor(m, spec.marker),
       spec.command(),
@@ -534,7 +534,7 @@ function inspectGlobalSessionStartDrift(): string[] {
     'the machine-wide Claude Code SessionStart orientation hook (~/.claude/settings.json) does not match ' +
       `what this build would write (installed epoch ${String(theirs)}, this build ${String(FEATURE_EPOCH)}) ` +
       '— it is present but STALE, so every folder on this machine is running older orientation text ' +
-      '(ADR 168). Run `musterd init` to rewrite it.',
+      '(ADR 168). Run `musterd init --refresh-hooks` to rewrite it.',
   ];
 }
 
@@ -695,6 +695,18 @@ export const claudeCode: Harness = {
     }
     removePermissions(plan.permissions);
     removeMusterdHooks();
+  },
+
+  // Hook-only refresh (ADR 168): rewrite the hook entries and nothing else. Safe in a live seat for
+  // the same reasons --refresh-guidance is — it touches no identity and no MCP entry.
+  refreshHooks: {
+    // Already provisioned for Claude Code here? A refresh updates what exists; creating a first
+    // install is `init`'s job. Same rule --refresh-guidance follows for a folder with no guidance.
+    applies: (dir) => existsSync(settingsLocalPath(dir)),
+    run: (dir) => ({
+      files: [settingsLocalPath(dir), globalSettingsPath()],
+      warnings: installMusterdHooks(dir),
+    }),
   },
 };
 
