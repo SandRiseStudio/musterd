@@ -15,8 +15,13 @@ import { resolveCapabilities, type MemberRow } from './rows.js';
  * goes `ready_for_review`. One function so the policy can evolve without touching the transition
  * machinery. Precedence:
  *
- *   1. a **high-risk** lane (any declared `risk` tag) routes to a live human/admin seat first —
- *      declared, never inferred;
+ *   1. a **high-risk** lane (any declared `risk` tag) routes to a live human/admin seat, and ONLY
+ *      to one — declared, never inferred. Human review is its own requirement class for risky work
+ *      (user-facing / expensive / destructive / prod-touching — ADR 172, decided by nick
+ *      2026-07-28), so a cross-family agent is NOT a substitute: with no live human/admin the pick
+ *      is null and the close records `human_review_missed`, loudly, rather than an agent review
+ *      quietly standing in for the one that was required. (Never a wedge: the close itself is
+ *      still possible — the requirement has a record, not a lock.)
  *   2. otherwise a live seat whose **model family differs from the worker's** (ADR 056: correlated
  *      models make correlated mistakes, so a same-family review re-runs the worker's blind spots).
  *      Family comes from the occupancy's attested model (ADR 158 observed-over-declared); a seat
@@ -164,8 +169,13 @@ export function pickReviewCounterpart(
         reviewer_family: memberFamily(db, authority),
       };
     }
-    // No live authority for a risky lane: fall through to cross-family rather than dropping the
-    // review entirely — a diverse agent review beats none, and the audit records which route ran.
+    // No live authority for a risky lane: NO fall-through to agent review (ADR 172). This used to
+    // fall through — "a diverse agent review beats none" — but that quietly substituted agent
+    // review for a *requirement*: risky work (user-facing / expensive / destructive / prod) wants a
+    // HUMAN's judgment, which is a different question from model diversity. Returning null makes
+    // the miss loud: the caller records `human_required` at ready time and the close derives
+    // `human_review_missed` instead of a plain `no_candidate`.
+    return null;
   }
 
   const mine = workerFamily(db, teamId, worker);

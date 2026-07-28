@@ -322,6 +322,20 @@ export function listAudit(
  * recorded); callers should fall back to the old label rather than invent one.
  */
 export function reviewWasRouted(db: Database, teamId: string, laneId: string): boolean | undefined {
+  return reviewRouting(db, teamId, laneId).routed;
+}
+
+/**
+ * The full routing outcome the ready edge recorded (ADR 169/172): whether an ask was routed, and
+ * whether the lane's declared risk made a HUMAN review required. `human_required` distinguishes the
+ * two no-candidate closes — an empty cross-family pool (`no_candidate`, the sanctioned degradation)
+ * versus a missing required human (`human_review_missed`, a requirement with no one to meet it).
+ */
+export function reviewRouting(
+  db: Database,
+  teamId: string,
+  laneId: string,
+): { routed: boolean | undefined; human_required: boolean } {
   const row = db
     .prepare<[string, string], { detail: string }>(
       `SELECT detail FROM audit
@@ -330,13 +344,19 @@ export function reviewWasRouted(db: Database, teamId: string, laneId: string): b
        ORDER BY ts DESC, id DESC LIMIT 1`,
     )
     .get(teamId, laneId);
-  if (!row) return undefined;
+  if (!row) return { routed: undefined, human_required: false };
   try {
-    const d = JSON.parse(row.detail) as { reviewer?: string; no_candidate?: boolean };
-    if (d.no_candidate === true) return false;
-    if (typeof d.reviewer === 'string' && d.reviewer.length > 0) return true;
-    return undefined; // pre-fix row: it recorded neither, so we genuinely do not know
+    const d = JSON.parse(row.detail) as {
+      reviewer?: string;
+      no_candidate?: boolean;
+      human_required?: boolean;
+    };
+    const human_required = d.human_required === true;
+    if (d.no_candidate === true) return { routed: false, human_required };
+    if (typeof d.reviewer === 'string' && d.reviewer.length > 0)
+      return { routed: true, human_required };
+    return { routed: undefined, human_required }; // pre-fix row: recorded neither — we do not know
   } catch {
-    return undefined;
+    return { routed: undefined, human_required: false };
   }
 }
