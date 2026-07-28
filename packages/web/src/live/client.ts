@@ -10,6 +10,8 @@ import {
   AuditResponseSchema,
   LaneBoardSchema,
   LaneResultSchema,
+  ReportSchema,
+  type Report,
   makeEnvelope,
   PROTOCOL_VERSION,
   type AuditEntry,
@@ -273,6 +275,16 @@ async function laneMutation(
   }
   // Validate the wire at the boundary (same contract the CLI parses), like fetchLaneBoard.
   return LaneResultSchema.parse(json);
+}
+
+/**
+ * The insight report (`GET /teams/:slug/report`, ADR 050/084) — the one server-side projection the
+ * board's rail renders (flow, waiting-on, blocked, coordination, MAST, steering). Member-authed, so
+ * the read-only observer credential is sufficient; validated at the boundary like fetchLaneBoard.
+ */
+export async function fetchReport(cfg: LiveConfig): Promise<Report> {
+  const json = await apiGet<unknown>(cfg, `/teams/${encodeURIComponent(cfg.team)}/report`);
+  return ReportSchema.parse(json);
 }
 
 /** Open a lane as the signed-in member (`POST /teams/:slug/lanes`); `claim: true` self-owns it. */
