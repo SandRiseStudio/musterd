@@ -191,6 +191,18 @@ export class HttpClient {
   addMember(slug: string, body: Record<string, unknown>) {
     return this.request('POST', `/teams/${slug}/members`, body);
   }
+  /**
+   * Re-mint a human member's `mscr_` credential in place — the recovery path for a lost one. Sits at
+   * the provisioning bar (localhost unauthenticated, admin off-host), so this deliberately does NOT
+   * require the client to carry a key: the caller's whole problem is that they have none.
+   */
+  rotateCredential(slug: string, name: string): Promise<{ member: string; credential: string }> {
+    return this.request(
+      'POST',
+      `/teams/${slug}/members/${encodeURIComponent(name)}/credential/rotate`,
+      {},
+    );
+  }
   roster(slug: string): Promise<{ members: MemberSummary[] }> {
     return this.request('GET', `/teams/${slug}/members`);
   }

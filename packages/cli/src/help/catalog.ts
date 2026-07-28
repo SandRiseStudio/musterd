@@ -249,14 +249,16 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Team & seats ───────────────────────────────────────────────────────────────────────────
   {
     name: 'team',
-    signature: '<create|add|remove|archive|export> …',
-    summary: 'create a team, add/remove members, archive a team, export the roster to git',
+    signature: '<create|add|credential|remove|archive|export> …',
+    summary:
+      'create a team, add/remove members, re-issue a lost credential, archive a team, export the roster to git',
     group: 'team',
     primary: true,
     detail:
       'Manage the standing roster:\n' +
       '  create <slug> [--as <you>] [--role <role>] [--display <name>]\n' +
       '  add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]\n' +
+      '  credential <name>            re-issue a human’s lost mscr_ credential, shown once (localhost, or admin off-host)\n' +
       '  remove <name>                soft-remove a member (history is kept)\n' +
       '  archive <slug> [--as <admin>]  soft-archive a whole team — off status/rosters, history kept (admin)\n' +
       '  export <slug>                move the roster onto git-tracked .musterd/ files (ADR 058)',

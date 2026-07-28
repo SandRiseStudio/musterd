@@ -183,6 +183,13 @@ export type AuditAction =
   // (`unknown_or_spent` | `off_machine`) — the miss series is the interesting one, because
   // `off_machine` is not this failing but the cross-device thread asking to exist, with a number.
   // Nonces are never logged, in any row.
+  // A human's `mscr_` credential was re-minted in place (`POST /members/:name/credential/rotate`) —
+  // the recovery path for a lost credential. actor = the off-host admin who authenticated, or null
+  // for the loopback caller the route trusts by ADR 134; target = the human seat; detail carries
+  // `{ via: 'local' | 'admin' }` and never the secret or its hash. This row is what makes the
+  // rotate self-announcing, which is the whole reason the bar can sit below admin-only: a rotation
+  // nobody authorized still cannot happen quietly.
+  | 'credential.rotate'
   | 'signin.handoff_staged'
   | 'signin.handoff_redeemed'
   | 'signin.handoff_missed'

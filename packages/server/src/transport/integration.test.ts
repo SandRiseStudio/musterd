@@ -4595,3 +4595,173 @@ describe('delivery hint on POST /messages (ADR 167)', () => {
     expect(line).not.toContain('may I?');
   });
 });
+
+/**
+ * Human credential rotate-in-place — the recovery path for a lost `mscr_`.
+ *
+ * `credential_hash` is one column and `mintCredential` overwrites it, so before this route a human
+ * who lost their credential was unrecoverable short of DB surgery. That is not hypothetical: it is
+ * the state the founder's own dogfood team was in, which made ADR 170's premise ("the CLI already
+ * holds your credential") false on the machine it shipped from.
+ *
+ * The bar is `authProvision` — localhost unauthenticated, admin off-host (ADR 134) — and these tests
+ * pin that deliberately, because admin-only is circular exactly when the locked-out human IS the
+ * admin. The compensating control is the audit row, so it is tested as load-bearing, not decoration.
+ */
+describe('human credential rotate-in-place', () => {
+  const rotatePath = (slug: string, name: string) =>
+    `/teams/${slug}/members/${encodeURIComponent(name)}/credential/rotate`;
+
+  it('a loopback caller with NO credential rotates a human seat, and the new secret authenticates', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const lost = team.json.human_credential as string;
+
+    // The whole point: the caller presents nothing, because what they lost is the thing they'd present.
+    const res = await post(rotatePath('dawn', 'nick'), {});
+    expect(res.status).toBe(200);
+    expect(res.json.member).toBe('nick');
+    expect(res.json.credential).toMatch(/^mscr_/);
+    expect(res.json.credential).not.toBe(lost);
+
+    // The new credential is a working identity…
+    const ok = await get('/teams/dawn/inbox', res.json.credential as string);
+    expect(ok.status).toBe(200);
+    // …and it is still the admin seat it was (rotation re-issues, it never re-grades).
+    const roster = await get('/teams/dawn/members', res.json.credential as string);
+    expect(roster.json.members.find((m: any) => m.name === 'nick').capabilities.is_admin).toBe(
+      true,
+    );
+  });
+
+  it('the old credential is dead — including at the claim path', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const lost = team.json.human_credential as string;
+    const res = await post(rotatePath('dawn', 'nick'), {});
+    const fresh = res.json.credential as string;
+
+    expect((await get('/teams/dawn/inbox', lost)).status).toBe(401);
+    // At the claim path the dead secret is simply not a key any more: it matches neither the agent
+    // key nor any credential_hash, so it lands in the claim route's own "invalid key" refusal (403,
+    // `type: refused`) rather than the bearer 401 the request paths give.
+    const staleClaim = await post('/teams/dawn/claim', {
+      key: lost,
+      target: { seat: 'nick' },
+      surface: 'cli',
+    });
+    expect(staleClaim.status).toBe(403);
+    expect(staleClaim.json).toMatchObject({ type: 'refused', message: /invalid key/ });
+
+    const freshClaim = await post('/teams/dawn/claim', {
+      key: fresh,
+      target: { seat: 'nick' },
+      surface: 'cli',
+    });
+    expect(freshClaim.status).toBe(200);
+  });
+
+  it('writes one `credential.rotate` audit row — and never the secret', async () => {
+    await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const res = await post(rotatePath('dawn', 'nick'), {});
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const rows = listAudit(server.db, teamId).filter((r) => r.action === 'credential.rotate');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.target).toBe('nick');
+    expect(rows[0]!.result).toBe('allow');
+    // Loopback callers are anonymous by design — the row says where the authority came from instead.
+    expect(rows[0]!.actor).toBeNull();
+    expect(JSON.parse(rows[0]!.detail!)).toEqual({ via: 'local' });
+    expect(rows[0]!.detail).not.toContain(res.json.credential);
+    expect(JSON.stringify(rows[0])).not.toContain((res.json.credential as string).slice(5));
+  });
+
+  it('refuses an AGENT seat — an agent has no per-seat credential to lose', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential as string;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+
+    const res = await post(rotatePath('dawn', 'Ada'), {});
+    expect(res.status).toBe(400);
+    expect(res.json.error.message).toMatch(/agent seat/i);
+    // Nothing was minted: Ada still has no credential, so nothing new authenticates as her.
+    const ada = getMemberByName(server.db, getTeamBySlug(server.db, 'dawn')!.id, 'Ada')!;
+    expect(ada.credential_hash).toBeNull();
+    const rows = listAudit(server.db, getTeamBySlug(server.db, 'dawn')!.id).filter(
+      (r) => r.action === 'credential.rotate',
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('404s for an unknown seat and for one that has left', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential as string;
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'human' }, tok);
+    // The message matters: a bare route-miss 404 would pass a status-only assertion, so pin the
+    // route's own refusal — it names the seat and the team.
+    const ghost = await post(rotatePath('dawn', 'ghost'), {});
+    expect(ghost.status).toBe(404);
+    expect(ghost.json.error.message).toBe('no member "ghost" in dawn');
+
+    await post('/teams/dawn/members/Lin/remove', {}, tok);
+    const res = await post(rotatePath('dawn', 'Lin'), {});
+    expect(res.status).toBe(404);
+    expect(res.json.error.message).toBe('no member "Lin" in dawn');
+  });
+});
+
+/** The off-host half of the same route: `authProvision`'s admin bar, exercised behind a proxy. */
+describe('human credential rotate: off-host requires an admin credential', () => {
+  let proxied: RunningServer;
+  let pbase: string;
+
+  beforeEach(async () => {
+    proxied = createServer({ db: openDb(':memory:'), port: 0, trustProxy: true });
+    const { port } = await proxied.listen();
+    pbase = `http://127.0.0.1:${port}`;
+  });
+  afterEach(async () => {
+    await proxied.close();
+  });
+
+  async function ppost(path: string, body: unknown, auth?: string) {
+    const res = await fetch(pbase + path, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(auth ? { authorization: `Bearer ${auth}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
+  }
+
+  it('refuses an unauthenticated off-host caller — a lost credential is not a network-mintable one', async () => {
+    await ppost('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const res = await ppost('/teams/dawn/members/nick/credential/rotate', {});
+    expect(res.status).toBe(401);
+    expect(res.json.error.message).toMatch(/off this machine|admin credential/i);
+  });
+
+  it('refuses a non-admin member off-host, and allows an admin', async () => {
+    const team = await ppost('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential as string;
+    const lin = await ppost('/teams/dawn/members', { name: 'Lin', kind: 'human' }, nickTok);
+    const linTok = lin.json.human_credential as string;
+
+    expect((await ppost('/teams/dawn/members/nick/credential/rotate', {}, linTok)).status).toBe(
+      403,
+    );
+
+    const byAdmin = await ppost('/teams/dawn/members/Lin/credential/rotate', {}, nickTok);
+    expect(byAdmin.status).toBe(200);
+    expect(byAdmin.json.credential).toMatch(/^mscr_/);
+    expect(byAdmin.json.credential).not.toBe(linTok);
+
+    const teamId = getTeamBySlug(proxied.db, 'dawn')!.id;
+    const rows = listAudit(proxied.db, teamId).filter((r) => r.action === 'credential.rotate');
+    expect(rows).toHaveLength(1);
+    // Off-host, the actor is the admin who proved themselves — the local anonymity does not carry over.
+    expect(rows[0]!.actor).toBe('nick');
+    expect(JSON.parse(rows[0]!.detail!)).toEqual({ via: 'admin' });
+  });
+});
