@@ -12,6 +12,7 @@ import {
   createLane,
   fetchReport,
   forgetObserver,
+  redeemSignin,
   updateLane,
   type LiveConfig,
 } from '../live/client';
@@ -184,11 +185,32 @@ function BoardPage() {
     disconnect();
   };
 
-  // Hydrate from the URL (`/board?team=<slug>`) — with a remembered member credential when one exists
-  // — else restore the last team into the form field. Client-only so it never runs during prerender.
+  // Hydrate from the URL. Three shapes, in order of authority:
+  //   `#s=<nonce>`  — `musterd board` walked us here (ADR 170): redeem the one-shot nonce for the
+  //                   member identity it stands for. The fragment is stripped BEFORE the redeem
+  //                   resolves, so a slow answer never leaves it sitting in the address bar.
+  //   `?team=<slug>` — the plain board, signed in from a remembered credential when we have one.
+  //   nothing        — restore the last team into the form field.
+  // Client-only so none of it runs during prerender.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const urlTeam = new URLSearchParams(window.location.search).get('team');
+    const nonce = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('s');
+    if (urlTeam && nonce) {
+      const clean = `${window.location.pathname}${window.location.search}`;
+      window.history.replaceState(null, '', clean);
+      setProvisioning(true);
+      void redeemSignin(urlTeam, nonce)
+        .then(({ as, credential }) => connect(urlTeam, { as, token: credential }))
+        .catch((e: unknown) => {
+          // An expired or already-opened link is ordinary, not exceptional: say so in the daemon's
+          // own words and drop into the normal form rather than dead-ending on a blank board.
+          setTeam(urlTeam);
+          setError(e instanceof Error ? e.message : String(e));
+        })
+        .finally(() => setProvisioning(false));
+      return;
+    }
     if (urlTeam) {
       void connect(urlTeam, loadMember(urlTeam) ?? undefined);
     } else {
