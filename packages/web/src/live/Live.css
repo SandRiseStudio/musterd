@@ -469,6 +469,54 @@
   right: var(--lc-5);
   z-index: var(--lc-z-overlay);
 }
+
+/* ─── the asks & approvals rail, seated INSIDE the office panel ────────────
+   It used to sit above all three panels, which billed the whole dashboard for a strip that is
+   usually silent (nick, 2026-07-28: move it into the office panel). Here it floats over the top of
+   the room the way the reel card floats over the bottom — the office frames its own asks. The slot
+   leaves the right edge to the collapse pill, and the sheet still opens downward over the room
+   (the panel is the tallest thing on the page, so nothing clips). */
+.lc-office__asks {
+  position: absolute;
+  inset: var(--lc-4) 56px auto var(--lc-4);
+  z-index: var(--lc-z-overlay);
+}
+
+/* The rail's own outer margin was for the page slot; inside the office the slot IS the margin. */
+.lc-office__asks .lc-asks {
+  margin: 0;
+}
+
+/* ─── the room's watermark ────────────────────────────────────────────────
+   The only place the brand appears inside the scene itself — bottom-right, opposite the reel card,
+   quiet enough to live under everything. It exists for the frame that leaves this app: a clip or a
+   screenshot of the room should still say whose room it is. Deliberately NOT the overlay card's
+   job — that card carries the TEAM's name; this carries the product's. */
+.lc-office__mark {
+  position: absolute;
+  right: var(--lc-5);
+  bottom: var(--lc-4);
+  z-index: var(--lc-z-overlay);
+  pointer-events: none;
+  opacity: 0.34;
+}
+
+.lc-office__mark-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--lc-paper-ink, #2b1f13);
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* The chip's mustard block at full strength would be the loudest thing in the corner; the group
+   opacity above mutes chip and word together so they fade as one object. */
+.lc-office__mark svg {
+  border-radius: 4px;
+}
 .lc-office__collapse .lc-collapse {
   background: rgba(20, 15, 12, 0.55);
   border-color: rgba(255, 233, 208, 0.22);
@@ -681,12 +729,14 @@
    A surface that tracked either signal would glare at midnight or dissolve at noon. */
 .lc-ov,
 .lc-gl-labels {
-  --lc-paper: #f8ecd6;
-  --lc-paper-2: #f0dfc0;
+  /* One shade deeper than the first cut (nick, 2026-07-28: "slightly darker") — toward toast, not
+     toward grey. Every ink below was RE-measured on this stock; three moved to hold AA. */
+  --lc-paper: #f3e2c3;
+  --lc-paper-2: #e9d3ab;
   --lc-paper-ink: #2b1f13;
   /* Softer inks are the SAME hue at lower alpha, never a grey — grey on warm paper reads dirty. */
-  --lc-paper-dim: rgba(43, 31, 19, 0.72);
-  --lc-paper-muted: rgba(43, 31, 19, 0.66); /* 4.65:1 on --lc-paper-2 — the AA floor, measured */
+  --lc-paper-dim: rgba(43, 31, 19, 0.72); /* 5.24:1 */
+  --lc-paper-muted: rgba(43, 31, 19, 0.68); /* 4.63:1 — the AA floor, re-measured on this stock */
   --lc-paper-edge: rgba(120, 78, 42, 0.28);
   --lc-paper-edge-2: rgba(120, 78, 42, 0.44);
   /* The floor takes the shadow, so it is brown-black, not neutral black. */
@@ -717,7 +767,11 @@
   /* A name chip rides on someone's head across a busy floor, so it stays the QUIET member of the
      paper family: paper at partial opacity, not a full card. Loud enough to read, never a row of
      labels competing with the room. */
-  background: color-mix(in srgb, var(--lc-paper) 86%, transparent);
+  /* Translucent on purpose (nick): the room should read THROUGH a nameplate — it hovers over
+     furniture and teammates constantly, and a solid chip carves permanent holes in the scene. 68%
+     keeps the ink at ~10:1 against anything the floor can put behind it. No blur to buy it back —
+     these render on the /broadcast capture (same rule as every scene-chrome surface). */
+  background: color-mix(in srgb, var(--lc-paper) 68%, transparent);
   border: 1px solid var(--lc-paper-edge);
   font-family: var(--font-mono, monospace);
   font-size: 10.5px;
@@ -3647,13 +3701,13 @@
      glow on a near-black fill, and on card stock those same values wash out to ~2.4:1. Same
      principle as before, opposite answer — scene chrome is its own lighting condition, and its
      lighting condition changed. */
-  --lc-ov-live: #b23325; /* 4.72:1 */
-  --lc-ov-warn: #7d5605; /* 5.00:1 — the `blocked` word, so it is held to a text ratio */
+  --lc-ov-live: #a52d20; /* 4.80:1 on the darker stock */
+  --lc-ov-warn: #745005; /* 4.97:1 — the `blocked` word, so it is held to a text ratio */
   /* Split, because one mustard cannot serve both jobs on paper: the rail is a non-text UI fill
      (3:1 suffices and the brighter value reads as a progress bar), while `+N` is text and is not
      exempt. Measured on --lc-paper-2. */
   --lc-ov-accent: #a8790a; /* 2.96:1 — FILLS ONLY (the rail sweep) */
-  --lc-ov-accent-ink: #7d5605; /* 5.00:1 — anything that is read as text */
+  --lc-ov-accent-ink: #745005; /* 4.97:1 — anything that is read as text */
   --lc-ov-mark: #c9970b;
 }
 
