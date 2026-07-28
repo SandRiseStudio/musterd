@@ -129,6 +129,7 @@ import {
   resolveCapabilities,
   toMember,
 } from '../store/rows.js';
+import { redeemHandoff, stageHandoff } from '../store/signinHandoff.js';
 import { staleLaneWarnings } from '../store/staleness.js';
 import {
   archiveTeam,
@@ -445,6 +446,16 @@ const AddMemberBody = z.object({
    *  gets. Omitted ⇒ `'full'`, the trusted local dashboard; safe as a default only because ADR 134
    *  restricts minting to a local peer or an admin. */
   observer_scope: z.enum(['full', 'public']).optional(),
+});
+
+/**
+ * Body for `POST /teams/:slug/signin-handoff` (ADR 170). The credential is checked, not stored —
+ * `authMember` must resolve it to `member`, so the route can only relay an authority the caller
+ * already holds.
+ */
+const StageHandoffSchema = z.object({
+  member: z.string().min(1),
+  credential: z.string().min(1),
 });
 
 /**
@@ -777,6 +788,29 @@ function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage): TeamRow
  * Local peer ⇒ unauthenticated, exactly as before (the CLI and the daemon-served /live dashboard both
  * provision this way, and neither holds an admin credential). Anyone else ⇒ admin.
  */
+/**
+ * Refuse anything that did not come from this machine (ADR 170, reusing ADR 134's predicate). Unlike
+ * `authProvision` there is no admin escape hatch: the sign-in handoff moves a *member* credential,
+ * and the whole reason it is safe to put a nonce in a URL is that the URL only works here. `onDeny`
+ * lets the caller record the refusal — an off-machine attempt is a product signal (someone wants
+ * cross-device sign-in), not just an error.
+ */
+function requireLocalPeer(
+  ctx: Ctx,
+  req: IncomingMessage,
+  action: string,
+  onDeny?: () => void,
+): void {
+  if (isLocalPeer(req.socket.remoteAddress, ctx.config.trustProxy)) return;
+  onDeny?.();
+  throw new MusterdError(
+    'forbidden',
+    `${action} only works on the machine running the daemon — a sign-in link carries a member ` +
+      'identity, so it is deliberately not redeemable from another device. Sign in with your ' +
+      'credential on that device instead.',
+  );
+}
+
 function authProvision(ctx: Ctx, slug: string, req: IncomingMessage): void {
   if (isLocalPeer(req.socket.remoteAddress, ctx.config.trustProxy)) return;
   try {
@@ -1046,6 +1080,77 @@ export async function handleHttp(
         return sendJson(res, 200, {
           members: summarize(ctx, slug, team.id, tryAuth(ctx, slug, req)),
         });
+      }
+
+      /* ─── sign-in handoff (ADR 170) ────────────────────────────────────────────────────────────
+       * `musterd board` walks a human into the browser without either of them handling a secret: the
+       * CLI stages the credential it already holds and gets back a nonce, which rides the URL
+       * fragment; the browser redeems it once. The nonce is a handle to a one-time relay, not a
+       * credential — worthless after a single read or sixty seconds, whichever comes first.
+       *
+       * Both ends are localhost-gated, and that is load-bearing rather than hardening: a link a
+       * phone could redeem is a link that carries a permanent member credential onto a device the
+       * ADR 040 trust boundary never covered. Cross-device sign-in needs a bounded credential and is
+       * deliberately out of scope — it surfaces here as a loud refusal, not a silent success.
+       */
+      if (method === 'POST' && rest === '/signin-handoff') {
+        const team = requireTeam(ctx.db, slug);
+        requireLocalPeer(ctx, req, 'stage a sign-in handoff');
+        const body = parseOrBadRequest(StageHandoffSchema, await readJson(req));
+        // The caller must already hold this member's credential: the relay moves an authority, it
+        // never issues one. A mismatch is the same `unauthorized` any bad credential gets.
+        const { member } = authMember(ctx.db, slug, body.credential, body.member);
+        const staged = stageHandoff({
+          team: team.slug,
+          member: member.name,
+          credential: body.credential,
+        });
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'signin.handoff_staged',
+          target: member.name,
+          result: 'allow',
+          detail: { surface: 'cli' },
+        });
+        return sendJson(res, 201, staged);
+      }
+
+      const handoffMatch = rest.match(/^\/signin-handoff\/([^/]+)$/);
+      if (method === 'GET' && handoffMatch) {
+        const team = requireTeam(ctx.db, slug);
+        requireLocalPeer(ctx, req, 'redeem a sign-in link', () =>
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'signin.handoff_missed',
+            target: null,
+            result: 'deny',
+            detail: { reason: 'off_machine' },
+          }),
+        );
+        const redeemed = redeemHandoff(team.slug, decodeURIComponent(handoffMatch[1]!));
+        if (!redeemed) {
+          // Unknown, expired, and already-redeemed are one answer on purpose — a caller holding a
+          // nonce learns nothing from the difference, and the CLI's remedy is the same for all three.
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'signin.handoff_missed',
+            target: null,
+            result: 'deny',
+            detail: { reason: 'unknown_or_spent' },
+          });
+          throw new MusterdError(
+            'not_found',
+            'that sign-in link was already used or has expired — run `musterd board` again',
+          );
+        }
+        appendAudit(ctx.db, team.id, {
+          actor: redeemed.as,
+          action: 'signin.handoff_redeemed',
+          target: redeemed.as,
+          result: 'allow',
+          detail: { surface: 'web' },
+        });
+        return sendJson(res, 200, redeemed);
       }
 
       // The governance audit log (ADR 071, P2) — admin-only, since it exposes who-did-what across the
