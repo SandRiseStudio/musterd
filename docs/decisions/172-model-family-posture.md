@@ -107,6 +107,16 @@ per-seat; the posture aggregates them, it does not re-decide them.
     routing an agent around the null pick would quietly satisfy a requirement it does not meet.
   - Never a wedge, still: nothing blocks the close. The requirement has a record, not a lock — the
     ADR 145 line this whole arc holds.
+
+- **Admins can only be humans — DECIDED by nick, 2026-07-28.** The first cut of the risk route
+  accepted `kind === 'human' || is_admin`, which left an edge: an agent granted admin capability
+  would have satisfied a _human_-review requirement. That edge is now closed at both ends. Reconcile
+  — the single writer of capabilities — clamps `is_admin` to false on any agent seat, loudly (the
+  declaration lands in the reconcile errors), so a seat file or an admin role can no longer
+  manufacture agent authority. And the review predicates check `kind === 'human'` directly rather
+  than trusting the capability bit, so the invariant holds even against a stale pre-clamp row. This
+  makes ADR 145's "authority = human-only admin overlay" an enforced property instead of a
+  convention.
 - **ADR 169 inc 5** (spin-up ephemeral cross-family reviewer) stays parked. This posture makes its
   evidence legible (the wake pool and the no-candidate series), and makes its cheap form obvious
   (wake an enrolled seat before renting a foreign model); the ask-gated spend design remains a

@@ -2496,7 +2496,9 @@ export async function handleHttp(
           const humanReviewMissed =
             routing.human_required &&
             lane.state === 'done' &&
-            !(member.kind === 'human' || resolveCapabilities(member).is_admin);
+            // kind-only, not `|| is_admin`: admins can only be humans (ADR 172), and a stale
+            // agent-admin row must not read as having satisfied a human-review requirement.
+            member.kind !== 'human';
           appendAudit(ctx.db, team.id, {
             actor: member.name,
             action: 'lane.closed',

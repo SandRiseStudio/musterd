@@ -8,20 +8,20 @@ import {
 import type { Database } from 'better-sqlite3';
 import { listMembers } from './members.js';
 import { hasLivePresence } from './presence.js';
-import { resolveCapabilities, type MemberRow } from './rows.js';
+import { type MemberRow } from './rows.js';
 
 /**
  * The review counterpart picker (ADR 169 §4) — who gets the standard-tier `approve` ask when a lane
  * goes `ready_for_review`. One function so the policy can evolve without touching the transition
  * machinery. Precedence:
  *
- *   1. a **high-risk** lane (any declared `risk` tag) routes to a live human/admin seat, and ONLY
- *      to one — declared, never inferred. Human review is its own requirement class for risky work
+ *   1. a **high-risk** lane (any declared `risk` tag) routes to a live HUMAN seat, and only to one
+ *      — declared, never inferred. Human review is its own requirement class for risky work
  *      (user-facing / expensive / destructive / prod-touching — ADR 172, decided by nick
- *      2026-07-28), so a cross-family agent is NOT a substitute: with no live human/admin the pick
- *      is null and the close records `human_review_missed`, loudly, rather than an agent review
- *      quietly standing in for the one that was required. (Never a wedge: the close itself is
- *      still possible — the requirement has a record, not a lock.)
+ *      2026-07-28), and admins can only be humans (same ruling), so a cross-family agent is NOT a
+ *      substitute: with no live human the pick is null and the close records `human_review_missed`,
+ *      loudly, rather than an agent review quietly standing in for the one that was required.
+ *      (Never a wedge: the close itself is still possible — a record, not a lock.)
  *   2. otherwise a live seat whose **model family differs from the worker's** (ADR 056: correlated
  *      models make correlated mistakes, so a same-family review re-runs the worker's blind spots).
  *      Family comes from the occupancy's attested model (ADR 158 observed-over-declared); a seat
@@ -161,7 +161,12 @@ export function pickReviewCounterpart(
   );
 
   if (lane.risk.length > 0) {
-    const authority = candidates.find((m) => m.kind === 'human' || resolveCapabilities(m).is_admin);
+    // `kind === 'human'` alone, deliberately not `|| is_admin`: admins can only be humans (ADR 172),
+    // so on a coherent db the disjunct adds nothing — and on an incoherent one (a pre-clamp row
+    // where an agent's capabilities JSON still carries is_admin) it would route the one review that
+    // exists to demand a human's judgment to an agent. The predicate holds the invariant even
+    // against stale rows.
+    const authority = candidates.find((m) => m.kind === 'human');
     if (authority) {
       return {
         reviewer: authority.name,

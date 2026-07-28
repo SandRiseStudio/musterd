@@ -214,13 +214,28 @@ describe('reconcile — governance projection (ADR 070, v0.3 P1)', () => {
       'reviewer',
       '[capabilities]\ncan_flag_urgent = false\nvisibility_level = "admin"\nis_admin = true\n',
     );
-    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    // A HUMAN seat: an admin role projects fully onto a human (agents get is_admin clamped below).
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "human"\nrole = "reviewer"\n' });
     reconcile();
     const caps = memberView('olive').capabilities!;
     expect(caps.can_flag_urgent).toBe(false);
     expect(caps.visibility_level).toBe('admin');
     expect(caps.is_admin).toBe(true);
     expect(caps.can_observe).toBe(true); // unset role field falls back to generalist
+  });
+
+  it('clamps is_admin on an AGENT seat, loudly — admins can only be humans (ADR 172)', () => {
+    // This exact shape used to project cleanly: an agent handed an admin role read is_admin=true,
+    // so a seat file could quietly manufacture the authority every admin gate exists to check
+    // (governance ops, audit reads, risky-lane human review). Now the single writer clamps it and
+    // says so; every other capability of the role still projects.
+    writeRole('ops', '[capabilities]\ncan_flag_urgent = false\nis_admin = true\n');
+    writeRoster('slug = "alpha"\n', { botty: 'kind = "agent"\nrole = "ops"\n' });
+    const result = reconcile();
+    const caps = memberView('botty').capabilities!;
+    expect(caps.is_admin).toBe(false);
+    expect(caps.can_flag_urgent).toBe(false); // the rest of the role projects untouched
+    expect(result.errors.some((e) => e.includes('botty') && e.includes('human-only'))).toBe(true);
   });
 
   it('a per-seat override narrows the role default but cannot widen it', () => {

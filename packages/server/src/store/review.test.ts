@@ -95,3 +95,26 @@ describe('teamFamilyPosture (ADR 172)', () => {
     expect(p.families).toEqual({});
   });
 });
+
+describe('pickReviewCounterpart — risky-lane human requirement (ADR 172)', () => {
+  it('never routes a risky lane to an agent, even one whose stale row still carries is_admin', async () => {
+    // Admins can only be humans (ADR 172). Reconcile clamps new projections, but a row written
+    // before the clamp can still carry is_admin in its capabilities JSON — and the one review that
+    // exists to demand a human's judgment must not route to it.
+    const { openLane } = await import('./lanes.js');
+    const { setMemberGovernance } = await import('./members.js');
+    const { db, team } = seed();
+    agent(db, team, 'ada', 'claude-opus-5'); // the worker
+    const { row: botty } = addMember(db, team, { kind: 'agent', name: 'botty', role: '' });
+    attach(db, botty.id, 'claude-code', 'conn-botty', { model: 'gpt-5.2-codex' });
+    setMemberGovernance(db, botty.id, null, JSON.stringify({ is_admin: true })); // the stale shape
+    const lane = openLane(db, team.id, 'dawn', 'ada', {
+      title: 'prod deploy',
+      risk: ['production'],
+      claim: true,
+    });
+    const { pickReviewCounterpart } = await import('./review.js');
+    // botty is live, cross-family, AND carries a stale admin bit — still not a human. Null pick.
+    expect(pickReviewCounterpart(db, team.id, lane, 'ada', TIMEOUT)).toBeNull();
+  });
+});

@@ -133,6 +133,17 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       roleDefaults.get(seat.role ?? '') ?? {},
       seat.capabilities ?? {},
     );
+    // Admins can only be humans (ADR 145's authority overlay, made explicit by nick 2026-07-28 in
+    // ADR 172). An agent seat file declaring `is_admin` — directly or via an admin role — is
+    // clamped here, at the single writer, and loudly: every admin-gated surface (governance ops,
+    // audit reads, risky-lane human review) assumes an admin is a human, so projecting an agent
+    // admin would let a seat file quietly manufacture the authority those gates exist to check.
+    if (m.kind !== 'human' && caps.is_admin) {
+      caps.is_admin = false;
+      result.errors.push(
+        `seat "${name}" is an agent declaring is_admin — clamped to false (admins are human-only, ADR 172)`,
+      );
+    }
     setMemberGovernance(db, m.id, seat.account_status ?? null, JSON.stringify(caps));
   }
 
