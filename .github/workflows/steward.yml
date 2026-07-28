@@ -69,6 +69,21 @@ jobs:
           count=$(node -e "process.stdout.write(String(require('./steward-findings.json').findings.length))")
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
+      # MCP SDK watch (ADR 175): the 2026-07-28 spec adoption lane is gated on the SDK shipping RC
+      # support, and this repo has no dependabot — so the weekly scan surfaces "a newer SDK exists"
+      # in the step summary. Informational only: the canaries in packages/mcp/src/sdkSeams.test.ts
+      # are what actually gate the bump PR. Never fails the job.
+      - name: MCP SDK release watch
+        run: |
+          current=$(node -e "process.stdout.write(require('./node_modules/@modelcontextprotocol/sdk/package.json').version)" 2>/dev/null || echo unknown)
+          latest=$(npm view @modelcontextprotocol/sdk dist-tags.latest 2>/dev/null || echo unknown)
+          if [ "$latest" != "unknown" ] && [ "$latest" != "$current" ]; then
+            echo "### MCP SDK: newer release available — \`$current\` installed, \`$latest\` published" >> "$GITHUB_STEP_SUMMARY"
+            echo "If its release notes announce MCP spec 2026-07-28 support, the gated adoption lane (ADR 175) is ready to start." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "MCP SDK watch: installed $current, latest $latest — nothing new"
+          fi
+
       - name: Is the agent enabled? (both secrets present)
         id: flags
         env:

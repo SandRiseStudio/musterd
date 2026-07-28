@@ -104,6 +104,8 @@ describe('ToolCallRecorder', () => {
 
 // End-to-end through the real SDK server (validation included) and a real daemon: the only seam
 // that sees an invalid-input bounce is the tools/call request handler this instruments.
+// SDK-seam canary (ADR 175): these three tests are part of the canary set `sdkSeams.test.ts`
+// anchors — they prove the seams against the real SDK, so don't weaken them to unit doubles.
 describe('tool-call telemetry end-to-end (ADR 144 inc 1)', () => {
   let server: RunningServer;
   let base: string;

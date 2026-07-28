@@ -27,6 +27,7 @@ import {
   startToolTelemetryFlush,
   ToolCallRecorder,
 } from './toolTelemetry.js';
+import { ADAPTER_VERSION } from './version.js';
 
 export { MusterdClient } from './client.js';
 export { loadMcpConfig, type McpConfig } from './config.js';
@@ -145,7 +146,9 @@ export function buildMcpServer(
   opts: { onFirstToolCall?: () => Promise<void>; recorder?: ToolCallRecorder } = {},
 ): McpServer {
   const server = new McpServer(
-    { name: 'musterd', version: '0.2.0', icons: [...MCP_ICONS] },
+    // version is package truth (ADR 175): serverInfo rides initialize today and, under MCP spec
+    // 2026-07-28, `server/discover` and every result's `_meta` — a literal here re-drifts.
+    { name: 'musterd', version: ADAPTER_VERSION, icons: [...MCP_ICONS] },
     { instructions: primerInstructions(config) },
   );
   // Patch registerTool before any tool registers, so every handler runs inside a
