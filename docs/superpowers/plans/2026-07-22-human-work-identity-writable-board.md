@@ -6,8 +6,9 @@
 [docs/superpowers/specs/2026-07-22-human-work-identity-writable-board-design.md](../specs/2026-07-22-human-work-identity-writable-board-design.md).
 
 **Goal:** Make the `/board` kanban writable by a signed-in human member — create/claim/advance/handoff/
-resolve lanes from the web — so nick can own a real `publish-to-npm` lane from the browser; then round
-the board out with an insight rail + Goal swimlanes and live-tail.
+resolve lanes from the web — so nick can own a real `launch-post` lane from the browser (the original
+publish-to-npm dogfood shipped as ADR 156 before this plan ran; see the spec's staleness refresh);
+then round the board out with an insight rail + Goal swimlanes and live-tail.
 
 **Architecture:** The backend is already complete (`POST /lanes`, `PATCH /lanes/:id`, `GET /report`,
 all member-authed). This is web-only: add two client functions mirroring `sendAct`, teach `/board` the
@@ -427,7 +428,7 @@ The quality gate before the PR: prove the nick dogfood works end-to-end and the 
 
 Follow the temp-daemon recipe at the top of `docs/perf/web-live-baseline.md`. `vite preview` the built
 web (never `vite dev`). Sign in on `/board?team=<team>` via Advanced as a real member seat with its
-`mscr_`. Create a lane titled "publish packages to npm", claim-it on. Verify: the card appears in
+`mscr_`. Create a lane titled "write the launch post", claim-it on. Verify: the card appears in
 `claimed`, `owner_seat` is that member, and `GET /lanes` shows it. Claim/advance/handoff/resolve a
 throwaway lane; confirm each persists.
 
