@@ -32,7 +32,7 @@ export type ShippedAnchor = { prs: number[] } | { legacy: true };
  * in-scope item carries one; out-of-scope items omit it. A shipped item may keep the wave it was
  * built in as history (the map badge), but the generated Build sequence lists only unshipped work.
  */
-export type Wave = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 'later';
+export type Wave = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 'later';
 
 export type Category =
   | 'human-loop'
@@ -161,7 +161,7 @@ export const CATEGORY_ORDER: Category[] = [
 
 export const STATUS_ORDER: Status[] = ['shipped', 'near-term', 'reserved', 'out-of-scope'];
 
-export const WAVE_ORDER: Wave[] = [1, 2, 3, 4, 5, 6, 7, 8, 'later'];
+export const WAVE_ORDER: Wave[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 'later'];
 
 export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
   1: { label: 'Wave 1', tone: 'Harden the coordination loop — small, additive, evidence-backed.' },
@@ -186,6 +186,10 @@ export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
   8: {
     label: 'Wave 8',
     tone: 'Any harness, always on — residency (resume the offline) plus the reevaluated role-template/mixed-harness layer; the top of the reachability ladder.',
+  },
+  9: {
+    label: 'Wave 9',
+    tone: 'A place to stand — state the install topology the primitives never composed (platform / team / projects / workspaces), give the team a filesystem home and the human a floor, and close the identity seams dogfood found.',
   },
   later: { label: 'Later', tone: 'No near-term pull; opportunistic.' },
 };
@@ -1085,6 +1089,19 @@ const RAW: RawItem[] = [
       'Today every seat runs on someone else’s harness (Claude Code, Cursor, Codex) with musterd as the coordination layer on top; the residency work (ADR 131) already names musterd’s own native harness as its reference actuator row. This item is that ambition whole: a musterd-native runtime a seat can live on directly, plus mixed-harness teams as the deliberately-supported composition (Track B finding 003: non-Claude harnesses coordinate through musterd today; ADR 101 makes model family a team-composition property). Role creation/assignment is deliberately NOT this item — roles are harness-independent (see roles-and-stewardship) and must work identically whether a seat runs on Claude Code, Codex, or musterd’s own harness. (Split 2026-07-13: this item previously also carried the role-template reevaluation.)',
     refs: [adr(26, 'ADRs 026–030'), adr(131, 'ADR 131')],
     dependsOn: ['harness-adapters'],
+  },
+  {
+    id: 'install-topology',
+    wave: 9,
+    title: 'Install topology — the team home is where the human stands',
+    plan: 'near-term',
+    category: 'platform',
+    blurb:
+      'One machine, one daemon, many teams, many repos — and every seat has a floor: agents stand in per-seat worktrees, the human stands in a per-team home (`~/musterd/<team>`). `musterd human <name>` provisions it in one command, a lost human credential becomes recoverable, and the shared agent key can never occupy a human seat.',
+    detail:
+      'Every primitive of a working install shipped separately (packaged binary ADR 156, team create, agent worktrees ADR 065, bindings, committed launch spec ADR 080, durable roster ADR 058) but the model composing them was never stated — and one evening of dogfood (2026-07-28) found the seams live: the claim path let the team agent key occupy a human seat (producing a binding every later request 403s — the invariant authByAgentKey enforces per-request was never enforced at occupancy), a lost mscr_ credential had no re-issue verb anywhere (the founder’s own credential for the dogfood team existed nowhere on his machine, blocking the ADR 170 `musterd board` flow whose premise is "the CLI already holds it"), and the human had no workspace at all — eleven agent worktrees, zero for the person ADR 145 made a peer. This item states the four-layer topology (platform / team / projects / workspaces) in docs/design/install-topology.md and lands six increments: the claim-path kind guard (bug, both HTTP and WS surfaces), the doctor diagnostic for dead bindings, credential rotate-in-place at the ADR 134 provisioning bar (`musterd team credential <name>`), the team home + `musterd human <name>` composition (teamHome config key; the home carries the human’s binding so board/inbox/send work bare as them; rosterHome composes rather than merges), lane `project` derivation from repo identity (today every lane is project=default, silently making contention checks team-wide), and the init team-picker fix for wiring a second repo to a known team. Deliberately parked: the operator checkout rename (runbook appendix only), multi-device humans (owned by ADR 170’s off_machine counter-signal), remote join P4.',
+    refs: [doc('docs/design/install-topology.md', 'install-topology.md'), adr(170, 'ADR 170'), adr(134, 'ADR 134'), adr(58, 'ADR 058')],
+    dependsOn: ['v03-p3-credentials', 'durable-roster', 'agent-workspace', 'packaging-easy-install'],
   },
   {
     id: 'roles-and-stewardship',
