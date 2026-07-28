@@ -95,7 +95,8 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Setup & daemon ─────────────────────────────────────────────────────────────────────────
   {
     name: 'init',
-    signature: '[--check [--fix]] [--refresh-guidance] [--prune-bindings [--apply]]',
+    signature:
+      '[--check [--fix]] [--refresh-guidance] [--refresh-hooks] [--prune-bindings [--apply]]',
     summary: 'interactive first-run setup — wire this folder to musterd',
     group: 'setup',
     primary: true,
@@ -104,7 +105,10 @@ export const CATALOG: readonly CommandEntry[] = [
       'gets this folder onto a team. `--check` reports provisioning drift without writing; add `--fix` ' +
       'to repair it by re-running init. `--refresh-guidance` rewrites only the stamped skill/command ' +
       'files — no prompts, no member mint, no binding rewrite — so it is safe in a live seat’s ' +
-      'workspace, which the full flow is not (ADR 161). In an already-bound folder the full flow ' +
+      'workspace, which the full flow is not (ADR 161). `--refresh-hooks` is its sibling for hooks ' +
+      '(ADR 168): it rewrites only the hook entries, so a hook added after this seat was provisioned ' +
+      'reaches it without re-provisioning, and it declines to overwrite a hook a newer musterd wrote. ' +
+      'In an already-bound folder the full flow ' +
       'defaults to that folder’s own team, never the last team this machine happened to use. ' +
       '`--prune-bindings` reports registry entries whose folder is gone (ADR 162) — add `--apply` to ' +
       'remove them; credentials are never touched.',
@@ -113,6 +117,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'musterd init --check',
       'musterd init --check --fix',
       'musterd init --refresh-guidance',
+      'musterd init --refresh-hooks',
       'musterd init --prune-bindings --apply',
     ],
   },

@@ -1,6 +1,6 @@
 import type { Parsed } from '../args.js';
 import { inspectProvisioning, runCheckBuild, runInitDoctor } from '../onboard/doctor.js';
-import { runInit, runPruneBindings, runRefreshGuidance } from '../onboard/init.js';
+import { runInit, runPruneBindings, runRefreshGuidance, runRefreshHooks } from '../onboard/init.js';
 import { theme } from '../render/theme.js';
 import { wireCommand } from './wire.js';
 
@@ -19,6 +19,9 @@ export async function initCommand(parsed: Parsed): Promise<number> {
   // Guidance-only refresh: deliberately checked before `--check`, so `--check --refresh-guidance`
   // means "fix the guidance", never "run the whole interactive flow".
   if (parsed.flags['refresh-guidance']) return runRefreshGuidance();
+  // Hook-only refresh (ADR 168), same precedence rule and the same reason: a stale or missing hook
+  // is not an identity problem, so its repair must not route through the identity-rewriting flow.
+  if (parsed.flags['refresh-hooks']) return runRefreshHooks();
   // Registry prune (ADR 162): reports by default, removes only with --apply. Local-file maintenance
   // like the refresh above — no daemon call, no identity, no credentials.
   if (parsed.flags['prune-bindings']) {

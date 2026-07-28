@@ -103,6 +103,53 @@ export function runRefreshGuidance(dir: string = process.cwd()): number {
 }
 
 /**
+ * `musterd init --refresh-hooks` (ADR 168): rewrite this folder's musterd hooks and nothing else.
+ *
+ * The sibling of `--refresh-guidance`, and it exists for the same reason: the doctor's hook-drift
+ * lines said "run `musterd init`", pointing at the one command that is interactive, re-mints
+ * identity, and re-points the worktree-family MCP entry (ADR 165). A hook that is stale or missing
+ * is not an identity problem, so repairing it should not route anyone through an identity flow.
+ *
+ * This is also the *delivery* mechanism the hook system never had. Measured across the 13 dogfood
+ * worktrees on 2026-07-27: the ADR 167 observer was installed in 0 of them and the ADR 150
+ * enforcement gate in 2, because a hook added after a seat was provisioned reached it only by
+ * re-provisioning. A declared enforcement class was therefore silently a no-op in most seats — it
+ * fails open, so nothing broke and nothing complained.
+ */
+export function runRefreshHooks(dir: string = process.cwd()): number {
+  const team = folderTeamHere(dir);
+  if (!team) {
+    process.stderr.write(
+      `${theme.warn(sym.warn)} no musterd binding here — run \`musterd init\` to set this folder up first\n`,
+    );
+    return 1;
+  }
+  // Only harnesses this folder is already provisioned for. A refresh updates what is there; a first
+  // install is `init`'s job — the same line --refresh-guidance draws.
+  const present = HARNESSES.filter((h) => h.refreshHooks?.applies(dir));
+  if (present.length === 0) {
+    process.stdout.write(
+      `${theme.meta('no musterd hooks in this folder to refresh — `musterd init` provisions them')}\n`,
+    );
+    return 0;
+  }
+  let refused = 0;
+  for (const h of present) {
+    const res = h.refreshHooks!.run(dir);
+    process.stdout.write(`${theme.ok(sym.ok)} ${h.label} hooks refreshed\n`);
+    for (const f of res.files) process.stdout.write(`  ${theme.meta(f)}\n`);
+    // A refusal is the ADR 168 downgrade guard firing: a NEWER build wrote the hook we were about to
+    // replace. Loud, and non-zero exit — silently "succeeding" while declining to write is the exact
+    // failure mode this whole ADR exists to end.
+    for (const w of res.warnings) {
+      refused++;
+      process.stderr.write(`${theme.warn(sym.warn)} ${w}\n`);
+    }
+  }
+  return refused > 0 ? 1 : 0;
+}
+
+/**
  * `musterd init --prune-bindings` (ADR 162): drop registry entries whose folder no longer exists.
  *
  * The ADR 020 registry records where each member is bound, keyed by absolute folder path, and

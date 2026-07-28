@@ -179,6 +179,32 @@ clear the line. Doing that from an unmerged branch build would have rewritten th
 for every folder from code that had not landed — the precise hazard this ADR exists to prevent. The
 repair waits for the merged build.
 
+### Follow-through — `--refresh-hooks`, and the delivery gap it exposed
+
+Performing the repair above surfaced a defect in this ADR itself: its prescription, "Run `musterd
+init`", had **no safe form**. `--refresh-guidance` deliberately skips hooks (ADR 161); the full flow
+is interactive, re-mints identity, and re-points the worktree-family MCP entry (ADR 165); and ADR 161
+states outright that the full flow is unsafe in a live seat's workspace — which is exactly where the
+drift line is read. A doctor line that prescribes a command nobody can safely run is half an
+instrument.
+
+Measuring the fleet turned that ergonomic complaint into a real finding. Across the 13 dogfood
+worktrees:
+
+| hook                                | installed in |
+| ----------------------------------- | ------------ |
+| `musterd-sessionmsg-hook` (ADR 167) | **0 of 13**  |
+| `musterd-gate-hook` (ADR 150)       | **2 of 13**  |
+
+So a declared enforcement class was **silently a no-op in most seats**. It fails open, so nothing
+broke and nothing complained. The cause is the same one this ADR is about, one level up: a hook added
+after a seat was provisioned reached it only by re-provisioning, and re-provisioning was unsafe — so
+hooks had no delivery mechanism at all, and the fleet quietly diverged.
+
+`musterd init --refresh-hooks` is that mechanism: hook entries only, no prompts, no member mint, no
+binding write, no MCP re-registration, honoring the downgrade refusal above and exiting non-zero when
+it fires. Every hook-drift line now names it instead of `musterd init`.
+
 ## Consequences
 
 - A hook downgrade becomes loud instead of silent, and the doctor stops reporting a stale machine-wide
