@@ -163,3 +163,277 @@ class FirehoseSound {
 
 /** Process-wide singleton — the toggle writes it, the stream hook reads it. */
 export const firehoseSound = new FirehoseSound();
+
+// ── room tone ────────────────────────────────────────────────────────────────────────────────────
+//
+// The sound of the office *being there*, as opposed to the sound of things happening in it. It is a
+// separate engine behind a separate switch because it answers a different question: the act cues
+// above tell you something arrived, this one tells you the room is inhabited. Somebody who wants a
+// quiet room with audible arrivals — or a lived-in room with no pings — should get exactly that, and
+// one toggle cannot serve both.
+//
+// Synthesised, like the cues: no audio assets, so it costs the byte budget nothing but the code (the
+// packages/web perf contract). Three layers, from continuous to sparse:
+//
+//   1. AIR — filtered noise, the building's ventilation. The bed everything else sits on.
+//   2. HUM  — a pair of very low, slightly detuned sines. Below conscious hearing on laptop speakers
+//             and clearly missing when you take it away, which is exactly what room tone is.
+//   3. LIFE — the sparse events: a run of keys somewhere, a mug set down, a chair. These are what
+//             make it an OFFICE rather than an air conditioner, and they are deliberately thin. A
+//             loop you notice is a loop you will turn off within the hour.
+//
+// It is quiet on purpose ("light ambient office noise" — nick, 2026-07-28), and it stops dead on a
+// hidden tab: an idle cost is paid by every viewer forever, and one left running in a background tab
+// is the most annoying possible version of this feature.
+
+const ROOM_PREF_KEY = 'musterd.live.roomtone';
+/** Ceiling on the whole bed. Low enough to sit under a podcast, loud enough to miss when it stops. */
+const ROOM_GAIN = 0.075;
+/** Gap between sparse events, seconds. Wide, and jittered inside the window — an office you can set
+ *  your watch by is a metronome, and the ear finds a metronome within about two cycles. */
+const LIFE_GAP: [number, number] = [3.5, 11];
+
+class RoomTone {
+  enabled = false;
+  private ctx: AudioContext | null = null;
+  private bus: GainNode | null = null;
+  private noise: AudioBuffer | null = null;
+  private sources: AudioScheduledSourceNode[] = [];
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private watching = false;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      try {
+        this.enabled = window.localStorage.getItem(ROOM_PREF_KEY) === '1';
+      } catch {
+        this.enabled = false;
+      }
+    }
+  }
+
+  /** Toggle the bed. Enabling must come from a user gesture so the AudioContext can start. */
+  setEnabled(on: boolean): void {
+    this.enabled = on;
+    try {
+      window.localStorage.setItem(ROOM_PREF_KEY, on ? '1' : '0');
+    } catch {
+      /* private mode / disabled storage — fine, just don't persist */
+    }
+    if (on) this.start();
+    else this.stop();
+  }
+
+  /**
+   * A preference that survives a reload cannot legally resume itself — the page has had no gesture
+   * yet, so the context would be born suspended. `resumeIfEnabled` is what the *first* interaction
+   * calls: if the viewer already asked for room tone in an earlier session, this is where it actually
+   * starts. No gesture ever arrives → nothing ever plays, which is the correct outcome, not a bug.
+   */
+  resumeIfEnabled(): void {
+    if (this.enabled) this.start();
+  }
+
+  private start(): void {
+    if (typeof window === 'undefined') return;
+    if (!this.ctx) {
+      const Ctor =
+        window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return;
+      this.ctx = new Ctor();
+    }
+    if (this.ctx.state === 'suspended') void this.ctx.resume();
+    if (this.bus) return; // already built and running
+
+    const ctx = this.ctx;
+    const bus = ctx.createGain();
+    // Faded in over a second and a half. Room tone that snaps on announces itself as an effect; the
+    // whole illusion is that it was always there and you only just noticed.
+    bus.gain.setValueAtTime(0.0001, ctx.currentTime);
+    bus.gain.exponentialRampToValueAtTime(ROOM_GAIN, ctx.currentTime + 1.5);
+    bus.connect(ctx.destination);
+    this.bus = bus;
+
+    // 1 · AIR. One second of noise on a loop, rolled off hard — what is left after a lowpass this low
+    // has no seam to hear, so a one-second buffer does the work of a recorded minute.
+    const air = ctx.createBufferSource();
+    air.buffer = this.noiseBuffer(ctx);
+    air.loop = true;
+    const airLp = ctx.createBiquadFilter();
+    airLp.type = 'lowpass';
+    airLp.frequency.value = 380;
+    airLp.Q.value = 0.4;
+    const airGain = ctx.createGain();
+    airGain.gain.value = 0.5;
+    air.connect(airLp).connect(airGain).connect(bus);
+    air.start();
+    this.sources.push(air);
+
+    // A slow swell across the bed, so the ventilation breathes instead of sitting at one level. Well
+    // under a cycle a minute: perceptible as life, never as a wobble.
+    const swell = ctx.createOscillator();
+    swell.frequency.value = 0.03;
+    const swellDepth = ctx.createGain();
+    swellDepth.gain.value = 0.16;
+    swell.connect(swellDepth).connect(airGain.gain);
+    swell.start();
+    this.sources.push(swell);
+
+    // 2 · HUM. Two low sines a few cents apart — the beat between them is the "big room" cue, and it
+    // is the detune doing that work, not the pitch.
+    for (const [f, g] of [
+      [57.5, 0.1],
+      [58.9, 0.08],
+    ] as const) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = f;
+      const gain = ctx.createGain();
+      gain.gain.value = g;
+      osc.connect(gain).connect(bus);
+      osc.start();
+      this.sources.push(osc);
+    }
+
+    // 3 · LIFE.
+    this.armLife();
+
+    // A bed left playing to a tab nobody is looking at is the worst version of this feature.
+    if (!this.watching) {
+      this.watching = true;
+      document.addEventListener('visibilitychange', this.onVisibility);
+    }
+    // `visibilitychange` only fires on a CHANGE, so the listener alone never catches the case where
+    // the tab is *already* hidden when the bed starts — a preference restored on a background tab,
+    // or a viewer who switched away between the click and the context opening. Check the state we
+    // are actually in, rather than waiting for it to be announced.
+    if (document.hidden) void ctx.suspend();
+  }
+
+  private onVisibility = (): void => {
+    if (!this.ctx || !this.enabled) return;
+    if (document.hidden) void this.ctx.suspend();
+    else void this.ctx.resume();
+  };
+
+  private stop(): void {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    const ctx = this.ctx;
+    const bus = this.bus;
+    if (!ctx || !bus) return;
+    // Fade out before tearing down, or the whole bed ends on a click.
+    const end = ctx.currentTime + 0.7;
+    bus.gain.cancelScheduledValues(ctx.currentTime);
+    bus.gain.setValueAtTime(Math.max(bus.gain.value, 0.0001), ctx.currentTime);
+    bus.gain.exponentialRampToValueAtTime(0.0001, end);
+    const sources = this.sources;
+    this.sources = [];
+    this.bus = null;
+    for (const s of sources) s.stop(end + 0.05);
+    setTimeout(() => bus.disconnect(), 900);
+  }
+
+  /** One second of white noise, built once and reused by every layer that needs a hiss. */
+  private noiseBuffer(ctx: AudioContext): AudioBuffer {
+    if (this.noise) return this.noise;
+    const buf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    this.noise = buf;
+    return buf;
+  }
+
+  /** Schedule the next sparse event, and re-arm from it. One timer, always. */
+  private armLife(): void {
+    clearTimeout(this.timer);
+    const wait = LIFE_GAP[0] + Math.random() * (LIFE_GAP[1] - LIFE_GAP[0]);
+    this.timer = setTimeout(() => {
+      if (this.bus && this.ctx?.state === 'running' && !document.hidden) this.life();
+      this.armLife();
+    }, wait * 1000);
+  }
+
+  /** Pick one of the room's small noises and play it, somewhere off to one side. */
+  private life(): void {
+    const ctx = this.ctx;
+    const bus = this.bus;
+    if (!ctx || !bus) return;
+    // Placed across the stereo field, never dead centre: everything in an office happens at somebody
+    // else's desk, and a sound in the middle of your head is a sound you made.
+    const pan = ctx.createStereoPanner?.();
+    const out = pan ?? ctx.createGain();
+    if (pan) pan.pan.value = (Math.random() * 2 - 1) * 0.75;
+    out.connect(bus);
+    setTimeout(() => out.disconnect(), 6000);
+
+    const roll = Math.random();
+    if (roll < 0.5) this.keys(ctx, out);
+    else if (roll < 0.72) this.tap(ctx, out, 0.9);
+    else if (roll < 0.88) this.creak(ctx, out);
+    else this.tap(ctx, out, 0.35);
+  }
+
+  /** Somebody typing, a few desks away: a short run of clicks at a human, uneven rate. */
+  private keys(ctx: AudioContext, out: AudioNode): void {
+    const n = 4 + Math.floor(Math.random() * 9);
+    let at = ctx.currentTime + 0.02;
+    for (let i = 0; i < n; i++) {
+      this.click(ctx, out, at, 1650 + Math.random() * 900, 0.05 + Math.random() * 0.04);
+      at += 0.055 + Math.random() * 0.075; // the jitter IS the humanity
+    }
+  }
+
+  /** A mug, a stapler, something set down on a desk. `body` picks how heavy it lands. */
+  private tap(ctx: AudioContext, out: AudioNode, body: number): void {
+    this.click(ctx, out, ctx.currentTime + 0.02, 260 + Math.random() * 420, 0.075 * body, 0.13);
+  }
+
+  /** A chair taking somebody's weight — a short downward glide, which is the whole gesture. */
+  private creak(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 7;
+    bp.frequency.setValueAtTime(520, t0);
+    bp.frequency.exponentialRampToValueAtTime(300, t0 + 0.42);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.05, t0 + 0.09);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t0);
+    src.stop(t0 + 0.5);
+  }
+
+  /** One short filtered noise burst — the shared shape behind a keystroke and a mug on a desk. */
+  private click(
+    ctx: AudioContext,
+    out: AudioNode,
+    at: number,
+    freq: number,
+    gain: number,
+    dur = 0.045,
+  ): void {
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = freq;
+    bp.Q.value = 2.2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(gain, at + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(bp).connect(g).connect(out);
+    src.start(at);
+    src.stop(at + dur + 0.03);
+  }
+}
+
+/** Process-wide singleton — the room-tone toggle owns it; nothing else needs to touch it. */
+export const roomTone = new RoomTone();

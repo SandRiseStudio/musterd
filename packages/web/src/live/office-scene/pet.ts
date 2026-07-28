@@ -41,8 +41,24 @@ export interface PetState {
   modeT: number;
   /** Gait phase (cycles), advanced by distance travelled while walking. */
   phase: number;
-  /** Screen-space facing: true = the pet points left. */
+  /** Screen-space facing INTENT: true = the pet wants to point left. Set the instant the heading
+   *  decides; what actually gets drawn is `face`, which chases this. */
   flip: boolean;
+  /**
+   * The facing the painter draws: the mirror factor, +1 (right) through 0 (edge-on) to −1 (left),
+   * eased toward `flip` rather than snapped to it. Passing through 0 IS the turn — the dog narrows,
+   * swings through square-on and opens out the other way, which is what a body does when it changes
+   * direction. Snapping the mirror was the old behaviour, and a dog that teleports through its own
+   * reflection is the single most artificial thing a walk cycle can do.
+   */
+  face: number;
+  /**
+   * Ground speed right now, logical units/s — eased toward `speed`, not set to it. A dog does not
+   * leave a nap at trotting pace or arrive at one still trotting: it winds up out of the stretch and
+   * winds down into the last stride. Gait phase advances from THIS, so the legs turn over slower
+   * through the ramp for free.
+   */
+  vel: number;
   /** Current route (waypoints, ends exact) and the segment index into it. */
   path: P[];
   seg: number;
@@ -63,8 +79,33 @@ export interface PetState {
 export const PET_SPEED = 55;
 /** Zoomies pace. Fast enough to read as a tear around the room, not so fast it teleports. */
 export const PET_DASH = 165;
-/** One full gait cycle per this much ground covered. */
-const STRIDE = 30;
+/**
+ * One full gait cycle per this much ground covered.
+ *
+ * **This number and the painter's foot reach are one measurement, not two.** A paw is planted for
+ * most of its cycle, so over one cycle it must travel backward under the dog by exactly the ground
+ * the dog covers — otherwise the feet scrub, which is the "his feet are barely moving" read. The
+ * painter derives its reach from this constant (see `GAIT_REACH` in render.ts) rather than carrying
+ * its own hand-tuned swing, so the two cannot drift apart the next time the dog is resized.
+ */
+export const STRIDE = 19;
+/** How hard the dog gets up to speed / sheds it, logical units/s². */
+const ACCEL = 190;
+/** Inside this much of the destination it is already slowing down for the arrival. */
+const BRAKE_D = 46;
+/** Never creep below this while still walking — an asymptotic arrival never actually arrives. */
+const MIN_VEL = 14;
+/**
+ * Time constant of the turn, seconds: the dog is ~95% of the way round after 3× this. Short enough
+ * that a corner reads as a swivel rather than a pirouette, long enough that you see it happen.
+ */
+const TURN_TAU = 0.075;
+/**
+ * How decisively the heading has to point sideways before the dog commits to turning. The room is a
+ * 2:1 iso, so a dog walking *into* the screen (lx and ly rising together) has almost no screen-space
+ * x — without a deadband it would flutter between facings for the whole diagonal.
+ */
+const FACE_COMMIT = 0.34;
 /** Wake-up stretch and settle-down curl durations (seconds). */
 export const STRETCH_S = 1.5;
 export const CURL_S = 1.1;
@@ -147,6 +188,8 @@ export function createPet(rng: () => number = Math.random): PetState {
     modeT: 0,
     phase: 0,
     flip: false,
+    face: 1,
+    vel: 0,
     path: [],
     seg: 0,
     plan: 'nap',
@@ -217,6 +260,7 @@ function setOff(pet: PetState, target: P | null, plan: PetState['plan'], minTrip
   pet.mode = 'stretch';
   pet.modeT = 0;
   pet.speed = PET_SPEED;
+  pet.vel = 0; // out of the stretch it winds up from standing, never from full pace
   return true;
 }
 
@@ -255,6 +299,7 @@ function zoomies(pet: PetState, rng: () => number): boolean {
   pet.mode = 'stretch';
   pet.modeT = 0;
   pet.speed = PET_DASH;
+  pet.vel = 0;
   return true;
 }
 
@@ -380,15 +425,39 @@ function besideSpot(at: P): P | null {
   return null;
 }
 
+/** Path length still ahead of the pet, following the waypoints rather than cutting the corner. */
+function remaining(pet: PetState): number {
+  let d = 0;
+  let at: P = { lx: pet.lx, ly: pet.ly };
+  for (let i = pet.seg + 1; i < pet.path.length; i++) {
+    const next = pet.path[i]!;
+    d += Math.hypot(next.lx - at.lx, next.ly - at.ly);
+    at = next;
+  }
+  return d;
+}
+
 /**
  * Advance the pet by `dt` seconds. Returns whether the pet still needs animation frames — false only
- * when it is asleep, which is the office's cue that the room can park on a baked still frame again.
+ * when it is asleep and square-on to its intended facing, which is the office's cue that the room can
+ * park on a baked still frame again.
  */
 export function stepPet(pet: PetState, dt: number): boolean {
   pet.modeT += dt;
+  // The turn runs under every mode and outlives the one that started it — a dog told to look at the
+  // door while it settles keeps turning through the settle. Exponential toward the intent, so the
+  // swivel is fast off the mark and lands soft; snapped the last sliver so it terminates exactly and
+  // the room can still park its frame loop.
+  const want = pet.flip ? -1 : 1;
+  if (pet.face !== want) {
+    pet.face += (want - pet.face) * (1 - Math.exp(-dt / TURN_TAU));
+    if (Math.abs(want - pet.face) < 0.004) pet.face = want;
+  }
+  const turning = pet.face !== want;
+
   switch (pet.mode) {
     case 'sleep':
-      return false;
+      return turning;
     case 'stretch':
       if (pet.modeT >= STRETCH_S) {
         pet.mode = 'walk';
@@ -396,7 +465,11 @@ export function stepPet(pet: PetState, dt: number): boolean {
       }
       return true;
     case 'walk': {
-      let travel = pet.speed * dt;
+      // Ease toward the trip's pace, braking for the arrival — `remaining` is the real path length
+      // left, not the crow-flies distance, so a dog rounding one last corner does not brake early.
+      const target = Math.max(MIN_VEL, Math.min(pet.speed, (remaining(pet) / BRAKE_D) * pet.speed));
+      pet.vel += Math.sign(target - pet.vel) * Math.min(ACCEL * dt, Math.abs(target - pet.vel));
+      let travel = pet.vel * dt;
       while (travel > 0 && pet.seg < pet.path.length - 1) {
         const next = pet.path[pet.seg + 1]!;
         const dx = next.lx - pet.lx;
@@ -410,15 +483,18 @@ export function stepPet(pet: PetState, dt: number): boolean {
         pet.lx += (dx / d) * step;
         pet.ly += (dy / d) * step;
         pet.phase += step / STRIDE; // gait from distance, never wall time
-        // Screen-space heading under the 2:1 iso: x grows with (lx − ly).
+        // Screen-space heading under the 2:1 iso: x grows with (lx − ly). Only a heading that points
+        // decisively sideways changes the facing: a leg angled into the screen has a screen-x of
+        // almost nothing, and honouring it would spin the dog on its own axis down a diagonal.
         const sx = dx - dy;
-        if (Math.abs(sx) > 0.5) pet.flip = sx < 0;
+        if (Math.abs(sx) > FACE_COMMIT * d) pet.flip = sx < 0;
         travel -= step;
         if (step >= d) pet.seg++;
       }
       if (pet.seg >= pet.path.length - 1) {
         pet.mode = pet.plan === 'sit-then-nap' ? 'sit' : 'curl';
         pet.modeT = 0;
+        pet.vel = 0;
       }
       return true;
     }

@@ -12,6 +12,7 @@ import {
   drawDog,
   glassColor,
   MACHINE_H,
+  pawCycle,
   renderScene,
 } from './render';
 import { assignSeats } from './seating';
@@ -162,6 +163,54 @@ describe('renderScene draws the whole office without throwing', () => {
   });
 });
 
+/**
+ * The gait. These are the numbers behind "his feet are barely moving" (nick, 2026-07-28), and each one
+ * is a property of the walk rather than a snapshot of it — a resize of the dog must not be able to
+ * quietly reintroduce the skate.
+ */
+describe('pawCycle (the dog does not skate)', () => {
+  it('carries the paw the full reach, once per cycle', () => {
+    const xs = Array.from({ length: 400 }, (_, i) => pawCycle(i / 400).x);
+    // Reach is normalised to 1, ±a few percent of overshoot at each end: the paw carries on backward
+    // for an instant after lift-off and reaches a little past the plant before it comes down, because
+    // the swing leaves and re-enters at stance velocity. That overshoot is the follow-through — a paw
+    // that stopped dead on the reach marks would be the sewing machine again.
+    expect(Math.max(...xs)).toBeGreaterThan(0.5);
+    expect(Math.max(...xs)).toBeLessThan(0.58);
+    expect(Math.min(...xs)).toBeLessThan(-0.5);
+    expect(Math.min(...xs)).toBeGreaterThan(-0.58);
+    expect(pawCycle(0).x).toBeCloseTo(pawCycle(1).x, 10);
+  });
+
+  it('holds the floor at a constant speed through stance — the no-scrub rule', () => {
+    // A planted paw must track backward at EXACTLY ground speed. Any wobble here is the foot sliding
+    // on the floor, which is the entire visual bug this cycle replaced.
+    const step = 0.001;
+    const vs: number[] = [];
+    for (let p = 0.02; p < 0.5; p += 0.02) vs.push((pawCycle(p + step).x - pawCycle(p).x) / step);
+    const v0 = vs[0]!;
+    for (const v of vs) expect(v).toBeCloseTo(v0, 6);
+    expect(v0).toBeLessThan(0); // and backward, not forward
+  });
+
+  it('is C¹ across both handoffs, so the paw never stalls mid-air or hitches on landing', () => {
+    // One-sided slopes taken right up against each join — a central difference would straddle it and
+    // average the very discontinuity under test.
+    const h = 1e-6;
+    const after = (p: number) => (pawCycle(p + h).x - pawCycle(p).x) / h;
+    const before = (p: number) => (pawCycle(p).x - pawCycle(p - h).x) / h;
+    const stance = after(0.3);
+    expect(after(0.56)).toBeCloseTo(stance, 3); // lift-off: still going backward at ground speed
+    expect(before(1)).toBeCloseTo(stance, 3); // touch-down: already going backward at ground speed
+  });
+
+  it('lifts the paw only while it is swinging', () => {
+    for (let p = 0; p < 0.55; p += 0.05) expect(pawCycle(p).lift).toBe(0);
+    expect(pawCycle(0.78).lift).toBeGreaterThan(0.5);
+    expect(pawCycle(0.999).lift).toBeLessThan(0.05); // back on the floor as it lands
+  });
+});
+
 /** Every dog pose gets painted somewhere — sleeping in the baked frame, trotting in the live loop — and a
  * pose that throws would take the whole scene's frame down with it, not just the dog. */
 describe('drawDog paints every pose', () => {
@@ -170,7 +219,7 @@ describe('drawDog paints every pose', () => {
 
   it.each(modes)('draws the %s pose without throwing, both facings', (mode) => {
     for (const flip of [false, true]) {
-      const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55 };
+      const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55, face: flip ? -1 : 1, vel: 55 };
       expect(() => drawDog(mockCtx(), fit, pet, 3.2)).not.toThrow();
     }
   });
@@ -182,7 +231,7 @@ describe('drawDog paints every pose', () => {
    */
   it.each(modes)('gives the %s pose both a white coat and black markings', (mode) => {
     const paints: string[] = [];
-    const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip: false, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55 };
+    const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip: false, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55, face: 1, vel: 55 };
     drawDog(mockCtx(paints), fit, pet, 3.2);
     const lum = (hex: string) => {
       const m = /^#([0-9a-f]{6})$/i.exec(hex);

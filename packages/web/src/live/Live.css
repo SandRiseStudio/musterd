@@ -151,6 +151,12 @@
   fill: currentColor;
   stroke: none;
 }
+/* The room-tone icon is all strokes — its leading path is the level meter, not a speaker body, so it
+   must opt out of the filled-first-path rule the arrival-cue icon relies on. */
+.lc__sound--room svg path:first-child {
+  fill: none;
+  stroke: currentColor;
+}
 /* ─── office clock ────────────────────────────────────────────────────────
  * Wall time as a glass pill: tabular digits, each in a fixed-width slot that a changed glyph rolls
  * up through (the seconds column moves every tick, the hour once an hour). A sheen sweeps the pill on
@@ -741,6 +747,32 @@
   --lc-paper-edge-2: rgba(120, 78, 42, 0.44);
   /* The floor takes the shadow, so it is brown-black, not neutral black. */
   --lc-paper-cast: rgba(58, 34, 12, 0.34);
+
+  /* ── lift ──────────────────────────────────────────────────────────────────────────────────────
+     Paper chrome floats over a warm cream room, and cream on cream is the whole contrast problem
+     (nick, 2026-07-28: the plates and bubbles "need to pop out more but i dont want too dark of
+     colors"). Darkening the STOCK is the move that request rules out — and it is also the wrong one:
+     the room's floor runs from bright sunlit tile to shaded tan, so no single fill separates from all
+     of it.
+
+     So the pop is bought at the EDGE and UNDERNEATH, where it costs no lightness at all:
+
+     · `--lc-paper-rim` — the cut edge, at nearly double the old hairline's contrast. An edge is what
+       the eye reads as "this is an object, not a lighter patch of floor"; a defined one does more for
+       legibility than any amount of fill.
+     · `--lc-paper-drop` / `--lc-paper-seat` — a two-part shadow: a soft drop that puts air under the
+       element, and a tight contact pool that stops it looking pasted on. Depth reads as separation
+       even where the tones nearly match.
+     · `--lc-paper-sheen` — one pixel of light along the top edge. Free contrast against everything
+       below it, and it is what makes the stock read as *lit* rather than merely pale.
+
+     Every value stays on the warm axis. A neutral grey shadow on a warm floor reads as dirt.
+     No blur anywhere: these paint on the /broadcast 1920×1080 capture, where a backdrop-filter is a
+     per-frame GPU readback forever. */
+  --lc-paper-rim: rgba(104, 62, 26, 0.52);
+  --lc-paper-drop: rgba(58, 34, 12, 0.42);
+  --lc-paper-seat: rgba(58, 34, 12, 0.26);
+  --lc-paper-sheen: rgba(255, 251, 240, 0.72);
 }
 
 .lc-gl-labels {
@@ -762,23 +794,30 @@
   transition: opacity var(--lc-med) var(--lc-ease);
 }
 .lc-gl-label__name {
-  padding: 1px 6px;
-  border-radius: 5px;
+  padding: 1.5px 7px;
+  border-radius: 5.5px;
   /* A name chip rides on someone's head across a busy floor, so it stays the QUIET member of the
-     paper family: paper at partial opacity, not a full card. Loud enough to read, never a row of
-     labels competing with the room. */
+     paper family: paper, not a full card. Loud enough to read, never a row of labels competing with
+     the room. */
   /* Translucent on purpose (nick): the room should read THROUGH a nameplate — it hovers over
-     furniture and teammates constantly, and a solid chip carves permanent holes in the scene. 68%
-     keeps the ink at ~10:1 against anything the floor can put behind it. No blur to buy it back —
-     these render on the /broadcast capture (same rule as every scene-chrome surface). */
-  background: color-mix(in srgb, var(--lc-paper) 68%, transparent);
-  border: 1px solid var(--lc-paper-edge);
+     furniture and teammates constantly, and a solid chip carves permanent holes in the scene. Held
+     at 84%: enough stock to read as one object, enough glass that the floor still shows through.
+     (68% was the first cut and washed out against sunlit tile — the plates disappeared into the
+     room instead of hovering over it.) No blur to buy contrast back — these render on the
+     /broadcast capture, same rule as every scene-chrome surface. */
+  background: color-mix(in srgb, var(--lc-paper) 84%, transparent);
+  border: 1px solid var(--lc-paper-rim);
   font-family: var(--font-mono, monospace);
   font-size: 10.5px;
-  font-weight: 550;
+  font-weight: 600;
   letter-spacing: -0.015em;
   color: var(--lc-paper-ink);
-  box-shadow: 0 1px 7px -3px var(--lc-paper-cast);
+  /* Sheen, drop, contact — the full lift stack (see the token block). It is the shadow, not the
+     fill, that gets a name off the floor and onto its owner's head. */
+  box-shadow:
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 2px 5px -1px var(--lc-paper-drop),
+    0 1px 1px -0.5px var(--lc-paper-seat);
 }
 .lc-gl-label.is-offline .lc-gl-label__name {
   color: var(--lc-dim);
@@ -831,10 +870,16 @@
   /* No backdrop-filter. It was here to buy contrast for a translucent dark bubble; opaque paper
      needs none — and this element renders on the /broadcast 1920x1080 30fps capture, where a blur
      is a per-frame GPU readback forever (the same rule the reel card block states). */
+  /* The act's tone owns the ring, and it is now a FULL-strength ring rather than a half-alpha
+     suggestion: a bubble has to carry both "someone spoke" and "this is what kind of act it was"
+     across a busy warm room, and at 52% the tone was a rumour. The tighter contact shadow underneath
+     is what actually separates the stock from the floor — see the lift tokens. */
   box-shadow:
-    0 8px 22px -8px var(--lc-paper-cast),
-    0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 52%, var(--lc-paper-edge)),
-    0 3px 18px -5px color-mix(in srgb, var(--lc-speech-tone) 40%, transparent);
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 0 0 1.5px color-mix(in srgb, var(--lc-speech-tone) 80%, var(--lc-paper-rim)),
+    0 2px 3px -1px var(--lc-paper-seat),
+    0 9px 22px -8px var(--lc-paper-drop),
+    0 3px 18px -5px color-mix(in srgb, var(--lc-speech-tone) 42%, transparent);
   /* hidden initial state — the JS toggles .is-in on the next frame so this paints first */
   opacity: 0;
   transform: translateY(7px) scale(0.9);
@@ -846,15 +891,27 @@
     max-height 260ms cubic-bezier(0.22, 1, 0.36, 1),
     box-shadow 220ms ease; /* gentle overshoot on enter — a warm little pop; smooth grow on hover */
 }
-/* the downward tail, matching the bubble body */
+/* The downward tail, matching the bubble body. Two triangles: a slightly larger one in the tone ring's
+   colour with a smaller one in the stock sitting on top of it — the only way a CSS-border triangle
+   gets an outline, and it has to have one now the body's ring carries the act's tone. Without it the
+   tail is the one edge of the bubble that dissolves into the room. */
+.lc-speech__inner::before,
 .lc-speech__inner::after {
   content: '';
   position: absolute;
   left: 50%;
-  bottom: -5px;
   transform: translateX(-50%);
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
+}
+.lc-speech__inner::before {
+  bottom: -7px;
+  border-left-width: 7.5px;
+  border-right-width: 7.5px;
+  border-top: 7.5px solid color-mix(in srgb, var(--lc-speech-tone) 80%, var(--lc-paper-rim));
+}
+.lc-speech__inner::after {
+  bottom: -5px;
   border-top: 6px solid var(--lc-paper-2);
 }
 .lc-speech.is-in .lc-speech__inner {
@@ -882,9 +939,11 @@
 .lc-speech.is-clickable:hover .lc-speech__inner {
   transform: translateY(-2px) scale(1.03);
   box-shadow:
-    0 10px 26px -8px var(--lc-paper-cast),
-    0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 78%, var(--lc-paper-edge)),
-    0 3px 22px -4px color-mix(in srgb, var(--lc-speech-tone) 55%, transparent);
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 0 0 2px var(--lc-speech-tone),
+    0 3px 4px -1px var(--lc-paper-seat),
+    0 12px 26px -8px var(--lc-paper-drop),
+    0 3px 22px -4px color-mix(in srgb, var(--lc-speech-tone) 58%, transparent);
 }
 /* the soft acknowledge pulse the moment a bubble is clicked (focus hands off to the stream flash) */
 .lc-speech.is-picked .lc-speech__inner {
@@ -893,15 +952,18 @@
 @keyframes lc-speech-picked {
   0% {
     box-shadow:
-      0 8px 22px -8px var(--lc-paper-cast),
-      0 0 0 2px var(--lc-speech-tone),
+      inset 0 1px 0 var(--lc-paper-sheen),
+      0 0 0 3px var(--lc-speech-tone),
+      0 9px 22px -8px var(--lc-paper-drop),
       0 0 30px -2px var(--lc-speech-tone);
   }
   100% {
     box-shadow:
-      0 8px 22px -8px var(--lc-paper-cast),
-      0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 52%, var(--lc-paper-edge)),
-      0 3px 18px -5px color-mix(in srgb, var(--lc-speech-tone) 40%, transparent);
+      inset 0 1px 0 var(--lc-paper-sheen),
+      0 0 0 1.5px color-mix(in srgb, var(--lc-speech-tone) 80%, var(--lc-paper-rim)),
+      0 2px 3px -1px var(--lc-paper-seat),
+      0 9px 22px -8px var(--lc-paper-drop),
+      0 3px 18px -5px color-mix(in srgb, var(--lc-speech-tone) 42%, transparent);
   }
 }
 .lc-speech__text {
@@ -3729,11 +3791,16 @@
   padding: clamp(10px, 0.8cqw, 19px) clamp(13px, 1.05cqw, 24px) clamp(14px, 1.1cqw, 25px);
   border-radius: clamp(11px, 0.8cqw, 16px);
   background: linear-gradient(180deg, var(--lc-paper) 0%, var(--lc-paper-2) 100%);
-  /* A drop shadow seats it on the floor; the hairline is the card's own cut edge. On paper the
-     top-edge highlight inverts — light stock needs a defining border, not a lighter lip. */
+  /* A drop shadow seats it on the floor; the hairline is the card's own cut edge. The card is the
+     largest paper object in the room and had the softest edge of the three, which is why it read as
+     a pale rectangle *of* the floor rather than an object lying on it: a long soft shadow alone
+     gives a surface height but never a boundary. So — a defined rim, a tighter pool of contact
+     shade under the near edge, and one lit pixel along the top. */
   box-shadow:
-    0 18px 44px -20px var(--lc-paper-cast),
-    inset 0 0 0 1px var(--lc-paper-edge);
+    inset 0 0 0 1px var(--lc-paper-rim),
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 3px 8px -3px var(--lc-paper-seat),
+    0 20px 44px -20px var(--lc-paper-drop);
   animation: lc-ov-card-in 480ms var(--ease-out) both;
 }
 
@@ -4016,25 +4083,32 @@
   inset: auto clamp(13px, 1.05cqw, 24px) clamp(6px, 0.4cqw, 9px) clamp(13px, 1.05cqw, 24px);
   display: flex;
   gap: 3px;
-  height: 2px;
+  height: 3px;
 }
 
+/* 2px of 13%-ink track was invisible from a metre away — the rail answers "how many, and when does
+   this change", and a rail nobody can see answers neither. Half a pixel taller, with the unplayed
+   track, the played track and the live sweep each a clear step apart, so the three states read as
+   three states rather than one faint line. */
 .lc-ov__seg {
   position: relative;
   flex: 1 1 0;
   overflow: hidden;
-  border-radius: 1px;
-  background: color-mix(in srgb, var(--lc-paper-ink) 13%, transparent);
+  border-radius: 1.5px;
+  background: color-mix(in srgb, var(--lc-paper-ink) 24%, transparent);
 }
 
 .lc-ov__seg.is-past {
-  background: color-mix(in srgb, var(--lc-paper-ink) 28%, transparent);
+  background: color-mix(in srgb, var(--lc-paper-ink) 46%, transparent);
 }
 
 .lc-ov__fill {
   position: absolute;
   inset: 0;
   background: var(--lc-ov-accent);
+  /* The one moving thing on the card gets to glow a little — it is the only element here whose job
+     is to be noticed from across the room. */
+  box-shadow: 0 0 5px -1px color-mix(in srgb, var(--lc-ov-accent) 75%, transparent);
   transform: scaleX(0);
   transform-origin: left center;
 }
