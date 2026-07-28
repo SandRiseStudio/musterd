@@ -430,7 +430,7 @@ export async function buildSkewNotes(deps?: {
       return ((await res.json()) as { build?: string }).build;
     });
   const daemon = await fetchDaemon().catch(() => undefined);
-  if (daemon && daemon !== ref) {
+  if (daemon && !sameCommit(daemon, ref)) {
     notes.push(
       `your CLI build (${short}) differs from the daemon (${daemon.slice(0, 7)}) — rebuild your checkout (pnpm build).`,
     );
@@ -463,33 +463,96 @@ export async function buildSkewNotes(deps?: {
 }
 
 /**
- * `musterd init --check-build` (ADR 135): the hook-cheap freshness probe — ONLY the CLI-vs-daemon
- * SHA compare (one 2s health fetch, no git, no manifest reads). One line on stdout when the builds
- * differ, silence otherwise, and ALWAYS exit 0 — this runs inside the SessionStart hook, which must
- * never fail or slow a session start.
+ * Do two build refs name the same commit, ignoring the `-dirty` uncommitted-work marker?
+ *
+ * A seat with uncommitted edits builds `<sha>-dirty` while the daemon runs a clean `<sha>`. That is
+ * not skew — it is the normal state of a worktree someone is working in, and the dist *is* the code
+ * they think it is. Reporting it was doubly wrong: both refs render identically once truncated for
+ * display, so the line literally read "your CLI build (3260685) differs from the daemon (3260685)",
+ * and its advice ("rebuild it") could not help, because the difference was the developer's own edits.
+ * A skew line that fires constantly on every active seat is the noise failure ADR 168 named.
+ *
+ * Genuine skew still reports: a different commit differs with or without the marker.
  */
-export async function runCheckBuild(deps?: {
+function sameCommit(a: string, b: string): boolean {
+  return a.replace(/-dirty$/, '') === b.replace(/-dirty$/, '');
+}
+
+/**
+ * Provisioning artifacts in this folder that disagree with what this build would write (ADR 171).
+ *
+ * The cheap half of the doctor, and cheap is the whole design constraint — this runs at every session
+ * start. It is pure file I/O: no network, no git, and critically **no `detect()`**, which shells out
+ * to `claude mcp get` and costs seconds. `inspectGuidance` needs only `existsSync` + stamp reads, and
+ * `inspectClaudeHookDrift` only reads `.claude/settings.local.json`, so both qualify while
+ * `inspectProvisioning` as a whole does not.
+ */
+export function inspectArtifactDrift(cwd: string): { guidance: string[]; hooks: string[] } {
+  return {
+    guidance: inspectGuidance(cwd, HARNESSES).drift,
+    // Returns [] when there is no local settings file, so an unprovisioned folder stays silent.
+    hooks: inspectClaudeHookDrift(cwd),
+  };
+}
+
+/**
+ * `musterd init --check-build`: the SessionStart probe (ADR 135 build skew + ADR 171 artifact drift).
+ *
+ * **Why the flag is still called `--check-build`.** It now reports more than the build, but every
+ * hook installed across the fleet invokes it by that name, and renaming it would strand each seat
+ * until it re-provisioned — the exact rot ADR 171 exists to close. Keeping the flag is also what lets
+ * this capability arrive with **no hook-text change and no `FEATURE_EPOCH` bump**: behaviour that
+ * lives in the CLI reaches every seat whose hook is already installed, while behaviour placed in the
+ * hook *string* reaches only seats that re-run provisioning. Prefer the CLI side of that line.
+ *
+ * The contract is unchanged and load-bearing: silent when clean, **always exit 0**, never throws, and
+ * bounded output — this stdout lands in model context every session, so drift is reported as ONE line
+ * naming counts and only the repairs actually needed, never one line per file however many drifted.
+ */
+export async function runSessionProbe(deps?: {
   cliRef?: string | undefined;
   daemonBuild?: () => Promise<string | undefined>;
+  cwd?: string;
 }): Promise<number> {
   const ref = deps?.cliRef !== undefined ? deps.cliRef : cliBuild();
-  if (!ref) return 0;
+  if (ref) {
+    try {
+      const fetchDaemon =
+        deps?.daemonBuild ??
+        (async () => {
+          const server = loadConfig().server;
+          const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(2000) });
+          return ((await res.json()) as { build?: string }).build;
+        });
+      const daemon = await fetchDaemon();
+      if (daemon && !sameCommit(daemon, ref)) {
+        process.stdout.write(
+          `musterd: your CLI build (${ref.slice(0, 7)}) differs from the daemon (${daemon.slice(0, 7)}) — this checkout's dist is stale. Rebuild it (pnpm build); if your MCP tools also warn, /mcp reload after.\n`,
+        );
+      }
+    } catch {
+      // daemon down / unreachable — silence, never noise at session start
+    }
+  }
   try {
-    const fetchDaemon =
-      deps?.daemonBuild ??
-      (async () => {
-        const server = loadConfig().server;
-        const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(2000) });
-        return ((await res.json()) as { build?: string }).build;
-      });
-    const daemon = await fetchDaemon();
-    if (daemon && daemon !== ref) {
+    const { guidance, hooks } = inspectArtifactDrift(deps?.cwd ?? process.cwd());
+    if (guidance.length + hooks.length > 0) {
+      const what = [
+        guidance.length > 0 ? `${String(guidance.length)} guidance file(s)` : null,
+        hooks.length > 0 ? `${String(hooks.length)} hook(s)` : null,
+      ].filter(Boolean);
+      const fix = [
+        guidance.length > 0 ? '`musterd init --refresh-guidance`' : null,
+        hooks.length > 0 ? '`musterd init --refresh-hooks`' : null,
+      ].filter(Boolean);
       process.stdout.write(
-        `musterd: your CLI build (${ref.slice(0, 7)}) differs from the daemon (${daemon.slice(0, 7)}) — this checkout's dist is stale. Rebuild it (pnpm build); if your MCP tools also warn, /mcp reload after.\n`,
+        `musterd: this folder's provisioning is behind what this build writes — ${what.join(' and ')} ` +
+          `missing or stale (ADR 171). Run ${fix.join(' and ')} to repair, ` +
+          `or \`musterd init --check\` for the detail.\n`,
       );
     }
   } catch {
-    // daemon down / unreachable — silence, never noise at session start
+    // A health probe never fails a session start, and never invents drift from a folder it cannot read.
   }
   return 0;
 }
