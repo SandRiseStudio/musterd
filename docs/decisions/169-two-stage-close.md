@@ -161,6 +161,54 @@ approval covers that session, not forever. This ships as its own increment at th
 If the plumbing proves too thin, increments 1–4 stand alone and this section remains the
 documented follow-up lane — the degradation path covers the gap honestly in the meantime.
 
+**Status 2026-07-28: earned, unbuilt, and blocked on arm availability — not on worth.** The
+amendment below settles the worth question in the affirmative (the no-candidate rate earns this
+increment without waiting on a catch rate). What stops it is narrower and more mundane: on this
+machine there is currently **no cross-family reviewer to spin up**. Surveyed the day the amendment
+landed, and it drifts — re-verify rather than trusting this list:
+
+- **ollama** (local `qwen3:4b`, the only model pulled) — on PATH and free, so it would need no ask
+  gate at all. Ruled out by the host owner: a prior unbounded run left `ollama serve` resident at
+  `num_ctx 32768` and brought the host to a standstill twice, competing with the dev fleet for RAM.
+  A local arm is off the table on this host regardless of how it is bounded.
+- **cursor-agent** — on PATH but unauthenticated (`--list-models` → "No models available for this
+  account"). Installed is not available.
+- **codex, grok, kimi, deepseek** — not on PATH.
+- **gemini** — on PATH, a genuinely different family, and hosted, so it carries no local-RAM risk.
+  It costs money, so it remains behind the §5 ask gate. This is the one live arm.
+
+**One rule this survey produced, and it is simpler than the carve-out it replaces: family is a
+property of the model, never of the harness.** `cursor-agent` looked at first like a distinct
+"composer family" deserving its own clause in ADR 158 §3. It is not a family at all — it is a
+harness taking `--model`, whose own `--help` advertises `gpt-5, sonnet-4, sonnet-4-thinking`. The
+same binary is an OpenAI reviewer or an Anthropic one depending on one flag. So a daemon-spawned
+reviewer is authoritative from its spawn arguments **whenever the daemon passes the model
+explicitly** — already true for codex, equally true for `cursor-agent --model X`, `ollama run
+qwen3:4b`, `gemini -m X`. No per-harness carve-out is needed, and ADR 158's `cursor → undefined`
+is correct as written: an unspawned cursor seat genuinely cannot know what it is running. The
+observation tier (reading a transcript to learn what a seat you did _not_ spawn is running) is
+untouched.
+
+**A caution for whoever measures the catch rate.** An offline spike was drafted to get a cheap
+catch-rate signal by replaying merged lane/diff pairs past a reviewer, and it was never run. On
+inspection its fixture would have inflated the number: four of its five cases were trivial — two
+paired a lane with a wholly unrelated commit (a title check, not a review) and two paired a lane
+with its own commit. Only one case tested the failure mode that actually occurs, **partial
+delivery**: a lane's own diff clipped to one package, so the UI requirement shipped and a
+server-side requirement silently did not. A rubber-stamping reviewer confirms exactly that case and
+catches the other two for free, so "3 of 3 catches" would have been two gimmes carrying one real
+test. Any future catch-rate measurement should be built from partial-delivery cases drawn from real
+merged lanes; unrelated-commit pairs measure nothing.
+
+**Budget note.** The daemon cannot spawn. Process actuation lives host-side (`musterd host`, ADR
+131): the daemon issues orders and the host actuates them through the `ActuatorBackend` seam in
+`packages/cli/src/host/backend.ts`, where `claudeCode` is backend #1 and the only one. A spin-up is
+therefore daemon mints an ephemeral seat and emits an order → host backend spawns it with an
+explicit `--model` → the seat comes online and attests → it reviews → it is spun down on
+resolution. `memberFamily` reads the model of the **latest live presence**, so a spawned reviewer
+must genuinely come online and attest; merely existing in the roster does not make it eligible.
+This is not a one-file change.
+
 ### What this does not do
 
 It does not gate `done` (a goal whose lanes are all unverified-done still derives `shipped` —
