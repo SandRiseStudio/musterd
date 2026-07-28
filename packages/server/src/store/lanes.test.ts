@@ -165,6 +165,35 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
     expect(laneWarnings(db, team.id, 'bravo', cleo)).toHaveLength(0);
   });
 
+  /**
+   * The mixed-era case that project *derivation* creates: before it existed every lane was
+   * `'default'`, so a scoped lane and a legacy one must not go mutually blind — an unscoped lane
+   * means "I didn't say", and a warning system should fail toward the false positive.
+   */
+  it("scenario 4b — an unscoped 'default' lane still contends with every project", () => {
+    const { db, team } = seed();
+    const legacy = openLane(db, team.id, 'bravo', 'June', {
+      title: 'members (opened before derivation)',
+      surface_globs: ['store/members.ts'],
+      claim: true,
+    });
+    expect(legacy.project).toBe('default');
+    const scoped = openLane(db, team.id, 'bravo', 'Cleo', {
+      title: 'members',
+      project: 'musterd',
+      surface_globs: ['store/members.ts'],
+      claim: true,
+    });
+    // Both directions — the wildcard is symmetric.
+    expect(laneWarnings(db, team.id, 'bravo', scoped)).toHaveLength(1);
+    expect(laneWarnings(db, team.id, 'bravo', legacy)).toHaveLength(1);
+
+    // …and the escape hatch closes it: re-project the legacy lane and they stop contending.
+    const moved = updateLane(db, team.id, legacy.id, 'bravo', { project: 'izzocam' })!;
+    expect(moved.project).toBe('izzocam');
+    expect(laneWarnings(db, team.id, 'bravo', scoped)).toHaveLength(0);
+  });
+
   it('scenario 5 — non-git: manual resolve closes the loop as a state transition', () => {
     const { db, team } = seed();
     const lane = openLane(db, team.id, 'bravo', 'June', { title: 'work', claim: true });

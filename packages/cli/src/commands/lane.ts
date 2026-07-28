@@ -1,4 +1,5 @@
 import { LaneStateSchema, type Lane, type LaneWarning } from '@musterd/protocol';
+import { resolveProject } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
@@ -16,7 +17,7 @@ const USAGE =
   '  musterd lane claim <id>\n' +
   '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>]\n' +
-  '  musterd lane update <id> [--state open|claimed|active|blocked|ready_for_review|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d]\n' +
+  '  musterd lane update <id> [--state open|claimed|active|blocked|ready_for_review|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d] [--project p]\n' +
   '  musterd lane ready <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lanes [--project p] [--mine] [--open] [--json]';
@@ -84,9 +85,9 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
       ...(flagStr(parsed.flags, 'detail') !== undefined
         ? { detail: flagStr(parsed.flags, 'detail')! }
         : {}),
-      ...(flagStr(parsed.flags, 'project') !== undefined
-        ? { project: flagStr(parsed.flags, 'project')! }
-        : {}),
+      // Derived here, not in the store: the daemon's cwd is the daemon's, so only the caller knows
+      // which repo this lane belongs to (--project > MUSTERD_PROJECT > repo identity > 'default').
+      project: resolveProject({ explicit: flagStr(parsed.flags, 'project') }),
       ...(flagStr(parsed.flags, 'role') !== undefined
         ? { role: flagStr(parsed.flags, 'role')! }
         : {}),
@@ -212,6 +213,9 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         : {}),
       ...(flagStr(parsed.flags, 'branch') !== undefined
         ? { branch: flagStr(parsed.flags, 'branch')! }
+        : {}),
+      ...(flagStr(parsed.flags, 'project') !== undefined
+        ? { project: flagStr(parsed.flags, 'project')! }
         : {}),
       ...(list(parsed.flags, 'surface') !== undefined
         ? { surface_globs: list(parsed.flags, 'surface')! }

@@ -14,6 +14,10 @@
     "./build-stamp": {
       "types": "./dist/build-stamp.d.ts",
       "default": "./dist/build-stamp.js"
+    },
+    "./project": {
+      "types": "./dist/project.d.ts",
+      "default": "./dist/project.js"
     }
   },
   "files": [

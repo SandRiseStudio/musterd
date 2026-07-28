@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
+import { gitToplevel } from '@musterd/protocol/project';
 
 /**
  * Provision an *isolated workspace* for a new agent (ADR 065). The thrash this avoids: in Claude Code
@@ -23,15 +24,6 @@ export interface Workspace {
 
 function git(args: string[], cwd: string): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-}
-
-/** The git toplevel for `cwd`, or null when `cwd` isn't inside a work tree. */
-function gitToplevel(cwd: string): string | null {
-  try {
-    return git(['rev-parse', '--show-toplevel'], cwd);
-  } catch {
-    return null;
-  }
 }
 
 export interface WorkspaceOpts {

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PROJECT,
   globToRegExp,
   LANE_CONTENDING_STATES,
   LANE_TERMINAL_STATES,
@@ -149,6 +150,7 @@ export function updateLane(
   const next = {
     id,
     team_id: teamId,
+    project: patch.project ?? existing.project,
     detail: patch.detail !== undefined ? patch.detail : existing.detail,
     owner_seat: ownerSeat,
     surface_globs: JSON.stringify(patch.surface_globs ?? existing.surface_globs),
@@ -167,7 +169,7 @@ export function updateLane(
     updated_at: now,
   };
   db.prepare(
-    `UPDATE lanes SET detail=@detail, owner_seat=@owner_seat, surface_globs=@surface_globs,
+    `UPDATE lanes SET project=@project, detail=@detail, owner_seat=@owner_seat, surface_globs=@surface_globs,
        depends_on=@depends_on, branch=@branch, goal_id=@goal_id, risk=@risk, merged_json=@merged_json,
        state=@state, claimed_at=@claimed_at, resolved_at=@resolved_at, updated_at=@updated_at
      WHERE team_id=@team_id AND id=@id`,
@@ -271,9 +273,20 @@ export function laneCoveringPath(
 }
 
 /**
+ * Do two lanes share a surface-space? Same project, or either side unscoped — `'default'` is a
+ * wildcard, not a peer project (see `DEFAULT_PROJECT`). Until derivation landed every lane was
+ * `'default'`, so without the wildcard a derived-project lane and a legacy one would go mutually
+ * blind the day derivation shipped — `project` is stamped at open and the board would simply stop
+ * warning, which is the exact failure the scoping exists to prevent, inverted.
+ */
+function projectsContend(a: string, b: string): boolean {
+  return a === b || a === DEFAULT_PROJECT || b === DEFAULT_PROJECT;
+}
+
+/**
  * The two Phase-1 checks (ADR 083 §3), computed live for one lane. Warn-only — callers never gate.
  * (a) unmet_dependency: a depends_on target not `done`. (b) surface_overlap: declared globs intersect
- * another *contending* lane's in the same project.
+ * another *contending* lane's in the same project (an unscoped lane contending with all of them).
  */
 export function laneWarnings(
   db: Database,
@@ -294,8 +307,9 @@ export function laneWarnings(
     });
   }
   if (lane.surface_globs.length > 0 && CONTENDING.has(lane.state)) {
-    for (const other of listLanes(db, teamId, teamSlug, { project: lane.project })) {
+    for (const other of listLanes(db, teamId, teamSlug)) {
       if (other.id === lane.id || !CONTENDING.has(other.state)) continue;
+      if (!projectsContend(lane.project, other.project)) continue;
       const shared = lane.surface_globs.flatMap((g) =>
         other.surface_globs.filter((og) => globsOverlap(g, og)).map((og) => `${g} ∩ ${og}`),
       );

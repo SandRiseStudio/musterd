@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { LaneStateSchema, type Lane, type LaneWarning, type NextBrief } from '@musterd/protocol';
+import { resolveProject } from '@musterd/protocol/project';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { errorResult, textResult } from './format.js';
@@ -76,7 +77,10 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
       inputSchema: {
         title: z.string().describe('the work-item, short'),
         detail: z.string().optional().describe('acceptance criteria / notes'),
-        project: z.string().optional().describe('surface-space scope; defaults to "default"'),
+        project: z
+          .string()
+          .optional()
+          .describe('surface-space scope; defaults to this workspace’s repo'),
         surface_globs: z
           .array(z.string())
           .optional()
@@ -93,7 +97,12 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     },
     async (args) => {
       try {
-        const { lane, warnings } = await client.openLane(args);
+        // Derived here, not in the store: the daemon's cwd is the daemon's, so only this adapter —
+        // running in the seat's own workspace — knows which repo the lane belongs to.
+        const { lane, warnings } = await client.openLane({
+          ...args,
+          project: resolveProject({ explicit: args.project }),
+        });
         return laneResult('lane opened', lane, warnings);
       } catch (err) {
         return errorResult(err);
@@ -194,8 +203,8 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_update',
     {
       description:
-        'Update a lane: state (active/blocked/done/…), surface_globs, depends_on, branch, detail. ' +
-        'Going active re-runs contention checks.',
+        'Update a lane: state (active/blocked/done/…), surface_globs, depends_on, branch, detail, ' +
+        'project. Going active re-runs contention checks.',
       inputSchema: {
         id: z.string().describe('lane id'),
         // Derived from the protocol schema (ADR 169 consolidation) — this enum was hand-duplicated
@@ -205,6 +214,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         surface_globs: z.array(z.string()).optional(),
         depends_on: z.array(z.string()).optional(),
         branch: z.string().optional(),
+        project: z.string().optional().describe('re-scope the surface-space'),
       },
     },
     async (args) => {
