@@ -69,7 +69,7 @@ Three changes, each small and additive.
 comment gains the writing build's `FEATURE_EPOCH`:
 
 ```
-# musterd-sessionstart-hook e2
+# musterd-sessionstart-hook e3
 ```
 
 `FEATURE_EPOCH` is already the project's ritual for a client-visible capability change (ADR 148), and
@@ -115,25 +115,44 @@ anything more needs a second live datum first.
 The instrument is the doctor line itself, and the honest risk is that it becomes noise — a drift line
 every seat prints forever because one stale checkout exists somewhere on the machine.
 
-**Guard metric — false-positive rate.** On a machine where every checkout is current, the expected
-count of hook-content drift lines is **zero**. Any nonzero steady-state count means the comparison is
-matching on incidental text (whitespace, shell quoting, an env difference) rather than on generation,
-and the check is wrong. Measure by running `musterd init --check` across all 13 dogfood worktrees
-after a fleet-wide refresh; the pass condition is 0/13.
+**Traces.** This ADR adds **no new ledger events**, and that is a deliberate call worth stating
+rather than leaving as an omission. A downgrade is a fact about a machine's filesystem, not about a
+seat's work, and the two existing candidates both mislead: an audit row would attribute a
+machine-wide condition to whichever seat happened to run the doctor, and the daemon cannot observe
+`~/.claude/settings.json` at all. So the trace surface is the **doctor's own output** — the `stale` /
+`ahead` lines from `musterd init --check`, which are already the established drift channel (ADR 060)
+and are read by a human or an agent at session start. The refusal path additionally emits one
+warning at `init` time naming both epochs. If the fleet sweep below shows downgrades happening
+repeatedly rather than once, that is the datum that would justify promoting this to a real ledger
+event; one incident does not.
 
-**Value metric — does it catch the real thing?** The pre-registered test is the incident that
-motivated this ADR, replayed: install the pre-#421 hook text, run `init --check`, and require exactly
-one _stale_ line naming the hook. Today that returns clean, which is the defect. A second arm runs
-the reverse — a deliberately-behind checkout against a current hook — and requires an _ahead_ line
-prescribing a checkout update rather than an `init`.
+**Eval — dataset and baseline.** The dataset is the **13 dogfood worktrees** on this machine, the
+same population ADR 158's fleet sweep used, each contributing one `musterd init --check` run plus the
+epoch stamp on the shared hook. The baseline is today's behavior, and it is a precise and damning
+number: on a machine that provably carried a stale hook (the pre-#421 text, confirmed by hand), the
+doctor reported **0 hook-content drift lines out of 13** — a 0% detection rate against a known
+positive. The post-change target on that same replayed condition is 13/13.
 
-**Downgrade-refusal arm.** Run `musterd init` from a checkout stamped at a lower epoch than the
-installed hook and assert the hook file is **byte-identical** afterward, plus one warning. This is
-the only assertion that proves the mechanism, because its whole purpose is that nothing happens.
+The guard metric runs the other direction: on a fleet where every checkout is current, the expected
+count is **0/13**. Any nonzero steady state means the comparison is matching incidental text
+(whitespace, shell quoting, an env difference) rather than generation, and the check is wrong rather
+than the fleet.
 
-**Where the numbers land.** Fleet sweep results go in this ADR alongside ADR 158's precedent (a
-13-worktree sweep replacing an n=1 baseline). If the guard metric fails — steady-state nonzero on a
-current fleet — the comparison narrows to the epoch stamp alone and stops diffing text at all.
+**Experiment.** Three pre-registered arms, all runnable before merge:
+
+1. _Replay the incident._ Install the pre-#421 hook text, run `init --check`, require exactly one
+   `stale` line naming the hook. Today this returns clean — that clean result **is** the defect.
+2. _Reverse the polarity._ Point a deliberately-behind checkout at a current hook; require an `ahead`
+   line prescribing a checkout update and **not** an `init`. This is the arm that catches getting the
+   direction backwards, which is precisely how the slot got re-baked in the first place.
+3. _Prove the refusal._ Run `musterd init` from a lower-epoch checkout against a higher-epoch
+   installed hook; assert the settings file is **byte-identical** afterward, plus one warning. This
+   is the only assertion that can prove the mechanism, because its entire purpose is that nothing
+   happens.
+
+**Kill criterion.** If arm 1 passes but the guard metric fails — steady-state nonzero on a current
+fleet — the comparison narrows to the epoch stamp alone and stops diffing hook text entirely. Results
+land in this section, following ADR 158's precedent of replacing an anecdote with a fleet number.
 
 ## Consequences
 
