@@ -35,7 +35,8 @@ one paragraph:
 
 The ecosystem is scrutinizing exactly this (tool descriptions as the dominant context cost; accuracy
 degrading past ~15–20 tools; harness-side deferred loading cutting 50+ tools from ~72K to ~8.7K tokens
-_and raising accuracy_; MCP spec issue #2808 proposing namespacing + discovery-tier schemas). And we
+_and raising accuracy_; MCP spec issue #2808 proposing namespacing + discovery-tier schemas — landed
+2026-07-28 as the spec's `server/discover` + cacheable `tools/list`, see ADR 175). And we
 cannot see any of it in our own data: the audit ledger is coordination-level, the `messages` table
 records acts not invocations, and nothing anywhere records which tool was called, how long it took,
 whether it bounced, or what its schema weighs.
@@ -70,7 +71,8 @@ coordination density, the MAST-in-the-wild dataset).
 
 Audit all 18 tool names to one stated convention — resolving the `team_*`/`lane_*` split is the first
 deliverable: either lanes fold into the shared prefix or the sub-surface split is deliberate and
-documented (tracking MCP spec #2808's namespacing proposal before picking). Rewrite every description
+documented (tracking MCP spec #2808's namespacing proposal before picking; resolved 2026-07-28 —
+see increment 6's note). Rewrite every description
 for concision; the field evidence says descriptions, not parameter structure, are the biggest lever.
 With harnesses building retrieval-style deferred tool loading, names and descriptions that **retrieve
 well** are the durable server-side investment.
@@ -166,6 +168,12 @@ tool search) and the MCP spec may adopt discovery-tier schemas (#2808) — if th
 increment 6 collapses into "names/descriptions that retrieve well" (increment 2) plus adopting the spec
 mechanism, and we build no bespoke `get_more_tools`. Re-evaluate against the harness landscape when
 increments 2–5 are done.
+
+> **Resolved 2026-07-28: the condition fired.** #2808 landed in MCP spec RC 2026-07-28 as
+> `server/discover` plus required `ttlMs`/`cacheScope` and deterministic ordering on `tools/list`
+> — spec mechanism plus prompt-cache economics, exactly the collapse this increment pre-registered.
+> Increment 6 builds nothing; adoption of the spec mechanism is SDK-gated and tracked in
+> [ADR 175](175-mcp-spec-2026-07-28-readiness.md).
 
 ### Principles frozen across the arc
 
