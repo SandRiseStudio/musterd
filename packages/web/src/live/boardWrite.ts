@@ -125,6 +125,18 @@ export function groupByGoal(lanes: Lane[], goals: Goal[]): GoalRow[] {
   return rows;
 }
 
+/** The filter-chip key for ownerless lanes — a name no seat can hold (seat names are word-shaped). */
+export const UNOWNED = '∅';
+
+/**
+ * The member filter (polish pass): an empty selection means everyone — the chips are a lens, never a
+ * gate. Selection keys are seat names, plus {@link UNOWNED} for the ownerless backlog.
+ */
+export function filterLanes(lanes: Lane[], owners: ReadonlySet<string>): Lane[] {
+  if (owners.size === 0) return lanes;
+  return lanes.filter((l) => owners.has(l.owner_seat ?? UNOWNED));
+}
+
 /** Column DOM guardrail (perf contract: no unbounded lists) — cap with an "…and K more" remainder. */
 export function capColumn<T>(
   items: T[],

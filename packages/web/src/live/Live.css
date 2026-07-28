@@ -2433,7 +2433,9 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--lc-human, #ff86a8) 22%, transparent);
   }
   .lc-card,
-  .lc-board__new {
+  .lc-board__new,
+  .lc-filter,
+  .lc-ask__btn {
     transition: none;
   }
   .lc-insight {
@@ -2448,6 +2450,18 @@
   gap: var(--lc-5);
   overflow: hidden;
   padding: var(--lc-6);
+  /* ambient depth — the lc-form glow recipe, dialed down to a room's daylight */
+  background:
+    radial-gradient(
+      520px 300px at 18% -8%,
+      color-mix(in srgb, var(--lc-accent) 7%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      640px 380px at 88% 110%,
+      color-mix(in srgb, var(--lc-accent) 5%, transparent),
+      transparent 70%
+    );
 }
 .lc-board__main {
   flex: 1;
@@ -2468,7 +2482,13 @@
   min-height: 0;
   border: 1px solid var(--lc-border);
   border-radius: var(--lc-r-lg);
-  background: color-mix(in srgb, var(--lc-ground) 55%, transparent);
+  /* a shallow tray: light falls from above, the surface recedes toward the floor */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--lc-surface) 62%, transparent),
+    color-mix(in srgb, var(--lc-ground) 40%, transparent)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
 }
 .lc-col__head {
   display: flex;
@@ -2537,13 +2557,17 @@
   border: 1px solid var(--lc-border);
   border-radius: var(--lc-r-md);
   background: var(--lc-surface);
+  /* resting elevation: barely off the tray */
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 5%, transparent);
   transition:
     border-color var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    transform var(--lc-fast) var(--lc-ease),
+    box-shadow var(--lc-fast) var(--lc-ease);
 }
 .lc-card:hover {
   border-color: var(--lc-border-2);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px -8px color-mix(in srgb, #000 22%, transparent);
 }
 .lc-card--warned {
   border-color: color-mix(in srgb, var(--lc-danger) 45%, var(--lc-border));
@@ -3034,6 +3058,57 @@
   max-width: 320px;
 }
 
+/* member filter chips — a lens over the same lanes ("whose desk am I looking at") */
+.lc-board__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lc-3);
+  margin-bottom: var(--lc-5);
+}
+.lc-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  padding: var(--lc-1) var(--lc-4) var(--lc-1) var(--lc-2);
+  border-radius: 999px;
+  border: 1px solid var(--lc-border-2);
+  background: var(--lc-surface-2);
+  color: var(--lc-muted);
+  cursor: pointer;
+  transition:
+    color var(--lc-fast) var(--lc-ease),
+    border-color var(--lc-fast) var(--lc-ease),
+    transform var(--lc-fast) var(--lc-ease);
+}
+.lc-filter:hover {
+  color: var(--lc-dim);
+  border-color: var(--lc-border-2);
+  transform: translateY(-1px);
+}
+.lc-filter:active {
+  transform: scale(0.96);
+}
+.lc-filter--on {
+  color: var(--lc-text);
+  border-color: transparent;
+}
+.lc-filter--unowned {
+  padding-left: var(--lc-4);
+  border-style: dashed;
+}
+.lc-filter__n {
+  min-width: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lc-accent) 16%, transparent);
+  color: var(--lc-dim);
+  font-size: 9.5px;
+  text-align: center;
+}
+
 /* topbar, signed in: the identity chip ("You're in the room."), sign-out, + New lane */
 .lc__identity {
   display: inline-flex;
@@ -3259,7 +3334,14 @@
   background: var(--lc-surface-2);
   color: var(--lc-dim);
   cursor: pointer;
-  transition: border-color var(--lc-fast) var(--lc-ease), color var(--lc-fast) var(--lc-ease);
+  transition:
+    border-color var(--lc-fast) var(--lc-ease),
+    color var(--lc-fast) var(--lc-ease),
+    transform var(--lc-fast) var(--lc-ease);
+}
+/* pills press back — the interface heard you */
+.lc-ask__btn:active:not(:disabled) {
+  transform: scale(0.96);
 }
 .lc-ask__btn:disabled {
   opacity: 0.5;

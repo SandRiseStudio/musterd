@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Goal, Lane, LaneBoard, LaneResult, LaneWarning } from '@musterd/protocol';
-import { applyLaneEcho, capColumn, groupByGoal, handoffPatch, laneActions } from './boardWrite';
+import {
+  applyLaneEcho,
+  capColumn,
+  filterLanes,
+  groupByGoal,
+  handoffPatch,
+  laneActions,
+  UNOWNED,
+} from './boardWrite';
 
 const lane = (over: Partial<Lane> = {}): Lane => ({
   id: 'L1',
@@ -176,6 +184,32 @@ describe('groupByGoal — the swimlane regroup (pure, no extra fetch)', () => {
     const rows = groupByGoal([lane({ id: 'A', goal_id: 'g1' })], [goal('g1', 'Real'), goal('g2', 'Empty')]);
     expect(rows.map((r) => r.id)).toEqual(['g1', 'g2']);
     expect(rows[1]!.lanes).toEqual([]);
+  });
+});
+
+describe('filterLanes — the member filter chips (empty selection = everyone)', () => {
+  const lanes = [
+    lane({ id: 'A', owner_seat: 'nick' }),
+    lane({ id: 'B', owner_seat: 'izzo' }),
+    lane({ id: 'C', owner_seat: null }),
+    lane({ id: 'D', owner_seat: 'nick' }),
+  ];
+
+  it('an empty selection filters nothing', () => {
+    expect(filterLanes(lanes, new Set())).toEqual(lanes);
+  });
+
+  it('selects one owner', () => {
+    expect(filterLanes(lanes, new Set(['nick'])).map((l) => l.id)).toEqual(['A', 'D']);
+  });
+
+  it('multi-select unions owners', () => {
+    expect(filterLanes(lanes, new Set(['izzo', 'nick'])).map((l) => l.id)).toEqual(['A', 'B', 'D']);
+  });
+
+  it('the UNOWNED sentinel selects ownerless lanes, and unions with named owners', () => {
+    expect(filterLanes(lanes, new Set([UNOWNED])).map((l) => l.id)).toEqual(['C']);
+    expect(filterLanes(lanes, new Set([UNOWNED, 'izzo'])).map((l) => l.id)).toEqual(['B', 'C']);
   });
 });
 

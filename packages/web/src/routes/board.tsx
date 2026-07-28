@@ -1,4 +1,4 @@
-import type { LaneBoard, OpenLane, UpdateLane } from '@musterd/protocol';
+import type { LaneBoard, MemberSummary, OpenLane, UpdateLane } from '@musterd/protocol';
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Board } from '../live/Board';
@@ -15,7 +15,7 @@ import {
   updateLane,
   type LiveConfig,
 } from '../live/client';
-import { applyLaneEcho } from '../live/boardWrite';
+import { applyLaneEcho, filterLanes, UNOWNED } from '../live/boardWrite';
 import { initial, kindOf, memberColor } from '../live/format';
 import { InsightRail } from '../live/InsightRail';
 import { useLiveStream } from '../live/useLiveStream';
@@ -127,6 +127,17 @@ function BoardPage() {
   const [optimistic, setOptimistic] = useState<LaneBoard | null>(null);
   useEffect(() => setOptimistic(null), [base]);
   const board = optimistic ?? base;
+
+  // The member filter — a lens over the same lanes, session-scoped, empty = everyone.
+  const [ownerFilter, setOwnerFilter] = useState<ReadonlySet<string>>(new Set());
+  const toggleOwner = (key: string) =>
+    setOwnerFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const shownLanes = board ? filterLanes(board.lanes, ownerFilter) : [];
 
   // The write gate, verbatim from AsksStrip (ADR 149): the auto-provisioned observer is hidden from
   // the roster, so membership is exactly "connected as a real seat".
@@ -331,11 +342,20 @@ function BoardPage() {
             >
               {note?.text ?? ''}
             </p>
+            {board != null && (
+              <FilterStrip
+                roster={roster}
+                lanes={board.lanes}
+                selected={ownerFilter}
+                onToggle={toggleOwner}
+                onClear={() => setOwnerFilter(new Set())}
+              />
+            )}
             {board == null ? (
               <p className="lc-col__empty">Opening the board…</p>
             ) : (
               <Board
-                lanes={board.lanes}
+                lanes={shownLanes}
                 warnings={board.warnings}
                 view={view}
                 goals={report?.goals ?? []}
@@ -358,6 +378,69 @@ function BoardPage() {
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * The member filter chips (polish pass) — one chip per rostered teammate plus the ownerless backlog,
+ * multi-select, a lens never a gate. Each chip carries the member's identity color (jade band agents,
+ * rose band humans) and a live count of the lanes they're carrying; selecting glows the chip in that
+ * same color, so a filtered board reads as "whose desk am I looking at."
+ */
+function FilterStrip({
+  roster,
+  lanes,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  roster: MemberSummary[];
+  lanes: LaneBoard['lanes'];
+  selected: ReadonlySet<string>;
+  onToggle: (key: string) => void;
+  onClear: () => void;
+}) {
+  const rosterIdx = new Map(roster.map((m) => [m.name, m]));
+  const live = (owner: string | null) =>
+    lanes.filter((l) => l.owner_seat === owner && l.state !== 'done' && l.state !== 'abandoned')
+      .length;
+  const unownedCount = live(null);
+  return (
+    <div className="lc-board__filters" role="group" aria-label="Filter lanes by owner">
+      {roster.map((m) => {
+        const on = selected.has(m.name);
+        const color = memberColor(m.name, kindOf(m.name, rosterIdx));
+        const n = live(m.name);
+        return (
+          <button
+            key={m.name}
+            className={`lc-filter${on ? ' lc-filter--on' : ''}`}
+            aria-pressed={on}
+            style={on ? { boxShadow: `0 0 0 1.5px ${color}` } : undefined}
+            onClick={() => onToggle(m.name)}
+          >
+            <span className="lc-card__avatar" style={{ background: color }} aria-hidden="true">
+              {initial(m.name)}
+            </span>
+            {m.name}
+            {n > 0 && <span className="lc-filter__n">{n}</span>}
+          </button>
+        );
+      })}
+      <button
+        className={`lc-filter lc-filter--unowned${selected.has(UNOWNED) ? ' lc-filter--on' : ''}`}
+        aria-pressed={selected.has(UNOWNED)}
+        onClick={() => onToggle(UNOWNED)}
+      >
+        unowned
+        {unownedCount > 0 && <span className="lc-filter__n">{unownedCount}</span>}
+      </button>
+      {selected.size > 0 && (
+        <button className="lc-card__abandon" onClick={onClear}>
+          everyone
+        </button>
+      )}
+    </div>
   );
 }
 
