@@ -51,7 +51,7 @@ import { deliveryHintFor } from '../protocol/nudge.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
-import { appendAudit, hasInterruptRaised, listAudit } from '../store/audit.js';
+import { appendAudit, hasInterruptRaised, listAudit, reviewWasRouted } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import { actDelivery, crossedBySeen } from '../store/delivery.js';
 import { listGoals } from '../store/goals.js';
@@ -2330,6 +2330,19 @@ export async function handleHttp(
         // (species approve, tier standard: 5m, proceed_with_risk — deliberately not the holding tier).
         let review: Record<string, unknown> | undefined;
         if (lane.state === 'ready_for_review' && before.state !== 'ready_for_review') {
+          const pick = pickReviewCounterpart(
+            ctx.db,
+            team.id,
+            lane,
+            lane.owner_seat ?? member.name,
+            ctx.config.presenceTimeoutMs,
+          );
+          // Record the ROUTING OUTCOME here, where it is known. Without it the close edge can only
+          // see "this lane passed through review" and calls every owner-close a `review_timeout` —
+          // asserting a question was asked and went unanswered, when on a fleet with no eligible
+          // counterpart nothing was ever asked. That conflation would make ADR 169's counter-metric
+          // ("if nearly all review asks expire unanswered, the tier or the routing is wrong")
+          // indict the tier and the picker for an empty candidate pool.
           appendAudit(ctx.db, team.id, {
             actor: member.name,
             action: 'lane.ready_for_review',
@@ -2339,15 +2352,9 @@ export async function handleHttp(
               lane: lane.id,
               owner: lane.owner_seat,
               ...(lane.merged ? { merged: lane.merged } : {}),
+              ...(pick ? { reviewer: pick.reviewer, route: pick.route } : { no_candidate: true }),
             },
           });
-          const pick = pickReviewCounterpart(
-            ctx.db,
-            team.id,
-            lane,
-            lane.owner_seat ?? member.name,
-            ctx.config.presenceTimeoutMs,
-          );
           if (pick) {
             deliverLaneAskAct(
               ctx,
@@ -2419,7 +2426,14 @@ export async function handleHttp(
                   : verified
                     ? 'counterpart_confirm'
                     : before.state === 'ready_for_review'
-                      ? 'review_timeout'
+                      ? // A timeout means somebody was asked and did not answer. When the picker
+                        // found nobody, no ask was ever sent, and calling that a timeout is simply
+                        // false — it is the sanctioned no-candidate degradation. `undefined` (a
+                        // lane that entered review before the routing outcome was recorded) keeps
+                        // the old label rather than inventing a verdict about the past.
+                        reviewWasRouted(ctx.db, team.id, lane.id) === false
+                        ? 'no_candidate'
+                        : 'review_timeout'
                       : 'self_close',
               worker_family: ownerAtClose ? workerFamily(ctx.db, team.id, ownerAtClose) : null,
               ...(verified ? { reviewer_family: workerFamily(ctx.db, team.id, member.name) } : {}),

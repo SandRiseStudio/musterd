@@ -2812,7 +2812,11 @@ describe('two-stage close (ADR 169)', () => {
   }
 
   async function auditRows(nickTok: string, action: string) {
-    const audit = await get('/teams/dawn/audit', nickTok);
+    return auditRowsFor(nickTok, 'dawn', action);
+  }
+  /** Same, for a team other than the shared `dawn` fixture (the solo-team degradation cases). */
+  async function auditRowsFor(tok: string, slug: string, action: string) {
+    const audit = await get(`/teams/${slug}/audit`, tok);
     return (audit.json.audit as { action: string }[]).filter((a) => a.action === action);
   }
 
@@ -2916,6 +2920,57 @@ describe('two-stage close (ADR 169)', () => {
     expect(byLane[a.json.lane.id].reason).toBe('review_timeout');
     expect(byLane[b.json.lane.id].verified).toBe(false);
     expect(byLane[b.json.lane.id].reason).toBe('self_close');
+  });
+
+  it('a close with no counterpart derives no_candidate, never review_timeout (nothing was asked)', async () => {
+    // A team of exactly one: `pickReviewCounterpart` finds nobody, so NO review ask is sent.
+    // Calling that close a "timeout" asserts a question was asked and went unanswered — it wasn't.
+    // The distinction is the difference between "reviewers rubber-stamp" and "review never ran",
+    // and ADR 169's counter-metric ("if nearly all review asks expire unanswered, the tier or the
+    // routing is wrong") indicts the tier and the picker unless these two are separable.
+    const team = await post('/teams', { slug: 'solo', creator: { name: 'sol', kind: 'human' } });
+    const solTok = team.json.human_credential as string;
+    const lane = await post('/teams/solo/lanes', { title: 'alone', claim: true }, solTok);
+    const soloPatch = async (body: unknown) => {
+      const r = await fetch(base + `/teams/solo/lanes/${lane.json.lane.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${solTok}` },
+        body: JSON.stringify(body),
+      });
+      return { status: r.status, json: (await r.json()) as Record<string, any> };
+    };
+
+    const ready = await soloPatch({ state: 'ready_for_review' });
+    expect(ready.json.review.self_close_sanctioned).toBe(true); // nobody to ask
+    await soloPatch({ state: 'done' });
+
+    const rows = await auditRowsFor(solTok, 'solo', 'lane.closed');
+    const closed = rows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
+    expect(closed.detail.verified).toBe(false); // unchanged — still an unverified close
+    expect(closed.detail.reason).toBe('no_candidate');
+
+    // And the routing outcome is recorded where it is KNOWN — at ready time, not inferred later.
+    const readyRows = await auditRowsFor(solTok, 'solo', 'lane.ready_for_review');
+    const r0 = readyRows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
+    expect(r0.detail.no_candidate).toBe(true);
+    expect(r0.detail.reviewer).toBeUndefined();
+  });
+
+  it('a routed review that the owner closes anyway still derives review_timeout', async () => {
+    // The other side of the same coin: here an ask WAS sent, so a timeout is the honest label.
+    const { nickTok, ada } = await setup();
+    const lane = await post('/teams/dawn/lanes', { title: 'routed', claim: true }, ada);
+    const ready = await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
+    expect(ready.json.review.reviewer).toBeTruthy(); // a counterpart existed and was asked
+    await patchLane(lane.json.lane.id, { state: 'done' }, ada);
+
+    const rows = await auditRows(nickTok, 'lane.closed');
+    const closed = rows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
+    expect(closed.detail.reason).toBe('review_timeout');
+    const readyRows = await auditRows(nickTok, 'lane.ready_for_review');
+    const r0 = readyRows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
+    expect(r0.detail.reviewer).toBeTruthy();
+    expect(r0.detail.no_candidate).toBeUndefined();
   });
 
   it('reviewer send-back audits lane.review_sent_back and the lane resumes', async () => {
