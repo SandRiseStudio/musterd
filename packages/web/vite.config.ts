@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 import viteReact from '@vitejs/plugin-react';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import { defineConfig } from 'vite';
@@ -23,7 +25,23 @@ const proxyEntry = { target: daemon, changeOrigin: true, configure: stripOrigin 
 // TanStack Start stays underneath so the future stateful dashboard adds routes without a
 // framework change. This Start version doesn't inject a React plugin, so we add @vitejs/plugin-react
 // ourselves (required for the dev-mode React Refresh runtime).
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // `vite dev` evaluates modules instead of bundling them, so @musterd/protocol's barrel drags
+  // enforcement.ts — and its `node:crypto` import — into the browser, where Vite's externalized
+  // stub throws on first access and takes /live down into its error boundary. The production build
+  // tree-shakes that module out, which is why only dev broke. Alias it to a throwing stub for dev
+  // only, so the prod bundle (and its ADR 151 byte budget) is bit-for-bit unchanged.
+  resolve: {
+    alias:
+      command === 'serve'
+        ? [
+            {
+              find: /^node:crypto$/,
+              replacement: fileURLToPath(new URL('./src/dev/node-crypto-stub.ts', import.meta.url)),
+            },
+          ]
+        : [],
+  },
   server: {
     // Deliberately NOT Vite's default 5173. `:5173` used to be *the* /live viewer (a `pnpm dev` server run
     // as a LaunchAgent, ADR 124) until the daemon took over serving /live from its own origin (ADR 132).
@@ -52,4 +70,4 @@ export default defineConfig({
     }),
     viteReact(),
   ],
-});
+}));
