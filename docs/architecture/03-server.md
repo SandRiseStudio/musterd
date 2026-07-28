@@ -47,6 +47,7 @@ src/
     reachability.ts   // ADR 153 unblocker-reachable projection: adminHumanReachable (present-or-notifiable settle term) OR liveTeammateExists × teammateRouteOpen (item-2-gated route-around term); pure read of members + presence + enforcement policy, gates the top-tier hold's terminal (held vs stranded)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)
     residency.ts      // the wake ledger: residency enrollment + wake leases — claimWakeLeases (transactional derivation, defer-snoozed) / settleWakeLease / expireWakeLeases / recordSessionAttestation (harness-class-only, inc 4); rate policy derived from residency.* audit rows (ADR 131)
+    review.ts         // the ADR 169 review-counterpart picker: pickReviewCounterpart (risk-tagged → live human/admin first, else a live seat whose model FAMILY differs from the worker's per ADR 158 attestation; unknown family ineligible; nobody → null = sanctioned self-close) + memberFamily/workerFamily
     roles.ts          // roles table: role defaults (capabilities + charter), projected from roles/*.toml (ADR 070)
     rows.ts           // raw DB row shapes (TeamRow/MemberRow/PresenceRow/MessageRow) + toMember (resolves account_status + capabilities, ADR 070)
   protocol/
