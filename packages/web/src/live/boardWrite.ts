@@ -5,7 +5,17 @@ import type { Goal, Lane, LaneBoard, LaneResult, UpdateLane } from '@musterd/pro
 
 /** A verb the board may offer on a card. `patch` is the exact `PATCH /lanes/:id` body. */
 export interface LaneAction {
-  kind: 'claim' | 'start' | 'block' | 'unblock' | 'handoff' | 'done' | 'abandon';
+  kind:
+    | 'claim'
+    | 'start'
+    | 'block'
+    | 'unblock'
+    | 'handoff'
+    | 'ready'
+    | 'done'
+    | 'confirm'
+    | 'sendback'
+    | 'abandon';
   patch: UpdateLane;
 }
 
@@ -16,6 +26,11 @@ const TERMINAL = new Set<Lane['state']>(['done', 'abandoned']);
  * only the owner moves an owned lane — you never touch a teammate's card (hand-off is the owner
  * *giving*, not a peer taking). Handoff's patch is a placeholder; the seat picker fills it via
  * {@link handoffPatch}.
+ *
+ * The one deliberate exception (ADR 169): a lane in `ready_for_review` offers its verbs to the
+ * COUNTERPART, not the owner — `confirm` (the close that derives verified) and `sendback`. The
+ * owner keeps only the degradation self-close (recorded unverified) plus abandon, so silence never
+ * wedges. The owner's own "done" on a live lane became `ready` — the two-stage entry.
  */
 export function laneActions(lane: Lane, me: string | null): LaneAction[] {
   if (!me || TERMINAL.has(lane.state)) return [];
@@ -23,13 +38,27 @@ export function laneActions(lane: Lane, me: string | null): LaneAction[] {
     // The daemon flips open→claimed itself when ownership lands (store/lanes.ts) — owner_seat alone.
     return [{ kind: 'claim', patch: { owner_seat: me } }];
   }
+  if (lane.state === 'ready_for_review') {
+    if (lane.owner_seat === me) {
+      // The degradation path: the review ask timed out (or nobody was eligible) — self-close,
+      // recorded unverified by the daemon. Never a wedge.
+      return [
+        { kind: 'done', patch: { state: 'done' } },
+        { kind: 'abandon', patch: { state: 'abandoned' } },
+      ];
+    }
+    return [
+      { kind: 'confirm', patch: { state: 'done' } },
+      { kind: 'sendback', patch: { state: 'active' } },
+    ];
+  }
   if (lane.owner_seat !== me) return [];
   const acts: LaneAction[] = [];
   if (lane.state === 'claimed') acts.push({ kind: 'start', patch: { state: 'active' } });
   if (lane.state === 'active') acts.push({ kind: 'block', patch: { state: 'blocked' } });
   if (lane.state === 'blocked') acts.push({ kind: 'unblock', patch: { state: 'active' } });
   acts.push({ kind: 'handoff', patch: {} });
-  acts.push({ kind: 'done', patch: { state: 'done' } });
+  acts.push({ kind: 'ready', patch: { state: 'ready_for_review' } });
   acts.push({ kind: 'abandon', patch: { state: 'abandoned' } });
   return acts;
 }

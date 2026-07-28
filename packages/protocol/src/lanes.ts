@@ -80,6 +80,13 @@ export const LaneSchema = z.object({
     .nullable()
     .default(null),
   state: LaneStateSchema,
+  /**
+   * Board-projection annotation (ADR 169), never stored: for a `done` lane, whether the close was a
+   * counterpart confirm (derived from the `lane.closed` audit row's closer vs owner-at-close).
+   * Absent on non-terminal lanes, on older daemons, and on lanes closed before the audit existed —
+   * absent means "unknown", and the UI says nothing rather than guessing.
+   */
+  verified: z.boolean().optional(),
   created_by: z.string(),
   created_at: z.number().int(),
   claimed_at: z.number().int().nullable(),

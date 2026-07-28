@@ -2618,6 +2618,17 @@
   border-color: color-mix(in srgb, var(--lc-info) 34%, transparent);
   background: color-mix(in srgb, var(--lc-info) 10%, transparent);
 }
+/* ADR 169: the derived close verdict on a Done card — a quiet pair, never a shout. Confirmed gets
+ * the success tint (a counterpart agreed); unverified stays in muted ink (honest, not a scolding). */
+.lc-card__chip--verified {
+  color: var(--lc-success);
+  border-color: color-mix(in srgb, var(--lc-success) 34%, transparent);
+  background: color-mix(in srgb, var(--lc-success) 10%, transparent);
+}
+.lc-card__chip--unverified {
+  color: var(--lc-faint);
+  border-style: dashed;
+}
 
 /* ── the writable board (item 5): write controls, compose, the beats ──
  * All member-gated in JSX; observers never mount any of this. Motion reuses the house vocabulary
