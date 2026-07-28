@@ -466,6 +466,7 @@ export const claudeCode: Harness = {
     // ADR 160: only Claude Code sessions can list + rename each other (the desktop app's
     // session-management tools), so only this harness carries the label-sessions skill.
     sessionsSkillPath: '.claude/skills/musterd-label-sessions/SKILL.md',
+    nudgeSkillPath: '.claude/skills/musterd-nudge-relay/SKILL.md',
   },
 
   // Claude Code hands its hooks a `transcript_path`, and the newest assistant turn in that file

@@ -123,6 +123,10 @@ export interface HarnessGuidance {
    * list and rename each other through agent-side tools (Claude Code Desktop today). Omit when the
    * harness has no writable session list; those get terminal-tab titles only. */
   sessionsSkillPath?: string;
+  /** Path for the **nudge-relay** skill (ADR 167) — declared only by harnesses whose sessions can
+   * message each other through agent-side tools (Claude Code Desktop today, the same surface test as
+   * `sessionsSkillPath`). Omit elsewhere; a `delivery_hint` an agent can't act on is simply inert. */
+  nudgeSkillPath?: string;
 }
 
 /** What a harness gets to work with when observing its own session's model. */

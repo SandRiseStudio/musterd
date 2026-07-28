@@ -98,6 +98,42 @@ export function deliveryHintFor(
   };
 }
 
+/**
+ * The confirmation half (ADR 167 §D5): an `actor.session_message` attestation arrived carrying a
+ * `nudgeRef` — was it a sanctioned relay, and was it verbatim? Fully derived, no pending-nudge store:
+ * `composeNudgeLine` is a pure function of the message row, so recompose + hash + compare answers
+ * both questions in one comparison. Null when the ULID doesn't resolve to a message on this team —
+ * that row is plain organic use, increment 1's population.
+ *
+ * `verbatim: true` is delivery confirmation AND the injection guard in one bit: a relay that matched
+ * the hash carried exactly the composed line and nothing else. `verbatim: false` means the model
+ * paraphrased — counted, never punished (the guidance skill is the tuning surface). Rolling-upgrade
+ * caveat (stated in the ADR): a composition change mid-relay reads as `verbatim: false`.
+ */
+export function confirmNudge(
+  db: Database,
+  teamId: string,
+  nudgeRef: string,
+  bodyFingerprint: string | undefined,
+): { nudge: true; verbatim: boolean } | null {
+  const msg = db
+    .prepare<[string, string], MessageRow>('SELECT * FROM messages WHERE team_id = ? AND id = ?')
+    .get(teamId, nudgeRef);
+  if (!msg || msg.to_kind !== 'member' || msg.to_member === null) return null;
+  if (bodyFingerprint === undefined) return { nudge: true, verbatim: false };
+  const sender = getMemberById(db, msg.from_member);
+  const recipient = getMemberById(db, msg.to_member);
+  if (!sender || !recipient) return { nudge: true, verbatim: false };
+  const line = composeNudgeLine(
+    sender.name,
+    msg.act,
+    msg.id,
+    recipient.kind,
+    tierFromMeta(msg.meta),
+  );
+  return { nudge: true, verbatim: textFingerprint(line) === bodyFingerprint };
+}
+
 /** The ask tier as stored on the row's meta JSON, if any — read leniently: composition must be a
  *  total function of the row (the confirmation loop replays it), so a malformed meta degrades to the
  *  tier-less phrasing rather than throwing. */

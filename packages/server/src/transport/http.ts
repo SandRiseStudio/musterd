@@ -138,7 +138,12 @@ import {
   setPolicy,
 } from '../store/teams.js';
 import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
-import { recordError, recordInterruptCheck, recordSeenLatency } from '../telemetry.js';
+import {
+  recordCcdNudge,
+  recordError,
+  recordInterruptCheck,
+  recordSeenLatency,
+} from '../telemetry.js';
 
 /**
  * The content-coding negotiated for this response from its request's `Accept-Encoding`, set once at
@@ -1989,6 +1994,7 @@ export async function handleHttp(
           member.name,
           ctx.config.presenceTimeoutMs,
         );
+        if (hint) recordCcdNudge('hinted');
         if (askTier?.success) {
           return sendJson(res, 201, {
             ack,

@@ -15,6 +15,8 @@ import { findGateAsk, gateAskHumanAnswer } from '../store/gateAsk.js';
 import { laneCoveringPath } from '../store/lanes.js';
 import { unblockerReachable } from '../store/reachability.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
+import { recordCcdNudge } from '../telemetry.js';
+import { confirmNudge } from './nudge.js';
 import { routeEnvelope } from './route.js';
 
 /**
@@ -267,6 +269,13 @@ export function recordActorAttestation(
   // session message is another agent's incoming context and a session id is contractually
   // machine-local), so this row records exactly what arrived and nothing needed redacting here.
   if (att.kind === 'session-message') {
+    // ADR 167 §D5 — the confirmation loop: a ULID in the body that resolves to a directed message on
+    // this team marks the row a sanctioned delivery-rail relay, and recompose-and-compare says
+    // whether it was verbatim. Fully derived; a non-resolving ULID leaves a plain observation row.
+    const confirmed = att.nudgeRef
+      ? confirmNudge(srv.db, team.id, att.nudgeRef, att.bodyFingerprint)
+      : null;
+    if (confirmed) recordCcdNudge(confirmed.verbatim ? 'relayed_verbatim' : 'relayed');
     appendAudit(srv.db, team.id, {
       actor: member.name,
       action: 'actor.session_message',
@@ -277,6 +286,7 @@ export function recordActorAttestation(
         ...(att.bodyFingerprint ? { body_fingerprint: att.bodyFingerprint } : {}),
         ...(att.sessionRef ? { session_ref: att.sessionRef } : {}),
         ...(att.nudgeRef ? { nudge_ref: att.nudgeRef } : {}),
+        ...(confirmed ?? {}),
       },
     });
     return;

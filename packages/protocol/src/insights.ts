@@ -99,6 +99,11 @@ export const DeliveryRecipientSchema = z.object({
   answered: z.object({ act: z.string(), id: z.string(), ts: z.number().int() }).nullable(),
   /** ADR 088 interrupt raises recorded for this (act, recipient) — the attempt history. */
   interrupt_raises: z.number().int(),
+  /** ADR 167 delivery-rail relays confirmed for this act — `actor.session_message` rows whose
+   *  `nudge_ref` names it (same derived-attempt pattern as `interrupt_raises`); `_verbatim` is the
+   *  subset whose fingerprint matched the recomposed line (the injection guard holding). */
+  ccd_nudges: z.number().int(),
+  ccd_nudges_verbatim: z.number().int(),
 });
 export type DeliveryRecipient = z.infer<typeof DeliveryRecipientSchema>;
 

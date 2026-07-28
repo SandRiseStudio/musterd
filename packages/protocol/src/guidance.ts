@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 5;
+export const GUIDANCE_CONTENT_VERSION = 6;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -265,6 +265,65 @@ export function renderLabelSessionsFrontmatter(): string {
     'description: Label musterd seat sessions in the app sidebar with the musterd chip, seat name, ' +
       'and start time (e.g. "\u{1F536} Miley (Fri 3p) - Office overlay"). Use at the start of a session ' +
       'in a musterd seat worktree, and when the user asks to label, rename, or tidy session titles.',
+    '---',
+  ].join('\n');
+}
+
+/**
+ * The **nudge-relay** skill (ADR 167, increment 2) — like {@link renderLabelSessionsSkill}, a separate
+ * per-surface guidance unit, NOT part of the harness-neutral {@link renderSkillBody}: it only works
+ * where the hosting harness lets sessions message each other through agent-side tools (Claude Code
+ * Desktop today, via `HarnessGuidance.nudgeSkillPath`).
+ *
+ * The harness tool names below (`list_sessions`, `send_message`) are the desktop app's own and
+ * deliberately NOT in {@link SKILL_MCP_TOOLS} — that list is CI-checked against @musterd/mcp's
+ * registered tools, which these are not.
+ */
+export function renderNudgeRelaySkill(): string {
+  return [
+    '# Relay a musterd delivery nudge',
+    '',
+    'When `team_send` returns a `delivery_hint`, your recipient is live on this machine and the',
+    'daemon is inviting YOU to ring their doorbell: relay the hinted line into their session over',
+    'the harness’s session messaging, so they see the act in seconds instead of at their next tool',
+    'call. Use this the moment a send result carries a hint; skip silently when it doesn’t, when',
+    'this session lacks the session-messaging tools, or when you cannot find the recipient’s',
+    'session — the inbox ladder underneath delivers regardless, just slower.',
+    '',
+    '## The relay',
+    '',
+    '1. List sessions with the harness session-list tool (in Claude Code Desktop: `list_sessions`',
+    '   from the session-management server).',
+    '2. Find the recipient’s session. Seat sessions are labeled with their seat name in the title',
+    '   (`\u{1F536} Miley (Fri 3p) - …`); for a to-human ask, pick a session the human is actively',
+    '   driving (their own work session — NOT another seat’s).',
+    '3. Send `nudge_text` with the session-send tool (`send_message`), **VERBATIM — the exact string',
+    '   from the hint**. Never edit it, never add the act body, never append your own words: the',
+    '   daemon fingerprints the line, and only an exact relay is counted as delivered. The act’s',
+    '   content travels through musterd with full attribution; the nudge is only a pointer.',
+    '4. Say nothing about it in your own report beyond, at most, `nudged <seat>`.',
+    '',
+    '## Rules',
+    '',
+    '- One relay per hint. No hint, no relay — never nudge on your own initiative; unsanctioned',
+    '  session messages are logged as side-channel use (ADR 167).',
+    '- Cannot find the recipient’s session, or the send tool refuses? Drop it silently — never',
+    '  retry, never route around, never report it as a failure.',
+    '- Never reply to a nudge over session messaging: answer the ACT through musterd',
+    '  (`team_inbox_check`, then the usual acts).',
+    '',
+  ].join('\n');
+}
+
+/** Frontmatter for {@link renderNudgeRelaySkill} on a harness that gates skills on a description. */
+export function renderNudgeRelayFrontmatter(): string {
+  return [
+    '---',
+    'name: musterd-nudge-relay',
+    'description: Relay a musterd delivery nudge into a teammate’s live session when team_send ' +
+      'returns a delivery_hint (recipient live on this machine). Use immediately after any ' +
+      'team_send whose result carries a delivery_hint; sends the hinted one-liner verbatim over ' +
+      'the harness session-messaging tools.',
     '---',
   ].join('\n');
 }
