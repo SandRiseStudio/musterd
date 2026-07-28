@@ -448,6 +448,19 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE presence ADD COLUMN epoch INTEGER');
     },
   },
+  {
+    // v24 — two-stage close (ADR 169). `risk` is the declared risk-tag list (JSON array; any tag
+    // routes the review ask human-first — declared, never inferred). `merged_json` persists the
+    // worker's ADR 109 merge attestation at `ready_for_review` so a counterpart's later confirm
+    // carries the *worker's* claim verbatim into `git.pr_merged`. The new lane state itself needs
+    // no DDL: `state` is open TEXT by design (the v5 CHECK-rebuild trap). Verified-ness is derived
+    // from the `lane.closed` audit row, never stored — so there is deliberately no column for it.
+    version: 24,
+    up: (db) => {
+      db.exec('ALTER TABLE lanes ADD COLUMN risk TEXT');
+      db.exec('ALTER TABLE lanes ADD COLUMN merged_json TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

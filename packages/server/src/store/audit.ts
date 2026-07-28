@@ -57,7 +57,19 @@ export type AuditAction =
   // ADR 109: a lane carrying a branch reached a terminal state — the seat attests the landed merge.
   // actor = the resolving seat, target = the branch, `detail` carries the attested (never verified)
   // `{ pr, sha, authorized_by }` — the join table between seats, main SHAs, and authorizing humans.
+  // ADR 169: `attested_by` credits the worker when a counterpart performs the closing act on a
+  // stage-one (ready_for_review-captured) attestation.
   | 'git.pr_merged'
+  // ADR 169: the two-stage close instrument. `lane.ready_for_review` is the worker's "technically
+  // complete" claim (detail: { lane, owner, merged? }). `lane.closed` is EVERY terminal edge —
+  // verified-ness is DERIVED here and only here (detail: { lane, state, closed_by, owner_at_close,
+  // verified, reason: counterpart_confirm|review_timeout|self_close|abandoned, worker_family,
+  // reviewer_family?, time_in_review_ms? }); owner_at_close is pinned so a post-close handoff can
+  // never flip a verdict. `lane.review_sent_back` is the review catch — a counterpart returned a
+  // ready_for_review lane to a live state (detail: { lane, reviewer, owner }).
+  | 'lane.ready_for_review'
+  | 'lane.closed'
+  | 'lane.review_sent_back'
   // ADR 131: harness residency — the six wake-ledger verbs. `enrolled`/`revoked` are the
   // authorization events (actor = the deciding caller, detail carries `authorized_by`, ADR 127).
   // `wake_leased` is the daemon ordering an actuation (actor null — machine decision); `woke` /

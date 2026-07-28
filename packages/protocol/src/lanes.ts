@@ -8,16 +8,38 @@ import { GoalSchema } from './goals.js';
  * and git is optional throughout (`branch` is just a carried artifact label).
  */
 
-/** Lane lifecycle. `open` = unowned (claimable); `blocked`/`abandoned` are side states. */
+/**
+ * Lane lifecycle. `open` = unowned (claimable); `blocked`/`abandoned` are side states.
+ * `ready_for_review` (ADR 169) is the worker's "technically complete" claim — still contending
+ * (the surface stays owned until a counterpart confirms), never terminal. `done` is the only
+ * success-terminal state; verified-ness is *derived* from the closing act's author vs the owner
+ * at close time (pinned in the `lane.closed` audit row), never stored.
+ */
 export const LaneStateSchema = z.enum([
   'open',
   'claimed',
   'active',
   'blocked',
+  'ready_for_review',
   'done',
   'abandoned',
 ]);
 export type LaneState = z.infer<typeof LaneStateSchema>;
+
+/**
+ * The two semantic state sets (ADR 169 consolidation — previously three hand-kept copies across
+ * store/transport/MCP, which a new state would have tripled into drift).
+ * Contending: an owned/worked lane whose surface participates in overlap warnings and the ADR 150
+ * Gate A edit-guard — includes `ready_for_review` (owned until confirmed). Terminal: the lane's
+ * active life is over.
+ */
+export const LANE_CONTENDING_STATES: ReadonlySet<LaneState> = new Set([
+  'claimed',
+  'active',
+  'blocked',
+  'ready_for_review',
+]);
+export const LANE_TERMINAL_STATES: ReadonlySet<LaneState> = new Set(['done', 'abandoned']);
 
 export const LaneSchema = z.object({
   id: z.string(),
@@ -38,6 +60,25 @@ export const LaneSchema = z.object({
   branch: z.string().nullable(),
   /** Optional link up to a declared Goal (ADR 084). null = ungrouped; the join is flat, never a tree. */
   goal_id: z.string().nullable(),
+  /**
+   * Declared risk tags (ADR 169), e.g. ["user-facing", "production", "cost"]. Any tag routes the
+   * review ask human-first. Declared at open/update, never inferred from surfaces. Defaulted so a
+   * newer client parses an older daemon's lanes (skew-tolerant, the ADR 148 posture).
+   */
+  risk: z.array(z.string()).default([]),
+  /**
+   * The worker's merge attestation, captured at `ready_for_review` (ADR 169) so the confirmer's
+   * close carries the *worker's* claim verbatim into `git.pr_merged`. Null until `lane_ready`;
+   * defaulted for older-daemon skew.
+   */
+  merged: z
+    .object({
+      pr: z.number().int().optional(),
+      sha: z.string().optional(),
+      authorized_by: z.string().optional(),
+    })
+    .nullable()
+    .default(null),
   state: LaneStateSchema,
   created_by: z.string(),
   created_at: z.number().int(),
@@ -77,6 +118,8 @@ export const OpenLaneSchema = z.object({
   branch: z.string().optional(),
   /** Link this lane to a Goal at open (ADR 084) — the id `musterd next` groups + derives status by. */
   goal_id: z.string().optional(),
+  /** Declared risk tags (ADR 169) — any tag routes the review ask human-first. */
+  risk: z.array(z.string()).optional(),
   claim: z.boolean().optional(),
 });
 export type OpenLane = z.infer<typeof OpenLaneSchema>;
@@ -92,10 +135,13 @@ export const UpdateLaneSchema = z.object({
   goal_id: z.string().nullable().optional(),
   /** Transfer ownership to this seat (lane_handoff / lane_claim sets it to the caller). */
   owner_seat: z.string().optional(),
+  /** Declared risk tags (ADR 169) — any tag routes the review ask human-first. */
+  risk: z.array(z.string()).optional(),
   /**
-   * Merge attestation (ADR 109), meaningful on a terminal move of a branch-carrying lane: the landed
-   * PR number, squash SHA, and the human whose authority the merge ran under (grant issuer or
-   * `request.decide` actor). Attested, never verified — recorded to the audit log as `git.pr_merged`.
+   * Merge attestation (ADR 109), meaningful on a terminal move of a branch-carrying lane — or, under
+   * two-stage close (ADR 169), captured at `ready_for_review` (the worker's claim) and persisted on
+   * the lane so a counterpart's later confirm carries it. Attested, never verified — recorded to the
+   * audit log as `git.pr_merged`.
    */
   merged: z
     .object({
@@ -107,10 +153,21 @@ export const UpdateLaneSchema = z.object({
 });
 export type UpdateLane = z.infer<typeof UpdateLaneSchema>;
 
-/** Every mutating lane verb returns the lane plus any contention warnings (ADR 083 §4). */
+/**
+ * Every mutating lane verb returns the lane plus any contention warnings (ADR 083 §4). Under
+ * two-stage close (ADR 169) a patch that enters `ready_for_review` additionally reports the review
+ * routing: who the ask went to, or that self-close is sanctioned (no eligible counterpart live).
+ */
 export const LaneResultSchema = z.object({
   lane: LaneSchema,
   warnings: z.array(LaneWarningSchema),
+  review: z
+    .object({
+      reviewer: z.string().optional(),
+      route: z.enum(['human_admin', 'cross_family']).optional(),
+      self_close_sanctioned: z.boolean().optional(),
+    })
+    .optional(),
 });
 export type LaneResult = z.infer<typeof LaneResultSchema>;
 
@@ -129,7 +186,7 @@ export type LaneBoard = z.infer<typeof LaneBoardSchema>;
 export const NextBriefSchema = z.object({
   /** Whose brief this is. */
   member: z.string(),
-  /** Lanes you own that are live (claimed/active/blocked) — what you're carrying. */
+  /** Lanes you own that are live (claimed/active/blocked/ready_for_review) — what you're carrying. */
   in_flight: z.array(LaneSchema),
   /** Your most recently shipped lanes (done), newest first — what just landed. */
   shipped: z.array(LaneSchema),
