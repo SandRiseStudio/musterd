@@ -2419,9 +2419,26 @@
   .lc-gl-label {
     transition: none;
   }
+  /* board (item 5): entrances become instant, the flourish becomes a plain arrival, and the
+     waiting-on-a-human breathe degrades to a static rose ring — state stays visible, motion doesn't */
+  .lc-card--enter,
+  .lc-card--landed,
+  .lc-card--flourish,
+  .lc-card--compose,
+  .lc-card__picker {
+    animation: none;
+  }
+  .lc-card--breathe {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--lc-human, #ff86a8) 22%, transparent);
+  }
+  .lc-card,
+  .lc-board__new {
+    transition: none;
+  }
 }
 
-/* ─── work board (ADR 104) — lanes as a read-only kanban ─────────────────── */
+/* ─── work board (ADR 104 / item 5) — lanes as a kanban, writable for a signed-in member ── */
 .lc__canvas--board {
   display: block;
   overflow: auto;
@@ -2490,12 +2507,15 @@
   padding: var(--lc-4);
   overflow-y: auto;
 }
+/* office-voice column microcopy — an empty column says something true, quietly */
 .lc-col__empty {
   margin: 0;
-  padding: var(--lc-6) 0;
+  padding: var(--lc-6) var(--lc-4);
   text-align: center;
   color: var(--lc-faint);
-  font-size: 18px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  letter-spacing: 0.01em;
 }
 
 /* a card = one lane */
@@ -2582,6 +2602,270 @@
   font-family: var(--font-mono, monospace);
   font-size: 10.5px;
   color: var(--lc-faint);
+}
+.lc-card__chip--branch {
+  color: var(--lc-info);
+  border-color: color-mix(in srgb, var(--lc-info) 34%, transparent);
+  background: color-mix(in srgb, var(--lc-info) 10%, transparent);
+}
+
+/* ── the writable board (item 5): write controls, compose, the beats ──
+ * All member-gated in JSX; observers never mount any of this. Motion reuses the house vocabulary
+ * (lc-rise entrances, 2.4s breathe for waiting-on-a-human) — new keyframes only where a beat needs
+ * one of its own (the done flourish). */
+
+/* my card carries my color at the edge — a 1px tint, never a stripe */
+.lc-card--mine {
+  border-color: color-mix(in srgb, var(--lc-accent) 32%, var(--lc-border));
+}
+
+/* card entrances: first-load stagger + the landing after a move between columns */
+.lc-card--enter,
+.lc-card--landed {
+  animation: lc-rise var(--lc-med) var(--lc-ease) both;
+}
+/* the done beat — glide in, then one warm mustard pulse; calm after (#warm-flourish) */
+.lc-card--flourish {
+  animation:
+    lc-rise var(--lc-med) var(--lc-ease) both,
+    lc-card-glow 700ms var(--lc-ease) 120ms 1;
+}
+@keyframes lc-card-glow {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-accent) 55%, transparent);
+  }
+  55% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--lc-accent) 22%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 9px transparent;
+  }
+}
+
+/* waiting on a human, made ambient: a human-owned blocked card breathes softly in rose */
+.lc-card--breathe {
+  animation: lc-card-breathe 2.4s var(--lc-ease) infinite;
+}
+@keyframes lc-card-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-human, #ff86a8) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--lc-human, #ff86a8) 16%, transparent);
+  }
+}
+
+/* blocked cards surface their note ("NOT BEFORE …") — two lines, then quiet */
+.lc-card__detail {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--lc-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* the actions row — always in the tab order, revealed on hover / keyboard focus */
+.lc-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lc-3);
+}
+@media (hover: hover) and (pointer: fine) {
+  .lc-card__actions {
+    opacity: 0;
+    transition: opacity var(--lc-fast) var(--lc-ease);
+  }
+  .lc-card:hover .lc-card__actions,
+  .lc-card:focus-within .lc-card__actions,
+  .lc-card__actions--compose {
+    opacity: 1;
+  }
+}
+.lc-card__act--claim:hover:not(:disabled),
+.lc-card__act--start:hover:not(:disabled) {
+  color: var(--lc-lane);
+  border-color: color-mix(in srgb, var(--lc-lane) 55%, transparent);
+}
+.lc-card__act--done:hover:not(:disabled) {
+  color: var(--lc-success);
+  border-color: color-mix(in srgb, var(--lc-success) 55%, transparent);
+}
+.lc-card__act--block:hover:not(:disabled),
+.lc-card__act--unblock:hover:not(:disabled) {
+  color: var(--lc-info);
+  border-color: color-mix(in srgb, var(--lc-info) 55%, transparent);
+}
+.lc-card__act--handoff:hover:not(:disabled) {
+  color: var(--lc-handoff);
+  border-color: color-mix(in srgb, var(--lc-handoff) 55%, transparent);
+}
+/* the quiet path — bare text, red only when you mean it (the ac__deny idiom) */
+.lc-card__abandon {
+  border: 0;
+  background: none;
+  padding: var(--lc-1) var(--lc-2);
+  font: inherit;
+  font-size: 11px;
+  color: var(--lc-faint);
+  cursor: pointer;
+  transition: color var(--lc-fast) var(--lc-ease);
+}
+.lc-card__abandon:hover:not(:disabled) {
+  color: var(--lc-danger);
+}
+
+/* the hand-off seat picker — the actions row steps aside, teammates step in */
+.lc-card__picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lc-3);
+  animation: lc-picker-in var(--lc-fast) var(--lc-ease) both;
+}
+@keyframes lc-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.lc-card__picker-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--lc-faint);
+}
+.lc-card__seat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* the "New lane" moment: a ghost card materializes atop Backlog and becomes the real thing */
+.lc-card--compose {
+  border-color: color-mix(in srgb, var(--lc-accent) 40%, var(--lc-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lc-accent) 10%, transparent) inset;
+  animation: lc-rise var(--lc-med) var(--lc-ease) both;
+}
+.lc-card__compose-title {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--lc-text);
+  outline: none;
+}
+.lc-card__compose-title::placeholder {
+  color: var(--lc-faint);
+}
+.lc-card__compose-claim {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lc-3);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--lc-muted);
+  cursor: pointer;
+}
+.lc-card__compose-claim input {
+  accent-color: var(--lc-accent);
+}
+.lc-card__compose-more {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-3);
+}
+.lc-card__compose-more input {
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-r-sm);
+  background: var(--lc-surface-2);
+  padding: var(--lc-2) var(--lc-3);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--lc-text);
+}
+
+/* the "…and K more" expander — a flattened almost-card */
+.lc-col__more {
+  border: 1px dashed var(--lc-border);
+  border-radius: var(--lc-r-md);
+  background: none;
+  padding: var(--lc-3);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--lc-faint);
+  cursor: pointer;
+  transition: color var(--lc-fast) var(--lc-ease), border-color var(--lc-fast) var(--lc-ease);
+}
+.lc-col__more:hover {
+  color: var(--lc-dim);
+  border-color: var(--lc-border-2);
+}
+
+/* the one polite status line — write outcomes land here, then fade from mind */
+.lc-board__note {
+  margin: 0 0 var(--lc-4);
+  min-height: 16px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--lc-dim);
+}
+.lc-board__note--err {
+  color: var(--lc-danger);
+}
+
+/* topbar, signed in: the identity chip ("You're in the room."), sign-out, + New lane */
+.lc__identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--lc-dim);
+}
+.lc__identity-out {
+  border: 0;
+  background: none;
+  padding: var(--lc-1) var(--lc-2);
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--lc-faint);
+  cursor: pointer;
+  transition: color var(--lc-fast) var(--lc-ease);
+}
+.lc__identity-out:hover {
+  color: var(--lc-danger);
+}
+.lc-board__new {
+  border: 0;
+  border-radius: var(--lc-r-sm);
+  background: var(--lc-accent);
+  color: #1a1405;
+  padding: var(--lc-2) var(--lc-4);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter var(--lc-fast) var(--lc-ease), transform var(--lc-fast) var(--lc-ease);
+}
+.lc-board__new:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.lc-board__new:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.lc-board__new:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 /* ─── asks & approvals strip (ADR 149) ────────────────────────────────────
