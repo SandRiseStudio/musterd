@@ -2436,13 +2436,23 @@
   .lc-board__new {
     transition: none;
   }
+  .lc-insight {
+    animation: none;
+  }
 }
 
 /* ─── work board (ADR 104 / item 5) — lanes as a kanban, writable for a signed-in member ── */
 .lc__canvas--board {
-  display: block;
-  overflow: auto;
+  display: flex;
+  align-items: stretch;
+  gap: var(--lc-5);
+  overflow: hidden;
   padding: var(--lc-6);
+}
+.lc-board__main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
 }
 .lc-board {
   display: grid;
@@ -2821,6 +2831,196 @@
 }
 .lc-board__note--err {
   color: var(--lc-danger);
+}
+
+/* ── Inc B: the insight rail + Goal swimlanes + the view toggle ── */
+
+/* segmented view toggle in the topbar — columns ⇄ goals */
+.lc-board__views {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--lc-border);
+  border-radius: 999px;
+  background: var(--lc-surface-2);
+}
+.lc-board__view {
+  border: 0;
+  background: none;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--lc-muted);
+  cursor: pointer;
+  transition: color var(--lc-fast) var(--lc-ease), background var(--lc-fast) var(--lc-ease);
+}
+.lc-board__view--on {
+  background: color-mix(in srgb, var(--lc-accent) 18%, transparent);
+  color: var(--lc-text);
+}
+
+/* the rail — a calm read of the report, collapsible to the house spine */
+.lc-insight {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-5);
+  flex: 0 0 236px;
+  overflow-y: auto;
+  padding: var(--lc-5);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-r-lg);
+  background: color-mix(in srgb, var(--lc-ground) 55%, transparent);
+  animation: lc-rise var(--lc-med) var(--lc-ease) both;
+}
+.lc-insight--rail {
+  position: relative;
+  flex: 0 0 34px;
+  padding: 0;
+  overflow: hidden;
+}
+.lc-insight__head {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-3);
+}
+.lc-insight__title,
+.lc-insight__label {
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lc-muted);
+}
+.lc-insight__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-3);
+}
+.lc-insight__section--flag .lc-insight__label {
+  color: var(--lc-danger);
+}
+.lc-insight__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--lc-3) var(--lc-4);
+  margin: 0;
+}
+.lc-insight__stats div {
+  display: flex;
+  flex-direction: column;
+}
+.lc-insight__stats dt {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--lc-faint);
+}
+.lc-insight__stats dd {
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 15px;
+  color: var(--lc-text);
+}
+.lc-insight__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-2);
+  font-size: 12px;
+  color: var(--lc-dim);
+}
+.lc-insight__list--dim {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--lc-muted);
+}
+.lc-insight__wait {
+  line-height: 1.4;
+}
+.lc-insight__who {
+  font-family: var(--font-mono, monospace);
+  font-weight: 700;
+}
+.lc-insight__dim {
+  color: var(--lc-faint);
+}
+.lc-insight__quiet,
+.lc-insight__empty {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--lc-faint);
+}
+.lc-insight__more {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--lc-faint);
+  cursor: pointer;
+  transition: color var(--lc-fast) var(--lc-ease);
+}
+.lc-insight__more:hover {
+  color: var(--lc-dim);
+}
+
+/* goal swimlane bands — the same columns, banded by Goal */
+.lc-board--goals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-6);
+  grid-auto-flow: unset;
+}
+.lc-band {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-4);
+}
+.lc-band__head {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-4);
+}
+.lc-band__title {
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--lc-text);
+}
+.lc-band__status {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.lc-band__status--planned {
+  color: var(--lc-muted);
+  background: color-mix(in srgb, var(--lc-muted) 12%, transparent);
+}
+.lc-band__status--in-flight {
+  color: var(--lc-lane);
+  background: color-mix(in srgb, var(--lc-lane) 12%, transparent);
+}
+.lc-band__status--shipped {
+  color: var(--lc-success);
+  background: color-mix(in srgb, var(--lc-success) 12%, transparent);
+}
+.lc-band__grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(230px, 1fr);
+  gap: var(--lc-5);
+  align-items: start;
+  overflow-x: auto;
+}
+.lc-band--compose {
+  max-width: 320px;
 }
 
 /* topbar, signed in: the identity chip ("You're in the room."), sign-out, + New lane */
