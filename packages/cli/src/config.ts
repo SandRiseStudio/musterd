@@ -309,11 +309,48 @@ export interface Config {
    * discover its reconcile roots ({@link resolveRosterRoots}).
    */
   rosterHome: Record<string, string>;
+  /**
+   * The **team home** per team, keyed by slug (install-topology §4): the directory a human stands in
+   * so their identity resolves without `--as` or pasting. Written by `musterd human <name>`; the
+   * default is `~/musterd/<slug>`.
+   *
+   * Deliberately a **distinct key from {@link Config.rosterHome}**, not a rename of it. `rosterHome`
+   * is ADR 058's *cutover signal* — a team is file-authoritative iff it has one — so provisioning a
+   * person a place to stand must never silently flip a db-only team into file-backed mode. They
+   * compose (when both exist they should name the same folder, and `team export` defaults into the
+   * team home); they do not merge.
+   */
+  teamHome: Record<string, string>;
 }
 
 /** Record a team's roster home (ADR 058 `team export`) — the cutover to file-authoritative. */
 export function recordRosterHome(config: Config, slug: string, dir: string): void {
   config.rosterHome[slug] = resolve(dir);
+}
+
+/** Record a team's home (install-topology §4) — where the human stands. Never touches `rosterHome`. */
+export function recordTeamHome(config: Config, slug: string, dir: string): void {
+  config.teamHome[slug] = resolve(dir);
+}
+
+/**
+ * Where a team's home lives by default: `~/musterd/<slug>`. `~/musterd/` is the natural roof over all
+ * of a human's teams — walking between them is `cd` — without itself being a config concept. Visible
+ * on purpose: unlike `~/.musterd/` (platform state a person never opens), the home is a place they
+ * stand in, so hiding it in a dotdir would contradict the thing it exists to provide.
+ */
+export function defaultTeamHome(slug: string): string {
+  return join(homedir(), 'musterd', slug);
+}
+
+/**
+ * Read a binding at an **exact** folder (`<dir>/.musterd/binding.json`), without {@link findBinding}'s
+ * walk up the tree. The distinction is load-bearing for the team home: `~/musterd/revive` sits under
+ * `~`, so a walking read could answer with some ancestor's binding and let one team's floor be
+ * written over another's.
+ */
+export function readBindingAt(dir: string): Binding | null {
+  return readBinding(join(dir, BINDING_DIR, BINDING_FILE));
 }
 
 /** Upsert an identity into the vault (ADR 059), keyed by (team, name). */
@@ -346,6 +383,7 @@ const DEFAULT: Config = {
   bindings: {},
   agentKeys: {},
   rosterHome: {},
+  teamHome: {},
 };
 
 /** Coerce a possibly-legacy stored identity to the v0.3 shape: a pre-cutover `token` maps to `key`
@@ -378,6 +416,7 @@ export function loadConfig(): Config {
       bindings: parsed.bindings ?? {},
       agentKeys: parsed.agentKeys ?? {},
       rosterHome: parsed.rosterHome ?? {},
+      teamHome: parsed.teamHome ?? {},
     };
   } catch {
     // Fresh objects (not DEFAULT's): callers like recordBinding mutate `bindings`/`identities`.
@@ -388,6 +427,7 @@ export function loadConfig(): Config {
       bindings: {},
       agentKeys: {},
       rosterHome: {},
+      teamHome: {},
     };
   }
 }

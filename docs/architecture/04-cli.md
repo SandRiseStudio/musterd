@@ -94,6 +94,7 @@ src/
     session.ts        // musterd session start|end --stdin (hook-driven capture → binding.session + harness-class-only attestation push) | show (the human triage view) (ADR 131 §5, inc 4)
     gate.ts           // musterd gate check --stdin — the PreToolUse enforcement gate (hook-driven): match the tool call vs the team's class table client-side, adjudicate matches via POST /gate; fail-open (ADR 150)
     host.ts           // musterd host [--once]: the resident wake-actuator loop (notify-shaped; ADR 131 inc 3)
+    human.ts          // musterd human <name>: the mirror of `agent` — stands a person in the team home (~/musterd/<team>) with their 0600 binding, mints/reuses/re-issues the credential, self-claims, sets current (ADR 176)
     serve.ts          // musterd serve [--port]
     broadcast.ts      // musterd broadcast --team … (--out|--twitch|--rtmp): headless-Chrome capture of /broadcast → CFR frame pump → ffmpeg (VideoToolbox/libx264) → file or RTMPS; stream key from env/Keychain only (ADR 157 inc 2)
     stream.ts         // musterd stream doctor|build|start|stop|status: the one-verb hosted broadcast, absorbing scripts/broadcast/live.sh — `doctor` prints the exact repair per failed precondition; `build` records the pushed DIGEST and `start` runs that (a rebuilt tag can resolve to the previous image) and discovers the tailnet address itself; secrets stay operator-set, presence-checked only
