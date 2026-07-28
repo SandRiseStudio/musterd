@@ -1,5 +1,5 @@
 import type { LaneBoard, MemberSummary, OpenLane, UpdateLane } from '@musterd/protocol';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Board } from '../live/Board';
 import {
@@ -64,6 +64,7 @@ function loadMember(team: string): { as: string; token: string } | null {
  * observer path stays exactly what it was: a hidden read-only seat, no account, no controls.
  */
 function BoardPage() {
+  const router = useRouter();
   const [team, setTeam] = useState('');
   const [advanced, setAdvanced] = useState<AdvancedState>({ open: false, as: '', token: '' });
   const [cfg, setCfg] = useState<LiveConfig | null>(null);
@@ -198,7 +199,13 @@ function BoardPage() {
     const nonce = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('s');
     if (urlTeam && nonce) {
       const clean = `${window.location.pathname}${window.location.search}`;
-      window.history.replaceState(null, '', clean);
+      // Strip through the ROUTER's history, not `window.history.replaceState`. The raw call cleans
+      // the address bar but leaves the router's own location — captured at hydration, hash included —
+      // stale; on the SUCCESS path the post-connect render settles the router, which re-syncs its
+      // location and puts the spent nonce back in the bar (izzo's find, ADR 174 acceptance run,
+      // lane 01KYN5G4Y5). Replacing via the router updates both copies, so there is nothing left to
+      // resurrect. Still before the redeem is even sent, per the ADR's guarantee.
+      router.history.replace(clean);
       setProvisioning(true);
       void redeemSignin(urlTeam, nonce)
         .then(({ as, credential }) => connect(urlTeam, { as, token: credential }))
