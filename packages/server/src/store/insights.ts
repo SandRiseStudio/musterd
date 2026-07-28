@@ -3,6 +3,7 @@ import type {
   CoordinationDensity,
   FlowMetrics,
   Report,
+  ReviewMetrics,
   SteeringMetrics,
   WaitingOnEntry,
   WakeMetrics,
@@ -358,6 +359,84 @@ export function deriveSteeringMetrics(
   };
 }
 
+const REVIEW_WINDOW_DAYS = 30;
+const REVIEW_WINDOW_MS = REVIEW_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * Two-stage close metrics (ADR 169 O&E) — the review lifecycle as counts, projected here so the
+ * eval is computable without an admin credential (ADR 052's reachability amendment).
+ *
+ * Counts only, and that is the whole privacy argument: every transition counted here is already
+ * broadcast to the team as a `lane_state` act when it happens, so the aggregate discloses nothing
+ * new — while the audit log keeps carrying claim refusals, grants, key rotation and policy changes
+ * behind the admin boundary. The alternative (widening `GET /audit`) would have traded a
+ * documentation problem for a governance one.
+ *
+ * A 30-day window rather than the wake ledger's 7: closes are far rarer than wakes, and the ADR's
+ * own experiment is "the first month's review-catch rate".
+ *
+ * `routed` vs `no_candidate` is carried separately because the headline catch rate is unreadable
+ * without it — a zero means "reviewers found nothing" or "no reviewer was ever eligible", and only
+ * the first is a reason to call the feature decorative.
+ */
+export function deriveReviewMetrics(
+  db: Database,
+  teamId: string,
+  now: number = Date.now(),
+): ReviewMetrics {
+  const since = now - REVIEW_WINDOW_MS;
+  const rows = db
+    .prepare<[string, number], { action: string; detail: string | null }>(
+      `SELECT action, detail FROM audit
+        WHERE team_id = ?
+          AND action IN ('lane.ready_for_review','lane.closed','lane.review_sent_back')
+          AND ts > ?`,
+    )
+    .all(teamId, since);
+
+  const m: ReviewMetrics = {
+    window_ms: REVIEW_WINDOW_MS,
+    ready: 0,
+    routed: 0,
+    no_candidate: 0,
+    sent_back: 0,
+    closed: {
+      total: 0,
+      counterpart_confirm: 0,
+      review_timeout: 0,
+      no_candidate: 0,
+      self_close: 0,
+      abandoned: 0,
+    },
+  };
+  for (const r of rows) {
+    let d: { reviewer?: string; no_candidate?: boolean; reason?: string } = {};
+    try {
+      d = r.detail ? (JSON.parse(r.detail) as typeof d) : {};
+    } catch {
+      d = {}; // an unparseable row is not worth failing a whole report over
+    }
+    if (r.action === 'lane.review_sent_back') {
+      m.sent_back++;
+    } else if (r.action === 'lane.ready_for_review') {
+      m.ready++;
+      // Pre-#450 rows recorded neither field; they count as `ready` and abstain from the split
+      // rather than being guessed into one side of it.
+      if (typeof d.reviewer === 'string' && d.reviewer.length > 0) m.routed++;
+      else if (d.no_candidate === true) m.no_candidate++;
+    } else {
+      m.closed.total++;
+      const reason = d.reason;
+      if (reason === 'counterpart_confirm') m.closed.counterpart_confirm++;
+      else if (reason === 'review_timeout') m.closed.review_timeout++;
+      else if (reason === 'no_candidate') m.closed.no_candidate++;
+      else if (reason === 'abandoned') m.closed.abandoned++;
+      else m.closed.self_close++; // includes legacy rows with no reason recorded
+    }
+  }
+  return m;
+}
+
 const WAKE_WINDOW_DAYS = 7;
 const WAKE_WINDOW_MS = WAKE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
@@ -529,6 +608,7 @@ export function deriveReport(
     steering: deriveSteeringMetrics(db, teamId, now),
     wake: deriveWakeMetrics(db, teamId, now),
     tool_calls: deriveToolCallMetrics(db, teamId, now),
+    review: deriveReviewMetrics(db, teamId, now),
     // ADR 172: the model-family posture snapshot — derived, never stored. Sustained monoculture is
     // read off the SERIES of reports, not off any single one.
     ...(presenceTimeoutMs !== undefined

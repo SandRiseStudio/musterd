@@ -409,11 +409,71 @@ async function toolsReport(parsed: Parsed): Promise<number> {
   return 0;
 }
 
+/**
+ * `musterd report review` (ADR 169 O&E, reachable per ADR 052's amendment): the two-stage close
+ * panel — how often review was routed, how often there was nobody to route to, and how often a
+ * counterpart actually sent work back.
+ *
+ * This exists because the ADR's own eval was defined over admin-only audit rows, so the seats meant
+ * to compute it could not read it. Counts only, and every transition counted here was already
+ * broadcast as a `lane_state` act — the aggregate discloses nothing the team could not see live.
+ */
+async function reviewReport(parsed: Parsed): Promise<number> {
+  const { team, http } = resolve(parsed.flags);
+  const report = await http.report(team);
+  const w = process.stdout.write.bind(process.stdout);
+  const r = report.review;
+  if (parsed.flags['json']) return (w(JSON.stringify(r ?? null) + '\n'), 0);
+  if (!r) {
+    w(theme.meta('this daemon predates two-stage close (ADR 169) — rebuild + restart it') + '\n');
+    return 0;
+  }
+  const days = Math.round(r.window_ms / 86_400_000);
+  w(`${theme.accent('review')} — ${team} ${theme.meta(`· last ${days}d`)}\n\n`);
+  if (r.ready === 0) {
+    w(theme.meta('  no lane has entered review yet — `musterd lane ready <id>` starts one') + '\n');
+    return 0;
+  }
+  // The catch rate's denominator is ROUTED asks, never lanes marked ready: a zero over the latter
+  // cannot separate "reviewers found nothing" from "nobody was eligible to look" (ADR 169).
+  const catchRate = r.routed > 0 ? ` · caught ${pct(r.sent_back / r.routed)}` : '';
+  w(
+    `  ${theme.accent(String(r.ready))} entered review · ${r.routed} routed · ${r.no_candidate} no counterpart${catchRate}\n`,
+  );
+  // Rows written before the routing outcome was recorded (pre-#450) count as `ready` and abstain
+  // from the split. Say so: without this line a panel reading "4 entered review · 0 routed" invites
+  // exactly the misreading this whole projection exists to prevent — and their closes carry the old
+  // `review_timeout` label, which asserts an ask that may never have been sent.
+  const unknown = r.ready - r.routed - r.no_candidate;
+  if (unknown > 0) {
+    w(
+      `  ${theme.meta(`${unknown} predate routing-outcome recording (ADR 169 follow-up) — their split is unknown, and their closes read as timeouts whether or not an ask was sent`)}\n`,
+    );
+  }
+  if (r.routed === 0 && r.no_candidate > 0) {
+    // The finding this panel exists to make legible, stated rather than left to arithmetic.
+    w(
+      `  ${theme.warn('review never ran')} — ${theme.meta('every ready lane found no eligible cross-family counterpart, so a zero catch rate says nothing about reviewing (see `musterd report` family_posture)')}\n`,
+    );
+  }
+  const c = r.closed;
+  w(`\n  ${theme.accent('closes')} (${c.total}):\n`);
+  const verifiedPct =
+    c.total > 0 ? ` ${theme.meta(`(${pct(c.counterpart_confirm / c.total)})`)}` : '';
+  w(`    ${theme.ok('confirmed')} ${c.counterpart_confirm}${verifiedPct}\n`);
+  w(`    ${theme.meta('self-closed')} ${c.self_close} · never entered review\n`);
+  w(`    ${theme.meta('no counterpart')} ${c.no_candidate} · sanctioned, nobody was asked\n`);
+  w(`    ${theme.meta('review timed out')} ${c.review_timeout} · asked, unanswered\n`);
+  if (c.abandoned > 0) w(`    ${theme.meta('abandoned')} ${c.abandoned}\n`);
+  return 0;
+}
+
 export async function reportCommand(parsed: Parsed): Promise<number> {
   if (parsed.positionals[0] === 'delivery') return deliveryReport(parsed, parsed.positionals[1]);
   if (parsed.positionals[0] === 'coordination') return coordinationReport(parsed);
   if (parsed.positionals[0] === 'residency') return residencyReport(parsed);
   if (parsed.positionals[0] === 'tools') return toolsReport(parsed);
+  if (parsed.positionals[0] === 'review') return reviewReport(parsed);
   const { team, http } = resolve(parsed.flags);
   const report = await http.report(team);
   if (parsed.flags['json']) {

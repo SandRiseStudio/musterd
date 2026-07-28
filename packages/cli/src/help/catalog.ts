@@ -396,7 +396,8 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Insight ────────────────────────────────────────────────────────────────────────────────
   {
     name: 'report',
-    signature: '[--altitude ic|team|exec] [--json]  |  delivery [<id>]  |  coordination  |  tools',
+    signature:
+      '[--altitude ic|team|exec] [--json]  |  delivery [<id>]  |  coordination  |  tools  |  review',
     summary: 'the insight report — flow metrics, waiting-on, the Goal board',
     group: 'insight',
     primary: true,
@@ -404,7 +405,8 @@ export const CATALOG: readonly CommandEntry[] = [
       'One derived projection (ADR 050/084) at three altitudes (ic / team / exec).\n' +
       '  report delivery [<id>]   the delivery ledger — open directed acts and who has seen/answered them\n' +
       '  report coordination      coordination health — density, time-to-unblock, ignored help, stalls\n' +
-      '  report tools             the MCP tool surface — per-tool calls/bounces/latency + rendered weight',
+      '  report tools             the MCP tool surface — per-tool calls/bounces/latency + rendered weight\n' +
+      '  report review            two-stage close (ADR 169) — reviews routed, no-counterpart degradations, catches',
   },
   {
     name: 'board',
