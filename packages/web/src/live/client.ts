@@ -9,13 +9,17 @@
 import {
   AuditResponseSchema,
   LaneBoardSchema,
+  LaneResultSchema,
   makeEnvelope,
   PROTOCOL_VERSION,
   type AuditEntry,
   type Envelope,
   type LaneBoard,
+  type LaneResult,
   type MemberSummary,
+  type OpenLane,
   type Request,
+  type UpdateLane,
 } from '@musterd/protocol';
 
 // Re-export so the audit view + route keep importing the entry type from this client module.
@@ -232,6 +236,58 @@ export async function sendAct(
     );
   }
   return (json as { ack: Envelope }).ack;
+}
+
+/**
+ * The writable board's mutation seam (item 5 / ADR 104): member-authed lane writes from the browser,
+ * so a signed-in human creates/claims/moves work exactly like a CLI seat would. The daemon emits the
+ * `lane_open`/`lane_claim`/`lane_state`/`lane_handoff`/`lane_resolve` team acts itself on these
+ * verbs — the client must never send a companion act. Both return the daemon's echo (`{lane,
+ * warnings}`) so the board can fold the change in optimistically: the firehose deliberately skips
+ * the sender, so this echo is the only copy the writing client sees (the AsksStrip precedent).
+ */
+async function laneMutation(
+  cfg: LiveConfig,
+  path: string,
+  method: 'POST' | 'PATCH',
+  input: unknown,
+): Promise<LaneResult> {
+  const res = await fetch(path, {
+    method,
+    headers: {
+      authorization: `Bearer ${cfg.token}`,
+      'content-type': 'application/json',
+      'x-musterd-surface': 'web',
+    },
+    body: JSON.stringify(input),
+  });
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const err = (json as { error?: { code?: string; message?: string } }).error;
+    throw new LiveFetchError(
+      err?.message ?? `HTTP ${res.status}`,
+      err?.code ?? `http_${res.status}`,
+      res.status,
+    );
+  }
+  // Validate the wire at the boundary (same contract the CLI parses), like fetchLaneBoard.
+  return LaneResultSchema.parse(json);
+}
+
+/** Open a lane as the signed-in member (`POST /teams/:slug/lanes`); `claim: true` self-owns it. */
+export function createLane(cfg: LiveConfig, input: OpenLane): Promise<LaneResult> {
+  return laneMutation(cfg, `/teams/${encodeURIComponent(cfg.team)}/lanes`, 'POST', input);
+}
+
+/** Update a lane — claim / advance / hand off / resolve are all this one PATCH seam. */
+export function updateLane(cfg: LiveConfig, id: string, input: UpdateLane): Promise<LaneResult> {
+  return laneMutation(
+    cfg,
+    `/teams/${encodeURIComponent(cfg.team)}/lanes/${encodeURIComponent(id)}`,
+    'PATCH',
+    input,
+  );
 }
 
 /* ─── shared read-only observer seat ──────────────────────────────────────────────────────────────

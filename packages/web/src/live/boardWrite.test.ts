@@ -1,0 +1,133 @@
+import { describe, expect, it } from 'vitest';
+import type { Lane, LaneBoard, LaneResult, LaneWarning } from '@musterd/protocol';
+import { applyLaneEcho, capColumn, handoffPatch, laneActions } from './boardWrite';
+
+const lane = (over: Partial<Lane> = {}): Lane => ({
+  id: 'L1',
+  team: 'revive',
+  project: 'default',
+  title: 'write the launch post',
+  detail: null,
+  owner_seat: null,
+  role: null,
+  surface_globs: [],
+  depends_on: [],
+  branch: null,
+  goal_id: null,
+  state: 'open',
+  created_by: 'nick',
+  created_at: 1,
+  claimed_at: null,
+  resolved_at: null,
+  updated_at: 1,
+  ...over,
+});
+
+describe('laneActions — the verb-legality table', () => {
+  it('offers nothing to an observer (me = null), whatever the lane', () => {
+    expect(laneActions(lane(), null)).toEqual([]);
+    expect(laneActions(lane({ owner_seat: 'nick', state: 'active' }), null)).toEqual([]);
+  });
+
+  it('an unowned open lane offers exactly claim (owner_seat alone — the daemon flips open→claimed)', () => {
+    const actions = laneActions(lane(), 'nick');
+    expect(actions.map((a) => a.kind)).toEqual(['claim']);
+    expect(actions[0]!.patch).toEqual({ owner_seat: 'nick' });
+  });
+
+  it("someone else's lane offers nothing — you never move a teammate's card", () => {
+    expect(laneActions(lane({ owner_seat: 'stanley', state: 'claimed' }), 'nick')).toEqual([]);
+    expect(laneActions(lane({ owner_seat: 'stanley', state: 'active' }), 'nick')).toEqual([]);
+  });
+
+  it('my claimed lane: start, hand off, done, abandon', () => {
+    const actions = laneActions(lane({ owner_seat: 'nick', state: 'claimed' }), 'nick');
+    expect(actions.map((a) => a.kind)).toEqual(['start', 'handoff', 'done', 'abandon']);
+    expect(actions.find((a) => a.kind === 'start')!.patch).toEqual({ state: 'active' });
+  });
+
+  it('my active lane: block, hand off, done, abandon', () => {
+    const actions = laneActions(lane({ owner_seat: 'nick', state: 'active' }), 'nick');
+    expect(actions.map((a) => a.kind)).toEqual(['block', 'handoff', 'done', 'abandon']);
+    expect(actions.find((a) => a.kind === 'block')!.patch).toEqual({ state: 'blocked' });
+    expect(actions.find((a) => a.kind === 'done')!.patch).toEqual({ state: 'done' });
+  });
+
+  it('my blocked lane: unblock, hand off, done, abandon', () => {
+    const actions = laneActions(lane({ owner_seat: 'nick', state: 'blocked' }), 'nick');
+    expect(actions.map((a) => a.kind)).toEqual(['unblock', 'handoff', 'done', 'abandon']);
+    expect(actions.find((a) => a.kind === 'unblock')!.patch).toEqual({ state: 'active' });
+    expect(actions.find((a) => a.kind === 'abandon')!.patch).toEqual({ state: 'abandoned' });
+  });
+
+  it('terminal lanes offer nothing, even to their owner', () => {
+    expect(laneActions(lane({ owner_seat: 'nick', state: 'done' }), 'nick')).toEqual([]);
+    expect(laneActions(lane({ owner_seat: 'nick', state: 'abandoned' }), 'nick')).toEqual([]);
+  });
+
+  it('handoffPatch transfers ownership to the picked seat', () => {
+    expect(handoffPatch('izzo')).toEqual({ owner_seat: 'izzo' });
+  });
+});
+
+describe('applyLaneEcho — the optimistic fold (the echo is the only copy the sender sees)', () => {
+  const board = (lanes: Lane[], warnings: LaneWarning[] = []): LaneBoard => ({ lanes, warnings });
+  const warning = (subject: string, withId = 'L9'): LaneWarning => ({
+    kind: 'surface_overlap',
+    subject,
+    with: withId,
+    owner: 'stanley',
+    detail: 'overlap',
+  });
+
+  it('replaces an existing lane by id in place (stable order — no card jumping)', () => {
+    const a = lane({ id: 'A', state: 'claimed', owner_seat: 'nick' });
+    const b = lane({ id: 'B' });
+    const echo: LaneResult = { lane: { ...a, state: 'active' }, warnings: [] };
+    const out = applyLaneEcho(board([a, b]), echo);
+    expect(out.lanes.map((l) => l.id)).toEqual(['A', 'B']);
+    expect(out.lanes[0]!.state).toBe('active');
+  });
+
+  it('appends a newly created lane', () => {
+    const out = applyLaneEcho(board([lane({ id: 'A' })]), {
+      lane: lane({ id: 'NEW', state: 'claimed', owner_seat: 'nick' }),
+      warnings: [],
+    });
+    expect(out.lanes.map((l) => l.id)).toEqual(['A', 'NEW']);
+  });
+
+  it("replaces the echoed lane's warnings and keeps everyone else's", () => {
+    const out = applyLaneEcho(board([lane({ id: 'A' }), lane({ id: 'B' })], [warning('A'), warning('B')]), {
+      lane: lane({ id: 'A', owner_seat: 'nick', state: 'claimed' }),
+      warnings: [warning('A', 'L7')],
+    });
+    expect(out.warnings).toEqual([warning('B'), warning('A', 'L7')]);
+  });
+
+  it('clears stale warnings for the echoed lane when the fresh echo carries none', () => {
+    const out = applyLaneEcho(board([lane({ id: 'A' })], [warning('A')]), {
+      lane: lane({ id: 'A', state: 'done', owner_seat: 'nick' }),
+      warnings: [],
+    });
+    expect(out.warnings).toEqual([]);
+  });
+});
+
+describe('capColumn — the column DOM guardrail', () => {
+  const items = Array.from({ length: 40 }, (_, i) => i);
+
+  it('shows everything when under the cap', () => {
+    expect(capColumn([1, 2, 3], 30, false)).toEqual({ shown: [1, 2, 3], hidden: 0 });
+  });
+
+  it('caps and counts the rest when over', () => {
+    const { shown, hidden } = capColumn(items, 30, false);
+    expect(shown).toHaveLength(30);
+    expect(hidden).toBe(10);
+  });
+
+  it('expanded shows everything', () => {
+    expect(capColumn(items, 30, true)).toEqual({ shown: items, hidden: 0 });
+  });
+});

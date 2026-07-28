@@ -5,6 +5,11 @@ import liveCss from '../live/Live.css?url';
 import brandCss from '../brand/brand.css?url';
 import { MusterdWord } from '../brand/MusterdWord';
 import { AsksStrip } from '../live/AsksStrip';
+import {
+  MemberSignInFields,
+  MemberSignInToggle,
+  type AdvancedState,
+} from '../live/MemberSignIn';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
@@ -431,8 +436,8 @@ function ConnectForm({
 }: {
   team: string;
   onTeam: (v: string) => void;
-  advanced: { open: boolean; as: string; token: string };
-  onAdvanced: (a: { open: boolean; as: string; token: string }) => void;
+  advanced: AdvancedState;
+  onAdvanced: (a: AdvancedState) => void;
   onWatch: () => void;
   provisioning: boolean;
   error: string | null;
@@ -457,28 +462,7 @@ function ConnectForm({
           />
         </label>
 
-        {advanced.open && (
-          <>
-            <label className="lc-form__field">
-              <span>Observe as (seat)</span>
-              <input
-                type="text"
-                value={advanced.as}
-                placeholder="your seat name"
-                onChange={(e) => onAdvanced({ ...advanced, as: e.target.value })}
-              />
-            </label>
-            <label className="lc-form__field">
-              <span>Credential</span>
-              <input
-                type="password"
-                value={advanced.token}
-                placeholder="mscr_… or mskey_…"
-                onChange={(e) => onAdvanced({ ...advanced, token: e.target.value })}
-              />
-            </label>
-          </>
-        )}
+        <MemberSignInFields advanced={advanced} onAdvanced={onAdvanced} />
 
         {error && <p className="lc-form__error">{error}</p>}
 
@@ -487,12 +471,7 @@ function ConnectForm({
           {provisioning ? 'Provisioning…' : 'Watch live'}
         </button>
 
-        <button
-          className="lc-form__advanced"
-          onClick={() => onAdvanced({ ...advanced, open: !advanced.open })}
-        >
-          {advanced.open ? 'Use an auto observer instead' : 'Advanced — connect as a specific seat'}
-        </button>
+        <MemberSignInToggle advanced={advanced} onAdvanced={onAdvanced} />
       </div>
     </div>
   );
