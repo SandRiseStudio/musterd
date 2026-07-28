@@ -281,12 +281,21 @@ export function agentKeyMayOccupy(member: Pick<MemberRow, 'kind' | 'observer'>):
   return member.kind === 'agent' || member.observer === 1;
 }
 
-/** The refusal for {@link agentKeyMayOccupy} — shared so every surface says the same thing. */
+/**
+ * The refusal for {@link agentKeyMayOccupy} — shared so every surface says the same thing.
+ *
+ * Deliberately states what is *refused* rather than what is allowed, because the two callers enforce
+ * slightly different rules and one enumeration cannot be true for both: the claim surfaces admit
+ * agent **and** observer seats ({@link agentKeyMayOccupy}), while `authByAgentKey` admits agent seats
+ * only — an observer is `kind: 'human'` and read-only, so it may be *occupied* with the team key but
+ * never *acted as*. Naming the refused seat is accurate on both paths; naming the permitted set is
+ * not.
+ */
 export function agentKeySeatKindRefusal(seat: string): { message: string; hint: string } {
   return {
     message:
-      `the team agent key may only act as an agent seat; the human seat "${seat}" authenticates ` +
-      'with its own credential',
+      `the human seat "${seat}" is not reachable with the team agent key; it authenticates with ` +
+      'its own credential',
     hint: `musterd join <team> --as ${seat} --key mscr_…`,
   };
 }
