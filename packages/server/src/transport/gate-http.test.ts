@@ -503,3 +503,82 @@ describe('POST /actor — actor attestation (ADR 163)', () => {
     expect(audits('actor.subagent_write')).toHaveLength(before);
   });
 });
+
+/**
+ * ADR 167 §D5 — the confirmation loop, end to end through the DB: a `delivery_hint` is issued on a
+ * directed send, the relay is attested via `POST /actor`, and the daemon recomposes + compares to
+ * mark the row `nudge`/`verbatim` — no pending-nudge store anywhere. The ledger projection
+ * (`ccd_nudges`) is asserted off the same rows.
+ */
+describe('nudge confirmation loop (ADR 167)', () => {
+  const SEND = 'mcp__ccd_session_mgmt__send_message';
+
+  async function sendHintedHandoff(): Promise<{ msgId: string; fingerprint: string }> {
+    await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, bearer(nickCred));
+    await get('/teams/dawn/inbox', seatHeaders('Bob')); // live ambient presence (ADR 057)
+    const envelope = makeEnvelope({
+      id: '01HTESTNDGEAAAAAAAAAAAAAAA',
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'member', name: 'Bob' },
+      act: 'handoff',
+      body: 'take the tariff lane',
+    });
+    const res = await post('/teams/dawn/messages', { envelope }, seatHeaders('Ada'));
+    expect(res.json.delivery_hint).toBeDefined();
+    return { msgId: envelope.id, fingerprint: res.json.delivery_hint.nudge_fingerprint };
+  }
+
+  it('a verbatim relay confirms: nudge:true + verbatim:true, projected into ccd_nudges', async () => {
+    const { msgId, fingerprint } = await sendHintedHandoff();
+    await post(
+      '/teams/dawn/actor',
+      { kind: 'session-message', tool: SEND, nudgeRef: msgId, bodyFingerprint: fingerprint },
+      seatHeaders('Ada'),
+    );
+    const row = audits('actor.session_message').at(-1)!;
+    expect(JSON.parse(row.detail!)).toMatchObject({
+      nudge: true,
+      verbatim: true,
+      nudge_ref: msgId,
+    });
+    const ledger = await get(`/teams/dawn/messages/${msgId}/delivery`, seatHeaders('Ada'));
+    expect(ledger.status).toBe(200);
+    const bob = ledger.json.recipients.find((r: any) => r.seat === 'Bob');
+    expect(bob).toMatchObject({ ccd_nudges: 1, ccd_nudges_verbatim: 1 });
+  });
+
+  it('a paraphrased relay counts as nudge:true + verbatim:false', async () => {
+    const { msgId } = await sendHintedHandoff();
+    await post(
+      '/teams/dawn/actor',
+      {
+        kind: 'session-message',
+        tool: SEND,
+        nudgeRef: msgId,
+        bodyFingerprint: 'ffffffffffffffff', // the model reworded the line
+      },
+      seatHeaders('Ada'),
+    );
+    const row = audits('actor.session_message').at(-1)!;
+    expect(JSON.parse(row.detail!)).toMatchObject({ nudge: true, verbatim: false });
+  });
+
+  it('a ULID that resolves to no message stays a plain observation row (organic use)', async () => {
+    await sendHintedHandoff();
+    await post(
+      '/teams/dawn/actor',
+      {
+        kind: 'session-message',
+        tool: SEND,
+        nudgeRef: '01HZZZZZZZZZAAAAAAAAAAAAAA',
+        bodyFingerprint: 'aaaabbbbccccdddd',
+      },
+      seatHeaders('Ada'),
+    );
+    const row = audits('actor.session_message').at(-1)!;
+    const detail = JSON.parse(row.detail!) as Record<string, unknown>;
+    expect(detail['nudge']).toBeUndefined();
+    expect(detail['verbatim']).toBeUndefined();
+  });
+});

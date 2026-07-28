@@ -103,6 +103,24 @@ function interruptRaises(db: Database, msg: MessageRow, recipientName: string): 
   return row?.n ?? 0;
 }
 
+/** ADR 167 delivery-rail relays confirmed for this act — the exact `interruptRaises` pattern: an
+ *  attempt is an audit row (`actor.session_message` whose `nudge_ref` names the act), the ledger
+ *  projects it. The nudge row carries no recipient of its own (only the sender is authenticated),
+ *  but a `nudge_ref` resolves through the act, whose recipient is fixed — so the count is per-act,
+ *  landing on its one directed recipient. `verbatim` counts the fingerprint-matched subset. */
+function ccdNudges(db: Database, msg: MessageRow): { total: number; verbatim: number } {
+  const row = db
+    .prepare<[string, string], { total: number; verbatim: number }>(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(json_extract(detail, '$.verbatim') = 1), 0) AS verbatim
+         FROM audit
+        WHERE team_id = ? AND action = 'actor.session_message'
+          AND json_extract(detail, '$.nudge_ref') = ?`,
+    )
+    .get(msg.team_id, msg.id);
+  return { total: row?.total ?? 0, verbatim: row?.verbatim ?? 0 };
+}
+
 function recipientLedger(
   db: Database,
   msg: MessageRow,
@@ -112,6 +130,7 @@ function recipientLedger(
   const answered = answerBy(db, msg, recipient.id) ?? resolve;
   const cursor = getCursor(db, recipient.id);
   const seen = cursor.last_read_ts >= msg.ts;
+  const nudges = ccdNudges(db, msg);
   return {
     seat: recipient.name,
     seat_id: normalizeSeatName(recipient.name),
@@ -119,6 +138,8 @@ function recipientLedger(
     seen_by: seen ? cursor.updated_at : null,
     answered,
     interrupt_raises: interruptRaises(db, msg, recipient.name),
+    ccd_nudges: nudges.total,
+    ccd_nudges_verbatim: nudges.verbatim,
   };
 }
 

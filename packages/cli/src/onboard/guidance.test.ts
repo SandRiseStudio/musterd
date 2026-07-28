@@ -177,3 +177,29 @@ describe('label-sessions guidance unit (ADR 160)', () => {
     expect(readFileSync(join(dir, rel), 'utf8')).toBe('# my own sweep\n');
   });
 });
+
+describe('nudge-relay guidance unit (ADR 167)', () => {
+  it('writes the nudge-relay skill for Claude Code (the only nudgeSkillPath declarer), stamped', () => {
+    const dir = tmp();
+    const res = writeGuidance(dir, [claudeCode, cursor, codex], { team: 'dawn' });
+    const rel = '.claude/skills/musterd-nudge-relay/SKILL.md';
+    expect(res.files).toContain(rel);
+    const text = readFileSync(join(dir, rel), 'utf8');
+    expect(parseContentStamp(text)?.version).toBe(GUIDANCE_CONTENT_VERSION);
+    expect(text).toContain('name: musterd-nudge-relay');
+    expect(text).toContain('VERBATIM');
+    expect(text).toContain('delivery_hint');
+    // Cursor/Codex declare no nudgeSkillPath — no sibling unit appears for them.
+    expect(res.files.filter((f) => f.includes('nudge-relay'))).toEqual([rel]);
+  });
+
+  it('is enumerated by guidanceTargets and removed by removeGuidance (dir pruned)', () => {
+    const dir = tmp();
+    writeGuidance(dir, [claudeCode], { team: 'dawn' });
+    const rel = '.claude/skills/musterd-nudge-relay/SKILL.md';
+    expect(guidanceTargets([claudeCode])).toContain(rel);
+    const { removed } = removeGuidance(dir, [claudeCode]);
+    expect(removed).toContain(rel);
+    expect(existsSync(join(dir, '.claude/skills/musterd-nudge-relay'))).toBe(false);
+  });
+});

@@ -7,6 +7,8 @@ import {
   renderContentStamp,
   renderLabelSessionsFrontmatter,
   renderLabelSessionsSkill,
+  renderNudgeRelayFrontmatter,
+  renderNudgeRelaySkill,
   renderSkillBody,
   renderSkillFrontmatter,
   renderSlashCommand,
@@ -143,6 +145,18 @@ export function writeGuidance(
         skipped,
       );
     }
+    if (g.nudgeSkillPath) {
+      // ADR 167: the nudge-relay skill — same per-surface split as label-sessions above, for
+      // harnesses whose sessions can message each other.
+      writeOne(
+        dir,
+        g.nudgeSkillPath,
+        `${renderNudgeRelayFrontmatter()}\n\n${renderNudgeRelaySkill()}`,
+        force,
+        written,
+        skipped,
+      );
+    }
     if (g.commandsDir) {
       for (const name of SLASH_COMMANDS) {
         writeOne(
@@ -169,6 +183,7 @@ export function guidanceTargets(harnesses: Harness[]): string[] {
     if (!g) continue;
     paths.add(g.skillPath);
     if (g.sessionsSkillPath) paths.add(g.sessionsSkillPath);
+    if (g.nudgeSkillPath) paths.add(g.nudgeSkillPath);
     if (g.commandsDir)
       for (const n of SLASH_COMMANDS) paths.add(join(g.commandsDir, `musterd-${n}.md`));
   }
@@ -195,6 +210,7 @@ export function removeGuidance(dir: string, harnesses: Harness[]): { removed: st
   for (const rel of [
     '.claude/skills/musterd',
     '.claude/skills/musterd-label-sessions',
+    '.claude/skills/musterd-nudge-relay',
     '.musterd/skill',
   ]) {
     const abs = join(dir, rel);

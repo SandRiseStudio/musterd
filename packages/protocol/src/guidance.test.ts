@@ -7,6 +7,8 @@ import {
   renderContentStamp,
   renderLabelSessionsFrontmatter,
   renderLabelSessionsSkill,
+  renderNudgeRelayFrontmatter,
+  renderNudgeRelaySkill,
   renderSkillBody,
   renderSkillFrontmatter,
   renderSlashCommand,
@@ -79,6 +81,7 @@ describe('version-bump discipline (ADR 085)', () => {
     3: 'a9b0672fc52bae70', // + claim-before-build lane rule & ask-stream playbook (ADR 147 inducement)
     4: 'c408be59e7172a1f', // + reachability-gated hold: the STRAND branch of the blocking-ask contract (ADR 153)
     5: 'ba6d7c18cb7ca635', // + label-sessions skill unit + `session` in the command reference (ADR 160)
+    6: 'bbeafefcb4cdd58e', // + nudge-relay skill unit (ADR 167)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
@@ -91,6 +94,8 @@ describe('version-bump discipline (ADR 085)', () => {
       renderSlashCommand('claim'),
       renderLabelSessionsSkill(),
       renderLabelSessionsFrontmatter(),
+      renderNudgeRelaySkill(),
+      renderNudgeRelayFrontmatter(),
     ].join('\n---\n');
     const hash = createHash('sha256').update(rendered).digest('hex').slice(0, 16);
     expect(SNAPSHOTS[GUIDANCE_CONTENT_VERSION]).toBeDefined();

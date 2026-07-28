@@ -26,5 +26,8 @@
 // Epoch 2 — ADR 153: the `stranded` ask outcome + the daemon-derived `unblocker_reachable` contract
 // field. A seat behind this epoch still holds correctly (fails safe toward the old contract) but cannot
 // strand or render the reachability-gated orders.
-export const FEATURE_EPOCH = 2 as const;
+// Epoch 3 — ADR 167: the `delivery_hint` on directed-act acks + the nudge-relay skill. A seat behind
+// this epoch simply never relays (the hint is additive and ignored) — its directed acts still deliver
+// through the ADR 088/131 ladder, just without the seconds-latency rail.
+export const FEATURE_EPOCH = 3 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;
