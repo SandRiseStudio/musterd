@@ -15,7 +15,15 @@ import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope } from '../protocol/validate.js';
 import { appendAudit } from '../store/audit.js';
 import { consumeGrant, refreshGrant, validateGrant } from '../store/grants.js';
-import { getMemberById, getMemberByName, hashToken, isHeld, markBound } from '../store/members.js';
+import {
+  agentKeyMayOccupy,
+  agentKeySeatKindRefusal,
+  getMemberById,
+  getMemberByName,
+  hashToken,
+  isHeld,
+  markBound,
+} from '../store/members.js';
 import { memoryEnvelope } from '../store/memory.js';
 import {
   attach,
@@ -301,6 +309,31 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             }
           }
           // observe: no target member — observer provisioned below in the OCCUPY path
+
+          // Step 2b: SECURITY — the shared team agent key may only occupy an AGENT seat. Same rule,
+          // same wording and same position as the HTTP claim path: AFTER target resolution (a `role`
+          // target can resolve to a human seat) and BEFORE the grant/request branches, so no admin is
+          // ever asked to approve a poisoned claim. `authenticatedAs === null` is the agent-key
+          // branch; a human credential already proved it identifies the target seat above. This
+          // covers BOTH claim branches below — only the ADR 146 re-seat path checked before.
+          if (authenticatedAs === null && targetMember && !agentKeyMayOccupy(targetMember)) {
+            const refusal = agentKeySeatKindRefusal(targetMember.name);
+            send(ws, {
+              type: 'refused',
+              code: 'forbidden',
+              message: refusal.message,
+              claimable: [],
+              hint: refusal.hint,
+            });
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'claim.refused',
+              target: targetMember.name,
+              result: 'deny',
+              detail: { code: 'forbidden', reason: 'agent_key_human_seat' },
+            });
+            return;
+          }
 
           // Step 3: account_status check on target member.
           if (targetMember) {

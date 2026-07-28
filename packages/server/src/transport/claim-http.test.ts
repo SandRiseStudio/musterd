@@ -248,9 +248,12 @@ describe('POST /claim — dogfood re-seat (ADR 146)', () => {
       target: { seat: 'nick' },
       surface: 'cli',
     });
-    // Falls through to the request lane — a human seat is never auto-occupiable via the team key.
-    expect(r.status).toBe(202);
-    expect(r.json.type).toBe('pending');
+    // STRENGTHENED (install-topology L1): the intent here — "a human seat is never auto-occupiable
+    // via the team key" — is unchanged, but falling through to the request lane was the weak way to
+    // achieve it. That queued a poisoned claim for an admin to approve and left a pending row behind.
+    // The seat-kind guard now refuses outright, before the grant/request branches.
+    expect(r.status).toBe(403);
+    expect(r.json.code).toBe('forbidden');
   });
 });
 
