@@ -389,7 +389,11 @@ describe('notify against a live daemon', () => {
     try {
       // No --once: starts the resident poll loop, whose first tick runs immediately.
       const done = notifyCommand(parseArgs([]), { notify: (n) => fired.push(n) });
-      await new Promise((r) => setTimeout(r, 80)); // let the first poll resolve
+      // Wait for the first poll to actually land, never for a fixed duration. That poll is a real
+      // HTTP round-trip to the test daemon, so any sleep long enough on an idle machine is a race on
+      // a loaded one: SIGINT arrives first, the loop exits, and `fired` is empty. Raising the sleep
+      // only moves the threshold — waiting on the condition removes it, and is faster when idle.
+      await vi.waitFor(() => expect(fired).toHaveLength(1), { timeout: 5_000, interval: 5 });
       process.emit('SIGINT');
       expect(await done).toBe(0);
     } finally {
