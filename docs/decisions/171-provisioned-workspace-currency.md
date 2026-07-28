@@ -214,15 +214,23 @@ musterd's own removals. Three defects measured, not one. Arm 3 alone is the pure
 and it is the one that matters most for the guard metric: it is what keeps the wider expected set
 from inventing drift for a harness this folder never wired.
 
-**The experiment that decides §4.** The trigger is the next guidance file or hook added to the
-templates after this lands. Measure fleet coverage **7 days** after that change merges — long enough
-that a drift line has been read at a session start in most seats, short enough that the answer is
-about the mechanism rather than about the week. Below 100%
-without a sweep ⇒ loud detection was insufficient and the periodic sweep is earned, with the
-constraints in §4 already settled. At 100% because someone acted on a now-visible drift line ⇒ the
-sweep is **never built**, and that is a success rather than a retreat: the cheapest mechanism that
-holds the invariant is the correct one, and a background writer into thirteen live workspaces is not
-a thing to build on suspicion.
+**The experiment that decides §4 — RETRACTED 2026-07-28, before it was ever run.** See
+"§4 reconsidered" below. The original text is preserved here because the way it was wrong is the
+finding:
+
+> Measure fleet coverage **7 days** after that change merges — long enough that a drift line has been
+> read at a session start in most seats […]
+
+That clause is the whole error, and it is stated as an assumption rather than a fact because the
+author never checked it. **A drift line is not read at a session start.** The `SessionStart` hook
+runs `musterd init --check-build` — the ADR 135 build-skew probe — and nothing else; it does not run
+the doctor. Guidance and hook drift surface only when a human or an agent deliberately types
+`musterd init --check`.
+
+So the experiment would have measured whether eight seats act on a line they will almost never see.
+A 100%-unrepaired result would have been read as "loud detection is insufficient, build the periodic
+sweep" when the true cause was that detection was never delivered at all. The confound is total, and
+no choice of window fixes it — the experiment was **mis-specified, not merely slow**.
 
 **Kill criterion.** If arm 1 passes but a guard metric fails, the expected set narrows back toward
 the recorded set and the change is reverted rather than tuned — a health check that invents drift
@@ -260,6 +268,42 @@ rather than performed across live worktrees from this branch — the same non-ac
 for the same reason, and it is also the opening state of the §4 experiment, whose whole question is
 whether a loud line is enough to get a fleet repaired without a background writer. Performing the
 repair here by hand would destroy the measurement.
+
+_Superseded the same day: the experiment that repair would have "destroyed" turned out to be invalid,
+so there was nothing to protect. The fleet was repaired 2026-07-28 — **8 of 8** worktrees now carry
+the ADR 167 nudge-relay skill and report **0** guidance drift, which is the guard metric hitting its
+pre-registered clean-fleet target of 0._
+
+### §4 reconsidered — 2026-07-28
+
+With the experiment retracted, the deferral it justified has to be re-decided, and the answer changes.
+The periodic sweep and `SessionStart` self-healing were the only two candidates considered, and both
+were arguments about **who performs the repair**. Given that the drift line reaches nobody, that was
+the wrong question: repair delivery cannot be the bottleneck while _detection_ delivery is missing.
+
+**Increment 2 is therefore neither of the deferred options. It is detection delivery:** the
+`SessionStart` hook gains a cheap drift line the way it already carries the build-skew line. This
+dominates both candidates on their own stated terms:
+
+- It **writes nothing**, so ADR 168's incidental-write objection — the sole surviving reason to
+  reject self-healing, once the timing objection was measured false — does not apply to it at all.
+- It needs no background writer into thirteen live workspaces, so the stale-writer hazard that
+  constrained the sweep never arises.
+- It makes the original question — is a loud line enough? — answerable in days rather than never,
+  because the line finally reaches someone who can act on it.
+
+The hook contract bounds the design: ≤2 s, read-only, always exit 0, and **silent when clean**, since
+`SessionStart` stdout lands in model context and costs tokens every session. That rules out the full
+doctor (a roster fetch and a `git fetch`) and calls for a cheap variant on the `--check-build` model:
+`existsSync` over the expected set plus a few file reads, no network, no git. Post-repair the steady
+state is silence, so it costs nothing until the next capability ships — precisely when it should
+speak.
+
+The periodic sweep is not rejected, only demoted: it remains the answer **if** a delivered line still
+fails to get the fleet repaired, which is now a question that can actually be asked. Tracked as lane
+`01KYMY7TVCJCQG7PTQWS59C9M2`, which also carries the `FEATURE_EPOCH` obligation — changing that
+hook's text without bumping the epoch would leave ADR 168's downgrade guard unable to tell the new
+text from the old.
 
 ## Consequences
 
