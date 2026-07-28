@@ -15,6 +15,7 @@ import { Route as CharacterSheetRouteImport } from './routes/character-sheet'
 import { Route as BroadcastRouteImport } from './routes/broadcast'
 import { Route as BoardRouteImport } from './routes/board'
 import { Route as AuditRouteImport } from './routes/audit'
+import { Route as AsksPreviewRouteImport } from './routes/asks-preview'
 import { Route as ApprovalsRouteImport } from './routes/approvals'
 import { Route as ApprovalPreviewRouteImport } from './routes/approval-preview'
 import { Route as IndexRouteImport } from './routes/index'
@@ -49,6 +50,11 @@ const AuditRoute = AuditRouteImport.update({
   path: '/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AsksPreviewRoute = AsksPreviewRouteImport.update({
+  id: '/asks-preview',
+  path: '/asks-preview',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApprovalsRoute = ApprovalsRouteImport.update({
   id: '/approvals',
   path: '/approvals',
@@ -69,6 +75,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/approval-preview': typeof ApprovalPreviewRoute
   '/approvals': typeof ApprovalsRoute
+  '/asks-preview': typeof AsksPreviewRoute
   '/audit': typeof AuditRoute
   '/board': typeof BoardRoute
   '/broadcast': typeof BroadcastRoute
@@ -80,6 +87,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/approval-preview': typeof ApprovalPreviewRoute
   '/approvals': typeof ApprovalsRoute
+  '/asks-preview': typeof AsksPreviewRoute
   '/audit': typeof AuditRoute
   '/board': typeof BoardRoute
   '/broadcast': typeof BroadcastRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/approval-preview': typeof ApprovalPreviewRoute
   '/approvals': typeof ApprovalsRoute
+  '/asks-preview': typeof AsksPreviewRoute
   '/audit': typeof AuditRoute
   '/board': typeof BoardRoute
   '/broadcast': typeof BroadcastRoute
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/'
     | '/approval-preview'
     | '/approvals'
+    | '/asks-preview'
     | '/audit'
     | '/board'
     | '/broadcast'
@@ -116,6 +126,7 @@ export interface FileRouteTypes {
     | '/'
     | '/approval-preview'
     | '/approvals'
+    | '/asks-preview'
     | '/audit'
     | '/board'
     | '/broadcast'
@@ -127,6 +138,7 @@ export interface FileRouteTypes {
     | '/'
     | '/approval-preview'
     | '/approvals'
+    | '/asks-preview'
     | '/audit'
     | '/board'
     | '/broadcast'
@@ -139,6 +151,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApprovalPreviewRoute: typeof ApprovalPreviewRoute
   ApprovalsRoute: typeof ApprovalsRoute
+  AsksPreviewRoute: typeof AsksPreviewRoute
   AuditRoute: typeof AuditRoute
   BoardRoute: typeof BoardRoute
   BroadcastRoute: typeof BroadcastRoute
@@ -191,6 +204,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuditRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/asks-preview': {
+      id: '/asks-preview'
+      path: '/asks-preview'
+      fullPath: '/asks-preview'
+      preLoaderRoute: typeof AsksPreviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/approvals': {
       id: '/approvals'
       path: '/approvals'
@@ -219,6 +239,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApprovalPreviewRoute: ApprovalPreviewRoute,
   ApprovalsRoute: ApprovalsRoute,
+  AsksPreviewRoute: AsksPreviewRoute,
   AuditRoute: AuditRoute,
   BoardRoute: BoardRoute,
   BroadcastRoute: BroadcastRoute,
