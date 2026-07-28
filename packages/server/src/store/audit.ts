@@ -167,6 +167,15 @@ export type AuditAction =
   // The inverse of team create: an admin soft-archived the whole team (`POST /teams/:slug/archive`).
   // target = the slug. The row lands in the archived team's own log — readable again only at the db
   // (requireTeam refuses archived teams), but the history survives, which is the point of soft.
+  // ADR 170: the sign-in handoff — `musterd board` staging the credential it already holds
+  // (`handoff_staged`, detail `{ surface: 'cli' }`) and the browser redeeming the nonce once
+  // (`handoff_redeemed`, `{ surface: 'web' }`). `handoff_missed` carries the `reason`
+  // (`unknown_or_spent` | `off_machine`) — the miss series is the interesting one, because
+  // `off_machine` is not this failing but the cross-device thread asking to exist, with a number.
+  // Nonces are never logged, in any row.
+  | 'signin.handoff_staged'
+  | 'signin.handoff_redeemed'
+  | 'signin.handoff_missed'
   | 'team.archive';
 
 export interface AuditEntry {
