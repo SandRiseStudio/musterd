@@ -79,6 +79,7 @@ export async function resetCommand(parsed: Parsed): Promise<number> {
     bindings: {},
     agentKeys: {},
     rosterHome: {},
+    teamHome: {},
   });
 
   process.stdout.write(

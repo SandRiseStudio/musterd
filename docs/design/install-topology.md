@@ -4,7 +4,9 @@
 **Author:** miley, from the 2026-07-28 dogfood session that surfaced every gap below, live.
 **Companion ADRs:** two ride the implementing PRs — the _credential re-issue_ ADR (increment 3,
 landed as [ADR 174](../decisions/174-human-credential-recovery.md)) and the _team home_ ADR
-(increment 4, still to be numbered). Numbers are picked at landing time against origin/main; ADR 171
+(increment 4, landed as [ADR 176](../decisions/176-the-team-home.md), which also settles the
+`config.current` question §5 left open — it sets it, and prints what it displaced).
+Numbers are picked at landing time against origin/main; ADR 171
 was taken by a different decision (#448) between this doc's drafting and its first commit, which is
 the collision trap doing its job.
 

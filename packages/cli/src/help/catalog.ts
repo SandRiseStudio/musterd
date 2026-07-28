@@ -282,6 +282,20 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: ['musterd agent scout --role researcher', 'musterd agent ryder --harness cursor'],
   },
   {
+    name: 'human',
+    signature: '<name> [--team <slug>] [--home <dir>] [--role <role>] [--rotate]',
+    summary: 'add a person AND give them the team home to stand in',
+    group: 'team',
+    primary: true,
+    detail:
+      'The mirror of `musterd agent`: agents stand in worktrees, the human stands in the **team ' +
+      'home** — `~/musterd/<team>` by default, holding their 0600 binding, so `musterd board`, ' +
+      '`musterd inbox --watch` and `musterd send` are simply them with no `--as` and nothing pasted. ' +
+      'Mints the credential for a new person, reuses one this machine already holds, and offers a ' +
+      're-issue (`--rotate`) when it holds none. Also sets the current team, and says so. Idempotent.',
+    examples: ['musterd human nick --team acme', 'musterd human lin --home ~/work/acme'],
+  },
+  {
     name: 'join',
     signature: '<slug> --as <name> [--token <tok>] [--surface cli]',
     summary: 'join a team as a named member from this surface',

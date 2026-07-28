@@ -15,6 +15,7 @@ import { gateCommand } from './commands/gate.js';
 import { goalCommand } from './commands/goal.js';
 import { reachabilityNudge } from './commands/helpers.js';
 import { hostCommand } from './commands/host.js';
+import { humanCommand } from './commands/human.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
@@ -179,6 +180,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return initCommand(rest);
     case 'agent':
       return agentCommand(rest);
+    case 'human':
+      return humanCommand(rest);
     case 'audit':
       return auditCommand(rest);
     case 'archaeology':
