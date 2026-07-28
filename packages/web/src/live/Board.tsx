@@ -1,4 +1,5 @@
 import type {
+  Goal,
   Lane,
   LaneState,
   LaneWarning,
@@ -7,7 +8,7 @@ import type {
   UpdateLane,
 } from '@musterd/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { capColumn, handoffPatch, laneActions, type LaneAction } from './boardWrite';
+import { capColumn, groupByGoal, handoffPatch, laneActions, type LaneAction } from './boardWrite';
 import { initial, kindOf, memberColor } from './format';
 
 /**
@@ -64,6 +65,10 @@ function ago(ts: number): string {
 export interface BoardProps {
   lanes: Lane[];
   warnings: LaneWarning[];
+  /** Columns (by lane state, the default) ⇄ goals (swimlane bands from the report's Goal list). */
+  view: 'columns' | 'goals';
+  /** Declared Goals with derived status — the swimlane bands (Inc B). Empty = "no goal" band only. */
+  goals: Goal[];
   /** Team roster — identity colors (jade agent / rose human) and the handoff seat picker. */
   roster: MemberSummary[];
   /** The signed-in member's seat name, or null for the read-only observer view. */
@@ -82,6 +87,8 @@ export interface BoardProps {
 export function Board({
   lanes,
   warnings,
+  view,
+  goals,
   roster,
   me,
   busyId,
@@ -128,9 +135,93 @@ export function Board({
   }, []);
 
   // Per-column "…and K more" expansion — session-scoped, resets on reconnect.
-  const [expanded, setExpanded] = useState<Set<LaneState>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   let cardIndex = 0;
+  const renderCard = (lane: Lane) => {
+    const i = cardIndex++;
+    return (
+      <LaneCard
+        key={lane.id}
+        lane={lane}
+        warnDetail={warned.get(lane.id) ?? null}
+        rosterIdx={rosterIdx}
+        me={me}
+        busy={busyId === lane.id}
+        landed={landed.has(lane.id)}
+        flourish={flourished.has(lane.id)}
+        enterDelay={entering ? Math.min(i, 9) * 60 : null}
+        onPatch={onPatch}
+      />
+    );
+  };
+
+  if (view === 'goals') {
+    const rows = groupByGoal(lanes.filter((l) => l.state !== 'abandoned'), goals);
+    return (
+      <div className="lc-board lc-board--goals">
+        {composing && (
+          <div className="lc-band lc-band--compose">
+            <ComposeCard busy={busyId === 'compose'} onClose={onComposeClose} onCreate={onCreate} />
+          </div>
+        )}
+        {rows.length === 0 && !composing && (
+          <p className="lc-col__empty">No goals declared, nothing in flight. A blank page.</p>
+        )}
+        {rows.map((row) => (
+          <section
+            key={row.id ?? '∅'}
+            className="lc-band"
+            aria-label={`${row.title} — ${row.lanes.length} ${row.lanes.length === 1 ? 'lane' : 'lanes'}`}
+          >
+            <header className="lc-band__head">
+              <span className="lc-band__title">{row.title}</span>
+              {row.status && (
+                <span className={`lc-band__status lc-band__status--${row.status}`}>{row.status}</span>
+              )}
+              <span className="lc-col__count">{row.lanes.length}</span>
+            </header>
+            {row.lanes.length === 0 ? (
+              <p className="lc-col__empty">Declared, untouched. It waits.</p>
+            ) : (
+              <div className="lc-band__grid">
+                {COLUMNS.map((col) => {
+                  const items = row.lanes.filter((l) => l.state === col.key);
+                  if (items.length === 0) return null;
+                  const key = `${row.id ?? '∅'}:${col.key}`;
+                  const { shown, hidden } = capColumn(
+                    items,
+                    col.key === 'done' ? DONE_CAP : COLUMN_CAP,
+                    expanded.has(key),
+                  );
+                  return (
+                    <div key={col.key} className={`lc-col lc-col--${col.tone}`}>
+                      <header className="lc-col__head">
+                        <span className="lc-col__label">{col.label}</span>
+                        <span className="lc-col__count">{items.length}</span>
+                      </header>
+                      <div className="lc-col__cards">
+                        {shown.map(renderCard)}
+                        {hidden > 0 && (
+                          <button
+                            className="lc-col__more"
+                            onClick={() => setExpanded((s) => new Set(s).add(key))}
+                          >
+                            …and {hidden} more
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="lc-board">
       {COLUMNS.map((col) => {
@@ -161,23 +252,7 @@ export function Board({
                   {col.key === 'open' && me ? 'Nothing waiting — open a lane.' : EMPTY_COPY[col.key]}
                 </p>
               ) : (
-                shown.map((lane) => {
-                  const i = cardIndex++;
-                  return (
-                    <LaneCard
-                      key={lane.id}
-                      lane={lane}
-                      warnDetail={warned.get(lane.id) ?? null}
-                      rosterIdx={rosterIdx}
-                      me={me}
-                      busy={busyId === lane.id}
-                      landed={landed.has(lane.id)}
-                      flourish={flourished.has(lane.id)}
-                      enterDelay={entering ? Math.min(i, 9) * 60 : null}
-                      onPatch={onPatch}
-                    />
-                  );
-                })
+                shown.map(renderCard)
               )}
               {hidden > 0 && (
                 <button

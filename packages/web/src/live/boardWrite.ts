@@ -1,7 +1,7 @@
 // Pure decision logic for the writable board (item 5 / ADR 104) — every rule that decides *what a
 // member may do to a lane* lives here, testable without DOM. The route/component layer renders these
 // verdicts; the daemon remains the authority (these mirror, never replace, its checks).
-import type { Lane, LaneBoard, LaneResult, UpdateLane } from '@musterd/protocol';
+import type { Goal, Lane, LaneBoard, LaneResult, UpdateLane } from '@musterd/protocol';
 
 /** A verb the board may offer on a card. `patch` is the exact `PATCH /lanes/:id` body. */
 export interface LaneAction {
@@ -56,6 +56,44 @@ export function applyLaneEcho(board: LaneBoard, result: LaneResult): LaneBoard {
     ...result.warnings,
   ];
   return { lanes, warnings };
+}
+
+/** One swimlane band: a declared Goal (with derived status), an undeclared goal id, or "no goal". */
+export interface GoalRow {
+  id: string | null;
+  title: string;
+  status: Goal['status'] | null;
+  lanes: Lane[];
+}
+
+/**
+ * The swimlane view's regroup (Inc B) — pure reorganization of lanes already fetched + the report's
+ * `goals` array, no extra fetch. Declared Goals keep their row even when empty (the plan is visible);
+ * lanes naming an undeclared goal id band under that raw id; unassigned lanes band under "no goal",
+ * last, and that row disappears when empty.
+ */
+export function groupByGoal(lanes: Lane[], goals: Goal[]): GoalRow[] {
+  const byGoal = new Map<string | null, Lane[]>();
+  for (const lane of lanes) {
+    const key = lane.goal_id ?? null;
+    const list = byGoal.get(key);
+    if (list) list.push(lane);
+    else byGoal.set(key, [lane]);
+  }
+  const rows: GoalRow[] = goals.map((g) => {
+    const owned = byGoal.get(g.id) ?? [];
+    byGoal.delete(g.id);
+    return { id: g.id, title: g.title, status: g.status, lanes: owned };
+  });
+  for (const [id, orphans] of byGoal) {
+    if (id === null) continue;
+    rows.push({ id, title: id, status: null, lanes: orphans });
+  }
+  const unassigned = byGoal.get(null);
+  if (unassigned && unassigned.length > 0) {
+    rows.push({ id: null, title: 'no goal', status: null, lanes: unassigned });
+  }
+  return rows;
 }
 
 /** Column DOM guardrail (perf contract: no unbounded lists) — cap with an "…and K more" remainder. */

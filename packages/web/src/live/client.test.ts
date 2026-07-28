@@ -5,6 +5,7 @@ import {
   LiveFetchError,
   acquireObserver,
   createLane,
+  fetchReport,
   isStaleCredential,
   updateLane,
 } from './client';
@@ -198,5 +199,53 @@ describe('createLane / updateLane (the writable board, item 5)', () => {
   it('rejects a malformed daemon body at the boundary (schema parse, like fetchLaneBoard)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => okJson({ lane: { id: 'L1' } })));
     await expect(updateLane(cfg, 'L1', { state: 'active' })).rejects.toThrow();
+  });
+
+  it('fetchReport GETs /teams/:slug/report member-authed and parses at the boundary', async () => {
+    const report = {
+      team: 'revive',
+      generated_ts: 1,
+      flow: { throughput_7d: 3, cycle_time_ms: null, wip: 2, oldest_wip_age_ms: 5000 },
+      waiting_on: [{ member: 'nick', threads: 8, oldest_age_ms: 172800000 }],
+      goals: [],
+      blocked: [{ id: 'L1', title: 'write the launch post', owner_seat: 'nick', goal_id: null }],
+      coordination: {
+        window_days: 7,
+        acts: 10,
+        journal: 2,
+        directed: 5,
+        threaded: 3,
+        journal_ratio: 0.2,
+        exchange_ratio: 0.8,
+        flag: false,
+      },
+      open_directed: [],
+      mast: {
+        window_days: 7,
+        time_to_unblock: { closed: 0, median_ms: null, p95_ms: null },
+        ignored_help: [],
+        stalled_threads: [],
+        circular_handoffs: [],
+        diversity: [],
+      },
+      steering: {
+        window_days: 7,
+        steers: 0,
+        acked: 0,
+        latency_median_ms: null,
+        latency_p95_ms: null,
+        superseded_acts: 0,
+        stale_wakes: 0,
+        stale_caught: 0,
+      },
+    };
+    const fetchMock = vi.fn(async () => okJson(report));
+    vi.stubGlobal('fetch', fetchMock);
+    const out = await fetchReport(cfg);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/teams/revive/report');
+    expect((init.headers as Record<string, string>).authorization).toBe('Bearer mscr_nick');
+    expect(out.waiting_on[0]!.member).toBe('nick');
+    expect(out.flow.wip).toBe(2);
   });
 });

@@ -10,13 +10,16 @@ import {
 import {
   acquireObserver,
   createLane,
+  fetchReport,
   forgetObserver,
   updateLane,
   type LiveConfig,
 } from '../live/client';
 import { applyLaneEcho } from '../live/boardWrite';
 import { initial, kindOf, memberColor } from '../live/format';
+import { InsightRail } from '../live/InsightRail';
 import { useLiveStream } from '../live/useLiveStream';
+import { useReport } from '../live/useReport';
 import { useWorkingOn } from '../live/useWorkingOn';
 import liveCss from '../live/Live.css?url';
 import brandCss from '../brand/brand.css?url';
@@ -34,6 +37,8 @@ export const Route = createFileRoute('/board')({
 });
 
 const TEAM_KEY = 'musterd.board.team';
+const VIEW_KEY = 'musterd.board.view';
+const RAIL_KEY = 'musterd.board.rail';
 /** Signed-in member credential per team, so a human doesn't re-paste `mscr_` every visit (item 5). */
 const MEMBER_KEY = (team: string) => `musterd.board.member.v1.${team}`;
 
@@ -98,6 +103,24 @@ function BoardPage() {
 
   const { envelopes, roster } = useLiveStream(cfg, { onCredentialInvalid });
   const base = useWorkingOn(cfg, envelopes);
+  const report = useReport(cfg, envelopes);
+
+  // View + rail preferences — sticky per browser, read once on mount (client-only).
+  const [view, setView] = useState<'columns' | 'goals'>('columns');
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem(VIEW_KEY) === 'goals') setView('goals');
+    if (window.localStorage.getItem(RAIL_KEY) === 'collapsed') setRailCollapsed(true);
+  }, []);
+  const pickView = (v: 'columns' | 'goals') => {
+    setView(v);
+    window.localStorage.setItem(VIEW_KEY, v);
+  };
+  const collapseRail = (c: boolean) => {
+    setRailCollapsed(c);
+    window.localStorage.setItem(RAIL_KEY, c ? 'collapsed' : 'open');
+  };
 
   // Optimistic overlay: our own writes fold in from the daemon's echo (the firehose skips the sender,
   // so the echo is the only copy we see). Any fresh base fetch is daemon truth and supersedes it.
@@ -212,6 +235,24 @@ function BoardPage() {
         <MusterdWord />
         <span className="lc__team">/ {connected ? `${cfg.team} · board` : 'board'}</span>
         <span className="lc__spacer" />
+        {connected && (
+          <div className="lc-board__views" role="group" aria-label="Board view">
+            <button
+              className={`lc-board__view${view === 'columns' ? ' lc-board__view--on' : ''}`}
+              aria-pressed={view === 'columns'}
+              onClick={() => pickView('columns')}
+            >
+              columns
+            </button>
+            <button
+              className={`lc-board__view${view === 'goals' ? ' lc-board__view--on' : ''}`}
+              aria-pressed={view === 'goals'}
+              onClick={() => pickView('goals')}
+            >
+              goals
+            </button>
+          </div>
+        )}
         {me && (
           <>
             <span className="lc__identity" title="You're in the room.">
@@ -283,24 +324,37 @@ function BoardPage() {
         </div>
       ) : (
         <div className="lc__canvas lc__canvas--board">
-          <p className={`lc-board__note${note ? ` lc-board__note--${note.tone}` : ''}`} aria-live="polite">
-            {note?.text ?? ''}
-          </p>
-          {board == null ? (
-            <p className="lc-col__empty">Opening the board…</p>
-          ) : (
-            <Board
-              lanes={board.lanes}
-              warnings={board.warnings}
-              roster={roster}
-              me={me}
-              busyId={busyId}
-              composing={composing}
-              onComposeClose={() => setComposing(false)}
-              onCreate={doCreate}
-              onPatch={doPatch}
-            />
-          )}
+          <div className="lc-board__main">
+            <p
+              className={`lc-board__note${note ? ` lc-board__note--${note.tone}` : ''}`}
+              aria-live="polite"
+            >
+              {note?.text ?? ''}
+            </p>
+            {board == null ? (
+              <p className="lc-col__empty">Opening the board…</p>
+            ) : (
+              <Board
+                lanes={board.lanes}
+                warnings={board.warnings}
+                view={view}
+                goals={report?.goals ?? []}
+                roster={roster}
+                me={me}
+                busyId={busyId}
+                composing={composing}
+                onComposeClose={() => setComposing(false)}
+                onCreate={doCreate}
+                onPatch={doPatch}
+              />
+            )}
+          </div>
+          <InsightRail
+            report={report}
+            rosterIdx={new Map(roster.map((m) => [m.name, m]))}
+            collapsed={railCollapsed}
+            onCollapsed={collapseRail}
+          />
         </div>
       )}
     </main>
