@@ -1,5 +1,6 @@
 import type { Envelope, MemberSummary } from '@musterd/protocol';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { MusterdWord } from '../brand/MusterdWord';
 import { actLabel, actTone, memberColor, memberPosture } from './format';
 import type { OfficeData, OfficeHandle } from './office-scene';
 import { actToEvent } from './office-scene/mapping';
@@ -50,6 +51,7 @@ export function OfficeScene({
   entries = [],
   status = 'idle',
   onReady,
+  topSlot,
 }: {
   teamName: string;
   roster: MemberSummary[];
@@ -71,6 +73,10 @@ export function OfficeScene({
   /** Handed the scene handle once it mounts (and `null` on teardown) — the broadcast route publishes it
    * as `window.__office` so a capturer can probe the scene. */
   onReady?: (handle: OfficeHandle | null) => void;
+  /** Interactive chrome floated over the TOP of the room — `/live` seats the asks & approvals rail
+   * here (nick's call: the office frames its own asks; the page above the panels stays quiet).
+   * `/broadcast` passes nothing: a stream cannot answer an ask. */
+  topSlot?: ReactNode;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
@@ -171,6 +177,16 @@ export function OfficeScene({
           // Steerable on the dashboard, a passive chyron on the stream: `/broadcast` has no cursor.
           interactive={!broadcast}
         />
+      )}
+      {/* The asks rail floats over the top of the room the way the reel floats over the bottom. */}
+      {!collapsed && topSlot && <div className="lc-office__asks">{topSlot}</div>}
+      {/* The product's mark on the room itself — for every frame that leaves this app (a clip, a
+          screenshot, the stream), quiet enough to live under everything. The overlay card carries
+          the TEAM's name; this corner carries the product's. */}
+      {!collapsed && (
+        <div className="lc-office__mark" aria-hidden="true">
+          <MusterdWord className="lc-office__mark-lockup" chipSize={15} />
+        </div>
       )}
       {onCollapse && (
         <div className="lc-office__collapse">

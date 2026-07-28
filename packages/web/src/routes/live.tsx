@@ -265,9 +265,6 @@ function LivePage() {
               {error} <button onClick={reset}>reset &amp; reconnect</button>
             </div>
           )}
-          {/* The asks & approvals strip (ADR 149) — above the fold, before the panels: loud is
-           *first thing seen*, not fourth panel scanned. Renders nothing until an ask exists. */}
-          <AsksStrip envelopes={envelopes} roster={roster} cfg={cfg!} />
           <div
             className={
               `lc__canvas${companion ? ' lc__canvas--companion' : ''}` +
@@ -286,6 +283,9 @@ function LivePage() {
               status={status}
               onCollapse={() => toggleCollapse('office')}
               onActClick={onActClick}
+              // The asks & approvals rail (ADR 149) rides the top of the room itself — the office
+              // frames its own asks (nick, 2026-07-28). Still renders nothing until an ask exists.
+              topSlot={<AsksStrip envelopes={envelopes} roster={roster} cfg={cfg!} />}
             />
             <RosterPanel
               roster={roster}
