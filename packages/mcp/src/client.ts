@@ -213,7 +213,15 @@ export class MusterdClient {
     return this.request('POST', `/teams/${this.config.team}/lanes`, body);
   }
 
-  updateLane(id: string, patch: unknown): Promise<{ lane: Lane; warnings: LaneWarning[] }> {
+  updateLane(
+    id: string,
+    patch: unknown,
+  ): Promise<{
+    lane: Lane;
+    warnings: LaneWarning[];
+    /** ADR 169: present when the patch entered ready_for_review — the review routing. */
+    review?: { reviewer?: string; route?: string; self_close_sanctioned?: boolean };
+  }> {
     return this.request(
       'PATCH',
       `/teams/${this.config.team}/lanes/${encodeURIComponent(id)}`,

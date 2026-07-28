@@ -29,6 +29,7 @@ import {
   GateCheckRequestSchema,
   AskTierSchema,
   askContract,
+  LANE_TERMINAL_STATES,
   makeEnvelope,
   type Envelope,
   type LaneWarning,
@@ -120,6 +121,7 @@ import {
   settleWakeLease,
   toResidency,
 } from '../store/residency.js';
+import { pickReviewCounterpart, workerFamily } from '../store/review.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import {
   hasFullMessageVisibility,
@@ -637,8 +639,38 @@ function deliverLaneAct(
   }
 }
 
-/** Lane states that end the lane's active life — mirrors the private TERMINAL set in store/lanes.ts. */
-const LANE_TERMINAL_STATES: ReadonlySet<string> = new Set(['done', 'abandoned']);
+// LANE_TERMINAL_STATES now imports from @musterd/protocol (ADR 169 consolidation) — this file
+// previously hand-mirrored the store's private TERMINAL set, a drift hazard three copies deep.
+
+/**
+ * The review ask (ADR 169 §4): a directed `ask` act from the worker to the picked counterpart —
+ * unlike {@link deliverLaneAct} this is act `ask`, so it rides the whole ask-stream machinery
+ * (tier contract, reachability, ask-span telemetry) with no new act kind. Best-effort like every
+ * lane delivery: a failed compose never fails the verb (the degradation path is self-close anyway).
+ */
+function deliverLaneAskAct(
+  ctx: Ctx,
+  team: TeamRow,
+  from: MemberRow,
+  to: string,
+  body: string,
+  meta: Record<string, unknown>,
+): void {
+  try {
+    const env = makeEnvelope({
+      id: ulid(),
+      team: team.slug,
+      from: from.name,
+      to: { kind: 'member', name: to },
+      act: 'ask',
+      body,
+      meta,
+    });
+    routeEnvelope(ctx, team, from, env);
+  } catch {
+    /* advisory only — the lane verb already succeeded */
+  }
+}
 
 /**
  * Broadcast a lane lifecycle event (open/resolve) to the whole team — same ordinary `message` envelope
@@ -2163,19 +2195,121 @@ export async function handleHttp(
             lane_state: { lane: lane.id, title: lane.title, state: lane.state },
           });
         }
+        // ADR 169 §4: entering ready_for_review is the worker's "technically complete" claim — audit
+        // it (with any stage-one merge attestation) and compose the review ask to the counterpart the
+        // picker chose. No counterpart ⇒ no ask, and the response says self-close is sanctioned (the
+        // ADR 145 degradation — never a wedge). The ask is an ordinary directed act from the worker
+        // (species approve, tier standard: 5m, proceed_with_risk — deliberately not the holding tier).
+        let review: Record<string, unknown> | undefined;
+        if (lane.state === 'ready_for_review' && before.state !== 'ready_for_review') {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'lane.ready_for_review',
+            target: lane.id,
+            result: 'allow',
+            detail: {
+              lane: lane.id,
+              owner: lane.owner_seat,
+              ...(lane.merged ? { merged: lane.merged } : {}),
+            },
+          });
+          const pick = pickReviewCounterpart(
+            ctx.db,
+            team.id,
+            lane,
+            lane.owner_seat ?? member.name,
+            ctx.config.presenceTimeoutMs,
+          );
+          if (pick) {
+            deliverLaneAskAct(
+              ctx,
+              team,
+              member,
+              pick.reviewer,
+              `[lane] review requested: "${lane.title}" — confirm (move the lane to done) or send it back to active with a note`,
+              {
+                species: 'approve',
+                tier: 'standard',
+                lane_review: {
+                  lane: lane.id,
+                  title: lane.title,
+                  branch: lane.branch,
+                  ...(lane.merged ? { merged: lane.merged } : {}),
+                  route: pick.route,
+                },
+              },
+            );
+            review = { reviewer: pick.reviewer, route: pick.route };
+          } else {
+            review = { self_close_sanctioned: true };
+          }
+        }
+        // ADR 169: a reviewer moving a ready_for_review lane back to a live state is the review
+        // catch — the counterpart said "not what I wanted". Audited; the lane_state broadcast above
+        // already told the team.
+        if (
+          before.state === 'ready_for_review' &&
+          !LANE_TERMINAL_STATES.has(lane.state) &&
+          lane.state !== 'ready_for_review' &&
+          member.name !== before.owner_seat
+        ) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'lane.review_sent_back',
+            target: lane.id,
+            result: 'allow',
+            detail: { lane: lane.id, reviewer: member.name, owner: before.owner_seat },
+          });
+        }
         // A resolve/abandon is a board-shape change — worth a team-visible note, same as an open.
         if (LANE_TERMINAL_STATES.has(lane.state) && !LANE_TERMINAL_STATES.has(before.state)) {
           const verb = lane.state === 'abandoned' ? 'abandoned' : 'resolved';
           deliverLaneTeamAct(ctx, team, member, `[lane] ${verb} "${lane.title}"`, {
             lane_resolve: { lane: lane.id, title: lane.title, state: lane.state },
           });
+          // ADR 169: every terminal edge writes lane.closed, and verified-ness is DERIVED here —
+          // never stored on the lane. Verified ⟺ done + the closer is a different seat than the
+          // owner at close time (pinned in this row so post-close handoffs can't flip the verdict).
+          // reason distinguishes the counterpart confirm from the two honest self-close shapes.
+          const ownerAtClose = before.owner_seat;
+          const verified =
+            lane.state === 'done' && ownerAtClose !== null && member.name !== ownerAtClose;
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'lane.closed',
+            target: lane.id,
+            result: 'allow',
+            detail: {
+              lane: lane.id,
+              state: lane.state,
+              closed_by: member.name,
+              owner_at_close: ownerAtClose,
+              verified,
+              reason:
+                lane.state === 'abandoned'
+                  ? 'abandoned'
+                  : verified
+                    ? 'counterpart_confirm'
+                    : before.state === 'ready_for_review'
+                      ? 'review_timeout'
+                      : 'self_close',
+              worker_family: ownerAtClose ? workerFamily(ctx.db, team.id, ownerAtClose) : null,
+              ...(verified ? { reviewer_family: workerFamily(ctx.db, team.id, member.name) } : {}),
+              // Approximation: entering review was this lane's last update before the close.
+              ...(before.state === 'ready_for_review'
+                ? { time_in_review_ms: Date.now() - before.updated_at }
+                : {}),
+            },
+          });
           // ADR 109: a branch-carrying lane landed — record the seat→SHA→authorizer join. The detail
           // is *attested* (ADR 101 hygiene: only the three known keys are copied off the client body,
           // and only when the client sent them); the actor is server-derived from the authed seat.
           // `authorized_by` here is client-attested (unlike decide/grant — ADR 127 — where the daemon
-          // knows the admin).
+          // knows the admin). ADR 169: when the close carries no fresh attestation, the stage-one
+          // capture (lane.merged, persisted at ready_for_review) flows through — with attested_by
+          // crediting the worker when a counterpart performs the closing act.
           if (lane.branch && lane.state === 'done') {
-            const m = body.merged;
+            const m = body.merged ?? lane.merged ?? undefined;
             appendAudit(ctx.db, team.id, {
               actor: member.name,
               action: 'git.pr_merged',
@@ -2186,11 +2320,14 @@ export async function handleHttp(
                 ...(m?.pr !== undefined ? { pr: m.pr } : {}),
                 ...(m?.sha !== undefined ? { sha: m.sha } : {}),
                 ...(m?.authorized_by !== undefined ? { authorized_by: m.authorized_by } : {}),
+                ...(verified && body.merged === undefined && lane.merged && ownerAtClose
+                  ? { attested_by: ownerAtClose }
+                  : {}),
               },
             });
           }
         }
-        return sendJson(res, 200, { lane, warnings });
+        return sendJson(res, 200, { lane, warnings, ...(review ? { review } : {}) });
       }
 
       // The mid-loop interrupt line (ADR 088): a silent-or-one-line probe a PostToolUse hook runs at

@@ -56,9 +56,36 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
     expect(warnings[0]!.owner).toBe('June');
     expect(warnings[0]!.detail).toContain('still active');
 
+    // ADR 169: ready_for_review does NOT clear it — a dependent building on unreviewed work is
+    // exactly when the warning earns its keep (advisory, so keeping it wedges nothing).
+    updateLane(db, team.id, june.id, 'bravo', { state: 'ready_for_review' });
+    const still = laneWarnings(db, team.id, 'bravo', cleo);
+    expect(still).toHaveLength(1);
+    expect(still[0]!.detail).toContain('still ready_for_review');
+
     // The dep resolving clears the warning (dedup-until-cleared is a diff over this).
     updateLane(db, team.id, june.id, 'bravo', { state: 'done' });
     expect(laneWarnings(db, team.id, 'bravo', cleo)).toHaveLength(0);
+  });
+
+  it('ADR 169: ready_for_review persists the stage-one attestation and stays unresolved', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'riley', {
+      title: 'two-stage',
+      project: 'musterd',
+      branch: 'riley/two-stage',
+      claim: true,
+    });
+    const ready = updateLane(db, team.id, lane.id, 'bravo', {
+      state: 'ready_for_review',
+      merged: { pr: 7, sha: 'deadbeef', authorized_by: 'nick' },
+    })!;
+    expect(ready.state).toBe('ready_for_review');
+    expect(ready.merged).toEqual({ pr: 7, sha: 'deadbeef', authorized_by: 'nick' });
+    expect(ready.resolved_at).toBeNull();
+    // The attestation survives an unrelated later patch (rebuild-from-existing carry).
+    const noted = updateLane(db, team.id, lane.id, 'bravo', { detail: 'note' })!;
+    expect(noted.merged).toEqual({ pr: 7, sha: 'deadbeef', authorized_by: 'nick' });
   });
 
   it('scenario 2 — the redone lane: handoff carries the branch', () => {
@@ -194,6 +221,8 @@ describe('deriveGoalStatus (the pinned rule, ADR 048 as amended by 084)', () => 
     expect(deriveGoalStatus([lane('done'), lane('active')])).toBe('in-flight');
     expect(deriveGoalStatus([lane('open')])).toBe('in-flight');
     expect(deriveGoalStatus([lane('blocked')])).toBe('in-flight');
+    // ADR 169: awaiting review is live — a goal is not shipped until its closes land.
+    expect(deriveGoalStatus([lane('done'), lane('ready_for_review')])).toBe('in-flight');
   });
   it('shipped only when all lanes are terminal AND at least one is done', () => {
     expect(deriveGoalStatus([lane('done')])).toBe('shipped');

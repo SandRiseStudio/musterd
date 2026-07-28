@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { Lane, LaneWarning, NextBrief } from '@musterd/protocol';
+import { LaneStateSchema, type Lane, type LaneWarning, type NextBrief } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { errorResult, textResult } from './format.js';
@@ -178,10 +178,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         'Going active re-runs contention checks.',
       inputSchema: {
         id: z.string().describe('lane id'),
-        state: z
-          .enum(['open', 'claimed', 'active', 'blocked', 'done', 'abandoned'])
-          .optional()
-          .describe('new state'),
+        // Derived from the protocol schema (ADR 169 consolidation) — this enum was hand-duplicated
+        // and silently missed new states.
+        state: z.enum(LaneStateSchema.options).optional().describe('new state'),
         detail: z.string().optional(),
         surface_globs: z.array(z.string()).optional(),
         depends_on: z.array(z.string()).optional(),
@@ -200,12 +199,56 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
   );
 
   server.registerTool(
+    'lane_ready',
+    {
+      description:
+        'Your work is technically complete — move the lane to ready_for_review (ADR 169) and ' +
+        'attest the landed merge here (pr/sha/authorized_by). musterd asks a counterpart from a ' +
+        'DIFFERENT model family to confirm before the lane is done. Then: wait ≤5m — a confirm ' +
+        'closes the lane, a send-back returns it to active; on silence, lane_resolve yourself ' +
+        '(recorded unverified, sanctioned). The surface stays yours until the close.',
+      inputSchema: {
+        id: z.string().describe('lane id'),
+        pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
+        sha: z.string().optional().describe('squash-merge SHA on main'),
+        authorized_by: z
+          .string()
+          .optional()
+          .describe('the human whose authority the merge ran under'),
+      },
+    },
+    async (args) => {
+      try {
+        const merged = {
+          ...(args.pr !== undefined ? { pr: args.pr } : {}),
+          ...(args.sha !== undefined ? { sha: args.sha } : {}),
+          ...(args.authorized_by !== undefined ? { authorized_by: args.authorized_by } : {}),
+        };
+        const { lane, warnings, review } = await client.updateLane(args.id, {
+          state: 'ready_for_review',
+          ...(Object.keys(merged).length ? { merged } : {}),
+        });
+        const hint = review?.reviewer
+          ? `\n\nreview asked of ${review.reviewer} (${review.route}) — standard tier: wait ≤5m; ` +
+            `a confirm closes the lane, a send-back resumes it; on silence, lane_resolve yourself ` +
+            `(recorded unverified).`
+          : `\n\nno eligible cross-family counterpart is live — self-close sanctioned: ` +
+            `lane_resolve when ready (recorded unverified).`;
+        return laneResult('lane ready for review', lane, warnings, hint);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
     'lane_resolve',
     {
       description:
         'Mark a lane done — clears its warnings and releases its surface. If its branch landed, ' +
         'attest the merge: pass pr, sha, and authorized_by so the audit log joins your seat to ' +
-        'the landed SHA and the authorizing human. Landed without a PR? Omit pr and pass sha alone.',
+        'the landed SHA and the authorizing human. Landed without a PR? Omit pr and pass sha alone. ' +
+        'Prefer lane_ready first (ADR 169): resolving your own lane records an unverified close.',
       inputSchema: {
         id: z.string().describe('lane id'),
         // `pr` is the PR *number*. Callers reached for `pr:"local"` to mean "merged without a PR";
@@ -231,7 +274,14 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           state: 'done',
           ...(Object.keys(merged).length ? { merged } : {}),
         });
-        return laneResult('lane done', lane, warnings, branchCleanupHint(lane) || undefined);
+        // ADR 169 advisory nudge: closing your own lane is an unverified close — legal, honest,
+        // and worth one line. A counterpart closing someone else's lane confirms it; no nudge.
+        const nudge =
+          client.member && lane.owner_seat === client.member
+            ? '\n\nunverified close recorded — prefer lane_ready when a counterpart is live (ADR 169).'
+            : '';
+        const hint = nudge + branchCleanupHint(lane);
+        return laneResult('lane done', lane, warnings, hint || undefined);
       } catch (err) {
         return errorResult(err);
       }

@@ -1,5 +1,7 @@
 import {
   globToRegExp,
+  LANE_CONTENDING_STATES,
+  LANE_TERMINAL_STATES,
   type Lane,
   type LaneState,
   type LaneWarning,
@@ -28,6 +30,10 @@ interface LaneRow {
   depends_on: string;
   branch: string | null;
   goal_id: string | null;
+  /** JSON array of declared risk tags (ADR 169); null on pre-v24 rows ⇒ []. */
+  risk: string | null;
+  /** The worker's merge attestation captured at ready_for_review (ADR 169); null until lane_ready. */
+  merged_json: string | null;
   state: string;
   created_by: string;
   created_at: number;
@@ -49,6 +55,8 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
     depends_on: JSON.parse(row.depends_on) as string[],
     branch: row.branch,
     goal_id: row.goal_id,
+    risk: row.risk ? (JSON.parse(row.risk) as string[]) : [],
+    merged: row.merged_json ? (JSON.parse(row.merged_json) as Lane['merged']) : null,
     state: row.state as LaneState,
     created_by: row.created_by,
     created_at: row.created_at,
@@ -58,8 +66,8 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
   };
 }
 
-/** States that participate in contention — an owned/worked lane, not done/abandoned/unowned-idle. */
-const CONTENDING: ReadonlySet<string> = new Set(['claimed', 'active', 'blocked']);
+/** States that participate in contention (ADR 169: shared constant — includes ready_for_review). */
+const CONTENDING: ReadonlySet<string> = LANE_CONTENDING_STATES;
 
 export function openLane(
   db: Database,
@@ -82,6 +90,8 @@ export function openLane(
     depends_on: JSON.stringify(input.depends_on ?? []),
     branch: input.branch ?? null,
     goal_id: input.goal_id ?? null,
+    risk: input.risk && input.risk.length > 0 ? JSON.stringify(input.risk) : null,
+    merged_json: null,
     state: claim ? 'claimed' : 'open',
     created_by: createdBy,
     created_at: now,
@@ -91,9 +101,9 @@ export function openLane(
   };
   db.prepare(
     `INSERT INTO lanes (id, team_id, project, title, detail, owner_seat, role, surface_globs,
-                        depends_on, branch, goal_id, state, created_by, created_at, claimed_at, resolved_at, updated_at)
+                        depends_on, branch, goal_id, risk, merged_json, state, created_by, created_at, claimed_at, resolved_at, updated_at)
      VALUES (@id, @team_id, @project, @title, @detail, @owner_seat, @role, @surface_globs,
-             @depends_on, @branch, @goal_id, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
+             @depends_on, @branch, @goal_id, @risk, @merged_json, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
   ).run(row);
   return rowToLane(row, teamSlug);
 }
@@ -124,6 +134,12 @@ export function updateLane(
   const state: LaneState =
     patch.state ??
     (patch.owner_seat !== undefined && existing.state === 'open' ? 'claimed' : existing.state);
+  // ADR 169: a merge attestation on a patch that *enters or sits in* ready_for_review is the
+  // worker's stage-one claim — persist it so a counterpart's later confirm carries it. (A terminal
+  // patch's `merged` keeps its ADR 109 meaning and flows to the audit at the route layer; persisting
+  // it here too is harmless and keeps the lane's last attestation readable.)
+  const merged = patch.merged !== undefined ? patch.merged : existing.merged;
+  const risk = patch.risk ?? existing.risk;
   const next = {
     id,
     team_id: teamId,
@@ -133,15 +149,19 @@ export function updateLane(
     depends_on: JSON.stringify(patch.depends_on ?? existing.depends_on),
     branch: patch.branch !== undefined ? patch.branch : existing.branch,
     goal_id: patch.goal_id !== undefined ? patch.goal_id : existing.goal_id,
+    risk: risk.length > 0 ? JSON.stringify(risk) : null,
+    merged_json: merged ? JSON.stringify(merged) : null,
     state,
     claimed_at: existing.claimed_at ?? (ownerSeat !== null ? now : null),
-    resolved_at: state === 'done' || state === 'abandoned' ? (existing.resolved_at ?? now) : null,
+    resolved_at: LANE_TERMINAL_STATES.has(state as LaneState)
+      ? (existing.resolved_at ?? now)
+      : null,
     updated_at: now,
   };
   db.prepare(
     `UPDATE lanes SET detail=@detail, owner_seat=@owner_seat, surface_globs=@surface_globs,
-       depends_on=@depends_on, branch=@branch, goal_id=@goal_id, state=@state, claimed_at=@claimed_at,
-       resolved_at=@resolved_at, updated_at=@updated_at
+       depends_on=@depends_on, branch=@branch, goal_id=@goal_id, risk=@risk, merged_json=@merged_json,
+       state=@state, claimed_at=@claimed_at, resolved_at=@resolved_at, updated_at=@updated_at
      WHERE team_id=@team_id AND id=@id`,
   ).run(next);
   return getLane(db, teamId, id, teamSlug);
@@ -181,14 +201,14 @@ export function lanesForGoal(
   return listLanes(db, teamId, teamSlug, { goalId });
 }
 
-/** Lane states that are terminal — a lane no longer being worked. */
-const TERMINAL: ReadonlySet<string> = new Set(['done', 'abandoned']);
+/** Lane states that are terminal — a lane no longer being worked (ADR 169: shared constant). */
+const TERMINAL: ReadonlySet<string> = LANE_TERMINAL_STATES;
 
 /**
  * The pinned derived-Goal-status rule (ADR 048 as amended by ADR 084): **lanes-authoritative,
  * conjunctive, flap-tolerant.** Given the lanes joined to a Goal:
  *   - `shipped`   ⟺ ≥1 lane, all terminal, and ≥1 reached `done` (not all `abandoned`);
- *   - `in-flight` ⟺ any lane is live (open/claimed/active/blocked);
+ *   - `in-flight` ⟺ any lane is live (open/claimed/active/blocked/ready_for_review);
  *   - `planned`   ⟺ no lanes.
  * Threads never enter here — they are the fallback the caller uses only when a Goal has zero lanes,
  * so a dead thread-`resolve` (2/21 in practice) can never pin a Goal's status. Live, not a latch:

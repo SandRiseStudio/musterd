@@ -15,7 +15,8 @@ const USAGE =
   '  musterd lane open "<title>" [--surface <glob>[,<glob>…]] [--depends <id>[,<id>…]] [--goal <id>] [--project p] [--role r] [--branch b] [--detail d] [--claim]\n' +
   '  musterd lane claim <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>]\n' +
-  '  musterd lane update <id> [--state open|claimed|active|blocked|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d]\n' +
+  '  musterd lane update <id> [--state open|claimed|active|blocked|ready_for_review|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d]\n' +
+  '  musterd lane ready <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lanes [--project p] [--mine] [--open] [--json]';
 
@@ -107,11 +108,12 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
 
-  if (sub === 'claim' || sub === 'resolve') {
+  if (sub === 'claim' || sub === 'resolve' || sub === 'ready') {
     const id = parsed.positionals[1];
     if (!id) throw new CliError(USAGE, 2);
-    // resolve may attest the landed merge (ADR 109): {pr, sha, authorized_by} rides the terminal
-    // move and lands in the audit log as `git.pr_merged` — the seat→SHA→authorizer join.
+    // resolve/ready may attest the landed merge (ADR 109): {pr, sha, authorized_by}. On resolve it
+    // rides the terminal move into `git.pr_merged`; on ready (ADR 169) it is the worker's stage-one
+    // claim, persisted on the lane so a counterpart's later confirm carries it.
     const prRaw = flagStr(parsed.flags, 'pr');
     const pr = prRaw !== undefined ? Number(prRaw) : undefined;
     if (pr !== undefined && !Number.isInteger(pr)) throw new CliError(USAGE, 2);
@@ -127,13 +129,45 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
       id,
       sub === 'claim'
         ? { owner_seat: identity.name }
-        : { state: 'done', ...(Object.keys(merged).length ? { merged } : {}) },
+        : {
+            state: sub === 'ready' ? 'ready_for_review' : 'done',
+            ...(Object.keys(merged).length ? { merged } : {}),
+          },
     );
-    process.stdout.write(
-      `${theme.ok('✓')} lane ${sub === 'claim' ? 'claimed' : 'done'}\n${renderLane(res.lane)}\n`,
-    );
+    const label = sub === 'claim' ? 'claimed' : sub === 'ready' ? 'ready for review' : 'done';
+    process.stdout.write(`${theme.ok('✓')} lane ${label}\n${renderLane(res.lane)}\n`);
     renderWarnings(res.warnings);
-    if (sub === 'resolve') renderBranchCleanup(res.lane.branch);
+    if (sub === 'ready') {
+      // ADR 169: report the review routing — who was asked, or that self-close is sanctioned.
+      if (res.review?.reviewer) {
+        process.stdout.write(
+          `review asked of ${theme.memberName(res.review.reviewer, 'agent')} ` +
+            theme.meta(
+              `(${res.review.route}) — standard tier: wait ≤5m; a confirm closes the lane, a ` +
+                `send-back resumes it; on silence, \`musterd lane resolve\` yourself (recorded unverified)`,
+            ) +
+            '\n',
+        );
+      } else {
+        process.stdout.write(
+          theme.meta(
+            'no eligible cross-family counterpart is live — self-close sanctioned: ' +
+              '`musterd lane resolve` when ready (recorded unverified)',
+          ) + '\n',
+        );
+      }
+    }
+    if (sub === 'resolve') {
+      // ADR 169 advisory nudge: closing your own lane records an unverified close.
+      if (res.lane.owner_seat === identity.name) {
+        process.stdout.write(
+          theme.meta(
+            'unverified close recorded — prefer `musterd lane ready` when a counterpart is live (ADR 169)',
+          ) + '\n',
+        );
+      }
+      renderBranchCleanup(res.lane.branch);
+    }
     return 0;
   }
 

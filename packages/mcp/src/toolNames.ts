@@ -27,6 +27,7 @@ export const TOOL_NAMES = [
   'lane_claim',
   'lane_handoff',
   'lane_update',
+  'lane_ready',
   'lane_resolve',
   'lane_board',
   'team_next',
