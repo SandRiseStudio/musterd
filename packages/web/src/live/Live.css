@@ -3301,24 +3301,6 @@
   font-size: 11px;
   padding-right: var(--lc-3);
 }
-/* Both rail buttons ARE `.lc-ask__btn` — same pill, same press-back, same accept/decline hover
-   colours. Only the shape differs, so only the shape is declared here. */
-.lc-asks__icon {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-}
-.lc-asks__icon svg {
-  width: 12px;
-  height: 12px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
 .lc-asks__spacer {
   flex: 1;
 }
@@ -3395,16 +3377,23 @@
     transform var(--lc-med) var(--lc-ease-quart),
     visibility 0s;
 }
+/* A wrap grid, not a horizontal strip: twenty asks read as rows you scan top-to-bottom in urgency
+   order, not a sideways carousel you drag blind. The sheet itself caps at ~half the viewport and
+   scrolls vertically inside — the wheel already does that; sideways it does not. */
 .lc-asks__cards {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: var(--lc-4);
-  overflow-x: auto;
+  max-height: min(46vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding-bottom: var(--lc-1);
 }
-/* Cards arrive in sequence, closest first — reads as one motion instead of a flash of four. */
+/* Cards arrive in sequence, most urgent first — reads as one motion instead of a flash of four.
+   The delay caps at the first eight: past that the reader is scrolling, not watching an overture. */
 .lc-asks__sheet[data-open] .lc-ask {
   animation: lc-ask-in var(--lc-med) var(--lc-ease-quart) backwards;
-  animation-delay: calc(var(--i, 0) * 45ms);
+  animation-delay: calc(min(var(--i, 0), 8) * 45ms);
 }
 @keyframes lc-ask-in {
   from {
@@ -3457,8 +3446,6 @@
   }
 }
 .lc-ask {
-  flex: 0 1 380px;
-  min-width: 260px;
   border: 1px solid var(--lc-border);
   border-radius: var(--lc-r-md);
   background: var(--lc-surface);

@@ -166,22 +166,20 @@ export function AsksStrip({
                 <button
                   type="button"
                   disabled={busy === lead.env.id}
-                  className="lc-ask__btn lc-ask__btn--accept lc-asks__icon"
+                  className="lc-ask__btn lc-ask__btn--accept"
                   onClick={() => void answer(lead, 'accept')}
-                  title={`accept — ${lead.env.from}`}
-                  aria-label={`accept ${lead.env.from}'s ask`}
+                  title={`approve — ${lead.env.from}`}
                 >
-                  <CheckIcon />
+                  Approve
                 </button>
                 <button
                   type="button"
                   disabled={busy === lead.env.id}
-                  className="lc-ask__btn lc-ask__btn--decline lc-asks__icon"
+                  className="lc-ask__btn lc-ask__btn--decline"
                   onClick={() => void answer(lead, 'decline')}
-                  title={`decline — ${lead.env.from}`}
-                  aria-label={`decline ${lead.env.from}'s ask`}
+                  title={`deny — ${lead.env.from}`}
                 >
-                  <CrossIcon />
+                  Deny
                 </button>
               </span>
             )}
@@ -294,7 +292,7 @@ function AskCard({
             className="lc-ask__btn lc-ask__btn--accept"
             onClick={() => onAnswer('accept')}
           >
-            accept
+            Approve
           </button>
           <button
             type="button"
@@ -302,7 +300,7 @@ function AskCard({
             className="lc-ask__btn lc-ask__btn--decline"
             onClick={() => onAnswer('decline')}
           >
-            decline
+            Deny
           </button>
           <button
             type="button"
@@ -353,21 +351,7 @@ function BellIcon() {
   );
 }
 
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 12 12" aria-hidden="true">
-      <path d="M2.6 6.3 4.9 8.6 9.4 3.7" />
-    </svg>
-  );
-}
 
-function CrossIcon() {
-  return (
-    <svg viewBox="0 0 12 12" aria-hidden="true">
-      <path d="M3.4 3.4 8.6 8.6M8.6 3.4 3.4 8.6" />
-    </svg>
-  );
-}
 
 function ChevronIcon() {
   return (

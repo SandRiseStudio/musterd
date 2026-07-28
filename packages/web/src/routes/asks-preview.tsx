@@ -87,6 +87,18 @@ const SCENES: Record<string, Envelope[]> = {
       55_000,
     ),
   ],
+  'twenty open (scale)': Array.from({ length: 20 }, (_, i) => {
+    const seats = ['izzo', 'ryder', 'stanley'] as const;
+    const tiers = ['blocking', 'standard', 'advisory'] as const;
+    const species = ['approve', 'consult', 'escalate'] as const;
+    return ask(
+      seats[i % 3]!,
+      species[i % 3]!,
+      tiers[i % 3]!,
+      `Ask #${i + 1} — a ${tiers[i % 3]} ${species[i % 3]} that exists to prove twenty of these stay navigable.`,
+      (i + 1) * 45_000,
+    );
+  }),
   'timed out — agent holding': [
     ask(
       'izzo',
