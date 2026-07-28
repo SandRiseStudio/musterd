@@ -1143,7 +1143,7 @@ describe('WebSocket', () => {
     });
     const refusedA = await a.waitFor('refused');
     expect(refusedA.code).toBe('forbidden');
-    expect(refusedA.message).toMatch(/agent seat/i);
+    expect(refusedA.message).toMatch(/human seat "nick" is not reachable/i);
     a.close();
 
     // Branch 2: WITHOUT a grant (would otherwise open a claim request and hold the socket).
@@ -2013,7 +2013,7 @@ describe('build attestation (ADR 135)', () => {
     });
     expect(r.status).toBe(403);
     expect(r.json.code).toBe('forbidden');
-    expect(r.json.message).toMatch(/agent seat/i);
+    expect(r.json.message).toMatch(/human seat "nick" is not reachable/i);
     expect(r.json.hint).toMatch(/mscr_/); // points at the human's own credential
 
     // …and nothing was queued for an admin to approve.
@@ -2037,7 +2037,7 @@ describe('build attestation (ADR 135)', () => {
       surface: 'cli',
     });
     expect(r.status).toBe(403);
-    expect(r.json.message).toMatch(/agent seat/i);
+    expect(r.json.message).toMatch(/human seat "nick" is not reachable/i);
   });
 
   it('HTTP claim: an agent key claiming an AGENT seat still works (the guard must not over-block)', async () => {
