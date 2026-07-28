@@ -3016,6 +3016,85 @@ describe('two-stage close (ADR 169)', () => {
   });
 });
 
+describe('releasing a lane — open ⟺ unowned', () => {
+  async function setup() {
+    const team = await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential as string;
+    await post('/teams/dusk/members', { name: 'ada', kind: 'agent' }, nickTok);
+    await post('/teams/dusk/members', { name: 'gee', kind: 'agent' }, nickTok);
+    return {
+      nickTok,
+      ada: { key: team.json.agent_key, seat: 'ada' } as Auth,
+      gee: { key: team.json.agent_key, seat: 'gee' } as Auth,
+    };
+  }
+  async function patchLane(id: string, body: unknown, auth: Auth) {
+    const r = await fetch(base + `/teams/dusk/lanes/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(auth) },
+      body: JSON.stringify(body),
+    });
+    return { status: r.status, json: (await r.json()) as Record<string, any> };
+  }
+
+  it('parking an owned lane releases it, audits who let go, and stops it contending', async () => {
+    const { nickTok, ada, gee } = await setup();
+    // gee holds an overlapping surface, so the board has something to contend with.
+    await post(
+      '/teams/dusk/lanes',
+      { title: 'geeʼs work', surface_globs: ['packages/server/**'], claim: true },
+      gee,
+    );
+    const mine = await post(
+      '/teams/dusk/lanes',
+      { title: 'parked work', surface_globs: ['packages/server/src/store/**'], claim: true },
+      ada,
+    );
+    const id = mine.json.lane.id as string;
+    expect(mine.json.warnings.some((w: any) => w.kind === 'surface_overlap')).toBe(true);
+
+    const released = await patchLane(id, { state: 'open' }, ada);
+    expect(released.json.lane.state).toBe('open');
+    expect(released.json.lane.owner_seat).toBeNull();
+    expect(released.json.lane.claimed_at).toBeNull();
+    expect(released.json.warnings).toHaveLength(0); // open lanes do not contend
+
+    const audit = await get('/teams/dusk/audit', nickTok);
+    const rows = (audit.json.audit as { action: string; detail: any; actor: string }[]).filter(
+      (a) => a.action === 'lane.released',
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actor).toBe('ada');
+    expect(rows[0].detail.owner_before).toBe('ada');
+  });
+
+  it('a released lane is claimable by another seat — release never fences it off', async () => {
+    const { ada, gee } = await setup();
+    const mine = await post('/teams/dusk/lanes', { title: 'up for grabs', claim: true }, ada);
+    const id = mine.json.lane.id as string;
+    await patchLane(id, { state: 'open' }, ada);
+
+    const taken = await patchLane(id, { owner_seat: 'gee' }, gee);
+    expect(taken.status).toBe(200);
+    expect(taken.json.lane.state).toBe('claimed');
+    expect(taken.json.lane.owner_seat).toBe('gee');
+    expect(taken.json.lane.claimed_at).not.toBeNull();
+  });
+
+  it('an already-open lane is untouched — no spurious release audit', async () => {
+    const { nickTok, ada } = await setup();
+    const lane = await post('/teams/dusk/lanes', { title: 'never claimed' }, ada);
+    expect(lane.json.lane.owner_seat).toBeNull();
+    await patchLane(lane.json.lane.id, { detail: 'just a note' }, ada);
+
+    const audit = await get('/teams/dusk/audit', nickTok);
+    const rows = (audit.json.audit as { action: string }[]).filter(
+      (a) => a.action === 'lane.released',
+    );
+    expect(rows).toHaveLength(0);
+  });
+});
+
 describe('declared Goals + next_goal (ADR 048/084)', () => {
   it('declares Goals over HTTP, derives status from lanes, and surfaces the next one in the brief', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });

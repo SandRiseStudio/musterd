@@ -2295,12 +2295,29 @@ export async function handleHttp(
             lane_claim: { lane: lane.id, title: lane.title },
           });
         }
+        // A release (an owned lane moved back to `open` — the store cleared the owner as the state
+        // machine's invariant). Letting go is as much a coordination fact as claiming, so it gets the
+        // same pair: a team-visible note and an audit row naming who held it. The `lane_state`
+        // broadcast below is suppressed for this edge — one event, not two.
+        if (before.owner_seat !== null && lane.state === 'open' && before.state !== 'open') {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'lane.released',
+            target: lane.id,
+            result: 'allow',
+            detail: { lane: lane.id, released_by: member.name, owner_before: before.owner_seat },
+          });
+          deliverLaneTeamAct(ctx, team, member, `[lane] released "${lane.title}" — open again`, {
+            lane_release: { lane: lane.id, title: lane.title, owner_before: before.owner_seat },
+          });
+        }
         // A non-terminal state move (e.g. active↔blocked) — the "it's blocked / unblocked" transition,
         // noteless and daemon-composed (ADR 102). Terminal moves fall to the resolve emit below instead.
         if (
           body.state !== undefined &&
           body.state !== before.state &&
-          !LANE_TERMINAL_STATES.has(lane.state)
+          !LANE_TERMINAL_STATES.has(lane.state) &&
+          !(lane.state === 'open' && before.owner_seat !== null) // the release emit above owns this edge
         ) {
           deliverLaneTeamAct(ctx, team, member, `[lane] "${lane.title}" → ${lane.state}`, {
             lane_state: { lane: lane.id, title: lane.title, state: lane.state },

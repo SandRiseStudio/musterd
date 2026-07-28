@@ -48,7 +48,12 @@ export const LaneSchema = z.object({
   project: z.string(),
   title: z.string(),
   detail: z.string().nullable(),
-  /** Owning seat name; null = open/unowned. */
+  /**
+   * Owning seat name; null = open/unowned. The two are one fact, not two: `state === 'open'` ⟺
+   * `owner_seat === null`, enforced on every transition (`updateLane`) — claiming an open lane
+   * moves it to `claimed`, and moving one back to `open` releases it. A lane that names an owner
+   * while sitting open would let the board assert that someone holds work nobody is doing.
+   */
   owner_seat: z.string().nullable(),
   /** Assignment hint (backend/frontend/…); advisory only in P1. */
   role: z.string().nullable(),

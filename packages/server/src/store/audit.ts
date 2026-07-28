@@ -70,6 +70,10 @@ export type AuditAction =
   | 'lane.ready_for_review'
   | 'lane.closed'
   | 'lane.review_sent_back'
+  // Letting go of a lane: an owned lane moved back to `open`, which the state machine's
+  // open ⟺ unowned invariant turns into a release (detail: { lane, released_by, owner_before }).
+  // Traceable for the same reason a claim is — "who stopped carrying this, and when".
+  | 'lane.released'
   // ADR 131: harness residency — the six wake-ledger verbs. `enrolled`/`revoked` are the
   // authorization events (actor = the deciding caller, detail carries `authorized_by`, ADR 127).
   // `wake_leased` is the daemon ordering an actuation (actor null — machine decision); `woke` /

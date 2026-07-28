@@ -7,7 +7,7 @@
  *
  * Naming convention (ADR 144 inc 2 — the audited standard): `<namespace>_<operation>`, with exactly
  * two DELIBERATE namespaces. `team_*` is the coordination surface — presence, acts, goals, memory,
- * insight (12 tools). `lane_*` is the work-board sub-surface — a lane's lifecycle (6 tools). The
+ * insight (12 tools). `lane_*` is the work-board sub-surface — a lane's lifecycle (7 tools). The
  * split is intentional, not drift: MCP spec issue #2808's namespacing proposal favors several small
  * namespaces over one flat prefix, and folding lanes into `team_lane_*` would lengthen every name
  * and break connected agents for no selection gain. New tools join one of these namespaces or argue
@@ -25,6 +25,7 @@ export const TOOL_NAMES = [
   'team_memory_read',
   'lane_open',
   'lane_claim',
+  'lane_release',
   'lane_handoff',
   'lane_update',
   'lane_ready',
