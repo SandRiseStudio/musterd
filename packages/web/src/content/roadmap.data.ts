@@ -65,6 +65,10 @@ export interface RoadmapItem {
   shipped?: ShippedAnchor;
   /** The ADR that *is* this item — the reverse anchor for the truth check (see {@link RawItem}). */
   frozenBy?: number;
+  /** Stated reason no single ADR freezes this item (see {@link RawItem}). */
+  unfrozen?: string;
+  /** What remains on an accepted-ADR arc that is landing incrementally (see {@link RawItem}). */
+  building?: string;
 }
 
 /**
@@ -90,14 +94,36 @@ export interface RawItem {
    * The ADR that *is* this item — its own freezing ADR, distinct from the `refs` it merely builds on.
    * The truth check reads that ADR's `Status:` line as a second, bidirectional anchor: a shipped item's
    * frozenBy ADR must be accepted, and — the drift that motivated this — an *unshipped* item whose
-   * frozenBy ADR is already accepted is flagged as a stale roadmap. Optional: only items with a
-   * dedicated freezing ADR set it.
+   * frozenBy ADR is already accepted is flagged as a stale roadmap.
+   *
+   * Declare exactly one of `frozenBy` / `unfrozen` (ADR 177). This used to be plain-optional, which
+   * made an absent value mean two different things — "no ADR freezes this" and "nobody said" — so the
+   * check silently skipped both and watched 11 of 82 items.
    */
   frozenBy?: number;
+  /**
+   * The explicit *negative*: no single ADR freezes this item, and why (a reserved stub with no design
+   * yet, a principle rather than a build, or a design frozen somewhere that is not an ADR). Mutually
+   * exclusive with `frozenBy`; declaring neither is an error, so the absence is always a stated fact
+   * rather than an omission. Keep it to a few words — this file ships in the web bundle.
+   */
+  unfrozen?: string;
+  /**
+   * Set with `frozenBy` when the arc is landing incrementally: its ADR is accepted and merged
+   * increments exist, but the item is not finished. Names what remains. Without this, an accepted ADR
+   * on an unshipped item reads as stale-roadmap drift — which is right for a mismarked item and wrong
+   * for one honestly mid-arc, and the schema could not tell them apart.
+   */
+  building?: string;
 }
 
-/** Derive the read-model item (with its `status`) from an authored declaration; enforce shipped-xor-plan. */
-function resolveItem(r: RawItem): RoadmapItem {
+/**
+ * Derive the read-model item (with its `status`) from an authored declaration, and enforce the two
+ * authoring invariants: shipped-xor-plan, and frozenBy-xor-unfrozen (ADR 177). Exported for the tests
+ * that prove each one actually throws — the whole point of the second is that a missing anchor must
+ * stop being silent.
+ */
+export function resolveItem(r: RawItem): RoadmapItem {
   const isShipped = r.shipped !== undefined;
   const isPlanned = r.plan !== undefined;
   if (isShipped === isPlanned) {
@@ -105,6 +131,26 @@ function resolveItem(r: RawItem): RoadmapItem {
       `roadmap item "${r.id}" must declare exactly one of \`shipped\` or \`plan\` (found ${
         isShipped ? 'both' : 'neither'
       })`,
+    );
+  }
+  const isFrozen = r.frozenBy !== undefined;
+  const isUnfrozen = r.unfrozen !== undefined;
+  if (isFrozen === isUnfrozen) {
+    throw new Error(
+      `roadmap item "${r.id}" must declare exactly one of \`frozenBy\` or \`unfrozen\` (found ${
+        isFrozen ? 'both' : 'neither'
+      }) — an absent anchor used to mean both "no ADR freezes this" and "nobody said" (ADR 177)`,
+    );
+  }
+  if (r.building !== undefined && !isFrozen) {
+    throw new Error(
+      `roadmap item "${r.id}" declares \`building\` without \`frozenBy\` — the remainder is only ` +
+        `meaningful against the ADR whose arc is landing`,
+    );
+  }
+  if (r.building !== undefined && r.shipped !== undefined) {
+    throw new Error(
+      `roadmap item "${r.id}" is shipped and also declares \`building\` — a finished item has no remainder`,
     );
   }
   const { plan: _plan, ...rest } = r;
@@ -207,6 +253,7 @@ const RAW: RawItem[] = [
   // ── shipped ───────────────────────────────────────────────────────────────
   {
     id: 'driver-co-presence',
+    frozenBy: 21,
     title: 'Driver co-presence',
     shipped: { legacy: true },
     category: 'human-loop',
@@ -217,6 +264,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'resolve-act',
+    frozenBy: 25,
     title: 'The resolve act',
     shipped: { legacy: true },
     category: 'human-loop',
@@ -226,6 +274,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'notify-nudge',
+    frozenBy: 35,
     title: 'Reachability nudge',
     shipped: { legacy: true },
     category: 'human-loop',
@@ -236,6 +285,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'telemetry-l1',
+    frozenBy: 15,
     title: 'Telemetry — Layer 1',
     shipped: { legacy: true },
     category: 'observability',
@@ -246,6 +296,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'harness-adapters',
+    frozenBy: 29,
     title: 'Harness adapters',
     shipped: { legacy: true },
     category: 'harness',
@@ -256,6 +307,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'workspace-scoped-presence',
+    frozenBy: 68,
     title: 'Seat stops flapping on health-check probes',
     shipped: { legacy: true },
     category: 'platform',
@@ -266,6 +318,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'agent-workspace',
+    frozenBy: 65,
     title: 'One-command agent workspaces',
     shipped: { legacy: true },
     category: 'harness',
@@ -276,6 +329,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'verify-provisioning',
+    frozenBy: 60,
     title: 'Verify provisioning, don’t assume',
     shipped: { legacy: true },
     category: 'harness',
@@ -286,6 +340,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'layered-guidance-surface',
+    frozenBy: 85,
     title: 'Layered guidance surface — primer, skill, help, hooks',
     shipped: { legacy: true },
     category: 'harness',
@@ -297,6 +352,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'committed-launch-spec',
+    frozenBy: 80,
     title: 'Committed launch spec — a clone self-wires',
     shipped: { legacy: true },
     category: 'harness',
@@ -308,6 +364,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'worktree-family-entry',
+    frozenBy: 165,
     title: 'Worktree-family MCP entry — a shared slot carries no per-seat state',
     shipped: { prs: [400] },
     category: 'harness',
@@ -320,6 +377,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'claim-on-first-use',
+    frozenBy: 32,
     title: 'Claim on first use',
     shipped: { legacy: true },
     category: 'harness',
@@ -330,6 +388,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'cross-network',
+    frozenBy: 39,
     title: 'Cross-network teams',
     shipped: { legacy: true },
     category: 'transport',
@@ -345,6 +404,7 @@ const RAW: RawItem[] = [
 
   {
     id: 'availability-urgent',
+    frozenBy: 44,
     title: 'Availability axis + urgent breakthrough',
     shipped: { legacy: true },
     category: 'human-loop',
@@ -356,6 +416,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'service-lifecycle',
+    frozenBy: 45,
     title: 'Daemon service lifecycle',
     shipped: { legacy: true },
     category: 'platform',
@@ -366,6 +427,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'agent-reachability',
+    frozenBy: 46,
     title: 'Agent-side reachability',
     shipped: { legacy: true },
     category: 'human-loop',
@@ -377,6 +439,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'service-roster-guard',
+    frozenBy: 47,
     title: 'Service guardrails',
     shipped: { legacy: true },
     category: 'platform',
@@ -395,6 +458,7 @@ const RAW: RawItem[] = [
   // Wave 1 — harden the coordination loop (small, additive, no v0.3 dependency).
   {
     id: 'seat-binding-ergonomics',
+    frozenBy: 55,
     title: 'Hand off & claim a seat without leaving the tool',
     shipped: { legacy: true },
     category: 'harness',
@@ -405,6 +469,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'agent-presence-touch',
+    frozenBy: 57,
     title: 'Ambient agent presence',
     shipped: { legacy: true },
     category: 'human-loop',
@@ -415,6 +480,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'durable-roster',
+    frozenBy: 58,
     title: 'Durable seat roster on git',
     shipped: { legacy: true },
     category: 'platform',
@@ -426,6 +492,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'multi-identity-vault',
+    frozenBy: 59,
     title: 'Multi-identity vault',
     shipped: { legacy: true },
     category: 'harness',
@@ -439,6 +506,7 @@ const RAW: RawItem[] = [
     // Shipped 2026-06-26 as the lead Wave 1 item: cheapest, and everything built after it carries
     // traces+evals by default — so the dogfood-loop + governance work below never needs retrofit.
     id: 'obs-evals-gate',
+    frozenBy: 52,
     title: 'Traces & evals first-class gate',
     shipped: { legacy: true },
     category: 'observability',
@@ -449,6 +517,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'inbox-reaches-blocked-agent',
+    frozenBy: 53,
     title: 'Inbox reaches a blocked agent',
     shipped: { legacy: true },
     category: 'human-loop',
@@ -460,6 +529,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'wake-on-message',
+    frozenBy: 54,
     title: 'Wake on message',
     shipped: { legacy: true },
     category: 'human-loop',
@@ -471,6 +541,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'cli-ergonomics',
+    frozenBy: 67,
     title: 'CLI ergonomics',
     shipped: { legacy: true },
     category: 'platform',
@@ -483,6 +554,7 @@ const RAW: RawItem[] = [
   // Wave 2 — the v0.3 governance rock, phased so the breaking auth swap is isolated (ADR 069 build plan).
   {
     id: 'v03-p0-plan',
+    frozenBy: 69,
     title: 'v0.3 governance — build plan & spec reconciliation',
     shipped: { legacy: true },
     category: 'platform',
@@ -494,6 +566,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'v03-p1-seats',
+    frozenBy: 69,
     title: 'v0.3 P1 — seats data model',
     shipped: { legacy: true },
     category: 'platform',
@@ -505,6 +578,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'v03-p2-enforcement',
+    frozenBy: 71,
     title: 'v0.3 P2 — in-band enforcement & audit',
     shipped: { legacy: true },
     category: 'platform',
@@ -516,6 +590,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'v03-p3-credentials',
+    frozenBy: 69,
     title: 'v0.3 P3 — credentials & the claim handshake',
     shipped: { legacy: true },
     category: 'platform',
@@ -527,6 +602,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'v03-p4-remote-join',
+    unfrozen: 'P4 has no ADR of its own; ADR 069 froze the credential model it will use',
     wave: 'later',
     title: 'v0.3 P4 — credentialed remote join',
     plan: 'reserved',
@@ -539,6 +615,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'notification-tiers',
+    frozenBy: 71,
     title: 'Notification tiers',
     shipped: { legacy: true },
     category: 'human-loop',
@@ -550,6 +627,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'coordination-lanes',
+    frozenBy: 83,
     title: 'Coordination lanes (Phase 1) — own the work, never dup a diff',
     shipped: { legacy: true },
     category: 'platform',
@@ -566,6 +644,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'telemetry-gaps',
+    frozenBy: 82,
     title: 'Close the dogfood telemetry gaps (instrument-by-default)',
     shipped: { legacy: true },
     category: 'observability',
@@ -584,6 +663,7 @@ const RAW: RawItem[] = [
   // ── reserved ──────────────────────────────────────────────────────────────
   {
     id: 'eval-experiment-engine',
+    frozenBy: 51,
     wave: 'later',
     title: 'Eval & experiment engine (batond)',
     plan: 'reserved',
@@ -596,6 +676,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'research-intake',
+    frozenBy: 56,
     wave: 'later',
     title: 'Research radar (ingest)',
     plan: 'reserved',
@@ -611,6 +692,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'schedule-enforcement',
+    unfrozen: 'a named remainder of ADR 071, never separately designed',
     wave: 'later',
     title: 'Schedule & lifecycle enforcement',
     plan: 'reserved',
@@ -622,6 +704,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'step-streaming',
+    unfrozen: 'a reserved transport stub — no design doc yet',
     wave: 'later',
     title: 'Step-level streaming transport',
     plan: 'reserved',
@@ -631,6 +714,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'federation',
+    unfrozen: 'a reserved transport stub — no design doc yet',
     wave: 'later',
     title: 'Team-to-team federation',
     plan: 'reserved',
@@ -640,6 +724,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'web-dashboard',
+    frozenBy: 61,
     wave: 3,
     title: 'Web dashboard — live team console',
     shipped: { legacy: true },
@@ -651,6 +736,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'live-office',
+    frozenBy: 79,
     title: 'Live isometric office',
     shipped: { legacy: true },
     category: 'surfaces',
@@ -662,6 +748,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'more-surfaces',
+    unfrozen: 'a surface stub — Slack-first when a surface wave opens, nothing frozen',
     wave: 'later',
     title: 'Slack surface (iOS deferred)',
     plan: 'reserved',
@@ -673,6 +760,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'orientation-spine',
+    frozenBy: 48,
     title: 'Plan/Goal model + `musterd next`/`done`',
     shipped: { legacy: true },
     category: 'insights',
@@ -683,6 +771,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'insight-engine',
+    frozenBy: 50,
     title: 'Insight engine — server-side projections',
     shipped: { legacy: true },
     category: 'insights',
@@ -694,6 +783,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'insight-cli-mcp',
+    frozenBy: 50,
     title: 'Reporting altitudes + waiting-on view (CLI + MCP)',
     shipped: { legacy: true },
     category: 'insights',
@@ -796,6 +886,8 @@ const RAW: RawItem[] = [
   },
   {
     id: 'harness-residency',
+    frozenBy: 131,
+    building: 'increment 6 — the native backend, owner-gated',
     wave: 8,
     title: 'musterd gives any harness residency (resume the offline)',
     plan: 'near-term',
@@ -814,6 +906,7 @@ const RAW: RawItem[] = [
   // L1 is verified emitting (finding 002) — the data is already useful, L2 makes it first-class.
   {
     id: 'telemetry-l2',
+    frozenBy: 89,
     wave: 5,
     title: 'Telemetry — Layer 2 + SDK',
     shipped: { legacy: true },
@@ -831,6 +924,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'seat-memory',
+    frozenBy: 93,
     wave: 5,
     title: 'Persistent seat memory',
     shipped: { legacy: true },
@@ -843,6 +937,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'model-experimentation',
+    frozenBy: 101,
     wave: 5,
     title: 'Model experimentation — frontier cadence + own models',
     shipped: { legacy: true },
@@ -855,6 +950,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'model-diversity',
+    frozenBy: 101,
     wave: 5,
     title: 'Model diversity as a team-composition feature',
     shipped: { legacy: true },
@@ -868,6 +964,8 @@ const RAW: RawItem[] = [
   },
   {
     id: 'cookoff-value-experiment',
+    frozenBy: 122,
+    building: 'the raw-transcript dataset export, gated on ADR 051 consent/redaction',
     wave: 6,
     title: 'cookoff — the controlled experiment that proves musterd’s value',
     plan: 'near-term',
@@ -887,6 +985,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'coordination-dataset',
+    frozenBy: 56,
     wave: 6,
     title: 'Coordination-traces dataset & MAST-in-the-wild',
     plan: 'near-term',
@@ -899,6 +998,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'lanes-phase2',
+    unfrozen: 'ADR 083 froze Phase 1; Phase 2 has no ADR of its own',
     wave: 'later',
     title: 'Coordination lanes — Phase 2 (observed surface + merge-funnel)',
     plan: 'reserved',
@@ -911,6 +1011,8 @@ const RAW: RawItem[] = [
   },
   {
     id: 'human-role-reevaluation',
+    frozenBy: 145,
+    building: 'the re-sequenced backlog items it produced are still landing',
     wave: 7,
     title: 'Re-found the human role — human↔agent coordination, reevaluated whole',
     plan: 'near-term',
@@ -986,6 +1088,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'human-work-identity',
+    unfrozen: 'design frozen in a spec, not an ADR',
     title: 'Human work identity — create & claim lanes from the web UI',
     shipped: { prs: [435, 439, 443, 444, 445, 446] },
     category: 'human-loop',
@@ -1015,6 +1118,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'web-steering-console',
+    unfrozen: 'named as future work by ADR 145; no ADR of its own',
     wave: 8,
     title: 'Web steering console — answer consultative asks from /live',
     plan: 'reserved',
@@ -1028,6 +1132,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'multi-human-admin',
+    unfrozen: 'ADR 145 froze the defaults; the item is gated on a second-human dogfood',
     wave: 'later',
     title: 'Multi-human admin model — the two-human dogfood',
     plan: 'reserved',
@@ -1041,6 +1146,8 @@ const RAW: RawItem[] = [
   },
   {
     id: 'insight-dashboard',
+    frozenBy: 104,
+    building: 'increment 3 — live-tail so the board moves on lane events, not on refresh',
     wave: 7,
     title: 'Work items, board & insight layer (web)',
     plan: 'near-term',
@@ -1053,6 +1160,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'packaging-easy-install',
+    frozenBy: 156,
     wave: 7,
     title: 'Packaging — npm release + Homebrew + post-install UX',
     shipped: { prs: [362] },
@@ -1065,6 +1173,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'driver-copresence-gap',
+    frozenBy: 155,
     wave: 7,
     title: 'Driver co-presence gap — make steering light up the human',
     shipped: { prs: [353] },
@@ -1079,6 +1188,7 @@ const RAW: RawItem[] = [
 
   {
     id: 'own-harness',
+    unfrozen: 'an ambition named across ADRs 026-030/131; nothing freezes it',
     wave: 8,
     title: 'musterd as its own harness & mixed-harness teams',
     plan: 'reserved',
@@ -1091,6 +1201,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'install-topology',
+    unfrozen: 'stated in install-topology.md; its six increments carry their own ADRs (170, 174, …)',
     wave: 9,
     title: 'Install topology — the team home is where the human stands',
     plan: 'near-term',
@@ -1104,6 +1215,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'roles-and-stewardship',
+    unfrozen: 'brainstorm pending — the seed doc is not yet an ADR',
     wave: 8,
     title: 'Roles & stewardship — a role library with an infra-touch guardrail',
     plan: 'reserved',
@@ -1120,6 +1232,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'sandboxed-runtime',
+    unfrozen: 'a stated non-goal with an optional future, not a design',
     wave: 'later',
     title: 'Sandboxed runtime',
     plan: 'reserved',
@@ -1128,6 +1241,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'python-sdk',
+    unfrozen: 'a fast-follow port of the reference client — nothing to freeze',
     wave: 'later',
     title: 'Python client SDK',
     plan: 'reserved',
@@ -1138,6 +1252,7 @@ const RAW: RawItem[] = [
   // ── captured from design docs / ADRs (roadmap-completeness pass, 2026-07-01) ──
   {
     id: 'team-hardening',
+    unfrozen: 'a cluster of security roadmap items; only ADR 128 inside it is frozen',
     wave: 'later',
     title: 'Shared/remote-team security hardening',
     plan: 'reserved',
@@ -1162,6 +1277,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'hosted-relay',
+    unfrozen: 'Topology C is named in deployment-topology.md; no ADR yet',
     wave: 'later',
     title: 'Hosted rendezvous relay (Topology C)',
     plan: 'reserved',
@@ -1175,6 +1291,8 @@ const RAW: RawItem[] = [
 
   {
     id: 'tool-call-telemetry',
+    frozenBy: 144,
+    building: 'the ledger/report aggregates beyond ADR 144 increment 1',
     wave: 'later',
     title: 'Tool-call telemetry — which tools get used, and what they cost',
     plan: 'reserved',
@@ -1194,6 +1312,8 @@ const RAW: RawItem[] = [
   },
   {
     id: 'mcp-tool-surface',
+    frozenBy: 144,
+    building: 'increment 4 — schemas and tool shape, wanting live bounce data',
     wave: 'later',
     title: 'musterd’s MCP server, examined — names, descriptions, schemas, results & discovery',
     plan: 'reserved',
@@ -1217,6 +1337,7 @@ const RAW: RawItem[] = [
   // ── out of scope ──────────────────────────────────────────────────────────
   {
     id: 'no-orchestrator',
+    unfrozen: 'a stated principle, not a build',
     title: 'A planner / orchestrator role',
     plan: 'out-of-scope',
     category: 'platform',
@@ -1225,6 +1346,7 @@ const RAW: RawItem[] = [
   },
   {
     id: 'no-runtime',
+    unfrozen: 'a stated principle, not a build',
     title: 'Running your agent',
     plan: 'out-of-scope',
     category: 'platform',
