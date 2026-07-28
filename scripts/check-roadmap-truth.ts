@@ -65,6 +65,8 @@ const errors: string[] = [];
 const warnings: string[] = [];
 let shippedChecked = 0;
 let frozenByChecked = 0;
+let unfrozen = 0;
+let building = 0;
 
 for (const item of ROADMAP_RAW) {
   const shipped = item.shipped !== undefined;
@@ -74,6 +76,17 @@ for (const item of ROADMAP_RAW) {
     errors.push(`"${item.id}": must declare exactly one of \`shipped\` or \`plan\`.`);
     continue;
   }
+
+  // (1b) frozenBy-xor-unfrozen — also defensive; resolveItem throws on import. The point of the
+  // invariant is coverage: rule (3) below is the drift detector, and it can only run on an item that
+  // names its freezing ADR. While the anchor was plain-optional an absent value meant both "no ADR
+  // freezes this" and "nobody said", so the check silently skipped both and watched 11 of 82 items —
+  // including the two that had drifted. Requiring the negative to be *stated* is what closes it.
+  if ((item.frozenBy !== undefined) === (item.unfrozen !== undefined)) {
+    errors.push(`"${item.id}": must declare exactly one of \`frozenBy\` or \`unfrozen\`.`);
+    continue;
+  }
+  if (item.unfrozen !== undefined) unfrozen++;
 
   // (2) shipped ⟹ the anchoring PR(s) are merged. Legacy is grandfathered; shallow clones skip.
   if (item.shipped && 'prs' in item.shipped) {
@@ -105,11 +118,14 @@ for (const item of ROADMAP_RAW) {
         `"${item.id}": shipped, but its freezing ADR ${item.frozenBy} is "${st}", not accepted — ` +
           `flip the ADR status, or the item isn't really done.`,
       );
-    } else if (!shipped && st === 'accepted') {
+    } else if (!shipped && st === 'accepted' && item.building === undefined) {
       errors.push(
         `"${item.id}": still "${item.plan}", but its freezing ADR ${item.frozenBy} is accepted — ` +
-          `the roadmap looks stale; mark it shipped (with its merged PR) or the ADR is premature.`,
+          `the roadmap looks stale; mark it shipped (with its merged PR), or declare \`building\` ` +
+          `naming what remains if the arc is honestly mid-flight.`,
       );
+    } else if (!shipped && st === 'accepted') {
+      building++;
     }
   }
 }
@@ -124,7 +140,9 @@ if (errors.length > 0) {
   );
   process.exit(1);
 }
+const pct = Math.round((frozenByChecked / ROADMAP_RAW.length) * 100);
 process.stdout.write(
   `✓ roadmap truth: ${ROADMAP_RAW.length} items — ${shippedChecked} shipped anchored to merged PRs` +
-    `${isShallow ? ' (skipped: shallow clone)' : ''}, ${frozenByChecked} frozenBy ADRs consistent.\n`,
+    `${isShallow ? ' (skipped: shallow clone)' : ''}, ${frozenByChecked} frozenBy ADRs consistent ` +
+    `(${pct}% under drift watch; ${unfrozen} declared unfrozen, ${building} mid-arc).\n`,
 );
