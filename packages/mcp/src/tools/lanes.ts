@@ -122,6 +122,26 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
   );
 
   server.registerTool(
+    'lane_release',
+    {
+      description:
+        'Let go of a lane you own without finishing it — it returns to the board as open for ' +
+        'anyone. Use when you park work rather than complete it; a claimed lane sitting idle ' +
+        'reserves work nobody is doing.',
+      inputSchema: { id: z.string().describe('lane id') },
+    },
+    async (args) => {
+      try {
+        // `open` means unowned, so the state move is the whole release — the store clears the owner.
+        const { lane, warnings } = await client.updateLane(args.id, { state: 'open' });
+        return laneResult('lane released — open for anyone', lane, warnings);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
     'lane_board',
     {
       description:

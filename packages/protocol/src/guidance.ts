@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 6;
+export const GUIDANCE_CONTENT_VERSION = 7;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -33,6 +33,7 @@ export const SKILL_MCP_TOOLS = [
   'team_next',
   'lane_open',
   'lane_claim',
+  'lane_release',
   'lane_handoff',
   'lane_resolve',
   'lane_board',
@@ -130,6 +131,9 @@ export function renderSkillBody(opts: { team: string }): string {
     '',
     '- **Never build in a lane a teammate already owns.** If the lane you need is claimed, coordinate —',
     "  `team_send` the owner, take a *different* open lane, or ask them to hand off — don't duplicate it.",
+    '- **Park work you stop carrying.** If you claimed a lane and are not doing it, `lane_release` /',
+    '  `musterd lane release <id>` hands it back to the board — a claimed lane sitting idle reserves work',
+    '  nobody is doing. Releasing is not failing; it is the honest board state.',
     '- Link a lane to a Goal with `--goal <id>` so status derives up the plan. `musterd next` gives your',
     '  orientation brief (what you carry, what to pick up); `musterd done` closes your live lane and shows',
     '  what is next. Overlap is warned, never blocked — the warning is a coordination prompt, act on it.',
@@ -156,7 +160,8 @@ export function renderSkillBody(opts: { team: string }): string {
     "  do **not** proceed; record it with a `status_update` carrying `meta.ask_ref` + `meta.ask_outcome:'held'`.",
     '  This is the admin gate — never edit past it on your own. The contract may say **STRAND** instead: when',
     '  no unblocker is reachable (no admin human present or notifiable, no live teammate with a sanctioned',
-    "  route), don't hold an empty room — record WIP on your lane's branch, release the lane to open, log",
+    "  route), don't hold an empty room — record WIP on your lane's branch, `lane_release` / `musterd lane",
+    '  release <id>` so it stops reading as yours, log',
     "  `meta.ask_outcome:'stranded'`, and close out. Stranding is still *not proceeding*.",
     '- **`species:escalate` — a true blocker or dispute only a human can settle.** Usually **`tier:standard`**.',
     '- **`species:consult` — "which direction / does this look right."** Wanted even in full-auto; usually',

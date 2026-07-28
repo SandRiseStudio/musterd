@@ -334,7 +334,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'lane',
     signature:
-      'open "<title>" [--surface <glob>,…] [--depends <id>,…] [--goal <id>] [--branch b] [--claim]  |  <claim|handoff|update|resolve> <id> [--to <seat>] [--branch <ref>] [--state <s>]',
+      'open "<title>" [--surface <glob>,…] [--depends <id>,…] [--goal <id>] [--branch b] [--claim]  |  <claim|release|handoff|update|resolve> <id> [--to <seat>] [--branch <ref>] [--state <s>]',
     summary: 'declare a unit of work; own it, hand it off, close it',
     group: 'work',
     primary: true,
@@ -342,6 +342,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'A lane is a declared unit of work with warn-only contention checks (ADR 083).\n' +
       '  open "<title>" [--surface …] [--depends …] [--goal <id>] [--branch b] [--claim]   declare it\n' +
       '  claim <id>                    take ownership\n' +
+      '  release <id>                  let it go — open for anyone again\n' +
       '  handoff <id> --to <seat> [--branch <ref>]   transfer it, with its branch\n' +
       '  update <id> [--state <s>] [--branch <ref>]  edit it\n' +
       '  resolve <id>                  close it\n' +

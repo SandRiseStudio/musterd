@@ -187,6 +187,51 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
   });
 });
 
+describe('the release invariant — open ⟺ unowned', () => {
+  it('moving an owned lane back to open clears the owner and the claim stamp', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'parked work', claim: true });
+    expect(lane.owner_seat).toBe('June');
+    expect(lane.claimed_at).not.toBeNull();
+    const released = updateLane(db, team.id, lane.id, 'bravo', { state: 'open' })!;
+    expect(released.state).toBe('open');
+    // The whole point: the board must not name a holder for work nobody is doing.
+    expect(released.owner_seat).toBeNull();
+    expect(released.claimed_at).toBeNull();
+  });
+
+  it('a released lane is claimable by a different seat, stamping a fresh tenure', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'parked work', claim: true });
+    const releasedAt = updateLane(db, team.id, lane.id, 'bravo', { state: 'open' }, 1_000)!;
+    expect(releasedAt.owner_seat).toBeNull();
+    const reclaimed = updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'Cleo' }, 5_000)!;
+    expect(reclaimed.state).toBe('claimed');
+    expect(reclaimed.owner_seat).toBe('Cleo');
+    // Not June's original stamp inherited: claimed_at describes the CURRENT tenure.
+    expect(reclaimed.claimed_at).toBe(5_000);
+  });
+
+  it('an owner named on the same patch as state:open still releases — state wins', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'parked', claim: true });
+    const out = updateLane(db, team.id, lane.id, 'bravo', {
+      state: 'open',
+      owner_seat: 'Cleo',
+    })!;
+    expect(out.state).toBe('open');
+    expect(out.owner_seat).toBeNull(); // the incoherent tuple is unrepresentable
+  });
+
+  it('a terminal close keeps its owner — release is only the open edge', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'shipped', claim: true });
+    const done = updateLane(db, team.id, lane.id, 'bravo', { state: 'done' })!;
+    expect(done.owner_seat).toBe('June'); // ADR 169 derives verified-ness from the owner at close
+    expect(done.claimed_at).not.toBeNull();
+  });
+});
+
 describe('goal_id join (ADR 084)', () => {
   it('round-trips goal_id through open + update, and lanesForGoal filters by it', () => {
     const { db, team } = seed();

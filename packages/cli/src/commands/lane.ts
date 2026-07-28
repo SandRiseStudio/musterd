@@ -5,7 +5,7 @@ import { theme } from '../render/theme.js';
 import { resolve } from './helpers.js';
 
 /**
- * `musterd lane <open|claim|handoff|update|resolve>` + `musterd lanes` — the CLI half of the lane
+ * `musterd lane <open|claim|release|handoff|update|resolve>` + `musterd lanes` — the CLI half of the lane
  * dual-surface (ADR 083, parity with the `lane_*` MCP tools). Every mutation prints the lane and any
  * contention warnings inline (warn-only; the verb never fails on contention).
  */
@@ -14,6 +14,7 @@ const USAGE =
   'usage:\n' +
   '  musterd lane open "<title>" [--surface <glob>[,<glob>…]] [--depends <id>[,<id>…]] [--goal <id>] [--project p] [--role r] [--branch b] [--detail d] [--claim]\n' +
   '  musterd lane claim <id>\n' +
+  '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>]\n' +
   '  musterd lane update <id> [--state open|claimed|active|blocked|ready_for_review|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d]\n' +
   '  musterd lane ready <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
@@ -168,6 +169,19 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
       }
       renderBranchCleanup(res.lane.branch);
     }
+    return 0;
+  }
+
+  if (sub === 'release') {
+    // The complement of `claim`: hand the lane back to the board rather than to a seat. `open` means
+    // unowned, so the state move IS the release — the store clears the owner and the claim stamp.
+    const id = parsed.positionals[1];
+    if (!id) throw new CliError(USAGE, 2);
+    const res = await http.updateLane(team, id, { state: 'open' });
+    process.stdout.write(
+      `${theme.ok('✓')} lane released — open for anyone\n${renderLane(res.lane)}\n`,
+    );
+    renderWarnings(res.warnings);
     return 0;
   }
 

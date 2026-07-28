@@ -82,6 +82,7 @@ describe('version-bump discipline (ADR 085)', () => {
     4: 'c408be59e7172a1f', // + reachability-gated hold: the STRAND branch of the blocking-ask contract (ADR 153)
     5: 'ba6d7c18cb7ca635', // + label-sessions skill unit + `session` in the command reference (ADR 160)
     6: 'bbeafefcb4cdd58e', // + nudge-relay skill unit (ADR 167)
+    7: '131f5f1bfc512501', // + lane_release: park work you stop carrying; the STRAND branch names the verb
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

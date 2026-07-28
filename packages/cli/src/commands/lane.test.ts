@@ -167,6 +167,14 @@ describe('lane commands', () => {
     expect(claimed.out).not.toContain('clear the local branch');
   });
 
+  it('release hands a claimed lane back to the board as unowned', async () => {
+    const id = await openLane(['parkme', '--claim']);
+    const res = await capture(() => laneCommand(parseArgs(['release', id])));
+    expect(res.out).toContain('lane released');
+    expect(res.out).toContain('open');
+    expect(res.out).toContain('unowned'); // renderLane's null-owner rendering
+  });
+
   it('handoff reassigns to another seat with a branch', async () => {
     await new (await import('../client.js')).HttpClient({
       server: serverUrl,
@@ -212,6 +220,7 @@ describe('lane commands', () => {
     await expect(laneCommand(parseArgs([]))).rejects.toThrow(/usage/);
     await expect(laneCommand(parseArgs(['open']))).rejects.toThrow(/usage/);
     await expect(laneCommand(parseArgs(['claim']))).rejects.toThrow(/usage/);
+    await expect(laneCommand(parseArgs(['release']))).rejects.toThrow(/usage/);
     await expect(laneCommand(parseArgs(['handoff', 'x']))).rejects.toThrow(/usage/);
     await expect(laneCommand(parseArgs(['update']))).rejects.toThrow(/usage/);
   });

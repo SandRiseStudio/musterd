@@ -129,11 +129,17 @@ export function updateLane(
 ): Lane | null {
   const existing = getLane(db, teamId, id, teamSlug);
   if (!existing) return null;
-  const ownerSeat = patch.owner_seat !== undefined ? patch.owner_seat : existing.owner_seat;
+  const owned = patch.owner_seat !== undefined ? patch.owner_seat : existing.owner_seat;
   // Taking ownership of an `open` lane implies `claimed` unless the patch names a state itself.
   const state: LaneState =
     patch.state ??
     (patch.owner_seat !== undefined && existing.state === 'open' ? 'claimed' : existing.state);
+  // The release invariant: `open` means unowned, so moving a lane back to `open` lets go of it —
+  // owner and the claim stamp both clear. Without this the state machine admits (open, owner=X),
+  // and the board then states a false fact: a lane nobody is working, rendered as someone's. This
+  // transition *is* the release verb (no `owner_seat: null` on the patch surface — that would also
+  // let a caller assign an arbitrary owner, which lane_claim is for).
+  const ownerSeat = state === 'open' ? null : owned;
   // ADR 169: a merge attestation on a patch that *enters or sits in* ready_for_review is the
   // worker's stage-one claim — persist it so a counterpart's later confirm carries it. (A terminal
   // patch's `merged` keeps its ADR 109 meaning and flows to the audit at the route layer; persisting
@@ -152,7 +158,9 @@ export function updateLane(
     risk: risk.length > 0 ? JSON.stringify(risk) : null,
     merged_json: merged ? JSON.stringify(merged) : null,
     state,
-    claimed_at: existing.claimed_at ?? (ownerSeat !== null ? now : null),
+    // claimed_at describes the CURRENT tenure: sticky while held, cleared by the release above so a
+    // re-claim stamps fresh rather than inheriting the previous holder's timestamp.
+    claimed_at: ownerSeat === null ? null : (existing.claimed_at ?? now),
     resolved_at: LANE_TERMINAL_STATES.has(state as LaneState)
       ? (existing.resolved_at ?? now)
       : null,
