@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { MODEL_UNKNOWN, modelFamily, resolveAttestation, resolveAttestedModel } from './model.js';
+import {
+  describeFamilyPosture,
+  MODEL_UNKNOWN,
+  modelFamily,
+  resolveAttestation,
+  resolveAttestedModel,
+} from './model.js';
 
 describe('modelFamily (ADR 101)', () => {
   it('derives the family as the leading alphabetic token, lowercased', () => {
@@ -100,5 +106,51 @@ describe('resolveAttestation — observation beats declaration', () => {
       drift: false,
       declared: undefined,
     });
+  });
+});
+
+describe('describeFamilyPosture (ADR 172) — one bounded line', () => {
+  const base = {
+    attesting: 0,
+    families: {},
+    unattested: 0,
+    wake_pool: [],
+    humans_live: 0,
+    computed_at: 1,
+  };
+
+  it('monoculture names the family, the count, and the remedy pool', () => {
+    const line = describeFamilyPosture({
+      ...base,
+      state: 'monoculture',
+      attesting: 3,
+      families: { claude: 3 },
+      wake_pool: ['dolly', 'grokbot', 'gptbot', 'kimi', 'compo'],
+      humans_live: 1,
+    });
+    expect(line).toContain('monoculture — 3 agents attesting, all claude');
+    expect(line).toContain('idle & enrollable: dolly, grokbot, gptbot +2');
+    expect(line).toContain('1 human(s) live');
+    expect(line).not.toContain('kimi'); // bounded: never one entry per seat
+  });
+
+  it('diverse lists family counts', () => {
+    expect(
+      describeFamilyPosture({
+        ...base,
+        state: 'diverse',
+        attesting: 4,
+        families: { claude: 3, gpt: 1 },
+      }),
+    ).toContain('diverse — claude×3, gpt×1');
+  });
+
+  it('unknown says why — zero attesting vs one attesting are different sentences', () => {
+    expect(describeFamilyPosture({ ...base, state: 'unknown' })).toContain(
+      'no agents attesting a known family',
+    );
+    expect(
+      describeFamilyPosture({ ...base, state: 'unknown', attesting: 1, families: { claude: 1 } }),
+    ).toContain('only 1 agent attesting a known family');
   });
 });

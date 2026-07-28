@@ -1,4 +1,10 @@
-import { modelFamily, MODEL_UNKNOWN, type Lane } from '@musterd/protocol';
+import {
+  modelFamily,
+  MODEL_UNKNOWN,
+  type FamilyPosture,
+  type FamilyPostureState,
+  type Lane,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { listMembers } from './members.js';
 import { hasLivePresence } from './presence.js';
@@ -49,6 +55,68 @@ export function memberFamily(db: Database, member: MemberRow): string {
 export function workerFamily(db: Database, teamId: string, worker: string): string {
   const m = listMembers(db, teamId).find((x) => x.name === worker);
   return m ? memberFamily(db, m) : MODEL_UNKNOWN;
+}
+
+/**
+ * The team's model-family posture (ADR 172) — derived at read time, never stored, because a seat is
+ * a **name**, not a model: what it runs can change between sessions, so the only honest statement is
+ * about who is attesting what right now, stamped with when.
+ *
+ * Counting rules, each load-bearing:
+ *   - Family comes from the live occupancy's attestation only — never inferred from a seat's name
+ *     (`grokbot` is a name, not a guarantee).
+ *   - A live agent attesting `unknown` counts in `unattested`, never in the denominator — it cannot
+ *     prove diversity, and a wrong guess here poisons the posture the way a wrong attestation
+ *     poisons ADR 056 conclusions. Same rule the review picker applies per-seat.
+ *   - Humans ride beside the posture (`humans_live`), never inside it: human review is its own
+ *     requirement class (the ADR 169 risk route), not a diversity substitute.
+ *   - Observers are invisible here as everywhere (ADR 063).
+ *
+ * Three states: `diverse` (≥2 distinct families attesting), `monoculture` (≥2 attesting, all one),
+ * `unknown` (<2 attesting — with one or zero data points you cannot tell, and saying `monoculture`
+ * would collapse "everyone HERE is claude" into "everyone ON THE TEAM is claude").
+ */
+export function teamFamilyPosture(
+  db: Database,
+  teamId: string,
+  presenceTimeoutMs: number,
+): FamilyPosture {
+  const families: Record<string, number> = {};
+  const wake_pool: string[] = [];
+  let attesting = 0;
+  let unattested = 0;
+  let humans_live = 0;
+  for (const m of listMembers(db, teamId)) {
+    if (m.observer) continue;
+    const live = hasLivePresence(db, m.id, presenceTimeoutMs);
+    if (m.kind === 'human') {
+      if (live) humans_live += 1;
+      continue;
+    }
+    if (!live) {
+      wake_pool.push(m.name);
+      continue;
+    }
+    const family = modelFamily(latestAttestedModel(db, m.id));
+    if (family === MODEL_UNKNOWN) {
+      unattested += 1;
+    } else {
+      attesting += 1;
+      families[family] = (families[family] ?? 0) + 1;
+    }
+  }
+  const distinct = Object.keys(families).length;
+  const state: FamilyPostureState =
+    distinct >= 2 ? 'diverse' : attesting >= 2 ? 'monoculture' : 'unknown';
+  return {
+    state,
+    attesting,
+    families,
+    unattested,
+    wake_pool,
+    humans_live,
+    computed_at: Date.now(),
+  };
 }
 
 /**

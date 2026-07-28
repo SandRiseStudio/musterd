@@ -15,6 +15,7 @@ import { listLanes } from './lanes.js';
 import { deriveMast } from './mast.js';
 import { getMemberByName } from './members.js';
 import { effectiveWakePolicy, getResidency } from './residency.js';
+import { teamFamilyPosture } from './review.js';
 import type { MessageRow } from './rows.js';
 import { getPolicy } from './teams.js';
 import { deriveToolCallMetrics } from './toolCalls.js';
@@ -508,6 +509,8 @@ export function deriveReport(
   teamId: string,
   teamSlug: string,
   now: number = Date.now(),
+  /** Presence liveness window for the family-posture snapshot (ADR 172); omitted ⇒ no posture. */
+  presenceTimeoutMs?: number,
 ): Report {
   const blocked: BlockedLane[] = listLanes(db, teamId, teamSlug)
     .filter((l) => l.state === 'blocked')
@@ -526,5 +529,10 @@ export function deriveReport(
     steering: deriveSteeringMetrics(db, teamId, now),
     wake: deriveWakeMetrics(db, teamId, now),
     tool_calls: deriveToolCallMetrics(db, teamId, now),
+    // ADR 172: the model-family posture snapshot — derived, never stored. Sustained monoculture is
+    // read off the SERIES of reports, not off any single one.
+    ...(presenceTimeoutMs !== undefined
+      ? { family_posture: teamFamilyPosture(db, teamId, presenceTimeoutMs) }
+      : {}),
   };
 }
