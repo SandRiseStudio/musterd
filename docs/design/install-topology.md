@@ -204,16 +204,32 @@ project and surface-contention warnings are team-wide** — `packages/web/**` in
 `packages/web/**` in any other repo the team touches.
 
 Design (lane L-project): derive `project` from repo identity at lane-open time — default **the
-basename of the git toplevel** of the opener's workspace (the MCP adapter already derives a
-per-session workspace label from exactly this; it just never feeds `project`), overridable by
-`--project` / `MUSTERD_PROJECT`, with non-git folders staying `'default'`. Two consequences to
-state honestly in the implementing PR:
+basename of the repo's common dir** (`git rev-parse --git-common-dir`, normalised to the repo
+directory it sits in), overridable by `--project` / `MUSTERD_PROJECT`, with non-git folders staying
+`'default'`.
+
+> **Amended 2026-07-28 (stanley's pre-implementation review, lane L-project).** The first draft said
+> "basename of the git toplevel", and that rule would have inverted the section's purpose on the
+> very fleet it was written for: `git rev-parse --show-toplevel` in a **linked worktree** returns
+> the worktree's own path, so this machine's ~13 sibling worktrees (`agents-stanley`,
+> `agents-miley`, …) would have become ~13 distinct projects for ONE repo — and since
+> `surface_overlap` is the only project-scoped check, contention would have switched **off** for
+> the whole dogfood team, silently, because overlap is warn-only. `--git-common-dir` is identical
+> across a worktree family, which is the invariant that matters: a project is a fact about the
+> repo, never about the seat standing in it (the same rule ADR 165 lands on for shared slots).
+
+Three consequences to state honestly in the implementing PR:
 
 - **Contention semantics change the day this lands**: per-project overlap checks become real, so
   same-glob lanes in different repos stop warning at each other. That is the intended meaning
   finally taking effect, not a regression — but it must be named, because warn-counts will drop.
-- **Back-compat**: existing lanes stay `'default'`; no migration rewrites history. Mixed-era teams
-  will briefly have old-'default' lanes warning against everything, which resolves as lanes close.
+- **Back-compat is a cliff, not a slope**: `project` is NOT NULL and `UpdateLane` carries no
+  `project` field, so the moment derivation lands, old-`'default'` lanes and new derived-project
+  lanes go mutually blind — immediately, not gradually as first written. The implementing PR must
+  add `project` to `UpdateLane` so a lane can be re-projected; immutability with no escape hatch is
+  what would make a mis-derived project unrecoverable.
+- **No migration rewrites history**: existing lanes stay `'default'` unless someone re-projects
+  them deliberately.
 
 ## 8. Explicitly parked
 
