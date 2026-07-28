@@ -147,11 +147,23 @@ insufficient" is a claim about human behavior that this ADR is not entitled to a
 experiment below is designed so it can fail.
 
 Self-healing at `SessionStart` — a seat repairing its own folder on every start — is considered and
-**rejected**. It makes a write to a shared slot incidental to every session start, which is the rule
-ADR 168 exists to hold, and it carries an unresolved correctness question: a hook installed during
-`SessionStart` plausibly does not take effect until the _next_ session, which would leave it unable
-to self-heal the reachability hooks it is most needed for. A mechanism that cannot repair its most
-important case is not the mechanism.
+**rejected on one ground rather than two.**
+
+The ground that holds: it makes a write to a shared slot incidental to every session start, which is
+precisely the rule ADR 168 exists to hold. A machine-wide concern would be hidden inside every seat's
+startup path, and the write would happen without anyone choosing it — the definition of incidental.
+
+The ground that does **not** hold, recorded because it was drafted as a reason and then checked: the
+first draft of this ADR argued that a hook installed during `SessionStart` would not take effect
+until the _next_ session, leaving self-healing unable to repair the reachability hooks it is most
+needed for. That is false. Claude Code's hook documentation states that "direct edits to hooks in
+settings files are normally picked up automatically by the file watcher," so a hook written during a
+session is live in that session. Self-healing would work. It is rejected because of what it does to
+the write, not because it would fail.
+
+This matters for the sequencing in §4: if the periodic sweep is later ruled out for its own reasons,
+`SessionStart` self-healing is a **live option** to reopen rather than a closed door, and reopening
+it costs only the ADR 168 argument above — which is a values call, and revisable.
 
 ## Observability & Evaluation
 
@@ -185,9 +197,22 @@ failure mode returning under a new name.
    drift.
 4. _Retired path._ A recorded path no longer in `guidanceTargets()` must produce silence.
 
-Only arm 1 fails against pre-change code. Arms 2–4 are regression guards that pass both before and
-after, and saying so is the point: four passing arms would otherwise imply four defects measured,
-when one was. ADR 168 drew this distinction about its own sixth assertion and it is worth keeping.
+**Predicted, then measured — and the prediction was wrong.** This ADR was drafted claiming only arm 1
+would fail against pre-change code, with arms 2–4 as regression guards passing both before and after.
+Run against the pre-change doctor, **arms 1, 2 and 4 fail, plus the guard metric; only arm 3 passes**.
+The correction is recorded rather than quietly fixed, because each surprise is a defect the ADR did
+not know it was fixing:
+
+- Arm 2 fails because a user's own file at a path musterd would write drew no note at all — the
+  pre-change check never looked at a path it had not recorded, so it could not decline to clobber
+  something it could not see.
+- Arm 4 fails because the pre-change check **nags about a retired path**: a file musterd itself
+  stopped writing was reported as "gone", prescribing a repair that would not restore it.
+
+So the receipt was not merely blind to additions — it was also wrong about the user's files and about
+musterd's own removals. Three defects measured, not one. Arm 3 alone is the pure regression guard,
+and it is the one that matters most for the guard metric: it is what keeps the wider expected set
+from inventing drift for a harness this folder never wired.
 
 **The experiment that decides §4.** The trigger is the next guidance file or hook added to the
 templates after this lands. Measure fleet coverage **7 days** after that change merges — long enough
@@ -202,6 +227,39 @@ a thing to build on suspicion.
 **Kill criterion.** If arm 1 passes but a guard metric fails, the expected set narrows back toward
 the recorded set and the change is reverted rather than tuned — a health check that invents drift
 costs more than one that misses it, because the first teaches people to stop reading.
+
+### Result — 2026-07-28, increment 1
+
+**The baseline turned over.** Across the 8 Claude Code dogfood worktrees, `musterd init --check`
+now reports the missing ADR 167 nudge-relay skill in **8 of 8**, against a measured pre-change
+baseline of **0 of 8**. The noise guard moved with it: **6 version lines per folder became 1**.
+
+**The guard metric fired during implementation, and it earned its place.** The first implementation
+scoped expectation to _configured_ harnesses — a reading of "what this build would write" that seemed
+obviously right and was wrong. On a live seat it produced four drift lines for Cursor guidance this
+folder had never been provisioned with, and — the damning part — **`--refresh-guidance` would never
+have written them**, because adding a harness's files is provisioning, not refreshing. Four
+uncleanable lines: the exact failure the guard was pre-registered to catch, caught by it, on the
+first real run rather than in review.
+
+The fix is stronger than the bug: `establishedHarnesses` is now the **single predicate shared by the
+doctor and by `--refresh-guidance`**, so the check expects precisely what its own prescribed repair
+would write, by construction rather than by two functions happening to agree. Arm 5 pins it.
+
+**On the kill criterion, honestly.** It says a failing guard means revert, not tune, and this was
+tuned. The distinction claimed — and it should be judged, not assumed — is that the criterion exists
+to stop a threshold being loosened until noise disappears, whereas the predicate here was corrected
+against an _objective external anchor_: parity with the repair command. There is a right answer to
+"what should the doctor expect" independent of how many lines it yields, and this is it. Arm 1 still
+passes and the guard now reads clean at zero. If a reviewer reads the criterion strictly, the strict
+remedy is a revert, and that call is the reviewer's to make rather than the author's.
+
+**What is not yet done.** The fleet is detected, not repaired: all 8 seats now carry a true drift
+line and `--refresh-guidance` is the one-command fix. That repair is deliberately left to the seats
+rather than performed across live worktrees from this branch — the same non-action ADR 168 recorded
+for the same reason, and it is also the opening state of the §4 experiment, whose whole question is
+whether a loud line is enough to get a fleet repaired without a background writer. Performing the
+repair here by hand would destroy the measurement.
 
 ## Consequences
 

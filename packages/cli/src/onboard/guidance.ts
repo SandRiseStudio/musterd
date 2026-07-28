@@ -174,6 +174,24 @@ export function writeGuidance(
   return { files: written, skipped, contentVersion: GUIDANCE_CONTENT_VERSION };
 }
 
+/**
+ * The harnesses whose guidance surface is **established** in `dir` — the ones a folder actually
+ * carries files for, keyed off the skill file `init` would have written when that harness was chosen.
+ *
+ * This is the single predicate shared by `--refresh-guidance` (what it will rewrite) and the doctor
+ * (what it expects to find), and they must agree by construction rather than by coincidence: a
+ * doctor that expects more than the repair writes emits drift no command can clear. That is not
+ * hypothetical — scoping the doctor to *configured* harnesses instead of established ones was tried
+ * first and produced exactly that on a live seat, four uncleanable lines for a harness whose guidance
+ * this folder was never provisioned with (ADR 171).
+ *
+ * `init` deliberately writes guidance for the ONE harness chosen at provisioning time, so "installed"
+ * and "configured" both overshoot; presence of the skill file is what records the actual choice.
+ */
+export function establishedHarnesses(dir: string, harnesses: Harness[]): Harness[] {
+  return harnesses.filter((h) => h.guidance && existsSync(join(dir, h.guidance.skillPath)));
+}
+
 /** Every relative path guidance *could* occupy, across the canonical location and all harnesses — the
  * removal set for uninstall and the expected set for the doctor. */
 export function guidanceTargets(harnesses: Harness[]): string[] {
