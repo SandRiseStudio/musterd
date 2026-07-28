@@ -59,8 +59,13 @@ export interface DoctorReport {
    * This exists so `--fix` can stop prescribing `musterd init` for entry drift. On a repo-root-shared
    * entry (ADR 143) that remedy is actively harmful: it repairs the running seat by taking the slot
    * from whoever holds it, and it mints a member and trips the already-bound guard on the way.
+   *
+   * `'identity'` ⇒ the dead binding (install-topology §6(a)): this folder's credential is wrong for
+   * the seat it claims. It outranks the other two, and `--fix` deliberately **cannot** perform it —
+   * the remedy is either a rebind from a held credential or a re-issue that invalidates somebody's
+   * live secret, and `musterd init` (the generic remedy) is the very command that wrote the binding.
    */
-  repair?: 'wire' | 'init';
+  repair?: 'wire' | 'init' | 'identity';
   /** Warn-only notes (locally-edited guidance) — surfaced but never exit-1 (ADR 085). */
   notes: string[];
   /** True when at least one installed harness has the musterd server registered. */
@@ -216,6 +221,95 @@ async function inspectModelAttestation(binding: Binding | null): Promise<string[
   ];
 }
 
+/**
+ * The **dead binding** (install-topology §6(a)): a folder whose binding claims a *human* seat while
+ * carrying the *team agent key*. It occupies once and then 403s on every subsequent request — the
+ * state `/Users/nick/agents` was in for two days, written by `init`'s "activate an existing member"
+ * intent handing `config.agentKeys[team]` to any target.
+ *
+ * L1 (#457) closed the door that produces this, so no new one can be written. This is the other
+ * half: the ones already on disk are invisible until something fails, and the failure is a 403 that
+ * names neither the cause nor the repair.
+ *
+ * Two things it deliberately does not do:
+ *
+ * - **Never flags an observer.** Observer seats are `kind: 'human'` with `observer: 1` (ADR 063) and
+ *   are claimed with the agent key *by design* — every `/live` watch-link is exactly that shape. The
+ *   rule is about authority, not the kind column, which is the same carve-out L1 needed.
+ * - **Never guesses when the roster is unreachable.** Seat kind is only knowable from the daemon, so
+ *   an offline run returns an honest "could not verify" note rather than either silence (which reads
+ *   as healthy) or a guess (ADR 173 — absent is not unknown).
+ *
+ * The repair is *not* `musterd init`: that is the command that wrote the binding, and its remedy for
+ * a live seat is an interactive identity rewrite. It is a credential command, and which one depends
+ * on whether this machine still holds a usable credential for the seat — so the note names the one
+ * that applies rather than both.
+ */
+async function inspectSeatIdentity(
+  binding: Binding | null,
+  cwd: string,
+): Promise<{ drift: string[]; notes: string[] }> {
+  const empty = { drift: [], notes: [] };
+  if (!binding?.server || !binding.team || !binding.agent_key) return empty;
+  const seat = bindingSeat(binding);
+  if (!seat) return empty; // a role pool resolves its seat server-side; there is nothing to compare
+
+  // The local half of the evidence, computable offline: is this folder authenticating with the
+  // *shared team key* rather than a seat credential? Exact match against what this machine recorded
+  // at `team create` is the certain form; the `mskey_` prefix (ADR 075) catches a machine that never
+  // held the team key but was handed one.
+  const config = loadConfig();
+  const carriesTeamKey =
+    binding.agent_key === config.agentKeys[binding.team] || binding.agent_key.startsWith('mskey_');
+  if (!carriesTeamKey) return empty;
+
+  let members;
+  try {
+    ({ members } = await new HttpClient({ server: binding.server }).roster(binding.team));
+  } catch {
+    // Say what cannot be seen, and what the abstention costs — the alternative is a check that reads
+    // as "healthy" precisely when it ran on nothing.
+    return {
+      drift: [],
+      notes: [
+        `couldn't verify seat "${seat}"'s identity — ${binding.server} is unreachable, and whether a ` +
+          `seat is human is only knowable from the roster. This folder authenticates with the team ` +
+          `agent key, which is correct for an agent seat and dead for a human one; re-run this check ` +
+          `with the daemon up to tell which.`,
+      ],
+    };
+  }
+  const member = members.find((m) => m.name === seat);
+  // A name absent from the roster is either a removed seat (a different fault) or an **observer** —
+  // ADR 063 hides observers from the roster entirely (`observer = 0` in listPresence), and an
+  // observer claiming with the team key is the design, not drift. Both correctly fall out here, so
+  // the carve-out L1 needed explicitly is free on this surface.
+  if (!member || member.kind !== 'human') return empty;
+
+  // Which repair applies is a local fact: does this machine still hold a real credential for the seat?
+  const held = config.knownIdentities.find(
+    (i) =>
+      i.team === binding.team &&
+      i.name === seat &&
+      i.key &&
+      i.key !== config.agentKeys[binding.team],
+  );
+  const repair = held
+    ? `\`musterd join ${binding.team} --as ${seat}\` here — this machine already holds their ` +
+      `credential, so this rebinds the folder with nothing to paste`
+    : `\`musterd team credential ${seat}\` here — this machine holds no credential for them, so it ` +
+      `must be re-issued (their previous one stops working), and running it in this folder repairs ` +
+      `this binding in the same breath`;
+  return {
+    drift: [
+      `${cwd}/.musterd/binding.json claims seat "${seat}", the roster says "${seat}" is a human, and ` +
+        `the binding carries the team agent key — the shared key may not act as a human seat, so this ` +
+        `folder occupies once and then 403s on every request. Run ${repair}.`,
+    ],
+    notes: [],
+  };
+}
+
 export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const primerManaged = classifyPrimerTarget(cwd) === 'managed';
   // The folder's single source of truth for which seat it claims (ADR 018). A legacy MCP registration
@@ -359,6 +453,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   drift.push(...guidance.drift);
   const duplicateAdapters = await inspectDuplicateAdapters(binding);
   const modelAttestation = await inspectModelAttestation(binding);
+  const seatIdentity = await inspectSeatIdentity(binding, cwd);
   // ADR 160: label coverage is per-surface, and some harnesses have no writable session list at
   // all. Say so plainly (a note, never drift — there is nothing to fix) instead of pretending.
   const sidebarless = HARNESSES.filter(
@@ -381,11 +476,18 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
             `no writable session list for a sidebar sweep (ADR 160).`,
         ]
       : [];
-  // Entry drift is repairable headlessly; anything else needs full onboarding. Classify BEFORE
-  // merging so the distinction survives into `--fix`.
-  const repair: 'wire' | 'init' | undefined =
-    drift.length > 0 ? 'init' : entryDrift.length > 0 ? 'wire' : undefined;
-  drift.push(...entryDrift);
+  // Classify BEFORE merging so the distinction survives into `--fix`. Identity drift wins outright:
+  // the seat is dead, no other repair reaches it, and the generic remedy would make it worse. Then
+  // entry drift (repairable headlessly by `wire`), then everything else (full onboarding).
+  const repair: DoctorReport['repair'] =
+    seatIdentity.drift.length > 0
+      ? 'identity'
+      : drift.length > 0
+        ? 'init'
+        : entryDrift.length > 0
+          ? 'wire'
+          : undefined;
+  drift.push(...seatIdentity.drift, ...entryDrift);
   return {
     primerManaged,
     harnesses,
@@ -395,6 +497,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       ...guidance.notes,
       ...duplicateAdapters,
       ...modelAttestation,
+      ...seatIdentity.notes,
       ...registryNotes,
       ...labelNotes,
       ...packagedInstallNotes(),
