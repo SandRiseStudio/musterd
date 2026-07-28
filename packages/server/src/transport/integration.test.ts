@@ -1122,6 +1122,50 @@ describe('WebSocket', () => {
     expect(noauth.status).toBe(401);
   });
 
+  it('WS claim: the team agent key cannot occupy a HUMAN seat, on either branch', async () => {
+    // The WS path resolves its target the same way HTTP does, and only the ADR 146 re-seat branch
+    // checked seat kind — so both the grant branch and the request branch were open. This asserts
+    // the refusal lands before either, i.e. no admin request is ever opened for a poisoned claim.
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+
+    // Branch 1: WITH a grant (would otherwise occupy immediately).
+    const a = new TestWs();
+    await a.open();
+    a.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'nick' },
+      grant: await standingGrant(nickTok, 'nick'),
+      surface: 'claude-code',
+    });
+    const refusedA = await a.waitFor('refused');
+    expect(refusedA.code).toBe('forbidden');
+    expect(refusedA.message).toMatch(/agent seat/i);
+    a.close();
+
+    // Branch 2: WITHOUT a grant (would otherwise open a claim request and hold the socket).
+    const b = new TestWs();
+    await b.open();
+    b.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'nick' },
+      surface: 'claude-code',
+    });
+    const refusedB = await b.waitFor('refused');
+    expect(refusedB.code).toBe('forbidden');
+    b.close();
+
+    // Neither branch queued anything for an admin.
+    const reqs = await get('/teams/dawn/requests', nickTok);
+    expect((reqs.json.requests ?? []).length).toBe(0);
+  });
+
   it('records provenance + workspace from the claim and surfaces them on the roster (ADR 014)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
@@ -1953,6 +1997,72 @@ describe('build attestation (ADR 135)', () => {
     expect(nickRow.presences[0].build).toBe(sha);
   });
 
+  it('HTTP claim: the team agent key cannot occupy a HUMAN seat, and leaves no request row', async () => {
+    // The team agent key is SHARED across every agent harness. authByAgentKey already refuses to
+    // *act* as a human seat (privilege escalation into admin ops), but the claim path resolves its
+    // target separately and never applied the same rule — so any agent could OCCUPY the human seat
+    // and inherit it. The refusal must land before the grant/request branches: an admin must never
+    // be asked to approve a poisoned claim, and no pending row may leak.
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+
+    const r = await post('/teams/dawn/claim', {
+      key: team.json.agent_key, // an agent key…
+      target: { seat: 'nick' }, // …aimed at the human admin seat
+      surface: 'cli',
+    });
+    expect(r.status).toBe(403);
+    expect(r.json.code).toBe('forbidden');
+    expect(r.json.message).toMatch(/agent seat/i);
+    expect(r.json.hint).toMatch(/mscr_/); // points at the human's own credential
+
+    // …and nothing was queued for an admin to approve.
+    const reqs = await get('/teams/dawn/requests', tok);
+    expect((reqs.json.requests ?? []).length).toBe(0);
+  });
+
+  it('HTTP claim: a ROLE target that resolves to a human seat is refused too', async () => {
+    // The guard has to sit after target resolution, not beside the seat-name branch — otherwise
+    // `--role` is an unguarded back door to the same seat.
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    // Give the human seat a role an agent might legitimately ask for.
+    const nickRow = getMemberByName(server.db, getTeamBySlug(server.db, 'dawn')!.id, 'nick')!;
+    server.db.prepare('UPDATE members SET role = ? WHERE id = ?').run('steward', nickRow.id);
+
+    const r = await post('/teams/dawn/claim', {
+      key: team.json.agent_key,
+      target: { role: 'steward' },
+      surface: 'cli',
+    });
+    expect(r.status).toBe(403);
+    expect(r.json.message).toMatch(/agent seat/i);
+  });
+
+  it('HTTP claim: an agent key claiming an AGENT seat still works (the guard must not over-block)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    const r = await post('/teams/dawn/claim', {
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(tok, 'Ada'),
+      surface: 'cli',
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it('HTTP claim: a human claiming their OWN seat with their credential still works (ADR 077)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const r = await post('/teams/dawn/claim', {
+      key: team.json.human_credential, // the human's own mscr_, not the agent key
+      target: { seat: 'nick' },
+      surface: 'cli',
+    });
+    expect(r.status).toBe(200);
+  });
+
   it('HTTP claim carries the build onto the stateless occupancy', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;
@@ -2412,7 +2522,10 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
   it('can_observe: a seat narrowed to can_observe:false is refused the firehose', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
-    await post('/teams/dawn/members', { name: 'Watcher', kind: 'human' }, nickTok);
+    // An AGENT seat: this test is about capability narrowing, and it previously claimed a plain
+    // human seat with the team agent key — which the install-topology L1 seat-kind guard now
+    // refuses. The kind was incidental to what is being asserted here.
+    await post('/teams/dawn/members', { name: 'Watcher', kind: 'agent' }, nickTok);
     setCaps('dawn', 'Watcher', { can_observe: false });
 
     const w = new TestWs();

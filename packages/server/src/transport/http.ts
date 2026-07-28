@@ -75,6 +75,8 @@ import {
 import {
   addMember,
   authMember,
+  agentKeyMayOccupy,
+  agentKeySeatKindRefusal,
   clearBound,
   getMemberById,
   getMemberByName,
@@ -1846,6 +1848,22 @@ export async function handleHttp(
             message: 'observe target not supported via HTTP claim — use WS claim',
             claimable: [],
             hint: 'open a WS connection and send a claim frame with { observe: true }',
+          });
+        }
+
+        // Step 2b: SECURITY — the shared team agent key may only occupy an AGENT seat. Deliberately
+        // here: AFTER target resolution (a `role` target can resolve to a human seat) and BEFORE the
+        // grant/request branches below, so a poisoned claim is never queued for an admin to approve.
+        // `authenticatedMember === null` is exactly the agent-key branch; a human credential already
+        // proved it identifies the target seat above.
+        if (authenticatedMember === null && !agentKeyMayOccupy(targetMember)) {
+          const refusal = agentKeySeatKindRefusal(targetMember.name);
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: refusal.message,
+            claimable: [],
+            hint: refusal.hint,
           });
         }
 

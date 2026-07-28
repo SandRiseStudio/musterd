@@ -253,11 +253,42 @@ function authByAgentKey(
   // set `x-musterd-seat: <admin>` and impersonate the human admin → privilege escalation (admin ops).
   // A human seat is reachable only via that human's own `mscr_` credential (authByCredential, kind-bound).
   if (member.kind !== 'agent')
-    throw new MusterdError(
-      'forbidden',
-      `the team agent key may only act as an agent seat; the human seat "${actingSeat}" authenticates with its own credential`,
-    );
+    throw new MusterdError('forbidden', agentKeySeatKindRefusal(actingSeat).message);
   return member;
+}
+
+/**
+ * SECURITY — the one statement of the agent-key seat-kind rule: **the shared team agent key may only
+ * reach an AGENT seat.**
+ *
+ * It lives here, beside `authByAgentKey`, because three surfaces enforce it and they must not drift:
+ * `authByAgentKey` (acting as a seat), the HTTP claim path, and both WebSocket claim branches. The
+ * claim surfaces enforced it nowhere until this was extracted — `authByAgentKey` blocked *acting* as
+ * a human seat, but claim resolves its target separately, so an agent key aimed at the human admin
+ * seat was accepted and queued as a pending request (observed: HTTP 202) for an admin to approve.
+ * That is the privilege-escalation path the acting check exists to close, reached one step earlier.
+ *
+ * The claim surfaces must apply this **after** target resolution — a `role` target can resolve to a
+ * human seat — and **before** the grant/request branches, so no admin is ever asked to approve a
+ * poisoned claim and no pending row leaks.
+ */
+export function agentKeyMayOccupy(member: Pick<MemberRow, 'kind' | 'observer'>): boolean {
+  // Observer seats are minted `kind: 'human'` with `observer: 1` (ADR 063) and are claimed with the
+  // team agent key by design — the /live wall and every watch-link are exactly that. They carry no
+  // authority to inherit: an observer is hidden from the roster and cannot send, so occupying one
+  // escalates nothing. Caught by three observer tests when this guard first read `kind === 'agent'`
+  // alone; the rule is about AUTHORITY, not the nominal kind column.
+  return member.kind === 'agent' || member.observer === 1;
+}
+
+/** The refusal for {@link agentKeyMayOccupy} — shared so every surface says the same thing. */
+export function agentKeySeatKindRefusal(seat: string): { message: string; hint: string } {
+  return {
+    message:
+      `the team agent key may only act as an agent seat; the human seat "${seat}" authenticates ` +
+      'with its own credential',
+    hint: `musterd join <team> --as ${seat} --key mscr_…`,
+  };
 }
 
 /** Human-credential (`mscr_`) auth: self-identifying; the credential is the authority for its seat. */
