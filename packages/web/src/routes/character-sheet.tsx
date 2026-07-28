@@ -137,13 +137,17 @@ function CharacterSheet() {
         });
         // The office dog, at the same 4×: every pose, both facings for the walk.
         const petRow = Math.ceil(NAMES.length / cols) * 3;
+        // `face` is the drawn facing (+1 right → −1 left); the mid-turn cell holds it part-way through
+        // so the swivel's foreshortening can be judged at 4× instead of only in a 150ms blur on the
+        // floor — the one frame of that motion nobody could ever actually look at.
         const PET_CELLS = [
-          { label: 'sleep', mode: 'sleep' as const, flip: false },
-          { label: 'curl', mode: 'curl' as const, flip: false },
-          { label: 'sit', mode: 'sit' as const, flip: false },
-          { label: 'walk', mode: 'walk' as const, flip: false },
-          { label: 'walk · flipped', mode: 'walk' as const, flip: true },
-          { label: 'stretch', mode: 'stretch' as const, flip: false },
+          { label: 'sleep', mode: 'sleep' as const, face: 1 },
+          { label: 'curl', mode: 'curl' as const, face: 1 },
+          { label: 'sit', mode: 'sit' as const, face: 1 },
+          { label: 'walk', mode: 'walk' as const, face: 1 },
+          { label: 'walk · flipped', mode: 'walk' as const, face: -1 },
+          { label: 'walk · mid-turn', mode: 'walk' as const, face: 0.38 },
+          { label: 'stretch', mode: 'stretch' as const, face: 1 },
         ];
         PET_CELLS.forEach((cell, i) => {
           const cx = i * CELL + CELL / 2;
@@ -157,12 +161,14 @@ function CharacterSheet() {
               mode: cell.mode,
               modeT: cell.mode === 'curl' ? (t * 0.9) % 1.1 : 1,
               phase: t * 1.3,
-              flip: cell.flip,
+              flip: cell.face < 0,
+              face: cell.face,
               path: [],
               seg: 0,
               plan: 'nap',
               sitFor: 99,
               speed: 55,
+              vel: 55,
             },
             t,
           );

@@ -18,7 +18,7 @@ import {
   genObserverName,
   acquireWatchLinkObserver,
 } from '../live/client';
-import { firehoseSound } from '../live/sound';
+import { firehoseSound, roomTone } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
 import { useWorkingOn } from '../live/useWorkingOn';
 import { roomEntries } from '../live/workingOn';
@@ -244,6 +244,7 @@ function LivePage() {
         <span className="lc__spacer" />
         {connected && <WatchLinkButton cfg={cfg!} />}
         {connected && <CompanionToggle on={companion} onToggle={toggleCompanion} />}
+        {connected && <RoomToneToggle />}
         {connected && <SoundToggle />}
         <Clock />
       </header>
@@ -395,6 +396,54 @@ function SoundToggle() {
         ) : (
           <path d="m10.8 6 3.4 4M14.2 6l-3.4 4" />
         )}
+      </svg>
+    </button>
+  );
+}
+
+/**
+ * Room tone: the sound of the office being *there* — ventilation, a low building hum, and somebody
+ * typing a few desks away. Its own switch rather than a mode of the one above, because the two
+ * answer different questions (see the room-tone block in `sound.ts`): a viewer may reasonably want
+ * arrivals audible in a silent room, or a lived-in room that never pings at them.
+ *
+ * Default OFF, like the cues, and for the same reason — the click IS the gesture that lets the
+ * AudioContext start. A preference restored from an earlier session cannot start itself, so this
+ * button is also where `resumeIfEnabled` gets its chance.
+ */
+function RoomToneToggle() {
+  const [on, setOn] = useState(() => roomTone.enabled);
+  // A stored `on` from a previous visit needs a gesture before it can make a sound. Any click
+  // anywhere on the page is gesture enough, and one is cheaper to catch than to ask for.
+  useEffect(() => {
+    if (!roomTone.enabled) return;
+    const wake = () => roomTone.resumeIfEnabled();
+    window.addEventListener('pointerdown', wake, { once: true });
+    return () => window.removeEventListener('pointerdown', wake);
+  }, []);
+  const toggle = () => {
+    const next = !on;
+    roomTone.setEnabled(next);
+    setOn(next);
+  };
+  return (
+    <button
+      type="button"
+      className={`lc__sound lc__sound--room${on ? ' lc__sound--on' : ''}`}
+      onClick={toggle}
+      aria-pressed={on}
+      title={on ? 'Silence the room' : 'Play the room: quiet office ambience'}
+    >
+      {/* Three rising bars behind a mug — "the room is running", not "a message arrived". Muted, the
+          bars flatten to one line: the room is still there, it just is not making a sound. */}
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        {on ? (
+          <path d="M2.5 9.5v2M5 7.5v4M7.5 5.5v6" />
+        ) : (
+          <path d="M2.5 11.5h5.2" />
+        )}
+        <path d="M10.5 6.5h3.2v3a2 2 0 0 1-2 2h-1.2z" />
+        <path d="M13.7 7.5h.6a1.1 1.1 0 0 1 0 2.2h-.6" />
       </svg>
     </button>
   );

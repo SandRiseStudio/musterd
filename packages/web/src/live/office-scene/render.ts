@@ -1,7 +1,7 @@
 import { canvasFont } from '../canvasFont';
 import { drawCharacter } from './character';
 import { depth, FLOOR, KX, KY, project, THICK, WALL_H, type Fit, type Pt } from './iso';
-import type { PetState } from './pet';
+import { STRIDE, type PetState } from './pet';
 import {
   BEAM_LEN,
   BEAM_SHEAR,
@@ -1367,6 +1367,10 @@ function drawPlant(
 
 const DOG = {
   fur: '#f1ece2', // warm white — the floor is warm, and a pure white dog reads as a hole in it
+  /** The same coat in shadow, for the two legs on the far side of the body. A white dog trotting on
+   *  white legs is a body with four invisible sticks under it: the far pair has to sit *behind*
+   *  something, and depth on a flat painter is a tone, not a z-index. */
+  furFar: '#d6cec0',
   patch: '#332e2a', // soft near-black; true #000 goes flat and lifts out of the room's palette
   cream: '#fdfaf4', // muzzle, chest, paws, tail tip — a shade brighter than the coat, so it still separates
   earIn: '#8a6a62',
@@ -1388,6 +1392,54 @@ const DOG_SIZE = 1.25;
 const WAG_HZ = 4.6;
 
 /**
+ * How far a paw travels, in dog units, over one gait cycle — **derived from the walk, never tuned by
+ * eye.** A planted paw tracks backward under the dog at exactly ground speed, so its reach has to
+ * equal the ground the dog covers in a cycle, converted into the painter's units:
+ *
+ * · `STRIDE` logical units of floor per cycle (pet.ts owns the cadence);
+ * · `× MEAN_KX` — the dog is a side-on billboard on a 2:1 iso, so only the screen-*x* part of its
+ *   travel is visible as travel. That part is |cos θ − sin θ|·KX of the distance, whose mean over
+ *   every heading is √2·(2/π)·KX ≈ 0.637. Averaging is the honest move: a per-heading reach would
+ *   freeze the legs solid whenever the dog walked straight into the screen;
+ * · `÷ DOG_SIZE` — the painter's units are the dog's own, and the dog got bigger.
+ *
+ * The bug this replaces was a hand-picked ±2-unit swing left behind when the dog was scaled up: the
+ * paws moved a quarter of the ground the body did, so the animal skated across the room with its
+ * feet twitching. Anything that changes the dog's size or cadence now moves this with it.
+ */
+const MEAN_KX = 0.6366;
+const GAIT_REACH = (STRIDE * MEAN_KX) / DOG_SIZE;
+/** Fraction of each cycle a paw spends planted. A trot sits a shade above half. */
+const DUTY = 0.56;
+/** How high a paw lifts through its swing, dog units. */
+const GAIT_LIFT = 2.9;
+
+/**
+ * Where one paw is in its cycle: `x` in units of `GAIT_REACH` (−0.5 behind the hip → +0.5 ahead),
+ * `lift` in units of `GAIT_LIFT`.
+ *
+ * **Stance is a straight line and that is the whole point** — the paw is on the floor, so it tracks
+ * backward at precisely the speed the floor passes under it and does not scrub. The return is a
+ * Hermite whose end slopes *match that stance velocity at both handoffs*, so the paw is already
+ * moving backward as it touches down and keeps moving backward as it plants: C¹ across the join,
+ * with no hitch at the moment the weight lands. A sine would have stalled the paw dead at both ends
+ * of the swing, which is the sewing-machine look every cheap walk cycle has.
+ */
+export function pawCycle(u: number): { x: number; lift: number } {
+  const p = ((u % 1) + 1) % 1;
+  if (p < DUTY) return { x: 0.5 - p / DUTY, lift: 0 };
+  const q = (p - DUTY) / (1 - DUTY);
+  const v = -(1 - DUTY) / DUTY; // stance velocity, expressed in swing-normalised time
+  const q2 = q * q;
+  const q3 = q2 * q;
+  const x =
+    (2 * q3 - 3 * q2 + 1) * -0.5 + (q3 - 2 * q2 + q) * v + (-2 * q3 + 3 * q2) * 0.5 + (q3 - q2) * v;
+  // Lift weighted early: a paw leaves the floor smartly and comes down softly, which is what makes a
+  // trot land rather than stamp.
+  return { x, lift: Math.sin(Math.PI * Math.pow(q, 0.82)) };
+}
+
+/**
  * Draw the office dog at its current pose. Screen-space profile (like the members' billboarded faces): the
  * body reads side-on and `flip` mirrors it for leftward travel. Small on purpose — dog-sized next to ~40px
  * people — so judge it at 4× on /character-sheet, not here.
@@ -1405,10 +1457,32 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
   // The one place the dog's size is set: every offset and radius below is in these units, so scaling
   // here scales the whole animal without touching a single pose.
   const s = fit.scale * DOG_SIZE;
-  const m = pet.flip ? -1 : 1;
-  const px = (dx: number, dy: number): Pt => ({ x: p.x + dx * m * s, y: p.y + dy * s });
+
+  // The contact shadow is painted in world space, BEFORE the facing mirror. It belongs to the floor,
+  // not to the body: a pool of shade that narrowed as the dog swivelled would read as the light
+  // moving. During a trot it also breathes with the bob — the dog is lightest at the top of its
+  // stride, and a shadow that ignores that is what makes a walk cycle feel weightless.
+  const sh = DOG_SHADOW[pet.mode];
+  const air = pet.mode === 'walk' ? 0.06 * Math.cos(pet.phase * 4 * Math.PI) : 0;
+  ellipse(
+    ctx,
+    { x: p.x, y: p.y + 1.5 * s },
+    sh.r * (1 - air) * s,
+    sh.r * sh.flat * (1 - air) * s,
+    `rgba(0,0,0,${(sh.a * (1 - air * 1.6)).toFixed(3)})`,
+  );
 
   ctx.save();
+  // Facing is a CONTINUOUS mirror (`pet.face`), not a boolean flip: a change of direction plays as
+  // the body narrowing, passing through square-on and opening out the other way. Applied as a canvas
+  // transform rather than a sign on every offset, so radii, stroke widths and clip paths all
+  // foreshorten together — half a turn drawn with mirrored offsets but unmirrored radii is a dog
+  // turning inside out. Never quite zero: a degenerate matrix draws nothing at all.
+  const m = pet.face >= 0 ? Math.max(pet.face, 0.03) : Math.min(pet.face, -0.03);
+  ctx.translate(p.x, p.y);
+  ctx.scale(m, 1);
+  const px = (dx: number, dy: number): Pt => ({ x: dx * s, y: dy * s });
+
   const stroke = (a: Pt, b: Pt, w: number, color: string): void => {
     ctx.strokeStyle = color;
     ctx.lineWidth = w * s;
@@ -1438,13 +1512,44 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
     const back = px(x1 - (dx / d) * 2.4, y1 - (dy / d) * 2.4);
     stroke(back, b, w, DOG.cream);
   };
-  /** A leg with a cream paw at the bottom — `lift` raises the foot off the floor mid-stride. */
-  const leg = (x: number, lift: number, w = 2.6): void => {
-    const top = px(x, -9);
-    const foot = px(x, -lift);
-    stroke(top, foot, w, DOG.fur);
-    ellipse(ctx, px(x, -lift), w * 0.5 * s, w * 0.38 * s, DOG.cream);
+  /**
+   * A leg, hip to paw. The hip stays pinned to the body and only the paw travels, which is the
+   * difference between a leg and the sliding pole this used to draw: a limb whose top moved with its
+   * foot never looked attached to the animal.
+   *
+   * The knee is a quadratic control point pushed off the hip→paw line by `bend`, so the leg flexes
+   * as it folds under and straightens as it reaches. Cheap, and at office scale indistinguishable
+   * from solving the joint properly.
+   */
+  const limb = (
+    hipX: number,
+    footX: number,
+    lift: number,
+    w: number,
+    bend: number,
+    far = false,
+  ): void => {
+    const hip = px(hipX, -9.2);
+    const foot = px(footX, -lift);
+    // Perpendicular to the leg, so the bend reads the same whatever angle the stride puts it at.
+    const dx = foot.x - hip.x;
+    const dy = foot.y - hip.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const knee = {
+      x: (hip.x + foot.x) / 2 + (dy / len) * bend * s * m,
+      y: (hip.y + foot.y) / 2 - (dx / len) * bend * s * m,
+    };
+    ctx.strokeStyle = far ? DOG.furFar : DOG.fur;
+    ctx.lineWidth = w * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(hip.x, hip.y);
+    ctx.quadraticCurveTo(knee.x, knee.y, foot.x, foot.y);
+    ctx.stroke();
+    ellipse(ctx, foot, w * 0.56 * s, w * 0.42 * s, far ? DOG.furFar : DOG.cream);
   };
+  /** A standing leg — straight down from the hip, for the poses that are not mid-stride. */
+  const leg = (x: number, lift: number, w = 2.6): void => limb(x, x, lift, w, 0);
   /** A floppy ear: hangs down the side of the head and swings a little with the body. Both are black —
    * on a white dog the ears are the markings that read first, at any size. */
   const ear = (x: number, y: number, r: number, swing = 0): void => {
@@ -1528,7 +1633,6 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       // cat wraps into a bun), slow breathing that damps in as the settle completes.
       const settle = pet.mode === 'curl' ? Math.min(1, pet.modeT / CURL_VIS_S) : 1;
       const breathe = 1 + 0.05 * Math.sin(t * 1.9) * settle;
-      ellipse(ctx, px(0, 1.5), 15 * s, 4.6 * s, 'rgba(0,0,0,0.14)');
       tail(-9, -7, -14, 0.5, -4, 1, 2.8); // draped round the flank, behind the body — a dog flops, it doesn't wrap
       ellipse(ctx, px(-0.5, -5.5), 12.5 * s, 6.8 * breathe * s, DOG.fur);
       patches(-0.5, -5.5, 12.5, 6.8 * breathe);
@@ -1540,7 +1644,6 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       // Upright on the haunches, front legs straight, tail sweeping the floor behind — the supervising
       // pose, and the one members walk past. Tongue out: a sitting dog watching you work is a happy one.
       const wag = Math.sin(t * WAG_HZ * Math.PI * 2);
-      ellipse(ctx, px(0, 1.5), 13 * s, 4.2 * s, 'rgba(0,0,0,0.14)');
       tail(-6.5, -6, -12, -1 + wag * 1.2, -14.5, 0.5 + wag * 2.6, 2.8); // thumping the floor
       ellipse(ctx, px(-1.5, -7.5), 8.2 * s, 8.5 * s, DOG.fur); // haunches
       patches(-1.5, -7.5, 8.2, 8.5);
@@ -1557,7 +1660,6 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
     case 'stretch': {
       // The play-bow every dog wakes up with: front paws reaching, chest to the floor, rump high, tail up.
       const wag = Math.sin(t * WAG_HZ * Math.PI * 2);
-      ellipse(ctx, px(0, 1.5), 16 * s, 4.6 * s, 'rgba(0,0,0,0.14)');
       tail(-9.5, -16, -14 + wag * 2, -22, -11 + wag * 3.5, -26, 2.8);
       ellipse(ctx, px(-7, -13), 7.8 * s, 7.2 * s, DOG.fur); // haunches, up
       patches(-7, -13, 7.8, 7.2);
@@ -1570,26 +1672,51 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       break;
     }
     case 'walk': {
-      // Trotting: diagonal gait off the distance-driven phase, tail carried high and wagging, ears bouncing
-      // a beat behind the body. Far legs, then body, then near legs — so it reads as four feet, not a comb.
-      const cyc = pet.phase * Math.PI * 2;
-      const bob = Math.sin(cyc * 2) * 0.7;
+      // Trotting: the two diagonal pairs, each paw planted for most of its cycle so the feet hold the
+      // floor while the body travels over them. Far legs, then body, then near legs — so it reads as
+      // four feet, not a comb.
+      const a = pawCycle(pet.phase); // far hind + near front
+      const b = pawCycle(pet.phase + 0.5); // far front + near hind
+      // Two beats of rise and fall per cycle (one per diagonal), and a matching fore/aft surge — the
+      // body is thrown forward as each pair drives and eases back as it swings through.
+      const bob = -Math.cos(pet.phase * 4 * Math.PI) * 0.95;
+      const surge = Math.sin(pet.phase * 4 * Math.PI) * 0.55;
       const wag = Math.sin(t * WAG_HZ * Math.PI * 2);
-      ellipse(ctx, px(0, 1.5), 14.5 * s, 4.5 * s, 'rgba(0,0,0,0.12)');
-      tail(-9.5, -13 + bob, -15 + wag * 1.6, -21, -12 + wag * 3, -25.5, 2.8);
-      leg(-7 + Math.sin(cyc) * 2, -Math.max(0, Math.sin(cyc)) * 2.5 + 0.5, 2.2);
-      leg(6 + Math.sin(cyc + Math.PI) * 2, -Math.max(0, Math.sin(cyc + Math.PI)) * 2.5 + 0.5, 2.2);
-      ellipse(ctx, px(0, -12.5 + bob), 11.5 * s, 6 * s, DOG.fur);
-      patches(0, -12.5 + bob, 11.5, 6);
-      leg(-6 + Math.sin(cyc + Math.PI) * 2, -Math.max(0, Math.sin(cyc + Math.PI)) * 2.5 + 0.5);
-      leg(7 + Math.sin(cyc) * 2, -Math.max(0, Math.sin(cyc)) * 2.5 + 0.5);
-      collar(10.5, -16.5 + bob, 4);
-      head(12.5, -21 + bob, true, -bob * 1.2, true);
+      // A hind leg folds forward under the dog, a front leg folds back — opposite knees, which is
+      // most of what separates a dog's trot from a pantomime horse.
+      const hind = (c: typeof a, hipX: number, w: number, far = false): void =>
+        limb(hipX, hipX + c.x * GAIT_REACH, c.lift * GAIT_LIFT + 0.5, w, -1.5 - c.lift * 1.4, far);
+      const front = (c: typeof a, hipX: number, w: number, far = false): void =>
+        limb(hipX, hipX + c.x * GAIT_REACH, c.lift * GAIT_LIFT + 0.5, w, 1.4 + c.lift * 1.3, far);
+      // A sabre, not a flagpole: it leaves the rump going BACKWARD and only then sweeps up, so the
+      // curve reads as a tail carried high rather than an aerial bolted to the hips. The wag swings
+      // the tip through the arc; the base barely moves, which is how a tail actually works.
+      tail(-10 + surge, -13.5 + bob, -18 + wag * 1.2, -19, -15.5 + wag * 3.2, -25, 2.8);
+      hind(a, -7 + surge, 2.4, true);
+      front(b, 6 + surge, 2.4, true);
+      ellipse(ctx, px(surge, -12.5 + bob), 11.5 * s, 6 * s, DOG.fur);
+      patches(surge, -12.5 + bob, 11.5, 6);
+      hind(b, -6 + surge, 2.9);
+      front(a, 7 + surge, 2.9);
+      collar(10.5 + surge, -16.5 + bob, 4);
+      // The head lags the body by a fraction of a beat — the follow-through that stops the whole dog
+      // reading as one rigid piece bouncing on springs.
+      const lag = -Math.cos((pet.phase - 0.055) * 4 * Math.PI) * 0.95;
+      head(12.5 + surge * 1.15, -21 + lag, true, -lag * 1.2, true);
       break;
     }
   }
   ctx.restore();
 }
+
+/** The pool of shade each pose casts: radius and flatness in dog units, and its darkness. */
+const DOG_SHADOW: Record<PetState['mode'], { r: number; flat: number; a: number }> = {
+  sleep: { r: 15, flat: 0.307, a: 0.14 },
+  curl: { r: 15, flat: 0.307, a: 0.14 },
+  sit: { r: 13, flat: 0.323, a: 0.14 },
+  stretch: { r: 16, flat: 0.288, a: 0.14 },
+  walk: { r: 14.5, flat: 0.31, a: 0.12 },
+};
 
 /** How long the settle-down takes to visually damp the breathing in from the sit (matches pet.ts CURL_S). */
 const CURL_VIS_S = 1.1;

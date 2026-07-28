@@ -148,15 +148,80 @@ describe('stepPet', () => {
     expect(b.phase).toBeCloseTo(a.phase, 5);
   });
 
-  it('covers ground at PET_SPEED while walking', () => {
+  /**
+   * The dog winds up to PET_SPEED rather than starting at it — but it does get there, and it does not
+   * exceed it. Asserted over a stretch of open road (not the first tick), because the first tick is
+   * precisely the ramp this is checking exists.
+   */
+  it('winds up to PET_SPEED and holds it mid-trip', () => {
     const pet = wakePet(13);
     runUntil(pet, 'walk');
+    const first = pet.vel;
+    for (let i = 0; i < 30 && pet.mode === 'walk'; i++) stepPet(pet, 1 / 60);
+    expect(first).toBeLessThan(PET_SPEED);
+    if (pet.mode !== 'walk') return;
+    expect(pet.vel).toBeCloseTo(PET_SPEED, 5);
     const x0 = pet.lx;
     const y0 = pet.ly;
     stepPet(pet, 0.1);
     if (pet.mode === 'walk') {
       expect(Math.hypot(pet.lx - x0, pet.ly - y0)).toBeCloseTo(PET_SPEED * 0.1, 0);
     }
+  });
+
+  /** ...and sheds it again on the way in, so it does not stop dead on the last stride. */
+  it('brakes into the arrival instead of stopping dead', () => {
+    const pet = wakePet(13);
+    runUntil(pet, 'walk');
+    let slowest = Infinity;
+    for (let i = 0; i < 2000 && pet.mode === 'walk'; i++) {
+      stepPet(pet, 1 / 60);
+      if (pet.mode === 'walk') slowest = Math.min(slowest, pet.vel);
+    }
+    expect(pet.mode).not.toBe('walk');
+    expect(slowest).toBeLessThan(PET_SPEED); // it was still slowing when it got there
+  });
+});
+
+/**
+ * Turning. The facing INTENT (`flip`) snaps the moment the heading decides; the facing that is DRAWN
+ * (`face`) chases it, which is what makes a change of direction a swivel rather than a teleport.
+ */
+describe('turning', () => {
+  it('eases the drawn facing toward the intent rather than snapping it', () => {
+    const pet = createPet(() => 0.5);
+    pet.flip = true; // "turn and look left"
+    stepPet(pet, 1 / 60);
+    expect(pet.face).toBeLessThan(1); // it has started to turn
+    expect(pet.face).toBeGreaterThan(-1); // and is nowhere near done
+    for (let i = 0; i < 60; i++) stepPet(pet, 1 / 60);
+    expect(pet.face).toBe(-1); // lands exactly, so the room can park its frame loop
+  });
+
+  it('keeps the room awake through a turn a sleeping dog started', () => {
+    const pet = createPet(() => 0.5);
+    expect(stepPet(pet, 1 / 60)).toBe(false); // settled and square-on: nothing to draw
+    pet.flip = true;
+    expect(stepPet(pet, 1 / 60)).toBe(true); // mid-swivel: it needs frames
+    for (let i = 0; i < 60; i++) stepPet(pet, 1 / 60);
+    expect(stepPet(pet, 1 / 60)).toBe(false); // and gives them back when it lands
+  });
+
+  it('holds its facing down a diagonal instead of fluttering', () => {
+    // Screen-space x is (lx − ly), so a route heading equally in +lx and +ly is walking straight INTO
+    // the screen: no honest facing exists, and the dog must simply keep the one it had.
+    const pet = createPet(() => 0.5);
+    pet.lx = 300;
+    pet.ly = 300;
+    pet.path = [
+      { lx: 300, ly: 300 },
+      { lx: 500, ly: 500 },
+    ];
+    pet.seg = 0;
+    pet.mode = 'walk';
+    pet.flip = true;
+    for (let i = 0; i < 200 && pet.mode === 'walk'; i++) stepPet(pet, 1 / 60);
+    expect(pet.flip).toBe(true);
   });
 });
 
