@@ -35,7 +35,7 @@ vi.mock('../client.js', () => ({
   },
 }));
 
-const { buildSkewNotes, inspectProvisioning, runCheckBuild } = await import('./doctor.js');
+const { buildSkewNotes, inspectProvisioning, runSessionProbe } = await import('./doctor.js');
 const { writeGuidance, CANONICAL_SKILL_PATH } = await import('./guidance.js');
 const { writeProvisionManifest } = await import('./manifest.js');
 
@@ -648,24 +648,54 @@ describe('build skew (ADR 135) — warn-only freshness, never drift', () => {
     expect(down).toEqual([]);
   });
 
-  it('runCheckBuild prints one line on mismatch and ALWAYS exits 0 (hook contract)', async () => {
+  // Found live: a seat with uncommitted edits builds `<sha>-dirty` while the daemon runs clean
+  // `<sha>`. Both truncate to the same 7 chars for display, so the line read "your CLI build
+  // (3260685) differs from the daemon (3260685)" — and prescribed a rebuild that could not help,
+  // because the difference was the developer's own uncommitted work. It fired on every active seat
+  // at every session start, which is the noise failure mode, not a freshness signal.
+  it('does not call an uncommitted working tree skew (same commit, `-dirty` marker)', async () => {
+    const dirty = await buildSkewNotes({
+      cliRef: `${sha('a')}-dirty`,
+      daemonBuild: async () => sha('a'),
+      repoDir: noGit(),
+    });
+    expect(dirty).toEqual([]);
+    // A genuinely different commit still reports, marker or not.
+    const real = await buildSkewNotes({
+      cliRef: `${sha('a')}-dirty`,
+      daemonBuild: async () => sha('d'),
+      repoDir: noGit(),
+    });
+    expect(real.some((n) => n.includes('differs from the daemon'))).toBe(true);
+  });
+
+  it('runSessionProbe prints one line on mismatch and ALWAYS exits 0 (hook contract)', async () => {
     const lines: string[] = [];
     const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((c: string) => {
       lines.push(String(c));
       return true;
     }) as never);
+    // An unprovisioned temp folder so the artifact half of the probe stays silent, isolating skew.
+    const bare = mkdtempSync(join(tmpdir(), 'musterd-bare-'));
     try {
-      const mismatch = await runCheckBuild({ cliRef: sha('a'), daemonBuild: async () => sha('d') });
+      const mismatch = await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => sha('d'),
+        cwd: bare,
+      });
       expect(mismatch).toBe(0);
       expect(lines.join('')).toContain('differs from the daemon');
 
       lines.length = 0;
-      expect(await runCheckBuild({ cliRef: sha('d'), daemonBuild: async () => sha('d') })).toBe(0);
-      expect(lines.join('')).toBe('');
-      expect(await runCheckBuild({ cliRef: undefined })).toBe(0); // unstamped → instant silence
       expect(
-        await runCheckBuild({
+        await runSessionProbe({ cliRef: sha('d'), daemonBuild: async () => sha('d'), cwd: bare }),
+      ).toBe(0);
+      expect(lines.join('')).toBe('');
+      expect(await runSessionProbe({ cliRef: undefined, cwd: bare })).toBe(0); // unstamped → silence
+      expect(
+        await runSessionProbe({
           cliRef: sha('a'),
+          cwd: bare,
           daemonBuild: async () => {
             throw new Error('down');
           },
@@ -674,6 +704,139 @@ describe('build skew (ADR 135) — warn-only freshness, never drift', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+/**
+ * ADR 171 increment 2 — detection delivery.
+ *
+ * The doctor's drift lines reached nobody: the `SessionStart` hook runs this probe and nothing else,
+ * so guidance/hook drift was visible only to whoever deliberately typed `musterd init --check`. The
+ * probe now carries artifact drift too. Its contract is the constraint: pure file I/O (no network,
+ * no git, and no `detect()`, which shells out to `claude mcp get`), silent when clean, always exit 0,
+ * and — because this stdout lands in model context every session — ONE bounded line however many
+ * files drifted.
+ */
+describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
+  const sha = (c: string) => c.repeat(40);
+
+  beforeEach(() => {
+    h.harnesses = [];
+    h.primer = 'managed';
+    h.binding = null;
+    h.bindings = {};
+  });
+
+  function tmp(): string {
+    return mkdtempSync(join(tmpdir(), 'musterd-probe-'));
+  }
+
+  /** Capture the probe's stdout for a folder, with build skew forced silent. */
+  async function probe(cwd: string): Promise<string[]> {
+    const lines: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((c: string) => {
+      lines.push(String(c));
+      return true;
+    }) as never);
+    try {
+      const code = await runSessionProbe({
+        cliRef: sha('d'),
+        daemonBuild: async () => sha('d'), // equal → no skew line
+        cwd,
+      });
+      expect(code).toBe(0); // the hook contract, asserted on every single path
+    } finally {
+      spy.mockRestore();
+    }
+    return lines.join('').split('\n').filter(Boolean);
+  }
+
+  it('is silent on a folder with no musterd provisioning at all', async () => {
+    expect(await probe(tmp())).toEqual([]);
+  });
+
+  it('is silent on a fully current folder — the steady state costs zero tokens', async () => {
+    const dir = tmp();
+    const g = writeGuidance(dir, [], { team: 'dawn' });
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: g.files, contentVersion: g.contentVersion },
+    });
+    expect(await probe(dir)).toEqual([]);
+  });
+
+  it('names guidance drift the doctor would have kept to itself', async () => {
+    const dir = tmp();
+    const g = writeGuidance(dir, [], { team: 'dawn' });
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: g.files, contentVersion: g.contentVersion },
+    });
+    h.harnesses = [
+      {
+        label: 'Claude Code',
+        guidance: {
+          frontmatter: 'claude-code',
+          skillPath: '.musterd/skill/SKILL.md',
+          nudgeSkillPath: '.claude/skills/musterd-nudge-relay/SKILL.md',
+        },
+        detect: async () => ({ installed: true, configured: true, detail: 'Claude Code' }),
+      },
+    ];
+    const lines = await probe(dir);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('--refresh-guidance');
+  });
+
+  it('names hook drift, and stays ONE line however many artifacts drifted', async () => {
+    const dir = tmp();
+    const g = writeGuidance(dir, [], { team: 'dawn' });
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: g.files, contentVersion: g.contentVersion },
+    });
+    // A settings file with no musterd hooks at all: every hook carrying a `missing` line fires.
+    mkdirSync(join(dir, '.claude'), { recursive: true });
+    writeFileSync(join(dir, '.claude', 'settings.local.json'), '{"hooks":{}}\n');
+    h.harnesses = [
+      {
+        label: 'Claude Code',
+        guidance: {
+          frontmatter: 'claude-code',
+          skillPath: '.musterd/skill/SKILL.md',
+          nudgeSkillPath: '.claude/skills/musterd-nudge-relay/SKILL.md',
+        },
+        detect: async () => ({ installed: true, configured: true, detail: 'Claude Code' }),
+      },
+    ];
+    const lines = await probe(dir);
+    // The token guard: several hooks AND a guidance file drifted, and it is still one line.
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('--refresh-guidance');
+    expect(lines[0]).toContain('--refresh-hooks');
+  });
+
+  it('names only the repair that is actually needed', async () => {
+    const dir = tmp();
+    const g = writeGuidance(dir, [], { team: 'dawn' });
+    writeProvisionManifest(dir, {
+      role: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: g.files, contentVersion: g.contentVersion },
+    });
+    mkdirSync(join(dir, '.claude'), { recursive: true });
+    writeFileSync(join(dir, '.claude', 'settings.local.json'), '{"hooks":{}}\n');
+    const lines = await probe(dir); // no harness guidance declared → guidance is clean
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('--refresh-hooks');
+    expect(lines[0]).not.toContain('--refresh-guidance');
   });
 });
 

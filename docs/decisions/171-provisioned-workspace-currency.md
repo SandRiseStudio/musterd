@@ -92,9 +92,11 @@ doctrine for them.
 
 ### 1. Anchor the guidance check to the expected set
 
-`inspectGuidance` iterates `guidanceTargets(h)` for each harness **configured in this folder** —
-mirroring the existing `claudeConfigured` gate on the hook check, so a machine without Cursor never
-gets phantom drift. Three outcomes, and the ordering matters:
+`inspectGuidance` iterates `guidanceTargets(h)` for each harness **established in this folder** —
+`establishedHarnesses`, the same predicate `--refresh-guidance` uses to decide what it will rewrite,
+so the doctor expects exactly what its own prescribed repair would write. (This ADR first said
+"configured" and was wrong; see the Result section — the difference put four uncleanable lines on a
+live seat.) Three outcomes, and the ordering matters:
 
 - **expected, absent** → drift, naming that the file postdates this folder's provisioning and
   prescribing `--refresh-guidance`. This is the line that would have caught nudge-relay at 0-of-8.
@@ -300,10 +302,55 @@ state is silence, so it costs nothing until the next capability ships — precis
 speak.
 
 The periodic sweep is not rejected, only demoted: it remains the answer **if** a delivered line still
-fails to get the fleet repaired, which is now a question that can actually be asked. Tracked as lane
-`01KYMY7TVCJCQG7PTQWS59C9M2`, which also carries the `FEATURE_EPOCH` obligation — changing that
-hook's text without bumping the epoch would leave ADR 168's downgrade guard unable to tell the new
-text from the old.
+fails to get the fleet repaired, which is now a question that can actually be asked.
+
+### Result — 2026-07-28, increment 2
+
+**Shipped, and it needed no hook-text change at all.** `--check-build` turned out to have exactly one
+call site in the repo — the `SessionStart` hook string itself — and to be absent from the help catalog
+and the arg table. It is a private hook-facing verb, so the artifact check went _inside_ that command.
+Three consequences, and the third is the one worth generalising:
+
+1. No hook text changed, so the `FEATURE_EPOCH` obligation this increment was expected to carry never
+   arose.
+2. Seats whose installed hook text is **stale** still gain the capability, because they invoke the
+   same flag.
+3. **Behaviour placed in the CLI reaches every seat whose hook is already installed; behaviour placed
+   in the hook _string_ reaches only seats that re-run provisioning** — which is the exact rot this
+   ADR exists to close. Given the choice, put capability on the CLI side of that line. This increment
+   is the first case where that rule paid, and it turned the expected change into a smaller one.
+
+The flag keeps its now-narrow name deliberately: every hook on the fleet calls it by that name, and
+renaming it would strand each seat until it re-provisioned.
+
+**Measured against the hook contract.** Silent on a clean folder; **0.4 s** wall clock against the
+2 s budget; exit 0 on every path. With one guidance file hidden, the probe emits exactly one line
+naming only the repair actually needed, and restoring the file returns it to silence:
+
+```
+musterd: this folder's provisioning is behind what this build writes — 1 guidance file(s)
+missing or stale (ADR 171). Run `musterd init --refresh-guidance` to repair, or
+`musterd init --check` for the detail.
+```
+
+Output is **one bounded line however many artifacts drifted** — the token guard, since this stdout is
+charged to model context at every session start. A test pins it with several hooks and a guidance
+file drifting simultaneously.
+
+**A drive-by defect, found because this line was finally being read carefully.** The build-skew half
+was firing on every actively-developed seat and saying nothing true: a worktree with uncommitted
+edits builds `<sha>-dirty` while the daemon runs a clean `<sha>`, and both truncate to the same seven
+characters for display. The line read `your CLI build (3260685) differs from the daemon (3260685)`,
+and prescribed a rebuild that could not help, because the difference _was_ the developer's own
+uncommitted work. Skew now compares commits with the marker stripped, so an unsaved working tree is
+not called stale while a genuinely different commit still reports. This was ADR 168's noise failure
+mode running unnoticed in the one line every session already printed — which is a fair warning about
+how long a wrong line can survive when nothing forces anyone to read it.
+
+**What this does not yet answer.** Whether a delivered line actually gets a fleet repaired. The
+fleet is currently clean, so the first real exercise is the next capability shipped as a hook or a
+guidance file — and unlike the retracted experiment, that measurement is now valid, because the line
+reaches someone.
 
 ## Consequences
 

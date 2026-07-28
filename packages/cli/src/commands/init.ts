@@ -1,5 +1,5 @@
 import type { Parsed } from '../args.js';
-import { inspectProvisioning, runCheckBuild, runInitDoctor } from '../onboard/doctor.js';
+import { inspectProvisioning, runInitDoctor, runSessionProbe } from '../onboard/doctor.js';
 import { runInit, runPruneBindings, runRefreshGuidance, runRefreshHooks } from '../onboard/init.js';
 import { theme } from '../render/theme.js';
 import { wireCommand } from './wire.js';
@@ -27,9 +27,11 @@ export async function initCommand(parsed: Parsed): Promise<number> {
   if (parsed.flags['prune-bindings']) {
     return runPruneBindings({ apply: Boolean(parsed.flags['apply']) });
   }
-  // `--check-build` (ADR 135): the hook-cheap freshness probe — one health fetch, one line on
-  // mismatch, always exit 0. Kept separate from `--check` (which reads manifests + runs git).
-  if (parsed.flags['check-build']) return runCheckBuild();
+  // `--check-build`: the SessionStart probe — build skew (ADR 135) plus artifact drift (ADR 171),
+  // one health fetch and pure file I/O, at most two bounded lines, always exit 0. Kept separate from
+  // `--check`, which additionally runs `detect()`, a roster fetch and git. The flag keeps its
+  // now-narrow name deliberately: every installed hook on the fleet calls it (see runSessionProbe).
+  if (parsed.flags['check-build']) return runSessionProbe();
   if (parsed.flags['check']) {
     const code = await runInitDoctor(Boolean(parsed.flags['json']));
     // --fix folds the "now run `musterd init`" follow-up the check would otherwise print into one step.
