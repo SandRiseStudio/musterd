@@ -498,7 +498,7 @@
   bottom: var(--lc-4);
   z-index: var(--lc-z-overlay);
   pointer-events: none;
-  opacity: 0.34;
+  opacity: 0.45; /* nick, 2026-07-28: 34% nearly vanished into the midday floor gradient */
 }
 
 .lc-office__mark-lockup {
