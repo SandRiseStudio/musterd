@@ -53,6 +53,7 @@ src/
     validate.ts       // thin wrappers over @musterd/protocol schemas + error mapping
     route.ts          // routeEnvelope(): the ONE validate+persist+deliver path (WS & HTTP share it)
     gate.ts           // adjudicateGate(): PreToolUse enforcement decision for a matched tool call — dispatch by kind to gateA (lane-ownership deny) / gateB (action→ask: block = deny-IS-emit — raise a species:approve/tier:blocking ask via routeEnvelope, fingerprint dedup, human-accept release); one shapes-only lane.gate/action.gate row (ADR 150)
+    nudge.ts          // the ccd delivery rail's daemon half (ADR 167): composeNudgeLine (deterministic, structured-fields-only — the ADR 128 discipline) + deliveryHintFor (predicate: directed hint-act, live recipient, derived 10-min damping)
   notify/
     slack.ts          // ask-stream Slack delivery: formatAskSlackText + postSlackWebhook — the daemon's one outbound call, fire-and-forget, opt-in via policy ask_slack_webhook (ADR 149)
   transport/

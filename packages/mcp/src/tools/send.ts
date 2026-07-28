@@ -150,11 +150,22 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
           args.act === 'ask' && isAskTier(meta['tier'])
             ? askContractText(envelope.id, meta['tier'], serverContract?.unblocker_reachable)
             : null;
+        // The delivery hint (ADR 167): the daemon says the recipient is live on this machine, and the
+        // relay is the SENDER's to make (only live desktop sessions hold the harness's session-send
+        // tool). Quoted verbatim so the model can relay it unmodified — the fingerprint check on the
+        // other end verifies exactly that. Absent hint (older daemon, offline recipient, damped) ⇒
+        // this response is byte-identical to before the ADR.
+        const hint = ackBody?.delivery_hint;
+        const hintGuidance = hint
+          ? ` Recipient is live: if you have the ccd session tools, find their session via ` +
+            `list_sessions (seat-name label) and send_message this line VERBATIM: "${hint.nudge_text}"`
+          : '';
         // Structured-first (ADR 144 inc 3): the id/thread a programmatic caller needs to keep the
         // exchange threaded (reply_to / thread on the next send), without parsing the prose.
-        const text = askGuidance
-          ? `sent ask to ${args.to} (id=${envelope.id}). ${askGuidance}`
-          : `sent ${args.act} to ${args.to} (id=${envelope.id})`;
+        const text =
+          (askGuidance
+            ? `sent ask to ${args.to} (id=${envelope.id}). ${askGuidance}`
+            : `sent ${args.act} to ${args.to} (id=${envelope.id})`) + hintGuidance;
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {
@@ -165,6 +176,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
             ...(args.act === 'ask' && isAskTier(meta['tier'])
               ? { ask_contract: serverContract ?? askContract(meta['tier']) }
               : {}),
+            ...(hint ? { delivery_hint: hint } : {}),
           },
         };
       } catch (err) {
