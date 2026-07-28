@@ -63,9 +63,15 @@ export type AuditAction =
   // ADR 169: the two-stage close instrument. `lane.ready_for_review` is the worker's "technically
   // complete" claim (detail: { lane, owner, merged? }). `lane.closed` is EVERY terminal edge —
   // verified-ness is DERIVED here and only here (detail: { lane, state, closed_by, owner_at_close,
-  // verified, reason: counterpart_confirm|review_timeout|self_close|abandoned, worker_family,
+  // verified, reason: counterpart_confirm|review_timeout|no_candidate|self_close|abandoned,
+  // worker_family,
   // reviewer_family?, time_in_review_ms? }); owner_at_close is pinned so a post-close handoff can
-  // never flip a verdict. `lane.review_sent_back` is the review catch — a counterpart returned a
+  // never flip a verdict. `no_candidate` is the honest name for the degradation where the picker
+  // found nobody, so no ask was ever sent — distinct from `review_timeout`, which asserts somebody
+  // WAS asked and did not answer; conflating them makes a fleet with no eligible reviewer look like
+  // one whose reviewers ignore their asks. The ready row records which happened
+  // (`reviewer`+`route`, or `no_candidate`), so the close edge derives it instead of guessing.
+  // `lane.review_sent_back` is the review catch — a counterpart returned a
   // ready_for_review lane to a live state (detail: { lane, reviewer, owner }).
   | 'lane.ready_for_review'
   | 'lane.closed'
@@ -301,4 +307,36 @@ export function listAudit(
       AuditRow
     >('SELECT * FROM audit WHERE team_id = ? ORDER BY ts DESC, id DESC LIMIT ?')
     .all(teamId, limit);
+}
+
+/**
+ * Was a review actually ROUTED the last time this lane entered `ready_for_review`? (ADR 169.)
+ *
+ * The close edge needs this to tell two very different unverified closes apart: an ask that was sent
+ * and went unanswered (`review_timeout`) versus no eligible counterpart existing at all
+ * (`no_candidate`). Only the ready edge knows, so it writes the answer down and this reads it back —
+ * derived from the audit trail rather than stored on the lane, the same discipline the verified
+ * verdict itself follows.
+ *
+ * `undefined` when there is no ready row to read (a legacy lane that entered review before this was
+ * recorded); callers should fall back to the old label rather than invent one.
+ */
+export function reviewWasRouted(db: Database, teamId: string, laneId: string): boolean | undefined {
+  const row = db
+    .prepare<[string, string], { detail: string }>(
+      `SELECT detail FROM audit
+         WHERE team_id = ? AND action = 'lane.ready_for_review'
+           AND json_extract(detail, '$.lane') = ?
+       ORDER BY ts DESC, id DESC LIMIT 1`,
+    )
+    .get(teamId, laneId);
+  if (!row) return undefined;
+  try {
+    const d = JSON.parse(row.detail) as { reviewer?: string; no_candidate?: boolean };
+    if (d.no_candidate === true) return false;
+    if (typeof d.reviewer === 'string' && d.reviewer.length > 0) return true;
+    return undefined; // pre-fix row: it recorded neither, so we genuinely do not know
+  } catch {
+    return undefined;
+  }
 }

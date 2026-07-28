@@ -111,7 +111,9 @@ transitions below are the _supported_ paths; others remain legal and merely deri
 - **Self-close** (the degradation, and the backward-compat path): the owner moves
   `ready_for_review → done` after the ask times out, or any seat calls today's `lane_resolve`
   straight from a live state. Both succeed — never a wedge, never an error. Audit
-  `lane.closed { verified: false, reason: 'review_timeout' | 'self_close', ask_ref? }`. The
+  `lane.closed { verified: false, reason: 'review_timeout' | 'no_candidate' | 'self_close',
+ask_ref? }` — `no_candidate` when the picker found nobody, so no ask was ever sent, kept
+  distinct from a real timeout for the reasons in the eval below. The
   verb response gains one advisory line: _"unverified close recorded — prefer `lane_ready`
   when a counterpart is live."_ Existing callers keep working byte-for-byte; only the response
   text grows.
@@ -184,14 +186,41 @@ time the unverified-close rate is **100%** — every close in the log's history 
 which is precisely the condition this ADR exists to make visible. _Metrics:_ the
 **unverified-close rate** (closed rows with `verified: false` / all closed — target: falls as
 the fleet adopts `lane_ready`; a floor well above zero is expected and honest, since solo
-sessions self-close by design); the **review-catch rate** (`review_sent_back` /
-`ready_for_review` — the number that measures whether review does anything; if it sits at zero
-for weeks while reviews happen, review is rubber-stamping and the feature is decorative); the
-**family-diversity coverage** (share of verified closes where `reviewer_family ≠
-worker_family` — target 100% by construction once routing works; below that means the picker
-leaked a same-family review). _Counter-metric:_ the review-ask timeout rate — if nearly all
-review asks expire unanswered, the tier or the routing is wrong and the feature is adding a 5 m
-tax with no review.
+sessions self-close by design); the **review-catch rate** (`review_sent_back` / reviews
+**actually routed** — the number that measures whether review does anything; if it sits at zero
+for weeks while reviews are being routed, review is rubber-stamping and the feature is
+decorative); the **no-candidate degradation rate** (`lane.closed` rows with
+`reason: no_candidate` / all rows entering review — what share of "reviews" never happened
+because the picker found nobody eligible); the **family-diversity coverage** (share of verified
+closes where `reviewer_family ≠ worker_family` — target 100% by construction once routing works;
+below that means the picker leaked a same-family review). _Counter-metric:_ the review-ask
+timeout rate — if nearly all _routed_ asks expire unanswered, the tier or the routing is wrong
+and the feature is adding a 5 m tax with no review.
+
+**Why the denominator is routed asks, not lanes marked ready** (added 2026-07-28 from the first
+live data). The two metrics above are the same number under the original definition, and that
+made the headline metric unreadable. A catch rate of zero has two opposite causes — reviewers
+looked and found nothing (rubber-stamping: the feature IS decorative), or no reviewer was ever
+eligible so nothing was reviewed (the feature was never exercised) — and retiring the feature is
+the right response to only the first. The first two live uses of `lane_ready` were both the
+second case: miley's and ryder's lanes went `ready_for_review → done` in 8.5 s and 13.0 s on a
+fleet whose live seats were all Claude-family, so `pickReviewCounterpart` had nobody to route to
+and correctly degraded. Splitting the two apart is also what keeps the counter-metric honest: it
+would otherwise have read a 100% ask-timeout rate against **zero asks sent**, indicting the tier
+choice and the picker for what is really an empty candidate pool.
+
+That split needed instrumentation, not just arithmetic. The ready edge is the only place that
+knows whether a counterpart was found, so it now records the outcome (`reviewer` + `route`, or
+`no_candidate: true`) in the `lane.ready_for_review` detail, and the close edge derives
+`reason: no_candidate` from it instead of labelling every owner-close a `review_timeout` — a
+label that asserts somebody was asked and did not answer. Legacy rows that recorded neither keep
+the old label rather than having a verdict invented about the past.
+
+_Reading the numbers requires an admin credential:_ `GET /audit` is admin-only, so an agent seat
+cannot compute any of this for itself. That is deliberate (the log carries governance rows) but
+it means the eval is a human-run or admin-run analysis, not something a seat can self-serve — if
+that becomes a barrier to it ever being computed, the fix is a non-admin projection of these
+counts in `musterd report`, not widening audit access.
 
 **Experiment.** No A/B: the baseline arm (single-stage close) is the entire recorded history,
 measured not assumed. Verification is adversarial-by-construction: the through-DB integration
