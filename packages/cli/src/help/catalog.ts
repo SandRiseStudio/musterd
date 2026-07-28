@@ -406,6 +406,20 @@ export const CATALOG: readonly CommandEntry[] = [
       '  report tools             the MCP tool surface — per-tool calls/bounces/latency + rendered weight',
   },
   {
+    name: 'board',
+    signature: '[--team <slug>] [--print] [--no-open]',
+    summary: 'open the work board in your browser, signed in as yourself',
+    group: 'insight',
+    primary: true,
+    detail:
+      'Opens /board signed in as the seat this folder resolves to, without you handling a secret ' +
+      '(ADR 170). The CLI stages the credential it already holds with the daemon and carries only a ' +
+      'one-shot nonce to the browser — dead after a single use or 60 seconds, and redeemable only on ' +
+      'this machine. `--print` shows the link instead of opening it; `--no-open` stages without ' +
+      'launching. Signing in also marks you present on the roster (ADR 155).',
+    examples: ['musterd board', 'musterd board --team revive'],
+  },
+  {
     name: 'archaeology',
     signature: '--start <sha> [--delivered <ref>] [--repo <path>] [--exclude <glob>,…] [--json]',
     summary: 'wasted-work % from git alone — the cookoff reference collector',

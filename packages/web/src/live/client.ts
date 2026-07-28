@@ -328,6 +328,33 @@ export function loadObserver(team: string): ObserverCreds | null {
 export function saveObserver(team: string, creds: ObserverCreds) {
   window.localStorage.setItem(observerKey(team), JSON.stringify(creds));
 }
+/**
+ * Redeem a sign-in nonce (ADR 170) — the browser end of `musterd board`. The nonce arrives in the
+ * URL fragment (never sent to a server by the browser, so it cannot land in an access log) and is
+ * spent here for the member identity it stands for. Single-use and short-lived by construction, so
+ * a failure is ordinary rather than exceptional: an expired or already-opened link 404s, and the
+ * caller falls back to the normal connect form.
+ */
+export async function redeemSignin(
+  team: string,
+  nonce: string,
+): Promise<{ as: string; credential: string }> {
+  const res = await fetch(
+    `/teams/${encodeURIComponent(team)}/signin-handoff/${encodeURIComponent(nonce)}`,
+  );
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) {
+    const err = (json as { error?: { code?: string; message?: string } }).error;
+    throw new LiveFetchError(
+      err?.message ?? `HTTP ${res.status}`,
+      err?.code ?? `http_${res.status}`,
+      res.status,
+    );
+  }
+  return json as { as: string; credential: string };
+}
+
 export function forgetObserver(team: string) {
   window.localStorage.removeItem(observerKey(team));
 }

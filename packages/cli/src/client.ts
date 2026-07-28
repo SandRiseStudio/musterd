@@ -385,6 +385,22 @@ export class HttpClient {
   }
 
   /** The insight report (ADR 050/084) — `GET /teams/:slug/report`, one server-side projection. */
+  /**
+   * Stage a browser sign-in (ADR 170) — hand the daemon the credential this CLI already holds and
+   * get back a one-shot, 60-second nonce to put in the URL fragment. The credential travels in the
+   * body (loopback POST), never in a URL; the daemon checks it resolves to `member` before staging,
+   * so this can only relay an authority we already had.
+   */
+  async stageSigninHandoff(
+    slug: string,
+    body: { member: string; credential: string },
+  ): Promise<{ nonce: string; expires_in_ms: number }> {
+    return (await this.request('POST', `/teams/${slug}/signin-handoff`, body)) as {
+      nonce: string;
+      expires_in_ms: number;
+    };
+  }
+
   async report(slug: string): Promise<Report> {
     const json = await this.request('GET', `/teams/${slug}/report`);
     const parsed = ReportSchema.safeParse(json);

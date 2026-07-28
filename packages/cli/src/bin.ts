@@ -6,6 +6,7 @@ import { agentCommand } from './commands/agent.js';
 import { archaeologyCommand } from './commands/archaeology.js';
 import { auditCommand } from './commands/audit.js';
 import { availabilityCommand } from './commands/availability.js';
+import { boardCommand } from './commands/board.js';
 import { broadcastCommand } from './commands/broadcast.js';
 import { claimCommand } from './commands/claim.js';
 import { doneCommand } from './commands/done.js';
@@ -208,6 +209,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return goalCommand(rest);
     case 'report':
       return reportCommand(rest);
+    case 'board':
+      return boardCommand(rest);
     case 'inbox':
       return inboxCommand(rest);
     case 'nudge':
