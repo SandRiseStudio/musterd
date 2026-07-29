@@ -353,6 +353,57 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(lines.join('\n')).toContain('wake deferred: scout');
   });
 
+  it('a FAILED wake is loud in the host log — the reason, not a placid "polling"', async () => {
+    // The dogfood silence (lane 01KYQ913P5): the reason reached the span and the daemon's audit row,
+    // and nothing a human reads. Every wake died on ENOENT for hours while the log said "◉ polling".
+    const { client } = fakeClient([order()]);
+    const lines: string[] = [];
+    await pollHostOnce(
+      deps({
+        backends: new Map([
+          [
+            'claude-code',
+            {
+              harness: 'claude-code',
+              wake: async () => ({
+                outcome: {
+                  occupied: false,
+                  session: 'fresh' as const,
+                  reason: 'spawn failed: spawn /gone/claude ENOENT',
+                },
+                settled: Promise.resolve(undefined),
+              }),
+            },
+          ],
+        ]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+        log: (l) => lines.push(l),
+      }),
+    );
+    const log = lines.join('\n');
+    expect(log).toContain('wake FAILED for scout');
+    expect(log).toContain('ENOENT');
+  });
+
+  it('a DEFERRAL stays quiet — the local-session guard working as designed is not a failure', async () => {
+    const { client } = fakeClient([order()]);
+    const lines: string[] = [];
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', fakeBackend().backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+        log: (l) => lines.push(l),
+        liveness: () => ({
+          state: 'live',
+          session: { harness: 'claude-code', id: 'cap-1', started_at: 1 },
+        }),
+      }),
+    );
+    expect(lines.join('\n')).not.toContain('wake FAILED');
+  });
+
   it('the guard passes resumable/ended/none states straight through to the backend', async () => {
     for (const state of ['resumable', 'gc-expired', 'none'] as const) {
       const { client, calls } = fakeClient([order()]);
