@@ -2391,7 +2391,11 @@ export async function handleHttp(
               owner: lane.owner_seat,
               ...(lane.merged ? { merged: lane.merged } : {}),
               ...(pick ? { reviewer: pick.reviewer, route: pick.route } : { no_candidate: true }),
-              ...(humanRequired ? { human_required: true } : {}),
+              // ALWAYS written, both ways (ADR 173 correction #1). Omitting the `false` made absence
+              // ambiguous — "not required" and "written before this field existed" were the same
+              // row — which is what forced the read to serve a legacy row as a confident no. With
+              // the boolean always present, absence means exactly "legacy", and the read can abstain.
+              human_required: humanRequired,
               ...(posture
                 ? {
                     family_posture: {
@@ -2490,11 +2494,18 @@ export async function handleHttp(
           const routing =
             before.state === 'ready_for_review'
               ? reviewRouting(ctx.db, team.id, lane.id)
-              : { routed: undefined as boolean | undefined, human_required: false };
+              : {
+                  routed: undefined as boolean | undefined,
+                  human_required: undefined as boolean | undefined,
+                };
           // ADR 172: even a verified close can miss the requirement — an agent counterpart
           // confirming a risky lane is a real review, but not the HUMAN one the risk demanded.
+          // `=== true`, never truthiness: an abstaining read must not assert the flag (ADR 173
+          // clause 3 — a consumer that folds `unknown` back into falsy re-creates the defect here,
+          // where it is invisible). A lane that never entered review abstains for a different and
+          // equally honest reason: nothing recorded a requirement because nothing was ever asked.
           const humanReviewMissed =
-            routing.human_required &&
+            routing.human_required === true &&
             lane.state === 'done' &&
             // kind-only, not `|| is_admin`: admins can only be humans (ADR 172), and a stale
             // agent-admin row must not read as having satisfied a human-review requirement.
@@ -2525,7 +2536,12 @@ export async function handleHttp(
                         // before the outcome was recorded) keeps the old label rather than
                         // inventing a verdict about the past.
                         routing.routed === false
-                        ? routing.human_required
+                        ? // Same discipline one level down: only a RECORDED requirement earns the
+                          // `human_review_missed` label. A row that abstains keeps the older,
+                          // weaker `no_candidate` — the label it would have carried before the
+                          // requirement was ever recorded — rather than a verdict about a past
+                          // that never wrote one down.
+                          routing.human_required === true
                           ? 'human_review_missed'
                           : 'no_candidate'
                         : 'review_timeout'
@@ -2533,6 +2549,12 @@ export async function handleHttp(
               // ADR 172: flagged even on a verified close — an agent counterpart's confirm on a
               // risky lane is a real review, but not the human one the risk tag demanded.
               ...(humanReviewMissed ? { human_review_missed: true } : {}),
+              // ADR 173 clause 4: an abstention has to be COUNTABLE, or the counter-metric's silence
+              // is indistinguishable from a clean zero. Recorded only where the question was live —
+              // a lane that entered review, whose ready row could not tell us what it required.
+              ...(before.state === 'ready_for_review' && routing.human_required === undefined
+                ? { human_required_unknown: true }
+                : {}),
               worker_family: ownerAtClose ? workerFamily(ctx.db, team.id, ownerAtClose) : null,
               ...(verified ? { reviewer_family: workerFamily(ctx.db, team.id, member.name) } : {}),
               // Approximation: entering review was this lane's last update before the close.

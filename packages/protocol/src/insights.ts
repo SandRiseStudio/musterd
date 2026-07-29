@@ -267,6 +267,15 @@ export const ReviewMetricsSchema = z.object({
     review_timeout: z.number().int().nonnegative(),
     /** Owner closed where no counterpart existed — sanctioned, and not a timeout. */
     no_candidate: z.number().int().nonnegative(),
+    /** ADR 172's counter-metric: a risky lane whose REQUIRED human review never happened — a
+     *  requirement with no one to meet it, not a shrug. Bucketed since ADR 173 correction #1; before
+     *  that it fell through to `self_close`, labelling a lane that entered review as one that never
+     *  did, which hid the very number ADR 172 introduced. */
+    human_review_missed: z.number().int().nonnegative(),
+    /** …and how many closes could not tell whether a human was required (a ready row written before
+     *  the requirement was recorded, or one that would not parse). The abstention the counter-metric
+     *  above is silent over — ADR 173 clause 4: an unknown must be countable, never merely absent. */
+    human_required_unknown: z.number().int().nonnegative(),
     /** Closed straight from a live state, never entering review (today's default path). */
     self_close: z.number().int().nonnegative(),
     abandoned: z.number().int().nonnegative(),

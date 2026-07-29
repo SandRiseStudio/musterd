@@ -405,12 +405,19 @@ export function deriveReviewMetrics(
       counterpart_confirm: 0,
       review_timeout: 0,
       no_candidate: 0,
+      human_review_missed: 0,
+      human_required_unknown: 0,
       self_close: 0,
       abandoned: 0,
     },
   };
   for (const r of rows) {
-    let d: { reviewer?: string; no_candidate?: boolean; reason?: string } = {};
+    let d: {
+      reviewer?: string;
+      no_candidate?: boolean;
+      reason?: string;
+      human_required_unknown?: boolean;
+    } = {};
     try {
       d = r.detail ? (JSON.parse(r.detail) as typeof d) : {};
     } catch {
@@ -430,8 +437,15 @@ export function deriveReviewMetrics(
       if (reason === 'counterpart_confirm') m.closed.counterpart_confirm++;
       else if (reason === 'review_timeout') m.closed.review_timeout++;
       else if (reason === 'no_candidate') m.closed.no_candidate++;
+      // ADR 172's counter-metric needs its own bucket: without one it fell to the `else` and was
+      // counted as a self-close — "never entered review" said of a lane that entered review and
+      // whose required human never came, which is the opposite of what the row records.
+      else if (reason === 'human_review_missed') m.closed.human_review_missed++;
       else if (reason === 'abandoned') m.closed.abandoned++;
       else m.closed.self_close++; // includes legacy rows with no reason recorded
+      // Orthogonal to the reason: the close edge stamps this when it could not tell whether a human
+      // was required, so the number above is readable as "…and N we could not judge" (ADR 173).
+      if (d.human_required_unknown === true) m.closed.human_required_unknown++;
     }
   }
   return m;

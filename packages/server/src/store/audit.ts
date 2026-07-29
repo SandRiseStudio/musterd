@@ -326,42 +326,53 @@ export function listAudit(
  * derived from the audit trail rather than stored on the lane, the same discipline the verified
  * verdict itself follows.
  *
- * `routed: undefined` when there is no ready row to read, or a pre-fix row that recorded neither
- * outcome: callers must fall back to the old label rather than invent one (ADR 173 — never backfill
- * a verdict onto history).
+ * BOTH fields are three-valued, and `undefined` means the same thing in each: there is no ready row,
+ * or the row we have does not record this outcome. Callers must fall back to the old label rather
+ * than invent one (ADR 173 — never backfill a verdict onto history), and must never fold `undefined`
+ * back into `false` at the point of use, which re-creates the defect where it is harder to see.
  *
- * KNOWN GAP (ADR 173, audited 2026-07-29): `human_required` is two-valued here while `routed` beside
- * it is three-valued. It reads `false` both for a legacy row predating #462 and for a `catch`-ed
- * parse failure, so "could not see" is served as "not required" and the close edge's
- * `human_review_missed` counter-metric undercounts silently. Correct at the write edge
- * (`lane.risk.length > 0`, a set the writer owns); wrong only on the read.
+ * ADR 173 CORRECTION #1 (2026-07-29). `human_required` used to be a bare boolean here while `routed`
+ * beside it abstained, so a legacy row and an unreadable row both read "no human was required" and
+ * the close edge's ADR 172 counter-metric undercounted with no line saying how much it abstained
+ * over. Two things found while fixing it, both wider than the report:
+ *
+ * - **The `catch` was unreachable, and the real failure was a throw.** Filtering on
+ *   `json_extract(detail, '$.lane')` made SQLite raise "malformed JSON" from the QUERY — and over
+ *   every `lane.ready_for_review` row the scan touched, so one corrupt row broke the close edge for
+ *   every lane. The filter is now `target` (the ready edge already writes the lane id there), the
+ *   read is the only JSON parsing left, and it is inside the try.
+ * - **Absence had to be made unambiguous at the WRITE edge to mean anything here.** The ready edge
+ *   wrote `human_required` only when true, so on its own a three-valued read would have abstained
+ *   over every ordinary no-risk lane. It now always writes the boolean, so absence means exactly
+ *   "written before that change" — clause 2, record the distinction where it is known.
  */
 export function reviewRouting(
   db: Database,
   teamId: string,
   laneId: string,
-): { routed: boolean | undefined; human_required: boolean } {
+): { routed: boolean | undefined; human_required: boolean | undefined } {
+  const unknown = { routed: undefined, human_required: undefined };
   const row = db
-    .prepare<[string, string], { detail: string }>(
+    .prepare<[string, string], { detail: string | null }>(
       `SELECT detail FROM audit
-         WHERE team_id = ? AND action = 'lane.ready_for_review'
-           AND json_extract(detail, '$.lane') = ?
+         WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
        ORDER BY ts DESC, id DESC LIMIT 1`,
     )
     .get(teamId, laneId);
-  if (!row) return { routed: undefined, human_required: false };
+  if (!row?.detail) return unknown;
   try {
     const d = JSON.parse(row.detail) as {
       reviewer?: string;
       no_candidate?: boolean;
       human_required?: boolean;
     };
-    const human_required = d.human_required === true;
+    // An explicit `false` is knowledge and survives as `false`; only a missing field abstains.
+    const human_required = typeof d.human_required === 'boolean' ? d.human_required : undefined;
     if (d.no_candidate === true) return { routed: false, human_required };
     if (typeof d.reviewer === 'string' && d.reviewer.length > 0)
       return { routed: true, human_required };
     return { routed: undefined, human_required }; // pre-fix row: recorded neither — we do not know
   } catch {
-    return { routed: undefined, human_required: false };
+    return unknown; // reachable now that the query no longer parses the JSON for us
   }
 }
