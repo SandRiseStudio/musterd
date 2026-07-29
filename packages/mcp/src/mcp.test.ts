@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bind } from './bind.js';
 import { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
+import { notReadyMessage } from './tools/format.js';
 import {
+  autojoin,
   buildMcpServer,
   installShutdownHandlers,
   primerInstructions,
@@ -481,6 +483,55 @@ describe('MCP adapter', () => {
       await Promise.resolve(toolCb(mcp, 'team_join')({})).catch(() => {});
       await Promise.resolve(toolCb(mcp, 'team_leave')({})).catch(() => {});
       expect(join).not.toHaveBeenCalled();
+    });
+
+    // THE SEAT-DROP ROOT CAUSE (lane 01KYQBSD93, fault B). Memoizing the attempt rather than the
+    // SUCCESS meant one unlucky moment — a daemon bounce, a transient socket error — permanently
+    // dormanted the session: every later team_* call answered "you haven't joined the team yet",
+    // truthfully, forever, because nothing ever tried again. Retry is the whole fix; probe safety
+    // is untouched, since a retry still only happens on a real tool call.
+    it('RETRIES on the next tool call when the attempt failed — one bad moment must not dormant the session', async () => {
+      let attempt = 0;
+      const join = vi.fn(async () => {
+        if (++attempt === 1) throw new Error('socket hang up');
+      });
+      const mcp = buildMcpServer(stubClient(), adaConfig(), { onFirstToolCall: join });
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      expect(join).toHaveBeenCalledTimes(1);
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      expect(join).toHaveBeenCalledTimes(2); // the retry the old memo swallowed
+      // …and once it succeeds it is memoized again: no re-join on every subsequent call.
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      expect(join).toHaveBeenCalledTimes(2);
+    });
+
+    // A failed autojoin must not fail the tool call that carried it: the tool still runs, and the
+    // dormant-guard message is what tells the agent what happened.
+    it('a failed attempt does not reject the tool call it rode in on', async () => {
+      const join = vi.fn(async () => {
+        throw new Error('connection refused');
+      });
+      const mcp = buildMcpServer(stubClient(), adaConfig(), { onFirstToolCall: join });
+      await expect(Promise.resolve(toolCb(mcp, 'team_members')({}))).resolves.toBeDefined();
+    });
+
+    // …and the guard must SAY so. A transport-level failure rejects `join()` before any error frame
+    // arrives, so nothing used to record it and the dormant message degraded to a bare "call
+    // team_join first" — which reads as "you forgot to join", not "your join failed". That is what
+    // sent the seat-drop investigation chasing binding.json and ADR 143 for a day.
+    it('records a transport-level autojoin failure so the dormant guard explains itself', async () => {
+      // A session that already knows its seat (binding-named) and autojoins — izzo's exact shape.
+      const cfg: McpConfig = {
+        ...adaConfig(),
+        server: 'http://127.0.0.1:1', // nothing listening: a transport failure, not a refusal frame
+        member: 'Ada',
+        autojoin: true,
+      };
+      const client = new MusterdClient(cfg);
+      await expect(autojoin(client, cfg)).rejects.toThrow();
+      expect(client.lastJoinError).toBeTruthy();
+      expect(notReadyMessage(client, 'send')).toContain('the last join attempt failed');
+      client.close();
     });
   });
 

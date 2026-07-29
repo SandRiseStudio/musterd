@@ -102,3 +102,43 @@ ambient cwd are exactly how this whole class of bug leaks.
 - **Experiment:** the before/after simulation in this ADR's verification — spawn the adapter, drive a
   bare `initialize` (probe) vs `initialize` + `tools/call` (session) over stdio against the live
   daemon, and diff the daemon log. Pre-fix the probe claims; post-fix only the tool call does.
+
+## Amendment (2026-07-29): memoize the success, not the attempt
+
+Deferring the autojoin to the first tool call was right and stays. What shipped with it was a
+one-shot: `fired ??= run()`, with `autojoin()` swallowing its own error to stderr. So an attempt that
+_failed_ still filled the memo, and nothing ever tried again.
+
+**The cost, measured live.** This is fault B of the seat-drop lane (`01KYQBSD93`), reproduced from
+the audit trail on 2026-07-29: two `team_send`s refused at different body sizes (~1.4 KB, then ~600 B),
+then an explicit `team_join` reporting a **fresh** join, then the same body through first try. The
+roster showed the seat `out` the whole time, while the session was demonstrably alive. Every one of
+those observations is what a never-joined session looks like — because that is what it was. One
+unlucky moment at session start, most likely the ~849 ms daemon-bounce window the auto-refresher
+opens every couple of minutes, and the session was dormant for the rest of its life.
+
+The failure was invisible from inside for two compounding reasons, and both are fixed:
+
+- **The memo could not tell success from failure.** It now holds the promise only while it is
+  pending or fulfilled, and clears it on rejection, so the next tool call retries. Probe safety is
+  untouched: a retry is still only ever driven by a real tool call, never by `initialize`.
+- **The dormant guard could not say why.** `lastJoinError` was only ever set from server `error`
+  frames, and a transport-level failure (connection refused, socket hang up) rejects `join()` before
+  any frame arrives — so the message degraded to a bare "you haven't joined the team yet — call
+  team*join first". That reads as \_you forgot to join*, not _your join failed_, which is precisely
+  why the investigation spent a day on `binding.json` and ADR 143. `autojoin` now records the
+  transport failure via `client.noteJoinFailure`, and rethrows so the arming layer can see it; the
+  guard appends "the last join attempt failed: …" as it was always designed to.
+
+**The general shape, worth naming:** a retry whose memo keys on _having tried_ rather than on _having
+succeeded_ converts a transient fault into a permanent one, silently. It is the same defect family as
+ADR 173's "a read that cannot see returns a confident value" — here the confident value is the memo
+itself, asserting a join that never happened.
+
+### Observability follow-through
+
+`claim.reseated` / `claim.superseded` / `claim.duplicate_workspace` in the audit table are what made
+this diagnosable after the fact, and they are enough: the absence of any claim row for a live session
+_is_ the fingerprint of this bug, and it is queryable. No new telemetry. The standing check is the
+one that found it — for a session that reports "you haven't joined", ask the audit whether that seat
+ever claimed in that window before touching any code.
