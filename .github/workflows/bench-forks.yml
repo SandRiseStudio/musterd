@@ -67,8 +67,8 @@ jobs:
           set -uo pipefail   # deliberately NOT -e: a red suite must be recorded, not abort the bench
 
           # Validate the dispatch inputs before they reach a command line. They arrive via `env:`
-          # rather than `${{ }}` interpolation (so they are never spliced into the script text), and
-          # they are word-split rather than eval'd — but they are still operator-supplied and used
+          # rather than Actions expression interpolation (so they are never spliced into the script
+          # text), and they are word-split rather than eval'd — but they are operator-supplied and used
           # unquoted below, so require plain integers and refuse anything else outright.
           case "$REPS" in ''|*[!0-9]*) echo "::error::reps must be a positive integer, got '$REPS'"; exit 1;; esac
           [ "$REPS" -ge 1 ] || { echo "::error::reps must be >= 1"; exit 1; }
