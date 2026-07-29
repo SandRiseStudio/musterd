@@ -390,5 +390,9 @@ describe('harness registry', () => {
       process.chdir(origCwd);
       rmSync(probeCwd, { recursive: true, force: true });
     }
-  }, 15_000);
+    // Higher than the 30s global: this is the only test that spawns an EXTERNAL binary, and process
+    // start-up is the first thing to stall on a swap-bound machine. Measured 2.2s idle, but it blew
+    // an explicit 15s ceiling under whole-suite load — the starvation factor here is worse than the
+    // in-process tests, not better, because it is waiting on the OS rather than on the event loop.
+  }, 60_000);
 });
