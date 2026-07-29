@@ -67,3 +67,12 @@ jobs:
       # prettier + roadmap:check + arch-trees:check + obs-evals:check + guidance:check + vocab:check
       - name: Gates (format + docs)
         run: pnpm format:check
+
+      # Diff-based, so it lives here rather than in the tree-based format:check chain: a protocol
+      # schema change or a new runtime dep must carry an ADR, and an accepted ADR's Decision is
+      # immutable (ADR 180). Needs the base branch present — fetch-depth: 0 above provides it.
+      - name: ADR-gated changes
+        if: github.event_name == 'pull_request'
+        env:
+          CHANGE_ADR_BASE: origin/${{ github.base_ref }}
+        run: pnpm change-adr:check

@@ -30,7 +30,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 
 function git(...args: string[]): string {
-  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return execFileSync('git', args, {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
 }
 
 /** File content at a ref, or null when the path does not exist there (added/deleted). */
