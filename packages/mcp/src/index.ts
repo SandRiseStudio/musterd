@@ -114,7 +114,22 @@ const AUTOJOIN_EXEMPT_TOOLS = new Set(['team_join', 'team_leave']);
  * immediately), a probe's is never. Memoized: concurrent and later calls share the one join.
  */
 function armAutojoinOnFirstToolCall(server: McpServer, run: () => Promise<void>): void {
+  // Memoize the SUCCESS, not the attempt. Holding the promise unconditionally meant one unlucky
+  // moment at session start — a daemon bounce mid-attempt, a socket hang-up — dormanted the session
+  // permanently: `wantPresence` never went true, so every later team_* call answered "you haven't
+  // joined the team yet" (truthfully, and forever, because nothing tried again), and only a manual
+  // `team_join` recovered it. That is fault B of the seat-drop lane, measured live on 2026-07-29:
+  // two sends refused at different body sizes, then an explicit join reporting a FRESH join.
+  //
+  // Clearing the memo on rejection makes the next tool call retry. Probe safety is untouched — a
+  // retry still only ever happens on a real tool call, never at initialize — and a failure still
+  // must not fail the call it rode in on: the tool runs dormant and the guard message explains.
   let fired: Promise<void> | undefined;
+  const attempt = (): Promise<void> =>
+    (fired ??= run().catch((err: unknown) => {
+      fired = undefined; // re-arm: the next tool call tries again
+      throw err;
+    }));
   const original = server.registerTool.bind(server) as (
     name: string,
     config: unknown,
@@ -131,7 +146,9 @@ function armAutojoinOnFirstToolCall(server: McpServer, run: () => Promise<void>)
       AUTOJOIN_EXEMPT_TOOLS.has(name)
         ? cb
         : async (...args: unknown[]) => {
-            await (fired ??= run());
+            // Never fail the call the attempt rode in on (the pre-existing posture, kept explicit
+            // now that a rejection is observable rather than swallowed upstream).
+            await attempt().catch(() => {});
             return cb(...args);
           },
     );
@@ -189,9 +206,12 @@ export function buildMcpServer(
  * session with a concrete identity just `join()`s when `config.autojoin` says so (resolved
  * `MUSTERD_AUTOJOIN` env > `binding.autojoin`, ADR 165 inc 2); a pending
  * session with a `seat`/`role` folder policy auto-claims that seat and occupies it. A `chat` policy
- * never auto-claims — the session stays a pending presence until a human names it. Best-effort: a
- * failure is reported to stderr and leaves the session pending/dormant rather than crashing the
- * adapter.
+ * never auto-claims — the session stays a pending presence until a human names it.
+ *
+ * Best-effort, but it must **rethrow**: the caller memoizes success and re-arms on failure, so a
+ * swallowed error read as "joined" and dormanted the session for good (the seat-drop lane's fault
+ * B). Not crashing the adapter is the arming layer's job — it catches — and the failure is recorded
+ * on the client so the dormant guard can say what went wrong instead of just "call team_join first".
  */
 export async function autojoin(client: MusterdClient, config: McpConfig): Promise<void> {
   try {
@@ -207,7 +227,10 @@ export async function autojoin(client: MusterdClient, config: McpConfig): Promis
           : null;
     if (target) await claimAndJoin(client, config, target);
   } catch (err) {
-    process.stderr.write(`musterd autojoin failed: ${(err as Error).message}\n`);
+    const message = (err as Error).message;
+    process.stderr.write(`musterd autojoin failed: ${message}\n`);
+    client.noteJoinFailure(`${message} (autojoin; the next tool call retries)`);
+    throw err;
   }
 }
 

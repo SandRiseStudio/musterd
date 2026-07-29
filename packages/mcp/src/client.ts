@@ -184,6 +184,17 @@ export class MusterdClient {
     return this.lastJoinErrorMsg;
   }
 
+  /**
+   * Record a join failure the socket frames never saw — a transport-level one (connection refused,
+   * socket hang up) that rejects `join()` before any `error` frame arrives. Without this the
+   * dormant-guard message degrades to a bare "call team_join first" for exactly the failure a reader
+   * most needs explained, which is what made the seat-drop incident read as a mystery rather than as
+   * a failed autojoin. Cleared like the others, by the next successful join.
+   */
+  noteJoinFailure(message: string): void {
+    this.lastJoinErrorMsg = message;
+  }
+
   // reason: returns parsed JSON of varying shape; callers narrow at each call site.
 
   private async request(
