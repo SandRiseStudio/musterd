@@ -7,8 +7,18 @@ import type {
   OpenLane,
   UpdateLane,
 } from '@musterd/protocol';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { capColumn, groupByGoal, handoffPatch, laneActions, type LaneAction } from './boardWrite';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  capColumn,
+  groupByGoal,
+  handoffPatch,
+  laneActions,
+  laneStates,
+  movedLanes,
+  NO_MOVES,
+  type LaneAction,
+  type MovedLanes,
+} from './boardWrite';
 import { initial, kindOf, memberColor } from './format';
 
 /**
@@ -113,28 +123,19 @@ export function Board({
 
   // Which cards just *moved* (state changed / newly appeared) — they land with motion; a card that
   // reaches Done gets the warm flourish. First render is handled by the entrance stagger instead.
-  const prevStates = useRef<Map<string, LaneState> | null>(null);
-  const { landed, flourished } = useMemo(() => {
-    const prev = prevStates.current;
-    const landed = new Set<string>();
-    const flourished = new Set<string>();
-    if (prev) {
-      for (const lane of lanes) {
-        const was = prev.get(lane.id);
-        if (was === lane.state) continue;
-        landed.add(lane.id);
-        // The warm flourish fires on a CONFIRMED close only (ADR 169, miley's call): a counterpart
-        // said "this is what I wanted". A self-close lands like any other move — no celebration for
-        // an unverified close, and no beat at all on merely reaching ready_for_review.
-        if (lane.state === 'done' && was !== undefined && lane.verified === true)
-          flourished.add(lane.id);
-      }
-    }
-    return { landed, flourished };
-  }, [lanes]);
-  useEffect(() => {
-    prevStates.current = new Map(lanes.map((l) => [l.id, l.state]));
-  }, [lanes]);
+  // Adjusting state during render — the pattern React sanctions for "what changed since last time",
+  // and the reason this no longer reads a ref mid-render. `states` is memoised on `lanes`, so the
+  // comparison flips exactly once per change and then converges; React re-runs this component before
+  // committing, so the stale `moved` below is never painted. The diff itself is a pure, tested
+  // function in boardWrite.
+  const states = useMemo(() => laneStates(lanes), [lanes]);
+  const [seen, setSeen] = useState<ReadonlyMap<string, LaneState> | null>(null);
+  const [moved, setMoved] = useState<MovedLanes>(NO_MOVES);
+  if (states !== seen) {
+    setMoved(seen ? movedLanes(seen, lanes) : NO_MOVES);
+    setSeen(states);
+  }
+  const { landed, flourished } = moved;
 
   // First-load entrance: a short stagger across the first few cards, then never again.
   const [entering, setEntering] = useState(true);

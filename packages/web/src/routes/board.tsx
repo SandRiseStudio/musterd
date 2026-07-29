@@ -99,7 +99,6 @@ function BoardPage() {
       );
       return null;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMember, disconnect]);
 
   const { envelopes, roster } = useLiveStream(cfg, { onCredentialInvalid });

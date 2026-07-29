@@ -1,5 +1,11 @@
-import type { Envelope, Lane, LaneBoard, LaneState, MemberSummary } from '@musterd/protocol';
-import type { Posture } from '@musterd/protocol';
+import type {
+  Envelope,
+  Lane,
+  LaneBoard,
+  LaneState,
+  MemberSummary,
+  Posture,
+} from '@musterd/protocol';
 import { laneEvent, memberColor, memberPosture } from './format';
 
 /**

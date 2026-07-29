@@ -58,7 +58,11 @@ export function Hero() {
   // Stable reference to the latest data builder (no roster changes on the landing hero, but the
   // pattern is consistent with office-preview and OfficeScene).
   const dataRef = useRef(buildData);
-  dataRef.current = buildData;
+  // Synced in an effect, not during render — a render must be pure. Declared before the mount effect
+  // that reads it, since effects run in declaration order.
+  useEffect(() => {
+    dataRef.current = buildData;
+  });
 
   useEffect(() => {
     const host = canvasHost.current;
