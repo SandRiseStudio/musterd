@@ -479,6 +479,21 @@ async function reviewReport(parsed: Parsed): Promise<number> {
     );
   }
   if (c.abandoned > 0) w(`    ${theme.meta('abandoned')} ${c.abandoned}\n`);
+  // The two abstentions that used to be counted as self-closes. Printed only when non-zero, but
+  // printed distinctly when they are: the arithmetic on this panel has to close, and a reader
+  // subtracting the named buckets from `total` should never be left with an unexplained remainder.
+  if (c.legacy_unlabelled > 0) {
+    w(
+      `    ${theme.meta(`${c.legacy_unlabelled} recorded no reason at all — legacy single-stage closes, from before the two-stage close existed`)}\n`,
+    );
+  }
+  // Warn-coloured, unlike the legacy line: this one is actionable, and it means this build is
+  // reading a log a newer musterd wrote, so other numbers on this panel may be undercounted too.
+  if (c.unknown_reason > 0) {
+    w(
+      `    ${theme.warn(`${c.unknown_reason} carry a reason this build cannot classify`)} ${theme.meta('— a newer musterd wrote them; update this checkout before trusting the split above')}\n`,
+    );
+  }
   return 0;
 }
 

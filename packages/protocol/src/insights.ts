@@ -276,9 +276,26 @@ export const ReviewMetricsSchema = z.object({
      *  the requirement was recorded, or one that would not parse). The abstention the counter-metric
      *  above is silent over — ADR 173 clause 4: an unknown must be countable, never merely absent. */
     human_required_unknown: z.number().int().nonnegative(),
-    /** Closed straight from a live state, never entering review (today's default path). */
+    /**
+     * Closed straight from a live state, never entering review (today's default path). Counted from
+     * an EXPLICIT `self_close` reason only: it was the ladder's `else` until 2026-07-29, so it also
+     * absorbed every row whose reason was missing or unrecognised, and then asserted "never entered
+     * review" about rows that had asserted nothing.
+     */
     self_close: z.number().int().nonnegative(),
     abandoned: z.number().int().nonnegative(),
+    /**
+     * Closes that recorded no reason at all — the legacy single-stage shape from before ADR 169's
+     * two-stage close. An abstention with nothing to be done about it, which is why it is a count and
+     * not a warning.
+     */
+    legacy_unlabelled: z.number().int().nonnegative(),
+    /**
+     * Closes carrying a reason this build cannot classify — written by a NEWER musterd. A different
+     * fact from `legacy_unlabelled`, with a different remedy (upgrade this reader), so a different
+     * name: one shared `unknown` would rebuild the collapse it replaces (ADR 173 clause 1).
+     */
+    unknown_reason: z.number().int().nonnegative(),
   }),
 });
 export type ReviewMetrics = z.infer<typeof ReviewMetricsSchema>;

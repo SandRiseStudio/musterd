@@ -409,6 +409,8 @@ export function deriveReviewMetrics(
       human_required_unknown: 0,
       self_close: 0,
       abandoned: 0,
+      legacy_unlabelled: 0,
+      unknown_reason: 0,
     },
   };
   for (const r of rows) {
@@ -442,7 +444,16 @@ export function deriveReviewMetrics(
       // whose required human never came, which is the opposite of what the row records.
       else if (reason === 'human_review_missed') m.closed.human_review_missed++;
       else if (reason === 'abandoned') m.closed.abandoned++;
-      else m.closed.self_close++; // includes legacy rows with no reason recorded
+      // `self_close` is a RECORDED reason asserting "never entered review", so it must be matched
+      // explicitly. It used to be the `else`, which meant it also absorbed the two ways of not
+      // knowing — and then asserted that positive claim about rows that made none.
+      else if (reason === 'self_close') m.closed.self_close++;
+      // Two ways to be uninformed, two remedies, therefore two names (ADR 173 clause 1): a row that
+      // recorded no reason is the legacy single-stage shape and there is nothing to do about it; a
+      // reason this build cannot classify was written by a NEWER one, and the remedy is to upgrade
+      // the reader. One shared `unknown` would rebuild the collapse one level up.
+      else if (reason === undefined) m.closed.legacy_unlabelled++;
+      else m.closed.unknown_reason++;
       // Orthogonal to the reason: the close edge stamps this when it could not tell whether a human
       // was required, so the number above is readable as "…and N we could not judge" (ADR 173).
       if (d.human_required_unknown === true) m.closed.human_required_unknown++;
