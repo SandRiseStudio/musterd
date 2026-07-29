@@ -30,7 +30,8 @@
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "test:scenarios": "vitest run tests/scenarios",
-    "typecheck": "pnpm -r exec tsc --noEmit"
+    "typecheck": "pnpm -r exec tsc --noEmit",
+    "change-adr:check": "node --disable-warning=ExperimentalWarning scripts/check-change-adr.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
