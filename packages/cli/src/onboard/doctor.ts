@@ -14,7 +14,7 @@ import { findBinding, loadConfig } from '../config.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
 import { cliBuild } from '../version.js';
-import { foreignAdapterNote, siblingWorkspaces } from './entryGuard.js';
+import { foreignAdapterNote, primaryCheckoutFor, siblingWorkspaces } from './entryGuard.js';
 import { contentHash, establishedHarnesses, guidanceTargets, strippedBody } from './guidance.js';
 import type { Harness } from './harness.js';
 import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
@@ -403,10 +403,17 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     }
     // An adapter inside a sibling seat's workspace: a note, not a refusal — identity comes from cwd,
     // so what this costs is running another checkout's build and breaking if that folder moves.
+    // The repo's PRIMARY checkout is excluded: one entry is shared by every worktree (ADR 143), so an
+    // adapter there is the shared install rather than drift, and prescribing a repair for it handed
+    // 11 of 12 dogfood seats a line whose fix just moved the failure to the other 11.
     if (d.registeredArgs !== undefined) {
       const note = foreignAdapterNote(
         { args: d.registeredArgs },
-        { workspaceDir: cwd, siblingDirs: siblingWorkspaces(cwd) },
+        {
+          workspaceDir: cwd,
+          siblingDirs: siblingWorkspaces(cwd),
+          primaryCheckout: primaryCheckoutFor(cwd),
+        },
       );
       if (note !== undefined) drift.push(note);
     }
