@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import {
   type Binding,
   bindingSeat,
@@ -611,8 +611,20 @@ export function rosterToFiles(
  */
 async function teamExport(parsed: Parsed): Promise<number> {
   const slug = parsed.positionals[1];
-  if (!slug) throw new CliError('usage: musterd team export <slug>', 2);
-  const dir = process.cwd();
+  if (!slug) throw new CliError('usage: musterd team export <slug> [--to <dir>]', 2);
+  // Where the roster lands (ADR 176 §1, increment 3): an explicit `--to` wins, else the team's own
+  // home, else this folder. The default matters because "which repo owns the roster when several
+  // touch one team" was migration-bootstrap.md's open question, and install-topology §4 answered it
+  // by saying **no repo does** — the roster's home is the *team's* home. Exporting into whatever
+  // folder you happened to stand in is how that question arose in the first place.
+  //
+  // `teamHome` and `rosterHome` still compose rather than merge: this changes only the DEFAULT
+  // DESTINATION. Recording `rosterHome` — ADR 058's file-authoritative cutover signal — is unchanged
+  // below, and having a home never implies the flip. Nor does exporting invent a home: a team with
+  // no `teamHome` exports here, exactly as before.
+  const explicitTo = flagStr(parsed.flags, 'to');
+  const home = loadConfig().teamHome[slug];
+  const dir = resolvePath(explicitTo ?? home ?? process.cwd());
   const musterdDir = join(dir, '.musterd');
   const teamFile = join(musterdDir, 'team.toml');
   if (existsSync(teamFile)) {
@@ -647,15 +659,29 @@ async function teamExport(parsed: Parsed): Promise<number> {
   const count = Object.keys(seatFiles).length;
   if (parsed.flags['json']) {
     process.stdout.write(
-      JSON.stringify({ slug, rosterHome: dir, seats: Object.keys(seatFiles) }) + '\n',
+      JSON.stringify({
+        slug,
+        rosterHome: dir,
+        // Say WHY it landed there, so a default that moved the files somewhere other than the folder
+        // you typed in is legible rather than surprising.
+        destination: explicitTo ? 'flag' : home ? 'teamHome' : 'cwd',
+        seats: Object.keys(seatFiles),
+      }) + '\n',
     );
     return 0;
   }
+  const where = dir === process.cwd() ? '.musterd/' : join(dir, '.musterd');
   process.stdout.write(
-    success(`exported "${slug}" roster → .musterd/ (${count} seat${count === 1 ? '' : 's'})`, {
+    success(`exported "${slug}" roster → ${where} (${count} seat${count === 1 ? '' : 's'})`, {
       next: 'musterd reload',
     }) + '\n',
   );
+  if (!explicitTo && home) {
+    process.stdout.write(
+      theme.meta(`the roster's home is the team's home, not a project repo — ${dir} (ADR 176).`) +
+        '\n',
+    );
+  }
   process.stdout.write(
     theme.meta(
       'these files are now the source of truth — git add + commit them for a reviewable roster.',

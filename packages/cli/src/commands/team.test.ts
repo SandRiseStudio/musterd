@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
@@ -330,5 +330,113 @@ describe('team credential command', () => {
     await expect(capture(() => teamCommand(parseArgs(['credential'])))).rejects.toThrow(
       /usage: musterd team credential <name>/,
     );
+  });
+});
+
+/**
+ * `musterd team export --to` and its default (ADR 176 increment 3).
+ *
+ * install-topology §4 answered migration-bootstrap.md's open question — "which repo owns the roster
+ * when several touch one team?" — by saying **no repo does**: the roster's home is the *team's*
+ * home. Exporting into whatever folder you happened to stand in is how that question arose. So the
+ * destination defaults to the team home when one exists.
+ *
+ * The two things that must NOT change are the reason `teamHome` and `rosterHome` are separate keys
+ * at all: exporting still records `rosterHome` (ADR 058's file-authoritative cutover signal), and
+ * having a home never implies the flip — nor does exporting invent a home.
+ */
+describe('team export — the roster lands in the team home', () => {
+  let server: RunningServer;
+  let dir: string;
+  let home: string;
+
+  beforeEach(async () => {
+    server = createServer({ db: openDb(':memory:'), port: 0 });
+    const { port } = await server.listen();
+    process.env['MUSTERD_SERVER'] = `http://127.0.0.1:${port}`;
+    dir = mkdtempSync(join(tmpdir(), 'musterd-export-'));
+    home = join(dir, 'home');
+    process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
+    vi.spyOn(process, 'cwd').mockReturnValue(dir);
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'ada'])));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await server.close();
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env['MUSTERD_SERVER'];
+    delete process.env['MUSTERD_CONFIG'];
+  });
+
+  async function capture(fn: () => Promise<number>): Promise<{ code: number; out: string }> {
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: never) => {
+      chunks.push(String(c));
+      return true;
+    });
+    try {
+      return { code: await fn(), out: chunks.join('') };
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  const readConfig = () =>
+    JSON.parse(readFileSync(process.env['MUSTERD_CONFIG'] as string, 'utf8'));
+  const setTeamHome = () => {
+    const c = readConfig();
+    c.teamHome = { dawn: home };
+    writeFileSync(process.env['MUSTERD_CONFIG'] as string, JSON.stringify(c));
+  };
+  const exportJson = async (args: string[]) =>
+    JSON.parse((await capture(() => teamCommand(parseArgs(['export', ...args, '--json'])))).out);
+
+  it('defaults into the team home, and says that is why', async () => {
+    setTeamHome();
+
+    const out = await exportJson(['dawn']);
+
+    expect(out.rosterHome).toBe(home);
+    expect(out.destination).toBe('teamHome');
+    expect(existsSync(join(home, '.musterd', 'team.toml'))).toBe(true);
+    // Not in the folder the command was typed in.
+    expect(existsSync(join(dir, '.musterd', 'team.toml'))).toBe(false);
+  });
+
+  it('still records rosterHome — the ADR 058 cutover signal survives the new default', async () => {
+    setTeamHome();
+
+    await exportJson(['dawn']);
+
+    expect(readConfig().rosterHome.dawn).toBe(home);
+  });
+
+  it('an explicit --to wins over the team home', async () => {
+    setTeamHome();
+    const elsewhere = join(dir, 'elsewhere');
+
+    const out = await exportJson(['dawn', '--to', elsewhere]);
+
+    expect(out.rosterHome).toBe(elsewhere);
+    expect(out.destination).toBe('flag');
+    expect(existsSync(join(elsewhere, '.musterd', 'team.toml'))).toBe(true);
+    expect(existsSync(join(home, '.musterd', 'team.toml'))).toBe(false);
+  });
+
+  it('falls back to this folder when the team has no home — unchanged for everyone else', async () => {
+    const out = await exportJson(['dawn']);
+
+    expect(out.rosterHome).toBe(dir);
+    expect(out.destination).toBe('cwd');
+    expect(existsSync(join(dir, '.musterd', 'team.toml'))).toBe(true);
+  });
+
+  it('never invents a team home as a side effect of exporting', async () => {
+    // The keys compose, they do not merge: `rosterHome` is the cutover signal, `teamHome` is where a
+    // person stands. Exporting must not quietly provision the second.
+    await exportJson(['dawn']);
+
+    expect(readConfig().teamHome ?? {}).toEqual({});
   });
 });

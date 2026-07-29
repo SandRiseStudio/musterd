@@ -207,8 +207,15 @@ was wrong and the conditional version §4 rejected is the repair.
    `teamHome`, and the dead-binding case §6(a) of install-topology names — the binding that claims a
    human seat with an agent key. Partly evaporates now that the home exists, which is why it follows
    rather than leads.
-3. **`team export` defaults into the home** (small, follows naturally): when a team has a `teamHome`
-   and no `rosterHome`, `--to` defaults there — the two keys composing rather than merging.
+3. **`team export` defaults into the home** (lane `01KYQE472Y`, landed): `--to <dir>` is explicit and
+   always wins; absent it, a team with a `teamHome` exports there, and a team without one exports
+   into the current folder exactly as before. This is the two keys composing rather than merging, and
+   the composition is _only_ about the destination: exporting still records `rosterHome` (ADR 058's
+   file-authoritative cutover signal) unchanged, having a home never implies the flip, and exporting
+   never invents a home. It also closes migration-bootstrap.md's deferred question directly — "which
+   repo owns the roster when several touch one team" had no good answer because the premise was
+   wrong, and the command now puts the roster where §4 says it lives instead of wherever the operator
+   happened to be standing.
 4. **Roll the model into the docs** (lane L6, landed): README + the agent skill teach the pair
    `agent`/`human` as one model rather than two commands, and `init`'s team menu offers the teams the
    vault already knows.
