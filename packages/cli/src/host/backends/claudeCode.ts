@@ -9,6 +9,7 @@ import type {
   WakeCompletion,
   WakeSpec,
 } from '../backend.js';
+import { ensurePinnedMusterd, wakeEnv } from '../pinnedBin.js';
 
 /**
  * Backend #1: Claude Code, fresh-first with the increment-4 resume upgrade (ADR 131 §5). The
@@ -82,6 +83,8 @@ export interface ClaudeCodeDeps {
   killGraceMs?: number;
   /** Injectable capture read (default: the shared {@link localSessionLiveness}). */
   readSession?: (workspace: string) => LocalSessionLiveness;
+  /** Injectable pinned-shim write (default: {@link ensurePinnedMusterd}); tests never touch $HOME. */
+  ensurePinned?: (opts: { node: string; binJs: string }) => string | undefined;
   resumeVerifyWindowMs?: number;
   confirmBeatMs?: number;
 }
@@ -185,7 +188,17 @@ function runAttempt(
   try {
     child = (deps.spawn ?? nodeSpawn)(bin, args, {
       cwd: spec.workspace,
-      env: { ...process.env, MUSTERD_PROVENANCE: 'wake' },
+      // The woken session's musterd hooks call a bare `musterd`, so PATH decides which BUILD runs
+      // inside the wake — and the host's PATH is not the operator's (it resolved a frozen Homebrew
+      // tarball on the dogfood machine, 147 commits behind). Pin the actuator's own build instead of
+      // inheriting the question; best-effort, so an unwritable pin degrades to the inherited PATH.
+      env: wakeEnv(
+        process.env,
+        (deps.ensurePinned ?? ensurePinnedMusterd)({
+          node: process.execPath,
+          binJs: process.argv[1] ?? '',
+        }),
+      ),
       detached: true, // its own process group, so the watchdog can kill harness + MCP children
       stdio: ['ignore', 'pipe', 'pipe'],
     });

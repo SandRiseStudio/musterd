@@ -204,6 +204,32 @@ describe('claudeCodeBackend.wake', () => {
     await actuation.settled;
   });
 
+  it('pins the actuator’s own musterd FIRST on the woken PATH (lane 01KYQMM141)', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, { ensurePinned: () => '/pinned/bin' });
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    // A woken session's hooks call a bare `musterd`; the pin must beat whatever else is on PATH.
+    expect(calls[0]!.opts.env?.['PATH']).toMatch(/^\/pinned\/bin:/);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('an unwritable pin degrades to the inherited PATH — never a failed wake', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, { ensurePinned: () => undefined });
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    expect(calls[0]!.opts.env?.['PATH']).toBe(process.env['PATH']);
+    expect(actuation.outcome).toEqual({ occupied: true, session: 'fresh' });
+    child.exit(0);
+    await actuation.settled;
+  });
+
   it('verified occupancy with non-wake provenance still occupies but names the stale adapter', async () => {
     const child = new FakeChild();
     const { backend } = harness(child);
