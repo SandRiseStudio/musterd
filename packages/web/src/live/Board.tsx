@@ -431,6 +431,11 @@ function SeatPicker({
 }) {
   const others = [...rosterIdx.values()].filter((m) => m.name !== me);
   return (
+    // Escape dismisses the picker. The rule guards against click handlers that turn a plain div
+    // into an invisible control a keyboard cannot reach — the opposite of what this is. This ADDS a
+    // keyboard path to a group whose buttons are already focusable, and removing it would take away
+    // the only way out that does not require finding Cancel by tab.
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       className="lc-card__picker"
       role="group"
@@ -491,6 +496,9 @@ function ComposeCard({
   };
 
   return (
+    // Escape abandons the composer — same rationale as the picker above: a keyboard escape hatch
+    // added to an element whose contents are already focusable, not a fake control.
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <form
       className="lc-card lc-card--compose"
       onSubmit={(e) => {
@@ -499,6 +507,14 @@ function ComposeCard({
       }}
       onKeyDown={(e) => e.key === 'Escape' && onClose()}
     >
+      {/* autoFocus is CORRECT here and the rule is wrong about this case. This composer does not
+          exist until you open it, and when a new composer appears in response to your action, focus
+          belongs inside it — that is what a dialog is supposed to do, and leaving focus behind on
+          the button that opened it is the actual accessibility failure. The rule cannot tell
+          on-open from on-page-load; the two connect forms, which ARE on-page-load, had theirs
+          removed in this same change. */}
+      {/* eslint-disable jsx-a11y/no-autofocus -- see the note above: focus belongs in a composer
+          the user just opened. */}
       <input
         className="lc-card__compose-title"
         type="text"
@@ -507,6 +523,7 @@ function ComposeCard({
         autoFocus
         onChange={(e) => setTitle(e.target.value)}
       />
+      {/* eslint-enable jsx-a11y/no-autofocus */}
       <label className="lc-card__compose-claim">
         <input type="checkbox" checked={claim} onChange={(e) => setClaim(e.target.checked)} />
         <span>and it&apos;s mine</span>

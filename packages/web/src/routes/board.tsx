@@ -10,7 +10,6 @@ import {
 import {
   acquireObserver,
   createLane,
-  fetchReport,
   forgetObserver,
   redeemSignin,
   updateLane,
@@ -331,11 +330,13 @@ function BoardPage() {
             </p>
             <label className="lc-form__field">
               <span>Team</span>
+              {/* No autoFocus — same reasoning as /live's connect form: this is the first thing on
+                  the page, and stealing focus on load skips the copy above that explains what
+                  watching versus signing in actually does to your identity on the board. */}
               <input
                 type="text"
                 value={team}
                 placeholder="ritual"
-                autoFocus
                 onChange={(e) => setTeam(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && submit()}
               />

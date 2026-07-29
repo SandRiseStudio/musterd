@@ -1,7 +1,7 @@
 import { appearanceOf, type Appearance } from './appearance';
 import { project, type Fit, type Pt } from './iso';
 import { FWD } from './layout';
-import { CHAR, GESTURE, type Skel, type V3 } from './skeleton';
+import { GESTURE, type Skel, type V3 } from './skeleton';
 import type { CarryKind, Dir, OfficeNode } from './types';
 
 /**
