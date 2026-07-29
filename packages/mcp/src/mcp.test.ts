@@ -497,3 +497,111 @@ describe('MCP adapter', () => {
     expect(unclaimed).not.toContain('You are **');
   });
 });
+
+/**
+ * The seat drop (reported by miley, independently hit by izzo): `team_join` succeeds, and the next
+ * `team_*` call refuses with "you haven't joined the team yet". `musterd whoami` is correct,
+ * binding.json is healthy, and `musterd status` shows the seat ONLINE the whole time — the daemon
+ * and the CLI agree, and only the MCP adapter thinks the seat is gone.
+ *
+ * The conflation under it: `joined` is pure WEBSOCKET state (`ws.on('close')` clears it, then
+ * `scheduleReconnect` backs off 1s → 30s), while every acting tool gates on it. But acts do not
+ * travel over that socket — `sendEnvelope` is an HTTP POST. So during any reconnect window the
+ * adapter refuses an operation that would have succeeded, and blames the agent's identity for a
+ * transport blip. miley lost a handoff note to exactly this.
+ */
+describe('seat drop — a closed socket is not a lost seat', () => {
+  it('acts still work over HTTP while the socket is down, so refusing them is gratuitous', async () => {
+    const client = new MusterdClient(adaConfig());
+    await bind(client);
+    await client.join();
+    expect(client.joined).toBe(true);
+    expect(client.member).toBe('Ada');
+
+    // Exactly what a daemon bounce does to every attached adapter: the socket closes underneath a
+    // session that still holds its seat. No leave(), no supersede — the seat is untouched.
+    (client as unknown as { ws: { close(): void } | null }).ws?.close();
+    await vi.waitFor(() => expect(client.joined).toBe(false));
+
+    // The seat is STILL HELD server-side — this is the split miley reported: daemon says online,
+    // adapter says you never joined.
+    expect(client.member).toBe('Ada');
+
+    // And the act the tool would have refused succeeds over HTTP, with the socket still down.
+    const envelope = {
+      id: '01JZZZZZZZZZZZZZZZZZZZZZZZ',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'team' as const },
+      act: 'status_update' as const,
+      body: 'sent while the websocket was closed',
+      ts: Date.now(),
+    };
+    await expect(client.sendEnvelope(envelope as never)).resolves.toBeDefined();
+
+    client.close();
+  });
+
+  it('team_send REFUSES that same act — the bug, and how miley lost a handoff note', async () => {
+    const client = new MusterdClient(adaConfig());
+    await bind(client);
+    await client.join();
+    const mcp = buildMcpServer(client, { ...adaConfig(), member: 'Ada' });
+    const send = (
+      mcp as unknown as {
+        _registeredTools: Record<string, { handler: (...a: unknown[]) => Promise<unknown> }>;
+      }
+    )._registeredTools['team_send']!.handler;
+
+    (client as unknown as { ws: { close(): void } | null }).ws?.close();
+    await vi.waitFor(() => expect(client.joined).toBe(false));
+
+    const res = (await send({ act: 'status_update', body: 'this must not be swallowed' }, {})) as {
+      content: { text: string }[];
+    };
+    const text = res.content[0]!.text;
+
+    // The seat is held, the daemon is up, and the act travels over HTTP — yet the tool refuses,
+    // and blames the agent's identity ("call team_join first") for a closed socket.
+    expect(text).not.toMatch(/haven't joined the team yet|pending presence/);
+
+    client.close();
+  });
+
+  it('still refuses a session that never occupied — a pending presence is not a seat', async () => {
+    const client = new MusterdClient(adaConfig());
+    await bind(client); // bound, never joined: member unset
+    const mcp = buildMcpServer(client, adaConfig());
+    const send = (
+      mcp as unknown as {
+        _registeredTools: Record<string, { handler: (...a: unknown[]) => Promise<unknown> }>;
+      }
+    )._registeredTools['team_send']!.handler;
+
+    const res = (await send({ act: 'status_update', body: 'x' }, {})) as {
+      content: { text: string }[];
+    };
+    expect(res.content[0]!.text).toMatch(/pending presence|haven't joined/);
+    client.close();
+  });
+
+  it('still refuses after a deliberate leave — giving up the seat is not a socket blip', async () => {
+    const client = new MusterdClient(adaConfig());
+    await bind(client);
+    await client.join();
+    const mcp = buildMcpServer(client, { ...adaConfig(), member: 'Ada' });
+    const send = (
+      mcp as unknown as {
+        _registeredTools: Record<string, { handler: (...a: unknown[]) => Promise<unknown> }>;
+      }
+    )._registeredTools['team_send']!.handler;
+
+    client.leave(); // member stays set, but the seat is genuinely released
+    const res = (await send({ act: 'status_update', body: 'x' }, {})) as {
+      content: { text: string }[];
+    };
+    expect(res.content[0]!.text).toMatch(/haven't joined the team yet/);
+    client.close();
+  });
+});

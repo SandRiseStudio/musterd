@@ -97,7 +97,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
       },
     },
     async (args) => {
-      if (!client.joined || !config.member) {
+      if (!client.holdsSeat || !config.member) {
         return textResult(notReadyMessage(client, 'send'));
       }
       const meta: Record<string, unknown> = { ...(args.meta ?? {}) };

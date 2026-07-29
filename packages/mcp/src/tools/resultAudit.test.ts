@@ -52,6 +52,7 @@ const ACTION_RE = /team_[a-z_]+|lane_[a-z_]+|musterd [a-z]+|check again/;
 /** A client for a team with nothing on it: joined, but every read comes back empty. */
 const emptyClient: any = {
   joined: true,
+  holdsSeat: true,
   claimed: true,
   member: 'Ada',
   build: undefined,
@@ -122,6 +123,7 @@ describe('a known failure class carries its repair line', () => {
   /** Every read/mutate rejects the way an unreachable daemon does. */
   const downClient: any = {
     joined: true,
+    holdsSeat: true,
     claimed: true,
     member: 'Ada',
     build: undefined,
@@ -233,6 +235,7 @@ describe('structured-first results carry structuredContent', () => {
   };
   const okClient: any = {
     joined: true,
+    holdsSeat: true,
     member: 'Ada',
     markSeen: () => undefined,
     sendEnvelope: async () => undefined,

@@ -168,6 +168,7 @@ describe('team_send handler', () => {
       registerSend,
       {
         joined: true,
+        holdsSeat: true,
         lastJoinError: null,
         sendEnvelope: sendEnvelope as any,
         markSeen,
@@ -195,6 +196,7 @@ describe('team_send handler', () => {
       registerSend,
       {
         joined: true,
+        holdsSeat: true,
         lastJoinError: null,
         sendEnvelope: (async () => ({ delivery_hint: hint })) as any,
         markSeen: vi.fn(),
@@ -211,6 +213,7 @@ describe('team_send handler', () => {
       registerSend,
       {
         joined: true,
+        holdsSeat: true,
         lastJoinError: null,
         sendEnvelope: (async () => undefined) as any,
         markSeen: vi.fn(),
@@ -228,6 +231,7 @@ describe('team_send handler', () => {
       registerSend,
       {
         joined: true,
+        holdsSeat: true,
         lastJoinError: null,
         sendEnvelope: (async (e: Envelope) => {
           sent.push(e);
@@ -247,6 +251,7 @@ describe('team_send handler', () => {
       registerSend,
       {
         joined: true,
+        holdsSeat: true,
         lastJoinError: null,
         sendEnvelope: (async () => {
           throw new Error('network down');
@@ -269,6 +274,7 @@ describe('team_send handler', () => {
       sent,
       client: {
         joined: true,
+        holdsSeat: true,
         lastJoinError: null,
         sendEnvelope: (async (e: Envelope) => {
           sent.push(e);
@@ -359,6 +365,7 @@ describe('team_inbox_check handler', () => {
   function inboxClient(over: Partial<MusterdClient>): Partial<MusterdClient> {
     return {
       joined: true,
+      holdsSeat: true,
       lastJoinError: null,
       drainBuffer: () => [],
       markRead: (async () => undefined) as any,
@@ -612,7 +619,11 @@ describe('team_memory handlers (ADR 093)', () => {
 
   it('save forwards headline + body and echoes the headline back', async () => {
     const saveMemory = vi.fn(async () => undefined);
-    const handlers = captureAll(registerMemory, { joined: true, saveMemory: saveMemory as any });
+    const handlers = captureAll(registerMemory, {
+      joined: true,
+      holdsSeat: true,
+      saveMemory: saveMemory as any,
+    });
     const out = text(
       await handlers['team_memory_save']!({ headline: 'wrapping up', body: 'left off at X' }),
     );
@@ -624,6 +635,7 @@ describe('team_memory handlers (ADR 093)', () => {
   it('save surfaces the server cap error (limit named, not swallowed)', async () => {
     const handlers = captureAll(registerMemory, {
       joined: true,
+      holdsSeat: true,
       saveMemory: (async () => {
         throw new Error('memory body is 9000 bytes; the limit is 8192');
       }) as any,
@@ -636,6 +648,7 @@ describe('team_memory handlers (ADR 093)', () => {
   it('read renders headline + age, then the body', async () => {
     const handlers = captureAll(registerMemory, {
       joined: true,
+      holdsSeat: true,
       readMemory: (async () => ({
         headline: 'mid-refactor',
         body: 'tests red in ws.test.ts',
@@ -653,6 +666,7 @@ describe('team_memory handlers (ADR 093)', () => {
   it('read presents a seat with nothing saved as an empty state, not an error', async () => {
     const handlers = captureAll(registerMemory, {
       joined: true,
+      holdsSeat: true,
       readMemory: (async () => {
         throw new Error('no memory saved for this seat');
       }) as any,
@@ -666,6 +680,7 @@ describe('team_memory handlers (ADR 093)', () => {
   it('read still surfaces a real failure as an error', async () => {
     const handlers = captureAll(registerMemory, {
       joined: true,
+      holdsSeat: true,
       readMemory: (async () => {
         throw new Error('daemon unreachable');
       }) as any,
@@ -724,7 +739,7 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
     const join = vi.fn(async () => undefined);
     const handler = capture(
       registerJoin,
-      { joined: true, join: join as any, memory: null },
+      { joined: true, holdsSeat: true, join: join as any, memory: null },
       config,
     );
     expect(text(await handler({}))).toContain('Already joined dawn as Ada');
@@ -736,6 +751,7 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
       registerJoin,
       {
         joined: true,
+        holdsSeat: true,
         memory: { headline: 'mid-refactor', saved_at: Date.now() - 60_000, size_bytes: 7 },
       },
       config,
@@ -847,7 +863,7 @@ describe('team_leave handler', () => {
 
   it('leaves and explains the held seat', async () => {
     const leave = vi.fn();
-    const handler = capture(registerLeave, { joined: true, leave }, config);
+    const handler = capture(registerLeave, { joined: true, holdsSeat: true, leave }, config);
     expect(text(await handler({}))).toContain('Left dawn');
     expect(leave).toHaveBeenCalledTimes(1);
   });
