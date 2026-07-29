@@ -305,6 +305,10 @@ export function refreshModelObservation(
     // scoped to ended-and-contradicted, so live-beside-live co-tenancy is left to the wake guard.
     let healedBinding = binding;
     let slot = session;
+    // Tracked beside the slot because `SessionCapture.transcript_path` is optional in the type while
+    // the guard above has already made it present here — and the heal below only ever replaces it
+    // with another concrete path.
+    let slotTranscript = session.transcript_path;
     if (session.ended_at !== undefined && live) {
       slot = {
         harness: session.harness,
@@ -312,6 +316,7 @@ export function refreshModelObservation(
         transcript_path: live.path,
         started_at: birthtimeOf(live.path) ?? now,
       };
+      slotTranscript = live.path;
       healedBinding = { ...binding, session: slot };
       saveBinding(dir, healedBinding);
     }
@@ -328,12 +333,16 @@ export function refreshModelObservation(
     // The harness that captured the session owns the parse — a codex-captured session must not be
     // read with Claude Code's eyes.
     const harness = slot.harness;
-    // Read the live session's transcript when the slot turned out to be a corpse: observing the dead
-    // predecessor would attest the model of a session that is not running.
-    const source = live ?? { path: session.transcript_path, id: session.id };
+    // Read from the SLOT — which the heal above has already pointed at the live session if the
+    // captured one turned out to be a corpse. Preferring `live` directly instead was a scope error
+    // with the same shape as the bug it was fixing, one step further out: `liveSessionElsewhere` is
+    // any transcript in the project dir touched inside LOCAL_SESSION_LIVE_MS, so a HEALTHY slot was
+    // overridden by whichever neighbour happened to be warm. Measured on izzo, 2026-07-29 — a seat
+    // that closed one session and opened another three minutes later attested the predecessor's
+    // model four seconds in, which is precisely where a *different* model is most likely to be read.
     const observed = observeModelFor(harness, {
-      transcript_path: source.path,
-      session_id: source.id,
+      transcript_path: slotTranscript,
+      session_id: slot.id,
     });
     if (!observed) return undefined; // unreadable / moved format — the prior observation stands
 
