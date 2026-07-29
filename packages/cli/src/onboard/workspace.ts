@@ -43,9 +43,16 @@ export interface WorkspaceOpts {
  * is shared across all worktrees, so without `extensions.worktreeConfig` the last-provisioned seat
  * would silently rename every other seat's commits. Best-effort: identity is attribution, never a
  * gate on provisioning.
+ *
+ * `top` is resolved from `dir` rather than passed in, because the callers that most need this are the
+ * ones that never computed a toplevel: `--here` and `--path` (§ {@link provisionWorkspace}). Outside a
+ * repo there is no toplevel and nothing to write, which is fine — a plain folder has no git identity
+ * to carry.
  */
-function setSeatGitIdentity(name: string, dir: string, top: string, team?: string): void {
+function setSeatGitIdentity(name: string, dir: string, team?: string): void {
   try {
+    const top = gitToplevel(dir);
+    if (!top) return; // a plain folder: nothing to attribute
     git(['config', 'extensions.worktreeConfig', 'true'], top);
     git(['config', '--worktree', 'user.name', `${name} (musterd seat)`], dir);
     git(['config', '--worktree', 'user.email', `${name}@${team ?? 'seats'}.musterd`], dir);
@@ -62,12 +69,23 @@ function setSeatGitIdentity(name: string, dir: string, top: string, team?: strin
 export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Workspace {
   const cwd = opts.cwd ?? process.cwd();
 
-  if (opts.here) return { dir: cwd, kind: 'here', created: false };
+  /*
+   * `--here` and `--path` used to return before writing any identity, and those are exactly the paths
+   * a REPAIR takes: `musterd agent <seat> --path <ws>` is the documented fix for an expired grant, so
+   * it runs against worktrees already in use. The result was that fixing a broken credential silently
+   * stripped the seat's attribution, and every later commit from that seat was authored as the human —
+   * which is how two live seats ended up with zero Co-authored-by trailers across dozens of merges.
+   */
+  if (opts.here) {
+    setSeatGitIdentity(name, cwd, opts.team);
+    return { dir: cwd, kind: 'here', created: false };
+  }
 
   if (opts.path) {
     const dir = isAbsolute(opts.path) ? opts.path : resolvePath(cwd, opts.path);
     const created = !existsSync(dir);
     if (created) mkdirSync(dir, { recursive: true });
+    setSeatGitIdentity(name, dir, opts.team);
     return { dir, kind: 'folder', created };
   }
 
@@ -77,7 +95,7 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
     const branch = `agent/${name}`;
     if (existsSync(dir)) {
       // Reuse path repairs identity too, so pre-109 worktrees pick it up on re-run.
-      setSeatGitIdentity(name, dir, top, opts.team);
+      setSeatGitIdentity(name, dir, opts.team);
       return { dir, kind: 'worktree', branch, created: false };
     }
     try {
@@ -87,7 +105,7 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
       // Branch already exists (e.g. a prior run): attach a worktree to it.
       git(['worktree', 'add', dir, branch], top);
     }
-    setSeatGitIdentity(name, dir, top, opts.team);
+    setSeatGitIdentity(name, dir, opts.team);
     return { dir, kind: 'worktree', branch, created: true };
   }
 
