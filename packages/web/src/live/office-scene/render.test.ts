@@ -219,9 +219,15 @@ describe('drawDog paints every pose', () => {
 
   it.each(modes)('draws the %s pose without throwing, both facings', (mode) => {
     for (const flip of [false, true]) {
-      const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55, face: flip ? -1 : 1, faceMag: 1, vel: 55 };
+      const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55, face: flip ? -1 : 1, faceMag: 1, depthSign: 1, vel: 55 };
       expect(() => drawDog(mockCtx(), fit, pet, 3.2)).not.toThrow();
     }
+  });
+
+  /** The narrow walk headings crossfade in the chest-on/rump-on view — both must paint. */
+  it.each([1, -1] as const)('draws the walk at a narrow facing (depthSign %d) without throwing', (depthSign) => {
+    const pet: PetState = { lx: 300, ly: 300, mode: 'walk', modeT: 0.4, phase: 1.7, flip: false, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55, face: 0.18, faceMag: 0.18, depthSign, vel: 55 };
+    expect(() => drawDog(mockCtx(), fit, pet, 3.2)).not.toThrow();
   });
 
   /**
@@ -231,7 +237,7 @@ describe('drawDog paints every pose', () => {
    */
   it.each(modes)('gives the %s pose both a white coat and black markings', (mode) => {
     const paints: string[] = [];
-    const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip: false, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55, face: 1, faceMag: 1, vel: 55 };
+    const pet: PetState = { lx: 300, ly: 300, mode, modeT: 0.4, phase: 1.7, flip: false, path: [], seg: 0, plan: 'nap', sitFor: 5, speed: 55, face: 1, faceMag: 1, depthSign: 1, vel: 55 };
     drawDog(mockCtx(paints), fit, pet, 3.2);
     const lum = (hex: string) => {
       const m = /^#([0-9a-f]{6})$/i.exec(hex);

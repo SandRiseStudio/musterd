@@ -54,8 +54,9 @@ function CharacterSheet() {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       // 3 blocks (seated+typing / walking / standing) × 4 facings each is too wide; instead: for each name,
       // one row of 4 facings seated, and a second sweep walking. Keep it to a readable grid.
-      // + 1 extra row at the bottom: the office dog, one cell per pose (it needs the same 4× scrutiny).
-      const rows = Math.ceil(NAMES.length / cols) * 3 + 1;
+      // + 2 extra rows at the bottom: the office dog, one cell per pose (it needs the same 4× scrutiny;
+      // 9 poses wrap onto a second row rather than walking off the right edge of the sheet).
+      const rows = Math.ceil(NAMES.length / cols) * 3 + 2;
       const W = cols * CELL;
       const H = rows * ROW + 40;
       canvas.width = W * dpr;
@@ -141,17 +142,20 @@ function CharacterSheet() {
         // so the swivel's foreshortening can be judged at 4× instead of only in a 150ms blur on the
         // floor — the one frame of that motion nobody could ever actually look at.
         const PET_CELLS = [
-          { label: 'sleep', mode: 'sleep' as const, face: 1 },
-          { label: 'curl', mode: 'curl' as const, face: 1 },
-          { label: 'sit', mode: 'sit' as const, face: 1 },
-          { label: 'walk', mode: 'walk' as const, face: 1 },
-          { label: 'walk · flipped', mode: 'walk' as const, face: -1 },
-          { label: 'walk · mid-turn', mode: 'walk' as const, face: 0.38 },
-          { label: 'stretch', mode: 'stretch' as const, face: 1 },
+          { label: 'sleep', mode: 'sleep' as const, face: 1, depthSign: 1 as const },
+          { label: 'curl', mode: 'curl' as const, face: 1, depthSign: 1 as const },
+          { label: 'sit', mode: 'sit' as const, face: 1, depthSign: 1 as const },
+          { label: 'walk', mode: 'walk' as const, face: 1, depthSign: 1 as const },
+          { label: 'walk · flipped', mode: 'walk' as const, face: -1, depthSign: 1 as const },
+          { label: 'walk · mid-turn', mode: 'walk' as const, face: 0.38, depthSign: 1 as const },
+          // The narrow headings: the crossfaded chest-on / rump-on views (the old paper-thin frames).
+          { label: 'walk · toward', mode: 'walk' as const, face: 0.18, depthSign: 1 as const },
+          { label: 'walk · away', mode: 'walk' as const, face: 0.18, depthSign: -1 as const },
+          { label: 'stretch', mode: 'stretch' as const, face: 1, depthSign: 1 as const },
         ];
         PET_CELLS.forEach((cell, i) => {
-          const cx = i * CELL + CELL / 2;
-          const cy = petRow * ROW + ROW - 60;
+          const cx = (i % cols) * CELL + CELL / 2;
+          const cy = (petRow + Math.floor(i / cols)) * ROW + ROW - 60;
           drawDog(
             ctx,
             { ox: cx, oy: cy, scale: 3.4 },
@@ -164,6 +168,7 @@ function CharacterSheet() {
               flip: cell.face < 0,
               face: cell.face,
               faceMag: Math.abs(cell.face),
+              depthSign: cell.depthSign,
               path: [],
               seg: 0,
               plan: 'nap',
@@ -176,7 +181,7 @@ function CharacterSheet() {
           ctx.fillStyle = 'rgba(30,20,10,.72)';
           ctx.font = canvasFont(11, '--font-mono', 400);
           ctx.textAlign = 'center';
-          ctx.fillText(`dog · ${cell.label}`, cx, petRow * ROW + ROW - 6);
+          ctx.fillText(`dog · ${cell.label}`, cx, (petRow + Math.floor(i / cols)) * ROW + ROW - 6);
         });
         raf = requestAnimationFrame(frame);
       };

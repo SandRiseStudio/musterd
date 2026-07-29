@@ -178,9 +178,10 @@ export const firehoseSound = new FirehoseSound();
 //   1. AIR — filtered noise, the building's ventilation. The bed everything else sits on.
 //   2. HUM  — a pair of very low, slightly detuned sines. Below conscious hearing on laptop speakers
 //             and clearly missing when you take it away, which is exactly what room tone is.
-//   3. LIFE — the sparse events: a run of keys somewhere, a mug set down, a chair. These are what
-//             make it an OFFICE rather than an air conditioner, and they are deliberately thin. A
-//             loop you notice is a loop you will turn off within the hour.
+//   3. LIFE — the sparse events: a run of keys somewhere, a murmured exchange too far away to parse,
+//             a mug set down, a chair, the odd chat-app ping at someone else's desk. These are what
+//             make it an OFFICE rather than an air conditioner. Every one of them is parameter-
+//             jittered per play — a loop you can predict is a loop you will turn off within the hour.
 //
 // It is quiet on purpose ("light ambient office noise" — nick, 2026-07-28), and it stops dead on a
 // hidden tab: an idle cost is paid by every viewer forever, and one left running in a background tab
@@ -264,7 +265,9 @@ class RoomTone {
     airLp.frequency.value = 380;
     airLp.Q.value = 0.4;
     const airGain = ctx.createGain();
-    airGain.gain.value = 0.5;
+    // Turned down from 0.5 (nick, 2026-07-29: "turn down the ambient white noise slightly") — the
+    // ventilation recedes to a bed and the LIFE events above it carry the room instead.
+    airGain.gain.value = 0.34;
     air.connect(airLp).connect(airGain).connect(bus);
     air.start();
     this.sources.push(air);
@@ -274,7 +277,7 @@ class RoomTone {
     const swell = ctx.createOscillator();
     swell.frequency.value = 0.03;
     const swellDepth = ctx.createGain();
-    swellDepth.gain.value = 0.16;
+    swellDepth.gain.value = 0.12;
     swell.connect(swellDepth).connect(airGain.gain);
     swell.start();
     this.sources.push(swell);
@@ -365,23 +368,107 @@ class RoomTone {
     const out = pan ?? ctx.createGain();
     if (pan) pan.pan.value = (Math.random() * 2 - 1) * 0.75;
     out.connect(bus);
-    setTimeout(() => out.disconnect(), 6000);
+    // Long enough for the longest murmur or typing run to finish before its channel goes away.
+    setTimeout(() => out.disconnect(), 9000);
 
+    // The mix leans on the sounds of *work* — typing and talk — with the object noises and the rare
+    // chat-app ping as seasoning. Every branch below jitters its own parameters, so even the same
+    // event twice in a row never plays the same twice (nick, 2026-07-29: "very dynamic and variable
+    // so they don't get old").
     const roll = Math.random();
-    if (roll < 0.5) this.keys(ctx, out);
-    else if (roll < 0.72) this.tap(ctx, out, 0.9);
-    else if (roll < 0.88) this.creak(ctx, out);
+    if (roll < 0.34) this.keys(ctx, out);
+    else if (roll < 0.54) this.murmur(ctx, out);
+    else if (roll < 0.68) this.tap(ctx, out, 0.9);
+    else if (roll < 0.8) this.creak(ctx, out);
+    else if (roll < 0.9) this.chime(ctx, out);
     else this.tap(ctx, out, 0.35);
   }
 
-  /** Somebody typing, a few desks away: a short run of clicks at a human, uneven rate. */
+  /** Somebody typing, a few desks away: a run of clicks at a human, uneven rate. Sometimes a quick
+   *  flurry, sometimes a long thought typed out — with a thinking pause in the middle of the long
+   *  ones. A uniform run is what the ear learns first. */
   private keys(ctx: AudioContext, out: AudioNode): void {
-    const n = 4 + Math.floor(Math.random() * 9);
+    const long = Math.random() < 0.3;
+    const n = long ? 14 + Math.floor(Math.random() * 12) : 4 + Math.floor(Math.random() * 9);
+    const pauseAt = long ? 5 + Math.floor(Math.random() * (n - 8)) : -1;
     let at = ctx.currentTime + 0.02;
     for (let i = 0; i < n; i++) {
       this.click(ctx, out, at, 1650 + Math.random() * 900, 0.05 + Math.random() * 0.04);
       at += 0.055 + Math.random() * 0.075; // the jitter IS the humanity
+      if (i === pauseAt) at += 0.5 + Math.random() * 1.1; // rereading the sentence
     }
+  }
+
+  /** A chat app pinging at somebody else's desk: two quick soft notes. Drawn from a few different
+   *  apps' worth of intervals — rising, wider, falling — so no two pings in a row are the same one. */
+  private chime(ctx: AudioContext, out: AudioNode): void {
+    const sets: [number, number][] = [
+      [523.25, 783.99], // C5 → G5
+      [587.33, 880.0], // D5 → A5
+      [659.25, 987.77], // E5 → B5
+      [783.99, 659.25], // G5 → E5 — the falling one
+    ];
+    const [f1, f2] = sets[Math.floor(Math.random() * sets.length)]!;
+    const g = 0.028 + Math.random() * 0.018; // always a few desks away, never YOUR notification
+    const t0 = ctx.currentTime + 0.02;
+    this.ping(ctx, out, t0, f1, g);
+    this.ping(ctx, out, t0 + 0.09 + Math.random() * 0.05, f2, g * 1.15);
+  }
+
+  /** One soft sine strike with a fast attack and a long ring — the body of a notification note. */
+  private ping(ctx: AudioContext, out: AudioNode, at: number, freq: number, gain: number): void {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(gain, at + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.5);
+    osc.connect(g).connect(out);
+    osc.start(at);
+    osc.stop(at + 0.55);
+  }
+
+  /** Two people talking a few desks away — too far to make out a word, which is the point. Band-passed
+   *  noise shaped into syllables, two voice registers trading short phrases; phrase count, syllable
+   *  count, register, contour and pacing all jittered, so no two conversations are alike. */
+  private murmur(ctx: AudioContext, out: AudioNode): void {
+    let at = ctx.currentTime + 0.05;
+    const phrases = 2 + Math.floor(Math.random() * 2);
+    for (let ph = 0; ph < phrases; ph++) {
+      // alternate speakers: one higher register, one lower
+      const voice = ph % 2 === 0 ? 195 + Math.random() * 60 : 130 + Math.random() * 40;
+      const syllables = 3 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < syllables; i++) {
+        const dur = 0.09 + Math.random() * 0.11;
+        this.voiceBurst(ctx, out, at, voice * (0.9 + Math.random() * 0.35), dur);
+        at += dur + 0.02 + Math.random() * 0.06;
+      }
+      at += 0.25 + Math.random() * 0.55; // the beat where the other one answers
+    }
+  }
+
+  /** One spoken syllable, heard through the room: a noise burst through a gliding bandpass (the pitch
+   *  contour of speech) then a hard lowpass (the wall between you and the words). */
+  private voiceBurst(ctx: AudioContext, out: AudioNode, at: number, freq: number, dur: number): void {
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 4.5;
+    bp.frequency.setValueAtTime(freq, at);
+    bp.frequency.exponentialRampToValueAtTime(freq * (0.85 + Math.random() * 0.3), at + dur);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 900;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.05 + Math.random() * 0.02, at + dur * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(bp).connect(lp).connect(g).connect(out);
+    src.start(at);
+    src.stop(at + dur + 0.03);
   }
 
   /** A mug, a stapler, something set down on a desk. `body` picks how heavy it lands. */
