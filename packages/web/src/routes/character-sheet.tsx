@@ -163,6 +163,7 @@ function CharacterSheet() {
               phase: t * 1.3,
               flip: cell.face < 0,
               face: cell.face,
+              faceMag: Math.abs(cell.face),
               path: [],
               seg: 0,
               plan: 'nap',

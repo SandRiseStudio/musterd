@@ -10,6 +10,7 @@ import {
   petBeg,
   PET_DASH,
   PET_SPEED,
+  MIN_FACE,
   stepPet,
   STRETCH_S,
   type PetState,
@@ -205,6 +206,47 @@ describe('turning', () => {
     expect(stepPet(pet, 1 / 60)).toBe(true); // mid-swivel: it needs frames
     for (let i = 0; i < 60; i++) stepPet(pet, 1 / 60);
     expect(stepPet(pet, 1 / 60)).toBe(false); // and gives them back when it lands
+  });
+
+  /**
+   * "It looks like hes walking sideways" (nick, 2026-07-28). The dog only has a left and a right
+   * view, so on a 2:1 iso a diagonal was drawn fully side-on while travelling at the camera. The
+   * width now follows the heading: side-on along a wall, narrow toward the viewer.
+   */
+  it('narrows toward the camera and opens out along a wall', () => {
+    const walkAlong = (tx: number, ty: number) => {
+      const pet = createPet(() => 0.5);
+      pet.lx = 300;
+      pet.ly = 300;
+      pet.path = [
+        { lx: 300, ly: 300 },
+        { lx: tx, ly: ty },
+      ];
+      pet.seg = 0;
+      pet.mode = 'walk';
+      for (let i = 0; i < 30 && pet.mode === 'walk'; i++) stepPet(pet, 1 / 60);
+      return pet;
+    };
+    // Measured in SCREEN space. +lx/−ly is the one heading whose screen travel is purely horizontal
+    // — straight across the room, fully side-on to the camera.
+    expect(walkAlong(500, 100).faceMag).toBeCloseTo(1, 2); // dx = −dy: no screen-y at all
+    // +lx/+ly is its opposite: no screen-x at all, straight down the screen at the viewer. As narrow
+    // as the painter is allowed to draw it, since it has no rear view to switch to.
+    expect(walkAlong(800, 800).faceMag).toBeCloseTo(MIN_FACE, 2);
+    // A pure +lx heading is NEITHER — under a 2:1 iso it still travels down-and-right on screen, so
+    // it sits between the two. This is the case that made the first version of this wrong: measured
+    // on the floor it looks like the side-on extreme, and it is not.
+    const alongOneAxis = walkAlong(800, 300).faceMag;
+    expect(alongOneAxis).toBeGreaterThan(MIN_FACE);
+    expect(alongOneAxis).toBeLessThan(1);
+  });
+
+  it('opens back to full profile when it turns to look at something', () => {
+    const pet = createPet(() => 0.5);
+    pet.faceMag = MIN_FACE; // left over from a diagonal it just finished
+    // petNotice is the cheapest route to faceToward: a walker passes, the dog looks up.
+    expect(petNotice(pet, [{ lx: pet.lx - 40, ly: pet.ly }], () => 0.5)).toBe(true);
+    expect(pet.faceMag).toBe(1);
   });
 
   it('holds its facing down a diagonal instead of fluttering', () => {
