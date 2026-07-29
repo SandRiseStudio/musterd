@@ -15,6 +15,7 @@ import { findBinding, findWorkspaceSpec, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { clock, theme } from '../render/theme.js';
+import { enumerateClaudeSessions } from '../session/enumerate.js';
 import {
   LOCAL_SESSION_LIVE_MS,
   localSessionLiveness,
@@ -111,6 +112,35 @@ async function captureCommand(event: 'start' | 'end', parsed: Parsed): Promise<n
   }
   await captureSession(event, parseHookPayload(await readStdin()));
   return 0;
+}
+
+/**
+ * Is a session running here that the capture slot does not name? — the ADR 166 question, asked of
+ * one reader that never asked it.
+ *
+ * `binding.session` is written only by the SessionStart hook. When that hook does not write for a
+ * new session, the predecessor's block survives with its `ended_at` intact, and every later reader
+ * concludes the live seat has ended. Enumerated session files are the stronger witness (ADR 166
+ * "THE FLIP"), so they settle it: a transcript in this workspace being appended to *right now*,
+ * whose id is not the captured one, means the slot is a corpse and names where the truth is.
+ *
+ * Returns the live session's transcript when the slot is contradicted, else undefined. Read-only,
+ * best-effort, and silent on any failure — it rides a hook.
+ */
+function liveSessionElsewhere(
+  dir: string,
+  session: SessionCapture,
+  now: number,
+  enumerate: typeof enumerateClaudeSessions,
+): { path: string; id: string } | undefined {
+  try {
+    const files = enumerate(dir);
+    if (!files) return undefined; // the harness cannot enumerate — the slot stays the only witness
+    const live = files.find((f) => now - f.mtime < LOCAL_SESSION_LIVE_MS && f.id !== session.id);
+    return live ? { path: live.path, id: live.id } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -220,20 +250,41 @@ export const OBSERVATION_REFRESH_MS = 5 * 60_000;
  * erases — same hook contract as capture. Returns the newly written model, or `undefined` for "no
  * change", which is the overwhelmingly common path.
  */
-export function refreshModelObservation(dirHint?: string): string | undefined {
+export function refreshModelObservation(
+  dirHint?: string,
+  // Injected for tests, mirroring `localSessionLiveness` — the enumerator reads the real
+  // ~/.claude/projects tree, which a unit test must not depend on.
+  enumerate: typeof enumerateClaudeSessions = enumerateClaudeSessions,
+): string | undefined {
   try {
     const dir = dirHint ?? findWorkspaceDir();
     if (!dir) return undefined;
     const binding = findBinding(dir, {});
-    // Only a live captured session has a transcript worth re-reading. An ended one is over: whatever
-    // it last attested is the truth about it, and a stale re-read would only muddy that.
     const session = binding?.session;
-    if (!binding || !session?.transcript_path || session.ended_at !== undefined) return undefined;
+    if (!binding || !session?.transcript_path) return undefined;
+
+    // Only a live captured session has a transcript worth re-reading — but "ended" is a claim by the
+    // SLOT, and ADR 166 already established that the slot is the weaker witness: enumerated session
+    // files decide, because "a workspace with a live session and a newer dead one is exactly the case
+    // the slot gets wrong". This reader never got that flip, and the cost is specific.
+    //
+    // The capture is only replaced by a SessionStart hook. When that hook does not write for a new
+    // session — measured live on 2026-07-29: 3 of 5 active seats carried a predecessor's block, one
+    // of them 16 days old — the corpse stays on disk with `ended_at` set, and every later read
+    // concludes the LIVE seat has ended. Bailing here then silently retires model *observation* for
+    // the rest of that seat's life, so attestation falls back to the stale declaration: ADR 163's
+    // named failure, "worse, because it looks trustworthy".
+    //
+    // So an ended slot ends the refresh only when nothing contradicts it. If the workspace has a
+    // live session that the slot does not name, the slot is a corpse and the live transcript is the
+    // one worth reading.
+    const now = Date.now();
+    const live = liveSessionElsewhere(dir, session, now, enumerate);
+    if (session.ended_at !== undefined && !live) return undefined;
 
     const prior = binding.model_observed;
     // Current already? Two ways to be stale: observed before this session began (the carry-forward),
     // or simply old enough that a mid-run switch could have happened since.
-    const now = Date.now();
     const current =
       prior !== undefined &&
       prior.observed_at >= session.started_at &&
@@ -243,9 +294,12 @@ export function refreshModelObservation(dirHint?: string): string | undefined {
     // The harness that captured the session owns the parse — a codex-captured session must not be
     // read with Claude Code's eyes.
     const harness = session.harness;
+    // Read the live session's transcript when the slot turned out to be a corpse: observing the dead
+    // predecessor would attest the model of a session that is not running.
+    const source = live ?? { path: session.transcript_path, id: session.id };
     const observed = observeModelFor(harness, {
-      transcript_path: session.transcript_path,
-      session_id: session.id,
+      transcript_path: source.path,
+      session_id: source.id,
     });
     if (!observed) return undefined; // unreadable / moved format — the prior observation stands
 
