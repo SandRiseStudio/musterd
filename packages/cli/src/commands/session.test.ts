@@ -266,6 +266,69 @@ describe('musterd session (capture)', () => {
       expect(readBinding(wsA).model_observed).toMatchObject({ model: 'claude-opus-5' });
     });
 
+    it('heals the slot to the live session when a corpse contradicts it (the wake-blip clobber)', () => {
+      // The measured 2026-07-29 shape, timestamps and all: the seat's real session began at 22:55;
+      // a short wake wrote the slot at 23:49 and ended at 23:50. The writer never missed — it was
+      // OUTVOTED, and nothing ever gives the slot back because a long-lived session fires
+      // SessionStart exactly once. The tool boundary is the boundary that always happens.
+      const liveBegan = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'blip-sid',
+            transcript_path: join(wsA, 'blip.jsonl'),
+            started_at: liveBegan + 3_240_000,
+            ended_at: liveBegan + 3_300_000,
+          },
+        }),
+      );
+      const livePath = transcript(wsA, 'claude-opus-5', 'live.jsonl');
+
+      refreshModelObservation(
+        wsA,
+        enumStub([{ id: 'live-sid', path: livePath, mtime: Date.now(), bytes: 10 }]),
+      );
+
+      const healed = readBinding(wsA).session!;
+      expect(healed.id).toBe('live-sid');
+      expect(healed.transcript_path).toBe(livePath);
+      expect(healed.ended_at).toBeUndefined();
+      expect(typeof healed.started_at).toBe('number');
+    });
+
+    it('heals the slot even when the live transcript is not yet readable for a model', () => {
+      // The heal is about the slot, not the observation: an unreadable/turnless live transcript
+      // must not leave the corpse in place — the next wake would resume the blip's transcript.
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'blip-sid',
+            transcript_path: join(wsA, 'blip.jsonl'),
+            started_at: startedAt,
+            ended_at: startedAt + 15_000,
+          },
+        }),
+      );
+      const livePath = join(wsA, 'live-empty.jsonl');
+      writeFileSync(livePath, '', 'utf8'); // exists, but carries no assistant turn yet
+
+      expect(
+        refreshModelObservation(
+          wsA,
+          enumStub([{ id: 'live-sid', path: livePath, mtime: Date.now(), bytes: 0 }]),
+        ),
+      ).toBeUndefined();
+
+      const healed = readBinding(wsA).session!;
+      expect(healed.id).toBe('live-sid');
+      expect(healed.ended_at).toBeUndefined();
+    });
+
     it('still stops when the slot ended and nothing contradicts it', () => {
       const startedAt = Date.now() - 3_600_000;
       writeBinding(
