@@ -84,6 +84,7 @@ describe('version-bump discipline (ADR 085)', () => {
     6: 'bbeafefcb4cdd58e', // + nudge-relay skill unit (ADR 167)
     7: '131f5f1bfc512501', // + lane_release: park work you stop carrying; the STRAND branch names the verb
     8: 'c01758f70a3e8737', // + where each kind of teammate stands: agents in worktrees, the human in the team home (ADR 176)
+    9: '6d3004fc8347d2e4', // + label-sessions: the sweep stamps the machine-wide file that quiets the per-turn label-nudge
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

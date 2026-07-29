@@ -29,5 +29,9 @@
 // Epoch 3 — ADR 167: the `delivery_hint` on directed-act acks + the nudge-relay skill. A seat behind
 // this epoch simply never relays (the hint is additive and ignored) — its directed acts still deliver
 // through the ADR 088/131 ladder, just without the seconds-latency rail.
-export const FEATURE_EPOCH = 3 as const;
+// Epoch 4 — the label-sweep nudge rail: `musterd session label-nudge` + the managed machine-wide
+// UserPromptSubmit hook, and the SessionStart orientation's label clause going due-gated. The bump is
+// what stops an older checkout's `init` from rewriting the machine-wide hooks back to the one-shot
+// text (ADR 168 downgrade guard — equal epochs overwrite). An older seat simply never nudges.
+export const FEATURE_EPOCH = 4 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

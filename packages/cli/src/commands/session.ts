@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
@@ -48,9 +48,10 @@ export async function sessionCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
   if (sub === 'start' || sub === 'end') return captureCommand(sub, parsed);
   if (sub === 'resolve-labels') return resolveLabelsCommand(parsed);
+  if (sub === 'label-nudge') return labelNudgeCommand();
   if (sub === 'show' || sub === undefined) return showCommand(parsed);
   throw new CliError(
-    'usage: musterd session start --stdin | end --stdin | resolve-labels --stdin | show  ' +
+    'usage: musterd session start --stdin | end --stdin | resolve-labels --stdin | label-nudge | show  ' +
       '(start/end are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
     2,
   );
@@ -547,6 +548,63 @@ export function resolveLabels(
   return { apply, skipped };
 }
 
+// ---------------------------------------------------------------------------------------------
+// The label-sweep nudge rail. The sweep only happens when a harness-side agent runs it, and the
+// one-shot SessionStart instruction was measured to fail: agents skip it under a busy first prompt
+// (3 days of unlabeled sidebar, 2026-07-29). So the ask repeats — the UserPromptSubmit hook calls
+// `label-nudge` every turn — but self-quiets: `resolve-labels` stamps a machine-wide "last sweep"
+// file, and the nudge prints ONLY while that stamp is missing or stale. One seat's sweep silences
+// every seat's nudge; nothing depends on the nudged session being the one that complies.
+// ---------------------------------------------------------------------------------------------
+
+/** How stale the machine-wide sweep stamp may get before the nudge re-arms. Long enough that a
+ *  sweep quiets a whole working session; short enough that new sessions never wait a day. */
+export const LABEL_SWEEP_STALE_MS = 4 * 3_600_000;
+
+/** Machine-wide (not per-workspace): a sweep labels every seat's sessions, so one stamp serves
+ *  all. Env-overridable for tests, like `MUSTERD_CCD_SESSIONS_DIR` above. */
+function labelStampPath(env: NodeJS.ProcessEnv): string {
+  return env['MUSTERD_LABEL_STAMP'] ?? join(homedir(), '.musterd', 'label-sweep.json');
+}
+
+/** Record "a sweep ran now". Best-effort: rides a hook-adjacent path, so it must never throw. */
+export function stampLabelSweep(now = Date.now(), env: NodeJS.ProcessEnv = process.env): void {
+  try {
+    const p = labelStampPath(env);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, JSON.stringify({ swept_at: now }) + '\n', 'utf8');
+  } catch {
+    // a failed stamp costs one extra nudge, never a broken sweep
+  }
+}
+
+/** True when the nudge should fire: no stamp, an unreadable stamp, or a stale one. */
+export function labelSweepDue(now = Date.now(), env: NodeJS.ProcessEnv = process.env): boolean {
+  try {
+    const rec = JSON.parse(readFileSync(labelStampPath(env), 'utf8')) as { swept_at?: unknown };
+    return typeof rec.swept_at !== 'number' || now - rec.swept_at >= LABEL_SWEEP_STALE_MS;
+  } catch {
+    return true;
+  }
+}
+
+/** `session label-nudge` — hook-driven, hence silent-or-one-line and never failing. */
+function labelNudgeCommand(): number {
+  try {
+    if (labelSweepDue()) {
+      process.stdout.write(
+        'musterd: the sidebar label sweep has not run recently — run the musterd-label-sessions ' +
+          'skill NOW, before continuing the task (list sessions, pipe through `musterd session ' +
+          'resolve-labels --stdin`, apply the renames). One sweep labels every seat session and ' +
+          'quiets this nudge machine-wide.\n',
+      );
+    }
+  } catch {
+    // hook contract: never fail, never noise
+  }
+  return 0;
+}
+
 /** The stdin wrapper: harness session-list JSON in, `{apply, skipped}` JSON out. */
 async function resolveLabelsCommand(parsed: Parsed): Promise<number> {
   if (parsed.flags['stdin'] !== true) {
@@ -562,6 +620,9 @@ async function resolveLabelsCommand(parsed: Parsed): Promise<number> {
     throw new CliError('resolve-labels: stdin must be a JSON array of session rows', 2);
   }
   process.stdout.write(JSON.stringify(resolveLabels(sessions), null, 1) + '\n');
+  // The sweep ran (even if `apply` came back empty — "checked, nothing to do" is still a sweep):
+  // stamp it, so `label-nudge` goes quiet machine-wide.
+  stampLabelSweep();
   return 0;
 }
 
