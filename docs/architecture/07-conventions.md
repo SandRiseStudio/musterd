@@ -69,7 +69,7 @@ catch-up strategy. The full playbook lives in [`AGENTS.md`](../../AGENTS.md); th
 - **Squash-merge only** — merge-commit and rebase-merge are disabled; `main` keeps a **linear history**,
   one commit per PR.
 - **Open a PR and let it land itself:** `gh pr create …` then `gh pr merge <n> --squash --auto --delete-branch`. Auto-merge waits for the required checks and squash-merges when green — don't poll.
-- **Required to merge:** the `gates` CI (`06-testing.md`) **and** `Cursor Bugbot` (the Cursor GitHub App, cursor.com/dashboard/bugbot — not in-repo) both green. `main` is PR-only, no direct pushes, no force-push/deletion. Admin (owner) is break-glass.
+- **Required to merge:** the `gates` CI (`06-testing.md`) green — the single required check (ADR 180 retired `Cursor Bugbot`). The `review` workflow may comment on PRs touching protocol/server, but it is **advisory** and never blocks. `main` is PR-only, no direct pushes, no force-push/deletion. Admin (owner) is break-glass.
 - **Sync a stale branch by rebase, never `merge main`:** `git fetch origin main && git rebase origin/main`, resolve once, `git push --force-with-lease`. Branch history is throwaway under squash; never `git push --force`.
 - **Before pushing**, run the fast local smoke (`pnpm typecheck && pnpm format:check`) — an optimization for feedback, not a duplicate of CI, which is the authority.
 
@@ -116,7 +116,7 @@ A task/milestone is done only when **all** are true:
 5. Any deviation from these docs has an ADR.
 6. For CLI changes: output still matches the Figma terminal frames (snapshot tests pass).
 7. For agent-facing changes: emitted traces and an eval (or an explicit, reasoned `n/a`) are present and described in the same commit — peer to tests and docs (ADR 052).
-8. Landed via the git workflow above (ADR 106): a **squash-merged PR** with the `gates` CI + `Cursor Bugbot` green — never a direct push to `main`. Locally, items 1–3 run as the fast pre-push smoke; CI is the authoritative gate.
+8. Landed via the git workflow above (ADR 106): a **squash-merged PR** with the `gates` CI green — never a direct push to `main`. Locally, items 1–3 run as the fast pre-push smoke; CI is the authoritative gate.
 
 ## Naming
 

@@ -62,6 +62,39 @@ export default tseslint.config(
     rules: { 'import/no-default-export': 'off' },
   },
   {
+    // AGENTS.md hard rule 5 / 00-overview: the CLI and MCP adapter talk to the server **over the
+    // wire**. Only `@musterd/protocol` crosses a package boundary. Importing `@musterd/server`
+    // links the daemon into a client process — it compiles and the tests pass, so nothing else
+    // catches it; this rule does. The single sanctioned exception (`commands/serve.ts`, which
+    // launches the daemon in-process per ADR 002) is carved out below.
+    files: ['packages/cli/src/**/*.ts', 'packages/mcp/src/**/*.ts'],
+    ignores: ['**/*.test.ts', 'packages/cli/src/commands/serve.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@musterd/server', '@musterd/server/**'],
+              message:
+                'Clients talk to the server over the wire (AGENTS.md hard rule 5). ' +
+                'Only commands/serve.ts may import @musterd/server, to launch the daemon in-process (ADR 002).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // 07-conventions "Error handling"/"Logging": the server emits single-line structured JSON and
+    // never `console.log`s an error and continues. A stray console call both breaks that format and
+    // is the likeliest way a token (`mskey_`/`msgr_`/`mscr_`) reaches stdout — the one thing
+    // AGENTS.md hard rule 4 forbids outright. Zero violations today; this keeps it that way.
+    files: ['packages/server/src/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: { 'no-console': 'error' },
+  },
+  {
     // Tests may use throwaway bindings and looser typing.
     files: ['**/*.test.ts', 'tests/**', 'examples/**'],
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
