@@ -61,7 +61,14 @@ import {
 import { WebSocket } from 'ws';
 import { buildClaimFrame, parseClaimResponse } from './claim-client.js';
 import type { ClaimOutcome } from './claim-client.js';
-import { CliError, exitForCode, isConnRefused } from './errors.js';
+import {
+  CliError,
+  RETRY_DELAYS_MS,
+  connectionNeverEstablished,
+  exitForCode,
+  isConnRefused,
+  worthRetrying,
+} from './errors.js';
 import { cliBuild } from './version.js';
 
 /** The `/inbox/interrupt-check` response (ADR 088). `raised: false` is the silent common path. */
@@ -105,6 +112,26 @@ export class HttpClient {
     return new HttpClient({ ...this.opts, noTouch: true });
   }
 
+  /**
+   * `fetch` that rides out a daemon bounce (§ {@link RETRY_DELAYS_MS}) — the ~849ms window in which
+   * the auto-refresher's rebuilt daemon is not yet answering. Retries a write whose connection was
+   * *refused*, and nothing else: a reset mid-flight connection may already have been processed, a read
+   * self-heals on the next poll, and any HTTP status is a real answer. All three go straight back to
+   * the caller.
+   */
+  private async fetchWithRetry(path: string, init: RequestInit): Promise<Response> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fetch(this.opts.server + path, init);
+      } catch (err) {
+        const delay = RETRY_DELAYS_MS[attempt];
+        const retryable = worthRetrying(init.method ?? 'GET') && connectionNeverEstablished(err);
+        if (delay === undefined || !retryable) throw err;
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+
   // reason: returns parsed JSON of varying shape; callers narrow at each call site.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async request(method: string, path: string, body?: unknown): Promise<any> {
@@ -126,7 +153,7 @@ export class HttpClient {
         this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
           ? resolveAttestedProvenance(process.env)
           : undefined;
-      res = await fetch(this.opts.server + path, {
+      res = await this.fetchWithRetry(path, {
         method,
         headers: {
           'content-type': 'application/json',
@@ -606,7 +633,9 @@ export class HttpClient {
     };
     let res: Response;
     try {
-      res = await fetch(this.opts.server + `/teams/${slug}/claim`, {
+      // Retries a refused connection like every other call: a claim that lands during the bounce is
+      // the worst one to drop, because a session that fails to claim reads as unclaimed afterwards.
+      res = await this.fetchWithRetry(`/teams/${slug}/claim`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',

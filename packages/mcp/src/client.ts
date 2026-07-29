@@ -24,6 +24,53 @@ function wsBase(server: string): string {
 }
 
 /**
+ * Retry schedule for a request whose connection was refused (§ {@link connectionNeverEstablished}).
+ *
+ * A daemon bounce is a real, routine hole in HTTP availability: measured 2026-07-29 at **849ms** (16
+ * consecutive 50ms polls) against a throwaway daemon killed and relaunched the way `service refresh`
+ * does it. The auto-refresher has driven that bounce **116 times** on the dogfood machine and every
+ * single one went through live sessions — its quiet-period guard has never once deferred, because on
+ * a 12-seat box "some seat is connected" is the steady state, not the exception. Without a retry, an
+ * act unlucky enough to land in that sub-second window simply fails, and the agent is told its work
+ * did not go through.
+ *
+ * The sum covers the measured outage about twice over, while a daemon that is genuinely gone still
+ * fails in under two seconds instead of hanging.
+ *
+ * Applied to WRITES only (§ {@link worthRetrying}).
+ */
+export const RETRY_DELAYS_MS = [250, 500, 1000];
+
+/**
+ * Only a write earns a retry, and the asymmetry is the point: losing an act is the damage this fix
+ * exists to prevent, while a lost read costs nothing — the next inbox poll or health check fetches it
+ * again a moment later.
+ *
+ * It also protects the hot path. `GET /inbox/interrupt-check` runs at *every tool boundary* (ADR 088),
+ * so retrying reads would add the whole retry budget to every single tool call whenever the daemon is
+ * genuinely stopped — trading a rare lost act for a permanently sluggish session, which is a worse
+ * bargain than the bug.
+ */
+function worthRetrying(method: string): boolean {
+  return method !== 'GET';
+}
+
+/**
+ * True only when the TCP connection was never established, which is the one case where re-sending is
+ * provably safe: the request never reached the server, so it cannot have been acted on once already.
+ *
+ * A **reset** connection is deliberately excluded. That one was live, the daemon may well have
+ * processed the body before dying, and re-posting it would duplicate the act — a second copy of a
+ * message, or a second lane claim. Node's fetch reports refusal and reset with the *same*
+ * `TypeError: fetch failed` message and puts the real code only on `cause.code`, so this has to read
+ * the cause. The CLI's `isConnRefused()` text-matches ECONNREFUSED *and* ECONNRESET *and* the bare
+ * "fetch failed" string: right for "can't reach the daemon", unusable as a retry predicate.
+ */
+function connectionNeverEstablished(err: unknown): boolean {
+  return (err as { cause?: { code?: string } } | null | undefined)?.cause?.code === 'ECONNREFUSED';
+}
+
+/**
  * HTTP client + background WS that holds presence and buffers inbound deliveries.
  * The buffer is a convenience; the server log + cursor are authoritative, so a
  * dropped socket never loses messages (they resurface via the inbox cursor).
@@ -146,21 +193,35 @@ export class MusterdClient {
     opts: { headers?: Record<string, string>; timeoutMs?: number } = {},
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
-    const res = await fetch(this.config.server + path, {
-      method,
-      headers: {
-        'content-type': 'application/json',
-        // v0.3 (ADR 075): authenticate with the team agent key (Bearer); the server dispatches on the
-        // prefix → the live-presence occupancy this session holds. Roster/health stay auth-optional.
-        ...(this.config.agent_key ? { authorization: `Bearer ${this.config.agent_key}` } : {}),
-        // The agent key authenticates the harness, not a seat — reads carry the occupied seat so the
-        // server can assert occupancy (SPEC A.7 §253). A send conveys it via the envelope `from`.
-        ...(this.config.member ? { 'x-musterd-seat': this.config.member } : {}),
-        ...(opts.headers ?? {}),
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      ...(opts.timeoutMs !== undefined ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
-    });
+    let res: Response;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        // Built inside the loop so each attempt gets a FRESH abort signal — a timeout signal hoisted
+        // out would already be spent by the time a retry used it, aborting instantly.
+        res = await fetch(this.config.server + path, {
+          method,
+          headers: {
+            'content-type': 'application/json',
+            // v0.3 (ADR 075): authenticate with the team agent key (Bearer); the server dispatches on the
+            // prefix → the live-presence occupancy this session holds. Roster/health stay auth-optional.
+            ...(this.config.agent_key ? { authorization: `Bearer ${this.config.agent_key}` } : {}),
+            // The agent key authenticates the harness, not a seat — reads carry the occupied seat so the
+            // server can assert occupancy (SPEC A.7 §253). A send conveys it via the envelope `from`.
+            ...(this.config.member ? { 'x-musterd-seat': this.config.member } : {}),
+            ...(opts.headers ?? {}),
+          },
+          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+          ...(opts.timeoutMs !== undefined ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
+        });
+        break;
+      } catch (err) {
+        const delay = RETRY_DELAYS_MS[attempt];
+        if (delay === undefined || !worthRetrying(method) || !connectionNeverEstablished(err)) {
+          throw err;
+        }
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
     const text = await res.text();
     const json = text ? JSON.parse(text) : {};
     if (!res.ok) {
