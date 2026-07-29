@@ -1,4 +1,4 @@
-import { FLOOR } from './iso';
+import { FLOOR, KX, KY } from './iso';
 import {
   BEAM_LEN,
   BEAM_SHEAR,
@@ -53,6 +53,23 @@ export interface PetState {
    */
   face: number;
   /**
+   * How side-on the current heading is, 0…1 — the *magnitude* `face` chases, with `flip` supplying
+   * the sign.
+   *
+   * The dog is a profile billboard on a 2:1 iso, so it only ever has a left and a right view. Walking
+   * a diagonal it is therefore drawn fully side-on while actually travelling toward or away from the
+   * camera, and a full-profile dog moving down the screen reads as a crab (nick, 2026-07-28: "it
+   * looks like hes walking sideways"). The bug was always there; giving the dog a real stride is what
+   * made it visible.
+   *
+   * The fix is the foreshortening the turn already had: narrow the whole figure by how much of the
+   * heading is actually across the screen. Straight along a wall → full profile. Straight at the
+   * camera → as narrow as `MIN_FACE` allows, which reads as a dog coming at you rather than one
+   * sliding. Floored well above zero because a true rear view is a pose this painter does not have,
+   * and a sliver held for a whole diagonal walk would read as a rendering fault, not a dog.
+   */
+  faceMag: number;
+  /**
    * Ground speed right now, logical units/s — eased toward `speed`, not set to it. A dog does not
    * leave a nap at trotting pace or arrive at one still trotting: it winds up out of the stretch and
    * winds down into the last stride. Gait phase advances from THIS, so the legs turn over slower
@@ -106,6 +123,12 @@ const TURN_TAU = 0.075;
  * x — without a deadband it would flutter between facings for the whole diagonal.
  */
 const FACE_COMMIT = 0.34;
+/**
+ * How narrow the dog is allowed to get walking straight at or away from the camera. Not zero: the
+ * painter has no rear view, so this is a *suggestion* of foreshortening, not a real one — enough that
+ * a diagonal stops reading as a crab, not so much that the dog becomes an edge.
+ */
+export const MIN_FACE = 0.42;
 /** Wake-up stretch and settle-down curl durations (seconds). */
 export const STRETCH_S = 1.5;
 export const CURL_S = 1.1;
@@ -189,6 +212,7 @@ export function createPet(rng: () => number = Math.random): PetState {
     phase: 0,
     flip: false,
     face: 1,
+    faceMag: 1,
     vel: 0,
     path: [],
     seg: 0,
@@ -328,6 +352,9 @@ export function petBeg(pet: PetState, seat: P, rng: () => number = Math.random):
 function faceToward(pet: PetState, at: P): void {
   const sx = at.lx - pet.lx - (at.ly - pet.ly);
   if (Math.abs(sx) > 0.5) pet.flip = sx < 0;
+  // Turning to LOOK at something is a settled pose, not travel: open the figure back to full profile
+  // so a dog that watched you walk past is not left wearing the last stride's foreshortening.
+  pet.faceMag = 1;
 }
 
 /** How close a walker has to pass before the sleeping dog bothers to open an eye. */
@@ -448,7 +475,7 @@ export function stepPet(pet: PetState, dt: number): boolean {
   // door while it settles keeps turning through the settle. Exponential toward the intent, so the
   // swivel is fast off the mark and lands soft; snapped the last sliver so it terminates exactly and
   // the room can still park its frame loop.
-  const want = pet.flip ? -1 : 1;
+  const want = (pet.flip ? -1 : 1) * pet.faceMag;
   if (pet.face !== want) {
     pet.face += (want - pet.face) * (1 - Math.exp(-dt / TURN_TAU));
     if (Math.abs(want - pet.face) < 0.004) pet.face = want;
@@ -484,10 +511,21 @@ export function stepPet(pet: PetState, dt: number): boolean {
         pet.ly += (dy / d) * step;
         pet.phase += step / STRIDE; // gait from distance, never wall time
         // Screen-space heading under the 2:1 iso: x grows with (lx − ly). Only a heading that points
-        // decisively sideways changes the facing: a leg angled into the screen has a screen-x of
+        // decisively sideways changes the facing SIGN: a leg angled into the screen has a screen-x of
         // almost nothing, and honouring it would spin the dog on its own axis down a diagonal.
         const sx = dx - dy;
         if (Math.abs(sx) > FACE_COMMIT * d) pet.flip = sx < 0;
+        // …but the WIDTH follows the heading continuously, with no deadband — that is what stops a
+        // diagonal reading as a crab.
+        //
+        // Measured in SCREEN space, not floor space, because that is where the dog is drawn. Under
+        // the 2:1 iso even a pure +lx heading travels down-and-right on screen, so "how side-on am
+        // I" is the fraction of the screen velocity that is horizontal — 1 only when the vertical
+        // component vanishes (the +lx/−ly axis, straight across the room), sinking to the floor when
+        // the dog comes at the camera down the +lx/+ly diagonal.
+        const vx = (dx - dy) * KX;
+        const vy = (dx + dy) * KY;
+        pet.faceMag = Math.max(MIN_FACE, Math.abs(vx) / (Math.hypot(vx, vy) || 1));
         travel -= step;
         if (step >= d) pet.seg++;
       }
@@ -495,6 +533,10 @@ export function stepPet(pet: PetState, dt: number): boolean {
         pet.mode = pet.plan === 'sit-then-nap' ? 'sit' : 'curl';
         pet.modeT = 0;
         pet.vel = 0;
+        // Settled poses are drawn side-on and are meant to be read that way — a napping dog held at
+        // a walking heading's foreshortening just looks squashed. Arriving opens the figure back out,
+        // through the same eased turn.
+        pet.faceMag = 1;
       }
       return true;
     }
