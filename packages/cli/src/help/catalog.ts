@@ -261,7 +261,8 @@ export const CATALOG: readonly CommandEntry[] = [
       '  credential <name>            re-issue a human’s lost mscr_ credential, shown once (localhost, or admin off-host)\n' +
       '  remove <name>                soft-remove a member (history is kept)\n' +
       '  archive <slug> [--as <admin>]  soft-archive a whole team — off status/rosters, history kept (admin)\n' +
-      '  export <slug>                move the roster onto git-tracked .musterd/ files (ADR 058)',
+      '  export <slug> [--to <dir>]   move the roster onto git-tracked .musterd/ files (ADR 058);\n' +
+      '                               defaults into the team home when the team has one (ADR 176)',
     examples: [
       'musterd team create acme --as nick',
       'musterd team add lin --kind human --role reviewer',
