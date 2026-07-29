@@ -24,7 +24,7 @@ the **files** are authoritative and the db is their projection. Three properties
    live session.
 3. **The global daemon hosts many teams** (the `countLivePresences` comment), but a team has **no
    inherent folder**. So "where do this team's files live?" has no automatic answer — migration must
-   *designate* a roster home.
+   _designate_ a roster home.
 
 ## `musterd team export <slug>` — the bootstrap command
 
@@ -52,7 +52,7 @@ whose hash is in `members.token_hash`. Export writes `seats/cosmo.toml` (identit
 and `bound_at`**. So the round-trips to a no-op: files describe exactly what the db already holds,
 reconcile changes nothing, and cosmo's live session never notices.
 
-The ordering guarantee that makes this safe: **export derives the files *from* the db**, so by
+The ordering guarantee that makes this safe: **export derives the files _from_ the db**, so by
 construction D ≡ C at cutover. Migration is the one moment files and db are born identical; the
 no-op reconcile is the proof. (The verification gate below asserts it before trusting it.)
 
@@ -63,9 +63,9 @@ old model, **mint == delivery** — `team add` returned the token and the holder
 pre-existing member is, in the new vocabulary, **already bound**. The migration that adds the column
 backfills `bound_at = created_at` for all existing members.
 
-Why this exact rule: a null `bound_at` would mark a legacy seat as *unheld*, and a stray
+Why this exact rule: a null `bound_at` would mark a legacy seat as _unheld_, and a stray
 `claim cosmo` would then rotate cosmo's token out from under a live session. Backfilling all legacy
-members to *held* closes that hole — a migrated seat can only be moved by `claim --token` adoption or
+members to _held_ closes that hole — a migrated seat can only be moved by `claim --token` adoption or
 operator `reclaim`, never by an accidental plain claim. New seats minted after migration get
 `bound_at` through the normal first-auth-touch path.
 
@@ -87,7 +87,7 @@ the same daemon. There is no flag-day, no all-or-nothing.
 files → project into a scratch `:memory:` db → assert the projected roster **deep-equals the live
 roster** it read in step 1 (same names, kinds, roles, lifecycles, `lifecycle_until`). Only on parity
 does it write `rosterHome` and complete. A mismatch aborts the export with a diff — the files are
-*not* yet authoritative, the db is untouched, and the operator fixes and retries.
+_not_ yet authoritative, the db is untouched, and the operator fixes and retries.
 
 So the dangerous step (handing authority to the files) is gated on a proof that the files reproduce
 the live roster exactly.
@@ -126,22 +126,28 @@ rows carry on. No data is lost because nothing was deleted from the db to begin 
 
 ## Code seams
 
-| Where | Change |
-|---|---|
-| `cli/src/commands/team.ts` | add `export` subcommand: read roster → write canonical files → parity gate → write `rosterHome` → gitignore flip + `git add`. |
-| `cli/src/config.ts` | add `rosterHome: Record<slug, absFolder>` to global config (next to `bindings`). |
-| `server` migration | add `members.bound_at INTEGER`; **backfill `bound_at = created_at` for all existing rows** in the same migration. |
-| `server/src/projection/reconcile.ts` | `reconcileAll` iterates only `rosterHome` teams; db-only teams are skipped (legacy path intact). |
-| `server` roster read endpoint | export reuses the existing roster read; no new read surface. |
-| `cli/src/onboard/init.ts` | already gitignoring only `binding.json` post-058; `export` applies the same flip to pre-existing repos. |
+| Where                                | Change                                                                                                                        |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `cli/src/commands/team.ts`           | add `export` subcommand: read roster → write canonical files → parity gate → write `rosterHome` → gitignore flip + `git add`. |
+| `cli/src/config.ts`                  | add `rosterHome: Record<slug, absFolder>` to global config (next to `bindings`).                                              |
+| `server` migration                   | add `members.bound_at INTEGER`; **backfill `bound_at = created_at` for all existing rows** in the same migration.             |
+| `server/src/projection/reconcile.ts` | `reconcileAll` iterates only `rosterHome` teams; db-only teams are skipped (legacy path intact).                              |
+| `server` roster read endpoint        | export reuses the existing roster read; no new read surface.                                                                  |
+| `cli/src/onboard/init.ts`            | already gitignoring only `binding.json` post-058; `export` applies the same flip to pre-existing repos.                       |
 
 ## Deferred
 
 - **A member that left (`left_at` set) before migration** — export only writes live members, so a
-  tombstoned legacy member has no file; its history stays in the db (correct — files are the *current*
+  tombstoned legacy member has no file; its history stays in the db (correct — files are the _current_
   roster, not the archive). Confirm no FK/report path expects a file for a departed member.
-- **Multiple folders already bound to the same team** — only one becomes `rosterHome`; the others keep
-  their `binding.json` (they *hold* seats, they don't *own* the roster). Spec the operator guidance for
-  picking the home when several repos touch one team.
+- ~~**Multiple folders already bound to the same team**~~ — **answered** by
+  [`install-topology.md`](./install-topology.md) §4: the roster's home is the **team's** home
+  (`~/musterd/<team>`, the `teamHome` key), not any project repo's, so "which repo owns the roster"
+  was the wrong question — no repo does. Only one folder becomes `rosterHome` and the others keep
+  their `binding.json` (they _hold_ seats, they don't _own_ the roster), exactly as this bullet
+  assumed; what was missing was a place to put it that is not a checkout. `teamHome` and `rosterHome`
+  stay deliberately distinct keys — `rosterHome` is this document's cutover signal, and provisioning
+  a human a place to stand must never flip a db-only team to file-authoritative — but when both
+  exist they should name the same folder, and `team export` should default `--to` there.
 - **Concurrent live `team add` during an export** — the parity gate would catch the new member as a
   mismatch and abort; a brief advisory "roster is migrating" lock is cleaner. Build-time detail.

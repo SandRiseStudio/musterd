@@ -75,6 +75,7 @@ const h = vi.hoisted(() => {
     folderSpec: null,
   };
   const claimKeys: (string | undefined)[] = [];
+  const selectOptions: { value: string; hint?: string }[][] = [];
   return {
     confirmQueue,
     selectQueue,
@@ -84,6 +85,7 @@ const h = vi.hoisted(() => {
     config,
     claimQueue,
     claimKeys,
+    selectOptions,
     ...box,
   };
 });
@@ -97,7 +99,12 @@ vi.mock('@clack/prompts', () => ({
   log: { info: vi.fn(), warn: vi.fn(), step: vi.fn(), success: vi.fn(), error: vi.fn() },
   spinner: () => ({ start: vi.fn(), stop: vi.fn() }),
   confirm: vi.fn(async () => h.confirmQueue.shift()),
-  select: vi.fn(async () => h.selectQueue.shift()),
+  select: vi.fn(async (o: { options?: { value: string; hint?: string }[] }) => {
+    // Record what each picker OFFERED, not just what was chosen — "which teams can I reach from
+    // here" is the thing L6 changed, and it is invisible from the return value alone.
+    h.selectOptions.push(o?.options ?? []);
+    return h.selectQueue.shift();
+  }),
   text: vi.fn(async () => h.textQueue.shift()),
 }));
 
@@ -155,12 +162,16 @@ beforeEach(() => {
   h.textQueue.length = 0;
   h.claimQueue.length = 0;
   h.claimKeys.length = 0;
+  h.selectOptions.length = 0;
   h.folderBinding = null;
   h.folderSpec = null;
   Object.assign(h.config, {
     server: 'http://localhost:4849',
     current: undefined,
     identities: {},
+    // Reset the ADR 059 vault too: init's team picker reads it, so a leaked entry from an earlier
+    // test silently changes which branch the next one takes.
+    knownIdentities: [],
     bindings: {},
     agentKeys: {},
   });
@@ -276,6 +287,105 @@ describe('runInit — team selection', () => {
     h.selectQueue.push('watch'); // intent
     expect(await runInit()).toBe(0);
     expect(h.http.createTeam).toHaveBeenCalled();
+  });
+});
+
+/**
+ * L6 / install-topology §3: **one team, many projects** is first-class, so wiring a second repo to a
+ * team this machine already knows must have a path that is not "create a new team".
+ *
+ * The picker used to offer exactly `config.current` + create-new. But `identities` holds ONE identity
+ * per team and only for the teams most recently acted on, while `knownIdentities` (ADR 059) is the
+ * superset another team's join cannot evict. So a machine could hold a perfectly good credential for
+ * a live team and still be routed at the one option that repoints the folder.
+ */
+describe('runInit — the picker offers every team this machine can reach (L6)', () => {
+  it('offers a live vault team that is NOT config.current, instead of only create-new', async () => {
+    h.config.current = 'dawn';
+    h.config.identities['dawn'] = { name: 'nick', key: 'mscr_dawn', surface: 'cli' };
+    // acme is in the vault only — the multi-team case the single-slot cache cannot represent.
+    h.config.knownIdentities.push({
+      team: 'acme',
+      name: 'nick-a',
+      key: 'mscr_acme',
+      surface: 'cli',
+    });
+    h.selectQueue.push('acme', 'watch');
+
+    expect(await runInit()).toBe(0);
+    expect(h.http.createTeam).not.toHaveBeenCalled();
+    expect(h.selectOptions[0]!.map((o) => o.value)).toEqual(['dawn', 'acme', '__new__']);
+  });
+
+  it('names WHO you would be on each team — with several offered, "which team" is "which me"', async () => {
+    h.config.current = 'dawn';
+    h.config.identities['dawn'] = { name: 'nick', key: 'mscr_dawn', surface: 'cli' };
+    h.config.knownIdentities.push({
+      team: 'acme',
+      name: 'nick-a',
+      key: 'mscr_acme',
+      surface: 'cli',
+    });
+    h.selectQueue.push('acme', 'watch');
+
+    await runInit();
+    const hints = Object.fromEntries(h.selectOptions[0]!.map((o) => [o.value, o.hint]));
+    expect(hints['acme']).toContain('you are nick-a');
+    expect(hints['dawn']).toContain('you are nick');
+    expect(hints['dawn']).toContain('last used here');
+  });
+
+  it('picking a non-current team resolves its credential from the vault — the crash this would have been', async () => {
+    // `config.identities[team]!.key` was a non-null assertion on a one-slot-per-team map: for any
+    // team but the current one it is undefined at runtime, and picking one is the whole point.
+    h.config.current = 'dawn';
+    h.config.identities['dawn'] = { name: 'nick', key: 'mscr_dawn', surface: 'cli' };
+    h.config.knownIdentities.push({
+      team: 'acme',
+      name: 'nick-a',
+      key: 'mscr_acme',
+      surface: 'cli',
+    });
+    h.selectQueue.push('acme', 'existing');
+    h.textQueue.push('Miley');
+    h.claimQueue.push({ state: 'occupied' });
+
+    expect(await runInit()).toBe(0);
+    expect(h.http.createTeam).not.toHaveBeenCalled();
+  });
+
+  it("reaches the folder's own team from the vault alone — ADR 161 was defeated by the single slot", async () => {
+    // Bound to revive, current is a dead experiment cell, and revive lives only in the vault. Before
+    // L6 folderKey came from `identities` only, so this fell into "no working credential for it" and
+    // offered to repoint the folder — the exact ADR 161 failure, one layer down.
+    h.folderBinding = { team: 'revive' };
+    h.config.current = 'cookoff-gb2';
+    h.config.knownIdentities.push({
+      team: 'revive',
+      name: 'nick',
+      key: 'mscr_revive',
+      surface: 'cli',
+    });
+    h.selectQueue.push('revive', 'watch');
+
+    expect(await runInit()).toBe(0);
+    expect(h.http.createTeam).not.toHaveBeenCalled();
+    expect(h.selectOptions[0]![0]!.hint).toBe("this folder's team");
+  });
+
+  it('never offers a team it cannot reach on this daemon', async () => {
+    h.config.current = 'dawn';
+    h.config.identities['dawn'] = { name: 'nick', key: 'mscr_dawn', surface: 'cli' };
+    h.config.knownIdentities.push({ team: 'gone', name: 'nick', key: 'mscr_gone', surface: 'cli' });
+    // Only dawn answers; `gone` is a wiped db / another server.
+    h.http.inbox.mockImplementation(async (team: string) => {
+      if (team === 'gone') throw new Error('no such team');
+      return { messages: [] };
+    });
+    h.selectQueue.push('dawn', 'watch');
+
+    await runInit();
+    expect(h.selectOptions[0]!.map((o) => o.value)).toEqual(['dawn', '__new__']);
   });
 });
 
@@ -430,12 +540,14 @@ describe('runInit — intent branches', () => {
       key: 'mscr_miley',
       surface: 'cli',
     });
-    h.textQueue.push('dawn', 'nick', '');
-    h.selectQueue.push('existing');
+    // The vault knows a live team now, so init offers it instead of routing at "create a new team"
+    // (L6) — pick it, then the intent.
+    h.selectQueue.push('dawn', 'existing');
     h.textQueue.push('Miley');
     h.claimQueue.push({ state: 'occupied' });
 
     expect(await runInit()).toBe(0);
+    expect(h.http.createTeam).not.toHaveBeenCalled();
     expect(h.claimKeys).toEqual(['mscr_miley']);
   });
 

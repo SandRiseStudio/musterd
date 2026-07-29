@@ -60,6 +60,68 @@ function folderTeamHere(dir: string = process.cwd()): string | null {
 }
 
 /**
+ * What this machine can authenticate to for `team` — **the vault (ADR 059), not the single-slot
+ * cache**.
+ *
+ * `config.identities` holds exactly one identity *per team*, and only for teams this machine has
+ * most recently acted on; `config.knownIdentities` is the superset that another team's join cannot
+ * evict. Reading only the former is why init could stand in a folder whose binding plainly named a
+ * live team, hold a perfectly good credential for it in the vault, and still conclude it had none —
+ * routing the operator at "create a new team", the one option that repoints the folder (ADR 161's
+ * failure, one layer down). The multi-team case is first-class (install-topology §3); the lookup
+ * has to be too.
+ */
+function credentialFor(config: Config, team: string): { name: string; key: string } | undefined {
+  const active = config.identities[team];
+  if (active?.key) return { name: active.name, key: active.key };
+  const known = config.knownIdentities.find((i) => i.team === team && i.key);
+  return known ? { name: known.name, key: known.key } : undefined;
+}
+
+/**
+ * Every team this machine holds a credential for, most-relevant first: the folder's own team (ADR
+ * 161 — it outranks everything), then the last-used one, then the rest of the vault. Deduped by
+ * slug, because a team appears in both `identities` and `knownIdentities` by design.
+ */
+/**
+ * The reusable-team rows for init's picker: every live team this machine can authenticate to,
+ * excluding any already listed above (the folder's own team gets its own first row). Each says WHO
+ * you would be on it — with several teams offered, "which one" is really "which me", and the vault
+ * is the only thing that knows.
+ */
+function teamOptions(
+  config: Config,
+  liveTeams: string[],
+  exclude: string[],
+): { value: string; label: string; hint: string }[] {
+  return liveTeams
+    .filter((slug) => !exclude.includes(slug))
+    .map((slug) => ({
+      value: slug,
+      label: slug,
+      hint:
+        slug === config.current
+          ? `you are ${credentialFor(config, slug)!.name} · last used here`
+          : `you are ${credentialFor(config, slug)!.name}`,
+    }));
+}
+
+function candidateTeams(config: Config, folderTeam: string | null): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const slug of [
+    ...(folderTeam ? [folderTeam] : []),
+    ...(config.current ? [config.current] : []),
+    ...config.knownIdentities.map((i) => i.team),
+  ]) {
+    if (seen.has(slug) || !credentialFor(config, slug)) continue;
+    seen.add(slug);
+    out.push(slug);
+  }
+  return out;
+}
+
+/**
  * `musterd init --refresh-guidance` (ADR 161): rewrite the stamped skill/command files and nothing
  * else. No team resolution, no member mint, no binding write, no MCP entry — so it is safe in a
  * live seat's worktree, which plain `init` is not. This exists because the doctor's guidance-drift
@@ -288,17 +350,25 @@ export async function runInit(): Promise<number> {
   // team there mints a new member and repoints a live seat's binding: the loudest possible failure
   // for the quietest possible reason.
   const folderTeam = folderTeamHere();
-  const folderKey = folderTeam ? config.identities[folderTeam]?.key : undefined;
-  const folderLive =
-    folderTeam && folderKey ? await cachedTeamLive(server, folderTeam, folderKey) : false;
+  const folderKey = folderTeam ? credentialFor(config, folderTeam)?.key : undefined;
 
+  // Probe every team this machine could offer, not just the cached one. A team is only offerable if
+  // it is live on *this* daemon — a wiped/replaced db or a different server makes a saved
+  // team+credential stale, and offering it would fail mid-flow (the db-mismatch dogfood class). The
+  // probes are independent, so they run together rather than serially: one authenticated call each,
+  // all to the same local daemon.
+  const candidates = candidateTeams(config, folderTeam);
+  const liveTeams = (
+    await Promise.all(
+      candidates.map(async (slug) =>
+        (await cachedTeamLive(server, slug, credentialFor(config, slug)!.key)) ? slug : null,
+      ),
+    )
+  ).filter((s): s is string => s !== null);
+
+  const folderLive = Boolean(folderTeam && folderKey && liveTeams.includes(folderTeam));
   const existing = config.current && config.identities[config.current];
-  // Only offer to reuse the cached team if it's actually live on *this* daemon. A wiped/replaced db
-  // or a different server makes the saved team+token stale; offering it would fail mid-flow (the
-  // db-mismatch dogfood class). Probe with an authenticated call so init stays the single entry point.
-  const cachedLive = existing
-    ? await cachedTeamLive(server, config.current!, config.identities[config.current!]!.key)
-    : false;
+  const cachedLive = Boolean(config.current && liveTeams.includes(config.current));
 
   if (folderTeam && folderLive) {
     // This folder already belongs to a live team — that is the default, and creating a new one is
@@ -308,15 +378,7 @@ export async function runInit(): Promise<number> {
         message: 'Which team?',
         options: [
           { value: folderTeam, label: folderTeam, hint: "this folder's team" },
-          ...(existing && cachedLive && config.current !== folderTeam
-            ? [
-                {
-                  value: config.current!,
-                  label: config.current!,
-                  hint: 'last used on this machine',
-                },
-              ]
-            : []),
+          ...teamOptions(config, liveTeams, [folderTeam]),
           { value: '__new__', label: 'Create a new team' },
         ],
       }),
@@ -325,7 +387,7 @@ export async function runInit(): Promise<number> {
       ({ team, creatorToken } = await createTeam(config, server));
     } else {
       team = pick;
-      creatorToken = config.identities[team]!.key;
+      creatorToken = credentialFor(config, team)!.key;
     }
   } else if (folderTeam && !folderLive) {
     // Bound folder, but no usable credential for its team here (or the team is gone from this
@@ -357,7 +419,7 @@ export async function runInit(): Promise<number> {
       return 0;
     }
     ({ team, creatorToken } = await createTeam(config, server));
-  } else if (existing && cachedLive) {
+  } else if (liveTeams.length > 0) {
     p.log.info(
       pc.dim(
         'A team is a standing roster, not a project — reuse the same team across folders to keep agents talking.',
@@ -367,11 +429,7 @@ export async function runInit(): Promise<number> {
       await p.select({
         message: 'Which team?',
         options: [
-          {
-            value: config.current!,
-            label: config.current!,
-            hint: `you are ${config.identities[config.current!]!.name}`,
-          },
+          ...teamOptions(config, liveTeams, []),
           { value: '__new__', label: 'Create a new team' },
         ],
       }),
@@ -379,8 +437,8 @@ export async function runInit(): Promise<number> {
     if (reuse === '__new__') {
       ({ team, creatorToken } = await createTeam(config, server));
     } else {
-      team = config.current!;
-      creatorToken = config.identities[team]!.key;
+      team = reuse;
+      creatorToken = credentialFor(config, team)!.key;
     }
   } else {
     if (existing && !cachedLive) {

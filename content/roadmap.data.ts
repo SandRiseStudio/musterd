@@ -167,7 +167,11 @@ const adr = (_n: number, label: string): Ref => ({
 const doc = (path: string, label: string): Ref => ({ label, href: `${REPO}/${path}` });
 
 export const STATUS_META: Record<Status, { label: string; tone: string; cssVar: string }> = {
-  shipped: { label: 'shipped', tone: 'Built and in the product today.', cssVar: '--status-shipped' },
+  shipped: {
+    label: 'shipped',
+    tone: 'Built and in the product today.',
+    cssVar: '--status-shipped',
+  },
   'near-term': {
     label: 'near-term',
     tone: 'Next up — designed, evidence-backed, not yet built.',
@@ -211,7 +215,10 @@ export const WAVE_ORDER: Wave[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 'later'];
 
 export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
   1: { label: 'Wave 1', tone: 'Harden the coordination loop — small, additive, evidence-backed.' },
-  2: { label: 'Wave 2', tone: 'The v0.3 governance rock, then the full governed tiers it unlocks.' },
+  2: {
+    label: 'Wave 2',
+    tone: 'The v0.3 governance rock, then the full governed tiers it unlocks.',
+  },
   3: { label: 'Wave 3', tone: 'Reach + the second-product seed.' },
   4: {
     label: 'Wave 4',
@@ -257,7 +264,8 @@ const RAW: RawItem[] = [
     title: 'Driver co-presence',
     shipped: { legacy: true },
     category: 'human-loop',
-    blurb: 'When a human steers an agent inside its session, the roster shows the human present — not offline.',
+    blurb:
+      'When a human steers an agent inside its session, the roster shows the human present — not offline.',
     detail:
       'The founding dogfood wound: a human driving an agent used to read as absent. Pulled pre-launch because the headline is humans and agents as peers.',
     refs: [adr(21, 'ADR 021')],
@@ -268,8 +276,10 @@ const RAW: RawItem[] = [
     title: 'The resolve act',
     shipped: { legacy: true },
     category: 'human-loop',
-    blurb: 'A terminal "done" signal for a thread. accept is not finished; resolve closes the loop.',
-    detail: 'A new collaboration act and a SPEC bump — it serves both progress-awareness and the future board layer.',
+    blurb:
+      'A terminal "done" signal for a thread. accept is not finished; resolve closes the loop.',
+    detail:
+      'A new collaboration act and a SPEC bump — it serves both progress-awareness and the future board layer.',
     refs: [adr(25, 'ADR 025')],
   },
   {
@@ -278,7 +288,8 @@ const RAW: RawItem[] = [
     title: 'Reachability nudge',
     shipped: { legacy: true },
     category: 'human-loop',
-    blurb: 'musterd notify pushes a localhost OS notification so an away human learns an agent needs them.',
+    blurb:
+      'musterd notify pushes a localhost OS notification so an away human learns an agent needs them.',
     detail:
       'The minimal down-payment on the notification protocol Co-Gym shows more than doubles collaboration win rate. Full notification tiers come with v0.3 governance.',
     refs: [adr(35, 'ADR 035'), adr(24, 'ADR 024')],
@@ -289,10 +300,15 @@ const RAW: RawItem[] = [
     title: 'Telemetry — Layer 1',
     shipped: { legacy: true },
     category: 'observability',
-    blurb: 'One OTLP span per Envelope on the validate → persist → route path, plus act and team metrics. Off by default, no phone-home.',
+    blurb:
+      'One OTLP span per Envelope on the validate → persist → route path, plus act and team metrics. Off by default, no phone-home.',
     detail:
       'meta.otel carries W3C trace context so a handoff links the sender and receiver traces across runtimes and vendors. @musterd/mcp emits and honors it.',
-    refs: [adr(15, 'ADR 015'), adr(11, 'ADR 011'), doc('docs/design/observability.md', 'observability.md')],
+    refs: [
+      adr(15, 'ADR 015'),
+      adr(11, 'ADR 011'),
+      doc('docs/design/observability.md', 'observability.md'),
+    ],
   },
   {
     id: 'harness-adapters',
@@ -300,10 +316,14 @@ const RAW: RawItem[] = [
     title: 'Harness adapters',
     shipped: { legacy: true },
     category: 'harness',
-    blurb: 'Claude Code, Cursor, and Codex each get a rendered role MCP server. Codex writes a project-local .codex/config.toml.',
+    blurb:
+      'Claude Code, Cursor, and Codex each get a rendered role MCP server. Codex writes a project-local .codex/config.toml.',
     detail:
       'Plus the role-template format and built-in library, musterd role, an uninstall manifest, charter injection, and musterd uninstall.',
-    refs: [adr(29, 'ADRs 029–031'), doc('docs/design/provisioning-recipe.md', 'provisioning-recipe.md')],
+    refs: [
+      adr(29, 'ADRs 029–031'),
+      doc('docs/design/provisioning-recipe.md', 'provisioning-recipe.md'),
+    ],
   },
   {
     id: 'workspace-scoped-presence',
@@ -311,7 +331,8 @@ const RAW: RawItem[] = [
     title: 'Seat stops flapping on health-check probes',
     shipped: { legacy: true },
     category: 'platform',
-    blurb: 'Agent single-active displacement is scoped by workspace: a same-seat reconnect (a reload, or Claude Code’s periodic MCP health-check spawn) no longer supersedes the live session — only a genuinely different session does.',
+    blurb:
+      'Agent single-active displacement is scoped by workspace: a same-seat reconnect (a reload, or Claude Code’s periodic MCP health-check spawn) no longer supersedes the live session — only a genuinely different session does.',
     detail:
       'A dogfood finding: an autojoined agent kept getting superseded “between posts”. Cause — Claude Code transiently spawns the stdio MCP server (health checks ~90s, claude mcp get), and with autojoin each spawn joined and, under newest-wins (ADR 017), displaced the real session, then disconnected. Fix: only displace connections from a different workspace; a same-workspace hello is the same seat reconnecting and is kept. Cross-workspace newest-wins (real reload / second machine) is unchanged.',
     refs: [adr(68, 'ADR 068'), adr(17, 'ADR 017'), adr(57, 'ADR 057')],
@@ -322,7 +343,8 @@ const RAW: RawItem[] = [
     title: 'One-command agent workspaces',
     shipped: { legacy: true },
     category: 'harness',
-    blurb: 'musterd agent <name> adds an agent AND gives it its own isolated git worktree, binding, and MCP registration — so two actors never fight over one folder’s seat.',
+    blurb:
+      'musterd agent <name> adds an agent AND gives it its own isolated git worktree, binding, and MCP registration — so two actors never fight over one folder’s seat.',
     detail:
       'Closes the identity-thrash dogfood: in Claude Code one folder = one MCP registration = one identity, so each agent needs its own workspace. The command provisions a worktree on an agent/<name> branch (sibling folder outside git), writes the binding there, and registers the server with autojoin. It also auto-issues a standing grant for the seat so the workspace occupies on launch without an admin-approval round-trip, and writes the committed launch spec (see committed-launch-spec). Re-adding a soft-removed name now revives it instead of dead-ending on a UNIQUE constraint.',
     refs: [adr(65, 'ADR 065'), adr(59, 'ADR 059')],
@@ -333,7 +355,8 @@ const RAW: RawItem[] = [
     title: 'Verify provisioning, don’t assume',
     shipped: { legacy: true },
     category: 'harness',
-    blurb: 'The SessionStart hook checks the musterd server is actually registered before telling an agent it’s auto-joined; if not, it prints the fix instead of a false reassurance.',
+    blurb:
+      'The SessionStart hook checks the musterd server is actually registered before telling an agent it’s auto-joined; if not, it prints the fix instead of a false reassurance.',
     detail:
       'Closes the gap between the committed AGENTS.md primer marker (travels with the repo) and the machine-local `claude mcp add -s local` registration. `musterd init`/`agent` now auto-install the verify hook globally + self-gating (it fires only in folders carrying the `musterd:start` primer, and absorbs a hand-pasted recipe so it never double-fires). `musterd init --check` is the on-demand drift detector for the same "primer present, server unregistered" state — read-only, like the arch-tree / fmt --check guards. The "server registration is never committable" limitation this once described is now lifted by the committed launch spec (see committed-launch-spec).',
     refs: [adr(60, 'ADR 060'), doc('docs/harness-hooks.md', 'harness-hooks.md')],
@@ -344,10 +367,15 @@ const RAW: RawItem[] = [
     title: 'Layered guidance surface — primer, skill, help, hooks',
     shipped: { legacy: true },
     category: 'harness',
-    blurb: 'musterd init writes an on-demand skill (seat claiming, handoff-with-branch, recovery) and slash commands alongside the primer, slimming the always-loaded primer to a loop kernel — with drift checks so the generated guidance can’t silently rot as the platform evolves.',
+    blurb:
+      'musterd init writes an on-demand skill (seat claiming, handoff-with-branch, recovery) and slash commands alongside the primer, slimming the always-loaded primer to a loop kernel — with drift checks so the generated guidance can’t silently rot as the platform evolves.',
     detail:
       'One doctrine: each fact lives in one layer — primer = the always-loaded loop kernel, skill = on-demand playbooks, `musterd help` = flag-level reference, hooks = enforcement, MCP = capability. No fact is duplicated across layers except command/tool *names*, which is exactly what CI verifies. Templates are pure renderers in @musterd/protocol (single-sourced with the primer), stamped with a monotonic content version; init writes one canonical body into thin per-harness shells (.claude/skills/musterd/SKILL.md, .cursor/rules/musterd.mdc, and the harness-neutral .musterd/skill/SKILL.md the primer points at — covering Codex). `musterd init --check` flags a stale/edited skill (stamp version + body hash); `pnpm guidance:check` breaks the build if the skill names a command/tool that no longer exists (asserted against the CLI HELP and the live MCP tool registry); a snapshot test forces a version bump on any prose change. Uninstall removes exactly the stamped files it wrote.',
-    refs: [adr(85, 'ADR 085'), doc('docs/design/agent-primer.md', 'agent-primer.md'), doc('docs/harness-hooks.md', 'harness-hooks.md')],
+    refs: [
+      adr(85, 'ADR 085'),
+      doc('docs/design/agent-primer.md', 'agent-primer.md'),
+      doc('docs/harness-hooks.md', 'harness-hooks.md'),
+    ],
     dependsOn: ['verify-provisioning'],
   },
   {
@@ -356,10 +384,15 @@ const RAW: RawItem[] = [
     title: 'Committed launch spec — a clone self-wires',
     shipped: { legacy: true },
     category: 'harness',
-    blurb: 'A secret-free .musterd/workspace.json rides the repo, so a fresh clone/worktree registers the musterd MCP server with one no-prompt `musterd wire` — no interactive init.',
+    blurb:
+      'A secret-free .musterd/workspace.json rides the repo, so a fresh clone/worktree registers the musterd MCP server with one no-prompt `musterd wire` — no interactive init.',
     detail:
       'Resolves the ADR 060 non-goal ("auto-register the server from the committed marker needs a secret-free, env-referenced entry"). Splits the binding: WorkspaceSpecSchema (server/team/surface/claim) is committable (only binding.json is gitignored, ADR 058), while the secrets (agent_key/grant) stay local (env / the 0600 global config / the gitignored binding). `musterd wire` reads the committed spec, resolves the key locally, and registers the server idempotently — tools only by default (no seat claim unless --autojoin), so a repo cloned by many never has every clone grab one seat. init/agent write the spec; the adapter reads it as a base (env > binding > spec); the SessionStart hook points a fresh clone at `musterd wire`.',
-    refs: [adr(80, 'ADR 080'), adr(60, 'ADR 060'), doc('docs/design/provisioning-recipe.md', 'provisioning-recipe.md')],
+    refs: [
+      adr(80, 'ADR 080'),
+      adr(60, 'ADR 060'),
+      doc('docs/design/provisioning-recipe.md', 'provisioning-recipe.md'),
+    ],
     dependsOn: ['verify-provisioning', 'agent-workspace'],
   },
   {
@@ -381,7 +414,8 @@ const RAW: RawItem[] = [
     title: 'Claim on first use',
     shipped: { legacy: true },
     category: 'harness',
-    blurb: 'A folder claim policy and live claim bring a running pending session online — no relaunch, no wire change.',
+    blurb:
+      'A folder claim policy and live claim bring a running pending session online — no relaunch, no wire change.',
     detail:
       'musterd claim --for <code> drops an ephemeral resolved sidecar the adapter adopts. The binding stays the durable channel; the sidecar is the live overlay.',
     refs: [adr(32, 'ADRs 032–034')],
@@ -392,7 +426,8 @@ const RAW: RawItem[] = [
     title: 'Cross-network teams',
     shipped: { legacy: true },
     category: 'transport',
-    blurb: 'Two people on two machines can share a team today — run the daemon on a Tailscale/WireGuard overlay and point each member’s MUSTERD_SERVER at its overlay address.',
+    blurb:
+      'Two people on two machines can share a team today — run the daemon on a Tailscale/WireGuard overlay and point each member’s MUSTERD_SERVER at its overlay address.',
     detail:
       'The topology framework is decided (one team = one daemon, not federation): overlay now, secured bind next, hosted relay later. The secured off-loopback bind shipped — the daemon refuses a non-loopback plaintext bind without TLS (wss://) or a trusted proxy, gates the WS upgrade on Origin/Host, and makes WAN timeouts tunable. Still ahead: the v0.3 credentialed remote join it carries, and a hosted relay for those who won’t run an overlay.',
     refs: [
@@ -408,7 +443,8 @@ const RAW: RawItem[] = [
     title: 'Availability axis + urgent breakthrough',
     shipped: { legacy: true },
     category: 'human-loop',
-    blurb: 'A human sets their own availability (available/away/dnd, away_until); an urgent flag with a required reason breaks through an away/dnd hold, and the notify loop tiers delivery by it.',
+    blurb:
+      'A human sets their own availability (available/away/dnd, away_until); an urgent flag with a required reason breaks through an away/dnd hold, and the notify loop tiers delivery by it.',
     detail:
       'The localhost down-payment on the governed model: availability is stored and on the roster, urgent rides meta with no version bump, tiering runs client-side. can_flag_urgent gating, audit, and the wasnt_urgent feedback are the v0.3 superset.',
     refs: [adr(44, 'ADR 044'), doc('SPEC.md', 'SPEC A.6a')],
@@ -420,7 +456,8 @@ const RAW: RawItem[] = [
     title: 'Daemon service lifecycle',
     shipped: { legacy: true },
     category: 'platform',
-    blurb: 'musterd service runs the daemon as a background service that survives a closed terminal, restarts on crash, and starts at login — without raw launchctl.',
+    blurb:
+      'musterd service runs the daemon as a background service that survives a closed terminal, restarts on crash, and starts at login — without raw launchctl.',
     detail:
       'A per-user macOS LaunchAgent today; systemd (--user) and Windows are the named seam. The CLI manages musterd’s own daemon’s lifecycle — not member agents — so the clean-core principle stays intact.',
     refs: [adr(45, 'ADR 045')],
@@ -431,7 +468,8 @@ const RAW: RawItem[] = [
     title: 'Agent-side reachability',
     shipped: { legacy: true },
     category: 'human-loop',
-    blurb: 'The agent half of the reachability loop: a directed act waiting for an agent surfaces on every command it runs, so a heads-down agent can’t miss a request_help addressed to it.',
+    blurb:
+      'The agent half of the reachability loop: a directed act waiting for an agent surfaces on every command it runs, so a heads-down agent can’t miss a request_help addressed to it.',
     detail:
       'The mirror of ADR 024’s human comeback summary, on the agent side. A dogfood finding — a seat-holding agent read its inbox once and left a directed request_help unanswered. A one-line stderr nudge appended to every acting command, built from the same pending-action predicate; client-side, no wire change.',
     refs: [adr(46, 'ADR 046'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
@@ -443,7 +481,8 @@ const RAW: RawItem[] = [
     title: 'Service guardrails',
     shipped: { legacy: true },
     category: 'platform',
-    blurb: 'musterd service stop/restart refuses when other members hold live sessions, so bouncing a shared daemon doesn’t silently drop a teammate.',
+    blurb:
+      'musterd service stop/restart refuses when other members hold live sessions, so bouncing a shared daemon doesn’t silently drop a teammate.',
     detail:
       'Ties the daemon lifecycle command to roster awareness. A dogfood finding — a shared daemon was restarted three times under a live teammate with no in-band heads-up. The CLI reads a derived connections count from /health and refuses by default; --force overrides, and it fails open when the daemon is unreachable. The daemon stays a clean core that only reports.',
     refs: [adr(47, 'ADR 047')],
@@ -462,7 +501,8 @@ const RAW: RawItem[] = [
     title: 'Hand off & claim a seat without leaving the tool',
     shipped: { legacy: true },
     category: 'harness',
-    blurb: 'A teammate issues a ready seat to another agent in one command, the receiver adopts it in one command, and a claim conflict no longer dead-ends — it names the runnable next command.',
+    blurb:
+      'A teammate issues a ready seat to another agent in one command, the receiver adopts it in one command, and a claim conflict no longer dead-ends — it names the runnable next command.',
     detail:
       'Elevated after a 2026-06-25 dogfood disaster: a fresh agent handed a pre-created named seat could not claim it (team add mints a join --token; claim <name> refused it; join/reclaim fought a shared cached identity), burned its whole session on acquisition, and escalated to hand-editing the live SQLite DB. The fix shipped: claim <name> --token adopts a teammate-created seat into the folder binding with no global-identity clobber; claim --for <code> binds a pending session; the claim conflict path names the next command instead of dead-ending; per-folder binding is the identity channel; and team add + the primer teach seat acquisition. Validated by a follow-up onboarding run (a fresh agent adopted its seat end-to-end, no DB surgery). The multi-identity vault (ADR 059) hardened it further — a second agent on the same machine can no longer clobber the first’s cached token.',
     refs: [adr(55, 'ADR 055'), adr(59, 'ADR 059'), adr(32, 'ADRs 032–034'), adr(36, 'ADR 036')],
@@ -473,7 +513,8 @@ const RAW: RawItem[] = [
     title: 'Ambient agent presence',
     shipped: { legacy: true },
     category: 'human-loop',
-    blurb: 'An agent doing bursty one-shot CLI work shows present on the roster instead of offline — liveness from real actions, not just a resident watch socket.',
+    blurb:
+      'An agent doing bursty one-shot CLI work shows present on the roster instead of offline — liveness from real actions, not just a resident watch socket.',
     detail:
       'Presence used to need a resident WS session; a sequence of one-shots read as offline. Now a short-TTL ambient presence touch on each authenticated command keeps a bursty agent present for the timeout window — while working: <x> still comes solely from a self-reported status_update (the two-clocks rule). No-ops under a resident session, upserts one row per member, and never displaces — so it composes with newest-session-wins and human fan-out. Unblocked the wake-on-message and blocked-agent work, which assume the roster reflects who is actually doing things.',
     refs: [adr(57, 'ADR 057'), adr(10, 'ADR 010'), adr(17, 'ADR 017')],
@@ -484,10 +525,15 @@ const RAW: RawItem[] = [
     title: 'Durable seat roster on git',
     shipped: { legacy: true },
     category: 'platform',
-    blurb: 'A team’s seat roster lives as committed .musterd/ files; the daemon is a projection of them, so the git history of seats/ is the membership audit log — while live state (presence, tokens) stays daemon-only.',
+    blurb:
+      'A team’s seat roster lives as committed .musterd/ files; the daemon is a projection of them, so the git history of seats/ is the membership audit log — while live state (presence, tokens) stays daemon-only.',
     detail:
       'From the Sierra/Max-Agency podcast (“materialize everything into files/git so coding agents can cook”). The durable/live line runs through the members row: seat identity (name/kind/role/lifecycle) → git-tracked seats/<name>.toml; token_hash + presence + the held/unheld bit stay daemon-private. The daemon reconciles the files (match-by-name, preserving id/token across reconciles), the file is the single writer (races are git merges), and a semantic round-trip guard keeps the projection faithful. Closes the seat-claim disaster by construction — the durable act an agent kept falling back to the filesystem to do IS a file act now. Shipped end to end: canonical TOML format + isomorphism guards, the projection/reconcile module, bound_at migration, file-backed team add/claim, musterd fmt/unbind/reload, and team export (the live db→file migration). The dogfood team alpha was migrated to a file-backed roster in production, token-preserving, with no teammate re-auth.',
-    refs: [adr(58, 'ADR 058'), doc('docs/design/projection-reconcile.md', 'projection-reconcile.md'), doc('docs/design/seat-lifecycle-as-files.md', 'seat-lifecycle-as-files.md')],
+    refs: [
+      adr(58, 'ADR 058'),
+      doc('docs/design/projection-reconcile.md', 'projection-reconcile.md'),
+      doc('docs/design/seat-lifecycle-as-files.md', 'seat-lifecycle-as-files.md'),
+    ],
     dependsOn: ['seat-binding-ergonomics', 'agent-presence-touch'],
   },
   {
@@ -496,7 +542,8 @@ const RAW: RawItem[] = [
     title: 'Multi-identity vault',
     shipped: { legacy: true },
     category: 'harness',
-    blurb: 'A second agent joining a team on the same machine can no longer clobber the first’s cached token — every claimed identity is kept, keyed by (team, member).',
+    blurb:
+      'A second agent joining a team on the same machine can no longer clobber the first’s cached token — every claimed identity is kept, keyed by (team, member).',
     detail:
       'The global config kept one identity slot per team, so a second member joining the same team on one machine overwrote the first’s token and --as <name> stopped resolving. Now a knownIdentities vault keeps every identity this machine has joined or claimed, keyed by (team, name), backfilled from the legacy single-slot config on load. The per-folder binding stays the active-identity channel; the vault is the durable superset behind --as.',
     refs: [adr(59, 'ADR 059')],
@@ -510,10 +557,15 @@ const RAW: RawItem[] = [
     title: 'Traces & evals first-class gate',
     shipped: { legacy: true },
     category: 'observability',
-    blurb: 'Every agent-facing feature ships with its traces and an eval, the way it ships with tests — an ADR-template section and a format:check guard enforce it. Cheap and compounding, so later features inherit it.',
+    blurb:
+      'Every agent-facing feature ships with its traces and an eval, the way it ships with tests — an ADR-template section and a format:check guard enforce it. Cheap and compounding, so later features inherit it.',
     detail:
       'The cheap, compounding half of the trace → eval → experiment flywheel: an "Observability & Evaluation" section in the ADR template (traces, eval metric + dataset + baseline, experiment) plus an obs-evals:check step in format:check, modeled on the arch-tree checker (presence and shape, not content). ADRs from 060 on must carry the section (earlier ones grandfathered); features built through later waves now carry telemetry by default and batond never retrofits.',
-    refs: [adr(52, 'ADR 052'), adr(51, 'ADR 051'), doc('docs/design/observability.md', 'observability.md')],
+    refs: [
+      adr(52, 'ADR 052'),
+      adr(51, 'ADR 051'),
+      doc('docs/design/observability.md', 'observability.md'),
+    ],
   },
   {
     id: 'inbox-reaches-blocked-agent',
@@ -521,7 +573,8 @@ const RAW: RawItem[] = [
     title: 'Inbox reaches a blocked agent',
     shipped: { legacy: true },
     category: 'human-loop',
-    blurb: 'A teammate’s message reaches an agent parked on an approval prompt — surfaced into the terminal the human is already at — instead of waiting until the human hand-relays it.',
+    blurb:
+      'A teammate’s message reaches an agent parked on an approval prompt — surfaced into the terminal the human is already at — instead of waiting until the human hand-relays it.',
     detail:
       'A dogfood finding: with per-tool approval on, an agent frozen on a permission prompt runs no command, so ADR 046’s per-command nudge can’t fire and the message waits until the human hand-relays it — the message-bus regression. Allowlisting musterd commands doesn’t help; the block is on the agent’s own gated work. The fix is push, not pull. Shipped: musterd nudge (a read-only print of the directed acts waiting for this seat) plus a Claude Code Notification hook that runs it at the approval-prompt moment, installed by configure (so init and agent both wire it), idempotent and marker-reversible by musterd uninstall. The hook’s authenticated read also keeps a blocked agent recently-present via ambient presence (ADR 057); the distinct blocked_on_approval label is deferred to the ambient-presence ADR (a closed presence enum, so a no-wire-change for now). Cursor/Codex degrade to ADR 046’s per-command nudge.',
     refs: [adr(53, 'ADR 053'), adr(46, 'ADR 046'), adr(57, 'ADR 057')],
@@ -533,7 +586,8 @@ const RAW: RawItem[] = [
     title: 'Wake on message',
     shipped: { legacy: true },
     category: 'human-loop',
-    blurb: 'An idle agent blocks until its next directed act arrives and resumes immediately — instead of polling on a timer or missing the message in the gap.',
+    blurb:
+      'An idle agent blocks until its next directed act arrives and resumes immediately — instead of polling on a timer or missing the message in the gap.',
     detail:
       'A dogfood finding: asked to “wake when the other agent messages,” an agent bolted inbox-polling onto /loop — a workaround that burns turns and trades latency for cost. Shipped musterd inbox --wait, a blocking one-shot over the existing watch socket that exits on the first directed act (exit 0 on a message, 124 on timeout); it first drains the durable inbox so a message that landed just before the wait isn’t missed, wakes only on acts directed to the seat (not broadcast journal traffic, narrowable with --from/--act), and --timeout bounds the wait (--timeout 0 unbounded). The musterd inbox --wait + /loop idiom is now blessed in the AGENTS.md primer. The free-agent complement to ADR 053’s blocked-agent push; neither reaches a frozen loop, so they pair.',
     refs: [adr(54, 'ADR 054'), adr(12, 'ADR 012')],
@@ -545,7 +599,8 @@ const RAW: RawItem[] = [
     title: 'CLI ergonomics',
     shipped: { legacy: true },
     category: 'platform',
-    blurb: 'The papercuts a fresh agent hits in its first five minutes — identity, version, inbox filters, one-command replies.',
+    blurb:
+      'The papercuts a fresh agent hits in its first five minutes — identity, version, inbox filters, one-command replies.',
     detail:
       'Dogfood papercuts, several from the 2026-06-25 onboarding retry. Earlier half landed first (inbox --unread/--peek/--limit). The rest shipped as ADR 067: musterd whoami (which seat does this folder resolve to, + source) and musterd --version (both the first things a fresh agent reaches for); inbox --from/--act filters (the --act flag was previously a no-op), a lens that never advances the read cursor; and accept/decline auto-targeting the latest open request_help/handoff (inheriting its thread) so closing a loop is one command instead of inbox --json | parse | --reply-to. No wire change — all client-side over existing read/send paths. One residual spins out to Later: edit/supersede a sent act (a correction shouldn’t leave overlapping copies in the recipient inbox) — that implies a new wire concept, not a papercut.',
     refs: [adr(67, 'ADR 067'), adr(24, 'ADR 024'), adr(36, 'ADR 036')],
@@ -558,10 +613,15 @@ const RAW: RawItem[] = [
     title: 'v0.3 governance — build plan & spec reconciliation',
     shipped: { legacy: true },
     category: 'platform',
-    blurb: 'The phased decomposition of the v0.3 governance rock, the four directional decisions, and the spec-gap resolutions — so the breaking auth change lands as one isolated, reviewed moment.',
+    blurb:
+      'The phased decomposition of the v0.3 governance rock, the four directional decisions, and the spec-gap resolutions — so the breaking auth change lands as one isolated, reviewed moment.',
     detail:
       'The governance model is fully designed (SPEC Appendix A + membership-model.md + security.md); ADR 069 turns it into a buildable plan. Decisions: one-shot schema reset (safe because ADR 058 made the daemon a projection of git seat-files); hard cutover to claim/grant everywhere (no dual-path); durable seat fields (account_status + capability narrowing) live in the git seat-files, credentials stay daemon-private; deliver the plan then start P1. Pins the open spec gaps: credential/grant token format, request expiry (1h), pending-claim push contract, decide→grant-lifetime binding, and the A.9↔ADR-058 reconciliation (members→seats is a seat-file extension, not a row migration).',
-    refs: [adr(69, 'ADR 069'), doc('SPEC.md', 'SPEC Appendix A'), doc('docs/design/membership-model.md', 'membership-model.md')],
+    refs: [
+      adr(69, 'ADR 069'),
+      doc('SPEC.md', 'SPEC Appendix A'),
+      doc('docs/design/membership-model.md', 'membership-model.md'),
+    ],
     dependsOn: ['cross-network'],
   },
   {
@@ -570,7 +630,8 @@ const RAW: RawItem[] = [
     title: 'v0.3 P1 — seats data model',
     shipped: { legacy: true },
     category: 'platform',
-    blurb: 'The substrate: account_status + capabilities on a seat, roles carrying default capabilities + charter, per-seat narrowing (never widening). Permissive defaults, no enforcement yet.',
+    blurb:
+      'The substrate: account_status + capabilities on a seat, roles carrying default capabilities + charter, per-seat narrowing (never widening). Permissive defaults, no enforcement yet.',
     detail:
       'Extends the ADR 058 git seat-file schema with account_status + capability narrowing, adds roles/<name>.toml for role defaults + charter, and projects both through reconcile into new daemon columns; lifts the CLI role-template’s already-shaped capacity/charter/capabilities into a shared @musterd/protocol type. A one-shot reset rebuilds the daemon DB from the extended files (no row-migration code). Pure substrate — token auth unchanged, nothing enforced — so it ships green with no flag day.',
     refs: [adr(69, 'ADR 069'), adr(58, 'ADR 058'), adr(26, 'ADR 026')],
@@ -582,7 +643,8 @@ const RAW: RawItem[] = [
     title: 'v0.3 P2 — in-band enforcement & audit',
     shipped: { legacy: true },
     category: 'platform',
-    blurb: 'The first real governance value, on the existing token auth: gate urgent on can_flag_urgent, admin-only governance routes, viewer-scoped visibility, account-status enforcement, and an append-only audit log.',
+    blurb:
+      'The first real governance value, on the existing token auth: gate urgent on can_flag_urgent, admin-only governance routes, viewer-scoped visibility, account-status enforcement, and an append-only audit log.',
     detail:
       'Turns the capabilities from P1 into enforcement at the routeEnvelope / roster-projection seams: can_flag_urgent gates the urgent meta flag — downgrade-and-deliver (strip urgent, set wasnt_urgent) + audit, never reject — completing the notification-tiers governed superset; is_admin gates the today-ungated reclaim/remove (creator-admin default + an empty-admin fallback so an un-migrated team keeps its escape hatch); visibility_level projects the roster per viewer (non-admins see their own caps, not other seats’ authority map); account_status (disabled/banned/archived) + can_message:none block sending; can_observe gates the ADR 063 firehose. Every governed op writes an append-only audit record (admin-only GET /audit). Ships on the existing occupant==seat token auth — no flag day.',
     refs: [adr(71, 'ADR 071'), adr(69, 'ADR 069'), adr(44, 'ADR 044'), adr(63, 'ADR 063')],
@@ -594,10 +656,16 @@ const RAW: RawItem[] = [
     title: 'v0.3 P3 — credentials & the claim handshake',
     shipped: { legacy: true },
     category: 'platform',
-    blurb: 'The breaking auth rework: team agent key + admin-issued grants + human credentials, the WS claim frame replacing hello, and the no-grant request/approval lane — cut over across every surface at once.',
+    blurb:
+      'The breaking auth rework: team agent key + admin-issued grants + human credentials, the WS claim frame replacing hello, and the no-grant request/approval lane — cut over across every surface at once.',
     detail:
       'Replaces token==member with agent key (authenticates a harness) + grant (authorizes a seat). The claim frame replaces hello (occupied/refused/pending); grants carry lifetime once|ttl|standing picked at live approval; the request lane routes a no-grant claim to admins (local-admin fast path + one-keystroke approval card); team policy allow_pre_issued_grants is the opt-in. Surface migration in one coordinated set: team add provisions a seat (no token), MUSTERD_TOKEN→MUSTERD_AGENT_KEY (+ optional MUSTERD_GRANT) with the seat resolved from binding.json (MUSTERD_CLAIM only a manual override, PR #58), init/join move to the claim flow. The single isolated breaking moment (ADR 069 decision 2). The CLI surface for the request lane (ADR 077): `musterd claim <name>` on a held/declared seat now opens an admin-approval request and waits over the WS instead of dead-ending; `musterd requests [--pending]` + `musterd requests decide <id> --approve [--once|--standing|--ttl-hours <n>] | --deny` are the admin decide surface; and `musterd init`’s "activate an existing member" branch drives that same flow (no longer a v0.3 stub).',
-    refs: [adr(69, 'ADR 069'), adr(77, 'ADR 077'), doc('SPEC.md', 'SPEC A.2/A.3/A.5'), doc('docs/design/security.md', 'security.md')],
+    refs: [
+      adr(69, 'ADR 069'),
+      adr(77, 'ADR 077'),
+      doc('SPEC.md', 'SPEC A.2/A.3/A.5'),
+      doc('docs/design/security.md', 'security.md'),
+    ],
     dependsOn: ['v03-p1-seats'],
   },
   {
@@ -607,10 +675,16 @@ const RAW: RawItem[] = [
     title: 'v0.3 P4 — credentialed remote join',
     plan: 'reserved',
     category: 'transport',
-    blurb: 'Plug the agent key + grant + human credential into the already-built secured off-loopback bind, so a teammate on another machine joins over wss with a real credential, not a locally-minted token.',
+    blurb:
+      'Plug the agent key + grant + human credential into the already-built secured off-loopback bind, so a teammate on another machine joins over wss with a real credential, not a locally-minted token.',
     detail:
       'The credential layer ADR 039/040 named but did not build. The secured transport (TLS/wss refuse-plaintext bind, Origin/Host gate) is done and waiting; P4 is mostly integration — the cross-network claim flow over that channel + docs. Now unblocked: P3’s agent-key + grant + human-credential model shipped (2026-06-30), so P4 is the remaining cross-network claim flow over the secured channel. Deferred at the 2026-07-01 reprioritization: the wedge is local coordination + human partnership and there is no near-term pull for cross-network, so remote join waits behind the telemetry + lanes work. Cross-org reach also wants a bilateral cross-boundary *consent* flow (who may add whom across an org line): band.ai has productized exactly this as "contacts" (request → approval → mutual access) — a reference design worth borrowing when this lands (landscape.md §5).',
-    refs: [adr(69, 'ADR 069'), adr(39, 'ADR 039'), adr(40, 'ADR 040'), doc('docs/design/landscape.md', 'landscape.md')],
+    refs: [
+      adr(69, 'ADR 069'),
+      adr(39, 'ADR 039'),
+      adr(40, 'ADR 040'),
+      doc('docs/design/landscape.md', 'landscape.md'),
+    ],
     dependsOn: ['v03-p3-credentials', 'cross-network'],
   },
   {
@@ -619,7 +693,8 @@ const RAW: RawItem[] = [
     title: 'Notification tiers',
     shipped: { legacy: true },
     category: 'human-loop',
-    blurb: 'The full reachability set: route an agent’s request for help to a human by salience and availability, not only when they are watching.',
+    blurb:
+      'The full reachability set: route an agent’s request for help to a human by salience and availability, not only when they are watching.',
     detail:
       'Co-Gym’s ablation: removing the notification protocol more than halves the collaboration win rate (30% → 70%). This is where the measured value is. The localhost availability + urgent down-payment shipped, then the governed superset (can_flag_urgent gating, audit, wasnt_urgent feedback) shipped inside v0.3 P2 enforcement (ADR 071). Only off_hours/schedule enforcement remains, tracked separately (Wave 3).',
     refs: [adr(71, 'ADR 071'), doc('docs/design/research-foundation.md', 'research-foundation.md')],
@@ -668,7 +743,8 @@ const RAW: RawItem[] = [
     title: 'Eval & experiment engine (batond)',
     plan: 'reserved',
     category: 'observability',
-    blurb: 'The batond half of the flywheel: team-outcome evals and side-by-side experiments over model × prompt × harness × team topology — built on a bought, Langfuse-shaped backend, never a from-scratch store.',
+    blurb:
+      'The batond half of the flywheel: team-outcome evals and side-by-side experiments over model × prompt × harness × team topology — built on a bought, Langfuse-shaped backend, never a from-scratch store.',
     detail:
       'Emit in musterd, engine in batond (ADR 051). OTel wire + Langfuse semantics for scores/datasets/experiments, plus the coordination-native additions no single-agent vendor can do: evals scored against a Goal’s definition-of-done (ADR 048/050), experiments that vary the team itself, judge calibration as meta-evals, and the harness-decay measurement that says when to delete complexity models have absorbed.',
     refs: [adr(51, 'ADR 051'), doc('docs/design/observability.md', 'observability.md')],
@@ -681,7 +757,8 @@ const RAW: RawItem[] = [
     title: 'Research radar (ingest)',
     plan: 'reserved',
     category: 'observability',
-    blurb: 'A standing scan/triage of new multi-agent-coordination research, funneled into research-foundation.md — findings that change a decision graduate to an ADR.',
+    blurb:
+      'A standing scan/triage of new multi-agent-coordination research, funneled into research-foundation.md — findings that change a decision graduate to an ADR.',
     detail:
       'The ingest half of the research practice (ADR 056): keep musterd shaped by the field. **M1–M3 landed** (#359/#360): in-repo store (`docs/research/radar/`), `pnpm radar:sweep` (arXiv + HF Papers + `seen.json` dedup), and `--triage` (tier-1 Haiku filter + tier-2 Sonnet honest-score / verdict ladder). Hand-run only today — print-only, no digest file, no schedule. **Remaining M4–M5:** weekly digest emit + `seen.json` append + notify, then the cloud routine. A human still decides what graduates to `research-foundation.md` / an ADR; no auto-merge into the thesis.',
     refs: [
@@ -697,7 +774,8 @@ const RAW: RawItem[] = [
     title: 'Schedule & lifecycle enforcement',
     plan: 'reserved',
     category: 'platform',
-    blurb: 'availability and lifecycle: until are stored today but not enforced. Later: honor windows for routing and auto-expire members.',
+    blurb:
+      'availability and lifecycle: until are stored today but not enforced. Later: honor windows for routing and auto-expire members.',
     detail:
       'The one governance-completion piece that did not ship with the Wave 2 rock (v0.3 P2): availability windows and lifecycle: until are stored but not yet enforced for routing/expiry. Moved out of the now-complete Wave 2 to later — a follow-on to the shipped P2 enforcement with no near-term pull.',
     dependsOn: ['v03-p2-enforcement'],
@@ -709,8 +787,10 @@ const RAW: RawItem[] = [
     title: 'Step-level streaming transport',
     plan: 'reserved',
     category: 'transport',
-    blurb: 'v0.1 sends whole Envelopes. A v2 transport adds step-level streaming, which beats wait-for-complete for collaborating agents.',
-    detail: 'The broadcast recipient kind is already distinct on the wire to anticipate richer delivery semantics.',
+    blurb:
+      'v0.1 sends whole Envelopes. A v2 transport adds step-level streaming, which beats wait-for-complete for collaborating agents.',
+    detail:
+      'The broadcast recipient kind is already distinct on the wire to anticipate richer delivery semantics.',
   },
   {
     id: 'federation',
@@ -719,7 +799,8 @@ const RAW: RawItem[] = [
     title: 'Team-to-team federation',
     plan: 'reserved',
     category: 'transport',
-    blurb: 'A Member belongs to one Team today. Teams that address one another, and identities recognized across Teams, come later.',
+    blurb:
+      'A Member belongs to one Team today. Teams that address one another, and identities recognized across Teams, come later.',
     dependsOn: ['cross-network'],
   },
   {
@@ -729,10 +810,17 @@ const RAW: RawItem[] = [
     title: 'Web dashboard — live team console',
     shipped: { legacy: true },
     category: 'surfaces',
-    blurb: 'A browser console for the team: the firehose observer stream, the live roster, and the governance/approval web views — a read-only window onto the same Members.',
+    blurb:
+      'A browser console for the team: the firehose observer stream, the live roster, and the governance/approval web views — a read-only window onto the same Members.',
     detail:
       'Built: the team firehose (ADR 061, subscribe scope team-all + GET /teams/:slug/messages), the daemon static-serve (ADR 062), the read-only observer seat (ADR 063/064), the approval card (ADR 072), and the governance web views (ADR 073) all landed; the /live dashboard has had polish passes and the office render on top. The web observer connects via the v0.3 P3.2 claim handshake (ADR 077) and the shared read-only watch link (ADR 063) shipped — the console works end-to-end against a live P3 daemon. Marked shipped at the 2026-07-10 reprioritization: the console does its job today; the once-vague "general hardening" remainder is now tracked concretely elsewhere — observer scoping under shared/remote-team security hardening, and the board/insight rail under the web insight layer. The Surface enum already includes web/ios/slack — same Member, more Presences.',
-    refs: [adr(61, 'ADR 061'), adr(63, 'ADR 063'), adr(72, 'ADR 072'), adr(73, 'ADR 073'), adr(77, 'ADR 077')],
+    refs: [
+      adr(61, 'ADR 061'),
+      adr(63, 'ADR 063'),
+      adr(72, 'ADR 072'),
+      adr(73, 'ADR 073'),
+      adr(77, 'ADR 077'),
+    ],
   },
   {
     id: 'live-office',
@@ -740,10 +828,18 @@ const RAW: RawItem[] = [
     title: 'Live isometric office',
     shipped: { legacy: true },
     category: 'surfaces',
-    blurb: 'Replace the /live constellation with a 2D isometric animated co-work office — presence→placement, act→choreography, travel-intensity == notification tier.',
+    blurb:
+      'Replace the /live constellation with a 2D isometric animated co-work office — presence→placement, act→choreography, travel-intensity == notification tier.',
     detail:
       'A living, human-vs-agent-neutral office view of the team (ADR 079). ADR 079 shipped M1–M3: M1 (code-drawn isometric floor + act cues + panel modes), M2 (per-member characters plus acts as walking choreography — walk-over, carry-box handoff, megaphone broadcast), M3 (presence changes walk in/out, door-open staging, urgent walks at faster cadence, reduced-motion parity). Then ADR 086 (ambient office life) added the calm-at-rest layer: Phase 1 GPU-composited ambient overlay + afterglow (idle-park invariant intact, rAF 0/sec at rest), Phase 2 idle micro-choreography (coffee strolls + idle-FPS cap + real-act preemption), Phase 3 render optimisation, and the ambient in-place gesture poses. ADR 133 then replaced the Rive rig — which was flat and ungrouped, so members glided with unmoving limbs and never actually sat down — with a procedural jointed skeleton (office-scene/skeleton.ts): a distance-driven walk cycle with IK legs and counter-swinging arms, a real seated pose with the hands typing on the desk, eased sit/stride blends, and a desk/chair geometry fix so a seated member is visible from the chest up instead of buried to the neck. The skeleton emits joint transforms, so a future 3D renderer can bind the same curves to a glTF rig. Remaining: overflow/nook polish and perf passes. Shares the firehose/observer substrate with the web dashboard. The office/stream act vocabulary has since grown to cover the full act set: lane lifecycle events render as a distinct work-moving class (ADR 102), the steering acts get their own choreography (ADR 107 — steer sweep + redirect, challenge question, defer board pulse), and a reclaimable seat shows a "reconnecting" hint on the roster (ADR 105). The act→tone/label/glyph/choreography/sound seam is documented in docs/architecture/08-web.md.',
-    refs: [adr(79, 'ADR 079'), adr(86, 'ADR 086'), adr(102, 'ADR 102'), adr(107, 'ADR 107'), adr(133, 'ADR 133'), doc('docs/architecture/08-web.md', '08-web.md')],
+    refs: [
+      adr(79, 'ADR 079'),
+      adr(86, 'ADR 086'),
+      adr(102, 'ADR 102'),
+      adr(107, 'ADR 107'),
+      adr(133, 'ADR 133'),
+      doc('docs/architecture/08-web.md', '08-web.md'),
+    ],
     dependsOn: ['web-dashboard'],
   },
   {
@@ -753,7 +849,8 @@ const RAW: RawItem[] = [
     title: 'Slack surface (iOS deferred)',
     plan: 'reserved',
     category: 'surfaces',
-    blurb: 'A Slack surface, so a Member is reachable where its human already lives; a native iOS app is explicitly deferred behind it.',
+    blurb:
+      'A Slack surface, so a Member is reachable where its human already lives; a native iOS app is explicitly deferred behind it.',
     detail:
       'Re-scoped at the 2026-07-10 reprioritization: no evidence pull for iOS anywhere in the record, while Slack is where the reachability loop (notify → availability → urgent) most plausibly meets a human day-to-day. Slack-first when a surface wave opens; iOS only on real demand.',
     dependsOn: ['web-dashboard'],
@@ -764,10 +861,16 @@ const RAW: RawItem[] = [
     title: 'Plan/Goal model + `musterd next`/`done`',
     shipped: { legacy: true },
     category: 'insights',
-    blurb: 'The orientation + handoff spine that kills the copy-paste toil: a declared Plan→Goal skeleton — the backlog noun — with derived status, and one-command next/done.',
+    blurb:
+      'The orientation + handoff spine that kills the copy-paste toil: a declared Plan→Goal skeleton — the backlog noun — with derived status, and one-command next/done.',
     detail:
       'From planning-and-insights-brainstorm.md (ADRs 048/049 as amended by ADR 084). Shipped in two increments: the goal_id lane join + deriveGoalStatus + `musterd next`/`done` + team_next (PR #79), then the declared-Goal seam — `musterd goal declare/list` + next_goal (PR #81). The declared skeleton (Goal existence, intent, wave, dependsOn) owns the backlog noun; below a Goal the work items are lanes (ownership/contention, joined by an optional goal_id on the lane) and threads (the conversational fabric + zero-compliance fallback). Goal status is *derived* — lanes-first, threads-fallback — never stored; handoff carries a goal_id; SessionStart auto-injects orientation. The toil-killing spine the brainstorm sequenced first; the insight engine projects over it.',
-    refs: [adr(48, 'ADR 048'), adr(49, 'ADR 049'), adr(84, 'ADR 084'), doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights')],
+    refs: [
+      adr(48, 'ADR 048'),
+      adr(49, 'ADR 049'),
+      adr(84, 'ADR 084'),
+      doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights'),
+    ],
   },
   {
     id: 'insight-engine',
@@ -775,10 +878,15 @@ const RAW: RawItem[] = [
     title: 'Insight engine — server-side projections',
     shipped: { legacy: true },
     category: 'insights',
-    blurb: 'One projection engine in the daemon — Goal status, the board view, flow metrics, waiting-on — computed over Goals × lanes × threads, never stored, exposed as an HTTP API.',
+    blurb:
+      'One projection engine in the daemon — Goal status, the board view, flow metrics, waiting-on — computed over Goals × lanes × threads, never stored, exposed as an HTTP API.',
     detail:
       'The single engine every insight surface renders (ADR 050 as amended by ADR 084), shipped as the report engine — flow metrics + waiting-on + GET /report (PR #82), then the coordination-density warning (PR #84): derived Goal status (lanes-first, threads-fallback), the board projection (the IC altitude — every work item, its latest-state column), flow metrics from lane timestamps (cycle time, WIP, age, throughput), the waiting-on view (openActionNeeded aggregated by recipient), and the broadcast-journal versus directed/threaded-exchange signal. Distinct from the shipped lanes contention board (ADR 083), which warns about overlap/dependency — this layer derives meaning from the same substrate. Goodhart guard: outcomes and queues, never message volume; v0.3 need-to-know governs derived human metrics.',
-    refs: [adr(50, 'ADR 050'), adr(84, 'ADR 084'), doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+    refs: [
+      adr(50, 'ADR 050'),
+      adr(84, 'ADR 084'),
+      doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md'),
+    ],
     dependsOn: ['orientation-spine', 'resolve-act', 'coordination-lanes'],
   },
   {
@@ -787,10 +895,15 @@ const RAW: RawItem[] = [
     title: 'Reporting altitudes + waiting-on view (CLI + MCP)',
     shipped: { legacy: true },
     category: 'insights',
-    blurb: '`musterd report` at IC/team/exec altitudes and the "N threads waiting on <human>" bottleneck view — the first surfaces of the insight engine, with MCP parity.',
+    blurb:
+      '`musterd report` at IC/team/exec altitudes and the "N threads waiting on <human>" bottleneck view — the first surfaces of the insight engine, with MCP parity.',
     detail:
       'From planning-and-insights-brainstorm.md Parts 4–6 (ADR 050 as amended by ADR 084): the CLI report with altitude flags (ic|team|exec) and the waiting-on-human view (oldest-first), plus the matching team_* MCP tools — agents use one channel only, so a CLI-only report would be invisible to MCP-wired teammates. Thin renderers over the insight engine, which owns the metric definitions; cost-per-shipped-work-item stays deferred to the batond cost-ingestion seam.',
-    refs: [adr(50, 'ADR 050'), adr(84, 'ADR 084'), doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights')],
+    refs: [
+      adr(50, 'ADR 050'),
+      adr(84, 'ADR 084'),
+      doc('docs/design/planning-and-insights-brainstorm.md', 'planning & insights'),
+    ],
     dependsOn: ['insight-engine'],
   },
   {
@@ -798,10 +911,14 @@ const RAW: RawItem[] = [
     title: 'Coordination-density insight',
     shipped: { prs: [84] },
     category: 'insights',
-    blurb: 'An insight that flags when a team’s traffic is all broadcast-journal and no directed or threaded exchange — coordination that only looks collaborative.',
+    blurb:
+      'An insight that flags when a team’s traffic is all broadcast-journal and no directed or threaded exchange — coordination that only looks collaborative.',
     detail:
       'Shipped in PR #84 under ADR 050: the report engine computes a seven-day broadcast-status-update share versus directed/threaded-exchange ratio from the act-typed log and warns only when a non-trivial sample is journal-heavy. `musterd report` and `team_report` surface the diagnostic; it is a candidate metric for the standalone coordination-observability product.',
-    refs: [adr(50, 'ADR 050'), doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+    refs: [
+      adr(50, 'ADR 050'),
+      doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md'),
+    ],
     frozenBy: 50,
     dependsOn: ['insight-engine'],
   },
@@ -821,7 +938,7 @@ const RAW: RawItem[] = [
     blurb:
       'A directed steer reaches an agent busy mid-task at its next tool-call boundary — the missing reachability rung for a loop that is neither idle nor blocked, but heads-down on its own work.',
     detail:
-      'The frontier the Qoder demo failure named and our own P3 dogfood measured (~37% wasted work, the largest item a steer that arrived too late). ADR 088 increment 1 SHIPPED 2026-07-05 (PR #109): `musterd inbox --interrupt-check` — a one-shot, local, sub-50ms query that exits silent when nothing waits and prints one daemon-composed line when an interrupt-class directed act does, provisioned by `musterd init` as a PostToolUse hook (verified by `init --check`, degrading to the ADR 046 per-command nudge where hooks are thin). The daemon owns the predicate (a short-lived CLI can\'t flush telemetry, and the composed line is a security requirement): `pendingInterrupts` in the server store gates on action-needed + urgent tier + unresolved thread, a new `GET /inbox/interrupt-check` route composes the line from structured fields, and a `musterd.interrupt.check` counter + `interrupt.raised` audit verb (DB-deduped per recipient+act) make every raised line auditable. Interrupt-class is scarce by construction (urgent tier gated by can_flag_urgent, ADR 044/071). Injection-surface mitigations shipped as launch requirements: the line is daemon-composed (never the raw body), sender always shown, capability-gated. Its headline eval is *steering latency* (steer sent → recipient acknowledges) — the number the launch demo (hook on vs off) is built around. Increments 2–3 (steer/challenge acts, plan epochs) carry the arc forward as their own items. Resident harnesses (OpenClaw/Hermes) need the same policy at their gateway; the ladder is indexed by harness residency class (agent-ontology.md §4).',
+      "The frontier the Qoder demo failure named and our own P3 dogfood measured (~37% wasted work, the largest item a steer that arrived too late). ADR 088 increment 1 SHIPPED 2026-07-05 (PR #109): `musterd inbox --interrupt-check` — a one-shot, local, sub-50ms query that exits silent when nothing waits and prints one daemon-composed line when an interrupt-class directed act does, provisioned by `musterd init` as a PostToolUse hook (verified by `init --check`, degrading to the ADR 046 per-command nudge where hooks are thin). The daemon owns the predicate (a short-lived CLI can't flush telemetry, and the composed line is a security requirement): `pendingInterrupts` in the server store gates on action-needed + urgent tier + unresolved thread, a new `GET /inbox/interrupt-check` route composes the line from structured fields, and a `musterd.interrupt.check` counter + `interrupt.raised` audit verb (DB-deduped per recipient+act) make every raised line auditable. Interrupt-class is scarce by construction (urgent tier gated by can_flag_urgent, ADR 044/071). Injection-surface mitigations shipped as launch requirements: the line is daemon-composed (never the raw body), sender always shown, capability-gated. Its headline eval is *steering latency* (steer sent → recipient acknowledges) — the number the launch demo (hook on vs off) is built around. Increments 2–3 (steer/challenge acts, plan epochs) carry the arc forward as their own items. Resident harnesses (OpenClaw/Hermes) need the same policy at their gateway; the ladder is indexed by harness residency class (agent-ontology.md §4).",
     refs: [
       adr(88, 'ADR 088'),
       doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line'),
@@ -840,7 +957,13 @@ const RAW: RawItem[] = [
       'Give steering first-class semantics: a directive `steer` that supersedes prior direction, an epistemic `challenge` that forces revalidation, and a `defer` verb that reorders/defers a Goal on the plan.',
     detail:
       'Increment 2 of the interrupt-line arc (design §4.2–4.3) — SHIPPED 2026-07-06 (ADR 103). A change of direction was free-text `message`; this appends three acts to the protocol vocabulary and rides the increment-1 interrupt line for delivery, with **no new delivery machinery** (three additive enum entries, no wire-version bump). **`steer`** (directive) is interrupt-class by definition — it raises the ⚡ line whether or not it is flagged urgent — and the newest steer **supersedes** prior direction (ADR 017 newest-wins applied to *direction*, as a pure read-side collapse inside `pendingInterrupts`) so a late-waking agent sees one current direction, never a contradictory stack. **`challenge`** (epistemic: "justify this assumption or reconsider it") is warn-never-block — tier-configurable, interrupting only when its sender flags it — and is answered with evidence: an `accept` now auto-targets an open challenge. **`defer`** is the plan-mutation act (the design\'s reorder/defer): it names `meta.goal_id` and an optional `meta.wave` target (a number reorders, "later" defers), mirroring the Goal `wave` field `nextGoal` reads — the verb ships here; automatic re-sequencing + goal epochs are increment 3. The interrupt-check line and audit now name the raise class (`steer` vs `urgent`), and the MCP `team_send` enum is derived from `ACTS` so the surface can never drift from the protocol again. Headline eval unchanged: *steering latency* on the first-class `steer`, plus a supersession-correctness check (zero acts taken against a superseded steer). The `/live` web render followed (ADR 107, PR #158): the office and stream now key on the three acts distinctly — `steer` as interrupt-class (a room-wide sweep + an urgent redirect run to the target), `challenge` as a "justify?" question cue, `defer` as a lane-family board pulse — with their own tones, badge glyphs, and opt-in sound cues; verified end-to-end against a live daemon.',
-    refs: [adr(103, 'ADR 103'), adr(107, 'ADR 107'), adr(88, 'ADR 088'), adr(17, 'ADR 017'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
+    refs: [
+      adr(103, 'ADR 103'),
+      adr(107, 'ADR 107'),
+      adr(88, 'ADR 088'),
+      adr(17, 'ADR 017'),
+      doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line'),
+    ],
     dependsOn: ['interrupt-line', 'orientation-spine'],
   },
   {
@@ -853,8 +976,14 @@ const RAW: RawItem[] = [
     blurb:
       'Catch stale work even when an interrupt misses: a goal carries a plan epoch, `defer` re-sequences it and bumps it, and only the lanes actually building against the moved plan get a targeted warning.',
     detail:
-      'Increment 3 of the arc (design §5) — SHIPPED 2026-07-08 (ADR 111), the semantic backstop for the deaf window the interrupt line cannot close (mid-generation, long single commands, approval-parked). It also gives `defer` the teeth ADR 103 withheld ("a signal, not yet an actuator"). Everything is **derived, nothing stored** — faithful to the ADR 048 maxim and the mirror of steer-supersession\'s read-side collapse: no migration, no wire-version bump. **Plan epochs** = bounded staleness from async distributed training (workers on stale weights ≙ agents on superseded plans): a Goal\'s epoch is the count of direction-changing acts naming it (every `defer`, plus a `steer` carrying `meta.goal_id`), projected out of the log beside the Goal\'s derived status. **`defer` actuates** by folding into that derivation — the newest wave assertion (declaration or `defer`) wins, so `nextGoal` actually re-sequences. **Targeted invalidation** = directory-based cache coherence (not broadcast/snooping): two owner-directed, warn-never-block lane signals — `stale_plan` (a lane whose own Goal moved epoch since it was claimed) and `stale_dependency` (a lane building on another whose Goal moved) — routed by the goal_id join + depends_on edges to exactly the affected owners, pushed on the defer/steer send path and annotated live on the board. The P3 dependency-revert (53% of that session\'s waste) is exactly the miss this closes. Watcher-not-gatekeeper.',
-    refs: [adr(111, 'ADR 111'), adr(103, 'ADR 103'), adr(88, 'ADR 088'), adr(84, 'ADR 084'), adr(83, 'ADR 083')],
+      "Increment 3 of the arc (design §5) — SHIPPED 2026-07-08 (ADR 111), the semantic backstop for the deaf window the interrupt line cannot close (mid-generation, long single commands, approval-parked). It also gives `defer` the teeth ADR 103 withheld (\"a signal, not yet an actuator\"). Everything is **derived, nothing stored** — faithful to the ADR 048 maxim and the mirror of steer-supersession's read-side collapse: no migration, no wire-version bump. **Plan epochs** = bounded staleness from async distributed training (workers on stale weights ≙ agents on superseded plans): a Goal's epoch is the count of direction-changing acts naming it (every `defer`, plus a `steer` carrying `meta.goal_id`), projected out of the log beside the Goal's derived status. **`defer` actuates** by folding into that derivation — the newest wave assertion (declaration or `defer`) wins, so `nextGoal` actually re-sequences. **Targeted invalidation** = directory-based cache coherence (not broadcast/snooping): two owner-directed, warn-never-block lane signals — `stale_plan` (a lane whose own Goal moved epoch since it was claimed) and `stale_dependency` (a lane building on another whose Goal moved) — routed by the goal_id join + depends_on edges to exactly the affected owners, pushed on the defer/steer send path and annotated live on the board. The P3 dependency-revert (53% of that session's waste) is exactly the miss this closes. Watcher-not-gatekeeper.",
+    refs: [
+      adr(111, 'ADR 111'),
+      adr(103, 'ADR 103'),
+      adr(88, 'ADR 088'),
+      adr(84, 'ADR 084'),
+      adr(83, 'ADR 083'),
+    ],
     dependsOn: ['interrupt-line', 'orientation-spine', 'coordination-lanes'],
   },
   {
@@ -867,8 +996,15 @@ const RAW: RawItem[] = [
     blurb:
       'The number the launch demo is built around: measure how fast steering reaches a busy agent, and how much stale work the anti-staleness layer actually catches.',
     detail:
-      'Increment 4 — the last rung of the interrupt-line arc (design §8 item 4) — SHIPPED 2026-07-10 (ADR 125, PRs #216/#218): the measurement layer that turns the whole arc from a claim into a before/after against the P3 37%-waste baseline. Three numbers derived purely from the message + lane log (no new capture, on the report engine): **steering latency** (a `steer` sent → the recipient\'s next act acknowledging it), **supersession-correctness** (acts taken against a *superseded* steer — should be zero, ADR 103; same-ts tie-break via message id matching `pendingInterrupts`), and **stale-work-caught** (the `stale_plan`/`stale_dependency` wakes that precede a lane owner changing course, ADR 111). Surfaced via `musterd report` + `team_report`, and doubling as the launch-demo A/B instrument (hook-on vs hook-off, ADR 056 benchmark scenario).',
-    refs: [adr(125, 'ADR 125'), adr(88, 'ADR 088'), adr(103, 'ADR 103'), adr(111, 'ADR 111'), adr(50, 'ADR 050'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
+      "Increment 4 — the last rung of the interrupt-line arc (design §8 item 4) — SHIPPED 2026-07-10 (ADR 125, PRs #216/#218): the measurement layer that turns the whole arc from a claim into a before/after against the P3 37%-waste baseline. Three numbers derived purely from the message + lane log (no new capture, on the report engine): **steering latency** (a `steer` sent → the recipient's next act acknowledging it), **supersession-correctness** (acts taken against a *superseded* steer — should be zero, ADR 103; same-ts tie-break via message id matching `pendingInterrupts`), and **stale-work-caught** (the `stale_plan`/`stale_dependency` wakes that precede a lane owner changing course, ADR 111). Surfaced via `musterd report` + `team_report`, and doubling as the launch-demo A/B instrument (hook-on vs hook-off, ADR 056 benchmark scenario).",
+    refs: [
+      adr(125, 'ADR 125'),
+      adr(88, 'ADR 088'),
+      adr(103, 'ADR 103'),
+      adr(111, 'ADR 111'),
+      adr(50, 'ADR 050'),
+      doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line'),
+    ],
     dependsOn: ['stale-plan-detection', 'insight-engine'],
   },
   {
@@ -893,8 +1029,13 @@ const RAW: RawItem[] = [
     blurb:
       'The offline rung: a seat binding holds the harness session id, so the daemon can resurrect an exited session on a directed act — turning a turn-scoped harness into an always-on one.',
     detail:
-      'From agent-ontology.md §4 (residency classes). Turn-scoped harnesses (Claude Code, Cursor) die between turns; the strategic claim is that musterd, holding the session id, can resurrect them on a directed act (`claude --resume <id> -p …`). Nobody has built the multi-agent, multi-human, one-team residency layer — the always-on gateways (OpenClaw, Hermes) are single-agent, single-human. **Increments 1–5 landed**: the frozen contract (#236, ADR 131); the wake ledger (#240 — stored leases, derived rate policy); `musterd host` + the claude fresh-first backend (#244 — first measured wake: roster occupancy in 22.4s, answered +46s); session capture + the local-session guard (#255/#257 — resume wake 4.1s); and increment 5 whole (#269/#271 + the service/steward PR): policy knobs (team defaults ⊕ per-seat overrides), the ping-pong demotion implemented (send-time provenance, v21), provenance newest-wins, wake latency/answer-rate/cost in the report engine (`musterd report residency`), the resumable roster badge, the wake actuator as a LaunchAgent (`service --wake`), and the pre-registered steward cron→wake experiment wired (run owner-gated). Remaining: increment 6 — the native backend (owner-gated), musterd\'s own agent loop as the contract\'s reference row.',
-    refs: [adr(131, 'ADR 131'), doc('docs/design/harness-residency.md', 'residency contract'), doc('docs/design/agent-ontology.md', 'agent-ontology.md'), doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line')],
+      "From agent-ontology.md §4 (residency classes). Turn-scoped harnesses (Claude Code, Cursor) die between turns; the strategic claim is that musterd, holding the session id, can resurrect them on a directed act (`claude --resume <id> -p …`). Nobody has built the multi-agent, multi-human, one-team residency layer — the always-on gateways (OpenClaw, Hermes) are single-agent, single-human. **Increments 1–5 landed**: the frozen contract (#236, ADR 131); the wake ledger (#240 — stored leases, derived rate policy); `musterd host` + the claude fresh-first backend (#244 — first measured wake: roster occupancy in 22.4s, answered +46s); session capture + the local-session guard (#255/#257 — resume wake 4.1s); and increment 5 whole (#269/#271 + the service/steward PR): policy knobs (team defaults ⊕ per-seat overrides), the ping-pong demotion implemented (send-time provenance, v21), provenance newest-wins, wake latency/answer-rate/cost in the report engine (`musterd report residency`), the resumable roster badge, the wake actuator as a LaunchAgent (`service --wake`), and the pre-registered steward cron→wake experiment wired (run owner-gated). Remaining: increment 6 — the native backend (owner-gated), musterd's own agent loop as the contract's reference row.",
+    refs: [
+      adr(131, 'ADR 131'),
+      doc('docs/design/harness-residency.md', 'residency contract'),
+      doc('docs/design/agent-ontology.md', 'agent-ontology.md'),
+      doc('docs/design/interrupt-line-mid-loop-reachability.md', 'interrupt line'),
+    ],
     dependsOn: ['wake-on-message'],
   },
 
@@ -909,7 +1050,8 @@ const RAW: RawItem[] = [
     title: 'Telemetry — Layer 2 + SDK',
     shipped: { legacy: true },
     category: 'observability',
-    blurb: 'A full CLI/MCP telemetry SDK, then MAST-aware views over the act-typed log that agent-observability tools cannot see.',
+    blurb:
+      'A full CLI/MCP telemetry SDK, then MAST-aware views over the act-typed log that agent-observability tools cannot see.',
     detail:
       'The seed of a standalone coordination-observability product, and the head of the depth wave. Pulled up 2026-07-04: Layer 1 is verified emitting live (finding 002 mined ~53 h from the local sink and caught the broadcast-journal anti-pattern by hand) — so the data is already useful; L2 is what turns "grep a text log" into first-class MAST-aware views (ignored request_help, circular handoffs, stalled threads, broadcast-only journaling) + the report surfaces. Frozen as a three-increment arc (ADR 089). Increment 1 SHIPPED 2026-07-05: the shared @musterd/telemetry bootstrap boots in the MCP adapter (a musterd.tool.call span around every tool) and the CLI (musterd.cli.command; serve + interrupt-check carved out), so the ADR 011 meta.otel plumbing fires in production and a handoff is one cross-agent distributed trace — identity attribution fixed first (issue #107: normalized seat id as the key, raw name a label). Increment 2 SHIPPED 2026-07-06 (ADR 090): per-recipient delivery status derived from the log + cursors + audit — never a delivery table (logged / seen / answered per recipient, attempt history as telemetry span events, the seen_latency metric completing the ADR 088 raised→read pair, and the open directed ledger on report / team_report / musterd report delivery) — the band.ai borrow (landscape.md §5) recast for seats; countOpenLoops gained resolve-exclusion so gauge and ledger reconcile. Increment 3 SHIPPED 2026-07-06 (ADR 091): the MAST-aware views — time-to-unblock, ignored request_help (the inc2 ledger filtered), stalled threads, circular handoffs — derived on the ADR 050 projection seam and served as report.mast + musterd report coordination + a health block on team_report; the finding-002 grep session is now one command. Arc complete.',
     refs: [
@@ -927,10 +1069,15 @@ const RAW: RawItem[] = [
     title: 'Persistent seat memory',
     shipped: { legacy: true },
     category: 'platform',
-    blurb: 'A persistent identity wants persistent memory — the seat carries a continuity note across the session gap, headline-first.',
+    blurb:
+      'A persistent identity wants persistent memory — the seat carries a continuity note across the session gap, headline-first.',
     detail:
-      'The membership-model reserved seam, designed (ADR 093, 2026-07-06) and SHIPPED the same day (PRs #129/#130). The v1 job is **cross-session continuity only**: one small occupant-written note per seat (headline ≤120 chars + body ≤8KB, last-write-wins, `saved_at` stamped, no server expiry), saved explicitly at natural boundaries — before a handoff, at wrap-up, when told to wind down. Delivery is **envelope-on-occupy / body-on-demand**: `OccupiedFrame.memory` un-stubbed into `{ headline, saved_at, size_bytes }` (SPEC A.3 minor), the join/claim result renders one ~30-token pointer line, and the body travels only over an explicit read. Daemon-private `seat_memory` table, seat-scoped with **no cross-seat read path** (team admins included — deliberately narrowing ADR 071); banned = inert applies; audit records sizes only, never content. Surfaces: `team_memory_save`/`team_memory_read` + the `team_join` one-liner (MCP), `musterd memory save|show|clear` + the claim/status pointer (CLI), and the skill\'s save-before-handoff playbook (guidance v2). Memory belongs to the seat, not the occupant — a successor inherits the note (agent=seat). Named follow-up seam: harness-hook auto-save (SessionEnd/PreCompact) if dogfood shows agents forget to save; eval = read-after-occupy rate.',
-    refs: [adr(93, 'ADR 093'), doc('docs/design/membership-model.md', 'membership-model.md'), doc('docs/design/agent-ontology.md', 'agent-ontology.md')],
+      "The membership-model reserved seam, designed (ADR 093, 2026-07-06) and SHIPPED the same day (PRs #129/#130). The v1 job is **cross-session continuity only**: one small occupant-written note per seat (headline ≤120 chars + body ≤8KB, last-write-wins, `saved_at` stamped, no server expiry), saved explicitly at natural boundaries — before a handoff, at wrap-up, when told to wind down. Delivery is **envelope-on-occupy / body-on-demand**: `OccupiedFrame.memory` un-stubbed into `{ headline, saved_at, size_bytes }` (SPEC A.3 minor), the join/claim result renders one ~30-token pointer line, and the body travels only over an explicit read. Daemon-private `seat_memory` table, seat-scoped with **no cross-seat read path** (team admins included — deliberately narrowing ADR 071); banned = inert applies; audit records sizes only, never content. Surfaces: `team_memory_save`/`team_memory_read` + the `team_join` one-liner (MCP), `musterd memory save|show|clear` + the claim/status pointer (CLI), and the skill's save-before-handoff playbook (guidance v2). Memory belongs to the seat, not the occupant — a successor inherits the note (agent=seat). Named follow-up seam: harness-hook auto-save (SessionEnd/PreCompact) if dogfood shows agents forget to save; eval = read-after-occupy rate.",
+    refs: [
+      adr(93, 'ADR 093'),
+      doc('docs/design/membership-model.md', 'membership-model.md'),
+      doc('docs/design/agent-ontology.md', 'agent-ontology.md'),
+    ],
     dependsOn: ['durable-roster'],
   },
   {
@@ -940,10 +1087,16 @@ const RAW: RawItem[] = [
     title: 'Model experimentation — frontier cadence + own models',
     shipped: { legacy: true },
     category: 'observability',
-    blurb: 'Treat the model itself as a first-class experimental variable: be early to each frontier model, and own models end-to-end.',
+    blurb:
+      'Treat the model itself as a first-class experimental variable: be early to each frontier model, and own models end-to-end.',
     detail:
       'From model-experimentation.md; design frozen 2026-07-06 in the "model as a variable" session with model-diversity (ADR 101 — the two share one kernel: `model` as a first-class attribute musterd captures). ADR 101 increment 1 SHIPPED 2026-07-07 (PR #144): the foundation Track A rides — per-occupancy harness-attested model (re-attestable via claim + heartbeat, `unknown` legal, never blocks — the durable seat stays model-agnostic per ADR 087; carried across the grant-less approval gap on the request), the per-act model stamp as the dataset (server-controlled + un-spoofable — `meta.model` stamped from the sender\'s attested occupancy, `musterd.model`/`musterd.model.family` on the envelope span), and the issue #107 stable-seat-id fix closed on the same seam. Track A (bleeding edge) is now a live process, not a platform: run the reproducible coordination experiment manifest (docs/research/frontier-cadence-manifest.md) as each new frontier model lands, diffing the emitted coordination metrics (loop_latency, dup-rate, wasted-work) vs the prior baseline → a per-model coordination leaderboard that accretes from research findings. Track B (own models) stays the reserved research tail in the separate lab repo: the tiny-model dogfood fixture (Stage 1 local instruct agent probing the guardrail floor → Stage 2 train-from-scratch with MLX), culminating in a fine-tuned coordination-judge model over the traces dataset.',
-    refs: [adr(101, 'ADR 101'), doc('docs/design/model-experimentation.md', 'model-experimentation'), adr(51, 'ADR 051'), adr(56, 'ADR 056')],
+    refs: [
+      adr(101, 'ADR 101'),
+      doc('docs/design/model-experimentation.md', 'model-experimentation'),
+      adr(51, 'ADR 051'),
+      adr(56, 'ADR 056'),
+    ],
     dependsOn: ['telemetry-l2'],
   },
   {
@@ -957,7 +1110,12 @@ const RAW: RawItem[] = [
       'Same-model agents agree in correlated ways, so their consensus is weak evidence. Record the model per occupancy and flag same-family review/approval chains — making model diversity a first-class team property.',
     detail:
       'From agent-ontology.md §5 (the monoculture problem); design frozen 2026-07-06 in the "model as a variable" session (ADR 101). SHIPPED 2026-07-07 (PR #144, ADR 101 increment 1): musterd is the model-agnostic layer, so heterogeneity is ours to make first-class — the model attaches per-occupancy (harness-attested — attested, never verified; `unknown` legal and honestly poisons conclusions as "unverifiable", never "diverse"), and the insight/report layer flags a review/approval/challenge chain (request_help/handoff/challenge answered by accept/decline from a different seat) that was single-model-FAMILY end-to-end ("treat agreement as weak evidence") — family (`claude-*` vs `gpt-*`) is the decorrelation boundary, review/approval scope keeps the flag scarce, warn-never-block keeps it a watcher. Surfaced in `musterd report coordination`, the `team_report` MAST health block, and `report.mast.diversity`; measured by the `musterd.insight.diversity_flags` observable gauge (derived state, not a counter). Still feeds the research track (ADR 056): agreement correlation between same-family vs cross-family reviewer pairs on real coordination traces is the evidence that upgrades or confirms the family boundary.',
-    refs: [adr(101, 'ADR 101'), doc('docs/design/agent-ontology.md', 'agent-ontology.md'), adr(56, 'ADR 056'), doc('docs/design/model-experimentation.md', 'model-experimentation')],
+    refs: [
+      adr(101, 'ADR 101'),
+      doc('docs/design/agent-ontology.md', 'agent-ontology.md'),
+      adr(56, 'ADR 056'),
+      doc('docs/design/model-experimentation.md', 'model-experimentation'),
+    ],
     dependsOn: ['model-experimentation'],
   },
   {
@@ -986,7 +1144,8 @@ const RAW: RawItem[] = [
     title: 'Coordination-traces dataset & MAST-in-the-wild',
     plan: 'near-term',
     category: 'observability',
-    blurb: 'The first research artifact: an open, redacted dataset of real human+agent coordination traces on HuggingFace, plus MAST failure detectors over the act-typed log — the data no single-agent vendor can produce.',
+    blurb:
+      'The first research artifact: an open, redacted dataset of real human+agent coordination traces on HuggingFace, plus MAST failure detectors over the act-typed log — the data no single-agent vendor can produce.',
     detail:
       'Dataset-first on the HF ladder (dataset → benchmark + leaderboard → paper → judge model), MAST-in-the-wild as the first thesis (ADR 056). Substrate is telemetry-l2 + coordination-density; reproducibility rides on the flywheel’s pinned experiment manifests (ADR 051) and baselines (ADR 052). Pulled up 2026-07-10 into the cookoff wave: ADR 122 makes every flagship cookoff run a labeled coordination transcript, so the dataset is now a *byproduct* of the experiment, not an independent build — sequenced directly behind the run ladder. Release stays gated on the opt-in + redaction posture (ADR 051) — no dataset ships before consent/redaction is enforced.',
     refs: [adr(56, 'ADR 056'), doc('docs/research/README.md', 'docs/research/')],
@@ -999,10 +1158,14 @@ const RAW: RawItem[] = [
     title: 'Coordination lanes — Phase 2 (observed surface + merge-funnel)',
     plan: 'reserved',
     category: 'platform',
-    blurb: 'The observed-surface + merge-funnel layer on top of the Phase-1 lane primitive — tighter contention signal, less reliance on declarations.',
+    blurb:
+      'The observed-surface + merge-funnel layer on top of the Phase-1 lane primitive — tighter contention signal, less reliance on declarations.',
     detail:
-      'Phase-1 (ADR 083) shipped the declared intent+dependency layer. Phase 2: observed surface (fs-watch / git-diff sampling instead of only declared globs), the symbol/hunk-level merge-funnel, lane_ack to silence a warning, role-pool auto-assignment of open lanes, and auto-done when a lane\'s branch merges. Watcher, never gatekeeper. Deliberately parked behind the cookoff (2026-07-10): cell D measures how much contention the *declared* Phase-1 layer already catches — if declared lanes cover most of it, Phase 2\'s priority drops; if wasted-work stays high with lanes on, this is the next lever. THE COOKOFF RAN, AND BY THAT CRITERION THE PRIORITY DROPS (recorded 2026-07-28): the flagship measured cell D (coordinated N=3) at 1.9% wasted work against C3 (uncoordinated N=3) at 72% — ~38x less redundancy at equal correctness. Declared Phase-1 lanes already catch nearly all the contention Phase 2 was meant to chase, so it is not the next lever. Two caveats: the comparison that earns this is D-versus-uncoordinated-N, never D-versus-solo (solo A wasted 0% and was cheapest), and 1.9% is measured on a bespoke fixture, not a promise about arbitrary repos. What reopens the item is evidence Phase 1 cannot produce — sustained waste with lanes on, or contention declared globs structurally cannot see.',
-    refs: [adr(83, 'ADR 083'), doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax')],
+      "Phase-1 (ADR 083) shipped the declared intent+dependency layer. Phase 2: observed surface (fs-watch / git-diff sampling instead of only declared globs), the symbol/hunk-level merge-funnel, lane_ack to silence a warning, role-pool auto-assignment of open lanes, and auto-done when a lane's branch merges. Watcher, never gatekeeper. Deliberately parked behind the cookoff (2026-07-10): cell D measures how much contention the *declared* Phase-1 layer already catches — if declared lanes cover most of it, Phase 2's priority drops; if wasted-work stays high with lanes on, this is the next lever. THE COOKOFF RAN, AND BY THAT CRITERION THE PRIORITY DROPS (recorded 2026-07-28): the flagship measured cell D (coordinated N=3) at 1.9% wasted work against C3 (uncoordinated N=3) at 72% — ~38x less redundancy at equal correctness. Declared Phase-1 lanes already catch nearly all the contention Phase 2 was meant to chase, so it is not the next lever. Two caveats: the comparison that earns this is D-versus-uncoordinated-N, never D-versus-solo (solo A wasted 0% and was cheapest), and 1.9% is measured on a bespoke fixture, not a promise about arbitrary repos. What reopens the item is evidence Phase 1 cannot produce — sustained waste with lanes on, or contention declared globs structurally cannot see.",
+    refs: [
+      adr(83, 'ADR 083'),
+      doc('docs/design/lanes-and-the-multi-agent-tax.md', 'lanes / multi-agent-tax'),
+    ],
     dependsOn: ['coordination-lanes'],
   },
   {
@@ -1144,10 +1307,14 @@ const RAW: RawItem[] = [
     shipped: { prs: [151, 435, 439] },
     title: 'Work items, board & insight layer (web)',
     category: 'insights',
-    blurb: 'The kanban-style board and team analytics rendered in the web dashboard — a thin surface over the insight engine, never a second store.',
+    blurb:
+      'The kanban-style board and team analytics rendered in the web dashboard — a thin surface over the insight engine, never a second store.',
     detail:
-      'The web surface for the already-shipped insight engine (server projections + GET /report + the report CLI/MCP all landed; this is the browser board they never got). ADR 104 frames it as three increments over the two existing endpoints — no board CRUD, no stored columns, the dashboard renders what the engine derives. Increment 1 shipped (PR #151): a read-only /board kanban over GET /lanes — one column per lane state (backlog/claimed/in-progress/blocked/done), cards carrying owner, Goal, branch, age, and the advisory lane-warning flag, auto-provisioning the same hidden observer seat /live uses. Increments 2 and 3 then landed under the writable-board arc rather than this item\'s banner, which is why this stayed marked unbuilt: the insight rail over GET /report plus the columns-versus-Goals swimlane toggle (#439), and the live read — one fetch, then a re-fetch only when a lane act arrives over the firehose, no polling (#435).',
-    refs: [adr(104, 'ADR 104'), doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md')],
+      "The web surface for the already-shipped insight engine (server projections + GET /report + the report CLI/MCP all landed; this is the browser board they never got). ADR 104 frames it as three increments over the two existing endpoints — no board CRUD, no stored columns, the dashboard renders what the engine derives. Increment 1 shipped (PR #151): a read-only /board kanban over GET /lanes — one column per lane state (backlog/claimed/in-progress/blocked/done), cards carrying owner, Goal, branch, age, and the advisory lane-warning flag, auto-provisioning the same hidden observer seat /live uses. Increments 2 and 3 then landed under the writable-board arc rather than this item's banner, which is why this stayed marked unbuilt: the insight rail over GET /report plus the columns-versus-Goals swimlane toggle (#439), and the live read — one fetch, then a re-fetch only when a lane act arrives over the firehose, no polling (#435).",
+    refs: [
+      adr(104, 'ADR 104'),
+      doc('docs/design/human-agent-dynamics.md', 'human-agent-dynamics.md'),
+    ],
     dependsOn: ['insight-engine', 'web-dashboard'],
   },
   {
@@ -1170,13 +1337,19 @@ const RAW: RawItem[] = [
     title: 'Driver co-presence gap — make steering light up the human',
     shipped: { prs: [353] },
     category: 'human-loop',
-    blurb: 'Closed by ADR 155 Increment 1: `musterd agent --driver` provisions the once-dormant MUSTERD_DRIVER link, and a human steering a live agent seat now composes as working + online on the roster — derived from the driver link at read time, no presence row of their own.',
+    blurb:
+      'Closed by ADR 155 Increment 1: `musterd agent --driver` provisions the once-dormant MUSTERD_DRIVER link, and a human steering a live agent seat now composes as working + online on the roster — derived from the driver link at read time, no presence row of their own.',
     detail:
       'Diagnosed 2026-07-04 from the live roster (nick showed offline while actively steering) + the code: (1) `musterd agent` never wrote MUSTERD_DRIVER (unlike `init`), so the ADR 021 "driven by" annotation never fired for agent-provisioned seats — the link was absent from all 903 provenance rows; (2) even when set, ADR 021 annotated the *agent* row only, giving the human no presence of their own. Both parts closed by ADR 155 Increment 1 (#353), exactly as the human-role reevaluation answered the "should steering mean present" question: `musterd agent --driver <you>` bakes the link opt-in per workspace, and the roster derives the steering human as working + online from any live agent presence carrying their name as `driver` — computed at read time (surveillance-asymmetry: no synthetic row, no new audit trail).',
-    refs: [adr(155, 'ADR 155'), adr(21, 'ADR 021'), adr(57, 'ADR 057'), adr(42, 'ADR 042'), adr(145, 'ADR 145')],
+    refs: [
+      adr(155, 'ADR 155'),
+      adr(21, 'ADR 021'),
+      adr(57, 'ADR 057'),
+      adr(42, 'ADR 042'),
+      adr(145, 'ADR 145'),
+    ],
     dependsOn: ['agent-presence-touch', 'human-presence-ladder'],
   },
-
 
   {
     id: 'own-harness',
@@ -1185,7 +1358,8 @@ const RAW: RawItem[] = [
     title: 'musterd as its own harness & mixed-harness teams',
     plan: 'reserved',
     category: 'harness',
-    blurb: 'musterd grows a standalone harness/chat of its own — a seat that runs on musterd directly, like Claude Code or Codex, instead of only sitting on top of them — then mixed-harness teams as a first-class shape.',
+    blurb:
+      'musterd grows a standalone harness/chat of its own — a seat that runs on musterd directly, like Claude Code or Codex, instead of only sitting on top of them — then mixed-harness teams as a first-class shape.',
     detail:
       'Today every seat runs on someone else’s harness (Claude Code, Cursor, Codex) with musterd as the coordination layer on top; the residency work (ADR 131) already names musterd’s own native harness as its reference actuator row. This item is that ambition whole: a musterd-native runtime a seat can live on directly, plus mixed-harness teams as the deliberately-supported composition (Track B finding 003: non-Claude harnesses coordinate through musterd today; ADR 101 makes model family a team-composition property). Role creation/assignment is deliberately NOT this item — roles are harness-independent (see roles-and-stewardship) and must work identically whether a seat runs on Claude Code, Codex, or musterd’s own harness. (Split 2026-07-13: this item previously also carried the role-template reevaluation.)',
     refs: [adr(26, 'ADRs 026–030'), adr(131, 'ADR 131')],
@@ -1193,17 +1367,28 @@ const RAW: RawItem[] = [
   },
   {
     id: 'install-topology',
-    unfrozen: 'stated in install-topology.md; its six increments carry their own ADRs (170, 174, …)',
+    unfrozen:
+      'stated in install-topology.md; its six increments carry their own ADRs (174, 176, 178, …)',
+    shipped: { prs: [457, 466, 474, 478, 481] },
     wave: 9,
     title: 'Install topology — the team home is where the human stands',
-    plan: 'near-term',
     category: 'platform',
     blurb:
       'One machine, one daemon, many teams, many repos — and every seat has a floor: agents stand in per-seat worktrees, the human stands in a per-team home (`~/musterd/<team>`). `musterd human <name>` provisions it in one command, a lost human credential becomes recoverable, and the shared agent key can never occupy a human seat.',
     detail:
       'Every primitive of a working install shipped separately (packaged binary ADR 156, team create, agent worktrees ADR 065, bindings, committed launch spec ADR 080, durable roster ADR 058) but the model composing them was never stated — and one evening of dogfood (2026-07-28) found the seams live: the claim path let the team agent key occupy a human seat (producing a binding every later request 403s — the invariant authByAgentKey enforces per-request was never enforced at occupancy), a lost mscr_ credential had no re-issue verb anywhere (the founder’s own credential for the dogfood team existed nowhere on his machine, blocking the ADR 170 `musterd board` flow whose premise is "the CLI already holds it"), and the human had no workspace at all — eleven agent worktrees, zero for the person ADR 145 made a peer. This item states the four-layer topology (platform / team / projects / workspaces) in docs/design/install-topology.md and lands six increments: the claim-path kind guard (bug, both HTTP and WS surfaces), the doctor diagnostic for dead bindings, credential rotate-in-place at the ADR 134 provisioning bar (`musterd team credential <name>`), the team home + `musterd human <name>` composition (teamHome config key; the home carries the human’s binding so board/inbox/send work bare as them; rosterHome composes rather than merges), lane `project` derivation from repo identity (today every lane is project=default, silently making contention checks team-wide), and the init team-picker fix for wiring a second repo to a known team. Deliberately parked: the operator checkout rename (runbook appendix only), multi-device humans (owned by ADR 170’s off_machine counter-signal), remote join P4.',
-    refs: [doc('docs/design/install-topology.md', 'install-topology.md'), adr(170, 'ADR 170'), adr(134, 'ADR 134'), adr(58, 'ADR 058')],
-    dependsOn: ['v03-p3-credentials', 'durable-roster', 'agent-workspace', 'packaging-easy-install'],
+    refs: [
+      doc('docs/design/install-topology.md', 'install-topology.md'),
+      adr(170, 'ADR 170'),
+      adr(134, 'ADR 134'),
+      adr(58, 'ADR 058'),
+    ],
+    dependsOn: [
+      'v03-p3-credentials',
+      'durable-roster',
+      'agent-workspace',
+      'packaging-easy-install',
+    ],
   },
   {
     id: 'roles-and-stewardship',
@@ -1212,7 +1397,8 @@ const RAW: RawItem[] = [
     title: 'Roles & stewardship — a role library with an infra-touch guardrail',
     plan: 'reserved',
     category: 'platform',
-    blurb: 'Create and assign named roles (steward, platform guardian, product manager, UX designer, facilitator/brainstorm, experimenter, researcher, support, database guru…) with charters + capabilities — including "only designated platform agents touch running infrastructure".',
+    blurb:
+      'Create and assign named roles (steward, platform guardian, product manager, UX designer, facilitator/brainstorm, experimenter, researcher, support, database guru…) with charters + capabilities — including "only designated platform agents touch running infrastructure".',
     detail:
       'Captured 2026-07-13 (owner intent; full brainstorm/design session pending — docs/design/roles-and-stewardship.md is the seed). The prompting problem: any agent can restart/rebuild shared infrastructure or modify platform code while teammates are online and depending on it; the desired end state is that only designated platform agent(s) may, and everyone else routes infra requests + troubleshooting to them (request_help by role). Explicitly lenient while the team is still building musterd itself — warn-first, watcher-never-gatekeeper, hardening later. Concrete first target (captured 2026-07-20): the **platform / infra guardian** as an on-call, self-healing-prod agent — a local cheap-probe-wakes-a-session watcher that supervises the daemon and the ADR 152 auto-refresher, auto-remediates safe classes, and escalates the rest, with the per-incident autonomy tier set by an admin via `musterd team policy` (ADR 150). Runtime/recency/probe/autonomy-as-policy all captured in the seed doc; the daemon auto-refresh mechanism it supervises shipped as ADR 152. Builds on what exists rather than re-inventing: the ADR 069/070 capability substrate (roles/<name>.toml already carries defaults + charter, per-seat narrowing, in-band enforcement + audit), the ADR 026–030 provisioning templates (the per-harness rendering half), the steward (ADR 112) as the first worked example of a role-agent (charter + autonomy knobs + guardrails; today an Action, wants to be a resident seat via ADR 131), and the no-orchestrator stance (a role is charter + capabilities on an ordinary seat, never a new protocol power). Roles are harness-independent by design — the same role assignable on Claude Code, Codex, Cursor, or musterd’s own future harness. Seed library also includes a Facilitator/brainstorm archetype (tldraw for diverge, harness visual companion for converge; portable intent, per-harness surfaces) — see the seed doc.',
     refs: [
@@ -1229,7 +1415,8 @@ const RAW: RawItem[] = [
     title: 'Sandboxed runtime',
     plan: 'reserved',
     category: 'platform',
-    blurb: 'musterd connects agents; it does not run them. A later, optional sandbox could host members with nowhere else to live.',
+    blurb:
+      'musterd connects agents; it does not run them. A later, optional sandbox could host members with nowhere else to live.',
   },
   {
     id: 'python-sdk',
@@ -1238,7 +1425,8 @@ const RAW: RawItem[] = [
     title: 'Python client SDK',
     plan: 'reserved',
     category: 'platform',
-    blurb: 'A fast follow after launch. The protocol is language-neutral; the TypeScript client is the reference, not the only one.',
+    blurb:
+      'A fast follow after launch. The protocol is language-neutral; the TypeScript client is the reference, not the only one.',
   },
 
   // ── captured from design docs / ADRs (roadmap-completeness pass, 2026-07-01) ──
@@ -1249,10 +1437,14 @@ const RAW: RawItem[] = [
     title: 'Shared/remote-team security hardening',
     plan: 'reserved',
     category: 'platform',
-    blurb: 'The security cluster that follows the v0.3 governance work once teams span machines: recipient-scoped message reads, multi-admin delegation, rotating/per-seat keys, a signed audit log, and abuse limits.',
+    blurb:
+      'The security cluster that follows the v0.3 governance work once teams span machines: recipient-scoped message reads, multi-admin delegation, rotating/per-seat keys, a signed audit log, and abuse limits.',
     detail:
       'Named as "roadmap" in security.md + membership-model.md: **recipient-scoped message reads SHIPPED** (ADR 128 — `GET /messages` + the `team-all` firehose no longer leak others\' DMs to a regular member; a party is sender/recipient/team-broadcast, admins + read-only observers see all under localhost-trust; the local-vs-shared observer scoping — a shared watch-link seeing only public traffic — is the tracked remainder here). Still reserved in this cluster: local-vs-shared observer scoping, multi-admin delegation & policy, per-seat / rotating agent keys, a tamper-evident (signed) audit log, claim rate-limiting / anomaly detection + per-sender urgent rate-limit, OS-keychain secret storage, and DB encryption-at-rest. Follows directly from the shipped v0.3 governance substrate.',
-    refs: [doc('docs/design/security.md', 'security.md'), doc('docs/design/membership-model.md', 'membership-model.md')],
+    refs: [
+      doc('docs/design/security.md', 'security.md'),
+      doc('docs/design/membership-model.md', 'membership-model.md'),
+    ],
   },
   {
     id: 'authorization-provenance',
@@ -1261,10 +1453,17 @@ const RAW: RawItem[] = [
     shipped: { prs: [167, 170, 227] },
     frozenBy: 127,
     category: 'platform',
-    blurb: 'For audit: when a decision, escalation, or merge routes to a human for authorization, record which human authorized it — a first-class, attestable link from an approved action back to the approver.',
+    blurb:
+      'For audit: when a decision, escalation, or merge routes to a human for authorization, record which human authorized it — a first-class, attestable link from an approved action back to the approver.',
     detail:
       'The merge half shipped as ADR 109 (PRs #167/#170): `authorized_by` on `git.pr_merged`, surfaced via `lane resolve --authorized-by`. ADR 127 extends the same key to `request.decide` + `grant.issue` (server-derived from the authenticated admin), writes `grant.issue` when an approve mints a grant, and adds `musterd audit --authorized-by <seat>` / `?authorized_by=` so admins can filter the ledger by authorizer. Seeds: P2 audit log (ADR 071), request lane (ADR 077), human credentials (P3).',
-    refs: [adr(127, 'ADR 127'), adr(109, 'ADR 109'), adr(71, 'ADR 071'), adr(77, 'ADR 077'), doc('docs/design/security.md', 'security.md')],
+    refs: [
+      adr(127, 'ADR 127'),
+      adr(109, 'ADR 109'),
+      adr(71, 'ADR 071'),
+      adr(77, 'ADR 077'),
+      doc('docs/design/security.md', 'security.md'),
+    ],
     dependsOn: ['v03-p2-enforcement'],
   },
   {
@@ -1274,7 +1473,8 @@ const RAW: RawItem[] = [
     title: 'Hosted rendezvous relay (Topology C)',
     plan: 'reserved',
     category: 'transport',
-    blurb: 'A musterd-operated hosted relay members dial out to — the "just works" path for teams that won\'t run a Tailscale/WireGuard overlay.',
+    blurb:
+      'A musterd-operated hosted relay members dial out to — the "just works" path for teams that won\'t run a Tailscale/WireGuard overlay.',
     detail:
       'From deployment-topology.md §Topology C: the largest transport build and the "just works" future — a hosted rendezvous relay so cross-network teams need no self-run overlay. Extends cross-network teams (the loopback + secured-bind + overlay topologies already shipped).',
     refs: [doc('docs/design/deployment-topology.md', 'deployment-topology'), adr(40, 'ADR 040')],
@@ -1317,9 +1517,18 @@ const RAW: RawItem[] = [
       doc('docs/design/mcp-tool-surface.md', 'mcp-tool-surface.md'),
       adr(29, 'ADRs 029–031'),
       adr(69, 'ADR 069'),
-      { label: 'ML Mastery — tool selection in AI agents', href: 'https://machinelearningmastery.com/the-complete-guide-to-tool-selection-in-ai-agents/' },
-      { label: 'Alibaba SkillWeaver (VentureBeat)', href: 'https://venturebeat.com/orchestration/new-alibaba-ai-framework-skips-loading-every-tool-cutting-agent-token-use-99' },
-      { label: 'The New Stack — MCP context problem', href: 'https://thenewstack.io/mcp-enterprise-agent-governance/' },
+      {
+        label: 'ML Mastery — tool selection in AI agents',
+        href: 'https://machinelearningmastery.com/the-complete-guide-to-tool-selection-in-ai-agents/',
+      },
+      {
+        label: 'Alibaba SkillWeaver (VentureBeat)',
+        href: 'https://venturebeat.com/orchestration/new-alibaba-ai-framework-skips-loading-every-tool-cutting-agent-token-use-99',
+      },
+      {
+        label: 'The New Stack — MCP context problem',
+        href: 'https://thenewstack.io/mcp-enterprise-agent-governance/',
+      },
     ],
     dependsOn: ['harness-adapters', 'own-harness', 'tool-call-telemetry'],
   },
@@ -1331,8 +1540,10 @@ const RAW: RawItem[] = [
     title: 'A planner / orchestrator role',
     plan: 'out-of-scope',
     category: 'platform',
-    blurb: 'One member does the work; the team does the coordination. musterd never forces decomposition.',
-    detail: 'A team of one agent, plus optionally a human, is a first-class — even default — configuration.',
+    blurb:
+      'One member does the work; the team does the coordination. musterd never forces decomposition.',
+    detail:
+      'A team of one agent, plus optionally a human, is a first-class — even default — configuration.',
   },
   {
     id: 'no-runtime',

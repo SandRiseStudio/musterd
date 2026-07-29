@@ -200,15 +200,30 @@ was wrong and the conditional version §4 rejected is the repair.
 
 ## Increments
 
-1. **The home and the verb** (this PR): `teamHome` config key + `defaultTeamHome` + `readBindingAt`;
+1. **The home and the verb** (#474, landed): `teamHome` config key + `defaultTeamHome` + `readBindingAt`;
    `musterd human <name>` with the three credential branches, the one-team refusal, the self-claim,
    and the announced `current` write; help catalog entry; unit coverage for each guard.
-2. **Doctor sees the floor** (lane L2, open): `init --check` / doctor reports a team with no
+2. **Doctor sees the floor** (#481, landed): `init --check` / doctor reports a team with no
    `teamHome`, and the dead-binding case §6(a) of install-topology names — the binding that claims a
    human seat with an agent key. Partly evaporates now that the home exists, which is why it follows
    rather than leads.
 3. **`team export` defaults into the home** (small, follows naturally): when a team has a `teamHome`
    and no `rosterHome`, `--to` defaults there — the two keys composing rather than merging.
-4. **Roll the model into the docs** (lane L-docs-settle): README + primer teach the pair
+4. **Roll the model into the docs** (lane L6, landed): README + the agent skill teach the pair
    `agent`/`human` as one model rather than two commands, and `init`'s team menu offers the teams the
    vault already knows.
+
+   Two things this increment settled that were not obvious when the ADR was written:
+
+   - **The pair belongs in the skill layer, not only in prose.** `musterd human` shipped in #474 and
+     was reachable from `musterd help` — but nothing an agent loads by default said it existed,
+     while the skill named `musterd agent` in passing. A verb that provisions a _teammate_ is
+     coordination knowledge, so it goes where the ADR 085 guidance lives, and both verbs join
+     `SKILL_CLI_COMMANDS` so renaming either breaks the build instead of rotting the skill. That
+     moves `GUIDANCE_CONTENT_VERSION` 7 → 8, which is fleet-visible: every provisioned folder's
+     guidance reads as stale until refreshed. That cost is the point of the stamp, not a side effect.
+   - **The team menu's defect was one layer below the menu.** `init` read `config.identities` — one
+     identity _per team_, and only for teams recently acted on — where it needed the ADR 059 vault.
+     That is why it could stand in a folder bound to a live team, hold a good credential for it, and
+     still conclude it had none: ADR 161's failure surviving underneath ADR 161's fix. The picker is
+     the visible half; `credentialFor()` reading the vault behind the cache is the actual repair.
