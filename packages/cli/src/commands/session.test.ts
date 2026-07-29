@@ -374,6 +374,40 @@ describe('musterd session (capture)', () => {
       ).toBeUndefined();
     });
 
+    it('reads the SLOT, not a live neighbour, when the slot has not ended', () => {
+      // Measured live on izzo, 2026-07-29: `model_observed` said claude-sonnet-5 four seconds into a
+      // session whose transcript is claude-opus-5 end to end. The heal is gated on
+      // `ended_at !== undefined && live`, but the transcript the model is read FROM was not — so any
+      // neighbour inside the 10-minute live window outranked a perfectly healthy slot. A seat closing
+      // one session and opening another minutes later is the ordinary case, not an edge one, and the
+      // predecessor it reads is exactly where a different model is most likely to be found.
+      const startedAt = Date.now() - 60_000;
+      const mine = transcript(wsA, 'claude-opus-5', 'mine.jsonl');
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'live-sid',
+            transcript_path: mine,
+            started_at: startedAt, // no ended_at — this slot is healthy
+          },
+        }),
+      );
+      // The predecessor, closed minutes ago and still inside LOCAL_SESSION_LIVE_MS.
+      const neighbour = transcript(wsA, 'claude-sonnet-5', 'neighbour.jsonl');
+
+      expect(
+        refreshModelObservation(
+          wsA,
+          enumStub([{ id: 'other-sid', path: neighbour, mtime: Date.now(), bytes: 10 }]),
+        ),
+      ).toBe('claude-opus-5');
+      expect(readBinding(wsA).model_observed?.model).toBe('claude-opus-5');
+      // …and a healthy slot is never rewritten by a neighbour.
+      expect(readBinding(wsA).session?.id).toBe('live-sid');
+    });
+
     it('falls back to the slot when the harness cannot enumerate at all', () => {
       const startedAt = Date.now() - 3_600_000;
       writeBinding(
