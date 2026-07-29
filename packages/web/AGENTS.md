@@ -7,11 +7,24 @@ nodes. Those numbers are the floor, not a high-water mark: do not spend them buy
 ## Hard gate
 
 `pnpm perf:check` (runs in CI after build) enforces byte budgets from
-[docs/perf/budgets.json](../../docs/perf/budgets.json): total/per-chunk JS gzip, CSS gzip, font
-bytes, and a font-family allowlist. If your change trips it, first try to shrink the change
-(lazy-load, drop the dependency, subset); raising a budget is allowed but is a deliberate, reviewed
-act — do it in the same PR and log the measured cost in
-[docs/perf/web-live-baseline.md](../../docs/perf/web-live-baseline.md) (ADR 151).
+[docs/perf/budgets.json](../../docs/perf/budgets.json): **initial** JS gzip, **total** JS gzip,
+per-chunk JS gzip, CSS gzip, font bytes, and a font-family allowlist.
+
+**The two JS budgets have different remedies, and reaching for the wrong one wastes a session**
+(ADR 183):
+
+- `initialJsGzipBytes` — the worst route's eager graph (entry + statically imported chunks), the
+  number a viewer feels. **Lazy-loading moves this.** Measured, 2026-07-29: a `lazy()` split took
+  `/asks-preview` 124.1 → 118.3 KB.
+- `totalJsGzipBytes` — every chunk, lazy included: how much code the product carries.
+  **Lazy-loading cannot move this** and slightly raises it. Delete code or drop the dependency.
+
+Each failure names its own remedy, so read the message rather than guessing. Raising a budget is
+allowed but is a deliberate, reviewed act — do it in the same PR and log the measured cost in
+[docs/perf/web-live-baseline.md](../../docs/perf/web-live-baseline.md) (ADR 151). **Before raising,
+check whether a re-baseline is due instead**: budgets are periodically reset to measured + 15%, and a
+re-baseline may only tighten — a loosening one is just a raise (ADR 183). Two ceilings were hit in
+one week in 2026-07 because raises were being used to fix a calibration problem.
 
 ## Standing rules (each one is a shipped, measured win — don't undo it)
 
@@ -22,7 +35,8 @@ act — do it in the same PR and log the measured cost in
   idle cost is paid by every viewer, forever.
 - **The stream DOM stays windowed** (~60 mounted rows, reveal-on-scrollback, live-edge collapse,
   1,000-envelope memory cap — #328). Don't mount unbounded lists anywhere; window them.
-- **Fonts: the three active families only** (Fraunces, Space Grotesk, Space Mono). A new family or
+- **Fonts: the three active families only** (Inter, Space Grotesk, Space Mono — body was re-fonted
+  Fraunces → Inter on 2026-07-20; `budgets.json` is the authority). A new family or
   weight is a re-font decision, not a side-effect (#329). Canvas painters read type via
   `src/live/canvasFont.ts` tokens — never hard-code a family name in a painter.
 - **The daemon already serves compressed + cached** (brotli/gzip, immutable hashed assets, ETag app

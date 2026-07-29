@@ -14,6 +14,17 @@
  * retired Inter/JetBrains families once sat in dist as 503 KB of never-fetched @font-face rules
  * (#329) — a new family must be a deliberate re-font, not a dependency side-effect.
  *
+ * TWO JS budgets, because they answer different questions (ADR 183):
+ *   initialJsGzipBytes — the worst route's EAGER graph: the entry plus everything the prerendered
+ *     HTML tells the browser to fetch before the page is interactive. This is what a viewer feels,
+ *     and it is the number lazy-loading moves.
+ *   totalJsGzipBytes  — every .js in dist/client, lazy chunks included. This is how much code the
+ *     product carries, which is what rots. Lazy-loading CANNOT move it (only raise it, by per-chunk
+ *     overhead), so its remedy is deleting code or dropping a dependency.
+ * Enforcing only the total is what ADR 151 shipped, and it made the gate's own first suggestion
+ * impossible to satisfy — measured 2026-07-29: splitting the room-tone engine moved 1.3 KB out of
+ * the initial payload and moved the total the WRONG way, 243.3 → 243.7 KB.
+ *
  * Needs `pnpm build` first (same trap as typecheck: dist/ is gitignored).
  * Runs on Node's native TypeScript (no build step, no deps).
  */
@@ -27,6 +38,7 @@ const repoRoot = join(here, '..', '..');
 const distClient = join(repoRoot, 'packages', 'web', 'dist', 'client');
 
 interface Budgets {
+  initialJsGzipBytes: number;
   totalJsGzipBytes: number;
   maxChunkGzipBytes: number;
   totalCssGzipBytes: number;
@@ -59,7 +71,16 @@ try {
 }
 
 const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`;
-const gzipSize = (file: string) => gzipSync(readFileSync(file)).length;
+
+const gzipCache = new Map<string, number>();
+function gzipSize(file: string): number {
+  let cached = gzipCache.get(file);
+  if (cached === undefined) {
+    cached = gzipSync(readFileSync(file)).length;
+    gzipCache.set(file, cached);
+  }
+  return cached;
+}
 
 const js = files.filter((f) => f.endsWith('.js'));
 const css = files.filter((f) => f.endsWith('.css'));
@@ -70,7 +91,51 @@ const totalJs = jsSizes.reduce((s, c) => s + c.gzip, 0);
 const totalCss = css.reduce((s, f) => s + gzipSize(f), 0);
 const totalFont = fonts.reduce((s, f) => s + statSync(f).size, 0);
 
+/*
+ * Each prerendered route ships an index.html naming its own eager graph: the entry <script> plus a
+ * <link rel="modulepreload"> per statically-imported chunk. Dynamic imports are absent by
+ * construction, which is exactly the distinction we want — so the HTML is the measurement, and no
+ * bundler-internal manifest has to be trusted or kept in sync.
+ */
+const routeHtml = files.filter((f) => f.endsWith('index.html'));
+const routeInitial = routeHtml
+  .map((html) => {
+    const route = `/${relative(distClient, html).replace(/(^|\/)index\.html$/, '')}`;
+    const refs = new Set(
+      [...readFileSync(html, 'utf8').matchAll(/(?:src|href)="\/assets\/([^"]+\.js)"/g)].map(
+        (m) => m[1]!,
+      ),
+    );
+    const chunks = [...refs].map((f) => ({
+      file: f,
+      gzip: gzipSize(join(distClient, 'assets', f)),
+    }));
+    return { route, chunks, gzip: chunks.reduce((s, c) => s + c.gzip, 0) };
+  })
+  .sort((a, b) => b.gzip - a.gzip);
+
 const failures: string[] = [];
+
+const worst = routeInitial[0];
+if (!worst) {
+  /*
+   * A build that emits no prerendered route HTML would make the initial-payload budget silently
+   * vacuous — a gate that always passes is worse than no gate, so this is a failure, not a skip.
+   */
+  failures.push(
+    `found no prerendered route HTML under ${relative(repoRoot, distClient)}, so the initial-payload budget could not be measured — if the build output moved, fix this checker rather than letting the budget pass vacuously (ADR 183)`,
+  );
+} else if (worst.gzip > budgets.initialJsGzipBytes) {
+  const top = [...worst.chunks]
+    .sort((a, b) => b.gzip - a.gzip)
+    .slice(0, 5)
+    .map((c) => `    ${kb(c.gzip)}  ${c.file}`)
+    .join('\n');
+  failures.push(
+    `initial JS gzip ${kb(worst.gzip)} on the worst route (${worst.route}) > budget ${kb(budgets.initialJsGzipBytes)}; its largest eager chunks:\n${top}\n` +
+      `    → this is the budget lazy-loading moves: a dynamic import drops a chunk out of the eager graph.`,
+  );
+}
 
 if (totalJs > budgets.totalJsGzipBytes) {
   const top = jsSizes
@@ -79,7 +144,8 @@ if (totalJs > budgets.totalJsGzipBytes) {
     .map((c) => `    ${kb(c.gzip)}  ${c.file}`)
     .join('\n');
   failures.push(
-    `total JS gzip ${kb(totalJs)} > budget ${kb(budgets.totalJsGzipBytes)}; largest chunks:\n${top}`,
+    `total JS gzip ${kb(totalJs)} across ${jsSizes.length} chunks > budget ${kb(budgets.totalJsGzipBytes)}; largest chunks:\n${top}\n` +
+      `    → lazy-loading will NOT move this number (it only adds per-chunk overhead): delete code, drop the dependency, or raise the budget deliberately.`,
   );
 }
 
@@ -109,15 +175,21 @@ for (const f of fonts) {
   }
 }
 
+const initialSummary = worst
+  ? `initial JS gzip ${kb(worst.gzip)}/${kb(budgets.initialJsGzipBytes)} (worst route ${worst.route}, ${worst.chunks.length} eager chunks)`
+  : 'initial JS gzip UNMEASURED';
 console.log(
-  `perf:check — JS gzip ${kb(totalJs)}/${kb(budgets.totalJsGzipBytes)} · CSS gzip ${kb(totalCss)}/${kb(budgets.totalCssGzipBytes)} · fonts ${kb(totalFont)}/${kb(budgets.totalFontBytes)} (${fonts.length} files) · largest chunk ${kb(Math.max(...jsSizes.map((c) => c.gzip)))}/${kb(budgets.maxChunkGzipBytes)}`,
+  `perf:check — ${initialSummary} · total JS gzip ${kb(totalJs)}/${kb(budgets.totalJsGzipBytes)} (${jsSizes.length} chunks) · CSS gzip ${kb(totalCss)}/${kb(budgets.totalCssGzipBytes)} · fonts ${kb(totalFont)}/${kb(budgets.totalFontBytes)} (${fonts.length} files) · largest chunk ${kb(Math.max(...jsSizes.map((c) => c.gzip)))}/${kb(budgets.maxChunkGzipBytes)}`,
 );
 
 if (failures.length > 0) {
   console.error('\nperf:check FAILED — the built web client exceeds docs/perf/budgets.json:\n');
   for (const f of failures) console.error(`  ✗ ${f}`);
   console.error(
-    '\nEither shrink the change (lazy-load, drop the dependency, subset the font) or — if the cost is justified — raise the budget in docs/perf/budgets.json in this PR and log the measured cost in docs/perf/web-live-baseline.md (see ADR 151).',
+    '\nEach failure above names the remedy that can actually move that number — the two JS budgets have different\n' +
+      'ones (ADR 183). If the cost is justified instead, raise the budget in docs/perf/budgets.json in this PR and log\n' +
+      'the measured cost in docs/perf/web-live-baseline.md (see ADR 151). Budgets are re-baselined on a cadence, so\n' +
+      'a tight fit is not a reason to raise: check whether a scheduled re-baseline is due first.',
   );
   process.exit(1);
 }
