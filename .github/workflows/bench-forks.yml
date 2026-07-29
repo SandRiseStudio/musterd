@@ -64,7 +64,12 @@ jobs:
           REPS: ${{ inputs.reps }}
           FORKS: ${{ inputs.forks }}
         run: |
-          set -uo pipefail   # deliberately NOT -e: a red suite must be recorded, not abort the bench
+          # Actions invokes this as `bash -e {0}`, so errexit is ALREADY ON before the script runs.
+          # `set -uo pipefail` does not clear it — the first red suite therefore killed the whole
+          # bench instead of being recorded, which is the exact trap this line was meant to avoid.
+          # `set +e` is the part that actually does it.
+          set -uo pipefail
+          set +e
 
           # Validate the dispatch inputs before they reach a command line. They arrive via `env:`
           # rather than Actions expression interpolation (so they are never spliced into the script
@@ -93,6 +98,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           RESULTS=""
+          FAILURES=0
           for rep in $(seq 1 "$REPS"); do
             # Counterbalance the order every other rep. Even a clean VM warms up (fs cache, node's
             # module cache), and a fixed order would hand that warm-up to whichever arm always ran
@@ -116,8 +122,16 @@ jobs:
                 TESTS=$(grep -oE 'Tests +[0-9]+ passed \([0-9]+\)' "/tmp/bench-r${rep}-f${n}.log" | tail -1)
                 STATUS="${TESTS:-passed}"
                 RESULTS="${RESULTS}${n} ${MS}"$'\n'
+                echo "rep${rep} forks=${n} ${MS}ms — ${STATUS}"
               else
                 STATUS="**FAILED (exit $EC)** — timing excluded"
+                FAILURES=$((FAILURES + 1))
+                # The first version of this bench sent suite output to /tmp and the tables to the step
+                # summary, so a red arm produced a step that failed with NOTHING in the run log to say
+                # why. Print the tail here: a bench you cannot debug from its own log is not a bench.
+                echo "::group::FAILED rep${rep} forks=${n} (exit ${EC}) — last 60 lines"
+                tail -60 "/tmp/bench-r${rep}-f${n}.log"
+                echo "::endgroup::"
               fi
               echo "| $rep | ${n/#0/default} | ${MS} ms | ${STATUS} |" >> "$GITHUB_STEP_SUMMARY"
             done
@@ -144,3 +158,11 @@ jobs:
             echo "that rule is fixed here so a result cannot be rationalised after the fact (#494)."
             echo "Differences smaller than the spread between reps of the *same* arm are noise."
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # Fail the job if any arm was red. The sweep still completed and every timing is recorded,
+          # but a bench that reports a tidy median over a suite that did not pass would be lying by
+          # omission — the same failure mode as averaging a failed run into the number.
+          if [ "$FAILURES" -gt 0 ]; then
+            echo "::error::${FAILURES} suite run(s) failed — medians above cover green runs only"
+            exit 1
+          fi
