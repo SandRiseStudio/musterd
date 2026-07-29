@@ -224,6 +224,112 @@ describe('musterd session (capture)', () => {
       return p;
     };
 
+    /**
+     * The stale-slot corpse, measured live on 2026-07-29: 3 of 5 active seats carried a PREDECESSOR's
+     * session block — one 16 days old — because `binding.session` is only ever replaced by a
+     * SessionStart hook, and when that hook does not write for a new session the old block survives
+     * with its `ended_at` intact.
+     *
+     * The cost is specific and silent: this refresh bailed on `ended_at`, so a live seat stopped
+     * observing its model for the rest of its life and attestation fell back to the stale
+     * declaration — ADR 163's named failure, "worse, because it looks trustworthy". ADR 166 already
+     * settled who wins when the slot and the session files disagree; this reader had not been told.
+     */
+    const enumStub =
+      (rows: { id: string; path: string; mtime: number; bytes: number }[] | undefined) => () =>
+        rows;
+
+    it('keeps observing when the ended slot is a corpse and a live session says otherwise', () => {
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          // A predecessor that genuinely ended an hour ago…
+          session: {
+            harness: 'claude-code',
+            id: 'dead-sid',
+            transcript_path: join(wsA, 'dead.jsonl'),
+            started_at: startedAt,
+            ended_at: startedAt + 15_000,
+          },
+        }),
+      );
+      // …while THIS session is live and running a different model.
+      const livePath = transcript(wsA, 'claude-opus-5', 'live.jsonl');
+
+      const observed = refreshModelObservation(
+        wsA,
+        enumStub([{ id: 'live-sid', path: livePath, mtime: Date.now(), bytes: 10 }]),
+      );
+
+      expect(observed).toBe('claude-opus-5');
+      expect(readBinding(wsA).model_observed).toMatchObject({ model: 'claude-opus-5' });
+    });
+
+    it('still stops when the slot ended and nothing contradicts it', () => {
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'dead-sid',
+            transcript_path: transcript(wsA, 'claude-opus-5', 'dead.jsonl'),
+            started_at: startedAt,
+            ended_at: startedAt + 15_000,
+          },
+        }),
+      );
+
+      // No live session in this workspace — the seat really has ended.
+      expect(refreshModelObservation(wsA, enumStub([]))).toBeUndefined();
+      expect(readBinding(wsA).model_observed).toBeUndefined();
+    });
+
+    it('does not treat the captured session itself as a contradiction', () => {
+      // The live session IS the captured one, and it ended. Same id ⇒ no corpse, no override.
+      const startedAt = Date.now() - 3_600_000;
+      const p = transcript(wsA, 'claude-opus-5', 'same.jsonl');
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'same-sid',
+            transcript_path: p,
+            started_at: startedAt,
+            ended_at: startedAt + 15_000,
+          },
+        }),
+      );
+
+      expect(
+        refreshModelObservation(
+          wsA,
+          enumStub([{ id: 'same-sid', path: p, mtime: Date.now(), bytes: 10 }]),
+        ),
+      ).toBeUndefined();
+    });
+
+    it('falls back to the slot when the harness cannot enumerate at all', () => {
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'dead-sid',
+            transcript_path: transcript(wsA, 'claude-opus-5', 'dead2.jsonl'),
+            started_at: startedAt,
+            ended_at: startedAt + 15_000,
+          },
+        }),
+      );
+
+      // undefined ⇒ no enumeration available; the slot stays the only witness (ADR 166 §weaker).
+      expect(refreshModelObservation(wsA, enumStub(undefined))).toBeUndefined();
+    });
+
     it('lands the observation SessionStart could not make (the shipped defect)', async () => {
       // Exactly the live shape: capture names a transcript that does not exist yet…
       const t = join(wsA, 't.jsonl');
