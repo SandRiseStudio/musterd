@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -992,5 +993,102 @@ describe('binding-registry staleness note (ADR 162)', () => {
     h.bindings[tmpdir()] = { team: 'revive', seat: 'stanley', surface: 'claude-code' };
     const r = await inspectProvisioning('/x');
     expect(r.notes.find((n) => n.includes('binding-registry'))).toBeUndefined();
+  });
+});
+
+describe('seat git attribution (ADR 109)', () => {
+  const made: string[] = [];
+  function tmp(prefix: string): string {
+    const d = mkdtempSync(join(tmpdir(), prefix));
+    made.push(d);
+    return d;
+  }
+  afterEach(() => {
+    for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  /** A real repo — this check shells out to git, so a fake path would only prove it stays quiet. */
+  function repo(): string {
+    const dir = tmp('musterd-attrib-');
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    execFileSync('git', ['config', 'user.email', 'human@example.com'], { cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'Human'], { cwd: dir });
+    return dir;
+  }
+
+  beforeEach(() => {
+    h.harnesses = [harness('Claude Code', true, true)];
+    h.binding = {
+      server: 'http://x',
+      team: 'revive',
+      agent_key: 'mskey_team',
+      surface: 'claude-code',
+      claim: { mode: 'seat', name: 'miley' },
+    };
+    h.roster = { members: [{ name: 'miley', kind: 'agent' }] };
+  });
+
+  it('notes a worktree attributed to the human, and prescribes the surgical repair', async () => {
+    const r = await inspectProvisioning(repo());
+    const note = r.notes.find((n) => n.includes('attributed to'));
+    expect(note).toBeDefined();
+    expect(note).toContain('human@example.com');
+    expect(note).toContain('git config --worktree user.name "miley (musterd seat)"');
+    expect(note).toContain('git config --worktree user.email "miley@revive.musterd"');
+    // Warn-only: attribution is not a functional failure, so it must never fail the check.
+    expect(r.drift.find((d) => d.includes('attributed to'))).toBeUndefined();
+  });
+
+  it('must NOT prescribe `musterd init` — that repoints the MCP entry every seat shares (ADR 143)', async () => {
+    const r = await inspectProvisioning(repo());
+    const note = r.notes.find((n) => n.includes('attributed to'))!;
+    expect(note).toContain('do NOT run `musterd init`');
+  });
+
+  it('stays quiet once the identity is set', async () => {
+    const dir = repo();
+    execFileSync('git', ['config', 'extensions.worktreeConfig', 'true'], { cwd: dir });
+    execFileSync('git', ['config', '--worktree', 'user.email', 'miley@revive.musterd'], {
+      cwd: dir,
+    });
+    const r = await inspectProvisioning(dir);
+    expect(r.notes.find((n) => n.includes('attributed to'))).toBeUndefined();
+  });
+
+  it('flags a WRONG identity too, not just a missing one — the two-spellings drift', async () => {
+    // A seat still on the pre-team-slug domain lands under two names in any per-seat rollup.
+    const dir = repo();
+    execFileSync('git', ['config', 'user.email', 'miley@musterd.local'], { cwd: dir });
+    const r = await inspectProvisioning(dir);
+    const note = r.notes.find((n) => n.includes('attributed to'))!;
+    expect(note).toContain('miley@musterd.local');
+    expect(note).toContain('miley@revive.musterd');
+  });
+
+  it('stays quiet outside a git repo — a plain folder has no identity to carry', async () => {
+    const r = await inspectProvisioning(tmp('musterd-attrib-plain-'));
+    expect(r.notes.find((n) => n.includes('attributed to'))).toBeUndefined();
+  });
+
+  it('stays SILENT for a human member — a person must keep their real git identity', async () => {
+    // Without this gate the check fires in the human's own primary checkout and prescribes replacing
+    // nick.sanders.a@gmail.com with a synthetic nick@revive.musterd, breaking GitHub attribution.
+    // Verified live: it did exactly that before the credential-prefix gate.
+    const dir = repo();
+    h.binding = {
+      server: 'http://x',
+      team: 'revive',
+      agent_key: 'mscr_human_credential',
+      surface: 'cli',
+      claim: { mode: 'seat', name: 'nick' },
+    };
+    const r = await inspectProvisioning(dir);
+    expect(r.notes.find((n) => n.includes('attributed to'))).toBeUndefined();
+  });
+
+  it('stays quiet with no seat to attribute (unprovisioned folder)', async () => {
+    h.binding = null;
+    const r = await inspectProvisioning(repo());
+    expect(r.notes.find((n) => n.includes('attributed to'))).toBeUndefined();
   });
 });

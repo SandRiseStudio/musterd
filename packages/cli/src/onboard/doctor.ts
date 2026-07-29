@@ -7,6 +7,7 @@ import {
   bindingSeat,
   formatClaimPolicy,
   parseContentStamp,
+  TOKEN_PREFIXES,
   type Binding,
 } from '@musterd/protocol';
 import { HttpClient } from '../client.js';
@@ -245,6 +246,72 @@ async function inspectModelAttestation(binding: Binding | null): Promise<string[
  * on whether this machine still holds a usable credential for the seat — so the note names the one
  * that applies rather than both.
  */
+/**
+ * Seat git attribution (ADR 109): does this worktree carry the identity that makes `git log` answer
+ * "which seat wrote this" without a lookup?
+ *
+ * A **note, never drift.** Nothing stops working when it is missing — commits still land, CI still
+ * passes. They are simply authored by the human, so `git log`, the ADR 109 `git.pr_merged` join and
+ * every per-seat rollup credit the wrong actor. That silence is the whole problem: two live seats
+ * reached dozens of merges with zero seat trailers before a manual audit noticed.
+ *
+ * The prescribed repair is the two surgical `git config` writes, deliberately **not** `musterd init`.
+ * On a repo-root-shared MCP entry (ADR 143) that generic remedy repoints the slot every other live
+ * seat is using — ryder's #514 lesson that a check must expect what its own repair would actually
+ * write, and the same reason ADR 168 carved identity out of the refresh path.
+ */
+function inspectGitAttribution(binding: Binding | null, cwd: string): string[] {
+  const seat = binding ? bindingSeat(binding) : undefined;
+  if (!seat || !binding?.team) return []; // no seat to attribute (role pool, or unprovisioned)
+
+  /*
+   * AGENT seats only, discriminated by the credential prefix (ADR 121's existing distinction: an
+   * `mscr_` human credential is not a harness). A human already has a real git identity, and a
+   * synthetic `nick@<team>.musterd` would be strictly worse — it breaks GitHub attribution and the
+   * email linkage a person's commits depend on. Without this gate the check fires in the human's own
+   * primary checkout and prescribes exactly that, which is the fleet-wide misfire class ADR 165 and
+   * ryder's #514 were both about: a guard whose prescribed repair is wrong for most of who sees it.
+   */
+  if (!binding.agent_key?.startsWith(TOKEN_PREFIXES.agent_key)) return [];
+
+  /*
+   * Compares the EFFECTIVE identity, not the worktree-scoped slot. Reading `--worktree` directly looks
+   * like the precise thing to do and is a trap: with `extensions.worktreeConfig` disabled git treats
+   * `--worktree` as `--local`, so the human's repo identity reads back as if the seat were configured.
+   * The effective value is also the honest question — "will a commit here be attributed to this seat?"
+   * — and it catches a *wrong* identity as well as a missing one, which is the other half of the drift
+   * (seats still carrying a pre-team-slug `@musterd.local` email land under two names in any rollup).
+   */
+  // Gate on being inside a repo first: `git config user.email` answers from ~/.gitconfig anywhere on
+  // the filesystem, so without this a plain folder would be told to fix an identity it cannot have.
+  try {
+    execFileSync('git', ['rev-parse', '--git-dir'], { cwd, stdio: 'ignore' });
+  } catch {
+    return [];
+  }
+  const expected = `${seat}@${binding.team}.musterd`;
+  let actual: string;
+  try {
+    actual = execFileSync('git', ['config', 'user.email'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return []; // not a git repo, or no identity at all to compare — nothing actionable here
+  }
+  if (actual === expected) return [];
+  const repair =
+    `    git config --worktree user.name "${seat} (musterd seat)"\n` +
+    `    git config --worktree user.email "${expected}"`;
+  return [
+    `commits from this folder are attributed to "${actual}", not to seat ${seat} — \`git log\` and the ` +
+      `ADR 109 per-seat rollups will credit the wrong actor. Nothing breaks, which is why this goes ` +
+      `unnoticed. Repair it in place; do NOT run \`musterd init\`, which repoints the MCP entry every ` +
+      `seat on this machine shares (ADR 143):\n${repair}`,
+  ];
+}
+
 async function inspectSeatIdentity(
   binding: Binding | null,
   cwd: string,
@@ -505,6 +572,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       ...duplicateAdapters,
       ...modelAttestation,
       ...seatIdentity.notes,
+      ...inspectGitAttribution(binding, cwd),
       ...registryNotes,
       ...labelNotes,
       ...packagedInstallNotes(),

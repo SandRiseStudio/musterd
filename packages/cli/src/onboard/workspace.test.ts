@@ -90,6 +90,61 @@ describe('provisionWorkspace', () => {
     expect(cfg('user.email', repo)).toBe('human@example.com');
   });
 
+  it('--path at an existing seat worktree still sets the identity — the grant-recovery path (ADR 109)', () => {
+    // `musterd agent <seat> --path <ws>` is the documented repair for an expired grant, so it runs
+    // against worktrees that already exist and are already in use. It used to return before writing
+    // any identity, which meant the fix for a broken credential silently stripped seat attribution —
+    // and left every later commit from that seat authored as the human.
+    const repo = tmp('mwd-path-id-');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 'human@example.com'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'Human'], { cwd: repo });
+    execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
+
+    const first = provisionWorkspace('June', { cwd: repo, team: 'revive' });
+    made.push(first.dir);
+    // Simulate a worktree provisioned before ADR 109 (or one whose config was lost).
+    execFileSync('git', ['config', '--worktree', '--unset', 'user.name'], { cwd: first.dir });
+    execFileSync('git', ['config', '--worktree', '--unset', 'user.email'], { cwd: first.dir });
+
+    const repaired = provisionWorkspace('June', { path: first.dir, cwd: repo, team: 'revive' });
+    expect(repaired.dir).toBe(first.dir);
+    const cfg = (key: string) =>
+      execFileSync('git', ['config', key], { cwd: repaired.dir, encoding: 'utf8' }).trim();
+    expect(cfg('user.name')).toBe('June (musterd seat)');
+    expect(cfg('user.email')).toBe('June@revive.musterd');
+    // Still worktree-scoped — repairing one seat must never rename the human's main tree.
+    expect(
+      execFileSync('git', ['config', 'user.name'], { cwd: repo, encoding: 'utf8' }).trim(),
+    ).toBe('Human');
+  });
+
+  it('--here in a seat worktree sets the identity too', () => {
+    const repo = tmp('mwd-here-id-');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 'human@example.com'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'Human'], { cwd: repo });
+    execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
+
+    const first = provisionWorkspace('June', { cwd: repo, team: 'revive' });
+    made.push(first.dir);
+    execFileSync('git', ['config', '--worktree', '--unset', 'user.name'], { cwd: first.dir });
+
+    provisionWorkspace('June', { here: true, cwd: first.dir, team: 'revive' });
+    expect(
+      execFileSync('git', ['config', 'user.name'], { cwd: first.dir, encoding: 'utf8' }).trim(),
+    ).toBe('June (musterd seat)');
+  });
+
+  it('--path outside a git repo is harmless — attribution never gates provisioning', () => {
+    // A plain folder has no worktree config to write; the best-effort identity write must not throw.
+    const cwd = tmp('mwd-path-plain-');
+    const target = join(cwd, 'spot');
+    const ws = provisionWorkspace('June', { path: target, cwd, team: 'revive' });
+    expect(ws).toMatchObject({ kind: 'folder', created: true });
+    expect(existsSync(ws.dir)).toBe(true);
+  });
+
   it('repairs the seat git identity on reuse (pre-109 worktrees)', () => {
     const repo = tmp('mwd-git4-');
     execFileSync('git', ['init', '-q'], { cwd: repo });
