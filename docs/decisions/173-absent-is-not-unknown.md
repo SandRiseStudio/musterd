@@ -32,7 +32,7 @@ cross-family pool).
 And the rule is already written down — locally, eight times, by at least four authors. `MODEL_UNKNOWN`
 "poisons conclusions _honestly_ — a chain with an unknown link is diversity unverifiable, never
 diverse." The mast verdict is `flagged | unverifiable`. Lane `verified` is optional because "absent
-means unknown, and the UI says nothing rather than guessing." `reviewWasRouted` returns
+means unknown, and the UI says nothing rather than guessing." `reviewRouting`'s `routed` is
 `boolean | undefined`. ADR 021: the adapter "never invents a driver it wasn't told about." ADR 044:
 "the server never invents it." ADR 067: "refuses rather than guessing." ADR 163 states it most
 sharply, scoped to attribution:
@@ -146,12 +146,91 @@ state at introduction, or does it need a follow-up PR to add one?
 - Some existing two-valued reads are wrong and are not fixed here. This ADR deliberately does **not**
   mandate a sweep: an audit of the eleven-item dataset is a separate piece of work, and retrofitting
   under a fresh rule is how a good rule earns a reputation for churn. New reads comply; old ones are
-  fixed when touched or when a reader is actually misled.
+  fixed when touched or when a reader is actually misled. _That audit has since been done — see
+  "The sweep question, answered" below. It found nothing to sweep, and the sentence above overstates
+  its own premise._
 - Consumers gain a burden too: an abstaining projection must be _handled_, not treated as falsy. A
   reader that folds `unknown` back into "no" re-creates the defect at the point of use, where it is
   harder to see.
 - ADR 052's evals get more trustworthy and more often incomplete — which is the trade this codebase
   has already chosen everywhere else it says "warn, never block" and "unknown is legal."
+
+## The sweep question, answered — 2026-07-29
+
+The no-sweep call above was made by this ADR's author, who asked izzo to push back on it. She never
+replied. So it stood for a day on nobody's judgement but its own, which is the only reason it was
+still open. Answering it properly meant doing the audit the ADR had deferred.
+
+**The audit. All eleven, read in code rather than argued about:**
+
+| #   | dataset item                       | verdict                                                               |
+| --- | ---------------------------------- | --------------------------------------------------------------------- |
+| 1   | lane close reason (#450)           | corrected — three-valued                                              |
+| 2   | doctor guidance check (#448)       | corrected                                                             |
+| 3   | `musterd report review` (#461)     | corrected                                                             |
+| 4   | ADR 172 posture                    | shipped three-valued at introduction                                  |
+| 5   | `human_review_missed` split (#462) | corrected                                                             |
+| 6   | `MODEL_UNKNOWN`                    | compliant — `packages/protocol/src/model.ts:15`                       |
+| 7   | mast `unverifiable` verdict        | compliant — `packages/server/src/store/mast.ts:201`                   |
+| 8   | lane `verified`                    | two-valued and **correctly** so — see below                           |
+| 9   | `reviewWasRouted`                  | three-valued `boolean \| undefined` — and **dead code**, zero callers |
+| 10  | ADR 168 `stale`/`ahead`            | compliant, and the exemplar of the rule                               |
+| 11  | ADR 141 `offline_reason`           | compliant — explicit `'unknown'` enum member, pinned by test          |
+
+**Zero of the eleven is an unfixed violation.** There was nothing to sweep. Two of the verdicts are
+worth their own line, because both are cases where the rule's _carve-out_ is doing the work:
+
+- **Lane `verified`** (`http.ts`) is computed from `lane.state`, `owner_at_close` and the closer's
+  name — every input enumerated in the same function. That is the "closed set you wrote yourself"
+  exemption, and three-valuing it would add ceremony and teach nobody anything. It is then _stored_
+  optional so the UI abstains, which is where the third state actually belongs.
+- **ADR 168's `stale`/`ahead`** is the best instance in the codebase: two early returns that abstain
+  out loud — "absent or unparseable — say nothing rather than invent drift", and "never installed
+  here — not this check's business". Its one collapse is sanctioned: `hookEpochOf` returns `0` for an
+  unstamped command, which reads as stale, and an unstamped hook genuinely _is_ from a pre-stamp
+  build. Absence of the stamp is evidence, not missing evidence — and the message prints `epoch 0`
+  rather than hiding the inference.
+
+**So the framing was the defect, not the code.** "The eleven-item dataset" is the eval's
+_population_ — five of them the week's corrections, six of them places the ADR cites as the rule
+already being right. It was never a backlog of eleven suspect reads. Reading it as a to-do list is
+what made a sweep look owed, and the handoff note that carried this question forward made exactly
+that misreading. **"Fixed when touched" stands, now on evidence rather than on the author's
+preference.**
+
+**Two findings the audit turned up, neither of them one of the eleven:**
+
+1. `reviewWasRouted` has no callers — `reviewRouting` (#462) superseded it. Deleted here. It was
+   compliant and unused, which is the least interesting way to be correct.
+2. **A twelfth item the dataset does not contain, and it is a real instance.** In `reviewRouting`,
+   `human_required` is a bare boolean on the _read_ edge while its sibling `routed` is three-valued
+   in the same return object. It returns `false` both for a legacy row that predates #462 and for a
+   `catch`-ed JSON parse failure — so "I could not see whether a human was required" is served as "no
+   human was required". At the close edge `human_review_missed` gates on it, so ADR 172's
+   counter-metric silently undercounts over those rows with no line saying how much it abstained
+   over, which is clause 4 of this ADR violated by the very function that motivated it. Narrow in
+   reach; exact in shape. Filed as its own lane rather than fixed inline, because a correction is
+   this ADR's trace and it should be recorded as one, not folded into a docs change.
+
+   Note what it is _not_: `human_required` is correct at the **write** edge, where it is
+   `lane.risk.length > 0` — a set the writer owns. Only the read is wrong. That is clause 2 ("record
+   the distinction where it is known") pointing at the fix.
+
+**On the experiment, and the ADR 177 question.** ADR 177 (#476) shipped a three-valued declaration at
+introduction, and the question put to this session was whether that counts as the registered trigger.
+**It does not**, and the reasoning matters more than the answer. The trigger was pre-registered
+narrowly: "the next derived read added to `GET /report`, to an audit-derived reason, or to a health
+check". ADR 177's `frozenBy`/`unfrozen` plus `building` is an authoring invariant and a check summary
+line — none of the three named surfaces. Counting it would mean widening a pre-registered trigger
+after the fact in order to collect a _favourable_ data point, which is the same error class as tuning
+a guard until it passes, and this codebase has one of those open already.
+
+So the experiment stands at **zero triggers, N=0** — not at one-in-favour. The honest position is
+that it has not been run, and the no-sweep call rests on the audit above rather than on any
+experimental evidence. The kill criterion is unchanged and still live: two consecutive corrections
+after this landed ⇒ replace the prose with a mechanism. Finding 2 above will be the first correction
+if it lands as one, and by the ADR's own regime it is an "old one fixed when touched" rather than a
+trigger hit — the distinction is what keeps the count honest.
 
 ## Related
 

@@ -317,26 +317,24 @@ export function listAudit(
 }
 
 /**
- * Was a review actually ROUTED the last time this lane entered `ready_for_review`? (ADR 169.)
- *
- * The close edge needs this to tell two very different unverified closes apart: an ask that was sent
- * and went unanswered (`review_timeout`) versus no eligible counterpart existing at all
- * (`no_candidate`). Only the ready edge knows, so it writes the answer down and this reads it back —
- * derived from the audit trail rather than stored on the lane, the same discipline the verified
- * verdict itself follows.
- *
- * `undefined` when there is no ready row to read (a legacy lane that entered review before this was
- * recorded); callers should fall back to the old label rather than invent one.
- */
-export function reviewWasRouted(db: Database, teamId: string, laneId: string): boolean | undefined {
-  return reviewRouting(db, teamId, laneId).routed;
-}
-
-/**
  * The full routing outcome the ready edge recorded (ADR 169/172): whether an ask was routed, and
  * whether the lane's declared risk made a HUMAN review required. `human_required` distinguishes the
  * two no-candidate closes — an empty cross-family pool (`no_candidate`, the sanctioned degradation)
  * versus a missing required human (`human_review_missed`, a requirement with no one to meet it).
+ *
+ * Only the ready edge can know either fact, so it writes them down and this reads them back —
+ * derived from the audit trail rather than stored on the lane, the same discipline the verified
+ * verdict itself follows.
+ *
+ * `routed: undefined` when there is no ready row to read, or a pre-fix row that recorded neither
+ * outcome: callers must fall back to the old label rather than invent one (ADR 173 — never backfill
+ * a verdict onto history).
+ *
+ * KNOWN GAP (ADR 173, audited 2026-07-29): `human_required` is two-valued here while `routed` beside
+ * it is three-valued. It reads `false` both for a legacy row predating #462 and for a `catch`-ed
+ * parse failure, so "could not see" is served as "not required" and the close edge's
+ * `human_review_missed` counter-metric undercounts silently. Correct at the write edge
+ * (`lane.risk.length > 0`, a set the writer owns); wrong only on the read.
  */
 export function reviewRouting(
   db: Database,
