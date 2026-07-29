@@ -143,10 +143,7 @@ describe('primaryCheckoutFor', () => {
 
   it('resolves a RELATIVE gitdir pointer against the worktree', () => {
     mkdirSync(dir('agents-rel'), { recursive: true });
-    writeFileSync(
-      join(dir('agents-rel'), '.git'),
-      'gitdir: ../agents/.git/worktrees/agents-rel\n',
-    );
+    writeFileSync(join(dir('agents-rel'), '.git'), 'gitdir: ../agents/.git/worktrees/agents-rel\n');
     expect(primaryCheckoutFor(dir('agents-rel'))).toBe(dir('agents'));
   });
 

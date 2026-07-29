@@ -133,7 +133,8 @@ export function foreignAdapterNote(
   // The shared install, not drift — see the block comment above. Checked before the sibling sweep
   // because the primary checkout is itself a bound seat in the dogfood layout, so it appears as a
   // sibling and would otherwise be reported as a peer worktree.
-  if (opts.primaryCheckout !== undefined && isInside(adapter, opts.primaryCheckout)) return undefined;
+  if (opts.primaryCheckout !== undefined && isInside(adapter, opts.primaryCheckout))
+    return undefined;
   for (const sibling of opts.siblingDirs ?? []) {
     if (isInside(adapter, sibling)) {
       // ADR 173: when the primary checkout could not be determined, this may in fact BE the shared

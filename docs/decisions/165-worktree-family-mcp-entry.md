@@ -181,3 +181,33 @@ The defect class was found by the fix's own dogfood: five defects reported in `a
 (2026-07-24), three per-worktree and safely fixable, two shared-slot and deliberately left unfixed
 because repairing them would have broken miley's live seat — which is the observation that produced
 the "empty, don't partition" resolution, stanley's ADR 166 design, and this ADR.
+
+### The zero-sum remedy survived on the path axis — 2026-07-29 (ryder)
+
+"Why the old remedy made it worse" above killed `musterd init` as the prescription for the **secrets**
+axis. It stayed alive on the **adapter-path** axis, in `foreignAdapterNote`, and had the same defect
+for the same reason.
+
+Measured on the fleet: the shared entry pointed at the primary checkout's adapter, and the note fired
+in **11 of 12** bound workspaces — each telling its seat to run `musterd init`, which repoints the one
+shared entry into that seat and hands the identical line to the other eleven. Satisfiable for at most
+one seat at a time, by construction. This is also the parity defect [ADR 171](171-provisioned-workspace-currency.md)
+fixed for the guidance doctor: **a check must expect what its own prescribed repair would actually
+write, across the fleet rather than in the folder it happens to run in.** Two ADRs have now been
+written about a doctor that expects something its repair does not produce, which is enough of a
+pattern to name.
+
+The fix distinguishes the repo's **primary checkout** — the shared install, the only state all N seats
+can agree on, and therefore not drift — from a **peer worktree**, which still is. The discriminator
+follows the workspace's own `.git` pointer rather than scanning neighbours; an earlier draft did scan,
+and picked `/Users/nick/MoveTrail`, an unrelated repo that merely sat beside the seats and carried a
+binding. "Is a primary checkout" is a far weaker question than "is the primary checkout of _this_
+worktree family", and only the second may silence a drift check. The note's text now prescribes a
+shared install and warns explicitly against `musterd init`.
+
+Two consequences worth keeping: this ADR's own invariant (a shared slot carries no per-seat state)
+implies the corollary that **a shared slot cannot be audited against per-seat expectations** — the
+check, not the slot, was wrong. And the remaining honest cost is unchanged and unfixed: every seat
+runs the primary checkout's build, which is skew no seat can see from where it stands. A real shared
+install outside every worktree would fix that, at the price of a refresh obligation nothing currently
+discharges.
