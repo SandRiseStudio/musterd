@@ -29,6 +29,7 @@ export const LaneStateSchema = z.enum([
   'claimed',
   'active',
   'blocked',
+  'paused',
   'ready_for_review',
   'done',
   'abandoned',

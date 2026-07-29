@@ -38,6 +38,7 @@ const EMPTY_COPY: Record<LaneState, string> = {
   claimed: "No one's picked anything up.",
   active: 'Nothing in flight.',
   blocked: 'Nothing stuck. Good sign.',
+  paused: 'Nothing on hold.',
   ready_for_review: 'Nothing awaiting eyes.',
   done: 'Nothing shipped yet — soon.',
   abandoned: '', // no column
