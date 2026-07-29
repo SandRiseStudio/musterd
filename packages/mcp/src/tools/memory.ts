@@ -65,7 +65,7 @@ export function registerMemory(server: McpServer, client: MusterdClient): void {
       },
     },
     async (args) => {
-      if (!client.joined) return textResult(notReadyMessage(client, 'save memory'));
+      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'save memory'));
       try {
         await client.saveMemory({
           headline: args.headline,
@@ -84,7 +84,7 @@ export function registerMemory(server: McpServer, client: MusterdClient): void {
     'team_memory_read',
     { description: READ_DESCRIPTION, inputSchema: {} },
     async () => {
-      if (!client.joined) return textResult(notReadyMessage(client, 'read memory'));
+      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'read memory'));
       try {
         const mem = await client.readMemory();
         const header = `memory (saved ${ago(Date.now() - mem.saved_at)} ago): ${mem.headline}`;

@@ -72,6 +72,26 @@ export class MusterdClient {
     return Boolean(this.config.member);
   }
 
+  /**
+   * Whether this session **holds its seat** — the question the acting tools actually mean, and
+   * deliberately not the same as {@link joined}.
+   *
+   * `joined` is WEBSOCKET state: `ws.on('close')` clears it and `scheduleReconnect` backs off 1s →
+   * 30s before the socket returns. But acts do not travel over that socket — `sendEnvelope`,
+   * `fetchInbox` and the memory calls are all HTTP, and the server keeps the seat through a
+   * disconnect (the ADR 010 reclaim grace). So gating acts on `joined` refused work that would have
+   * succeeded, and told the agent it had never joined because somebody restarted the daemon. That is
+   * how a handoff note was lost on 2026-07-28.
+   *
+   * Holding a seat is two facts, both durable across a socket flap: this session **occupied** one
+   * (`member` is set, assigned by the server's `occupied` frame), and it has not **given it up** —
+   * `wantPresence` goes false exactly on the deliberate exits (`leave`, `close`) and on the terminal
+   * refusals (`refused`, `superseded`), so a newest-wins takeover still stops this session acting.
+   */
+  get holdsSeat(): boolean {
+    return this.claimed && this.wantPresence;
+  }
+
   /** The claimed seat's member name, or undefined while pending (unclaimed). */
   get member(): string | undefined {
     return this.config.member;

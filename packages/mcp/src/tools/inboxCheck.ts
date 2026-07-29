@@ -26,7 +26,7 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
       },
     },
     async (args) => {
-      if (!client.joined) {
+      if (!client.holdsSeat) {
         return textResult(notReadyMessage(client, 'check your inbox'));
       }
       try {
