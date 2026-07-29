@@ -172,4 +172,30 @@ describe('saveBinding merge-guard + atomic write (ADR 131 inc 4)', () => {
     expect(entries).toContain('"team": "dawn"');
     expect(existsSync(join(dir, '.musterd', `binding.json.${process.pid}.tmp`))).toBe(false);
   });
+
+  /**
+   * The asymmetry that let #508 happen: the write side took whatever it was handed, while the read
+   * side parsed strictly and turned any failure into `null`. A type-correct caller could therefore
+   * write a binding that `findBinding` would refuse to read ever again — and since `null` also means
+   * "no binding here", the seat simply went quiet. Measured: a fractional `started_at` from
+   * `statSync().birthtimeMs` against `z.number().int()`.
+   *
+   * TypeScript cannot close this: every Zod refinement (`.int()`, `.min()`, `.regex()`, brands) is
+   * invisible to the type it validates. Only the writer checking the same schema the reader uses can.
+   */
+  it('refuses to write a binding the reader could not parse', () => {
+    // `started_at: number` type-checks; `z.number().int()` rejects it at runtime.
+    const bad = { ...base, session: { ...capture, started_at: 1785352706039.4507 } };
+    expect(() => saveBinding(dir, bad)).toThrow(/session\.started_at/);
+  });
+
+  it('leaves the previous good binding intact when it refuses a bad write', () => {
+    // The property that matters most: a refused write must not be worse than no write. The seat
+    // keeps the identity it had, and the next capture can heal it.
+    saveBinding(dir, { ...base, session: capture });
+    const good = onDisk();
+    expect(() => saveBinding(dir, { ...base, session: { ...capture, started_at: 1.5 } })).toThrow();
+    expect(onDisk()).toEqual(good);
+    expect(existsSync(join(dir, '.musterd', `binding.json.${process.pid}.tmp`))).toBe(false);
+  });
 });

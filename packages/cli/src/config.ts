@@ -14,6 +14,7 @@ import {
   BINDING_FILE,
   BindingSchema,
   bindingSeat,
+  assertWritableBinding,
   WORKSPACE_SPEC_FILE,
   WorkspaceSpecSchema,
   type Binding,
@@ -114,10 +115,35 @@ export function findBinding(
   }
 }
 
+/** Paths already warned about, so a corrupt binding announces itself once rather than on every tool
+ *  boundary (this read rides the PostToolUse hook). */
+const warnedCorrupt = new Set<string>();
+
+/**
+ * `null` here has always meant two very different things — "no binding" and "a binding I could not
+ * parse" — and the second one is why #508 was silent for a full session: the seat kept working over
+ * MCP while every CLI identity path quietly resolved to nothing. A file that EXISTS but does not
+ * parse is a broken workspace, not an unbound one, and it says so. Once per path, on stderr, so it
+ * cannot flood a hook or corrupt an MCP stdio channel.
+ */
 function readBinding(path: string): Binding | null {
+  let raw: string;
   try {
-    return BindingSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    raw = readFileSync(path, 'utf8');
   } catch {
+    return null; // genuinely absent — the ordinary "not a musterd workspace" answer
+  }
+  try {
+    return BindingSchema.parse(JSON.parse(raw));
+  } catch (err) {
+    if (!warnedCorrupt.has(path)) {
+      warnedCorrupt.add(path);
+      const detail = err instanceof Error ? err.message.replace(/\s+/g, ' ').slice(0, 300) : '';
+      console.error(
+        `[musterd] ${path} exists but does not parse — this workspace has no usable identity until ` +
+          `it is repaired, and every musterd command here will behave as if it were unbound. ${detail}`,
+      );
+    }
     return null;
   }
 }
@@ -180,6 +206,9 @@ export function saveBinding(dir: string, binding: Binding): string {
       ? { model_observed: onDisk.model_observed }
       : {}),
   };
+  // Before anything touches the filesystem: a binding the reader could not parse must not replace
+  // one it can. Ahead of the tmp write so a refusal leaves no debris either.
+  assertWritableBinding(merged);
   const tmp = `${p}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   try {

@@ -297,6 +297,38 @@ describe('saveBinding merge-guard (ADR 131 inc 4 — the adapter must not clobbe
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  /**
+   * The adapter shares the CLI's write path in shape but not in code, so it needs its own pin: the
+   * refusal must hold on BOTH surfaces or the guard is only half there. #508's fractional
+   * `started_at` reached disk through the hook, but nothing stopped the adapter writing the same.
+   */
+  it('refuses a binding the reader could not parse, leaving the good one in place', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-badb-'));
+    try {
+      const boot = {
+        server: 'http://s1',
+        team: 'lab',
+        surface: 'claude-code' as const,
+        claim: { mode: 'seat' as const, name: 'Ui' },
+        agent_key: 'mskey_1',
+      };
+      saveBinding(ws, { ...boot, session: { harness: 'claude-code', id: 'sid', started_at: 1 } });
+      const good = readFileSync(join(ws, '.musterd', 'binding.json'), 'utf8');
+
+      expect(() =>
+        saveBinding(ws, {
+          ...boot,
+          // Type-correct `number`, rejected by the schema's `.int()` — exactly birthtimeMs.
+          session: { harness: 'claude-code', id: 'sid', started_at: 1785352706039.4507 },
+        }),
+      ).toThrow(/session\.started_at/);
+
+      expect(readFileSync(join(ws, '.musterd', 'binding.json'), 'utf8')).toBe(good);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('saveBinding merge-guard — the hook-written model observation', () => {

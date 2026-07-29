@@ -4,6 +4,7 @@ import {
   BINDING_DIR,
   BINDING_FILE,
   BindingSchema,
+  assertWritableBinding,
   WORKSPACE_SPEC_FILE,
   WorkspaceSpecSchema,
   type Binding,
@@ -80,10 +81,31 @@ function trustedExplicitBinding(startDir: string, env: NodeJS.ProcessEnv): strin
   return undefined;
 }
 
+/** Warn-once set — see the CLI's copy. stderr is safe here: the MCP protocol channel is stdout. */
+const warnedCorrupt = new Set<string>();
+
+/**
+ * A file that exists but does not parse is a broken workspace, not an unbound one — and collapsing
+ * both to `null` is what let #508 disable a seat's identity silently for a whole session.
+ */
 function readBinding(path: string): Binding | null {
+  let raw: string;
   try {
-    return BindingSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    raw = readFileSync(path, 'utf8');
   } catch {
+    return null; // genuinely absent
+  }
+  try {
+    return BindingSchema.parse(JSON.parse(raw));
+  } catch (err) {
+    if (!warnedCorrupt.has(path)) {
+      warnedCorrupt.add(path);
+      const detail = err instanceof Error ? err.message.replace(/\s+/g, ' ').slice(0, 300) : '';
+      console.error(
+        `[musterd] ${path} exists but does not parse — this workspace has no usable identity until ` +
+          `it is repaired. ${detail}`,
+      );
+    }
     return null;
   }
 }
@@ -185,6 +207,9 @@ export function saveBinding(dir: string, binding: Binding): string {
       ? { model_observed: onDisk.model_observed }
       : {}),
   };
+  // A binding the reader could not parse must not replace one it can — ahead of the tmp write, so a
+  // refusal leaves no debris. Shared with the CLI copy so the two cannot drift.
+  assertWritableBinding(merged);
   const tmp = `${p}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   try {
