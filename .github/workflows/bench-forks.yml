@@ -116,7 +116,11 @@ jobs:
             for n in $ORDER; do
               if [ "$n" = "0" ]; then FLAG=""; else FLAG="--poolOptions.forks.maxForks=$n"; fi
               START=$(date +%s%N)
-              pnpm test -- $FLAG > "/tmp/bench-r${rep}-f${n}.log" 2>&1
+              # NO_COLOR because vitest colours its output when CI=true — the reporter's summary
+              # arrives as "\e[2m Tests \e[22m \e[1m\e[32m2467 passed…", and the first two attempts to
+              # parse the count both failed on those escapes. Plain output is the deterministic fix;
+              # the strip below is the belt to this braces, so colour returning cannot re-break it.
+              NO_COLOR=1 pnpm test -- $FLAG > "/tmp/bench-r${rep}-f${n}.log" 2>&1
               EC=$?
               END=$(date +%s%N)
               MS=$(( (END - START) / 1000000 ))
@@ -124,10 +128,11 @@ jobs:
               # A timing number from a failing suite is meaningless — surface it rather than let it be
               # averaged into a median that then looks respectable.
               if [ "$EC" -eq 0 ]; then
-                # Fall back to the reporter's own last line rather than a bare "passed" — the first
-                # sweep reported "passed" with no count, which is unfalsifiable in a record.
-                TESTS=$(grep -oE 'Tests +[0-9]+ passed \([0-9]+\)' "/tmp/bench-r${rep}-f${n}.log" | tail -1)
-                [ -n "$TESTS" ] || TESTS=$(grep -E '^\s+Tests ' "/tmp/bench-r${rep}-f${n}.log" | tail -1 | sed 's/^ *//')
+                # Strip ANSI before matching, so the count survives a coloured reporter as well as
+                # a plain one. Verified against both: a locally redirected run (plain) and a run under
+                # CI=true GITHUB_ACTIONS=true (coloured) both yield "Tests  N passed (N)".
+                TESTS=$(sed -E 's/\x1b\[[0-9;]*m//g' "/tmp/bench-r${rep}-f${n}.log" \
+                  | grep -oE 'Tests +[0-9]+ passed \([0-9]+\)' | tail -1)
                 STATUS="${TESTS:-passed (count not parsed)}"
                 RESULTS="${RESULTS}${n} ${MS}"$'\n'
                 echo "rep${rep} forks=${n} ${MS}ms — ${STATUS}"
