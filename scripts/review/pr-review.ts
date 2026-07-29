@@ -32,6 +32,13 @@ const REVIEWABLE = [/^packages\/protocol\/src\//, /^packages\/server\/src\//];
 /** Keep one review bounded. A diff past this is truncated rather than silently costing 10×. */
 const MAX_DIFF_CHARS = 120_000;
 
+/**
+ * Total budget for the full post-change bodies of the changed files (see below). ~200k chars is
+ * ~50k tokens — about $0.05 on Haiku, an order of magnitude under what a required frontier reviewer
+ * cost per PR. Files are included whole, largest-last, until the budget runs out.
+ */
+const MAX_BODY_CHARS = 200_000;
+
 const MODEL = process.env.REVIEW_MODEL ?? 'claude-haiku-4-5';
 
 function git(...args: string[]): string {
@@ -40,6 +47,15 @@ function git(...args: string[]): string {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
+}
+
+/** File content at a ref, or null when the path does not exist there (deleted in this change). */
+function fileAt(ref: string, path: string): string | null {
+  try {
+    return git('show', `${ref}:${path}`);
+  } catch {
+    return null;
+  }
 }
 
 function resolveBase(): string {
@@ -63,12 +79,37 @@ if (inScope.length === 0) {
   process.exit(0);
 }
 
-// -U15 gives the model enough surrounding code to judge a call site without shipping whole files.
 let diff = git('diff', `-U15`, `${base}...HEAD`, '--', ...inScope);
 let truncated = false;
 if (diff.length > MAX_DIFF_CHARS) {
   diff = diff.slice(0, MAX_DIFF_CHARS);
   truncated = true;
+}
+
+/**
+ * The diff alone is not enough, and the first smoke test proved it: a `-U15` window around a new
+ * `LaneState` cut off two lines into `LANE_CONTENDING_STATES`, so the model saw the set open but
+ * never saw that the new state was missing from it — and reported no findings on a real bug.
+ *
+ * Most of what this reviewer is for is *omission* ("a new state that doesn't contend", "a field
+ * parsed here but not there"), and an omission is invisible in a keyhole: you cannot see what isn't
+ * in the hunk. So send each changed file's full post-change body alongside the diff. Smallest first,
+ * so one large file can't starve the rest of the budget.
+ */
+const bodies: { path: string; text: string }[] = [];
+let bodyBudget = MAX_BODY_CHARS;
+const omittedBodies: string[] = [];
+for (const path of [...inScope].sort(
+  (a, b) => (fileAt('HEAD', a)?.length ?? 0) - (fileAt('HEAD', b)?.length ?? 0),
+)) {
+  const text = fileAt('HEAD', path);
+  if (text === null) continue; // deleted in this change — the diff already shows the removal
+  if (text.length > bodyBudget) {
+    omittedBodies.push(path);
+    continue;
+  }
+  bodyBudget -= text.length;
+  bodies.push({ path, text });
 }
 
 const rules = readFileSync(join(repoRoot, '.github', 'REVIEW-RULES.md'), 'utf8');
@@ -95,22 +136,35 @@ const userContent = [
   truncated
     ? `NOTE: this diff was truncated at ${MAX_DIFF_CHARS} characters. Review what is present; do not speculate about the rest.`
     : null,
+  omittedBodies.length > 0
+    ? `NOTE: too large to include in full, so you have only their diff hunks: ${omittedBodies.join(', ')}.`
+    : null,
   `Files under review (${inScope.length}):`,
   ...inScope.map((f) => `  ${f}`),
   '',
-  'Unified diff:',
+  'What changed — unified diff:',
   '```diff',
   diff,
   '```',
+  '',
+  'Full contents of each changed file AFTER the change. Read these, not just the diff: most bugs',
+  'worth reporting here are omissions — a value added in one place and not the matching place —',
+  'and an omission is invisible in a diff hunk. Check that every change is reflected everywhere it',
+  'has to be.',
+  ...bodies.flatMap(({ path, text }) => ['', `--- ${path} ---`, '```ts', text, '```']),
 ]
   .filter((l) => l !== null)
   .join('\n');
 
 if (process.argv.includes('--dry-run')) {
+  const bodyChars = bodies.reduce((n, b) => n + b.text.length, 0);
   process.stdout.write(
     `[dry run] model=${MODEL} files=${inScope.length} diff=${diff.length} chars` +
       `${truncated ? ' (truncated)' : ''}\n` +
-      `[dry run] system prompt ${system.length} chars; no API call made.\n`,
+      `[dry run] full bodies: ${bodies.length}/${inScope.length} file(s), ${bodyChars} chars` +
+      `${omittedBodies.length > 0 ? ` (omitted: ${omittedBodies.join(', ')})` : ''}\n` +
+      `[dry run] system ${system.length} + user ${userContent.length} chars` +
+      ` ≈ ${Math.round((system.length + userContent.length) / 4)} tokens; no API call made.\n`,
   );
   process.exit(0);
 }
