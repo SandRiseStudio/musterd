@@ -85,6 +85,11 @@ jobs:
           # the core count is not trivia — it decides whether "capping" is even a distinct arm here.
           CORES=$(nproc)
           MEM=$(awk '/MemTotal/{printf "%.1f", $2/1048576}' /proc/meminfo)
+          # To stdout as well as the summary. The first sweep left the core count readable only in the
+          # step summary, so the run log could not answer the one question that decides how to read the
+          # whole table: whether an arm equals the default. Two arms timing identically means nothing
+          # until you know the core count.
+          echo "runner: ${CORES} cores, ${MEM} GB — vitest default maxForks = ${CORES}"
           {
             echo "## bench-forks"
             echo
@@ -119,8 +124,11 @@ jobs:
               # A timing number from a failing suite is meaningless — surface it rather than let it be
               # averaged into a median that then looks respectable.
               if [ "$EC" -eq 0 ]; then
+                # Fall back to the reporter's own last line rather than a bare "passed" — the first
+                # sweep reported "passed" with no count, which is unfalsifiable in a record.
                 TESTS=$(grep -oE 'Tests +[0-9]+ passed \([0-9]+\)' "/tmp/bench-r${rep}-f${n}.log" | tail -1)
-                STATUS="${TESTS:-passed}"
+                [ -n "$TESTS" ] || TESTS=$(grep -E '^\s+Tests ' "/tmp/bench-r${rep}-f${n}.log" | tail -1 | sed 's/^ *//')
+                STATUS="${TESTS:-passed (count not parsed)}"
                 RESULTS="${RESULTS}${n} ${MS}"$'\n'
                 echo "rep${rep} forks=${n} ${MS}ms — ${STATUS}"
               else
