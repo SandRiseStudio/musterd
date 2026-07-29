@@ -115,11 +115,27 @@ It also retires the last of the flake story. #482 fixed a real race, #491 fixed 
 ceiling, and the "workers starve each other" theory that motivated both was a property of one
 memory-constrained laptop, not of the suite.
 
-## Known wart
+## The wart, and what it was — resolved 2026-07-29
 
-The per-arm status reads `passed (count not parsed)`. The suite genuinely passed — a failing arm is
-excluded from the median, printed with 60 lines of context, and fails the job — but the test-count
-capture does not match vitest's output under `CI=true`, and the fallback added for exactly this did
-not match either. The pattern works on a locally redirected run, so the CI reporter formats its
-summary differently. Timings are unaffected; whoever next runs the bench should check the raw log and
-fix the pattern against what is actually there rather than guessing a third time.
+The first sweep reported `passed (count not parsed)` for every arm. The suite genuinely passed, and
+timings were never affected, but an unfalsifiable "passed" in a record whose whole purpose is to be
+trusted later is worth chasing.
+
+It took three attempts, and only the third was based on looking. **Vitest colours its output when
+`CI=true`**, so the summary arrives as
+`\e[2m Tests \e[22m \e[1m\e[32m2469 passed\e[39m…` — the line was there all along, wearing escape
+sequences. Locally vitest detects a non-TTY and emits plain text, which is exactly why the pattern
+matched every local check and failed on every real run. The first two attempts assumed the line was
+missing, then that it was shaped differently; neither looked at the bytes under the conditions that
+actually applied.
+
+Fixed with `NO_COLOR=1` on the invocation plus an ANSI strip when reading — deliberately overlapping,
+so colour returning cannot silently re-break it. Verified on a real dispatch: `Tests 2469 passed
+(2469)`.
+
+**The transferable bit:** every defect in this bench — a literal expression in a comment, `set -uo
+pipefail` not clearing errexit, output written where it could not be read back, and this — was
+invisible to local checks and to review, and none were catchable before merge, because a
+`workflow_dispatch` workflow is not dispatchable until it is on the default branch. The only thing
+that ever found one was running it. Budget for that when changing this file: merge, dispatch, read
+the log.
