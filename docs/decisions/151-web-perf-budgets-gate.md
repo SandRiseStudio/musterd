@@ -2,6 +2,11 @@
 
 - Status: accepted — 2026-07-19
 - Date: 2026-07-19
+- Amended by [ADR 183](183-two-js-budgets.md) (2026-07-29): the single `totalJsGzipBytes` budget
+  below could not be moved by the lazy-loading this gate's own failure text recommended, so the JS
+  budget became two — `initialJsGzipBytes` (worst route's eager graph) plus the total as a code-rot
+  ceiling — and the "measured + ~10% headroom" baselines became a periodic re-baseline at +15% that
+  may only tighten. The raise protocol and everything else here stand.
 
 ## Context
 
