@@ -99,7 +99,7 @@ The protocol is the only thing imported across boundaries; the server is replace
 
 ## Glossary
 
-**Team** — a named, persistent group of Members; a standing roster, not a project (reused across folders). **Member** — a durable identity (`agent`/`human`), not a session. **Presence** — where a Member is currently attached. **Surface** — a kind of place a Member can be present (`cli`, `claude-code`, `codex`, …). **Act** — the typed intent of a message. (Canonical definitions: [`docs/design/brand.md`](./docs/design/brand.md) §5.)
+**Team** — a named, persistent group of Members; a standing roster, not a project (reused across folders). **Member** — a durable identity (`agent`/`human`), not a session. **Presence** — where a Member is currently attached. **Surface** — a kind of place a Member can be present (`cli`, `claude-code`, `codex`, …). **Act** — the typed intent of a message. **Workspace** — where a Member stands: **agents stand in worktrees, the human stands in the team home**. `musterd agent <name>` gives an agent an isolated git worktree (it writes code); `musterd human <name>` gives a person the team home at `~/musterd/<team>` (what they need is somewhere their identity resolves, so `musterd board` and `musterd send` are simply them, with no `--as` and nothing pasted). (Canonical definitions: [`docs/design/brand.md`](./docs/design/brand.md) §5; the four-layer model: [`docs/design/install-topology.md`](./docs/design/install-topology.md).)
 
 ## Development
 

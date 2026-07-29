@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 7;
+export const GUIDANCE_CONTENT_VERSION = 8;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -43,6 +43,11 @@ export const SKILL_MCP_TOOLS = [
  * `HELP` text, so renaming a command without updating the skill breaks the build. */
 export const SKILL_CLI_COMMANDS = [
   'init',
+  // The workspace pair the skill now teaches (ADR 176): agents stand in worktrees, the human stands
+  // in the team home. Named here so renaming either verb breaks the build instead of rotting the skill.
+  'agent',
+  'human',
+  'board',
   'claim',
   'whoami',
   'status',
@@ -119,6 +124,13 @@ export function renderSkillBody(opts: { team: string }): string {
     "  --here` inside a live seat's folder (it clobbers the binding).",
     '- **Approve requests you own** (admin): `musterd requests` lists pending claims; decide with the',
     '  request-decide flow (see `musterd help`).',
+    '',
+    '**Where each kind of teammate stands.** `musterd agent <name>` mints an agent seat and stands it in',
+    'an isolated git worktree, because an agent writes code. `musterd human <name>` stands a person in the',
+    '**team home** (`~/musterd/<team>`), because what a human needs is somewhere their identity resolves —',
+    '`musterd board`, `musterd inbox --watch` and `musterd send` are simply them there, with no `--as` and',
+    'nothing pasted. The pair is one model, not two commands: **agents stand in worktrees, the human stands',
+    'in the team home.** If a human on your team has no floor to act from, `musterd human` is the fix.',
     '',
     '## Owning work in a lane — claim before you build',
     '',
