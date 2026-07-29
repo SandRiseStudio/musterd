@@ -1,0 +1,146 @@
+# Suite-timing bench — how long does `pnpm test` take on a clean machine, and does fork count matter?
+#
+# MANUAL ONLY. A bench that runs on every PR is a tax, not a tool; this exists to be reached for when
+# someone suspects the suite is drifting, or wants to revisit the `maxForks` question that #494
+# measured on a laptop and declined.
+#
+# WHY THIS EXISTS, AND WHY IT IS ON CI: #494's numbers carried 2.4x noise for *identical* settings
+# (maxForks=8 measured at 21.6s and 52.3s) because the dogfood laptop hosts several working seats and
+# their builds land whenever they like. A runner is an isolated VM with no teammates on it, which
+# removes the dominant noise source rather than averaging over it.
+#
+# The standing value is not tuning. It is a reproducible answer to "how long does this suite take on a
+# quiet machine" — the baseline whose absence let the #482/#491 flakes read as slowness when they were
+# contention.
+name: bench-forks
+
+on:
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: 'Repetitions of the full sweep (median is taken across these).'
+        default: '3'
+      forks:
+        description: 'maxForks values to compare, space-separated. 0 means "vitest default".'
+        default: '0 1 2 4'
+
+# Never let two benches share a runner pool slot and each other's noise.
+concurrency:
+  group: bench-forks
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: bench
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      # dist/ is gitignored and workspace packages resolve to ./dist, so the suite must be built first
+      # or every arm measures a broken run identically (ADR 106 / the stale-dist trap).
+      - name: Build
+        run: pnpm build
+
+      - name: Bench
+        env:
+          REPS: ${{ inputs.reps }}
+          FORKS: ${{ inputs.forks }}
+        run: |
+          set -uo pipefail   # deliberately NOT -e: a red suite must be recorded, not abort the bench
+
+          # Validate the dispatch inputs before they reach a command line. They arrive via `env:`
+          # rather than `${{ }}` interpolation (so they are never spliced into the script text), and
+          # they are word-split rather than eval'd — but they are still operator-supplied and used
+          # unquoted below, so require plain integers and refuse anything else outright.
+          case "$REPS" in ''|*[!0-9]*) echo "::error::reps must be a positive integer, got '$REPS'"; exit 1;; esac
+          [ "$REPS" -ge 1 ] || { echo "::error::reps must be >= 1"; exit 1; }
+          for n in $FORKS; do
+            case "$n" in ''|*[!0-9]*) echo "::error::forks must be space-separated integers, got '$n'"; exit 1;; esac
+          done
+
+          # Record the machine beside the result. Vitest's default maxForks is one worker per CPU, so
+          # the core count is not trivia — it decides whether "capping" is even a distinct arm here.
+          CORES=$(nproc)
+          MEM=$(awk '/MemTotal/{printf "%.1f", $2/1048576}' /proc/meminfo)
+          {
+            echo "## bench-forks"
+            echo
+            echo "\`$(git rev-parse --short HEAD)\` · **${CORES} cores · ${MEM} GB** · reps ${REPS}"
+            echo
+            echo "> Vitest's default \`maxForks\` is one per CPU, i.e. **${CORES}** on this runner."
+            echo "> An arm at or above that is the default in disguise, not a separate treatment."
+            echo
+            echo "| rep | maxForks | wall | suite |"
+            echo "| --- | --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          RESULTS=""
+          for rep in $(seq 1 "$REPS"); do
+            # Counterbalance the order every other rep. Even a clean VM warms up (fs cache, node's
+            # module cache), and a fixed order would hand that warm-up to whichever arm always ran
+            # last. Reversing alternate reps cancels it instead of hoping it is small.
+            ORDER="$FORKS"
+            if [ $((rep % 2)) -eq 0 ]; then
+              ORDER=$(echo "$FORKS" | tr ' ' '\n' | tac | tr '\n' ' ')
+            fi
+
+            for n in $ORDER; do
+              if [ "$n" = "0" ]; then FLAG=""; else FLAG="--poolOptions.forks.maxForks=$n"; fi
+              START=$(date +%s%N)
+              pnpm test -- $FLAG > "/tmp/bench-r${rep}-f${n}.log" 2>&1
+              EC=$?
+              END=$(date +%s%N)
+              MS=$(( (END - START) / 1000000 ))
+
+              # A timing number from a failing suite is meaningless — surface it rather than let it be
+              # averaged into a median that then looks respectable.
+              if [ "$EC" -eq 0 ]; then
+                TESTS=$(grep -oE 'Tests +[0-9]+ passed \([0-9]+\)' "/tmp/bench-r${rep}-f${n}.log" | tail -1)
+                STATUS="${TESTS:-passed}"
+                RESULTS="${RESULTS}${n} ${MS}"$'\n'
+              else
+                STATUS="**FAILED (exit $EC)** — timing excluded"
+              fi
+              echo "| $rep | ${n/#0/default} | ${MS} ms | ${STATUS} |" >> "$GITHUB_STEP_SUMMARY"
+            done
+          done
+
+          # Median per arm, over green runs only.
+          {
+            echo
+            echo "### Median (green runs only)"
+            echo
+            echo "| maxForks | median wall | n |"
+            echo "| --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for n in $FORKS; do
+            MEDIAN=$(echo "$RESULTS" | awk -v f="$n" '$1==f {print $2}' | sort -n | awk '{a[NR]=$1} END {if (NR==0) print "-"; else if (NR%2) print a[(NR+1)/2]; else printf "%d", (a[NR/2]+a[NR/2+1])/2}')
+            COUNT=$(echo "$RESULTS" | awk -v f="$n" '$1==f {c++} END {print c+0}')
+            echo "| ${n/#0/default} | ${MEDIAN} ms | ${COUNT} |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          {
+            echo
+            echo "Interpretation: adopt a cap only if it is **faster or neutral** at the median —"
+            echo "that rule is fixed here so a result cannot be rationalised after the fact (#494)."
+            echo "Differences smaller than the spread between reps of the *same* arm are noise."
+          } >> "$GITHUB_STEP_SUMMARY"
