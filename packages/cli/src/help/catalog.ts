@@ -575,7 +575,8 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'session',
-    signature: 'show [--json]  |  start --stdin | end --stdin  |  resolve-labels --stdin',
+    signature:
+      'show [--json]  |  start --stdin | end --stdin  |  resolve-labels --stdin  |  label-nudge',
     summary: 'this workspace’s captured harness session — what a wake would resume (ADR 131)',
     group: 'admin',
     detail:
@@ -586,7 +587,9 @@ export const CATALOG: readonly CommandEntry[] = [
       'upgrades from fresh to `--resume`, and a live local session defers the wake entirely. ' +
       '`show` is the human view: what is captured here, is it live, would a wake resume or defer. ' +
       '`resolve-labels` is the sidebar-sweep decision engine (ADR 160): session-list JSON in, ' +
-      '`{apply, skipped}` out — the label-sessions skill pipes through it and applies the renames.',
+      '`{apply, skipped}` out — the label-sessions skill pipes through it and applies the renames; ' +
+      'it also stamps the machine-wide last-sweep file. `label-nudge` is the hook-driven other ' +
+      'half: one imperative line while that stamp is missing/stale (>4h), silence otherwise.',
     examples: ['musterd session show', 'musterd session show --json'],
   },
   {

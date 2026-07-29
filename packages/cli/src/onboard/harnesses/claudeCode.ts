@@ -124,6 +124,7 @@ function removePermissions(perms: ProvisionPermissions): void {
  */
 export const NOTIFICATION_HOOK_MARKER = 'musterd-notify-hook';
 export const SESSIONSTART_HOOK_MARKER = 'musterd-sessionstart-hook';
+export const PROMPTSUBMIT_HOOK_MARKER = 'musterd-promptsubmit-hook';
 export const POSTTOOLUSE_HOOK_MARKER = 'musterd-interrupt-hook';
 export const PRETOOLUSE_HOOK_MARKER = 'musterd-gate-hook';
 export const SESSIONMSG_HOOK_MARKER = 'musterd-sessionmsg-hook';
@@ -212,18 +213,39 @@ function sessionStartHookCommand(): string {
     "`musterd init --check` to confirm), then reload this session.'; fi; else " +
     "echo 'You are on a musterd team (your seat auto-claims on your first team_* tool call). Run " +
     'team_inbox_check now to join and see anything waiting. Only call team_join if a tool says you ' +
-    'are not joined. Then run the musterd-label-sessions skill once to label the other seat ' +
-    'sessions in the sidebar; this session stays unlabeled by design, because a session cannot ' +
-    "rename itself.'; fi; " +
+    "are not joined.'; fi; " +
     // ADR 135 freshness probe: one line when this checkout's CLI dist differs from the daemon, so a
     // stale worktree learns at minute 0 instead of after an hour of "but I merged it". Guarded (only
     // when `musterd` resolves), read-only, ≤2s, and never failing — the hook contract stays intact.
-    'command -v musterd >/dev/null 2>&1 && musterd init --check-build 2>/dev/null || true ' +
+    // The label-sweep nudge rides the same guard: due-gated (silent once any seat swept in the last
+    // 4h), replacing the old always-on "run the label-sessions skill" clause that agents measurably
+    // skipped — the per-turn UserPromptSubmit repeat below is what actually gets it run.
+    'command -v musterd >/dev/null 2>&1 && { musterd init --check-build 2>/dev/null; ' +
+    'musterd session label-nudge 2>/dev/null; } || true ' +
     // ADR 168: the epoch stamp. This hook is ONE machine-wide entry, so whichever checkout runs
     // `init` last writes it for every folder — and until this stamp, an older checkout's rewrite was
     // indistinguishable from the current text. The stamp makes the generation readable, so a writer
     // can refuse to downgrade and the doctor can tell "stale hook" from "behind checkout".
     `# ${SESSIONSTART_HOOK_MARKER} ${epochTag(FEATURE_EPOCH)}`
+  );
+}
+
+function promptSubmitHookCommand(): string {
+  // The per-turn boundary nudge (machine-wide, self-gating like the SessionStart orientation): at
+  // every prompt in a musterd folder, remind the agent of the status_update/inbox ritual, then run
+  // the due-gated label-sweep nudge. The label clause is the load-bearing half: the one-shot
+  // SessionStart ask was measured to fail (agents skip it under a busy first prompt — 3 days of
+  // unlabeled sidebar, 2026-07-29), and a nudge that REPEATS until `musterd session resolve-labels`
+  // stamps the machine-wide sweep file is the difference between "documented" and "happens".
+  // Formerly a hand-pasted recipe (docs/harness-hooks.md); managed here so it drift-checks and
+  // epoch-guards like every other musterd hook.
+  return (
+    'f="${CLAUDE_PROJECT_DIR:-.}/AGENTS.md"; test -f "$f" && grep -q musterd:start "$f" || exit 0; ' +
+    "echo 'musterd: if you finished a unit of work since your last update, post a one-line " +
+    'team_send status_update (flips you to working: on the roster); then team_inbox_check for ' +
+    "replies.'; " +
+    'command -v musterd >/dev/null 2>&1 && musterd session label-nudge 2>/dev/null || true ' +
+    `# ${PROMPTSUBMIT_HOOK_MARKER} ${epochTag(FEATURE_EPOCH)}`
   );
 }
 
@@ -283,6 +305,19 @@ function isMusterdSessionStart(m: ClaudeHookMatcher): boolean {
   );
 }
 
+/**
+ * True if a hook entry is musterd's UserPromptSubmit — by marker OR by the hand-pasted recipe's
+ * signature (a `musterd:start` gate + the status_update nudge), so the auto-install absorbs the
+ * recipe from docs/harness-hooks.md instead of stacking beside it.
+ */
+function isMusterdPromptSubmit(m: ClaudeHookMatcher): boolean {
+  return m.hooks.some(
+    (h) =>
+      h.command.includes(PROMPTSUBMIT_HOOK_MARKER) ||
+      (h.command.includes('musterd:start') && h.command.includes('status_update')),
+  );
+}
+
 /** Read Claude settings from `path`: `{}` if absent, or `null` if present-but-unparseable — so a
  *  caller never overwrites a real config (e.g. the user's global settings.json) it couldn't parse. */
 function readSettingsSafe(path: string): ClaudeSettings | null {
@@ -331,6 +366,17 @@ function upsertHook(
       'would downgrade every folder on this machine (ADR 168). The hook was left untouched. Update ' +
       'this checkout (`git pull` + `pnpm build`, or `musterd service refresh`) and re-run.'
     );
+  }
+  // True no-op when the exact entry is already installed: don't touch the file at all. Matters for
+  // the machine-wide settings, where a per-folder refresh would otherwise rewrite (and reformat) the
+  // shared file on every run even with nothing to say.
+  if (
+    present.length === 1 &&
+    present[0]!.hooks.length === 1 &&
+    present[0]!.hooks[0]!.command === command &&
+    present[0]!.matcher === matcher
+  ) {
+    return undefined;
   }
   const existing = (settings.hooks[event] ?? []).filter((m) => !matches(m));
   existing.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] });
@@ -451,15 +497,16 @@ export function installMusterdHooks(dir: string = process.cwd()): string[] {
     );
     if (warning) warnings.push(warning);
   }
-  // The machine-wide orientation hook — the one an older checkout could silently downgrade for every
-  // folder at once, and so the only one carrying an epoch stamp and a refusal (ADR 168).
-  const globalWarning = upsertHook(
-    globalSettingsPath(),
-    'SessionStart',
-    isMusterdSessionStart,
-    sessionStartHookCommand(),
-  );
-  if (globalWarning) warnings.push(globalWarning);
+  // The machine-wide hooks — the ones an older checkout could silently downgrade for every folder
+  // at once, and so the ones carrying an epoch stamp and a refusal (ADR 168): the SessionStart
+  // orientation, and the per-turn UserPromptSubmit boundary/label nudge it hands off to.
+  for (const [event, matches, command] of [
+    ['SessionStart', isMusterdSessionStart, sessionStartHookCommand()],
+    ['UserPromptSubmit', isMusterdPromptSubmit, promptSubmitHookCommand()],
+  ] as const) {
+    const globalWarning = upsertHook(globalSettingsPath(), event, matches, command);
+    if (globalWarning) warnings.push(globalWarning);
+  }
   return warnings;
 }
 
@@ -514,27 +561,54 @@ export function inspectClaudeHookDrift(cwd: string): string[] {
  * re-bake the shared slot.
  */
 function inspectGlobalSessionStartDrift(): string[] {
+  return [
+    ...inspectGlobalHookDrift(
+      'SessionStart',
+      isMusterdSessionStart,
+      SESSIONSTART_HOOK_MARKER,
+      sessionStartHookCommand(),
+      'orientation',
+    ),
+    ...inspectGlobalHookDrift(
+      'UserPromptSubmit',
+      isMusterdPromptSubmit,
+      PROMPTSUBMIT_HOOK_MARKER,
+      promptSubmitHookCommand(),
+      'boundary/label-nudge',
+    ),
+  ];
+}
+
+/** One machine-wide hook's drift verdict — the SessionStart logic above, parametrized when the
+ *  UserPromptSubmit nudge became the second epoch-stamped global hook. */
+function inspectGlobalHookDrift(
+  event: string,
+  matches: (m: ClaudeHookMatcher) => boolean,
+  marker: string,
+  command: string,
+  label: string,
+): string[] {
   const settings = readSettingsSafe(globalSettingsPath());
   if (!settings) return []; // absent or unparseable — say nothing rather than invent drift
-  const installed = (settings.hooks?.['SessionStart'] ?? [])
-    .filter(isMusterdSessionStart)
+  const installed = (settings.hooks?.[event] ?? [])
+    .filter(matches)
     .flatMap((m) => m.hooks.map((h) => h.command))
-    .find((c) => c.includes(SESSIONSTART_HOOK_MARKER));
+    .find((c) => c.includes(marker));
   if (installed === undefined) return []; // never installed here — not this check's business
-  if (installed === sessionStartHookCommand()) return [];
+  if (installed === command) return [];
   const theirs = hookEpochOf(installed);
   if (theirs > FEATURE_EPOCH) {
     return [
-      `the machine-wide Claude Code SessionStart orientation hook (~/.claude/settings.json) was written ` +
+      `the machine-wide Claude Code ${event} ${label} hook (~/.claude/settings.json) was written ` +
         `by a NEWER musterd (epoch ${String(theirs)}) than this checkout (epoch ${String(FEATURE_EPOCH)}). ` +
         'The hook is fine — this checkout is behind. Update it (`git pull` + `pnpm build`); do NOT run ' +
         '`musterd init` here, which would downgrade the hook for every folder on this machine (ADR 168).',
     ];
   }
   return [
-    'the machine-wide Claude Code SessionStart orientation hook (~/.claude/settings.json) does not match ' +
+    `the machine-wide Claude Code ${event} ${label} hook (~/.claude/settings.json) does not match ` +
       `what this build would write (installed epoch ${String(theirs)}, this build ${String(FEATURE_EPOCH)}) ` +
-      '— it is present but STALE, so every folder on this machine is running older orientation text ' +
+      `— it is present but STALE, so every folder on this machine is running older ${label} text ` +
       '(ADR 168). Run `musterd init --refresh-hooks` to rewrite it.',
   ];
 }

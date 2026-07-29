@@ -213,3 +213,39 @@ returned correct labels on demand. Two defects in how the decision met the world
   both streams redirected, the OSC title still lands (`script(1)` capture); where there is no
   controlling terminal at all (the desktop app, launchd), the open throws and the writer stays
   silent, as designed.
+
+## Amendment (2026-07-29): the nudge rail — a sweep that must be asked for, asked until it happens
+
+**Measured.** The trigger died again, exactly as the Observability section predicted it could: after
+2026-07-27's sweep, not one ran for three days. Every new seat session received the SessionStart
+instruction ("run the musterd-label-sessions skill once") and every one skipped it under a busy
+first prompt — the human was hand-typing seat prefixes into the sidebar, which is the affordance
+failing at its one job. The engine, the rename tool, and the instruction were all verified working
+the day the gap was noticed; the missing piece was purely that a one-shot ask at session start
+loses to the opening task.
+
+**Decision.** The ask repeats until it is satisfied, and satisfaction is machine-checkable:
+
+- `musterd session resolve-labels` now **stamps** a machine-wide last-sweep file
+  (`~/.musterd/label-sweep.json`, env-overridable) on every run — an empty `apply` is still a sweep.
+- New `musterd session label-nudge`: prints one imperative line while the stamp is missing or stale
+  (>4h), and nothing otherwise. Hook-shaped: silent-or-one-line, never fails.
+- The hand-pasted `UserPromptSubmit` recipe (docs/harness-hooks.md) becomes a **managed machine-wide
+  hook** (marker `musterd-promptsubmit-hook`, absorbing the recipe by signature), carrying the
+  status_update ritual plus `label-nudge`. Per-turn is the point: the status_update nudge on this
+  same rail is demonstrably obeyed, and repetition-until-stamped converts "documented" into
+  "happens". The SessionStart orientation drops its always-on label clause for the same due-gated
+  call.
+- `FEATURE_EPOCH` 3 → 4: both machine-wide hooks changed text, and the ADR 168 downgrade guard only
+  protects across a bump (equal epochs overwrite), so without it any older checkout's `init` would
+  quietly restore the one-shot world.
+
+Self-quieting is the load-bearing property — one seat's sweep silences every seat's nudge for 4h,
+so the steady state is one sweep per working stretch, not one per session. The failure mode of a
+lost stamp is one redundant nudge, never a broken sweep.
+
+**Observability.** The standing check stays the sidebar (chips should accumulate), but the trigger
+itself is now observable where it wasn't: the stamp file's age *is* the trigger's health, and
+`label-nudge`'s output in a transcript shows the ask firing. If chips stop accumulating while the
+stamp stays fresh, sweeps are running but renames are not landing (the acceptor layer); if the
+stamp goes stale for days, agents are ignoring even the per-turn line — escalate past nudging.

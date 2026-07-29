@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 8;
+export const GUIDANCE_CONTENT_VERSION = 9;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -263,6 +263,10 @@ export function renderLabelSessionsSkill(): string {
     '   `session_id` and `title`. Independent calls — issue them in parallel.',
     '4. Report one line: `labeled 3 sessions (Miley ×2, Izzo ×1)`. If `apply` is empty and this ran',
     '   automatically, say nothing at all; if the user asked, say `nothing to label`.',
+    '',
+    'Step 2 also stamps the machine-wide last-sweep file, which is what silences the per-turn',
+    '`label-nudge` hook line for every seat — so when that nudge sent you here, one sweep is the',
+    'whole job; do not re-run it each turn.',
     '',
     '## What the engine guarantees (so you do not re-derive it)',
     '',

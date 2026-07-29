@@ -98,6 +98,49 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
     expect(readFileSync(globalSettings(), 'utf8')).toContain('musterd-sessionstart-hook e');
   });
 
+  it('installs the machine-wide UserPromptSubmit nudge hook, stamped and label-nudge-bearing', () => {
+    h.folderBinding = { team: 'revive' };
+    seedProvisioned();
+    expect(runRefreshHooks(cwd)).toBe(0);
+    const global = readFileSync(globalSettings(), 'utf8');
+    expect(global).toContain('musterd-promptsubmit-hook e');
+    expect(global).toContain('musterd session label-nudge');
+  });
+
+  it('ABSORBS a hand-pasted UserPromptSubmit recipe instead of stacking a second hook beside it', () => {
+    h.folderBinding = { team: 'revive' };
+    seedProvisioned();
+    // The docs/harness-hooks.md recipe as pasted by hand: musterd:start gate + status_update nudge,
+    // no marker. Pre-managed installs (2026-07) all carry exactly this.
+    writeFileSync(
+      globalSettings(),
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command:
+                    'f="${CLAUDE_PROJECT_DIR:-.}/AGENTS.md"; test -f "$f" && grep -q musterd:start "$f" && echo \'musterd: ... status_update ...\' || true',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+    expect(runRefreshHooks(cwd)).toBe(0);
+    const parsed = JSON.parse(readFileSync(globalSettings(), 'utf8')) as {
+      hooks: { UserPromptSubmit: { hooks: { command: string }[] }[] };
+    };
+    expect(parsed.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(parsed.hooks.UserPromptSubmit[0]!.hooks[0]!.command).toContain(
+      'musterd-promptsubmit-hook',
+    );
+  });
+
   it('is idempotent — a second refresh changes nothing', () => {
     h.folderBinding = { team: 'revive' };
     seedProvisioned();
@@ -124,10 +167,15 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
       }),
       'utf8',
     );
-    const before = readFileSync(globalSettings(), 'utf8');
-
     expect(runRefreshHooks(cwd)).toBe(1); // refused ⇒ non-zero, so a script can see it
-    expect(readFileSync(globalSettings(), 'utf8')).toBe(before); // …and genuinely left alone
+    // …and the protected slot genuinely left alone (the file itself may gain OTHER global hooks —
+    // the refusal is per-slot, and the UserPromptSubmit nudge still installs beside it).
+    const after = JSON.parse(readFileSync(globalSettings(), 'utf8')) as {
+      hooks: { SessionStart: { hooks: { command: string }[] }[] };
+    };
+    expect(after.hooks.SessionStart).toEqual([
+      { hooks: [{ type: 'command', command: 'echo soon # musterd-sessionstart-hook e999' }] },
+    ]);
     // The local hooks still land: the refusal is scoped to the slot it protects, not the whole run.
     expect(allCommands()).toContain('musterd-gate-hook');
   });
