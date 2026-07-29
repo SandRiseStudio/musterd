@@ -129,20 +129,31 @@ review-catch rate, auto- vs asked-merges, and per-seat daily spend — all deriv
 
 ## Observability & Evaluation
 
-- New audit verbs ride the existing `residency.*` family: work-order leases and outcomes are
-  distinguishable by derivation (`immediate` / `batched` / `work_order`), so every metric is a
-  read-side projection over rows that already exist or extend them.
-- **Success metrics, pre-stated:** (a) manual fresh-session starts per flow-day drop from the
-  measured 23 toward single digits; (b) review-catch rate leaves zero — verified closes appear
-  without a human staging a reviewer; (c) merge audit coverage goes from 9/40 to every-loop-merge
-  attested; (d) the founder's out-of-band steering (disposable web sign-ins, in-session relays)
-  visibly shrinks against the 2026-07-28 baseline, which is preserved in the telemetry snapshot from
-  that day.
-- **Failure signals, pre-stated:** wake exhaustion or watchdog kills trending up per seat; woken
-  sessions that burn budget without a lane-state transition; auto-merges on lanes that later revert.
-  `budget_usd` flags per the honesty clause; the toggle is the kill switch, per seat, instantly.
-- Increment 0's repair is itself an evaluation: the expired-grant failure mode was silent for at
-  least a day — after the repair, a dead rail must be loud on roster/doctor within one poll cycle.
+**Traces.** Work-order wakes ride the existing `residency.*` audit family, distinguishable by
+derivation (`immediate` / `batched` / `work_order`), so every series below is a read-side projection
+over rows that already exist or extend them: wakes by derivation and outcome, review-catch rate
+(verified closes ÷ `lane_ready` uses), merge audit coverage (`git.pr_merged` rows ÷ merges), and
+per-seat wake spend from `residency.wake_cost`. The failure signals are the same rows read the other
+way: exhaustion and watchdog kills trending up per seat, woken sessions that burn budget without a
+lane-state transition, auto-merges on lanes that later revert. `budget_usd` flags per the honesty
+clause; the toggle is the per-seat kill switch. Increment 0's repair is itself instrumented: the
+expired-grant failure mode was silent for a day — after the repair, a dead rail must be loud on
+roster/doctor within one poll cycle.
+
+**Eval.** Dataset: the preserved 2026-07-28 telemetry snapshot — 23 manual fresh-session starts,
+190 acts, 27 lanes, 40 merges of which 9 audited, review-catch 0/3, zero wake leases. That day is
+the baseline; the same queries re-run over a comparable flow-day with `flow: auto` on are the eval.
+Pre-stated success: (a) manual session starts drop toward single digits; (b) review-catch leaves
+zero without a human staging a reviewer; (c) every loop merge is attested; (d) the founder's
+out-of-band steering (disposable `web-*` sign-ins, in-session relays) visibly shrinks. Mechanism
+correctness is tested, not monitored: argv tests keep asserting no skip-permissions flag on any wake
+arg builder, and the inc-2 derivation gets a through-DB test that a live session vetoes the wake.
+
+**Experiment.** The toggle is the natural A/B: seats flip to `flow: auto` one at a time, so each
+flow-day yields within-team contrast between auto and manual seats on the success metrics above.
+The increments are staged so each hypothesis is falsifiable alone — inc 3 tests "a woken reviewer
+produces verified closes at acceptable spend" before inc 4 bets merges on it; if inc 3's catch rate
+stays near zero or its spend is ugly, inc 4 does not ship.
 
 ## Consequences
 
