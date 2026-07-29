@@ -70,3 +70,56 @@ synthetic. **#491's ceiling holds at load 105.**
 Measure on a CI runner, not this laptop. GitHub runners differ in cores and RAM, the tuning does not
 transfer, and a cap would change CI runtime for everyone. Re-run the flag-sanity check first — it is
 the cheapest way to catch a measurement that is silently comparing a setting to itself.
+
+---
+
+# Revisited on CI — 2026-07-29
+
+That last section is now done. The bench is a workflow (`.github/workflows/bench-forks.yml`,
+manual-only via `workflow_dispatch`); this is its first full sweep, and it settles the question the
+laptop could only shrug at.
+
+**Runner: 4 cores, 15.6 GB. Vitest's default `maxForks` is one per CPU, so `maxForks=4` _is_ the
+default here** — an arm at 4 is the default wearing a different label, not a treatment. This is why
+the bench prints the core count: without it the table below is unreadable.
+
+| rep        | default (=4)  | 1             | 2             | 4             |
+| ---------- | ------------- | ------------- | ------------- | ------------- |
+| 1          | 46,868 ms     | 47,030 ms     | 47,128 ms     | 46,824 ms     |
+| 2          | 46,028 ms     | 47,848 ms     | 48,391 ms     | 46,540 ms     |
+| 3          | 46,985 ms     | 47,904 ms     | 46,718 ms     | 46,908 ms     |
+| **median** | **46,868 ms** | **47,848 ms** | **47,128 ms** | **46,824 ms** |
+
+Twelve runs, all green. Reps 1 and 3 ran the arms forward, rep 2 reversed.
+
+## Two findings, and the second is the interesting one
+
+**1. The cap question is closed.** `maxForks=4` and the default land 44 ms apart on a 47-second run —
+they are the same setting, exactly as the core count predicts, which is a pleasing check that the
+harness measures what it claims. Capping CI to 4 would be a no-op because CI is already there. So the
+cap was never a CI question at all; it was a question about local defaults, and #494 answered that one
+on the machine where it mattered.
+
+**2. The suite barely parallelises on a clean machine.** `maxForks=1` costs **2%** against 4 (47,848
+vs 46,824 ms). One worker, on four cores, is two percent slower. The total spread across every arm and
+rep is 46,028–48,391 ms — about 5%.
+
+That second number reframes the laptop data rather than confirming it. On the dogfood box, 1 fork
+against 8 was **3.2x** on a subset. Here, 1 against 4 is 1.02x on the whole suite. The difference is
+not the fork count — it is that the laptop was swapping. **Nothing about this suite is CPU-bound**;
+its ~47 s is dominated by work that does not parallelise (module transform and collect, real daemon
+start-up, socket waits). Anyone hoping to make the suite faster should attack that, not the worker
+count, and this table is the evidence for skipping the obvious-looking lever.
+
+It also retires the last of the flake story. #482 fixed a real race, #491 fixed a miscalibrated
+ceiling, and the "workers starve each other" theory that motivated both was a property of one
+memory-constrained laptop, not of the suite.
+
+## Known wart
+
+The per-arm status reads `passed (count not parsed)`. The suite genuinely passed — a failing arm is
+excluded from the median, printed with 60 lines of context, and fails the job — but the test-count
+capture does not match vitest's output under `CI=true`, and the fallback added for exactly this did
+not match either. The pattern works on a locally redirected run, so the CI reporter formats its
+summary differently. Timings are unaffected; whoever next runs the bench should check the raw log and
+fix the pattern against what is actually there rather than guessing a third time.
