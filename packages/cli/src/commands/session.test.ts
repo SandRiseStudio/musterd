@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Binding } from '@musterd/protocol';
+import { BindingSchema, type Binding } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import {
@@ -296,6 +296,43 @@ describe('musterd session (capture)', () => {
       expect(healed.transcript_path).toBe(livePath);
       expect(healed.ended_at).toBeUndefined();
       expect(typeof healed.started_at).toBe('number');
+    });
+
+    it('writes a binding that can still be READ — the heal must not brick its own workspace', () => {
+      // The regression that shipped with the heal: `started_at` came from `statSync().birthtimeMs`,
+      // which is fractional, while SessionCaptureSchema declares `z.number().int()`. `readBinding`
+      // parses inside a try/catch and returns null on a throw, so ONE heal made `findBinding` return
+      // null for that workspace forever — and every CLI path that resolves identity through it
+      // (including this very refresh, at its first guard) died silently for the rest of the seat's
+      // life. Measured on izzo, 2026-07-29: started_at 1785352706039.4507, byte-identical to the
+      // transcript's birthtimeMs.
+      //
+      // `typeof started_at === 'number'` is what the case above asserts, and a float passes it. Only
+      // a round-trip through the real schema catches this, so that is what this pins.
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'blip-sid',
+            transcript_path: join(wsA, 'blip.jsonl'),
+            started_at: startedAt,
+            ended_at: startedAt + 15_000,
+          },
+        }),
+      );
+      const livePath = transcript(wsA, 'claude-opus-5', 'live-int.jsonl');
+
+      refreshModelObservation(
+        wsA,
+        enumStub([{ id: 'live-sid', path: livePath, mtime: Date.now(), bytes: 10 }]),
+      );
+
+      const raw = JSON.parse(readFileSync(join(wsA, '.musterd', 'binding.json'), 'utf8'));
+      const parsed = BindingSchema.safeParse(raw);
+      expect(parsed.success).toBe(true);
+      expect(Number.isInteger(raw.session.started_at)).toBe(true);
     });
 
     it('heals the slot even when the live transcript is not yet readable for a model', () => {

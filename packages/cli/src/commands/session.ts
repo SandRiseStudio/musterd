@@ -144,11 +144,18 @@ function liveSessionElsewhere(
 }
 
 /** When a healed slot's session began: the transcript file appears at session start, so its
- *  birthtime is the honest `started_at`. Undefined on any stat failure — it rides a hook. */
+ *  birthtime is the honest `started_at`. Undefined on any stat failure — it rides a hook.
+ *
+ *  FLOORED, and that is load-bearing: `birthtimeMs` is fractional, while `SessionCaptureSchema`
+ *  declares `started_at` as `z.number().int()`. Handing the float straight through wrote a binding
+ *  that `readBinding` could no longer parse, so `findBinding` returned null for that workspace
+ *  forever and every CLI path that resolves identity through it died silently — including this
+ *  refresh, at its own first guard. TypeScript cannot see the difference: `.int()` is a runtime
+ *  refinement on a field the type system only knows as `number`. */
 function birthtimeOf(path: string): number | undefined {
   try {
     const t = statSync(path).birthtimeMs;
-    return Number.isFinite(t) && t > 0 ? t : undefined;
+    return Number.isFinite(t) && t > 0 ? Math.floor(t) : undefined;
   } catch {
     return undefined;
   }
