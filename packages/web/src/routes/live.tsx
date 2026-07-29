@@ -500,11 +500,15 @@ function ConnectForm({
         </p>
         <label className="lc-form__field">
           <span>Team</span>
+          {/* No autoFocus. This form is the FIRST thing on the page, and focusing it on load drops a
+              screen-reader user straight into a text field — past the heading and past the sentence
+              above explaining that watching creates a hidden observer seat and never puts them on
+              the roster. That is a privacy fact they are entitled to hear before they start typing.
+              The page is a single form, so a keyboard user is one Tab away regardless. */}
           <input
             type="text"
             value={team}
             placeholder="alpha"
-            autoFocus
             onChange={(e) => onTeam(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && onWatch()}
           />

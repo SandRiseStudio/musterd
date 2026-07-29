@@ -455,10 +455,6 @@ describe('seated micro-beat choreography', () => {
 });
 
 describe('errands', () => {
-  const step = (a: ReturnType<typeof createActors>, s: number) => {
-    for (let i = 0; i < Math.round(s / 0.05); i++) a.step(0.05);
-  };
-
   it('water errand: the bottle is in hand (desk copy hidden) only during the trip, and ends back home', () => {
     const { placements, byName } = world([node('Ada')]);
     const actors = createActors();

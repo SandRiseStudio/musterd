@@ -38,7 +38,6 @@ import {
   WINDOWS,
   type Bookshelf,
   type Huddle,
-  type Pod,
   type Rug,
 } from './layout';
 import { DAY_ENV, type LightEnv } from './lighting';
@@ -242,7 +241,9 @@ function frustum(
       const p = project(lx + (sx! * w) / 2, ly + (sy! * d) / 2, fit);
       return { x: p.x, y: p.y - u };
     });
-  const [A0, B0, C0, D0] = at(w0, d0, baseUp * fit.scale);
+  // A0 (the far-top corner) is occluded by the box's own faces — the hole keeps the positional
+  // destructure aligned with `at`'s corner order rather than renaming the three that are drawn.
+  const [, B0, C0, D0] = at(w0, d0, baseUp * fit.scale);
   const [A1, B1, C1, D1] = at(w1, d1, (baseUp + hPx) * fit.scale);
   quad(ctx, [B0!, C0!, C1!, B1!], shade(base, 0.72));
   quad(ctx, [D0!, C0!, C1!, D1!], shade(base, 0.86));
@@ -853,7 +854,10 @@ function drawWindowBeams(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv)
       grad.addColorStop(1, `rgba(${r}, ${g}, ${bl}, 0)`);
       ctx.fillStyle = grad;
       ctx.beginPath();
-      for (const [i, p] of [pa, pb, pf1, pf0].entries()) i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      for (const [i, p] of [pa, pb, pf1, pf0].entries()) {
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
       ctx.closePath();
       ctx.fill();
     }
