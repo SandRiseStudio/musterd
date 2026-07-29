@@ -10,7 +10,7 @@ export function getRouter() {
       <main className="shell" style={{ padding: '20vh 0' }}>
         <h1 className="mono">404</h1>
         <p>
-          Nothing here. <a href="/">Back to the roadmap.</a>
+          Nothing here. <a href="/">Back to the start.</a>
         </p>
       </main>
     ),

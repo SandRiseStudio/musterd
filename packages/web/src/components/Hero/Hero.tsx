@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { TAGLINE } from '../../content/roadmap.data';
+import { TAGLINE } from '../../content/site';
 import { MusterdChip } from '../../brand/MusterdWord';
 import { memberColor } from '../../live/format';
 import type { OfficeData, OfficeEvent, OfficeHandle } from '../../live/office-scene';

@@ -14,7 +14,7 @@ import {
   ROADMAP_RAW,
   type RawItem,
   type RoadmapItem,
-} from '../../packages/web/src/content/roadmap.data.ts';
+} from '../../content/roadmap.data.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, '..', '..');

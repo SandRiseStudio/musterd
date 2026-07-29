@@ -1,4 +1,4 @@
-import { WEDGE } from '../content/roadmap.data';
+import { WEDGE } from '../content/site';
 import { LiquidGlass } from './LiquidGlass/LiquidGlass';
 import './Wedge.css';
 

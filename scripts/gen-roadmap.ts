@@ -1,6 +1,12 @@
 /*
  * Generate the item region of ROADMAP.md from the single source of truth,
- * packages/web/src/content/roadmap.data.ts (the same module the web map imports).
+ * content/roadmap.data.ts.
+ *
+ * That module lives at the repo root rather than under packages/web because every consumer of it is
+ * a build-time one — this generator, check-roadmap-truth, and the steward drift scan. It was a web
+ * module back when the landing page rendered a roadmap map; that map is gone, and ~82 items of prose
+ * have no business in a browser bundle. The one string the page still needs (WEDGE) is imported from
+ * the web package below.
  *
  *   pnpm roadmap:gen     — rewrite ROADMAP.md's generated region in place
  *   pnpm roadmap:check   — fail (exit 1) if ROADMAP.md is out of date
@@ -21,12 +27,12 @@ import {
   STATUS_ORDER,
   WAVE_META,
   WAVE_ORDER,
-  WEDGE,
   waveRank,
   type Ref,
   type RoadmapItem,
   type Status,
-} from '../packages/web/src/content/roadmap.data.ts';
+} from '../content/roadmap.data.ts';
+import { WEDGE } from '../packages/web/src/content/site.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROADMAP_PATH = join(here, '..', 'ROADMAP.md');

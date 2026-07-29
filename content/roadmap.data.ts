@@ -1350,15 +1350,9 @@ export const ROADMAP: RoadmapItem[] = RAW.map(resolveItem);
 /** The authored declarations, unresolved — what `scripts/check-roadmap-truth.ts` verifies against reality. */
 export const ROADMAP_RAW: RawItem[] = RAW;
 
-export const WEDGE = {
-  heading: 'How priorities are decided',
-  body:
-    'The wedge is persistent teams with identity, presence, and humans as peers — the coordination layer where about 79% of multi-agent failures actually happen. Work is weighed by whether it strengthens that layer, not by adding more agents or more orchestration. Human partnership ranks first, on evidence: collaborative agents beat fully autonomous ones on real-user preference, and removing the notification protocol more than halves the win rate.',
-  refs: [
-    doc('ROADMAP.md', 'ROADMAP.md'),
-    doc('docs/design/research-foundation.md', 'research-foundation.md'),
-    doc('docs/design/landscape.md', 'landscape.md'),
-  ] as Ref[],
-};
-
-export const TAGLINE = 'Muster your agents and humans into persistent teams.';
+/**
+ * TAGLINE and WEDGE used to live here. They are landing-page copy, not roadmap data, and keeping them
+ * in this module meant the browser had to download all of RAW to render two paragraphs — so they moved
+ * to `packages/web/src/content/site.ts`, in the package that renders them. `gen-roadmap` imports WEDGE
+ * from there.
+ */

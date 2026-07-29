@@ -4,7 +4,10 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['packages/**/*.test.ts', 'tests/**/*.test.ts'],
+    // `content/` earns its own glob: roadmap.data.ts moved out of packages/web when the roadmap map
+    // was dropped from the UI, and its ADR 177 invariant tests moved with it. Without this line they
+    // would still pass locally and silently stop running in CI, which is the worst way to lose a gate.
+    include: ['packages/**/*.test.ts', 'tests/**/*.test.ts', 'content/**/*.test.ts'],
     environment: 'node',
     pool: 'forks',
     // NO_COLOR pins picocolors OFF in tests so render assertions (plain `▌`/lengths) are deterministic
