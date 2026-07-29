@@ -25,7 +25,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROADMAP_RAW } from '../packages/web/src/content/roadmap.data.ts';
+import { ROADMAP_RAW } from '../content/roadmap.data.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');

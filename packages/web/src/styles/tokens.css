@@ -101,12 +101,6 @@
   --glow-mustard: rgba(225, 173, 1, 0.45);
   --glow-mustard-soft: rgba(225, 173, 1, 0.16);
 
-  /* Status colors for roadmap items */
-  --status-shipped: var(--mustard-500);
-  --status-near-term: var(--mustard-300);
-  --status-reserved: var(--zinc-400);
-  --status-out: var(--zinc-500);
-
   /* ---- Office semantic tokens — DARK (dusk office) ---- */
   --sky: linear-gradient(180deg, #2a2044 0%, #392842 52%, #432a1f 100%);
   --floor: #e4a96b;
@@ -152,9 +146,6 @@
   --accent-bright: var(--mustard-500);
   --glow-mustard: rgba(184, 134, 11, 0.28);
   --glow-mustard-soft: rgba(184, 134, 11, 0.12);
-
-  --status-shipped: var(--mustard-700);
-  --status-near-term: var(--mustard-500);
 
   /* Office — daylight */
   --sky: linear-gradient(180deg, #e9d9c3 0%, #f3e7d4 52%, #ffe9c8 100%);

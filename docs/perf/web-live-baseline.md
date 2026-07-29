@@ -171,3 +171,56 @@ The shared daemon (:4849) was serving build `40065c5` — **14 commits behind ma
 asks strip / speech bubbles / re-font. This baseline was taken against a fresh-main build on a
 temp daemon instead. Any perf numbers eyeballed against the shared daemon are stale until a
 `musterd service refresh`.
+
+## Roadmap map dropped from the web UI — total JS gzip 243.3 → 201.5 KB (2026-07-29)
+
+**−41.8 KB JS gzip (−17%), −1.6 KB CSS gzip.** Headroom against the unchanged 250,000-byte budget
+goes from **0.8 KB to 42.6 KB**.
+
+nick, 2026-07-28: drop the roadmap from the web UI. `components/Roadmap/*` is deleted, and
+`roadmap.data.ts` — ~82 items of authored prose, 130 KB of source — moved from
+`packages/web/src/content/` to `content/` at the repo root. Every consumer of that module is
+build-time (`gen-roadmap`, `check-roadmap-truth`, the ADR 112 steward scan); it lived under
+`packages/web` only because the landing page used to render a map from it, so the browser was
+downloading the entire roadmap to draw a page that mostly says three paragraphs and a hero.
+
+The two strings the landing page still needs (`TAGLINE`, `WEDGE`) moved to
+`packages/web/src/content/site.ts`. Leaving them behind in the data module would have dragged all of
+`RAW` back into the bundle to render two paragraphs, which is the entire cost this move avoids.
+`gen-roadmap` imports `WEDGE` from there — one source of truth, pulled toward the consumer that is
+picky about bytes.
+
+Dead with the map: the `--status-*` tokens in `tokens.css` (both themes), which only `Roadmap.css`
+ever read.
+
+**The budget was NOT raised.** PR #484 proposed 250,000 → 258,000 when headroom was 0.8 KB; this
+reclaim is fifty times that raise, so #484 was closed without merging and only its finding was kept
+(below). ADR 151 says shrink first — this is what that looks like when the shrink is available.
+
+**Worth a re-baseline.** At 201.5 KB against 250,000, headroom is now ~21%. The 2026-07-19 numbers
+were set with ~12% and were exhausted in nine days by ordinary shipping, so a periodic review of all
+four budgets is still the right follow-up — see the CSS raise and the JS analysis logged above.
+
+### Finding (carried over from the closed #484): this budget cannot be satisfied by lazy-loading
+
+`scripts/perf/check-budgets.ts` sums the gzip of **every** `.js` under `dist/client`, lazy chunks
+included. So code-splitting cannot reduce `totalJsGzipBytes` — it can only raise it slightly, by the
+per-chunk overhead. Measured, not reasoned: splitting the default-off room-tone engine into its own
+chunk moved **1.3 KB** out of the live route's initial payload and moved the gate the *wrong* way,
+**243.3 → 243.7 KB**. That split was reverted; 0.5% off initial load did not justify an extra module
+boundary and a round-trip.
+
+It matters because `perf:check`'s own failure message tells you to "shrink the change (lazy-load,
+…)", and the first remedy it names provably cannot move the number it enforces. Two honest readings,
+and choosing between them is an ADR 151 decision:
+
+1. **Total shipped JS is the right metric** — it tracks how much code the product carries, which is
+   what actually rots. Then the failure message should stop recommending lazy-loading, and splitting
+   should be justified against the Lighthouse baseline instead.
+2. **Initial payload is the right metric** — what a viewer downloads before the page is interactive.
+   Then the budget wants an `initialJsGzipBytes` (entry + route chunk) alongside a looser
+   `totalJsGzipBytes`, and the current advice becomes correct.
+
+Until that is settled, treat `totalJsGzipBytes` as a *code-volume* budget and do not reach for
+code-splitting to satisfy it. **This removal is the shape that does work: delete the code, or move
+it to where it is actually consumed.**
