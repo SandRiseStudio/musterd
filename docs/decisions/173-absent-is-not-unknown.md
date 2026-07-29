@@ -276,6 +276,51 @@ not merely undercounted on abstaining rows; where it did fire it was filed under
 `closed.human_review_missed` and `closed.human_required_unknown` are now reported, the second being
 clause 4 made operational: the count says how much the first one abstained over.
 
+## The residual, one level below correction #1 — 2026-07-29
+
+Giving `human_review_missed` its own bucket fixed the row that had been landing in the wrong place. It
+did not fix the **`else` that had been catching it**, which still read:
+
+```ts
+else m.closed.self_close++; // includes legacy rows with no reason recorded
+```
+
+`self_close` is a _recorded_ reason asserting "never entered review". As the ladder's `else` it also
+absorbed a close that recorded **no** reason (the legacy single-stage shape) and one carrying a reason
+this build **cannot classify** (written by a newer musterd) — then made that positive claim on behalf
+of rows that made none. Two ways of being uninformed, with different remedies: nothing to be done
+about a legacy row, upgrade the reader for the other. So clause 1 gives them separate names,
+`legacy_unlabelled` and `unknown_reason`, rather than one shared `unknown` that would rebuild the
+collapse one level up. `self_close` now matches explicitly, and a test asserts the buckets **sum to
+`total`** — an abstention that is merely uncounted misleads exactly as much as one miscounted.
+
+The pattern worth extracting: **fixing a collapse by adding a case does not fix the arm that was
+absorbing it.** Correction #1 moved one reason out of the `else` and left the `else` as wrong as it
+found it, for two other reasons. A default arm that means "everything I did not name" is an abstention
+whether or not its author thought of it that way, and it needs a name for the same reason the values
+above it do.
+
+### The ledger question, explicitly not answered here
+
+Whether this counts as **correction #2** — which would fire the kill criterion — is a real question
+and it is deliberately left open, because the person who would benefit from a convenient answer must
+not be the one giving it.
+
+- **For counting it:** it is a separate PR, adding third and fourth states to a read that had two,
+  which is precisely the trace this ADR pre-registered.
+- **Against:** it is the same function, the same audit, the same day, and the same defect as
+  correction #1 — an incompletely applied fix rather than a fresh discovery. Counting one logical
+  correction as two would fire the criterion on a technicality and force a mechanism the evidence has
+  not actually earned.
+
+ryder authored this ADR, its experiment, and its ledger, and found both items. Deciding how his own
+findings are tallied against his own criterion is the [ADR
+171](171-provisioned-workspace-currency.md) hazard exactly — an author marking his own homework — so
+the standing count above is **left at 1** pending izzo's or nick's call, and this section is the
+argument, not the verdict. If it is counted, the criterion fires and the answer is the lint over
+derived reads; the shape that would have caught all four defects here is _a derived read whose sibling
+fields, or whose default arm, disagree with its named cases about whether they can abstain_.
+
 ## Related
 
 - [ADR 163](163-actor-attestation-tool-boundary.md) — the sharpest prior statement, scoped to

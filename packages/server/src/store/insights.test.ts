@@ -903,7 +903,11 @@ describe('deriveReviewMetrics (ADR 169) — the review eval, without an admin cr
     expect(m.routed).toBe(0);
     expect(m.no_candidate).toBe(0); // counted in neither — we do not know
     expect(m.closed.total).toBe(1);
-    expect(m.closed.self_close).toBe(1); // a reasonless close is the legacy single-stage shape
+    // This used to assert `self_close`, which reads as "never entered review" — a positive claim
+    // about a row that recorded nothing. It abstains now: the ready split already refuses to guess
+    // for this row, and the close bucket has to refuse on the same evidence or the two disagree.
+    expect(m.closed.legacy_unlabelled).toBe(1);
+    expect(m.closed.self_close).toBe(0);
   });
 
   it('is zero-shaped on a team that has never used review', () => {
@@ -954,5 +958,50 @@ describe('deriveReviewMetrics (ADR 169) — the review eval, without an admin cr
     const m = deriveReport(db, team.id, 'revive').review!;
     expect(m.closed.human_required_unknown).toBe(1);
     expect(m.closed.human_review_missed).toBe(0); // never inferred from an abstention
+  });
+
+  // The residual #517 left behind, one level below the bucket it added. `self_close` is a REAL
+  // recorded reason — "never entered review" — so the ladder's `else` must not also absorb the two
+  // ways of not knowing. They are different facts with different remedies (nothing to do about a
+  // legacy row; upgrade the reader for a reason a newer build wrote), so clause 1 gives them
+  // different names rather than one `unknown`.
+  it('separates an unrecognised reason from one that was never recorded, and from a real self-close', () => {
+    const { db, team } = seed();
+    row(db, team.id, 'lane.closed', { lane: 'a', reason: 'some_future_reason', verified: false });
+    row(db, team.id, 'lane.closed', { lane: 'b', verified: false }); // no reason at all
+    row(db, team.id, 'lane.closed', { lane: 'c', reason: 'self_close', verified: false });
+
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.closed.unknown_reason).toBe(1);
+    expect(m.closed.legacy_unlabelled).toBe(1);
+    expect(m.closed.self_close).toBe(1); // only an EXPLICIT self_close is one
+    expect(m.closed.total).toBe(3);
+  });
+
+  // The arithmetic a reader does on this panel has to close, or an abstention that is merely
+  // uncounted is as misleading as one that is miscounted.
+  it('the reason buckets sum to total, so nothing hides in a rounding gap', () => {
+    const { db, team } = seed();
+    row(db, team.id, 'lane.closed', { lane: 'a', reason: 'counterpart_confirm', verified: true });
+    row(db, team.id, 'lane.closed', { lane: 'b', reason: 'review_timeout', verified: false });
+    row(db, team.id, 'lane.closed', { lane: 'c', reason: 'no_candidate', verified: false });
+    row(db, team.id, 'lane.closed', { lane: 'd', reason: 'human_review_missed', verified: false });
+    row(db, team.id, 'lane.closed', { lane: 'e', reason: 'self_close', verified: false });
+    row(db, team.id, 'lane.closed', { lane: 'f', reason: 'abandoned', verified: false });
+    row(db, team.id, 'lane.closed', { lane: 'g', reason: 'who_knows', verified: false });
+    row(db, team.id, 'lane.closed', { lane: 'h', verified: false });
+
+    const c = deriveReport(db, team.id, 'revive').review!.closed;
+    const summed =
+      c.counterpart_confirm +
+      c.review_timeout +
+      c.no_candidate +
+      c.human_review_missed +
+      c.self_close +
+      c.abandoned +
+      c.unknown_reason +
+      c.legacy_unlabelled;
+    expect(summed).toBe(c.total);
+    expect(c.total).toBe(8);
   });
 });
