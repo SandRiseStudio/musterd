@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
@@ -143,6 +143,17 @@ function liveSessionElsewhere(
   }
 }
 
+/** When a healed slot's session began: the transcript file appears at session start, so its
+ *  birthtime is the honest `started_at`. Undefined on any stat failure — it rides a hook. */
+function birthtimeOf(path: string): number | undefined {
+  try {
+    const t = statSync(path).birthtimeMs;
+    return Number.isFinite(t) && t > 0 ? t : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Ask the harness that owns this capture what model it is actually running. Never throws: a probe
  * failure must not fail a hook, and `undefined` simply falls through to the declared tier.
@@ -282,18 +293,41 @@ export function refreshModelObservation(
     const live = liveSessionElsewhere(dir, session, now, enumerate);
     if (session.ended_at !== undefined && !live) return undefined;
 
-    const prior = binding.model_observed;
+    // The heal (lane 01KYQF0STK). An ended slot contradicted by a live session is not just a bad
+    // witness to route around — it is a corpse that keeps doing damage: `session show` reports the
+    // seat ended, and the wake ladder resumes the BLIP's transcript, because a valid-but-wrong slot
+    // id outranks enumeration. The route table proved SessionStart fires on every spawn route; the
+    // corpse gets there by being written LAST — a short concurrent session (a wake beside an
+    // idle-but-open interactive session) steals the slot and stamps `ended_at`, and the long-lived
+    // session never fires SessionStart again to take it back. So the tool boundary — the boundary
+    // that always happens — gives the slot to the session that is actually running. `started_at`
+    // comes from the transcript's birthtime (the file appears when the session begins); the heal is
+    // scoped to ended-and-contradicted, so live-beside-live co-tenancy is left to the wake guard.
+    let healedBinding = binding;
+    let slot = session;
+    if (session.ended_at !== undefined && live) {
+      slot = {
+        harness: session.harness,
+        id: live.id,
+        transcript_path: live.path,
+        started_at: birthtimeOf(live.path) ?? now,
+      };
+      healedBinding = { ...binding, session: slot };
+      saveBinding(dir, healedBinding);
+    }
+
+    const prior = healedBinding.model_observed;
     // Current already? Two ways to be stale: observed before this session began (the carry-forward),
     // or simply old enough that a mid-run switch could have happened since.
     const current =
       prior !== undefined &&
-      prior.observed_at >= session.started_at &&
+      prior.observed_at >= slot.started_at &&
       now - prior.observed_at < OBSERVATION_REFRESH_MS;
     if (current) return undefined;
 
     // The harness that captured the session owns the parse — a codex-captured session must not be
     // read with Claude Code's eyes.
-    const harness = session.harness;
+    const harness = slot.harness;
     // Read the live session's transcript when the slot turned out to be a corpse: observing the dead
     // predecessor would attest the model of a session that is not running.
     const source = live ?? { path: session.transcript_path, id: session.id };
@@ -304,7 +338,7 @@ export function refreshModelObservation(
     if (!observed) return undefined; // unreadable / moved format — the prior observation stands
 
     saveBinding(dir, {
-      ...binding,
+      ...healedBinding,
       model_observed: { model: observed, harness, observed_at: now },
     });
     return observed;
