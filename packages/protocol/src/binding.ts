@@ -127,6 +127,36 @@ export const BindingSchema = WorkspaceSpecSchema.extend({
 export type Binding = z.infer<typeof BindingSchema>;
 
 /**
+ * Refuse a binding the reader would not be able to parse — call this before persisting one.
+ *
+ * The write side and the read side of `binding.json` had drifted apart: readers run
+ * `BindingSchema.parse` inside a try/catch that collapses any failure to `null`, while both
+ * `saveBinding` implementations wrote whatever they were handed. A caller that satisfies the
+ * TypeScript type can still violate the schema, because every Zod refinement — `.int()`, `.min()`,
+ * `.regex()`, brands — is invisible to the type it validates. When that happened (a fractional
+ * `started_at` from `statSync().birthtimeMs`, #508) the binding became permanently unreadable, and
+ * because `null` also means "no binding here", the seat just went quiet.
+ *
+ * Throwing is deliberately the safer half of the trade. The alternative — completing the write — is
+ * not "no worse than nothing": it destroys an identity that was working. A refused write leaves the
+ * previous good binding in place, and the next capture heals it.
+ *
+ * Lives here, beside the schema, so the two copies of `saveBinding` (cli, mcp) cannot drift into
+ * disagreeing about what is writable.
+ */
+export function assertWritableBinding(binding: unknown): void {
+  const parsed = BindingSchema.safeParse(binding);
+  if (parsed.success) return;
+  const detail = parsed.error.issues
+    .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+    .join('; ');
+  throw new Error(
+    `refusing to write an unreadable binding — ${detail}. This binding would fail the same schema ` +
+      'every reader uses, which would make the workspace identity-less until it is repaired by hand.',
+  );
+}
+
+/**
  * Does this folder auto-claim a seat on launch (ADR 075)? Replaces the v0.2 `isClaimed` (which meant
  * "has a persisted concrete identity" — there is none in v0.3; the resolved seat is server-side
  * session state). True iff the binding carries an agent key AND a non-`chat` claim policy. A `chat`
