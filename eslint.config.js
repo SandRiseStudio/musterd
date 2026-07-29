@@ -117,16 +117,27 @@ export default tseslint.config(
     rules: {
       // The mandate: a11y failures are ERRORS and fail the build, same as anywhere else.
       ...jsxA11y.flatConfigs.recommended.rules,
-      // react-hooks lands as WARNINGS, deliberately. The v7 rule set is React-Compiler-era and much
-      // stricter than the exhaustive-deps most people picture: it flags 32 places here, and a fair
-      // number are idiomatic latest-value refs and mount-time state hydration that work correctly
-      // and are commented as such. Auditing them is real work with real regression risk in the
-      // office's rAF loops, and it is NOT what this handoff was about — bundling it in would make an
-      // a11y PR unreviewable. Warning keeps the signal visible for whoever takes that lane; nothing
-      // here is dismissed, only sequenced.
-      ...Object.fromEntries(
-        Object.keys(reactHooks.configs.recommended.rules).map((rule) => [rule, 'warn']),
-      ),
+      // react-hooks at full strength — the v7 set, as ERRORS. #493 landed these as warnings so an
+      // a11y PR stayed reviewable; the follow-up audit went through all 34 and this is where it
+      // came out. Two rules are off, and both for a reason about THIS codebase rather than taste:
+      ...reactHooks.configs.recommended.rules,
+
+      // OFF — permanently unactionable here, not merely inconvenient. musterd's web is
+      // server-rendered (TanStack Start), and client-only state cannot be read during render or in a
+      // `useState` initializer without a hydration mismatch: `localStorage` and `new Date()` do not
+      // exist on the server. So the panel-collapse prefs, the board's view/rail prefs and the wall
+      // clock all hydrate in a mount effect behind a `typeof window` guard, which is the correct
+      // pattern and the one this rule is written to forbid. It flagged 13 sites and every one was
+      // that. A rule that can never be satisfied is not a warning, it is noise that hides real ones.
+      'react-hooks/set-state-in-effect': 'off',
+
+      // OFF — the five sites are `Date.now()` read while rendering elapsed/remaining time, and the
+      // components that need it fresh already force the re-render themselves (AsksStrip runs a 1s
+      // tick precisely so its countdown re-reads the clock). Checked before switching it off: none
+      // of them are stale. Lifting `now` into shared ticking state would satisfy the rule and change
+      // no behaviour, so it stays available as a tidy-up — but it is not a defect, and the byte
+      // budget has a claim on any component that re-renders more often than it must.
+      'react-hooks/purity': 'off',
       // Grouped `case`s with a comment between them are this codebase's idiom for "these acts share
       // a tone, and here is why" (see format.ts's act→tone map). `allowEmptyCase` permits exactly
       // that shape and still catches the fallthrough that matters — a case with STATEMENTS that

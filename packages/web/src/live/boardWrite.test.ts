@@ -7,6 +7,8 @@ import {
   groupByGoal,
   handoffPatch,
   laneActions,
+  laneStates,
+  movedLanes,
   UNOWNED,
 } from './boardWrite';
 
@@ -228,5 +230,53 @@ describe('capColumn — the column DOM guardrail', () => {
 
   it('expanded shows everything', () => {
     expect(capColumn(items, 30, true)).toEqual({ shown: items, hidden: 0 });
+  });
+});
+
+/**
+ * The board's motion, which used to be a ref read mid-render and therefore untestable. Each case is
+ * a rule someone decided, not an implementation detail: ADR 169 says the flourish is earned by a
+ * counterpart's confirmation, and nothing else on the board celebrates itself.
+ */
+describe('movedLanes', () => {
+  it('lands a card that changed column, and leaves a settled one alone', () => {
+    const before = laneStates([lane({ id: 'a', state: 'open' }), lane({ id: 'b', state: 'active' })]);
+    const now = [lane({ id: 'a', state: 'claimed' }), lane({ id: 'b', state: 'active' })];
+    const { landed } = movedLanes(before, now);
+    expect([...landed]).toEqual(['a']);
+  });
+
+  it('lands a card that is new to the board', () => {
+    const { landed } = movedLanes(laneStates([]), [lane({ id: 'fresh', state: 'open' })]);
+    expect([...landed]).toEqual(['fresh']);
+  });
+
+  it('flourishes a VERIFIED close and not an unverified one (ADR 169)', () => {
+    const before = laneStates([lane({ id: 'v', state: 'active' }), lane({ id: 'u', state: 'active' })]);
+    const { landed, flourished } = movedLanes(before, [
+      lane({ id: 'v', state: 'done', verified: true }),
+      lane({ id: 'u', state: 'done', verified: false }),
+    ]);
+    expect([...flourished]).toEqual(['v']);
+    // Both still MOVED — the unverified close animates in, it just gets no celebration.
+    expect([...landed].sort()).toEqual(['u', 'v']);
+  });
+
+  it('does not flourish a lane that was already done before the diff', () => {
+    // `was === undefined` is a lane the previous snapshot never saw; arriving already-done is not a
+    // close anyone watched happen, so it lands without the beat.
+    const { flourished } = movedLanes(laneStates([]), [
+      lane({ id: 'x', state: 'done', verified: true }),
+    ]);
+    expect([...flourished]).toEqual([]);
+  });
+
+  it('gives no beat for merely reaching review', () => {
+    const before = laneStates([lane({ id: 'r', state: 'active' })]);
+    const { landed, flourished } = movedLanes(before, [
+      lane({ id: 'r', state: 'ready_for_review', verified: true }),
+    ]);
+    expect([...landed]).toEqual(['r']);
+    expect([...flourished]).toEqual([]);
   });
 });

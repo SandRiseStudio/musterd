@@ -1,7 +1,7 @@
 // Pure decision logic for the writable board (item 5 / ADR 104) — every rule that decides *what a
 // member may do to a lane* lives here, testable without DOM. The route/component layer renders these
 // verdicts; the daemon remains the authority (these mirror, never replace, its checks).
-import type { Goal, Lane, LaneBoard, LaneResult, UpdateLane } from '@musterd/protocol';
+import type { Goal, Lane, LaneBoard, LaneResult, LaneState, UpdateLane } from '@musterd/protocol';
 
 /** A verb the board may offer on a card. `patch` is the exact `PATCH /lanes/:id` body. */
 export interface LaneAction {
@@ -145,4 +145,42 @@ export function capColumn<T>(
 ): { shown: T[]; hidden: number } {
   if (expanded || items.length <= cap) return { shown: items, hidden: 0 };
   return { shown: items.slice(0, cap), hidden: items.length - cap };
+}
+
+/** The two motion sets the board hands its cards: which moved, and which earned the flourish. */
+export interface MovedLanes {
+  landed: ReadonlySet<string>;
+  flourished: ReadonlySet<string>;
+}
+
+/** Nothing moved — the first render, and the shared empty value so identity stays stable. */
+export const NO_MOVES: MovedLanes = { landed: new Set(), flourished: new Set() };
+
+/** A lane-id → state snapshot, the input `movedLanes` diffs against. */
+export function laneStates(lanes: Lane[]): ReadonlyMap<string, LaneState> {
+  return new Map(lanes.map((l) => [l.id, l.state]));
+}
+
+/**
+ * Which cards changed column since the previous snapshot — `landed` animate in, `flourished` get the
+ * warm beat.
+ *
+ * Pure, and deliberately so: this used to read a ref mid-render, which made the board's motion a
+ * function of mutable state the renderer could not see and left it impossible to test. A diff of two
+ * snapshots is the same logic with neither problem.
+ *
+ * The flourish fires on a CONFIRMED close only (ADR 169, miley's call): a counterpart said "this is
+ * what I wanted". A self-close lands like any other move — no celebration for an unverified close,
+ * and no beat at all on merely reaching `ready_for_review`.
+ */
+export function movedLanes(prev: ReadonlyMap<string, LaneState>, lanes: Lane[]): MovedLanes {
+  const landed = new Set<string>();
+  const flourished = new Set<string>();
+  for (const lane of lanes) {
+    const was = prev.get(lane.id);
+    if (was === lane.state) continue;
+    landed.add(lane.id);
+    if (lane.state === 'done' && was !== undefined && lane.verified === true) flourished.add(lane.id);
+  }
+  return { landed, flourished };
 }

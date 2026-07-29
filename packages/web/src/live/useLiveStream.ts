@@ -42,7 +42,9 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
   // Keep the latest callbacks in a ref so the connect effect doesn't re-run (and re-provision) when the
   // route re-renders with fresh closures — only cfg identity should drive reconnects.
   const hooksRef = useRef(hooks);
-  hooksRef.current = hooks;
+  useEffect(() => {
+    hooksRef.current = hooks;
+  });
   const [envelopes, setEnvelopes] = useState<Envelope[]>([]);
   // The daemon's build ref (ADR 130/135) — an operator detail (roster tooltip).
   const [daemonBuild, setDaemonBuild] = useState<string | undefined>(undefined);
@@ -55,11 +57,20 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
   // Ids we've already sounded — at-least-once delivery + reconnect replays must not double-chime.
   const chimedRef = useRef<Set<string>>(new Set());
 
+  // Reconnects are driven by the credential TRIPLE, never by `cfg`'s object identity — the route
+  // rebuilds that object on plenty of renders that mean nothing to the connection, and re-running
+  // this effect tears down a live socket and re-provisions. Rebuilding the triple into a local
+  // `conn` is what lets the dependency list be honest about that instead of suppressing the rule:
+  // everything the effect reads is now in its deps.
+  const team = cfg?.team;
+  const as = cfg?.as;
+  const token = cfg?.token;
   useEffect(() => {
-    if (!cfg) {
+    if (!team || !as || !token) {
       setStatus('idle');
       return;
     }
+    const cfg: LiveConfig = { team, as, token };
     let alive = true;
     setEnvelopes([]);
     setLiveIds(new Set());
@@ -142,7 +153,7 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
       alive = false;
       client.close();
     };
-  }, [cfg?.team, cfg?.as, cfg?.token]);
+  }, [team, as, token]);
 
   return { envelopes, roster, status, error, liveIds, daemonBuild, daemonEpoch };
 }

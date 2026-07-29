@@ -72,7 +72,9 @@ export function Stream({
   const visible = envelopes.slice(hidden);
   // Latest envelopes for the stable reveal listener (registered once, must not go stale).
   const envelopesRef = useRef(envelopes);
-  envelopesRef.current = envelopes;
+  useEffect(() => {
+    envelopesRef.current = envelopes;
+  });
   // Scroll correction captured at expansion time, applied after the wider window commits.
   const anchorRef = useRef<{ top: number; height: number } | null>(null);
   // A reveal target whose row isn't mounted yet — scrolled+flashed as soon as it exists.
@@ -88,7 +90,9 @@ export function Stream({
     setWindowSize((w) => expandedWindow(w, envelopesRef.current.length));
   };
   const expandRef = useRef(expand);
-  expandRef.current = expand;
+  useEffect(() => {
+    expandRef.current = expand;
+  });
 
   // Follow the bottom as content grows (new rows AND text typing out) — but only while the reader is
   // already near the bottom, so scrolling up to read history is never yanked back down.

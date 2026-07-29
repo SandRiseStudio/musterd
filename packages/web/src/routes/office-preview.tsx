@@ -254,7 +254,11 @@ function OfficePreviewPage() {
     [present, away, idle, stale],
   );
   const dataRef = useRef(buildData);
-  dataRef.current = buildData;
+  // Synced in an effect, not during render — see OfficeScene: the mount effect subscribes once and
+  // reads the latest builder through this ref, and it is declared after this one so it sees it set.
+  useEffect(() => {
+    dataRef.current = buildData;
+  });
 
   useEffect(() => {
     const host = hostRef.current;

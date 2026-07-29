@@ -84,14 +84,23 @@ export function OfficeScene({
   const emittedRef = useRef<Set<string>>(new Set());
 
   const data = useMemo(() => computeData(teamName, roster), [teamName, roster]);
+  // Latest-value refs for the mount effect below, which subscribes ONCE and must not re-run when a
+  // prop identity changes (re-running it would tear down and rebuild the whole canvas scene).
+  //
+  // Written in an effect rather than during render: a render must be pure, and React may render a
+  // component and throw the result away. This effect is declared BEFORE the mount effect on purpose
+  // — effects run in declaration order, so the refs are populated by the time the scene mounts and
+  // reads them.
   const dataRef = useRef(data);
-  dataRef.current = data;
   const onActClickRef = useRef(onActClick);
-  onActClickRef.current = onActClick;
   const onReadyRef = useRef(onReady);
-  onReadyRef.current = onReady;
   const collapsedRef = useRef(collapsed);
-  collapsedRef.current = collapsed;
+  useEffect(() => {
+    dataRef.current = data;
+    onActClickRef.current = onActClick;
+    onReadyRef.current = onReady;
+    collapsedRef.current = collapsed;
+  });
 
   useEffect(() => {
     const host = hostRef.current;
