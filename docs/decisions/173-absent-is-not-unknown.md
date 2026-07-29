@@ -139,6 +139,9 @@ state at introduction, or does it need a follow-up PR to add one?
   booleans. A doctrine ADR that does not change behaviour is decoration, and this one should be
   measured for that rather than assumed innocent of it.
 
+_Standing count, kept here so it cannot drift: **1 correction, 0 trigger hits.** See "Correction #1"
+below for the first, and why an old read fixed when touched is not a trigger hit._
+
 ## Consequences
 
 - New derived reads carry an abstention state at introduction, which is a small, permanent tax on
@@ -231,6 +234,47 @@ experimental evidence. The kill criterion is unchanged and still live: two conse
 after this landed ⇒ replace the prose with a mechanism. Finding 2 above will be the first correction
 if it lands as one, and by the ADR's own regime it is an "old one fixed when touched" rather than a
 trigger hit — the distinction is what keeps the count honest.
+
+## Correction #1 — `reviewRouting.human_required`, landed 2026-07-29
+
+Finding 2 above landed as a correction, so the ledger reads: **corrections since this ADR: 1. Trigger
+hits: still 0.** Those two counts stay separate on purpose. This one is an "old one fixed when
+touched" — a read that predates the ADR, found by audit — not the pre-registered trigger, which is
+still specifically _a newly added derived read_ on `GET /report`, an audit-derived reason, or a health
+check. The kill criterion is live and unmoved: **one more correction, consecutively, and the prose is
+insufficient** — replace it with a mechanism (the ADR-template question, or a lint over derived reads
+returning bare booleans).
+
+`human_required` is three-valued now, on the read edge only, exactly as clause 2 pointed. What made
+the fix bigger than a type change were two things the audit could not have seen from the outside, and
+both are worth carrying forward as evidence about the _shape_ of this defect class:
+
+1. **The abstention had to be created at the write edge before the read could report it.** The ready
+   edge wrote `human_required` only when true, so absence meant "not required" _or_ "legacy row" —
+   indistinguishable. A three-valued read alone would have abstained over every ordinary no-risk
+   lane: strictly more honest and completely useless, an unknown so common it carries no information.
+   The field is now always written, both ways, so absence means precisely "written before that
+   change". **The lesson for clause 2: "record the distinction where it is known" is a claim about
+   the writer, and a reader cannot become honest on its own if the writer threw the distinction
+   away.** An omitted `false` is not a smaller record than an explicit one — it is a lossy one.
+
+2. **The `catch` this ADR reasoned about was unreachable, and the actual failure was worse than a
+   wrong answer.** The lookup filtered on `json_extract(detail, '$.lane')`, so an unparseable row
+   made SQLite raise from the _query_, before the try — and because that expression was evaluated
+   over every `lane.ready_for_review` row the scan touched, a single corrupt row broke the close edge
+   for **every lane**, not just its own. The filter is now the indexed `target` column (the ready
+   edge already writes the lane id there), which leaves exactly one JSON parse, inside the try, where
+   the ADR always assumed it was. Noted because the ADR's own framing — "a read that cannot parse its
+   evidence returns a confident value" — quietly assumes the read _survives_ the unparseable
+   evidence. Sometimes the projection does not abstain OR lie; it throws, and takes its neighbours
+   with it. Worth a look wherever else `json_extract` filters an audit scan.
+
+The counter-metric is also legible for the first time: `human_review_missed` closes had no bucket in
+`deriveReviewMetrics`, so the reason ladder's `else` counted them as `self_close` — "never entered
+review", said of a lane that entered review and whose required human never came. ADR 172's number was
+not merely undercounted on abstaining rows; where it did fire it was filed under its opposite. Both
+`closed.human_review_missed` and `closed.human_required_unknown` are now reported, the second being
+clause 4 made operational: the count says how much the first one abstained over.
 
 ## Related
 

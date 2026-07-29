@@ -464,6 +464,20 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   w(`    ${theme.meta('self-closed')} ${c.self_close} · never entered review\n`);
   w(`    ${theme.meta('no counterpart')} ${c.no_candidate} · sanctioned, nobody was asked\n`);
   w(`    ${theme.meta('review timed out')} ${c.review_timeout} · asked, unanswered\n`);
+  // ADR 172's counter-metric, warn-coloured because it is the one close shape that is nobody's
+  // sanctioned degradation: the lane declared a risk, the risk demanded a human, no human came.
+  if (c.human_review_missed > 0) {
+    w(
+      `    ${theme.warn('human review missed')} ${c.human_review_missed} · a declared risk required a human, none reviewed\n`,
+    );
+  }
+  // And the abstention beside it (ADR 173 clause 4): without this line the count above reads as a
+  // clean census, when for these closes we simply could not see what the lane required.
+  if (c.human_required_unknown > 0) {
+    w(
+      `    ${theme.meta(`${c.human_required_unknown} of those closes could not tell whether a human was required — their ready row predates the field or would not parse, so the count above abstains over them`)}\n`,
+    );
+  }
   if (c.abandoned > 0) w(`    ${theme.meta('abandoned')} ${c.abandoned}\n`);
   return 0;
 }

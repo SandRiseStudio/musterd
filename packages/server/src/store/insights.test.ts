@@ -913,4 +913,46 @@ describe('deriveReviewMetrics (ADR 169) — the review eval, without an admin cr
     expect(m.closed.total).toBe(0);
     expect(m.window_ms).toBeGreaterThan(0);
   });
+
+  // ADR 172's counter-metric was invisible in the one report meant to show it: `human_review_missed`
+  // had no bucket, so the reason-ladder's `else` swept those closes into `self_close` — "never
+  // entered review", of a lane that demonstrably entered review and whose required human never came.
+  it('counts a human_review_missed close as itself, NOT as a self-close', () => {
+    const { db, team } = seed();
+    row(db, team.id, 'lane.ready_for_review', {
+      lane: 'a',
+      no_candidate: true,
+      human_required: true,
+    });
+    row(db, team.id, 'lane.closed', {
+      lane: 'a',
+      reason: 'human_review_missed',
+      human_review_missed: true,
+      verified: false,
+    });
+
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.closed.human_review_missed).toBe(1);
+    expect(m.closed.self_close).toBe(0); // the miscount this replaces
+    expect(m.closed.no_candidate).toBe(0); // and not folded into the sanctioned degradation either
+  });
+
+  // Clause 4: an abstention must be VISIBLE, not merely absent from a count. The close edge records
+  // that it could not tell; the report carries the total so a reader knows how much the
+  // human_review_missed number abstained over.
+  it('surfaces how many closes could not tell whether a human was required', () => {
+    const { db, team } = seed();
+    row(db, team.id, 'lane.ready_for_review', { lane: 'a', no_candidate: true }); // pre-#462 row
+    row(db, team.id, 'lane.closed', {
+      lane: 'a',
+      reason: 'no_candidate',
+      human_required_unknown: true,
+      verified: false,
+    });
+    row(db, team.id, 'lane.closed', { lane: 'b', reason: 'self_close', verified: false });
+
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.closed.human_required_unknown).toBe(1);
+    expect(m.closed.human_review_missed).toBe(0); // never inferred from an abstention
+  });
 });

@@ -107,6 +107,15 @@ per-seat; the posture aggregates them, it does not re-decide them.
     routing an agent around the null pick would quietly satisfy a requirement it does not meet.
   - Never a wedge, still: nothing blocks the close. The requirement has a record, not a lock — the
     ADR 145 line this whole arc holds.
+  - **Amended 2026-07-29 (ADR 173 correction #1).** This counter-metric was wrong in both directions
+    at once and neither was visible: on a close whose ready row predated the requirement field, the
+    read served "could not tell" as "not required" and the flag was silently omitted; and where the
+    reason DID fire, `deriveReviewMetrics` had no bucket for it, so `human_review_missed` closes were
+    counted as `self_close` — "never entered review", of a lane that entered review. The requirement
+    is now always recorded at the ready edge (both booleans, so absence means "legacy" and nothing
+    else), the close edge asserts the flag only on `=== true`, and the report carries
+    `closed.human_review_missed` beside `closed.human_required_unknown` — the count of closes this
+    number abstains over. Read the second before drawing any conclusion from the first.
 
 - **Admins can only be humans — DECIDED by nick, 2026-07-28.** The first cut of the risk route
   accepted `kind === 'human' || is_admin`, which left an edge: an agent granted admin capability
