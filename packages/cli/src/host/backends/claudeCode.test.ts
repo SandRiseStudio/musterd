@@ -230,6 +230,83 @@ describe('claudeCodeBackend.wake', () => {
     await actuation.settled;
   });
 
+  it('a stale cached claude path self-heals: re-resolve and retry inside the same attempt', async () => {
+    // The measured failure (lane 01KYQ913P5): a resident host cached a path, a CLI upgrade moved the
+    // install, and 8 of 14 wake failures were ENOENT on the dead path — three of which exhaust an act.
+    const child = new FakeChild();
+    let invalidated = 0;
+    const bins = ['/gone/claude', '/moved/claude'];
+    const calls: SpawnCall[] = [];
+    const backend = claudeCodeBackend({
+      resolveBin: async () => bins[Math.min(invalidated, 1)]!,
+      invalidateBin: () => {
+        invalidated++;
+      },
+      spawn: ((bin: string, args: string[], opts: SpawnCall['opts']) => {
+        calls.push({ bin, args, opts });
+        if (bin === '/gone/claude') throw new Error('spawn /gone/claude ENOENT');
+        return child as never;
+      }) as never,
+      mintSessionId: () => '00000000-0000-4000-8000-000000000000',
+      killGraceMs: 5,
+      confirmBeatMs: 5,
+      readSession: () => ({ state: 'none' }),
+    });
+    const c = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const actuation = await backend.wake(spec(), c);
+
+    expect(invalidated).toBe(1);
+    expect(calls.map((k) => k.bin)).toEqual(['/gone/claude', '/moved/claude']);
+    expect(actuation.outcome).toEqual({ occupied: true, session: 'fresh' });
+    expect(c.lines.join(' ')).toContain('re-resolved and retrying');
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('a NON-ENOENT spawn failure does not re-resolve — the path is right, something else is wrong', async () => {
+    let invalidated = 0;
+    const calls: string[] = [];
+    const backend = claudeCodeBackend({
+      resolveBin: async () => '/fake/claude',
+      invalidateBin: () => {
+        invalidated++;
+      },
+      spawn: ((bin: string) => {
+        calls.push(bin);
+        throw new Error('spawn /fake/claude EACCES');
+      }) as never,
+      mintSessionId: () => '00000000-0000-4000-8000-000000000000',
+      readSession: () => ({ state: 'none' }),
+    });
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: false })),
+    );
+    expect(invalidated).toBe(0);
+    expect(calls).toEqual(['/fake/claude']); // one attempt only — never double-spend on EACCES
+    expect(actuation.outcome.reason).toContain('EACCES');
+  });
+
+  it('re-resolving to the SAME path does not retry — a retry that cannot differ is wasted spend', async () => {
+    const calls: string[] = [];
+    const backend = claudeCodeBackend({
+      resolveBin: async () => '/same/claude',
+      invalidateBin: () => {},
+      spawn: ((bin: string) => {
+        calls.push(bin);
+        throw new Error('spawn /same/claude ENOENT');
+      }) as never,
+      mintSessionId: () => '00000000-0000-4000-8000-000000000000',
+      readSession: () => ({ state: 'none' }),
+    });
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: false })),
+    );
+    expect(calls).toEqual(['/same/claude']);
+    expect(actuation.outcome.reason).toContain('ENOENT');
+  });
+
   it('verified occupancy with non-wake provenance still occupies but names the stale adapter', async () => {
     const child = new FakeChild();
     const { backend } = harness(child);

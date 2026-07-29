@@ -49,7 +49,23 @@ export function claudeCandidates(): string[] {
 
 let claudeBinCache: string | null | undefined;
 
-/** Resolve a runnable `claude`: PATH first, then known install locations. Cached per process. */
+/**
+ * Drop the memoised answer so the next {@link resolveClaudeBin} searches again.
+ *
+ * The cache is per *process*, which is harmless for a one-shot CLI and wrong for `musterd host` — a
+ * KeepAlive resident loop that lives for days. A path resolved at boot outlives the CLI it pointed
+ * at: a `claude` upgrade that moves the install leaves the host spawning a path that no longer
+ * exists, and since a spawn failure burns a wake attempt, three of them exhaust the act terminally.
+ * Measured on the dogfood machine (lane `01KYQ913P5`): **8 of 14 recorded wake failures were ENOENT
+ * on a stale cached path** — `~/.npmglobal/bin/claude` (4) and `~/.local/bin/claude` (3), plus one
+ * outright "not found". No wake has ever failed on an expired grant.
+ */
+export function invalidateClaudeBinCache(): void {
+  claudeBinCache = undefined;
+}
+
+/** Resolve a runnable `claude`: PATH first, then known install locations. Cached per process —
+ *  call {@link invalidateClaudeBinCache} when a spawn proves the cached answer stale. */
 export async function resolveClaudeBin(): Promise<string | null> {
   if (claudeBinCache !== undefined) return claudeBinCache;
   if ((await hasRunnable('claude', ['--version'])).ok) return (claudeBinCache = 'claude');

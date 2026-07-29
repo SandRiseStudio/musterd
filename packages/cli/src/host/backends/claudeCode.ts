@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { resolveClaudeBin } from '../../claudeBin.js';
+import { invalidateClaudeBinCache, resolveClaudeBin } from '../../claudeBin.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
 import type {
   ActuatorBackend,
@@ -85,6 +85,8 @@ export interface ClaudeCodeDeps {
   readSession?: (workspace: string) => LocalSessionLiveness;
   /** Injectable pinned-shim write (default: {@link ensurePinnedMusterd}); tests never touch $HOME. */
   ensurePinned?: (opts: { node: string; binJs: string }) => string | undefined;
+  /** Injectable cache drop (default: {@link invalidateClaudeBinCache}) for the stale-bin re-resolve. */
+  invalidateBin?: () => void;
   resumeVerifyWindowMs?: number;
   confirmBeatMs?: number;
 }
@@ -362,6 +364,30 @@ function slotRung(
   return { id: s.id };
 }
 
+/**
+ * A spawn failure that means "the binary is not there" — the stale-cache signature. Narrow on
+ * purpose: a permission error or a crashed harness must NOT trigger a re-resolve, because those say
+ * the path is right and something else is wrong, and retrying them would double-spend the attempt.
+ */
+function isMissingBinary(spawnFailure: string): boolean {
+  return /\bENOENT\b/.test(spawnFailure);
+}
+
+/**
+ * Re-resolve `claude` after a spawn proved the cached path stale. Returns the NEW path, or
+ * `undefined` when nothing changed — so the caller only retries when retrying can differ.
+ */
+async function respawnAfterStaleBin(
+  deps: ClaudeCodeDeps,
+  staleBin: string,
+  spawnFailure: string,
+): Promise<string | undefined> {
+  if (!isMissingBinary(spawnFailure)) return undefined;
+  (deps.invalidateBin ?? invalidateClaudeBinCache)();
+  const fresh = await (deps.resolveBin ?? resolveClaudeBin)();
+  return fresh && fresh !== staleBin ? fresh : undefined;
+}
+
 export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
   return {
     harness: 'claude-code',
@@ -480,8 +506,44 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
         },
       );
       if ('spawnFailure' in fresh) {
+        // A resident host caches its `claude` path, and a CLI upgrade that moves the install turns
+        // every later wake into ENOENT on a path that no longer exists — 8 of 14 recorded wake
+        // failures. A spawn failure is the only honest proof the cached answer went stale, so react
+        // to it: re-resolve once and retry, rather than burning this attempt (three exhaust the act).
+        const healed = await respawnAfterStaleBin(deps, bin, fresh.spawnFailure);
+        if (!healed) {
+          return {
+            outcome: { occupied: false, session: 'fresh', reason: fresh.spawnFailure },
+            settled: settleAll(),
+          };
+        }
+        ctx.log(`claude moved (${bin} → ${healed}) — re-resolved and retrying ${seat}`);
+        const retry = runAttempt(
+          deps,
+          healed,
+          buildWakeArgs(spec.order.composed_line, sessionId, argOpts),
+          spec,
+          ctx,
+          {
+            label: 'fresh',
+            timeoutMs: Math.max(deadline - Date.now(), Math.min(10_000, spec.bounds.timeout_ms)),
+            confirmBeatMs: deps.confirmBeatMs ?? VERIFY_CONFIRM_BEAT_MS,
+          },
+        );
+        if ('spawnFailure' in retry) {
+          return {
+            outcome: { occupied: false, session: 'fresh', reason: retry.spawnFailure },
+            settled: settleAll(),
+          };
+        }
+        const healedOutcome = await retry.result;
+        settledParts.push(healedOutcome.settled);
         return {
-          outcome: { occupied: false, session: 'fresh', reason: fresh.spawnFailure },
+          outcome: {
+            occupied: healedOutcome.occupied,
+            session: 'fresh',
+            ...(healedOutcome.reason ? { reason: healedOutcome.reason } : {}),
+          },
           settled: settleAll(),
         };
       }
