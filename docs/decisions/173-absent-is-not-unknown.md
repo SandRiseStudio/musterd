@@ -139,8 +139,13 @@ state at introduction, or does it need a follow-up PR to add one?
   booleans. A doctrine ADR that does not change behaviour is decoration, and this one should be
   measured for that rather than assumed innocent of it.
 
-_Standing count, kept here so it cannot drift: **1 correction, 0 trigger hits.** See "Correction #1"
-below for the first, and why an old read fixed when touched is not a trigger hit._
+_Standing count, kept here so it cannot drift — **two counters, deliberately apart** (verdict
+2026-07-30, see "The ledger, settled"):_
+
+- _**Kill-criterion experiment: 0 triggers, 0 corrections.** Un-run. No newly added derived read has
+  appeared on the three named surfaces since this ADR landed._
+- _**Old reads fixed when touched: 2** (`reviewRouting` #517, `insights.ts` #521). Diagnostic only.
+  This counter fires nothing._
 
 ## Consequences
 
@@ -237,13 +242,10 @@ trigger hit — the distinction is what keeps the count honest.
 
 ## Correction #1 — `reviewRouting.human_required`, landed 2026-07-29
 
-Finding 2 above landed as a correction, so the ledger reads: **corrections since this ADR: 1. Trigger
-hits: still 0.** Those two counts stay separate on purpose. This one is an "old one fixed when
-touched" — a read that predates the ADR, found by audit — not the pre-registered trigger, which is
-still specifically _a newly added derived read_ on `GET /report`, an audit-derived reason, or a health
-check. The kill criterion is live and unmoved: **one more correction, consecutively, and the prose is
-insufficient** — replace it with a mechanism (the ADR-template question, or a lint over derived reads
-returning bare booleans).
+Finding 2 above landed as a fix. It was first logged here as "correction #1" against the kill
+criterion; **that was wrong and is corrected below** — it is an old read fixed when touched, which
+this ADR's own regime excludes from the trigger, and therefore from the criterion that counts
+corrections to triggers.
 
 `human_required` is three-valued now, on the read edge only, exactly as clause 2 pointed. What made
 the fix bigger than a type change were two things the audit could not have seen from the outside, and
@@ -262,12 +264,21 @@ both are worth carrying forward as evidence about the _shape_ of this defect cla
    wrong answer.** The lookup filtered on `json_extract(detail, '$.lane')`, so an unparseable row
    made SQLite raise from the _query_, before the try — and because that expression was evaluated
    over every `lane.ready_for_review` row the scan touched, a single corrupt row broke the close edge
-   for **every lane**, not just its own. The filter is now the indexed `target` column (the ready
+   for **every lane**, not just its own. _(Correction, measured by ryder 2026-07-29: the sweep this
+   paragraph originally recommended does not pay, and the throw is not reachable in practice — both
+   audit writers are `x ? JSON.stringify(x) : null`, and `json_extract` over `NULL` returns `NULL`;
+   only `''`, plaintext or genuinely malformed JSON raises, which needs direct DB manipulation. Nor
+   is it a performance argument: 0.451ms vs 0.430ms for the `target=` form on the real DB, and
+   28.6ms vs 32.0ms at 32× scale — `json_extract` is not slower at all. The real cost is a missing
+   index on `action`, which hits both forms equally, tracked as its own lane. The `target=` filter
+   here stands on being the narrower, more obvious predicate, not on a hazard it removes fleet-wide.
+   Recorded because the recommendation was mine and it was wrong.)_ The filter is now the `target` column (the ready
    edge already writes the lane id there), which leaves exactly one JSON parse, inside the try, where
    the ADR always assumed it was. Noted because the ADR's own framing — "a read that cannot parse its
    evidence returns a confident value" — quietly assumes the read _survives_ the unparseable
    evidence. Sometimes the projection does not abstain OR lie; it throws, and takes its neighbours
-   with it. Worth a look wherever else `json_extract` filters an audit scan.
+   with it — a third failure mode worth holding in mind even where, as here, the conditions for it
+   turn out not to arise.
 
 The counter-metric is also legible for the first time: `human_review_missed` closes had no bucket in
 `deriveReviewMetrics`, so the reason ladder's `else` counted them as `self_close` — "never entered
@@ -300,26 +311,62 @@ found it, for two other reasons. A default arm that means "everything I did not 
 whether or not its author thought of it that way, and it needs a name for the same reason the values
 above it do.
 
-### The ledger question, explicitly not answered here
+### The ledger, settled — 2026-07-30 (izzo's call, ryder concurring)
 
-Whether this counts as **correction #2** — which would fire the kill criterion — is a real question
-and it is deliberately left open, because the person who would benefit from a convenient answer must
-not be the one giving it.
+The question ryder left open — is #521 correction #2, firing the criterion, or the same correction as
+#517 incompletely applied? — was **neither**, and the ledger itself was the defect.
 
-- **For counting it:** it is a separate PR, adding third and fourth states to a read that had two,
-  which is precisely the trace this ADR pre-registered.
-- **Against:** it is the same function, the same audit, the same day, and the same defect as
-  correction #1 — an incompletely applied fix rather than a fresh discovery. Counting one logical
-  correction as two would fire the criterion on a technicality and force a mechanism the evidence has
-  not actually earned.
+**Read the Experiment block as written.** Its three bullets are all outcomes _of the trigger_: "the
+next derived read ADDED to `GET /report`, an audit-derived reason, or a health check — does it ship
+with its abstention state at introduction, or does it need a follow-up PR?" So "needs a correction"
+means _a triggered read needed a follow-up_, and the kill criterion — "two consecutive corrections" —
+counts corrections **to trigger instances**, not archaeology. Both #517 and #521 are old reads
+pre-dating the ADR, surfaced by audit. Under the ADR's own regime that is "fixed when touched", which
+it explicitly says is not a trigger hit; it follows that neither is a criterion correction either.
 
-ryder authored this ADR, its experiment, and its ledger, and found both items. Deciding how his own
-findings are tallied against his own criterion is the [ADR
-171](171-provisioned-workspace-currency.md) hazard exactly — an author marking his own homework — so
-the standing count above is **left at 1** pending izzo's or nick's call, and this section is the
-argument, not the verdict. If it is counted, the criterion fires and the answer is the lint over
-derived reads; the shape that would have caught all four defects here is _a derived read whose sibling
-fields, or whose default arm, disagree with its named cases about whether they can abstain_.
+So the ledger is **two counters**, and they must never be added together:
+
+| counter                                                        | value          | fires anything?        |
+| -------------------------------------------------------------- | -------------- | ---------------------- |
+| Kill-criterion experiment (triggers / corrections-to-triggers) | 0 / 0          | yes — at 2 consecutive |
+| Old reads fixed when touched                                   | 2 (#517, #521) | no, diagnostic only    |
+
+**Why this reading and not the flattering one.** Under "2 = fires", the criterion would be spent on
+two pre-existing bugs found by a single audit — and a genuinely new two-valued read shipping next
+week would arrive with the criterion already burned, which is the outcome the criterion exists to
+prevent. It also costs the reading that would have looked best for this arc ("two findings in one
+day, the prose is working hard"): under the correct reading, neither finding is evidence about the
+prose at all, because the prose was never in front of the people who wrote those reads.
+
+**Recorded as a joint error, not ryder's.** He asked for a count without specifying which of two
+senses it counted; I pinned it without noticing the ambiguity. It stood wrong for about an hour. The
+author-marks-own-homework hazard ([ADR 171](171-provisioned-workspace-currency.md)) was real and he
+was right to hand it off — and the handoff worked in the direction it was supposed to: the answer
+that came back was the one that cost the answerer something.
+
+### Prose-insufficiency evidence that stands outside the experiment
+
+This belongs in the record whatever the counters say, because no counter would ever have caught it.
+
+**Correction #2's defect was one line below correction #1's, in a function izzo was editing at the
+time, while consciously applying this rule.** #517 added two abstention buckets to
+`deriveReviewMetrics`'s reason ladder — the act of applying clause 1 — and left the `else` arm
+directly beneath them collapsing two more abstentions. The rule was not merely available, not merely
+recently read: it was _the thing being done_, in that function, in that minute. It still did not
+catch a third abstention one line away.
+
+That is a strictly stronger argument for a mechanism than any tally of corrections, and it points at
+the shape of the mechanism too: the miss was a **default arm**, which reads as control flow rather
+than as a value, so a rule phrased about _what a projection returns_ slides right past it. A lint
+would want to treat `else` in a classifying ladder as one of the cases — because that is what it is.
+
+**Forward note for whoever hits the trigger first.** Two candidate trigger instances are visibly
+coming, and whoever builds either is the experiment: the `delivery_hint` rail has no `nudge.*` /
+`delivery.*` audit vocabulary at all, so "no hint was warranted" is indistinguishable from "the code
+never fires" (stanley, 2026-07-29) — and [ADR 179](179-board-triggered-work-order-wakes.md)'s
+per-loop observability adds derived reads by design. If your new read ships three-valued at
+introduction, say so in your PR: that is the datum, and it is the one the criterion has been waiting
+for.
 
 ## Related
 
