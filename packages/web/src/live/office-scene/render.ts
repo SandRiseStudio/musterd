@@ -1283,19 +1283,22 @@ function watercooler(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: nu
 function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf): void {
   const f = FWD[s.dir];
   const sn = f[1] !== 0; // S/N run along x; E/W run along y
-  const wx = sn ? SHELF_LONG : SHELF_DEEP;
-  const dy = sn ? SHELF_DEEP : SHELF_LONG;
-  box(ctx, fit, s.lx, s.ly, wx, dy, SHELF_H, PAL.wood); // carcass
-  // book rows on the front (room-facing) face — three bands of little spines up the height
+  const wx = sn ? s.long : s.deep;
+  const dy = sn ? s.deep : s.long;
+  box(ctx, fit, s.lx, s.ly, wx, dy, s.high, mul(PAL.wood, s.tone)); // carcass
+  // Book rows on the front (room-facing) face. The bands are spread over the unit's own height
+  // rather than pinned at a fixed pitch, so a low-wide unit reads as a credenza with two shelves
+  // instead of a tall one with its top sliced off.
   const BOOKS = ['#c95c4a', '#e0a72b', '#5aa0c9', '#6aa86a', '#b06fc9', '#d98b4a'];
   const face = 0.5; // fraction of the long side the books span
-  for (let row = 0; row < 3; row++) {
-    const baseUp = 8 + row * 18;
+  const bandGap = (s.high - 14) / s.rows;
+  for (let row = 0; row < s.rows; row++) {
+    const baseUp = 8 + row * bandGap;
     const n = 5;
     for (let i = 0; i < n; i++) {
       const t = (i - (n - 1) / 2) / n; // -.4..+.4 along the shelf
-      const bx = s.lx + (sn ? t * SHELF_LONG * face : f[0] * (SHELF_DEEP / 2 - 2));
-      const by = s.ly + (sn ? f[1] * (SHELF_DEEP / 2 - 2) : t * SHELF_LONG * face);
+      const bx = s.lx + (sn ? t * s.long * face : f[0] * (s.deep / 2 - 2));
+      const by = s.ly + (sn ? f[1] * (s.deep / 2 - 2) : t * s.long * face);
       const col = BOOKS[(row * 2 + i) % BOOKS.length]!;
       box(ctx, fit, bx, by, sn ? 8 : 3, sn ? 3 : 8, 13, col, baseUp);
     }

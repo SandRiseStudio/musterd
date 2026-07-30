@@ -368,25 +368,65 @@ export const WINDOWS: readonly Win[] = [
 export const BEAM_LEN = 150;
 export const BEAM_SHEAR = 46;
 
+/** What sits on a shelf top. A credenza-height top is a real surface — leaving it bare repeats the
+ *  same uniformity problem one shelf down. */
+export type ShelfDecor = 'plant' | 'photo' | 'books' | 'trophy';
+
 export interface Bookshelf {
   lx: number;
   ly: number;
   /** Which way the shelf's open (book) face points — set so it faces into the room. */
   dir: Dir;
+  /** Along the wall. */
+  long: number;
+  /** Into the room. */
+  deep: number;
+  high: number;
+  /** Book bands up the carcass — scales with height, so a low unit is not a tall one squashed. */
+  rows: number;
+  /** Carcass tone multiplier off `PAL.wood`. */
+  tone: number;
+  /** Shelved spine-in, page-edges to the room. Exactly one unit, and it is deliberate. */
+  reversed?: boolean;
+  decor: ShelfDecor;
 }
 
-/** Bookshelf footprint (logical): a slim unit that lines a wall — wide along the wall, shallow, tall. */
+/** Default bookshelf footprint (logical): wide along the wall, shallow, tall. Each unit overrides
+ *  these — they are the baseline the archetypes vary from, not the shape of every shelf. */
 export const SHELF_LONG = 58;
 export const SHELF_DEEP = 20;
 export const SHELF_H = 66;
 
-/** Freestanding bookshelves flush to the open wall stretches (back of footprint on the perimeter,
- * same pattern as the entrance door) — warm decor, block nav. */
+/**
+ * Freestanding bookshelves flush to the open wall stretches (back of footprint on the perimeter,
+ * same pattern as the entrance door) — warm decor, block nav.
+ *
+ * Three archetypes rather than four copies of one box (nick, 2026-07-30: "right now we have the same
+ * uniform bookshelves throughout the office space"). A tall-narrow reads as a bookcase; a low-wide
+ * puts its top at a height where an object actually reads, which is what makes `decor` worth having;
+ * the standard is the baseline. The carcass `tone` varies too — a room accumulates furniture over
+ * years, it does not buy a matched set in one afternoon.
+ */
 export const BOOKSHELVES: Bookshelf[] = [
-  { lx: 130, ly: SHELF_DEEP / 2, dir: 'S' }, // back wall, in the corner behind pod 0
-  { lx: FLOOR - SHELF_DEEP / 2, ly: 320, dir: 'W' }, // right wall, below the lounge
-  { lx: SHELF_DEEP / 2, ly: 240, dir: 'E' }, // left wall, beside pod 0
-  { lx: SHELF_DEEP / 2, ly: 560, dir: 'E' }, // left wall, beside pod 2
+  // back wall, corner behind pod 0 — tall narrow
+  { lx: 130, ly: 10, dir: 'S', long: 44, deep: 20, high: 88, rows: 4, tone: 1.0, decor: 'plant' },
+  // right wall below the lounge — low wide, and the one shelved backwards
+  {
+    lx: FLOOR - 11,
+    ly: 320,
+    dir: 'W',
+    long: 76,
+    deep: 22,
+    high: 46,
+    rows: 2,
+    tone: 0.94,
+    reversed: true,
+    decor: 'photo',
+  },
+  // left wall beside pod 0 — standard
+  { lx: 10, ly: 240, dir: 'E', long: 58, deep: 20, high: 66, rows: 3, tone: 1.05, decor: 'books' },
+  // left wall beside pod 2 — low wide
+  { lx: 11, ly: 560, dir: 'E', long: 70, deep: 22, high: 48, rows: 2, tone: 0.97, decor: 'trophy' },
 ];
 
 // ── Leisure spots ─────────────────────────────────────────────────────────────────────────────────────

@@ -86,7 +86,9 @@ function solidRects(): Rect[] {
   for (const p of PLANTS) out.push(rect(p.lx, p.ly, 26, 26));
   for (const s of BOOKSHELVES) {
     const sn = s.dir === 'S' || s.dir === 'N';
-    out.push(rect(s.lx, s.ly, sn ? SHELF_LONG : SHELF_DEEP, sn ? SHELF_DEEP : SHELF_LONG));
+    // Per-shelf footprint — the units are no longer one repeated box, and a blocker sized off the
+    // old shared constants would let people walk through the wide ones.
+    out.push(rect(s.lx, s.ly, sn ? s.long : s.deep, sn ? s.deep : s.long));
   }
   // entrance door posts (the doorway between them stays open) — the door runs along the back-left wall,
   // so the posts straddle it in ly with the plane set back in −lx.

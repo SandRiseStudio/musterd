@@ -126,8 +126,10 @@ describe('LEISURE_SPOTS', () => {
 
 describe('BOOKSHELVES — flush to floor edges', () => {
   it('pins each shelf so its back sits on the perimeter (door-flush pattern)', () => {
-    const half = SHELF_DEEP / 2;
     for (const s of BOOKSHELVES) {
+      // Per-shelf depth: the units are no longer one repeated box, so "flush" is measured against
+      // each unit's own footprint rather than a shared constant.
+      const half = s.deep / 2;
       switch (s.dir) {
         case 'S':
           expect(s.ly).toBe(half);
@@ -147,5 +149,25 @@ describe('BOOKSHELVES — flush to floor edges', () => {
         }
       }
     }
+  });
+
+  it('is not a matched set — the units differ in size', () => {
+    expect(new Set(BOOKSHELVES.map((s) => s.long)).size).toBeGreaterThan(1);
+    expect(new Set(BOOKSHELVES.map((s) => s.high)).size).toBeGreaterThan(1);
+  });
+
+  it('scales the band count with the height, so a low unit is not a tall one squashed', () => {
+    const byHeight = [...BOOKSHELVES].sort((a, b) => a.high - b.high);
+    expect(byHeight[0]!.rows).toBeLessThan(byHeight[byHeight.length - 1]!.rows);
+  });
+
+  it('has exactly one shelved backwards, and it is on the right wall', () => {
+    const reversed = BOOKSHELVES.filter((s) => s.reversed);
+    expect(reversed).toHaveLength(1);
+    expect(reversed[0]!.dir).toBe('W');
+  });
+
+  it('gives every unit something for its top', () => {
+    for (const s of BOOKSHELVES) expect(s.decor).toBeTruthy();
   });
 });
