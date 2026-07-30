@@ -80,9 +80,9 @@ export function OfficeScene({
   topSlot?: ReactNode;
   /**
    * Chrome seated in a strip BENEATH the room rather than floated over it — `/live` puts the office
-   * noticeboard here. Passing it also frames the stage (see `.lc-office--framed`): the room takes only
-   * the height its own aspect needs and this band gets the rest, which is height the panel was
-   * previously letterboxing away. `/broadcast` passes nothing and stays full-bleed.
+   * noticeboard here. The band is sized to its content and the room keeps every remaining pixel, so
+   * adding one costs the scene exactly the band's own height and never more. `/broadcast` passes
+   * nothing and stays full-bleed.
    */
   bandSlot?: ReactNode;
 }) {
@@ -178,13 +178,7 @@ export function OfficeScene({
   const humans = roster.filter((m) => m.kind === 'human').length;
 
   return (
-    <section
-      className={
-        `lc-office${collapsed ? ' is-collapsed' : ''}` +
-        // A band to fill is what makes the stage take only the room's own aspect — see `bandSlot`.
-        `${bandSlot && !collapsed ? ' lc-office--framed' : ''}`
-      }
-    >
+    <section className={`lc-office${collapsed ? ' is-collapsed' : ''}`}>
       {/* The room's box. Everything below that must line up with canvas pixels — the plates, the
           ambient overlay, the speech bubbles, the floated chrome — is positioned against the stage,
           so framing the office moves the whole scene as one piece. */}
