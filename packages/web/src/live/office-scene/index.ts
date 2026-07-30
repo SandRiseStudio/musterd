@@ -5,6 +5,7 @@ import { identityMeta, plateModel, shortLaneState, shortWorkTitle } from '../pre
 import { createActors, type Actors } from './actors';
 import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
+import { createReceptionist, stepReceptionist } from './receptionist';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
@@ -158,6 +159,8 @@ export function mountOffice(
   const actors: Actors = createActors();
   /** The office dog (pet.ts): asleep in the baked frame; stirred by the ambient scheduler below. */
   const pet = createPet();
+  /** The front-desk receptionist (receptionist.ts) — staff, not roster; asleep when the room is empty. */
+  const recep = createReceptionist();
   /** The scene clock, in seconds. Everything that animates on its own — breathing, the typing bursts —
    * reads it, so it advances only while the loop runs and a rested office holds its frame. */
   let clock = 0;
@@ -257,7 +260,7 @@ export function mountOffice(
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
     const poses = actors.poses();
-    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv, pet, actors.sceneFx());
+    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv, pet, actors.sceneFx(), recep);
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
@@ -644,7 +647,7 @@ export function mountOffice(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, pet, actors.sceneFx());
+    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, pet, actors.sceneFx(), recep);
     drawCues();
     positionLabels(anchors.heads);
   }
@@ -705,6 +708,10 @@ export function mountOffice(
     const walking = actors.step(dt);
     if (walking) noticePassersBy(); // a sleeping dog wakes to watch whoever is walking past it
     const petActive = stepPet(pet, dt); // false once it's asleep — the pet never keeps the room awake
+    // The receptionist wakes for a present member and looks up while any check-in beat holds. Like
+    // the pet, she never keeps an empty room awake: asleep returns false and the room bakes still.
+    const anyonePresent = [...actors.nodes().values()].some((n) => n.presence !== 'offline');
+    const recepActive = stepReceptionist(recep, dt, anyonePresent, actors.checkInHolds() > 0);
     pushOccupancy(now);
     for (let i = cues.length - 1; i >= 0; i--) {
       const c = cues[i]!;
@@ -717,13 +724,13 @@ export function mountOffice(
     // freezing the instant a long walk ends (#5).
     if (walking || cues.length) lastActive = now;
     const alive = living();
-    if (walking || alive || petActive) {
+    if (walking || alive || petActive || recepActive) {
       drawDynamic();
     } else {
-      if (wasActive) bake(); // walkers just re-seated (or the pet curled up) — refresh the buffer
+      if (wasActive) bake(); // walkers just re-seated (or the pet/receptionist dozed off) — refresh
       drawStatic();
     }
-    wasActive = walking || alive || petActive;
+    wasActive = walking || alive || petActive || recepActive;
     // Keep animating while anything moves *or* while the room is alive (someone at a desk breathing and
     // typing — capped to ~20fps above). When the last walk/cue clears and nobody is working, we draw one
     // final settled frame and park: the frame stays on-canvas until the next act or presence change.

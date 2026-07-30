@@ -2,6 +2,7 @@ import { canvasFont } from '../canvasFont';
 import { drawCharacter } from './character';
 import { depth, FLOOR, KX, KY, project, THICK, WALL_H, type Fit, type Pt } from './iso';
 import { STRIDE, type PetState } from './pet';
+import { RECEPTIONIST_WAKE_S, type ReceptionistState } from './receptionist';
 import {
   BEAM_LEN,
   BEAM_SHEAR,
@@ -19,6 +20,8 @@ import {
   DESK_UP,
   DESK_W,
   ENTRANCE,
+  FRONT_DESK,
+  RECEPTIONIST,
   FWD,
   HUDDLES,
   KEYBOARD_ALONG,
@@ -1345,9 +1348,88 @@ function printer(ctx: CanvasRenderingContext2D, fit: Fit): void {
 }
 
 /** Reception: a waiting couch turned toward the door, a low table, and a plant — the nook's vocabulary. */
-function receptionItems(ctx: CanvasRenderingContext2D, fit: Fit): DepthItem[] {
+/**
+ * The front desk: a counter with a RAISED TRANSACTION LEDGE — the ledge is the load-bearing detail,
+ * because a counter without one is just a big desk, and the ledge is what makes the corner read as
+ * reception rather than as a thirteenth workstation. Monitor turned away from the room (you see the
+ * back of reception screens), a phone, a small plant, the visitor log.
+ */
+function frontDesk(ctx: CanvasRenderingContext2D, fit: Fit): void {
+  const D = FRONT_DESK;
+  box(ctx, fit, D.lx, D.ly, D.long - 4, D.deep - 3, D.high - 4, dim(PAL.wood, 0.9)); // base
+  box(ctx, fit, D.lx, D.ly, D.long, D.deep, 4, woodTop(), D.high - 4); // worktop
+  // The ledge: a narrower, taller rail along the visitor (south) edge.
+  box(ctx, fit, D.lx, D.ly + D.deep / 2 - 3, D.long - 6, 6, 7, dim(PAL.wood, 0.82), D.high);
+  // Monitor, back to the room — panel south of its foot so the visitor sees the housing.
+  box(ctx, fit, D.lx - 18, D.ly - 4, 12, 2, 2, '#2f2f33', D.high); // foot
+  box(ctx, fit, D.lx - 18, D.ly - 3, 16, 2.4, 12, '#3a3a3e', D.high + 2); // housing
+  // Phone: base + handset lying across it.
+  box(ctx, fit, D.lx + 6, D.ly - 5, 10, 7, 2.5, '#4a4a50', D.high);
+  box(ctx, fit, D.lx + 6, D.ly - 7.5, 11, 3, 2, '#3a3a3e', D.high + 2.5);
+  // A small plant on the east end, and the visitor log open mid-counter.
+  box(ctx, fit, D.lx + 30, D.ly - 4, 8, 8, 5, PLANT.pot, D.high);
+  const pp = project(D.lx + 30, D.ly - 4, fit);
+  ellipse(ctx, { x: pp.x, y: pp.y - (D.high + 9) * fit.scale }, 6 * fit.scale, 4 * fit.scale, PLANT.leaf);
+  box(ctx, fit, D.lx - 2, D.ly + 3, 14, 9, 1, '#f2ecd9', D.high); // the log
+  box(ctx, fit, D.lx - 2, D.ly + 3, 1, 9, 1.4, '#c9bfa5', D.high); // its spine
+}
+
+/** Her palette — deliberately unlike any member avatar: no member colour, no visor, a cardigan. */
+const RECEP = {
+  cardigan: '#4e7d74',
+  cardiganShade: '#3f6a62',
+  skin: '#e8b98f',
+  hair: '#3d2f28',
+  log: '#f2ecd9',
+} as const;
+
+/**
+ * The receptionist, behind the counter. Most of her is occluded by the desk (the depth relation
+ * layout.test.ts pins), so the read is head, shoulders and arms — which is also what keeps her
+ * cheap. She is STAFF: no nameplate ever, never in a headcount, never walks. Asleep she is a still
+ * pose on the baked layer; the office being empty must not cost a frame budget.
+ */
+function drawReceptionist(ctx: CanvasRenderingContext2D, fit: Fit, r: ReceptionistState, t: number): void {
+  const s = fit.scale;
+  const p = project(RECEPTIONIST.lx, RECEPTIONIST.ly, fit);
+  const deskTop = FRONT_DESK.high;
+  // Wake progress eases her from slumped (0) to upright (1); greeting lifts the head a touch more.
+  const wake =
+    r.mode === 'asleep' ? 0
+    : r.mode === 'waking' ? Math.min(1, r.modeT / RECEPTIONIST_WAKE_S)
+    : 1;
+  const lift = r.mode === 'greeting' ? 2.5 : 0;
+  // Idle breathing/typing sway — only once awake, and gentle. Asleep is deliberately motionless.
+  const sway = wake >= 1 ? Math.sin(t * 2.1) * 0.6 : 0;
+  const slump = (1 - wake) * 9; // how far she is folded onto the counter
+  const shoulderUp = deskTop + 14 - slump;
+  const headUp = deskTop + 24 - slump * 1.6 + lift;
+  // Torso: cardigan over the chair back, shaded side east.
+  ellipse(ctx, { x: p.x, y: p.y - shoulderUp * s }, 9.5 * s, 6.5 * s, RECEP.cardigan);
+  ellipse(ctx, { x: p.x + 4 * s, y: p.y - (shoulderUp - 1) * s }, 4.5 * s, 5 * s, RECEP.cardiganShade);
+  // Head: tilted forward asleep, level awake, up for a greeting. Bun at the back.
+  const headX = p.x + (1 - wake) * 3 * s;
+  ellipse(ctx, { x: headX, y: p.y - (headUp + sway * 0.4) * s }, 5.2 * s, 5.6 * s, RECEP.skin);
+  ellipse(ctx, { x: headX - 2 * s, y: p.y - (headUp + 3.5) * s }, 4.6 * s, 3 * s, RECEP.hair);
+  ellipse(ctx, { x: headX - 5.5 * s, y: p.y - (headUp + 1) * s }, 2 * s, 2.2 * s, RECEP.hair); // the bun
+  // Arms: folded under her head asleep; on the counter awake (typing-ish bob).
+  if (wake < 0.5) {
+    ellipse(ctx, { x: p.x + 2 * s, y: p.y - (deskTop + 5) * s }, 7 * s, 2.4 * s, RECEP.cardigan);
+  } else {
+    ellipse(ctx, { x: p.x - 5 * s, y: p.y - (deskTop + 6 + sway * 0.5) * s }, 3 * s, 2 * s, RECEP.cardigan);
+    ellipse(ctx, { x: p.x + 5 * s, y: p.y - (deskTop + 6 - sway * 0.5) * s }, 3 * s, 2 * s, RECEP.cardigan);
+  }
+}
+
+function receptionItems(ctx: CanvasRenderingContext2D, fit: Fit, recep: ReceptionistState | null, t: number): DepthItem[] {
   const R = RECEPTION;
   return [
+    // She sorts at her own feet, north of the counter, so the counter paints over her lower body.
+    {
+      d: depth(RECEPTIONIST.lx, RECEPTIONIST.ly),
+      fn: () => drawReceptionist(ctx, fit, recep ?? { mode: 'asleep', modeT: 0, aloneT: 0 }, t),
+    },
+    { d: depth(FRONT_DESK.lx, FRONT_DESK.ly), fn: () => frontDesk(ctx, fit) },
     { d: depth(R.couch.lx, R.couch.ly), fn: () => couch(ctx, fit, R.couch.lx, R.couch.ly, PAL.couch, R.couch.dir) },
     { d: depth(R.table.lx, R.table.ly), fn: () => ctable(ctx, fit, R.table.lx, R.table.ly) },
     { d: depth(R.plant.lx, R.plant.ly), fn: () => drawPlant(ctx, fit, R.plant.lx, R.plant.ly, 'fiddle') },
@@ -3423,6 +3505,8 @@ export function renderScene(
   /** Errand scene effects, derived per-frame by the actor system (`actors.sceneFx()`): an open fridge
    * door, desks whose water bottle is currently in its owner's hand. Absent → everything at rest. */
   fx?: { fridgeOpen: boolean; bottleCarriers: Set<string> },
+  /** The receptionist's state (receptionist.ts). Absent → asleep, which is the empty-office truth. */
+  recep: ReceptionistState | null = null,
 ): SceneAnchors {
   // Grounds the diorama on the panel surface before anything else paints (the floor covers its middle).
   drawGroundShadow(ctx, fit);
@@ -3478,7 +3562,7 @@ export function renderScene(
     const cy = MEETING.ly + c.dy;
     items.push({ d: depth(cx, cy), fn: () => meetingChair(ctx, fit, cx, cy, c.dir) });
   }
-  items.push(...receptionItems(ctx, fit));
+  items.push(...receptionItems(ctx, fit, recep, t));
   items.push({ d: depth(PRINTER.lx, PRINTER.ly), fn: () => printer(ctx, fit) });
   items.push({ d: depth(ENTRANCE.lx, ENTRANCE.ly), fn: () => drawEntrance(ctx, fit) });
 

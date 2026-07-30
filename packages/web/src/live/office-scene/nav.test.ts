@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  RECEPTIONIST,
+
   FRONT_DESK,
   CHECK_IN_MARKS,
   COFFEE_STAND,
