@@ -80,17 +80,35 @@ that job.
 
 ## 2 · Whiteboard
 
-**Problem:** the doodle is a crowding failure caused by scale. Boxes + arrows + cylinder + cloud +
-four labels, rendered at ~half size under wall shear, collapse into hash.
+**Problem:** the doodle is a crowding failure caused by scale. Shapes rendered at ~half size under
+wall shear collapse into hash.
 
-**Fix — subtract:**
+### Baseline — read this before starting
 
-- **Three shapes, two arrows, one label.** Not five, not four.
-- Every mark ≥ ~10 logical units; stroke weight up so lines survive the downscale.
-- Majority of the board stays **white**. The composition is mostly negative space with a small
-  diagram in it — which is also what a real whiteboard mid-week looks like.
-- Marker ink stays musterd orange (unchanged from presence-chrome §3).
-- Tray, markers, eraser, frameless white face, no-roster rule: all unchanged.
+A denser second cut of this board existed as uncommitted work and was **discarded on nick's call**
+(2026-07-30). It was landscape `112×68`, frameless with a hairline rim, carried an iso marker tray
+with three markers and an eraser, and drew six objects with four text labels (`api` / `web` / `db` /
+`cdn`, the last two at 5.5 logical units — about 3 px at `/live`). That density is the complaint.
+
+It is recoverable at `git stash` — *"whiteboard v2 from stopped agent"* — if the tray is ever wanted
+back. **Do not restore it wholesale.**
+
+So the baseline to build from is the committed painter: **portrait `92×80`, framed**, with two boxes,
+a connector arrow, a cylinder and a cloud — five objects, no labels, no tray.
+
+### Fix — subtract
+
+- **Three shapes, two arrows, at most one label.** The current five objects come down to three.
+- Every mark ≥ ~10 logical units; stroke weight up so lines survive the downscale. Any label that
+  cannot be set at ≥ 10 units is cut, not shrunk.
+- Majority of the board stays **white**. Mostly negative space with a small diagram in it — which is
+  also what a real whiteboard mid-week looks like.
+- **Keep portrait and keep the frame.** The tall geometry is the documented iso-shear constraint for
+  this wall (a wide board shears its bands into diagonals), and the frame matches the other wall
+  objects. Landscape and frameless were part of the discarded cut and are not adopted here.
+- Marker ink stays musterd orange; the no-roster rule is unchanged (presence-chrome §3).
+- **A tray is optional and out of scope for this pass.** If it comes back later it is a separate,
+  additive change — it was never the problem.
 
 **Acceptance:** at `/live` fitted scale the diagram reads as *a diagram* — you can count the shapes.
 If you cannot count them, cut one more.
