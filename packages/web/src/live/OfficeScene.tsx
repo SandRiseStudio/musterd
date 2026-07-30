@@ -65,8 +65,9 @@ export function OfficeScene({
   onReady,
   topSlot,
   bandSlot,
-  /** Hybrid nameplate work cues vs in-panel WorkStack (`stack`) vs neither. Default hybrid. */
-  workCues = 'hybrid',
+  /** Hybrid nameplate work cues vs in-panel WorkStack (`stack`) vs neither. Default none on the
+   *  plate — work lives in WorkStack on `/live` (nick, 2026-07-30). */
+  workCues = 'none',
 }: {
   teamName: string;
   roster: MemberSummary[];

@@ -9,7 +9,7 @@ import {
 
 describe('shortSurface', () => {
   it('maps known harnesses to compact labels', () => {
-    expect(shortSurface('claude-code')).toBe('claude');
+    expect(shortSurface('claude-code')).toBe('claude code');
     expect(shortSurface('cursor')).toBe('cursor');
     expect(shortSurface('codex')).toBe('codex');
     expect(shortSurface('cli')).toBe('cli');

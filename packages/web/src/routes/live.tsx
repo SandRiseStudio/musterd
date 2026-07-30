@@ -39,8 +39,8 @@ const TEAM_KEY = 'musterd.live.team';
 const COLLAPSE_KEY = 'musterd.live.collapsed';
 const COMPANION_KEY = 'musterd.live.companion';
 
-/** Hybrid nameplate cues by default; set to `stack` to use the in-panel WorkStack fallback. */
-const WORK_CUES: 'hybrid' | 'stack' | 'none' = 'hybrid';
+/** Work lives in the in-panel stack — not on nameplates (nick, 2026-07-30 eye test). */
+const WORK_CUES: 'hybrid' | 'stack' | 'none' = 'stack';
 
 /** The three live panels, each independently collapsible into a slim rail. */
 type PanelId = 'office' | 'roster' | 'stream';
@@ -291,8 +291,7 @@ function LivePage() {
               // The asks & approvals rail (ADR 149) rides the top of the room itself — the office
               // frames its own asks (nick, 2026-07-28). Still renders nothing until an ask exists.
               topSlot={<AsksStrip envelopes={envelopes} roster={roster} cfg={cfg!} />}
-              // Hybrid work cues on nameplates by default; flip WORK_CUES to `stack` if the floor
-              // gets noisy (presence-chrome design 2026-07-30).
+              // Work lives in WorkStack under the room — not on nameplates (nick, 2026-07-30).
               workCues={WORK_CUES}
               bandSlot={WORK_CUES === 'stack' ? <WorkStack entries={entries} /> : undefined}
             />

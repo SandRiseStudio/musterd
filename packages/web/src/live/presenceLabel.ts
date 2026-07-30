@@ -1,7 +1,8 @@
 import type { LaneState } from '@musterd/protocol';
 
+/** Friendly harness labels — never collapse `claude-code` to bare `claude` (reads as the model family). */
 const SURFACE_SHORT: Record<string, string> = {
-  'claude-code': 'claude',
+  'claude-code': 'claude code',
   cursor: 'cursor',
   codex: 'codex',
   cli: 'cli',
