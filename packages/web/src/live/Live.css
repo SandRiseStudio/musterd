@@ -752,160 +752,73 @@
   overflow: hidden;
 }
 
-/* ─── the office noticeboard (the roster, with names, as an object) ─────────────────────────────────
-   Cork in a wooden frame with one pinned slip per member. It hangs in the band under the room because
-   the room's own walls are 63–76px tall on screen and cannot carry twelve legible names (see
-   OfficeBoard.tsx). Type is DOM at a fixed size on purpose: identical on a laptop and on the 1920×1080
-   broadcast, which no canvas-painted board could promise.
-
-   Materials come from the scene-chrome paper set above, so the board belongs to the room rather than to
-   the dashboard. No backdrop-filter anywhere — same rule as every other surface that lands on the
-   /broadcast capture. */
-.lc-notice {
+/* ─── work stack (fallback A — present & working only, under the room) ─────────────────────────── */
+.lc-workstack {
   flex: 1;
   min-width: 0;
   padding: 6px 8px 7px;
+  max-height: 28vh;
+  overflow: hidden;
   display: flex;
-  align-items: start;
-  /* The room is the point of this panel; the board is a caption under it. Capped so a very large roster
-     scrolls inside the cork rather than eating the room's height — the band is sized from this. */
-  max-height: 38vh;
 }
-.lc-notice__frame {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 5px 7px 6px;
-  border-radius: 6px;
-  /* cork, and the frame as a rim rather than a drawn border — the same trick the room's furniture uses */
-  background: linear-gradient(180deg, #c69a63 0%, #bd9058 100%);
-  box-shadow:
-    inset 0 0 0 3px #7d5a3a,
-    inset 0 1px 0 3px rgba(255, 250, 235, 0.22),
-    0 2px 6px -2px var(--lc-paper-drop, rgba(58, 34, 12, 0.42));
-}
-.lc-notice__head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 0 2px 4px;
-}
-.lc-notice__title {
-  font-family: var(--font-mono, monospace);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: rgba(45, 28, 12, 0.72);
-}
-.lc-notice__count {
-  margin-left: auto;
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-  font-weight: 700;
-  color: #3a2512;
-}
-.lc-notice__of {
-  font-weight: 500;
-  opacity: 0.6;
-}
-/* The slips wrap into as many columns as the band is wide — a noticeboard fills its cork. */
-.lc-notice__slips {
+.lc-workstack__list {
   flex: 1;
   min-height: 0;
   margin: 0;
-  padding: 0;
+  padding: 4px 6px;
   list-style: none;
-  display: grid;
-  /* Wraps into as many columns as the band is wide, and the rows are generous because the reshape
-     handed this strip real height — a noticeboard that fills its cork, with type big enough to be the
-     point of the whole exercise. `auto-fit` + a max keeps a wide band from stretching slips into
-     banners; the row cap stops a 3-seat team from making three enormous ones. */
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  /* A fixed row height, not `minmax(…, max-content)`: names are single-line with an ellipsis, so
-     max-content only contributes sub-pixel growth — and one fractional pixel over the container is
-     enough to raise a scrollbar gutter on a board that visibly fits. */
-  grid-auto-rows: 21px;
-  align-content: start;
-  gap: 5px 6px;
-  /* `overflow-x: hidden` is load-bearing, not tidying: fractional column widths round up against the
-     track sum and a 1px overflow paints a full horizontal scrollbar across the bottom of the cork. */
-  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-.lc-notice__slip {
-  position: relative;
   display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 7px 0 8px;
-  border-radius: 3px;
-  /* a paper slip, tinted by its member's own colour — pale enough that the NAME is what reads */
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--slip-tone) 22%, #f7ecd6) 0%,
-    color-mix(in srgb, var(--slip-tone) 14%, #f2e4c9) 100%
-  );
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    0 1px 2px -0.5px rgba(58, 34, 12, 0.34);
+  flex-direction: column;
+  gap: 3px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--lc-paper) 88%, transparent);
+  border: 1px solid var(--lc-paper-rim);
+  box-shadow: 0 2px 6px -2px var(--lc-paper-drop, rgba(58, 34, 12, 0.42));
 }
-/* Out members hang crooked and drained: legible as "not here" from the shape alone, before any colour
-   is resolved — the cue that still works if the hues are indistinguishable to you. */
-.lc-notice__slip.is-out {
-  transform: rotate(-1.4deg);
-  filter: saturate(0.5);
-  opacity: 0.72;
+.lc-workstack__row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--lc-paper-ink);
 }
-.lc-notice__slip:nth-child(even).is-out {
-  transform: rotate(1.1deg);
-}
-.lc-notice__pin {
-  position: absolute;
-  top: -2px;
-  left: 50%;
-  width: 4px;
-  height: 4px;
-  margin-left: -2px;
-  border-radius: 50%;
-  background: #4b3524;
-  box-shadow: 0 1px 1px rgba(255, 255, 255, 0.4);
-}
-.lc-notice__dot {
+.lc-workstack__dot {
   flex: 0 0 auto;
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--lc-faint);
+  align-self: center;
 }
-.lc-notice__slip--working .lc-notice__dot {
-  background: var(--lc-success);
-  box-shadow: 0 0 5px color-mix(in srgb, var(--lc-success) 70%, transparent);
+.lc-workstack__name {
+  flex: 0 0 auto;
+  font-weight: 700;
 }
-.lc-notice__slip--idle .lc-notice__dot {
-  background: var(--lc-warn, #f4cf52);
-}
-.lc-notice__slip--away .lc-notice__dot {
-  background: color-mix(in srgb, var(--lc-warn, #f4cf52) 55%, var(--lc-faint));
-}
-.lc-notice__name {
+.lc-workstack__title {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: #33210f;
+  color: var(--lc-dim);
 }
-@media (prefers-reduced-motion: reduce) {
-  .lc-notice__slip.is-out,
-  .lc-notice__slip:nth-child(even).is-out {
-    transform: none;
-  }
+.lc-workstack__state,
+.lc-workstack__said {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: var(--lc-accent);
+  opacity: 0.85;
 }
+.lc-workstack__said {
+  color: var(--lc-dim);
+}
+
+/* ─── (retired) office noticeboard — WHO'S IN cork rail removed in presence-chrome 2026-07-30 ─── */
+/* The band under the room remains for WorkStack when workCues === 'stack'. */
+
 .lc-gl-canvas {
   position: absolute;
   inset: 0;
@@ -1014,6 +927,59 @@
     inset 0 1px 0 var(--lc-paper-sheen),
     0 2px 5px -1px var(--lc-paper-drop),
     0 1px 1px -0.5px var(--lc-paper-seat);
+}
+.lc-gl-label__meta {
+  max-width: 9.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lc-paper) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc-paper-rim) 70%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--lc-dim);
+  box-shadow: 0 1px 3px -1px var(--lc-paper-drop);
+}
+.lc-gl-label__work {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lc-paper) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 28%, var(--lc-paper-rim));
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  font-weight: 500;
+  color: var(--lc-paper-ink);
+  box-shadow: 0 1px 3px -1px var(--lc-paper-drop);
+}
+.lc-gl-label__tip {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  max-width: 16rem;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--lc-paper);
+  border: 1px solid var(--lc-paper-rim);
+  box-shadow: 0 4px 12px -2px var(--lc-paper-drop);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  color: var(--lc-paper-ink);
+  z-index: 3;
+  pointer-events: none;
+}
+.lc-gl-label:hover .lc-gl-label__tip,
+.lc-gl-label:focus-within .lc-gl-label__tip {
+  display: block;
 }
 .lc-gl-label.is-offline .lc-gl-label__name {
   color: var(--lc-dim);

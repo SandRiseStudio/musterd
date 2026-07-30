@@ -656,114 +656,132 @@ function wallClock(
 }
 
 /**
- * The in/out board: the roster, hung on the office wall (nick, 2026-07-29 — "put that in the actual
- * office space like on one of the walls").
+ * Dry-erase whiteboard on the far-right wall — set dressing only (presence-chrome design 2026-07-30).
+ * White face, musterd-orange marker scribbles (fake architecture diagram). Not a roster: no member
+ * colours, no present/total count.
  *
- * **Why it carries no names.** The first design was one row per member, name and dot, like the rail it
- * came from. Measured, that cannot work: `fitFloor` gives /live a scale of ≈0.52, so the wall gap this
- * board hangs in (t 0.80…0.98 — the only span the windows and prints leave) is about 60px across on
- * screen. Six names in 60px puts each glyph at roughly 4px. So the board says what a 60px object can
- * actually say: one tag per member, in *their* colour — the same colour their avatar and nameplate
- * already wear, which is how you identify anyone on this floor — plus a present/total count, because
- * three digits survive where a name does not. Names stay on the floating plates, where they are read.
- *
- * A present member's tag hangs square and full-colour. Away and offline tags hang crooked and drained:
- * legible as "not here" from the silhouette alone, before any colour is resolved, and the one cue that
- * still works for a viewer who cannot separate the hues.
+ * Portrait geometry is load-bearing: along this wall the screen drops KY/KX = 0.5px per px across, so
+ * a wide board shears its bands into diagonals. Tall and narrow keeps strokes readable.
  */
-function wallRoster(
+function wallWhiteboard(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   edge: (t: number) => [number, number],
   tc: number,
   uc: number,
-  nodes: OfficeNode[],
 ): void {
-  /**
-   * Portrait, and that is a geometry constraint rather than a taste call. Along this wall the screen
-   * drops KY/KX = 0.5px for every px across, so a board of width `W` falls `0.5·W·KX` from its left
-   * edge to its right. Wide and short (the first cut, 124×58) fell 44px across a 58px-tall board, and
-   * every full-width band — a header rail, a row of tags — came out as a diagonal stripe cutting
-   * through the rows below it. Tall and narrow keeps the drop well under the height, so bands read as
-   * bands. The same shear is why the header here is a pinned slip and not a rail across the top.
-   */
-  // Sized to the wall gap it hangs in (t 0.80…0.98 ≈ 162 logical units), and a shade larger than the
-  // composition strictly needs: at /live's fitted scale of ≈0.52 the tags land at ~7px and the count at
-  // ~6px, so every unit of linear size is legibility. The tags are what carry the read at that size —
-  // the count is supplementary, and comes into its own on /broadcast, where the scale is 1.14.
   const W = 92; // along the wall, logical floor units
   const H = 80; // up the wall, WALL_H px
-  /** Board-local → wall point. `a` runs along the wall, `b` up it, both out from the board's centre. */
   const p = (a: number, b: number): Pt => wallPt(edge, tc + a / FLOOR, uc + b / WALL_H, fit);
   const rect = (a0: number, b0: number, a1: number, b1: number, fill: string): void =>
     quad(ctx, [p(a0, b0), p(a1, b0), p(a1, b1), p(a0, b1)], fill);
 
-  // Hangs off the wall: a shadow down-right of the frame is what makes it an object rather than a
-  // painted rectangle. Same direction as every other cast shadow in the room.
-  rect(-W / 2 + 3, -H / 2 - 3, W / 2 + 3, H / 2 - 3, 'rgba(58, 34, 12, 0.20)');
+  rect(-W / 2 + 3, -H / 2 - 3, W / 2 + 3, H / 2 - 3, WHITEBOARD.shadow);
   rect(-W / 2, -H / 2, W / 2, H / 2, DRESS.frame);
-  rect(-W / 2 + 3, -H / 2 + 3.5, W / 2 - 3, H / 2 - 3.5, BOARD.cork);
+  rect(-W / 2 + 3, -H / 2 + 3.5, W / 2 - 3, H / 2 - 3.5, WHITEBOARD.face);
 
-  /**
-   * One member's tag, pinned to the cork. `tilt` leans it (radians, in board-local space): rotating the
-   * corners about the tag's own centre rather than transforming the canvas, so the tag shears onto the
-   * wall plane like everything else here instead of tipping out of it.
-   */
-  const tag = (a: number, b: number, w: number, h: number, fill: string, tilt: number): void => {
-    const co = Math.cos(tilt);
-    const si = Math.sin(tilt);
-    const at = (da: number, db: number): Pt => p(a + da * co - db * si, b + da * si + db * co);
-    quad(ctx, [at(-w / 2, -h / 2), at(w / 2, -h / 2), at(w / 2, h / 2), at(-w / 2, h / 2)], fill);
-    // A sliver of shade along the bottom edge gives the tag a thickness; the pin holds it up.
-    quad(ctx, [at(-w / 2, -h / 2), at(w / 2, -h / 2), at(w / 2, -h / 2 + 1.6), at(-w / 2, -h / 2 + 1.6)], 'rgba(58, 34, 12, 0.22)');
-    const pin = at(0, h / 2 - 1.4);
-    ellipse(ctx, pin, 1.5 * fit.scale, 1.5 * fit.scale, BOARD.pin);
+  const stroke = (pts: [number, number][], width: number, color: string): void => {
+    if (pts.length < 2) return;
+    ctx.save();
+    ctx.beginPath();
+    const [a0, b0] = pts[0]!;
+    const s0 = p(a0, b0);
+    ctx.moveTo(s0.x, s0.y);
+    for (let i = 1; i < pts.length; i++) {
+      const [a, b] = pts[i]!;
+      const s = p(a, b);
+      ctx.lineTo(s.x, s.y);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1, width * fit.scale);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.restore();
   };
 
-  // The header is itself a slip pinned to the cork — the tag vocabulary reused rather than a band
-  // across the top, which the shear turns into a diagonal. Dark ink on a pale slip, so the one piece
-  // of type on the board has the contrast it needs at ~4px of cap height.
-  const present = nodes.filter((n) => n.posture === 'working' || n.posture === 'idle').length;
-  const slipW = 34;
-  // Inset by its own half-width, or the slip hangs off the frame's left edge.
-  const slipA = -W / 2 + 4 + slipW / 2;
-  tag(slipA, H / 2 - 13.5, slipW, 14, BOARD.slip, 0);
-  wallText(ctx, fit, edge, tc + slipA / FLOOR, uc + (H / 2 - 18) / WALL_H, `${present}/${nodes.length}`, 12, BOARD.slipInk, 'center');
-
-  // A grid that fills left-to-right, top-to-bottom, in roster order — so a member keeps their place on
-  // the board across rebakes instead of hopping about as presence changes.
-  //
-  // Past 9 members the extra tags are simply not drawn, and there is deliberately no "+N" marker: the
-  // slip already states `present/total`, so the board stays honest about the size of the team without
-  // a fiddly extra element. These tags are a presence overview, not an index of who is who.
-  const COLS = 3;
-  const tw = 22;
-  const th = 12;
-  const gapA = (W - 8 - COLS * tw) / (COLS + 1);
-  const top = H / 2 - 25 - 4 - th / 2;
-  const shown = Math.min(nodes.length, COLS * 3);
-  for (let i = 0; i < shown; i++) {
-    const n = nodes[i]!;
-    const col = i % COLS;
-    const row = Math.floor(i / COLS);
-    const a = -W / 2 + 4 + gapA * (col + 1) + tw * (col + 0.5);
-    const b = top - row * (th + 4);
-    const out = n.posture === 'away' || n.posture === 'offline';
-    // Drained toward the cork, not toward grey: a grey tag on a warm board reads as dirt, the same
-    // rule the paper chrome follows. Idle sits between — present, but nobody's holding a task.
-    const fill = out ? dim(n.color, 0.62) : n.posture === 'idle' ? dim(n.color, 0.86) : n.color;
-    // A hash on the name, so two out members next to each other don't hang at the same angle.
-    const lean = out ? 0.1 + (seedOf(n.name) % 7) * 0.012 : 0;
-    tag(a, b, tw, th, fill, lean);
-  }
+  // Left box (a service) → right box (a client), connected by an arrow
+  stroke(
+    [
+      [-30, 16],
+      [-30, -10],
+      [-6, -10],
+      [-6, 16],
+      [-30, 16],
+    ],
+    1.5,
+    WHITEBOARD.ink,
+  );
+  stroke(
+    [
+      [6, 10],
+      [6, -16],
+      [32, -16],
+      [32, 10],
+      [6, 10],
+    ],
+    1.5,
+    WHITEBOARD.ink,
+  );
+  stroke(
+    [
+      [-6, 2],
+      [6, 2],
+    ],
+    1.3,
+    WHITEBOARD.ink,
+  );
+  stroke(
+    [
+      [2, -1],
+      [6, 2],
+      [2, 5],
+    ],
+    1.3,
+    WHITEBOARD.ink,
+  );
+  // Cylinder (store) under the left box
+  stroke(
+    [
+      [-28, -18],
+      [-8, -18],
+      [-8, -28],
+      [-28, -28],
+      [-28, -18],
+    ],
+    1.2,
+    WHITEBOARD.inkDim,
+  );
+  stroke(
+    [
+      [-28, -23],
+      [-8, -23],
+    ],
+    1.0,
+    WHITEBOARD.inkDim,
+  );
+  // Loose cloud / scribble up top
+  stroke(
+    [
+      [-18, 28],
+      [-8, 34],
+      [6, 32],
+      [18, 26],
+      [10, 22],
+      [-12, 24],
+      [-18, 28],
+    ],
+    1.1,
+    WHITEBOARD.inkDim,
+  );
 }
 
-/** The in/out board's stock: cork, the paper slip its count is written on, and the pins. */
-const BOARD = {
-  cork: '#c69a63',
-  slip: '#f4e6c9',
-  slipInk: '#4b3524',
-  pin: '#4b3524',
+/** White dry-erase face + musterd-orange marker ink (`mustard-500`). */
+const WHITEBOARD = {
+  face: '#F7F7F5',
+  ink: '#E1AD01',
+  inkDim: 'rgba(225, 173, 1, 0.55)',
+  shadow: 'rgba(58, 34, 12, 0.20)',
 } as const;
 
 /**
@@ -868,11 +886,9 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv, nodes
     if (edge === WALL_EDGES[1]) {
       wallArt(ctx, fit, edge, 0.15, 0.56, 60, 44, 'sunrise'); // over the corner bookshelf
       wallClock(ctx, fit, edge, 0.52, 0.62, env.hours); // dead centre, between the windows
-      // The in/out board takes the far-right gap, which used to hold a pair of small prints. A board
-      // that tells you who is in earns that wall over two decorative frames — and it has to be THIS
-      // wall: `+t` runs screen-left on the other one, so its count would read backwards (the same
-      // constraint that fixed the clock here).
-      wallRoster(ctx, fit, edge, 0.885, 0.6, nodes);
+      // Dry-erase whiteboard (set dressing) — far-right gap. Must be THIS wall: `+t` runs screen-left
+      // on the other one (same constraint that fixed the clock here).
+      wallWhiteboard(ctx, fit, edge, 0.885, 0.6);
       return;
     }
     wallArt(ctx, fit, edge, 0.14, 0.56, 54, 42, 'arches');

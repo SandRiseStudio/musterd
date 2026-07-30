@@ -65,6 +65,8 @@ export function OfficeScene({
   onReady,
   topSlot,
   bandSlot,
+  /** Hybrid nameplate work cues vs in-panel WorkStack (`stack`) vs neither. Default hybrid. */
+  workCues = 'hybrid',
 }: {
   teamName: string;
   roster: MemberSummary[];
@@ -91,12 +93,12 @@ export function OfficeScene({
    * `/broadcast` passes nothing: a stream cannot answer an ask. */
   topSlot?: ReactNode;
   /**
-   * Chrome seated in a strip BENEATH the room rather than floated over it — `/live` puts the office
-   * noticeboard here. The band is sized to its content and the room keeps every remaining pixel, so
-   * adding one costs the scene exactly the band's own height and never more. `/broadcast` passes
-   * nothing and stays full-bleed.
+   * Chrome seated in a strip BENEATH the room rather than floated over it — `/live` puts WorkStack
+   * here when `workCues === 'stack'`. The band is sized to its content and the room keeps every
+   * remaining pixel. `/broadcast` passes nothing and stays full-bleed.
    */
   bandSlot?: ReactNode;
+  workCues?: 'hybrid' | 'stack' | 'none';
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
@@ -139,6 +141,8 @@ export function OfficeScene({
         const handle = mountOffice(host, labelHost, reduced, {
           onActClick: (id) => onActClickRef.current?.(id),
           broadcast,
+          interactiveLabels: !broadcast,
+          showWorkCues: workCues === 'hybrid',
         });
         handle.update(dataRef.current);
         handle.setSuspended(collapsedRef.current); // mounted while collapsed → start parked
@@ -154,7 +158,7 @@ export function OfficeScene({
       handleRef.current = null;
       onReadyRef.current?.(null);
     };
-  }, [broadcast]);
+  }, [broadcast, workCues]);
 
   useEffect(() => {
     handleRef.current?.update(data);
@@ -201,14 +205,13 @@ export function OfficeScene({
         <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
         {/* The office's own chrome, identical on /live and /broadcast by construction — the whole point
             of the shared component. Collapsed, the panel is a rail with nowhere to put it. */}
-        {!collapsed && (
+        {!collapsed && broadcast && (
           <OfficeOverlay
             teamName={teamName}
             present={presentCount(roster)}
             entries={entries}
             status={status}
-            // Steerable on the dashboard, a passive chyron on the stream: `/broadcast` has no cursor.
-            interactive={!broadcast}
+            interactive={false}
           />
         )}
         {/* The asks rail floats over the top of the room the way the reel floats over the bottom. */}

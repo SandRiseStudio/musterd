@@ -1,5 +1,6 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
+import { identityMeta, shortLaneState, truncateWork } from '../presenceLabel';
 import { createActors, type Actors } from './actors';
 import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
@@ -115,6 +116,16 @@ export interface OfficeOptions {
    * running while the tab is hidden or headless, DPR is pinned to 1 for a deterministic capture size,
    * and suspend requests are ignored. Only `/broadcast` passes it — see ./broadcast.ts. */
   broadcast?: boolean;
+  /**
+   * `/live` only: labels accept pointer/hover so the identity+work tip can open. Broadcast keeps
+   * labels non-interactive (no cursor on a stream capture).
+   */
+  interactiveLabels?: boolean;
+  /**
+   * Hybrid work cues under nameplates (spec §2). When false, always-on work lines are omitted — use
+   * the in-panel WorkStack fallback instead.
+   */
+  showWorkCues?: boolean;
 }
 
 export function mountOffice(
@@ -124,6 +135,8 @@ export function mountOffice(
   options: OfficeOptions = {},
 ): OfficeHandle {
   const broadcast = options.broadcast === true;
+  const interactiveLabels = options.interactiveLabels === true;
+  const showWorkCues = options.showWorkCues !== false;
   const dpr = officeDpr(broadcast, DPR_CAP);
 
   const canvas = document.createElement('canvas');
@@ -304,7 +317,10 @@ export function mountOffice(
 
   /** Create/remove label elements + set their text, and position them from `headMap`. Small (nook/strip)
    * actors are left unlabelled — their names bunch at a glance and the roster panel is the name source of
-   * truth; the "+N" pills and location carry the secondary read. */
+   * truth; the "+N" pills and location carry the secondary read.
+   *
+   * Present members also get an identity meta line (harness · model · role) and, when hybrid cues are on,
+   * a truncated work line — see presence-chrome design 2026-07-30. */
   function syncLabels(headMap: Map<string, Pt>, nodes: Map<string, OfficeNode>, poses: Map<string, Pose>) {
     const seen = new Set<string>();
     for (const [name, head] of headMap) {
@@ -315,10 +331,13 @@ export function mountOffice(
       if (!el) {
         el = document.createElement('div');
         el.className = 'lc-gl-label';
+        if (interactiveLabels) el.tabIndex = 0;
         labelHost.appendChild(el);
         labels.set(name, el);
       }
       el.textContent = '';
+      el.style.pointerEvents = interactiveLabels ? 'auto' : 'none';
+
       const nameEl = document.createElement('span');
       nameEl.className = 'lc-gl-label__name';
       // The same dot the roster panel leads with, off the same posture: green working · amber idle ·
@@ -329,9 +348,57 @@ export function mountOffice(
       nameEl.appendChild(dot);
       nameEl.appendChild(document.createTextNode(name));
       el.appendChild(nameEl);
-      // The member's status/activity is no longer a persistent caption here (it used to render as one
-      // ultra-wide, never-fading line). It now surfaces as an ephemeral speech bubble on each act (below);
-      // the roster panel remains the always-on source of truth for who's doing what.
+
+      const present = node.presence !== 'offline';
+      const meta = identityMeta({
+        surface: node.surface,
+        model: node.model,
+        role: node.role,
+      });
+      if (present && meta.line) {
+        const metaEl = document.createElement('span');
+        metaEl.className = 'lc-gl-label__meta';
+        metaEl.textContent = meta.line;
+        el.appendChild(metaEl);
+      }
+
+      const chip = shortLaneState(node.laneState);
+      const said = node.workSource === 'status';
+      const showWork =
+        showWorkCues && present && node.workTitle != null && node.workTitle.length > 0;
+      if (showWork) {
+        const workEl = document.createElement('span');
+        workEl.className = 'lc-gl-label__work';
+        workEl.textContent = [
+          truncateWork(node.workTitle!),
+          chip,
+          said ? 'said' : null,
+          node.moreLanes > 0 ? `+${node.moreLanes}` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        el.appendChild(workEl);
+      }
+
+      if (interactiveLabels && (meta.title || node.workTitle)) {
+        const tip = document.createElement('div');
+        tip.className = 'lc-gl-label__tip';
+        tip.setAttribute('role', 'tooltip');
+        const tipLines = [
+          meta.title || null,
+          node.workTitle
+            ? `${node.workTitle}${chip ? ` (${chip})` : ''}${said ? ' · said' : ''}`
+            : null,
+        ].filter(Boolean);
+        tip.textContent = tipLines.join('\n');
+        el.appendChild(tip);
+        el.title = ''; // CSS tip replaces native tooltip
+      } else if (meta.title) {
+        el.title = meta.title;
+      } else {
+        el.title = '';
+      }
+
       el.classList.toggle('is-offline', node.presence !== 'online');
       el.style.transform = `translate(-50%, -100%) translate(${head.x}px, ${head.y}px)`;
     }
