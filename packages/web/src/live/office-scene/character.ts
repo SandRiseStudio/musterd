@@ -332,12 +332,28 @@ function drawHead(
   const backHair = (dx: number, dy: number, rx: number, ry: number): void =>
     disc(ctx, { x: hd.p.x + dx * r, y: hd.p.y + dy * r }, r * rx, r * ry, hc);
 
+  /**
+   * Where the hair stops, in screen px below the head centre — anchored to the SHOULDER, not to a
+   * multiple of the head radius.
+   *
+   * Sizing the fall off `r` was the bug behind "the receptionist looks like a seal": a mass 1.75×
+   * the head radius hanging below the skull is fine when you can see the whole body for scale, and
+   * reads as one rounded blob when the body is hidden behind a desk. Hair falls *to the shoulders* —
+   * so ask the skeleton where they are. It also keeps long hair honest across sitting, standing and
+   * walking, where the head-to-shoulder distance genuinely changes.
+   */
+  const shoulderDrop = Math.max(r * 0.5, (px(k.shoulder[0]).p.y + px(k.shoulder[1]).p.y) / 2 - hd.p.y);
+
   if (look.hair === 'afro') backHair(0, -0.05, 1.24, 1.2);
   else if (look.hair === 'long') {
-    backHair(0, 0.95, 1.12, 1.75); // the fall — well past the jaw, onto the shoulders
-    backHair(0, 0.1, 1.14, 1.1); // and the mass around the skull itself
+    // Centre it halfway to the shoulder and give it half that height, so the mass ENDS at the
+    // shoulder line rather than continuing down over the torso.
+    const fall = shoulderDrop * 0.62;
+    disc(ctx, { x: hd.p.x, y: hd.p.y + fall }, r * 1.02, Math.max(r * 0.9, fall + r * 0.55), hc);
+    backHair(0, 0.06, 1.1, 1.05); // and the mass around the skull itself
   } else if (look.hair === 'bob') {
-    backHair(0, 0.5, 1.22, 1.3); // chin-length and wider than it is long — that IS a bob
+    const fall = shoulderDrop * 0.34;
+    disc(ctx, { x: hd.p.x, y: hd.p.y + fall }, r * 1.16, Math.max(r * 0.95, fall + r * 0.6), hc);
   } else if (look.hair === 'ponytail') {
     backHair(0.1, 0.05, 1.08, 1.04); // gathered at the crown
     backHair(0.62, 0.85, 0.34, 0.9); // the tail, hanging off to one side
@@ -383,9 +399,10 @@ function drawHead(
     // of the skull. This is what sells long hair from the front — without it a long back mass just
     // looks like a big head, because from this angle you cannot see behind the skull at all.
     if (look.hair === 'long' || look.hair === 'bob') {
-      const fall = look.hair === 'long' ? 1.5 : 1.0;
+      // Strands stop at the shoulder too — a strand that outruns the mass behind it reads as a beard.
+      const strand = Math.max(r * 0.5, shoulderDrop * (look.hair === 'long' ? 0.5 : 0.32));
       for (const side of [-1, 1]) {
-        disc(ctx, { x: hd.p.x + side * r * 0.86, y: hd.p.y + r * 0.42 }, r * 0.3, r * fall * 0.62, hc);
+        disc(ctx, { x: hd.p.x + side * r * 0.82, y: hd.p.y + strand * 0.5 }, r * 0.26, strand * 0.62, hc);
       }
     }
   }
