@@ -8,6 +8,24 @@ import {
   shortWorkTitle,
 } from './presenceLabel';
 
+describe('shortModel — the Claude families', () => {
+  it('names every Claude family with its version, Fable included', () => {
+    expect(shortModel('claude-opus-5')).toBe('opus 5');
+    expect(shortModel('claude-sonnet-4-5')).toBe('sonnet 4.5');
+    expect(shortModel('claude-haiku-4-5-20251001')).toBe('haiku 4.5');
+    expect(shortModel('claude-fable-5')).toBe('fable 5');
+  });
+
+  it('never leaves the vendor prefix on a known family', () => {
+    // The bug: an unlisted family fell through to the "first two segments" fallback and rendered
+    // "claude fable" — vendor + family, no version, and it reads like the harness.
+    for (const id of ['claude-opus-5', 'claude-fable-5', 'claude-sonnet-4-5']) {
+      expect(shortModel(id)).not.toContain('claude');
+      expect(shortModel(id)).toMatch(/\d/);
+    }
+  });
+});
+
 describe('plateModel', () => {
   it('gives the short model for the always-on plate', () => {
     expect(plateModel('claude-opus-4-5')).toBe('opus 4.5');

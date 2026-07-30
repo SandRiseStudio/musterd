@@ -319,12 +319,32 @@ function drawHead(
    */
   const face = (dx: number, dy: number): Pt => ({ x: hd.p.x + dx * r, y: hd.p.y + dy * r });
 
-  // ── hair behind the skull ── (kept close to the skull: at r×1.5 an afro was wider than the torso)
-  if (look.hair === 'afro') disc(ctx, at(0, 1.5, -1), r * 1.22, r * 1.18, hc);
-  else if (look.hair === 'long') disc(ctx, at(0, -4, -2), r * 0.98, r * 1.16, hc);
-  else if (look.hair === 'bob') disc(ctx, at(0, -1.5, -2), r * 1.06, r * 1.02, hc);
-  else if (look.hair === 'ponytail') disc(ctx, at(0, -2, -7), r * 0.42, r * 0.72, hc);
-  else if (look.hair === 'bun') disc(ctx, at(0, R + 2, -2), r * 0.46, r * 0.42, hc);
+  // ── hair behind the skull ──
+  //
+  // In SCREEN space, for the same reason the face is billboarded (see below): "long hair falls to the
+  // shoulders" is a silhouette against the torso, and the 2:1 iso sends character-space −z down-LEFT,
+  // so a mass offset that way slides off the side of the head instead of hanging behind it.
+  //
+  // These masses used to top out around r×1.16 — barely wider than the skull — which is why not one
+  // member on the floor read as having long hair (nick, 2026-07-30). At 30px the ONLY thing that
+  // carries hair length is how far the mass extends past the jaw, so `long` and `bob` now genuinely
+  // reach down over the shoulders. Drawn before the skull, so the face still sits clean on top.
+  const backHair = (dx: number, dy: number, rx: number, ry: number): void =>
+    disc(ctx, { x: hd.p.x + dx * r, y: hd.p.y + dy * r }, r * rx, r * ry, hc);
+
+  if (look.hair === 'afro') backHair(0, -0.05, 1.24, 1.2);
+  else if (look.hair === 'long') {
+    backHair(0, 0.95, 1.12, 1.75); // the fall — well past the jaw, onto the shoulders
+    backHair(0, 0.1, 1.14, 1.1); // and the mass around the skull itself
+  } else if (look.hair === 'bob') {
+    backHair(0, 0.5, 1.22, 1.3); // chin-length and wider than it is long — that IS a bob
+  } else if (look.hair === 'ponytail') {
+    backHair(0.1, 0.05, 1.08, 1.04); // gathered at the crown
+    backHair(0.62, 0.85, 0.34, 0.9); // the tail, hanging off to one side
+  } else if (look.hair === 'bun') {
+    backHair(0, 0.05, 1.06, 1.02);
+    disc(ctx, { x: hd.p.x, y: hd.p.y - r * 0.92 }, r * 0.46, r * 0.42, hc); // the knot on top
+  }
 
   // ── the skull ──
   disc(ctx, hd.p, r, r * 0.98, look.skin);
@@ -359,6 +379,15 @@ function drawHead(
     crown(hc, DROP[look.hair]);
     // A side parting: a sweep of hair across one side of the brow, breaking the symmetry.
     if (look.hair === 'side') disc(ctx, at(R * 0.42, 4.5, R * 0.34), r * 0.46, r * 0.3, hc);
+    // Face-framing strands for the long styles: a sliver of hair down each side of the face, IN FRONT
+    // of the skull. This is what sells long hair from the front — without it a long back mass just
+    // looks like a big head, because from this angle you cannot see behind the skull at all.
+    if (look.hair === 'long' || look.hair === 'bob') {
+      const fall = look.hair === 'long' ? 1.5 : 1.0;
+      for (const side of [-1, 1]) {
+        disc(ctx, { x: hd.p.x + side * r * 0.86, y: hd.p.y + r * 0.42 }, r * 0.3, r * fall * 0.62, hc);
+      }
+    }
   }
 
   // ── the hat, over the hair ──

@@ -1004,7 +1004,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0;
-  max-width: 12rem;
+  max-width: 16rem;
   padding: 2px 8px 2px 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--lc-paper) 90%, transparent);
@@ -1035,7 +1035,7 @@
 }
 /* The model, inline after the rule: same stock, same hue, one notch quieter than the name. */
 .lc-gl-label__model {
-  max-width: 6.5rem;
+  max-width: 5.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

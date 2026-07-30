@@ -23,8 +23,11 @@ export function shortModel(model: string | null | undefined): string {
   const raw = model.trim();
   if (!raw || raw.toLowerCase() === 'unknown') return '';
   const lower = raw.toLowerCase();
-  // claude-opus-4-5 → opus 4.5 (Anthropic encodes the minor as a hyphen)
-  const anthropic = lower.match(/\b(opus|sonnet|haiku)[- ]?(\d+)(?:[-.](\d+))?/);
+  // claude-opus-4-5 → opus 4.5 (Anthropic encodes the minor as a hyphen).
+  // `fable` belongs in this list: without it, claude-fable-5 fell through to the generic fallback and
+  // came out "claude fable" — the vendor prefix plus a family name, and no version at all. Any new
+  // Claude family name has to be added here or it regresses the same way, silently.
+  const anthropic = lower.match(/\b(opus|sonnet|haiku|fable)[- ]?(\d+)(?:[-.](\d+))?/);
   if (anthropic) {
     const ver = anthropic[3] ? `${anthropic[2]}.${anthropic[3]}` : anthropic[2]!;
     return `${anthropic[1]} ${ver}`;

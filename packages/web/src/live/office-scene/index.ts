@@ -1,7 +1,7 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
 import { roomTone, type LifeContext } from '../sound';
-import { identityMeta, plateModel, shortLaneState, shortWorkTitle } from '../presenceLabel';
+import { identityMeta, plateModel, shortLaneState, shortSurface, shortWorkTitle } from '../presenceLabel';
 import { createActors, type Actors } from './actors';
 import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
@@ -363,16 +363,20 @@ export function mountOffice(
       who.className = 'lc-gl-label__who';
       who.textContent = name;
       plate.appendChild(who);
-      const model = present ? plateModel(node.model) : null;
-      if (model) {
+      // Harness, then model, each behind its own rule. The harness came back after it turned out
+      // "which harness is that seat on" is a thing you want at a glance, not on hover — and it is
+      // unambiguous again now that a Claude model renders as `fable 5` rather than `claude fable`.
+      const segments = present ? [shortSurface(node.surface), plateModel(node.model)] : [];
+      for (const seg of segments) {
+        if (!seg) continue;
         const divider = document.createElement('span');
         divider.className = 'lc-gl-label__rule';
         divider.setAttribute('aria-hidden', 'true');
         plate.appendChild(divider);
-        const modelEl = document.createElement('span');
-        modelEl.className = 'lc-gl-label__model';
-        modelEl.textContent = model;
-        plate.appendChild(modelEl);
+        const segEl = document.createElement('span');
+        segEl.className = 'lc-gl-label__model';
+        segEl.textContent = seg;
+        plate.appendChild(segEl);
       }
       el.appendChild(plate);
 
