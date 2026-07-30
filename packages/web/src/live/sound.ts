@@ -212,11 +212,145 @@ const LIFE_GAP: [number, number] = [2.5, 8];
  *
  * As re-measured through the same offline graph, peaks against a −33.7 dBFS bed: keystroke −25,
  * murmur −25, chime −30, mug −30, creak −31. **Those readings carry about ±3 dB** — each render draws
+ *
+ * 2026-07-30, typing rebuild: re-rendered through the same chain shapes (stereo OfflineAudioContext,
+ * so absolute numbers shifted — the bed read −40.2 in that render; only the DELTAS are comparable).
+ * The old single-transient keystroke sat **+13.5 dB over the bed**, which was the "too loud". The
+ * two-transient press now lands at bed +0.4 (thock) and +1.3 (release click) — at the bed, which is
+ * where a keyboard three desks away belongs. The new events reuse the existing shapes at or below
+ * the old mug/creak envelope numbers and inherit this calibration.
  * a fresh random noise buffer, and the peak of a narrowband noise burst wanders that much. A control
  * sweep confirmed the harness itself tracks gain at ~6 dB per doubling, so differences of that order
  * are real and anything smaller is not. Do not tune this layer to a finer resolution than that.
  */
 const LIFE_GAIN = 34;
+
+
+// ── the life roll, as data ───────────────────────────────────────────────────────────────────────
+//
+// Which small noise plays next used to be an inline `if (roll < 0.34) …` chain, which nothing could
+// test and every addition re-balanced by hand. It is now a weighted table plus a pure picker, so the
+// mix is inspectable, the gates (chatter needs two people NEAR each other, dog noises need the dog)
+// are testable without an AudioContext, and the synths below stay what they are: leaf functions.
+
+/** What the scene tells the sound engine. Pushed one way (scene → sound), never read back — that is
+ *  what keeps this file testable without a canvas. `x` values are screen positions in [-1, 1]. */
+export interface LifeContext {
+  /** Pairs of members actually near each other — sharing a pod, the huddle, or the lounge. */
+  pairs: ReadonlyArray<{ x: number }>;
+  /** The office dog, when it is on the floor. */
+  dog: { x: number; walking: boolean } | null;
+}
+
+/** An occupancy nobody has pushed yet: an empty office, which must not talk to itself. */
+export const EMPTY_LIFE: LifeContext = { pairs: [], dog: null };
+
+/**
+ * The mix. Work and talk stay the majority on purpose — the new events are seasoning, and a room
+ * where the stapler fires as often as the typing is a cartoon. Weights sum to 1; the gated events'
+ * weight is REDISTRIBUTED (by renormalising over what is available) when their condition fails, so
+ * an empty office is not simply quieter by the chatter slots.
+ */
+export const LIFE_EVENTS: ReadonlyArray<{ name: string; weight: number }> = [
+  { name: 'keys', weight: 0.34 },
+  { name: 'murmur', weight: 0.17 },
+  { name: 'whisper', weight: 0.04 },
+  { name: 'tap', weight: 0.07 },
+  { name: 'creak', weight: 0.06 },
+  { name: 'chime', weight: 0.04 },
+  { name: 'softTap', weight: 0.03 },
+  { name: 'stapler', weight: 0.03 },
+  { name: 'drawer', weight: 0.03 },
+  { name: 'footsteps', weight: 0.04 },
+  { name: 'sip', weight: 0.03 },
+  { name: 'blow', weight: 0.02 },
+  { name: 'water', weight: 0.02 },
+  { name: 'eating', weight: 0.03 },
+  { name: 'paws', weight: 0.025 },
+  { name: 'jingle', weight: 0.01 },
+  { name: 'yawn', weight: 0.01 },
+  // A bark on a timer is an alarm clock. Rarity IS the design; do not "fix" this upward.
+  { name: 'bark', weight: 0.005 },
+];
+
+const CHATTER = new Set(['murmur', 'whisper']);
+const DOG_EVENTS = new Set(['paws', 'jingle', 'yawn', 'bark']);
+
+/** Is this event available under the current occupancy? Chatter needs a co-located pair — a headcount
+ *  of two at opposite ends of the floor is not a conversation. Paws need the dog actually walking. */
+function lifeAvailable(name: string, ctx: LifeContext): boolean {
+  if (CHATTER.has(name)) return ctx.pairs.length > 0;
+  if (name === 'paws') return ctx.dog?.walking === true;
+  if (DOG_EVENTS.has(name)) return ctx.dog != null;
+  return true;
+}
+
+/** Pick the next life event for a uniform `roll` in [0, 1). Pure and deterministic. */
+export function pickLifeEvent(roll: number, ctx: LifeContext): string {
+  const avail = LIFE_EVENTS.filter((e) => lifeAvailable(e.name, ctx));
+  const total = avail.reduce((sum, e) => sum + e.weight, 0);
+  let acc = 0;
+  for (const e of avail) {
+    acc += e.weight;
+    if (roll * total < acc) return e.name;
+  }
+  return avail[avail.length - 1]!.name;
+}
+
+/**
+ * Where an event pans. Chatter comes from the pair and dog noises from the dog — the room's sound
+ * should match what the eye can see. Everything else returns null: play it from a random side, the
+ * way the layer always has (everything in an office happens at somebody else's desk).
+ */
+export function panFor(name: string, ctx: LifeContext): number | null {
+  if (CHATTER.has(name)) return (ctx.pairs[0]?.x ?? 0) * 0.75;
+  if (DOG_EVENTS.has(name)) return (ctx.dog?.x ?? 0) * 0.75;
+  return null;
+}
+
+// ── the keyboard ─────────────────────────────────────────────────────────────────────────────────
+
+/** One desk's keyboard: the body pitch of its thock, the down→up gap, and the two transient gains. */
+export interface Keyboard {
+  body: number;
+  gap: number;
+  downGain: number;
+  upGain: number;
+}
+
+/**
+ * A keyboard per RUN, not per key. Every keystroke in the office used to be the same synth roll, so
+ * a burst at one desk sounded identical to a burst at another; drawing the parameters once per run
+ * makes a burst one keyboard and the next burst a different desk. Deterministic in the seed so the
+ * tests can hold it still.
+ */
+export function keyboardFor(seed: number): Keyboard {
+  const r = (salt: number): number => {
+    let h = Math.imul(seed ^ (salt * 0x9e3779b9), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  return {
+    // An octave-ish below the old 1650–2550 Hz band: the bright band was the "fake" half of the
+    // complaint — it was playing only a keystroke's click, never its thock.
+    body: 750 + r(1) * 550,
+    gap: 0.028 + r(2) * 0.03,
+    downGain: 0.017 + r(3) * 0.009,
+    upGain: 0.01 + r(4) * 0.005,
+  };
+}
+
+/**
+ * The two transients of one keypress: a low thock as the key bottoms out, then a lighter, brighter
+ * click as it releases. The original played only the second half, which is why it read as fake AND
+ * as the loudest thing in the room — both complaints had the same root (nick, 2026-07-30).
+ */
+export function keypressPlan(kb: Keyboard): ReadonlyArray<{ freq: number; gain: number; dur: number; at: number }> {
+  return [
+    { freq: kb.body, gain: kb.downGain, dur: 0.045, at: 0 },
+    { freq: kb.body * 2.6, gain: kb.upGain, dur: 0.028, at: kb.gap },
+  ];
+}
 
 class RoomTone {
   enabled = false;
@@ -228,6 +362,8 @@ class RoomTone {
   private sources: AudioScheduledSourceNode[] = [];
   private timer: ReturnType<typeof setTimeout> | undefined;
   private watching = false;
+  /** What the scene last told us about who is near whom. Starts empty: an empty office is quiet. */
+  private occupancy: LifeContext = EMPTY_LIFE;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -259,6 +395,11 @@ class RoomTone {
    */
   resumeIfEnabled(): void {
     if (this.enabled) this.start();
+  }
+
+  /** The scene pushes who is near whom (and where the dog is). One-way by design — see LifeContext. */
+  setOccupancy(ctx: LifeContext): void {
+    this.occupancy = ctx;
   }
 
   private start(): void {
@@ -395,36 +536,56 @@ class RoomTone {
     if (!ctx || !bus) return;
     // Placed across the stereo field, never dead centre: everything in an office happens at somebody
     // else's desk, and a sound in the middle of your head is a sound you made.
+    const name = pickLifeEvent(Math.random(), this.occupancy);
     const pan = ctx.createStereoPanner?.();
     const out = pan ?? ctx.createGain();
-    if (pan) pan.pan.value = (Math.random() * 2 - 1) * 0.75;
+    // Positioned events (chatter, the dog) pan to where they are on screen; the rest land somewhere
+    // off to one side, the way the layer always has.
+    const at = panFor(name, this.occupancy);
+    if (pan) pan.pan.value = at ?? (Math.random() * 2 - 1) * 0.75;
     out.connect(bus);
     // Long enough for the longest murmur or typing run to finish before its channel goes away.
     setTimeout(() => out.disconnect(), 9000);
 
-    // The mix leans on the sounds of *work* — typing and talk — with the object noises and the rare
-    // chat-app ping as seasoning. Every branch below jitters its own parameters, so even the same
-    // event twice in a row never plays the same twice (nick, 2026-07-29: "very dynamic and variable
-    // so they don't get old").
-    const roll = Math.random();
-    if (roll < 0.34) this.keys(ctx, out);
-    else if (roll < 0.54) this.murmur(ctx, out);
-    else if (roll < 0.68) this.tap(ctx, out, 0.9);
-    else if (roll < 0.8) this.creak(ctx, out);
-    else if (roll < 0.9) this.chime(ctx, out);
-    else this.tap(ctx, out, 0.35);
+    // Every branch jitters its own parameters, so even the same event twice in a row never plays the
+    // same twice (nick, 2026-07-29: "very dynamic and variable so they don't get old").
+    switch (name) {
+      case 'keys': return this.keys(ctx, out);
+      case 'murmur': return this.murmur(ctx, out, false);
+      case 'whisper': return this.murmur(ctx, out, true);
+      case 'tap': return this.tap(ctx, out, 0.9);
+      case 'softTap': return this.tap(ctx, out, 0.35);
+      case 'creak': return this.creak(ctx, out);
+      case 'chime': return this.chime(ctx, out);
+      case 'stapler': return this.stapler(ctx, out);
+      case 'drawer': return this.drawer(ctx, out);
+      case 'footsteps': return this.footsteps(ctx, out);
+      case 'sip': return this.sip(ctx, out, 1);
+      case 'water': return this.sip(ctx, out, 0.72);
+      case 'blow': return this.blow(ctx, out);
+      case 'eating': return this.eating(ctx, out);
+      case 'paws': return this.paws(ctx, out);
+      case 'jingle': return this.jingle(ctx, out);
+      case 'yawn': return this.blow(ctx, out, true);
+      case 'bark': return this.bark(ctx, out);
+    }
   }
 
-  /** Somebody typing, a few desks away: a run of clicks at a human, uneven rate. Sometimes a quick
-   *  flurry, sometimes a long thought typed out — with a thinking pause in the middle of the long
-   *  ones. A uniform run is what the ear learns first. */
+  /** Somebody typing, a few desks away: a run of keypresses at a human, uneven rate. Sometimes a
+   *  quick flurry, sometimes a long thought typed out — with a thinking pause in the middle of the
+   *  long ones. A uniform run is what the ear learns first. One `Keyboard` per run (see
+   *  `keyboardFor`), two transients per key (see `keypressPlan`) — and the whole thing sits at the
+   *  bed's level now, not 9 dB over it, which was the "too loud" half of the complaint. */
   private keys(ctx: AudioContext, out: AudioNode): void {
+    const kb = keyboardFor(Math.floor(Math.random() * 0xffffffff));
     const long = Math.random() < 0.3;
     const n = long ? 14 + Math.floor(Math.random() * 12) : 4 + Math.floor(Math.random() * 9);
     const pauseAt = long ? 5 + Math.floor(Math.random() * (n - 8)) : -1;
     let at = ctx.currentTime + 0.02;
     for (let i = 0; i < n; i++) {
-      this.click(ctx, out, at, 1650 + Math.random() * 900, 0.05 + Math.random() * 0.04);
+      for (const tr of keypressPlan(kb)) {
+        this.click(ctx, out, at + tr.at, tr.freq * (0.94 + Math.random() * 0.12), tr.gain, tr.dur);
+      }
       at += 0.055 + Math.random() * 0.075; // the jitter IS the humanity
       if (i === pauseAt) at += 0.5 + Math.random() * 1.1; // rereading the sentence
     }
@@ -466,7 +627,10 @@ class RoomTone {
   /** Two people talking a few desks away — too far to make out a word, which is the point. Band-passed
    *  noise shaped into syllables, two voice registers trading short phrases; phrase count, syllable
    *  count, register, contour and pacing all jittered, so no two conversations are alike. */
-  private murmur(ctx: AudioContext, out: AudioNode): void {
+  private murmur(ctx: AudioContext, out: AudioNode, whisper: boolean): void {
+    // A whisper is the same exchange with the voice taken out of it: quieter, and pushed into a
+    // tighter, breathier band — the shape of consonants carrying without pitch.
+    const level = whisper ? 0.45 : 1;
     let at = ctx.currentTime + 0.05;
     const phrases = 2 + Math.floor(Math.random() * 2);
     for (let ph = 0; ph < phrases; ph++) {
@@ -475,11 +639,12 @@ class RoomTone {
       // around 300–650 Hz, and centring the band on a 130 Hz fundamental put nearly all the energy
       // below where the muffling lowpass could shape it (it was also the quietest event by 17 dB).
       // Two registers, an upper and a lower speaker, so an exchange has two people in it.
-      const voice = ph % 2 === 0 ? 460 + Math.random() * 190 : 310 + Math.random() * 130;
+      const base = ph % 2 === 0 ? 460 + Math.random() * 190 : 310 + Math.random() * 130;
+      const voice = whisper ? base * 1.5 : base;
       const syllables = 3 + Math.floor(Math.random() * 4);
       for (let i = 0; i < syllables; i++) {
         const dur = 0.09 + Math.random() * 0.11;
-        this.voiceBurst(ctx, out, at, voice * (0.9 + Math.random() * 0.35), dur);
+        this.voiceBurst(ctx, out, at, voice * (0.9 + Math.random() * 0.35), dur, level);
         at += dur + 0.02 + Math.random() * 0.06;
       }
       at += 0.25 + Math.random() * 0.55; // the beat where the other one answers
@@ -488,7 +653,7 @@ class RoomTone {
 
   /** One spoken syllable, heard through the room: a noise burst through a gliding bandpass (the pitch
    *  contour of speech) then a hard lowpass (the wall between you and the words). */
-  private voiceBurst(ctx: AudioContext, out: AudioNode, at: number, freq: number, dur: number): void {
+  private voiceBurst(ctx: AudioContext, out: AudioNode, at: number, freq: number, dur: number, level = 1): void {
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer(ctx);
     src.loop = true;
@@ -505,7 +670,7 @@ class RoomTone {
     lp.frequency.value = 1100;
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, at);
-    g.gain.exponentialRampToValueAtTime(0.075 + Math.random() * 0.028, at + dur * 0.35);
+    g.gain.exponentialRampToValueAtTime((0.075 + Math.random() * 0.028) * level, at + dur * 0.35);
     g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     src.connect(bp).connect(lp).connect(g).connect(out);
     src.start(at);
@@ -536,6 +701,153 @@ class RoomTone {
     src.connect(bp).connect(g).connect(out);
     src.start(t0);
     src.stop(t0 + 0.5);
+  }
+
+  /** A stapler: the soft press of the arm, then the sharp ka-CHUNK of the staple setting. Two
+   *  transients with the weight on the second, which is the opposite of a keypress — that reversal
+   *  is what keeps them from reading as the same object. */
+  private stapler(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    this.click(ctx, out, t0, 380 + Math.random() * 120, 0.05, 0.04);
+    this.click(ctx, out, t0 + 0.07 + Math.random() * 0.03, 900 + Math.random() * 300, 0.14, 0.05);
+  }
+
+  /** A wooden drawer: a low slide swelling over a third of a second, ended by a hard stop. The slide
+   *  is a noise swell with NO attack transient — the stop is the only edge, which is what makes it a
+   *  drawer and not a knock followed by a hiss. */
+  private drawer(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    const dur = 0.3 + Math.random() * 0.2;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.2;
+    bp.frequency.setValueAtTime(180 + Math.random() * 80, t0);
+    bp.frequency.exponentialRampToValueAtTime(260 + Math.random() * 80, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.1, t0 + dur * 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t0);
+    src.stop(t0 + dur + 0.03);
+    this.click(ctx, out, t0 + dur, 200 + Math.random() * 100, 0.11, 0.06); // the stop
+  }
+
+  /** Somebody walking past: paced pairs of soft low thuds. The pan drift across the field is the
+   *  whole effect — footsteps that stay in one place are a woodpecker. */
+  private footsteps(ctx: AudioContext, out: AudioNode): void {
+    const steps = 4 + Math.floor(Math.random() * 4);
+    const pace = 0.42 + Math.random() * 0.14;
+    const from = (Math.random() * 2 - 1) * 0.7;
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    let at = ctx.currentTime + 0.02;
+    for (let i = 0; i < steps; i++) {
+      // Per-step pan: a small chain per thud, drifting across the field as they cross the room.
+      const pan = ctx.createStereoPanner?.();
+      const leg: AudioNode = pan ?? ctx.createGain();
+      if (pan) pan.pan.value = Math.max(-1, Math.min(1, from + dir * (i / steps) * 0.6));
+      leg.connect(out);
+      this.click(ctx, leg, at, 110 + Math.random() * 60, 0.09, 0.07);
+      at += pace * (0.92 + Math.random() * 0.16);
+    }
+  }
+
+  /** A sip — coffee at full body, water lower and wetter via `body`. A short liquid intake, then the
+   *  tiny swallow underneath it. */
+  private sip(ctx: AudioContext, out: AudioNode, body: number): void {
+    const t0 = ctx.currentTime + 0.02;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 3.5;
+    bp.frequency.setValueAtTime(1400 * body, t0);
+    bp.frequency.exponentialRampToValueAtTime(900 * body, t0 + 0.16);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.055, t0 + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t0);
+    src.stop(t0 + 0.2);
+    this.click(ctx, out, t0 + 0.22 + Math.random() * 0.05, 240 * body, 0.05, 0.06); // the swallow
+  }
+
+  /** Blowing on a hot coffee — or, with `long`, a yawn: a breath swell through a slow-opening
+   *  lowpass, no transient anywhere. The absence of an edge IS the sound. */
+  private blow(ctx: AudioContext, out: AudioNode, long = false): void {
+    const t0 = ctx.currentTime + 0.02;
+    const dur = long ? 0.9 + Math.random() * 0.4 : 0.45 + Math.random() * 0.2;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(500, t0);
+    // A yawn's jaw opens the tract wider than pursed lips ever do — same gesture, bigger sweep.
+    lp.frequency.exponentialRampToValueAtTime(long ? 1600 : 1100, t0 + dur * 0.45);
+    lp.frequency.exponentialRampToValueAtTime(420, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(long ? 0.05 : 0.065, t0 + dur * 0.4);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(lp).connect(g).connect(out);
+    src.start(t0);
+    src.stop(t0 + dur + 0.03);
+  }
+
+  /** Somebody eating at their desk: soft irregular crunches at an uneven rate — the irregularity is
+   *  what separates chewing from machinery. */
+  private eating(ctx: AudioContext, out: AudioNode): void {
+    const bites = 3 + Math.floor(Math.random() * 4);
+    let at = ctx.currentTime + 0.02;
+    for (let i = 0; i < bites; i++) {
+      this.click(ctx, out, at, 700 + Math.random() * 500, 0.045 + Math.random() * 0.02, 0.05 + Math.random() * 0.03);
+      at += 0.28 + Math.random() * 0.3;
+    }
+  }
+
+  /** The dog's paws on the boards — much softer and rounder than human footsteps, and quicker. */
+  private paws(ctx: AudioContext, out: AudioNode): void {
+    let at = ctx.currentTime + 0.02;
+    for (let i = 0; i < 5 + Math.floor(Math.random() * 4); i++) {
+      this.click(ctx, out, at, 190 + Math.random() * 80, 0.035, 0.035);
+      at += 0.16 + Math.random() * 0.05;
+    }
+  }
+
+  /** A collar shake: a quick cluster of tiny bright transients — the tag against the buckle. */
+  private jingle(ctx: AudioContext, out: AudioNode): void {
+    let at = ctx.currentTime + 0.02;
+    for (let i = 0; i < 6 + Math.floor(Math.random() * 5); i++) {
+      this.ping(ctx, out, at, 2400 + Math.random() * 1600, 0.006 + Math.random() * 0.004);
+      at += 0.045 + Math.random() * 0.04;
+    }
+  }
+
+  /** One quiet bark — a short voiced burst with a fast pitch drop. Kept soft on purpose: this dog is
+   *  across the room, and its rarity is set in LIFE_EVENTS, not here. */
+  private bark(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 2.8;
+    bp.frequency.setValueAtTime(620 + Math.random() * 120, t0);
+    bp.frequency.exponentialRampToValueAtTime(320, t0 + 0.14);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.12, t0 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t0);
+    src.stop(t0 + 0.2);
   }
 
   /** One short filtered noise burst — the shared shape behind a keystroke and a mug on a desk. */
