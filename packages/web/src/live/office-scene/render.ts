@@ -71,11 +71,11 @@ export interface ScenePalette {
   wall: string;
 }
 
-/** Dusk office (the historical hard-coded values) — also the fallback when a token can't be read. */
+/** Dusk office (mirrors the dusk tokens in tokens.css) — also the fallback when a token can't be read. */
 export const DARK_PALETTE: ScenePalette = {
-  floor: '#e4a96b',
-  floor2: '#c6863f',
-  wood: '#7a4e2d',
+  floor: '#ebae64',
+  floor2: '#c8863c',
+  wood: '#85552c',
   couch: '#e3a72b',
   wall: '#2a2030', // the dusk `--wall` token (tokens.css)
 };

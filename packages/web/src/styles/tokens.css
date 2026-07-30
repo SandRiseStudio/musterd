@@ -101,12 +101,14 @@
   --glow-mustard: rgba(225, 173, 1, 0.45);
   --glow-mustard-soft: rgba(225, 173, 1, 0.16);
 
-  /* ---- Office semantic tokens — DARK (dusk office) ---- */
+  /* ---- Office semantic tokens — DARK (dusk office) ----
+     The same warm-up as daylight but held back: dusk already runs a night veil over the scene, and a
+     floor pushed to full daylight saturation under it reads as a lit floor in an unlit room. */
   --sky: linear-gradient(180deg, #2a2044 0%, #392842 52%, #432a1f 100%);
-  --floor: #e4a96b;
-  --floor-2: #c6863f;
+  --floor: #ebae64;
+  --floor-2: #c8863c;
   --wall: #2a2030;
-  --wood: #7a4e2d;
+  --wood: #85552c;
   --couch: #e3a72b;
   --ink: #f8efe1; /* cream text on the scene */
   --muted: #ab9684;
@@ -147,12 +149,20 @@
   --glow-mustard: rgba(184, 134, 11, 0.28);
   --glow-mustard-soft: rgba(184, 134, 11, 0.12);
 
-  /* Office — daylight */
+  /* Office — daylight.
+     Floor and wood re-pitched against the isometric asset pack the room was drawn from (nick's
+     reference, 2026-07-29), measured rather than eyeballed: the pack's floor quantizes to #f9b953
+     (hue 36, sat 0.67, val 0.98) and its wood to #9e581c (hue 27, sat 0.82). Ours sat at sat 0.48 and
+     0.57 — same hues, meaningfully less saturated, which is the whole reason the room read dustier
+     than the reference it came from. Pulled most of the way there, not all: the pack is a soft-3D
+     render with gradient shading to carry its intensity, and this room is flat-shaded, where full
+     saturation goes garish. `--wall` is deliberately NOT touched — the paper chrome's contrast was
+     tuned against this exact cream (#522), and moving the backdrop would silently undo that. */
   --sky: linear-gradient(180deg, #e9d9c3 0%, #f3e7d4 52%, #ffe9c8 100%);
-  --floor: #efbd7d;
-  --floor-2: #d7964f;
+  --floor: #f6bb68;
+  --floor-2: #d18f43;
   --wall: #f2d4aa;
-  --wood: #9a6a42;
+  --wood: #a3652a;
   --couch: #e8b23d;
   --ink: #2a2118;
   --muted: #7a6a56;
