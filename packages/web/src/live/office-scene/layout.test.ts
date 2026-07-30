@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FLOOR, project } from './iso';
 import {
+  ART,
   BOOKSHELVES,
   HUDDLE_POUFS,
   HUDDLE_TABLE,
@@ -16,6 +17,7 @@ import {
   RECEPTION,
   SEAT_BACK,
   SHELF_DEEP,
+  WINDOWS,
 } from './layout';
 
 describe('desk pods', () => {
@@ -124,6 +126,51 @@ describe('LEISURE_SPOTS', () => {
       expect(s.lx).toBeLessThan(FLOOR);
       expect(s.ly).toBeLessThan(FLOOR);
     }
+  });
+});
+
+describe('the walls are not a matched set', () => {
+  it('hangs six pieces of art, varied in size and shape', () => {
+    expect(ART).toHaveLength(6);
+    expect(new Set(ART.map((a) => `${a.w}x${a.h}`)).size).toBeGreaterThan(3);
+    expect(ART.some((a) => a.w > a.h)).toBe(true); // landscape
+    expect(ART.some((a) => a.h > a.w)).toBe(true); // portrait
+    expect(ART.some((a) => a.w === a.h)).toBe(true); // square
+  });
+
+  it('varies motif and frame treatment, including one unframed', () => {
+    expect(new Set(ART.map((a) => a.motif)).size).toBeGreaterThan(2);
+    expect(new Set(ART.map((a) => a.frame)).size).toBeGreaterThan(1);
+    expect(ART.some((a) => a.frame === 'none')).toBe(true);
+  });
+
+  it('puts art on both walls', () => {
+    expect(ART.some((a) => a.wall === 0)).toBe(true);
+    expect(ART.some((a) => a.wall === 1)).toBe(true);
+  });
+
+  it('never hangs a picture over a window', () => {
+    // Both back walls are mostly glass, so this is the constraint that decides where art can go at
+    // all — and the first cut of the salon cluster failed it, hanging three pieces across the frame
+    // of the near window. Half-widths are converted to `t` the same way `wallArt` does.
+    for (const a of ART) {
+      const half = a.w / 2 / FLOOR;
+      for (const w of WINDOWS) {
+        const overlaps = a.tc + half > w.t0 && a.tc - half < w.t1;
+        expect(overlaps, `art (${a.motif} on wall ${a.wall} at t=${a.tc}) overlaps a window`).toBe(false);
+      }
+    }
+  });
+
+  it('does not make four copies of one window', () => {
+    expect(new Set(WINDOWS.map((w) => w.mullions)).size).toBeGreaterThan(1);
+    expect(WINDOWS.some((w) => w.sill)).toBe(true);
+  });
+
+  it('brightens toward one sun — a random ramp reads as broken glass, not sunlight', () => {
+    const bright = WINDOWS.map((w) => w.bright);
+    expect(new Set(bright).size).toBeGreaterThan(1);
+    expect([...bright]).toEqual([...bright].sort((a, b) => b - a));
   });
 });
 

@@ -9,6 +9,7 @@ import {
   actorSortAnchor,
   animatedDeskAnchors,
   BOOK_COLORS,
+  CLOCK_NUMERALS,
   coffeeAnchor,
   drawDog,
   glassColor,
@@ -282,6 +283,48 @@ describe('packShelf — the books are not a texture swatch', () => {
     const run = [0, 1, 2, 3].flatMap((si) => packShelf(si, 0, 58, false));
     expect(run.some((b) => b.marks > 0)).toBe(true);
     for (const b of run) if (b.w < 6.5) expect(b.marks).toBe(0);
+  });
+});
+
+describe('the wall clock has a numbered dial', () => {
+  const fit = fitFloor(1200, 900);
+  const roster = (nodes: OfficeNode[]): Map<string, OfficeNode> => new Map(nodes.map((n) => [n.name, n]));
+
+  it('sets twelve numerals with the quarters heavier', () => {
+    expect(CLOCK_NUMERALS).toHaveLength(12);
+    const heavy = CLOCK_NUMERALS.filter((n) => n.big).map((n) => n.hour);
+    expect([...heavy].sort((a, b) => a - b)).toEqual([3, 6, 9, 12]);
+  });
+
+  it('runs the hours in clock order from 12', () => {
+    expect(CLOCK_NUMERALS.map((n) => n.hour)).toEqual([12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  });
+
+  it('draws them as strokes, never canvas text — a 4px glyph is a grey smear', () => {
+    const texts: string[] = [];
+    const ctx = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient')
+            return () => ({ addColorStop() {} });
+          if (prop === 'measureText') return () => ({ width: 0 });
+          if (prop === 'fillText') return (s: string) => void texts.push(s);
+          return () => undefined;
+        },
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    renderScene(ctx, fit, new Map(), roster([node('ada', 'working')]), new Map());
+    for (const n of CLOCK_NUMERALS) expect(texts).not.toContain(String(n.hour));
+  });
+
+  it('gives every numeral at least one stroke path', () => {
+    for (const n of CLOCK_NUMERALS) {
+      expect(n.strokes.length).toBeGreaterThan(0);
+      for (const p of n.strokes) expect(p.length).toBeGreaterThan(1);
+    }
   });
 });
 

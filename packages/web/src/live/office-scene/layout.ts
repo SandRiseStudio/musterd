@@ -397,11 +397,63 @@ export interface Win {
   t1: number;
   u0: number;
   u1: number;
+  /** Vertical pane divisions — 2 gives the classic four-light, 3 a taller-lit unit. */
+  mullions: 2 | 3;
+  /** What stands on the ledge, if anything. */
+  sill: 'plant' | 'mug' | null;
+  /** Glass brightness multiplier. Monotone along the wall: one sun, not four. */
+  bright: number;
 }
-/** Two windows per back wall — spaced so the wall reads as a facade, not a single porthole. */
+
+/**
+ * Where the art hangs. `wall` indexes `WALL_EDGES` — 0 is the back-left (its `+t` runs screen-LEFT,
+ * so it mirrors text and can only take type-free pieces), 1 the back-right.
+ *
+ * Six pieces rather than two identical ones, varied on three independent axes — size, orientation and
+ * treatment — because two of anything at the same size and height reads as a pattern rather than as a
+ * collection. The salon cluster is three small pieces hung as a group, which is the arrangement that
+ * most obviously says "somebody chose these" instead of "one print was centred on each wall".
+ */
+export interface ArtPiece {
+  wall: 0 | 1;
+  tc: number;
+  uc: number;
+  w: number;
+  h: number;
+  motif: 'sunrise' | 'cairn' | 'arches' | 'bauhaus';
+  frame: 'thin' | 'thick' | 'none';
+}
+
+export const ART: readonly ArtPiece[] = [
+  // back-left wall: a large landscape near the corner, then the salon cluster of three past the
+  // far window. Both walls are mostly glass, so the only places a picture can hang are the corner
+  // stretch (t < 0.28), the gap between the windows (0.46–0.58) and the far end (t > 0.78) —
+  // `layout.test.ts` holds this, because the first cut hung three of these ON a window.
+  { wall: 0, tc: 0.14, uc: 0.56, w: 54, h: 42, motif: 'arches', frame: 'thick' },
+  { wall: 0, tc: 0.83, uc: 0.68, w: 26, h: 26, motif: 'bauhaus', frame: 'none' },
+  { wall: 0, tc: 0.92, uc: 0.66, w: 22, h: 30, motif: 'cairn', frame: 'thin' },
+  { wall: 0, tc: 0.87, uc: 0.46, w: 30, h: 22, motif: 'sunrise', frame: 'thin' },
+  // back-right wall: the big one over the corner shelf, and a small square under the clock
+  { wall: 1, tc: 0.15, uc: 0.56, w: 60, h: 44, motif: 'sunrise', frame: 'thick' },
+  { wall: 1, tc: 0.52, uc: 0.34, w: 24, h: 24, motif: 'cairn', frame: 'thin' },
+];
+/**
+ * Two windows per back wall — spaced so the wall reads as a facade, not a single porthole.
+ *
+ * They are no longer four copies of one window (nick, 2026-07-30: "make these windows more magical
+ * looking, more warm looking, but let's not overdo it so that it looks like they're not realistic or
+ * don't have actual utility"). Every difference below is something that happens in a real room:
+ *
+ * · `mullions` alternates the pane pattern, the way a real facade mixes units.
+ * · `sill` puts an object on the ledge — a sill is what makes a window part of a room rather than a
+ *   hole in a wall, and the thing standing on it is the proof someone lives here.
+ * · `bright` is the one that buys most of the warmth for nothing: windows nearer the sun are
+ *   brighter. It MUST stay monotone along the wall — a random brightness reads as broken glass
+ *   rather than as sunlight, and the daylight beams on the floor derive from the same numbers.
+ */
 export const WINDOWS: readonly Win[] = [
-  { t0: 0.28, t1: 0.46, u0: 0.34, u1: 0.82 },
-  { t0: 0.58, t1: 0.78, u0: 0.34, u1: 0.82 },
+  { t0: 0.28, t1: 0.46, u0: 0.34, u1: 0.82, mullions: 2, sill: 'plant', bright: 1 },
+  { t0: 0.58, t1: 0.78, u0: 0.34, u1: 0.82, mullions: 3, sill: 'mug', bright: 0.88 },
 ];
 
 /** How far into the room a window's daylight beam reaches (logical units), and its sideways sun-shear. */

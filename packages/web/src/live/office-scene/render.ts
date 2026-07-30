@@ -5,6 +5,7 @@ import { STRIDE, type PetState } from './pet';
 import {
   BEAM_LEN,
   BEAM_SHEAR,
+  ART,
   BOOKSHELVES,
   HUDDLE_POUFS,
   HUDDLE_TABLE,
@@ -393,6 +394,21 @@ function drawFloor(ctx: CanvasRenderingContext2D, fit: Fit): void {
  * The glass colour: bright sky by day (warm at golden hour via `skyTint`), a dark pane with a faint city
  * glow by night. Interpolated on `daylight`, so it tracks the same PST clock as the beam and the veil.
  */
+/**
+ * Brighten an `rgb(...)` string by a factor, staying in `rgb(...)`.
+ *
+ * `glassColor` returns `rgb()`, not hex, and `mul()` only parses hex — feeding one to the other gives
+ * `#NaN0b15`, which canvas silently ignores while keeping whatever colour was loaded last. That is the
+ * exact class of bug the parseable-colour guard in render.test.ts exists for, and this is the third
+ * time this pass has walked into it. If you need to scale a colour, check what format it is in first.
+ */
+function rgbMul(color: string, f: number): string {
+  const m = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(color);
+  if (!m) return color;
+  const c = (v: string) => Math.round(Math.min(255, Math.max(0, Number(v) * f)));
+  return `rgb(${c(m[1]!)}, ${c(m[2]!)}, ${c(m[3]!)})`;
+}
+
 export function glassColor(env: LightEnv): string {
   const [sr, sg, sb] = hexRgb('#0f1626'); // night pane
   const m = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(env.skyTint);
@@ -574,11 +590,17 @@ function wallArt(
   w: number,
   h: number,
   motif: MotifName,
+  frame: 'thin' | 'thick' | 'none' = 'thick',
 ): void {
   const dt = w / 2 / FLOOR;
   const du = h / 2 / WALL_H;
-  wallRect(ctx, fit, edge, tc - dt, uc - du, tc + dt, uc + du, DRESS.frame);
-  wallRect(ctx, fit, edge, tc - dt * 0.88, uc - du * 0.88, tc + dt * 0.88, uc + du * 0.88, DRESS.mat);
+  // Frame weight varies per piece. `none` is a stretched canvas — an unframed piece in a group is
+  // what stops six prints reading as one catalogue order.
+  if (frame !== 'none') {
+    wallRect(ctx, fit, edge, tc - dt, uc - du, tc + dt, uc + du, DRESS.frame);
+  }
+  const inset = frame === 'thick' ? 0.88 : frame === 'thin' ? 0.95 : 1;
+  wallRect(ctx, fit, edge, tc - dt * inset, uc - du * inset, tc + dt * inset, uc + du * inset, DRESS.mat);
 
   const hw = (w / 2) * 0.68; // the mat opening — a composition needs the area a lone colour block didn't
   const hh = (h / 2) * 0.68;
@@ -622,6 +644,81 @@ function wallArt(
  * Right-hand wall only, and not by taste: on the back-left wall `+t` runs *screen-left*, so a clock hung
  * there would tell the time backwards.
  */
+/**
+ * The twelve numerals, as stroke paths in a unit box rather than glyphs.
+ *
+ * The face is R=25, which is roughly 26 screen px at /live — a numeral inside it is about 4px, where
+ * canvas text renders as a grey smear and no `canvasFont` token can help, because the problem is the
+ * pixel count and not the family. Drawn strokes stay marks at that size.
+ *
+ * The quarters are set larger, and that ratio is the entire design: at /live you cannot make out any
+ * individual numeral, but you *can* see a ring of four heavy marks and eight light ones, and that
+ * rhythm is what reads as "a numbered dial" rather than as a blank disc or as mush. Up close, at
+ * /broadcast and /office-preview scale, they resolve into hand-lettered characters with visible
+ * wobble. If the /live read ever goes back to mush, widen this size ratio before touching anything
+ * else.
+ *
+ * Coordinates are in a [-1, 1] box, y up. Each numeral is a list of polylines.
+ */
+export const CLOCK_NUMERALS: ReadonlyArray<{
+  hour: number;
+  big: boolean;
+  strokes: [number, number][][];
+}> = [
+  { hour: 12, big: true, strokes: [[[-0.75, 1], [-0.4, 1], [-0.4, -1]], [[0.05, -1], [0.7, -1], [0.7, 0], [0.15, 0], [0.15, 1], [0.75, 1]]] },
+  { hour: 1, big: false, strokes: [[[-0.4, 0.6], [0, 1], [0, -1]]] },
+  { hour: 2, big: false, strokes: [[[-0.6, 0.7], [0.1, 1], [0.6, 0.4], [-0.6, -1], [0.65, -1]]] },
+  { hour: 3, big: true, strokes: [[[-0.6, 0.85], [0.45, 1], [0, 0.1], [0.55, -0.2], [0.1, -1], [-0.6, -0.8]]] },
+  { hour: 4, big: false, strokes: [[[0.35, 1], [-0.6, -0.2], [0.7, -0.2]], [[0.3, 0.3], [0.3, -1]]] },
+  { hour: 5, big: false, strokes: [[[0.6, 1], [-0.45, 0.95], [-0.5, 0.1], [0.4, 0.2], [0.5, -0.75], [-0.5, -0.9]]] },
+  { hour: 6, big: true, strokes: [[[0.5, 0.95], [-0.45, 0.6], [-0.5, -0.8], [0.45, -0.95], [0.5, -0.1], [-0.45, -0.2]]] },
+  { hour: 7, big: false, strokes: [[[-0.6, 1], [0.6, 1], [-0.15, -1]]] },
+  { hour: 8, big: false, strokes: [[[0, 1], [-0.5, 0.5], [0.45, 0.05], [-0.5, -0.5], [0.1, -1], [0.55, -0.4], [-0.45, 0.1], [0.4, 0.55], [0, 1]]] },
+  { hour: 9, big: true, strokes: [[[0.45, -0.9], [-0.5, -0.55], [-0.45, 0.3], [0.45, 0.15], [0.5, 1], [-0.4, 0.85]]] },
+  { hour: 10, big: false, strokes: [[[-0.75, 1], [-0.55, -1]], [[0.1, 1], [0.65, 0.8], [0.6, -0.8], [0.05, -1], [0.1, 1]]] },
+  { hour: 11, big: false, strokes: [[[-0.5, 1], [-0.35, -1]], [[0.3, 1], [0.45, -1]]] },
+];
+
+/** Paint the numeral ring. Hand-drawn strokes, wobbled off a stable hash so the lettering has a hand
+ *  in it without shuffling on every rebake. */
+function drawClockNumerals(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  edge: (t: number) => [number, number],
+  tc: number,
+  uc: number,
+  R: number,
+): void {
+  ctx.save();
+  ctx.strokeStyle = DRESS.tick;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  CLOCK_NUMERALS.forEach((n, i) => {
+    const a = (i / 12) * Math.PI * 2;
+    const ct = tc + (Math.sin(a) * R * 0.76) / FLOOR;
+    const cu = uc + (Math.cos(a) * R * 0.76) / WALL_H;
+    const size = n.big ? 5.6 : 3.4;
+    ctx.lineWidth = Math.max(0.7, (n.big ? 1.9 : 1.25) * fit.scale);
+    for (const path of n.strokes) {
+      ctx.beginPath();
+      path.forEach(([x, y], k) => {
+        // A little wobble per vertex — hand lettering, not a font, and stable across repaints.
+        const wob = (magicRnd(i * 37 + k * 7) - 0.5) * 0.16;
+        const p = wallPt(
+          edge,
+          ct + ((x + wob) * size) / FLOOR,
+          cu + ((y + wob) * size) / WALL_H,
+          fit,
+        );
+        if (k === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+    }
+  });
+  ctx.restore();
+}
+
 function wallClock(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -633,12 +730,7 @@ function wallClock(
   const R = 25;
   wallDisc(ctx, fit, edge, tc, uc, R + 2.5, DRESS.clockRim);
   wallDisc(ctx, fit, edge, tc, uc, R, DRESS.clockFace);
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
-    const t = tc + (Math.sin(a) * R * 0.8) / FLOOR;
-    const u = uc + (Math.cos(a) * R * 0.8) / WALL_H;
-    wallDisc(ctx, fit, edge, t, u, i % 3 === 0 ? 2.2 : 1.2, DRESS.tick);
-  }
+  drawClockNumerals(ctx, fit, edge, tc, uc, R);
   // Hands: 12 o'clock is straight up the wall (+u), sweeping clockwise toward +t.
   const hand = (turns: number, len: number, w: number): void => {
     const a = turns * Math.PI * 2;
@@ -886,18 +978,20 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv, nodes
    * corner; the left wall gets a tall print between its windows and the hanging planter. Nothing sits below
    * u 0.36 (the bookshelves' height) or inside a window's `t` span.
    */
-  const dress = (edge: (t: number) => [number, number]): void => {
+  const dress = (edge: (t: number) => [number, number], wallIndex: 0 | 1): void => {
     // Nothing goes high near the back corner: that is where the wall is tallest on screen and the canvas
     // crops its top edge, so anything hung up there loses the wall behind it and floats.
-    if (edge === WALL_EDGES[1]) {
-      wallArt(ctx, fit, edge, 0.15, 0.56, 60, 44, 'sunrise'); // over the corner bookshelf
+    for (const a of ART) {
+      if (a.wall !== wallIndex) continue;
+      wallArt(ctx, fit, edge, a.tc, a.uc, a.w, a.h, a.motif, a.frame);
+    }
+    if (wallIndex === 1) {
       wallClock(ctx, fit, edge, 0.52, 0.62, env.hours); // dead centre, between the windows
       // Dry-erase whiteboard (set dressing) — far-right gap. Must be THIS wall: `+t` runs screen-left
       // on the other one (same constraint that fixed the clock here).
       wallWhiteboard(ctx, fit, edge, 0.885, 0.6);
       return;
     }
-    wallArt(ctx, fit, edge, 0.14, 0.56, 54, 42, 'arches');
     wallHanger(ctx, fit, edge, 0.52, 0.76); // between the windows — where you'd really hang one
   };
 
@@ -917,15 +1011,43 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv, nodes
       quad(ctx, [pt(w.t0, w.u0), pt(w.t1, w.u0), pt(w.t1, w.u1), pt(w.t0, w.u1)], frame); // reveal
       const iT = (w.t1 - w.t0) * 0.08;
       const iU = (w.u1 - w.u0) * 0.1;
-      quad(ctx, [pt(w.t0 + iT, w.u0 + iU), pt(w.t1 - iT, w.u0 + iU), pt(w.t1 - iT, w.u1 - iU), pt(w.t0 + iT, w.u1 - iU)], glass);
-      // panes: one vertical + one horizontal mullion, so it reads as a window, not a lit hole
-      const mid = (w.t0 + w.t1) / 2;
+      // One sun: the nearer window is brighter. This is the change that buys most of the warmth, and
+      // it costs nothing in realism because it is simply what happens.
+      quad(ctx, [pt(w.t0 + iT, w.u0 + iU), pt(w.t1 - iT, w.u0 + iU), pt(w.t1 - iT, w.u1 - iU), pt(w.t0 + iT, w.u1 - iU)], rgbMul(glass, w.bright));
+      // Panes, so it reads as a window rather than a lit hole. The vertical count alternates between
+      // units — a real facade mixes them, and four identical windows was the complaint.
       const midU = (w.u0 + w.u1) / 2;
-      quad(ctx, [pt(mid - iT * 0.35, w.u0 + iU), pt(mid + iT * 0.35, w.u0 + iU), pt(mid + iT * 0.35, w.u1 - iU), pt(mid - iT * 0.35, w.u1 - iU)], frame);
+      for (let m = 1; m < w.mullions; m++) {
+        const t = w.t0 + ((w.t1 - w.t0) * m) / w.mullions;
+        quad(ctx, [pt(t - iT * 0.3, w.u0 + iU), pt(t + iT * 0.3, w.u0 + iU), pt(t + iT * 0.3, w.u1 - iU), pt(t - iT * 0.3, w.u1 - iU)], frame);
+      }
       quad(ctx, [pt(w.t0 + iT, midU - iU * 0.35), pt(w.t1 - iT, midU - iU * 0.35), pt(w.t1 - iT, midU + iU * 0.35), pt(w.t0 + iT, midU + iU * 0.35)], frame);
+      // A bloom where the light spills onto the wall above the head — the glow a bright window
+      // actually throws, and the reason the top of the reveal never reads as a hard cut.
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.16 * w.bright;
+      quad(ctx, [pt(w.t0 - 0.012, w.u1), pt(w.t1 + 0.012, w.u1), pt(w.t1 + 0.012, w.u1 + 0.07), pt(w.t0 - 0.012, w.u1 + 0.07)], '#ffe9b8');
+      ctx.restore();
+      // The sill, and whatever is standing on it. A window without a ledge is a hole in a wall.
+      const sillU = w.u0 - 0.018;
+      quad(ctx, [pt(w.t0 - 0.014, sillU), pt(w.t1 + 0.014, sillU), pt(w.t1 + 0.014, w.u0), pt(w.t0 - 0.014, w.u0)], shade(PAL.wall, faceShade * 1.06));
+      if (w.sill) {
+        const st = (w.t0 + w.t1) / 2 + (w.t1 - w.t0) * 0.24;
+        const sp = pt(st, w.u0);
+        const r = fit.scale;
+        if (w.sill === 'plant') {
+          ellipse(ctx, { x: sp.x, y: sp.y - 4 * r }, 4.5 * r, 4 * r, PLANT.pot);
+          ellipse(ctx, { x: sp.x, y: sp.y - 10 * r }, 6 * r, 5 * r, PLANT.leaf);
+          ellipse(ctx, { x: sp.x - 3 * r, y: sp.y - 12 * r }, 3.5 * r, 3 * r, PLANT.leafLit);
+        } else {
+          ellipse(ctx, { x: sp.x, y: sp.y - 4 * r }, 3.6 * r, 3.4 * r, '#f2e7d5');
+          ellipse(ctx, { x: sp.x, y: sp.y - 6 * r }, 3.2 * r, 1.6 * r, '#c9a887');
+        }
+      }
     }
 
-    dress(edge);
+    dress(edge, edge === WALL_EDGES[1] ? 1 : 0);
 
     // A low, slightly sagging strand of warm bulbs turns the architectural shell into a place people
     // chose to inhabit. The bulbs stay on in daylight too, but read as tiny pearl pins rather than glare.
