@@ -1280,7 +1280,139 @@ function watercooler(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: nu
 }
 
 /** A bookshelf: a wood carcass with three shelves of colourful book spines facing into the room. */
-function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf): void {
+/**
+ * Stable per-book noise. Seeded, never `Math.random()`: the shelves live on the baked still layer and
+ * get repainted on every resize, and a book that changes width between repaints flickers.
+ */
+export function shelfRnd(shelf: number, book: number, salt: number): number {
+  let h = (shelf * 73856093) ^ (book * 19349663) ^ (salt * 83492791);
+  h = Math.imul(h ^ (h >>> 15), 2246822507);
+  h = Math.imul(h ^ (h >>> 13), 3266489909);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/**
+ * Spine colours. The white and the black are the point: a shelf of only saturated mid-tones is the
+ * tell that a palette was picked rather than accumulated. They are punctuation against the warm
+ * body, not equal members of it.
+ */
+export const BOOK_COLORS: readonly string[] = [
+  '#c95c4a',
+  '#e0a72b',
+  '#5aa0c9',
+  '#6aa86a',
+  '#b06fc9',
+  '#d98b4a',
+  '#8c4a3a',
+  '#3f7a8c',
+  '#a8422f',
+  '#7a6ab0',
+  '#f4f1ea', // the white one
+  '#22201d', // the black one
+];
+
+/** Page-edges seen from the room. Cream and near-uniform — that flatness is the whole joke. */
+export const PAGE_EDGE = '#e8dcc4';
+
+/** Spines light enough that lettering has to go on in a dark ink to be seen at all. */
+const LIGHT_SPINES = new Set(['#f4f1ea', '#e0a72b']);
+
+export interface BookSpine {
+  /** Centre offset along the shelf, from the middle. */
+  along: number;
+  w: number;
+  h: number;
+  color: string;
+  /** 0 upright; otherwise the height squash of a book tipped against its neighbour. */
+  lean: number;
+  /** Lettering bars on the spine. 0 = nothing to read. */
+  marks: number;
+}
+
+/**
+ * Pack one shelf band with books.
+ *
+ * Packed by WIDTH rather than by count, because the widths vary — a fixed count of varied spines
+ * leaves a ragged gap at one end. Uniform verticals were the single biggest reason the old shelves
+ * read as a texture swatch rather than as books, so the lean matters more than it looks: it is
+ * applied as a height squash plus a gap on the lean side rather than a rotation, because `box()` is
+ * axis-aligned and a real rotation would mean a new primitive for a two-pixel effect.
+ *
+ * `marks` is lettering, and it is deliberately not text. A spine is about 4 x 7 screen px at /live,
+ * where real glyphs render as a grey smear and no font token can fix it — the problem is the pixel
+ * count, not the family. Bars at a consistent cap height are what a title looks like across a room,
+ * and they resolve into type-like texture at /broadcast and /office-preview scale.
+ * **Do not "fix" these into real strings.**
+ */
+export function packShelf(si: number, row: number, long: number, reversed: boolean): BookSpine[] {
+  const out: BookSpine[] = [];
+  const span = long * 0.82;
+  const seed = (i: number, salt: number): number => shelfRnd(si, row * 32 + i, salt);
+  let along = -span / 2;
+  for (let i = 0; along < span / 2 - 5; i++) {
+    const w = 5 + seed(i, 1) * 6; // 5..11
+    if (along + w > span / 2) break; // never overhang the carcass
+    const h = 10 + seed(i, 2) * 6; // 10..16
+    const lean = seed(i, 4) < 0.18 ? 0.82 : 0;
+    const color = reversed
+      ? shade(PAGE_EDGE, 0.97 + seed(i, 6) * 0.06)
+      : BOOK_COLORS[Math.floor(seed(i, 3) * BOOK_COLORS.length)]!;
+    // A backwards shelf has nothing to read — that is what makes it read as backwards.
+    const marks = reversed || w < 6.5 ? 0 : seed(i, 5) < 0.45 ? 2 : 1;
+    out.push({ along: along + w / 2, w, h: h * (lean || 1), color, lean, marks });
+    along += w + (lean ? 2.5 : 0.6); // the leaner needs a gap to fall into
+  }
+  return out;
+}
+
+/**
+ * One object on each shelf top.
+ *
+ * Its own small painters rather than `drawPlant` and friends: those carry a floor contact shadow and
+ * floor-scale proportions, and a 19-unit pot with a shadow pooled under it reads as a plant standing
+ * *behind* the shelf, not on it. Everything here is sized for a surface a metre and a half up.
+ *
+ * The photo leans rather than stands. Leaning is what makes an object read as *placed* by somebody,
+ * and it is the cheapest possible break in the "every rectangle is square to the room" grid.
+ */
+function shelfDecor(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf): void {
+  const up = s.high;
+  const f = FWD[s.dir];
+  const sn = f[1] !== 0;
+  // Nudge the object toward the room-facing edge so it sits on the front of the top, not the middle.
+  const dx = sn ? 0 : f[0] * 2;
+  const dy = sn ? f[1] * 2 : 0;
+  const x = s.lx + dx;
+  const y = s.ly + dy;
+  switch (s.decor) {
+    case 'plant': {
+      box(ctx, fit, x, y, 13, 13, 9, PLANT.pot, up);
+      box(ctx, fit, x, y, 15, 15, 2.5, PLANT.rim, up + 9);
+      ellipse(ctx, { x: project(x, y, fit).x, y: project(x, y, fit).y - (up + 15) * fit.scale }, 11 * fit.scale, 6 * fit.scale, PLANT.leaf);
+      ellipse(ctx, { x: project(x, y, fit).x - 5 * fit.scale, y: project(x, y, fit).y - (up + 18) * fit.scale }, 7 * fit.scale, 4 * fit.scale, PLANT.leafLit);
+      return;
+    }
+    case 'photo': {
+      box(ctx, fit, x, y, sn ? 18 : 4, sn ? 4 : 18, 22, DRESS.frame, up);
+      box(ctx, fit, x - dx * 0.6, y - dy * 0.6, sn ? 14 : 2, sn ? 2 : 14, 17, DRESS.mat, up + 2.5);
+      return;
+    }
+    case 'books': {
+      box(ctx, fit, x, y, sn ? 22 : 14, sn ? 14 : 22, 4, BOOK_COLORS[0]!, up);
+      box(ctx, fit, x, y, sn ? 19 : 12, sn ? 12 : 19, 3.5, BOOK_COLORS[3]!, up + 4);
+      box(ctx, fit, x, y, sn ? 16 : 11, sn ? 11 : 16, 3, BOOK_COLORS[10]!, up + 7.5);
+      return;
+    }
+    case 'trophy': {
+      box(ctx, fit, x, y, 10, 10, 4, '#6b5220', up);
+      box(ctx, fit, x, y, 4, 4, 7, '#c9a44a', up + 4);
+      ellipse(ctx, { x: project(x, y, fit).x, y: project(x, y, fit).y - (up + 13) * fit.scale }, 6 * fit.scale, 4 * fit.scale, '#d8b55c');
+      return;
+    }
+  }
+}
+
+function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf, si: number): void {
   const f = FWD[s.dir];
   const sn = f[1] !== 0; // S/N run along x; E/W run along y
   const wx = sn ? s.long : s.deep;
@@ -1289,20 +1421,29 @@ function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf): void 
   // Book rows on the front (room-facing) face. The bands are spread over the unit's own height
   // rather than pinned at a fixed pitch, so a low-wide unit reads as a credenza with two shelves
   // instead of a tall one with its top sliced off.
-  const BOOKS = ['#c95c4a', '#e0a72b', '#5aa0c9', '#6aa86a', '#b06fc9', '#d98b4a'];
-  const face = 0.5; // fraction of the long side the books span
   const bandGap = (s.high - 14) / s.rows;
   for (let row = 0; row < s.rows; row++) {
     const baseUp = 8 + row * bandGap;
-    const n = 5;
-    for (let i = 0; i < n; i++) {
-      const t = (i - (n - 1) / 2) / n; // -.4..+.4 along the shelf
-      const bx = s.lx + (sn ? t * s.long * face : f[0] * (s.deep / 2 - 2));
-      const by = s.ly + (sn ? f[1] * (s.deep / 2 - 2) : t * s.long * face);
-      const col = BOOKS[(row * 2 + i) % BOOKS.length]!;
-      box(ctx, fit, bx, by, sn ? 8 : 3, sn ? 3 : 8, 13, col, baseUp);
+    for (const b of packShelf(si, row, s.long, s.reversed === true)) {
+      const bx = s.lx + (sn ? b.along : f[0] * (s.deep / 2 - 2));
+      const by = s.ly + (sn ? f[1] * (s.deep / 2 - 2) : b.along);
+      box(ctx, fit, bx, by, sn ? b.w : 3, sn ? 3 : b.w, b.h, b.color, baseUp);
+      // Lettering: short bars at a consistent cap height, in an ink that separates from the spine.
+      if (b.marks === 0) continue;
+      // HEX on purpose. `box()` shades its own side faces by re-`dim()`ing the fill it was handed,
+      // and `dim` only parses hex — an `rgba()` ink here slices to [NaN, 186, NaN], which canvas
+      // silently ignores while keeping the previous colour (see the `mul` docblock).
+      // Flat near-white/near-black rather than a multiple of the spine: `mul` cannot lift a near-black
+      // spine to a readable ink (0x22 x 1.85 is still black), and at this size lettering is a value
+      // contrast or it is nothing.
+      const ink = LIGHT_SPINES.has(b.color) ? '#2a2622' : '#f5f2ec';
+      for (let m = 0; m < b.marks; m++) {
+        const up = baseUp + b.h * (0.62 - m * 0.18);
+        box(ctx, fit, bx, by, sn ? b.w * 0.5 : 3.2, sn ? 3.2 : b.w * 0.5, 0.9, ink, up);
+      }
     }
   }
+  shelfDecor(ctx, fit, s);
 }
 
 /** A huddle, as depth items (same reasoning as the nook). Sized up to read proportionate to the desks:
@@ -2959,9 +3100,11 @@ export function renderScene(
   for (const plant of PLANTS) {
     items.push({ d: depth(plant.lx, plant.ly), fn: () => drawPlant(ctx, fit, plant.lx, plant.ly, plant.species) });
   }
-  for (const s of BOOKSHELVES) {
-    items.push({ d: depth(s.lx, s.ly), fn: () => bookshelf(ctx, fit, s) });
-  }
+  BOOKSHELVES.forEach((s, si) => {
+    // The index is the book seed — it is what makes shelf 0 and shelf 2 hold different books
+    // despite being the same size.
+    items.push({ d: depth(s.lx, s.ly), fn: () => bookshelf(ctx, fit, s, si) });
+  });
   // Rugs are flat floor paint — draw them right after the floor (before every solid/actor), so a member
   // standing anywhere on a rug is never over-painted by it. Solid pieces self-sort at their footprints.
   for (const pod of PODS) {

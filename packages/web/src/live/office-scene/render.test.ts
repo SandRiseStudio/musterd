@@ -8,12 +8,15 @@ import type { PetMode, PetState } from './pet';
 import {
   actorSortAnchor,
   animatedDeskAnchors,
+  BOOK_COLORS,
   coffeeAnchor,
   drawDog,
   glassColor,
   MACHINE_H,
+  packShelf,
   pawCycle,
   renderScene,
+  shelfRnd,
 } from './render';
 import { assignSeats } from './seating';
 import type { OfficeNode, Pose } from './types';
@@ -220,6 +223,65 @@ describe('the wall whiteboard', () => {
 
   it('still draws a diagram — an empty board is not the fix', () => {
     expect(inkStrokes()).toBeGreaterThanOrEqual(3);
+  });
+});
+
+/**
+ * The books. Packing is a pure function so it can be checked without a canvas — the interesting
+ * behaviour is all in the numbers (does a shelf vary, does it stay inside its carcass, is it stable
+ * across repaints), and none of it needs a pixel to assert.
+ */
+describe('packShelf — the books are not a texture swatch', () => {
+  const shelf = () => packShelf(0, 0, 58, false);
+
+  it('varies spine width, height and colour across one shelf', () => {
+    const run = shelf();
+    expect(run.length).toBeGreaterThan(4);
+    expect(new Set(run.map((b) => b.w)).size).toBeGreaterThan(1);
+    expect(new Set(run.map((b) => b.h)).size).toBeGreaterThan(1);
+    expect(new Set(run.map((b) => b.color)).size).toBeGreaterThan(2);
+  });
+
+  it('offers a white and a black spine — a shelf of mid-tones reads as a picked palette', () => {
+    expect(BOOK_COLORS).toContain('#f4f1ea');
+    expect(BOOK_COLORS).toContain('#22201d');
+  });
+
+  it('leans a few books and leaves most upright', () => {
+    // Sample several shelves: one row is a small sample, and the point is the *proportion*.
+    const all = [0, 1, 2, 3].flatMap((si) => [0, 1].flatMap((r) => packShelf(si, r, 58, false)));
+    const leaning = all.filter((b) => b.lean !== 0);
+    expect(leaning.length).toBeGreaterThan(0);
+    expect(leaning.length).toBeLessThan(all.length / 2);
+  });
+
+  it('is deterministic — a baked layer that changes between repaints flickers', () => {
+    expect(packShelf(2, 1, 58, false)).toEqual(packShelf(2, 1, 58, false));
+    expect(shelfRnd(1, 2, 3)).toBe(shelfRnd(1, 2, 3));
+  });
+
+  it('gives different shelves different books', () => {
+    expect(packShelf(0, 0, 58, false)).not.toEqual(packShelf(1, 0, 58, false));
+  });
+
+  it('keeps every book inside the carcass', () => {
+    for (const long of [44, 58, 76]) {
+      for (const b of packShelf(1, 0, long, false)) {
+        expect(Math.abs(b.along) + b.w / 2).toBeLessThanOrEqual(long / 2);
+      }
+    }
+  });
+
+  it('shelves a reversed unit as page edges with no lettering to read', () => {
+    const run = packShelf(1, 0, 76, true);
+    expect(run.every((b) => b.marks === 0)).toBe(true);
+    expect(run.every((b) => b.color !== '#22201d')).toBe(true);
+  });
+
+  it('letters the wide spines and leaves the narrow ones bare', () => {
+    const run = [0, 1, 2, 3].flatMap((si) => packShelf(si, 0, 58, false));
+    expect(run.some((b) => b.marks > 0)).toBe(true);
+    for (const b of run) if (b.w < 6.5) expect(b.marks).toBe(0);
   });
 });
 
