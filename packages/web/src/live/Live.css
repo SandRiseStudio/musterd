@@ -995,12 +995,13 @@
   white-space: nowrap;
   transition: opacity var(--lc-med) var(--lc-ease);
 }
-/* One unified nameplate — name + harness · model in a single paper pill (never stacked chips). */
+/* The nameplate: a paper pill carrying the dot and the name, and nothing else. The model rides
+   underneath on its own line (.lc-gl-label__model); harness and role are a hover away. */
 .lc-gl-label__plate {
   display: inline-flex;
   align-items: center;
   gap: 0;
-  max-width: 16rem;
+  max-width: 11rem;
   padding: 3px 10px 3px 8px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--lc-paper) 90%, transparent);
@@ -1020,28 +1021,21 @@
   font-weight: 700;
   color: var(--lc-paper-ink);
 }
-.lc-gl-label__sep {
-  margin: 0 0.28em;
-  font-weight: 500;
-  font-size: 9px;
-  color: color-mix(in srgb, var(--lc-accent-bright) 55%, transparent);
-  user-select: none;
-}
-.lc-gl-label__meta {
-  font-weight: 600;
-  font-size: 8px;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-  color: #8a6508;
+/* Second line: the model. Same hue as the plate ink at lower alpha — the rule the palette block
+   above already states. The previous cut used #8a6508, a third hue, and it read dirty on the warm
+   paper for exactly the reason that comment gives: on this stock, anything off-hue reads as grime. */
+.lc-gl-label__model {
+  max-width: 11rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  /* Soft mustard wash behind the meta so it reads as a slick inset, not raw type on cream */
-  padding: 1px 5px 1px 4px;
-  margin: -1px -2px -1px 0;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--lc-accent) 14%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 35%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: lowercase;
+  color: color-mix(in srgb, var(--lc-paper-ink) 62%, transparent);
+  text-shadow: 0 1px 0 var(--lc-paper-sheen);
 }
 /* Work cues no longer ride the nameplate — see .lc-workstack. Keep class inert if hybrid is re-enabled. */
 .lc-gl-label__work {

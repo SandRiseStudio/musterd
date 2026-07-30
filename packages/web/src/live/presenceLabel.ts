@@ -39,6 +39,17 @@ export function shortModel(model: string | null | undefined): string {
   return lower.split('-').slice(0, 2).join(' ').slice(0, 18);
 }
 
+/**
+ * The model label for the always-on nameplate. Deliberately model-only: the harness moved to hover
+ * (room-dressing design §1) because it is the least surprising field — nearly every seat runs the
+ * same one, so it cost width over every head and bought nothing at a glance. The full surface and
+ * the raw model id are still one hover away, via {@link identityMeta}'s `title`.
+ */
+export function plateModel(model: string | null | undefined): string | null {
+  const short = shortModel(model);
+  return short ? short : null;
+}
+
 export function identityMeta(opts: {
   surface?: string | null;
   model?: string | null;

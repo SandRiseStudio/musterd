@@ -1,6 +1,6 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
-import { identityMeta, shortLaneState, shortWorkTitle } from '../presenceLabel';
+import { identityMeta, plateModel, shortLaneState, shortWorkTitle } from '../presenceLabel';
 import { createActors, type Actors } from './actors';
 import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
@@ -355,18 +355,18 @@ export function mountOffice(
       who.className = 'lc-gl-label__who';
       who.textContent = name;
       plate.appendChild(who);
-      if (present && meta.line) {
-        const sep = document.createElement('span');
-        sep.className = 'lc-gl-label__sep';
-        sep.setAttribute('aria-hidden', 'true');
-        sep.textContent = '·';
-        plate.appendChild(sep);
-        const metaEl = document.createElement('span');
-        metaEl.className = 'lc-gl-label__meta';
-        metaEl.textContent = meta.line;
-        plate.appendChild(metaEl);
-      }
       el.appendChild(plate);
+
+      // Second line: the model, alone. Harness and role live on hover (`meta.title`) — see the
+      // room-dressing design §1. One wide pill carrying name · harness · model was both too wide
+      // over every head and, at 8px in a third hue, muddy on the warm paper.
+      const model = present ? plateModel(node.model) : null;
+      if (model) {
+        const modelEl = document.createElement('span');
+        modelEl.className = 'lc-gl-label__model';
+        modelEl.textContent = model;
+        el.appendChild(modelEl);
+      }
 
       const chip = shortLaneState(node.laneState);
       const said = node.workSource === 'status';

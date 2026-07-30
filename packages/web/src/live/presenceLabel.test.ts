@@ -1,11 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import {
   identityMeta,
+  plateModel,
   shortLaneState,
   shortModel,
   shortSurface,
   shortWorkTitle,
 } from './presenceLabel';
+
+describe('plateModel', () => {
+  it('gives the short model for the always-on plate', () => {
+    expect(plateModel('claude-opus-4-5')).toBe('opus 4.5');
+  });
+
+  it('is null when there is no model worth showing', () => {
+    expect(plateModel(null)).toBeNull();
+    expect(plateModel('')).toBeNull();
+    expect(plateModel('unknown')).toBeNull();
+  });
+
+  it('never carries the harness — that moved to hover', () => {
+    expect(plateModel('claude-opus-4-5')).not.toContain('claude code');
+  });
+});
 
 describe('shortSurface', () => {
   it('maps known harnesses to compact labels', () => {
