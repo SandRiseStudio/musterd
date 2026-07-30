@@ -15,8 +15,6 @@ import {
   PLANTS,
   PRINTER,
   RECEPTION,
-  SHELF_DEEP,
-  SHELF_LONG,
 } from './layout';
 
 /**

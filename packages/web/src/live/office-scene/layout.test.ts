@@ -16,7 +16,6 @@ import {
   PODS,
   RECEPTION,
   SEAT_BACK,
-  SHELF_DEEP,
   WINDOWS,
 } from './layout';
 

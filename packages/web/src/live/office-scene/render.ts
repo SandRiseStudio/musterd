@@ -34,9 +34,6 @@ import {
   PRINTER,
   RECEPTION,
   SEAT_TOP,
-  SHELF_DEEP,
-  SHELF_H,
-  SHELF_LONG,
   SINK,
   WINDOWS,
   type Bookshelf,
@@ -846,41 +843,6 @@ const WHITEBOARD = {
   shadow: 'rgba(58, 34, 12, 0.20)',
 } as const;
 
-/**
- * Type lying ON a wall, sheared onto its plane rather than pasted over it in screen space.
- *
- * The wall's local frame, in the units the rest of this file already uses: one step along `t` is one
- * logical FLOOR unit, which projects to (KX, KY)·scale; one step of `u` is one WALL_H px, which is
- * (0, −1)·scale. Feeding those as a matrix puts the glyphs on the wall, leaning with the isometric.
- *
- * Two things this must get right. Local y runs **down** the wall (the matrix's `d` is +scale, not
- * −scale): canvas glyphs extend in +y from the baseline, so an up-positive frame draws every letter
- * upside down. And it composes with `transform`, never `setTransform` — the context already carries the
- * device-pixel-ratio matrix, and replacing it outright would paint this text at the wrong size on
- * every retina display.
- */
-function wallText(
-  ctx: CanvasRenderingContext2D,
-  fit: Fit,
-  edge: (t: number) => [number, number],
-  t: number,
-  u: number,
-  text: string,
-  size: number,
-  fill: string,
-  align: CanvasTextAlign = 'left',
-): void {
-  const o = wallPt(edge, t, u, fit);
-  ctx.save();
-  ctx.translate(o.x, o.y);
-  ctx.transform(KX * fit.scale, KY * fit.scale, 0, fit.scale, 0, 0);
-  ctx.font = canvasFont(size, '--font-mono', 700);
-  ctx.fillStyle = fill;
-  ctx.textAlign = align;
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillText(text, 0, 0);
-  ctx.restore();
-}
 
 /** A planter hung off the wall on a bracket, trailing vines — the one piece of dressing with some droop. */
 function wallHanger(
@@ -971,7 +933,7 @@ function wallHanger(
   vine(12, 27, false);
 }
 
-function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv, nodes: OfficeNode[]): void {
+function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void {
   /**
    * What each wall carries. The right wall gets the clock (it is the only one whose `+t` runs screen-right,
    * so it is the only one a clock can be hung on) plus a print over the corner bookshelf and a pair by the
@@ -3278,7 +3240,7 @@ export function renderScene(
   // The room shell: back walls + windows as a backdrop (behind every item), then the daylight beams they
   // cast onto the floor (under every item). Both before the depth-sorted loop — see the walls note above.
   // Roster order (Map insertion order), so a member keeps the same spot on the in/out board.
-  drawWalls(ctx, fit, env, [...byName.values()]);
+  drawWalls(ctx, fit, env);
   drawWindowBeams(ctx, fit, env);
 
   // desk → seat owner (for the monitor's working glow); the owner may be walking but the seat stays lit.

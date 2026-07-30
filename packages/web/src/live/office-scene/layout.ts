@@ -499,26 +499,58 @@ export const SHELF_H = 66;
  * the standard is the baseline. The carcass `tone` varies too — a room accumulates furniture over
  * years, it does not buy a matched set in one afternoon.
  */
+const DEEP_WIDE = 22; // the low-wide archetype is a touch deeper than the slim units
+
 export const BOOKSHELVES: Bookshelf[] = [
   // back wall, corner behind pod 0 — tall narrow
-  { lx: 130, ly: 10, dir: 'S', long: 44, deep: 20, high: 88, rows: 4, tone: 1.0, decor: 'plant' },
+  {
+    lx: 130,
+    ly: SHELF_DEEP / 2,
+    dir: 'S',
+    long: 44,
+    deep: SHELF_DEEP,
+    high: 88,
+    rows: 4,
+    tone: 1.0,
+    decor: 'plant',
+  },
   // right wall below the lounge — low wide, and the one shelved backwards
   {
-    lx: FLOOR - 11,
+    lx: FLOOR - DEEP_WIDE / 2,
     ly: 320,
     dir: 'W',
     long: 76,
-    deep: 22,
+    deep: DEEP_WIDE,
     high: 46,
     rows: 2,
     tone: 0.94,
     reversed: true,
     decor: 'photo',
   },
-  // left wall beside pod 0 — standard
-  { lx: 10, ly: 240, dir: 'E', long: 58, deep: 20, high: 66, rows: 3, tone: 1.05, decor: 'books' },
+  // left wall beside pod 0 — the standard unit, i.e. the constants above
+  {
+    lx: SHELF_DEEP / 2,
+    ly: 240,
+    dir: 'E',
+    long: SHELF_LONG,
+    deep: SHELF_DEEP,
+    high: SHELF_H,
+    rows: 3,
+    tone: 1.05,
+    decor: 'books',
+  },
   // left wall beside pod 2 — low wide
-  { lx: 11, ly: 560, dir: 'E', long: 70, deep: 22, high: 48, rows: 2, tone: 0.97, decor: 'trophy' },
+  {
+    lx: DEEP_WIDE / 2,
+    ly: 560,
+    dir: 'E',
+    long: 70,
+    deep: DEEP_WIDE,
+    high: 48,
+    rows: 2,
+    tone: 0.97,
+    decor: 'trophy',
+  },
 ];
 
 // ── Leisure spots ─────────────────────────────────────────────────────────────────────────────────────
