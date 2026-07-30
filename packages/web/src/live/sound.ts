@@ -192,12 +192,38 @@ const ROOM_PREF_KEY = 'musterd.live.roomtone';
 const ROOM_GAIN = 0.075;
 /** Gap between sparse events, seconds. Wide, and jittered inside the window — an office you can set
  *  your watch by is a metronome, and the ear finds a metronome within about two cycles. */
-const LIFE_GAP: [number, number] = [3.5, 11];
+const LIFE_GAP: [number, number] = [2.5, 8];
+/**
+ * Makeup gain on the whole LIFE layer, and the reason it needs one.
+ *
+ * Every life event is band-limited noise: a bandpass on white noise throws away all but a sliver of
+ * the spectrum, so its envelope value (`0.07` for a keystroke) multiplies a signal that is *already*
+ * 20–40 dB down. The AIR bed is a wide 380 Hz lowpass, where most of the energy survives. Written
+ * without compensation the two layers are not on the same scale at all, and the first version of this
+ * feature shipped inaudible: rendered offline through this exact graph, the bed peaked at −35 dBFS
+ * while a keystroke peaked at −58.9 and a murmured syllable at −75.5 — 24 and 40 dB *under* the
+ * ventilation that was supposed to sit behind them (nick, 2026-07-29: "im not sure if I hear any of
+ * the added life audio"). They were there; the bed was burying them.
+ *
+ * So the layer gets its own bus and the per-event gains stay *relative* (a keystroke louder than a
+ * mug, a mug louder than nothing), with this one number carrying the makeup. Retune the layer here,
+ * never by scattering factors through five synths. Target: events peak a few dB ABOVE the bed, which
+ * is what a foreground sound in a real room does.
+ *
+ * As re-measured through the same offline graph, peaks against a −33.7 dBFS bed: keystroke −25,
+ * murmur −25, chime −30, mug −30, creak −31. **Those readings carry about ±3 dB** — each render draws
+ * a fresh random noise buffer, and the peak of a narrowband noise burst wanders that much. A control
+ * sweep confirmed the harness itself tracks gain at ~6 dB per doubling, so differences of that order
+ * are real and anything smaller is not. Do not tune this layer to a finer resolution than that.
+ */
+const LIFE_GAIN = 34;
 
 class RoomTone {
   enabled = false;
   private ctx: AudioContext | null = null;
   private bus: GainNode | null = null;
+  /** The LIFE layer's own bus (see `LIFE_GAIN`) — sparse events land here, never straight on `bus`. */
+  private lifeBus: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private sources: AudioScheduledSourceNode[] = [];
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -298,7 +324,11 @@ class RoomTone {
       this.sources.push(osc);
     }
 
-    // 3 · LIFE.
+    // 3 · LIFE, on its own bus so the band-limited events can be lifted clear of the wideband bed.
+    const lifeBus = ctx.createGain();
+    lifeBus.gain.value = LIFE_GAIN;
+    lifeBus.connect(bus);
+    this.lifeBus = lifeBus;
     this.armLife();
 
     // A bed left playing to a tab nobody is looking at is the worst version of this feature.
@@ -333,6 +363,7 @@ class RoomTone {
     const sources = this.sources;
     this.sources = [];
     this.bus = null;
+    this.lifeBus = null;
     for (const s of sources) s.stop(end + 0.05);
     setTimeout(() => bus.disconnect(), 900);
   }
@@ -360,7 +391,7 @@ class RoomTone {
   /** Pick one of the room's small noises and play it, somewhere off to one side. */
   private life(): void {
     const ctx = this.ctx;
-    const bus = this.bus;
+    const bus = this.lifeBus;
     if (!ctx || !bus) return;
     // Placed across the stereo field, never dead centre: everything in an office happens at somebody
     // else's desk, and a sound in the middle of your head is a sound you made.
@@ -409,7 +440,10 @@ class RoomTone {
       [783.99, 659.25], // G5 → E5 — the falling one
     ];
     const [f1, f2] = sets[Math.floor(Math.random() * sets.length)]!;
-    const g = 0.028 + Math.random() * 0.018; // always a few desks away, never YOUR notification
+    // A pure sine loses far less through its (nonexistent) filtering than the noise-based events do,
+    // so on the shared LIFE bus it needs the *smallest* number here to sit level with them. Kept a
+    // touch under the keystroke: this is always a ping at somebody else's desk, never yours.
+    const g = 0.009 + Math.random() * 0.006;
     const t0 = ctx.currentTime + 0.02;
     this.ping(ctx, out, t0, f1, g);
     this.ping(ctx, out, t0 + 0.09 + Math.random() * 0.05, f2, g * 1.15);
@@ -437,7 +471,11 @@ class RoomTone {
     const phrases = 2 + Math.floor(Math.random() * 2);
     for (let ph = 0; ph < phrases; ph++) {
       // alternate speakers: one higher register, one lower
-      const voice = ph % 2 === 0 ? 195 + Math.random() * 60 : 130 + Math.random() * 40;
+      // Formant centre, not vocal-fold pitch: what carries through a room is the resonance band
+      // around 300–650 Hz, and centring the band on a 130 Hz fundamental put nearly all the energy
+      // below where the muffling lowpass could shape it (it was also the quietest event by 17 dB).
+      // Two registers, an upper and a lower speaker, so an exchange has two people in it.
+      const voice = ph % 2 === 0 ? 460 + Math.random() * 190 : 310 + Math.random() * 130;
       const syllables = 3 + Math.floor(Math.random() * 4);
       for (let i = 0; i < syllables; i++) {
         const dur = 0.09 + Math.random() * 0.11;
@@ -456,15 +494,18 @@ class RoomTone {
     src.loop = true;
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
-    bp.Q.value = 4.5;
+    // Wide (Q 1.6, was 4.5): a narrow band on noise is a whistle, and it also starved the event of
+    // nearly all its energy. A broad formant band reads as a voice and leaves the lowpass below
+    // something to actually muffle.
+    bp.Q.value = 1.6;
     bp.frequency.setValueAtTime(freq, at);
     bp.frequency.exponentialRampToValueAtTime(freq * (0.85 + Math.random() * 0.3), at + dur);
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 900;
+    lp.frequency.value = 1100;
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, at);
-    g.gain.exponentialRampToValueAtTime(0.05 + Math.random() * 0.02, at + dur * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.075 + Math.random() * 0.028, at + dur * 0.35);
     g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     src.connect(bp).connect(lp).connect(g).connect(out);
     src.start(at);
@@ -473,7 +514,7 @@ class RoomTone {
 
   /** A mug, a stapler, something set down on a desk. `body` picks how heavy it lands. */
   private tap(ctx: AudioContext, out: AudioNode, body: number): void {
-    this.click(ctx, out, ctx.currentTime + 0.02, 260 + Math.random() * 420, 0.075 * body, 0.13);
+    this.click(ctx, out, ctx.currentTime + 0.02, 260 + Math.random() * 420, 0.12 * body, 0.13);
   }
 
   /** A chair taking somebody's weight — a short downward glide, which is the whole gesture. */
@@ -489,7 +530,8 @@ class RoomTone {
     bp.frequency.exponentialRampToValueAtTime(300, t0 + 0.42);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.05, t0 + 0.09);
+    // Q 7 is the narrowest band of any life event, so it loses the most and needs the most back.
+    g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.09);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
     src.connect(bp).connect(g).connect(out);
     src.start(t0);
