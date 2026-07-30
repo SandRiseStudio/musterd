@@ -103,6 +103,20 @@ export type AuditAction =
   | 'residency.wake_deferred'
   | 'residency.session_captured'
   | 'residency.session_ended'
+  // ADR 167 delivery rail, made observable (ADR 173; lane `01KYQ9175S`). The rail's own decision for
+  // a send where it was genuinely a CANDIDATE — the act was directed at a real other member and was
+  // hint-eligible — with `detail.reason` naming which leg of the predicate answered: `issued`,
+  // `recipient_not_live`, `suppressed_window`, `recipient_unknown`. Deliberately NOT written for
+  // not-directed / act-not-eligible / self-addressed sends: those cover essentially every message
+  // ever sent, and mirroring them here would make the audit log a copy of the messages table. The
+  // gated population is ~40 rows across the project's entire history.
+  //
+  // This row exists because its absence WAS the bug. `recordCcdNudge('hinted')` counted successes
+  // only, in OTel, which is off unless an operator wired an endpoint — so a correct zero (one
+  // eligible act all day, addressed to an away human) was indistinguishable from a dead code path,
+  // and sat as a suspected defect for two days. A rail whose job is delivery has to be able to say
+  // why it declined.
+  | 'nudge.decision'
   // ADR 131 increment 5: the SUPPLEMENTARY cost record. The primary wake report lands at roster
   // verification (~seconds, inside the lease TTL); harness-attested cost only exists when the run
   // exits, often minutes later — so the host posts a second report for the already-settled lease

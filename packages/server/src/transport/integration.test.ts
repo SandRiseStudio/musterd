@@ -4526,6 +4526,68 @@ describe('delivery hint on POST /messages (ADR 167)', () => {
     expect(res.json.delivery_hint.nudge_fingerprint).toMatch(/^[0-9a-f]{16}$/);
   });
 
+  // ADR 173 / lane 01KYQ9175S: the four causes below are DIFFERENT FACTS, and the version of this
+  // test that asserted all four as `toBeUndefined()` is why a correct zero read as a dead rail for
+  // two days. The wire stays additive (no `delivery_hint` for any of them); what is new is that the
+  // decision is now recorded, and only for the acts where the rail was genuinely a candidate.
+  it('records WHY no hint was issued — and only for acts the rail was a candidate for', async () => {
+    const { ada, bob, nick } = await team();
+    await get('/teams/dawn/inbox', ada); // ada live, so her own sends are attributable
+    // (1) rail candidate: eligible + directed, recipient never touched the daemon.
+    const notLive = await post(
+      '/teams/dawn/messages',
+      { envelope: env('Ada', { kind: 'member', name: 'Bob' }, 'handoff', 'h-why-1') },
+      ada,
+    );
+    expect(notLive.json.delivery_hint).toBeUndefined();
+    // (2)+(3) NOT candidates: team-addressed, and a directed act outside the hint set.
+    await post(
+      '/teams/dawn/messages',
+      { envelope: env('Ada', { kind: 'team' }, 'handoff', 'h-why-2') },
+      ada,
+    );
+    await post(
+      '/teams/dawn/messages',
+      { envelope: env('Ada', { kind: 'member', name: 'Bob' }, 'status_update', 'h-why-3') },
+      ada,
+    );
+
+    const rows = (await get('/teams/dawn/audit?limit=100', nick)).json.audit.filter(
+      (e: any) => e.action === 'nudge.decision',
+    );
+    // Exactly one row: the candidate. The other two are ordinary traffic and must not be mirrored
+    // into the audit log — that gate is what keeps this affordable (~40 rows all-time).
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toMatchObject({
+      reason: 'recipient_not_live',
+      act: 'handoff',
+      rail: 'ccd_session',
+    });
+
+    // Bob comes live and Ada sends an eligible act again — and this is NOT `issued`, because the
+    // handoff above already invited a doorbell for Bob inside the suppression window. The damping is
+    // the sixth reason, and it is only reachable with real history + presence, which is why it lives
+    // here rather than in the unit file. Before this lane it was the same bare `null` as "you
+    // addressed the whole team" — an intentional, well-tuned decision, indistinguishable from a bug.
+    await get('/teams/dawn/inbox', bob);
+    const damped = await post(
+      '/teams/dawn/messages',
+      { envelope: env('Ada', { kind: 'member', name: 'Bob' }, 'handoff', 'h-why-4') },
+      ada,
+    );
+    expect(damped.status).toBe(201);
+    expect(damped.json.delivery_hint).toBeUndefined();
+    const after = (await get('/teams/dawn/audit?limit=100', nick)).json.audit.filter(
+      (e: any) => e.action === 'nudge.decision',
+    );
+    // Both rail-candidate decisions are on the record, each naming its own cause — which is the whole
+    // point: "no hint" is now two distinct, countable facts instead of one silent absence.
+    expect(after.map((e: any) => e.detail.reason).sort()).toEqual([
+      'recipient_not_live',
+      'suppressed_window',
+    ]);
+  });
+
   it('no hint: offline recipient, team-addressed act, out-of-set act, self-send', async () => {
     const { ada, bob } = await team();
     // Bob has never touched the daemon — no live presence.

@@ -39,6 +39,7 @@ import {
   resolvePosture,
   resolveOfflineReason,
   type OfflineReason,
+  isRailCandidate,
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { z } from 'zod';
@@ -151,6 +152,7 @@ import {
 import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
 import {
   recordCcdNudge,
+  recordNudgeDecision,
   recordError,
   recordInterruptCheck,
   recordSeenLatency,
@@ -2149,13 +2151,36 @@ export async function handleHttp(
         // one party reliably holding the harness's session-send tool — to relay a daemon-composed
         // one-line nudge. Same additive contract as `ask_contract` above; null (the common case) means
         // the ack is exactly what it was before the ADR.
-        const hint = deliveryHintFor(
+        const decision = deliveryHintFor(
           ctx.db,
           result.message,
           member.name,
           ctx.config.presenceTimeoutMs,
         );
+        const hint = decision.hint;
         if (hint) recordCcdNudge('hinted');
+        // Every decision counted by reason, so the `issued` count has a denominator (ADR 173) — and,
+        // because that counter is OTel and off by default here, a DURABLE row for the decisions that
+        // were actually about the rail. Gated on isRailCandidate: the excluded reasons cover nearly
+        // every message ever sent, and mirroring those into the audit log would drown it. All-time the
+        // gated population is ~40 rows, so this is free and makes the zero queryable:
+        //   SELECT json_extract(detail,'$.reason'), COUNT(*) FROM audit
+        //     WHERE action = 'nudge.decision' GROUP BY 1;
+        recordNudgeDecision(decision.reason);
+        if (isRailCandidate(decision.reason)) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'nudge.decision',
+            target: result.message.id,
+            result: 'allow',
+            detail: {
+              reason: decision.reason,
+              act: result.message.act,
+              message: result.message.id,
+              rail: 'ccd_session',
+            },
+          });
+        }
         if (askTier?.success) {
           return sendJson(res, 201, {
             ack,

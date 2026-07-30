@@ -1,8 +1,9 @@
 import {
   DELIVERY_HINT_ACTS,
   textFingerprint,
-  type DeliveryHint,
   type DeliveryHintAct,
+  type DeliveryHintDecision,
+  type NoHintReason,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { getMemberById } from '../store/members.js';
@@ -68,11 +69,20 @@ function recentlyHinted(db: Database, msg: MessageRow, now: number): boolean {
 }
 
 /**
- * The hint predicate + assembly (ADR 167 §D6). Null — the overwhelmingly common answer — means the
- * ack is exactly what it was before this ADR. A hint is issued only when every leg holds:
- * a directed member-addressed act in the hint set, a recipient who is someone else, with fresh
- * presence (the same liveness test the reachability projections use), and no hint-eligible act
- * already delivered to them inside the window.
+ * The hint predicate + assembly (ADR 167 §D6). A hint is issued only when every leg holds: a directed
+ * member-addressed act in the hint set, a recipient who is someone else, with fresh presence (the same
+ * liveness test the reachability projections use), and no hint-eligible act already delivered to them
+ * inside the window.
+ *
+ * **Returns the reason either way** (ADR 173 clause 1, lane `01KYQ9175S`). This used to return a bare
+ * `DeliveryHint | null`, and that `null` stood for six different facts — from "you addressed the whole
+ * team" to "your recipient is asleep" to "we already rang that doorbell a minute ago". The caller could
+ * not tell them apart, nothing recorded which one fired, and the only counter incremented solely on
+ * success, so a **correct** zero was indistinguishable from a dead code path. That is exactly the
+ * absent-vs-unknown collapse, in the observability of a rail whose whole job is to be observable.
+ *
+ * No-hint is still the overwhelmingly common answer and still additive at the wire: the caller sends
+ * `delivery_hint` only for `issued`, so the ack is byte-identical to pre-ADR-167 in every other case.
  */
 export function deliveryHintFor(
   db: Database,
@@ -80,21 +90,25 @@ export function deliveryHintFor(
   senderName: string,
   presenceTimeoutMs: number,
   now: number = Date.now(),
-): DeliveryHint | null {
-  if (msg.to_kind !== 'member' || msg.to_member === null) return null;
-  if (!isHintAct(msg.act)) return null;
-  if (msg.to_member === msg.from_member) return null;
+): DeliveryHintDecision {
+  const no = (reason: NoHintReason): DeliveryHintDecision => ({ hint: null, reason });
+  if (msg.to_kind !== 'member' || msg.to_member === null) return no('not_directed');
+  if (!isHintAct(msg.act)) return no('act_not_eligible');
+  if (msg.to_member === msg.from_member) return no('self_addressed');
   const recipient = getMemberById(db, msg.to_member);
-  if (!recipient) return null;
-  if (!hasLivePresence(db, recipient.id, presenceTimeoutMs)) return null;
-  if (recentlyHinted(db, msg, now)) return null;
+  if (!recipient) return no('recipient_unknown');
+  if (!hasLivePresence(db, recipient.id, presenceTimeoutMs)) return no('recipient_not_live');
+  if (recentlyHinted(db, msg, now)) return no('suppressed_window');
   const tier = tierFromMeta(msg.meta);
   const nudge_text = composeNudgeLine(senderName, msg.act, msg.id, recipient.kind, tier);
   return {
-    recipient_live: true,
-    rail: 'ccd_session',
-    nudge_text,
-    nudge_fingerprint: textFingerprint(nudge_text),
+    reason: 'issued',
+    hint: {
+      recipient_live: true,
+      rail: 'ccd_session',
+      nudge_text,
+      nudge_fingerprint: textFingerprint(nudge_text),
+    },
   };
 }
 

@@ -202,6 +202,64 @@ the current composer. A composition change while a relay is in flight reads as
 `verbatim: false`. Both halves live in one daemon today, so this is a labelled imprecision, not a
 defect; whoever splits the daemon inherits this sentence.
 
+## Amendment (2026-07-30): the rail could not say why it declined
+
+**"Hint issuance is visible on the message ack"** (above) was true and insufficient, and the gap cost
+two days. The ack shows a hint when one is issued. Nothing anywhere showed a hint being _declined_, or
+why — and `deliveryHintFor` returned a bare `DeliveryHint | null` in which that `null` stood for six
+different facts: team-addressed, act-not-eligible, self-addressed, recipient-row-missing,
+recipient-not-live, and damped-by-the-suppression-window. The only counter, `recordCcdNudge('hinted')`,
+incremented **solely on success**, and it is OTel, which is off unless an operator wired an endpoint
+(ADR 089 / ADR 015 posture). So on the dogfood machine the rail emitted no signal at all, in either
+direction.
+
+**What that produced.** "`delivery_hint` emitted zero hints on a 190-act day" was filed as an ADR 179
+gate defect and sat as a suspected bug (lane `01KYQ9175S`). The premise was wrong: the denominator was
+not 190 but **1**. On 2026-07-28 the traffic was `team|message` 92, `team|status_update` 80,
+`member|message` 44, plus one `accept`, one `resolve`, and exactly one hint-eligible act — an `ask`
+from izzo to **nick**, an away human with no live local session, on a rail that only reaches live
+local sessions. Declining was correct. Zero was the right answer, and there was no way to know it.
+
+That indistinguishability is ADR 173's invariant applied to this ADR's own observability: absence of a
+hint was reported as evidence about the rail, when it was evidence about the traffic.
+
+### What changed
+
+- **`deliveryHintFor` returns the reason either way** — `{ hint, reason: 'issued' }` or
+  `{ hint: null, reason: <named cause> }`, one name per leg of the predicate (ADR 173 clause 1: name
+  the abstention after its cause, not its shape). The wire contract is untouched: `delivery_hint`
+  still rides the ack only for `issued`, so every other case is byte-identical to before.
+- **A durable row for the decisions that are actually about the rail.** `nudge.decision` is written
+  when the rail was a genuine _candidate_ — the act was directed at a real other member and was
+  hint-eligible — carrying `detail.reason`. It is deliberately NOT written for
+  not-directed / act-not-eligible / self-addressed sends: those cover essentially every message ever
+  sent, and mirroring them would turn the audit log into a copy of the messages table. The gated
+  population is **~40 rows across the project's entire history**, so the cost is nil and the zero
+  becomes queryable:
+
+  ```sql
+  SELECT json_extract(detail,'$.reason'), COUNT(*) FROM audit
+    WHERE action = 'nudge.decision' GROUP BY 1;
+  ```
+
+- **Every decision counted by reason** in telemetry too, so `issued` finally has a denominator — but
+  the audit row is the load-bearing half, precisely because a metric nobody is scraping is not
+  observability.
+
+### Honest limits
+
+- **No backfill** (ADR 173 clause 3). Historical liveness is not recoverable — presence is now-state,
+  not a log — so the reasons for past sends are unknown and stay unknown. The counts begin at this
+  change, and a reader comparing across it is comparing to nothing.
+- **The relay half is still underdetermined.** `nudge.decision` records what the daemon decided, not
+  what the sender did with it; `issued` without a matching `actor.session_message` still cannot
+  separate "the sender ignored the hint" from "the sender had no session tools". That is the eval's
+  relay-rate question and it wants relay data, not more instrumentation.
+- **The more interesting finding is out of scope here.** All-time hint-eligible volume is ~40 acts,
+  against 136 free-text `message` acts. The team talks in prose rather than the typed act vocabulary,
+  which is what starves this rail — a vocabulary-adoption question (ADR 144's tool surface), not an
+  observability one, and it deserves its own lane rather than a fix smuggled in here.
+
 ## Consequences
 
 - Seat use of the harness's session messaging becomes ledger-visible with zero behaviour change —
