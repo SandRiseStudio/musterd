@@ -371,14 +371,19 @@ export const RECEPTION = {
  * sit SOUTH, on the walk path, side by side: simultaneous arrivals check in **in parallel**, never
  * as a queue — the beat is ceremony, and ceremony that queues is the gate the design rejected.
  */
-export const FRONT_DESK = { lx: 170, ly: 745, long: 88, deep: 30, high: 34, dir: 'S' as Dir };
-export const RECEPTIONIST = { lx: 170, ly: 720, dir: 'S' as Dir };
+// Sized against the DESKS, not against itself. It was 88x30x34 next to 100x68x36 workstations, which
+// read as a hall table (nick, 2026-07-30: "the front desk is very small compared to the rest of the
+// desks"). A reception counter is a shade wider and shallower than a workstation, at the same height.
+export const FRONT_DESK = { lx: 170, ly: 735, long: 124, deep: 62, high: DESK_UP, dir: 'S' as Dir };
+/** She sits behind it exactly like a member sits at a desk — same SEAT_BACK, same chair, same size. */
+export const RECEPTIONIST = { lx: FRONT_DESK.lx, ly: FRONT_DESK.ly - SEAT_BACK, dir: 'S' as Dir };
+// South of the overflow queue strip, not across it: the counter grew to desk scale and pushed both
+// the strip and the marks apart. A mark inside a blocked cell gets nudged by `nearestFree` and the
+// pause lands somewhere other than in front of the desk, so `nav.test.ts` holds all three walkable.
 export const CHECK_IN_MARKS: ReadonlyArray<{ lx: number; ly: number }> = [
-  { lx: 132, ly: 788 },
-  { lx: 172, ly: 792 },
-  // The east mark stops short of the waiting table's inflated nav footprint — a mark inside a
-  // blocked cell gets nudged by nearestFree and the pause lands somewhere else.
-  { lx: 204, ly: 782 },
+  { lx: 112, ly: 832 },
+  { lx: 166, ly: 836 },
+  { lx: 208, ly: 848 },
 ];
 /** The pause at the mark, seconds. A beat, not a gate. */
 export const CHECK_IN_S = 1.2;

@@ -13,7 +13,7 @@
  * first arrival, works small idles while anyone is present, looks up (`greeting`) while a check-in
  * beat plays, and dozes off again a little after the last member leaves.
  */
-export type ReceptionistMode = 'asleep' | 'waking' | 'idle' | 'greeting';
+export type ReceptionistMode = 'asleep' | 'waking' | 'idle' | 'greeting' | 'typing' | 'call';
 
 export interface ReceptionistState {
   mode: ReceptionistMode;
@@ -21,6 +21,22 @@ export interface ReceptionistState {
   modeT: number;
   /** Seconds since the office emptied — the fuse on going back to sleep. */
   aloneT: number;
+  /** Seconds until the next work beat is drawn. */
+  nextBeat: number;
+  /** How long the current beat runs. */
+  beatLen: number;
+}
+
+/** How long a beat runs, seconds: a call is a conversation, typing is a burst. */
+const BEAT_LEN: Record<'typing' | 'call', [number, number]> = {
+  typing: [3, 7],
+  call: [7, 14],
+};
+/** Gap between work beats. Wide and jittered — a receptionist on a metronome is a clock. */
+const BEAT_GAP: [number, number] = [4, 11];
+
+function reBeat(r: ReceptionistState): void {
+  r.nextBeat = BEAT_GAP[0] + Math.random() * (BEAT_GAP[1] - BEAT_GAP[0]);
 }
 
 /** The wake stretch: the yawn-and-straighten between slumped and working. */
@@ -33,7 +49,14 @@ export const RECEPTIONIST_WAKE_S = 0.9;
 export const RECEPTIONIST_SLEEP_DELAY_S = 6;
 
 export function createReceptionist(): ReceptionistState {
-  return { mode: 'asleep', modeT: 0, aloneT: 0 };
+  const r: ReceptionistState = { mode: 'asleep', modeT: 0, aloneT: 0, nextBeat: 0, beatLen: 0 };
+  reBeat(r);
+  return r;
+}
+
+/** Is she mid-work-beat? The painter uses this to pick the pose; nothing else should care. */
+export function receptionistBusy(r: ReceptionistState): boolean {
+  return r.mode === 'typing' || r.mode === 'call';
 }
 
 /**
@@ -73,6 +96,31 @@ export function stepReceptionist(
       } else if (greeting) {
         r.mode = 'greeting';
         r.modeT = 0;
+      } else {
+        // Work beats: a stretch of typing, or a call on the corded landline. Drawn on a jittered
+        // timer rather than alternating, so the desk never falls into a visible rhythm.
+        r.nextBeat -= dt;
+        if (r.nextBeat <= 0) {
+          const kind = Math.random() < 0.55 ? 'typing' : 'call';
+          const [lo, hi] = BEAT_LEN[kind];
+          r.beatLen = lo + Math.random() * (hi - lo);
+          r.mode = kind;
+          r.modeT = 0;
+        }
+      }
+      break;
+    case 'typing':
+    case 'call':
+      // A greeting always wins: somebody is standing at the counter, and the whole point of the beat
+      // is that she looks up. The interrupted call simply ends — she was wrapping up anyway.
+      if (greeting) {
+        r.mode = 'greeting';
+        r.modeT = 0;
+        reBeat(r);
+      } else if (r.modeT >= r.beatLen || !anyonePresent) {
+        r.mode = 'idle';
+        r.modeT = 0;
+        reBeat(r);
       }
       break;
     case 'greeting':
@@ -82,5 +130,6 @@ export function stepReceptionist(
       }
       break;
   }
-  return r.mode !== before || r.mode === 'waking' || r.mode === 'greeting';
+  // Typing and calls are motion, so they hold the dynamic frame; settled idle does not (see above).
+  return r.mode !== before || r.mode === 'waking' || r.mode === 'greeting' || receptionistBusy(r);
 }

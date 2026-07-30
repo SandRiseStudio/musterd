@@ -37,6 +37,37 @@ describe('the receptionist', () => {
     advance(r, RECEPTIONIST_WAKE_S + 0.2, true);
     expect(r.mode).toBe('idle');
     advance(r, 30, true);
+    expect(r.mode).not.toBe('asleep'); // idle or mid-beat — never back under
+  });
+
+  it('works: over a few minutes she both types and takes a call', () => {
+    const r = createReceptionist();
+    const seen = new Set<string>();
+    for (let i = 0; i < 6000; i++) {
+      stepReceptionist(r, 0.05, true, false);
+      seen.add(r.mode);
+    }
+    expect(seen.has('typing')).toBe(true);
+    expect(seen.has('call')).toBe(true);
+    expect(seen.has('idle')).toBe(true); // beats are punctuation, not a treadmill
+  });
+
+  it('drops whatever she is doing to greet somebody at the counter', () => {
+    const r = createReceptionist();
+    // Wind her into a work beat, then put a member at the mark.
+    for (let i = 0; i < 4000 && !['typing', 'call'].includes(r.mode); i++) {
+      stepReceptionist(r, 0.05, true, false);
+    }
+    expect(['typing', 'call']).toContain(r.mode);
+    stepReceptionist(r, 0.05, true, true);
+    expect(r.mode).toBe('greeting');
+  });
+
+  it('does not keep typing at an office that just emptied', () => {
+    const r = createReceptionist();
+    for (let i = 0; i < 4000 && r.mode !== 'typing'; i++) stepReceptionist(r, 0.05, true, false);
+    expect(r.mode).toBe('typing');
+    stepReceptionist(r, 0.05, false, false);
     expect(r.mode).toBe('idle');
   });
 

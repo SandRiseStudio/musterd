@@ -1374,52 +1374,112 @@ function frontDesk(ctx: CanvasRenderingContext2D, fit: Fit): void {
   box(ctx, fit, D.lx - 2, D.ly + 3, 1, 9, 1.4, '#c9bfa5', D.high); // its spine
 }
 
-/** Her palette — deliberately unlike any member avatar: no member colour, no visor, a cardigan. */
-const RECEP = {
-  cardigan: '#4e7d74',
-  cardiganShade: '#3f6a62',
-  skin: '#e8b98f',
-  hair: '#3d2f28',
-  log: '#f2ecd9',
-} as const;
-
 /**
- * The receptionist, behind the counter. Most of her is occluded by the desk (the depth relation
- * layout.test.ts pins), so the read is head, shoulders and arms — which is also what keeps her
- * cheap. She is STAFF: no nameplate ever, never in a headcount, never walks. Asleep she is a still
- * pose on the baked layer; the office being empty must not cost a frame budget.
+ * The receptionist, at her desk — a FULL member-sized character through the same `drawCharacter`
+ * path as everybody else, not a bespoke pile of ellipses.
+ *
+ * The first cut hand-drew her at roughly half scale, which read exactly as what it was: "a mini
+ * version of the other characters" (nick, 2026-07-30). She now sits in a chair at a desk-height
+ * counter like any member, at `size: 1`, and gets the real skeleton — so she types with the same
+ * `typing` solve and takes a call with `GESTURE.call`, the beat the skeleton already had.
+ *
+ * What still makes her STAFF rather than roster is everything around the drawing: she is not in the
+ * node map, gets no nameplate, is in no headcount, and never walks. She is drawn as a `human` so she
+ * has a face rather than an agent's visor — a receptionist behind a visor reads as another agent,
+ * which is precisely the confusion to avoid. Her wardrobe hashes off the fixed name below, which is
+ * not a member name and never enters the roster.
  */
+const RECEPTIONIST_NODE: OfficeNode = {
+  name: 'receptionist',
+  kind: 'human',
+  presence: 'online',
+  activity: 'working',
+  posture: 'working',
+  state: null,
+  color: 'hsl(172, 32%, 46%)',
+  role: '',
+  surface: null,
+  model: null,
+  workTitle: null,
+  workSource: null,
+  laneState: null,
+  moreLanes: 0,
+};
+
 function drawReceptionist(ctx: CanvasRenderingContext2D, fit: Fit, r: ReceptionistState, t: number): void {
-  const s = fit.scale;
-  const p = project(RECEPTIONIST.lx, RECEPTIONIST.ly, fit);
-  const deskTop = FRONT_DESK.high;
-  // Wake progress eases her from slumped (0) to upright (1); greeting lifts the head a touch more.
+  const asleep = r.mode === 'asleep';
   const wake =
-    r.mode === 'asleep' ? 0
+    asleep ? 0
     : r.mode === 'waking' ? Math.min(1, r.modeT / RECEPTIONIST_WAKE_S)
     : 1;
-  const lift = r.mode === 'greeting' ? 2.5 : 0;
-  // Idle breathing/typing sway — only once awake, and gentle. Asleep is deliberately motionless.
-  const sway = wake >= 1 ? Math.sin(t * 2.1) * 0.6 : 0;
-  const slump = (1 - wake) * 9; // how far she is folded onto the counter
-  const shoulderUp = deskTop + 14 - slump;
-  const headUp = deskTop + 24 - slump * 1.6 + lift;
-  // Torso: cardigan over the chair back, shaded side east.
-  ellipse(ctx, { x: p.x, y: p.y - shoulderUp * s }, 9.5 * s, 6.5 * s, RECEP.cardigan);
-  ellipse(ctx, { x: p.x + 4 * s, y: p.y - (shoulderUp - 1) * s }, 4.5 * s, 5 * s, RECEP.cardiganShade);
-  // Head: tilted forward asleep, level awake, up for a greeting. Bun at the back.
-  const headX = p.x + (1 - wake) * 3 * s;
-  ellipse(ctx, { x: headX, y: p.y - (headUp + sway * 0.4) * s }, 5.2 * s, 5.6 * s, RECEP.skin);
-  ellipse(ctx, { x: headX - 2 * s, y: p.y - (headUp + 3.5) * s }, 4.6 * s, 3 * s, RECEP.hair);
-  ellipse(ctx, { x: headX - 5.5 * s, y: p.y - (headUp + 1) * s }, 2 * s, 2.2 * s, RECEP.hair); // the bun
-  // Arms: folded under her head asleep; on the counter awake (typing-ish bob).
-  if (wake < 0.5) {
-    ellipse(ctx, { x: p.x + 2 * s, y: p.y - (deskTop + 5) * s }, 7 * s, 2.4 * s, RECEP.cardigan);
-  } else {
-    ellipse(ctx, { x: p.x - 5 * s, y: p.y - (deskTop + 6 + sway * 0.5) * s }, 3 * s, 2 * s, RECEP.cardigan);
-    ellipse(ctx, { x: p.x + 5 * s, y: p.y - (deskTop + 6 - sway * 0.5) * s }, 3 * s, 2 * s, RECEP.cardigan);
-  }
+  // Asleep is a slump, not a separate drawing: the same seated figure folded forward over the desk.
+  // `sit` stays 1 throughout — she never stands up, which is most of what "never leaves the desk"
+  // means to the painter.
+  const gesture =
+    r.mode === 'call' ? GESTURE.call
+    : asleep || r.mode === 'waking' ? GESTURE.chin // chin-on-hand reads as dozing at a desk
+    : 0;
+  const gestureT =
+    r.mode === 'call' ? Math.min(0.98, r.modeT / Math.max(r.beatLen, 0.01))
+    : asleep ? 0.5 // held at the plateau: a still slump, no animation on an empty office
+    : 1 - wake;
+  const typing = r.mode === 'typing';
+  const pose: Pose = {
+    lx: RECEPTIONIST.lx,
+    ly: RECEPTIONIST.ly,
+    dir: RECEPTIONIST.dir,
+    sit: 1,
+    phase: 0,
+    stride: 0,
+    run: false,
+    small: false,
+    alpha: 1,
+    carry: r.mode === 'call' ? 'phone' : null,
+    bubble: null,
+    gesture,
+    gestureT,
+    moving: false,
+  };
+  drawCharacter(ctx, fit, {
+    lx: pose.lx,
+    ly: pose.ly,
+    dir: pose.dir,
+    node: RECEPTIONIST_NODE,
+    skel: solveSkeleton({
+      phase: 0,
+      sit: 1,
+      stride: 0,
+      run: false,
+      t,
+      // Her typing is the members' typing burst, on her own seed so she is not in lockstep with a desk.
+      typing: typing ? typingBurst(RECEPTIONIST_SEED, t) : 0,
+      carry: pose.carry,
+      help: false,
+      gesture,
+      gestureT,
+      seed: RECEPTIONIST_SEED,
+    }),
+    size: 1,
+    alpha: 1,
+    carry: pose.carry,
+    gesture,
+    gestureT,
+    t,
+    seed: RECEPTIONIST_SEED / 0xffffffff,
+  });
 }
+
+/** Her own stable seed — sharing a desk's seed would put her typing in lockstep with a member's. */
+const RECEPTIONIST_SEED = 0x9e3779b9;
+
+/** What the scene draws when nobody has stepped her yet: an empty office, which is the honest default. */
+const SLEEPING_RECEPTIONIST: ReceptionistState = {
+  mode: 'asleep',
+  modeT: 0,
+  aloneT: 0,
+  nextBeat: 0,
+  beatLen: 0,
+};
 
 function receptionItems(ctx: CanvasRenderingContext2D, fit: Fit, recep: ReceptionistState | null, t: number): DepthItem[] {
   const R = RECEPTION;
@@ -1427,7 +1487,7 @@ function receptionItems(ctx: CanvasRenderingContext2D, fit: Fit, recep: Receptio
     // She sorts at her own feet, north of the counter, so the counter paints over her lower body.
     {
       d: depth(RECEPTIONIST.lx, RECEPTIONIST.ly),
-      fn: () => drawReceptionist(ctx, fit, recep ?? { mode: 'asleep', modeT: 0, aloneT: 0 }, t),
+      fn: () => drawReceptionist(ctx, fit, recep ?? SLEEPING_RECEPTIONIST, t),
     },
     { d: depth(FRONT_DESK.lx, FRONT_DESK.ly), fn: () => frontDesk(ctx, fit) },
     { d: depth(R.couch.lx, R.couch.ly), fn: () => couch(ctx, fit, R.couch.lx, R.couch.ly, PAL.couch, R.couch.dir) },
