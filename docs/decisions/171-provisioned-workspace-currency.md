@@ -264,6 +264,53 @@ against an _objective external anchor_: parity with the repair command. There is
 passes and the guard now reads clean at zero. If a reviewer reads the criterion strictly, the strict
 remedy is a revert, and that call is the reviewer's to make rather than the author's.
 
+**Reviewer's verdict on the kill criterion — 2026-07-29, stanley (not the author).** Routed by ryder
+on lane `01KYQYZMAP`, adjudicated here because a criterion an author reinterprets alone is not
+pre-registered at all. **The tune stands, _and_ the criterion was mis-specified for guards of this
+shape.** Both halves matter; the first without the second would be a blank cheque.
+
+The criterion conflates two failures it treats as one. **A noisy check** reports drift that is real
+but not worth acting on; its remedy genuinely is revert, because the tempting fix is loosening a
+threshold until the noise disappears, and that is unfalsifiable. **An incoherent check** reports
+drift its own prescribed repair cannot clear. #448 was the second: four lines telling a seat to run
+`--refresh-guidance` for files that command would never write. That is not a threshold at all — it is
+a correctness property, and it is binary. Reverting it would have returned the check to a *differently*
+unfit state, not a fit one. The criterion's own rationale argues for repair here: an uncleanable line
+teaches people to stop reading *more* thoroughly than an actionable one, because no action makes it go
+away.
+
+Three checkable facts, none of which rest on the author's account of intent:
+
+1. **The numbers moved the wrong way for a tune-to-silence.** The change *raised* true detection
+   (0 of 8 → 8 of 8 on the missing ADR 167 skill) while removing the four uncleanable lines and
+   cutting 6 version lines per folder to 1. A change aimed at quieting a guard lowers both; this one
+   raised detection.
+2. **The anchor was independently re-derived, in a different subsystem, by a later bug.** #514's
+   foreign-adapter guard hit the same fault and named the same principle — a check must expect what
+   its own repair would actually write, fleet-wide. A post-hoc rationalisation does not go on to
+   predict the next bug; ADR 182 is the same principle again.
+3. **Parity is verifiable without reference to the guard metric.** `establishedHarnesses` is now one
+   predicate shared by the doctor and the repair, so agreement is structural rather than two
+   functions happening to coincide.
+
+**The boundary, so this is not reusable as an escape hatch.** A failing guard may be repaired instead
+of reverted only when all three hold: (i) the repair is forced by an anchor verifiable *independently*
+of the guard metric, (ii) the anchor is named before the new count is measured, and (iii) the change
+would still be correct if the count moved against it. Absent any one, the plain remedy — revert —
+applies. This mirrors the discipline ADR 151's re-baseline took under the same pressure: encode the
+boundary, never assert the exception.
+
+**What this review is NOT evidence of.** It cannot be recorded as a cross-family confirm. ryder
+originally labelled the routing same-family from a session-start roster read, corrected it to
+cross-family on the belief that stanley attests `claude-fable-5` — and by adjudication time that was
+false twice over: nick switched this seat to `claude-opus-5` mid-session, and the seat's live presence
+now attests **nothing at all** (`presence.model` empty), which under ADR 169 makes it ineligible as a
+cross-family counterpart in either direction. So the honest record is: **closed by a reviewer who is
+not the author, family unattested.** ADR 169 increment 5's instrument is still unexercised. That the
+label was wrong, corrected, and wrong again is the third stale-roster-read of the day and ADR 173's
+defect in miniature for the third time — the lesson is that model family is not a fact a note may
+carry, only a value read at the moment it is used.
+
 **What is not yet done.** The fleet is detected, not repaired: all 8 seats now carry a true drift
 line and `--refresh-guidance` is the one-command fix. That repair is deliberately left to the seats
 rather than performed across live worktrees from this branch — the same non-action ADR 168 recorded
