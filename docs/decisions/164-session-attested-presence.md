@@ -295,7 +295,10 @@ transcript never written, sitting in the slot while that workspace's real sessio
 previous evening — kept working.
 
 This ADR's ladder is deliberately robust to it (re-adopt rather than treat as a takeover; never
-adopt a corpse), so **presence is protected**. The **wake guard is not**. The Claude Code wake
+adopt a corpse), so **presence is protected** — **wrong, and disproved on 2026-07-29; see the
+amendment below.** Re-adoption is exactly the hole: the ladder adopts a neighbour's capture whenever
+it _looks_ alive, and then treats that neighbour's death as its own. The **wake guard is not**
+protected either. The Claude Code wake
 backend's rule — "never spawn, fresh or resume, beside a live local session" — takes
 `localSessionLiveness` as its only input, and that reads the same slot: probed directly,
 `agents-miley` returns `resumable` (no live session) while its session is alive. A phantom capture
@@ -305,6 +308,56 @@ the newcomer displaces presence under ADR 068.
 Out of scope here, and tracked as its own lane rather than patched blind: the fix is a schema
 question (captures keyed by session id vs. refusing to clobber a live capture vs. a smarter writer),
 and it deserves the same design-first treatment this one got.
+
+## Amendment (2026-07-29): activity outranks inference, and a dormant adapter must actually come back
+
+The "Known limit" above conceded the last-write-wins slot but claimed **presence is protected**. It
+is not, and the counter-example is fault B2 of the seat-drop lane (`01KYQBSD93`) — reproduced live
+3× by stanley: `team_join`, then _exactly one_ `team_*` call succeeds, then every later one answers
+"you haven't joined the team yet", indefinitely, until another manual join buys one more call.
+
+**Two defects compose, and the second is what makes it permanent.**
+
+1. **The ladder releases a live seat on an inference.** Re-adoption (`session.id !== this.adopted`)
+   takes over any capture that _looks_ alive, so a neighbour session that briefly owns the slot
+   becomes this adapter's adopted session — and when the neighbour's `ended_at` lands, rung 3 fires
+   for a session that was never ours. Rung 4 does the same with a neighbour's quiet transcript. Both
+   call `leave()`, which clears `wantPresence`; the seat is released with **no server-side event at
+   all** — no `claim.superseded`, no `claim.duplicate_workspace`, nothing in the audit but the
+   _absence_ of presence. That absence is why this read as a mystery for two days.
+
+2. **The promised recovery was never implemented.** Rung 3's own comment says dormant rather than
+   exit precisely because "a dormant adapter comes back on its next tool call". Nothing did that. The
+   mechanism that would — the ADR 108 deferred autojoin — had already been spent by the _successful_
+   first join, and it is memoized for the life of the process. So "dormant" was indistinguishable
+   from dead, and the tool-facing message said the one thing that was actively misleading: _you
+   haven't joined_, when the truth was _I released your seat because I thought you had gone_.
+
+**The fix, in the order that matters.**
+
+- **Activity outranks inference** (`shouldReleaseOnVerdict`). Every rung below `ppid` infers the
+  harness's fate from disk. A tool call is not an inference — the harness called us. So a session
+  that acted within the last heartbeat is not released, whatever the ladder read. `ppid === 1` stays
+  exempt: re-parenting to launchd is process fact, and an orphan is an orphan however recently it
+  acted. This is prevention: a working session now never gets the wrong verdict in the first place.
+- **A dormant adapter comes back**, as this ADR always said it would: a liveness release is marked
+  distinctly from a deliberate `team_leave`, and the next tool call re-arms the autojoin and
+  re-occupies. Scoped to the ladder on purpose — an explicit `leave` stays left.
+- **The demotion says so.** The reason reaches `lastJoinError`, so the guard reads "seat presence was
+  released because this session looked inactive (`<rung>` check); a tool call is evidence otherwise,
+  so the next one re-joins" instead of a bare "call team_join first". It used to be announced only on
+  stderr — a channel no session reads.
+
+**What this does not settle.** Which rung fired for stanley is unproven: his adapter is gone and the
+stderr line went with it. Both inference rungs funnel through the same release and the same missing
+recovery, so the fix does not depend on the answer — but the honest statement is that the _class_ is
+demonstrated and the instance is inferred. The underlying schema defect is untouched and still owed a
+design: `binding.session` remains one slot for a workspace that can hold several sessions, and
+"never adopt a corpse" cannot rescue a reader whose evidence is about somebody else.
+
+**The general shape**, worth carrying past this ADR: a safety mechanism that acts on inference needs
+a channel for first-hand evidence to overrule it, and a way back from a verdict it got wrong.
+This one had neither — it could demote on a guess and had no route home.
 
 ## Related
 

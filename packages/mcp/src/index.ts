@@ -113,7 +113,11 @@ const AUTOJOIN_EXEMPT_TOOLS = new Set(['team_join', 'team_leave']);
  * cross: a real session's first act is a tool call (the SessionStart hook asks for `team_inbox_check`
  * immediately), a probe's is never. Memoized: concurrent and later calls share the one join.
  */
-function armAutojoinOnFirstToolCall(server: McpServer, run: () => Promise<void>): void {
+function armAutojoinOnFirstToolCall(
+  server: McpServer,
+  run: () => Promise<void>,
+  client?: { releasedByLiveness: boolean; noteActivity?: () => void },
+): void {
   // Memoize the SUCCESS, not the attempt. Holding the promise unconditionally meant one unlucky
   // moment at session start — a daemon bounce mid-attempt, a socket hang-up — dormanted the session
   // permanently: `wantPresence` never went true, so every later team_* call answered "you haven't
@@ -146,6 +150,15 @@ function armAutojoinOnFirstToolCall(server: McpServer, run: () => Promise<void>)
       AUTOJOIN_EXEMPT_TOOLS.has(name)
         ? cb
         : async (...args: unknown[]) => {
+            // Re-arm when the ADR 164 liveness ladder released the seat (fault B2). The ladder
+            // demotes on INFERENCE — a quiet transcript, an `ended_at` written for a session that
+            // may not even be ours — and its own contract says a dormant adapter returns on the next
+            // tool call. This is that return: a tool call is direct evidence the session is alive,
+            // which outranks the inference that said otherwise. Scoped to the ladder deliberately;
+            // an explicit `team_leave` stays left.
+            // First-hand proof of life, recorded BEFORE anything else can judge us dead.
+            client?.noteActivity?.();
+            if (client?.releasedByLiveness) fired = undefined;
             // Never fail the call the attempt rode in on (the pre-existing posture, kept explicit
             // now that a rejection is observable rather than swallowed upstream).
             await attempt().catch(() => {});
@@ -186,7 +199,7 @@ export function buildMcpServer(
   instrumentToolCoercion(server);
   // Patched second so the deferred autojoin runs INSIDE the first tool's span — the join latency it
   // causes is attributed to the call that triggered it.
-  if (opts.onFirstToolCall) armAutojoinOnFirstToolCall(server, opts.onFirstToolCall);
+  if (opts.onFirstToolCall) armAutojoinOnFirstToolCall(server, opts.onFirstToolCall, client);
   registerJoin(server, client, config);
   registerLeave(server, client, config);
   registerSend(server, client, config);

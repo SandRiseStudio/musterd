@@ -23,6 +23,32 @@ function wsBase(server: string): string {
   return server.replace(/^http/, 'ws');
 }
 
+/** Presence heartbeat cadence, and the window in which a tool call still counts as proof of life
+ *  (ADR 164): one beat, so every check is judged against activity since the previous one. */
+export const HEARTBEAT_MS = 15_000;
+
+/**
+ * Whether a non-live ladder verdict should actually release the seat — **activity outranks
+ * inference** (ADR 164, seat-drop fault B2).
+ *
+ * Every rung below `ppid` is an inference about whether the harness is still there, drawn from disk:
+ * a transcript that stopped growing, an `ended_at` that may have been written for a neighbour session
+ * which briefly owned the slot. A tool call is not an inference — the harness called us. So a session
+ * that acted within the last heartbeat cannot be dead, whatever the ladder read.
+ *
+ * `ppid` is exempt: being re-parented to launchd is process fact, not inference, and an orphaned
+ * adapter is orphaned however recently it acted.
+ */
+export function shouldReleaseOnVerdict(
+  rung: string | undefined,
+  lastActivityAt: number,
+  now: number,
+  heartbeatMs = HEARTBEAT_MS,
+): boolean {
+  if (rung === 'ppid') return true;
+  return now - lastActivityAt >= heartbeatMs;
+}
+
 /**
  * Retry schedule for a request whose connection was refused (§ {@link connectionNeverEstablished}).
  *
@@ -102,6 +128,8 @@ export class MusterdClient {
   /** Why the last join attempt failed — surfaced by the dormant tool guards so a silent autojoin
    * failure (e.g. wrong-db token rejection) is visible to the agent, not just "call team_join". */
   private lastJoinErrorMsg: string | null = null;
+  private releasedByLivenessFlag = false;
+  private lastActivityAt = 0;
   /** Invoked when this session is superseded by a successor **in its own workspace** (ADR 092): the
    * adapter has been replaced by a reload and should exit cleanly rather than linger dormant. Wired by
    * the MCP entrypoint to the graceful-shutdown-then-exit path; unset in tests / library use. */
@@ -481,16 +509,46 @@ export class MusterdClient {
       return false; // fail open — an unjudgeable session is not evidence of a dead one
     }
     if (verdict.verdict === 'live') return false;
+    // Activity outranks inference — see shouldReleaseOnVerdict. Without this, the re-arm below only
+    // recovers from a wrong verdict every 15s; with it, a working session never gets one.
+    if (!shouldReleaseOnVerdict(verdict.rung, this.lastActivityAt, Date.now())) return false;
     process.stderr.write(
       `musterd: session no longer live (${verdict.rung}) — releasing seat presence\n`,
     );
     this.leave();
+    // Mark WHY the seat was released, after `leave()` (which clears the flag for the deliberate
+    // case). ADR 164 promises "a dormant adapter comes back on its next tool call" — this flag is
+    // what lets the arming layer keep that promise, and it must distinguish a ladder demotion from
+    // an explicit `team_leave`, which is meant to stay left. The reason also reaches the agent: the
+    // demotion used to be announced only on stderr, a channel no session reads, while the tool-facing
+    // message said "you haven't joined the team yet" — the opposite of what happened.
+    this.releasedByLivenessFlag = true;
+    this.lastJoinErrorMsg =
+      `seat presence was released because this session looked inactive ` +
+      `(${verdict.rung ?? 'unknown'} check); a tool call is evidence otherwise, so the next one re-joins`;
     if (verdict.verdict === 'exit') this.onReplaced?.();
     return true;
   }
 
+  /**
+   * True when the ADR 164 liveness ladder released this seat — as opposed to a deliberate
+   * `team_leave`. A tool call arriving afterwards is direct evidence the session is alive, which
+   * outranks the ladder's inference, so the arming layer re-joins on it. Cleared by the next
+   * successful occupy, and never set by `leave()` itself.
+   */
+  get releasedByLiveness(): boolean {
+    return this.releasedByLivenessFlag;
+  }
+
+  /** Record that the harness just called a tool — the only first-hand evidence this process gets
+   *  that its session is alive. Consulted by {@link attestSession}; see the note there. */
+  noteActivity(now = Date.now()): void {
+    this.lastActivityAt = now;
+  }
+
   /** Release the seat (back to dormant). The server keeps a 45s reclaim grace; tools stay registered. */
   leave(): void {
+    this.releasedByLivenessFlag = false; // a deliberate release; attestSession re-sets it after
     this.wantPresence = false;
     this.joinedFlag = false;
     this.memoryEnvelope = null; // occupy-scoped: stale once the seat is released
@@ -541,6 +599,7 @@ export class MusterdClient {
       if (frame.type === 'occupied') {
         // Claim succeeded — the server resolved + assigned the seat (a role pool's `<role>-<n>` too).
         this.joinedFlag = true;
+        this.releasedByLivenessFlag = false;
         this.lastJoinErrorMsg = null;
         this.pendingRequestId = null;
         this.waitOnPending = false;
@@ -571,7 +630,7 @@ export class MusterdClient {
               }),
             );
           }
-        }, 15_000);
+        }, HEARTBEAT_MS);
         this.heartbeat.unref?.();
         this.pendingJoin?.resolve();
         this.pendingJoin = null;
