@@ -1,4 +1,5 @@
 import { canvasFont } from '../canvasFont';
+import type { Appearance } from './appearance';
 import { drawCharacter } from './character';
 import { depth, FLOOR, KX, KY, project, THICK, WALL_H, type Fit, type Pt } from './iso';
 import { STRIDE, type PetState } from './pet';
@@ -1359,19 +1360,28 @@ function frontDesk(ctx: CanvasRenderingContext2D, fit: Fit): void {
   box(ctx, fit, D.lx, D.ly, D.long - 4, D.deep - 3, D.high - 4, dim(PAL.wood, 0.9)); // base
   box(ctx, fit, D.lx, D.ly, D.long, D.deep, 4, woodTop(), D.high - 4); // worktop
   // The ledge: a narrower, taller rail along the visitor (south) edge.
-  box(ctx, fit, D.lx, D.ly + D.deep / 2 - 3, D.long - 6, 6, 7, dim(PAL.wood, 0.82), D.high);
-  // Monitor, back to the room — panel south of its foot so the visitor sees the housing.
-  box(ctx, fit, D.lx - 18, D.ly - 4, 12, 2, 2, '#2f2f33', D.high); // foot
-  box(ctx, fit, D.lx - 18, D.ly - 3, 16, 2.4, 12, '#3a3a3e', D.high + 2); // housing
-  // Phone: base + handset lying across it.
-  box(ctx, fit, D.lx + 6, D.ly - 5, 10, 7, 2.5, '#4a4a50', D.high);
-  box(ctx, fit, D.lx + 6, D.ly - 7.5, 11, 3, 2, '#3a3a3e', D.high + 2.5);
-  // A small plant on the east end, and the visitor log open mid-counter.
-  box(ctx, fit, D.lx + 30, D.ly - 4, 8, 8, 5, PLANT.pot, D.high);
-  const pp = project(D.lx + 30, D.ly - 4, fit);
-  ellipse(ctx, { x: pp.x, y: pp.y - (D.high + 9) * fit.scale }, 6 * fit.scale, 4 * fit.scale, PLANT.leaf);
-  box(ctx, fit, D.lx - 2, D.ly + 3, 14, 9, 1, '#f2ecd9', D.high); // the log
-  box(ctx, fit, D.lx - 2, D.ly + 3, 1, 9, 1.4, '#c9bfa5', D.high); // its spine
+  box(ctx, fit, D.lx, D.ly + D.deep / 2 - 4, D.long - 8, 8, 9, dim(PAL.wood, 0.82), D.high);
+  // Props at DESK scale — these were sized by eye against the counter and came out doll-sized beside
+  // the workstations (nick, 2026-07-30). A member's monitor is ~34 wide and ~26 tall; hers matches.
+  // Monitor, back to the room: she reads the screen, the visitor reads the housing.
+  box(ctx, fit, D.lx - 30, D.ly - 6, 20, 6, 4, '#2f2f33', D.high); // foot
+  box(ctx, fit, D.lx - 30, D.ly - 4, 34, 5, 24, '#3a3a3e', D.high + 4); // housing
+  // A corded landline — the phone she actually picks up. Base, keypad, and the handset on its cradle.
+  box(ctx, fit, D.lx + 22, D.ly - 8, 20, 15, 4, '#4a4a50', D.high);
+  box(ctx, fit, D.lx + 22, D.ly - 12, 21, 7, 5, '#3a3a3e', D.high + 4); // the handset, cradled
+  box(ctx, fit, D.lx + 22, D.ly - 2, 13, 5, 1.2, '#6a6a72', D.high + 4); // keypad
+  // A plant on the east end and the visitor log open mid-counter — both at desk-prop scale.
+  // The foliage sits ON the rim, not floating above it — `drawPlant`'s whole lesson, re-learned here:
+  // a gap between pot and leaves reads as a crate with a bush hovering over it.
+  const POT_H = 11;
+  box(ctx, fit, D.lx + 50, D.ly - 6, 15, 15, POT_H, PLANT.pot, D.high);
+  box(ctx, fit, D.lx + 50, D.ly - 6, 17, 17, 2.5, PLANT.rim, D.high + POT_H);
+  const pp = project(D.lx + 50, D.ly - 6, fit);
+  const potTop = (D.high + POT_H + 2.5) * fit.scale;
+  ellipse(ctx, { x: pp.x, y: pp.y - potTop - 4 * fit.scale }, 11 * fit.scale, 7 * fit.scale, PLANT.leaf);
+  ellipse(ctx, { x: pp.x - 4 * fit.scale, y: pp.y - potTop - 8 * fit.scale }, 7 * fit.scale, 5 * fit.scale, PLANT.leafLit);
+  box(ctx, fit, D.lx - 2, D.ly + 10, 26, 18, 1.6, '#f2ecd9', D.high); // the log
+  box(ctx, fit, D.lx - 2, D.ly + 10, 2, 18, 2.2, '#c9bfa5', D.high); // its spine
 }
 
 /**
@@ -1386,9 +1396,32 @@ function frontDesk(ctx: CanvasRenderingContext2D, fit: Fit): void {
  * What still makes her STAFF rather than roster is everything around the drawing: she is not in the
  * node map, gets no nameplate, is in no headcount, and never walks. She is drawn as a `human` so she
  * has a face rather than an agent's visor — a receptionist behind a visor reads as another agent,
- * which is precisely the confusion to avoid. Her wardrobe hashes off the fixed name below, which is
- * not a member name and never enters the roster.
+ * which is precisely the confusion to avoid.
+ *
+ * Her look is WRITTEN DOWN, not hashed. Hashing is right for members — a name is all the identity
+ * the floor has — but she is one designed character, and leaving her to the hash meant nobody had
+ * ever looked at what it produced: gold skin under dark red long hair, which closed around her face
+ * into a single oval and read as a seal. A fixed character gets fixed art.
  */
+const RECEPTIONIST_LOOK: Appearance = {
+  skin: '#c68642',
+  // A ponytail rather than the full fall: she is seen from the chest up behind a counter, and a long
+  // mass in that framing has nothing to hang against, so it silhouettes into the head.
+  hair: 'ponytail',
+  hairColor: '#3d2a1c',
+  facialHair: 'none',
+  hat: 'none',
+  hatColor: '#2a2118',
+  // Long sleeves — bare forearms in gold-on-gold were half of why she had no readable arms.
+  cut: 'long',
+  bareArms: false,
+  bottom: '#3f5570',
+  shoes: '#22262b',
+  accessory: 'glasses',
+  accessoryColor: '#2f7f6a',
+  smile: 'soft',
+  presents: 'femme',
+};
 const RECEPTIONIST_NODE: OfficeNode = {
   name: 'receptionist',
   kind: 'human',
@@ -1466,6 +1499,7 @@ function drawReceptionist(ctx: CanvasRenderingContext2D, fit: Fit, r: Receptioni
     gestureT,
     t,
     seed: RECEPTIONIST_SEED / 0xffffffff,
+    look: RECEPTIONIST_LOOK,
   });
 }
 

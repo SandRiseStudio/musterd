@@ -29,7 +29,11 @@ describe('the receptionist', () => {
     const r = createReceptionist();
     advance(r, RECEPTIONIST_WAKE_S + 0.5, true);
     expect(r.mode).toBe('idle');
-    expect(advance(r, 5, true)).toBe(false); // settled idle: the baked buffer can carry her
+    // One tick that stays in idle must not claim the dynamic frame. Asserted per-tick rather than
+    // over a window: work beats fire on a 4–11s timer, so any window long enough to be interesting
+    // is also long enough to start typing — which SHOULD hold the frame.
+    const active = stepReceptionist(r, 0.05, true, false);
+    if (r.mode === 'idle') expect(active).toBe(false);
   });
 
   it('wakes on the first arrival and stays awake while anyone is present', () => {

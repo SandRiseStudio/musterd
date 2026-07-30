@@ -104,6 +104,15 @@ export interface CharacterOpts {
   /** Scene clock (s) and the member's seed — the face's own small life: a blink, an LED pulse. */
   t: number;
   seed: number;
+  /**
+   * Override the wardrobe instead of hashing it from the name.
+   *
+   * For members the hash is the whole point — a name is all the identity the floor has. The
+   * receptionist is the exception: she is a *designed* character, so leaving her look to a hash meant
+   * nobody had ever actually looked at the combination it produced (it dealt gold skin under dark red
+   * long hair, which closed around her face into one oval and read, fairly, as a seal).
+   */
+  look?: Appearance;
 }
 
 /**
@@ -131,7 +140,7 @@ export function drawCharacter(
   const { skel: k, node, dir, size } = o;
   const px = projector(o.lx, o.ly, dir, fit, size, o.heading);
   const u = fit.scale * size; // one logical unit, in screen px, at this character's size
-  const look = appearanceOf(node);
+  const look = o.look ?? appearanceOf(node);
   const acc = node.color; // the identity hue — the top, and only the top
   const accDark = hslL(acc, 0.72);
 
