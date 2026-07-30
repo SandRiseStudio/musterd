@@ -52,6 +52,7 @@ export function OfficeScene({
   status = 'idle',
   onReady,
   topSlot,
+  bandSlot,
 }: {
   teamName: string;
   roster: MemberSummary[];
@@ -77,6 +78,13 @@ export function OfficeScene({
    * here (nick's call: the office frames its own asks; the page above the panels stays quiet).
    * `/broadcast` passes nothing: a stream cannot answer an ask. */
   topSlot?: ReactNode;
+  /**
+   * Chrome seated in a strip BENEATH the room rather than floated over it — `/live` puts the office
+   * noticeboard here. Passing it also frames the stage (see `.lc-office--framed`): the room takes only
+   * the height its own aspect needs and this band gets the rest, which is height the panel was
+   * previously letterboxing away. `/broadcast` passes nothing and stays full-bleed.
+   */
+  bandSlot?: ReactNode;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
@@ -170,33 +178,45 @@ export function OfficeScene({
   const humans = roster.filter((m) => m.kind === 'human').length;
 
   return (
-    <section className={`lc-office${collapsed ? ' is-collapsed' : ''}`}>
-      {/* Canvas stays mounted while collapsed (state survives, re-expanding is instant) but the
-          render loop is SUSPENDED via setSuspended — no draw cost behind an invisible panel. */}
-      <div className="lc-gl-canvas" ref={hostRef} aria-hidden="true" />
-      <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
-      {/* The office's own chrome, identical on /live and /broadcast by construction — the whole point
-          of the shared component. Collapsed, the panel is a rail with nowhere to put it. */}
-      {!collapsed && (
-        <OfficeOverlay
-          teamName={teamName}
-          present={presentCount(roster)}
-          entries={entries}
-          status={status}
-          // Steerable on the dashboard, a passive chyron on the stream: `/broadcast` has no cursor.
-          interactive={!broadcast}
-        />
-      )}
-      {/* The asks rail floats over the top of the room the way the reel floats over the bottom. */}
-      {!collapsed && topSlot && <div className="lc-office__asks">{topSlot}</div>}
-      {/* The product's mark on the room itself — for every frame that leaves this app (a clip, a
-          screenshot, the stream), quiet enough to live under everything. The overlay card carries
-          the TEAM's name; this corner carries the product's. */}
-      {!collapsed && (
-        <div className="lc-office__mark" aria-hidden="true">
-          <MusterdWord className="lc-office__mark-lockup" chipSize={15} />
-        </div>
-      )}
+    <section
+      className={
+        `lc-office${collapsed ? ' is-collapsed' : ''}` +
+        // A band to fill is what makes the stage take only the room's own aspect — see `bandSlot`.
+        `${bandSlot && !collapsed ? ' lc-office--framed' : ''}`
+      }
+    >
+      {/* The room's box. Everything below that must line up with canvas pixels — the plates, the
+          ambient overlay, the speech bubbles, the floated chrome — is positioned against the stage,
+          so framing the office moves the whole scene as one piece. */}
+      <div className="lc-office__stage">
+        {/* Canvas stays mounted while collapsed (state survives, re-expanding is instant) but the
+            render loop is SUSPENDED via setSuspended — no draw cost behind an invisible panel. */}
+        <div className="lc-gl-canvas" ref={hostRef} aria-hidden="true" />
+        <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
+        {/* The office's own chrome, identical on /live and /broadcast by construction — the whole point
+            of the shared component. Collapsed, the panel is a rail with nowhere to put it. */}
+        {!collapsed && (
+          <OfficeOverlay
+            teamName={teamName}
+            present={presentCount(roster)}
+            entries={entries}
+            status={status}
+            // Steerable on the dashboard, a passive chyron on the stream: `/broadcast` has no cursor.
+            interactive={!broadcast}
+          />
+        )}
+        {/* The asks rail floats over the top of the room the way the reel floats over the bottom. */}
+        {!collapsed && topSlot && <div className="lc-office__asks">{topSlot}</div>}
+        {/* The product's mark on the room itself — for every frame that leaves this app (a clip, a
+            screenshot, the stream), quiet enough to live under everything. The overlay card carries
+            the TEAM's name; this corner carries the product's. */}
+        {!collapsed && (
+          <div className="lc-office__mark" aria-hidden="true">
+            <MusterdWord className="lc-office__mark-lockup" chipSize={15} />
+          </div>
+        )}
+      </div>
+      {!collapsed && bandSlot && <div className="lc-office__band">{bandSlot}</div>}
       {onCollapse && (
         <div className="lc-office__collapse">
           <CollapseButton side="left" label="the office" onClick={onCollapse} />
