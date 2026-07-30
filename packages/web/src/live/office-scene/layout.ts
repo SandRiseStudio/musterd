@@ -363,6 +363,26 @@ export const RECEPTION = {
   plant: { lx: 335, ly: 690 },
 } as const;
 
+/**
+ * The front desk (reception design 2026-07-30): a counter on the reception rug, facing the arrivals
+ * path, anchoring the couch/table/plant cluster that used to wait for nothing. The receptionist
+ * stands NORTH of the counter — smaller lx+ly, so the counter paints in front of her and occludes
+ * her lower body, which is what makes a figure behind a desk read as behind it. The check-in marks
+ * sit SOUTH, on the walk path, side by side: simultaneous arrivals check in **in parallel**, never
+ * as a queue — the beat is ceremony, and ceremony that queues is the gate the design rejected.
+ */
+export const FRONT_DESK = { lx: 170, ly: 745, long: 88, deep: 30, high: 34, dir: 'S' as Dir };
+export const RECEPTIONIST = { lx: 170, ly: 720, dir: 'S' as Dir };
+export const CHECK_IN_MARKS: ReadonlyArray<{ lx: number; ly: number }> = [
+  { lx: 132, ly: 788 },
+  { lx: 172, ly: 792 },
+  // The east mark stops short of the waiting table's inflated nav footprint — a mark inside a
+  // blocked cell gets nudged by nearestFree and the pause lands somewhere else.
+  { lx: 204, ly: 782 },
+];
+/** The pause at the mark, seconds. A beat, not a gate. */
+export const CHECK_IN_S = 1.2;
+
 /** The printer/supply station against the back wall. */
 export const PRINTER = { lx: 390, ly: 60, w: 46, d: 34, h: 32 };
 

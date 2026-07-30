@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { FLOOR, project, WALL_H } from './iso';
 import {
   ART,
+  CHECK_IN_MARKS,
+  FRONT_DESK,
+  RECEPTIONIST,
   BOOKSHELVES,
   HUDDLE_POUFS,
   HUDDLE_TABLE,
@@ -9,6 +12,8 @@ import {
   DESK_D,
   DESK_SLOTS,
   DESK_W,
+  ENTRANCE,
+  STRIP_CAP,
   FWD,
   LEISURE_SPOTS,
   MEETING,
@@ -125,6 +130,36 @@ describe('LEISURE_SPOTS', () => {
       expect(s.lx).toBeLessThan(FLOOR);
       expect(s.ly).toBeLessThan(FLOOR);
     }
+  });
+});
+
+describe('the front desk', () => {
+  it('sits near the entrance, facing arrivals', () => {
+    expect(Math.hypot(FRONT_DESK.lx - ENTRANCE.lx, FRONT_DESK.ly - ENTRANCE.ly)).toBeLessThan(260);
+  });
+
+  it('does not sit on the overflow queue strip', () => {
+    for (let i = 0; i < STRIP_CAP; i++) {
+      const qx = ENTRANCE.lx + 34 + i * 32;
+      const qy = ENTRANCE.ly - 10 - i * 6;
+      const inDesk =
+        Math.abs(qx - FRONT_DESK.lx) < FRONT_DESK.long / 2 &&
+        Math.abs(qy - FRONT_DESK.ly) < FRONT_DESK.deep / 2;
+      expect(inDesk).toBe(false);
+    }
+  });
+
+  it('puts the receptionist behind the counter and the marks in front of it', () => {
+    expect(CHECK_IN_MARKS.length).toBeGreaterThanOrEqual(3);
+    for (const m of CHECK_IN_MARKS) {
+      expect(Math.sign(m.ly - FRONT_DESK.ly)).not.toBe(Math.sign(RECEPTIONIST.ly - FRONT_DESK.ly));
+    }
+  });
+
+  it('occludes the receptionist with the counter, not the other way round', () => {
+    // Depth is lx+ly: the greater sum paints later, in front. A receptionist painted OVER her own
+    // desk reads as standing on it.
+    expect(RECEPTIONIST.lx + RECEPTIONIST.ly).toBeLessThan(FRONT_DESK.lx + FRONT_DESK.ly);
   });
 });
 
