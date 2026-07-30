@@ -1,0 +1,87 @@
+import type { LaneState } from '@musterd/protocol';
+
+const SURFACE_SHORT: Record<string, string> = {
+  'claude-code': 'claude',
+  cursor: 'cursor',
+  codex: 'codex',
+  cli: 'cli',
+  web: 'web',
+  ios: 'ios',
+  slack: 'slack',
+  other: 'other',
+};
+
+export function shortSurface(surface: string | null | undefined): string {
+  if (!surface) return '';
+  return SURFACE_SHORT[surface] ?? surface;
+}
+
+/** Glanceable model label — prefer family + version crumb over raw id. */
+export function shortModel(model: string | null | undefined): string {
+  if (!model) return '';
+  const raw = model.trim();
+  if (!raw || raw.toLowerCase() === 'unknown') return '';
+  const lower = raw.toLowerCase();
+  // claude-opus-4-5 → opus 4.5 (Anthropic encodes the minor as a hyphen)
+  const anthropic = lower.match(/\b(opus|sonnet|haiku)[- ]?(\d+)(?:[-.](\d+))?/);
+  if (anthropic) {
+    const ver = anthropic[3] ? `${anthropic[2]}.${anthropic[3]}` : anthropic[2]!;
+    return `${anthropic[1]} ${ver}`;
+  }
+  // gpt-5.6-… → gpt 5.6
+  const gpt = lower.match(/\bgpt[- ]?(\d+(?:\.\d+)?)/);
+  if (gpt) return `gpt ${gpt[1]}`;
+  // grok-4.5 → grok 4.5
+  const grok = lower.match(/\bgrok[- ]?(\d+(?:\.\d+)?)/);
+  if (grok) return `grok ${grok[1]}`;
+  // fallback: first two hyphen segments, spaces
+  return lower.split('-').slice(0, 2).join(' ').slice(0, 18);
+}
+
+export function identityMeta(opts: {
+  surface?: string | null;
+  model?: string | null;
+  role?: string | null;
+}): { line: string | null; title: string } {
+  const surf = shortSurface(opts.surface);
+  const mod = shortModel(opts.model);
+  const role = opts.role?.trim() ?? '';
+  const parts = [surf, mod].filter(Boolean);
+  let line: string | null = parts.length ? parts.join(' · ') : null;
+  if (role) line = line ? `${line} · ${role}` : role;
+  const titleParts = [
+    opts.surface ?? null,
+    opts.model && opts.model !== 'unknown' ? opts.model : null,
+    role || null,
+  ].filter(Boolean);
+  return { line, title: titleParts.join(' · ') };
+}
+
+export function truncateWork(title: string, maxChars = 32): string {
+  const t = title.trim();
+  if (t.length <= maxChars) return t;
+  return `${t.slice(0, Math.max(1, maxChars - 1))}…`;
+}
+
+export function shortLaneState(state: LaneState | null | undefined): string | null {
+  switch (state) {
+    case 'claimed':
+      return 'claimed';
+    case 'active':
+      return 'active';
+    case 'blocked':
+      return 'blocked';
+    case 'ready_for_review':
+      return 'review';
+    case 'open':
+    case 'done':
+    case 'abandoned':
+    case undefined:
+    case null:
+      return null;
+    default: {
+      const _exhaustive: never = state;
+      return _exhaustive;
+    }
+  }
+}
