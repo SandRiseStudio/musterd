@@ -30,3 +30,52 @@ export interface DeliveryHint {
   nudge_text: string;
   nudge_fingerprint: string;
 }
+
+/**
+ * Why no hint was issued (ADR 173 clause 1 — name the abstention after its cause, not its shape).
+ *
+ * The predicate used to return a bare `null` for all six of these, which made the rail's own decision
+ * unreadable from outside: "no hint was warranted" and "the hint code never fires" were the same
+ * observation. That indistinguishability let a correct zero sit as a suspected bug for two days
+ * (lane `01KYQ9175S`), and the pre-existing test asserted four different causes as one
+ * `toBeUndefined()` — the collapse encoded as coverage.
+ */
+export const NO_HINT_REASONS = [
+  /** Team- or broadcast-addressed: the rail nudges one live recipient, so there is nobody to nudge. */
+  'not_directed',
+  /** Directed, but the act is not in {@link DELIVERY_HINT_ACTS} — a `message`/`status_update` etc. */
+  'act_not_eligible',
+  /** Sender addressed themselves; a doorbell for your own session is noise. */
+  'self_addressed',
+  /** `to_member` did not resolve to a member row — a data-integrity oddity, rare and worth seeing. */
+  'recipient_unknown',
+  /** Resolved, eligible, directed — but the recipient has no fresh presence on the rail. */
+  'recipient_not_live',
+  /** Damped: another eligible act already reached them inside the suppression window. */
+  'suppressed_window',
+] as const;
+export type NoHintReason = (typeof NO_HINT_REASONS)[number];
+
+/** The predicate's full answer: the hint when one was issued, and always the reason either way. */
+export type DeliveryHintDecision =
+  | { hint: DeliveryHint; reason: 'issued' }
+  | { hint: null; reason: NoHintReason };
+
+/**
+ * Reasons where the rail was genuinely **in play** — the act was directed at a real other member and
+ * was hint-eligible, so whether a nudge went out is a fact about the rail rather than about ordinary
+ * traffic. Only these are worth a durable audit row: all-time they number in the tens (40 eligible
+ * acts across the project's entire history), while the excluded reasons cover essentially every
+ * message ever sent and would turn the audit log into a message mirror.
+ */
+export const RAIL_CANDIDATE_REASONS: readonly (NoHintReason | 'issued')[] = [
+  'issued',
+  'recipient_unknown',
+  'recipient_not_live',
+  'suppressed_window',
+];
+
+/** Was the rail a real candidate for this act? See {@link RAIL_CANDIDATE_REASONS}. */
+export function isRailCandidate(reason: NoHintReason | 'issued'): boolean {
+  return RAIL_CANDIDATE_REASONS.includes(reason);
+}

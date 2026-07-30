@@ -62,7 +62,7 @@ autorefresh covers the daemon, not the binary a wake's hooks resolve (lane
 `01KYQMM141SSC5DEYC8NSX8WQW`); a real mid-session seat drop hiding behind the same error string as a
 benign misreport, in two distinct faults (lanes `01KYQBSD93YAD198FCT2T7BW5C`,
 `01KYQCF678TC29ARGWRFD2H4A5`) beside an auto-refresher quiet-period guard that has never once fired
-(lane `01KYQP9VMTDH3GZ9PZP2Z9NAY9`); model attestation reading the *neighbour's* transcript — fixed
+(lane `01KYQP9VMTDH3GZ9PZP2Z9NAY9`); model attestation reading the _neighbour's_ transcript — fixed
 the same day (#506, lane `01KYQN5EXP0DMRVKSDC6YCDQ39`); `delivery_hint` emitting zero hints on the
 190-act day (lane `01KYQ9175S7YNVH4FSK8TWJXVT`); ~45 junk `web-*` members and stale departed-seat
 claims (lane `01KYQ91AWP66ZSQDYBB2M3WTKP`); and attribution gaps (lane
@@ -71,7 +71,7 @@ as a **gate**, not a footnote.
 
 The second brainstorm also replaced the architecture. The original increments implied one
 monolithic automatic loop assembled in stages. The rewrite decomposes it into **composable scoped
-loops** — each defined as *trigger state → routing rule → outcome states*, chained by board
+loops** — each defined as _trigger state → routing rule → outcome states_, chained by board
 transitions. There is no big-loop object anywhere: the end-to-end loop is **emergent**, never
 stored — [ADR 048](048-plan-goal-work-item-model.md)'s standing bet, applied to the loop itself.
 A rejected review, for example, is not a feature of the review loop; it is a board transition the
@@ -99,10 +99,10 @@ Every loop — these three and any future one — is confined to exactly three v
 2. **Wake** a named seat with a work-order carrying a **lane id only**.
 3. **Move** a work item between states in response to a seat's act.
 
-A loop never injects instructions into a session, never chooses *how* work gets done, and never
+A loop never injects instructions into a session, never chooses _how_ work gets done, and never
 acts on a seat's behalf. This is the ADR 131 §7 needle restated per-loop — loops route work
-*between* named, attested actors who can decline, hold, or raise an ask; they do not script what
-happens *inside* a session, which is the intra-task-orchestration trap musterd positions against.
+_between_ named, attested actors who can decline, hold, or raise an ask; they do not script what
+happens _inside_ a session, which is the intra-task-orchestration trap musterd positions against.
 It also keeps the [ADR 128](128-recipient-scoped-message-reads.md) injection bar structural: the
 work-order's composed line carries the seat, team, and lane id — never a lane title, never free
 text — so no agent-authored text ever enters a spawn prompt. Every future loop proposal is tested
@@ -132,20 +132,20 @@ eventual vocabulary.
 rail is known-broken; building `flow: auto` on it would automate a mechanism we know is wrong. The
 ledger, with the board lanes as the join key:
 
-| Gate item | Lane | Status (2026-07-29) |
-| --- | --- | --- |
-| Woken sessions run a frozen Jul-23 musterd 0.3.1 (autorefresh misses the wake path) | `01KYQMM141SSC5DEYC8NSX8WQW` | claimed (stanley) — first |
-| Wake-grant expiry is silent: surface on roster/doctor, re-mint, verify one live wake | `01KYQ913P5N8SNERVSZ56NV0W3` | open |
-| Seat drop A — join succeeds, next call says never joined | `01KYQBSD93YAD198FCT2T7BW5C` | open |
-| Seat drop B — restarted adapter reads unclaimed forever | `01KYQCF678TC29ARGWRFD2H4A5` | open |
-| Auto-refresher quiet-period guard has never fired (113/113 force-bounces) | `01KYQP9VMTDH3GZ9PZP2Z9NAY9` | open |
-| `delivery_hint` emitted zero hints on a 190-act day | `01KYQ9175S7YNVH4FSK8TWJXVT` | open |
-| Roster hygiene — stale departed-seat claims, ~45 junk `web-*` members | `01KYQ91AWP66ZSQDYBB2M3WTKP` | open |
-| Attribution gaps — worktree without seat git identity, trailer drift | `01KYQ91DKAKWWCK5HFRP4AH1PH` | open |
-| Attestation read the neighbour's transcript | `01KYQN5EXP0DMRVKSDC6YCDQ39` | **done** (#506) |
-| Retire dolly — no successful session since 07-14, every wake watchdogs out | roster action, no lane | decided (nick) |
+| Gate item                                                                            | Lane                         | Status (2026-07-29)                                                                                                                                                                |
+| ------------------------------------------------------------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Woken sessions run a frozen Jul-23 musterd 0.3.1 (autorefresh misses the wake path)  | `01KYQMM141SSC5DEYC8NSX8WQW` | claimed (stanley) — first                                                                                                                                                          |
+| Wake-grant expiry is silent: surface on roster/doctor, re-mint, verify one live wake | `01KYQ913P5N8SNERVSZ56NV0W3` | open                                                                                                                                                                               |
+| Seat drop A — join succeeds, next call says never joined                             | `01KYQBSD93YAD198FCT2T7BW5C` | open                                                                                                                                                                               |
+| Seat drop B — restarted adapter reads unclaimed forever                              | `01KYQCF678TC29ARGWRFD2H4A5` | open                                                                                                                                                                               |
+| Auto-refresher quiet-period guard has never fired (113/113 force-bounces)            | `01KYQP9VMTDH3GZ9PZP2Z9NAY9` | open                                                                                                                                                                               |
+| `delivery_hint` emitted zero hints on a 190-act day                                  | `01KYQ9175S7YNVH4FSK8TWJXVT` | **done** — premise WRONG (denominator was 1, not 190; zero was correct); the real defect was that the rail could not say why it declined, now `nudge.decision` (ADR 167 amendment) |
+| Roster hygiene — stale departed-seat claims, ~45 junk `web-*` members                | `01KYQ91AWP66ZSQDYBB2M3WTKP` | open                                                                                                                                                                               |
+| Attribution gaps — worktree without seat git identity, trailer drift                 | `01KYQ91DKAKWWCK5HFRP4AH1PH` | open                                                                                                                                                                               |
+| Attestation read the neighbour's transcript                                          | `01KYQN5EXP0DMRVKSDC6YCDQ39` | **done** (#506)                                                                                                                                                                    |
+| Retire dolly — no successful session since 07-14, every wake watchdogs out           | roster action, no lane       | decided (nick)                                                                                                                                                                     |
 
-The grant-expiry fix has a named shape: `residency status` today checks grant *presence*, never
+The grant-expiry fix has a named shape: `residency status` today checks grant _presence_, never
 validity, and `doctor` has no residency check at all — `validateGrant`'s `expired` / `revoked`
 reasons must reach both surfaces, so a dead rail is loud within one poll cycle. Dolly's retirement
 is a roster action, not a debug lane — `musterd team remove` per [ADR 019](019-team-remove.md)
@@ -155,8 +155,8 @@ gate converges.
 
 ### The dispatch loop
 
-*Trigger:* a lane in `claimed` whose owner is an enrolled, offline, `flow: auto` seat.
-*Route:* work-order wake to the owner. *Outcome:* the owner's session works the lane.
+_Trigger:_ a lane in `claimed` whose owner is an enrolled, offline, `flow: auto` seat.
+_Route:_ work-order wake to the owner. _Outcome:_ the owner's session works the lane.
 
 One routing rule, two trigger edges, shipped in order:
 
@@ -173,7 +173,7 @@ One routing rule, two trigger edges, shipped in order:
   this ADR per [ADR 180](180-review-after-bugbot.md)'s `change-adr:check`. "No live session" needs
   the clean ended-cleanly signal: the SessionEnd capture (`ended_at`) plus
   [ADR 166](166-session-liveness-by-enumeration.md) enumeration **outrank** the 10-minute
-  transcript-mtime guard — and the fix lands in the *deciding* branch (the enumerated path in
+  transcript-mtime guard — and the fix lands in the _deciding_ branch (the enumerated path in
   `liveness.ts` currently ignores `ended_at` entirely while the demoted slot path honors it),
   otherwise every wake is vetoed for 10 minutes after every clean exit. Whether the ended-cleanly
   signal also moves daemon-side (today `recordSessionAttestation` lands only `start`; the liveness
@@ -197,18 +197,18 @@ ceiling per-derivation) the day this loop ships.
 
 ### The review loop
 
-*Trigger:* a lane enters `ready_for_review`. *Route:* a reviewer — live counterpart, else woken
-from `wake_pool`, human where required. *Outcomes:* a confirm closes the lane verified; a
+_Trigger:_ a lane enters `ready_for_review`. _Route:_ a reviewer — live counterpart, else woken
+from `wake_pool`, human where required. _Outcomes:_ a confirm closes the lane verified; a
 send-back returns it to the owner.
 
 When `pickReviewCounterpart` finds nobody live and `teamFamilyPosture().wake_pool` is non-empty,
 the ready edge emits a work-order wake for the best cross-family candidate; the review ask already
 waits in their inbox. One design point is settled here: `wake_pool` today lists offline seats with
-no family attached (family is read from *live* presence rows only) and the `lane.ready_for_review`
+no family attached (family is read from _live_ presence rows only) and the `lane.ready_for_review`
 audit stores only the pool's count — so "best cross-family candidate" needs a **durable family
 source**, proposed as the seat's last-attested family from audit history (observation, aged, never
 a declaration). Risky lanes are untouched by this loop's wake: [ADR 172](172-model-family-posture.md)
-already requires a *human* reviewer there, on the `blocking` tier.
+already requires a _human_ reviewer there, on the `blocking` tier.
 
 **The reject edge costs nothing.** A send-back moves the lane to `claimed` — and a `claimed` lane
 with an offline `flow: auto` owner is precisely the dispatch loop's trigger. The needs-fix wake is
@@ -232,8 +232,8 @@ structurally-zero to measured.
 
 ### The merge loop
 
-*Trigger:* a **verified** close (closer ≠ owner at close — the only kind the review loop makes
-routinely possible). *Route:* unrisky ⇒ actuate the merge; risky ⇒ a human. *Outcome:* merged and
+_Trigger:_ a **verified** close (closer ≠ owner at close — the only kind the review loop makes
+routinely possible). _Route:_ unrisky ⇒ actuate the merge; risky ⇒ a human. _Outcome:_ merged and
 cleaned up, or an answered ask.
 
 An **unrisky** lane auto-merges — the closing agent runs the one git workflow
@@ -263,7 +263,7 @@ backwards: per-derivation rate caps can only split **after** the `residency.woke
 `residency.wake_failed` detail carries the derivation — caps read history. `/board` and
 `team_report` surface: wakes by loop and outcome, sessions chained, review-catch and no-candidate
 rates, circuit-breaker trips, auto- vs asked-merges, and per-seat daily spend — all derived from
-audit rows. This section is doubly load-bearing: it is the operational dashboard *and* the
+audit rows. This section is doubly load-bearing: it is the operational dashboard _and_ the
 instrument that decides the loops-as-data reevaluation.
 
 ### The toggles
@@ -278,7 +278,7 @@ Two knobs, two meanings — **the seat is the unit of trust; the loop is the uni
   that is not enabled derives nothing, for any seat. This is the install unit, the mechanism of the
   loop-by-loop trust ramp, and the seed of the eventual declarative layer.
 
-A wake fires only where both agree: the loop is enabled on the team *and* the target seat is
+A wake fires only where both agree: the loop is enabled on the team _and_ the target seat is
 `flow: auto`.
 
 ### The harness actuation contract
@@ -287,7 +287,7 @@ Everything above actuates through one seam, and today that seam has exactly one 
 Naming the contract keeps the coupling bounded without building a second harness prematurely.
 
 A **loop-capable harness** provides three signals, anchored on the `ActuatorBackend` seam
-(`packages/cli/src/host/backend.ts`) — deliberately distinct from the *provisioning* adapter seam
+(`packages/cli/src/host/backend.ts`) — deliberately distinct from the _provisioning_ adapter seam
 (`Harness` in `packages/cli/src/onboard/harness.ts`, [ADR 026](026-harness-tool-environment.md)–[031](031-codex-adapter-scope.md)),
 which shares only the harness id string:
 
@@ -334,7 +334,7 @@ auto-merge (merge loop).
 ## What deliberately does not change
 
 - **No orchestrator, no runtime, no daemon timers.** The daemon derives candidates; the host
-  actuates; the agent owns every clock and every decision about *what* to do — a woken session
+  actuates; the agent owns every clock and every decision about _what_ to do — a woken session
   orients from the board and may decline, release, or raise an ask like any other session. The host
   executes reachability policy; it never decides work (ADR 131 §7's needle, threaded the same way —
   the three-verb interface is that needle restated per-loop).
@@ -379,7 +379,7 @@ the wake.
 **Experiment.** Two contrast axes, both natural A/Bs. Per seat: `flow: auto` flips one seat at a
 time, so each flow-day yields within-team contrast between auto and manual seats on the success
 metrics above. Per loop: the enable switches stage the hypotheses so each is falsifiable alone —
-the review loop tests "a woken reviewer produces verified closes at acceptable spend" *before* the
+the review loop tests "a woken reviewer produces verified closes at acceptable spend" _before_ the
 merge loop bets merges on it; if the review loop's catch rate stays near zero or its spend is
 ugly, the merge loop is not enabled. The same staging feeds the loops-as-data reevaluation: the
 recorded trigger vocabulary across three shipped loops is the dataset that decision reads.

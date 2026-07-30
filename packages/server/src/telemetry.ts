@@ -279,6 +279,21 @@ export function recordCcdNudge(stage: 'hinted' | 'relayed' | 'relayed_verbatim')
   ix().ccdNudge.add(1, { 'musterd.nudge.stage': stage });
 }
 
+/**
+ * Count the rail's decision for EVERY directed-act send, by reason (ADR 173, lane `01KYQ9175S`).
+ *
+ * `recordCcdNudge('hinted')` counts only successes, so its zero was unreadable: no denominator, and
+ * no way to see which leg of the predicate declined. This counts the whole decision space, so the
+ * `issued` rate has something to be a rate *of*.
+ *
+ * Note this is OTel, which is off unless an operator set an endpoint (ADR 089 / ADR 015 posture) —
+ * which is precisely why the durable half of this lives in the audit log rather than here. A metric
+ * nobody is scraping is not observability.
+ */
+export function recordNudgeDecision(reason: string): void {
+  ix().ccdNudge.add(1, { 'musterd.nudge.stage': 'decided', 'musterd.nudge.reason': reason });
+}
+
 /** Count a presence attach/detach for churn (observability.md §4). */
 export function recordPresenceChurn(event: 'attach' | 'detach', surface?: string): void {
   ix().presenceChurn.add(1, {
