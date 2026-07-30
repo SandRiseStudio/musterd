@@ -363,7 +363,7 @@
    "magical" part. Track widths live in CSS vars so the collapse classes just retune a single value. */
 .lc__canvas {
   --rail-w: 46px;
-  /* The office track carries a LANDSCAPE scene (see --lc-scene-aspect), and its width is the only
+  /* The office track carries a LANDSCAPE scene (1272.8 × 888.4), and its width is the only
      lever on how big the room draws — `fitFloor` is width-limited here at every realistic window
      size. Measured 2026-07-29 at a 1280px viewport: 1.55fr gave the office 456px and a fit scale of
      0.337, which put the room's entire back wall at 63px tall. Widened to 2.05fr → 549px → scale
@@ -706,15 +706,7 @@
 }
 
 /* ─── the office scene lives in this slot ─────────────────────────────── */
-/**
- * The projected scene box: 2·FLOOR·KX wide by SCENE_RISE + 2·FLOOR·KY + SCENE_DROP tall (iso.ts), so
- * 1272.8 × 888.4. `fitFloor` fits that whole box, which means a panel of any OTHER aspect wastes the
- * difference — and the office column is tall and narrow, so what it wasted was height: 369 of 668px at
- * a 1280 viewport, measured. Locking the stage to this ratio spends the width the column has and hands
- * the leftover height to the band below, instead of letterboxing the room inside its own panel.
- */
 .lc-office {
-  --lc-scene-aspect: 1272.8 / 888.4;
   position: relative;
   flex: 0 0 38%;
   min-width: 0;
@@ -730,30 +722,32 @@
 /**
  * The room's own box. Everything that has to line up with canvas pixels — the canvas, the name-plate
  * layer, the ambient overlay, the speech bubbles — is positioned against THIS element, so the stage is
- * the one place the room's geometry is established.
+ * the one place the room's geometry is established. With no band (that is /broadcast and
+ * /office-preview) it fills the panel exactly as the office always has.
  *
- * Unframed (the default, and what /broadcast and /office-preview get) it simply fills the panel, exactly
- * as the office always has. `.lc-office--framed` opts into the aspect lock, and only /live passes it —
- * a full-bleed 16:9 capture has no leftover height to reclaim and must not be letterboxed to make some.
+ * The stage takes **every pixel the band does not**, and nothing constrains its shape.
+ *
+ * It briefly had an aspect lock, to stop a narrow office column letterboxing the room. That was right
+ * for the three-column layout and wrong everywhere else, because the room's size is `min(width-limit,
+ * height-limit)` and the lock could only ever *remove* height: with both side panels collapsed the
+ * office is ~1890px wide, the clamp cut the stage to 690px, and the fit flipped from width-limited to
+ * height-limited — scale 0.987 → 0.730, a 26% smaller room (nick, 2026-07-30: "the office space got
+ * smaller and there is more white space all around"). Giving the stage the leftover height instead can
+ * never shrink the room; at worst the extra height goes unused because width is binding.
  */
 .lc-office__stage {
   position: relative;
   flex: 1;
   min-height: 0;
 }
-.lc-office--framed .lc-office__stage {
-  flex: 0 0 auto;
-  aspect-ratio: var(--lc-scene-aspect);
-  /* A very wide office column would otherwise make the stage taller than the panel and push the band
-     off the bottom. Clamped, the fit goes back to being height-limited — a little horizontal slack
-     instead of vertical, which is the same trade in the safer direction. */
-  max-height: 74%;
-}
-/* The reclaimed strip under the room: the office's own noticeboard hangs here. */
+/**
+ * The strip under the room, sized to the noticeboard and NOT a moment taller. As `flex: 1` it swallowed
+ * everything the stage left — measured at 302px tall holding an 86px board, so 216px of it was bare
+ * panel ("takes up a ton of space and adds some unused space as well").
+ */
 .lc-office__band {
   position: relative;
-  flex: 1;
-  min-height: 0;
+  flex: 0 0 auto;
   display: flex;
   overflow: hidden;
 }
@@ -770,22 +764,20 @@
 .lc-notice {
   flex: 1;
   min-width: 0;
-  padding: 8px 10px 10px;
+  padding: 6px 8px 7px;
   display: flex;
-  /* The board takes the height its slips need and no more, pinned to the top of the band. Stretched to
-     fill, a small team left a tall slab of bare cork; snug, the panel's own amber horizon glow finishes
-     the column underneath it, which is what that gradient was drawn for. */
   align-items: start;
-  /* Never taller than the band — a very large roster scrolls inside the cork instead of overflowing it. */
-  max-height: 100%;
+  /* The room is the point of this panel; the board is a caption under it. Capped so a very large roster
+     scrolls inside the cork rather than eating the room's height — the band is sized from this. */
+  max-height: 38vh;
 }
 .lc-notice__frame {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  padding: 7px 8px 8px;
-  border-radius: 7px;
+  padding: 5px 7px 6px;
+  border-radius: 6px;
   /* cork, and the frame as a rim rather than a drawn border — the same trick the room's furniture uses */
   background: linear-gradient(180deg, #c69a63 0%, #bd9058 100%);
   box-shadow:
@@ -797,7 +789,7 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 0 2px 6px;
+  padding: 0 2px 4px;
 }
 .lc-notice__title {
   font-family: var(--font-mono, monospace);
