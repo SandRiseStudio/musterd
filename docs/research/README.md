@@ -14,7 +14,7 @@ Research is the publishable output of the trace → eval → experiment flywheel
 
 Operationalize MAST's multi-agent failure taxonomy ([arXiv 2503.13657](https://arxiv.org/abs/2503.13657)) as live detectors over musterd's act-typed message log — ignored `request_help`, circular handoffs, stalled threads, broadcast-only "journal" coordination. Substrate: the shipped `coordination-density` insight (ADR 050, PR #84) and Telemetry Layer 2. Contribution vs MAST: the first **dataset + detectors of real coordination failures**, not annotated transcripts.
 
-**First artifact:** an open, redacted coordination-traces dataset (OTel/Langfuse-shaped). Release is **gated on the opt-in + redaction posture** (ADR 051) being enforced — no dataset ships before consent/redaction is real.
+**First artifact:** an open, redacted coordination-traces dataset (OTel/Langfuse-shaped). Release is **gated on the consent + redaction posture of [ADR 184](../decisions/184-dataset-consent-and-redaction.md)** — which states the gate's definition of done as four checkable conditions, so "no dataset ships before consent/redaction is real" has a test. _Previously this cited ADR 051; that pointer was wrong twice over — 051 is still `proposed` (so the gate waited on a product-boundary debate it is not part of), and its posture governs prompt text inside spans, while this artifact is built from the message log. See ADR 184 §Context._
 
 ## How to add a finding
 
