@@ -740,7 +740,15 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
       process.env['MUSTERD_GRANT'] = grant;
       const waitP = inboxCommand(parseArgs(['--wait', '--timeout', '5']));
 
-      // Let the socket connect + subscribe, then nick (his bound folder) sends Ada a directed act.
+      // This sleep biases the send toward the live-push path (what this test is named for); it is no
+      // longer what makes the test correct. `--wait` starts in two phases — it drains the durable
+      // inbox, THEN opens the socket — and an act landing between them used to be caught by neither,
+      // so the wait sat until its deadline and exited 124 no matter how generous that deadline was.
+      // That was this test's flake: under a loaded suite the socket phase stretched past the sleep.
+      // inbox.ts now re-drains once the socket is subscribed, so both sides of the window wake it and
+      // a mistimed sleep costs nothing. Deliberately NOT replaced with polling for Ada's presence:
+      // the socket's `session` provenance is overwritten by her own next HTTP call, so that
+      // "condition" is transient and a poll that samples late spins forever — measured, not guessed.
       await new Promise((r) => setTimeout(r, 300));
       actAsNobody();
       await sendCommand(parseArgs(['--to', 'Ada', '--act', 'request_help', 'wake up please']));

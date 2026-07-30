@@ -286,15 +286,19 @@ async function waitInbox(
     return 0;
   };
 
-  // Startup-race guard: a directed act may have landed between the last check and this wait. Drain the
-  // durable inbox first and wake immediately on the earliest unread match, before opening the socket.
-  const pending = await http.inbox(team, { unread: true }).catch(() => undefined);
-  if (pending) {
-    const hit = pending.messages.find(
+  // The earliest unread act that should wake this wait, if any.
+  const findPending = async (): Promise<Envelope | undefined> => {
+    const pending = await http.inbox(team, { unread: true }).catch(() => undefined);
+    if (!pending) return undefined;
+    return pending.messages.find(
       (m) => m.ts > pending.cursor.last_read_ts && wakesWait(m, identity.name, filter),
     );
-    if (hit) return deliver(hit);
-  }
+  };
+
+  // Startup-race guard: a directed act may have landed between the last check and this wait. Drain the
+  // durable inbox first and wake immediately on the earliest unread match, before opening the socket.
+  const startupHit = await findPending();
+  if (startupHit) return deliver(startupHit);
 
   return new Promise<number>((resolveP) => {
     let done = false;
@@ -327,6 +331,18 @@ async function waitInbox(
       provenance: 'session',
       workspace: resolveWorkspace(),
       scope: 'team',
+      // Close the startup gap. The drain above ran BEFORE this socket existed, so an act that landed
+      // between the two was caught by neither — the drain had already run and no subscription yet
+      // existed to push it. The act was never lost (it stays durably unread, and the next `--wait`
+      // finds it), but this wait would sit until its deadline and exit as if nothing had arrived,
+      // which reads as a broken interrupt line. watchClaim subscribes before invoking this, so
+      // anything newer than this second drain arrives on the socket instead. `finish` is idempotent,
+      // so an act caught by both paths still wakes exactly once.
+      onOccupied: () => {
+        void findPending().then((env) => {
+          if (env && !done) finish(0, async () => void (await deliver(env)));
+        });
+      },
       onDeliver: (env) => {
         if (done || !wakesWait(env, identity.name, filter)) return;
         finish(0, async () => {

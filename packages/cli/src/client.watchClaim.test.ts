@@ -83,6 +83,30 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
     expect(frames.some((f) => f.type === 'subscribe' && f.scope === 'team')).toBe(true);
   });
 
+  it('subscribes BEFORE handing control to onOccupied, so a re-drain cannot race the subscription', () => {
+    // Load-bearing ordering, not cosmetics. `inbox --wait` drains the durable inbox, THEN opens this
+    // socket; an act landing between those two points is caught by neither, so the wait sits until
+    // its deadline (ADR 054). The close is a second drain from onOccupied — which only works if the
+    // subscription is already registered when it runs, or the same gap simply reopens one frame later.
+    const sock = new FakeSocket();
+    let framesAtOccupied: string[] = [];
+    watchClaim({
+      ...base,
+      createSocket: () => sock,
+      onOccupied: () => {
+        framesAtOccupied = [...sock.sent];
+      },
+    });
+    sock.emit('open');
+    sock.emit(
+      'message',
+      JSON.stringify({ type: 'occupied', seat, presence_id: '01J', server_time: 7, memory: null }),
+    );
+    expect(framesAtOccupied.map((s) => JSON.parse(s)).some((f) => f.type === 'subscribe')).toBe(
+      true,
+    );
+  });
+
   it('occupied carrying a resume grant (ADR 087) threads the token to onOccupied', () => {
     const { sock, opts } = harness();
     sock.emit('open');
