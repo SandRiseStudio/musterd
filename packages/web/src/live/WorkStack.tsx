@@ -1,5 +1,5 @@
 import type { RoomEntry } from './workingOn';
-import { shortLaneState, truncateWork } from './presenceLabel';
+import { shortLaneState, shortWorkTitle } from './presenceLabel';
 
 /**
  * Fallback A — in-panel list of present members who have something on (presence-chrome design
@@ -17,7 +17,7 @@ export function WorkStack({ entries }: { entries: RoomEntry[] }) {
             <li key={e.name} className="lc-workstack__row">
               <i className="lc-workstack__dot" style={{ background: e.color }} aria-hidden="true" />
               <span className="lc-workstack__name">{e.name}</span>
-              <span className="lc-workstack__title">{truncateWork(e.title!, 40)}</span>
+              <span className="lc-workstack__title">{shortWorkTitle(e.title!, 5)}</span>
               {chip && <span className="lc-workstack__state">{chip}</span>}
               {e.source === 'status' && <span className="lc-workstack__said">said</span>}
             </li>

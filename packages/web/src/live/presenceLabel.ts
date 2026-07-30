@@ -57,6 +57,22 @@ export function identityMeta(opts: {
   return { line, title: titleParts.join(' · ') };
 }
 
+/**
+ * A glanceable work cue: the first few *whole* words of a lane/status title.
+ * Never cuts mid-word — a truncated "Office presence chrome (namepla…" is worse than silence.
+ */
+export function shortWorkTitle(title: string, maxWords = 4): string {
+  const words = title
+    .trim()
+    .replace(/\s+/g, ' ')
+    .split(' ')
+    .filter(Boolean);
+  if (words.length === 0) return '';
+  if (words.length <= maxWords) return words.join(' ');
+  return `${words.slice(0, maxWords).join(' ')}…`;
+}
+
+/** @deprecated Prefer {@link shortWorkTitle} — character ellipsis cuts mid-word. */
 export function truncateWork(title: string, maxChars = 32): string {
   const t = title.trim();
   if (t.length <= maxChars) return t;

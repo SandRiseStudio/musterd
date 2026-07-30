@@ -1,6 +1,6 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
-import { identityMeta, shortLaneState, truncateWork } from '../presenceLabel';
+import { identityMeta, shortLaneState, shortWorkTitle } from '../presenceLabel';
 import { createActors, type Actors } from './actors';
 import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
@@ -319,8 +319,8 @@ export function mountOffice(
    * actors are left unlabelled — their names bunch at a glance and the roster panel is the name source of
    * truth; the "+N" pills and location carry the secondary read.
    *
-   * Present members also get an identity meta line (harness · model · role) and, when hybrid cues are on,
-   * a truncated work line — see presence-chrome design 2026-07-30. */
+   * Present members get one unified nameplate chip (name · harness · model) and, when hybrid cues
+   * are on, a soft 3–4 word work whisper underneath — see presence-chrome design 2026-07-30. */
   function syncLabels(headMap: Map<string, Pt>, nodes: Map<string, OfficeNode>, poses: Map<string, Pose>) {
     const seen = new Set<string>();
     for (const [name, head] of headMap) {
@@ -338,45 +338,40 @@ export function mountOffice(
       el.textContent = '';
       el.style.pointerEvents = interactiveLabels ? 'auto' : 'none';
 
-      const nameEl = document.createElement('span');
-      nameEl.className = 'lc-gl-label__name';
-      // The same dot the roster panel leads with, off the same posture: green working · amber idle ·
-      // amber-dim away · faint offline. It used to key off raw `presence`, which is only *connectedness* —
-      // so an idle member sat at a desk under a green dot and read as hard at work.
-      const dot = document.createElement('span');
-      dot.className = `lc-gl-label__dot lc-gl-label__dot--${DOT_STATE[node.posture]}`;
-      nameEl.appendChild(dot);
-      nameEl.appendChild(document.createTextNode(name));
-      el.appendChild(nameEl);
-
       const present = node.presence !== 'offline';
       const meta = identityMeta({
         surface: node.surface,
         model: node.model,
         role: node.role,
       });
+
+      // One plate: presence dot + name + optional harness · model · role (never a second pill).
+      const plate = document.createElement('span');
+      plate.className = 'lc-gl-label__plate';
+      const dot = document.createElement('span');
+      dot.className = `lc-gl-label__dot lc-gl-label__dot--${DOT_STATE[node.posture]}`;
+      plate.appendChild(dot);
+      const who = document.createElement('span');
+      who.className = 'lc-gl-label__who';
+      who.textContent = name;
+      plate.appendChild(who);
       if (present && meta.line) {
         const metaEl = document.createElement('span');
         metaEl.className = 'lc-gl-label__meta';
         metaEl.textContent = meta.line;
-        el.appendChild(metaEl);
+        plate.appendChild(metaEl);
       }
+      el.appendChild(plate);
 
       const chip = shortLaneState(node.laneState);
       const said = node.workSource === 'status';
       const showWork =
         showWorkCues && present && node.workTitle != null && node.workTitle.length > 0;
       if (showWork) {
+        // Soft whisper under the plate — whole words only; state/said/+N live in the hover tip.
         const workEl = document.createElement('span');
-        workEl.className = 'lc-gl-label__work';
-        workEl.textContent = [
-          truncateWork(node.workTitle!),
-          chip,
-          said ? 'said' : null,
-          node.moreLanes > 0 ? `+${node.moreLanes}` : null,
-        ]
-          .filter(Boolean)
-          .join(' · ');
+        workEl.className = `lc-gl-label__work${chip === 'blocked' ? ' is-blocked' : ''}`;
+        workEl.textContent = shortWorkTitle(node.workTitle!);
         el.appendChild(workEl);
       }
 
@@ -387,12 +382,14 @@ export function mountOffice(
         const tipLines = [
           meta.title || null,
           node.workTitle
-            ? `${node.workTitle}${chip ? ` (${chip})` : ''}${said ? ' · said' : ''}`
+            ? `${node.workTitle}${chip ? ` (${chip})` : ''}${said ? ' · said' : ''}${
+                node.moreLanes > 0 ? ` · +${node.moreLanes}` : ''
+              }`
             : null,
         ].filter(Boolean);
         tip.textContent = tipLines.join('\n');
         el.appendChild(tip);
-        el.title = ''; // CSS tip replaces native tooltip
+        el.title = '';
       } else if (meta.title) {
         el.title = meta.title;
       } else {

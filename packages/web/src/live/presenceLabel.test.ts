@@ -4,7 +4,7 @@ import {
   shortLaneState,
   shortModel,
   shortSurface,
-  truncateWork,
+  shortWorkTitle,
 } from './presenceLabel';
 
 describe('shortSurface', () => {
@@ -50,14 +50,17 @@ describe('identityMeta', () => {
   });
 });
 
-describe('truncateWork', () => {
+describe('shortWorkTitle', () => {
   it('leaves short titles alone', () => {
-    expect(truncateWork('ship it')).toBe('ship it');
+    expect(shortWorkTitle('ship it')).toBe('ship it');
   });
-  it('ellipsis long titles at maxChars', () => {
-    const t = truncateWork('a'.repeat(40), 32);
-    expect(t.length).toBe(32);
-    expect(t.endsWith('…')).toBe(true);
+  it('keeps whole words — never mid-word ellipsis', () => {
+    expect(shortWorkTitle('Office presence chrome (nameplates + hybrid work)', 4)).toBe(
+      'Office presence chrome (nameplates…',
+    );
+  });
+  it('defaults to four words', () => {
+    expect(shortWorkTitle('one two three four five six')).toBe('one two three four…');
   });
 });
 

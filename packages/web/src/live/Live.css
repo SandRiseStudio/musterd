@@ -896,82 +896,82 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   white-space: nowrap;
   transition: opacity var(--lc-med) var(--lc-ease);
 }
-.lc-gl-label__name {
-  padding: 1px 7px;
-  /* A pill, not a card (nick, 2026-07-29: "slightly smaller and more rounded corners") — full-round
-     ends read softer over the room than a cornered chip ever can. */
+/* One unified nameplate — name + harness · model in a single paper pill (never stacked chips). */
+.lc-gl-label__plate {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+  max-width: 14rem;
+  padding: 2px 9px 2px 7px;
   border-radius: 999px;
-  /* A name chip rides on someone's head across a busy floor, so it stays the QUIET member of the
-     paper family: paper, not a full card. Loud enough to read, never a row of labels competing with
-     the room. */
-  /* Translucent on purpose (nick): the room should read THROUGH a nameplate — it hovers over
-     furniture and teammates constantly, and a solid chip carves permanent holes in the scene. Held
-     at 84%: enough stock to read as one object, enough glass that the floor still shows through.
-     (68% was the first cut and washed out against sunlit tile — the plates disappeared into the
-     room instead of hovering over it.) No blur to buy contrast back — these render on the
-     /broadcast capture, same rule as every scene-chrome surface. */
-  background: color-mix(in srgb, var(--lc-paper) 84%, transparent);
-  border: 1px solid var(--lc-paper-rim);
+  background: color-mix(in srgb, var(--lc-paper) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 22%, var(--lc-paper-rim));
   font-family: var(--font-mono, monospace);
   font-size: 9.5px;
-  font-weight: 600;
   letter-spacing: -0.015em;
   color: var(--lc-paper-ink);
-  /* Sheen, drop, contact — the full lift stack (see the token block). It is the shadow, not the
-     fill, that gets a name off the floor and onto its owner's head. */
   box-shadow:
     inset 0 1px 0 var(--lc-paper-sheen),
-    0 2px 5px -1px var(--lc-paper-drop),
-    0 1px 1px -0.5px var(--lc-paper-seat);
+    0 0 0 1px color-mix(in srgb, var(--lc-accent) 12%, transparent),
+    0 2px 6px -1px var(--lc-paper-drop),
+    0 1px 1px -0.5px var(--lc-paper-seat),
+    0 0 14px -4px color-mix(in srgb, var(--lc-accent) 28%, transparent);
+}
+.lc-gl-label__who {
+  font-weight: 700;
+  color: var(--lc-paper-ink);
 }
 .lc-gl-label__meta {
-  max-width: 9.5rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--lc-paper) 72%, transparent);
-  border: 1px solid color-mix(in srgb, var(--lc-paper-rim) 70%, transparent);
-  font-family: var(--font-mono, monospace);
-  font-size: 8px;
+  margin-left: 0.35em;
+  padding-left: 0.4em;
+  border-left: 1px solid color-mix(in srgb, var(--lc-accent) 35%, transparent);
   font-weight: 500;
+  font-size: 8.5px;
   letter-spacing: -0.02em;
-  color: var(--lc-dim);
-  box-shadow: 0 1px 3px -1px var(--lc-paper-drop);
-}
-.lc-gl-label__work {
-  max-width: 11rem;
+  color: color-mix(in srgb, var(--lc-accent-bright) 72%, var(--lc-paper-ink));
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--lc-paper) 78%, transparent);
-  border: 1px solid color-mix(in srgb, var(--lc-accent) 28%, var(--lc-paper-rim));
+}
+/* Soft work whisper under the plate — no second pill, whole words only. */
+.lc-gl-label__work {
+  max-width: 12rem;
+  padding: 0 2px;
   font-family: var(--font-mono, monospace);
   font-size: 8px;
   font-weight: 500;
-  color: var(--lc-paper-ink);
-  box-shadow: 0 1px 3px -1px var(--lc-paper-drop);
+  letter-spacing: -0.01em;
+  color: color-mix(in srgb, var(--lc-accent-bright) 55%, var(--lc-paper-ink));
+  text-shadow:
+    0 1px 0 color-mix(in srgb, var(--lc-paper) 70%, transparent),
+    0 0 8px color-mix(in srgb, var(--lc-accent) 18%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lc-gl-label__work.is-blocked {
+  color: color-mix(in srgb, var(--lc-danger, #ef4444) 70%, var(--lc-paper-ink));
 }
 .lc-gl-label__tip {
   display: none;
   position: absolute;
   left: 50%;
-  bottom: calc(100% + 4px);
+  bottom: calc(100% + 6px);
   transform: translateX(-50%);
   max-width: 16rem;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: var(--lc-paper);
-  border: 1px solid var(--lc-paper-rim);
-  box-shadow: 0 4px 12px -2px var(--lc-paper-drop);
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--lc-paper) 94%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 28%, var(--lc-paper-rim));
+  box-shadow:
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 6px 18px -4px var(--lc-paper-drop),
+    0 0 16px -6px color-mix(in srgb, var(--lc-accent) 30%, transparent);
   font-family: var(--font-mono, monospace);
   font-size: 10px;
-  line-height: 1.35;
+  line-height: 1.4;
   white-space: pre-wrap;
   color: var(--lc-paper-ink);
   z-index: 3;
@@ -981,10 +981,28 @@
 .lc-gl-label:focus-within .lc-gl-label__tip {
   display: block;
 }
-.lc-gl-label.is-offline .lc-gl-label__name {
+.lc-gl-label:hover .lc-gl-label__plate,
+.lc-gl-label:focus-within .lc-gl-label__plate {
+  border-color: color-mix(in srgb, var(--lc-accent) 42%, var(--lc-paper-rim));
+  box-shadow:
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 0 0 1px color-mix(in srgb, var(--lc-accent) 22%, transparent),
+    0 3px 8px -1px var(--lc-paper-drop),
+    0 0 18px -3px color-mix(in srgb, var(--lc-accent) 40%, transparent);
+}
+.lc-gl-label.is-offline .lc-gl-label__plate {
   color: var(--lc-dim);
   background: rgba(13, 9, 6, 0.46);
+  border-color: transparent;
+  box-shadow: none;
+}
+.lc-gl-label.is-offline .lc-gl-label__who {
   font-weight: 500;
+  color: var(--lc-dim);
+}
+/* Back-compat if anything still targets the old name class */
+.lc-gl-label__name {
+  display: none;
 }
 /* the roster panel's presence dot, miniaturised, leading the floating name */
 .lc-gl-label__dot {
@@ -995,6 +1013,8 @@
   margin-bottom: 1px;
   border-radius: 50%;
   vertical-align: middle;
+  flex: 0 0 auto;
+  align-self: center;
 }
 .lc-gl-label__dot--on {
   background: var(--lc-success);
