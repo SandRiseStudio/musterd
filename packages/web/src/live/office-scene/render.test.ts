@@ -130,6 +130,80 @@ describe('coffeeAnchor (the ambient steam source)', () => {
   });
 });
 
+/**
+ * The wall in/out board (`wallRoster`). It carries no names — at /live's fitted scale the wall gap it
+ * hangs in is ~60px across, so presence is carried by each member's own colour plus a `present/total`
+ * count. These tests pin the two things that make it readable: one tag per member in their colour, and
+ * an out member visibly drained rather than shown at full strength.
+ */
+describe('the wall in/out board', () => {
+  const fit = fitFloor(1200, 900);
+
+  /** A ctx that also records `fillText`, which the shared mock throws away — the count is the board's
+   *  one piece of type and its correctness is exactly what a reader relies on. */
+  function textCtx(paints: string[], texts: string[]): CanvasRenderingContext2D {
+    const grad = { addColorStop: (_s: number, c: string) => void paints.push(c) };
+    return new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => grad;
+          if (prop === 'measureText') return () => ({ width: 0 });
+          if (prop === 'fillText') return (s: string) => void texts.push(s);
+          return () => undefined;
+        },
+        set(_t, prop, value) {
+          if ((prop === 'fillStyle' || prop === 'strokeStyle') && typeof value === 'string') paints.push(value);
+          return true;
+        },
+      },
+    ) as unknown as CanvasRenderingContext2D;
+  }
+
+  const roster = (nodes: OfficeNode[]): Map<string, OfficeNode> => new Map(nodes.map((n) => [n.name, n]));
+
+  it('pins a tag in each present member’s own colour — that colour IS the identification', () => {
+    const paints: string[] = [];
+    const nodes = ['ada', 'bo', 'cy'].map((n) => node(n, 'working'));
+    renderScene(textCtx(paints, []), fit, new Map(), roster(nodes), new Map());
+    for (const n of nodes) expect(paints).toContain(n.color);
+  });
+
+  it('drains an away/offline member instead of painting them at full strength', () => {
+    const away: OfficeNode = { ...node('dev', 'idle'), presence: 'away', posture: 'away' };
+    const paints: string[] = [];
+    renderScene(textCtx(paints, []), fit, new Map(), roster([away]), new Map());
+    // The full-strength colour must NOT appear (nothing else on the wall paints a member colour), and
+    // something in the same hue family must — i.e. it was dimmed, not omitted and not left bright.
+    expect(paints).not.toContain(away.color);
+    const hue = /hsl\(\s*([-\d.]+)/.exec(away.color)![1];
+    expect(paints.some((c) => c.startsWith(`hsl(${hue}`))).toBe(true);
+  });
+
+  it('writes the count as present/total, so away members are visibly not counted as in', () => {
+    const texts: string[] = [];
+    const nodes = [node('ada', 'working'), node('bo', 'working'), { ...node('cy', 'idle'), posture: 'offline' as const }];
+    renderScene(textCtx([], texts), fit, new Map(), roster(nodes), new Map());
+    expect(texts).toContain('2/3');
+  });
+
+  it('caps the grid at 9 tags but keeps the count honest about the whole team', () => {
+    const paints: string[] = [];
+    const texts: string[] = [];
+    const nodes = Array.from({ length: 14 }, (_, i) => node(`m${i}`, 'working'));
+    expect(() => renderScene(textCtx(paints, texts), fit, new Map(), roster(nodes), new Map())).not.toThrow();
+    expect(texts).toContain('14/14');
+    expect(nodes.filter((n) => paints.includes(n.color)).length).toBe(9);
+  });
+
+  it('draws an empty board for an empty team rather than throwing', () => {
+    const texts: string[] = [];
+    expect(() => renderScene(textCtx([], texts), fit, new Map(), new Map(), new Map())).not.toThrow();
+    expect(texts).toContain('0/0');
+  });
+});
+
 describe('renderScene draws the whole office without throwing', () => {
   const fit = fitFloor(1200, 900);
   const empty = new Map();
