@@ -87,7 +87,7 @@ demotes interrupt-class acts whose trigger reads `wake` into the batched candida
 | `timeout_ms`           | 5m           | 30s–1h                 | `--timeout 5m` (only _tightens_ the host's `--timeout`) |
 | `max_turns`            | unset        | 1–200                  | `--max-turns`                                           |
 | `budget_usd`           | unset        | ≤100                   | `--budget` (report flag — see below)                    |
-| `transcript_max_bytes` | 10 MiB       | 64KiB–256MiB           | `--transcript-max <MiB>` (hygiene rollover bound)       |
+| `transcript_max_bytes` | 256 KiB      | 64KiB–256MiB           | `--transcript-max <MiB>` (fractions OK: `0.25`)          |
 
 Team defaults live on `teams.policy` (`PolicySchema.residency`); the seat override is a **sparse**
 partial in `residency.policy` (reserved since v16 — no migration), preserved on a plain re-enroll

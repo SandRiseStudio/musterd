@@ -97,6 +97,14 @@ export function fmtDurationMs(ms: number): string {
   return `${ms}ms`;
 }
 
+/** Render a byte count in the largest unit that still says something — the render twin of the
+ *  byte-valued policy knobs. Sub-MiB values stay in KiB: the resume hygiene bound is 256 KiB since
+ *  the 2026-07-29 recalibration, and MiB-only formatting rendered it as "0MiB". */
+export function fmtBytes(bytes: number): string {
+  const [value, unit] = bytes < 1_048_576 ? [bytes / 1024, 'KiB'] : [bytes / 1_048_576, 'MiB'];
+  return `${Number(value.toFixed(1))} ${unit}`;
+}
+
 /** Parse `--meta k=v` pairs into an object, coercing numbers/booleans. */
 export function parseMeta(pairs: string[]): Record<string, unknown> | undefined {
   if (pairs.length === 0) return undefined;

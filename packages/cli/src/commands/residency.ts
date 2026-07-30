@@ -10,7 +10,7 @@ import {
   type ResidencyPolicy,
   type ResidencyPolicyOverride,
 } from '@musterd/protocol';
-import { flagStr, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
+import { flagStr, fmtBytes, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import {
@@ -44,7 +44,7 @@ import { findWorkspaceDir, resolve, resolveRead } from './helpers.js';
 const POLICY_FLAGS_USAGE =
   '[--lane both|interrupt|batched] [--cooldown <15m>] [--hourly-cap <n>] [--attempt-cap <n>] ' +
   '[--tool-policy reply-only|seat-policy] [--timeout <5m>] [--max-turns <n>] [--budget <usd>] ' +
-  '[--transcript-max <MiB>]';
+  '[--transcript-max <MiB, fractions OK>]';
 
 export async function residencyCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
@@ -115,9 +115,7 @@ function renderPolicy(policy: ResidencyPolicy, override?: ResidencyPolicyOverrid
   if (policy.max_turns !== undefined) bits.push(`${policy.max_turns} turns${star('max_turns')}`);
   if (policy.budget_usd !== undefined)
     bits.push(`budget $${policy.budget_usd}${star('budget_usd')}`);
-  bits.push(
-    `transcript ${(policy.transcript_max_bytes / 1_048_576).toFixed(0)}MiB${star('transcript_max_bytes')}`,
-  );
+  bits.push(`transcript ${fmtBytes(policy.transcript_max_bytes)}${star('transcript_max_bytes')}`);
   return bits.join(' · ');
 }
 

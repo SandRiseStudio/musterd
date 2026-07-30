@@ -195,6 +195,34 @@ ceiling (default 5 minutes) clamps every policy timeout today, **silently** — 
 work-order under a 5-minute host ceiling runs 5 minutes. The clamp must become loud (or the
 ceiling per-derivation) the day this loop ships.
 
+**Work-order wakes are fresh-first in effect, and no new derivation is needed to get there.** ADR 131
+chose resume-first for continuity — one life, one transcript — in a **reply** context, where the
+session's job is to answer the act that woke it and its own history *is* the context. A work-order
+wake has a different job: the board is the work order, the composed line carries a lane id and
+nothing else, and the session orients through `team_next` and the ADR 048/049 spine. Paying to
+re-ingest history the design deliberately does not rely on is waste, and the 2026-07-29 measurement
+in ADR 131's Observability amendment prices it: resume cost 2.2x a fresh boot at 450 KiB of
+transcript and 8.0x at 3.4 MiB, against a fresh boot's tight $0.91–1.51. The recalibrated
+`transcript_max_bytes` (256 KiB) already delivers fresh-first for any seat with more than ~3 lives of
+history, because the shipped resume ladder degrades to fresh on its own once the bound binds — so
+this loop does **not** need a per-derivation resume policy, and should not grow one until there is a
+measurement that a work-order wake wants continuity.
+
+**The spend exposure, stated plainly rather than discovered later.** `budget_usd` flags and never
+kills (ADR 131's honesty clause — no backend can stop a run mid-flight on dollars), which was
+defensible when every wake was a reply-only doorbell bounded by a 5-minute watchdog. This loop
+changes the exposure in three ways at once: sessions become genuine coding runs under
+`work_timeout_ms` (30 minutes, 6x the reply watchdog), they are triggered by **board state** rather
+than by a human sending an act, and the record already contains $9.08 and $13.53 single wakes. That
+leaves the per-seat `flow` toggle and the per-team per-loop enable as the only real brakes — both
+all-or-nothing, neither a spend bound. Two consequences follow. First, **the circuit breaker is a
+spend brake, not just a hygiene one**: a `claimed`↔`needs-fix` ping-pong at $1–2.50 a bounce is
+expensive quickly, and its trip threshold should be chosen with that in mind rather than purely on
+loop-stability grounds. Second, whether the `work_order` derivation deserves a **hard** cap — the
+first bound that would actually kill a run — is left open here deliberately: it is an owner call
+about money, it cannot be answered from the reply-wake ledger, and the honest first step is that the
+`work_order` rows make per-loop spend visible before anything is promised about capping it.
+
 ### The review loop
 
 _Trigger:_ a lane enters `ready_for_review`. _Route:_ a reviewer — live counterpart, else woken

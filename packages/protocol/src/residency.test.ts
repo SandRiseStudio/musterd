@@ -13,8 +13,17 @@ describe('ResidencyPolicySchema (ADR 131 inc 5) — the knobs, defaults in ONE p
       attempt_cap: 3,
       tool_policy: 'reply-only',
       timeout_ms: 300_000,
-      transcript_max_bytes: 10 * 1024 * 1024,
+      transcript_max_bytes: 256 * 1024,
     });
+  });
+
+  it('the hygiene bound sits below the measured resume/fresh crossover (2026-07-29)', () => {
+    const { transcript_max_bytes: bound } = ResidencyPolicySchema.parse({});
+    // The 11-row `residency.wake_cost` ledger, joined to pre-wake transcript size: resume cost
+    // $0.76–$1.23 at 231–373 KiB (at or under the $0.91–1.51 fresh range) and $2.53 at 450 KiB.
+    // The bound must roll the 450 KiB case to fresh and keep the 231 KiB one resumable.
+    expect(bound).toBeLessThan(449.8 * 1024);
+    expect(bound).toBeGreaterThanOrEqual(231.0 * 1024);
   });
 
   it('rejects out-of-range knobs (the write-side strictness the 400 names)', () => {

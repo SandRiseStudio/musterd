@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { fmtBytes } from '../../args.js';
 import { invalidateClaudeBinCache, resolveClaudeBin } from '../../claudeBin.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
 import type {
@@ -49,11 +50,29 @@ const VERIFY_CONFIRM_BEAT_MS = 3_000;
 
 /** The context-hygiene bound (ADR 131 §5: "prefers resume for continuity but rolls over to a
  *  fresh session when the transcript is bloated or stale" — the cost bound and the compaction
- *  escape are one clause). 10 MiB of transcript JSONL is several compaction cycles deep; past it,
- *  resume spends more re-ingesting history than a fresh seat-primer boot costs. Since increment 5
- *  this is the DEFAULT — per-seat policy delivers `transcript_max_bytes` on the wake order (the
- *  rehearsal data reads ~108 KiB/life, so 10 MiB ≈ 60 lives; the default stands). */
-export const RESUME_TRANSCRIPT_MAX_BYTES = 10 * 1024 * 1024;
+ *  escape are one clause): past it, resume spends more re-ingesting history than a fresh
+ *  seat-primer boot costs.
+ *
+ *  RECALIBRATED 2026-07-29 from 10 MiB to 256 KiB. The old value was derived by counting *lives*
+ *  (~108 KiB/life ⇒ 10 MiB ≈ 60 lives) and never checked against the dollar crossover the sentence
+ *  above states. All 11 `residency.wake_cost` rows, joined to the pre-wake transcript size their
+ *  ladder actually compared against:
+ *
+ *      fresh   (n=4):  $1.01  $1.51  $0.91  $1.09          → mean $1.13, range $0.91–1.51
+ *      resumed 231 KiB  $1.21  | 308 KiB  $1.23 | 373 KiB  $0.76   ← at or under the fresh range
+ *      resumed 450 KiB  $2.53  | 3.4 MiB  $9.08                    ← 2.2x and 8.0x a fresh boot
+ *
+ *  So the crossover is bracketed by [373 KiB, 450 KiB] — 23x below the old bound. Inside the cheap
+ *  region cost is NOT monotonic in transcript size ($0.76 at 373 KiB beats $1.21 at 231 KiB),
+ *  because `cost_usd` is the whole wake and the work done dominates; those cheap points are
+ *  therefore *lower bounds* on ingestion cost, and n=1 per point cannot resolve the crossover more
+ *  finely. 256 KiB takes the conservative end of an unresolvable bracket: ~3 lives of continuity at
+ *  the measured ~70–80 KiB/life, comfortably below every resume that overran a fresh boot.
+ *
+ *  This is the fallback only — the server puts the effective policy's `transcript_max_bytes` on
+ *  every order, so a team whose stored policy materialized the old value keeps it until rewritten
+ *  (see ADR 131 "Observability & Evaluation"). */
+export const RESUME_TRANSCRIPT_MAX_BYTES = 256 * 1024;
 
 /** Per-run argv options (increment 5) — delivered on the wake order by the daemon's effective
  *  policy, applied identically to the fresh and resume paths (one permission posture per run). */
@@ -339,7 +358,7 @@ function resumeLadder(
   if (liveness.state === 'resumable' && e?.id !== undefined && e.bytes !== undefined) {
     if (e.bytes > transcriptMaxBytes)
       return {
-        skip: `newest transcript is ${(e.bytes / 1_048_576).toFixed(1)} MiB (hygiene bound ${(transcriptMaxBytes / 1_048_576).toFixed(1)} MiB)`,
+        skip: `newest transcript is ${fmtBytes(e.bytes)} (hygiene bound ${fmtBytes(transcriptMaxBytes)})`,
       };
     return { id: e.id, via: 'enumerated' };
   }
@@ -359,7 +378,7 @@ function slotRung(
     return { skip: 'captured transcript is missing' };
   if (liveness.transcriptBytes > transcriptMaxBytes)
     return {
-      skip: `transcript is ${(liveness.transcriptBytes / 1_048_576).toFixed(1)} MiB (hygiene bound ${(transcriptMaxBytes / 1_048_576).toFixed(1)} MiB)`,
+      skip: `transcript is ${fmtBytes(liveness.transcriptBytes)} (hygiene bound ${fmtBytes(transcriptMaxBytes)})`,
     };
   return { id: s.id };
 }
