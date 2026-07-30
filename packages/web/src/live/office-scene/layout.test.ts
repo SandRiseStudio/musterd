@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FLOOR, project } from './iso';
+import { FLOOR, project, WALL_H } from './iso';
 import {
   ART,
   BOOKSHELVES,
@@ -157,6 +157,29 @@ describe('the walls are not a matched set', () => {
       for (const w of WINDOWS) {
         const overlaps = a.tc + half > w.t0 && a.tc - half < w.t1;
         expect(overlaps, `art (${a.motif} on wall ${a.wall} at t=${a.tc}) overlaps a window`).toBe(false);
+      }
+    }
+  });
+
+  it('never hangs a picture behind a bookshelf', () => {
+    // A shelf occupies a `t` band on its wall and stands `high` units up it. If a picture shares that
+    // band, its bottom edge has to clear the carcass AND whatever is standing on top of it — this
+    // broke silently when the corner unit went from 66 to 88 tall and swallowed a print's lower third.
+    const DECOR_UP = 22; // the tallest shelf-top object
+    for (const a of ART) {
+      const halfT = a.w / 2 / FLOOR;
+      const bottom = a.uc * WALL_H - a.h / 2;
+      for (const s of BOOKSHELVES) {
+        // wall 0 is the lx=0 edge (t maps to ly); wall 1 is the ly=0 edge (t maps to lx)
+        const onWall0 = s.dir === 'E';
+        if ((a.wall === 0) !== onWall0) continue;
+        const st = (onWall0 ? s.ly : s.lx) / FLOOR;
+        const halfS = s.long / 2 / FLOOR;
+        if (a.tc + halfT < st - halfS || a.tc - halfT > st + halfS) continue;
+        expect(
+          bottom,
+          `art (${a.motif} at t=${a.tc}) hangs behind the ${s.high}-tall shelf at t=${st.toFixed(2)}`,
+        ).toBeGreaterThan(s.high + DECOR_UP);
       }
     }
   });

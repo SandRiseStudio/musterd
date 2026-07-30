@@ -275,14 +275,22 @@ describe('packShelf — the books are not a texture swatch', () => {
 
   it('shelves a reversed unit as page edges with no lettering to read', () => {
     const run = packShelf(1, 0, 76, true);
-    expect(run.every((b) => b.marks === 0)).toBe(true);
+    expect(run.every((b) => b.title === '')).toBe(true);
     expect(run.every((b) => b.color !== '#22201d')).toBe(true);
   });
 
-  it('letters the wide spines and leaves the narrow ones bare', () => {
+  it('titles every spine on a normal shelf', () => {
     const run = [0, 1, 2, 3].flatMap((si) => packShelf(si, 0, 58, false));
-    expect(run.some((b) => b.marks > 0)).toBe(true);
-    for (const b of run) if (b.w < 6.5) expect(b.marks).toBe(0);
+    expect(run.every((b) => b.title.length > 0)).toBe(true);
+    expect(new Set(run.map((b) => b.title)).size).toBeGreaterThan(2);
+  });
+
+  it('packs the books nearly shoulder to shoulder — an airy row reads as a colour swatch', () => {
+    const run = packShelf(0, 0, 58, false);
+    for (let i = 1; i < run.length; i++) {
+      const gap = (run[i]!.along - run[i]!.w / 2) - (run[i - 1]!.along + run[i - 1]!.w / 2);
+      expect(gap).toBeLessThan(2);
+    }
   });
 });
 
@@ -300,7 +308,8 @@ describe('the wall clock has a numbered dial', () => {
     expect(CLOCK_NUMERALS.map((n) => n.hour)).toEqual([12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 
-  it('draws them as strokes, never canvas text — a 4px glyph is a grey smear', () => {
+  /** Collects every string the scene sets with `fillText`. */
+  function sceneText(): string[] {
     const texts: string[] = [];
     const ctx = new Proxy(
       {},
@@ -317,14 +326,26 @@ describe('the wall clock has a numbered dial', () => {
       },
     ) as unknown as CanvasRenderingContext2D;
     renderScene(ctx, fit, new Map(), roster([node('ada', 'working')]), new Map());
-    for (const n of CLOCK_NUMERALS) expect(texts).not.toContain(String(n.hour));
+    return texts;
+  }
+
+  it('sets the quarters as real type — twelve scribbles on a 26px face is grit, not a clock', () => {
+    const texts = sceneText();
+    for (const n of CLOCK_NUMERALS.filter((c) => c.big)) {
+      expect(texts).toContain(String(n.hour));
+    }
   });
 
-  it('gives every numeral at least one stroke path', () => {
-    for (const n of CLOCK_NUMERALS) {
-      expect(n.strokes.length).toBeGreaterThan(0);
-      for (const p of n.strokes) expect(p.length).toBeGreaterThan(1);
+  it('leaves the other eight hours as ticks rather than cramming in more numerals', () => {
+    const texts = sceneText();
+    for (const n of CLOCK_NUMERALS.filter((c) => !c.big)) {
+      expect(texts).not.toContain(String(n.hour));
     }
+  });
+
+  it('labels the whiteboard diagram — a diagram somebody drew has words on it', () => {
+    const texts = sceneText();
+    for (const word of ['web', 'api', 'db']) expect(texts).toContain(word);
   });
 });
 

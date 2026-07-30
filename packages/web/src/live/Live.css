@@ -1021,21 +1021,31 @@
   font-weight: 700;
   color: var(--lc-paper-ink);
 }
-/* Second line: the model. Same hue as the plate ink at lower alpha — the rule the palette block
-   above already states. The previous cut used #8a6508, a third hue, and it read dirty on the warm
-   paper for exactly the reason that comment gives: on this stock, anything off-hue reads as grime. */
+/* Second line: the model, on its own small paper chip.
+   Bare text failed here (nick, 2026-07-30: "it looks bad just as floating text/can barely read it").
+   Two reasons, and the chip fixes both: the office floor is a busy, warm, mid-value canvas, so 8.5px
+   type at 62% alpha had almost no contrast anywhere it landed; and with no container it read as
+   something spilled under the plate rather than as part of the nameplate.
+   So: the same paper stock as the plate at full ink, one step smaller, with the same rim and drop.
+   Two chips stacked, not one wide bar — which was the shape problem in the cut before this. */
 .lc-gl-label__model {
-  max-width: 11rem;
+  max-width: 10rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 1px 7px 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lc-paper) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 20%, var(--lc-paper-rim));
+  box-shadow:
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 1px 4px -1px var(--lc-paper-drop);
   font-family: var(--font-mono, monospace);
   font-size: 8.5px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   text-transform: lowercase;
-  color: color-mix(in srgb, var(--lc-paper-ink) 62%, transparent);
-  text-shadow: 0 1px 0 var(--lc-paper-sheen);
+  color: color-mix(in srgb, var(--lc-paper-ink) 88%, transparent);
 }
 /* Work cues no longer ride the nameplate — see .lc-workstack. Keep class inert if hybrid is re-enabled. */
 .lc-gl-label__work {

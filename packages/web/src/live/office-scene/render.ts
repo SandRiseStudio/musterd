@@ -642,42 +642,36 @@ function wallArt(
  * there would tell the time backwards.
  */
 /**
- * The twelve numerals, as stroke paths in a unit box rather than glyphs.
- *
- * The face is R=25, which is roughly 26 screen px at /live — a numeral inside it is about 4px, where
- * canvas text renders as a grey smear and no `canvasFont` token can help, because the problem is the
- * pixel count and not the family. Drawn strokes stay marks at that size.
- *
- * The quarters are set larger, and that ratio is the entire design: at /live you cannot make out any
- * individual numeral, but you *can* see a ring of four heavy marks and eight light ones, and that
- * rhythm is what reads as "a numbered dial" rather than as a blank disc or as mush. Up close, at
- * /broadcast and /office-preview scale, they resolve into hand-lettered characters with visible
- * wobble. If the /live read ever goes back to mush, widen this size ratio before touching anything
- * else.
- *
- * Coordinates are in a [-1, 1] box, y up. Each numeral is a list of polylines.
+ * The dial's twelve positions. `big` marks the quarters, which are the only ones set as numerals —
+ * see `drawClockNumerals` for why twelve numerals cannot work on a 26px face.
  */
-export const CLOCK_NUMERALS: ReadonlyArray<{
-  hour: number;
-  big: boolean;
-  strokes: [number, number][][];
-}> = [
-  { hour: 12, big: true, strokes: [[[-0.75, 1], [-0.4, 1], [-0.4, -1]], [[0.05, -1], [0.7, -1], [0.7, 0], [0.15, 0], [0.15, 1], [0.75, 1]]] },
-  { hour: 1, big: false, strokes: [[[-0.4, 0.6], [0, 1], [0, -1]]] },
-  { hour: 2, big: false, strokes: [[[-0.6, 0.7], [0.1, 1], [0.6, 0.4], [-0.6, -1], [0.65, -1]]] },
-  { hour: 3, big: true, strokes: [[[-0.6, 0.85], [0.45, 1], [0, 0.1], [0.55, -0.2], [0.1, -1], [-0.6, -0.8]]] },
-  { hour: 4, big: false, strokes: [[[0.35, 1], [-0.6, -0.2], [0.7, -0.2]], [[0.3, 0.3], [0.3, -1]]] },
-  { hour: 5, big: false, strokes: [[[0.6, 1], [-0.45, 0.95], [-0.5, 0.1], [0.4, 0.2], [0.5, -0.75], [-0.5, -0.9]]] },
-  { hour: 6, big: true, strokes: [[[0.5, 0.95], [-0.45, 0.6], [-0.5, -0.8], [0.45, -0.95], [0.5, -0.1], [-0.45, -0.2]]] },
-  { hour: 7, big: false, strokes: [[[-0.6, 1], [0.6, 1], [-0.15, -1]]] },
-  { hour: 8, big: false, strokes: [[[0, 1], [-0.5, 0.5], [0.45, 0.05], [-0.5, -0.5], [0.1, -1], [0.55, -0.4], [-0.45, 0.1], [0.4, 0.55], [0, 1]]] },
-  { hour: 9, big: true, strokes: [[[0.45, -0.9], [-0.5, -0.55], [-0.45, 0.3], [0.45, 0.15], [0.5, 1], [-0.4, 0.85]]] },
-  { hour: 10, big: false, strokes: [[[-0.75, 1], [-0.55, -1]], [[0.1, 1], [0.65, 0.8], [0.6, -0.8], [0.05, -1], [0.1, 1]]] },
-  { hour: 11, big: false, strokes: [[[-0.5, 1], [-0.35, -1]], [[0.3, 1], [0.45, -1]]] },
+export const CLOCK_NUMERALS: ReadonlyArray<{ hour: number; big: boolean }> = [
+  { hour: 12, big: true },
+  { hour: 1, big: false },
+  { hour: 2, big: false },
+  { hour: 3, big: true },
+  { hour: 4, big: false },
+  { hour: 5, big: false },
+  { hour: 6, big: true },
+  { hour: 7, big: false },
+  { hour: 8, big: false },
+  { hour: 9, big: true },
+  { hour: 10, big: false },
+  { hour: 11, big: false },
 ];
 
-/** Paint the numeral ring. Hand-drawn strokes, wobbled off a stable hash so the lettering has a hand
- *  in it without shuffling on every rebake. */
+/**
+ * Paint the dial.
+ *
+ * Twelve numerals do not fit. The face is R=25 — about 26 screen px at /live — and the first cut set
+ * all twelve as hand-drawn stroke paths, which nick called horrible, correctly: at that size each
+ * numeral is a 4px scribble, and twelve scribbles in a ring is grit, not a clock.
+ *
+ * So the quarters get REAL TYPE, set large enough to actually read, and the other eight hours get
+ * ticks. That is a normal, handsome way to draw a clock, and it spends the whole numeral budget on
+ * the four positions a person actually reads a wall clock by. The type goes through `wallText` (and
+ * therefore `canvasFont`), so it shears onto the wall and honours the font tokens.
+ */
 function drawClockNumerals(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -687,31 +681,19 @@ function drawClockNumerals(
   R: number,
 ): void {
   ctx.save();
-  ctx.strokeStyle = DRESS.tick;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
   CLOCK_NUMERALS.forEach((n, i) => {
     const a = (i / 12) * Math.PI * 2;
-    const ct = tc + (Math.sin(a) * R * 0.76) / FLOOR;
-    const cu = uc + (Math.cos(a) * R * 0.76) / WALL_H;
-    const size = n.big ? 5.6 : 3.4;
-    ctx.lineWidth = Math.max(0.7, (n.big ? 1.9 : 1.25) * fit.scale);
-    for (const path of n.strokes) {
-      ctx.beginPath();
-      path.forEach(([x, y], k) => {
-        // A little wobble per vertex — hand lettering, not a font, and stable across repaints.
-        const wob = (magicRnd(i * 37 + k * 7) - 0.5) * 0.16;
-        const p = wallPt(
-          edge,
-          ct + ((x + wob) * size) / FLOOR,
-          cu + ((y + wob) * size) / WALL_H,
-          fit,
-        );
-        if (k === 0) ctx.moveTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
-      });
-      ctx.stroke();
+    const ring = n.big ? 0.66 : 0.8;
+    const t = tc + (Math.sin(a) * R * ring) / FLOOR;
+    const u = uc + (Math.cos(a) * R * ring) / WALL_H;
+    if (!n.big) {
+      wallDisc(ctx, fit, edge, t, u, 1.3, DRESS.tick);
+      return;
     }
+    // Alphabetic baseline: drop it by about half a cap height so the numeral sits centred on its
+    // ring position rather than hanging under it.
+    const size = 11;
+    wallText(ctx, fit, edge, t, u - (size * 0.35) / WALL_H, String(n.hour), size, DRESS.tick, 'center');
   });
   ctx.restore();
 }
@@ -761,15 +743,18 @@ function wallWhiteboard(
   tc: number,
   uc: number,
 ): void {
-  const W = 92; // along the wall, logical floor units
-  const H = 80; // up the wall, WALL_H px
+  // Landscape, and frameless (nick, 2026-07-30). A real dry-erase board is wider than it is tall and
+  // has no dark surround — just the board's own thickness catching the light. The earlier portrait
+  // geometry was a hedge against iso shear; the actual shear guard is "closed shapes and short
+  // strokes, no full-width horizontal bands", which the diagram below respects.
+  const W = 124; // along the wall, logical floor units
+  const H = 74; // up the wall, WALL_H px
   const p = (a: number, b: number): Pt => wallPt(edge, tc + a / FLOOR, uc + b / WALL_H, fit);
   const rect = (a0: number, b0: number, a1: number, b1: number, fill: string): void =>
     quad(ctx, [p(a0, b0), p(a1, b0), p(a1, b1), p(a0, b1)], fill);
 
-  rect(-W / 2 + 3, -H / 2 - 3, W / 2 + 3, H / 2 - 3, WHITEBOARD.shadow);
-  rect(-W / 2, -H / 2, W / 2, H / 2, DRESS.frame);
-  rect(-W / 2 + 3, -H / 2 + 3.5, W / 2 - 3, H / 2 - 3.5, WHITEBOARD.face);
+  rect(-W / 2 + 4, -H / 2 - 4, W / 2 + 4, H / 2 - 4, WHITEBOARD.shadow); // soft cast, no frame
+  rect(-W / 2, -H / 2, W / 2, H / 2, WHITEBOARD.face);
 
   const stroke = (pts: [number, number][], width: number, color: string): void => {
     if (pts.length < 2) return;
@@ -802,12 +787,17 @@ function wallWhiteboard(
   // Rules, if you are tempted to add something back:
   //   · Five marks total. A sixth does not add information here, it removes it.
   //   · Nothing under ~10 logical units. Anything smaller cannot be resolved at /live at all.
-  //   · No text. A label small enough to fit is a label too small to read (measured: ~3px).
   //   · Majority white — a real whiteboard mid-week is mostly empty, and so is this one.
+  //
+  // Labels ARE allowed, at the size set below — the earlier ban came from a cut that set them at 5.5
+  // units (~3px on /live), which is unreadable everywhere. Three words at 9 units read as lettering
+  // at /live and as words on /broadcast and /office-preview, which is the whole point of a diagram
+  // somebody drew. Do not add a fourth label, and do not shrink these to fit one in.
   //
   // The acceptance test is literally "can you count the shapes at /live scale". If you cannot,
   // cut one more.
   const W_INK = 2.2; // heavier than the old 1.5, so the lines survive the downscale
+  const LABEL = 9; // logical units — the floor at which type survives the /live downscale
 
   /** One service over two dependencies — the most legible three-box shape there is. */
   const boxPath = (a0: number, b0: number, a1: number, b1: number): [number, number][] => [
@@ -818,30 +808,132 @@ function wallWhiteboard(
     [a0, b0],
   ];
 
-  stroke(boxPath(-22, 14, 22, 30), W_INK, WHITEBOARD.ink); // the service, up top
-  stroke(boxPath(-34, -28, -8, -10), W_INK, WHITEBOARD.ink); // dependency, left
-  stroke(boxPath(8, -28, 34, -10), W_INK, WHITEBOARD.ink); // dependency, right
+  stroke(boxPath(-26, 12, 26, 32), W_INK, WHITEBOARD.ink); // the service, up top
+  stroke(boxPath(-46, -30, -12, -10), W_INK, WHITEBOARD.ink); // dependency, left
+  stroke(boxPath(12, -30, 46, -10), W_INK, WHITEBOARD.ink); // dependency, right
 
   // Each arrow is ONE polyline that retraces its own tip to draw the head — two strokes per arrow
   // would put this over the mark budget, and a headless connector reads as a wall, not a call.
-  const arrow = (a: number): [number, number][] => [
-    [a, 14],
-    [a, -10],
-    [a - 5, -4],
-    [a, -10],
-    [a + 5, -4],
+  const arrow = (a0: number, a1: number): [number, number][] => [
+    [a0, 12],
+    [a1, -10],
+    [a1 - 5, -4],
+    [a1, -10],
+    [a1 + 5, -4],
   ];
-  stroke(arrow(-16), W_INK, WHITEBOARD.ink);
-  stroke(arrow(16), W_INK, WHITEBOARD.ink);
+  stroke(arrow(-14, -29), W_INK, WHITEBOARD.ink);
+  stroke(arrow(14, 29), W_INK, WHITEBOARD.ink);
+
+  // The words. Baseline sits a little under each box's centre so the type looks set in the box
+  // rather than floating through its top edge.
+  const label = (a: number, b: number, text: string): void =>
+    wallText(ctx, fit, edge, tc + a / FLOOR, uc + b / WALL_H, text, LABEL, WHITEBOARD.ink, 'center');
+  label(0, 18, 'web');
+  label(-29, -24, 'api');
+  label(29, -24, 'db');
+
+  // Board thickness, not a frame: a hairline aluminium edge is what a frameless dry-erase board has.
+  stroke(boxPath(-W / 2, -H / 2, W / 2, H / 2), 0.9, WHITEBOARD.rim);
 }
 
-/** White dry-erase face + musterd-orange marker ink (`mustard-500`). */
+/**
+ * The marker tray under the board: a real iso `box()` ledge protruding into the room, with pens lying
+ * on it and a felt eraser. It uses the furniture shade language rather than the wall's, because it is
+ * furniture — a thing sticking out of the wall, not a shape painted on it, and that is exactly what
+ * sells the board as an object.
+ *
+ * Only valid on the back-right wall (`ly = 0`, into-room is `+ly`), which is the only wall the board
+ * hangs on anyway.
+ */
+function whiteboardTray(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  tc: number,
+  uc: number,
+  boardW: number,
+  boardH: number,
+): void {
+  const trayH = 5;
+  const trayDepth = 14;
+  const along = boardW - 10;
+  const lx = tc * FLOOR;
+  const ly = trayDepth / 2 + 1.5; // proud of the wall plane
+  const up = uc * WALL_H - boardH / 2 - trayH - 1.5; // top of the ledge just under the board
+  box(ctx, fit, lx, ly, along, trayDepth, trayH, WHITEBOARD.tray, up);
+  // Front catch-lip — darker and a touch taller, so the ledge reads as a tray and not a slab.
+  box(ctx, fit, lx, ly + trayDepth / 2 - 1.5, along - 2, 3, trayH + 2.5, WHITEBOARD.trayLip, up);
+  const propUp = up + trayH;
+
+  /** A dry-erase marker lying on the tray: barrel, fatter cap at one end, felt tip at the other. */
+  const marker = (offset: number, color: string): void => {
+    const mx = lx + offset;
+    const my = ly - 1; // nestled behind the lip
+    box(ctx, fit, mx, my, 15, 4.2, 4.2, color, propUp);
+    box(ctx, fit, mx + 8.5, my, 5, 4.6, 4.6, WHITEBOARD.cap, propUp);
+    box(ctx, fit, mx - 7.5, my, 2.5, 2.8, 2.8, shade(color, 0.7), propUp + 0.7);
+  };
+  marker(-along / 2 + 16, WHITEBOARD.markerBlack);
+  marker(-along / 2 + 36, WHITEBOARD.markerBlue);
+  marker(-along / 2 + 56, WHITEBOARD.ink);
+
+  // The felt eraser — a squat block with a darker pad on top.
+  const ex = lx + along / 2 - 14;
+  box(ctx, fit, ex, ly - 0.5, 13, 9, 5.5, WHITEBOARD.eraser, propUp);
+  box(ctx, fit, ex, ly - 0.5, 12, 8, 1.8, WHITEBOARD.eraserEdge, propUp + 5.5);
+}
+
+/** White dry-erase face, musterd-orange marker ink (`mustard-500`), and the tray's own greys. */
 const WHITEBOARD = {
   face: '#F7F7F5',
   ink: '#E1AD01',
   inkDim: 'rgba(225, 173, 1, 0.55)',
-  shadow: 'rgba(58, 34, 12, 0.20)',
+  shadow: 'rgba(58, 34, 12, 0.16)',
+  /** Hairline aluminium edge — board thickness, NOT a frame. */
+  rim: 'rgba(160, 158, 152, 0.55)',
+  tray: '#B8B5AD',
+  trayLip: '#9A978E',
+  cap: '#E8E6E0',
+  markerBlack: '#2C2C2C',
+  markerBlue: '#3B6FBF',
+  eraser: '#EDE6DA',
+  eraserEdge: '#C9BFAE',
 } as const;
+
+/**
+ * Type lying ON a wall, sheared onto its plane rather than pasted over it in screen space.
+ *
+ * The wall's local frame, in the units the rest of this file already uses: one step along `t` is one
+ * logical FLOOR unit, which projects to (KX, KY)·scale; one step of `u` is one WALL_H px, which is
+ * (0, −1)·scale. Feeding those as a matrix puts the glyphs on the wall, leaning with the isometric.
+ *
+ * Two things this must get right. Local y runs **down** the wall (the matrix's `d` is +scale, not
+ * −scale): canvas glyphs extend in +y from the baseline, so an up-positive frame draws every letter
+ * upside down. And it composes with `transform`, never `setTransform` — the context already carries the
+ * device-pixel-ratio matrix, and replacing it outright would paint this text at the wrong size on
+ * every retina display.
+ */
+function wallText(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  edge: (t: number) => [number, number],
+  t: number,
+  u: number,
+  text: string,
+  size: number,
+  fill: string,
+  align: CanvasTextAlign = 'left',
+): void {
+  const o = wallPt(edge, t, u, fit);
+  ctx.save();
+  ctx.translate(o.x, o.y);
+  ctx.transform(KX * fit.scale, KY * fit.scale, 0, fit.scale, 0, 0);
+  ctx.font = canvasFont(size, '--font-mono', 700);
+  ctx.fillStyle = fill;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
 
 
 /** A planter hung off the wall on a bracket, trailing vines — the one piece of dressing with some droop. */
@@ -951,7 +1043,8 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void
       wallClock(ctx, fit, edge, 0.52, 0.62, env.hours); // dead centre, between the windows
       // Dry-erase whiteboard (set dressing) — far-right gap. Must be THIS wall: `+t` runs screen-left
       // on the other one (same constraint that fixed the clock here).
-      wallWhiteboard(ctx, fit, edge, 0.885, 0.6);
+      wallWhiteboard(ctx, fit, edge, 0.855, 0.6);
+      whiteboardTray(ctx, fit, 0.855, 0.6, 124, 74);
       return;
     }
     wallHanger(ctx, fit, edge, 0.52, 0.76); // between the windows — where you'd really hang one
@@ -1479,9 +1572,31 @@ export interface BookSpine {
   color: string;
   /** 0 upright; otherwise the height squash of a book tipped against its neighbour. */
   lean: number;
-  /** Lettering bars on the spine. 0 = nothing to read. */
-  marks: number;
+  /** The spine title, or `''` for a book with nothing to read (a reversed shelf, or a narrow spine). */
+  title: string;
 }
+
+/**
+ * Spine titles. Short on purpose: a spine is a few units wide, so the text is set DOWN the spine and
+ * its length is bounded by the book's height, not its width. Two or three short words is what fits.
+ */
+const BOOK_TITLES: readonly string[] = [
+  'atlas',
+  'notes',
+  'iso',
+  'canvas',
+  'form',
+  'light',
+  'colour',
+  'type',
+  'grids',
+  'shape',
+  'depth',
+  'room',
+  'index',
+  'draft',
+  'plans',
+];
 
 /**
  * Pack one shelf band with books.
@@ -1500,23 +1615,72 @@ export interface BookSpine {
  */
 export function packShelf(si: number, row: number, long: number, reversed: boolean): BookSpine[] {
   const out: BookSpine[] = [];
-  const span = long * 0.82;
+  const span = long * 0.9;
   const seed = (i: number, salt: number): number => shelfRnd(si, row * 32 + i, salt);
   let along = -span / 2;
-  for (let i = 0; along < span / 2 - 5; i++) {
-    const w = 5 + seed(i, 1) * 6; // 5..11
+  for (let i = 0; along < span / 2 - 4; i++) {
+    // Narrower, and packed nearly touching. Books on a shelf lean on each other; the first cut had
+    // both a wide spine range and visible air between every volume, which is what made the row read
+    // as a colour swatch rather than as books (nick, 2026-07-30: "they don't look like books").
+    const w = 4 + seed(i, 1) * 3.5; // 4..7.5
     if (along + w > span / 2) break; // never overhang the carcass
-    const h = 10 + seed(i, 2) * 6; // 10..16
-    const lean = seed(i, 4) < 0.18 ? 0.82 : 0;
+    const h = 11 + seed(i, 2) * 5; // 11..16
+    const lean = seed(i, 4) < 0.14 ? 0.86 : 0;
     const color = reversed
       ? shade(PAGE_EDGE, 0.97 + seed(i, 6) * 0.06)
       : BOOK_COLORS[Math.floor(seed(i, 3) * BOOK_COLORS.length)]!;
     // A backwards shelf has nothing to read — that is what makes it read as backwards.
-    const marks = reversed || w < 6.5 ? 0 : seed(i, 5) < 0.45 ? 2 : 1;
-    out.push({ along: along + w / 2, w, h: h * (lean || 1), color, lean, marks });
-    along += w + (lean ? 2.5 : 0.6); // the leaner needs a gap to fall into
+    const title = reversed ? '' : BOOK_TITLES[Math.floor(seed(i, 5) * BOOK_TITLES.length)]!;
+    out.push({ along: along + w / 2, w, h: h * (lean || 1), color, lean, title });
+    along += w + (lean ? 1.8 : 0.25); // shoulder to shoulder; the leaner needs a gap to fall into
   }
   return out;
+}
+
+/**
+ * A title running DOWN a book's spine, the way a title on a shelved book actually runs.
+ *
+ * Drawn in screen space and rotated a quarter turn, not sheared onto a face like `wallText`: a spine
+ * is a narrow vertical strip, "up" projects straight up the screen in this isometric, and rotating
+ * about the spine's centre puts the type exactly where a real title sits. Building a per-book face
+ * matrix would buy nothing at four pixels wide.
+ *
+ * The size is bounded by the spine's WIDTH (the text's cap height has to fit across the spine) while
+ * its length is bounded by the book's height — which is why `BOOK_TITLES` are all short words. Then
+ * the whole thing is clipped to the spine rectangle, so a long word is cut off by the edge of the
+ * book rather than running out over its neighbours.
+ *
+ * At /live this is fine lettering rather than legible words — that is what type this size is. It
+ * resolves on /office-preview and /broadcast, which is where anybody reads a book title anyway.
+ */
+function spineTitle(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  bx: number,
+  by: number,
+  baseUp: number,
+  b: BookSpine,
+): void {
+  const size = Math.min(b.w * 0.72, 4.6);
+  if (size < 2) return; // below this the ink is a smudge, and a smudge is worse than a plain spine
+  const p = project(bx, by, fit);
+  const cx = p.x;
+  const cy = p.y - (baseUp + b.h / 2) * fit.scale;
+  // HEX on purpose (see the `mul` docblock): flat near-white/near-black, because `mul` cannot lift a
+  // near-black spine to a readable ink and at this size lettering is a value contrast or it is nothing.
+  const ink = LIGHT_SPINES.has(b.color) ? '#2a2622' : '#f5f2ec';
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(cx - (b.w / 2) * fit.scale, cy - (b.h / 2) * fit.scale, b.w * fit.scale, b.h * fit.scale);
+  ctx.clip();
+  ctx.translate(cx, cy);
+  ctx.rotate(-Math.PI / 2);
+  ctx.font = canvasFont(Math.round(size * fit.scale * 10) / 10, '--font-mono', 700);
+  ctx.fillStyle = ink;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(b.title, 0, 0);
+  ctx.restore();
 }
 
 /**
@@ -1582,19 +1746,7 @@ function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf, si: nu
       const bx = s.lx + (sn ? b.along : f[0] * (s.deep / 2 - 2));
       const by = s.ly + (sn ? f[1] * (s.deep / 2 - 2) : b.along);
       box(ctx, fit, bx, by, sn ? b.w : 3, sn ? 3 : b.w, b.h, b.color, baseUp);
-      // Lettering: short bars at a consistent cap height, in an ink that separates from the spine.
-      if (b.marks === 0) continue;
-      // HEX on purpose. `box()` shades its own side faces by re-`dim()`ing the fill it was handed,
-      // and `dim` only parses hex — an `rgba()` ink here slices to [NaN, 186, NaN], which canvas
-      // silently ignores while keeping the previous colour (see the `mul` docblock).
-      // Flat near-white/near-black rather than a multiple of the spine: `mul` cannot lift a near-black
-      // spine to a readable ink (0x22 x 1.85 is still black), and at this size lettering is a value
-      // contrast or it is nothing.
-      const ink = LIGHT_SPINES.has(b.color) ? '#2a2622' : '#f5f2ec';
-      for (let m = 0; m < b.marks; m++) {
-        const up = baseUp + b.h * (0.62 - m * 0.18);
-        box(ctx, fit, bx, by, sn ? b.w * 0.5 : 3.2, sn ? 3.2 : b.w * 0.5, 0.9, ink, up);
-      }
+      if (b.title) spineTitle(ctx, fit, bx, by, baseUp, b);
     }
   }
   shelfDecor(ctx, fit, s);
