@@ -752,12 +752,35 @@
   overflow: hidden;
 }
 
-/* ─── work stack — who is on what, under the room (warm paper tray) ───────────────────────────── */
+/* ─── work stack — floats over the office floor (bottom of the stage) ─────────────────────────── */
+.lc-office__work {
+  position: absolute;
+  left: var(--lc-4);
+  right: auto;
+  bottom: var(--lc-4);
+  z-index: var(--lc-z-overlay);
+  width: min(420px, calc(100% - 120px));
+  max-width: 48%;
+  pointer-events: none;
+  container-type: inline-size;
+}
+.lc-office__work .lc-workstack {
+  pointer-events: auto;
+  /* Inherit the scene-chrome paper set so the tray matches nameplates / speech bubbles */
+  --lc-paper: #f3e2c3;
+  --lc-paper-2: #e9d3ab;
+  --lc-paper-ink: #2b1f13;
+  --lc-paper-dim: rgba(43, 31, 19, 0.72);
+  --lc-paper-rim: rgba(120, 78, 42, 0.42);
+  --lc-paper-drop: rgba(58, 34, 12, 0.38);
+  --lc-paper-sheen: rgba(255, 252, 245, 0.55);
+  padding: 0;
+  max-height: min(32vh, 220px);
+  width: 100%;
+}
 .lc-workstack {
   flex: 1;
   min-width: 0;
-  padding: 5px 8px 6px;
-  max-height: 26vh;
   overflow: hidden;
   display: flex;
 }
@@ -767,20 +790,20 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 6px 8px 7px;
-  border-radius: 10px;
+  padding: 7px 9px 8px;
+  border-radius: 12px;
   background: linear-gradient(
     165deg,
-    color-mix(in srgb, var(--lc-paper) 92%, var(--lc-accent)) 0%,
-    color-mix(in srgb, var(--lc-paper) 90%, transparent) 42%,
-    color-mix(in srgb, var(--lc-paper-2, var(--lc-paper)) 88%, transparent) 100%
+    color-mix(in srgb, var(--lc-paper) 94%, var(--lc-accent)) 0%,
+    color-mix(in srgb, var(--lc-paper) 91%, transparent) 48%,
+    color-mix(in srgb, var(--lc-paper-2) 90%, transparent) 100%
   );
-  border: 1px solid color-mix(in srgb, var(--lc-accent) 28%, var(--lc-paper-rim));
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 30%, var(--lc-paper-rim));
   box-shadow:
     inset 0 1px 0 var(--lc-paper-sheen),
-    inset 0 0 20px -10px color-mix(in srgb, var(--lc-accent) 22%, transparent),
-    0 2px 8px -2px var(--lc-paper-drop, rgba(58, 34, 12, 0.42)),
-    0 0 18px -8px color-mix(in srgb, var(--lc-accent) 26%, transparent);
+    inset 0 0 22px -10px color-mix(in srgb, var(--lc-accent) 24%, transparent),
+    0 3px 10px -2px var(--lc-paper-drop),
+    0 0 20px -6px color-mix(in srgb, var(--lc-accent) 30%, transparent);
 }
 .lc-workstack__head {
   display: flex;
@@ -804,7 +827,7 @@
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--lc-accent-bright) 75%, var(--lc-paper-ink));
+  color: #8a6508;
 }
 .lc-workstack__count,
 .lc-workstack__quiet {
@@ -812,7 +835,7 @@
   font-family: var(--font-mono, monospace);
   font-size: 9px;
   font-weight: 500;
-  color: var(--lc-dim);
+  color: var(--lc-paper-dim, rgba(43, 31, 19, 0.72));
 }
 .lc-workstack__list {
   flex: 1;
@@ -831,16 +854,16 @@
   align-items: baseline;
   gap: 7px;
   min-width: 0;
-  padding: 3px 6px 3px 5px;
-  border-radius: 6px;
+  padding: 4px 7px 4px 6px;
+  border-radius: 7px;
   font-family: var(--font-mono, monospace);
   font-size: 10.5px;
   color: var(--lc-paper-ink);
-  background: color-mix(in srgb, var(--lc-paper) 55%, transparent);
+  background: color-mix(in srgb, var(--lc-paper) 58%, transparent);
   transition: background 160ms ease;
 }
 .lc-workstack__row:hover {
-  background: color-mix(in srgb, var(--lc-accent) 10%, var(--lc-paper));
+  background: color-mix(in srgb, var(--lc-accent) 12%, var(--lc-paper));
 }
 .lc-workstack__row.is-blocked {
   background: color-mix(in srgb, var(--lc-danger, #ef4444) 8%, var(--lc-paper));
@@ -865,7 +888,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
-  color: color-mix(in srgb, var(--lc-paper-ink) 78%, var(--lc-dim));
+  color: color-mix(in srgb, var(--lc-paper-ink) 78%, transparent);
 }
 .lc-workstack__state,
 .lc-workstack__said,
@@ -873,24 +896,23 @@
   flex: 0 0 auto;
   font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  padding: 1px 5px;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
   border-radius: 999px;
-  color: color-mix(in srgb, var(--lc-accent-bright) 80%, #3a2512);
-  background: color-mix(in srgb, var(--lc-accent) 16%, transparent);
+  color: #8a6508;
+  background: color-mix(in srgb, var(--lc-accent) 18%, transparent);
 }
 .lc-workstack__row.is-blocked .lc-workstack__state {
   color: color-mix(in srgb, var(--lc-danger, #ef4444) 85%, #3a2512);
   background: color-mix(in srgb, var(--lc-danger, #ef4444) 14%, transparent);
 }
 .lc-workstack__said {
-  color: var(--lc-dim);
-  background: color-mix(in srgb, var(--lc-dim) 12%, transparent);
+  color: var(--lc-paper-dim, rgba(43, 31, 19, 0.72));
+  background: color-mix(in srgb, var(--lc-paper-ink) 8%, transparent);
   font-weight: 500;
 }
 
-/* ─── (retired) office noticeboard — WHO'S IN cork rail removed in presence-chrome 2026-07-30 ─── */
-/* The band under the room holds WorkStack. */
+/* ─── (retired) under-room band for work — now an in-stage overlay (.lc-office__work) ─────────── */
 
 .lc-gl-canvas {
   position: absolute;
@@ -998,17 +1020,28 @@
   font-weight: 700;
   color: var(--lc-paper-ink);
 }
+.lc-gl-label__sep {
+  margin: 0 0.28em;
+  font-weight: 500;
+  font-size: 9px;
+  color: color-mix(in srgb, var(--lc-accent-bright) 55%, transparent);
+  user-select: none;
+}
 .lc-gl-label__meta {
-  margin-left: 0.4em;
-  padding-left: 0.45em;
-  border-left: 1px solid color-mix(in srgb, var(--lc-accent) 40%, transparent);
-  font-weight: 550;
-  font-size: 8.5px;
-  letter-spacing: -0.01em;
-  color: color-mix(in srgb, var(--lc-accent-bright) 78%, #3a2512);
+  font-weight: 600;
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: #8a6508;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Soft mustard wash behind the meta so it reads as a slick inset, not raw type on cream */
+  padding: 1px 5px 1px 4px;
+  margin: -1px -2px -1px 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lc-accent) 14%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 35%, transparent);
 }
 /* Work cues no longer ride the nameplate — see .lc-workstack. Keep class inert if hybrid is re-enabled. */
 .lc-gl-label__work {

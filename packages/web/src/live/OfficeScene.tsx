@@ -7,6 +7,7 @@ import { actToEvent } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
 import type { ConnStatus } from './client';
 import { OfficeOverlay } from './OfficeOverlay';
+import { WorkStack } from './WorkStack';
 import { presentCount, type RoomEntry } from './workingOn';
 
 /**
@@ -214,6 +215,12 @@ export function OfficeScene({
             status={status}
             interactive={false}
           />
+        )}
+        {/* Work card floats over the room (bottom of the stage) — not a band under it. */}
+        {!collapsed && workCues === 'stack' && (
+          <div className="lc-office__work">
+            <WorkStack entries={entries} />
+          </div>
         )}
         {/* The asks rail floats over the top of the room the way the reel floats over the bottom. */}
         {!collapsed && topSlot && <div className="lc-office__asks">{topSlot}</div>}

@@ -2,8 +2,8 @@ import type { RoomEntry } from './workingOn';
 import { shortLaneState } from './presenceLabel';
 
 /**
- * Who is working — compact card under the office room (presence-chrome design §2 / fallback A,
- * now the primary work surface). Present members with a title only; no full roster, no carousel.
+ * Who is working — floats over the office floor (presence-chrome design). Present members with a
+ * title only; no full roster, no carousel. Rendered inside `OfficeScene` as stage chrome.
  */
 export function WorkStack({ entries }: { entries: RoomEntry[] }) {
   const rows = entries.filter((e) => e.title != null);

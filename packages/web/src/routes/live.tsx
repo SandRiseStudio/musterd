@@ -8,7 +8,6 @@ import { AsksStrip } from '../live/AsksStrip';
 import { MemberSignInFields, MemberSignInToggle, type AdvancedState } from '../live/MemberSignIn';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
-import { WorkStack } from '../live/WorkStack';
 import { scrollToMessage, Stream } from '../live/Stream';
 import type { LiveConfig } from '../live/client';
 import {
@@ -291,9 +290,7 @@ function LivePage() {
               // The asks & approvals rail (ADR 149) rides the top of the room itself — the office
               // frames its own asks (nick, 2026-07-28). Still renders nothing until an ask exists.
               topSlot={<AsksStrip envelopes={envelopes} roster={roster} cfg={cfg!} />}
-              // Work lives in WorkStack under the room — not on nameplates (nick, 2026-07-30).
               workCues={WORK_CUES}
-              bandSlot={WORK_CUES === 'stack' ? <WorkStack entries={entries} /> : undefined}
             />
             <RosterPanel
               roster={roster}

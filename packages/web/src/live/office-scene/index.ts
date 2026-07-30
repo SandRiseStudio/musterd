@@ -356,6 +356,11 @@ export function mountOffice(
       who.textContent = name;
       plate.appendChild(who);
       if (present && meta.line) {
+        const sep = document.createElement('span');
+        sep.className = 'lc-gl-label__sep';
+        sep.setAttribute('aria-hidden', 'true');
+        sep.textContent = '·';
+        plate.appendChild(sep);
         const metaEl = document.createElement('span');
         metaEl.className = 'lc-gl-label__meta';
         metaEl.textContent = meta.line;
