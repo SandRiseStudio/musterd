@@ -1574,7 +1574,20 @@ export interface BookSpine {
   lean: number;
   /** The spine title, or `''` for a book with nothing to read (a reversed shelf, or a narrow spine). */
   title: string;
+  /** The title's ink. Chosen per book with the spine, so a shelf's lettering varies like its cloth. */
+  ink: string;
 }
+
+/**
+ * Title inks, split by the VALUE of the spine they go on. Real books letter their spines in gilt,
+ * cream, black, colours — a shelf where every dark spine carries the same white ink reads as one
+ * printing run (nick, 2026-07-30: "they don't all have to be white text"). The split is the part
+ * that is not negotiable: at four pixels wide, lettering is a value contrast or it is nothing, so a
+ * dark spine draws from the light pool and a light spine from the dark pool — variety comes from
+ * within the pool, never by relaxing the contrast rule.
+ */
+const INK_ON_DARK: readonly string[] = ['#f5f2ec', '#e8c87a', '#c9dbe8', '#e8b4a8', '#d9c9ea'];
+const INK_ON_LIGHT: readonly string[] = ['#2a2622', '#5c3a2e', '#2e4a5c', '#6b2f3a'];
 
 /**
  * Spine titles. Short on purpose: a spine is a few units wide, so the text is set DOWN the spine and
@@ -1631,7 +1644,9 @@ export function packShelf(si: number, row: number, long: number, reversed: boole
       : BOOK_COLORS[Math.floor(seed(i, 3) * BOOK_COLORS.length)]!;
     // A backwards shelf has nothing to read — that is what makes it read as backwards.
     const title = reversed ? '' : BOOK_TITLES[Math.floor(seed(i, 5) * BOOK_TITLES.length)]!;
-    out.push({ along: along + w / 2, w, h: h * (lean || 1), color, lean, title });
+    const pool = LIGHT_SPINES.has(color) ? INK_ON_LIGHT : INK_ON_DARK;
+    const ink = pool[Math.floor(seed(i, 7) * pool.length)]!;
+    out.push({ along: along + w / 2, w, h: h * (lean || 1), color, lean, title, ink });
     along += w + (lean ? 1.8 : 0.25); // shoulder to shoulder; the leaner needs a gap to fall into
   }
   return out;
@@ -1666,9 +1681,6 @@ function spineTitle(
   const p = project(bx, by, fit);
   const cx = p.x;
   const cy = p.y - (baseUp + b.h / 2) * fit.scale;
-  // HEX on purpose (see the `mul` docblock): flat near-white/near-black, because `mul` cannot lift a
-  // near-black spine to a readable ink and at this size lettering is a value contrast or it is nothing.
-  const ink = LIGHT_SPINES.has(b.color) ? '#2a2622' : '#f5f2ec';
   ctx.save();
   ctx.beginPath();
   ctx.rect(cx - (b.w / 2) * fit.scale, cy - (b.h / 2) * fit.scale, b.w * fit.scale, b.h * fit.scale);
@@ -1676,7 +1688,7 @@ function spineTitle(
   ctx.translate(cx, cy);
   ctx.rotate(-Math.PI / 2);
   ctx.font = canvasFont(Math.round(size * fit.scale * 10) / 10, '--font-mono', 700);
-  ctx.fillStyle = ink;
+  ctx.fillStyle = b.ink;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(b.title, 0, 0);

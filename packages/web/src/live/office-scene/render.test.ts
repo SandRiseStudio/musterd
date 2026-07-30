@@ -285,6 +285,11 @@ describe('packShelf — the books are not a texture swatch', () => {
     expect(new Set(run.map((b) => b.title)).size).toBeGreaterThan(2);
   });
 
+  it('letters in more than one ink — a shelf of all-white titles reads as one printing run', () => {
+    const run = [0, 1, 2, 3].flatMap((si) => [0, 1].flatMap((r) => packShelf(si, r, 58, false)));
+    expect(new Set(run.map((b) => b.ink)).size).toBeGreaterThan(2);
+  });
+
   it('packs the books nearly shoulder to shoulder — an airy row reads as a colour swatch', () => {
     const run = packShelf(0, 0, 58, false);
     for (let i = 1; i < run.length; i++) {

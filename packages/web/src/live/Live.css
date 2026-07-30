@@ -995,20 +995,23 @@
   white-space: nowrap;
   transition: opacity var(--lc-med) var(--lc-ease);
 }
-/* The nameplate: a paper pill carrying the dot and the name, and nothing else. The model rides
-   underneath on its own line (.lc-gl-label__model); harness and role are a hover away. */
+/* The nameplate: ONE compact paper pill — dot + name | model, split by a hairline rule.
+   Third shape for this plate. A second line under the pill read as spilled text; a second chip read
+   as clutter; the original one-liner failed by being big, not by being one line. So: one line again,
+   but genuinely small — tighter type, tighter padding, and the model in the same ink so the pill
+   reads as a single made object rather than a name with an accessory. Harness stays on hover. */
 .lc-gl-label__plate {
   display: inline-flex;
   align-items: center;
   gap: 0;
-  max-width: 11rem;
-  padding: 3px 10px 3px 8px;
+  max-width: 12rem;
+  padding: 2px 8px 2px 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--lc-paper) 90%, transparent);
   border: 1px solid color-mix(in srgb, var(--lc-accent) 26%, var(--lc-paper-rim));
   font-family: var(--font-mono, monospace);
-  font-size: 9.5px;
-  letter-spacing: -0.015em;
+  font-size: 8.5px;
+  letter-spacing: -0.01em;
   color: var(--lc-paper-ink);
   box-shadow:
     inset 0 1px 0 var(--lc-paper-sheen),
@@ -1017,35 +1020,29 @@
     0 1px 1px -0.5px var(--lc-paper-seat),
     0 0 16px -4px color-mix(in srgb, var(--lc-accent) 32%, transparent);
 }
+/* The divider: a real vertical rule, not a typographic dot. At 8px, a mid-dot is a smudge between
+   two words; a 1px rule at reduced height reads as structure. */
+.lc-gl-label__rule {
+  width: 1px;
+  height: 0.9em;
+  margin: 0 0.55em;
+  background: color-mix(in srgb, var(--lc-paper-ink) 28%, transparent);
+  flex: none;
+}
 .lc-gl-label__who {
   font-weight: 700;
   color: var(--lc-paper-ink);
 }
-/* Second line: the model, on its own small paper chip.
-   Bare text failed here (nick, 2026-07-30: "it looks bad just as floating text/can barely read it").
-   Two reasons, and the chip fixes both: the office floor is a busy, warm, mid-value canvas, so 8.5px
-   type at 62% alpha had almost no contrast anywhere it landed; and with no container it read as
-   something spilled under the plate rather than as part of the nameplate.
-   So: the same paper stock as the plate at full ink, one step smaller, with the same rim and drop.
-   Two chips stacked, not one wide bar — which was the shape problem in the cut before this. */
+/* The model, inline after the rule: same stock, same hue, one notch quieter than the name. */
 .lc-gl-label__model {
-  max-width: 10rem;
+  max-width: 6.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 1px 7px 2px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--lc-paper) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--lc-accent) 20%, var(--lc-paper-rim));
-  box-shadow:
-    inset 0 1px 0 var(--lc-paper-sheen),
-    0 1px 4px -1px var(--lc-paper-drop);
-  font-family: var(--font-mono, monospace);
-  font-size: 8.5px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: lowercase;
-  color: color-mix(in srgb, var(--lc-paper-ink) 88%, transparent);
+  color: color-mix(in srgb, var(--lc-paper-ink) 78%, transparent);
 }
 /* Work cues no longer ride the nameplate — see .lc-workstack. Keep class inert if hybrid is re-enabled. */
 .lc-gl-label__work {

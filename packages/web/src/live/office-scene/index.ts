@@ -345,7 +345,11 @@ export function mountOffice(
         role: node.role,
       });
 
-      // One plate: presence dot + name + optional harness · model · role (never a second pill).
+      // ONE compact plate: dot + name | model, divided by a hairline rule. Third shape for this
+      // nameplate, and the reasoning that survived all three: harness stays on hover (the least
+      // surprising field), but the model lives ON the line with the name — a second line under the
+      // pill read as spilled text (nick), and a second chip read as clutter (nick again). One small
+      // pill with a real divider is the version that reads as a single made object.
       const plate = document.createElement('span');
       plate.className = 'lc-gl-label__plate';
       const dot = document.createElement('span');
@@ -355,18 +359,18 @@ export function mountOffice(
       who.className = 'lc-gl-label__who';
       who.textContent = name;
       plate.appendChild(who);
-      el.appendChild(plate);
-
-      // Second line: the model, alone. Harness and role live on hover (`meta.title`) — see the
-      // room-dressing design §1. One wide pill carrying name · harness · model was both too wide
-      // over every head and, at 8px in a third hue, muddy on the warm paper.
       const model = present ? plateModel(node.model) : null;
       if (model) {
+        const divider = document.createElement('span');
+        divider.className = 'lc-gl-label__rule';
+        divider.setAttribute('aria-hidden', 'true');
+        plate.appendChild(divider);
         const modelEl = document.createElement('span');
         modelEl.className = 'lc-gl-label__model';
         modelEl.textContent = model;
-        el.appendChild(modelEl);
+        plate.appendChild(modelEl);
       }
+      el.appendChild(plate);
 
       const chip = shortLaneState(node.laneState);
       const said = node.workSource === 'status';
