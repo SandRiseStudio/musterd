@@ -45,8 +45,10 @@ export const ResidencyPolicySchema = z.object({
    *  cooldown/caps/watchdog (owner call, 2026-07-14). */
   budget_usd: z.number().positive().max(100).optional(),
   /** Resume hygiene bound: transcripts past this roll over to a fresh session (64KiB–256MiB).
-   *  Default 10MiB ≈ 60 wake lives at the measured ~108KiB/life. */
-  transcript_max_bytes: z.number().int().min(65_536).max(268_435_456).default(10_485_760),
+   *  Default 256KiB — a *cost* crossover, recalibrated against the wake ledger on 2026-07-29 (see
+   *  ADR 131 "Observability & Evaluation"). The previous 10MiB counted lives, not dollars, and sat
+   *  ~23x past the point where resume stops being the cheap option. */
+  transcript_max_bytes: z.number().int().min(65_536).max(268_435_456).default(262_144),
 });
 export type ResidencyPolicy = z.infer<typeof ResidencyPolicySchema>;
 

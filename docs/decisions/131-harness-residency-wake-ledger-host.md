@@ -283,6 +283,53 @@ derivable — the live extension IS the wake block (wake-triggered acts are the 
 by construction); the mined pre-residency baseline stays a one-off recipe recorded with the
 experiment pre-registration._
 
+_Amendment (2026-07-29): the hygiene bound was recalibrated against the ledger it was guessed ahead
+of — 10 MiB → **256 KiB**. §5 states the bound as a **cost crossover** ("rolls over to a fresh
+session when the transcript is bloated"; the code comment spelled it "past it, resume spends more
+re-ingesting history than a fresh seat-primer boot costs"), but the 10 MiB value was derived by
+counting *lives* — ~108 KiB/life ⇒ ≈60 lives — and the dollar claim was never checked. All 11
+`residency.wake_cost` rows, joined through their `residency.woke` row's `lease_id` to the
+`fresh|resumed` axis, and each resumed row joined to the **pre-wake** byte count of the transcript
+its ladder actually compared against (reconstructed by splitting each JSONL at the wake timestamp —
+the live file size is post-wake and overstates by the run's own appended turns):_
+
+| session | pre-wake transcript | cost                              | vs fresh mean  |
+| ------- | ------------------- | --------------------------------- | -------------- |
+| fresh   | n/a                 | $1.01, $1.51, $0.91, $1.09        | mean **$1.13** |
+| resumed | 231 KiB             | $1.21                             | 1.1x           |
+| resumed | 308 KiB             | $1.23                             | 1.1x           |
+| resumed | 373 KiB             | $0.76                             | 0.7x           |
+| resumed | 450 KiB             | $2.53                             | **2.2x**       |
+| resumed | 3.4 MiB             | $9.08                             | **8.0x**       |
+| resumed | 1.0 MiB             | $0 (3.1 s no-op — never ingested) | —              |
+| resumed | unrecoverable       | $13.53                            | **12.0x**      |
+
+_So the stated crossover sits in **[373 KiB, 450 KiB]** — passed ~23x below the bound meant to catch
+it, and the two most expensive wakes ever recorded are both resumes. Fresh has a floor **and** a
+ceiling ($0.91–1.51); resume has a floor and no effective ceiling. Three honesty limits, recorded
+because they bound how hard this number can be read: `cost_usd` is the **whole wake**, not the
+ingestion, so inside the cheap region cost is not even monotonic in size ($0.76 at 373 KiB beats
+$1.21 at 231 KiB) — work done dominates, and the cheap points are therefore lower bounds on
+ingestion cost; n=1 per point cannot resolve the crossover more finely than the bracket; and the
+$13.53 outlier's transcript is gone (that adapter and its stderr were lost), so it is reported and
+not fitted. 256 KiB takes the conservative end of the bracket — ~3 lives at the measured
+~70–80 KiB/life — rather than tuning to the last cheap datum. The resume ladder is unchanged and
+deliberately kept: today's wakes are all **reply** wakes, where a seat's own history genuinely is
+part of the context, so continuity is worth something where it is cheap. This tightens the bound; it
+does not disable resume._
+
+_Finding, and the reason the recalibration is two changes rather than one: a default in the schema
+does not reach a team that already has a stored policy. `setPolicy` does `PolicySchema.parse(...)` →
+`JSON.stringify(parsed)`, so the **first** write of any single knob materializes **every** default
+into `teams.policy` — the live `revive` row carried an explicit `"transcript_max_bytes":10485760`
+written by whoever once set `lane`. From then on the schema default is dead for that team, and the
+ladder's own fallback constant (`RESUME_TRANSCRIPT_MAX_BYTES`) is unreachable too, because the server
+puts `policy.transcript_max_bytes` on **every** order unconditionally. Recalibrating the code is
+therefore correct for new teams and for the fallback path, and a stored-policy rewrite is what makes
+it take effect on an existing one. That materialize-on-write behaviour makes every byte-, time- and
+count-valued default un-retunable in the field, which is a defect in its own right and is tracked
+separately rather than fixed here._
+
 **Experiment** — two, pre-registered: (1) the ADR 112 steward substrate swap — cron → residency
 trigger under an unchanged charter, comparing task latency and cost per task across a week each;
 (2) a cookoff residency benchmark row (research finding 005's resident-vs-CLI coverage axis) once

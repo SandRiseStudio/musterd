@@ -440,6 +440,40 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
     },
   );
 
+  // ── The recalibrated hygiene bound (2026-07-29) ────────────────────────────────────────────
+  // The bound is a *cost* crossover, not a hygiene aesthetic: its own doc comment says "past it,
+  // resume spends more re-ingesting history than a fresh seat-primer boot costs". These two pin
+  // the bound against the measurement rather than against the constant, so a future retune that
+  // walks back past the crossover fails here instead of silently costing money.
+  it('a transcript past the measured crossover (450 KiB) rolls to fresh', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable({ transcriptBytes: 460_597 }), // dolly, the $2.53 resume
+    });
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const actuation = await backend.wake(spec(), context);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args).not.toContain('--resume');
+    expect(actuation.outcome.session).toBe('fresh');
+    // Legible at sub-MiB bounds: "0.4 MiB (hygiene bound 0.2 MiB)" says nothing useful.
+    expect(context.lines.join('\n')).toMatch(/transcript is 449\.8 KiB \(hygiene bound 256 KiB\)/);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('a transcript inside the cheap region (231 KiB) still resumes — continuity is not thrown away', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable({ transcriptBytes: 236_590 }), // dolly, the $1.21 resume
+    });
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const actuation = await backend.wake(spec(), context);
+    expect(calls[0]!.args).toContain('--resume');
+    expect(context.lines.join('\n')).not.toContain('resume skipped');
+    child.exit(0);
+    await actuation.settled;
+  });
+
   it('the pre-capture world (state none) goes fresh QUIETLY — no skip noise', async () => {
     const child = new FakeChild();
     const { backend, calls } = harness(child); // default readSession: none
