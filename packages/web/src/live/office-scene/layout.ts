@@ -190,11 +190,16 @@ export const NOOK_RUG: Rug = { shape: 'diamond', weave: 'border', fill: '#ce9256
  * the kitchenette (fridge · counter+machine · water cooler) lines the back, well clear of the seating.
  */
 export const LOUNGE = {
-  // kitchenette across the back, spaced apart
-  fridge: { dx: -110, dy: -48, w: 32, d: 28, h: 54 },
-  counter: { dx: -54, dy: -76, w: 78, d: 24, h: 32 },
+  // Kitchenette across the back, spaced apart.
+  //
+  // Sized against the desks, not against itself (nick, 2026-07-30: "the scale of the sink and that
+  // kitchenette is off — it's a little small compared to the rest of the office space"). A desk is
+  // 100 x 68; a 78-wide counter beside it read as a side table with a bowl on it. The run now grows
+  // to the RIGHT — the left end is pinned by the fridge, and extending that way would have buried it.
+  fridge: { dx: -114, dy: -48, w: 36, d: 30, h: 72 },
+  counter: { dx: -33, dy: -76, w: 120, d: 30, h: 34 },
   machine: { dx: -74, dy: -76 },
-  cooler: { dx: 42, dy: -82, w: 22, d: 22, h: 48 }, // water cooler
+  cooler: { dx: 44, dy: -82, w: 26, d: 26, h: 52 }, // water cooler
   // (a nook plant used to sit at dx 112 — removed to thin the nook's right edge, which already has the
   // big floor plant at 830,330 and the right-wall bookshelf beside it.)
   // conversation set in the front, with breathing room between each piece

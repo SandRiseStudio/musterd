@@ -1190,7 +1190,17 @@ function nookItems(
     items: [
       at(L.fridge.dx, L.fridge.dy, () => fridge(ctx, fit, lx + L.fridge.dx, ly + L.fridge.dy, fridgeOpen)),
       at(L.counter.dx, L.counter.dy, () => {
-        box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy, L.counter.w, L.counter.d, L.counter.h, woodTop());
+        // Base cabinets, then a slab that overhangs them — the overhang is what separates a worktop
+        // from a plain box, and it is most of why this now reads as a fitted kitchen run.
+        box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy, L.counter.w - 4, L.counter.d - 3, L.counter.h - 4, dim(woodTop(), 0.88));
+        box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy, L.counter.w, L.counter.d, 4, woodTop(), L.counter.h - 4);
+        // Backsplash upstand along the run's back edge. A worktop that just stops is a table; a
+        // worktop that turns up the wall is a kitchen, and this is the cheapest way to say so.
+        box(ctx, fit, lx + L.counter.dx, ly + L.counter.dy - L.counter.d / 2 + 1.5, L.counter.w, 3, 16, dim(woodTop(), 0.8), L.counter.h);
+        // Cabinet doors: two seams down the run, so the base is cabinetry rather than a solid plinth.
+        for (const seam of [-0.22, 0.22]) {
+          box(ctx, fit, lx + L.counter.dx + L.counter.w * seam, ly + L.counter.dy + L.counter.d / 2 - 2, 1.2, 1, L.counter.h - 8, dim(woodTop(), 0.72), 2);
+        }
         coffeeMachine(ctx, fit, lx + L.machine.dx, ly + L.machine.dy, L.counter.h);
         counterSink(ctx, fit, lx + SINK.dx, ly + SINK.dy, L.counter.h);
         // What a counter actually carries beside the machine: the beans, and the mugs waiting their turn.
@@ -1249,10 +1259,11 @@ function fridge(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number,
 
 /** The counter sink: an inset basin with a rim and a little gooseneck faucet — the plate drop-off. */
 function counterSink(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, up: number): void {
-  box(ctx, fit, lx, ly, 16, 12, 1.2, '#cfd6d8', up); // the rim
-  box(ctx, fit, lx, ly, 12, 8, 0.8, '#7d8a90', up + 0.4); // the basin, reading dark against the rim
-  box(ctx, fit, lx - 6, ly - 4, 1.6, 1.6, 7, '#9aa8ae', up); // faucet riser at the back corner
-  box(ctx, fit, lx - 4.5, ly - 4, 4, 1.6, 1.4, '#9aa8ae', up + 7); // …bending over the basin
+  // Scaled with the run: a 16-unit basin on a 120-unit counter reads as a soap dish.
+  box(ctx, fit, lx, ly, 26, 18, 1.4, '#cfd6d8', up); // the rim
+  box(ctx, fit, lx, ly, 20, 13, 1, '#7d8a90', up + 0.5); // the basin, reading dark against the rim
+  box(ctx, fit, lx - 10, ly - 6, 2.2, 2.2, 10, '#9aa8ae', up); // faucet riser at the back corner
+  box(ctx, fit, lx - 7, ly - 6, 7, 2.2, 1.8, '#9aa8ae', up + 10); // …bending over the basin
 }
 
 /** The espresso machine: a body with a warmer plate, a lit switch, a group head, and a cup under it. */
