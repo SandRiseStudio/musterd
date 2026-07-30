@@ -700,80 +700,48 @@ function wallWhiteboard(
     ctx.restore();
   };
 
-  // Left box (a service) → right box (a client), connected by an arrow
-  stroke(
-    [
-      [-30, 16],
-      [-30, -10],
-      [-6, -10],
-      [-6, 16],
-      [-30, 16],
-    ],
-    1.5,
-    WHITEBOARD.ink,
-  );
-  stroke(
-    [
-      [6, 10],
-      [6, -16],
-      [32, -16],
-      [32, 10],
-      [6, 10],
-    ],
-    1.5,
-    WHITEBOARD.ink,
-  );
-  stroke(
-    [
-      [-6, 2],
-      [6, 2],
-    ],
-    1.3,
-    WHITEBOARD.ink,
-  );
-  stroke(
-    [
-      [2, -1],
-      [6, 2],
-      [2, 5],
-    ],
-    1.3,
-    WHITEBOARD.ink,
-  );
-  // Cylinder (store) under the left box
-  stroke(
-    [
-      [-28, -18],
-      [-8, -18],
-      [-8, -28],
-      [-28, -28],
-      [-28, -18],
-    ],
-    1.2,
-    WHITEBOARD.inkDim,
-  );
-  stroke(
-    [
-      [-28, -23],
-      [-8, -23],
-    ],
-    1.0,
-    WHITEBOARD.inkDim,
-  );
-  // Loose cloud / scribble up top
-  stroke(
-    [
-      [-18, 28],
-      [-8, 34],
-      [6, 32],
-      [18, 26],
-      [10, 22],
-      [-12, 24],
-      [-18, 28],
-    ],
-    1.1,
-    WHITEBOARD.inkDim,
-  );
+  // ── The diagram: three boxes, two arrows, and deliberately nothing else ────────────────────────
+  //
+  // This board renders at roughly half size under wall shear, and the mark budget is the whole
+  // design. An earlier cut drew six objects with four labels — two of them set at ~3px on /live —
+  // and the result was hash rather than a diagram (nick, 2026-07-30: "a little too crowded, and it
+  // doesn't look very good"). Subtracting is the fix; there is no stroke weight that rescues six
+  // objects at this size.
+  //
+  // Rules, if you are tempted to add something back:
+  //   · Five marks total. A sixth does not add information here, it removes it.
+  //   · Nothing under ~10 logical units. Anything smaller cannot be resolved at /live at all.
+  //   · No text. A label small enough to fit is a label too small to read (measured: ~3px).
+  //   · Majority white — a real whiteboard mid-week is mostly empty, and so is this one.
+  //
+  // The acceptance test is literally "can you count the shapes at /live scale". If you cannot,
+  // cut one more.
+  const W_INK = 2.2; // heavier than the old 1.5, so the lines survive the downscale
+
+  /** One service over two dependencies — the most legible three-box shape there is. */
+  const boxPath = (a0: number, b0: number, a1: number, b1: number): [number, number][] => [
+    [a0, b0],
+    [a1, b0],
+    [a1, b1],
+    [a0, b1],
+    [a0, b0],
+  ];
+
+  stroke(boxPath(-22, 14, 22, 30), W_INK, WHITEBOARD.ink); // the service, up top
+  stroke(boxPath(-34, -28, -8, -10), W_INK, WHITEBOARD.ink); // dependency, left
+  stroke(boxPath(8, -28, 34, -10), W_INK, WHITEBOARD.ink); // dependency, right
+
+  // Each arrow is ONE polyline that retraces its own tip to draw the head — two strokes per arrow
+  // would put this over the mark budget, and a headless connector reads as a wall, not a call.
+  const arrow = (a: number): [number, number][] => [
+    [a, 14],
+    [a, -10],
+    [a - 5, -4],
+    [a, -10],
+    [a + 5, -4],
+  ];
+  stroke(arrow(-16), W_INK, WHITEBOARD.ink);
+  stroke(arrow(16), W_INK, WHITEBOARD.ink);
 }
 
 /** White dry-erase face + musterd-orange marker ink (`mustard-500`). */

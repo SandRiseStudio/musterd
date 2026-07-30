@@ -180,6 +180,47 @@ describe('the wall whiteboard', () => {
     renderScene(textCtx([], texts), fit, new Map(), roster([node('ada', 'working')]), new Map());
     expect(texts.some((t) => /^\d+\/\d+$/.test(t))).toBe(false);
   });
+
+  /**
+   * Counts `stroke()` calls made *while the marker ink is loaded* — a scene-wide stroke count would
+   * drown in the rest of the office. This is the whiteboard's mark budget, and it is a budget because
+   * the board renders at roughly half size under wall shear: past a handful of marks the diagram
+   * stops being countable and turns to hash, which is the exact regression this describe exists for.
+   */
+  function inkStrokes(): number {
+    let current = '';
+    let count = 0;
+    const ctx = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient')
+            return () => ({ addColorStop() {} });
+          if (prop === 'measureText') return () => ({ width: 0 });
+          if (prop === 'stroke')
+            return () => {
+              if (current === '#E1AD01' || current.includes('225, 173, 1')) count++;
+            };
+          return () => undefined;
+        },
+        set(_t, prop, value) {
+          if (prop === 'strokeStyle' && typeof value === 'string') current = value;
+          return true;
+        },
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    renderScene(ctx, fit, new Map(), roster([node('ada', 'working')]), new Map());
+    return count;
+  }
+
+  it('draws at most five marks — a crowded board turns to hash at /live scale', () => {
+    expect(inkStrokes()).toBeLessThanOrEqual(5);
+  });
+
+  it('still draws a diagram — an empty board is not the fix', () => {
+    expect(inkStrokes()).toBeGreaterThanOrEqual(3);
+  });
 });
 
 describe('renderScene draws the whole office without throwing', () => {
