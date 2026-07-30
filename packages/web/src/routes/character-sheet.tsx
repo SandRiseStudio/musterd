@@ -101,6 +101,12 @@ function CharacterSheet() {
               state: null,
               color: memberColor(name, kind),
               role: '',
+              surface: null,
+              model: null,
+              workTitle: null,
+              workSource: null,
+              laneState: null,
+              moreLanes: 0,
             };
             const seed = seedOf(name);
             const skel = solveSkeleton({

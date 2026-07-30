@@ -28,6 +28,12 @@ function node(name: string, activity: OfficeNode['activity']): OfficeNode {
     state: null,
     color: memberColor(name, 'agent'),
     role: '',
+    surface: null,
+    model: null,
+    workTitle: null,
+    workSource: null,
+    laneState: null,
+    moreLanes: 0,
   };
 }
 

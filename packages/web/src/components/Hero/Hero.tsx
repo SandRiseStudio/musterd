@@ -45,6 +45,12 @@ function buildData(): OfficeData {
       state: m.state,
       color: memberColor(m.name, m.kind),
       role: '',
+      surface: null,
+      model: null,
+      workTitle: null,
+      workSource: null,
+      laneState: null,
+      moreLanes: 0,
     })),
   };
 }

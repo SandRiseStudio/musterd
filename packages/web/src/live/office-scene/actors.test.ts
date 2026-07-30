@@ -15,6 +15,12 @@ function node(name: string, presence: OfficeNode['presence'] = 'online'): Office
     state: null,
     color: 'hsl(200, 60%, 60%)',
     role: '',
+    surface: null,
+    model: null,
+    workTitle: null,
+    workSource: null,
+    laneState: null,
+    moreLanes: 0,
   };
 }
 function world(nodes: OfficeNode[]) {

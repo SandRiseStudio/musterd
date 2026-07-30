@@ -13,12 +13,18 @@ import { presentCount, type RoomEntry } from './workingOn';
  * Roster → the office's node data. `posture` is resolved here with `memberPosture` — the *same* call the
  * roster rail's chip makes — so the floor and the rail read one value: a member the rail calls `idle` is
  * on the couch with an amber dot, never at a desk with a green one.
+ *
+ * Surface/model/work fields feed the floating nameplates (presence-chrome design, 2026-07-30).
  */
-function computeData(teamName: string, roster: MemberSummary[]): OfficeData {
+function computeData(teamName: string, roster: MemberSummary[], entries: RoomEntry[]): OfficeData {
+  const byName = new Map(entries.map((e) => [e.name, e]));
   return {
     teamName,
     nodes: roster.map((m) => {
       const kind = m.kind === 'human' ? 'human' : 'agent';
+      const live =
+        m.presences?.find((p) => p.status === 'online' || p.status === 'away') ?? m.presences?.[0];
+      const entry = byName.get(m.name);
       return {
         name: m.name,
         kind,
@@ -28,6 +34,12 @@ function computeData(teamName: string, roster: MemberSummary[]): OfficeData {
         state: m.state ?? null,
         color: memberColor(m.name, kind),
         role: m.role,
+        surface: live?.surface ?? null,
+        model: live?.model ?? null,
+        workTitle: entry?.title ?? null,
+        workSource: entry?.source ?? null,
+        laneState: entry?.laneState ?? null,
+        moreLanes: entry?.moreLanes ?? 0,
       };
     }),
   };
@@ -91,7 +103,7 @@ export function OfficeScene({
   const handleRef = useRef<OfficeHandle | null>(null);
   const emittedRef = useRef<Set<string>>(new Set());
 
-  const data = useMemo(() => computeData(teamName, roster), [teamName, roster]);
+  const data = useMemo(() => computeData(teamName, roster, entries), [teamName, roster, entries]);
   // Latest-value refs for the mount effect below, which subscribes ONCE and must not re-run when a
   // prop identity changes (re-running it would tear down and rebuild the whole canvas scene).
   //
