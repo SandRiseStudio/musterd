@@ -202,9 +202,18 @@ export const LOUNGE = {
   cooler: { dx: 44, dy: -82, w: 26, d: 26, h: 52 }, // water cooler
   // (a nook plant used to sit at dx 112 — removed to thin the nook's right edge, which already has the
   // big floor plant at 830,330 and the right-wall bookshelf beside it.)
-  // conversation set in the front, with breathing room between each piece
-  couch: { dx: 6, dy: 2, len: 108, dep: 44 }, // faces S (toward the room)
-  table: { dx: 6, dy: 66, w: 56, d: 40 },
+  // Conversation set in the front. The gaps are the point: a coffee table sits a stride from a couch,
+  // not against it, and the old 64-unit centre spacing put the table's edge within a few units of the
+  // couch front (couch dep 44, table d 40 — 42 units of furniture across a 64-unit gap).
+  couch: { dx: 6, dy: -4, len: 108, dep: 44 }, // faces S (toward the room)
+  table: { dx: 6, dy: 74, w: 56, d: 40 },
+  // The chairs stay where they were. Pushing them out with the table walked chairW into a reading
+  // spot (MIN_SPOT_GAP) and put an away member's stand point on furniture — the gap this set needed
+  // was between the couch and the table, and widening everything just moved the crowding outward.
+  // The chairs do not move. Pushing them out with the table walked chairW into a reading spot
+  // (MIN_SPOT_GAP) and closed the aisle behind them onto the away members' stand points — the gap
+  // this set actually needed was between the couch and the table, and widening everything else just
+  // moved the crowding outward into the arc of people standing behind it.
   chairE: { dx: -62, dy: 64, size: 52 }, // left of the table, facing it
   chairW: { dx: 72, dy: 64, size: 52 }, // right of the table, facing it
 } as const;
@@ -257,6 +266,29 @@ export interface Huddle {
   poufs: [string, string, string];
 }
 
+/**
+ * Where the three poufs sit, as offsets from the huddle centre, and how far each is knocked off
+ * square.
+ *
+ * **One source for both the painter and the leisure spots.** These offsets used to be written out
+ * twice — once in `huddleItems`, once in `LEISURE_SPOTS` — which means a pouf could be moved in one
+ * place and leave its occupant sitting on bare floor in the other.
+ *
+ * The distances are what stop the cluster reading as one welded object (nick, 2026-07-30: the chairs
+ * "look like they are basically attached to the coffee table"). The table is 66 across and a pouf is
+ * 42, so anything under ~64 from centre is literally touching; the old ring sat at 54 and 61. `spin`
+ * is the other half: three poufs at identical angles is a CAD assembly, and used furniture is never
+ * square to its table.
+ */
+export const HUDDLE_POUFS: ReadonlyArray<{ dx: number; dy: number; spin: number; dir: Dir }> = [
+  { dx: 0, dy: -72, spin: -0.09, dir: 'S' },
+  { dx: 68, dy: 42, spin: 0.13, dir: 'W' },
+  { dx: -66, dy: 44, spin: -0.05, dir: 'E' },
+];
+
+/** The huddle's low table footprint. */
+export const HUDDLE_TABLE = 66;
+
 /** One huddle space, in the clearing the three pods leave in the middle of the room. */
 export const HUDDLES: Huddle[] = [
   {
@@ -269,7 +301,10 @@ export const HUDDLES: Huddle[] = [
     // Softened toward the muted pod-rug treatment: a calmer clay field with a low-contrast border, so the
     // huddle rug seats onto the floor instead of popping forward like a floating slab.
     rug: { shape: 'rect', weave: 'border', fill: '#d4a483', mark: '#c69172' },
-    rugSize: 168,
+    // Widened with the cluster: pushing the poufs off the table ran them over the old 168 edge, and a
+    // seat half on the rug reads worse than no rug at all. Kept modest so the bare floor between this
+    // and the pod rugs survives — that gap is what makes each one an area rather than a stain.
+    rugSize: 190,
     poufs: ['#f06d5a', '#e3a72b', '#8b6fd6'],
   },
 ];
@@ -526,11 +561,13 @@ export const LEISURE_SPOTS: LeisureSpot[] = (() => {
     { zone: 'lounge', lx: NOOK.lx + L.chairW.dx - 5, ly: NOOK.ly + L.chairW.dy, dir: 'W', sit: 1 },
   ];
   // Poufs are backless: the occupant sits on the centre, turned toward the huddle's low table.
-  const huddle: LeisureSpot[] = [
-    { zone: 'huddle', lx: h.lx, ly: h.ly - 54, dir: 'S', sit: 1 },
-    { zone: 'huddle', lx: h.lx + 52, ly: h.ly + 32, dir: 'W', sit: 1 },
-    { zone: 'huddle', lx: h.lx - 52, ly: h.ly + 32, dir: 'E', sit: 1 },
-  ];
+  const huddle: LeisureSpot[] = HUDDLE_POUFS.map((p) => ({
+    zone: 'huddle' as const,
+    lx: h.lx + p.dx,
+    ly: h.ly + p.dy,
+    dir: p.dir,
+    sit: 1,
+  }));
   // All four meeting chairs are seats — see MEETING for why they sit along one side and the two ends
   // rather than down both sides. `nav.test.ts` holds every offered spot to having open floor beside it,
   // so an arrangement that walls a chair in fails a test rather than shipping as a seat nobody can

@@ -6,6 +6,8 @@ import {
   BEAM_LEN,
   BEAM_SHEAR,
   BOOKSHELVES,
+  HUDDLE_POUFS,
+  HUDDLE_TABLE,
   CHAIR_LIFT,
   CHAIR_OFF,
   CHAIR_SEAT_H,
@@ -799,11 +801,45 @@ function wallHanger(
   const pt = (t: number, u: number): Pt => wallPt(edge, t, u, fit);
   // Short cords: run them long and the pot swings under a narrow V that reads as a handbag, not a planter.
   const uPot = uTop - 17 / WALL_H;
+  const bt = 15 / FLOOR;
+
+  /**
+   * An ellipse in WALL space — a ring of `wallPt` samples rather than `ctx.ellipse`, so it shears with
+   * the wall like everything else on it. This is the shape that does the heavy lifting below: the whole
+   * "it looks flat, not 3D-ish" complaint (nick, 2026-07-30) came down to the pot having no visible
+   * opening. A trapezoid is a shape; a trapezoid with an ellipse across its mouth is a container.
+   */
+  const wallEllipse = (t: number, u: number, rt: number, ru: number, fill: string): void => {
+    const pts: Pt[] = [];
+    for (let i = 0; i < 18; i++) {
+      const th = (i / 18) * Math.PI * 2;
+      pts.push(pt(t + (Math.cos(th) * rt) / FLOOR, u + (Math.sin(th) * ru) / WALL_H));
+    }
+    quad(ctx, pts, fill);
+  };
+
+  /** One trailing vine. `back` runs it behind the pot, dimmed — see the ordering note below. */
+  const vine = (dt: number, drop: number, back: boolean): void => {
+    ctx.strokeStyle = back ? dim(DRESS.vine, 0.72) : DRESS.vine;
+    ctx.lineWidth = Math.max(0.8, (back ? 1.4 : 1.7) * fit.scale);
+    ctx.lineCap = 'round';
+    const a = pt(tc + dt / FLOOR, uPot);
+    const c = pt(tc + (dt * 1.9) / FLOOR, uPot - drop / 2 / WALL_H);
+    const b = pt(tc + (dt * 1.4) / FLOOR, uPot - drop / WALL_H);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.quadraticCurveTo(c.x, c.y, b.x, b.y);
+    ctx.stroke();
+    ellipse(ctx, b, (back ? 2.8 : 3.4) * fit.scale, (back ? 2.1 : 2.6) * fit.scale, back ? dim(DRESS.vine, 0.72) : DRESS.vine);
+  };
+
+  // Cords, converging on ONE bracket point rather than running near-parallel — parallel cords are the
+  // other half of the flat read, because nothing in the picture recedes.
   ctx.strokeStyle = DRESS.rope;
   ctx.lineWidth = Math.max(0.6, 1.1 * fit.scale);
   for (const dt of [-13 / FLOOR, 0, 13 / FLOOR]) {
     ctx.beginPath();
-    const a = pt(tc + dt * 0.2, uTop);
+    const a = pt(tc, uTop);
     const b = pt(tc + dt, uPot);
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -814,31 +850,33 @@ function wallHanger(
   ctx.arc(h0.x, h0.y, Math.max(0.8, 1.6 * fit.scale), 0, Math.PI * 2);
   ctx.fillStyle = DRESS.rope;
   ctx.fill();
-  // A bowl, drawn as the wall-space trapezoid a pot seen head-on actually is.
-  const bt = 15 / FLOOR;
+
+  // Painter's order is the whole trick, and it is why the vines are split rather than looped once:
+  // BACK vines → pot → rim → interior → FRONT vines. Foliage passing behind the pot is what states
+  // that the pot has a far side at all. Drawn in one pass they all sit in front, and the plant reads
+  // as a decal stuck on top of a bowl.
+  vine(-15, 30, true);
+  vine(9, 40, true);
+
+  // The bowl: a tapered body with a shaded side, so it is lit rather than filled flat.
   quad(
     ctx,
     [pt(tc - bt, uPot), pt(tc + bt, uPot), pt(tc + bt * 0.62, uPot - 17 / WALL_H), pt(tc - bt * 0.62, uPot - 17 / WALL_H)],
     DRESS.pot,
   );
-  quad(ctx, [pt(tc - bt * 1.1, uPot + 3 / WALL_H), pt(tc + bt * 1.1, uPot + 3 / WALL_H), pt(tc + bt, uPot), pt(tc - bt, uPot)], DRESS.potRim);
-  for (const [dt, drop] of [
-    [-11, 34],
-    [2, 50],
-    [12, 27],
-  ] as const) {
-    ctx.strokeStyle = DRESS.vine;
-    ctx.lineWidth = Math.max(0.8, 1.7 * fit.scale);
-    ctx.lineCap = 'round';
-    const a = pt(tc + dt / FLOOR, uPot);
-    const c = pt(tc + (dt * 1.9) / FLOOR, uPot - drop / 2 / WALL_H);
-    const b = pt(tc + (dt * 1.4) / FLOOR, uPot - drop / WALL_H);
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.quadraticCurveTo(c.x, c.y, b.x, b.y);
-    ctx.stroke();
-    ellipse(ctx, b, 3.4 * fit.scale, 2.6 * fit.scale, DRESS.vine);
-  }
+  quad(
+    ctx,
+    [pt(tc + bt * 0.34, uPot), pt(tc + bt, uPot), pt(tc + bt * 0.62, uPot - 17 / WALL_H), pt(tc + bt * 0.38, uPot - 17 / WALL_H)],
+    dim(DRESS.pot, 0.86),
+  );
+  // The mouth: rim ellipse, then the shadowed interior inside it.
+  wallEllipse(tc, uPot, 15, 5.2, DRESS.potRim);
+  wallEllipse(tc, uPot - 0.4 / WALL_H, 12.2, 3.9, dim(DRESS.pot, 0.62));
+  wallEllipse(tc, uPot - 1.6 / WALL_H, 9.5, 2.6, DRESS.vine); // the soil/foliage crown in the opening
+
+  vine(-11, 34, false);
+  vine(2, 50, false);
+  vine(12, 27, false);
 }
 
 function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv, nodes: OfficeNode[]): void {
@@ -1089,6 +1127,22 @@ function meetingTable(ctx: CanvasRenderingContext2D, fit: Fit): void {
     box(ctx, fit, M.lx + sx * (M.w / 2 - 8), M.ly + sy * (M.d / 2 - 8), 8, 8, M.h - 6, dim(PAL.wood, 0.9));
   }
   box(ctx, fit, M.lx, M.ly, M.w, M.d, 6, woodTop(), M.h - 6);
+  // The conference speakerphone: a three-lobed puck with a dark grille and one LED. This is the object
+  // that tells you a table is a conference table rather than a long desk, which is the whole reason it
+  // is here. Static — a blinking LED would drag the still layer onto the animated one for nothing.
+  const hub = M.lx - 46;
+  for (const [dx, dy] of [
+    [0, -9],
+    [8, 5],
+    [-8, 5],
+  ] as const) {
+    box(ctx, fit, hub + dx, M.ly + dy, 13, 13, 3, '#3a3a3e', M.h);
+  }
+  box(ctx, fit, hub, M.ly, 17, 17, 4.5, '#2c2c30', M.h);
+  const puck = project(hub, M.ly, fit);
+  ellipse(ctx, { x: puck.x, y: puck.y - (M.h + 4.5) * fit.scale }, 5 * fit.scale, 2.4 * fit.scale, '#4a4a50');
+  box(ctx, fit, hub + 5, M.ly - 4, 1.8, 1.8, 0.7, '#6ee7a0', M.h + 4.5); // the LED
+
   // A tiny shared centrepiece: ceramic pot, leaves, and mustard blossom. At office scale it reads as a
   // warm irregularity on the long slab; in companion mode the individual pieces resolve.
   box(ctx, fit, M.lx, M.ly, 14, 14, 9, '#efe2c6', M.h);
@@ -1162,10 +1216,15 @@ function ctable(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number)
   const s = project(lx, ly, fit);
   ellipse(ctx, { x: s.x, y: s.y }, 42 * fit.scale, 13 * fit.scale, 'rgba(0,0,0,0.12)');
   box(ctx, fit, lx, ly, LOUNGE.table.w, LOUNGE.table.d, 16, woodTop());
+  // A tray with a couple of books left on it, beside the bowl. Showroom furniture is furniture nobody
+  // has used; the tray is the cheapest possible evidence that somebody sat here and put something down.
+  box(ctx, fit, lx - 13, ly + 3, 22, 15, 1.2, '#b98a5e', 16);
+  box(ctx, fit, lx - 13, ly + 3, 18, 12, 2.4, BOOK_COLORS[7]!, 17.2);
+  box(ctx, fit, lx - 12, ly + 3, 16, 11, 2, BOOK_COLORS[5]!, 19.6);
   // Fruit bowl + a single flower keeps the lounge from reading like untouched showroom furniture.
-  ellipse(ctx, { x: s.x, y: s.y - 18 * fit.scale }, 10 * fit.scale, 4 * fit.scale, '#e8c17d');
-  ellipse(ctx, { x: s.x - 4 * fit.scale, y: s.y - 21 * fit.scale }, 3 * fit.scale, 2 * fit.scale, '#d8774f');
-  ellipse(ctx, { x: s.x + 3 * fit.scale, y: s.y - 22 * fit.scale }, 3 * fit.scale, 2 * fit.scale, '#f4cf52');
+  ellipse(ctx, { x: s.x + 8 * fit.scale, y: s.y - 18 * fit.scale }, 10 * fit.scale, 4 * fit.scale, '#e8c17d');
+  ellipse(ctx, { x: s.x + 4 * fit.scale, y: s.y - 21 * fit.scale }, 3 * fit.scale, 2 * fit.scale, '#d8774f');
+  ellipse(ctx, { x: s.x + 11 * fit.scale, y: s.y - 22 * fit.scale }, 3 * fit.scale, 2 * fit.scale, '#f4cf52');
 }
 
 /** One depth-sortable draw call. The nook/huddle used to paint as single blobs anchored at their
@@ -1461,20 +1520,25 @@ function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf, si: nu
  * roomier poufs and a bigger low table on a wider rug. */
 function huddleItems(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): { rug: () => void; items: DepthItem[] } {
   const at = (dx: number, dy: number, fn: () => void): DepthItem => ({ d: depth(h.lx + dx, h.ly + dy), fn });
-  const pouf = (lx: number, ly: number, color: string): void => {
+  /** `spin` knocks a pouf off square. `box()` is axis-aligned, so the turn is faked by trading width
+   *  for depth — at this size that reads as a seat nudged round, which is all it needs to do. */
+  const pouf = (lx: number, ly: number, color: string, spin: number): void => {
     const p = project(lx, ly, fit);
+    const w = 42 * (1 - Math.abs(spin) * 0.5);
+    const d = 42 * (1 + Math.abs(spin) * 0.5);
     ellipse(ctx, { x: p.x, y: p.y + 3 * fit.scale }, 23 * fit.scale, 8 * fit.scale, 'rgba(64, 39, 25, 0.13)');
-    box(ctx, fit, lx, ly, 42, 42, 20, dim(color, 0.93));
+    box(ctx, fit, lx, ly, w, d, 20, dim(color, 0.93));
     ellipse(ctx, { x: p.x, y: p.y - 20 * fit.scale }, 20 * fit.scale, 8 * fit.scale, mul(color, 1.07));
-    ellipse(ctx, { x: p.x - 5 * fit.scale, y: p.y - 23 * fit.scale }, 7 * fit.scale, 2.2 * fit.scale, 'rgba(255,255,255,0.18)');
+    // The dimple slides with the spin, so the seat reads as turned rather than merely reshaped.
+    ellipse(ctx, { x: p.x + spin * 40 * fit.scale, y: p.y - 23 * fit.scale }, 7 * fit.scale, 2.2 * fit.scale, 'rgba(255,255,255,0.18)');
   };
   return {
     rug: () => drawRug(ctx, fit, h.rug, h.lx, h.ly, h.rugSize, h.rugSize),
     items: [
-      at(0, -54, () => pouf(h.lx, h.ly - 54, h.poufs[0])),
-      at(0, 0, () => box(ctx, fit, h.lx, h.ly, 66, 66, 18, woodTop())),
-      at(52, 32, () => pouf(h.lx + 52, h.ly + 32, h.poufs[1])),
-      at(-52, 32, () => pouf(h.lx - 52, h.ly + 32, h.poufs[2])),
+      ...HUDDLE_POUFS.map((p, i) =>
+        at(p.dx, p.dy, () => pouf(h.lx + p.dx, h.ly + p.dy, h.poufs[i]!, p.spin)),
+      ),
+      at(0, 0, () => box(ctx, fit, h.lx, h.ly, HUDDLE_TABLE, HUDDLE_TABLE, 18, woodTop())),
     ],
   };
 }
