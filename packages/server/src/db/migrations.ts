@@ -461,6 +461,25 @@ export const MIGRATIONS: Migration[] = [
       db.exec('ALTER TABLE lanes ADD COLUMN merged_json TEXT');
     },
   },
+  {
+    // v25 — index audit by `action`. Every audit read but the paged listing narrows by team_id and
+    // then filters on `action`, but v9's only index is (team_id, ts), so each one SCANNED the whole
+    // team's rows. Measured on a 118,976-row copy of the real dogfood DB (~2 years at the observed
+    // 134 rows/day): the derived reads cost 62–85 ms each and drop to 0.04–1.2 ms with this index,
+    // which EXPLAIN QUERY PLAN confirms SQLite actually picks. Today, at 3.6k rows, they are 0.4 ms
+    // — this is bought before the table is large, not because anything is slow now.
+    //
+    // `audit` is append-only and hot, so the write cost was measured too, not assumed: a third index
+    // costs +10 µs/insert (~35% of a 28 µs insert), which at 134 rows/day is 1.35 ms/day across the
+    // whole team. Index storage is ~7 MB at 118k rows.
+    //
+    // Deliberately NOT paired with a query rewrite: the json_extract predicates cost the same as
+    // plain-column ones (28.6 vs 32.0 ms at scale) — the scan was the cost, never the extraction.
+    version: 25,
+    up: (db) => {
+      db.exec('CREATE INDEX idx_audit_team_action_ts ON audit(team_id, action, ts)');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

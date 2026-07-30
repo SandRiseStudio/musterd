@@ -10,7 +10,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('24');
+    expect(ver?.value).toBe('25');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -66,6 +66,47 @@ describe('db', () => {
       (c) => c.name,
     );
     expect(cols).toContain('last_offline_reason');
+    db.close();
+  });
+
+  it('v25 indexes audit by action, and the planner actually picks it over (team_id, ts)', () => {
+    const db = openDb(':memory:');
+    const indexes = (
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='audit'")
+        .all() as {
+        name: string;
+      }[]
+    ).map((i) => i.name);
+    expect(indexes).toContain('idx_audit_team_action_ts');
+
+    // Existence is not the point — the planner choosing it is. Without this index these reads
+    // SCAN every row the team owns; asserting the chosen index is what stops a later schema
+    // change from silently returning them to a scan.
+    const plan = (
+      db
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT target, detail FROM audit
+             WHERE team_id = ? AND action = 'lane.closed' ORDER BY ts`,
+        )
+        .all('t') as { detail: string }[]
+    )
+      .map((r) => r.detail)
+      .join(' | ');
+    expect(plan).toContain('idx_audit_team_action_ts');
+
+    // The paged listing narrows by team_id alone and must keep using the v9 (team_id, ts) index —
+    // it orders by ts, so the new index would be a regression there.
+    const pagedPlan = (
+      db
+        .prepare(
+          'EXPLAIN QUERY PLAN SELECT * FROM audit WHERE team_id = ? ORDER BY ts DESC LIMIT ?',
+        )
+        .all('t', 50) as { detail: string }[]
+    )
+      .map((r) => r.detail)
+      .join(' | ');
+    expect(pagedPlan).toContain('idx_audit_team_ts');
     db.close();
   });
 
@@ -151,7 +192,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(24); // runs v18…v24 (observer grades + residency + offline reason + send provenance + tool-call stats + feature epoch + two-stage close)
+    expect(runMigrations(db)).toBe(25); // runs v18…v25 (observer grades + residency + offline reason + send provenance + tool-call stats + feature epoch + two-stage close + audit action index)
 
     const scope = (id: string) =>
       db
