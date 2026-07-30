@@ -515,6 +515,51 @@ describe('MCP adapter', () => {
       await expect(Promise.resolve(toolCb(mcp, 'team_members')({}))).resolves.toBeDefined();
     });
 
+    // SEAT-DROP FAULT B2 (stanley's live repro, 3x: join → exactly one call ✓ → every later call
+    // "you haven't joined"). The ADR 164 liveness ladder demotes a session it judges dead by calling
+    // `leave()`, which clears `wantPresence` — and its own comment promises "a dormant adapter comes
+    // back on its next tool call". Nothing implemented that: the autojoin memo was already spent by
+    // the SUCCESSFUL first join, so the seat stayed released for the life of the process. A tool call
+    // is direct evidence the session is alive, which outranks the ladder's inference.
+    it('RE-JOINS after the liveness ladder released the seat — the recovery ADR 164 promises', async () => {
+      const join = vi.fn(async () => {});
+      let held = true;
+      const client = {
+        ...stubClient(),
+        get holdsSeat() {
+          return held;
+        },
+        get releasedByLiveness() {
+          return !held;
+        },
+      } as unknown as MusterdClient;
+      const mcp = buildMcpServer(client, adaConfig(), { onFirstToolCall: join });
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      expect(join).toHaveBeenCalledTimes(1);
+      held = false; // the heartbeat's attestSession → leave()
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      expect(join).toHaveBeenCalledTimes(2);
+    });
+
+    // …but an EXPLICIT team_leave must stay left. Re-arming on "no longer holds a seat" alone would
+    // silently undo the one thing `leave` means, on the very next tool call.
+    it('does NOT re-join after a deliberate leave — only a liveness demotion re-arms', async () => {
+      const join = vi.fn(async () => {});
+      const client = {
+        ...stubClient(),
+        get holdsSeat() {
+          return false;
+        },
+        get releasedByLiveness() {
+          return false; // released on purpose, not by the ladder
+        },
+      } as unknown as MusterdClient;
+      const mcp = buildMcpServer(client, adaConfig(), { onFirstToolCall: join });
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      expect(join).toHaveBeenCalledTimes(1);
+    });
+
     // …and the guard must SAY so. A transport-level failure rejects `join()` before any error frame
     // arrives, so nothing used to record it and the dormant message degraded to a bare "call
     // team_join first" — which reads as "you forgot to join", not "your join failed". That is what

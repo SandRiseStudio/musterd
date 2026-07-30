@@ -1,5 +1,6 @@
 import type { SessionCapture } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
+import { HEARTBEAT_MS, shouldReleaseOnVerdict } from './client.js';
 import { ADOPT_SETTLE_MS, SESSION_STALE_MS, SessionAttestation } from './sessionLiveness.js';
 
 const T0 = 1_700_000_000_000;
@@ -193,5 +194,32 @@ describe('SessionAttestation (ADR 164)', () => {
       mtime = now - 1_000;
       expect(a.check(now).verdict).toBe('live');
     }
+  });
+});
+
+/**
+ * Activity-outranks-inference (ADR 164, seat-drop fault B2). The ladder reads disk and infers; a
+ * tool call is the harness speaking first-hand. When they disagree about a session that just acted,
+ * the tool call wins — otherwise a working session gets released every heartbeat on the strength of
+ * a stale transcript or a neighbour's `ended_at`.
+ */
+describe('shouldReleaseOnVerdict — a session that just acted is not dead', () => {
+  const NOW = 1_000_000;
+
+  it('refuses to release on an inference rung when a tool call landed within the heartbeat', () => {
+    expect(shouldReleaseOnVerdict('stale', NOW - 1_000, NOW)).toBe(false);
+    expect(shouldReleaseOnVerdict('ended', NOW - 14_999, NOW)).toBe(false);
+  });
+
+  it('releases on an inference rung once the session has genuinely gone quiet', () => {
+    expect(shouldReleaseOnVerdict('stale', NOW - HEARTBEAT_MS, NOW)).toBe(true);
+    expect(shouldReleaseOnVerdict('ended', NOW - 3_600_000, NOW)).toBe(true);
+    // never acted at all — the pre-activity default must not read as "just acted"
+    expect(shouldReleaseOnVerdict('stale', 0, NOW)).toBe(true);
+  });
+
+  it('ALWAYS releases on ppid — an orphaned process is fact, not inference', () => {
+    expect(shouldReleaseOnVerdict('ppid', NOW, NOW)).toBe(true);
+    expect(shouldReleaseOnVerdict('ppid', NOW - 1, NOW)).toBe(true);
   });
 });
