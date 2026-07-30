@@ -6,6 +6,7 @@ import brandCss from '../brand/brand.css?url';
 import { MusterdWord } from '../brand/MusterdWord';
 import { AsksStrip } from '../live/AsksStrip';
 import { MemberSignInFields, MemberSignInToggle, type AdvancedState } from '../live/MemberSignIn';
+import { OfficeBoard } from '../live/OfficeBoard';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
@@ -287,6 +288,10 @@ function LivePage() {
               // The asks & approvals rail (ADR 149) rides the top of the room itself — the office
               // frames its own asks (nick, 2026-07-28). Still renders nothing until an ask exists.
               topSlot={<AsksStrip envelopes={envelopes} roster={roster} cfg={cfg!} />}
+              // The noticeboard sits in the strip under the room — the roster with NAMES, which the
+              // room's own 63px-tall walls could never carry (see OfficeBoard.tsx). Passing a band is
+              // also what frames the stage, so this is the prop that reclaims the panel's wasted height.
+              bandSlot={<OfficeBoard roster={roster} />}
             />
             <RosterPanel
               roster={roster}
