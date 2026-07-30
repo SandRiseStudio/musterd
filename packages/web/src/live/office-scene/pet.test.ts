@@ -1,4 +1,24 @@
 import { describe, expect, it } from 'vitest';
+import { towardnessFor } from './render';
+
+describe('the turn never shows a bare squashed billboard', () => {
+  it('starts the chest-on crossfade before the profile squashes past half width', () => {
+    // The paper band was |face| between 1.0 and 0.55: squashed profile, no chest-on view yet. The
+    // fade now starts at 0.75, so the unshaded squash range a viewer can see is much narrower.
+    expect(towardnessFor(0.7)).toBeGreaterThan(0);
+    expect(towardnessFor(0.8)).toBe(0);
+  });
+
+  it('is fully chest-on above the ribcage floor, so the sliver underneath is never visible', () => {
+    // drawDog floors the mirror at 0.16 — by then this must be 1 or the floor itself would show.
+    expect(towardnessFor(0.35)).toBe(1);
+    expect(towardnessFor(0.16)).toBe(1);
+  });
+
+  it('is symmetric — a leftward turn fades exactly like a rightward one', () => {
+    expect(towardnessFor(-0.5)).toBe(towardnessFor(0.5));
+  });
+});
 import {
   createPet,
   CURL_S,

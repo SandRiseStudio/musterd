@@ -2082,8 +2082,14 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
   // the body narrowing, passing through square-on and opening out the other way. Applied as a canvas
   // transform rather than a sign on every offset, so radii, stroke widths and clip paths all
   // foreshorten together — half a turn drawn with mirrored offsets but unmirrored radii is a dog
-  // turning inside out. Never quite zero: a degenerate matrix draws nothing at all.
-  const m = pet.face >= 0 ? Math.max(pet.face, 0.03) : Math.min(pet.face, -0.03);
+  // turning inside out.
+  //
+  // The floor is a RIBCAGE, not a degenerate-matrix guard. It used to be 0.03 — enough to keep the
+  // matrix invertible, and also the exact "sheet of paper turning edge-on" nick kept seeing: a flat
+  // profile squashed to 3% of its width IS a sheet of paper, geometrically. In life a dog seen from
+  // any angle is still as wide as its chest, so the profile never narrows past this before the
+  // chest-on view (below) has fully taken over and hidden it.
+  const m = pet.face >= 0 ? Math.max(pet.face, 0.16) : Math.min(pet.face, -0.16);
   ctx.translate(p.x, p.y);
   ctx.scale(m, 1);
   const px = (dx: number, dy: number): Pt => ({ x: dx * s, y: dy * s });
@@ -2321,6 +2327,13 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       hind(a, -7 + surge, 2.4, true);
       front(b, 6 + surge, 2.4, true);
       ellipse(ctx, px(surge, -12.5 + bob), 11.5 * s, 6 * s, DOG.fur);
+      // Shoulder and haunch mass: two overlapping forms a half-tone off the barrel, the standard
+      // illustrator's fake for a rib cage. This is what the legs attach TO — without it they read as
+      // sticks under a shape, and the flat barrel is most of why a mid-turn dog read as paper even
+      // after the roundness pass below (the shade pass lights a volume; it cannot invent one).
+      // Under `patches`/`shade`, so markings and light fall across them like the rest of the coat.
+      ellipse(ctx, px(6.2 + surge, -12 + bob), 5.4 * s, 5.2 * s, 'rgba(214, 206, 192, 0.55)');
+      ellipse(ctx, px(-6.8 + surge, -12.2 + bob), 5.9 * s, 5.5 * s, 'rgba(214, 206, 192, 0.55)');
       patches(surge, -12.5 + bob, 11.5, 6);
       shade(surge, -12.5 + bob, 11.5, 6);
       hind(b, -6 + surge, 2.9);
@@ -2342,8 +2355,21 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
   // never had — a chest-on (or rump-on) dog on the same gait cycles. The profile keeps painting
   // underneath; by the time this is opaque the profile is a few pixels wide and fully hidden, so the
   // fade never shows a double image.
-  const towardness = Math.min(1, Math.max(0, (0.55 - Math.abs(pet.face)) / 0.2));
+  const towardness = towardnessFor(pet.face);
   if (pet.mode === 'walk' && towardness > 0) drawDogFacing(ctx, p, s, pet, t, towardness);
+}
+
+/**
+ * How much of the chest-on view to blend in as the profile squashes.
+ *
+ * The window starts EARLIER than the original 0.55: the band between full profile and 0.55 was the
+ * remaining "paper" band — squashed billboard, no chest-on view yet — and a walking dog turns
+ * constantly, so it spent most of every turn inside it. The ramp ends at |face| 0.35, comfortably
+ * above the 0.16 ribcage floor in `drawDog`, so the profile underneath is fully hidden while it is
+ * still a plausible body width. Exported for the tests: this is pure geometry policy, no canvas.
+ */
+export function towardnessFor(face: number): number {
+  return Math.min(1, Math.max(0, (0.75 - Math.abs(face)) / 0.4));
 }
 
 /**
