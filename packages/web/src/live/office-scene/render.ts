@@ -1625,6 +1625,22 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
     ellipse(ctx, px(x - rx * 0.5, y - ry * 0.45), rx * 0.62 * s, ry * 0.5 * s, DOG.patch);
     ctx.restore();
   };
+  /**
+   * The roundness pass: a warm belly shade and a crown of light, clipped to the body ellipse the pose
+   * just drew. Painted OVER the patches — light falls on the coat and its markings alike, which is
+   * what turns a flat sticker into a volume (nick, 2026-07-29: "the dog isn't really 3d looking like
+   * the members are"). Both stay on the warm axis: a neutral grey shade on a warm floor reads as dirt.
+   */
+  const shade = (x: number, y: number, rx: number, ry: number): void => {
+    ctx.save();
+    ctx.beginPath();
+    const c = px(x, y);
+    ctx.ellipse(c.x, c.y, rx * s, ry * s, 0, 0, Math.PI * 2);
+    ctx.clip();
+    ellipse(ctx, px(x, y + ry * 0.66), rx * 1.08 * s, ry * 0.6 * s, 'rgba(88, 62, 40, 0.16)');
+    ellipse(ctx, px(x - rx * 0.12, y - ry * 0.58), rx * 0.8 * s, ry * 0.46 * s, 'rgba(255, 252, 243, 0.3)');
+    ctx.restore();
+  };
   const collar = (x: number, y: number, r: number): void => {
     ellipse(ctx, px(x, y), r * s, r * 0.42 * s, DOG.collar);
     ellipse(ctx, px(x + r * 0.15, y + r * 0.5), r * 0.24 * s, r * 0.26 * s, DOG.tag);
@@ -1640,6 +1656,7 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       tail(-9, -7, -14, 0.5, -4, 1, 2.8); // draped round the flank, behind the body — a dog flops, it doesn't wrap
       ellipse(ctx, px(-0.5, -5.5), 12.5 * s, 6.8 * breathe * s, DOG.fur);
       patches(-0.5, -5.5, 12.5, 6.8 * breathe);
+      shade(-0.5, -5.5, 12.5, 6.8 * breathe);
       ellipse(ctx, px(7.5, -2), 3.6 * s, 1.8 * s, DOG.cream); // front paws, tucked under the chin
       head(7, -6.5, false);
       break;
@@ -1651,10 +1668,12 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       tail(-6.5, -6, -12, -1 + wag * 1.2, -14.5, 0.5 + wag * 2.6, 2.8); // thumping the floor
       ellipse(ctx, px(-1.5, -7.5), 8.2 * s, 8.5 * s, DOG.fur); // haunches
       patches(-1.5, -7.5, 8.2, 8.5);
+      shade(-1.5, -7.5, 8.2, 8.5);
       ellipse(ctx, px(3.5, -12), 5.4 * s, 7.2 * s, DOG.fur); // chest, up
       // A patch over the shoulder rather than the old cream blaze, which is invisible now the coat is
       // white. It also separates the chest from the haunches, which would otherwise merge into one blob.
       patchOn(3.5, -12, 5.4, 7.2);
+      shade(3.5, -12, 5.4, 7.2);
       leg(2.2, 0.5);
       leg(5.4, 0.5);
       collar(4.5, -18.5, 4.4);
@@ -1667,8 +1686,10 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       tail(-9.5, -16, -14 + wag * 2, -22, -11 + wag * 3.5, -26, 2.8);
       ellipse(ctx, px(-7, -13), 7.8 * s, 7.2 * s, DOG.fur); // haunches, up
       patches(-7, -13, 7.8, 7.2);
+      shade(-7, -13, 7.8, 7.2);
       leg(-9, 0.5, 3);
       ellipse(ctx, px(2, -5.5), 8.5 * s, 4.4 * s, DOG.fur); // chest sweeping low
+      shade(2, -5.5, 8.5, 4.4);
       stroke(px(4, -5.5), px(13, -1.5), 2.6, DOG.fur); // front legs reaching out flat
       ellipse(ctx, px(13, -1.5), 1.5 * s, 1 * s, DOG.cream);
       collar(9.5, -8.5, 4);
@@ -1700,6 +1721,7 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       front(b, 6 + surge, 2.4, true);
       ellipse(ctx, px(surge, -12.5 + bob), 11.5 * s, 6 * s, DOG.fur);
       patches(surge, -12.5 + bob, 11.5, 6);
+      shade(surge, -12.5 + bob, 11.5, 6);
       hind(b, -6 + surge, 2.9);
       front(a, 7 + surge, 2.9);
       collar(10.5 + surge, -16.5 + bob, 4);
@@ -1709,6 +1731,158 @@ export function drawDog(ctx: CanvasRenderingContext2D, fit: Fit, pet: PetState, 
       head(12.5 + surge * 1.15, -21 + lag, true, -lag * 1.2, true);
       break;
     }
+  }
+  ctx.restore();
+
+  // ── the toward/away view ───────────────────────────────────────────────────────────────────────
+  // The profile above is a billboard: walking at or away from the camera the mirror narrows it toward
+  // a sliver, and a sliver held for a whole diagonal is the "extremely thin, like a piece of paper"
+  // read (nick, 2026-07-29). So once the mirror gets narrow, crossfade in the view the billboard
+  // never had — a chest-on (or rump-on) dog on the same gait cycles. The profile keeps painting
+  // underneath; by the time this is opaque the profile is a few pixels wide and fully hidden, so the
+  // fade never shows a double image.
+  const towardness = Math.min(1, Math.max(0, (0.55 - Math.abs(pet.face)) / 0.2));
+  if (pet.mode === 'walk' && towardness > 0) drawDogFacing(ctx, p, s, pet, t, towardness);
+}
+
+/**
+ * The dog seen along its own spine — toward the camera (`pet.depthSign === 1`, we get the face) or
+ * away (we get the rump and the back of the head). Deliberately the same vocabulary as the profile:
+ * cream paws, one dark eye patch, the mustard collar, the wagging cream-tipped tail — so the
+ * crossfade reads as the same animal turning, not a sprite swap.
+ */
+function drawDogFacing(
+  ctx: CanvasRenderingContext2D,
+  p: Pt,
+  s: number,
+  pet: PetState,
+  t: number,
+  alpha: number,
+): void {
+  const toward = pet.depthSign === 1;
+  // A whisper of the dying profile heading, so the figure leans out of the turn rather than snapping
+  // to dead-symmetric the instant the crossfade starts.
+  const lean = pet.face * 2.2;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(p.x, p.y);
+  const px = (dx: number, dy: number): Pt => ({ x: dx * s, y: dy * s });
+
+  const a = pawCycle(pet.phase);
+  const b = pawCycle(pet.phase + 0.5);
+  const bob = -Math.cos(pet.phase * 4 * Math.PI) * 0.95;
+  const wag = Math.sin(t * WAG_HZ * Math.PI * 2);
+  const lag = -Math.cos((pet.phase - 0.055) * 4 * Math.PI) * 0.95;
+
+  /** A straight leg seen end-on: only the lift and a little lateral sway of the stride survive the
+   *  foreshortening — the reach itself points along the view axis and vanishes. */
+  const leg = (x: number, c: { x: number; lift: number }, w: number, far = false): void => {
+    const hip = px(x + lean * 0.4, -9.2 + bob * 0.4);
+    const foot = px(x * (1 + 0.12 * c.x) + lean * 0.4, -(c.lift * GAIT_LIFT + 0.5));
+    ctx.strokeStyle = far ? DOG.furFar : DOG.fur;
+    ctx.lineWidth = w * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(hip.x, hip.y);
+    ctx.lineTo(foot.x, foot.y);
+    ctx.stroke();
+    ellipse(ctx, foot, w * 0.56 * s, w * 0.42 * s, far ? DOG.furFar : DOG.cream);
+  };
+  /** The tail, end-on: base hidden by the body, the cream tip swinging wide of the rump. */
+  const tail = (): void => {
+    const bx = (pet.flip ? -1 : 1) * 1.6 + lean;
+    const base = px(bx, -14 + bob);
+    const mid = px(bx + wag * 1.4, -18.5 + bob);
+    const tip = px(bx + wag * 3, -21.5 + bob);
+    ctx.strokeStyle = DOG.patch;
+    ctx.lineWidth = 2.6 * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(base.x, base.y);
+    ctx.quadraticCurveTo(mid.x, mid.y, tip.x, tip.y);
+    ctx.stroke();
+    ctx.strokeStyle = DOG.cream;
+    ctx.beginPath();
+    ctx.moveTo((mid.x + tip.x) / 2, (mid.y + tip.y) / 2);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.stroke();
+  };
+  /** The head, straight on (or from behind). Both ears show; the away view is all crown patch. */
+  const head = (): void => {
+    const hx = lean * 1.6;
+    const hy = -21 + lag;
+    // both floppy ears, hanging off the sides of the skull
+    for (const ex of [-4.6, 4.6]) {
+      ellipse(ctx, px(hx + ex, hy - 0.6), 1.9 * s, 3.5 * s, DOG.patch);
+      if (toward) ellipse(ctx, px(hx + ex * 0.98, hy - 0.4), 0.9 * s, 2 * s, DOG.earIn);
+    }
+    ellipse(ctx, px(hx, hy), 5.2 * s, 5 * s, DOG.fur);
+    ctx.save();
+    ctx.beginPath();
+    const skull = px(hx, hy);
+    ctx.ellipse(skull.x, skull.y, 5.2 * s, 5 * s, 0, 0, Math.PI * 2);
+    ctx.clip();
+    if (toward) {
+      // the one-sided eye patch, same side the profile wears it
+      ellipse(ctx, px(hx + (pet.flip ? -1.9 : 1.9), hy - 1.3), 2.9 * s, 3.5 * s, DOG.patch);
+    } else {
+      // back of the head: the patch saddles the whole crown and there is no face to draw
+      ellipse(ctx, px(hx, hy - 1.2), 4.5 * s, 4.2 * s, DOG.patch);
+    }
+    ctx.restore();
+    if (!toward) return;
+    ellipse(ctx, px(hx, hy + 2.6), 3.2 * s, 2.2 * s, DOG.cream); // muzzle, dead centre
+    ellipse(ctx, px(hx + 0.4, hy + 4.6), 1.2 * s, 1 * s, DOG.tongue);
+    ellipse(ctx, px(hx, hy + 1.7), 1.25 * s, 1 * s, DOG.nose);
+    for (const ex of [-2.1, 2.1]) {
+      ellipse(ctx, px(hx + ex, hy - 1), 1.35 * s, 1.5 * s, DOG.cream);
+      ellipse(ctx, px(hx + ex, hy - 1), 0.85 * s, 1 * s, DOG.eye);
+      ellipse(ctx, px(hx + ex + 0.3, hy - 1.4), 0.3 * s, 0.3 * s, '#ffffff');
+    }
+  };
+  /** The barrel: rounder than the profile's side view, with the same shade/highlight roundness pass. */
+  const body = (): void => {
+    const by = -12.5 + bob;
+    ellipse(ctx, px(lean, by), 7.2 * s, 6.2 * s, DOG.fur);
+    ctx.save();
+    ctx.beginPath();
+    const c = px(lean, by);
+    ctx.ellipse(c.x, c.y, 7.2 * s, 6.2 * s, 0, 0, Math.PI * 2);
+    ctx.clip();
+    if (toward) {
+      ellipse(ctx, px(lean - 2.6, by - 2.2), 3.2 * s, 3.4 * s, DOG.patch); // shoulder patch
+      ellipse(ctx, px(lean + 0.6, by + 2.4), 3.2 * s, 3.2 * s, DOG.cream); // chest blaze
+    } else {
+      ellipse(ctx, px(lean + 0.4, by - 1.6), 4.6 * s, 4.2 * s, DOG.patch); // the saddle over the back
+      ellipse(ctx, px(lean - 3.6, by + 1.4), 2 * s, 2.6 * s, DOG.patch);
+    }
+    ellipse(ctx, px(lean, by + 4), 7.6 * s, 3.6 * s, 'rgba(88, 62, 40, 0.16)');
+    ellipse(ctx, px(lean - 0.8, by - 3.6), 5.6 * s, 2.8 * s, 'rgba(255, 252, 243, 0.3)');
+    ctx.restore();
+  };
+  const collar = (): void => {
+    ellipse(ctx, px(lean, -17 + bob), 4.3 * s, 1.35 * s, DOG.collar);
+    if (toward) ellipse(ctx, px(lean + 0.6, -15.6 + bob), 1 * s, 1.1 * s, DOG.tag);
+  };
+
+  if (toward) {
+    tail(); // far side, peeking over the rump
+    leg(-4.4, a, 2.4, true);
+    leg(4.4, b, 2.4, true);
+    body();
+    leg(-2.5, b, 2.9);
+    leg(2.5, a, 2.9);
+    collar();
+    head();
+  } else {
+    head(); // beyond the body, so the shoulders overlap its chin
+    collar();
+    leg(-4.4, b, 2.4, true);
+    leg(4.4, a, 2.4, true);
+    body();
+    leg(-2.5, a, 2.9);
+    leg(2.5, b, 2.9);
+    tail(); // nearest the camera — over everything
   }
   ctx.restore();
 }

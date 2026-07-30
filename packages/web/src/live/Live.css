@@ -794,8 +794,10 @@
   transition: opacity var(--lc-med) var(--lc-ease);
 }
 .lc-gl-label__name {
-  padding: 1.5px 7px;
-  border-radius: 5.5px;
+  padding: 1px 7px;
+  /* A pill, not a card (nick, 2026-07-29: "slightly smaller and more rounded corners") — full-round
+     ends read softer over the room than a cornered chip ever can. */
+  border-radius: 999px;
   /* A name chip rides on someone's head across a busy floor, so it stays the QUIET member of the
      paper family: paper, not a full card. Loud enough to read, never a row of labels competing with
      the room. */
@@ -808,7 +810,7 @@
   background: color-mix(in srgb, var(--lc-paper) 84%, transparent);
   border: 1px solid var(--lc-paper-rim);
   font-family: var(--font-mono, monospace);
-  font-size: 10.5px;
+  font-size: 9.5px;
   font-weight: 600;
   letter-spacing: -0.015em;
   color: var(--lc-paper-ink);
@@ -866,8 +868,18 @@
   max-width: 260px;
   padding: 7px 11px 8px;
   border-radius: 13px;
-  background: linear-gradient(180deg, var(--lc-paper) 0%, var(--lc-paper-2) 100%);
-  /* No backdrop-filter. It was here to buy contrast for a translucent dark bubble; opaque paper
+  /* Slightly glassy paper (nick, 2026-07-29: "slightly transparent and visually rich"): the stock
+     drops to ~88% so the room ghosts through a bubble that hovers over it, and each tier of the
+     gradient carries a whisper of the act's tone — the top edge blushes with the tone, the body
+     stays paper. Held well above the nameplates' 84%: a bubble carries five lines of text and
+     cannot afford the wash-out a chip can. */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, color-mix(in srgb, var(--lc-paper) 88%, var(--lc-speech-tone)) 90%, transparent) 0%,
+    color-mix(in srgb, var(--lc-paper) 89%, transparent) 34%,
+    color-mix(in srgb, var(--lc-paper-2) 87%, transparent) 100%
+  );
+  /* No backdrop-filter. It was here to buy contrast for a translucent dark bubble; near-opaque paper
      needs none — and this element renders on the /broadcast 1920x1080 30fps capture, where a blur
      is a per-frame GPU readback forever (the same rule the reel card block states). */
   /* The act's tone owns the ring, and it is now a FULL-strength ring rather than a half-alpha
@@ -876,6 +888,7 @@
      is what actually separates the stock from the floor — see the lift tokens. */
   box-shadow:
     inset 0 1px 0 var(--lc-paper-sheen),
+    inset 0 0 16px -6px color-mix(in srgb, var(--lc-speech-tone) 30%, transparent),
     0 0 0 1.5px color-mix(in srgb, var(--lc-speech-tone) 80%, var(--lc-paper-rim)),
     0 2px 3px -1px var(--lc-paper-seat),
     0 9px 22px -8px var(--lc-paper-drop),

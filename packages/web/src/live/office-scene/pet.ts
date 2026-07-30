@@ -70,6 +70,14 @@ export interface PetState {
    */
   faceMag: number;
   /**
+   * Which way the depth-wise part of the heading points: +1 walking down-screen (toward the camera),
+   * −1 up-screen (away). Only meaningful while `faceMag` is low — it is what lets the painter draw a
+   * *face* or a *rump* on the narrow figure instead of holding the profile sliver (the "piece of
+   * paper" read, nick 2026-07-29). Sticky: it keeps its last decisive value through the ambiguous
+   * moments, so the toward/away view never flutters mid-diagonal.
+   */
+  depthSign: 1 | -1;
+  /**
    * Ground speed right now, logical units/s — eased toward `speed`, not set to it. A dog does not
    * leave a nap at trotting pace or arrive at one still trotting: it winds up out of the stretch and
    * winds down into the last stride. Gait phase advances from THIS, so the legs turn over slower
@@ -213,6 +221,7 @@ export function createPet(rng: () => number = Math.random): PetState {
     flip: false,
     face: 1,
     faceMag: 1,
+    depthSign: 1,
     vel: 0,
     path: [],
     seg: 0,
@@ -526,6 +535,9 @@ export function stepPet(pet: PetState, dt: number): boolean {
         const vx = (dx - dy) * KX;
         const vy = (dx + dy) * KY;
         pet.faceMag = Math.max(MIN_FACE, Math.abs(vx) / (Math.hypot(vx, vy) || 1));
+        // Toward or away? Committed only when the vertical component clearly dominates the noise —
+        // the same deadband idea as FACE_COMMIT, so the front/back view can't flutter.
+        if (Math.abs(vy) > 0.3 * (Math.hypot(vx, vy) || 1)) pet.depthSign = vy > 0 ? 1 : -1;
         travel -= step;
         if (step >= d) pet.seg++;
       }
