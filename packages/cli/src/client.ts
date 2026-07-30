@@ -842,8 +842,12 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
     if (raw.type === 'occupied' || raw.type === 'refused' || raw.type === 'pending') {
       const o = parseClaimResponse(raw);
       if (o.state === 'occupied') {
-        opts.onOccupied?.(o.seat, o.presenceId, o.grant, o.memory);
+        // Subscribe FIRST, then hand control to the caller. The order is load-bearing: a caller that
+        // reconciles durable state in `onOccupied` (as `inbox --wait` does, to close the drain/socket
+        // startup gap — ADR 054) must run that reconciliation against a socket that is already
+        // subscribed, or anything landing in between is missed by both paths.
         subscribe();
+        opts.onOccupied?.(o.seat, o.presenceId, o.grant, o.memory);
       } else if (o.state === 'refused') {
         opts.onRefused?.(o.code, o.message, o.claimable, o.hint);
       } else {
