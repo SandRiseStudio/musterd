@@ -10,9 +10,14 @@ The **universal harness adapter**. One MCP (stdio) server exposing **eighteen to
 - `@musterd/protocol` for envelope/act validation (identical rules to server + CLI).
 - Same `client.ts` HTTP/WS approach as the CLI (consider extracting a shared `@musterd/protocol`-level client; if you do, ADR it).
 
-**Harness identity and model attestation (ADR 120).** Once MCP initialization completes, the adapter
-retains the SDK's bounded `clientInfo.name`/`version` as local diagnostic context and emits it on its
-initialization telemetry. It never treats client identity as model truth or forwards it in an Envelope.
+**Harness identity and model attestation (ADR 120, both protocol eras).** The adapter retains a
+bounded `clientInfo.name`/`version` as local diagnostic context and emits it on its initialization
+telemetry — captured from whichever seam the connected era offers: a legacy client's `initialize`
+handshake (`oninitialized` fires), or — under the stateless 2026-07-28 protocol, which never sends
+`initialize` — the per-request `_meta['io.modelcontextprotocol/clientInfo']` read once at the
+tools/call seam (`observeHarnessRequests`, with the SDK's per-request-backfilled
+`getClientVersion()` as fallback). First capture wins. It never treats client identity as model
+truth or forwards it in an Envelope.
 The existing declaration ladder remains `MUSTERD_MODEL` → `ANTHROPIC_MODEL` → local
 `binding.json` model → `unknown`; an unknown declaration is usable but writes one warn-level
 adapter-start diagnostic and appears as a warn-only `musterd init --check` note for a live seat.
