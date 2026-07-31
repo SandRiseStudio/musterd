@@ -8,9 +8,11 @@ import {
   captureSession,
   LABEL_SWEEP_STALE_MS,
   labelSweepDue,
+  lookupCcdMeta,
   OBSERVATION_REFRESH_MS,
   refreshModelObservation,
   resolveLabels,
+  scanCcd,
   sessionCommand,
   stampLabelSweep,
 } from './session.js';
@@ -963,5 +965,54 @@ describe('musterd session label-nudge (evidence-based due)', () => {
     stampLabelSweep(NOW, env());
     const rec = JSON.parse(readFileSync(stampPath, 'utf8')) as { swept_at: number };
     expect(rec.swept_at).toBe(NOW);
+  });
+
+  // #538 review / lane 01KYWGMXYY: labelSweepDue walked+parsed the CCD tree twice.
+  it('resolveLabels reuses a handed ccdIndex (does not re-read the CCD dir)', () => {
+    const index = new Map([['s1', { titleSource: 'user' as const, createdAt: NOW - 3_600_000 }]]);
+    const res = resolveLabels([{ sessionId: 's1', title: 'hand words', cwd: seatWs }], {
+      now: NOW,
+      env: { MUSTERD_CCD_SESSIONS_DIR: join(ccdDir, 'absent') },
+      ccdIndex: index,
+    });
+    expect(res.apply).toEqual([]);
+    expect(res.skipped).toEqual({ 'hand-named': 1 });
+  });
+
+  it('scanCcd returns rows and index from one walk', () => {
+    writeCcd('s1', {
+      sessionId: 'local_s1',
+      cliSessionId: 'cli-s1',
+      title: 'Needs chip',
+      cwd: seatWs,
+      createdAt: NOW - 3_600_000,
+      titleSource: 'auto',
+      isArchived: false,
+    });
+    const scan = scanCcd(ccdDir);
+    expect(scan).not.toBeNull();
+    expect(scan!.rows).toHaveLength(1);
+    expect(scan!.rows[0]!.sessionId).toBe('cli-s1');
+    expect(scan!.index.get('cli-s1')?.titleSource).toBe('auto');
+    expect(scan!.index.get('local_s1')?.titleSource).toBe('auto');
+    expect(labelSweepDue(NOW, env())).toBe(true);
+  });
+
+  // Latent forever-loop: no-index lookup used to skip the local_ fallback.
+  it('lookupCcdMeta without an index still finds via local_ prefix fallback', () => {
+    const proj = join(ccdDir, 'org', 'proj');
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(
+      join(proj, 'local_file-stem.json'),
+      JSON.stringify({
+        sessionId: 'local_file-stem',
+        cliSessionId: 'cli-other',
+        createdAt: NOW - 3_600_000,
+        titleSource: 'user',
+      }),
+    );
+    // Look up by stem without the local_ prefix — index branch and no-index branch must agree.
+    expect(lookupCcdMeta(ccdDir, 'file-stem').titleSource).toBe('user');
+    expect(lookupCcdMeta(ccdDir, 'cli-other').titleSource).toBe('user');
   });
 });
