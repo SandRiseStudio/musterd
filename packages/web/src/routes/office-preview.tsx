@@ -46,19 +46,19 @@ const POOL: Mock[] = [
 
 /**
  * Harness + model per fixture member. Deliberately varied, including a long id and a `null` model:
- * the nameplate's second line has to survive both the widest label it will ever see and the seat
- * that has nothing to report, and neither case is reachable if every fixture member is identical.
+ * the nameplate's provider icon + expand detail have to survive both the widest label it will ever
+ * see and the seat that has nothing to report.
  */
-const FIXTURE_IDENTITY: Record<string, { surface: string; model: string | null }> = {
-  Ada: { surface: 'claude-code', model: 'claude-opus-4-5' },
+const FIXTURE_IDENTITY: Record<string, { surface: string; model: string | null; role?: string }> = {
+  Ada: { surface: 'claude-code', model: 'claude-opus-5', role: 'lead' },
   Bo: { surface: 'cursor', model: 'claude-sonnet-4-5' },
-  Cy: { surface: 'codex', model: 'gpt-5.6-codex-max' },
+  Cy: { surface: 'codex', model: 'gpt-5.6-terra-medium' },
   Dev: { surface: 'cli', model: null },
-  Eli: { surface: 'claude-code', model: 'claude-haiku-4-5-20251001' },
+  Eli: { surface: 'claude-code', model: 'gemini-3.2-pro' },
   Fen: { surface: 'web', model: 'grok-4.5' },
-  Gus: { surface: 'slack', model: null },
-  Hana: { surface: 'claude-code', model: 'claude-opus-4-5' },
-  Ivy: { surface: 'cursor', model: 'claude-sonnet-4-5' },
+  Gus: { surface: 'slack', model: 'llama-4-maverick' },
+  Hana: { surface: 'claude-code', model: 'deepseek-v4-pro' },
+  Ivy: { surface: 'cursor', model: 'mistral-large-3', role: 'design' },
 };
 
 // A looping choreography script (ms offset → event), so the room is always alive on the preview.
@@ -264,9 +264,9 @@ function OfficePreviewPage() {
           posture,
           state: m.state,
           color: memberColor(m.name, m.kind),
-          role: '',
-          // Varied identity, so the preview actually exercises the nameplate's second line and its
-          // truncation. These were `null` while the plate carried harness · model, which meant the
+          role: FIXTURE_IDENTITY[m.name]?.role ?? '',
+          // Varied identity, so the preview actually exercises the nameplate's provider icon and its
+          // expand detail. These were `null` while the plate carried harness · model, which meant the
           // one surface for eyeballing a nameplate could never render one.
           surface: FIXTURE_IDENTITY[m.name]?.surface ?? 'claude-code',
           // Read the entry, not `?? default` — an explicit `model: null` IS the case worth showing
@@ -299,7 +299,7 @@ function OfficePreviewPage() {
     import('../live/office-scene')
       .then(({ mountOffice }) => {
         if (disposed || !host || !labelHost) return;
-        const handle = mountOffice(host, labelHost, false);
+        const handle = mountOffice(host, labelHost, false, { interactiveLabels: true });
         handle.update(dataRef.current());
         handleRef.current = handle;
         (window as unknown as { __office?: OfficeHandle }).__office = handle; // dev-fixture debug handle
