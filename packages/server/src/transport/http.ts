@@ -125,6 +125,7 @@ import { unblockerReachable } from '../store/reachability.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import {
   claimWakeLeases,
+  effectiveWakePolicy,
   enrollResidency,
   getResidency,
   listResidency,
@@ -138,6 +139,9 @@ import {
   memberModelByName,
   pickHumanReviewer,
   pickReviewCounterpart,
+  pickWakeReviewer,
+  REVIEW_LOOP_BREAKER_N,
+  reviewLoopBounceCount,
   teamFamilyPosture,
   verifiedCloses,
   workerFamily,
@@ -2430,7 +2434,62 @@ export async function handleHttp(
             lane.risk.length > 0 && !peerPick
               ? pickHumanReviewer(ctx.db, team.id, worker, ctx.config.presenceTimeoutMs)
               : null;
-          const pick = peerPick ?? humanFallback;
+          let pick = peerPick ?? humanFallback;
+          let wakeQueued = false;
+          let breakerTripped = false;
+          // ADR 191: when nobody live is eligible, try a marked-wakeable offline seat — only if the
+          // review loop is enabled AND that seat is flow:auto AND the circuit breaker has not tripped.
+          const teamPolicy = getPolicy(ctx.db, team.id);
+          const posture = pick
+            ? undefined
+            : teamFamilyPosture(ctx.db, team.id, ctx.config.presenceTimeoutMs);
+          if (!pick && lane.risk.length === 0 && posture) {
+            if (reviewLoopBounceCount(ctx.db, team.id, lane.id) >= REVIEW_LOOP_BREAKER_N) {
+              breakerTripped = true;
+              const human = pickHumanReviewer(
+                ctx.db,
+                team.id,
+                worker,
+                ctx.config.presenceTimeoutMs,
+              );
+              if (human) {
+                pick = human;
+                deliverLaneAskAct(
+                  ctx,
+                  team,
+                  member,
+                  human.reviewer,
+                  `[lane] review loop breaker: "${lane.title}" bounced ${String(REVIEW_LOOP_BREAKER_N)}+ times — decide (confirm or send back)`,
+                  {
+                    species: 'approve',
+                    tier: 'blocking',
+                    lane_review: {
+                      lane: lane.id,
+                      title: lane.title,
+                      branch: lane.branch,
+                      ...(lane.merged ? { merged: lane.merged } : {}),
+                      route: human.route,
+                      grade: human.grade,
+                      breaker: true,
+                    },
+                  },
+                );
+              }
+            } else if (teamPolicy.loops?.review === true) {
+              const wakePick = pickWakeReviewer(ctx.db, team.id, worker, posture);
+              if (wakePick) {
+                const wakeMember = getMemberByName(ctx.db, team.id, wakePick.reviewer);
+                const enrollment = wakeMember ? getResidency(ctx.db, team.id, wakeMember.id) : null;
+                const seatPolicy = enrollment
+                  ? effectiveWakePolicy(teamPolicy.residency, enrollment.policy)
+                  : null;
+                if (seatPolicy?.flow === 'auto') {
+                  pick = wakePick;
+                  wakeQueued = true;
+                }
+              }
+            }
+          }
           // Record the ROUTING OUTCOME here, where it is known. Without it the close edge can only
           // see "this lane passed through review" and calls every owner-close a `review_timeout` —
           // asserting a question was asked and went unanswered, when on a fleet with no eligible
@@ -2444,9 +2503,8 @@ export async function handleHttp(
           // ADR 172: when nobody is eligible, record WHY nobody was — the derived family posture.
           // Without it a run of no_candidate rows says "the pool was empty" but not what the pool
           // looked like, and the remedy (wake an enrolled seat vs. enroll one) is undecidable later.
-          const posture = pick
-            ? undefined
-            : teamFamilyPosture(ctx.db, team.id, ctx.config.presenceTimeoutMs);
+          // Keep posture on wake_queued / breaker rows too — the remedy list still matters.
+          const postureForAudit = pick && !wakeQueued && !breakerTripped ? undefined : posture;
           appendAudit(ctx.db, team.id, {
             actor: member.name,
             action: 'lane.ready_for_review',
@@ -2459,8 +2517,17 @@ export async function handleHttp(
               // ADR 188: the achieved rung of the diversity ladder rides beside the historical
               // two-value route, so a cross_model routing is never mistaken for a cross_family one.
               ...(pick
-                ? { reviewer: pick.reviewer, route: pick.route, review_grade: pick.grade }
-                : { no_candidate: true }),
+                ? {
+                    reviewer: pick.reviewer,
+                    route: pick.route,
+                    review_grade: pick.grade,
+                    ...(wakeQueued ? { wake_queued: true } : {}),
+                    ...(breakerTripped ? { breaker_tripped: true } : {}),
+                  }
+                : {
+                    no_candidate: true,
+                    ...(breakerTripped ? { breaker_tripped: true } : {}),
+                  }),
               // ADR 188: how the human requirement will be met — 'gated' (fires on the peer's
               // accept) vs 'immediate' (no peer existed). Absent on non-risky lanes.
               ...(humanRequired && pick
@@ -2471,19 +2538,19 @@ export async function handleHttp(
               // row — which is what forced the read to serve a legacy row as a confident no. With
               // the boolean always present, absence means exactly "legacy", and the read can abstain.
               human_required: humanRequired,
-              ...(posture
+              ...(postureForAudit
                 ? {
                     family_posture: {
-                      state: posture.state,
-                      attesting: posture.attesting,
-                      families: posture.families,
-                      wake_pool: posture.wake_pool.length,
+                      state: postureForAudit.state,
+                      attesting: postureForAudit.attesting,
+                      families: postureForAudit.families,
+                      wake_pool: postureForAudit.wake_pool.length,
                     },
                   }
                 : {}),
             },
           });
-          if (pick) {
+          if (pick && !breakerTripped) {
             deliverLaneAskAct(
               ctx,
               team,
@@ -2511,12 +2578,27 @@ export async function handleHttp(
               route: pick.route,
               grade: pick.grade,
               tier: humanRequired && pick.grade === 'human' ? 'blocking' : 'standard',
+              ...(wakeQueued
+                ? {
+                    wake_queued: true,
+                    wait_ms: teamPolicy.residency.work_timeout_ms,
+                  }
+                : {}),
               ...(humanRequired
                 ? {
                     human_review_required: true,
                     human_ask: pick.grade === 'human' ? 'immediate' : 'gated',
                   }
                 : {}),
+            };
+          } else if (pick && breakerTripped) {
+            // Breaker already delivered the blocking human ask above.
+            review = {
+              reviewer: pick.reviewer,
+              route: pick.route,
+              grade: pick.grade,
+              tier: 'blocking',
+              breaker_tripped: true,
             };
           } else if (humanRequired) {
             // ADR 172: a risky lane with no live human/admin. NOT the sanctioned self-close — the
@@ -2536,6 +2618,7 @@ export async function handleHttp(
             // woken to change it (ADR 172). One bounded line — this lands in the worker's context.
             review = {
               self_close_sanctioned: true,
+              ...(breakerTripped ? { breaker_tripped: true } : {}),
               ...(posture
                 ? { family_posture: posture, posture_hint: describeFamilyPosture(posture) }
                 : {}),

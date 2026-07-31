@@ -522,3 +522,86 @@ describe('ping-pong demotion (ADR 131 §4, landed inc 5)', () => {
     expect(orders[0]!.lane).toBe('immediate');
   });
 });
+
+describe('claimWakeLeases — work_order derivation (ADR 191 review loop)', () => {
+  it('leases a seat-policy work_order for an unanswered lane_review ask when loops.review + flow:auto', async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { review: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    const lane = openLane(db, team.id, team.slug, nick.name, {
+      title: 'a change',
+      claim: true,
+    });
+    updateLane(db, team.id, lane.id, team.slug, { state: 'ready_for_review' });
+    msg(db, team, nick, ada, 'ask', 'ask1', 1_000, {
+      meta: {
+        species: 'approve',
+        tier: 'standard',
+        lane_review: {
+          lane: lane.id,
+          title: lane.title,
+          route: 'cross_family',
+          grade: 'cross_model',
+        },
+      },
+    });
+
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({
+      seat: 'Ada',
+      act_id: 'ask1',
+      derivation: 'work_order',
+      lane_id: lane.id,
+      tool_policy: 'seat-policy',
+    });
+    expect(orders[0]!.bounds?.timeout_ms).toBe(WAKE_POLICY_DEFAULTS.work_timeout_ms);
+    expect(orders[0]!.composed_line).toContain(lane.id);
+    expect(orders[0]!.composed_line).not.toContain(lane.title);
+    const leased = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_leased');
+    expect(JSON.parse(leased[0]!.detail as string)).toMatchObject({
+      derivation: 'work_order',
+      lane_id: lane.id,
+    });
+  });
+
+  it('does not derive work_order when loops.review is off (launch default)', async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    const lane = openLane(db, team.id, team.slug, nick.name, {
+      title: 'a change',
+      claim: true,
+    });
+    updateLane(db, team.id, lane.id, team.slug, { state: 'ready_for_review' });
+    msg(db, team, nick, ada, 'ask', 'ask1', 1_000, {
+      meta: {
+        species: 'approve',
+        tier: 'standard',
+        lane_review: { lane: lane.id },
+      },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('does not derive work_order when the seat is flow:manual', async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { review: true } });
+    enroll(db, team, ada, HOST, { flow: 'manual' });
+    const lane = openLane(db, team.id, team.slug, nick.name, {
+      title: 'a change',
+      claim: true,
+    });
+    updateLane(db, team.id, lane.id, team.slug, { state: 'ready_for_review' });
+    msg(db, team, nick, ada, 'ask', 'ask1', 1_000, {
+      meta: {
+        species: 'approve',
+        tier: 'standard',
+        lane_review: { lane: lane.id },
+      },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+});

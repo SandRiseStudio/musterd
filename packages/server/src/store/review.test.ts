@@ -316,3 +316,93 @@ describe('pickReviewCounterpart — graded ladder (ADR 188)', () => {
     expect(p).toMatchObject({ reviewer: 'nick', grade: 'human' });
   });
 });
+
+describe('pickWakeReviewer (ADR 191)', () => {
+  function wentOffline(
+    db: ReturnType<typeof seed>['db'],
+    team: ReturnType<typeof seed>['team'],
+    name: string,
+    model: string,
+    enrolled = true,
+  ): void {
+    const { row } = addMember(db, team, { kind: 'agent', name, role: '' });
+    db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+       VALUES (?, ?, ?, NULL, 'occupancy.model_attested', ?, 'allow', ?, ?)`,
+    ).run(
+      `a-${name}`,
+      team.id,
+      Date.now() - 3_600_000,
+      name,
+      JSON.stringify({ old: null, new: model, source: 'claim' }),
+      Date.now() - 3_600_000,
+    );
+    if (enrolled) {
+      enrollResidency(db, team.id, {
+        member_id: row.id,
+        harness: 'claude-code',
+        host: 'h',
+        grant_id: 'g',
+        authorized_by: 'nick',
+      });
+    }
+  }
+
+  it('picks a wakeable cross_family idle seat over a wakeable cross_model one', async () => {
+    const { pickWakeReviewer } = await import('./review.js');
+    const { db, team } = seed();
+    agent(db, team, 'worker', 'claude-opus-5');
+    wentOffline(db, team, 'dolly', 'claude-opus-4-8');
+    wentOffline(db, team, 'gptbot', 'gpt-5.6-sol');
+    const posture = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(pickWakeReviewer(db, team.id, 'worker', posture)).toMatchObject({
+      reviewer: 'gptbot',
+      grade: 'cross_family',
+    });
+  });
+
+  it('skips not_enrolled seats even when they would restore family diversity', async () => {
+    const { pickWakeReviewer } = await import('./review.js');
+    const { db, team } = seed();
+    agent(db, team, 'worker', 'claude-opus-5');
+    agent(db, team, 'twin', 'claude-opus-5'); // monoculture live
+    wentOffline(db, team, 'grokbot', 'grok-4.5', false);
+    const posture = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(pickWakeReviewer(db, team.id, 'worker', posture)).toBeNull();
+  });
+
+  it('never routes same_model from the wake pool', async () => {
+    const { pickWakeReviewer } = await import('./review.js');
+    const { db, team } = seed();
+    agent(db, team, 'worker', 'claude-opus-5');
+    wentOffline(db, team, 'twin', 'claude-opus-5');
+    const posture = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(pickWakeReviewer(db, team.id, 'worker', posture)).toBeNull();
+  });
+});
+
+describe('reviewLoopBounceCount (ADR 191)', () => {
+  it('counts prior ready_for_review audit rows for the lane', async () => {
+    const { reviewLoopBounceCount, REVIEW_LOOP_BREAKER_N } = await import('./review.js');
+    const { appendAudit } = await import('./audit.js');
+    const { db, team } = seed();
+    expect(REVIEW_LOOP_BREAKER_N).toBe(3);
+    expect(reviewLoopBounceCount(db, team.id, 'lane-1')).toBe(0);
+    appendAudit(db, team.id, {
+      actor: 'ada',
+      action: 'lane.ready_for_review',
+      target: 'lane-1',
+      result: 'allow',
+      detail: { lane: 'lane-1' },
+    });
+    appendAudit(db, team.id, {
+      actor: 'ada',
+      action: 'lane.ready_for_review',
+      target: 'lane-1',
+      result: 'allow',
+      detail: { lane: 'lane-1' },
+    });
+    expect(reviewLoopBounceCount(db, team.id, 'lane-1')).toBe(2);
+    expect(reviewLoopBounceCount(db, team.id, 'other')).toBe(0);
+  });
+});
