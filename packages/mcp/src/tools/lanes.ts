@@ -229,15 +229,43 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     },
   );
 
+  const laneSubmitHandler = async (args: {
+    id: string;
+    pr?: number | undefined;
+    sha?: string | undefined;
+    authorized_by?: string | undefined;
+  }) => {
+    try {
+      const merged = {
+        ...(args.pr !== undefined ? { pr: args.pr } : {}),
+        ...(args.sha !== undefined ? { sha: args.sha } : {}),
+        ...(args.authorized_by !== undefined ? { authorized_by: args.authorized_by } : {}),
+      };
+      const { lane, warnings, review } = await client.updateLane(args.id, {
+        state: 'awaiting_acceptance',
+        ...(Object.keys(merged).length ? { merged } : {}),
+      });
+      const hint = review?.reviewer
+        ? `\n\nacceptance asked of ${review.reviewer} (${review.route}) — wait ≤5m; ` +
+          `accept closes the lane, reject resumes it; on silence, lane_resolve yourself ` +
+          `(recorded unconfirmed). Acceptor judges intent/principles/usable/feel — not the diff.`
+        : `\n\nno eligible acceptor is live — self-close sanctioned: ` +
+          `lane_resolve when ready (recorded unconfirmed).`;
+      return laneResult('lane submitted for acceptance', lane, warnings, hint);
+    } catch (err) {
+      return errorResult(err);
+    }
+  };
+
   server.registerTool(
-    'lane_ready',
+    'lane_submit',
     {
       description:
-        'Your work is technically complete — move the lane to ready_for_review (ADR 169) and ' +
-        'attest the landed merge here (pr/sha/authorized_by). musterd asks a counterpart from a ' +
-        'DIFFERENT model family to confirm before the lane is done. Then: wait ≤5m — a confirm ' +
-        'closes the lane, a send-back returns it to active; on silence, lane_resolve yourself ' +
-        '(recorded unverified, sanctioned). The surface stays yours until the close.',
+        'Your work is technically complete and merged — move the lane to awaiting_acceptance (ADR 192) ' +
+        'and attest the landed merge (pr/sha/authorized_by). This is OUTCOME ACCEPTANCE, not a code ' +
+        'review: musterd asks an acceptor to judge intent/principles/usable/feel of the landed ' +
+        'artifact. Wait ≤5m — accept closes the lane, reject returns it to active; on silence, ' +
+        'lane_resolve yourself (recorded unconfirmed, sanctioned). Auto-merge first; then submit.',
       inputSchema: {
         id: z.string().describe('lane id'),
         pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
@@ -248,28 +276,27 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           .describe('the human whose authority the merge ran under'),
       },
     },
-    async (args) => {
-      try {
-        const merged = {
-          ...(args.pr !== undefined ? { pr: args.pr } : {}),
-          ...(args.sha !== undefined ? { sha: args.sha } : {}),
-          ...(args.authorized_by !== undefined ? { authorized_by: args.authorized_by } : {}),
-        };
-        const { lane, warnings, review } = await client.updateLane(args.id, {
-          state: 'ready_for_review',
-          ...(Object.keys(merged).length ? { merged } : {}),
-        });
-        const hint = review?.reviewer
-          ? `\n\nreview asked of ${review.reviewer} (${review.route}) — standard tier: wait ≤5m; ` +
-            `a confirm closes the lane, a send-back resumes it; on silence, lane_resolve yourself ` +
-            `(recorded unverified).`
-          : `\n\nno eligible cross-family counterpart is live — self-close sanctioned: ` +
-            `lane_resolve when ready (recorded unverified).`;
-        return laneResult('lane ready for review', lane, warnings, hint);
-      } catch (err) {
-        return errorResult(err);
-      }
+    laneSubmitHandler,
+  );
+
+  // Deprecated alias for lane_submit (ADR 192) — keep registered so older sessions/harness memory work.
+  server.registerTool(
+    'lane_ready',
+    {
+      description:
+        'Deprecated alias for lane_submit (ADR 192). Prefer lane_submit — same outcome-acceptance ' +
+        'stage after merge; not a code review.',
+      inputSchema: {
+        id: z.string().describe('lane id'),
+        pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
+        sha: z.string().optional().describe('squash-merge SHA on main'),
+        authorized_by: z
+          .string()
+          .optional()
+          .describe('the human whose authority the merge ran under'),
+      },
     },
+    laneSubmitHandler,
   );
 
   server.registerTool(
@@ -279,7 +306,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         'Mark a lane done — clears its warnings and releases its surface. If its branch landed, ' +
         'attest the merge: pass pr, sha, and authorized_by so the audit log joins your seat to ' +
         'the landed SHA and the authorizing human. Landed without a PR? Omit pr and pass sha alone. ' +
-        'Prefer lane_ready first (ADR 169): resolving your own lane records an unverified close.',
+        'Prefer lane_submit first (ADR 192): resolving your own lane records an unconfirmed close.',
       inputSchema: {
         id: z.string().describe('lane id'),
         // `pr` is the PR *number*. Callers reached for `pr:"local"` to mean "merged without a PR";
@@ -305,11 +332,11 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           state: 'done',
           ...(Object.keys(merged).length ? { merged } : {}),
         });
-        // ADR 169 advisory nudge: closing your own lane is an unverified close — legal, honest,
-        // and worth one line. A counterpart closing someone else's lane confirms it; no nudge.
+        // ADR 192 advisory nudge: closing your own lane is an unconfirmed close — legal, honest,
+        // and worth one line. A counterpart closing someone else's lane accepts it; no nudge.
         const nudge =
           client.member && lane.owner_seat === client.member
-            ? '\n\nunverified close recorded — prefer lane_ready when a counterpart is live (ADR 169).'
+            ? '\n\nunconfirmed close recorded — prefer lane_submit when an acceptor is live (ADR 192).'
             : '';
         const hint = nudge + branchCleanupHint(lane);
         return laneResult('lane done', lane, warnings, hint || undefined);

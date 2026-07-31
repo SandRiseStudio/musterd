@@ -2992,7 +2992,7 @@ describe('two-stage close (ADR 169)', () => {
       ada,
     );
     expect(ready.status).toBe(200);
-    expect(ready.json.lane.state).toBe('ready_for_review');
+    expect(ready.json.lane.state).toBe('awaiting_acceptance');
     // Stage-one attestation persisted on the lane; not terminal (resolved_at unset).
     expect(ready.json.lane.merged).toEqual({ pr: 42, sha: 'abc123', authorized_by: 'nick' });
     expect(ready.json.lane.resolved_at).toBeNull();
@@ -3015,6 +3015,12 @@ describe('two-stage close (ADR 169)', () => {
     expect(ask.meta.tier).toBe('standard');
     expect(ask.meta.lane_review.lane).toBe(laneId);
     expect(ask.meta.lane_review.branch).toBe('ada/fix');
+    // ADR 192: ask body carries outcome-acceptance checklist (not "confirm or send back").
+    expect(ask.body).toContain('acceptance requested');
+    expect(ask.body).toContain('Intent');
+    expect(ask.body).toContain('Principles');
+    expect(ask.body).toContain('Usable');
+    expect(ask.body).toContain('Feel');
 
     // The audit recorded the worker's claim — and the achieved grade (ADR 188).
     const rows = await auditRows(nickTok, 'lane.ready_for_review');

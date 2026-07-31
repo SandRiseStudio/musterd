@@ -423,7 +423,7 @@ export const CATALOG: readonly CommandEntry[] = [
       '  report delivery [<id>]   the delivery ledger — open directed acts and who has seen/answered them\n' +
       '  report coordination      coordination health — density, time-to-unblock, ignored help, stalls\n' +
       '  report tools             the MCP tool surface — per-tool calls/bounces/latency + rendered weight\n' +
-      '  report review            two-stage close (ADR 169) — reviews routed, no-counterpart degradations, catches',
+      '  report review            outcome acceptance (ADR 192) — asks routed, no-counterpart degradations, rejects',
   },
   {
     name: 'board',

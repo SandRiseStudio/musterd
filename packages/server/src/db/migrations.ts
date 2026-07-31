@@ -511,6 +511,15 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // v27 — outcome acceptance rename (ADR 192). Rewrite live rows from the ADR 169 spelling
+    // `ready_for_review` to canonical `awaiting_acceptance`. No DDL: `state` is open TEXT.
+    // Audit action strings stay frozen (`lane.ready_for_review`, …) — do not rewrite history.
+    version: 27,
+    up: (db) => {
+      db.exec(`UPDATE lanes SET state = 'awaiting_acceptance' WHERE state = 'ready_for_review'`);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

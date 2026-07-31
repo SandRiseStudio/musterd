@@ -10,10 +10,11 @@ import { GoalSchema } from './goals.js';
 
 /**
  * Lane lifecycle. `open` = unowned (claimable); `blocked`/`abandoned` are side states.
- * `ready_for_review` (ADR 169) is the worker's "technically complete" claim — still contending
- * (the surface stays owned until a counterpart confirms), never terminal. `done` is the only
- * success-terminal state; verified-ness is *derived* from the closing act's author vs the owner
- * at close time (pinned in the `lane.closed` audit row), never stored.
+ * `awaiting_acceptance` (ADR 192; was `ready_for_review` in ADR 169) is the worker's "technically
+ * complete" claim after merge — still contending (the surface stays owned until a counterpart
+ * *accepts the outcome*), never terminal. `done` is the only success-terminal state; accepted-ness
+ * is *derived* from the closing act's author vs the owner at close time (pinned in the
+ * `lane.closed` audit row as `verified`), never stored.
  */
 /**
  * The unscoped project — what a lane opened outside a git repo carries, and what every lane opened
@@ -29,23 +30,38 @@ export const LaneStateSchema = z.enum([
   'claimed',
   'active',
   'blocked',
+  /** Canonical post-merge outcome-acceptance stage (ADR 192). */
+  'awaiting_acceptance',
+  /**
+   * Legacy alias for `awaiting_acceptance` (ADR 169 name). Dual-accepted for fleet skew; new writes
+   * use `awaiting_acceptance`. Prefer {@link isAwaitingAcceptance} over raw equality.
+   */
   'ready_for_review',
   'done',
   'abandoned',
 ]);
 export type LaneState = z.infer<typeof LaneStateSchema>;
 
+/** True when the lane is in the post-merge outcome-acceptance stage (ADR 192), either spelling. */
+export function isAwaitingAcceptance(state: string): boolean {
+  return state === 'awaiting_acceptance' || state === 'ready_for_review';
+}
+
+/** Canonical state to write when entering outcome acceptance (ADR 192). */
+export const AWAITING_ACCEPTANCE: LaneState = 'awaiting_acceptance';
+
 /**
  * The two semantic state sets (ADR 169 consolidation — previously three hand-kept copies across
  * store/transport/MCP, which a new state would have tripled into drift).
  * Contending: an owned/worked lane whose surface participates in overlap warnings and the ADR 150
- * Gate A edit-guard — includes `ready_for_review` (owned until confirmed). Terminal: the lane's
+ * Gate A edit-guard — includes outcome acceptance (owned until accepted). Terminal: the lane's
  * active life is over.
  */
 export const LANE_CONTENDING_STATES: ReadonlySet<LaneState> = new Set([
   'claimed',
   'active',
   'blocked',
+  'awaiting_acceptance',
   'ready_for_review',
 ]);
 export const LANE_TERMINAL_STATES: ReadonlySet<LaneState> = new Set(['done', 'abandoned']);
@@ -81,9 +97,9 @@ export const LaneSchema = z.object({
    */
   risk: z.array(z.string()).default([]),
   /**
-   * The worker's merge attestation, captured at `ready_for_review` (ADR 169) so the confirmer's
-   * close carries the *worker's* claim verbatim into `git.pr_merged`. Null until `lane_ready`;
-   * defaulted for older-daemon skew.
+   * The worker's merge attestation, captured at `awaiting_acceptance` (ADR 192 / formerly
+   * `ready_for_review`) so the acceptor's close carries the *worker's* claim verbatim into
+   * `git.pr_merged`. Null until `lane_submit`; defaulted for older-daemon skew.
    */
   merged: z
     .object({
@@ -95,8 +111,9 @@ export const LaneSchema = z.object({
     .default(null),
   state: LaneStateSchema,
   /**
-   * Board-projection annotation (ADR 169), never stored: for a `done` lane, whether the close was a
-   * counterpart confirm (derived from the `lane.closed` audit row's closer vs owner-at-close).
+   * Board-projection annotation (ADR 169/191), never stored: for a `done` lane, whether the close
+   * was a counterpart *acceptance* (derived from the `lane.closed` audit row's closer vs
+   * owner-at-close). Wire name stays `verified`; UI copy is accepted / unconfirmed (ADR 192).
    * Absent on non-terminal lanes, on older daemons, and on lanes closed before the audit existed —
    * absent means "unknown", and the UI says nothing rather than guessing.
    */
@@ -166,9 +183,9 @@ export const UpdateLaneSchema = z.object({
   risk: z.array(z.string()).optional(),
   /**
    * Merge attestation (ADR 109), meaningful on a terminal move of a branch-carrying lane — or, under
-   * two-stage close (ADR 169), captured at `ready_for_review` (the worker's claim) and persisted on
-   * the lane so a counterpart's later confirm carries it. Attested, never verified — recorded to the
-   * audit log as `git.pr_merged`.
+   * two-stage close (ADR 192), captured at `awaiting_acceptance` (the worker's claim) and persisted
+   * on the lane so a counterpart's later accept carries it. Attested, never verified — recorded to
+   * the audit log as `git.pr_merged`.
    */
   merged: z
     .object({
@@ -182,8 +199,8 @@ export type UpdateLane = z.infer<typeof UpdateLaneSchema>;
 
 /**
  * Every mutating lane verb returns the lane plus any contention warnings (ADR 083 §4). Under
- * two-stage close (ADR 169) a patch that enters `ready_for_review` additionally reports the review
- * routing: who the ask went to, or that self-close is sanctioned (no eligible counterpart live).
+ * two-stage close (ADR 192) a patch that enters `awaiting_acceptance` additionally reports the
+ * acceptor routing: who the ask went to, or that self-close is sanctioned (no eligible acceptor live).
  */
 export const LaneResultSchema = z.object({
   lane: LaneSchema,
@@ -213,7 +230,7 @@ export type LaneBoard = z.infer<typeof LaneBoardSchema>;
 export const NextBriefSchema = z.object({
   /** Whose brief this is. */
   member: z.string(),
-  /** Lanes you own that are live (claimed/active/blocked/ready_for_review) — what you're carrying. */
+  /** Lanes you own that are live (claimed/active/blocked/awaiting_acceptance) — what you're carrying. */
   in_flight: z.array(LaneSchema),
   /** Your most recently shipped lanes (done), newest first — what just landed. */
   shipped: z.array(LaneSchema),

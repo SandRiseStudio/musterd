@@ -88,6 +88,7 @@ describe('version-bump discipline (ADR 085)', () => {
     8: 'c01758f70a3e8737', // + where each kind of teammate stands: agents in worktrees, the human in the team home (ADR 176)
     9: '6d3004fc8347d2e4', // + label-sessions: the sweep stamps the machine-wide file that quiets the per-turn label-nudge
     10: '1cd5b6236f2b64d0', // + forever-loop fix prose + Cursor self-label skill (ADR 186)
+    11: 'a5bf07c7b3b2c44a', // + outcome acceptance close loop (ADR 192): lane_submit + checklist
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
