@@ -1,6 +1,6 @@
 import type { MemberSummary } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { formatMember, formatRoster } from './format.js';
+import { formatMember, formatRoster, notReadyMessage } from './format.js';
 
 const base = { team: 'dawn', lifecycle: 'forever' as const, created_at: 0, role: '' };
 
@@ -81,5 +81,30 @@ describe('formatRoster (the agent-facing roster)', () => {
 
   it('handles an empty team', () => {
     expect(formatRoster([])).toBe('no members yet — team_join claims your seat');
+  });
+});
+
+describe('notReadyMessage — seat-drop B (ADR 193)', () => {
+  // A restarted adapter has no member yet (`claimed === false`) even when a claim already failed.
+  // The pending-presence arm used to ignore lastJoinError, so an expired grant read as "claim a
+  // seat first" — the wrong repair (lane 01KYQCF678).
+  it('surfaces a failed claim while still a pending presence', () => {
+    const msg = notReadyMessage(
+      {
+        claimed: false,
+        lastJoinError: 'expired_grant: grant expired',
+        claimCode: 'GXJ0',
+      },
+      'send',
+    );
+    expect(msg).toContain('expired_grant');
+    expect(msg).toMatch(/last join attempt failed/i);
+    expect(msg).toMatch(/repair:/i);
+  });
+
+  it('keeps the plain pending-presence copy when no join has failed yet', () => {
+    const msg = notReadyMessage({ claimed: false, lastJoinError: null, claimCode: 'AB12' }, 'send');
+    expect(msg).toContain('pending presence');
+    expect(msg).not.toMatch(/last join attempt failed/i);
   });
 });

@@ -16,8 +16,15 @@ import {
   type WSServerFrame,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
+import { clearGrantFromBinding } from './binding.js';
 import { refreshAttestation, type McpConfig } from './config.js';
 import { SessionAttestation } from './sessionLiveness.js';
+
+/** A refuse whose cause is a bad *grant*, not a bad seat — drop the grant and retry bare (ADR 193). */
+function isStaleGrantRefusal(frame: { code: string; message: string }): boolean {
+  if (frame.code === 'expired_grant') return true;
+  return /grant (expired|revoked|consumed|not_found)/i.test(`${frame.code} ${frame.message}`);
+}
 
 function wsBase(server: string): string {
   return server.replace(/^http/, 'ws');
@@ -130,6 +137,8 @@ export class MusterdClient {
   private lastJoinErrorMsg: string | null = null;
   private releasedByLivenessFlag = false;
   private lastActivityAt = 0;
+  /** One drop-and-bare-retry per join attempt when a grant is refused as stale (ADR 193). */
+  private staleGrantRetried = false;
   /** Invoked when this session is superseded by a successor **in its own workspace** (ADR 092): the
    * adapter has been replaced by a reload and should exit cleanly rather than linger dormant. Wired by
    * the MCP entrypoint to the graceful-shutdown-then-exit path; unset in tests / library use. */
@@ -436,6 +445,7 @@ export class MusterdClient {
     }
     this.wantPresence = true;
     this.waitOnPending = (timeoutMs ?? 0) > 0;
+    this.staleGrantRetried = false;
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const clearTimer = () => {
@@ -563,11 +573,8 @@ export class MusterdClient {
     if (this.closed) return;
     const ws = new WebSocket(wsBase(this.config.server) + '/ws');
     this.ws = ws;
-    ws.on('open', () => {
-      this.backoff = 1000;
-      // A reconnect is a second chance to attest truthfully — re-read before claiming (ADR 158 §7).
+    const sendClaim = (includeGrant: boolean) => {
       refreshAttestation(this.config);
-      // v0.3 (ADR 075/078): present the team agent key + a claim target (replaces `hello {token}`).
       ws.send(
         JSON.stringify({
           type: 'claim',
@@ -575,19 +582,22 @@ export class MusterdClient {
           team: this.config.team,
           key: this.config.agent_key,
           target: this.claimTarget(),
-          ...(this.config.grant !== undefined ? { grant: this.config.grant } : {}),
+          ...(includeGrant && this.config.grant !== undefined ? { grant: this.config.grant } : {}),
           surface: this.config.surface,
           provenance: this.config.provenance,
           workspace: this.config.workspace,
           ...(this.config.driver ? { driver: this.config.driver } : {}),
-          // Model attestation (ADR 101): attested, never verified — absent reads as `unknown`.
           ...(this.config.model ? { model: this.config.model } : {}),
-          // Build attestation (ADR 135): the dist this process booted from; absent when unstamped.
           ...(this.config.build ? { build: this.config.build } : {}),
-          // Feature epoch (ADR 148): compiled-in capability counter; the roster's skew signal.
           ...(this.config.epoch != null ? { epoch: this.config.epoch } : {}),
         }),
       );
+    };
+    ws.on('open', () => {
+      this.backoff = 1000;
+      // A reconnect is a second chance to attest truthfully — re-read before claiming (ADR 158 §7).
+      // v0.3 (ADR 075/078): present the team agent key + a claim target (replaces `hello {token}`).
+      sendClaim(true);
     });
     ws.on('message', (data) => {
       let frame: WSServerFrame;
@@ -600,6 +610,7 @@ export class MusterdClient {
         // Claim succeeded — the server resolved + assigned the seat (a role pool's `<role>-<n>` too).
         this.joinedFlag = true;
         this.releasedByLivenessFlag = false;
+        this.staleGrantRetried = false;
         this.lastJoinErrorMsg = null;
         this.pendingRequestId = null;
         this.waitOnPending = false;
@@ -635,7 +646,22 @@ export class MusterdClient {
         this.pendingJoin?.resolve();
         this.pendingJoin = null;
       } else if (frame.type === 'refused') {
-        // Terminal denial (seat occupied / not admin / expired grant, etc.) — stop holding the seat
+        // Stale grant (ADR 193): a grant is an optimisation, not the authenticator. Drop it from
+        // memory + binding and re-claim bare once on this same socket — do NOT clear wantPresence
+        // (that is what stranded restarted adapters as pending presence forever).
+        if (this.config.grant && !this.staleGrantRetried && isStaleGrantRefusal(frame)) {
+          this.staleGrantRetried = true;
+          delete this.config.grant;
+          try {
+            clearGrantFromBinding(this.config.bindingDir);
+          } catch {
+            // in-memory drop still heals this process; disk write failure is non-fatal
+          }
+          this.lastJoinErrorMsg = `${frame.code}: ${frame.message} — dropped stale grant, retrying without it`;
+          if (ws.readyState === ws.OPEN) sendClaim(false);
+          return;
+        }
+        // Terminal denial (seat occupied / not admin / bad key, etc.) — stop holding the seat
         // and don't thrash reconnecting (a reconnect would just be refused again).
         this.wantPresence = false;
         this.pendingRequestId = null;

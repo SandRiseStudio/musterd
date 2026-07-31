@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolveBindingDir, saveBinding } from './binding.js';
+import { resolveBindingDir, saveBinding, clearGrantFromBinding, findBinding } from './binding.js';
 import { loadMcpConfig, refreshAttestation } from './config.js';
 
 let dir: string;
@@ -571,6 +571,31 @@ describe('empty env — the ADR 165 shared-entry contract', () => {
       expect(loadMcpConfig({ MUSTERD_TEAM: 'other' }).team).toBe('other');
     } finally {
       rmSync(wsDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('clearGrantFromBinding (ADR 193)', () => {
+  it('removes the grant and leaves every other field intact', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'musterd-clear-grant-'));
+    try {
+      saveBinding(ws, {
+        server: 'http://localhost:4849',
+        team: 'revive',
+        agent_key: 'mskey_x',
+        grant: 'msgr_stale',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'Ada' },
+        model: 'claude-test',
+      });
+      clearGrantFromBinding(ws);
+      const after = findBinding(ws);
+      expect(after?.grant).toBeUndefined();
+      expect(after?.agent_key).toBe('mskey_x');
+      expect(after?.claim).toEqual({ mode: 'seat', name: 'Ada' });
+      expect(after?.model).toBe('claude-test');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
     }
   });
 });
