@@ -28,17 +28,18 @@ export default defineConfig({
     // NO_COLOR pins picocolors OFF in tests so render assertions (plain `▌`/lengths) are deterministic
     // regardless of the runner — CI sets `CI=1`, which otherwise makes picocolors emit ANSI and breaks
     // the row/clip render tests. Production color is unaffected (test-env only). See ADR 106.
-    // MUSTERD_CONFIG pins the global config to a throwaway file for the whole run (ADR 162). Without
-    // it, every test that calls `saveBinding` records its temp workspace in the DEVELOPER'S real
-    // `~/.musterd/config.json` — the ADR 020 registry write is best-effort and silent, so nothing
-    // ever surfaced it. Measured on the dogfood machine before this line existed: 780 registry
-    // entries, 759 of them dead test temp dirs on the fixture team, and `nameBoundElsewhere` was
-    // warning about folders that had not existed for weeks. Tests that exercise config behavior set
-    // their own MUSTERD_CONFIG and still override this.
+    //
+    // Machine-wide path isolation (ADR 162 + ADR 190): MUSTERD_CONFIG / MUSTERD_HOST_REGISTRY must
+    // never resolve to the operator's ~/.musterd under vitest. The `env` pin is the start-of-worker
+    // belt; `setupFiles` re-asserts both overrides before/after every test so a suite's afterEach
+    // `delete` cannot leave the worker unprotected. configPath()/hostRegistryPath() throw if the
+    // override is missing while VITEST is set.
+    setupFiles: ['tests/setup/isolate-machine-state.ts'],
     env: {
       MUSTERD_SILENT: '1',
       NO_COLOR: '1',
       MUSTERD_CONFIG: join(tmpdir(), `musterd-vitest-config-${process.pid}.json`),
+      MUSTERD_HOST_REGISTRY: join(tmpdir(), `musterd-vitest-host-registry-${process.pid}.json`),
     },
     coverage: {
       provider: 'v8',

@@ -2,7 +2,7 @@
 
 > **Living document.** This is the initial direction, not gospel. It will evolve. If you (the executing agent) find an error, contradiction, or better approach during implementation: (1) do not silently deviate — record the issue and your proposed change in `docs/decisions/NNN-<slug>.md` (a short ADR: context, problem, decision, consequences), (2) make the smallest correct change, (3) update the affected doc in the same commit. Docs and code must never disagree at the end of a commit.
 
-Test runner: **vitest** (one config per package, plus a root `pnpm test` that runs all). No test is allowed to hit the network or a real `~/.musterd` — server tests inject an in-memory DB; client tests run against a server started in-process on an ephemeral port (`port: 0`).
+Test runner: **vitest** (one config per package, plus a root `pnpm test` that runs all). No test is allowed to hit the network or a real `~/.musterd` — server tests inject an in-memory DB; client tests run against a server started in-process on an ephemeral port (`port: 0`). Machine-wide paths (`MUSTERD_CONFIG`, `MUSTERD_HOST_REGISTRY`) are pinned by `tests/setup/isolate-machine-state.ts` and enforced by `machineStatePath` under `VITEST` ([ADR 190](../decisions/190-vitest-machine-state-isolation.md)); clearing an override without replacing it throws.
 
 ## Test pyramid
 

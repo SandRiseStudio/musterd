@@ -21,6 +21,7 @@ src/
   help.ts             // re-exports the plain `HELP` string (from help/plain.ts) so guidance:check can import it; ADR 085
   args.ts             // argv parser → { command, positionals, flags }
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
+  machinePaths.ts     // machine-wide path resolvers; VITEST refuses unset overrides (ADR 190)
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; HttpClient forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)

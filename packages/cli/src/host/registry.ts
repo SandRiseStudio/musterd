@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { z } from 'zod';
+import { machineStatePath } from '../machinePaths.js';
 
 /**
  * The machine-local host registry (ADR 131 §1): seat → workspace path + harness, one file per
@@ -38,7 +38,7 @@ export type HostRegistry = z.infer<typeof HostRegistrySchema>;
 
 /** `~/.musterd/host-registry.json`; `MUSTERD_HOST_REGISTRY` overrides (tests, odd setups). */
 export function hostRegistryPath(): string {
-  return process.env['MUSTERD_HOST_REGISTRY'] ?? join(homedir(), '.musterd', 'host-registry.json');
+  return machineStatePath('MUSTERD_HOST_REGISTRY', 'host-registry.json');
 }
 
 /** Load the registry; missing or malformed reads as empty (the registry is rebuildable by
