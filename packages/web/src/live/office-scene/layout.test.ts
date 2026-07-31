@@ -21,6 +21,7 @@ import {
   PODS,
   RECEPTION,
   SEAT_BACK,
+  WALL_BOARD,
   WINDOWS,
 } from './layout';
 
@@ -217,6 +218,30 @@ describe('the walls are not a matched set', () => {
         ).toBeGreaterThan(s.high + DECOR_UP);
       }
     }
+  });
+
+  it('hangs the agile board clear of every window, the clock, the art, and the wall ends', () => {
+    // The board holds the whiteboard's old slot widened into the wall's free far end — these are the
+    // guards that earn it a home in layout.ts (the same rules the art lives by). The clock's numbers
+    // come from render.ts (`wallClock` R=25 at t 0.52): mirrored here as data because the draw call
+    // doesn't export them, and drifting silently onto the clock is exactly what this test is for.
+    const half = WALL_BOARD.w / 2 / FLOOR;
+    const t0 = WALL_BOARD.tc - half;
+    const t1 = WALL_BOARD.tc + half;
+    expect(t0).toBeGreaterThan(0);
+    expect(t1).toBeLessThanOrEqual(1);
+    for (const w of WINDOWS) {
+      expect(t1 <= w.t0 || t0 >= w.t1, `board (t ${t0.toFixed(3)}–${t1.toFixed(3)}) overlaps a window`).toBe(true);
+    }
+    const CLOCK = { tc: 0.52, r: 27.5 / FLOOR };
+    expect(t0 > CLOCK.tc + CLOCK.r || t1 < CLOCK.tc - CLOCK.r).toBe(true);
+    for (const a of ART.filter((p) => p.wall === WALL_BOARD.wall)) {
+      const ah = a.w / 2 / FLOOR;
+      expect(t1 <= a.tc - ah || t0 >= a.tc + ah, `board overlaps the ${a.motif} print`).toBe(true);
+    }
+    // Vertically: on the wall (u ∈ [0,1]), above the bookshelf line the art also respects.
+    expect(WALL_BOARD.uc * WALL_H - WALL_BOARD.h / 2).toBeGreaterThan(0);
+    expect(WALL_BOARD.uc * WALL_H + WALL_BOARD.h / 2).toBeLessThan(WALL_H);
   });
 
   it('does not make four copies of one window', () => {

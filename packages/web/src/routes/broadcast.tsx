@@ -159,6 +159,7 @@ function BroadcastPage() {
             envelopes={envelopes}
             liveIds={liveIds}
             entries={entries}
+            board={board}
             status={status}
             broadcast
             captureFps={captureFps}

@@ -6,6 +6,7 @@ import brandCss from '../brand/brand.css?url';
 import { MusterdWord } from '../brand/MusterdWord';
 import { AsksStrip } from '../live/AsksStrip';
 import { MemberSignInFields, MemberSignInToggle, type AdvancedState } from '../live/MemberSignIn';
+import { BoardOverlay, preloadBoard } from '../live/BoardOverlay';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
@@ -216,6 +217,23 @@ function LivePage() {
 
   // A clicked office speech bubble navigates to its act in the stream. If the stream rail is collapsed,
   // expand it first and let the expand transition land before scrolling — one smooth motion, no jump cut.
+  // The wall's agile board, opened: the hotspot's rect is the overlay's zoom origin. Null = closed
+  // (nothing mounted — a closed /live pays nothing for the board). The opener is captured HERE,
+  // before the canvas goes inert (inert blurs it — activeElement read any later sees only <body>),
+  // and focus goes home a frame after the close commits and inert lifts.
+  const [boardOrigin, setBoardOrigin] = useState<DOMRect | null>(null);
+  const boardOpener = useRef<HTMLElement | null>(null);
+  const openBoard = useCallback((rect: DOMRect) => {
+    boardOpener.current = (document.activeElement as HTMLElement | null) ?? null;
+    setBoardOrigin(rect);
+  }, []);
+  const closeBoard = useCallback(() => {
+    setBoardOrigin(null);
+    // A macrotask, not rAF: focus must go home even in a hidden tab (rAF stalls there), and by the
+    // time this runs React has committed the close and lifted `inert`.
+    window.setTimeout(() => boardOpener.current?.focus?.({ preventScroll: true }), 0);
+  }, []);
+
   const onActClick = useCallback(
     (id: string) => {
       if (collapsed.stream) {
@@ -276,6 +294,9 @@ function LivePage() {
               `${collapsed.roster ? ' is-roster-collapsed' : ''}` +
               `${collapsed.stream ? ' is-stream-collapsed' : ''}`
             }
+            // A modal means it: while the board overlay is up, the room behind it takes no focus and
+            // no clicks (the AsksStrip inert precedent, promoted to page scope).
+            inert={boardOrigin != null}
           >
             <OfficeScene
               teamName={team}
@@ -284,9 +305,12 @@ function LivePage() {
               liveIds={liveIds}
               collapsed={collapsed.office}
               entries={entries}
+              board={board}
               status={status}
               onCollapse={() => toggleCollapse('office')}
               onActClick={onActClick}
+              onBoardOpen={openBoard}
+              onBoardHover={preloadBoard}
               // The asks & approvals rail (ADR 149) rides the top of the room itself — the office
               // frames its own asks (nick, 2026-07-28). Still renders nothing until an ask exists.
               topSlot={<AsksStrip envelopes={envelopes} roster={roster} cfg={cfg!} />}
@@ -307,6 +331,15 @@ function LivePage() {
               onCollapse={() => toggleCollapse('stream')}
             />
           </div>
+          {boardOrigin && (
+            <BoardOverlay
+              cfg={cfg}
+              roster={roster}
+              base={board}
+              origin={boardOrigin}
+              onClose={closeBoard}
+            />
+          )}
         </>
       )}
     </main>

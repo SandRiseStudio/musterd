@@ -1,4 +1,4 @@
-import type { Envelope, MemberSummary } from '@musterd/protocol';
+import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { MusterdWord } from '../brand/MusterdWord';
 import { actLabel, actTone, memberColor, memberPosture } from './format';
@@ -9,6 +9,7 @@ import type { ConnStatus } from './client';
 import { OfficeOverlay } from './OfficeOverlay';
 import { WorkStack } from './WorkStack';
 import { presentCount, type RoomEntry } from './workingOn';
+import { projectWallBoard } from './office-scene/wallboard';
 
 /**
  * Roster → the office's node data. `posture` is resolved here with `memberPosture` — the *same* call the
@@ -17,10 +18,16 @@ import { presentCount, type RoomEntry } from './workingOn';
  *
  * Surface/model/work fields feed the floating nameplates (presence-chrome design, 2026-07-30).
  */
-function computeData(teamName: string, roster: MemberSummary[], entries: RoomEntry[]): OfficeData {
+function computeData(
+  teamName: string,
+  roster: MemberSummary[],
+  entries: RoomEntry[],
+  board: LaneBoard | null,
+): OfficeData {
   const byName = new Map(entries.map((e) => [e.name, e]));
   return {
     teamName,
+    wallBoard: projectWallBoard(board),
     nodes: roster.map((m) => {
       const kind = m.kind === 'human' ? 'human' : 'agent';
       const live =
@@ -60,9 +67,12 @@ export function OfficeScene({
   collapsed = false,
   onCollapse,
   onActClick,
+  onBoardOpen,
+  onBoardHover,
   broadcast = false,
   captureFps,
   entries = [],
+  board = null,
   status = 'idle',
   onReady,
   topSlot,
@@ -79,6 +89,11 @@ export function OfficeScene({
   onCollapse?: () => void;
   /** Speech-bubble click-through: called with the act's envelope id (the route scrolls the stream). */
   onActClick?: (id: string) => void;
+  /** The wall's agile board clicked — hands back its viewport rect (the overlay's zoom origin).
+   * `/live` only; leaving it unset (as `/broadcast` does) renders the board as plain paint. */
+  onBoardOpen?: (rect: DOMRect) => void;
+  /** First hover/focus on the board — preload the overlay's lazy chunk. */
+  onBoardHover?: () => void;
   /** Broadcast mode (ADR 157) — only `/broadcast` sets it: the scene is a stream source, so it keeps
    * animating unseen, pins DPR to 1, and ignores reduced-motion (the viewer of a stream is not the
    * person whose OS preference this is). */
@@ -88,6 +103,8 @@ export function OfficeScene({
   /** The overlay's reel — everyone in the room and what they are on, already derived by the route
    * (see `roomEntries`). */
   entries?: RoomEntry[];
+  /** The full lane board — the wall's agile board draws from it (routes already hold it for the reel). */
+  board?: LaneBoard | null;
   /** Connection state, for the overlay's honest LIVE/CONNECTING signal. */
   status?: ConnStatus;
   /** Handed the scene handle once it mounts (and `null` on teardown) — the broadcast route publishes it
@@ -110,7 +127,10 @@ export function OfficeScene({
   const handleRef = useRef<OfficeHandle | null>(null);
   const emittedRef = useRef<Set<string>>(new Set());
 
-  const data = useMemo(() => computeData(teamName, roster, entries), [teamName, roster, entries]);
+  const data = useMemo(
+    () => computeData(teamName, roster, entries, board),
+    [teamName, roster, entries, board],
+  );
   // Latest-value refs for the mount effect below, which subscribes ONCE and must not re-run when a
   // prop identity changes (re-running it would tear down and rebuild the whole canvas scene).
   //
@@ -120,11 +140,15 @@ export function OfficeScene({
   // reads them.
   const dataRef = useRef(data);
   const onActClickRef = useRef(onActClick);
+  const onBoardOpenRef = useRef(onBoardOpen);
+  const onBoardHoverRef = useRef(onBoardHover);
   const onReadyRef = useRef(onReady);
   const collapsedRef = useRef(collapsed);
   useEffect(() => {
     dataRef.current = data;
     onActClickRef.current = onActClick;
+    onBoardOpenRef.current = onBoardOpen;
+    onBoardHoverRef.current = onBoardHover;
     onReadyRef.current = onReady;
     collapsedRef.current = collapsed;
   });
@@ -145,6 +169,14 @@ export function OfficeScene({
         if (disposed || !host || !labelHost) return;
         const handle = mountOffice(host, labelHost, reduced, {
           onActClick: (id) => onActClickRef.current?.(id),
+          // Presence decides whether the hotspot exists at all, so gate on the mount-time prop —
+          // stable per route (/live wires it, /broadcast never does) — and read through the ref after.
+          ...(onBoardOpenRef.current
+            ? {
+                onBoardClick: (rect: DOMRect) => onBoardOpenRef.current?.(rect),
+                onBoardHover: () => onBoardHoverRef.current?.(),
+              }
+            : {}),
           broadcast,
           ...(captureFps !== undefined ? { captureFps } : {}),
           interactiveLabels: !broadcast,

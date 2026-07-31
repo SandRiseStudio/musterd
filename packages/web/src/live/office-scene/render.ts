@@ -39,11 +39,13 @@ import {
   RECEPTION,
   SEAT_TOP,
   SINK,
+  WALL_BOARD,
   WINDOWS,
   type Bookshelf,
   type Huddle,
   type Rug,
 } from './layout';
+import { STICKY_CAP, type WallBoard } from './wallboard';
 import { DAY_ENV, type LightEnv } from './lighting';
 import { deskMoodFor, deskMoodStyle } from './moods';
 import type { Placement } from './seating';
@@ -733,112 +735,106 @@ function wallClock(
 }
 
 /**
- * Dry-erase whiteboard on the far-right wall — set dressing only (presence-chrome design 2026-07-30).
- * White face, musterd-orange marker scribbles (fake architecture diagram). Not a roster: no member
- * colours, no present/total count.
+ * The agile board on the far-right wall — the team's real lanes as sticky notes. This deliberately
+ * reverses the 2026-07-30 "set dressing only" decision: the whiteboard it replaced was a drawing of
+ * work, this IS the work (nick, 2026-07-31). Same lane board the `/board` page renders, squinted at
+ * from across the room — columns mirror `Board.tsx`, and on /live clicking it opens that very board,
+ * so the glimpse and the close-up never disagree.
  *
- * Portrait geometry is load-bearing: along this wall the screen drops KY/KX = 0.5px per px across, so
- * a wide board shears its bands into diagonals. Tall and narrow keeps strokes readable.
+ * What survives the /live downscale (~0.52) is colour and position, not words, so a lane is a
+ * ~17×11-unit paper rectangle in its column's tone — above the ~10-unit resolvability floor — with a
+ * seeded placement jitter so the wall reads as pinned by hands, not printed. The ONLY type is the
+ * `+N` overflow badge at 9 units (the floor at which lettering survives; see the old diagram's
+ * hard-won sizing notes in git history). Everything else the board says, it says with paper.
+ *
+ * `data` is null when no team is connected (previews, the connect form): the board still hangs,
+ * face + caps + dividers, an empty week rather than a missing object.
  */
-function wallWhiteboard(
+function wallLaneBoard(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   edge: (t: number) => [number, number],
-  tc: number,
-  uc: number,
+  data: WallBoard | null,
 ): void {
-  // Landscape, and frameless (nick, 2026-07-30). A real dry-erase board is wider than it is tall and
-  // has no dark surround — just the board's own thickness catching the light. The earlier portrait
-  // geometry was a hedge against iso shear; the actual shear guard is "closed shapes and short
-  // strokes, no full-width horizontal bands", which the diagram below respects.
-  const W = 124; // along the wall, logical floor units
-  const H = 74; // up the wall, WALL_H px
+  const { tc, uc, w: W, h: H } = WALL_BOARD;
   const p = (a: number, b: number): Pt => wallPt(edge, tc + a / FLOOR, uc + b / WALL_H, fit);
   const rect = (a0: number, b0: number, a1: number, b1: number, fill: string): void =>
     quad(ctx, [p(a0, b0), p(a1, b0), p(a1, b1), p(a0, b1)], fill);
-
-  rect(-W / 2 + 4, -H / 2 - 4, W / 2 + 4, H / 2 - 4, WHITEBOARD.shadow); // soft cast, no frame
-  rect(-W / 2, -H / 2, W / 2, H / 2, WHITEBOARD.face);
-
   const stroke = (pts: [number, number][], width: number, color: string): void => {
-    if (pts.length < 2) return;
     ctx.save();
     ctx.beginPath();
-    const [a0, b0] = pts[0]!;
-    const s0 = p(a0, b0);
+    const s0 = p(pts[0]![0], pts[0]![1]);
     ctx.moveTo(s0.x, s0.y);
     for (let i = 1; i < pts.length; i++) {
-      const [a, b] = pts[i]!;
-      const s = p(a, b);
+      const s = p(pts[i]![0], pts[i]![1]);
       ctx.lineTo(s.x, s.y);
     }
     ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(1, width * fit.scale);
+    ctx.lineWidth = Math.max(0.6, width * fit.scale);
     ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
     ctx.stroke();
     ctx.restore();
   };
 
-  // ── The diagram: three boxes, two arrows, and deliberately nothing else ────────────────────────
-  //
-  // This board renders at roughly half size under wall shear, and the mark budget is the whole
-  // design. An earlier cut drew six objects with four labels — two of them set at ~3px on /live —
-  // and the result was hash rather than a diagram (nick, 2026-07-30: "a little too crowded, and it
-  // doesn't look very good"). Subtracting is the fix; there is no stroke weight that rescues six
-  // objects at this size.
-  //
-  // Rules, if you are tempted to add something back:
-  //   · Five marks total. A sixth does not add information here, it removes it.
-  //   · Nothing under ~10 logical units. Anything smaller cannot be resolved at /live at all.
-  //   · Majority white — a real whiteboard mid-week is mostly empty, and so is this one.
-  //
-  // Labels ARE allowed, at the size set below — the earlier ban came from a cut that set them at 5.5
-  // units (~3px on /live), which is unreadable everywhere. Three words at 9 units read as lettering
-  // at /live and as words on /broadcast and /office-preview, which is the whole point of a diagram
-  // somebody drew. Do not add a fourth label, and do not shrink these to fit one in.
-  //
-  // The acceptance test is literally "can you count the shapes at /live scale". If you cannot,
-  // cut one more.
-  const W_INK = 2.2; // heavier than the old 1.5, so the lines survive the downscale
-  const LABEL = 9; // logical units — the floor at which type survives the /live downscale
+  rect(-W / 2 + 4, -H / 2 - 4, W / 2 + 4, H / 2 - 4, WHITEBOARD.shadow); // soft cast, no frame
+  rect(-W / 2, -H / 2, W / 2, H / 2, WHITEBOARD.face);
 
-  /** One service over two dependencies — the most legible three-box shape there is. */
-  const boxPath = (a0: number, b0: number, a1: number, b1: number): [number, number][] => [
-    [a0, b0],
-    [a1, b0],
-    [a1, b1],
-    [a0, b1],
-    [a0, b0],
-  ];
+  // Six columns, edge margin 4, hairline dividers between them. The dividers are what make the bare
+  // board read as a kanban waiting for work instead of a blank sheet.
+  const M = 4;
+  const colW = (W - M * 2) / WALLBOARD_TONES.length;
+  for (let i = 1; i < WALLBOARD_TONES.length; i++) {
+    const a = -W / 2 + M + i * colW;
+    stroke([[a, -H / 2 + M], [a, H / 2 - M]], 0.7, WHITEBOARD.rim);
+  }
 
-  stroke(boxPath(-26, 12, 26, 32), W_INK, WHITEBOARD.ink); // the service, up top
-  stroke(boxPath(-46, -30, -12, -10), W_INK, WHITEBOARD.ink); // dependency, left
-  stroke(boxPath(12, -30, 46, -10), W_INK, WHITEBOARD.ink); // dependency, right
+  for (let i = 0; i < WALLBOARD_TONES.length; i++) {
+    const tone = WALLBOARD_TONES[i]!;
+    const a0 = -W / 2 + M + i * colW;
+    const mid = a0 + colW / 2;
+    // The cap strip: each column announces its state in full colour even when it holds nothing.
+    rect(a0 + 2, H / 2 - M - 2.5, a0 + colW - 2, H / 2 - M, tone.cap);
 
-  // Each arrow is ONE polyline that retraces its own tip to draw the head — two strokes per arrow
-  // would put this over the mark budget, and a headless connector reads as a wall, not a call.
-  const arrow = (a0: number, a1: number): [number, number][] => [
-    [a0, 12],
-    [a1, -10],
-    [a1 - 5, -4],
-    [a1, -10],
-    [a1 + 5, -4],
-  ];
-  stroke(arrow(-14, -29), W_INK, WHITEBOARD.ink);
-  stroke(arrow(14, 29), W_INK, WHITEBOARD.ink);
+    const col = data?.[i];
+    if (!col) continue;
+    // Stickies hang from just under the cap, newest at the bottom (board order, same as /board).
+    const noteW = 17;
+    const noteH = 11;
+    for (let s = 0; s < col.stickies.length; s++) {
+      const seed = col.stickies[s]!.seed;
+      // Seeded jitter, ±1.5 units across and ±0.8 up — pinned by a hand, stable across repaints.
+      const ja = (((seed >>> (s * 3)) % 7) - 3) * 0.5;
+      const jb = (((seed >>> (s * 5 + 2)) % 5) - 2) * 0.4;
+      const top = H / 2 - M - 6 - s * (noteH + 2.5) + jb;
+      rect(mid - noteW / 2 + ja, top - noteH, mid + noteW / 2 + ja, top, tone.note);
+      // A thin darker header edge on each note — the "written on" line that sells it as paper.
+      rect(mid - noteW / 2 + ja, top - 2, mid + noteW / 2 + ja, top, tone.cap);
+    }
+    // The overflow badge — the one piece of type, at the size that survives the downscale.
+    if (col.count > STICKY_CAP) {
+      const b = H / 2 - M - 6 - STICKY_CAP * (13.5) - 4;
+      wallText(ctx, fit, edge, tc + mid / FLOOR, uc + b / WALL_H, `+${col.count - STICKY_CAP}`, 9, tone.cap, 'center');
+    }
+  }
 
-  // The words. Baseline sits a little under each box's centre so the type looks set in the box
-  // rather than floating through its top edge.
-  const label = (a: number, b: number, text: string): void =>
-    wallText(ctx, fit, edge, tc + a / FLOOR, uc + b / WALL_H, text, LABEL, WHITEBOARD.ink, 'center');
-  label(0, 18, 'web');
-  label(-29, -24, 'api');
-  label(29, -24, 'db');
-
-  // Board thickness, not a frame: a hairline aluminium edge is what a frameless dry-erase board has.
-  stroke(boxPath(-W / 2, -H / 2, W / 2, H / 2), 0.9, WHITEBOARD.rim);
+  // Board thickness, not a frame: the hairline aluminium edge the whiteboard had, kept.
+  stroke([[-W / 2, -H / 2], [W / 2, -H / 2], [W / 2, H / 2], [-W / 2, H / 2], [-W / 2, -H / 2]], 0.9, WHITEBOARD.rim);
 }
+
+/**
+ * Column tones, one per `WALL_COLUMNS` entry in order. Canvas can't read CSS custom properties, so
+ * these mirror Live.css's lane/danger/success tones as hex the way `WHITEBOARD` already does: `cap`
+ * is the full-value state colour, `note` its paper-pastel wash. Board columns, left to right:
+ * open · claimed · active · blocked · awaiting_acceptance · done.
+ */
+const WALLBOARD_TONES: ReadonlyArray<{ cap: string; note: string }> = [
+  { cap: '#B4A88F', note: '#EFE8D8' }, // open — warm unbleached paper
+  { cap: '#948DDE', note: '#E6E3F8' }, // claimed — lane indigo, lightened: picked up, not yet moving
+  { cap: '#5A52C9', note: '#D8D4F3' }, // active — the lane tone itself (--lc-lane)
+  { cap: '#D1503F', note: '#F5DAD4' }, // blocked — --lc-danger
+  { cap: '#7A72D6', note: '#DFDCF6' }, // awaiting acceptance — indigo leaning patient
+  { cap: '#2F9E6A', note: '#D5ECDF' }, // done — --lc-success
+];
 
 /**
  * The marker tray under the board: a real iso `box()` ledge protruding into the room, with pens lying
@@ -1029,7 +1025,12 @@ function wallHanger(
   vine(12, 27, false);
 }
 
-function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void {
+function drawWalls(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  env: LightEnv,
+  wallBoard: WallBoard | null = null,
+): void {
   /**
    * What each wall carries. The right wall gets the clock (it is the only one whose `+t` runs screen-right,
    * so it is the only one a clock can be hung on) plus a print over the corner bookshelf and a pair by the
@@ -1045,10 +1046,10 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void
     }
     if (wallIndex === 1) {
       wallClock(ctx, fit, edge, 0.52, 0.62, env.hours); // dead centre, between the windows
-      // Dry-erase whiteboard (set dressing) — far-right gap. Must be THIS wall: `+t` runs screen-left
-      // on the other one (same constraint that fixed the clock here).
-      wallWhiteboard(ctx, fit, edge, 0.855, 0.6);
-      whiteboardTray(ctx, fit, 0.855, 0.6, 124, 74);
+      // The agile board — far-right gap. Must be THIS wall: `+t` runs screen-left on the other one
+      // (same constraint that fixed the clock here), and a kanban has a reading direction.
+      wallLaneBoard(ctx, fit, edge, wallBoard);
+      whiteboardTray(ctx, fit, WALL_BOARD.tc, WALL_BOARD.uc, WALL_BOARD.w, WALL_BOARD.h);
       return;
     }
     wallHanger(ctx, fit, edge, 0.52, 0.76); // between the windows — where you'd really hang one
@@ -1144,6 +1145,27 @@ function drawWalls(ctx: CanvasRenderingContext2D, fit: Fit, env: LightEnv): void
 function magicRnd(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
+}
+
+/**
+ * The agile board's screen-space bounding box — the DOM hotspot on /live is positioned from this
+ * (the `magicAnchors` pattern: pure geometry out, index.ts places the element). The wall shears the
+ * board, so the box brackets all four projected corners rather than trusting any two.
+ */
+export function boardAnchor(fit: Fit): { x: number; y: number; w: number; h: number } {
+  const { tc, uc, w: W, h: H } = WALL_BOARD;
+  const edge = WALL_EDGES[WALL_BOARD.wall]!;
+  const corners = [
+    wallPt(edge, tc - W / 2 / FLOOR, uc - H / 2 / WALL_H, fit),
+    wallPt(edge, tc + W / 2 / FLOOR, uc - H / 2 / WALL_H, fit),
+    wallPt(edge, tc + W / 2 / FLOOR, uc + H / 2 / WALL_H, fit),
+    wallPt(edge, tc - W / 2 / FLOOR, uc + H / 2 / WALL_H, fit),
+  ];
+  const xs = corners.map((c) => c.x);
+  const ys = corners.map((c) => c.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
 
 /**
@@ -3624,6 +3646,8 @@ export function renderScene(
   fx?: { fridgeOpen: boolean; bottleCarriers: Set<string> },
   /** The receptionist's state (receptionist.ts). Absent → asleep, which is the empty-office truth. */
   recep: ReceptionistState | null = null,
+  /** The real lane board squinted down for the wall (wallboard.ts). Null → the empty board hangs. */
+  wallBoard: WallBoard | null = null,
 ): SceneAnchors {
   // Grounds the diorama on the panel surface before anything else paints (the floor covers its middle).
   drawGroundShadow(ctx, fit);
@@ -3631,7 +3655,7 @@ export function renderScene(
   // The room shell: back walls + windows as a backdrop (behind every item), then the daylight beams they
   // cast onto the floor (under every item). Both before the depth-sorted loop — see the walls note above.
   // Roster order (Map insertion order), so a member keeps the same spot on the in/out board.
-  drawWalls(ctx, fit, env);
+  drawWalls(ctx, fit, env, wallBoard);
   drawWindowBeams(ctx, fit, env);
 
   // desk → seat owner (for the monitor's working glow); the owner may be walking but the seat stays lit.
