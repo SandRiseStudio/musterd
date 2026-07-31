@@ -43,14 +43,29 @@ export function shortModel(model: string | null | undefined): string {
 }
 
 /**
- * The model label for the always-on nameplate. Deliberately model-only: the harness moved to hover
- * (room-dressing design §1) because it is the least surprising field — nearly every seat runs the
- * same one, so it cost width over every head and bought nothing at a glance. The full surface and
- * the raw model id are still one hover away, via {@link identityMeta}'s `title`.
+ * Short model label for the nameplate. Collapsed `/live` shows the provider icon instead; broadcast
+ * and the expanded detail line still use this text. Full surface / raw model id stay on hover via
+ * {@link identityMeta}'s `title`.
  */
 export function plateModel(model: string | null | undefined): string | null {
   const short = shortModel(model);
   return short ? short : null;
+}
+
+/** Text segments for the expanded plate, in display order: model → harness → role. */
+export function plateDetailSegments(opts: {
+  surface?: string | null;
+  model?: string | null;
+  role?: string | null;
+}): string[] {
+  const parts: string[] = [];
+  const mod = plateModel(opts.model);
+  if (mod) parts.push(mod);
+  const surf = shortSurface(opts.surface);
+  if (surf) parts.push(surf);
+  const role = opts.role?.trim() ?? '';
+  if (role) parts.push(role);
+  return parts;
 }
 
 export function identityMeta(opts: {

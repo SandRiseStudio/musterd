@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   identityMeta,
+  plateDetailSegments,
   plateModel,
   shortLaneState,
   shortModel,
@@ -82,6 +83,24 @@ describe('identityMeta', () => {
     const m = identityMeta({ surface: 'cli', model: null, role: 'backend' });
     expect(m.line).toBe('cli · backend');
     expect(m.title).toContain('backend');
+  });
+});
+
+describe('plateDetailSegments', () => {
+  it('orders model then harness then role', () => {
+    expect(
+      plateDetailSegments({
+        surface: 'cursor',
+        model: 'claude-opus-5',
+        role: 'backend',
+      }),
+    ).toEqual(['opus 5', 'cursor', 'backend']);
+  });
+
+  it('omits empty parts', () => {
+    expect(plateDetailSegments({ surface: 'cli', model: null, role: '' })).toEqual(['cli']);
+    expect(plateDetailSegments({ surface: null, model: 'grok-4.5' })).toEqual(['grok 4.5']);
+    expect(plateDetailSegments({})).toEqual([]);
   });
 });
 
