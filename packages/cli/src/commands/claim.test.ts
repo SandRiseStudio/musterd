@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -223,6 +224,28 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     expect(b.member).toBeUndefined(); // v0.3: no member/token in the binding
     expect(b.token).toBeUndefined();
     expect(b.claim).toEqual({ mode: 'seat', name: 'Ada' });
+  });
+
+  it('rewrites worktree git identity to the claimed team (ADR 197)', async () => {
+    // Simulate a seat worktree that still carries an old-team email after a re-bind.
+    execFileSync('git', ['init', '-q'], { cwd });
+    execFileSync('git', ['config', 'extensions.worktreeConfig', 'true'], { cwd });
+    execFileSync('git', ['config', '--worktree', 'user.name', 'Ada (musterd seat)'], { cwd });
+    execFileSync('git', ['config', '--worktree', 'user.email', 'Ada@oldteam.musterd'], { cwd });
+    execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd });
+
+    await declareSeat('Ada');
+    const g = await grant('Ada');
+    const { code } = await run(['Ada', '--team', 'dawn', '--grant', g]);
+    expect(code).toBe(0);
+    const email = execFileSync('git', ['config', 'user.email'], {
+      cwd,
+      encoding: 'utf8',
+    }).trim();
+    expect(email).toBe('Ada@dawn.musterd');
+    expect(execFileSync('git', ['config', 'user.name'], { cwd, encoding: 'utf8' }).trim()).toBe(
+      'Ada (musterd seat)',
+    );
   });
 
   it('errors clearly when no agent key is available', async () => {

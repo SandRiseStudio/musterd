@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { provisionWorkspace } from './workspace.js';
+import { provisionWorkspace, setSeatGitIdentity } from './workspace.js';
 
 const made: string[] = [];
 function tmp(prefix: string): string {
@@ -163,5 +163,29 @@ describe('provisionWorkspace', () => {
       encoding: 'utf8',
     }).trim();
     expect(name).toBe('June (musterd seat)');
+  });
+
+  it('setSeatGitIdentity rewrites the team domain on re-bind (ADR 197)', () => {
+    // claim/join call this after saveBinding; without it a folder that moves teams keeps
+    // seat@oldTeam.musterd and splits one seat across two emails on main.
+    const repo = tmp('mwd-rebind-');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 'human@example.com'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'Human'], { cwd: repo });
+    execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
+
+    const ws = provisionWorkspace('grokbot', { cwd: repo, team: 'oldteam' });
+    made.push(ws.dir);
+    const cfg = (key: string) =>
+      execFileSync('git', ['config', key], { cwd: ws.dir, encoding: 'utf8' }).trim();
+    expect(cfg('user.email')).toBe('grokbot@oldteam.musterd');
+
+    setSeatGitIdentity('grokbot', ws.dir, 'revive');
+    expect(cfg('user.name')).toBe('grokbot (musterd seat)');
+    expect(cfg('user.email')).toBe('grokbot@revive.musterd');
+    // Still worktree-scoped — re-bind must never rename the human's main tree.
+    expect(
+      execFileSync('git', ['config', 'user.email'], { cwd: repo, encoding: 'utf8' }).trim(),
+    ).toBe('human@example.com');
   });
 });

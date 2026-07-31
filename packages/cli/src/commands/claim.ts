@@ -11,6 +11,7 @@ import {
   writeResolution,
   type PendingMarker,
 } from '../onboard/pending.js';
+import { setSeatGitIdentity } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
 import { WAIT_TIMEOUT_EXIT } from './inbox.js';
 import { renderMemoryLine } from './memory.js';
@@ -192,6 +193,9 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
           ...(binding?.model !== undefined ? { model: binding.model } : {}),
         };
         saveBinding(process.cwd(), next);
+        // ADR 197: re-bind refreshes the worktree git identity. Provision writes it once; without
+        // this, a folder that moves to another team (or seat) keeps `seat@oldTeam.musterd`.
+        setSeatGitIdentity(seat, process.cwd(), team);
 
         // Bring a matched waiting session online now (ADR 034): hand it the resolved seat via a
         // sidecar its watcher adopts (it already holds the team agent key), then drop the marker.
