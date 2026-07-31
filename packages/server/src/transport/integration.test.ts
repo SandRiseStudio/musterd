@@ -3026,10 +3026,8 @@ describe('two-stage close (ADR 169)', () => {
   });
 
   it('a cross_model counterpart is routable and graded as such (ADR 188)', async () => {
-    const { nickTok, ada } = await setup();
-    // Retire nick's and gee's freshness by advancing nothing — instead give the team a seat that is
-    // the ONLY live counterpart in ada's family but a different model, on a private team where the
-    // dawn fixture's nick/gee cannot outrank it. Simplest: a fresh team with just the two agents.
+    // A private team with just two agents of one family, different models — the dawn fixture's
+    // live human and cross-family gee would outrank the rung this test is about.
     const t = await post('/teams', { slug: 'grade', creator: { name: 'nick2', kind: 'human' } });
     const nick2 = t.json.human_credential as string;
     const mk = async (name: string, model: string): Promise<Auth> => {
@@ -3057,7 +3055,47 @@ describe('two-stage close (ADR 169)', () => {
     expect(ready.json.review.grade).toBe('cross_model');
     const rows = await auditRowsFor(nick2, 'grade', 'lane.ready_for_review');
     expect(rows[0].detail.review_grade).toBe('cross_model');
-    void nickTok;
+
+    // The close edge derives the grade too (ADR 188): twin (opus-4.8) confirms worker's (opus-5)
+    // lane — verified:true with review_grade cross_model beside it, not a bare boolean.
+    const twin: Auth = { key: t.json.agent_key as string, seat: 'twin' };
+    const closed = await fetch(base + `/teams/grade/lanes/${lane.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(twin) },
+      body: JSON.stringify({ state: 'done' }),
+    }).then(async (r) => ({ status: r.status, json: (await r.json()) as Record<string, any> }));
+    expect(closed.status).toBe(200);
+    const closedRows = await auditRowsFor(nick2, 'grade', 'lane.closed');
+    expect(closedRows[0].detail.verified).toBe(true);
+    expect(closedRows[0].detail.review_grade).toBe('cross_model');
+  });
+
+  it('a same-model voluntary confirm stays verified but is graded same_model (ADR 188)', async () => {
+    const t = await post('/teams', { slug: 'twins', creator: { name: 'n3', kind: 'human' } });
+    const n3 = t.json.human_credential as string;
+    const mk = async (name: string): Promise<Auth> => {
+      await post(`/teams/twins/members`, { name, kind: 'agent' }, n3);
+      const auth: Auth = { key: t.json.agent_key as string, seat: name };
+      await fetch(base + '/teams/twins/inbox', {
+        headers: { ...authHeaders(auth), 'x-musterd-model': 'claude-opus-5' },
+      });
+      return auth;
+    };
+    const a = await mk('alpha');
+    const b = await mk('beta');
+    const lane = await post('/teams/twins/lanes', { title: 'twinned', claim: true }, a);
+    const patch = (body: unknown, auth: Auth) =>
+      fetch(base + `/teams/twins/lanes/${lane.json.lane.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', ...authHeaders(auth) },
+        body: JSON.stringify(body),
+      }).then(async (r) => ({ status: r.status, json: (await r.json()) as Record<string, any> }));
+    await patch({ state: 'ready_for_review' }, a); // same-model twin ⇒ no_candidate routed
+    const closed = await patch({ state: 'done' }, b); // beta confirms anyway — legal, never a wedge
+    expect(closed.status).toBe(200);
+    const rows = await auditRowsFor(n3, 'twins', 'lane.closed');
+    expect(rows[0].detail.verified).toBe(true); // a different seat DID confirm
+    expect(rows[0].detail.review_grade).toBe('same_model'); // and the grade says what it was worth
   });
 
   it('counterpart confirm derives verified:true and carries the stage-one attestation into git.pr_merged', async () => {
@@ -3087,6 +3125,8 @@ describe('two-stage close (ADR 169)', () => {
     expect(closedRows[0].detail.owner_at_close).toBe('ada');
     expect(closedRows[0].detail.worker_family).toBe('claude');
     expect(closedRows[0].detail.reviewer_family).toBe('human');
+    // ADR 188: a human confirmer grades as 'human' — cross-family by construction, named honestly.
+    expect(closedRows[0].detail.review_grade).toBe('human');
     expect(closedRows[0].detail.time_in_review_ms).toBeGreaterThanOrEqual(0);
 
     // git.pr_merged carries the worker's stage-one attestation, credited via attested_by.

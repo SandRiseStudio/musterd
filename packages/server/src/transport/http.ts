@@ -37,6 +37,7 @@ import {
   type MemberSummary,
   type Provenance,
   describeFamilyPosture,
+  reviewGrade,
   resolvePosture,
   resolveOfflineReason,
   type OfflineReason,
@@ -127,6 +128,8 @@ import {
   toResidency,
 } from '../store/residency.js';
 import {
+  memberIsHuman,
+  memberModelByName,
   pickReviewCounterpart,
   teamFamilyPosture,
   verifiedCloses,
@@ -2610,6 +2613,23 @@ export async function handleHttp(
                 : {}),
               worker_family: ownerAtClose ? workerFamily(ctx.db, team.id, ownerAtClose) : null,
               ...(verified ? { reviewer_family: workerFamily(ctx.db, team.id, member.name) } : {}),
+              // ADR 188: the close edge finally CHECKS what the confirm was worth, for routed and
+              // voluntary confirms alike. `verified` keeps its meaning (a different seat confirmed);
+              // the grade rides beside it so a same-model confirm can never imply diversity it does
+              // not have. A human confirmer grades 'human' (cross-family by construction). When a
+              // model is unattested at close the grade abstains — and the abstention is COUNTED
+              // (`review_grade_unknown`, ADR 173) rather than left indistinguishable from silence.
+              ...(verified
+                ? (() => {
+                    if (memberIsHuman(ctx.db, team.id, member.name))
+                      return { review_grade: 'human' };
+                    const g = reviewGrade(
+                      ownerAtClose ? memberModelByName(ctx.db, team.id, ownerAtClose) : null,
+                      memberModelByName(ctx.db, team.id, member.name),
+                    );
+                    return g ? { review_grade: g } : { review_grade_unknown: true };
+                  })()
+                : {}),
               // Approximation: entering review was this lane's last update before the close.
               ...(before.state === 'ready_for_review'
                 ? { time_in_review_ms: Date.now() - before.updated_at }

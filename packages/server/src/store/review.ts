@@ -119,6 +119,21 @@ export function workerFamily(db: Database, teamId: string, worker: string): stri
 }
 
 /**
+ * A seat's live attested model by name, or null — presence-only, deliberately (ADR 187's split:
+ * the durable record answers "what would waking this seat bring", never "what is it running now").
+ * The close edge grades with this (ADR 188); a human seat has no model and grades as 'human' there.
+ */
+export function memberModelByName(db: Database, teamId: string, name: string): string | null {
+  const m = listMembers(db, teamId).find((x) => x.name === name);
+  return m ? latestAttestedModel(db, m.id) : null;
+}
+
+/** Is this seat name a human? The close edge needs the kind, not just the model. */
+export function memberIsHuman(db: Database, teamId: string, name: string): boolean {
+  return listMembers(db, teamId).find((x) => x.name === name)?.kind === 'human';
+}
+
+/**
  * The team's model-family posture (ADR 172) — derived at read time, never stored, because a seat is
  * a **name**, not a model: what it runs can change between sessions, so the only honest statement is
  * about who is attesting what right now, stamped with when.
