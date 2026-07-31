@@ -402,34 +402,72 @@ function ccdSessionsDir(env: NodeJS.ProcessEnv): string {
   );
 }
 
-/** The desktop app's record for a session: created-at (ms) + who last set the title. */
-function ccdMeta(dir: string, sessionId: string): { createdAt?: number; titleSource?: string } {
+/** Index every CCD record by sessionId, cliSessionId, and file stem — list_sessions may hand any. */
+function buildCcdIndex(dir: string): Map<string, { createdAt?: number; titleSource?: string }> {
+  const index = new Map<string, { createdAt?: number; titleSource?: string }>();
+  if (!existsSync(dir)) return index;
   try {
     for (const org of readdirSync(dir)) {
       const orgDir = join(dir, org);
-      let inner: string[];
+      let projects: string[];
       try {
-        inner = readdirSync(orgDir);
+        projects = readdirSync(orgDir);
       } catch {
         continue;
       }
-      for (const proj of inner) {
-        const p = join(orgDir, proj, `${sessionId}.json`);
-        if (!existsSync(p)) continue;
-        const rec = JSON.parse(readFileSync(p, 'utf8')) as {
-          createdAt?: number;
-          titleSource?: string;
-        };
-        return {
-          ...(rec.createdAt !== undefined ? { createdAt: rec.createdAt } : {}),
-          ...(rec.titleSource !== undefined ? { titleSource: rec.titleSource } : {}),
-        };
+      for (const proj of projects) {
+        const projDir = join(orgDir, proj);
+        let files: string[];
+        try {
+          files = readdirSync(projDir);
+        } catch {
+          continue;
+        }
+        for (const file of files) {
+          if (!file.endsWith('.json')) continue;
+          try {
+            const rec = JSON.parse(readFileSync(join(projDir, file), 'utf8')) as {
+              sessionId?: string;
+              cliSessionId?: string;
+              createdAt?: number;
+              titleSource?: string;
+            };
+            const meta = {
+              ...(rec.createdAt !== undefined ? { createdAt: rec.createdAt } : {}),
+              ...(rec.titleSource !== undefined ? { titleSource: rec.titleSource } : {}),
+            };
+            const stem = file.slice(0, -'.json'.length);
+            index.set(stem, meta);
+            if (rec.sessionId) index.set(rec.sessionId, meta);
+            if (rec.cliSessionId) index.set(rec.cliSessionId, meta);
+          } catch {
+            // one bad record — keep indexing
+          }
+        }
       }
     }
   } catch {
-    // dir missing/moved — degrade to the session row
+    // dir unreadable
   }
-  return {};
+  return index;
+}
+
+/** The desktop app's record for a session: created-at (ms) + who last set the title. */
+function ccdMeta(
+  dir: string,
+  sessionId: string,
+  index?: Map<string, { createdAt?: number; titleSource?: string }>,
+): { createdAt?: number; titleSource?: string } {
+  if (index) {
+    return (
+      index.get(sessionId) ??
+      index.get(
+        sessionId.startsWith('local_') ? sessionId.slice('local_'.length) : `local_${sessionId}`,
+      ) ??
+      {}
+    );
+  }
+  return buildCcdIndex(dir).get(sessionId) ?? {};
 }
 
 /**
@@ -470,6 +508,7 @@ export function resolveLabels(
 ): ResolveLabelsResult {
   const now = opts.now ?? Date.now();
   const dir = ccdSessionsDir(opts.env ?? process.env);
+  const ccdIndex = buildCcdIndex(dir);
   const apply: ResolveLabelsResult['apply'] = [];
   const skipped: Record<string, number> = {};
   const skip = (reason: string): void => {
@@ -491,29 +530,20 @@ export function resolveLabels(
       skip('not-a-seat');
       continue;
     }
-    const meta = ccdMeta(dir, s.sessionId);
+    const meta = ccdMeta(dir, s.sessionId, ccdIndex);
     const parse = parseSeatLabel(title, seat);
     if (parse.chipped && parse.seated) {
       skip('already-labeled');
       continue;
     }
-    // The user-title guard, NARROWED (ADR 160 amendment). "A title the user typed is never
-    // overwritten" still holds for anything the human wrote in their own terms. But a title the
-    // human already wrote in *seat form* — "Miley - fix(broadcast)" — states exactly what this
-    // sweep states; completing it (chip, timestamp, their words verbatim) is finishing their
-    // sentence, not overruling it. The guard used to run BEFORE the seat parse, which made the
-    // chip-upgrade branch below unreachable in practice: a chipless seat-prefixed title is almost
-    // always one a human typed, so the rows most in need of upgrading were the ones permanently
-    // skipped — and hand-renaming, the workaround for an unlabeled sidebar, silently opted a
-    // session out of ever being labeled again.
-    //
-    // MEASURED CEILING (2026-07-27): on Claude Code Desktop this narrowing is inert, because the
-    // app's own rename tool refuses a user-titled session and reports success anyway. Our guard was
-    // redundant with the harness's. What survives is the non-user case (an earlier sweep's output,
-    // or an auto-title that leads with the seat) plus the dated/subject/boundary fixes below. Keep
-    // the narrowing — it is right, and other surfaces may not have the app's guard — but do not
-    // expect it to reclaim a row a human renamed by hand.
-    if (meta.titleSource === 'user' && !parse.seated) {
+    // A titleSource:user row is never proposed — including seat-form hand titles
+    // ("Miley - fix(x)"). Measured 2026-07-27 and again 2026-07-30 (lane 01KYSY7JNB): Claude Code
+    // Desktop's rename tool soft-refuses every user-titled session and reports success anyway, so
+    // proposing them produced an infinite sweep (same ~30 rows every 4h, zero chips land). The
+    // 2026-07-27 "complete seat-form user titles" narrowing was right in principle and inert on
+    // this harness; on this harness it was also harmful. Other surfaces without that soft-refuse
+    // can revisit; for Claude Code Desktop, skip all user titles (ADR 160 / ADR 186).
+    if (meta.titleSource === 'user') {
       skip('hand-named');
       continue;
     }
@@ -552,13 +582,15 @@ export function resolveLabels(
 // The label-sweep nudge rail. The sweep only happens when a harness-side agent runs it, and the
 // one-shot SessionStart instruction was measured to fail: agents skip it under a busy first prompt
 // (3 days of unlabeled sidebar, 2026-07-29). So the ask repeats — the UserPromptSubmit hook calls
-// `label-nudge` every turn — but self-quiets: `resolve-labels` stamps a machine-wide "last sweep"
-// file, and the nudge prints ONLY while that stamp is missing or stale. One seat's sweep silences
-// every seat's nudge; nothing depends on the nudged session being the one that complies.
+// `label-nudge` every turn — but self-quiets when there is nothing left that the engine can land.
+//
+// ADR 173 / lane 01KYSY7JNB: the due predicate keys off *evidence* ("are there labelable unlabeled
+// seat sessions?") via the desktop session records + resolveLabels, not off stamp age. Stamp age
+// alone re-armed forever while the same soft-refused user titles stayed unlabeled. The stamp is
+// kept as a fallback when those records are unreadable (non-mac / no Desktop install).
 // ---------------------------------------------------------------------------------------------
 
-/** How stale the machine-wide sweep stamp may get before the nudge re-arms. Long enough that a
- *  sweep quiets a whole working session; short enough that new sessions never wait a day. */
+/** How stale the machine-wide sweep stamp may get before the *fallback* nudge re-arms (CCD absent). */
 export const LABEL_SWEEP_STALE_MS = 4 * 3_600_000;
 
 /** Machine-wide (not per-workspace): a sweep labels every seat's sessions, so one stamp serves
@@ -578,8 +610,76 @@ export function stampLabelSweep(now = Date.now(), env: NodeJS.ProcessEnv = proce
   }
 }
 
-/** True when the nudge should fire: no stamp, an unreadable stamp, or a stale one. */
+/**
+ * Build SessionRows from the desktop app's session-record tree (same enrichment source
+ * resolveLabels reads). Returns null when the tree is missing/unreadable — ADR 173 abstention:
+ * we cannot see whether work remains, so the caller falls back to stamp age.
+ */
+export function ccdSessionRows(env: NodeJS.ProcessEnv = process.env): SessionRow[] | null {
+  const root = ccdSessionsDir(env);
+  if (!existsSync(root)) return null;
+  const rows: SessionRow[] = [];
+  try {
+    for (const org of readdirSync(root)) {
+      const orgDir = join(root, org);
+      let projects: string[];
+      try {
+        projects = readdirSync(orgDir);
+      } catch {
+        continue;
+      }
+      for (const proj of projects) {
+        const projDir = join(orgDir, proj);
+        let files: string[];
+        try {
+          files = readdirSync(projDir);
+        } catch {
+          continue;
+        }
+        for (const file of files) {
+          if (!file.endsWith('.json')) continue;
+          try {
+            const rec = JSON.parse(readFileSync(join(projDir, file), 'utf8')) as {
+              sessionId?: string;
+              cliSessionId?: string;
+              title?: string;
+              cwd?: string;
+              isArchived?: boolean;
+              lastActivityAt?: number;
+            };
+            const sessionId = rec.cliSessionId ?? rec.sessionId;
+            if (!sessionId) continue;
+            rows.push({
+              sessionId,
+              ...(rec.title !== undefined ? { title: rec.title } : {}),
+              ...(rec.cwd !== undefined ? { cwd: rec.cwd } : {}),
+              ...(rec.isArchived !== undefined ? { isArchived: rec.isArchived } : {}),
+              ...(typeof rec.lastActivityAt === 'number'
+                ? { lastActivityAt: new Date(rec.lastActivityAt).toISOString() }
+                : {}),
+            });
+          } catch {
+            // one bad record must not kill the due-check
+          }
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+  return rows;
+}
+
+/**
+ * True when the nudge should fire. Prefer evidence (unlabeled sessions resolveLabels would still
+ * propose) over stamp age. Stamp age is the fallback when CCD records are absent — never treat
+ * "I cannot see" as "nothing to do" (ADR 173).
+ */
 export function labelSweepDue(now = Date.now(), env: NodeJS.ProcessEnv = process.env): boolean {
+  const rows = ccdSessionRows(env);
+  if (rows !== null) {
+    return resolveLabels(rows, { now, env }).apply.length > 0;
+  }
   try {
     const rec = JSON.parse(readFileSync(labelStampPath(env), 'utf8')) as { swept_at?: unknown };
     return typeof rec.swept_at !== 'number' || now - rec.swept_at >= LABEL_SWEEP_STALE_MS;
@@ -593,10 +693,9 @@ function labelNudgeCommand(): number {
   try {
     if (labelSweepDue()) {
       process.stdout.write(
-        'musterd: the sidebar label sweep has not run recently — run the musterd-label-sessions ' +
-          'skill NOW, before continuing the task (list sessions, pipe through `musterd session ' +
-          'resolve-labels --stdin`, apply the renames). One sweep labels every seat session and ' +
-          'quiets this nudge machine-wide.\n',
+        'musterd: unlabeled seat sessions still need a sidebar chip — run the musterd-label-sessions ' +
+          'skill NOW (list sessions, pipe through `musterd session resolve-labels --stdin`, apply ' +
+          'the renames). The nudge stays quiet once nothing labelable remains.\n',
       );
     }
   } catch {

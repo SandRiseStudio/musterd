@@ -715,33 +715,44 @@ describe('musterd session resolve-labels (ADR 160)', () => {
     });
   });
 
-  // The regression this lane exists for. A human who renames a session by hand — the workaround
-  // for an unlabeled sidebar — used to opt that session out of labeling PERMANENTLY, because the
-  // titleSource guard ran before the seat parse. A hand-typed title in seat form says exactly what
-  // the sweep says, so it is completed rather than skipped.
-  it('COMPLETES a hand-named title that is already in seat form: chip + time, words verbatim', () => {
+  it('skips hand-named rows when list_sessions hands the cliSessionId (≠ file stem)', () => {
+    // Desktop files are named local_<uuid>; list_sessions often returns cliSessionId, a *different*
+    // uuid. A miss left titleSource unset and the forever-loop proposed user titles (ADR 186).
+    const proj = join(ccdDir, 'org', 'proj');
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(
+      join(proj, 'local_file-stem.json'),
+      JSON.stringify({
+        sessionId: 'local_file-stem',
+        cliSessionId: 'cli-uuid-other',
+        createdAt: NOW - 3_600_000,
+        titleSource: 'user',
+      }),
+    );
+    const res = run([{ sessionId: 'cli-uuid-other', title: 'Miley - hand typed', cwd: seatWs }]);
+    expect(res.apply).toEqual([]);
+    expect(res.skipped).toEqual({ 'hand-named': 1 });
+  });
+
+  // Measured 2026-07-30 (lane 01KYSY7JNB): proposing seat-form user titles forever-looped the
+  // nudge — Desktop soft-refuses them with a success reply. Skip ALL titleSource:user.
+  it('skips a hand-named title even when it is already in seat form (Desktop soft-refuses)', () => {
     writeCcdRecord('s', { createdAt: NOW - 3_600_000, titleSource: 'user' });
     const res = run([
       { sessionId: 's', title: 'Miley - fix(broadcast): three things', cwd: seatWs },
     ]);
-    expect(res.skipped['hand-named']).toBeUndefined();
-    expect(res.apply).toHaveLength(1);
-    const title = res.apply[0]!.title;
-    expect(title.startsWith(`${CHIP} Miley (`)).toBe(true);
-    expect(title.endsWith(') - fix(broadcast): three things')).toBe(true);
-    // the seat is not restated inside the subject
-    expect(title).not.toContain('- Miley -');
+    expect(res.apply).toEqual([]);
+    expect(res.skipped).toEqual({ 'hand-named': 1 });
   });
 
-  it('adds only the chip to a hand-named seat title that already carries a stamp (never re-dates)', () => {
+  it('skips a hand-named seat title that already carries a stamp (same soft-refuse)', () => {
     writeCcdRecord('s', { createdAt: NOW - 3_600_000, titleSource: 'user' });
     const res = run([{ sessionId: 's', title: 'Miley (Mon 2p) - MCP list', cwd: seatWs }]);
-    expect(res.apply).toEqual([
-      { session_id: 's', seat: 'Miley', title: `${CHIP} Miley (Mon 2p) - MCP list` },
-    ]);
+    expect(res.apply).toEqual([]);
+    expect(res.skipped).toEqual({ 'hand-named': 1 });
   });
 
-  // The other half of the narrowing: everything NOT in seat form stays inviolable.
+  // The other half: everything NOT in seat form stays inviolable (unchanged).
   it('still never touches a hand-named title written in the human OWN terms', () => {
     writeCcdRecord('a', { createdAt: NOW - 3_600_000, titleSource: 'user' });
     writeCcdRecord('b', { createdAt: NOW - 3_600_000, titleSource: 'user' });
@@ -754,7 +765,8 @@ describe('musterd session resolve-labels (ADR 160)', () => {
     expect(res.skipped).toEqual({ 'hand-named': 2 });
   });
 
-  it('upgrades a pre-chip label by prepending the chip, KEEPING the original timestamp text', () => {
+  it('upgrades a pre-chip AUTO label by prepending the chip, KEEPING the original timestamp text', () => {
+    writeCcdRecord('s', { createdAt: NOW - 3_600_000, titleSource: 'auto' });
     const res = run([{ sessionId: 's', title: 'Miley (Mon 2p) - MCP list', cwd: seatWs }]);
     expect(res.apply).toEqual([
       { session_id: 's', seat: 'Miley', title: `${CHIP} Miley (Mon 2p) - MCP list` },
@@ -800,68 +812,154 @@ describe('musterd session resolve-labels (ADR 160)', () => {
 });
 
 /**
- * The label-sweep nudge rail. The one-shot SessionStart instruction was measured to fail (agents
- * skip it under a busy first prompt — 3 days of unlabeled sidebar, 2026-07-29), so the sweep is
- * nudged per-turn until it happens: `resolve-labels` stamps a machine-wide "last sweep" file, and
- * `label-nudge` prints one imperative line only while the stamp is missing or stale. Self-quieting:
- * any one seat's sweep silences every seat's nudge.
+ * The label-sweep nudge rail. Due keys off evidence (CCD + resolveLabels.apply) when the desktop
+ * session records are readable; stamp age is only the fallback when they are not (ADR 173).
  */
-describe('musterd session label-nudge (label-sweep stamp)', () => {
+describe('musterd session label-nudge (evidence-based due)', () => {
   const NOW = Date.UTC(2026, 6, 29, 22, 0);
   let stampPath: string;
+  let ccdDir: string;
+  let seatWs: string;
   const dirs: string[] = [];
 
   beforeEach(() => {
     const d = mkdtempSync(join(tmpdir(), 'musterd-label-stamp-'));
     dirs.push(d);
     stampPath = join(d, 'nested', 'label-sweep.json'); // nested: the stamp write must mkdir -p
+    ccdDir = mkdtempSync(join(tmpdir(), 'musterd-label-ccd-'));
+    dirs.push(ccdDir);
+    seatWs = mkdtempSync(join(tmpdir(), 'musterd-label-seat-'));
+    dirs.push(seatWs);
+    mkdirSync(join(seatWs, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(seatWs, '.musterd', 'workspace.json'),
+      JSON.stringify({
+        server: 'http://127.0.0.1:1',
+        team: 'dawn',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'miley' },
+      }),
+    );
   });
   afterEach(() => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  const env = () => ({ MUSTERD_LABEL_STAMP: stampPath });
-
-  it('is due when no sweep was ever stamped', () => {
-    expect(labelSweepDue(NOW, env())).toBe(true);
+  const env = (over: Record<string, string> = {}) => ({
+    MUSTERD_LABEL_STAMP: stampPath,
+    MUSTERD_CCD_SESSIONS_DIR: ccdDir,
+    ...over,
   });
 
-  it('a stamp quiets it, and staleness re-arms it', () => {
+  const writeCcd = (id: string, rec: object): void => {
+    const proj = join(ccdDir, 'org', 'proj');
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, `${id}.json`), JSON.stringify(rec));
+  };
+
+  it('is due when CCD shows an unlabeled auto seat session — even with a fresh stamp', () => {
     stampLabelSweep(NOW, env());
-    expect(labelSweepDue(NOW + 60_000, env())).toBe(false);
-    expect(labelSweepDue(NOW + LABEL_SWEEP_STALE_MS + 1, env())).toBe(true);
+    writeCcd('s1', {
+      sessionId: 's1',
+      cliSessionId: 's1',
+      title: 'Daemon refresh',
+      cwd: seatWs,
+      createdAt: NOW - 3_600_000,
+      titleSource: 'auto',
+      isArchived: false,
+    });
+    expect(labelSweepDue(NOW + 60_000, env())).toBe(true);
   });
 
-  it('an unreadable stamp file means due — never a crash', () => {
+  it('is quiet when CCD shows only hand-named / already-labeled rows — even with a stale stamp', () => {
+    writeCcd('hand', {
+      sessionId: 'hand',
+      cliSessionId: 'hand',
+      title: 'Miley - my words',
+      cwd: seatWs,
+      createdAt: NOW - 3_600_000,
+      titleSource: 'user',
+      isArchived: false,
+    });
+    writeCcd('done', {
+      sessionId: 'done',
+      cliSessionId: 'done',
+      title: '\u{1F536} Miley (Fri 3p) - x',
+      cwd: seatWs,
+      createdAt: NOW - 3_600_000,
+      titleSource: 'auto',
+      isArchived: false,
+    });
+    // no stamp at all — still quiet, because apply would be empty
+    expect(labelSweepDue(NOW, env())).toBe(false);
+  });
+
+  it('falls back to stamp age when CCD dir is missing (ADR 173: absent ≠ nothing-to-do)', () => {
+    const missing = join(ccdDir, 'does-not-exist');
+    expect(labelSweepDue(NOW, env({ MUSTERD_CCD_SESSIONS_DIR: missing }))).toBe(true);
+    stampLabelSweep(NOW, env({ MUSTERD_CCD_SESSIONS_DIR: missing }));
+    expect(labelSweepDue(NOW + 60_000, env({ MUSTERD_CCD_SESSIONS_DIR: missing }))).toBe(false);
+    expect(
+      labelSweepDue(NOW + LABEL_SWEEP_STALE_MS + 1, env({ MUSTERD_CCD_SESSIONS_DIR: missing })),
+    ).toBe(true);
+  });
+
+  it('an unreadable stamp file means due on the fallback path — never a crash', () => {
+    const missing = join(ccdDir, 'gone');
     mkdirSync(join(stampPath, '..'), { recursive: true });
     writeFileSync(stampPath, 'not json');
-    expect(labelSweepDue(NOW, env())).toBe(true);
+    expect(labelSweepDue(NOW, env({ MUSTERD_CCD_SESSIONS_DIR: missing }))).toBe(true);
   });
 
-  it('the command prints the nudge when due and NOTHING when fresh, exiting 0 both times', async () => {
+  it('the command prints the nudge when due and NOTHING when quiet, exiting 0 both times', async () => {
     const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const run = () => sessionCommand(parseArgs(['label-nudge']));
-    const withEnv = async (): Promise<number> => {
-      process.env['MUSTERD_LABEL_STAMP'] = stampPath;
+    const withEnv = async (e: Record<string, string>): Promise<number> => {
+      const prev: Record<string, string | undefined> = {};
+      for (const [k, v] of Object.entries(e)) {
+        prev[k] = process.env[k];
+        process.env[k] = v;
+      }
       try {
         return await run();
       } finally {
-        delete process.env['MUSTERD_LABEL_STAMP'];
+        for (const [k, v] of Object.entries(prev)) {
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+        }
       }
     };
-    expect(await withEnv()).toBe(0);
+    writeCcd('s1', {
+      sessionId: 's1',
+      cliSessionId: 's1',
+      title: 'Needs chip',
+      cwd: seatWs,
+      createdAt: NOW - 3_600_000,
+      titleSource: 'auto',
+      isArchived: false,
+    });
+    expect(await withEnv(env())).toBe(0);
     expect(out.mock.calls.map((c) => String(c[0])).join('')).toContain('musterd-label-sessions');
     out.mockClear();
-    stampLabelSweep(Date.now(), env());
-    expect(await withEnv()).toBe(0);
+    // clear the unlabeled row → quiet
+    writeFileSync(
+      join(ccdDir, 'org', 'proj', 's1.json'),
+      JSON.stringify({
+        sessionId: 's1',
+        cliSessionId: 's1',
+        title: '\u{1F536} Miley (Fri 3p) - Needs chip',
+        cwd: seatWs,
+        createdAt: NOW - 3_600_000,
+        titleSource: 'auto',
+        isArchived: false,
+      }),
+    );
+    expect(await withEnv(env())).toBe(0);
     expect(out.mock.calls.join('')).toBe('');
     out.mockRestore();
   });
 
   it('resolve-labels stamps the sweep even when nothing needed labeling', () => {
-    // through the pure engine's command wrapper contract: the stamp rides the command, so call it
-    // via stampLabelSweep exactly as resolveLabelsCommand does — asserted at the file level here,
-    // and the command-level wiring is one line covered by the due->quiet transition above.
     stampLabelSweep(NOW, env());
     const rec = JSON.parse(readFileSync(stampPath, 'utf8')) as { swept_at: number };
     expect(rec.swept_at).toBe(NOW);

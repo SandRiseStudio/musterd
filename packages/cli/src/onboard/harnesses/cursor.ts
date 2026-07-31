@@ -44,6 +44,9 @@ export const cursor: Harness = {
     skillPath: '.cursor/rules/musterd.mdc',
     frontmatter: 'cursor',
     commandsDir: '.cursor/commands',
+    // ADR 186: Cursor can rename the *current* chat via `rename_chat` (when cursor-app-control is
+    // present) — not a peer sweep. Self-label guidance is a separate unit from Claude's cross-rename.
+    selfLabelSkillPath: '.cursor/rules/musterd-label-session.mdc',
   },
 
   // Cursor runs no hooks and exposes no per-session record we can read, so there is nothing to

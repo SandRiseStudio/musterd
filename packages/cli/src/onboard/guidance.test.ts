@@ -145,17 +145,24 @@ describe('guidanceTargets', () => {
 });
 
 describe('label-sessions guidance unit (ADR 160)', () => {
-  it('writes the label-sessions skill for Claude Code (the only sessionsSkillPath declarer), stamped', () => {
+  it('writes the label-sessions skill for Claude Code and the self-label rule for Cursor (ADR 186)', () => {
     const dir = tmp();
     const res = writeGuidance(dir, [claudeCode, cursor, codex], { team: 'dawn' });
-    const rel = '.claude/skills/musterd-label-sessions/SKILL.md';
-    expect(res.files).toContain(rel);
-    const text = readFileSync(join(dir, rel), 'utf8');
-    expect(parseContentStamp(text)?.version).toBe(GUIDANCE_CONTENT_VERSION);
-    expect(text).toContain('name: musterd-label-sessions');
-    expect(text).toContain('resolve-labels --stdin');
-    // Cursor/Codex declare no sessionsSkillPath — no sibling unit appears for them.
-    expect(res.files.filter((f) => f.includes('label-sessions'))).toEqual([rel]);
+    const cross = '.claude/skills/musterd-label-sessions/SKILL.md';
+    const self = '.cursor/rules/musterd-label-session.mdc';
+    expect(res.files).toContain(cross);
+    expect(res.files).toContain(self);
+    const crossText = readFileSync(join(dir, cross), 'utf8');
+    expect(parseContentStamp(crossText)?.version).toBe(GUIDANCE_CONTENT_VERSION);
+    expect(crossText).toContain('name: musterd-label-sessions');
+    expect(crossText).toContain('resolve-labels --stdin');
+    expect(crossText).toContain('never proposed');
+    const selfText = readFileSync(join(dir, self), 'utf8');
+    expect(parseContentStamp(selfText)?.version).toBe(GUIDANCE_CONTENT_VERSION);
+    expect(selfText).toContain('rename_chat');
+    expect(selfText).toContain('current chat only');
+    // Codex declares neither — no sibling unit.
+    expect(res.files.filter((f) => f.includes('label-session'))).toEqual([cross, self]);
   });
 
   it('is enumerated by guidanceTargets and removed by removeGuidance (dir pruned)', () => {
