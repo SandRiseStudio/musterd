@@ -3,6 +3,7 @@ import {
   MODEL_UNKNOWN,
   type FamilyPosture,
   type FamilyPostureState,
+  type WakeCandidate,
   type Lane,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
@@ -40,6 +41,44 @@ export interface ReviewPick {
   reviewer_family: string;
 }
 
+/** One seat's last attestation, whichever source proved it. */
+interface Attestation {
+  model: string | null;
+  /** When it was attested; null when there is none. Age is the reader's to judge, not ours to expire. */
+  at: number | null;
+}
+
+const NO_ATTESTATION: Attestation = { model: null, at: null };
+
+/**
+ * Every seat's last attested model, from the **durable** record (ADR 187). `presence` carries the
+ * attestation only while a seat is live and is reaped when it goes offline — so reading it alone made
+ * every idle seat's family `unknown`, which is what silently emptied the cross-family pool.
+ *
+ * The `occupancy.model_attested` audit row is the house-correct source: `route.ts` already names the
+ * occupancy attestation the *source* and the per-act `meta.model` stamp the *dataset*. One query per
+ * posture (not one per seat), index-ordered by `idx_audit_team_action_ts` (v25), folded newest-wins.
+ * The scan is bounded by one team's attestation history — 661 rows at ~30/day when this shipped, so
+ * it stays cheap for years; if that ever stops being true the fix is a per-seat projection, not a
+ * different source.
+ */
+function durableAttestations(db: Database, teamId: string): Map<string, Attestation> {
+  const rows = db
+    .prepare<[string], { target: string | null; model: string | null; ts: number }>(
+      `SELECT target, json_extract(detail, '$.new') AS model, ts
+         FROM audit
+        WHERE team_id = ? AND action = 'occupancy.model_attested'
+        ORDER BY ts ASC`,
+    )
+    .all(teamId);
+  const out = new Map<string, Attestation>();
+  for (const r of rows) {
+    if (!r.target || !r.model) continue; // a de-attestation (new: null) proves nothing
+    out.set(r.target, { model: r.model, at: r.ts }); // newest wins
+  }
+  return out;
+}
+
 /** The attested model of a member's most recent live occupancy (ADR 101/158), or null. */
 function latestAttestedModel(db: Database, memberId: string): string | null {
   const row = db
@@ -51,7 +90,18 @@ function latestAttestedModel(db: Database, memberId: string): string | null {
   return row?.model ?? null;
 }
 
-/** A member's diversity family: 'human' for human seats, else the attested model's family. */
+/**
+ * A member's diversity family: 'human' for human seats, else the family its **live** occupancy
+ * attests. Deliberately NOT durable-aware, and that is the load-bearing part (ADR 187).
+ *
+ * This is the predicate the review picker routes on, and it must only ever speak about a session
+ * that is running now. A live seat whose current occupancy attested nothing reads `unknown` and is
+ * ineligible — falling back to what it attested last week would let a *stale memory* certify a live
+ * review as cross-family, which is the one failure mode durable attestation must not introduce: a
+ * review whose diversity claim is false is worse than no review at all (ADR 056). The durable record
+ * answers a different question — "what would waking this idle seat bring" — and lives in
+ * {@link durableAttestations}, reachable only from the wake pool.
+ */
 export function memberFamily(db: Database, member: MemberRow): string {
   return member.kind === 'human' ? 'human' : modelFamily(latestAttestedModel(db, member.id));
 }
@@ -68,8 +118,10 @@ export function workerFamily(db: Database, teamId: string, worker: string): stri
  * about who is attesting what right now, stamped with when.
  *
  * Counting rules, each load-bearing:
- *   - Family comes from the live occupancy's attestation only — never inferred from a seat's name
- *     (`grokbot` is a name, not a guarantee).
+ *   - Family comes from an attestation, never inferred from a seat's name (`grokbot` is a name, not
+ *     a guarantee). For a LIVE seat that is its occupancy's attestation; for an idle one it is the
+ *     durable `occupancy.model_attested` record (ADR 187), which is why `wake_pool` can say what
+ *     waking a seat would bring instead of listing anonymous names.
  *   - A live agent attesting `unknown` counts in `unattested`, never in the denominator — it cannot
  *     prove diversity, and a wrong guess here poisons the posture the way a wrong attestation
  *     poisons ADR 056 conclusions. Same rule the review picker applies per-seat.
@@ -87,7 +139,8 @@ export function teamFamilyPosture(
   presenceTimeoutMs: number,
 ): FamilyPosture {
   const families: Record<string, number> = {};
-  const wake_pool: string[] = [];
+  const wake_pool: WakeCandidate[] = [];
+  const durable = durableAttestations(db, teamId);
   let attesting = 0;
   let unattested = 0;
   let humans_live = 0;
@@ -99,7 +152,14 @@ export function teamFamilyPosture(
       continue;
     }
     if (!live) {
-      wake_pool.push(m.name);
+      // ADR 187: what this seat would bring, not just that it exists. The durable attestation is a
+      // memory, not an observation — so it rides with the timestamp that lets a reader discount it.
+      const last = durable.get(m.name) ?? NO_ATTESTATION;
+      wake_pool.push({
+        seat: m.name,
+        family: modelFamily(last.model),
+        attested_at: last.at,
+      });
       continue;
     }
     const family = modelFamily(latestAttestedModel(db, m.id));

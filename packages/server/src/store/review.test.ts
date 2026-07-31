@@ -1,3 +1,4 @@
+import { describeFamilyPosture } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { addMember } from './members.js';
@@ -42,7 +43,10 @@ describe('teamFamilyPosture (ADR 172)', () => {
     expect(p.state).toBe('monoculture');
     expect(p.attesting).toBe(3);
     expect(p.families).toEqual({ claude: 3 });
-    expect(p.wake_pool.sort()).toEqual(['gptbot', 'grokbot']);
+    // ADR 187: idle seats carry what they would bring. Never attested here, so `unknown` — the
+    // durable-record cases are covered in their own describe below.
+    expect(p.wake_pool.map((c) => c.seat).sort()).toEqual(['gptbot', 'grokbot']);
+    expect(p.wake_pool.every((c) => c.family === 'unknown')).toBe(true);
   });
 
   it('diverse: one cross-family attester flips it', () => {
@@ -93,6 +97,104 @@ describe('teamFamilyPosture (ADR 172)', () => {
     expect(p.state).toBe('unknown');
     expect(p.attesting).toBe(0);
     expect(p.families).toEqual({});
+  });
+});
+
+/**
+ * ADR 187. `presence` holds an attestation only while a seat is live and is reaped when it goes
+ * offline, so reading it alone made every idle seat's family `unknown` — which silently emptied the
+ * cross-family remedy while the durable `occupancy.model_attested` record knew the answer all along.
+ */
+describe('the wake pool reads the durable attestation record (ADR 187)', () => {
+  /** An agent that attested once and then went away — no presence row survives it. */
+  function wentOffline(
+    db: ReturnType<typeof seed>['db'],
+    team: ReturnType<typeof seed>['team'],
+    name: string,
+    model: string,
+    at: number = Date.now(),
+  ): void {
+    if (!db.prepare('SELECT 1 FROM members WHERE team_id = ? AND name = ?').get(team.id, name)) {
+      addMember(db, team, { kind: 'agent', name, role: '' });
+    }
+    db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+       VALUES (?, ?, ?, NULL, 'occupancy.model_attested', ?, 'allow', ?, ?)`,
+    ).run(
+      `a-${name}-${String(at)}`,
+      team.id,
+      at,
+      name,
+      JSON.stringify({ old: null, new: model, source: 'claim' }),
+      at,
+    );
+  }
+
+  it('an idle seat carries the family it last attested, with the age of that claim', () => {
+    const { db, team } = seed();
+    agent(db, team, 'ada', 'claude-opus-5');
+    agent(db, team, 'lin', 'claude-opus-5');
+    const when = Date.now() - 86_400_000 * 21;
+    wentOffline(db, team, 'grokbot', 'grok-4.5', when);
+
+    const p = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(p.state).toBe('monoculture'); // still — an idle seat never counts as attesting
+    expect(p.wake_pool).toEqual([{ seat: 'grokbot', family: 'grok', attested_at: when }]);
+  });
+
+  it('newest attestation wins — a seat that switched models is not remembered as its old one', () => {
+    const { db, team } = seed();
+    const old = Date.now() - 86_400_000 * 30;
+    wentOffline(db, team, 'drifter', 'grok-4.5', old);
+    wentOffline(db, team, 'drifter', 'claude-opus-5', old + 86_400_000);
+
+    const p = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(p.wake_pool).toEqual([
+      { seat: 'drifter', family: 'claude', attested_at: old + 86_400_000 },
+    ]);
+  });
+
+  it('a seat that never attested stays unknown — the record cannot invent one', () => {
+    const { db, team } = seed();
+    agent(db, team, 'ghost'); // enrolled, never attached, never attested
+    const p = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(p.wake_pool).toEqual([{ seat: 'ghost', family: 'unknown', attested_at: null }]);
+  });
+
+  /**
+   * The hazard this design must not introduce. A LIVE seat whose current occupancy attested nothing
+   * must read `unknown`, NOT whatever it attested last week — otherwise a stale memory could certify
+   * a live review as cross-family, and a review whose diversity claim is false is worse than no
+   * review at all (ADR 056). The durable record answers "what would waking this seat bring", never
+   * "what is this seat running now".
+   */
+  it('a LIVE seat is never described by its durable record — no stale cross-family claim', () => {
+    const { db, team } = seed();
+    agent(db, team, 'ada', 'claude-opus-5');
+    agent(db, team, 'lin', 'claude-opus-5');
+    // grokbot attested grok long ago, then came back on a session that attests nothing.
+    wentOffline(db, team, 'grokbot', 'grok-4.5', Date.now() - 86_400_000 * 21);
+    const row = db
+      .prepare<[string], { id: string }>('SELECT id FROM members WHERE name = ?')
+      .get('grokbot')!;
+    attach(db, row.id, 'claude-code', 'conn-grokbot'); // live, no model
+
+    const p = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(p.unattested).toBe(1); // present, proves nothing
+    expect(p.families).toEqual({ claude: 2 }); // NOT { claude: 2, grok: 1 }
+    expect(p.state).toBe('monoculture'); // a stale memory must not read as diversity
+    expect(p.wake_pool).toEqual([]); // and it is not idle, so it is not a remedy either
+  });
+
+  it('the posture line names the cross-family remedy first, with its age', () => {
+    const { db, team } = seed();
+    agent(db, team, 'ada', 'claude-opus-5');
+    agent(db, team, 'lin', 'claude-opus-5');
+    wentOffline(db, team, 'sleepy', 'claude-opus-5', Date.now() - 3_600_000);
+    wentOffline(db, team, 'grokbot', 'grok-4.5', Date.now() - 86_400_000 * 3);
+
+    const line = describeFamilyPosture(teamFamilyPosture(db, team.id, TIMEOUT));
+    expect(line).toContain('idle & enrollable: grokbot (grok, 3d ago)');
   });
 });
 

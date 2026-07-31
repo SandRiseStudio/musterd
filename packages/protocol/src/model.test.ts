@@ -110,6 +110,7 @@ describe('resolveAttestation — observation beats declaration', () => {
 });
 
 describe('describeFamilyPosture (ADR 172) — one bounded line', () => {
+  const NOW = Date.now();
   const base = {
     attesting: 0,
     families: {},
@@ -125,13 +126,25 @@ describe('describeFamilyPosture (ADR 172) — one bounded line', () => {
       state: 'monoculture',
       attesting: 3,
       families: { claude: 3 },
-      wake_pool: ['dolly', 'grokbot', 'gptbot', 'kimi', 'compo'],
+      // ADR 187: cross-family candidates sort FIRST, so the three slots go to the seats that would
+      // actually change the posture — `dolly` is another claude and must lose its slot to them.
+      wake_pool: [
+        { seat: 'dolly', family: 'claude', attested_at: NOW - 3_600_000 },
+        { seat: 'grokbot', family: 'grok', attested_at: NOW - 86_400_000 * 21 },
+        { seat: 'gptbot', family: 'gpt', attested_at: NOW - 86_400_000 * 21 },
+        { seat: 'kimi', family: 'unknown', attested_at: null },
+        { seat: 'compo', family: 'composer', attested_at: NOW - 3_600_000 * 5 },
+      ],
       humans_live: 1,
     });
     expect(line).toContain('monoculture — 3 agents attesting, all claude');
-    expect(line).toContain('idle & enrollable: dolly, grokbot, gptbot +2');
+    expect(line).toContain('idle & enrollable: grokbot (grok, 21d ago)');
+    expect(line).toContain('gptbot (gpt, 21d ago)');
+    expect(line).toContain('compo (composer, 5h ago)');
+    expect(line).toContain('+2');
     expect(line).toContain('1 human(s) live');
     expect(line).not.toContain('kimi'); // bounded: never one entry per seat
+    expect(line).not.toContain('dolly'); // a same-family seat is not the remedy
   });
 
   it('diverse lists family counts', () => {
