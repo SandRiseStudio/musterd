@@ -249,3 +249,16 @@ itself is now observable where it wasn't: the stamp file's age *is* the trigger'
 `label-nudge`'s output in a transcript shows the ask firing. If chips stop accumulating while the
 stamp stays fresh, sweeps are running but renames are not landing (the acceptor layer); if the
 stamp goes stale for days, agents are ignoring even the per-turn line — escalate past nudging.
+
+### Amendment 2026-07-30 — forever-loop fix + cross-harness capabilities
+
+Superseded in part by [ADR 186](186-cross-harness-session-labels.md):
+
+1. **Nudge due keys off evidence, not stamp age.** Stamp age re-armed forever while the same
+   soft-refused `titleSource: user` rows stayed unlabeled (lane 01KYSY7JNB). `label-nudge` now runs
+   `resolveLabels` over CCD rows and fires only when `apply` would be non-empty; stamp age is the
+   fallback when CCD is unreadable (ADR 173).
+2. **All `titleSource: user` rows are skipped** — including seat-form hand titles. The 2026-07-27
+   narrowing remains right in principle and was inert+harmful on Desktop's soft-refuse.
+3. **Cursor is `self_rename`, not "no sidebar".** `rename_chat` labels the current chat only;
+   Codex stays write-`none` (titles are readable). Terminal OSC remains the universal path.

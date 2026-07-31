@@ -528,11 +528,13 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const duplicateAdapters = await inspectDuplicateAdapters(binding);
   const modelAttestation = await inspectModelAttestation(binding);
   const seatIdentity = await inspectSeatIdentity(binding, cwd);
-  // ADR 160: label coverage is per-surface, and some harnesses have no writable session list at
-  // all. Say so plainly (a note, never drift — there is nothing to fix) instead of pretending.
-  const sidebarless = HARNESSES.filter(
+  // ADR 160/185: label coverage is per-capability (cross_rename / self_rename / none). Say so
+  // plainly (a note, never drift — capability gaps are not misconfiguration).
+  const noPeerSweep = HARNESSES.filter(
     (h) => !h.guidance?.sessionsSkillPath && harnesses.find((s) => s.label === h.label)?.configured,
   );
+  const selfLabel = noPeerSweep.filter((h) => h.guidance?.selfLabelSkillPath);
+  const terminalOnly = noPeerSweep.filter((h) => !h.guidance?.selfLabelSkillPath);
   // ADR 162: the binding registry only grows — nothing prunes an entry when its folder is deleted.
   // Warn-only and cheap (one stat per entry), and only worth saying once it is actually noisy.
   const staleBindings = Object.keys(loadConfig().bindings).filter((f) => !existsSync(f));
@@ -543,13 +545,20 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
             `run \`musterd init --prune-bindings\` to review, \`--apply\` to remove. Credentials are untouched.`,
         ]
       : [];
-  const labelNotes =
-    sidebarless.length > 0
+  const labelNotes = [
+    ...(selfLabel.length > 0
       ? [
-          `${sidebarless.map((h) => h.label).join(' + ')}: seat labels reach the terminal tab only — ` +
-            `no writable session list for a sidebar sweep (ADR 160).`,
+          `${selfLabel.map((h) => h.label).join(' + ')}: seat labels = terminal OSC + current-chat ` +
+            `self-rename when the harness rename tool is present (ADR 186 self_rename) — no peer sidebar sweep.`,
         ]
-      : [];
+      : []),
+    ...(terminalOnly.length > 0
+      ? [
+          `${terminalOnly.map((h) => h.label).join(' + ')}: seat labels reach the terminal tab only — ` +
+            `no session rename API for a sidebar write (ADR 160/185).`,
+        ]
+      : []),
+  ];
   // Classify BEFORE merging so the distinction survives into `--fix`. Identity drift wins outright:
   // the seat is dead, no other repair reaches it, and the generic remedy would make it worse. Then
   // entry drift (repairable headlessly by `wire`), then everything else (full onboarding).

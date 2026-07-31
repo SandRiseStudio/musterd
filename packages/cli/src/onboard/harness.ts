@@ -126,10 +126,13 @@ export interface HarnessGuidance {
   /** Dir for slash-command prompt files (one `.md` per command), relative to the binding folder.
    * Omit when the harness has no project-level slash-command support. */
   commandsDir?: string;
-  /** Path for the **label-sessions** skill (ADR 160) — declared only by harnesses whose sessions can
-   * list and rename each other through agent-side tools (Claude Code Desktop today). Omit when the
-   * harness has no writable session list; those get terminal-tab titles only. */
+  /** Path for the **label-sessions** skill (ADR 160 / 185 `cross_rename`) — harnesses that can list
+   * peers and rename by id (Claude Code Desktop today). Omit when the harness has no peer list. */
   sessionsSkillPath?: string;
+  /** Path for the **self-label** skill (ADR 186 `self_rename`) — harnesses that can rename only the
+   * *current* chat (Cursor `rename_chat` today). Distinct from `sessionsSkillPath`: the apply loop
+   * is inverted (label self, not peers). Omit when neither capability exists (Codex today). */
+  selfLabelSkillPath?: string;
   /** Path for the **nudge-relay** skill (ADR 167) — declared only by harnesses whose sessions can
    * message each other through agent-side tools (Claude Code Desktop today, the same surface test as
    * `sessionsSkillPath`). Omit elsewhere; a `delivery_hint` an agent can't act on is simply inert. */

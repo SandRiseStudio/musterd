@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 9;
+export const GUIDANCE_CONTENT_VERSION = 10;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -271,10 +271,68 @@ export function renderLabelSessionsSkill(): string {
     '## What the engine guarantees (so you do not re-derive it)',
     '',
     '- Only sessions in musterd seat worktrees; other repos are never touched.',
-    '- A title the user typed (`titleSource: "user"`) is never overwritten.',
-    '- Idempotent: labeled rows skip; pre-chip labels get the chip without re-dating.',
+    '- A title the user typed (`titleSource: "user"`) is never proposed — including seat-form',
+    '  hand titles. Claude Code Desktop soft-refuses those renames with a success reply; proposing',
+    '  them was the forever-nudge bug (ADR 186).',
+    '- Idempotent: labeled rows skip; pre-chip *auto* labels get the chip without re-dating.',
     '- Brand-new sessions are skipped until their auto-title settles.',
+    '- The nudge stays quiet once `apply` would be empty — it keys off evidence, not stamp age.',
     '',
+  ].join('\n');
+}
+
+/**
+ * The **self-label** skill (ADR 186) — Cursor (and any future harness with current-only rename).
+ * Inverse of {@link renderLabelSessionsSkill}: Claude renames *peers* and cannot rename itself;
+ * Cursor's `rename_chat` renames *only the current* chat and has no peer list. One shared grammar
+ * (`renderSeatLabel`); two apply loops.
+ */
+export function renderSelfLabelSessionSkill(): string {
+  return [
+    '# Label this seat session (current chat only)',
+    '',
+    'Prefix **this** chat’s title with the musterd chip and seat so a human scanning the Cursor',
+    'sidebar can tell which seat it is — `\u{1F536} Dolly (Fri 3p) - <subject>`. Cursor cannot list',
+    'or rename *other* sessions (no peer sweep); Claude Code Desktop is the inverse. Terminal tabs',
+    'are already labeled by the CLI OSC postamble whenever you shell out to `musterd`.',
+    '',
+    '## When to run',
+    '',
+    '- At session start in a musterd seat worktree, once, if the `rename_chat` tool is available',
+    '  (Cursor built-in MCP `cursor-app-control`).',
+    '- When the user asks to label or rename this chat.',
+    '- Skip silently when `rename_chat` is not in your tool list — do not invent a SQLite write.',
+    '',
+    '## The self-label',
+    '',
+    '1. Resolve this folder’s seat (`musterd whoami` / binding claim name).',
+    '2. Build the title with the shared grammar: chip + capitalized seat + compact start time +',
+    '   short subject (current title stripped of any prior chip/seat prefix, or a 3–6 word summary',
+    '   of the task). Prefer `musterd session resolve-labels` shape mentally: never re-date a title',
+    '   that already carries `(Fri 3p)`; never invent a wrong seat.',
+    '3. Call `rename_chat` with that exact title (current chat only — the tool has no session id).',
+    '4. Report one line: `labeled this session as Dolly`. If the tool is missing, say nothing',
+    '   when this ran automatically.',
+    '',
+    '## Hard rules',
+    '',
+    '- Never write Cursor’s `state.vscdb` / Codex SQLite from the CLI — the app owns those stores.',
+    '- Do not try a Claude-style peer sweep here; there is no list API.',
+    '- A human-owned title the user just typed wins — if they renamed this chat by hand this turn,',
+    '  leave it.',
+    '',
+  ].join('\n');
+}
+
+/** Cursor-rule frontmatter for {@link renderSelfLabelSessionSkill}. */
+export function renderSelfLabelSessionFrontmatter(): string {
+  return [
+    '---',
+    'description: Label this Cursor chat with the musterd seat chip (e.g. "\u{1F536} Dolly (Fri 3p) - …"). ' +
+      'Use at session start in a musterd seat worktree when rename_chat is available, and when the ' +
+      'user asks to label or rename this chat.',
+    'alwaysApply: false',
+    '---',
   ].join('\n');
 }
 

@@ -9,6 +9,8 @@ import {
   renderLabelSessionsSkill,
   renderNudgeRelayFrontmatter,
   renderNudgeRelaySkill,
+  renderSelfLabelSessionFrontmatter,
+  renderSelfLabelSessionSkill,
   renderSkillBody,
   renderSkillFrontmatter,
   renderSlashCommand,
@@ -134,12 +136,22 @@ export function writeGuidance(
     if (!g) continue;
     writeOne(dir, g.skillPath, skillFile(g.frontmatter, opts.team), force, written, skipped);
     if (g.sessionsSkillPath) {
-      // ADR 160: the label-sessions skill — a separate unit, only for harnesses whose sessions can
-      // list/rename each other (the canonical body stays harness-neutral, so it never merges in).
+      // ADR 160/185 cross_rename: peer sweep — only for harnesses that can list/rename each other.
       writeOne(
         dir,
         g.sessionsSkillPath,
         `${renderLabelSessionsFrontmatter()}\n\n${renderLabelSessionsSkill()}`,
+        force,
+        written,
+        skipped,
+      );
+    }
+    if (g.selfLabelSkillPath) {
+      // ADR 186 self_rename: current-chat only (Cursor rename_chat) — inverted apply loop.
+      writeOne(
+        dir,
+        g.selfLabelSkillPath,
+        `${renderSelfLabelSessionFrontmatter()}\n\n${renderSelfLabelSessionSkill()}`,
         force,
         written,
         skipped,
@@ -201,6 +213,7 @@ export function guidanceTargets(harnesses: Harness[]): string[] {
     if (!g) continue;
     paths.add(g.skillPath);
     if (g.sessionsSkillPath) paths.add(g.sessionsSkillPath);
+    if (g.selfLabelSkillPath) paths.add(g.selfLabelSkillPath);
     if (g.nudgeSkillPath) paths.add(g.nudgeSkillPath);
     if (g.commandsDir)
       for (const n of SLASH_COMMANDS) paths.add(join(g.commandsDir, `musterd-${n}.md`));
