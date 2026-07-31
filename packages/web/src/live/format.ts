@@ -108,7 +108,11 @@ export type LaneEventKind =
   | 'lane_resolve'
   | 'lane_handoff';
 export function laneEvent(env: Pick<Envelope, 'act' | 'meta'>): LaneEventKind | null {
-  if (env.act !== 'message' || !env.meta) return null;
+  // Most lane events ride as `message` + meta. The handoff is the exception: it goes out as act
+  // `handoff` so the wake ledger can see it (a lane handed to an offline seat has to be able to spawn
+  // them). The meta key is what identifies a lane event either way — the act check only keeps a
+  // teammate-composed `handoff`, which carries no lane meta, from being read as one.
+  if ((env.act !== 'message' && env.act !== 'handoff') || !env.meta) return null;
   if (env.meta['lane_open']) return 'lane_open';
   if (env.meta['lane_claim']) return 'lane_claim';
   if (env.meta['lane_state']) return 'lane_state';

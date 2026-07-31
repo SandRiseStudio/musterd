@@ -14,6 +14,7 @@ import { WebSocket } from 'ws';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
+import { openDirectedLedger } from '../store/delivery.js';
 import { getMemberByName, setMemberGovernance } from '../store/members.js';
 import { getTeamBySlug } from '../store/teams.js';
 
@@ -2740,6 +2741,49 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(msg.body).toContain('handed to you');
     expect(msg.body).toContain('agent/riley');
     expect(msg.meta.lane_handoff.branch).toBe('agent/riley');
+
+    // The act NAMES the transfer. This is load-bearing, not cosmetic: `openDirectedLedger` (and so
+    // every wake candidate derived from it) matches on `act IN ('request_help','handoff')`, so a
+    // handoff that rides as a plain `message` reaches an offline recipient never — which is exactly
+    // what the tool description promised and did not deliver (measured 2026-07-29: 10 minutes of
+    // host polling, zero leases).
+    expect(msg.act).toBe('handoff');
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const ledger = openDirectedLedger(server.db, teamId);
+    const entry = ledger.find((d) => d.id === msg.id);
+    expect(entry).toBeDefined();
+    expect(entry!.recipients.map((r) => r.seat)).toContain('bo');
+  });
+
+  it('a surface-overlap warning stays a plain message — advisories must never spend a wake', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+    const boTok = bo.json.human_credential;
+
+    // nick claims a surface; bo claims one that overlaps it → nick gets the advisory.
+    await post(
+      '/teams/dawn/lanes',
+      { title: 'store', surface_globs: ['packages/server/src/store/**'], claim: true },
+      nickTok,
+    );
+    await post(
+      '/teams/dawn/lanes',
+      { title: 'store too', surface_globs: ['packages/server/src/store/delivery.ts'], claim: true },
+      boTok,
+    );
+
+    const inbox = await get('/teams/dawn/inbox?unread=1', nickTok);
+    const warn = inbox.json.messages.find(
+      (m: { meta?: { lane_warning?: unknown } }) => m.meta?.lane_warning,
+    );
+    expect(warn).toBeDefined();
+    // The regression guard for the two-caller trap: `deliverLaneAct` serves both the handoff and this
+    // advisory. Naming the act on the shared helper instead of at the handoff call site would make
+    // "your lane overlaps someone's" wake offline seats — strictly worse than the bug it fixes.
+    expect(warn.act).toBe('message');
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    expect(openDirectedLedger(server.db, teamId).map((d) => d.id)).not.toContain(warn.id);
   });
 
   it('resolving a branch-carrying lane audits git.pr_merged with the attested merge detail (ADR 109)', async () => {

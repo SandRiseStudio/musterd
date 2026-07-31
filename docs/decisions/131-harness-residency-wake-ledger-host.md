@@ -318,6 +318,19 @@ deliberately kept: today's wakes are all **reply** wakes, where a seat's own his
 part of the context, so continuity is worth something where it is cheap. This tightens the bound; it
 does not disable resume._
 
+_What the unit actually is (2026-07-30, correcting the amendment above): every figure in that table is
+`total_cost_usd` as reported by the `claude` CLI, and on this machine that is **not money charged**. The
+wake actuator spawns the `claude` binary, and the `musterd host` LaunchAgent's environment carries
+`PATH` and nothing else — no `ANTHROPIC_API_KEY`, no Bedrock or Vertex variables — so a woken session
+authenticates on the owner's subscription. The dollar figures are the notional API-list-price equivalent
+of the tokens consumed; the resource they actually draw down is **subscription allowance**. Nothing in
+the argument above changes: 2.2x is 2.2x, the crossover bracket is unmoved, and allowance is a real
+scarce budget worth defending. But a reader should not conclude that a $9.08 wake billed $9.08. The
+trap for whoever reads this later is that the reported field is byte-identical in both modes — drop an
+`ANTHROPIC_API_KEY` into that LaunchAgent env and every wake silently becomes real API billing, with no
+change in what the ledger records or how it reads. If that day comes, this paragraph is the thing that
+has to be revisited, not the numbers._
+
 _Finding, and the reason the recalibration is two changes rather than one: a default in the schema
 does not reach a team that already has a stored policy. `setPolicy` does `PolicySchema.parse(...)` →
 `JSON.stringify(parsed)`, so the **first** write of any single knob materializes **every** default
