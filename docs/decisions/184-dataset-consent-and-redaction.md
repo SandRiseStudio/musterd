@@ -101,7 +101,7 @@ for it with consent in hand.
 ### 3. Consent: per-author, opt-in, revocable, and recorded where the act is
 
 Consent attaches to the **author of a message**, not to a team or a release. **v1 releases omit all
-prose** (§Amendment), so this section is the posture for a *later* prose-including release — not a
+prose** (§Amendment), so this section is the posture for a _later_ prose-including release — not a
 requirement to ship structural-only.
 
 - **Default: no.** Absence of consent is never consent (ADR 173's invariant, applied to permission).
@@ -141,6 +141,33 @@ values question:
 structural-fields-only** — all prose bodies (human and agent) omitted until a later ADR argues for
 consented prose with evidence (see Observability & Evaluation → Experiment). Structure is the novel
 signal; prose is optional later.
+
+#### Why "no", recorded for whoever later argues for prose
+
+The decision above is not caution, and the bar it sets should not be readable as one. Two things were
+tangled in the question, and only one of them is about agent seats at all.
+
+**Standing is not the issue.** An agent seat has no privacy interest of its own — there is no one
+there to be harmed by publication, and the party with standing is the human who provisioned it, whom
+[ADR 109](109-seat-git-attribution.md) and
+[ADR 150](150-structural-inducement-pretooluse-gates.md) already hold accountable for the seat's work.
+A seat consenting on its own behalf would be its operator consenting with extra ceremony, leaving a
+paper trail that implies a check nobody performed. Had standing been the only question, the answer
+would have been yes.
+
+**Contamination is the issue, and it survives the standing answer.** Agent prose quotes humans. A
+handoff body carries a human's ask verbatim; a `status_update` paraphrases something said in a chat
+the dataset never sees. Publishing agent prose on the operator's consent therefore publishes **human**
+prose that arrived by a side door, from humans who were never asked. On this machine the failure is
+invisible — one human provisioned every seat, so the operator is consenting to their own words either
+way — which is exactly why it could not be settled by inspection here: the permissive rule would have
+been written against the single configuration in which it cannot be observed to fail. On a two-human
+team it is a live leak.
+
+**So the bar for a later consented-prose ADR is third-party quotation, not author consent.** Per-author
+opt-in does not clear it. A proposal must say what happens to prose that quotes a human who did not
+consent — and "the operator owns every seat here" is not an answer, because it is a property of one
+deployment rather than of the posture.
 
 ## What this explicitly does not do
 
@@ -184,7 +211,7 @@ signal; prose is optional later.
   default omission costs nothing. Does not reproduce ⇒ that is the concrete argument for consented
   prose, made with evidence instead of appetite. Either outcome is publishable, and the second is more
   interesting. §The one decision is already answered for release 1; this experiment informs whether a
-  *later* prose release is warranted.
+  _later_ prose release is warranted.
 
 ## Related
 
