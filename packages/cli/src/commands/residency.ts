@@ -5,7 +5,7 @@ import {
   BINDING_DIR,
   BINDING_FILE,
   bindingSeat,
-  ResidencyPolicySchema,
+  type PolicyOverride,
   type Residency,
   type ResidencyPolicy,
   type ResidencyPolicyOverride,
@@ -120,13 +120,14 @@ function renderPolicy(policy: ResidencyPolicy, override?: ResidencyPolicyOverrid
 }
 
 /** Launch defaults ⊕ team defaults ⊕ seat override — the CLI-side twin of the server's
- *  `effectiveWakePolicy`, for rendering only (the daemon derives its own at lease time). */
-function mergePolicy(
-  defaults: ResidencyPolicy,
+ *  `effectiveWakePolicy`. Generic over density: the same merge layers an override onto dense defaults
+ *  (for rendering) and onto the sparse stored doc (for the ADR 185 read-merge-write). */
+function mergePolicy<T extends ResidencyPolicy | ResidencyPolicyOverride>(
+  defaults: T,
   override: ResidencyPolicyOverride | null | undefined,
-): ResidencyPolicy {
+): T {
   if (!override) return defaults;
-  const merged: ResidencyPolicy = { ...defaults };
+  const merged: T = { ...defaults };
   for (const [key, value] of Object.entries(override)) {
     if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
   }
@@ -280,27 +281,41 @@ async function offCommand(parsed: Parsed): Promise<number> {
 async function policyCommand(parsed: Parsed): Promise<number> {
   const { team, http } = resolve(parsed.flags);
   const knobs = collectPolicyFlags(parsed);
-  const { policy: current } = await http.getPolicy(team);
+  const { policy: current, stored } = await http.getPolicy(team);
 
   if (knobs === undefined) {
     if (parsed.flags['json']) {
-      process.stdout.write(JSON.stringify(current.residency) + '\n');
+      process.stdout.write(
+        JSON.stringify({ ...current.residency, stored: stored.residency ?? {} }) + '\n',
+      );
       return 0;
     }
     process.stdout.write(`${theme.accent('wake policy defaults')} — ${team}\n`);
     process.stdout.write(`  ${renderPolicy(current.residency)}\n`);
+    // ADR 185: which of those values this team actually chose, and which track the shipped default
+    // and will move when it does. The old dense storage made every value look chosen.
+    const chosen = Object.keys(stored.residency ?? {});
+    process.stdout.write(
+      theme.meta(
+        chosen.length === 0
+          ? '  every value inherited — a shipped default change reaches this team'
+          : `  set on this team: ${chosen.join(', ')} — the rest inherit`,
+      ) + '\n',
+    );
     process.stdout.write(
       theme.meta('  set: musterd residency policy --cooldown 15m …  ' + POLICY_FLAGS_USAGE) + '\n',
     );
     return 0;
   }
 
+  // ADR 185: merge into the SPARSE stored residency, so setting one knob pins one knob. `--reset-policy`
+  // drops the key entirely — which is what "back to launch defaults" always meant, and now is.
   const residency =
-    Object.keys(knobs).length === 0
-      ? // `--reset-policy`: back to launch defaults.
-        ResidencyPolicySchema.parse({})
-      : mergePolicy(current.residency, knobs);
-  const { policy: updated } = await http.setPolicy(team, { ...current, residency });
+    Object.keys(knobs).length === 0 ? undefined : mergePolicy(stored.residency ?? {}, knobs);
+  const next: PolicyOverride = { ...stored };
+  if (residency === undefined) delete next.residency;
+  else next.residency = residency;
+  const { policy: updated } = await http.setPolicy(team, next);
   if (parsed.flags['json']) {
     process.stdout.write(JSON.stringify(updated.residency) + '\n');
     return 0;

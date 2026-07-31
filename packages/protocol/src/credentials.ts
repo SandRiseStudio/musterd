@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { EnforcementPolicySchema } from './enforcement.js';
-import { ResidencyPolicySchema } from './residency.js';
+import { ResidencyPolicyOverrideSchema, ResidencyPolicySchema } from './residency.js';
 
 /**
  * Credential + team-policy contracts (SPEC A.2/A.6, ADR 069 P3 / ADR 076). Secrets are minted with a
@@ -79,3 +79,68 @@ export const PolicySchema = z.object({
   enforcement: EnforcementPolicySchema.default({}),
 });
 export type Policy = z.infer<typeof PolicySchema>;
+
+/**
+ * What an admin actually chose (ADR 185) — the shape team policy is **stored** and **posted** in.
+ * Partial at the top level *and* through both nested sub-objects: a top-level `.partial()` alone
+ * would leave a present `residency` dense, which is precisely the bug one level down.
+ *
+ * Why this exists: `setPolicy` used to `PolicySchema.parse` before storing, so the first write of any
+ * single knob materialized EVERY default into the row and killed the schema default for that team
+ * forever. Defaults are now applied on read (`getPolicy`) and never on write. The pattern is not new
+ * — `ResidencyPolicyOverrideSchema` has always been the sparse shape for per-seat overrides; team
+ * policy was the odd one out.
+ */
+export const PolicyOverrideSchema = PolicySchema.partial().extend({
+  residency: ResidencyPolicyOverrideSchema.optional(),
+  enforcement: EnforcementPolicySchema.partial().optional(),
+});
+export type PolicyOverride = z.infer<typeof PolicyOverrideSchema>;
+
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Strip the keys of one sub-object that equal their current schema default; undefined if none survive. */
+function sparsifySub(
+  value: unknown,
+  schema: typeof ResidencyPolicySchema | typeof EnforcementPolicySchema,
+): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const defaults = schema.parse({}) as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value)) {
+    // A key with no default (max_turns, budget_usd) can only be there because someone set it.
+    if (!(key in defaults) || !sameValue(v, defaults[key])) out[key] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Recover the sparse doc from a policy blob that was stored densely (ADR 185 migration): **keep the
+ * keys whose value differs from the current default, drop the ones that equal it.**
+ *
+ * A deliberately-chosen value that happens to equal the default is indistinguishable from one the old
+ * parse baked in — the audit log recorded the post-parse result, so intent was never written down.
+ * That ambiguity is unrecoverable, but bounded: stripping such a key changes nothing unless the
+ * default later moves, and at that moment tracking the new default is the likelier intent for a value
+ * nobody can show was chosen. A value that *differs* from the default is unambiguously deliberate and
+ * is always kept.
+ */
+export function sparsifyPolicy(stored: unknown): PolicyOverride {
+  if (typeof stored !== 'object' || stored === null) return {};
+  const defaults = PolicySchema.parse({}) as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(stored)) {
+    if (key === 'residency' || key === 'enforcement') {
+      const sub = sparsifySub(
+        value,
+        key === 'residency' ? ResidencyPolicySchema : EnforcementPolicySchema,
+      );
+      if (sub) out[key] = sub;
+      continue;
+    }
+    if (!(key in defaults) || !sameValue(value, defaults[key])) out[key] = value;
+  }
+  return PolicyOverrideSchema.parse(out);
+}

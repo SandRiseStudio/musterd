@@ -10,7 +10,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('25');
+    expect(ver?.value).toBe('26');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -192,7 +192,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(25); // runs v18…v25 (observer grades + residency + offline reason + send provenance + tool-call stats + feature epoch + two-stage close + audit action index)
+    expect(runMigrations(db)).toBe(26); // runs v18…v26 (observer grades + residency + offline reason + send provenance + tool-call stats + feature epoch + two-stage close + audit action index + sparse team policy)
 
     const scope = (id: string) =>
       db
@@ -207,6 +207,66 @@ describe('db', () => {
     // … and the grade stays meaningless (NULL) on an ordinary member, rather than reading as if it
     // governed one.
     expect(scope('m-reg')).toBeNull();
+    db.close();
+  });
+
+  /**
+   * v26 (ADR 185) — the rows already frozen by the old parse-then-store `setPolicy` are rewritten
+   * sparse. `t1` carries the REAL `revive` blob as it stood on 2026-07-30 (the one non-NULL policy in
+   * the live fleet); `t2` carries a NULL, which must stay NULL rather than becoming `{}`.
+   */
+  it('v26 strips the baked-in defaults out of a densely-stored team policy', () => {
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    for (const m of MIGRATIONS) {
+      if (m.version > 25) break;
+      m.up(db);
+    }
+    db.prepare(
+      "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '25') " +
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    ).run();
+
+    const now = Date.now();
+    const team = (id: string, slug: string, policy: string | null) =>
+      db
+        .prepare(
+          `INSERT INTO teams (id, slug, display, default_lifecycle, policy, created_at, updated_at)
+           VALUES (?, ?, NULL, 'forever', ?, ?, ?)`,
+        )
+        .run(id, slug, policy, now, now);
+    team(
+      't1',
+      'revive',
+      JSON.stringify({
+        allow_pre_issued_grants: false,
+        standing_reseat_known_agents: true,
+        ask_fallback_to_nonadmin: false,
+        residency: {
+          lane: 'both',
+          cooldown_ms: 1_800_000,
+          hourly_cap: 2,
+          attempt_cap: 3,
+          tool_policy: 'reply-only',
+          timeout_ms: 300_000,
+          transcript_max_bytes: 262_144,
+        },
+        enforcement: { classes: [] },
+      }),
+    );
+    team('t2', 'dawn', null);
+
+    expect(runMigrations(db)).toBe(26);
+
+    const policy = (id: string) =>
+      db
+        .prepare<[string], { policy: string | null }>('SELECT policy FROM teams WHERE id = ?')
+        .get(id)?.policy;
+
+    // Seven stored keys in, one out: only the knob whose value differs from its default survives.
+    expect(JSON.parse(policy('t1') as string)).toEqual({ standing_reseat_known_agents: true });
+    // A team that never wrote a policy is not touched — NULL is already "everything inherited".
+    expect(policy('t2')).toBeNull();
     db.close();
   });
 });

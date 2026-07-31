@@ -15,6 +15,7 @@ import {
   resolveAttestedProvenance,
   TOKEN_PREFIXES,
   type Policy,
+  type PolicyOverride,
   type EnforcementPolicy,
   type ActorAttestation,
   type GateCheckRequest,
@@ -557,15 +558,31 @@ export class HttpClient {
     return parsed.data;
   }
 
-  /** The team governance policy (SPEC A.6) — `GET /teams/:slug/policy`, admin. The read half of
-   *  `musterd residency policy`: read → merge → set, so one knob changes without re-stating the rest. */
-  async getPolicy(slug: string): Promise<{ policy: Policy }> {
-    return (await this.request('GET', `/teams/${slug}/policy`)) as { policy: Policy };
+  /**
+   * The team governance policy (SPEC A.6) — `GET /teams/:slug/policy`, admin. Returns both halves:
+   * `policy` is effective (defaults applied, what to *display*), `stored` is sparse — only the knobs
+   * somebody chose. The read half of `musterd residency policy`: read → merge → set, so one knob
+   * changes without re-stating the rest. Merge into `stored` (ADR 185); merging into `policy` is what
+   * re-froze every default into the row on each write.
+   */
+  async getPolicy(slug: string): Promise<{ policy: Policy; stored: PolicyOverride }> {
+    return (await this.request('GET', `/teams/${slug}/policy`)) as {
+      policy: Policy;
+      stored: PolicyOverride;
+    };
   }
 
-  /** Set the team governance policy — `POST /teams/:slug/policy`, admin, audited `policy.change`. */
-  async setPolicy(slug: string, policy: Policy): Promise<{ policy: Policy }> {
-    return (await this.request('POST', `/teams/${slug}/policy`, policy)) as { policy: Policy };
+  /** Set the team governance policy — `POST /teams/:slug/policy`, admin, audited `policy.change`.
+   *  Takes the sparse doc and REPLACES what is stored: an omitted key is unset, and its schema
+   *  default comes back to life (ADR 185). */
+  async setPolicy(
+    slug: string,
+    policy: PolicyOverride,
+  ): Promise<{ policy: Policy; stored: PolicyOverride }> {
+    return (await this.request('POST', `/teams/${slug}/policy`, policy)) as {
+      policy: Policy;
+      stored: PolicyOverride;
+    };
   }
 
   /** The enforcement class table (ADR 150) — `GET /teams/:slug/enforcement`, MEMBER-readable (unlike the
