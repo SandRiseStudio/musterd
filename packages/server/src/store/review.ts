@@ -3,6 +3,8 @@ import {
   MODEL_UNKNOWN,
   type FamilyPosture,
   type FamilyPostureState,
+  type ReviewGrade,
+  reviewGrade,
   type WakeCandidate,
   type Lane,
 } from '@musterd/protocol';
@@ -35,8 +37,12 @@ import { type MemberRow } from './rows.js';
 export interface ReviewPick {
   /** The chosen counterpart's seat name. */
   reviewer: string;
-  /** Why this seat: 'human_admin' (risk route) or 'cross_family'. */
+  /** Why this seat: 'human_admin' (risk route) or 'cross_family'. Historical two-value field —
+   *  kept for wire compat; `grade` (ADR 188) carries the finer truth. */
   route: 'human_admin' | 'cross_family';
+  /** The achieved rung of the diversity ladder (ADR 188). 'human' for a human counterpart —
+   *  cross-family by construction, and named honestly rather than folded into cross_family. */
+  grade: ReviewGrade | 'human';
   /** The reviewer's family ('human' for human seats) — the audit's reviewer_family. */
   reviewer_family: string;
 }
@@ -231,6 +237,7 @@ export function pickReviewCounterpart(
       return {
         reviewer: authority.name,
         route: 'human_admin',
+        grade: 'human',
         reviewer_family: memberFamily(db, authority),
       };
     }
@@ -243,18 +250,36 @@ export function pickReviewCounterpart(
     return null;
   }
 
-  const mine = workerFamily(db, teamId, worker);
-  // Humans first within the cross-family pool: a human counterpart is the stronger "this is what
-  // I wanted" claim when one happens to be live, and is cross-family by construction.
-  const pool = [...candidates].sort(
-    (a, b) => Number(b.kind === 'human') - Number(a.kind === 'human'),
-  );
-  for (const m of pool) {
-    const family = memberFamily(db, m);
-    if (family === MODEL_UNKNOWN) continue; // can't prove diversity — ineligible (ADR 158 posture)
-    if (family !== mine) {
-      return { reviewer: m.name, route: 'cross_family', reviewer_family: family };
-    }
-  }
-  return null;
+  // The graded ladder (ADR 188). Decorrelation is a spectrum, and the old boolean rule treated
+  // its middle as its bottom: 16 of the first 17 review episodes closed no_candidate on an
+  // all-claude roster while a *different claude model* was live and would have caught different
+  // mistakes. Order: human (cross-family by construction, and the stronger claim) > cross_family >
+  // cross_model. same_model and ungradeable seats are never routed — a same-checkpoint review
+  // re-runs the worker's blind spots, and an unattested seat cannot prove anything (ADR 158).
+  const workerSeat = listMembers(db, teamId).find((x) => x.name === worker);
+  const workerModel = workerSeat ? latestAttestedModel(db, workerSeat.id) : null;
+  const LADDER = ['human', 'cross_family', 'cross_model'] as const;
+  const graded = candidates
+    .map((m) => ({
+      m,
+      grade:
+        m.kind === 'human'
+          ? ('human' as const)
+          : reviewGrade(workerModel, latestAttestedModel(db, m.id)),
+    }))
+    .filter(
+      (c): c is { m: (typeof candidates)[number]; grade: (typeof LADDER)[number] } =>
+        c.grade !== null && c.grade !== 'same_model',
+    )
+    // Stable sort: among equal grades the roster order stands — no new tie-break policy here.
+    .sort((a, b) => LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade));
+  const best = graded[0];
+  if (!best) return null;
+  return {
+    reviewer: best.m.name,
+    // Wire-compat: `route` keeps its two historical values; `grade` carries the finer truth.
+    route: 'cross_family',
+    grade: best.grade,
+    reviewer_family: memberFamily(db, best.m),
+  };
 }
