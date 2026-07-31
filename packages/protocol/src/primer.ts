@@ -65,7 +65,7 @@ export function renderPrimer(opts: {
     "  status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.",
     '- **Claim a lane *before* you build — reading the board is not enough.** `lane_claim` / `musterd lane',
     '  claim` the ONE you will do (`lane_open` if new); **never build in a lane a teammate owns.** Hand off',
-    "  with `team_send {act:'handoff'}`, close with `resolve`.",
+    "  with `team_send {act:'handoff'}`; after merge `lane_submit`, then accept or `lane_resolve`.",
     '- **Ask a human before you act big or stall.** For a costly / irreversible / out-of-scope action, or',
     "  when only a human can unblock you: `team_send {act:'ask'}` / `musterd send --act ask` (`meta.species`",
     '  + `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).',

@@ -2,6 +2,7 @@ import {
   type AskSpecies,
   type AskTier,
   type Envelope,
+  isAwaitingAcceptance,
   makeEnvelope,
   modelFamily,
 } from '@musterd/protocol';
@@ -263,7 +264,7 @@ function routeEnvelopeInner(
 
 /**
  * ADR 188 stage two — the gated human ask. Fires when an ACCEPT lands whose replied-to message is a
- * lane-review ask (`meta.lane_review`) for a lane that is (a) risky and (b) still `ready_for_review`.
+ * lane-review ask (`meta.lane_review`) for a lane that is (a) risky and (b) still awaiting acceptance.
  * Composes the blocking-tier human ask FROM the lane's owner (the worker whose lane it is — same
  * sender as the stage-one ask) carrying the peer's findings, and audits `lane.review_peer_confirmed`
  * whether or not a human was live — `human_ask_fired: false` is the countable degradation
@@ -294,7 +295,7 @@ function fireGatedHumanAsk(
   }
   if (!laneReview?.lane) return;
   const lane = getLane(ctx.db, team.id, laneReview.lane, team.slug);
-  if (!lane || lane.risk.length === 0 || lane.state !== 'ready_for_review') return;
+  if (!lane || lane.risk.length === 0 || !isAwaitingAcceptance(lane.state)) return;
   const owner = lane.owner_seat ? getMemberByName(ctx.db, team.id, lane.owner_seat) : null;
   if (!owner) return;
 
@@ -314,6 +315,13 @@ function fireGatedHumanAsk(
   if (!human) return;
 
   const findings = peerFindings.length > 500 ? `${peerFindings.slice(0, 500)}…` : peerFindings;
+  const checklist =
+    'Judge the LANDED OUTCOME (not a code review): ' +
+    '(1) Intent — matches the lane brief? ' +
+    '(2) Principles — project/musterd hard rules? ' +
+    '(3) Usable — exercise the path enough to say it works? ' +
+    '(4) Feel — only if UI/copy/brand is in surface, else N/A. ' +
+    'Accept → move the lane to done; reject → send it back to active with a concrete note.';
   const ask = makeEnvelope({
     id: ulid(),
     team: team.slug,
@@ -321,8 +329,8 @@ function fireGatedHumanAsk(
     to: { kind: 'member', name: human.reviewer },
     act: 'ask',
     body:
-      `[lane] human review required: "${lane.title}" — peer ${peer.name} reviewed and accepted: ` +
-      `"${findings}". Confirm (move the lane to done) or send it back to active with a note.`,
+      `[lane] human acceptance required: "${lane.title}" — peer ${peer.name} accepted with: ` +
+      `"${findings}". ${checklist}`,
     meta: {
       species: 'approve',
       tier: 'blocking',

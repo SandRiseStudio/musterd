@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 10;
+export const GUIDANCE_CONTENT_VERSION = 11;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -35,6 +35,7 @@ export const SKILL_MCP_TOOLS = [
   'lane_claim',
   'lane_release',
   'lane_handoff',
+  'lane_submit',
   'lane_resolve',
   'lane_board',
 ] as const;
@@ -157,6 +158,19 @@ export function renderSkillBody(opts: { team: string }): string {
     "not re-derive it. Pair it with `team_send {act:'handoff'}` / `musterd send --act handoff` naming the",
     'artifact. The receiver answers with `accept`/`decline` (set `reply_to`), and — importantly — accepting',
     'is not finishing: close the thread with `resolve` when the work actually lands.',
+    '',
+    '## Closing a lane — outcome acceptance (ADR 192)',
+    '',
+    'This is **not** a GitHub/code review. CI + auto-merge land the PR; then an acceptor judges the',
+    '**landed outcome** (intent / principles / usable / feel) — not the hunk list.',
+    '',
+    '1. After merge: `lane_submit` / `musterd lane submit` with the merge attestation (`pr`, `sha`,',
+    '   `authorized_by`). Moves the lane to `awaiting_acceptance` and asks an acceptor.',
+    '2. Acceptor: accept (→ done) or reject (→ active with a concrete note). Not style nits.',
+    '3. On silence / no candidate: `lane_resolve` / `musterd lane resolve` yourself — recorded',
+    '   **unconfirmed**, never a wedge. Prefer a live acceptor over self-close.',
+    '',
+    '(`lane_ready` / `musterd lane ready` remain as deprecated aliases for submit.)',
     '',
     '## Asking a human (the ask stream, ADR 147)',
     '',

@@ -34,7 +34,7 @@ const COLUMNS: ReadonlyArray<{ key: LaneState; label: string; tone: string }> = 
   { key: 'claimed', label: 'Claimed', tone: 'lane' },
   { key: 'active', label: 'In progress', tone: 'lane' },
   { key: 'blocked', label: 'Blocked', tone: 'danger' },
-  { key: 'ready_for_review', label: 'In review', tone: 'lane' },
+  { key: 'awaiting_acceptance', label: 'Awaiting acceptance', tone: 'lane' },
   { key: 'done', label: 'Done', tone: 'success' },
 ];
 
@@ -43,12 +43,13 @@ const COLUMN_CAP = 30;
 const DONE_CAP = 10;
 
 /** Office-voice empty states — each column gets its own line, in the room's register. */
-const EMPTY_COPY: Record<LaneState, string> = {
+const EMPTY_COPY: Partial<Record<LaneState, string>> = {
   open: 'Nothing waiting. Quiet desk.',
   claimed: "No one's picked anything up.",
   active: 'Nothing in flight.',
   blocked: 'Nothing stuck. Good sign.',
-  ready_for_review: 'Nothing awaiting eyes.',
+  awaiting_acceptance: 'Nothing awaiting acceptance.',
+  ready_for_review: 'Nothing awaiting acceptance.',
   done: 'Nothing shipped yet — soon.',
   abandoned: '', // no column
 };
@@ -59,10 +60,10 @@ const ACTION_LABEL: Record<LaneAction['kind'], string> = {
   block: 'stuck',
   unblock: 'unstick',
   handoff: 'hand off',
-  ready: 'ready',
+  ready: 'submit',
   done: 'done',
-  confirm: 'confirm',
-  sendback: 'send back',
+  confirm: 'accept',
+  sendback: 'reject',
   abandon: 'let it go',
 };
 
@@ -117,7 +118,11 @@ export function Board({
   const rosterIdx = useMemo(() => new Map(roster.map((m) => [m.name, m])), [roster]);
   const byState = useMemo(() => {
     const m = new Map<LaneState, Lane[]>(COLUMNS.map((c) => [c.key, []]));
-    for (const lane of lanes) m.get(lane.state)?.push(lane); // abandoned has no column → excluded
+    for (const lane of lanes) {
+      // ADR 192: legacy ready_for_review rows fold into the awaiting_acceptance column.
+      const key = lane.state === 'ready_for_review' ? 'awaiting_acceptance' : lane.state;
+      m.get(key)?.push(lane); // abandoned has no column → excluded
+    }
     return m;
   }, [lanes]);
 
@@ -343,13 +348,16 @@ function LaneCard({
         )}
         {lane.goal_id && <span className="lc-card__chip lc-card__chip--goal">{lane.goal_id}</span>}
         {lane.state === 'done' && lane.verified === true && (
-          <span className="lc-card__chip lc-card__chip--verified" title="Confirmed by a counterpart">
-            ✓ confirmed
+          <span className="lc-card__chip lc-card__chip--verified" title="Accepted by a counterpart">
+            ✓ accepted
           </span>
         )}
         {lane.state === 'done' && lane.verified === false && (
-          <span className="lc-card__chip lc-card__chip--unverified" title="Self-closed — no counterpart confirm">
-            unverified
+          <span
+            className="lc-card__chip lc-card__chip--unverified"
+            title="Self-closed — no counterpart acceptance"
+          >
+            unconfirmed
           </span>
         )}
         {lane.branch && <span className="lc-card__chip lc-card__chip--branch">{lane.branch}</span>}

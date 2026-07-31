@@ -137,20 +137,20 @@ describe('lane commands', () => {
     expect(resolved.out).toContain('done');
   });
 
-  it('ready moves a lane to ready_for_review, keeps the attestation, and reports the routing (ADR 169)', async () => {
+  it('submit moves a lane to awaiting_acceptance, keeps the attestation, and reports the routing (ADR 192)', async () => {
     const id = await openLane(['reviewable', '--claim', '--branch', 'feat/review']);
     const ready = await capture(() =>
-      laneCommand(parseArgs(['ready', id, '--pr', '7', '--sha', 'deadbeef'])),
+      laneCommand(parseArgs(['submit', id, '--pr', '7', '--sha', 'deadbeef'])),
     );
     expect(ready.code).toBe(0);
-    expect(ready.out).toContain('lane ready for review');
-    expect(ready.out).toContain('ready_for_review');
-    // Solo team: no eligible cross-family counterpart → self-close sanctioned, spelled out.
+    expect(ready.out).toContain('lane submitted for acceptance');
+    expect(ready.out).toContain('awaiting_acceptance');
+    // Solo team: no eligible acceptor → self-close sanctioned, spelled out.
     expect(ready.out).toContain('self-close sanctioned');
-    // The degradation path stays open: the owner can still resolve, nudged as unverified.
+    // The degradation path stays open: the owner can still resolve, nudged as unconfirmed.
     const resolved = await capture(() => laneCommand(parseArgs(['resolve', id])));
     expect(resolved.out).toContain('lane done');
-    expect(resolved.out).toContain('unverified close recorded');
+    expect(resolved.out).toContain('unconfirmed close recorded');
   });
 
   it('resolve prints the local-branch cleanup hint when the lane carries a branch', async () => {

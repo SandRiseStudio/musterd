@@ -28,6 +28,7 @@ export const TOOL_NAMES = [
   'lane_release',
   'lane_handoff',
   'lane_update',
+  'lane_submit',
   'lane_ready',
   'lane_resolve',
   'lane_board',

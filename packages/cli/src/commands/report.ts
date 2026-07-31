@@ -410,9 +410,9 @@ async function toolsReport(parsed: Parsed): Promise<number> {
 }
 
 /**
- * `musterd report review` (ADR 169 O&E, reachable per ADR 052's amendment): the two-stage close
- * panel — how often review was routed, how often there was nobody to route to, and how often a
- * counterpart actually sent work back.
+ * `musterd report review` (ADR 169 O&E / ADR 192 acceptance wording, reachable per ADR 052): the
+ * two-stage close panel — how often outcome acceptance was routed, how often there was nobody to
+ * route to, and how often an acceptor rejected (sent work back). Metric keys stay `review.*`.
  *
  * This exists because the ADR's own eval was defined over admin-only audit rows, so the seats meant
  * to compute it could not read it. Counts only, and every transition counted here was already
@@ -429,19 +429,22 @@ async function reviewReport(parsed: Parsed): Promise<number> {
     return 0;
   }
   const days = Math.round(r.window_ms / 86_400_000);
-  w(`${theme.accent('review')} — ${team} ${theme.meta(`· last ${days}d`)}\n\n`);
+  w(`${theme.accent('acceptance')} — ${team} ${theme.meta(`· last ${days}d`)}\n\n`);
   if (r.ready === 0) {
-    w(theme.meta('  no lane has entered review yet — `musterd lane ready <id>` starts one') + '\n');
+    w(
+      theme.meta('  no lane has entered acceptance yet — `musterd lane submit <id>` starts one') +
+        '\n',
+    );
     return 0;
   }
   // The catch rate's denominator is ROUTED asks, never lanes marked ready: a zero over the latter
-  // cannot separate "reviewers found nothing" from "nobody was eligible to look" (ADR 169).
+  // cannot separate "acceptors found nothing" from "nobody was eligible to look" (ADR 169/191).
   const catchRate = r.routed > 0 ? ` · caught ${pct(r.sent_back / r.routed)}` : '';
   w(
-    `  ${theme.accent(String(r.ready))} entered review · ${r.routed} routed · ${r.no_candidate} no counterpart${catchRate}\n`,
+    `  ${theme.accent(String(r.ready))} entered acceptance · ${r.routed} routed · ${r.no_candidate} no counterpart${catchRate}\n`,
   );
   // Rows written before the routing outcome was recorded (pre-#450) count as `ready` and abstain
-  // from the split. Say so: without this line a panel reading "4 entered review · 0 routed" invites
+  // from the split. Say so: without this line a panel reading "4 entered acceptance · 0 routed" invites
   // exactly the misreading this whole projection exists to prevent — and their closes carry the old
   // `review_timeout` label, which asserts an ask that may never have been sent.
   const unknown = r.ready - r.routed - r.no_candidate;
@@ -453,22 +456,22 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   if (r.routed === 0 && r.no_candidate > 0) {
     // The finding this panel exists to make legible, stated rather than left to arithmetic.
     w(
-      `  ${theme.warn('review never ran')} — ${theme.meta('every ready lane found no eligible cross-family counterpart, so a zero catch rate says nothing about reviewing (see `musterd report` family_posture)')}\n`,
+      `  ${theme.warn('acceptance never ran')} — ${theme.meta('every submitted lane found no eligible acceptor, so a zero catch rate says nothing about accepting (see `musterd report` family_posture)')}\n`,
     );
   }
   const c = r.closed;
   w(`\n  ${theme.accent('closes')} (${c.total}):\n`);
   const verifiedPct =
     c.total > 0 ? ` ${theme.meta(`(${pct(c.counterpart_confirm / c.total)})`)}` : '';
-  w(`    ${theme.ok('confirmed')} ${c.counterpart_confirm}${verifiedPct}\n`);
-  w(`    ${theme.meta('self-closed')} ${c.self_close} · never entered review\n`);
+  w(`    ${theme.ok('accepted')} ${c.counterpart_confirm}${verifiedPct}\n`);
+  w(`    ${theme.meta('self-closed')} ${c.self_close} · never entered acceptance\n`);
   w(`    ${theme.meta('no counterpart')} ${c.no_candidate} · sanctioned, nobody was asked\n`);
-  w(`    ${theme.meta('review timed out')} ${c.review_timeout} · asked, unanswered\n`);
+  w(`    ${theme.meta('acceptance timed out')} ${c.review_timeout} · asked, unanswered\n`);
   // ADR 172's counter-metric, warn-coloured because it is the one close shape that is nobody's
   // sanctioned degradation: the lane declared a risk, the risk demanded a human, no human came.
   if (c.human_review_missed > 0) {
     w(
-      `    ${theme.warn('human review missed')} ${c.human_review_missed} · a declared risk required a human, none reviewed\n`,
+      `    ${theme.warn('human acceptance missed')} ${c.human_review_missed} · a declared risk required a human, none accepted\n`,
     );
   }
   // And the abstention beside it (ADR 173 clause 4): without this line the count above reads as a

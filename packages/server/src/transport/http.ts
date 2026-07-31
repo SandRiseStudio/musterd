@@ -31,6 +31,7 @@ import {
   AskTierSchema,
   askContract,
   LANE_TERMINAL_STATES,
+  isAwaitingAcceptance,
   makeEnvelope,
   type Envelope,
   type LaneWarning,
@@ -689,7 +690,7 @@ function deliverLaneAct(
 // previously hand-mirrored the store's private TERMINAL set, a drift hazard three copies deep.
 
 /**
- * The review ask (ADR 169 §4): a directed `ask` act from the worker to the picked counterpart —
+ * Outcome-acceptance ask (ADR 192): a directed `ask` act from the worker to the picked acceptor —
  * unlike {@link deliverLaneAct} this is act `ask`, so it rides the whole ask-stream machinery
  * (tier contract, reachability, ask-span telemetry) with no new act kind. Best-effort like every
  * lane delivery: a failed compose never fails the verb (the degradation path is self-close anyway).
@@ -716,6 +717,27 @@ function deliverLaneAskAct(
   } catch {
     /* advisory only — the lane verb already succeeded */
   }
+}
+
+/** ADR 192 acceptor checklist — judge the landed outcome, not the diff. */
+function acceptanceAskBody(
+  title: string,
+  opts: { human?: boolean; peerFindings?: string } = {},
+): string {
+  const checklist =
+    'Judge the LANDED OUTCOME (not a code review): ' +
+    '(1) Intent — matches the lane brief? ' +
+    '(2) Principles — project/musterd hard rules? ' +
+    '(3) Usable — exercise the path enough to say it works? ' +
+    '(4) Feel — only if UI/copy/brand is in surface, else N/A. ' +
+    'Accept → move the lane to done; reject → send it back to active with a concrete note.';
+  if (opts.human && opts.peerFindings !== undefined) {
+    return (
+      `[lane] human acceptance required: "${title}" — peer accepted with: "${opts.peerFindings}". ` +
+      checklist
+    );
+  }
+  return `[lane] acceptance requested: "${title}" — ${checklist}`;
 }
 
 /**
@@ -2412,13 +2434,12 @@ export async function handleHttp(
             lane_state: { lane: lane.id, title: lane.title, state: lane.state },
           });
         }
-        // ADR 169 §4: entering ready_for_review is the worker's "technically complete" claim — audit
-        // it (with any stage-one merge attestation) and compose the review ask to the counterpart the
-        // picker chose. No counterpart ⇒ no ask, and the response says self-close is sanctioned (the
-        // ADR 145 degradation — never a wedge). The ask is an ordinary directed act from the worker
-        // (species approve, tier standard: 5m, proceed_with_risk — deliberately not the holding tier).
+        // ADR 192: entering awaiting_acceptance is the worker's "technically complete" claim — audit
+        // it (with any stage-one merge attestation) and compose the acceptance ask to the acceptor the
+        // picker chose. No acceptor ⇒ no ask, and the response says self-close is sanctioned (the
+        // ADR 145 degradation — never a wedge). Audit action stays `lane.ready_for_review` (frozen).
         let review: Record<string, unknown> | undefined;
-        if (lane.state === 'ready_for_review' && before.state !== 'ready_for_review') {
+        if (isAwaitingAcceptance(lane.state) && !isAwaitingAcceptance(before.state)) {
           // ADR 188 two-stage: for a risky lane the picker returns the PEER (agents-only ladder);
           // when no peer exists the human ask is not gated behind a stage that cannot happen —
           // fall back to the stage-two human directly, at the blocking tier, as before ADR 188.
@@ -2551,28 +2572,21 @@ export async function handleHttp(
             },
           });
           if (pick && !breakerTripped) {
-            deliverLaneAskAct(
-              ctx,
-              team,
-              member,
-              pick.reviewer,
-              `[lane] review requested: "${lane.title}" — confirm (move the lane to done) or send it back to active with a note`,
-              {
-                species: 'approve',
-                // ADR 172/188: the HUMAN review ask carries the holding tier (required has teeth);
-                // a risky lane's stage-one PEER ask rides standard like any peer review — the
-                // blocking ask is composed at stage two, when the peer's accept lands (route.ts).
-                tier: humanRequired && pick.grade === 'human' ? 'blocking' : 'standard',
-                lane_review: {
-                  lane: lane.id,
-                  title: lane.title,
-                  branch: lane.branch,
-                  ...(lane.merged ? { merged: lane.merged } : {}),
-                  route: pick.route,
-                  grade: pick.grade,
-                },
+            deliverLaneAskAct(ctx, team, member, pick.reviewer, acceptanceAskBody(lane.title), {
+              species: 'approve',
+              // ADR 172/188: the HUMAN acceptance ask carries the holding tier (required has teeth);
+              // a risky lane's stage-one PEER ask rides standard like any peer acceptance — the
+              // blocking ask is composed at stage two, when the peer's accept lands (route.ts).
+              tier: humanRequired && pick.grade === 'human' ? 'blocking' : 'standard',
+              lane_review: {
+                lane: lane.id,
+                title: lane.title,
+                branch: lane.branch,
+                ...(lane.merged ? { merged: lane.merged } : {}),
+                route: pick.route,
+                grade: pick.grade,
               },
-            );
+            });
             review = {
               reviewer: pick.reviewer,
               route: pick.route,
@@ -2625,13 +2639,13 @@ export async function handleHttp(
             };
           }
         }
-        // ADR 169: a reviewer moving a ready_for_review lane back to a live state is the review
-        // catch — the counterpart said "not what I wanted". Audited; the lane_state broadcast above
-        // already told the team.
+        // ADR 192: an acceptor moving an awaiting_acceptance lane back to a live state is the
+        // rejection — the counterpart said "not what we wanted". Audited; the lane_state broadcast above
+        // already told the team. Audit action stays `lane.review_sent_back` (frozen).
         if (
-          before.state === 'ready_for_review' &&
+          isAwaitingAcceptance(before.state) &&
           !LANE_TERMINAL_STATES.has(lane.state) &&
-          lane.state !== 'ready_for_review' &&
+          !isAwaitingAcceptance(lane.state) &&
           member.name !== before.owner_seat
         ) {
           appendAudit(ctx.db, team.id, {
@@ -2657,13 +2671,12 @@ export async function handleHttp(
             lane.state === 'done' && ownerAtClose !== null && member.name !== ownerAtClose;
           // ADR 169/172: what the ready edge recorded — routed-or-not, and whether the lane's risk
           // made a human review REQUIRED. Read once; feeds both the reason and the missed flag.
-          const routing =
-            before.state === 'ready_for_review'
-              ? reviewRouting(ctx.db, team.id, lane.id)
-              : {
-                  routed: undefined as boolean | undefined,
-                  human_required: undefined as boolean | undefined,
-                };
+          const routing = isAwaitingAcceptance(before.state)
+            ? reviewRouting(ctx.db, team.id, lane.id)
+            : {
+                routed: undefined as boolean | undefined,
+                human_required: undefined as boolean | undefined,
+              };
           // ADR 172: even a verified close can miss the requirement — an agent counterpart
           // confirming a risky lane is a real review, but not the HUMAN one the risk demanded.
           // `=== true`, never truthiness: an abstaining read must not assert the flag (ADR 173
@@ -2692,7 +2705,7 @@ export async function handleHttp(
                   ? 'abandoned'
                   : verified
                     ? 'counterpart_confirm'
-                    : before.state === 'ready_for_review'
+                    : isAwaitingAcceptance(before.state)
                       ? // A timeout means somebody was asked and did not answer. When the picker
                         // found nobody, no ask was ever sent, and calling that a timeout is simply
                         // false. Two no-ask shapes (ADR 172): an empty cross-family pool is the
@@ -2718,7 +2731,7 @@ export async function handleHttp(
               // ADR 173 clause 4: an abstention has to be COUNTABLE, or the counter-metric's silence
               // is indistinguishable from a clean zero. Recorded only where the question was live —
               // a lane that entered review, whose ready row could not tell us what it required.
-              ...(before.state === 'ready_for_review' && routing.human_required === undefined
+              ...(isAwaitingAcceptance(before.state) && routing.human_required === undefined
                 ? { human_required_unknown: true }
                 : {}),
               worker_family: ownerAtClose ? workerFamily(ctx.db, team.id, ownerAtClose) : null,
@@ -2726,7 +2739,7 @@ export async function handleHttp(
               // ADR 188 two-stage: which peer review a RISKY lane actually got — the newest
               // lane.review_peer_confirmed row's grade, or 'none'. Only written on risky lanes;
               // the human half of the pair stays `human_review_missed`, derived exactly as before.
-              ...(lane.risk.length > 0 && before.state === 'ready_for_review'
+              ...(lane.risk.length > 0 && isAwaitingAcceptance(before.state)
                 ? { peer_review: peerReviewGradeOf(ctx.db, team.id, lane.id) }
                 : {}),
               // ADR 188: the close edge finally CHECKS what the confirm was worth, for routed and
@@ -2747,7 +2760,7 @@ export async function handleHttp(
                   })()
                 : {}),
               // Approximation: entering review was this lane's last update before the close.
-              ...(before.state === 'ready_for_review'
+              ...(isAwaitingAcceptance(before.state)
                 ? { time_in_review_ms: Date.now() - before.updated_at }
                 : {}),
             },
@@ -2757,7 +2770,7 @@ export async function handleHttp(
           // and only when the client sent them); the actor is server-derived from the authed seat.
           // `authorized_by` here is client-attested (unlike decide/grant — ADR 127 — where the daemon
           // knows the admin). ADR 169: when the close carries no fresh attestation, the stage-one
-          // capture (lane.merged, persisted at ready_for_review) flows through — with attested_by
+          // capture (lane.merged, persisted at awaiting_acceptance) flows through — with attested_by
           // crediting the worker when a counterpart performs the closing act.
           if (lane.branch && lane.state === 'done') {
             const m = body.merged ?? lane.merged ?? undefined;

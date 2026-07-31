@@ -61,14 +61,14 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
     updateLane(db, team.id, june.id, 'bravo', { state: 'ready_for_review' });
     const still = laneWarnings(db, team.id, 'bravo', cleo);
     expect(still).toHaveLength(1);
-    expect(still[0]!.detail).toContain('still ready_for_review');
+    expect(still[0]!.detail).toContain('still awaiting_acceptance');
 
     // The dep resolving clears the warning (dedup-until-cleared is a diff over this).
     updateLane(db, team.id, june.id, 'bravo', { state: 'done' });
     expect(laneWarnings(db, team.id, 'bravo', cleo)).toHaveLength(0);
   });
 
-  it('ADR 169: ready_for_review persists the stage-one attestation and stays unresolved', () => {
+  it('ADR 192: awaiting_acceptance persists the stage-one attestation and stays unresolved', () => {
     const { db, team } = seed();
     const lane = openLane(db, team.id, 'bravo', 'riley', {
       title: 'two-stage',
@@ -77,10 +77,10 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
       claim: true,
     });
     const ready = updateLane(db, team.id, lane.id, 'bravo', {
-      state: 'ready_for_review',
+      state: 'ready_for_review', // legacy spelling coerces on write
       merged: { pr: 7, sha: 'deadbeef', authorized_by: 'nick' },
     })!;
-    expect(ready.state).toBe('ready_for_review');
+    expect(ready.state).toBe('awaiting_acceptance');
     expect(ready.merged).toEqual({ pr: 7, sha: 'deadbeef', authorized_by: 'nick' });
     expect(ready.resolved_at).toBeNull();
     // The attestation survives an unrelated later patch (rebuild-from-existing carry).
@@ -296,7 +296,7 @@ describe('deriveGoalStatus (the pinned rule, ADR 048 as amended by 084)', () => 
     expect(deriveGoalStatus([lane('open')])).toBe('in-flight');
     expect(deriveGoalStatus([lane('blocked')])).toBe('in-flight');
     // ADR 169: awaiting review is live — a goal is not shipped until its closes land.
-    expect(deriveGoalStatus([lane('done'), lane('ready_for_review')])).toBe('in-flight');
+    expect(deriveGoalStatus([lane('done'), lane('awaiting_acceptance')])).toBe('in-flight');
   });
   it('shipped only when all lanes are terminal AND at least one is done', () => {
     expect(deriveGoalStatus([lane('done')])).toBe('shipped');

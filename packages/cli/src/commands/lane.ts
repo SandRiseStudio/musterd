@@ -17,8 +17,9 @@ const USAGE =
   '  musterd lane claim <id>\n' +
   '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>]\n' +
-  '  musterd lane update <id> [--state open|claimed|active|blocked|ready_for_review|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d] [--project p]\n' +
-  '  musterd lane ready <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
+  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d] [--project p]\n' +
+  '  musterd lane submit <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
+  '  musterd lane ready <id> […]  (deprecated alias for submit)\n' +
   '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lanes [--project p] [--mine] [--open] [--json]';
 
@@ -110,12 +111,12 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
 
-  if (sub === 'claim' || sub === 'resolve' || sub === 'ready') {
+  if (sub === 'claim' || sub === 'resolve' || sub === 'ready' || sub === 'submit') {
     const id = parsed.positionals[1];
     if (!id) throw new CliError(USAGE, 2);
-    // resolve/ready may attest the landed merge (ADR 109): {pr, sha, authorized_by}. On resolve it
-    // rides the terminal move into `git.pr_merged`; on ready (ADR 169) it is the worker's stage-one
-    // claim, persisted on the lane so a counterpart's later confirm carries it.
+    // resolve/submit may attest the landed merge (ADR 109): {pr, sha, authorized_by}. On resolve it
+    // rides the terminal move into `git.pr_merged`; on submit (ADR 192) it is the worker's stage-one
+    // claim, persisted on the lane so an acceptor's later accept carries it. `ready` is a deprecated alias.
     const prRaw = flagStr(parsed.flags, 'pr');
     const pr = prRaw !== undefined ? Number(prRaw) : undefined;
     if (pr !== undefined && !Number.isInteger(pr)) throw new CliError(USAGE, 2);
@@ -126,35 +127,37 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         ? { authorized_by: flagStr(parsed.flags, 'authorized-by')! }
         : {}),
     };
+    const submit = sub === 'ready' || sub === 'submit';
     const res = await http.updateLane(
       team,
       id,
       sub === 'claim'
         ? { owner_seat: identity.name }
         : {
-            state: sub === 'ready' ? 'ready_for_review' : 'done',
+            state: submit ? 'awaiting_acceptance' : 'done',
             ...(Object.keys(merged).length ? { merged } : {}),
           },
     );
-    const label = sub === 'claim' ? 'claimed' : sub === 'ready' ? 'ready for review' : 'done';
+    const label = sub === 'claim' ? 'claimed' : submit ? 'submitted for acceptance' : 'done';
     process.stdout.write(`${theme.ok('✓')} lane ${label}\n${renderLane(res.lane)}\n`);
     renderWarnings(res.warnings);
-    if (sub === 'ready') {
-      // ADR 169: report the review routing — who was asked, or that self-close is sanctioned.
+    if (submit) {
+      // ADR 192: report the acceptor routing — who was asked, or that self-close is sanctioned.
       if (res.review?.reviewer) {
         process.stdout.write(
-          `review asked of ${theme.memberName(res.review.reviewer, 'agent')} ` +
+          `acceptance asked of ${theme.memberName(res.review.reviewer, 'agent')} ` +
             theme.meta(
-              `(${res.review.route}) — standard tier: wait ≤5m; a confirm closes the lane, a ` +
-                `send-back resumes it; on silence, \`musterd lane resolve\` yourself (recorded unverified)`,
+              `(${res.review.route}) — wait ≤5m; accept closes the lane, reject resumes it; ` +
+                `on silence, \`musterd lane resolve\` yourself (recorded unconfirmed). ` +
+                `Acceptor judges intent/principles/usable/feel — not a code review.`,
             ) +
             '\n',
         );
       } else {
         process.stdout.write(
           theme.meta(
-            'no eligible cross-family counterpart is live — self-close sanctioned: ' +
-              '`musterd lane resolve` when ready (recorded unverified)',
+            'no eligible acceptor is live — self-close sanctioned: ' +
+              '`musterd lane resolve` when ready (recorded unconfirmed)',
           ) + '\n',
         );
       }
@@ -164,7 +167,7 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
       if (res.lane.owner_seat === identity.name) {
         process.stdout.write(
           theme.meta(
-            'unverified close recorded — prefer `musterd lane ready` when a counterpart is live (ADR 169)',
+            'unconfirmed close recorded — prefer `musterd lane submit` when an acceptor is live (ADR 192)',
           ) + '\n',
         );
       }

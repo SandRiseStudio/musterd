@@ -62,7 +62,7 @@ describe('laneActions — the verb-legality table', () => {
     const actions = laneActions(lane({ owner_seat: 'nick', state: 'active' }), 'nick');
     expect(actions.map((a) => a.kind)).toEqual(['block', 'handoff', 'ready', 'abandon']);
     expect(actions.find((a) => a.kind === 'block')!.patch).toEqual({ state: 'blocked' });
-    expect(actions.find((a) => a.kind === 'ready')!.patch).toEqual({ state: 'ready_for_review' });
+    expect(actions.find((a) => a.kind === 'ready')!.patch).toEqual({ state: 'awaiting_acceptance' });
   });
 
   it('my blocked lane: unblock, hand off, ready, abandon', () => {
@@ -72,22 +72,22 @@ describe('laneActions — the verb-legality table', () => {
     expect(actions.find((a) => a.kind === 'abandon')!.patch).toEqual({ state: 'abandoned' });
   });
 
-  it("ready_for_review flips the verbs to the COUNTERPART: confirm + send back (ADR 169's one exception)", () => {
-    const inReview = lane({ owner_seat: 'ada', state: 'ready_for_review' });
+  it('awaiting_acceptance flips the verbs to the ACCEPTOR: accept + reject (ADR 192)', () => {
+    const inReview = lane({ owner_seat: 'ada', state: 'awaiting_acceptance' });
     const reviewer = laneActions(inReview, 'nick');
     expect(reviewer.map((a) => a.kind)).toEqual(['confirm', 'sendback']);
     expect(reviewer.find((a) => a.kind === 'confirm')!.patch).toEqual({ state: 'done' });
     expect(reviewer.find((a) => a.kind === 'sendback')!.patch).toEqual({ state: 'active' });
   });
 
-  it('ready_for_review offers the owner only the degradation self-close + abandon (never a wedge)', () => {
-    const mine = laneActions(lane({ owner_seat: 'nick', state: 'ready_for_review' }), 'nick');
+  it('awaiting_acceptance offers the owner only the degradation self-close + abandon (never a wedge)', () => {
+    const mine = laneActions(lane({ owner_seat: 'nick', state: 'awaiting_acceptance' }), 'nick');
     expect(mine.map((a) => a.kind)).toEqual(['done', 'abandon']);
     expect(mine.find((a) => a.kind === 'done')!.patch).toEqual({ state: 'done' });
   });
 
-  it('ready_for_review offers an observer nothing', () => {
-    expect(laneActions(lane({ owner_seat: 'ada', state: 'ready_for_review' }), null)).toEqual([]);
+  it('awaiting_acceptance offers an observer nothing', () => {
+    expect(laneActions(lane({ owner_seat: 'ada', state: 'awaiting_acceptance' }), null)).toEqual([]);
   });
 
   it('terminal lanes offer nothing, even to their owner', () => {
@@ -274,7 +274,7 @@ describe('movedLanes', () => {
   it('gives no beat for merely reaching review', () => {
     const before = laneStates([lane({ id: 'r', state: 'active' })]);
     const { landed, flourished } = movedLanes(before, [
-      lane({ id: 'r', state: 'ready_for_review', verified: true }),
+      lane({ id: 'r', state: 'awaiting_acceptance', verified: true }),
     ]);
     expect([...landed]).toEqual(['r']);
     expect([...flourished]).toEqual([]);

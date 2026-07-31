@@ -2,6 +2,7 @@
 // member may do to a lane* lives here, testable without DOM. The route/component layer renders these
 // verdicts; the daemon remains the authority (these mirror, never replace, its checks).
 import type { Goal, Lane, LaneBoard, LaneResult, LaneState, UpdateLane } from '@musterd/protocol';
+import { isAwaitingAcceptance } from '@musterd/protocol';
 
 /** A verb the board may offer on a card. `patch` is the exact `PATCH /lanes/:id` body. */
 export interface LaneAction {
@@ -27,10 +28,10 @@ const TERMINAL = new Set<Lane['state']>(['done', 'abandoned']);
  * *giving*, not a peer taking). Handoff's patch is a placeholder; the seat picker fills it via
  * {@link handoffPatch}.
  *
- * The one deliberate exception (ADR 169): a lane in `ready_for_review` offers its verbs to the
- * COUNTERPART, not the owner — `confirm` (the close that derives verified) and `sendback`. The
- * owner keeps only the degradation self-close (recorded unverified) plus abandon, so silence never
- * wedges. The owner's own "done" on a live lane became `ready` — the two-stage entry.
+ * The one deliberate exception (ADR 192): a lane in `awaiting_acceptance` offers its verbs to the
+ * ACCEPTOR, not the owner — `confirm` (accept → done) and `sendback` (reject → active). The
+ * owner keeps only the degradation self-close (recorded unconfirmed) plus abandon, so silence never
+ * wedges. The owner's own "done" on a live lane became `ready` — the two-stage entry (submit).
  */
 export function laneActions(lane: Lane, me: string | null): LaneAction[] {
   if (!me || TERMINAL.has(lane.state)) return [];
@@ -38,10 +39,10 @@ export function laneActions(lane: Lane, me: string | null): LaneAction[] {
     // The daemon flips open→claimed itself when ownership lands (store/lanes.ts) — owner_seat alone.
     return [{ kind: 'claim', patch: { owner_seat: me } }];
   }
-  if (lane.state === 'ready_for_review') {
+  if (isAwaitingAcceptance(lane.state)) {
     if (lane.owner_seat === me) {
-      // The degradation path: the review ask timed out (or nobody was eligible) — self-close,
-      // recorded unverified by the daemon. Never a wedge.
+      // The degradation path: the acceptance ask timed out (or nobody was eligible) — self-close,
+      // recorded unconfirmed by the daemon. Never a wedge.
       return [
         { kind: 'done', patch: { state: 'done' } },
         { kind: 'abandon', patch: { state: 'abandoned' } },
@@ -58,7 +59,7 @@ export function laneActions(lane: Lane, me: string | null): LaneAction[] {
   if (lane.state === 'active') acts.push({ kind: 'block', patch: { state: 'blocked' } });
   if (lane.state === 'blocked') acts.push({ kind: 'unblock', patch: { state: 'active' } });
   acts.push({ kind: 'handoff', patch: {} });
-  acts.push({ kind: 'ready', patch: { state: 'ready_for_review' } });
+  acts.push({ kind: 'ready', patch: { state: 'awaiting_acceptance' } });
   acts.push({ kind: 'abandon', patch: { state: 'abandoned' } });
   return acts;
 }
@@ -169,9 +170,9 @@ export function laneStates(lanes: Lane[]): ReadonlyMap<string, LaneState> {
  * function of mutable state the renderer could not see and left it impossible to test. A diff of two
  * snapshots is the same logic with neither problem.
  *
- * The flourish fires on a CONFIRMED close only (ADR 169, miley's call): a counterpart said "this is
- * what I wanted". A self-close lands like any other move — no celebration for an unverified close,
- * and no beat at all on merely reaching `ready_for_review`.
+ * The flourish fires on an ACCEPTED close only (ADR 192): a counterpart said the outcome matched.
+ * A self-close lands like any other move — no celebration for an unconfirmed close,
+ * and no beat at all on merely reaching `awaiting_acceptance`.
  */
 export function movedLanes(prev: ReadonlyMap<string, LaneState>, lanes: Lane[]): MovedLanes {
   const landed = new Set<string>();

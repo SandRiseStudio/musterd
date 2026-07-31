@@ -104,7 +104,8 @@ describe('shortLaneState', () => {
     expect(shortLaneState('active')).toBe('active');
     expect(shortLaneState('blocked')).toBe('blocked');
     expect(shortLaneState('claimed')).toBe('claimed');
-    expect(shortLaneState('ready_for_review')).toBe('review');
+    expect(shortLaneState('ready_for_review')).toBe('acceptance');
+    expect(shortLaneState('awaiting_acceptance')).toBe('acceptance');
   });
   it('returns null for done/abandoned/null', () => {
     expect(shortLaneState('done')).toBeNull();

@@ -102,8 +102,9 @@ export function shortLaneState(state: LaneState | null | undefined): string | nu
       return 'active';
     case 'blocked':
       return 'blocked';
+    case 'awaiting_acceptance':
     case 'ready_for_review':
-      return 'review';
+      return 'acceptance';
     case 'open':
     case 'done':
     case 'abandoned':

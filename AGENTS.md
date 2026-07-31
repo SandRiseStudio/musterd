@@ -132,17 +132,16 @@ checks), so don't improvise a merge method or a catch-up strategy.
 1. **Branch from fresh `main`, in your worktree.** `git fetch origin main` then `git checkout -b feat/<slug> origin/main` (or `fix/`/`docs/`). One branch per lane.
 2. **Work and commit normally — as your seat.** Intermediate commits don't matter — the PR is **squash-merged** to one commit. Your worktree's git identity is your seat ([ADR 109](docs/decisions/109-seat-git-attribution.md)); end every commit message with your seat trailer `Co-authored-by: <seat> <seat@<team>.musterd>` (this replaces the generic model trailer — add a model line alongside if you like). The trailer is what survives the squash onto `main`, so keep it when editing a squash body.
 3. **Before pushing, run the fast local gates:** `pnpm typecheck && pnpm format:check` (seconds). This is a _smoke test for speed_, not a duplicate of CI — do **not** run the full suite locally to "pre-verify" CI. CI is the authority.
-4. **Open the PR and let it land itself:** `gh pr create …` then `gh pr merge <n> --squash --auto --delete-branch`. Auto-merge waits for the required check (`gates` CI) and squash-merges when green. **Don't poll or babysit** — walk away; you'll be notified.
+4. **Open the PR and let it land itself:** `gh pr create …` then `gh pr merge <n> --squash --auto --delete-branch`. Auto-merge waits for the required check (`gates` CI) and squash-merges when green. **Don't poll or babysit** — walk away; you'll be notified. This is the technical land path — not blocked on peer acceptance ([ADR 192](docs/decisions/192-outcome-acceptance.md)).
 5. **Fell behind `main`? Rebase — never `merge main`:** `git fetch origin main && git rebase origin/main`, resolve conflicts once, re-run the fast gates, `git push --force-with-lease`. Your branch is throwaway history under squash, so rebasing is free; `--force-with-lease` won't clobber a teammate.
-6. **When you resolve the lane, attest the merge:** pass `{pr, sha, authorized_by}` on the lane resolve so the audit log joins your seat to the landed SHA and the authorizing human (ADR 109; `authorized_by` defaults to your grant's issuer). Then **clear the _local_ branch:** `git fetch origin main --prune && git switch --detach origin/main && git branch -D <branch>`. Auto-delete only removes the **remote** branch; the local one lingers. You can't `git checkout main` (a sibling worktree owns it) and `git branch -d` refuses a squash-merged branch — so **detach to fresh `origin/main`** (which is also step 1's start state) and force-delete. Between lanes your worktree rests detached at `origin/main`, not on a stale branch. `lane resolve` prints this line for you.
+6. **Submit for outcome acceptance, then close:** after merge, `lane_submit` / `musterd lane submit` with `{pr, sha, authorized_by}` moves the lane to `awaiting_acceptance` and asks an acceptor to judge intent/principles/usable/feel of the **landed** outcome (not a code review). Prefer a counterpart accept over self-`lane_resolve` (self-close is recorded unconfirmed). Then **clear the _local_ branch:** `git fetch origin main --prune && git switch --detach origin/main && git branch -D <branch>`. Auto-delete only removes the **remote** branch; the local one lingers. You can't `git checkout main` (a sibling worktree owns it) and `git branch -d` refuses a squash-merged branch — so **detach to fresh `origin/main`** (which is also step 1's start state) and force-delete. Between lanes your worktree rests detached at `origin/main`, not on a stale branch. `lane resolve` prints this line for you.
 
 **Hard rules:** never merge with a merge-commit or rebase-merge (disabled anyway); never `git push --force` (use `--force-with-lease`); never merge past a red `gates` run. Auto-delete clears the **remote** branch; you still clear the **local** one (step 6) — `git branch -d` won't (squash-merge isn't an ancestor), so use `-D` once the PR is merged. The `gates` check runs `build → typecheck → test → coverage → format:check → change-adr:check`. The `review` workflow ([ADR 180](docs/decisions/180-review-after-bugbot.md)) posts advisory findings on PRs touching `packages/protocol/src` or `packages/server/src`; read them, but they are not a gate and never block a merge.
 
 <!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
-
 ## Your musterd team
 
-You are a member of the **revive** team — **claim your seat first** (`team_join`, or `musterd claim <name>` then `musterd status`; a seat is claimed with the team **agent key** — set `MUSTERD_AGENT_KEY` or pass `--key mskey_…`, and an admin approves if no grant was pre-issued) so teammates can see and reach you. musterd is your coordination layer: your teammates — other agents _and_ humans — are
+You are **stanley** on the **revive** team. musterd is your coordination layer: your teammates — other agents *and* humans — are
 reachable through it, and humans on the team are peers, not approvers.
 
 **Your channel.** If this session has the `team_*` tools (the musterd MCP server), they are your
@@ -157,9 +156,13 @@ The loop — `team_*` tool form / `musterd` CLI form:
 - **Check your inbox at every task boundary.** `team_inbox_check` / `musterd inbox` — on start, when
   you finish a unit of work, and after being heads-down. Directed acts wait there for a reply.
 - **Report status as you work.** `team_send {act:'status_update'}` / `musterd send --act
-status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
-- **Own your work in a lane** and **hand off cleanly.** `lane_open` / `musterd lane open` when you
-  start; `team_send {act:'handoff'}` / `musterd send --act handoff` to pass work; close with `resolve`.
+  status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
+- **Claim a lane *before* you build — reading the board is not enough.** `lane_claim` / `musterd lane
+  claim` the ONE you will do (`lane_open` if new); **never build in a lane a teammate owns.** Hand off
+  with `team_send {act:'handoff'}`; after merge `lane_submit`, then accept or `lane_resolve`.
+- **Ask a human before you act big or stall.** For a costly / irreversible / out-of-scope action, or
+  when only a human can unblock you: `team_send {act:'ask'}` / `musterd send --act ask` (`meta.species`
+  + `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
 
 Invoke the tools/commands for real and use what they return — never write down an imagined inbox or
 reply. Keep messages short: use the acts, do not narrate in free text.
@@ -168,5 +171,6 @@ reply. Keep messages short: use the acts, do not narrate in free text.
 waiting on the inbox without polling, or recovering from an error — read the **musterd skill**
 (`.claude/skills/musterd/SKILL.md`, `.cursor/rules/musterd.mdc`, or `.musterd/skill/SKILL.md`) or run
 `musterd help` for the full command reference.
+<!-- musterd:end -->
 
 <!-- musterd:end -->
