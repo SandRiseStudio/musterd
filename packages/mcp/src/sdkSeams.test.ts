@@ -1,6 +1,6 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/server';
+import { McpServer } from '@modelcontextprotocol/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
@@ -58,10 +58,24 @@ function firstText(result: { content?: unknown }): string {
 }
 
 describe('SDK seam canaries (ADR 175)', () => {
-  it('methodOf reads the method literal off the real SDK request schemas', () => {
+  it('methodOf reads the key the real SDK registers its tool handlers under', () => {
     // The single most likely silent-detach point: all three setRequestHandler patches key on this.
-    expect(methodOf(CallToolRequestSchema)).toBe('tools/call');
-    expect(methodOf(ListToolsRequestSchema)).toBe('tools/list');
+    // SDK v2 (spec 2026-07-28) keys handlers by method STRING — so the anchor is no longer a
+    // request schema's `.shape.method.value` but the first argument the SDK's own registration
+    // path actually passes. Drive the real registration (registerTool triggers it) through a spy
+    // and assert methodOf resolves both tool methods from what genuinely arrived.
+    const mcp = new McpServer({ name: 'canary', version: '0.0.0' });
+    const inner = mcp.server as unknown as { setRequestHandler: (...args: unknown[]) => unknown };
+    const original = inner.setRequestHandler.bind(mcp.server);
+    const seen: unknown[] = [];
+    inner.setRequestHandler = (...args: unknown[]) => {
+      seen.push(args[0]);
+      return original(...(args as Parameters<typeof original>));
+    };
+    mcp.registerTool('canary_tool', { description: 'x' }, () => ({ content: [] }));
+    const methods = seen.map(methodOf);
+    expect(methods).toContain('tools/call');
+    expect(methods).toContain('tools/list');
   });
 
   it("the real SDK's validation-bounce prose still matches BOUNCE_RE", async () => {

@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { LaneStateSchema, type Lane, type LaneWarning, type NextBrief } from '@musterd/protocol';
 import { resolveProject } from '@musterd/protocol/project';
 import { z } from 'zod';

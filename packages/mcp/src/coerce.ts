@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { closestOption } from './repair.js';
 
 /**
@@ -274,15 +274,12 @@ export function wasCoerced(request: unknown): boolean {
 export function instrumentToolCoercion(server: McpServer): void {
   captureSchemaKeys(server);
   const inner = server.server;
-  const original = inner.setRequestHandler.bind(inner) as (
-    schema: unknown,
-    handler: RequestHandler,
-  ) => unknown;
-  (inner as { setRequestHandler: unknown }).setRequestHandler = (
-    schema: unknown,
-    handler: RequestHandler,
-  ) => {
-    if (methodOf(schema) !== 'tools/call') return original(schema, handler);
+  const original = inner.setRequestHandler.bind(inner) as (...args: unknown[]) => unknown;
+  // Variadic pass-through: v2 keys by method string, v1 by schema; handler is always last.
+  (inner as { setRequestHandler: unknown }).setRequestHandler = (...pArgs: unknown[]) => {
+    const handler = pArgs[pArgs.length - 1] as RequestHandler;
+    if (methodOf(pArgs[0]) !== 'tools/call' || typeof handler !== 'function')
+      return original(...pArgs);
     const wrapped: RequestHandler = (request, extra) => {
       try {
         const params = (request as { params?: { name?: unknown; arguments?: unknown } } | undefined)
@@ -316,7 +313,7 @@ export function instrumentToolCoercion(server: McpServer): void {
       }
       return handler(request, extra);
     };
-    return original(schema, wrapped);
+    return original(...pArgs.slice(0, -1), wrapped);
   };
 }
 
@@ -353,9 +350,10 @@ function captureSchemaKeys(server: McpServer): void {
 
 type RequestHandler = (request: unknown, extra: unknown) => unknown;
 
-/** The Zod method literal off an SDK request schema — same defensive read as the sibling wrappers. */
-function methodOf(schema: unknown): string | undefined {
-  const value = (schema as { shape?: { method?: { value?: unknown } } } | undefined)?.shape?.method
-    ?.value;
+/** The registered method — v2 string key or v1 zod schema literal; same read as the siblings. */
+function methodOf(schemaOrMethod: unknown): string | undefined {
+  if (typeof schemaOrMethod === 'string') return schemaOrMethod;
+  const value = (schemaOrMethod as { shape?: { method?: { value?: unknown } } } | undefined)?.shape
+    ?.method?.value;
   return typeof value === 'string' ? value : undefined;
 }

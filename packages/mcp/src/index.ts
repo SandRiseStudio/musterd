@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { McpServer } from '@modelcontextprotocol/server';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { renderPrimer } from '@musterd/protocol';
 import { bind } from './bind.js';
 import { MCP_ICONS } from './brand.js';

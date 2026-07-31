@@ -1,7 +1,7 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import {
   type Act,
-  ActSchema,
+  ACTS,
   type AskTier,
   AskTierSchema,
   askContract,
@@ -85,15 +85,20 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
       inputSchema: {
         to: z.string().default('@team').describe("member name, or '@team', or '@broadcast'"),
         // Derived from ACTS (the protocol's single source of truth) so the MCP surface can never drift
-        // from the enum — a new act lands here the moment it's appended (ADR 103).
-        act: ActSchema,
+        // from the enum — a new act lands here the moment it's appended (ADR 103). Rebuilt with this
+        // package's zod (4) rather than importing ActSchema: the protocol package is still on zod 3,
+        // and a zod-3 schema object is not a zod-4 type at the registerTool boundary.
+        act: z.enum(ACTS),
         body: z.string(),
         thread: z.string().optional().describe('thread id to reply within'),
         reply_to: z
           .string()
           .optional()
           .describe('message id this accepts/declines; omit to answer the latest open ask'),
-        meta: z.record(z.unknown()).optional().describe('act-specific fields, e.g. {progress:0.5}'),
+        meta: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe('act-specific fields, e.g. {progress:0.5}'),
       },
     },
     async (args) => {
