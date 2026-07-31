@@ -22,6 +22,7 @@ import {
   type WorkspaceSpec,
 } from '@musterd/protocol';
 import { parseClaimTarget } from './claim-client.js';
+import { machineStatePath } from './machinePaths.js';
 
 /**
  * A v0.3 claim credential resolved from env (ADR 075 Decision 1) — the P3 successor to {@link Identity}.
@@ -402,7 +403,7 @@ function backfillVault(
 }
 
 export function configPath(): string {
-  return process.env['MUSTERD_CONFIG'] ?? join(homedir(), '.musterd', 'config.json');
+  return machineStatePath('MUSTERD_CONFIG', 'config.json');
 }
 
 const DEFAULT: Config = {
