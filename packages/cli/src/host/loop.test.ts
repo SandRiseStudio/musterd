@@ -214,6 +214,43 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(lines.join('\n')).toMatch(/no agent key/);
   });
 
+  it('a MIXED group: the seat whose workspace is unreadable is reported, never spawned into', async () => {
+    // The single-entry case above hides this bug, because an all-unreadable group is skipped whole.
+    // With one healthy seat beside one whose worktree is gone, the group still has a readable key,
+    // so the poll proceeds — and the dead seat's order must not reach a backend carrying a cwd that
+    // does not exist. Measured on the dogfood machine 2026-07-30: izzo's registry entry named a
+    // worktree deleted two weeks earlier, beside miley's and dolly's healthy ones.
+    const { client, calls } = fakeClient([
+      order({ lease_id: 'L-ok', seat: 'miley', act_id: 'A-ok' }),
+      order({ lease_id: 'L-dead', seat: 'izzo', act_id: 'A-dead' }),
+    ]);
+    const { backend, specs } = fakeBackend();
+    const lines: string[] = [];
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({
+          entries: [
+            entryOf({ seat: 'miley', workspace: '/ws/miley' }),
+            entryOf({ seat: 'izzo', workspace: '/ws/gone' }),
+          ],
+        }),
+        readAgentKey: (ws) => (ws === '/ws/gone' ? undefined : 'mskey_test'),
+        clientFor: () => client,
+        log: (l) => lines.push(l),
+      }),
+    );
+    // The healthy seat is unaffected — this must not become "skip the whole group".
+    expect(specs.map((s) => s.workspace)).toEqual(['/ws/miley']);
+    // The dead seat is reported (never dropped — the lease must settle) with a reason that names
+    // the workspace, so the operator is not left reading an ENOENT attributed to a stale binary.
+    const dead = calls.reports.find((r) => r.lease_id === 'L-dead');
+    expect(dead?.occupied).toBe(false);
+    expect(dead?.reason).toMatch(/workspace/i);
+    expect(dead?.reason).toContain('/ws/gone');
+    expect(lines.join('\n')).toMatch(/wake FAILED for izzo/);
+  });
+
   it('roster verify: offline → live-with-wake-provenance resolves occupied with the provenance', async () => {
     const offline: MemberSummary[] = [
       {

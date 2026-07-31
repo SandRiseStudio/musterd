@@ -138,6 +138,12 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
     const keyed = group.entries
       .map((e) => ({ entry: e, key: readAgentKey(e.workspace) }))
       .filter((e): e is { entry: HostRegistryEntry; key: string } => e.key !== undefined);
+    // `keyed` is not only how the group's auth key is picked — it is the set of entries whose
+    // workspace is actually READABLE, which is a precondition for spawning into it at all. Dispatch
+    // below resolves seats through this map rather than through `group.entries`, because a MIXED
+    // group (one healthy seat, one whose worktree was deleted) keeps `keyed` non-empty and would
+    // otherwise sail past the guard above and spawn with a `cwd` that does not exist.
+    const spawnable = new Map(keyed.map((k) => [k.entry.seat, k.entry]));
     if (keyed.length === 0) {
       deps.log(
         `! no agent key readable for ${group.team} on ${group.server} — ` +
@@ -161,19 +167,40 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
         `wake due: ${order.seat} [${order.lane}] — ${order.act} from ${order.sender} ` +
           `(lease ${order.lease_id})`,
       );
-      const entry = group.entries.find((e) => e.seat === order.seat);
-      const report = (outcome: WakeOutcome) =>
-        client
+      const entry = spawnable.get(order.seat);
+      // Every failed wake is loud HERE, in the one place every outcome funnels through, rather than
+      // only on the actuation path. The pre-actuation branches below (no registry entry, dead
+      // workspace, no backend) settle the lease and `continue` — before this, they did so with the
+      // host log showing nothing but a placid "wake due", which is the exact failure mode ADR 179's
+      // gate forbids ("a dead rail must be loud within one poll cycle"). A deferral is not a failure
+      // and stays quiet: that is the local-session guard working as designed.
+      const report = (outcome: WakeOutcome) => {
+        if (!outcome.occupied && !outcome.deferred)
+          deps.log(
+            `! wake FAILED for ${order.seat} (${order.lane}): ` +
+              `${outcome.reason ?? 'no reason reported'}`,
+          );
+        return client
           .wakeReport(group.team, { lease_id: order.lease_id, ...outcome })
           .catch((err: Error) =>
             deps.log(`! wake-report failed for lease ${order.lease_id}: ${err.message}`),
           );
+      };
 
       if (!entry) {
+        // Two distinct faults, told apart because the operator's next move differs. Registered but
+        // unreadable is the stale-pointer case: an enrollment outlives the worktree it named (a
+        // worktree created in the wrong place and later deleted, say), and the registry never
+        // notices. Spawning anyway costs an attempt, fails ENOENT, and — because the only ENOENT
+        // heal on the path is the one written for a moved `claude` binary — gets reported as a
+        // stale binary. Three of those exhaust the act on a diagnosis that names the wrong thing.
+        const registered = group.entries.find((e) => e.seat === order.seat);
         await report({
           occupied: false,
-          reason:
-            'seat not in this machine’s host registry — re-run `musterd residency on` in its workspace',
+          reason: registered
+            ? `workspace ${registered.workspace} is missing or has no binding — the registry entry ` +
+              `outlived it; re-run \`musterd residency on --as <admin>\` in the seat's real workspace`
+            : 'seat not in this machine’s host registry — re-run `musterd residency on` in its workspace',
         });
         continue;
       }
@@ -261,16 +288,9 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
       span.setStatus({
         code: actuation.outcome.occupied ? SpanStatusCode.OK : SpanStatusCode.ERROR,
       });
-      // A failed wake used to be silent HERE: the reason went to the span and the daemon's audit row
-      // and nowhere a human looks. On the dogfood machine the host logged a placid "◉ polling" while
-      // every wake died on ENOENT, three attempts at a time, until the act exhausted — the failure
-      // mode ADR 179's gate calls out ("a dead rail must be loud within one poll cycle"). A deferral
-      // is NOT a failure and stays quiet: it is the local-session guard working as designed.
-      if (!actuation.outcome.occupied && !actuation.outcome.deferred)
-        deps.log(
-          `! wake FAILED for ${order.seat} (${order.lane}): ` +
-            `${actuation.outcome.reason ?? 'no reason reported'}`,
-        );
+      // The loud-failure log for this outcome lives in `report` above, so every branch that settles
+      // a lease — actuation and the pre-actuation bail-outs alike — is equally loud. It was here
+      // alone until 2026-07-31, which is why a dead registry entry could fail three times in silence.
       await report(actuation.outcome);
       span.end();
       // The supplementary cost report (increment 5): harness-attested cost exists only at run

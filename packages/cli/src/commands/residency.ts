@@ -14,6 +14,7 @@ import { flagStr, fmtBytes, fmtDurationMs, parseDurationMs, type Parsed } from '
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import {
+  type HostRegistryEntry,
   hostRegistryPath,
   loadHostRegistry,
   removeHostEntry,
@@ -45,6 +46,62 @@ const POLICY_FLAGS_USAGE =
   '[--lane both|interrupt|batched] [--cooldown <15m>] [--hourly-cap <n>] [--attempt-cap <n>] ' +
   '[--tool-policy reply-only|seat-policy] [--timeout <5m>] [--max-turns <n>] [--budget <usd>] ' +
   '[--transcript-max <MiB, fractions OK>]';
+
+/**
+ * The remediation every drift line points at. It carries `--as <admin>` because enrollment is an
+ * actor≠authorizer gate (ADR 127, and the header above) and these hints are read *inside a seat's
+ * workspace*, where the caller authenticates as that agent seat — so the bare form fails with
+ * `this operation requires an admin seat (is_admin)`. Observed 2026-07-31: the drift line printed
+ * the bare form, the operator ran it verbatim in the workspace it named, and it was refused. A hint
+ * that cannot be executed where it is printed is worse than no hint — it reads as a broken tool
+ * rather than a missing flag. One constant so the whole surface cannot drift apart again.
+ */
+const ENROLL_HINT = 'musterd residency on --as <admin>';
+
+/**
+ * The enrollment↔registry cross-check (ADR 131 §1, third store): every enrollment claiming a host
+ * label this machine has answered to needs a registry entry whose workspace can actually host a
+ * woken session, or `musterd host` will be handed an order it cannot serve.
+ *
+ * Pure — takes the three inputs and returns the lines — so the wording is testable. That matters
+ * more than it looks: these strings ARE the remediation, and both faults they distinguish have now
+ * been hit for real on the dogfood machine. `existsSync` is injectable for the same reason.
+ */
+export function registryDrift(
+  residency: readonly Pick<Residency, 'seat' | 'host'>[],
+  entries: readonly HostRegistryEntry[],
+  team: string,
+  hostLabel: string,
+  exists: (p: string) => boolean = existsSync,
+): string[] {
+  const myLabels = new Set([hostLabel, ...entries.map((e) => e.host)]);
+  const lines: string[] = [];
+  for (const r of residency) {
+    if (!myLabels.has(r.host)) continue;
+    const entry = entries.find((e) => e.team === team && e.seat === r.seat);
+    if (!entry) {
+      lines.push(
+        `! drift: "${r.seat}" is enrolled to ${r.host} but missing from this machine's host ` +
+          `registry — run \`${ENROLL_HINT}\` in its workspace`,
+      );
+      continue;
+    }
+    if (exists(join(entry.workspace, BINDING_DIR, BINDING_FILE))) continue;
+    // Two faults, two different next moves, so they get two different sentences. A workspace that is
+    // GONE is nearly always an abandoned worktree the registry outlived — the fix is to re-register
+    // the real one. Saying "has no binding" about a path that does not exist sends the reader
+    // hunting a config fault instead of recognising their own deleted directory. A workspace that
+    // exists but holds no binding is the provisioning case the original text was written for.
+    const vanished = !exists(entry.workspace);
+    lines.push(
+      `! drift: "${r.seat}"'s registered workspace ${entry.workspace} ` +
+        (vanished ? 'no longer exists' : 'has no binding') +
+        ` — a wake cannot occupy; re-run \`${ENROLL_HINT}\` in ` +
+        (vanished ? "the seat's real workspace" : 'that workspace'),
+    );
+  }
+  return lines;
+}
 
 export async function residencyCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
@@ -340,7 +397,7 @@ async function statusCommand(parsed: Parsed): Promise<number> {
   }
   if (residency.length === 0) {
     process.stdout.write(
-      theme.meta('no seats enrolled — `musterd residency on` in a seat’s workspace') + '\n',
+      theme.meta(`no seats enrolled — \`${ENROLL_HINT}\` in a seat’s workspace`) + '\n',
     );
     return 0;
   }
@@ -366,7 +423,7 @@ async function statusCommand(parsed: Parsed): Promise<number> {
       process.stdout.write(
         theme.warn(
           `! drift: "${bound}" is enrolled but this workspace holds no grant — ` +
-            're-run `musterd residency on` here',
+            `re-run \`${ENROLL_HINT}\` here`,
         ) + '\n',
       );
     } else if (!mine && binding.grant !== undefined) {
@@ -390,32 +447,15 @@ async function statusCommand(parsed: Parsed): Promise<number> {
   // label this machine has answered to must have a registry entry, or `musterd host` here will be
   // handed a wake order it cannot map to a workspace.
   const registry = loadHostRegistry();
-  const myLabels = new Set([hostname(), ...registry.entries.map((e) => e.host)]);
-  for (const r of residency) {
-    if (!myLabels.has(r.host)) continue;
-    const entry = registry.entries.find((e) => e.team === team && e.seat === r.seat);
-    if (!entry) {
-      process.stdout.write(
-        theme.warn(
-          `! drift: "${r.seat}" is enrolled to ${r.host} but missing from this machine's host ` +
-            `registry — run \`musterd residency on\` in its workspace`,
-        ) + '\n',
-      );
-    } else if (!existsSync(join(entry.workspace, BINDING_DIR, BINDING_FILE))) {
-      process.stdout.write(
-        theme.warn(
-          `! drift: "${r.seat}"'s registered workspace ${entry.workspace} has no binding — ` +
-            `a wake cannot occupy; re-run \`musterd residency on\` there`,
-        ) + '\n',
-      );
-    }
+  for (const line of registryDrift(residency, registry.entries, team, hostname())) {
+    process.stdout.write(theme.warn(line) + '\n');
   }
   for (const entry of registry.entries.filter((e) => e.team === team)) {
     if (!residency.some((r) => r.seat === entry.seat)) {
       process.stdout.write(
         theme.meta(
           `note: host registry holds "${entry.seat}" (${hostRegistryPath()}) but the seat is not ` +
-            'enrolled — stale after a revoke elsewhere; `musterd residency on` or ignore',
+            `enrolled — stale after a revoke elsewhere; \`${ENROLL_HINT}\` or ignore`,
         ) + '\n',
       );
     }
