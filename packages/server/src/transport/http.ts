@@ -55,7 +55,13 @@ import { deliveryHintFor } from '../protocol/nudge.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
-import { appendAudit, hasInterruptRaised, listAudit, reviewRouting } from '../store/audit.js';
+import {
+  appendAudit,
+  hasInterruptRaised,
+  listAudit,
+  peerReviewGradeOf,
+  reviewRouting,
+} from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import { actDelivery, crossedBySeen } from '../store/delivery.js';
 import { listGoals } from '../store/goals.js';
@@ -130,6 +136,7 @@ import {
 import {
   memberIsHuman,
   memberModelByName,
+  pickHumanReviewer,
   pickReviewCounterpart,
   teamFamilyPosture,
   verifiedCloses,
@@ -2408,13 +2415,22 @@ export async function handleHttp(
         // (species approve, tier standard: 5m, proceed_with_risk — deliberately not the holding tier).
         let review: Record<string, unknown> | undefined;
         if (lane.state === 'ready_for_review' && before.state !== 'ready_for_review') {
-          const pick = pickReviewCounterpart(
+          // ADR 188 two-stage: for a risky lane the picker returns the PEER (agents-only ladder);
+          // when no peer exists the human ask is not gated behind a stage that cannot happen —
+          // fall back to the stage-two human directly, at the blocking tier, as before ADR 188.
+          const worker = lane.owner_seat ?? member.name;
+          const peerPick = pickReviewCounterpart(
             ctx.db,
             team.id,
             lane,
-            lane.owner_seat ?? member.name,
+            worker,
             ctx.config.presenceTimeoutMs,
           );
+          const humanFallback =
+            lane.risk.length > 0 && !peerPick
+              ? pickHumanReviewer(ctx.db, team.id, worker, ctx.config.presenceTimeoutMs)
+              : null;
+          const pick = peerPick ?? humanFallback;
           // Record the ROUTING OUTCOME here, where it is known. Without it the close edge can only
           // see "this lane passed through review" and calls every owner-close a `review_timeout` —
           // asserting a question was asked and went unanswered, when on a fleet with no eligible
@@ -2445,6 +2461,11 @@ export async function handleHttp(
               ...(pick
                 ? { reviewer: pick.reviewer, route: pick.route, review_grade: pick.grade }
                 : { no_candidate: true }),
+              // ADR 188: how the human requirement will be met — 'gated' (fires on the peer's
+              // accept) vs 'immediate' (no peer existed). Absent on non-risky lanes.
+              ...(humanRequired && pick
+                ? { human_ask: pick.grade === 'human' ? 'immediate' : 'gated' }
+                : {}),
               // ALWAYS written, both ways (ADR 173 correction #1). Omitting the `false` made absence
               // ambiguous — "not required" and "written before this field existed" were the same
               // row — which is what forced the read to serve a legacy row as a confident no. With
@@ -2471,10 +2492,10 @@ export async function handleHttp(
               `[lane] review requested: "${lane.title}" — confirm (move the lane to done) or send it back to active with a note`,
               {
                 species: 'approve',
-                // ADR 172: a risky lane's human review is a requirement, so its ask carries the
-                // holding tier (15m, ADR 147/153 reachability-gated) rather than standard's 5m
-                // proceed-with-risk — the tier is where "required" has teeth without a wedge.
-                tier: humanRequired ? 'blocking' : 'standard',
+                // ADR 172/188: the HUMAN review ask carries the holding tier (required has teeth);
+                // a risky lane's stage-one PEER ask rides standard like any peer review — the
+                // blocking ask is composed at stage two, when the peer's accept lands (route.ts).
+                tier: humanRequired && pick.grade === 'human' ? 'blocking' : 'standard',
                 lane_review: {
                   lane: lane.id,
                   title: lane.title,
@@ -2489,7 +2510,13 @@ export async function handleHttp(
               reviewer: pick.reviewer,
               route: pick.route,
               grade: pick.grade,
-              tier: humanRequired ? 'blocking' : 'standard',
+              tier: humanRequired && pick.grade === 'human' ? 'blocking' : 'standard',
+              ...(humanRequired
+                ? {
+                    human_review_required: true,
+                    human_ask: pick.grade === 'human' ? 'immediate' : 'gated',
+                  }
+                : {}),
             };
           } else if (humanRequired) {
             // ADR 172: a risky lane with no live human/admin. NOT the sanctioned self-close — the
@@ -2613,6 +2640,12 @@ export async function handleHttp(
                 : {}),
               worker_family: ownerAtClose ? workerFamily(ctx.db, team.id, ownerAtClose) : null,
               ...(verified ? { reviewer_family: workerFamily(ctx.db, team.id, member.name) } : {}),
+              // ADR 188 two-stage: which peer review a RISKY lane actually got — the newest
+              // lane.review_peer_confirmed row's grade, or 'none'. Only written on risky lanes;
+              // the human half of the pair stays `human_review_missed`, derived exactly as before.
+              ...(lane.risk.length > 0 && before.state === 'ready_for_review'
+                ? { peer_review: peerReviewGradeOf(ctx.db, team.id, lane.id) }
+                : {}),
               // ADR 188: the close edge finally CHECKS what the confirm was worth, for routed and
               // voluntary confirms alike. `verified` keeps its meaning (a different seat confirmed);
               // the grade rides beside it so a same-model confirm can never imply diversity it does

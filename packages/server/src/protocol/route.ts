@@ -1,13 +1,22 @@
-import { type AskSpecies, type AskTier, type Envelope, modelFamily } from '@musterd/protocol';
+import {
+  type AskSpecies,
+  type AskTier,
+  type Envelope,
+  makeEnvelope,
+  modelFamily,
+} from '@musterd/protocol';
+import { ulid } from 'ulid';
 import type { Ctx } from '../context.js';
 import { MusterdError } from '../errors.js';
 import { log } from '../log.js';
 import { formatAskSlackText, postSlackWebhook } from '../notify/slack.js';
 import { appendAudit } from '../store/audit.js';
+import { getLane } from '../store/lanes.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
 import { currentAttestedModel } from '../store/presence.js';
 import { adminHumanPresent } from '../store/reachability.js';
+import { pickHumanReviewer } from '../store/review.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
 import { getPolicy } from '../store/teams.js';
@@ -174,6 +183,16 @@ function routeEnvelopeInner(
     const ref = env.meta?.['in_reply_to'];
     const refTs = typeof ref === 'string' ? getMessageTs(ctx.db, team.id, ref) : null;
     if (refTs !== null && env.ts >= refTs) recordLoopClosure(env.act, env.ts - refTs, loopDims);
+    // ADR 188 stage two: a peer's accept on a risky lane's review ask fires the HUMAN ask, with
+    // the peer's findings in the body — the human reviews an already-screened change. Best-effort
+    // like every lane delivery: a failure here must never fail the accept itself.
+    if (env.act === 'accept' && typeof ref === 'string') {
+      try {
+        fireGatedHumanAsk(ctx, team, sender, ref, env.body);
+      } catch (err) {
+        log.warn({ msg: 'gated_human_ask_failed', err: String(err) });
+      }
+    }
   } else if (env.act === 'resolve' && env.thread) {
     const rootTs = getMessageTs(ctx.db, team.id, env.thread);
     if (rootTs !== null && env.ts >= rootTs)
@@ -240,6 +259,85 @@ function routeEnvelopeInner(
   });
 
   return { message, recipients, delivered };
+}
+
+/**
+ * ADR 188 stage two — the gated human ask. Fires when an ACCEPT lands whose replied-to message is a
+ * lane-review ask (`meta.lane_review`) for a lane that is (a) risky and (b) still `ready_for_review`.
+ * Composes the blocking-tier human ask FROM the lane's owner (the worker whose lane it is — same
+ * sender as the stage-one ask) carrying the peer's findings, and audits `lane.review_peer_confirmed`
+ * whether or not a human was live — `human_ask_fired: false` is the countable degradation
+ * (ADR 173), and the close edge still derives `human_review_missed` when no human ever confirms.
+ *
+ * A peer accept on a NON-risky lane's review ask does nothing here: one review is that lane's whole
+ * contract. Recursion is bounded — the composed act is an `ask`, which this hook never matches.
+ */
+function fireGatedHumanAsk(
+  ctx: Ctx,
+  team: TeamRow,
+  peer: MemberRow,
+  repliedToId: string,
+  peerFindings: string,
+): void {
+  const replied = ctx.db
+    .prepare<
+      [string, string],
+      { meta: string | null }
+    >('SELECT meta FROM messages WHERE team_id = ? AND id = ?')
+    .get(team.id, repliedToId);
+  if (!replied?.meta) return;
+  let laneReview: { lane?: string; title?: string; grade?: string } | undefined;
+  try {
+    laneReview = (JSON.parse(replied.meta) as { lane_review?: typeof laneReview }).lane_review;
+  } catch {
+    return;
+  }
+  if (!laneReview?.lane) return;
+  const lane = getLane(ctx.db, team.id, laneReview.lane, team.slug);
+  if (!lane || lane.risk.length === 0 || lane.state !== 'ready_for_review') return;
+  const owner = lane.owner_seat ? getMemberByName(ctx.db, team.id, lane.owner_seat) : null;
+  if (!owner) return;
+
+  const human = pickHumanReviewer(ctx.db, team.id, owner.name, ctx.config.presenceTimeoutMs);
+  appendAudit(ctx.db, team.id, {
+    actor: peer.name,
+    action: 'lane.review_peer_confirmed',
+    target: lane.id,
+    result: 'allow',
+    detail: {
+      lane: lane.id,
+      peer: peer.name,
+      grade: laneReview.grade ?? null,
+      human_ask_fired: human !== null,
+    },
+  });
+  if (!human) return;
+
+  const findings = peerFindings.length > 500 ? `${peerFindings.slice(0, 500)}…` : peerFindings;
+  const ask = makeEnvelope({
+    id: ulid(),
+    team: team.slug,
+    from: owner.name,
+    to: { kind: 'member', name: human.reviewer },
+    act: 'ask',
+    body:
+      `[lane] human review required: "${lane.title}" — peer ${peer.name} reviewed and accepted: ` +
+      `"${findings}". Confirm (move the lane to done) or send it back to active with a note.`,
+    meta: {
+      species: 'approve',
+      tier: 'blocking',
+      lane_review: {
+        lane: lane.id,
+        title: lane.title,
+        branch: lane.branch,
+        ...(lane.merged ? { merged: lane.merged } : {}),
+        route: 'human_admin',
+        grade: 'human',
+        peer_confirmed_by: peer.name,
+      },
+    },
+  });
+  routeEnvelope(ctx, team, owner, ask);
 }
 
 /**

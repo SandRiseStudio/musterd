@@ -76,6 +76,7 @@ export type AuditAction =
   | 'lane.ready_for_review'
   | 'lane.closed'
   | 'lane.review_sent_back'
+  | 'lane.review_peer_confirmed'
   // Letting go of a lane: an owned lane moved back to `open`, which the state machine's
   // open ⟺ unowned invariant turns into a release (detail: { lane, released_by, owner_before }).
   // Traceable for the same reason a claim is — "who stopped carrying this, and when".
@@ -388,5 +389,26 @@ export function reviewRouting(
     return { routed: undefined, human_required }; // pre-fix row: recorded neither — we do not know
   } catch {
     return unknown; // reachable now that the query no longer parses the JSON for us
+  }
+}
+
+/**
+ * The newest `lane.review_peer_confirmed` grade for a lane, or 'none' (ADR 188). The close edge
+ * writes this on risky lanes so the two-review pair (peer + human) is legible in one row.
+ */
+export function peerReviewGradeOf(db: Database, teamId: string, laneId: string): string {
+  const row = db
+    .prepare<[string, string], { detail: string | null }>(
+      `SELECT detail FROM audit
+         WHERE team_id = ? AND action = 'lane.review_peer_confirmed' AND target = ?
+       ORDER BY ts DESC, id DESC LIMIT 1`,
+    )
+    .get(teamId, laneId);
+  if (!row?.detail) return 'none';
+  try {
+    const g = (JSON.parse(row.detail) as { grade?: unknown }).grade;
+    return typeof g === 'string' ? g : 'none';
+  } catch {
+    return 'none';
   }
 }
