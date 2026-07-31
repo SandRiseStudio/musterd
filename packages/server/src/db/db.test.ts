@@ -10,7 +10,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('26');
+    expect(ver?.value).toBe('27');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -192,7 +192,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(26); // runs v18…v26 (observer grades + residency + offline reason + send provenance + tool-call stats + feature epoch + two-stage close + audit action index + sparse team policy)
+    expect(runMigrations(db)).toBe(27); // runs v18…v27 (observer grades + residency + offline reason + send provenance + tool-call stats + feature epoch + two-stage close + audit action index + sparse team policy + outcome-acceptance rename)
 
     const scope = (id: string) =>
       db
@@ -256,7 +256,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(26);
+    expect(runMigrations(db)).toBe(27);
 
     const policy = (id: string) =>
       db

@@ -6,7 +6,11 @@ import type {
   WakeLane,
   WakeOrder,
 } from '@musterd/protocol';
-import { ResidencyPolicyOverrideSchema, ResidencyPolicySchema } from '@musterd/protocol';
+import {
+  isAwaitingAcceptance,
+  ResidencyPolicyOverrideSchema,
+  ResidencyPolicySchema,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { appendAudit } from './audit.js';
@@ -356,9 +360,9 @@ interface WakeCandidate {
 }
 
 /**
- * Unanswered lane-review asks addressed to this seat whose lane is still `ready_for_review`
- * (ADR 191 work_order derivation). Oldest first. Deliberately NOT folded into `openDirectedLedger`
- * — arbitrary asks stay non-wakeable; only this board edge spends.
+ * Unanswered lane-acceptance asks addressed to this seat whose lane is still awaiting acceptance
+ * (ADR 191 work_order derivation / ADR 192 vocab). Oldest first. Deliberately NOT folded into
+ * `openDirectedLedger` — arbitrary asks stay non-wakeable; only this board edge spends.
  */
 function dueReviewWorkOrders(
   db: Database,
@@ -396,7 +400,7 @@ function dueReviewWorkOrders(
     }
     if (!laneId) continue;
     const lane = getLane(db, teamId, laneId, teamSlug);
-    if (!lane || lane.state !== 'ready_for_review') continue;
+    if (!lane || !isAwaitingAcceptance(lane.state)) continue;
     const sender = getMemberById(db, row.from_member);
     out.push({
       act_id: row.id,
