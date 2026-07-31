@@ -1,7 +1,14 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
 import { roomTone, type LifeContext } from '../sound';
-import { identityMeta, plateModel, shortLaneState, shortSurface, shortWorkTitle } from '../presenceLabel';
+import { modelProvider } from '../modelProvider';
+import { providerIconHtml } from '../modelProviderIcon';
+import {
+  identityMeta,
+  plateDetailParts,
+  shortLaneState,
+  shortWorkTitle,
+} from '../presenceLabel';
 import { createActors, type Actors } from './actors';
 import {
   ambientFrameBudgetMs,
@@ -190,6 +197,54 @@ export function mountOffice(
   const speeches = new Map<string, Speech>(); // one live speech bubble per member (name → bubble)
   const cues: Cue[] = [];
 
+  const AUTO_COLLAPSE_MS = 5000;
+  /** Expand + timer state survives syncLabels DOM rebuilds. */
+  const plateExpand = new Map<
+    string,
+    { expanded: boolean; timer: ReturnType<typeof setTimeout> | null }
+  >();
+
+  function clearExpandTimer(name: string) {
+    const st = plateExpand.get(name);
+    if (!st?.timer) return;
+    clearTimeout(st.timer);
+    st.timer = null;
+  }
+
+  function applyExpandDom(name: string, expanded: boolean) {
+    const el = labels.get(name);
+    if (!el) return;
+    el.classList.toggle('is-expanded', expanded);
+    const btn = el.querySelector('.lc-gl-label__toggle');
+    if (btn) {
+      btn.textContent = expanded ? '▾' : '▸';
+      btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+  }
+
+  function scheduleCollapse(name: string) {
+    const st = plateExpand.get(name);
+    if (!st?.expanded) return;
+    clearExpandTimer(name);
+    st.timer = setTimeout(() => {
+      st.expanded = false;
+      st.timer = null;
+      applyExpandDom(name, false);
+    }, AUTO_COLLAPSE_MS);
+  }
+
+  function toggleExpand(name: string) {
+    if (!interactiveLabels) return;
+    let st = plateExpand.get(name);
+    if (!st) {
+      st = { expanded: false, timer: null };
+      plateExpand.set(name, st);
+    }
+    clearExpandTimer(name);
+    st.expanded = !st.expanded;
+    applyExpandDom(name, st.expanded);
+  }
+
   // ── Tier-A ambient overlay (ADR 086): GPU-composited CSS life over the baked floor — a slow day-cycle
   // wash, coffee-nook steam, and the animated desk props. Pure CSS, no canvas/RAF cost; off entirely under
   // reduced-motion. Lives in its own layer between the canvas and the label overlay. (The working-monitor
@@ -339,8 +394,8 @@ export function mountOffice(
    * actors are left unlabelled — their names bunch at a glance and the roster panel is the name source of
    * truth; the "+N" pills and location carry the secondary read.
    *
-   * Present members get one unified nameplate chip (name · harness · model) and, when hybrid cues
-   * are on, a soft 3–4 word work whisper underneath — see presence-chrome design 2026-07-30. */
+   * Present members: collapsed plate is name + chevron + provider icon; expand reveals
+   * model · harness · role. Broadcast: icon + short model only (no toggle). */
   function syncLabels(headMap: Map<string, Pt>, nodes: Map<string, OfficeNode>, poses: Map<string, Pose>) {
     const seen = new Set<string>();
     for (const [name, head] of headMap) {
@@ -357,19 +412,18 @@ export function mountOffice(
       }
       el.textContent = '';
       el.style.pointerEvents = interactiveLabels ? 'auto' : 'none';
+      el.classList.toggle('is-broadcast', !interactiveLabels);
 
       const present = node.presence !== 'offline';
+      const expanded = plateExpand.get(name)?.expanded === true;
+      el.classList.toggle('is-expanded', expanded);
+
       const meta = identityMeta({
         surface: node.surface,
         model: node.model,
         role: node.role,
       });
 
-      // ONE compact plate: dot + name | model, divided by a hairline rule. Third shape for this
-      // nameplate, and the reasoning that survived all three: harness stays on hover (the least
-      // surprising field), but the model lives ON the line with the name — a second line under the
-      // pill read as spilled text (nick), and a second chip read as clutter (nick again). One small
-      // pill with a real divider is the version that reads as a single made object.
       const plate = document.createElement('span');
       plate.className = 'lc-gl-label__plate';
       const dot = document.createElement('span');
@@ -379,29 +433,76 @@ export function mountOffice(
       who.className = 'lc-gl-label__who';
       who.textContent = name;
       plate.appendChild(who);
-      // Harness, then model, each behind its own rule. The harness came back after it turned out
-      // "which harness is that seat on" is a thing you want at a glance, not on hover — and it is
-      // unambiguous again now that a Claude model renders as `fable 5` rather than `claude fable`.
-      const segments = present ? [shortSurface(node.surface), plateModel(node.model)] : [];
-      for (const seg of segments) {
-        if (!seg) continue;
-        const divider = document.createElement('span');
-        divider.className = 'lc-gl-label__rule';
-        divider.setAttribute('aria-hidden', 'true');
-        plate.appendChild(divider);
-        const segEl = document.createElement('span');
-        segEl.className = 'lc-gl-label__model';
-        segEl.textContent = seg;
-        plate.appendChild(segEl);
+
+      if (present) {
+        if (interactiveLabels) {
+          const toggle = document.createElement('button');
+          toggle.type = 'button';
+          toggle.className = 'lc-gl-label__toggle';
+          toggle.textContent = expanded ? '▾' : '▸';
+          toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+          toggle.setAttribute('aria-label', `Expand ${name} identity`);
+          toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleExpand(name);
+          });
+          plate.appendChild(toggle);
+        }
+
+        const provider = modelProvider(node.model);
+        const icon = document.createElement('span');
+        icon.className = 'lc-gl-label__provider';
+        icon.style.borderColor = provider.border;
+        icon.style.background = provider.fill;
+        icon.innerHTML = providerIconHtml(provider);
+        plate.appendChild(icon);
+
+        const detail = document.createElement('span');
+        detail.className = 'lc-gl-label__detail';
+        const detailParts = interactiveLabels
+          ? plateDetailParts({
+              surface: node.surface,
+              model: node.model,
+              role: node.role,
+            })
+          : plateDetailParts({ model: node.model }).filter((p) => p.kind === 'model');
+        for (const part of detailParts) {
+          const divider = document.createElement('span');
+          divider.className = 'lc-gl-label__rule';
+          divider.setAttribute('aria-hidden', 'true');
+          detail.appendChild(divider);
+          const segEl = document.createElement('span');
+          segEl.className = `lc-gl-label__seg lc-gl-label__seg--${part.kind}`;
+          segEl.textContent = part.text;
+          detail.appendChild(segEl);
+        }
+        plate.appendChild(detail);
+
+        if (interactiveLabels) {
+          plate.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleExpand(name);
+          });
+        }
       }
       el.appendChild(plate);
+
+      if (interactiveLabels) {
+        el.addEventListener('pointerenter', () => clearExpandTimer(name));
+        el.addEventListener('pointerleave', () => scheduleCollapse(name));
+        el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleExpand(name);
+          }
+        });
+      }
 
       const chip = shortLaneState(node.laneState);
       const said = node.workSource === 'status';
       const showWork =
         showWorkCues && present && node.workTitle != null && node.workTitle.length > 0;
       if (showWork) {
-        // Soft whisper under the plate — whole words only; state/said/+N live in the hover tip.
         const workEl = document.createElement('span');
         workEl.className = `lc-gl-label__work${chip === 'blocked' ? ' is-blocked' : ''}`;
         workEl.textContent = shortWorkTitle(node.workTitle!);
@@ -434,6 +535,8 @@ export function mountOffice(
     }
     for (const [name, el] of labels) {
       if (!seen.has(name)) {
+        clearExpandTimer(name);
+        plateExpand.delete(name);
         el.remove();
         labels.delete(name);
       }
@@ -1203,6 +1306,8 @@ export function mountOffice(
       ro?.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
       for (const [who, s] of [...speeches]) clearSpeech(who, s); // cancel timers + remove bubbles
+      for (const name of plateExpand.keys()) clearExpandTimer(name);
+      plateExpand.clear();
       for (const el of labels.values()) el.remove();
       labels.clear();
       ambientHost.remove(); // removes the day-cycle wash, steam, and the animated desk props
