@@ -175,6 +175,21 @@ increments 2–5 are done.
 > Increment 6 builds nothing; adoption of the spec mechanism is SDK-gated and tracked in
 > [ADR 175](175-mcp-spec-2026-07-28-readiness.md).
 
+> **Re-sequenced 2026-07-31, and ADR 175 Phase B has since landed (#565).** The SDK's
+> 2026-07-28-spec support shipped 2026-07-27 as a package split — `@modelcontextprotocol/server`
+> 2.0.0 + `core`, on **zod 4** (`@modelcontextprotocol/sdk` frozen at 1.30.0) — which made the
+> zod-4 migration of the tool shapes mandatory rather than conditional. That is why increment 4 was
+> sequenced **behind** the adoption lane: it is schema work on the same 20 shapes, and running it
+> first would have rewritten every schema twice.
+>
+> The remaining order, now that the migration is in: **increment 5 (scope-by-role) is next and
+> unblocked** — it touches render/registration rather than schema internals, and it is what makes
+> Phase B's `cacheScope: 'private'` claim ("the surface is seat/role-scoped") fully true.
+> **Increment 4 follows**, on the zod-4 substrate, and must re-argue itself from increment-1 data
+> before it is built: the measured decision of 2026-07-24 was already "no split, no merge", and the
+> #297 repair hints may have absorbed the confusion it was scoped for. Measure, then craft — or
+> don't craft.
+
 ### Principles frozen across the arc
 
 - The surface is a **designed product artifact** — both halves, send and read-back, held to a standard.
