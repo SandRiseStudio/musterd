@@ -1,4 +1,11 @@
-import { type AgentKeyMint, type Policy, PolicySchema, TOKEN_PREFIXES } from '@musterd/protocol';
+import {
+  type AgentKeyMint,
+  type Policy,
+  type PolicyOverride,
+  PolicyOverrideSchema,
+  PolicySchema,
+  TOKEN_PREFIXES,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import type { z } from 'zod';
@@ -91,27 +98,48 @@ export function getAgentKeyHash(db: Database, teamId: string): string | null {
   return row?.agent_key_hash ?? null;
 }
 
-/** Set the team governance policy (overwrites). Re-parses to apply defaults; returns the stored policy. */
+/**
+ * Set the team governance policy (ADR 185). Stores **only what was chosen** — the sparse doc goes to
+ * the row verbatim, and defaults are applied on read by `getPolicy`, never here. Replace semantics,
+ * not patch: a key the new doc omits is unset, which is how `--ask-slack-webhook off` and
+ * `--reset-policy` restore a real default instead of storing one. Returns the effective policy.
+ *
+ * The old shape parsed before storing, so the first write of any single knob materialized every
+ * default into the row and the schema default was dead for that team from then on — see ADR 185 and
+ * the #530 recalibration that had to ship a data change on top of a code change.
+ */
 export function setPolicy(
   db: Database,
   teamId: string,
-  policy: z.input<typeof PolicySchema>,
+  policy: z.input<typeof PolicyOverrideSchema>,
 ): Policy {
-  const parsed = PolicySchema.parse(policy);
+  const stored = PolicyOverrideSchema.parse(policy);
   db.prepare('UPDATE teams SET policy = ?, updated_at = ? WHERE id = ?').run(
-    JSON.stringify(parsed),
+    JSON.stringify(stored),
     Date.now(),
     teamId,
   );
-  return parsed;
+  return getPolicy(db, teamId);
+}
+
+function readStored(db: Database, teamId: string): unknown {
+  const row = db
+    .prepare<[string], { policy: string | null }>('SELECT policy FROM teams WHERE id = ?')
+    .get(teamId);
+  return row?.policy ? JSON.parse(row.policy) : {};
 }
 
 /** The team policy, parsed with defaults applied (an unset policy ⇒ all defaults). */
 export function getPolicy(db: Database, teamId: string): Policy {
-  const row = db
-    .prepare<[string], { policy: string | null }>('SELECT policy FROM teams WHERE id = ?')
-    .get(teamId);
-  return PolicySchema.parse(row?.policy ? JSON.parse(row.policy) : {});
+  return PolicySchema.parse(readStored(db, teamId));
+}
+
+/**
+ * The team policy **as stored** — sparse, only the keys somebody chose (ADR 185). The write path and
+ * the explicit-vs-inherited display read this; every consumer of effective values wants `getPolicy`.
+ */
+export function getStoredPolicy(db: Database, teamId: string): PolicyOverride {
+  return PolicyOverrideSchema.parse(readStored(db, teamId));
 }
 
 /** Update a team's durable fields in place (ADR 058 reconcile upsert). Preserves id + created_at. */

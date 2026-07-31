@@ -7,6 +7,7 @@ import {
   type EnforcementPosture,
   type Lifecycle,
   type MemberKind,
+  type PolicyOverride,
   parseSeatFile,
   type SeatFile,
   serializeSeat,
@@ -27,7 +28,7 @@ import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 import { hint, success } from '../render/ui.js';
 import { writeSeatFile } from '../roster.js';
-import { findWorkspaceDir, resolve } from './helpers.js';
+import { findWorkspaceDir, inherited, resolve } from './helpers.js';
 
 export async function teamCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
@@ -53,16 +54,20 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
  * `--ask-fallback-to-nonadmin on` lets an admin-unanswered ask fall back to non-admin humans past its
  * tier timeout. ADR 149: `--ask-slack-webhook <url>` points the ask stream's loud reach at a Slack
  * incoming webhook (`off` clears it); the URL is a secret, so the display masks it to its host. Reads
- * → merges the named knob(s) → POSTs the whole policy (the residency-policy read-merge-write pattern),
- * so setting one knob never clobbers the wake-policy defaults.
+ * → merges the named knob(s) → POSTs the policy (the residency-policy read-merge-write pattern), so
+ * setting one knob never clobbers the wake-policy defaults.
  */
 async function teamPolicy(parsed: Parsed): Promise<number> {
   const { team, http } = resolve(parsed.flags);
-  const { policy: current } = await http.getPolicy(team);
+  const { policy: current, stored } = await http.getPolicy(team);
 
   // Read-merge-write each named knob (never clobber the wake-policy defaults). Both flags may be set
   // in one call; onOff throws on a value that is neither on nor off.
-  const merged = { ...current };
+  //
+  // ADR 185: merge into the SPARSE `stored` doc, not the defaults-applied `current`. Merging into
+  // `current` is what re-materialized every default into the row on each write, killing the schema
+  // default for the team. `delete merged.ask_slack_webhook` now genuinely unsets the key.
+  const merged: PolicyOverride = { ...stored };
   let changed = false;
   const reseat = onOff(parsed.flags['reseat-known-agents'], '--reseat-known-agents');
   if (reseat !== undefined) {
@@ -138,22 +143,22 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   }
 
   if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify(current) + '\n');
+    process.stdout.write(JSON.stringify({ ...current, stored }) + '\n');
     return 0;
   }
   process.stdout.write(`${theme.accent('team policy')} — ${team}\n`);
   process.stdout.write(
-    `  re-seat known agents: ${current.standing_reseat_known_agents ? theme.accent('on') : 'off'}\n`,
+    `  re-seat known agents: ${current.standing_reseat_known_agents ? theme.accent('on') : 'off'}${inherited(stored, 'standing_reseat_known_agents')}\n`,
   );
   process.stdout.write(
-    `  ask fallback to non-admins: ${current.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}\n`,
+    `  ask fallback to non-admins: ${current.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}${inherited(stored, 'ask_fallback_to_nonadmin')}\n`,
   );
   process.stdout.write(
-    `  allow pre-issued grants: ${current.allow_pre_issued_grants ? 'on' : 'off'}\n`,
+    `  allow pre-issued grants: ${current.allow_pre_issued_grants ? 'on' : 'off'}${inherited(stored, 'allow_pre_issued_grants')}\n`,
   );
   // ADR 149: the webhook URL is a secret — show only that it's set, and where it points (host).
   process.stdout.write(
-    `  ask slack webhook: ${current.ask_slack_webhook ? theme.accent(maskWebhook(current.ask_slack_webhook)) : 'off'}\n`,
+    `  ask slack webhook: ${current.ask_slack_webhook ? theme.accent(maskWebhook(current.ask_slack_webhook)) : 'off'}${inherited(stored, 'ask_slack_webhook')}\n`,
   );
   // ADR 150: the enforcement class table — the opt-in PreToolUse gate declaration.
   const classes = current.enforcement.classes;
@@ -167,6 +172,10 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
       process.stdout.write(`    · ${kind} ${c.class} [${c.match.join(', ')}] → ${posture}\n`);
     }
   }
+  if (Object.keys(stored).length === 0)
+    process.stdout.write(
+      theme.meta('  every value is inherited — this team tracks the shipped defaults') + '\n',
+    );
   process.stdout.write(theme.meta('  set: musterd team policy --reseat-known-agents on') + '\n');
   process.stdout.write(
     theme.meta(
@@ -184,12 +193,15 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
  * calls. `--enforce-posture warn|block` (default block) applies to every class set in THIS invocation.
  */
 function applyEnforcementFlags(
-  merged: { enforcement: { classes: EnforcementClass[] } },
+  merged: { enforcement?: { classes?: EnforcementClass[] | undefined } | undefined },
   parsed: Parsed,
 ): boolean {
   let changed = false;
   if (parsed.flags['enforce-clear'] === true) {
-    merged.enforcement = { classes: [] };
+    // ADR 185: drop the key rather than storing `{classes: []}`. The empty table IS the default, so
+    // an inherited enforcement and a stored-empty one behave identically — but only the first keeps
+    // the row honest about what was chosen.
+    delete merged.enforcement;
     changed = true;
   }
   const postureRaw = flagStr(parsed.flags, 'enforce-posture') ?? 'block';
@@ -199,7 +211,7 @@ function applyEnforcementFlags(
   const posture = postureRaw as EnforcementPosture;
 
   const upsert = (cls: EnforcementClass): void => {
-    const classes = merged.enforcement.classes.filter((c) => c.class !== cls.class);
+    const classes = (merged.enforcement?.classes ?? []).filter((c) => c.class !== cls.class);
     classes.push(cls);
     merged.enforcement = { classes };
     changed = true;

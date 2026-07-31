@@ -16,7 +16,7 @@ import {
   ClaimTargetSchema,
   DecideRequestSchema,
   IssueGrantSchema,
-  PolicySchema,
+  PolicyOverrideSchema,
   EnrollResidencyBodySchema,
   RevokeResidencyBodySchema,
   SessionAttestationBodySchema,
@@ -146,6 +146,7 @@ import {
   createTeam,
   getAgentKeyHash,
   getPolicy,
+  getStoredPolicy,
   requireTeam,
   rotateAgentKey,
   setPolicy,
@@ -1462,26 +1463,32 @@ export async function handleHttp(
 
       if (method === 'POST' && rest === '/policy') {
         const { team, member } = authAdmin(ctx, slug, req);
-        const policy = setPolicy(
-          ctx.db,
-          team.id,
-          parseOrBadRequest(PolicySchema, await readJson(req)),
-        );
+        // ADR 185: the wire carries the SPARSE doc — only the knobs an admin chose — and the row
+        // stores it verbatim. Replace semantics, so an omitted key is unset and its default comes
+        // back to life. The audit records the request, not the parsed result: the old row wrote
+        // `detail: policy` post-parse, which is exactly why nothing could later say whether a stored
+        // value was chosen or baked in.
+        const stored = parseOrBadRequest(PolicyOverrideSchema, await readJson(req));
+        const policy = setPolicy(ctx.db, team.id, stored);
         appendAudit(ctx.db, team.id, {
           actor: member.name,
           action: 'policy.change',
           target: null,
           result: 'allow',
-          detail: policy,
+          detail: stored,
         });
-        return sendJson(res, 200, { policy });
+        return sendJson(res, 200, { policy, stored });
       }
 
       // The read half of the policy verb (increment 5): `musterd residency policy` does
-      // read → merge → POST, so admins can set one knob without re-stating the rest.
+      // read → merge → POST, so admins can set one knob without re-stating the rest. It merges into
+      // `stored` (ADR 185) — merging into `policy` is what re-densified the row on every write.
       if (method === 'GET' && rest === '/policy') {
         const { team } = authAdmin(ctx, slug, req);
-        return sendJson(res, 200, { policy: getPolicy(ctx.db, team.id) });
+        return sendJson(res, 200, {
+          policy: getPolicy(ctx.db, team.id),
+          stored: getStoredPolicy(ctx.db, team.id),
+        });
       }
 
       // ── PreToolUse enforcement gates (ADR 150 — structural inducement) ──────────────────────────

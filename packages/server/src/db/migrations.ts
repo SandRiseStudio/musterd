@@ -1,3 +1,4 @@
+import { sparsifyPolicy } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { SCHEMA_V1_SQL } from './schema.js';
 
@@ -478,6 +479,36 @@ export const MIGRATIONS: Migration[] = [
     version: 25,
     up: (db) => {
       db.exec('CREATE INDEX idx_audit_team_action_ts ON audit(team_id, action, ts)');
+    },
+  },
+  {
+    // v26 — sparse team policy (ADR 185). `setPolicy` used to parse-then-store, so the first write of
+    // any single knob froze EVERY default into `teams.policy` and the schema default was dead for that
+    // team forever. Defaults now apply on read; this rewrites the rows already frozen.
+    //
+    // The rule is keep-if-differs, strip-if-equal. A value that differs from the current default is
+    // unambiguously deliberate. A value that equals it is ambiguous — the old audit row recorded the
+    // post-parse result, so intent was never written down anywhere — but stripping it is inert unless
+    // the default later moves, and at that moment tracking the new default is the likelier intent for
+    // a value nobody can show was chosen. No DDL: this is a data rewrite of one TEXT column.
+    version: 26,
+    up: (db) => {
+      const rows = db
+        .prepare<
+          [],
+          { id: string; policy: string }
+        >('SELECT id, policy FROM teams WHERE policy IS NOT NULL')
+        .all();
+      const update = db.prepare('UPDATE teams SET policy = ? WHERE id = ?');
+      for (const row of rows) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(row.policy);
+        } catch {
+          continue; // unparseable blob: leave it alone rather than destroy it
+        }
+        update.run(JSON.stringify(sparsifyPolicy(parsed)), row.id);
+      }
     },
   },
 ];

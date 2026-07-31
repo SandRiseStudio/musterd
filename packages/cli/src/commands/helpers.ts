@@ -12,6 +12,7 @@ import { HttpClient } from '../client.js';
 import { findBinding, identityFromEnv, loadConfig, type Config, type Identity } from '../config.js';
 import { CliError } from '../errors.js';
 import { openActionNeeded, renderReachabilityNudge } from '../render/rows.js';
+import { theme } from '../render/theme.js';
 
 /** Walk up from `startDir` to the folder holding `.musterd/binding.json` (the workspace root), or
  *  null. The anchor for commands that WRITE the binding — never write at bare `process.cwd()`
@@ -256,4 +257,13 @@ export function kindLookup(members: MemberSummary[]): (name: string) => MemberKi
   const map = new Map<string, MemberKind>();
   for (const m of members) map.set(m.name, m.kind);
   return (name: string) => map.get(name) ?? 'agent';
+}
+
+/**
+ * The ADR 185 explicit-vs-inherited marker. A key the stored (sparse) policy does not carry is
+ * inherited from the shipped schema default, and will move when that default moves — which is the
+ * fact the old dense storage hid, and the reason a recalibration could silently reach nothing.
+ */
+export function inherited(stored: Record<string, unknown> | undefined, key: string): string {
+  return stored && key in stored ? '' : theme.meta('  ·  default');
 }
