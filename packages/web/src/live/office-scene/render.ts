@@ -1355,33 +1355,52 @@ function printer(ctx: CanvasRenderingContext2D, fit: Fit): void {
  * reception rather than as a thirteenth workstation. Monitor turned away from the room (you see the
  * back of reception screens), a phone, a small plant, the visitor log.
  */
-function frontDesk(ctx: CanvasRenderingContext2D, fit: Fit): void {
+function frontDesk(ctx: CanvasRenderingContext2D, fit: Fit, t: number, working: boolean): void {
   const D = FRONT_DESK;
+  const f = FWD[D.dir];
+  const sn = f[1] !== 0; // S/N desks run their long axis along x
   box(ctx, fit, D.lx, D.ly, D.long - 4, D.deep - 3, D.high - 4, dim(PAL.wood, 0.9)); // base
   box(ctx, fit, D.lx, D.ly, D.long, D.deep, 4, woodTop(), D.high - 4); // worktop
-  // The ledge: a narrower, taller rail along the visitor (south) edge.
-  box(ctx, fit, D.lx, D.ly + D.deep / 2 - 4, D.long - 8, 8, 9, dim(PAL.wood, 0.82), D.high);
-  // Props at DESK scale — these were sized by eye against the counter and came out doll-sized beside
-  // the workstations (nick, 2026-07-30). A member's monitor is ~34 wide and ~26 tall; hers matches.
-  // Monitor, back to the room: she reads the screen, the visitor reads the housing.
-  box(ctx, fit, D.lx - 30, D.ly - 6, 20, 6, 4, '#2f2f33', D.high); // foot
-  box(ctx, fit, D.lx - 30, D.ly - 4, 34, 5, 24, '#3a3a3e', D.high + 4); // housing
-  // A corded landline — the phone she actually picks up. Base, keypad, and the handset on its cradle.
-  box(ctx, fit, D.lx + 22, D.ly - 8, 20, 15, 4, '#4a4a50', D.high);
-  box(ctx, fit, D.lx + 22, D.ly - 12, 21, 7, 5, '#3a3a3e', D.high + 4); // the handset, cradled
-  box(ctx, fit, D.lx + 22, D.ly - 2, 13, 5, 1.2, '#6a6a72', D.high + 4); // keypad
-  // A plant on the east end and the visitor log open mid-counter — both at desk-prop scale.
-  // The foliage sits ON the rim, not floating above it — `drawPlant`'s whole lesson, re-learned here:
-  // a gap between pot and leaves reads as a crate with a bush hovering over it.
+  // The transaction ledge along the visitor edge — the detail that says reception, not workstation.
+  box(ctx, fit, D.lx + f[0] * (D.deep / 2 - 4), D.ly + f[1] * (D.deep / 2 - 4), sn ? D.long - 8 : 8, sn ? 8 : D.long - 8, 9, dim(PAL.wood, 0.82), D.high);
+
+  /** Desk-relative placement, exactly as `drawWorkstation` does it: `along` runs toward the monitor,
+   *  `across` runs sideways. Reusing the members' own frame is what makes her station match theirs. */
+  const at = (along: number, across: number): [number, number] => {
+    const p: [number, number] = [-f[1], f[0]];
+    return [D.lx + f[0] * along + p[0] * across, D.ly + f[1] * along + p[1] * across];
+  };
+
+  // The SAME monitor, keyboard and mouse the desks use, in the same relative spots. She sits at
+  // SEAT_BACK behind the desk facing `dir`, so a monitor `deep/2 - 14` along that facing sits in
+  // front of her with its screen toward her and its back to the room — which is both what a real
+  // reception desk looks like and what makes her read as facing her screen rather than the camera.
+  const [mx, my] = at(D.deep / 2 - 17, 0);
+  monitor(ctx, fit, mx, my, D.dir, working, D.high, null, t);
+  const [kx, ky] = at(KEYBOARD_ALONG, 0);
+  deskKeyboard(ctx, fit, kx, ky, sn, D.high);
+  const [sx, sy] = at(KEYBOARD_ALONG + 2, 27);
+  deskMouse(ctx, fit, sx, sy, sn, D.high);
+
+  // A corded landline on her left — the phone `GESTURE.call` picks up. Base, cradled handset, keypad.
+  const [px_, py_] = at(-8, -40);
+  box(ctx, fit, px_, py_, 20, 15, 4, '#4a4a50', D.high);
+  box(ctx, fit, px_, py_ - 4, 21, 7, 5, '#3a3a3e', D.high + 4);
+  box(ctx, fit, px_, py_ + 3, 13, 5, 1.2, '#6a6a72', D.high + 4);
+
+  // A plant at the far end, foliage seated ON the rim (drawPlant's lesson: a gap reads as a bush
+  // hovering over a crate), and the visitor log open on the ledge side.
+  const [gx, gy] = at(-6, 44);
   const POT_H = 11;
-  box(ctx, fit, D.lx + 50, D.ly - 6, 15, 15, POT_H, PLANT.pot, D.high);
-  box(ctx, fit, D.lx + 50, D.ly - 6, 17, 17, 2.5, PLANT.rim, D.high + POT_H);
-  const pp = project(D.lx + 50, D.ly - 6, fit);
+  box(ctx, fit, gx, gy, 15, 15, POT_H, PLANT.pot, D.high);
+  box(ctx, fit, gx, gy, 17, 17, 2.5, PLANT.rim, D.high + POT_H);
+  const pp = project(gx, gy, fit);
   const potTop = (D.high + POT_H + 2.5) * fit.scale;
   ellipse(ctx, { x: pp.x, y: pp.y - potTop - 4 * fit.scale }, 11 * fit.scale, 7 * fit.scale, PLANT.leaf);
   ellipse(ctx, { x: pp.x - 4 * fit.scale, y: pp.y - potTop - 8 * fit.scale }, 7 * fit.scale, 5 * fit.scale, PLANT.leafLit);
-  box(ctx, fit, D.lx - 2, D.ly + 10, 26, 18, 1.6, '#f2ecd9', D.high); // the log
-  box(ctx, fit, D.lx - 2, D.ly + 10, 2, 18, 2.2, '#c9bfa5', D.high); // its spine
+  const [lx2, ly2] = at(2, -24);
+  box(ctx, fit, lx2, ly2, 24, 16, 1.6, '#f2ecd9', D.high);
+  box(ctx, fit, lx2, ly2, 2, 16, 2.2, '#c9bfa5', D.high);
 }
 
 /**
@@ -1404,11 +1423,15 @@ function frontDesk(ctx: CanvasRenderingContext2D, fit: Fit): void {
  * into a single oval and read as a seal. A fixed character gets fixed art.
  */
 const RECEPTIONIST_LOOK: Appearance = {
-  skin: '#c68642',
+  skin: '#e8b07d',
   // A ponytail rather than the full fall: she is seen from the chest up behind a counter, and a long
   // mass in that framing has nothing to hang against, so it silhouettes into the head.
   hair: 'ponytail',
-  hairColor: '#3d2a1c',
+  // Auburn, not near-black. Dark brown hair over a low hairline put a dark band across her brow that
+  // ran straight into the dark glasses frame below it — two dark bands with a sliver of skin between
+  // them, which is why her eyes read as a smudge rather than as eyes. The glasses are gone for the
+  // same reason: at this size she can have a hairline OR eyewear across the face, not both.
+  hairColor: '#a06c38',
   facialHair: 'none',
   hat: 'none',
   hatColor: '#2a2118',
@@ -1417,7 +1440,7 @@ const RECEPTIONIST_LOOK: Appearance = {
   bareArms: false,
   bottom: '#3f5570',
   shoes: '#22262b',
-  accessory: 'glasses',
+  accessory: 'none',
   accessoryColor: '#2f7f6a',
   smile: 'soft',
   presents: 'femme',
@@ -1523,7 +1546,7 @@ function receptionItems(ctx: CanvasRenderingContext2D, fit: Fit, recep: Receptio
       d: depth(RECEPTIONIST.lx, RECEPTIONIST.ly),
       fn: () => drawReceptionist(ctx, fit, recep ?? SLEEPING_RECEPTIONIST, t),
     },
-    { d: depth(FRONT_DESK.lx, FRONT_DESK.ly), fn: () => frontDesk(ctx, fit) },
+    { d: depth(FRONT_DESK.lx, FRONT_DESK.ly), fn: () => frontDesk(ctx, fit, t, recep?.mode === 'typing') },
     { d: depth(R.couch.lx, R.couch.ly), fn: () => couch(ctx, fit, R.couch.lx, R.couch.ly, PAL.couch, R.couch.dir) },
     { d: depth(R.table.lx, R.table.ly), fn: () => ctable(ctx, fit, R.table.lx, R.table.ly) },
     { d: depth(R.plant.lx, R.plant.ly), fn: () => drawPlant(ctx, fit, R.plant.lx, R.plant.ly, 'fiddle') },

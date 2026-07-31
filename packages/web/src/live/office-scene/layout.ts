@@ -374,16 +374,16 @@ export const RECEPTION = {
 // Sized against the DESKS, not against itself. It was 88x30x34 next to 100x68x36 workstations, which
 // read as a hall table (nick, 2026-07-30: "the front desk is very small compared to the rest of the
 // desks"). A reception counter is a shade wider and shallower than a workstation, at the same height.
-export const FRONT_DESK = { lx: 132, ly: 735, long: 124, deep: 62, high: DESK_UP, dir: 'S' as Dir };
+export const FRONT_DESK = { lx: 112, ly: 690, long: 108, deep: 62, high: DESK_UP, dir: 'S' as Dir };
 /** She sits behind it exactly like a member sits at a desk — same SEAT_BACK, same chair, same size. */
 export const RECEPTIONIST = { lx: FRONT_DESK.lx, ly: FRONT_DESK.ly - SEAT_BACK, dir: 'S' as Dir };
 // South of the overflow queue strip, not across it: the counter grew to desk scale and pushed both
 // the strip and the marks apart. A mark inside a blocked cell gets nudged by `nearestFree` and the
 // pause lands somewhere other than in front of the desk, so `nav.test.ts` holds all three walkable.
 export const CHECK_IN_MARKS: ReadonlyArray<{ lx: number; ly: number }> = [
-  { lx: 96, ly: 828 },
-  { lx: 148, ly: 836 },
-  { lx: 198, ly: 846 },
+  { lx: 92, ly: 800 },
+  { lx: 146, ly: 812 },
+  { lx: 196, ly: 826 },
 ];
 /** The pause at the mark, seconds. A beat, not a gate. */
 export const CHECK_IN_S = 1.2;
