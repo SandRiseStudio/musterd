@@ -46,10 +46,14 @@ describe('observeModel — the even contract', () => {
     );
   });
 
-  it('cursor declares its gap explicitly — no probe, so nothing is claimed', () => {
-    // Cursor runs no hooks and exposes no per-session record. Returning undefined here is the honest
-    // answer: this seat falls back to the declared tier and the doctor says the declaration is all
-    // we have, rather than pretending to knowledge musterd does not have.
+  it('cursor observes model_id from the Agent hook payload (ADR 198)', () => {
+    expect(cursor.observeModel?.({ model_id: 'claude-opus-4-7', model: 'thinking-slug' })).toBe(
+      'claude-opus-4-7',
+    );
+    expect(cursor.observeModel?.({ model: 'gpt-5.6-sol' })).toBe('gpt-5.6-sol');
+  });
+
+  it('cursor still ignores transcript_path — Cursor JSONL has no message.model', () => {
     expect(
       cursor.observeModel?.({ transcript_path: transcriptWith('claude-opus-4-8') }),
     ).toBeUndefined();

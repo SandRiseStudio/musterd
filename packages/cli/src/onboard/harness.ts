@@ -145,6 +145,13 @@ export interface ModelObservationInput {
   transcript_path?: string | undefined;
   /** The harness session id, for harnesses that key their own logs by it. */
   session_id?: string | undefined;
+  /**
+   * Structured selected-model id from a Cursor Agent hook (ADR 198). Preferred over {@link model}
+   * when both are present — `model` can be a legacy/thinking slug.
+   */
+  model_id?: string | undefined;
+  /** Legacy composer model slug from a Cursor Agent hook (ADR 198). */
+  model?: string | undefined;
 }
 
 /** A pluggable onboarding adapter for one agent harness. */

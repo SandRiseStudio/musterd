@@ -47,12 +47,13 @@ import { findWorkspaceDir } from './helpers.js';
 export async function sessionCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
   if (sub === 'start' || sub === 'end') return captureCommand(sub, parsed);
+  if (sub === 'observe') return observeCommand(parsed);
   if (sub === 'resolve-labels') return resolveLabelsCommand(parsed);
   if (sub === 'label-nudge') return labelNudgeCommand();
   if (sub === 'show' || sub === undefined) return showCommand(parsed);
   throw new CliError(
-    'usage: musterd session start --stdin | end --stdin | resolve-labels --stdin | label-nudge | show  ' +
-      '(start/end are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
+    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | show  ' +
+      '(start/end/observe are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
     2,
   );
 }
@@ -84,6 +85,10 @@ export interface HookPayload {
   session_id?: string;
   transcript_path?: string;
   cwd?: string;
+  /** Cursor Agent hooks (ADR 198): structured selected-model id. */
+  model_id?: string;
+  /** Cursor Agent hooks (ADR 198): legacy composer model slug. */
+  model?: string;
 }
 
 function parseHookPayload(raw: string): HookPayload {
@@ -91,12 +96,25 @@ function parseHookPayload(raw: string): HookPayload {
     const json: unknown = JSON.parse(raw);
     if (typeof json !== 'object' || json === null) return {};
     const o = json as Record<string, unknown>;
+    // Cursor uses conversation_id; Claude Code uses session_id. Same capture slot.
+    const sessionId =
+      typeof o['session_id'] === 'string'
+        ? o['session_id']
+        : typeof o['conversation_id'] === 'string'
+          ? o['conversation_id']
+          : undefined;
+    const roots = Array.isArray(o['workspace_roots'])
+      ? o['workspace_roots'].filter((r): r is string => typeof r === 'string')
+      : [];
+    const cwd = typeof o['cwd'] === 'string' ? o['cwd'] : roots.length > 0 ? roots[0] : undefined;
     return {
-      ...(typeof o['session_id'] === 'string' ? { session_id: o['session_id'] } : {}),
-      ...(typeof o['transcript_path'] === 'string'
+      ...(sessionId ? { session_id: sessionId } : {}),
+      ...(typeof o['transcript_path'] === 'string' && o['transcript_path']
         ? { transcript_path: o['transcript_path'] }
         : {}),
-      ...(typeof o['cwd'] === 'string' ? { cwd: o['cwd'] } : {}),
+      ...(cwd ? { cwd } : {}),
+      ...(typeof o['model_id'] === 'string' ? { model_id: o['model_id'] } : {}),
+      ...(typeof o['model'] === 'string' ? { model: o['model'] } : {}),
     };
   } catch {
     return {};
@@ -112,6 +130,17 @@ async function captureCommand(event: 'start' | 'end', parsed: Parsed): Promise<n
     );
   }
   await captureSession(event, parseHookPayload(await readStdin()));
+  return 0;
+}
+
+async function observeCommand(parsed: Parsed): Promise<number> {
+  if (parsed.flags['stdin'] !== true) {
+    throw new CliError(
+      'usage: musterd session observe --stdin  — Cursor hook-driven (ADR 198): pipe the Agent hook JSON in',
+      2,
+    );
+  }
+  await observeCursorSession(parseHookPayload(await readStdin()));
   return 0;
 }
 
@@ -171,6 +200,8 @@ function observeModelFor(harnessId: string, payload: HookPayload): string | unde
     return HARNESSES.find((h) => h.id === harnessId)?.observeModel?.({
       ...(payload.transcript_path ? { transcript_path: payload.transcript_path } : {}),
       ...(payload.session_id ? { session_id: payload.session_id } : {}),
+      ...(payload.model_id ? { model_id: payload.model_id } : {}),
+      ...(payload.model ? { model: payload.model } : {}),
     });
   } catch {
     return undefined;
@@ -241,6 +272,71 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
       // unreachable daemon / auth drift — the local capture stands; `residency status` names drift
     }
   }
+}
+
+/**
+ * Cursor Agent hook path (ADR 198): stamp `binding.session` with `harness: 'cursor'` and observe
+ * the live `model_id` from the hook payload. Same never-fail / never-erase / refresh-throttle
+ * contract as Claude's transcript refresh — fidelity differs (hook fields, not JSONL).
+ */
+export async function observeCursorSession(payload: HookPayload): Promise<string | undefined> {
+  if (!payload.session_id) return undefined;
+
+  const explicit = process.env['MUSTERD_BINDING'];
+  const dir = explicit
+    ? dirname(dirname(explicit))
+    : findWorkspaceDir(payload.cwd ?? process.cwd());
+  if (!dir) return undefined;
+
+  const binding = findBinding(dir, {});
+  if (!binding) return undefined;
+
+  const now = Date.now();
+  const prior = binding.session;
+  const same = prior?.id === payload.session_id && prior.harness === 'cursor';
+  const session: SessionCapture = {
+    harness: 'cursor',
+    id: payload.session_id,
+    ...(payload.transcript_path
+      ? { transcript_path: payload.transcript_path }
+      : same && prior.transcript_path
+        ? { transcript_path: prior.transcript_path }
+        : {}),
+    started_at: same ? prior.started_at : now,
+  };
+
+  const observed = observeModelFor('cursor', payload);
+  const priorObs = binding.model_observed;
+  const current =
+    observed !== undefined &&
+    priorObs !== undefined &&
+    priorObs.model === observed &&
+    priorObs.observed_at >= session.started_at &&
+    now - priorObs.observed_at < OBSERVATION_REFRESH_MS;
+
+  const model_observed =
+    observed && !current
+      ? { model: observed, harness: 'cursor' as const, observed_at: now }
+      : binding.model_observed;
+
+  saveBinding(dir, { ...binding, session, ...(model_observed ? { model_observed } : {}) });
+
+  if (!same || prior?.ended_at !== undefined) {
+    const seat = bindingSeat(binding);
+    if (binding.agent_key && seat) {
+      try {
+        const http = new HttpClient({
+          server: binding.server,
+          key: binding.agent_key,
+        }).presenceNeutral();
+        await http.attestSession(binding.team, { seat, harness: 'cursor', event: 'start' });
+      } catch {
+        /* daemon unreachable — local capture stands */
+      }
+    }
+  }
+
+  return observed && !current ? observed : undefined;
 }
 
 /**
