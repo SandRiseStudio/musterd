@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { addMember } from './members.js';
 import { attach } from './presence.js';
+import { enrollResidency } from './residency.js';
 import { teamFamilyPosture } from './review.js';
 import { createTeam } from './teams.js';
 
@@ -47,6 +48,8 @@ describe('teamFamilyPosture (ADR 172)', () => {
     // durable-record cases are covered in their own describe below.
     expect(p.wake_pool.map((c) => c.seat).sort()).toEqual(['gptbot', 'grokbot']);
     expect(p.wake_pool.every((c) => c.family === 'unknown')).toBe(true);
+    // ADR 189: never enrolled in these fixtures → marked, not filtered.
+    expect(p.wake_pool.every((c) => c.wakeability === 'not_enrolled')).toBe(true);
   });
 
   it('diverse: one cross-family attester flips it', () => {
@@ -139,7 +142,9 @@ describe('the wake pool reads the durable attestation record (ADR 187)', () => {
 
     const p = teamFamilyPosture(db, team.id, TIMEOUT);
     expect(p.state).toBe('monoculture'); // still — an idle seat never counts as attesting
-    expect(p.wake_pool).toEqual([{ seat: 'grokbot', family: 'grok', attested_at: when }]);
+    expect(p.wake_pool).toEqual([
+      { seat: 'grokbot', family: 'grok', attested_at: when, wakeability: 'not_enrolled' },
+    ]);
   });
 
   it('newest attestation wins — a seat that switched models is not remembered as its old one', () => {
@@ -150,7 +155,12 @@ describe('the wake pool reads the durable attestation record (ADR 187)', () => {
 
     const p = teamFamilyPosture(db, team.id, TIMEOUT);
     expect(p.wake_pool).toEqual([
-      { seat: 'drifter', family: 'claude', attested_at: old + 86_400_000 },
+      {
+        seat: 'drifter',
+        family: 'claude',
+        attested_at: old + 86_400_000,
+        wakeability: 'not_enrolled',
+      },
     ]);
   });
 
@@ -158,7 +168,9 @@ describe('the wake pool reads the durable attestation record (ADR 187)', () => {
     const { db, team } = seed();
     agent(db, team, 'ghost'); // enrolled, never attached, never attested
     const p = teamFamilyPosture(db, team.id, TIMEOUT);
-    expect(p.wake_pool).toEqual([{ seat: 'ghost', family: 'unknown', attested_at: null }]);
+    expect(p.wake_pool).toEqual([
+      { seat: 'ghost', family: 'unknown', attested_at: null, wakeability: 'not_enrolled' },
+    ]);
   });
 
   /**
@@ -194,7 +206,40 @@ describe('the wake pool reads the durable attestation record (ADR 187)', () => {
     wentOffline(db, team, 'grokbot', 'grok-4.5', Date.now() - 86_400_000 * 3);
 
     const line = describeFamilyPosture(teamFamilyPosture(db, team.id, TIMEOUT));
-    expect(line).toContain('idle & enrollable: grokbot (grok, 3d ago)');
+    expect(line).toContain('idle: grokbot (grok, 3d ago, not_enrolled)');
+  });
+
+  it('an enrolled idle seat is marked wakeable — mark-not-filter, never filter (ADR 189)', () => {
+    const { db, team } = seed();
+    agent(db, team, 'ada', 'claude-opus-5');
+    agent(db, team, 'lin', 'claude-opus-5');
+    const when = Date.now() - 86_400_000 * 3;
+    wentOffline(db, team, 'grokbot', 'grok-4.5', when);
+    wentOffline(db, team, 'compo', 'composer-2', when);
+    const grok = db
+      .prepare<[string], { id: string }>('SELECT id FROM members WHERE name = ?')
+      .get('grokbot')!;
+    enrollResidency(db, team.id, {
+      member_id: grok.id,
+      harness: 'claude-code',
+      host: 'mac.lan',
+      grant_id: 'g1',
+      authorized_by: 'nick',
+    });
+
+    const p = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(p.wake_pool).toEqual(
+      expect.arrayContaining([
+        { seat: 'grokbot', family: 'grok', attested_at: when, wakeability: 'wakeable' },
+        { seat: 'compo', family: 'composer', attested_at: when, wakeability: 'not_enrolled' },
+      ]),
+    );
+    // Both stay in the pool — mark, don't filter.
+    expect(p.wake_pool.map((c) => c.seat).sort()).toEqual(['compo', 'grokbot']);
+    const line = describeFamilyPosture(p);
+    // Wakeable cross-family wins the first slot over not_enrolled cross-family.
+    expect(line).toMatch(/idle: grokbot \(grok, 3d ago\)/);
+    expect(line).toContain('compo (composer, 3d ago, not_enrolled)');
   });
 });
 

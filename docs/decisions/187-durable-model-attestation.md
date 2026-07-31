@@ -4,6 +4,8 @@
   lane opened by stanley (`01KYV4Q6GY`) and re-scoped after measurement. Number **187** — verified
   free against `origin/main` at branch time (highest there: 186, dolly's).
 - Date: 2026-07-31
+- See also: [ADR 189](189-wake-pool-wakeability.md) — marks whether each idle seat can actually be woken
+  (enrollment), without filtering the pool.
 - Builds on: [ADR 158](158-model-attestation-truth.md) (attestation truth — this ADR extends its
   "an ended session is not re-observed; what it last attested is the truth about it" one step
   further, to the seat), [ADR 172](172-model-family-posture.md) (the posture and `wake_pool` this

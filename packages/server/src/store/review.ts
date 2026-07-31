@@ -1,6 +1,7 @@
 import {
   modelFamily,
   MODEL_UNKNOWN,
+  wakeabilityFromFacts,
   type FamilyPosture,
   type FamilyPostureState,
   type ReviewGrade,
@@ -11,6 +12,7 @@ import {
 import type { Database } from 'better-sqlite3';
 import { listMembers } from './members.js';
 import { hasLivePresence } from './presence.js';
+import { listWakeableMemberIds } from './residency.js';
 import { type MemberRow } from './rows.js';
 
 /**
@@ -162,6 +164,7 @@ export function teamFamilyPosture(
   const families: Record<string, number> = {};
   const wake_pool: WakeCandidate[] = [];
   const durable = durableAttestations(db, teamId);
+  const enrolled = listWakeableMemberIds(db, teamId);
   let attesting = 0;
   let unattested = 0;
   let humans_live = 0;
@@ -175,11 +178,14 @@ export function teamFamilyPosture(
     if (!live) {
       // ADR 187: what this seat would bring, not just that it exists. The durable attestation is a
       // memory, not an observation — so it rides with the timestamp that lets a reader discount it.
+      // ADR 189: mark whether dispatch can wake it (enrollment), never filter it out — an unenrolled
+      // cross-family seat is still the diversity gap, just not a spend target yet.
       const last = durable.get(m.name) ?? NO_ATTESTATION;
       wake_pool.push({
         seat: m.name,
         family: modelFamily(last.model),
         attested_at: last.at,
+        wakeability: wakeabilityFromFacts({ enrolled: enrolled.has(m.id) }),
       });
       continue;
     }

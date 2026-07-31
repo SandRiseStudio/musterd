@@ -1,4 +1,9 @@
-import type { MemberSummary, WakeLeasesResponse, WakeReportBody } from '@musterd/protocol';
+import {
+  wakeabilityFromFacts,
+  type MemberSummary,
+  type WakeLeasesResponse,
+  type WakeReportBody,
+} from '@musterd/protocol';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import { HttpClient } from '../client.js';
 import { findBinding } from '../config.js';
@@ -194,9 +199,15 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
         // notices. Spawning anyway costs an attempt, fails ENOENT, and — because the only ENOENT
         // heal on the path is the one written for a moved `claude` binary — gets reported as a
         // stale binary. Three of those exhaust the act on a diagnosis that names the wrong thing.
+        // ADR 189: same enum the wake pool marks with — dead workspace vs not on this host's
+        // registry (cross-machine / never-registered mismatch).
         const registered = group.entries.find((e) => e.seat === order.seat);
+        const wakeability = registered
+          ? wakeabilityFromFacts({ enrolled: true, workspace_readable: false })
+          : wakeabilityFromFacts({ enrolled: false });
         await report({
           occupied: false,
+          wakeability,
           reason: registered
             ? `workspace ${registered.workspace} is missing or has no binding — the registry entry ` +
               `outlived it; re-run \`musterd residency on --as <admin>\` in the seat's real workspace`
