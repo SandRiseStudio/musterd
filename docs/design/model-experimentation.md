@@ -2,13 +2,14 @@
 
 > **Design direction, not built.** Captures a standing thread (prior sessions, Nick's priority): musterd
 > should treat _the model itself_ as a first-class experimental variable — both by being **early to each
-> new frontier model** and by **owning models end-to-end**. Extends the flywheel (ADR 051) and the
+> new frontier model** and by **owning models end-to-end**. Extends the flywheel
+> ([ADR 194](../decisions/194-flywheel-practice-not-batond.md); was ADR 051) and the
 > research practice (ADR 056); the substrate is the coordination telemetry (ADR 082) already shipped.
 > Corrections via ADR + update this doc.
 
 ## Why this is a musterd thread, not a distraction
 
-The flywheel's experiment axis (ADR 051) is `model × prompt × agent-config × harness × eval × **team
+The flywheel's experiment axis ([ADR 194](../decisions/194-flywheel-practice-not-batond.md)) is `model × prompt × agent-config × harness × eval × **team
 topology**`. Model is the first term, and it's the one the whole field re-rolls every few weeks. musterd's
 edge is that it can measure what _actually_ changes when the model changes — not on a benchmark, but on
 **real human+agent coordination** (the rarest data, ADR 056): does a new model shout into the void less,
@@ -20,7 +21,7 @@ close loops more, dup work less? Those are the emitted coordination metrics (`lo
 The habit: when a new frontier model ships, run the standard coordination experiment against it and record
 a finding.
 
-- **Cadence, not a platform.** A reproducible experiment manifest (ADR 051) pinned to a model id, run on
+- **Cadence, not a platform.** A reproducible experiment manifest (ADR 194 / research practice) pinned to a model id, run on
   a fixed dogfood scenario, diffed against the prior model's baseline (ADR 052 baseline requirement). One
   `docs/research/NNN-*.md` finding per model, per the lab-notebook practice (ADR 056).
 - **What we measure:** the coordination evals (directed-act latency, resolve-rate, dup-rate, wasted-work
@@ -88,7 +89,7 @@ client version, prompt, or tool arguments. See [ADR 120](../decisions/120-harnes
 > green-lit as a revive of the existing `musterd-lab` scaffold, pointed at the shipped ADR 101
 > attestation substrate; Stage 2 stays gated until the coordination-traces dataset ships. The model
 > ids named below are historical — per ADR 110 the exact model is a pinned experiment-manifest term
-> (ADR 051), not doctrine here.
+> (ADR 194), not doctrine here.
 
 Two staged goals, on Apple Silicon, kept in a separate lab repo (`musterd-lab`), never the product repos —
 it's a fixture + a research asset, not a shipped dependency.
@@ -103,7 +104,8 @@ it's a fixture + a research asset, not a shipped dependency.
   TinyStories/Shakespeare) to learn the internals, then taught the musterd command grammar so it can
   drive the Stage 1 harness. The far end of this track meets the **research ladder's final rung** (ADR
   056): a **fine-tuned coordination-judge model** trained on our own coordination-traces dataset — a model
-  that scores coordination quality, which is both a research artifact and a batond eval component.
+  that scores coordination quality, which is both a research artifact and (if ever built) a batond eval
+  component — not a dependency of the research practice itself ([ADR 194](../decisions/194-flywheel-practice-not-batond.md)).
 
 ## How the two tracks connect
 
@@ -111,14 +113,15 @@ Track A tells us _how the best available models coordinate_; Track B gives us _m
 probe the floor (weak agents) and eventually to **build the judge** that scores everyone. Both write into
 the same lab notebook and the same dataset ladder, and both are measured on the coordination telemetry
 that already ships by default (ADR 082). Neither is a near-term build item — they're the research spine
-the roadmap's _Later_ observability items (`eval-experiment-engine`, `coordination-dataset`,
-`research-radar`) hang from.
+the roadmap's _Later_ observability items (`eval-experiment-engine` as parked batond,
+`coordination-dataset`, `research-radar`) hang from.
 
 ## Related
 
-- ADR 051 (flywheel — the experiment axis), ADR 056 (research as first-class — produce/ingest, the
-  dataset ladder), ADR 052 (obs-evals gate — baselines), ADR 082 (the coordination telemetry it measures
-  on).
+- [ADR 194](../decisions/194-flywheel-practice-not-batond.md) (flywheel — experiment axis; supersedes
+  ADR 051), ADR 056 (research as first-class — produce/ingest, the dataset ladder), ADR 052
+  (obs-evals gate — baselines), ADR 082 (the coordination telemetry it measures on),
+  [ADR 184](../decisions/184-dataset-consent-and-redaction.md) (dataset publication gate).
 - `docs/design/research-foundation.md` (external evidence), `docs/research/README.md` (the lab notebook),
   `docs/design/research-radar-plan.md` (ingest half), `docs/design/brand-coordination-observability.md`
-  (batond, where the engine + judge live).
+  (batond name/brand — parked product per ADR 194).

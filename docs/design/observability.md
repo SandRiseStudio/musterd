@@ -35,18 +35,28 @@ Two layers, with a hard line between them:
 
 - Trace storage / a spans database — export OTLP, let Langfuse/Braintrust/Phoenix/Datadog/ClickHouse store it.
 - Generic LLM-call dashboards, token/cost accounting, prompt management.
-- An eval platform **in musterd core**. The eval + experiment _engine_ is **batond's** domain (§5, ADR 051), not the protocol's — musterd core still builds none of it.
+- An eval platform **in musterd core**. musterd core still builds none of it. Musterd’s own
+  compare→promote→observe loop lives in the **research practice** ([ADR 194](../decisions/194-flywheel-practice-not-batond.md));
+  a standalone eval/experiment **product** (working name **batond**) is parked for later (§5) — not
+  required to close the flywheel.
 
 If a future feature looks like one of these, the default answer is "integrate, don't build" — overriding that requires an ADR.
 
-### The flywheel (ADR 051)
+### The flywheel ([ADR 194](../decisions/194-flywheel-practice-not-batond.md); supersedes ADR 051)
 
-The strategy above extends to evals and experiments as one loop — **observe (trace) → hypothesize → experiment → compare → promote → observe** — without crossing the build/buy line:
+The loop — **observe (trace) → hypothesize → experiment → compare → promote → observe** — without
+crossing the build/buy line for musterd core:
 
-- **Emit in musterd, engine in batond.** musterd emits the coordination trace; batond runs the eval + experiment engine over it.
-- **OTel wire, Langfuse semantics.** Wire format stays OTel (ADR 011/015, portable). For the higher-level objects — **prompt-as-versioned-artifact, datasets, scores, experiments** — batond adopts **Langfuse's data model/vocabulary** (OSS, OTel-compatible, a connected MCP surface) rather than inventing its own, and builds the coordination-semantic layer _on top_ — it does not rebuild the trace/prompt/score stores.
-- **Coordination-native moat, both ends.** The trace unit is the _team task_ (coordination acts + agent-turn detail on one timeline); the eval unit is the _team outcome_ (did the human+agent team hit the Goal's definition-of-done — ADR 048's derived status / ADR 050's projections _are_ the eval signal); experiments vary **team topology**, not just `model × prompt × harness`. No single-agent vendor can do any of these.
-- **Prompts opt-in + versioned; meta-evals = judge calibration; model currency measured** (frontier API + open via NIM/Ollama, compared on the cost × latency × quality frontier); and the **harness-decay thesis** — measure scaffolding's diminishing returns so we know when to delete complexity models have absorbed.
+- **Emit in musterd; compare→promote in the research practice.** musterd emits the coordination
+  trace; findings, cookoff manifests, and ADR/PR promotion close the loop. batond is a *parked*
+  later product, not the engine that makes the flywheel real.
+- **OTel wire.** Wire format stays OTel (ADR 011/015, portable). Langfuse-shaped
+  datasets/scores/experiments remain a batond-era option if that product is built — not a near-term
+  dependency for musterd R&D. Dogfood uses the local OTLP sink (ADR 082).
+- **Coordination-native moat, both ends.** The trace unit is the _team task_ (coordination acts + agent-turn detail on one timeline); the eval unit is the _team outcome_ (did the human+agent team hit the Goal's definition-of-done — ADR 048's derived status / ADR 050's projections _are_ the eval signal); experiments vary **team topology**, not just `model × prompt × harness` (cookoff / ADR 122 already ran this without a platform).
+- **Prompts opt-in + versioned** on the emission path (never the body); **publication** of message-log
+  artifacts is gated separately ([ADR 184](../decisions/184-dataset-consent-and-redaction.md)).
+  Meta-evals / model currency / harness-decay remain questions the research practice can run.
 
 The day-to-day discipline that keeps this real — every agent-facing feature ships with traces + an eval — is the **definition-of-done gate, ADR 052** (`07-conventions.md`).
 
@@ -63,7 +73,7 @@ src/
   index.ts // the shared OTLP bootstrap (ADR 089): telemetryEnabled + startTelemetry(serviceName, attrs) + bounded shutdown/flush
 ```
 
-> **Instrument-by-default for dogfood (ADR 082, 2026-07-01).** The dogfood daemon now boots this SDK to a local OTLP sink so the next session is measurable live (finding 001), emission staying pure-OTLP (a local collector is an interim stand-in for batond). The product default stays off / no-phone-home. The metric set grew (below), plus a structured HTTP request log on `daemon.log`. Setup: `docs/dogfood-telemetry.md`.
+> **Instrument-by-default for dogfood (ADR 082, 2026-07-01).** The dogfood daemon now boots this SDK to a local OTLP sink so the next session is measurable live (finding 001), emission staying pure-OTLP (swap the endpoint later if a standalone collector lands). The product default stays off / no-phone-home. The metric set grew (below), plus a structured HTTP request log on `daemon.log`. Setup: `docs/dogfood-telemetry.md`.
 
 Scope: `@musterd/server` first; CLI and MCP adapter only get error/diagnostic logging until there's a reason for more.
 
@@ -121,9 +131,15 @@ The substrate for these views is the **per-recipient delivery ledger** (ADR 090,
 
 ### Standalone ambition
 
-This layer should ship as its **own product** (working name **batond**, reversible — see `docs/design/brand-coordination-observability.md` §5): it ingests musterd logs natively but also plain OTel GenAI/agent spans, so teams not running musterd can still use the coordination lens. batond is also the **home of the eval + experiment engine** (ADR 051) — Langfuse-shaped scores/datasets/experiments plus the coordination-native additions (team-outcome evals, team-topology experiments) — built on a bought backend, never a from-scratch store. The protocol stays MIT and self-sufficient; the insight product must never become a requirement for using musterd.
+This layer _may_ later ship as its **own product** (working name **batond**, reversible — see
+`docs/design/brand-coordination-observability.md` §5): ingest musterd logs and plain OTel GenAI/agent
+spans so teams not running musterd can still use the coordination lens. Per [ADR 194](../decisions/194-flywheel-practice-not-batond.md),
+that product is **parked** — optional, not required for musterd’s R&D flywheel (which lives in the
+research practice). If built, it would be a natural home for Langfuse-shaped scores/datasets/experiments
+plus coordination-native additions; it must never become a requirement for using musterd. Many §5b
+views already ship inside musterd (insight engine / `musterd report`).
 
-**First non-musterd ingestion target: Flue.** Flue's `@flue/opentelemetry` emits `workflow → operation → turn → tool` gen*ai spans, and its `task` tool produces a parent→child agent tree — a minimal multi-agent topology batond can render with \_zero* musterd involved. That makes Flue the cleanest proof of the "native, not captive" claim (a real third-party framework, not a strawman) and de-risks the "captive to musterd" criticism before musterd ingestion exists. Mirror Flue's two ingestion-relevant hooks — `exportContent` (content redaction) and `resolveRootContext` (parent-trace stitching) — in batond's ingestion design. Caveat and moat: Flue has _no_ cross-agent attributes (no waits/contention/blocking) — deriving the between-view is the work, not a shortcut. See `docs/design/landscape.md` §3.
+**First non-musterd ingestion target (if batond is ever built): Flue.** Flue's `@flue/opentelemetry` emits `workflow → operation → turn → tool` gen*ai spans, and its `task` tool produces a parent→child agent tree — a minimal multi-agent topology batond can render with \_zero* musterd involved. That makes Flue the cleanest proof of the "native, not captive" claim (a real third-party framework, not a strawman) and de-risks the "captive to musterd" criticism before musterd ingestion exists. Mirror Flue's two ingestion-relevant hooks — `exportContent` (content redaction) and `resolveRootContext` (parent-trace stitching) — in batond's ingestion design. Caveat and moat: Flue has _no_ cross-agent attributes (no waits/contention/blocking) — deriving the between-view is the work, not a shortcut. See `docs/design/landscape.md` §3.
 
 ## 6. Sequencing
 
@@ -134,7 +150,8 @@ This layer should ship as its **own product** (working name **batond**, reversib
    broadcast-journal density).~~ ✅ **done** — the server-side insight engine exposes them through
    `musterd report` and `team_report` (ADR 050 / PRs #82 and #84; ADR 091 for the MAST views). The
    remaining web-dashboard work is the insight rail in the roadmap's web insight-layer entry.
-4. **Later, by explicit decision:** the standalone product (§5), once dogfooding proves which views matter.
+4. **Later, by explicit decision:** the standalone product (§5), if dogfooding still wants a
+   third-party coordination lens — parked per ADR 194, not a flywheel blocker.
 
 ## 7. Non-goals
 

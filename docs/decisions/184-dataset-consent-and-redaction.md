@@ -1,9 +1,10 @@
 # 184 — The dataset gate: consent and redaction as a posture of their own
 
-- Status: proposed — **and deliberately small, because it exists to be decidable.** One question needs
-  answering (§The one decision); everything else here is inventory of what is already true.
+- Status: accepted (2026-07-31) — §The one decision answered **no** (structural-only v1; see Amendment).
 - Date: 2026-07-30
 - Authored by izzo (lane `01KYRNHVWNKXR0M9PHGREJDN6S`), at nick's direction.
+- Accepted by: nick + ryder (flywheel reevaluation; design
+  `docs/superpowers/specs/2026-07-31-flywheel-reevaluation-design.md`).
 - Number **184** — verified free on `origin/main` (highest is 183) at branch time.
 - Extracted from: [ADR 051](051-trace-eval-experiment-flywheel.md), whose Consequences already say the
   named seams each get "its own ADR when built". This is that ADR for one of them, so it is a
@@ -99,13 +100,13 @@ for it with consent in hand.
 
 ### 3. Consent: per-author, opt-in, revocable, and recorded where the act is
 
-Consent attaches to the **author of a message**, not to a team or a release:
+Consent attaches to the **author of a message**, not to a team or a release. **v1 releases omit all
+prose** (§Amendment), so this section is the posture for a *later* prose-including release — not a
+requirement to ship structural-only.
 
 - **Default: no.** Absence of consent is never consent (ADR 173's invariant, applied to permission).
-- **Agent seats** consent through their operator: a seat's consent is the consent of the human who
-  provisioned it, declared once per seat, because an agent cannot meaningfully consent on its own
-  behalf. This must be stated explicitly rather than assumed, since it is the case that would
-  otherwise be silently taken as yes.
+- **Agent seats:** the provisioning human's consent is **not** sufficient to publish agent-seat prose
+  (§The one decision → **no**). A future ADR must define a stronger rule before any agent prose ships.
 - **Human members** consent for themselves, per member, and can withdraw. Withdrawal applies to
   future releases; a release already published cannot be recalled, and the ADR says so plainly rather
   than implying a promise the world does not allow.
@@ -114,54 +115,52 @@ Consent attaches to the **author of a message**, not to a team or a release:
 
 ### 4. The gate's definition of done
 
-`docs/research/README.md` stops citing ADR 051 and cites this ADR. "Consent/redaction is real" becomes
-four checkable conditions — a release may ship when **all** hold:
+`docs/research/README.md` cites this ADR (not ADR 051). "Consent/redaction is real" becomes four
+checkable conditions — a release may ship when **all** hold:
 
 1. An export path exists that emits structural fields only, with per-release pseudonymised seat names.
-2. Prose bodies are excluded unless the author's consent is recorded, and the exporter **fails closed**
-   — an unreadable or absent consent record excludes the body rather than including it.
-3. The export is reproducible from a pinned manifest (ADR 051's experiment-manifest requirement, which
-   this borrows and does not redefine).
+2. **v1 / default:** prose bodies are **always excluded** (human and agent). A later prose-including
+   release may include a body only when the author's consent is recorded under a rule that satisfies
+   §3, and the exporter **fails closed** — an unreadable or absent consent record excludes the body.
+3. The export is reproducible from a pinned experiment manifest (owned by the research practice /
+   [ADR 194](194-flywheel-practice-not-batond.md); this ADR borrows the requirement and does not
+   redefine the manifest format).
 4. A human authorises the specific release. Not a policy flag — a person, per release, the same shape
    as the merge authorisation ADR 109 records.
 
 ## The one decision
 
 Everything above is either inventory of the status quo or a straightforward reading of it. The single
-question that needs nick, because it is a values call and not an engineering one:
+values question:
 
 > **Is agent-seat prose publishable on the provisioning human's consent alone?**
 
-A "yes" makes the dogfood corpus largely publishable today, since nick provisioned every agent seat on
-this machine — which is precisely why it should be answered deliberately rather than assumed. A "no"
-means the first release is structural-fields-only, which is still the novel artifact (no incumbent has
-coordination structure over real human+agent teams), just without quotable prose.
+### Amendment (2026-07-31) — answered **no**
 
-**This ADR does not need answering to be useful.** Parts 1, 2 and 4 stand either way; the answer only
-sets what a first release contains.
+**No.** Agent-seat prose is not publishable on operator consent alone. **v1 and default releases are
+structural-fields-only** — all prose bodies (human and agent) omitted until a later ADR argues for
+consented prose with evidence (see Observability & Evaluation → Experiment). Structure is the novel
+signal; prose is optional later.
 
 ## What this explicitly does not do
 
-- **Does not resolve ADR 051.** The flywheel decision stays `proposed` and this ADR does not depend on
-  it. If 051 is later accepted, rejected, or superseded, nothing here changes.
-- **Does not build the exporter.** This is the posture and the gate; the export path is its own lane
-  and its own increment, and it should not be built until §The one decision is answered, because the
-  answer changes its shape.
+- **Does not depend on ADR 051.** Dataset ethics are independent of the flywheel product-boundary
+  decision. ADR 051 is superseded by [ADR 194](194-flywheel-practice-not-batond.md); nothing here
+  changes if that supersession is read alone.
+- **Does not build the exporter.** This is the posture and the gate; the export path is its own lane.
+  §The one decision is answered, so the exporter shape for v1 is fixed: structural-only.
 - **Does not add a consent mechanism to emission.** No new field on the message envelope, no new
-  prompt at send time. Consent is per-member state consulted at export.
+  prompt at send time. Consent is per-member state consulted at export (when prose is ever included).
 - **Does not weaken anything already enforced.** No emission path changes.
 
 ## Consequences
 
-- The dataset gate becomes openable: it has an owner (this ADR), a definition of done (§4), and a
-  single blocking question (§The one decision) instead of an undefined dependency on an unaccepted ADR.
-- The first release is probably structural-fields-only, and that is a **better** first artifact than
-  waiting: it is publishable sooner, it is the part that is genuinely novel, and it forecloses nothing.
-- Somebody must answer §The one decision before the exporter is built. That is the intended cost — the
-  question was always there, buried in a README sentence, and this surfaces it.
+- The dataset gate is openable: it has an owner (this ADR), a definition of done (§4), and §The one
+  decision is answered — v1 is structural-only.
+- Structural-fields-only is the **correct** first artifact: publishable sooner, genuinely novel, and
+  forecloses nothing for a later consented-prose release.
 - A withdrawal cannot un-publish. Stated in the ADR so no consent flow implies otherwise.
-- ADR 051 gains a pointer here and keeps its two-line direction as strategy. Its "each gets its own ADR
-  when built" line is now true of this seam.
+- The flywheel strategy ADR no longer owns this seam; cite this ADR for publication posture.
 
 ## Observability & Evaluation
 
@@ -182,17 +181,20 @@ sets what a first release contains.
   Take a finding already published from full internal data (finding 006's coordination-vs-uncoordinated
   waste numbers, or 008's detector recall) and attempt to reproduce its headline from a
   structural-only export alone. Reproduces ⇒ prose is not load-bearing for the dataset's value and the
-  default omission costs nothing, which retires §The one decision as a blocker for release 1.
-  Does not reproduce ⇒ that is the concrete argument for consented prose, made with evidence instead of
-  appetite. Either outcome is publishable, and the second is more interesting.
+  default omission costs nothing. Does not reproduce ⇒ that is the concrete argument for consented
+  prose, made with evidence instead of appetite. Either outcome is publishable, and the second is more
+  interesting. §The one decision is already answered for release 1; this experiment informs whether a
+  *later* prose release is warranted.
 
 ## Related
 
-- [ADR 051](051-trace-eval-experiment-flywheel.md) — the flywheel strategy this seam was extracted
-  from; still `proposed`, and deliberately not a dependency.
+- [ADR 051](051-trace-eval-experiment-flywheel.md) — superseded by ADR 194; this seam was extracted
+  from its Consequences while 051 was still `proposed`.
+- [ADR 194](194-flywheel-practice-not-batond.md) — flywheel boundary after reevaluation; owns the
+  experiment-manifest requirement this gate borrows.
 - [ADR 052](052-traces-evals-first-class-gate.md) — the definition-of-done gate whose shape §4 borrows.
 - [ADR 056](056-research-as-first-class-practice.md) — research as practice; names the dataset as the
-  first rung of the artifact ladder. Also `proposed`, also not a dependency.
+  first rung of the artifact ladder.
 - [ADR 173](173-absent-is-not-unknown.md) — absent is not unknown. Applied here to permission: a
   missing consent record is not consent, and the exporter fails closed.
 - [ADR 109](109-seat-git-attribution.md) — per-release human authorisation follows its merge-authority

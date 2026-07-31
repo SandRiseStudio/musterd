@@ -6,8 +6,9 @@ envelope span + coordination metrics; this wires it to a local sink on the machi
 
 > **Scope.** This is the *dogfood* posture — the daemons we operate. The **product** default stays
 > off / no-phone-home (users opt in via the standard OTel env vars, `observability.md` §config). The
-> sink here is the throwaway **interim stand-in for batond** (ADR 082): emission is pure OTLP, so batond
-> — or any real collector — replaces the *endpoint*, never the instrumentation.
+> sink here is a throwaway **local OTLP collector** (ADR 082): emission is pure OTLP, so any real
+> collector — including a future parked batond product (ADR 194) — replaces the *endpoint*, never the
+> instrumentation.
 
 ## What's wired (machine-local, not committed)
 
