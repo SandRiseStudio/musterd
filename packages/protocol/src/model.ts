@@ -166,7 +166,45 @@ export const FAMILY_POSTURE_STATES = ['diverse', 'monoculture', 'unknown'] as co
 export type FamilyPostureState = (typeof FAMILY_POSTURE_STATES)[number];
 
 /**
- * One idle seat in the wake pool, and what waking it would bring (ADR 187).
+ * Why an idle seat is (or is not) a spendable wake target (ADR 189). Mark-not-filter: the pool keeps
+ * every idle agent so diversity potential stays visible; dispatch only spends `wakeable` ones.
+ *
+ * Layers pass only facts they have — the server knows enrollment, the host knows the workspace —
+ * via {@link wakeabilityFromFacts}. A fact a layer does not have is omitted, never invented.
+ */
+export const WAKEABILITIES = [
+  'wakeable',
+  'not_enrolled',
+  'enrolled_dead_workspace',
+  'enrolled_host_stale',
+] as const;
+export type Wakeability = (typeof WAKEABILITIES)[number];
+
+/** Facts a layer knows about a seat's wake readiness. Omit unknowns; do not pass `false` for "I
+ *  have not checked". */
+export interface WakeabilityFacts {
+  /** Is there a `residency` row for this seat? */
+  enrolled: boolean;
+  /** Host-only: does the registry entry's workspace still exist with a readable binding? */
+  workspace_readable?: boolean;
+  /** Host-only (or future host-heartbeat): is the enrolled host reachable / polling? */
+  host_reachable?: boolean;
+}
+
+/**
+ * Shared wakeability predicate (ADR 189). Pure: same facts ⇒ same reason, on server or host.
+ * Enrollment is the first gate; host refinements only apply to enrolled seats.
+ */
+export function wakeabilityFromFacts(facts: WakeabilityFacts): Wakeability {
+  if (!facts.enrolled) return 'not_enrolled';
+  if (facts.workspace_readable === false) return 'enrolled_dead_workspace';
+  if (facts.host_reachable === false) return 'enrolled_host_stale';
+  return 'wakeable';
+}
+
+/**
+ * One idle seat in the wake pool, and what waking it would bring (ADR 187) — plus whether dispatch
+ * can actually wake it (ADR 189).
  *
  * `family` comes from the team's durable attestation record, not from presence — a seat that has gone
  * offline still last attested *something*, and discarding that is what made every idle seat read
@@ -174,6 +212,10 @@ export type FamilyPostureState = (typeof FAMILY_POSTURE_STATES)[number];
  * observation, which is exactly why `attested_at` travels with it: the age is the reader's to
  * discount. Deliberately never expired — a woken seat re-attests on claim, so a stale guess costs one
  * wake and self-corrects, and can never produce a review whose diversity claim is false.
+ *
+ * `wakeability` is mark-not-filter: unenrolled cross-family seats stay in the pool (so the posture
+ * still names the diversity gap) but are marked `not_enrolled` so ADR 179 increment 5 does not spend
+ * a wake on a name dispatch cannot reach.
  */
 export interface WakeCandidate {
   seat: string;
@@ -181,6 +223,8 @@ export interface WakeCandidate {
   family: string;
   /** When that attestation was recorded; null when there is none. */
   attested_at: number | null;
+  /** Can dispatch wake this seat? Marked, never filtered (ADR 189). */
+  wakeability: Wakeability;
 }
 
 export interface FamilyPosture {
@@ -210,22 +254,33 @@ function attestationAge(at: number | null, now: number): string {
 }
 
 /**
- * The wake-pool clause: who is idle and what waking them would bring (ADR 187). Candidates whose
- * family is NOT already attesting come first — those are the ones that would actually change the
- * posture, and the truncation should spend its three slots on them rather than on a fourth claude
- * seat. Seats that have never attested sort last: they are the lottery tickets.
+ * The wake-pool clause: who is idle, what waking them would bring (ADR 187), and whether dispatch
+ * can reach them (ADR 189). Ranking: wakeable cross-family first (the spendable remedy), then other
+ * wakeable, then marked-but-unwakeable cross-family (so the diversity gap stays named), then the
+ * rest. Never-attested sorts last inside each band. Truncation spends its three slots on that order.
  */
 function describeWakePool(p: FamilyPosture, now: number = Date.now()): string {
   if (p.wake_pool.length === 0) return '';
-  const rank = (c: WakeCandidate): number =>
+  const diversity = (c: WakeCandidate): number =>
     c.family === MODEL_UNKNOWN ? 2 : (p.families[c.family] ?? 0) > 0 ? 1 : 0;
+  const rank = (c: WakeCandidate): number => {
+    const band = c.wakeability === 'wakeable' ? 0 : 1;
+    return band * 10 + diversity(c);
+  };
   const ordered = [...p.wake_pool].sort((a, b) => rank(a) - rank(b));
   const shown = ordered
     .slice(0, 3)
-    .map((c) => `${c.seat} (${c.family}, ${attestationAge(c.attested_at, now)})`)
+    .map((c) => {
+      const age = attestationAge(c.attested_at, now);
+      // Wakeable seats stay compact; non-wakeable ones carry the reason so the line does not imply
+      // they are a spend target (the old "idle & enrollable" lie ADR 189 retires).
+      return c.wakeability === 'wakeable'
+        ? `${c.seat} (${c.family}, ${age})`
+        : `${c.seat} (${c.family}, ${age}, ${c.wakeability})`;
+    })
     .join(', ');
   const more = p.wake_pool.length > 3 ? ` +${String(p.wake_pool.length - 3)}` : '';
-  return `; idle & enrollable: ${shown}${more}`;
+  return `; idle: ${shown}${more}`;
 }
 
 /**

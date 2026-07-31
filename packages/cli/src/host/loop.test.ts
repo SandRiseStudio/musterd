@@ -150,8 +150,33 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
       }),
     );
     expect(calls.reports).toHaveLength(1);
-    expect(calls.reports[0]).toMatchObject({ lease_id: 'L9', occupied: false });
+    expect(calls.reports[0]).toMatchObject({
+      lease_id: 'L9',
+      occupied: false,
+      wakeability: 'not_enrolled',
+    });
     expect(calls.reports[0]!.reason).toMatch(/host registry/);
+  });
+
+  it('a registered seat whose workspace is unreadable reports enrolled_dead_workspace (ADR 189)', async () => {
+    const { client, calls } = fakeClient([order({ seat: 'ghost', lease_id: 'L8' })]);
+    await pollHostOnce(
+      deps({
+        backends: new Map(),
+        // Registry knows the seat, but readAgentKey fails → not spawnable (dead workspace).
+        loadRegistry: () => ({
+          entries: [entryOf(), entryOf({ seat: 'ghost', workspace: '/ws/ghost' })],
+        }),
+        readAgentKey: (ws) => (ws === '/ws/ghost' ? undefined : 'mskey_x'),
+        clientFor: () => client,
+      }),
+    );
+    expect(calls.reports[0]).toMatchObject({
+      lease_id: 'L8',
+      occupied: false,
+      wakeability: 'enrolled_dead_workspace',
+    });
+    expect(calls.reports[0]!.reason).toMatch(/missing or has no binding/);
   });
 
   it('an order for a harness with no backend is reported failed with the harness named', async () => {

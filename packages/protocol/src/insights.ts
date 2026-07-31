@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { GoalSchema } from './goals.js';
-import { FAMILY_POSTURE_STATES, type FamilyPosture } from './model.js';
+import { FAMILY_POSTURE_STATES, WAKEABILITIES, type FamilyPosture } from './model.js';
 import { ToolCallMetricsSchema } from './tool-telemetry.js';
 
 /**
@@ -355,6 +355,8 @@ export const FamilyPostureSchema: z.ZodType<FamilyPosture> = z.object({
       seat: z.string(),
       family: z.string(),
       attested_at: z.number().int().nullable(),
+      /** Mark-not-filter wake readiness (ADR 189). */
+      wakeability: z.enum(WAKEABILITIES),
     }),
   ),
   humans_live: z.number().int(),

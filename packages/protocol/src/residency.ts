@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { WAKEABILITIES } from './model.js';
 
 /**
  * Harness residency (ADR 131, increment 2) — the wake-ledger wire shapes. A seat *enrolls* into
@@ -217,5 +218,9 @@ export const WakeReportBodySchema = z.object({
   /** Failure summary for a not-occupied outcome (watchdog timeout, spawn error) — host-composed,
    *  never model output. */
   reason: z.string().max(200).optional(),
+  /** Typed wakeability axis (ADR 189) — same enum as `WakeCandidate.wakeability`, so audits can
+   *  query "how many wakes failed because the workspace is gone" without parsing prose. Optional
+   *  for back-compat with hosts that have not yet upgraded. */
+  wakeability: z.enum(WAKEABILITIES).optional(),
 });
 export type WakeReportBody = z.infer<typeof WakeReportBodySchema>;

@@ -7,6 +7,7 @@ import {
   resolveAttestation,
   reviewGrade,
   resolveAttestedModel,
+  wakeabilityFromFacts,
 } from './model.js';
 
 describe('modelFamily (ADR 101)', () => {
@@ -111,6 +112,37 @@ describe('resolveAttestation — observation beats declaration', () => {
   });
 });
 
+describe('wakeabilityFromFacts (ADR 189)', () => {
+  it('unenrolled is not_enrolled — host facts never override that', () => {
+    expect(wakeabilityFromFacts({ enrolled: false })).toBe('not_enrolled');
+    expect(
+      wakeabilityFromFacts({ enrolled: false, workspace_readable: false, host_reachable: false }),
+    ).toBe('not_enrolled');
+  });
+
+  it('enrolled with no host defects is wakeable', () => {
+    expect(wakeabilityFromFacts({ enrolled: true })).toBe('wakeable');
+    expect(wakeabilityFromFacts({ enrolled: true, workspace_readable: true })).toBe('wakeable');
+  });
+
+  it('host refinements only apply to enrolled seats', () => {
+    expect(wakeabilityFromFacts({ enrolled: true, workspace_readable: false })).toBe(
+      'enrolled_dead_workspace',
+    );
+    expect(wakeabilityFromFacts({ enrolled: true, host_reachable: false })).toBe(
+      'enrolled_host_stale',
+    );
+    // Dead workspace wins over host_stale — the operator's next move is the registry pointer.
+    expect(
+      wakeabilityFromFacts({
+        enrolled: true,
+        workspace_readable: false,
+        host_reachable: false,
+      }),
+    ).toBe('enrolled_dead_workspace');
+  });
+});
+
 describe('describeFamilyPosture (ADR 172) — one bounded line', () => {
   const NOW = Date.now();
   const base = {
@@ -128,25 +160,61 @@ describe('describeFamilyPosture (ADR 172) — one bounded line', () => {
       state: 'monoculture',
       attesting: 3,
       families: { claude: 3 },
-      // ADR 187: cross-family candidates sort FIRST, so the three slots go to the seats that would
-      // actually change the posture — `dolly` is another claude and must lose its slot to them.
+      // ADR 187 + 189: wakeable cross-family first; unenrolled cross-family still named but marked.
       wake_pool: [
-        { seat: 'dolly', family: 'claude', attested_at: NOW - 3_600_000 },
-        { seat: 'grokbot', family: 'grok', attested_at: NOW - 86_400_000 * 21 },
-        { seat: 'gptbot', family: 'gpt', attested_at: NOW - 86_400_000 * 21 },
-        { seat: 'kimi', family: 'unknown', attested_at: null },
-        { seat: 'compo', family: 'composer', attested_at: NOW - 3_600_000 * 5 },
+        { seat: 'dolly', family: 'claude', attested_at: NOW - 3_600_000, wakeability: 'wakeable' },
+        {
+          seat: 'grokbot',
+          family: 'grok',
+          attested_at: NOW - 86_400_000 * 21,
+          wakeability: 'wakeable',
+        },
+        {
+          seat: 'gptbot',
+          family: 'gpt',
+          attested_at: NOW - 86_400_000 * 21,
+          wakeability: 'wakeable',
+        },
+        { seat: 'kimi', family: 'unknown', attested_at: null, wakeability: 'not_enrolled' },
+        {
+          seat: 'compo',
+          family: 'composer',
+          attested_at: NOW - 3_600_000 * 5,
+          wakeability: 'wakeable',
+        },
       ],
       humans_live: 1,
     });
     expect(line).toContain('monoculture — 3 agents attesting, all claude');
-    expect(line).toContain('idle & enrollable: grokbot (grok, 21d ago)');
+    expect(line).toContain('idle: grokbot (grok, 21d ago)');
     expect(line).toContain('gptbot (gpt, 21d ago)');
     expect(line).toContain('compo (composer, 5h ago)');
     expect(line).toContain('+2');
     expect(line).toContain('1 human(s) live');
     expect(line).not.toContain('kimi'); // bounded: never one entry per seat
     expect(line).not.toContain('dolly'); // a same-family seat is not the remedy
+  });
+
+  it('prefers a wakeable same-family seat over an unenrolled cross-family one for the spend slots', () => {
+    // ADR 189: mark-not-filter — grokbot stays visible in the pool, but the bounded line spends its
+    // first slots on seats dispatch can actually wake.
+    const line = describeFamilyPosture({
+      ...base,
+      state: 'monoculture',
+      attesting: 2,
+      families: { claude: 2 },
+      wake_pool: [
+        {
+          seat: 'grokbot',
+          family: 'grok',
+          attested_at: NOW - 86_400_000,
+          wakeability: 'not_enrolled',
+        },
+        { seat: 'miley', family: 'claude', attested_at: NOW - 3_600_000, wakeability: 'wakeable' },
+      ],
+    });
+    expect(line).toContain('idle: miley (claude, 1h ago)');
+    expect(line).toContain('grokbot (grok, 24h ago, not_enrolled)');
   });
 
   it('diverse lists family counts', () => {
