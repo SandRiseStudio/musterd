@@ -350,7 +350,13 @@ export const FamilyPostureSchema: z.ZodType<FamilyPosture> = z.object({
   attesting: z.number().int(),
   families: z.record(z.string(), z.number().int()),
   unattested: z.number().int(),
-  wake_pool: z.array(z.string()),
+  wake_pool: z.array(
+    z.object({
+      seat: z.string(),
+      family: z.string(),
+      attested_at: z.number().int().nullable(),
+    }),
+  ),
   humans_live: z.number().int(),
   computed_at: z.number().int(),
 });

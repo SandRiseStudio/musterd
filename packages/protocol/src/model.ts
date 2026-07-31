@@ -131,6 +131,24 @@ export function resolveAttestation(input: AttestationInput): AttestationResult {
 export const FAMILY_POSTURE_STATES = ['diverse', 'monoculture', 'unknown'] as const;
 export type FamilyPostureState = (typeof FAMILY_POSTURE_STATES)[number];
 
+/**
+ * One idle seat in the wake pool, and what waking it would bring (ADR 187).
+ *
+ * `family` comes from the team's durable attestation record, not from presence — a seat that has gone
+ * offline still last attested *something*, and discarding that is what made every idle seat read
+ * `unknown` and quietly emptied the cross-family remedy. It is a memory of an observation, not an
+ * observation, which is exactly why `attested_at` travels with it: the age is the reader's to
+ * discount. Deliberately never expired — a woken seat re-attests on claim, so a stale guess costs one
+ * wake and self-corrects, and can never produce a review whose diversity claim is false.
+ */
+export interface WakeCandidate {
+  seat: string;
+  /** Last attested family, or `unknown` for a seat that has never attested one. */
+  family: string;
+  /** When that attestation was recorded; null when there is none. */
+  attested_at: number | null;
+}
+
 export interface FamilyPosture {
   state: FamilyPostureState;
   /** Live agents attesting a KNOWN family — the posture's denominator. */
@@ -139,12 +157,41 @@ export interface FamilyPosture {
   families: Record<string, number>;
   /** Live agents attesting `unknown` — present, but they cannot prove anything (ADR 158). */
   unattested: number;
-  /** Enrolled agents with no live presence — the remedy list: monoculture is fixed by WAKING one. */
-  wake_pool: string[];
+  /** Idle agents — the remedy list: monoculture is fixed by WAKING one. Entries carry what each seat
+   *  would bring (ADR 187), so the list is a targeted remedy rather than a lottery ticket. */
+  wake_pool: WakeCandidate[];
   /** Live humans. Beside the posture, not in it (see above). */
   humans_live: number;
   /** When this snapshot was taken — a posture without a timestamp masquerades as a durable fact. */
   computed_at: number;
+}
+
+/** How old an attestation is, in the coarsest unit that still says something (ADR 187). */
+function attestationAge(at: number | null, now: number): string {
+  if (at === null) return 'never attested';
+  const hours = Math.max(0, Math.floor((now - at) / 3_600_000));
+  if (hours < 1) return 'just now';
+  if (hours < 48) return `${String(hours)}h ago`;
+  return `${String(Math.floor(hours / 24))}d ago`;
+}
+
+/**
+ * The wake-pool clause: who is idle and what waking them would bring (ADR 187). Candidates whose
+ * family is NOT already attesting come first — those are the ones that would actually change the
+ * posture, and the truncation should spend its three slots on them rather than on a fourth claude
+ * seat. Seats that have never attested sort last: they are the lottery tickets.
+ */
+function describeWakePool(p: FamilyPosture, now: number = Date.now()): string {
+  if (p.wake_pool.length === 0) return '';
+  const rank = (c: WakeCandidate): number =>
+    c.family === MODEL_UNKNOWN ? 2 : (p.families[c.family] ?? 0) > 0 ? 1 : 0;
+  const ordered = [...p.wake_pool].sort((a, b) => rank(a) - rank(b));
+  const shown = ordered
+    .slice(0, 3)
+    .map((c) => `${c.seat} (${c.family}, ${attestationAge(c.attested_at, now)})`)
+    .join(', ');
+  const more = p.wake_pool.length > 3 ? ` +${String(p.wake_pool.length - 3)}` : '';
+  return `; idle & enrollable: ${shown}${more}`;
 }
 
 /**
@@ -153,12 +200,7 @@ export interface FamilyPosture {
  * seat: the wake pool truncates at three names.
  */
 export function describeFamilyPosture(p: FamilyPosture): string {
-  const pool =
-    p.wake_pool.length === 0
-      ? ''
-      : `; idle & enrollable: ${p.wake_pool.slice(0, 3).join(', ')}${
-          p.wake_pool.length > 3 ? ` +${String(p.wake_pool.length - 3)}` : ''
-        }`;
+  const pool = describeWakePool(p);
   const humans = p.humans_live > 0 ? `; ${String(p.humans_live)} human(s) live` : '';
   if (p.state === 'unknown') {
     const why =
