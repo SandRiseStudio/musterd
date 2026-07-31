@@ -122,9 +122,10 @@ const REPAIR_CLASSES: { match: RegExp; hint: string }[] = [
     hint: 'the team daemon looks unreachable — no musterd tool will work until a human checks it (`musterd service status`)',
   },
   {
-    // The resume-token treadmill (ADR 087): the seat's grant lapsed; only a re-mint fixes it.
+    // The resume-token treadmill (ADR 087 / ADR 193): the seat's grant lapsed. The adapter drops it
+    // and retries bare once; if that still cannot occupy, remint + reload.
     match: /grant (expired|revoked|consumed)|expired_grant/i,
-    hint: 'the seat grant needs re-minting — a human runs `musterd agent <seat> --path <this workspace>`, then reload this MCP connection (/mcp) to pick it up',
+    hint: 'the seat grant is stale — this adapter drops it and retries bare; if that still fails, a human remints with `musterd agent <seat> --path <this workspace>` then /mcp reload',
   },
   {
     // ADR 068/092: another session took this seat; this one is stale, not broken.
@@ -182,11 +183,14 @@ export function notReadyMessage(
   action: string,
 ): string {
   if (!client.claimed) {
-    return (
+    const base =
       `you're a pending presence (unclaimed, code ${client.claimCode}) — you hold no seat, so you ` +
       `can't ${action}. Claim one first: team_join {as:'Ada'} (named) or team_join {role:'backend'} ` +
-      `(pool), or have a human run \`musterd claim <name>\` here.`
-    );
+      `(pool), or have a human run \`musterd claim <name>\` here.`;
+    // Seat-drop B (ADR 193): a restarted adapter is still `!claimed` after a failed claim, and the
+    // failure (e.g. expired_grant) is exactly what the agent needs — not a blank "claim a seat".
+    if (!client.lastJoinError) return base;
+    return `${base}\nNote: the last join attempt failed: ${client.lastJoinError}${repairHint(client.lastJoinError)}`;
   }
   return notJoinedMessage(action, client.lastJoinError);
 }

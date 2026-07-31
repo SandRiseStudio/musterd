@@ -237,6 +237,64 @@ describe('MCP adapter', () => {
     bad.close();
   });
 
+  // SEAT-DROP B (lane 01KYQCF678, ADR 193). A restarted adapter loads with member undefined and a
+  // grant in binding.json. When that grant has expired, today's client sets wantPresence=false on
+  // refused and never retries — the session reads as a pending presence forever. The grant is an
+  // optimisation, not the authenticator: drop it, persist the drop, retry bare. With ADR 146 reseat
+  // on, bare reclaim of a held agent seat occupies immediately.
+  it('drops an expired grant and re-claims bare — a restarted adapter self-heals (ADR 193)', async () => {
+    const { findBinding, saveBinding } = await import('./binding.js');
+    const tmp = mkdtempSync(join(tmpdir(), 'musterd-expired-grant-'));
+    try {
+      await api(
+        'POST',
+        '/teams/dawn/policy',
+        { standing_reseat_known_agents: true },
+        tokens['nick'],
+      );
+
+      // Occupy once so the seat is held (bound_at) — the reseat policy's "known" signal.
+      const boot = { ...adaConfig(), bindingDir: tmp };
+      saveBinding(tmp, {
+        server: boot.server,
+        team: boot.team,
+        agent_key: boot.agent_key!,
+        surface: boot.surface,
+        claim: { mode: 'seat', name: 'Ada' },
+        grant: boot.grant!,
+      });
+      const first = new MusterdClient(boot);
+      await first.join();
+      expect(first.joined).toBe(true);
+      first.leave();
+      first.close();
+
+      // Poison the grant the way a lapsed resume token poisons a binding after restart.
+      server.db.prepare('UPDATE grants SET expires_at = 1 WHERE expires_at IS NULL').run();
+
+      // Fresh process: no member, same expired grant on disk + in config.
+      const restarted: McpConfig = {
+        ...adaConfig(),
+        bindingDir: tmp,
+        grant: tokens['ada_grant']!,
+      };
+      delete (restarted as { member?: string }).member;
+      expect(restarted.member).toBeUndefined();
+      expect(findBinding(tmp)?.grant).toBe(tokens['ada_grant']);
+
+      const second = new MusterdClient(restarted);
+      await second.join();
+      expect(second.joined).toBe(true);
+      expect(second.member).toBe('Ada');
+      // In-memory and on disk: the stale grant is gone so the next restart does not re-poison.
+      expect(restarted.grant).toBeUndefined();
+      expect(findBinding(tmp)?.grant).toBeUndefined();
+      second.close();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('Ada sends a status_update that nick sees in his inbox', async () => {
     const client = new MusterdClient(adaConfig());
     await client.join();

@@ -220,3 +220,17 @@ export function saveBinding(dir: string, binding: Binding): string {
   renameSync(tmp, p);
   return p;
 }
+
+/**
+ * Drop a stale grant from the on-disk binding (ADR 193). A grant the server has refused
+ * (`expired` / `revoked` / `not_found`) must not survive a process restart — otherwise every
+ * relaunch re-poisons itself and reads as a pending presence forever. No-op when there is no
+ * binding or it carries no grant. Preserves every other field (including `session` via the
+ * {@link saveBinding} merge guard).
+ */
+export function clearGrantFromBinding(bindingDir: string = process.cwd()): void {
+  const existing = findBinding(bindingDir);
+  if (!existing || existing.grant === undefined) return;
+  const { grant: _dropped, ...rest } = existing;
+  saveBinding(bindingDir, rest);
+}
