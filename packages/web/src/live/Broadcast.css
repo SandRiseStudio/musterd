@@ -1,7 +1,7 @@
 /*
  * musterd — broadcast mode (ADR 157). Route-local styles for /broadcast: a fixed 1920×1080 capture
- * stage centred in a letterbox. The on-screen chrome is NOT here: it is the shared OfficeOverlay,
- * styled in Live.css, so the stream and the dashboard render the same component. This file only ships
+ * stage centred in a letterbox. The on-screen chrome is the shared WorkStack (same as /live),
+ * styled in Live.css so the dashboard and the stream cannot drift apart. This file only ships
  * in the /broadcast lazy chunk and holds nothing but the stage.
  *
  * The stage is fixed in CSS pixels *on purpose*. The office scene sizes its canvas from
@@ -41,7 +41,7 @@
 }
 
 /* Operator diagnostics only — the two states with no office to look at. Everything else on screen
-   is the shared OfficeOverlay, styled in Live.css so /live and /broadcast cannot drift apart. */
+   is the shared WorkStack, styled in Live.css so /live and /broadcast cannot drift apart. */
 
 .bc__note {
   position: absolute;

@@ -209,9 +209,10 @@ export function OfficeScene({
             render loop is SUSPENDED via setSuspended — no draw cost behind an invisible panel. */}
         <div className="lc-gl-canvas" ref={hostRef} aria-hidden="true" />
         <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
-        {/* The office's own chrome, identical on /live and /broadcast by construction — the whole point
-            of the shared component. Collapsed, the panel is a rail with nowhere to put it. */}
-        {!collapsed && broadcast && (
+        {/* WorkStack is the shared "who's on what" chrome for /live and /broadcast (presence-chrome
+            design). The old OfficeOverlay chyron only renders when workCues is not stack — otherwise
+            the two would sit on top of each other and the routes would diverge again. */}
+        {!collapsed && broadcast && workCues !== 'stack' && (
           <OfficeOverlay
             teamName={teamName}
             present={presentCount(roster)}

@@ -162,6 +162,7 @@ function BroadcastPage() {
             status={status}
             broadcast
             captureFps={captureFps}
+            workCues="stack"
             onReady={onSceneReady}
           />
         )}
