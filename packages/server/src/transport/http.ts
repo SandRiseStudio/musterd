@@ -2437,7 +2437,11 @@ export async function handleHttp(
               lane: lane.id,
               owner: lane.owner_seat,
               ...(lane.merged ? { merged: lane.merged } : {}),
-              ...(pick ? { reviewer: pick.reviewer, route: pick.route } : { no_candidate: true }),
+              // ADR 188: the achieved rung of the diversity ladder rides beside the historical
+              // two-value route, so a cross_model routing is never mistaken for a cross_family one.
+              ...(pick
+                ? { reviewer: pick.reviewer, route: pick.route, review_grade: pick.grade }
+                : { no_candidate: true }),
               // ALWAYS written, both ways (ADR 173 correction #1). Omitting the `false` made absence
               // ambiguous — "not required" and "written before this field existed" were the same
               // row — which is what forced the read to serve a legacy row as a confident no. With
@@ -2474,12 +2478,14 @@ export async function handleHttp(
                   branch: lane.branch,
                   ...(lane.merged ? { merged: lane.merged } : {}),
                   route: pick.route,
+                  grade: pick.grade,
                 },
               },
             );
             review = {
               reviewer: pick.reviewer,
               route: pick.route,
+              grade: pick.grade,
               tier: humanRequired ? 'blocking' : 'standard',
             };
           } else if (humanRequired) {
