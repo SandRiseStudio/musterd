@@ -143,9 +143,11 @@ _Standing count, kept here so it cannot drift — **two counters, deliberately a
 2026-07-30, see "The ledger, settled"):_
 
 - _**Kill-criterion experiment: 0 triggers, 0 corrections.** Un-run. No newly added derived read has
-  appeared on the three named surfaces since this ADR landed._
-- _**Old reads fixed when touched: 2** (`reviewRouting` #517, `insights.ts` #521). Diagnostic only.
-  This counter fires nothing._
+  appeared on the three named surfaces since this ADR landed — and see "Adjudication" below: the
+  trigger is now believed **un-runnable as pre-registered**, which is a fault in the pre-registration
+  rather than a result. It stays frozen regardless._
+- _**Old reads fixed when touched: 3** (`reviewRouting` #517, `insights.ts` #521, `deliveryHintFor`
+  #529). Diagnostic only. This counter fires nothing._
 
 ## Consequences
 
@@ -367,6 +369,106 @@ never fires" (stanley, 2026-07-29) — and [ADR 179](179-board-triggered-work-or
 per-loop observability adds derived reads by design. If your new read ships three-valued at
 introduction, say so in your PR: that is the datum, and it is the one the criterion has been waiting
 for.
+
+> **Superseded by the adjudication below — 2026-07-30.** The first of those two candidates landed as
+> [#529](https://github.com/SandRiseStudio/musterd/pull/529) and was ruled **not a trigger**: it
+> repaired a read that already existed rather than adding one. This note's premise — that whoever
+> built the rail's audit vocabulary would thereby be adding a new derived read — was wrong, and the
+> error is instructive: the trigger keeps failing to fire because the defect lives in reads that are
+> already written, which is the fault the adjudication records.
+
+## Adjudication — the delivery rail (#529) is not a trigger, and the experiment cannot run — 2026-07-30
+
+izzo declared [#529](https://github.com/SandRiseStudio/musterd/pull/529) the experiment's first real
+trigger instance and deliberately refused to score it: "marking my own homework here is the same
+ADR 171 hazard he handed to me last time." She was right to route it. The ruling is mine because I
+wrote this ADR — **which is also the conflict, and it should be stated rather than left implicit: the
+author of a doctrine ADR is the party with an interest in it surviving its own kill criterion.** The
+ruling below is the one that costs this ADR its only favourable data point, and that is not a
+coincidence worth being proud of; it is what the pre-registration already said.
+
+**Ruling: not a trigger instance. Two independent reasons, either sufficient.**
+
+1. **It is not a newly added derived read.** `deliveryHintFor` shipped in
+   [#432](https://github.com/SandRiseStudio/musterd/pull/432) (ADR 167 inc 2a) with six bare
+   `return null` legs. #529 corrected it. That is exactly the "old read fixed when touched" shape the
+   ledger settled on 2026-07-30 — the same class as #517 and #521 — and this ADR's own regime
+   excludes it from the trigger.
+2. **It is not on a pre-registered surface.** The trigger names `GET /report`, an audit-derived
+   reason, or a health check. `deliveryHintFor` rides the `POST /messages` ack and derives from
+   presence. The new `nudge.decision` action is real and useful, but it is audit **vocabulary and a
+   write** — `audit.ts` gains a union member — not a derived read. No new read was added on any named
+   surface.
+
+Reason 2 is the ADR 177 precedent applied to a case where it cuts the other way. That question was
+ruled out because counting it "would mean widening a pre-registered trigger after the fact in order
+to collect a _favourable_ data point, which is the same error class as tuning a guard until it
+passes." Widening it now — when the datum is favourable and I am the author — would be that error
+committed knowingly.
+
+**Counters after this ruling:**
+
+- **Kill-criterion experiment: 0 triggers, 0 corrections.** Still un-run.
+- **Old reads fixed when touched: 3** (`reviewRouting` #517, `insights.ts` #521, `deliveryHintFor`
+  #529). Diagnostic only; fires nothing.
+
+### The finding that matters more than the ruling: this experiment is close to unfalsifiable
+
+Both candidates my own forward note named have now arrived. Both turned out to be repairs of
+pre-existing reads. Three days of concentrated work on precisely this defect class has produced
+**three old-read repairs and zero triggers.**
+
+That is not bad luck; it is a design fault in the pre-registration, and it is mine. The trigger
+selects for a **rare** event — a brand-new derived read on one of three named surfaces — while the
+defect manifests overwhelmingly in **reads that already exist**, which the experiment ignores by
+construction. A criterion that cannot fire cannot kill anything, and an ADR whose kill criterion
+cannot fire is the decoration this ADR warned about, now wearing a pre-registration as its costume.
+
+**The pre-registration stays frozen anyway.** Rewriting it to fit observed data is the failure mode
+it exists to prevent, and it would be a worse error than the one it corrects. It is recorded as
+un-runnable, not repaired.
+
+### What the evidence says, from the channel the pre-registration did not count
+
+The question the criterion was meant to answer — _is prose sufficient?_ — has been answered
+elsewhere, and it does not need the criterion:
+
+- **#521 is the damning instance and it still stands.** izzo was adding two abstention buckets to
+  that exact `else`-chain, with the rule consciously in mind, and walked past a third one line below.
+- **izzo's own account of #529 points the same way**, and she volunteered it against her own
+  interest: what made her name the six reasons "was not the prose. It was reading the six-way
+  collapse in the code and recognising the shape from #517/#521. Pattern-matching on a defect I had
+  just fixed twice, not applying a written rule."
+- She also names the confound before anyone else could: she is not a naive subject. She settled the
+  ledger, wrote the forward note naming this very rail, and applied clause 1 twice that day. Her
+  success is therefore **uninformative about prose sufficiency for anyone else** — which is the
+  honest reading, and it is hers.
+
+Same author, same defect class, opposite outcomes, days apart. The variable that tracked success was
+**recency of having repaired one**, not exposure to the written rule. That is evidence about this
+ADR's theory of change, and it is unfavourable: the ADR claims naming the rule at the right level
+lets the next author apply it before shipping. The one author with the most exposure to the naming
+still missed a case while applying it, and succeeded later by recognition rather than by rule.
+
+**Recommendation, and it is nick's call, not mine to take unilaterally on my own ADR:** the mechanism
+the kill criterion would have triggered now rests on better evidence than the criterion would ever
+have produced. The cheap half is a required question in the ADR template ("what does this projection
+say when it cannot see?"). The sharp half is a lint over derived reads — and #521 says what it must
+cover: a **default arm in a classifying ladder is one of the cases**, because a rule phrased about
+what a projection _returns_ slides straight past an `else`.
+
+### Clause 1 extends to internal predicates — izzo's amendment, accepted
+
+Her closing point is correct and is adopted: this defect was in the **observability of a rail**, and
+the collapse was in a predicate's **return type**, not in a value a human reads. Nobody planned to
+surface that `null`. It still propagated outward until "no hint was warranted" and "the code never
+fires" were the same observation, and a correct zero sat as a suspected defect for two days.
+
+Clause 1 is naturally read as being about reported values. It is not so limited: **it applies to any
+derived answer, including internal ones nobody intends to surface.** An internal collapse is in some
+ways worse, because there is no reader to notice the wrong value — it is discovered only when
+somebody asks why the system appears dead, and by then the absent evidence has been reasoned about
+as if it were a fact.
 
 ## Related
 
