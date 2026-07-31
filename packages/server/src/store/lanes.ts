@@ -352,3 +352,65 @@ export function boardWarnings(
   }
   return out;
 }
+
+/**
+ * In-flight states a departed seat must not keep owning (ADR 196). `awaiting_acceptance` /
+ * `ready_for_review` keep the owner name so outcome acceptance can still derive verified-ness.
+ */
+const RELEASE_ON_DEPART = "('claimed','active','blocked')" as const;
+
+/**
+ * Release a seat's in-flight lanes back to `open` (ADR 196 / open ⟺ unowned). Used when the seat
+ * soft-leaves the roster so the board cannot assert ownership for a name every list filter drops.
+ * Returns the released lane ids + prior state for logging/audit.
+ */
+export function releaseInFlightClaimsForSeat(
+  db: Database,
+  teamId: string,
+  seatName: string,
+  now: number = Date.now(),
+): { id: string; state_before: string }[] {
+  const rows = db
+    .prepare<[string, string], { id: string; state: string }>(
+      `SELECT id, state FROM lanes
+       WHERE team_id = ? AND owner_seat = ? AND state IN ${RELEASE_ON_DEPART}`,
+    )
+    .all(teamId, seatName);
+  if (rows.length === 0) return [];
+  const upd = db.prepare(
+    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
+     WHERE team_id = ? AND id = ?`,
+  );
+  db.transaction(() => {
+    for (const r of rows) upd.run(now, teamId, r.id);
+  })();
+  return rows.map((r) => ({ id: r.id, state_before: r.state }));
+}
+
+/**
+ * Sweep in-flight lanes whose owner has already soft-left (ADR 196). Clears historical ghosts
+ * left by pre-fix `leaveMember` calls; the reaper runs this every tick.
+ */
+export function releaseDepartedSeatClaims(
+  db: Database,
+  now: number = Date.now(),
+): { team_id: string; seat: string; lane: string; state_before: string }[] {
+  const rows = db
+    .prepare<[], { lane: string; team_id: string; seat: string; state_before: string }>(
+      `SELECT l.id AS lane, l.team_id, l.owner_seat AS seat, l.state AS state_before
+       FROM lanes l
+       JOIN members m ON m.team_id = l.team_id AND m.name = l.owner_seat
+       WHERE m.left_at IS NOT NULL
+         AND l.state IN ${RELEASE_ON_DEPART}`,
+    )
+    .all();
+  if (rows.length === 0) return [];
+  const upd = db.prepare(
+    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
+     WHERE team_id = ? AND id = ?`,
+  );
+  db.transaction(() => {
+    for (const r of rows) upd.run(now, r.team_id, r.lane);
+  })();
+  return rows;
+}

@@ -1,7 +1,8 @@
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
 import { appendAudit } from '../store/audit.js';
-import { getMemberById, reapStaleObservers } from '../store/members.js';
+import { releaseDepartedSeatClaims } from '../store/lanes.js';
+import { getMemberById, reapExcessIdleObservers, reapStaleObservers } from '../store/members.js';
 import { hasLivePresence, reapStale } from '../store/presence.js';
 import { expireRequests } from '../store/requests.js';
 import type { RequestRow } from '../store/requests.js';
@@ -65,6 +66,13 @@ export function startReaper(ctx: Ctx): () => void {
       log.info({ msg: 'reap_wake_leases_expired', count: expiredLeases.length });
     }
 
+    // ADR 196: release in-flight lanes still owned by soft-removed seats (pre-fix ghosts + any
+    // leave path that skipped the store composition).
+    const releasedClaims = releaseDepartedSeatClaims(ctx.db, now);
+    if (releasedClaims.length > 0) {
+      log.info({ msg: 'reap_departed_claims', count: releasedClaims.length });
+    }
+
     // Reap idle observer seats (ADR 064) so the auto-provisioned `web-xxxx` seats don't accumulate.
     const reapedObservers = reapStaleObservers(
       ctx.db,
@@ -73,6 +81,16 @@ export function startReaper(ctx: Ctx): () => void {
     );
     if (reapedObservers.length > 0) {
       log.info({ msg: 'reap_observers', count: reapedObservers.length });
+    }
+
+    // ADR 196: concurrent idle-observer cap — TTL is the long-stop; the cap bounds peak churn.
+    const reapedExcess = reapExcessIdleObservers(
+      ctx.db,
+      ctx.config.observerIdleCap,
+      now - ctx.config.presenceTimeoutMs,
+    );
+    if (reapedExcess.length > 0) {
+      log.info({ msg: 'reap_observers_excess', count: reapedExcess.length });
     }
 
     const removed = reapStale(ctx.db, ctx.config.presenceTimeoutMs);
