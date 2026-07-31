@@ -1079,6 +1079,11 @@
 .lc-gl-label.is-expanded .lc-gl-label__detail {
   display: inline-flex;
 }
+/* The detail's leading rule now lives in the plate, ahead of the provider icon —
+   so the first segment supplies its own gap off that icon. */
+.lc-gl-label__detail > .lc-gl-label__seg:first-child {
+  margin-left: 0.45em;
+}
 .lc-gl-label__seg {
   max-width: 4.5rem;
   overflow: hidden;
