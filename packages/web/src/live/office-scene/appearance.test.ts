@@ -117,3 +117,59 @@ describe('the identity read (load-bearing)', () => {
     expect(a.cut).toBe(h.cut);
   });
 });
+
+describe('presentation', () => {
+  const names = Array.from({ length: 400 }, (_, i) => `person${i}`);
+
+  it('never gives a femme character facial hair', () => {
+    for (const name of names) {
+      const look = appearanceOf({ name, kind: 'human' });
+      if (look.presents === 'femme') expect(look.facialHair).toBe('none');
+    }
+  });
+
+  it('puts long hair on the floor — the whole point of the axis', () => {
+    const LONG = new Set(['bob', 'long', 'ponytail', 'bun']);
+    const withLong = names.filter((n) => LONG.has(appearanceOf({ name: n, kind: 'human' }).hair));
+    // Comfortably more than a rounding error: the complaint was that NOBODY had long hair.
+    expect(withLong.length).toBeGreaterThan(names.length * 0.25);
+  });
+
+  it('draws every option from every palette — a weak hash silently halves the wardrobe', () => {
+    // This is a regression test for a measured bug, not a theoretical one: with FNV's single-shift
+    // finalizer the salt streams stayed correlated and `hoodie` came up ZERO times in 400 names.
+    const looks = names.map((n) => appearanceOf({ name: n, kind: 'human' }));
+    expect(new Set(looks.map((l) => l.cut)).size).toBe(5);
+    expect(new Set(looks.map((l) => l.hat)).size).toBe(4);
+    expect(new Set(looks.map((l) => l.accessory)).size).toBe(4);
+    expect(new Set(looks.map((l) => l.skin)).size).toBeGreaterThan(14);
+    expect(new Set(looks.map((l) => l.hair)).size).toBeGreaterThan(6);
+  });
+
+  it('offers all three presentations, so the floor is not two tidy camps', () => {
+    const seen = new Set(names.map((n) => appearanceOf({ name: n, kind: 'human' }).presents));
+    expect(seen).toEqual(new Set(['femme', 'masc', 'neutral']));
+  });
+
+  it('keeps beards on the floor for the members who can have them', () => {
+    const bearded = names.filter((n) => appearanceOf({ name: n, kind: 'human' }).facialHair !== 'none');
+    expect(bearded.length).toBeGreaterThan(20);
+  });
+
+  it('leaves everything that is not gendered running free of the axis', () => {
+    // Skin, tops, trousers and hats must not sort by presentation — that would turn a wardrobe axis
+    // into a stereotype generator.
+    const femme = names.filter((n) => appearanceOf({ name: n, kind: 'human' }).presents === 'femme');
+    const masc = names.filter((n) => appearanceOf({ name: n, kind: 'human' }).presents === 'masc');
+    const skins = (list: string[]) => new Set(list.map((n) => appearanceOf({ name: n, kind: 'human' }).skin));
+    const cuts = (list: string[]) => new Set(list.map((n) => appearanceOf({ name: n, kind: 'human' }).cut));
+    expect(skins(femme).size).toBeGreaterThan(8);
+    expect(skins(masc).size).toBeGreaterThan(8);
+    expect(cuts(femme).size).toBe(5);
+    expect(cuts(masc).size).toBe(5);
+  });
+
+  it('still gives agents no facial hair whatever they present as', () => {
+    for (const name of names) expect(appearanceOf({ name, kind: 'agent' }).facialHair).toBe('none');
+  });
+});

@@ -22,12 +22,25 @@
 
 import type { OfficeNode } from './types';
 
-/** FNV-1a, salted — one independent stable stream of choices per member. */
+/**
+ * FNV-1a, salted, with a proper avalanche — one independent stable stream of choices per member.
+ *
+ * The finalizer is load-bearing and used not to be. With FNV's single `h ^= h >>> 15`, the streams
+ * for different salts stayed correlated on structured names, and `Math.floor(hash × len)` collapsed
+ * into a few buckets: measured over 400 names, the `hoodie` top cut came up **zero times** and
+ * `long` sleeves seven, while `stripe`/`vest` took most of the floor. Every "pick from a list" in
+ * this file was quietly drawing from about half its palette.
+ *
+ * `fmix32` (murmur3's finalizer) is what makes the salts genuinely independent. Note this **changes
+ * everyone's existing look** — it is a reshuffle, not a redesign, and the wardrobe was always
+ * "stable per name", never "these specific people look like this".
+ */
 function hash(name: string, salt: number): number {
-  let h = (2166136261 ^ salt) >>> 0;
+  let h = (2166136261 ^ Math.imul(salt + 1, 0x9e3779b1)) >>> 0;
   for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
-  h ^= h >>> 15;
-  return (h >>> 0) / 4294967296;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 /** Pick from a list by a salted hash of the name — stable forever, uncorrelated across salts. */
 function pick<T>(list: readonly T[], name: string, salt: number): T {
@@ -113,6 +126,30 @@ export type FacialHair = 'none' | 'stubble' | 'moustache' | 'goatee' | 'beard';
 /** Weighted toward `none` — a floor where everyone has a beard is as uniform as one where nobody does. */
 const FACIAL_HAIR: readonly FacialHair[] = ['none', 'none', 'none', 'none', 'stubble', 'moustache', 'goatee', 'beard'];
 
+/**
+ * How a member presents. This exists for one reason: the floor read as entirely male (nick,
+ * 2026-07-30, "none of our characters or members have long hair/look like a woman"), and the two
+ * things that fix that pull in opposite directions unless something coordinates them — hair long
+ * enough to read as long, and **no facial hair on a femme character**.
+ *
+ * Picking hair and beard from independent hashes (which is what the rest of this file does, on
+ * purpose) cannot express that constraint: it will cheerfully deal a beard to a ponytail. So this is
+ * the one axis the wardrobe coordinates around, and it stays deliberately coarse — presentation is
+ * hair and facial hair, nothing else. Skin, top, trousers, shoes, hats, glasses and headphones all
+ * keep running free off their own salts, because none of those belong to a gender.
+ *
+ * `neutral` is a real third option rather than a rounding error: those members draw from the whole
+ * hair pool and can wear stubble, which is what stops the floor sorting into two tidy camps.
+ */
+export type Presents = 'femme' | 'masc' | 'neutral';
+const PRESENTS: readonly Presents[] = ['femme', 'femme', 'femme', 'masc', 'masc', 'masc', 'neutral'];
+
+/** Long silhouettes. A femme character draws from these, so "looks like a woman" is legible at 30px
+ *  — where the ONLY thing that reads is the shape of the head against the shoulders. */
+const FEMME_HAIR: readonly HairStyle[] = ['bob', 'long', 'ponytail', 'bun', 'long', 'bob', 'afro'];
+/** Short and mid silhouettes. `side` and `short` carry most of this, with a bald/buzz minority. */
+const MASC_HAIR: readonly HairStyle[] = ['buzz', 'short', 'side', 'bald', 'short', 'side', 'afro'];
+
 export type Hat = 'none' | 'cap' | 'beanie' | 'band';
 /** Hats are the rarest thing on the floor, so they stay a small delight rather than a uniform. */
 const HATS: readonly Hat[] = ['none', 'none', 'none', 'none', 'none', 'cap', 'beanie', 'band'];
@@ -152,6 +189,10 @@ const AGENT_ACCESSORIES: readonly Accessory[] = ['none', 'none', 'none', 'none',
  * identity hue so the accessory reads as *a thing they own*, not part of their colour signature. */
 const ACCESSORY_COLORS = ['#d1503f', '#e08a43', '#e1ad01', '#2f8f7a', '#3f6fa8', '#8a5fd6', '#c85a7a', '#4f8a3a'] as const;
 
+/** Neutral presentation stops at stubble — a full beard reads as a definite choice, and `neutral`
+ *  is deliberately the option that does not make one. */
+const NEUTRAL_FACIAL_HAIR: readonly FacialHair[] = ['none', 'none', 'none', 'stubble'];
+
 /** A gentle per-person smile for humans — some beam wide, some just turn the corners up. */
 export type Smile = 'soft' | 'wide';
 const SMILES: readonly Smile[] = ['soft', 'soft', 'wide'];
@@ -175,6 +216,8 @@ export interface Appearance {
   accessoryColor: string;
   /** How a human smiles (agents smile through their visor instead). */
   smile: Smile;
+  /** Presentation — coordinates hair length with facial hair. See {@link Presents}. */
+  presents: Presents;
 }
 
 /**
@@ -184,7 +227,11 @@ export interface Appearance {
  */
 export function appearanceOf(node: Pick<OfficeNode, 'name' | 'kind'>): Appearance {
   const { name, kind } = node;
-  const hair = pick(HAIR_STYLES, name, 3);
+  const presents = pick(PRESENTS, name, 14);
+  const hair =
+    presents === 'femme' ? pick(FEMME_HAIR, name, 3)
+    : presents === 'masc' ? pick(MASC_HAIR, name, 3)
+    : pick(HAIR_STYLES, name, 3);
   const cut = pick(TOP_CUTS, name, 8);
   const skin = pick(SKINS, name, 1);
   return {
@@ -196,7 +243,12 @@ export function appearanceOf(node: Pick<OfficeNode, 'name' | 'kind'>): Appearanc
     hairColor: pickContrasting(HAIR_COLORS, name, 4, skin),
     // Agents wear a visor across the face, so facial hair would have nowhere to read — and a bearded robot
     // muddies the one tell the office cannot afford to lose.
-    facialHair: kind === 'agent' ? 'none' : pick(FACIAL_HAIR, name, 5),
+    // Agents wear a visor, so facial hair has nowhere to read; a femme character never has any. The
+    // second rule is why `presents` exists at all — independent hashes deal beards to ponytails.
+    facialHair:
+      kind === 'agent' || presents === 'femme' ? 'none'
+      : presents === 'neutral' ? pick(NEUTRAL_FACIAL_HAIR, name, 5)
+      : pick(FACIAL_HAIR, name, 5),
     hat: pick(HATS, name, 6),
     hatColor: pickContrasting(HAT_COLORS, name, 7, skin),
     cut,
@@ -207,5 +259,6 @@ export function appearanceOf(node: Pick<OfficeNode, 'name' | 'kind'>): Appearanc
     accessory: pick(kind === 'agent' ? AGENT_ACCESSORIES : ACCESSORIES, name, 11),
     accessoryColor: pick(ACCESSORY_COLORS, name, 12),
     smile: pick(SMILES, name, 13),
+    presents,
   };
 }

@@ -104,6 +104,15 @@ export interface CharacterOpts {
   /** Scene clock (s) and the member's seed — the face's own small life: a blink, an LED pulse. */
   t: number;
   seed: number;
+  /**
+   * Override the wardrobe instead of hashing it from the name.
+   *
+   * For members the hash is the whole point — a name is all the identity the floor has. The
+   * receptionist is the exception: she is a *designed* character, so leaving her look to a hash meant
+   * nobody had ever actually looked at the combination it produced (it dealt gold skin under dark red
+   * long hair, which closed around her face into one oval and read, fairly, as a seal).
+   */
+  look?: Appearance;
 }
 
 /**
@@ -131,7 +140,7 @@ export function drawCharacter(
   const { skel: k, node, dir, size } = o;
   const px = projector(o.lx, o.ly, dir, fit, size, o.heading);
   const u = fit.scale * size; // one logical unit, in screen px, at this character's size
-  const look = appearanceOf(node);
+  const look = o.look ?? appearanceOf(node);
   const acc = node.color; // the identity hue — the top, and only the top
   const accDark = hslL(acc, 0.72);
 
@@ -319,12 +328,48 @@ function drawHead(
    */
   const face = (dx: number, dy: number): Pt => ({ x: hd.p.x + dx * r, y: hd.p.y + dy * r });
 
-  // ── hair behind the skull ── (kept close to the skull: at r×1.5 an afro was wider than the torso)
-  if (look.hair === 'afro') disc(ctx, at(0, 1.5, -1), r * 1.22, r * 1.18, hc);
-  else if (look.hair === 'long') disc(ctx, at(0, -4, -2), r * 0.98, r * 1.16, hc);
-  else if (look.hair === 'bob') disc(ctx, at(0, -1.5, -2), r * 1.06, r * 1.02, hc);
-  else if (look.hair === 'ponytail') disc(ctx, at(0, -2, -7), r * 0.42, r * 0.72, hc);
-  else if (look.hair === 'bun') disc(ctx, at(0, R + 2, -2), r * 0.46, r * 0.42, hc);
+  // ── hair behind the skull ──
+  //
+  // In SCREEN space, for the same reason the face is billboarded (see below): "long hair falls to the
+  // shoulders" is a silhouette against the torso, and the 2:1 iso sends character-space −z down-LEFT,
+  // so a mass offset that way slides off the side of the head instead of hanging behind it.
+  //
+  // These masses used to top out around r×1.16 — barely wider than the skull — which is why not one
+  // member on the floor read as having long hair (nick, 2026-07-30). At 30px the ONLY thing that
+  // carries hair length is how far the mass extends past the jaw, so `long` and `bob` now genuinely
+  // reach down over the shoulders. Drawn before the skull, so the face still sits clean on top.
+  const backHair = (dx: number, dy: number, rx: number, ry: number): void =>
+    disc(ctx, { x: hd.p.x + dx * r, y: hd.p.y + dy * r }, r * rx, r * ry, hc);
+
+  /**
+   * Where the hair stops, in screen px below the head centre — anchored to the SHOULDER, not to a
+   * multiple of the head radius.
+   *
+   * Sizing the fall off `r` was the bug behind "the receptionist looks like a seal": a mass 1.75×
+   * the head radius hanging below the skull is fine when you can see the whole body for scale, and
+   * reads as one rounded blob when the body is hidden behind a desk. Hair falls *to the shoulders* —
+   * so ask the skeleton where they are. It also keeps long hair honest across sitting, standing and
+   * walking, where the head-to-shoulder distance genuinely changes.
+   */
+  const shoulderDrop = Math.max(r * 0.5, (px(k.shoulder[0]).p.y + px(k.shoulder[1]).p.y) / 2 - hd.p.y);
+
+  if (look.hair === 'afro') backHair(0, -0.05, 1.24, 1.2);
+  else if (look.hair === 'long') {
+    // Centre it halfway to the shoulder and give it half that height, so the mass ENDS at the
+    // shoulder line rather than continuing down over the torso.
+    const fall = shoulderDrop * 0.62;
+    disc(ctx, { x: hd.p.x, y: hd.p.y + fall }, r * 1.02, Math.max(r * 0.9, fall + r * 0.55), hc);
+    backHair(0, 0.06, 1.1, 1.05); // and the mass around the skull itself
+  } else if (look.hair === 'bob') {
+    const fall = shoulderDrop * 0.34;
+    disc(ctx, { x: hd.p.x, y: hd.p.y + fall }, r * 1.16, Math.max(r * 0.95, fall + r * 0.6), hc);
+  } else if (look.hair === 'ponytail') {
+    backHair(0.1, 0.05, 1.08, 1.04); // gathered at the crown
+    backHair(0.62, 0.85, 0.34, 0.9); // the tail, hanging off to one side
+  } else if (look.hair === 'bun') {
+    backHair(0, 0.05, 1.06, 1.02);
+    disc(ctx, { x: hd.p.x, y: hd.p.y - r * 0.92 }, r * 0.46, r * 0.42, hc); // the knot on top
+  }
 
   // ── the skull ──
   disc(ctx, hd.p, r, r * 0.98, look.skin);
@@ -359,6 +404,16 @@ function drawHead(
     crown(hc, DROP[look.hair]);
     // A side parting: a sweep of hair across one side of the brow, breaking the symmetry.
     if (look.hair === 'side') disc(ctx, at(R * 0.42, 4.5, R * 0.34), r * 0.46, r * 0.3, hc);
+    // Face-framing strands for the long styles: a sliver of hair down each side of the face, IN FRONT
+    // of the skull. This is what sells long hair from the front — without it a long back mass just
+    // looks like a big head, because from this angle you cannot see behind the skull at all.
+    if (look.hair === 'long' || look.hair === 'bob') {
+      // Strands stop at the shoulder too — a strand that outruns the mass behind it reads as a beard.
+      const strand = Math.max(r * 0.5, shoulderDrop * (look.hair === 'long' ? 0.5 : 0.32));
+      for (const side of [-1, 1]) {
+        disc(ctx, { x: hd.p.x + side * r * 0.82, y: hd.p.y + strand * 0.5 }, r * 0.26, strand * 0.62, hc);
+      }
+    }
   }
 
   // ── the hat, over the hair ──

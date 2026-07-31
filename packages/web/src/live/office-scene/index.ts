@@ -1,10 +1,13 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
+import { roomTone, type LifeContext } from '../sound';
+import { identityMeta, plateModel, shortLaneState, shortSurface, shortWorkTitle } from '../presenceLabel';
 import { createActors, type Actors } from './actors';
 import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
+import { createReceptionist, stepReceptionist } from './receptionist';
 import { fitFloor, project, type Fit, type Pt } from './iso';
-import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD } from './layout';
+import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
 import { assignSeats, type Placement } from './seating';
 import {
@@ -115,6 +118,16 @@ export interface OfficeOptions {
    * running while the tab is hidden or headless, DPR is pinned to 1 for a deterministic capture size,
    * and suspend requests are ignored. Only `/broadcast` passes it — see ./broadcast.ts. */
   broadcast?: boolean;
+  /**
+   * `/live` only: labels accept pointer/hover so the identity+work tip can open. Broadcast keeps
+   * labels non-interactive (no cursor on a stream capture).
+   */
+  interactiveLabels?: boolean;
+  /**
+   * Hybrid work cues under nameplates (spec §2). When false, always-on work lines are omitted — use
+   * the in-panel WorkStack fallback instead.
+   */
+  showWorkCues?: boolean;
 }
 
 export function mountOffice(
@@ -124,6 +137,8 @@ export function mountOffice(
   options: OfficeOptions = {},
 ): OfficeHandle {
   const broadcast = options.broadcast === true;
+  const interactiveLabels = options.interactiveLabels === true;
+  const showWorkCues = options.showWorkCues !== false;
   const dpr = officeDpr(broadcast, DPR_CAP);
 
   const canvas = document.createElement('canvas');
@@ -144,6 +159,8 @@ export function mountOffice(
   const actors: Actors = createActors();
   /** The office dog (pet.ts): asleep in the baked frame; stirred by the ambient scheduler below. */
   const pet = createPet();
+  /** The front-desk receptionist (receptionist.ts) — staff, not roster; asleep when the room is empty. */
+  const recep = createReceptionist();
   /** The scene clock, in seconds. Everything that animates on its own — breathing, the typing bursts —
    * reads it, so it advances only while the loop runs and a rested office holds its frame. */
   let clock = 0;
@@ -243,7 +260,7 @@ export function mountOffice(
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
     const poses = actors.poses();
-    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv, pet, actors.sceneFx());
+    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv, pet, actors.sceneFx(), recep);
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
@@ -304,7 +321,10 @@ export function mountOffice(
 
   /** Create/remove label elements + set their text, and position them from `headMap`. Small (nook/strip)
    * actors are left unlabelled — their names bunch at a glance and the roster panel is the name source of
-   * truth; the "+N" pills and location carry the secondary read. */
+   * truth; the "+N" pills and location carry the secondary read.
+   *
+   * Present members get one unified nameplate chip (name · harness · model) and, when hybrid cues
+   * are on, a soft 3–4 word work whisper underneath — see presence-chrome design 2026-07-30. */
   function syncLabels(headMap: Map<string, Pt>, nodes: Map<string, OfficeNode>, poses: Map<string, Pose>) {
     const seen = new Set<string>();
     for (const [name, head] of headMap) {
@@ -315,23 +335,84 @@ export function mountOffice(
       if (!el) {
         el = document.createElement('div');
         el.className = 'lc-gl-label';
+        if (interactiveLabels) el.tabIndex = 0;
         labelHost.appendChild(el);
         labels.set(name, el);
       }
       el.textContent = '';
-      const nameEl = document.createElement('span');
-      nameEl.className = 'lc-gl-label__name';
-      // The same dot the roster panel leads with, off the same posture: green working · amber idle ·
-      // amber-dim away · faint offline. It used to key off raw `presence`, which is only *connectedness* —
-      // so an idle member sat at a desk under a green dot and read as hard at work.
+      el.style.pointerEvents = interactiveLabels ? 'auto' : 'none';
+
+      const present = node.presence !== 'offline';
+      const meta = identityMeta({
+        surface: node.surface,
+        model: node.model,
+        role: node.role,
+      });
+
+      // ONE compact plate: dot + name | model, divided by a hairline rule. Third shape for this
+      // nameplate, and the reasoning that survived all three: harness stays on hover (the least
+      // surprising field), but the model lives ON the line with the name — a second line under the
+      // pill read as spilled text (nick), and a second chip read as clutter (nick again). One small
+      // pill with a real divider is the version that reads as a single made object.
+      const plate = document.createElement('span');
+      plate.className = 'lc-gl-label__plate';
       const dot = document.createElement('span');
       dot.className = `lc-gl-label__dot lc-gl-label__dot--${DOT_STATE[node.posture]}`;
-      nameEl.appendChild(dot);
-      nameEl.appendChild(document.createTextNode(name));
-      el.appendChild(nameEl);
-      // The member's status/activity is no longer a persistent caption here (it used to render as one
-      // ultra-wide, never-fading line). It now surfaces as an ephemeral speech bubble on each act (below);
-      // the roster panel remains the always-on source of truth for who's doing what.
+      plate.appendChild(dot);
+      const who = document.createElement('span');
+      who.className = 'lc-gl-label__who';
+      who.textContent = name;
+      plate.appendChild(who);
+      // Harness, then model, each behind its own rule. The harness came back after it turned out
+      // "which harness is that seat on" is a thing you want at a glance, not on hover — and it is
+      // unambiguous again now that a Claude model renders as `fable 5` rather than `claude fable`.
+      const segments = present ? [shortSurface(node.surface), plateModel(node.model)] : [];
+      for (const seg of segments) {
+        if (!seg) continue;
+        const divider = document.createElement('span');
+        divider.className = 'lc-gl-label__rule';
+        divider.setAttribute('aria-hidden', 'true');
+        plate.appendChild(divider);
+        const segEl = document.createElement('span');
+        segEl.className = 'lc-gl-label__model';
+        segEl.textContent = seg;
+        plate.appendChild(segEl);
+      }
+      el.appendChild(plate);
+
+      const chip = shortLaneState(node.laneState);
+      const said = node.workSource === 'status';
+      const showWork =
+        showWorkCues && present && node.workTitle != null && node.workTitle.length > 0;
+      if (showWork) {
+        // Soft whisper under the plate — whole words only; state/said/+N live in the hover tip.
+        const workEl = document.createElement('span');
+        workEl.className = `lc-gl-label__work${chip === 'blocked' ? ' is-blocked' : ''}`;
+        workEl.textContent = shortWorkTitle(node.workTitle!);
+        el.appendChild(workEl);
+      }
+
+      if (interactiveLabels && (meta.title || node.workTitle)) {
+        const tip = document.createElement('div');
+        tip.className = 'lc-gl-label__tip';
+        tip.setAttribute('role', 'tooltip');
+        const tipLines = [
+          meta.title || null,
+          node.workTitle
+            ? `${node.workTitle}${chip ? ` (${chip})` : ''}${said ? ' · said' : ''}${
+                node.moreLanes > 0 ? ` · +${node.moreLanes}` : ''
+              }`
+            : null,
+        ].filter(Boolean);
+        tip.textContent = tipLines.join('\n');
+        el.appendChild(tip);
+        el.title = '';
+      } else if (meta.title) {
+        el.title = meta.title;
+      } else {
+        el.title = '';
+      }
+
       el.classList.toggle('is-offline', node.presence !== 'online');
       el.style.transform = `translate(-50%, -100%) translate(${head.x}px, ${head.y}px)`;
     }
@@ -570,7 +651,7 @@ export function mountOffice(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, pet, actors.sceneFx());
+    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, pet, actors.sceneFx(), recep);
     drawCues();
     positionLabels(anchors.heads);
   }
@@ -631,6 +712,11 @@ export function mountOffice(
     const walking = actors.step(dt);
     if (walking) noticePassersBy(); // a sleeping dog wakes to watch whoever is walking past it
     const petActive = stepPet(pet, dt); // false once it's asleep — the pet never keeps the room awake
+    // The receptionist wakes for a present member and looks up while any check-in beat holds. Like
+    // the pet, she never keeps an empty room awake: asleep returns false and the room bakes still.
+    const anyonePresent = [...actors.nodes().values()].some((n) => n.presence !== 'offline');
+    const recepActive = stepReceptionist(recep, dt, anyonePresent, actors.checkInHolds() > 0);
+    pushOccupancy(now);
     for (let i = cues.length - 1; i >= 0; i--) {
       const c = cues[i]!;
       c.t += dt / CUE_SECS;
@@ -642,13 +728,13 @@ export function mountOffice(
     // freezing the instant a long walk ends (#5).
     if (walking || cues.length) lastActive = now;
     const alive = living();
-    if (walking || alive || petActive) {
+    if (walking || alive || petActive || recepActive) {
       drawDynamic();
     } else {
-      if (wasActive) bake(); // walkers just re-seated (or the pet curled up) — refresh the buffer
+      if (wasActive) bake(); // walkers just re-seated (or the pet/receptionist dozed off) — refresh
       drawStatic();
     }
-    wasActive = walking || alive || petActive;
+    wasActive = walking || alive || petActive || recepActive;
     // Keep animating while anything moves *or* while the room is alive (someone at a desk breathing and
     // typing — capped to ~20fps above). When the last walk/cue clears and nobody is working, we draw one
     // final settled frame and park: the frame stays on-canvas until the next act or presence change.
@@ -686,6 +772,63 @@ export function mountOffice(
     const moving: { lx: number; ly: number }[] = [];
     for (const pose of actors.poses().values()) if (pose.moving) moving.push({ lx: pose.lx, ly: pose.ly });
     if (moving.length) petNotice(pet, moving);
+  }
+
+  // ── occupancy → room tone ──────────────────────────────────────────────────────────────────────
+  // The scene tells the sound engine who is near whom, so the murmur only plays when two members
+  // actually share a zone and pans toward them (life/sound design §2.2). One-way and throttled: the
+  // engine never reads the scene, and a push every couple of seconds is plenty for a layer whose
+  // events are 2.5–8s apart.
+  let occAt = 0;
+  function pushOccupancy(now: number): void {
+    if (now - occAt < 2000) return;
+    occAt = now;
+    const toX = (lx: number, ly: number): number => {
+      const sx = project(lx, ly, fit).x;
+      return Math.max(-1, Math.min(1, (sx / width) * 2 - 1));
+    };
+    // Group present members by shared zone: a pod (desk slots), a leisure zone, or the nook.
+    const zones = new Map<string, { lx: number; ly: number }[]>();
+    for (const [name, pl] of placements) {
+      const node = actors.nodes().get(name);
+      if (!node || node.presence === 'offline') continue;
+      let zone: string | null = null;
+      let at: { lx: number; ly: number } | null = null;
+      if (pl.kind === 'desk') {
+        const slot = DESK_SLOTS[pl.slot];
+        if (slot) {
+          zone = `pod-${slot.pod}`;
+          at = { lx: slot.lx, ly: slot.ly };
+        }
+      } else if (pl.kind === 'leisure') {
+        const spot = LEISURE_SPOTS[pl.spot];
+        if (spot) {
+          zone = spot.zone;
+          at = { lx: spot.lx, ly: spot.ly };
+        }
+      } else if (pl.kind === 'nook') {
+        zone = 'lounge';
+        at = { lx: 700, ly: 190 };
+      }
+      if (zone && at) {
+        const list = zones.get(zone) ?? [];
+        list.push(at);
+        zones.set(zone, list);
+      }
+    }
+    const pairs: { x: number }[] = [];
+    for (const members of zones.values()) {
+      if (members.length >= 2) {
+        const mid = members.slice(0, 2);
+        pairs.push({ x: toX((mid[0]!.lx + mid[1]!.lx) / 2, (mid[0]!.ly + mid[1]!.ly) / 2) });
+      }
+    }
+    const ctx: LifeContext = {
+      pairs,
+      // An asleep dog is a quiet dog — it neither pads nor jingles.
+      dog: pet.mode === 'sleep' ? null : { x: toX(pet.lx, pet.ly), walking: pet.mode === 'walk' },
+    };
+    roomTone.setOccupancy(ctx);
   }
 
   /** Open-floor spots just beside each working member's chair — where the pet sits to supervise. */

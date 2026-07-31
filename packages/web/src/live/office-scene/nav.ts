@@ -1,6 +1,7 @@
 import { FLOOR } from './iso';
 import {
   BOOKSHELVES,
+  FRONT_DESK,
   CHAIR_OFF,
   CHAIR_SIZE,
   DESK_D,
@@ -15,8 +16,6 @@ import {
   PLANTS,
   PRINTER,
   RECEPTION,
-  SHELF_DEEP,
-  SHELF_LONG,
 } from './layout';
 
 /**
@@ -83,10 +82,14 @@ function solidRects(): Rect[] {
   out.push(rect(RECEPTION.table.lx, RECEPTION.table.ly, LOUNGE.table.w, LOUNGE.table.d));
   out.push(rect(RECEPTION.plant.lx, RECEPTION.plant.ly, 26, 26));
   out.push(rect(PRINTER.lx, PRINTER.ly, PRINTER.w, PRINTER.d));
+  // The front desk blocks like the bookshelves do — a counter you can walk through is a rug.
+  out.push(rect(FRONT_DESK.lx, FRONT_DESK.ly, FRONT_DESK.long, FRONT_DESK.deep));
   for (const p of PLANTS) out.push(rect(p.lx, p.ly, 26, 26));
   for (const s of BOOKSHELVES) {
     const sn = s.dir === 'S' || s.dir === 'N';
-    out.push(rect(s.lx, s.ly, sn ? SHELF_LONG : SHELF_DEEP, sn ? SHELF_DEEP : SHELF_LONG));
+    // Per-shelf footprint — the units are no longer one repeated box, and a blocker sized off the
+    // old shared constants would let people walk through the wide ones.
+    out.push(rect(s.lx, s.ly, sn ? s.long : s.deep, sn ? s.deep : s.long));
   }
   // entrance door posts (the doorway between them stays open) — the door runs along the back-left wall,
   // so the posts straddle it in ly with the plane set back in −lx.

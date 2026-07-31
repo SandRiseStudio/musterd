@@ -15,6 +15,12 @@ function node(name: string, presence: OfficeNode['presence'] = 'online'): Office
     state: null,
     color: 'hsl(200, 60%, 60%)',
     role: '',
+    surface: null,
+    model: null,
+    workTitle: null,
+    workSource: null,
+    laneState: null,
+    moreLanes: 0,
   };
 }
 function world(nodes: OfficeNode[]) {
@@ -750,5 +756,73 @@ describe('neighbour conversations', () => {
     const [a, b] = actors.deskNeighbours()[0]!;
     actors.deskChat(a, b);
     expect(actors.deskNeighbours().some(([x, y]) => x === a || y === a)).toBe(false);
+  });
+});
+
+describe('the check-in beat', () => {
+  it('does NOT fire for members already present on the first snapshot', () => {
+    // The first reconcile is how a page load seats the room. Everyone in it is "new" to the client
+    // but none of them just arrived — without this gate a refresh replays the whole ritual and you
+    // get the roster queueing at the door because somebody hit reload.
+    const actors = createActors();
+    const w = world([node('Ada'), node('Bo'), node('Cy')]);
+    actors.setHomes(w.placements, w.byName, false);
+    expect(actors.pendingCheckIns()).toHaveLength(0);
+  });
+
+  it('fires exactly once for a member who appears in a later update', () => {
+    const actors = createActors();
+    const w1 = world([node('Ada')]);
+    actors.setHomes(w1.placements, w1.byName, false);
+    const w2 = world([node('Ada'), node('Bo')]);
+    actors.setHomes(w2.placements, w2.byName, true);
+    expect(actors.pendingCheckIns()).toEqual(['Bo']);
+  });
+
+  it('checks simultaneous arrivals in at their own marks, in parallel', () => {
+    const actors = createActors();
+    const w1 = world([node('Ada')]);
+    actors.setHomes(w1.placements, w1.byName, false);
+    const w2 = world([node('Ada'), node('Bo'), node('Cy'), node('Dev')]);
+    actors.setHomes(w2.placements, w2.byName, true);
+    const marks = actors.pendingCheckIns().map((n) => actors.checkInMark(n));
+    expect(new Set(marks).size).toBe(marks.length); // distinct marks, not a queue
+  });
+
+  it('pauses at the mark — the receptionist sees a hold while the beat plays', () => {
+    const actors = createActors();
+    const w1 = world([node('Ada')]);
+    actors.setHomes(w1.placements, w1.byName, false);
+    const w2 = world([node('Ada'), node('Bo')]);
+    actors.setHomes(w2.placements, w2.byName, true);
+    let sawHold = false;
+    for (let i = 0; i < 400 && actors.active(); i++) {
+      actors.step(0.05);
+      if (actors.checkInHolds() > 0) sawHold = true;
+    }
+    expect(sawHold).toBe(true);
+  });
+
+  it('never strands an arrival at the mark — the beat ends and they reach their seat', () => {
+    const actors = createActors();
+    const w1 = world([node('Ada')]);
+    actors.setHomes(w1.placements, w1.byName, false);
+    const w2 = world([node('Ada'), node('Bo')]);
+    actors.setHomes(w2.placements, w2.byName, true);
+    let guard = 0;
+    while (actors.active() && guard++ < 2000) actors.step(0.05);
+    expect(actors.pendingCheckIns()).toHaveLength(0);
+    const home = homePoses(w2.placements, w2.byName).get('Bo')!;
+    const pose = actors.poses().get('Bo')!;
+    expect(Math.hypot(pose.lx - home.lx, pose.ly - home.ly)).toBeLessThan(2);
+  });
+
+  it('an away arrival (small, into the nook) skips the ceremony', () => {
+    const actors = createActors();
+    const w1 = world([node('Ada')]);
+    actors.setHomes(w1.placements, w1.byName, false);
+    const w2 = world([node('Ada'), node('Bo', 'away')]);
+    actors.setHomes(w2.placements, w2.byName, true);
+    expect(actors.pendingCheckIns()).toHaveLength(0);
   });
 });

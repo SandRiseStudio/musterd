@@ -44,6 +44,23 @@ const POOL: Mock[] = [
   { name: 'Ivy', kind: 'human', activity: 'working', state: 'designing the character rig' },
 ];
 
+/**
+ * Harness + model per fixture member. Deliberately varied, including a long id and a `null` model:
+ * the nameplate's second line has to survive both the widest label it will ever see and the seat
+ * that has nothing to report, and neither case is reachable if every fixture member is identical.
+ */
+const FIXTURE_IDENTITY: Record<string, { surface: string; model: string | null }> = {
+  Ada: { surface: 'claude-code', model: 'claude-opus-4-5' },
+  Bo: { surface: 'cursor', model: 'claude-sonnet-4-5' },
+  Cy: { surface: 'codex', model: 'gpt-5.6-codex-max' },
+  Dev: { surface: 'cli', model: null },
+  Eli: { surface: 'claude-code', model: 'claude-haiku-4-5-20251001' },
+  Fen: { surface: 'web', model: 'grok-4.5' },
+  Gus: { surface: 'slack', model: null },
+  Hana: { surface: 'claude-code', model: 'claude-opus-4-5' },
+  Ivy: { surface: 'cursor', model: 'claude-sonnet-4-5' },
+};
+
 // A looping choreography script (ms offset → event), so the room is always alive on the preview.
 const SCRIPT: { at: number; ev: OfficeEvent }[] = [
   { at: 200, ev: { kind: 'walk-help', from: 'Ada', to: 'Bo', tier: 'needs-attn' } },
@@ -248,6 +265,17 @@ function OfficePreviewPage() {
           state: m.state,
           color: memberColor(m.name, m.kind),
           role: '',
+          // Varied identity, so the preview actually exercises the nameplate's second line and its
+          // truncation. These were `null` while the plate carried harness · model, which meant the
+          // one surface for eyeballing a nameplate could never render one.
+          surface: FIXTURE_IDENTITY[m.name]?.surface ?? 'claude-code',
+          // Read the entry, not `?? default` — an explicit `model: null` IS the case worth showing
+          // (a seat with nothing to report), and a nullish fallback makes it unreachable.
+          model: m.name in FIXTURE_IDENTITY ? FIXTURE_IDENTITY[m.name]!.model : 'claude-opus-4-5',
+          workTitle: null,
+          workSource: null,
+          laneState: null,
+          moreLanes: 0,
         };
       }),
     }),

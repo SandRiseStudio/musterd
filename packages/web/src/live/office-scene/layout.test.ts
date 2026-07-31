@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { FLOOR, project } from './iso';
+import { FLOOR, project, WALL_H } from './iso';
 import {
+  ART,
+  CHECK_IN_MARKS,
+  FRONT_DESK,
+  RECEPTIONIST,
   BOOKSHELVES,
+  HUDDLE_POUFS,
+  HUDDLE_TABLE,
+  HUDDLES,
   DESK_D,
   DESK_SLOTS,
   DESK_W,
+  ENTRANCE,
+  STRIP_CAP,
   FWD,
   LEISURE_SPOTS,
   MEETING,
@@ -12,7 +21,7 @@ import {
   PODS,
   RECEPTION,
   SEAT_BACK,
-  SHELF_DEEP,
+  WINDOWS,
 } from './layout';
 
 describe('desk pods', () => {
@@ -124,10 +133,141 @@ describe('LEISURE_SPOTS', () => {
   });
 });
 
+describe('the front desk', () => {
+  it('sits near the entrance, facing arrivals', () => {
+    expect(Math.hypot(FRONT_DESK.lx - ENTRANCE.lx, FRONT_DESK.ly - ENTRANCE.ly)).toBeLessThan(260);
+  });
+
+  it('does not sit on the overflow queue strip', () => {
+    for (let i = 0; i < STRIP_CAP; i++) {
+      const qx = ENTRANCE.lx + 34 + i * 32;
+      const qy = ENTRANCE.ly - 10 - i * 6;
+      const inDesk =
+        Math.abs(qx - FRONT_DESK.lx) < FRONT_DESK.long / 2 &&
+        Math.abs(qy - FRONT_DESK.ly) < FRONT_DESK.deep / 2;
+      expect(inDesk).toBe(false);
+    }
+  });
+
+  it('puts the receptionist behind the counter and the marks in front of it', () => {
+    expect(CHECK_IN_MARKS.length).toBeGreaterThanOrEqual(3);
+    for (const m of CHECK_IN_MARKS) {
+      expect(Math.sign(m.ly - FRONT_DESK.ly)).not.toBe(Math.sign(RECEPTIONIST.ly - FRONT_DESK.ly));
+    }
+  });
+
+  it('occludes the receptionist with the counter, not the other way round', () => {
+    // Depth is lx+ly: the greater sum paints later, in front. A receptionist painted OVER her own
+    // desk reads as standing on it.
+    expect(RECEPTIONIST.lx + RECEPTIONIST.ly).toBeLessThan(FRONT_DESK.lx + FRONT_DESK.ly);
+  });
+});
+
+describe('the walls are not a matched set', () => {
+  it('hangs six pieces of art, varied in size and shape', () => {
+    expect(ART).toHaveLength(6);
+    expect(new Set(ART.map((a) => `${a.w}x${a.h}`)).size).toBeGreaterThan(3);
+    expect(ART.some((a) => a.w > a.h)).toBe(true); // landscape
+    expect(ART.some((a) => a.h > a.w)).toBe(true); // portrait
+    expect(ART.some((a) => a.w === a.h)).toBe(true); // square
+  });
+
+  it('varies motif and frame treatment, including one unframed', () => {
+    expect(new Set(ART.map((a) => a.motif)).size).toBeGreaterThan(2);
+    expect(new Set(ART.map((a) => a.frame)).size).toBeGreaterThan(1);
+    expect(ART.some((a) => a.frame === 'none')).toBe(true);
+  });
+
+  it('puts art on both walls', () => {
+    expect(ART.some((a) => a.wall === 0)).toBe(true);
+    expect(ART.some((a) => a.wall === 1)).toBe(true);
+  });
+
+  it('never hangs a picture over a window', () => {
+    // Both back walls are mostly glass, so this is the constraint that decides where art can go at
+    // all — and the first cut of the salon cluster failed it, hanging three pieces across the frame
+    // of the near window. Half-widths are converted to `t` the same way `wallArt` does.
+    for (const a of ART) {
+      const half = a.w / 2 / FLOOR;
+      for (const w of WINDOWS) {
+        const overlaps = a.tc + half > w.t0 && a.tc - half < w.t1;
+        expect(overlaps, `art (${a.motif} on wall ${a.wall} at t=${a.tc}) overlaps a window`).toBe(false);
+      }
+    }
+  });
+
+  it('never hangs a picture behind a bookshelf', () => {
+    // A shelf occupies a `t` band on its wall and stands `high` units up it. If a picture shares that
+    // band, its bottom edge has to clear the carcass AND whatever is standing on top of it — this
+    // broke silently when the corner unit went from 66 to 88 tall and swallowed a print's lower third.
+    const DECOR_UP = 22; // the tallest shelf-top object
+    for (const a of ART) {
+      const halfT = a.w / 2 / FLOOR;
+      const bottom = a.uc * WALL_H - a.h / 2;
+      for (const s of BOOKSHELVES) {
+        // wall 0 is the lx=0 edge (t maps to ly); wall 1 is the ly=0 edge (t maps to lx)
+        const onWall0 = s.dir === 'E';
+        if ((a.wall === 0) !== onWall0) continue;
+        const st = (onWall0 ? s.ly : s.lx) / FLOOR;
+        const halfS = s.long / 2 / FLOOR;
+        if (a.tc + halfT < st - halfS || a.tc - halfT > st + halfS) continue;
+        expect(
+          bottom,
+          `art (${a.motif} at t=${a.tc}) hangs behind the ${s.high}-tall shelf at t=${st.toFixed(2)}`,
+        ).toBeGreaterThan(s.high + DECOR_UP);
+      }
+    }
+  });
+
+  it('does not make four copies of one window', () => {
+    expect(new Set(WINDOWS.map((w) => w.mullions)).size).toBeGreaterThan(1);
+    expect(WINDOWS.some((w) => w.sill)).toBe(true);
+  });
+
+  it('brightens toward one sun — a random ramp reads as broken glass, not sunlight', () => {
+    const bright = WINDOWS.map((w) => w.bright);
+    expect(new Set(bright).size).toBeGreaterThan(1);
+    expect([...bright]).toEqual([...bright].sort((a, b) => b - a));
+  });
+});
+
+describe('the huddle is furniture, not one welded object', () => {
+  it('leaves a real gap between every pouf and the table', () => {
+    const POUF = 42;
+    for (const p of HUDDLE_POUFS) {
+      expect(Math.hypot(p.dx, p.dy)).toBeGreaterThan(HUDDLE_TABLE / 2 + POUF / 2 + 8);
+    }
+  });
+
+  it('knocks each pouf off square by a different amount', () => {
+    expect(new Set(HUDDLE_POUFS.map((p) => p.spin)).size).toBe(HUDDLE_POUFS.length);
+    for (const p of HUDDLE_POUFS) expect(p.spin).not.toBe(0);
+  });
+
+  it('keeps the whole cluster on its rug', () => {
+    const h = HUDDLES[0]!;
+    for (const p of HUDDLE_POUFS) {
+      expect(Math.abs(p.dx) + 21).toBeLessThanOrEqual(h.rugSize / 2);
+      expect(Math.abs(p.dy) + 21).toBeLessThanOrEqual(h.rugSize / 2);
+    }
+  });
+
+  it('seats an occupant on every pouf — the spots derive from the same table', () => {
+    const h = HUDDLES[0]!;
+    const spots = LEISURE_SPOTS.filter((s) => s.zone === 'huddle');
+    expect(spots).toHaveLength(HUDDLE_POUFS.length);
+    for (const p of HUDDLE_POUFS) {
+      expect(spots.some((s) => s.lx === h.lx + p.dx && s.ly === h.ly + p.dy)).toBe(true);
+    }
+  });
+});
+
 describe('BOOKSHELVES — flush to floor edges', () => {
   it('pins each shelf so its back sits on the perimeter (door-flush pattern)', () => {
-    const half = SHELF_DEEP / 2;
     for (const s of BOOKSHELVES) {
+      // Per-shelf depth: the units are no longer one repeated box, so "flush" is measured against
+      // each unit's own footprint rather than a shared constant.
+      const half = s.deep / 2;
       switch (s.dir) {
         case 'S':
           expect(s.ly).toBe(half);
@@ -147,5 +287,25 @@ describe('BOOKSHELVES — flush to floor edges', () => {
         }
       }
     }
+  });
+
+  it('is not a matched set — the units differ in size', () => {
+    expect(new Set(BOOKSHELVES.map((s) => s.long)).size).toBeGreaterThan(1);
+    expect(new Set(BOOKSHELVES.map((s) => s.high)).size).toBeGreaterThan(1);
+  });
+
+  it('scales the band count with the height, so a low unit is not a tall one squashed', () => {
+    const byHeight = [...BOOKSHELVES].sort((a, b) => a.high - b.high);
+    expect(byHeight[0]!.rows).toBeLessThan(byHeight[byHeight.length - 1]!.rows);
+  });
+
+  it('has exactly one shelved backwards, and it is on the right wall', () => {
+    const reversed = BOOKSHELVES.filter((s) => s.reversed);
+    expect(reversed).toHaveLength(1);
+    expect(reversed[0]!.dir).toBe('W');
+  });
+
+  it('gives every unit something for its top', () => {
+    for (const s of BOOKSHELVES) expect(s.decor).toBeTruthy();
   });
 });

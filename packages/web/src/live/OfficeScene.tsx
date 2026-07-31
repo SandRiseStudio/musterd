@@ -7,18 +7,25 @@ import { actToEvent } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
 import type { ConnStatus } from './client';
 import { OfficeOverlay } from './OfficeOverlay';
+import { WorkStack } from './WorkStack';
 import { presentCount, type RoomEntry } from './workingOn';
 
 /**
  * Roster → the office's node data. `posture` is resolved here with `memberPosture` — the *same* call the
  * roster rail's chip makes — so the floor and the rail read one value: a member the rail calls `idle` is
  * on the couch with an amber dot, never at a desk with a green one.
+ *
+ * Surface/model/work fields feed the floating nameplates (presence-chrome design, 2026-07-30).
  */
-function computeData(teamName: string, roster: MemberSummary[]): OfficeData {
+function computeData(teamName: string, roster: MemberSummary[], entries: RoomEntry[]): OfficeData {
+  const byName = new Map(entries.map((e) => [e.name, e]));
   return {
     teamName,
     nodes: roster.map((m) => {
       const kind = m.kind === 'human' ? 'human' : 'agent';
+      const live =
+        m.presences?.find((p) => p.status === 'online' || p.status === 'away') ?? m.presences?.[0];
+      const entry = byName.get(m.name);
       return {
         name: m.name,
         kind,
@@ -28,6 +35,12 @@ function computeData(teamName: string, roster: MemberSummary[]): OfficeData {
         state: m.state ?? null,
         color: memberColor(m.name, kind),
         role: m.role,
+        surface: live?.surface ?? null,
+        model: live?.model ?? null,
+        workTitle: entry?.title ?? null,
+        workSource: entry?.source ?? null,
+        laneState: entry?.laneState ?? null,
+        moreLanes: entry?.moreLanes ?? 0,
       };
     }),
   };
@@ -53,6 +66,9 @@ export function OfficeScene({
   onReady,
   topSlot,
   bandSlot,
+  /** Hybrid nameplate work cues vs in-panel WorkStack (`stack`) vs neither. Default none on the
+   *  plate — work lives in WorkStack on `/live` (nick, 2026-07-30). */
+  workCues = 'none',
 }: {
   teamName: string;
   roster: MemberSummary[];
@@ -79,19 +95,19 @@ export function OfficeScene({
    * `/broadcast` passes nothing: a stream cannot answer an ask. */
   topSlot?: ReactNode;
   /**
-   * Chrome seated in a strip BENEATH the room rather than floated over it — `/live` puts the office
-   * noticeboard here. The band is sized to its content and the room keeps every remaining pixel, so
-   * adding one costs the scene exactly the band's own height and never more. `/broadcast` passes
-   * nothing and stays full-bleed.
+   * Chrome seated in a strip BENEATH the room rather than floated over it — `/live` puts WorkStack
+   * here when `workCues === 'stack'`. The band is sized to its content and the room keeps every
+   * remaining pixel. `/broadcast` passes nothing and stays full-bleed.
    */
   bandSlot?: ReactNode;
+  workCues?: 'hybrid' | 'stack' | 'none';
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<OfficeHandle | null>(null);
   const emittedRef = useRef<Set<string>>(new Set());
 
-  const data = useMemo(() => computeData(teamName, roster), [teamName, roster]);
+  const data = useMemo(() => computeData(teamName, roster, entries), [teamName, roster, entries]);
   // Latest-value refs for the mount effect below, which subscribes ONCE and must not re-run when a
   // prop identity changes (re-running it would tear down and rebuild the whole canvas scene).
   //
@@ -127,6 +143,8 @@ export function OfficeScene({
         const handle = mountOffice(host, labelHost, reduced, {
           onActClick: (id) => onActClickRef.current?.(id),
           broadcast,
+          interactiveLabels: !broadcast,
+          showWorkCues: workCues === 'hybrid',
         });
         handle.update(dataRef.current);
         handle.setSuspended(collapsedRef.current); // mounted while collapsed → start parked
@@ -142,7 +160,7 @@ export function OfficeScene({
       handleRef.current = null;
       onReadyRef.current?.(null);
     };
-  }, [broadcast]);
+  }, [broadcast, workCues]);
 
   useEffect(() => {
     handleRef.current?.update(data);
@@ -189,15 +207,20 @@ export function OfficeScene({
         <div className="lc-gl-labels" ref={labelRef} aria-hidden="true" />
         {/* The office's own chrome, identical on /live and /broadcast by construction — the whole point
             of the shared component. Collapsed, the panel is a rail with nowhere to put it. */}
-        {!collapsed && (
+        {!collapsed && broadcast && (
           <OfficeOverlay
             teamName={teamName}
             present={presentCount(roster)}
             entries={entries}
             status={status}
-            // Steerable on the dashboard, a passive chyron on the stream: `/broadcast` has no cursor.
-            interactive={!broadcast}
+            interactive={false}
           />
+        )}
+        {/* Work card floats over the room (bottom of the stage) — not a band under it. */}
+        {!collapsed && workCues === 'stack' && (
+          <div className="lc-office__work">
+            <WorkStack entries={entries} />
+          </div>
         )}
         {/* The asks rail floats over the top of the room the way the reel floats over the bottom. */}
         {!collapsed && topSlot && <div className="lc-office__asks">{topSlot}</div>}

@@ -1,4 +1,6 @@
 import {
+  CHECK_IN_MARKS,
+  CHECK_IN_S,
   COFFEE_STAND,
   COOLER_STAND,
   DESK_SLOTS,
@@ -221,6 +223,9 @@ interface Walk {
   /** The low-priority walk-home that `cancelAmbient` leaves behind when a stroll yields. Like `ambient`,
    * a real act for this member preempts it instantly rather than queuing behind it. */
   yield?: boolean;
+  /** An arrival routed via a check-in mark (reception design 2026-07-30): which mark, and the index
+   * of the pause leg — so the engine can report who is mid-check-in without inspecting geometry. */
+  checkIn?: { mark: number; holdLeg: number };
 }
 type Req = { kind: 'help' | 'handoff'; to: string; urgent: boolean };
 
@@ -377,6 +382,12 @@ export interface Actors {
   /** How many members *arrived* since the last call (clears) — departures don't count. The office dog
    * greets an arrival at the door; nobody, dog included, gets up to see you leave. */
   takeArrivals(): number;
+  /** Names currently on a check-in walk (door -> mark -> seat). Test surface + debugging. */
+  pendingCheckIns(): string[];
+  /** Which mark a member's check-in uses, or null when they are not checking in. */
+  checkInMark(name: string): number | null;
+  /** How many arrivals are standing at a mark right now — the receptionist's cue to look up. */
+  checkInHolds(): number;
   active(): boolean;
 }
 
@@ -420,6 +431,30 @@ export function createActors(): Actors {
       t: 0,
       small: exit ? from.small : to.small,
       ...(fade ? { fade } : {}),
+    };
+  }
+
+  /**
+   * An arrival's walk, routed via a check-in mark: door → mark, a beat facing the desk, then on to
+   * their seat. Same fade-in staging as a plain arrival. **This must only ever be built from the
+   * animate branch of `setHomes`** — the first snapshot seats everyone silently, which is the whole
+   * guard against a page reload replaying the ritual for the entire roster.
+   */
+  function checkInWalk(who: string, dest: Pose, mark: number): Walk {
+    const speed = 78;
+    const at = CHECK_IN_MARKS[mark]!;
+    const from = entrancePose(dest);
+    const toMark = legsAlong(findPath({ lx: from.lx, ly: from.ly }, { lx: at.lx, ly: at.ly }, othersAt(who)), speed, 1.2, 4, null);
+    const stand = endOf(toMark);
+    const onward = legsAlong(findPath(stand, { lx: dest.lx, ly: dest.ly }, othersAt(who)), speed, 1.2, 5, null);
+    return {
+      // Facing N: the counter is north of every mark, and the pause is *at* somebody, not near them.
+      legs: [...toMark, hold(stand, 'N', CHECK_IN_S, {}), ...onward],
+      i: 0,
+      t: 0,
+      small: dest.small,
+      fade: 'in',
+      checkIn: { mark, holdLeg: toMark.length },
     };
   }
 
@@ -680,11 +715,19 @@ export function createActors(): Actors {
       }
 
       // Arrivals (walk in from the door, fading in) and drifts (desk ⇄ nook / reseat).
+      // Check-in marks are dealt per reconcile, round-robin: a wave of arrivals checks in side by
+      // side at distinct marks, and anyone past the last mark skips the beat and walks straight in —
+      // ceremony that queues is the gate the design explicitly rejected.
+      let marksDealt = 0;
       for (const [name, dest] of newHomes) {
         if (!prevHomes.has(name)) {
           exiting.delete(name);
           ghosts.delete(name);
-          walks.set(name, straightWalk(name, entrancePose(dest), dest, false, 'in'));
+          if (!dest.small && marksDealt < CHECK_IN_MARKS.length) {
+            walks.set(name, checkInWalk(name, dest, marksDealt++));
+          } else {
+            walks.set(name, straightWalk(name, entrancePose(dest), dest, false, 'in'));
+          }
           doorPulses++;
           arrivals++;
         } else if (!exiting.has(name)) {
@@ -1017,6 +1060,20 @@ export function createActors(): Actors {
     takeArrivals() {
       const n = arrivals;
       arrivals = 0;
+      return n;
+    },
+    pendingCheckIns() {
+      const out: string[] = [];
+      for (const [name, w] of walks) if (w.checkIn) out.push(name);
+      return out;
+    },
+    checkInMark(name: string) {
+      return walks.get(name)?.checkIn?.mark ?? null;
+    },
+    /** How many arrivals are standing at a mark RIGHT NOW — the receptionist's cue to look up. */
+    checkInHolds() {
+      let n = 0;
+      for (const w of walks.values()) if (w.checkIn && w.i === w.checkIn.holdLeg) n++;
       return n;
     },
     takeDoorPulses() {

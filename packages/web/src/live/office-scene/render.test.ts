@@ -8,12 +8,16 @@ import type { PetMode, PetState } from './pet';
 import {
   actorSortAnchor,
   animatedDeskAnchors,
+  BOOK_COLORS,
+  CLOCK_NUMERALS,
   coffeeAnchor,
   drawDog,
   glassColor,
   MACHINE_H,
+  packShelf,
   pawCycle,
   renderScene,
+  shelfRnd,
 } from './render';
 import { assignSeats } from './seating';
 import type { OfficeNode, Pose } from './types';
@@ -28,6 +32,12 @@ function node(name: string, activity: OfficeNode['activity']): OfficeNode {
     state: null,
     color: memberColor(name, 'agent'),
     role: '',
+    surface: null,
+    model: null,
+    workTitle: null,
+    workSource: null,
+    laneState: null,
+    moreLanes: 0,
   };
 }
 
@@ -131,16 +141,13 @@ describe('coffeeAnchor (the ambient steam source)', () => {
 });
 
 /**
- * The wall in/out board (`wallRoster`). It carries no names — at /live's fitted scale the wall gap it
- * hangs in is ~60px across, so presence is carried by each member's own colour plus a `present/total`
- * count. These tests pin the two things that make it readable: one tag per member in their colour, and
- * an out member visibly drained rather than shown at full strength.
+ * The wall whiteboard (`wallWhiteboard`). Set dressing only — white face, mustard marker ink. Not a
+ * roster: no member colours, no present/total count.
  */
-describe('the wall in/out board', () => {
+describe('the wall whiteboard', () => {
   const fit = fitFloor(1200, 900);
 
-  /** A ctx that also records `fillText`, which the shared mock throws away — the count is the board's
-   *  one piece of type and its correctness is exactly what a reader relies on. */
+  /** A ctx that also records `fillText` / stroke colours. */
   function textCtx(paints: string[], texts: string[]): CanvasRenderingContext2D {
     const grad = { addColorStop: (_s: number, c: string) => void paints.push(c) };
     return new Proxy(
@@ -163,44 +170,187 @@ describe('the wall in/out board', () => {
 
   const roster = (nodes: OfficeNode[]): Map<string, OfficeNode> => new Map(nodes.map((n) => [n.name, n]));
 
-  it('pins a tag in each present member’s own colour — that colour IS the identification', () => {
+  it('paints the white face and mustard ink, not member roster colours', () => {
     const paints: string[] = [];
-    const nodes = ['ada', 'bo', 'cy'].map((n) => node(n, 'working'));
+    const nodes = ['ada', 'bo'].map((n) => node(n, 'working'));
     renderScene(textCtx(paints, []), fit, new Map(), roster(nodes), new Map());
-    for (const n of nodes) expect(paints).toContain(n.color);
+    expect(paints).toContain('#F7F7F5');
+    expect(paints.some((c) => c === '#E1AD01' || c.includes('225, 173, 1'))).toBe(true);
+    for (const n of nodes) expect(paints).not.toContain(n.color);
   });
 
-  it('drains an away/offline member instead of painting them at full strength', () => {
-    const away: OfficeNode = { ...node('dev', 'idle'), presence: 'away', posture: 'away' };
-    const paints: string[] = [];
-    renderScene(textCtx(paints, []), fit, new Map(), roster([away]), new Map());
-    // The full-strength colour must NOT appear (nothing else on the wall paints a member colour), and
-    // something in the same hue family must — i.e. it was dimmed, not omitted and not left bright.
-    expect(paints).not.toContain(away.color);
-    const hue = /hsl\(\s*([-\d.]+)/.exec(away.color)![1];
-    expect(paints.some((c) => c.startsWith(`hsl(${hue}`))).toBe(true);
-  });
-
-  it('writes the count as present/total, so away members are visibly not counted as in', () => {
+  it('does not write a present/total count (no longer a roster)', () => {
     const texts: string[] = [];
-    const nodes = [node('ada', 'working'), node('bo', 'working'), { ...node('cy', 'idle'), posture: 'offline' as const }];
-    renderScene(textCtx([], texts), fit, new Map(), roster(nodes), new Map());
-    expect(texts).toContain('2/3');
+    renderScene(textCtx([], texts), fit, new Map(), roster([node('ada', 'working')]), new Map());
+    expect(texts.some((t) => /^\d+\/\d+$/.test(t))).toBe(false);
   });
 
-  it('caps the grid at 9 tags but keeps the count honest about the whole team', () => {
-    const paints: string[] = [];
-    const texts: string[] = [];
-    const nodes = Array.from({ length: 14 }, (_, i) => node(`m${i}`, 'working'));
-    expect(() => renderScene(textCtx(paints, texts), fit, new Map(), roster(nodes), new Map())).not.toThrow();
-    expect(texts).toContain('14/14');
-    expect(nodes.filter((n) => paints.includes(n.color)).length).toBe(9);
+  /**
+   * Counts `stroke()` calls made *while the marker ink is loaded* — a scene-wide stroke count would
+   * drown in the rest of the office. This is the whiteboard's mark budget, and it is a budget because
+   * the board renders at roughly half size under wall shear: past a handful of marks the diagram
+   * stops being countable and turns to hash, which is the exact regression this describe exists for.
+   */
+  function inkStrokes(): number {
+    let current = '';
+    let count = 0;
+    const ctx = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient')
+            return () => ({ addColorStop() {} });
+          if (prop === 'measureText') return () => ({ width: 0 });
+          if (prop === 'stroke')
+            return () => {
+              if (current === '#E1AD01' || current.includes('225, 173, 1')) count++;
+            };
+          return () => undefined;
+        },
+        set(_t, prop, value) {
+          if (prop === 'strokeStyle' && typeof value === 'string') current = value;
+          return true;
+        },
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    renderScene(ctx, fit, new Map(), roster([node('ada', 'working')]), new Map());
+    return count;
+  }
+
+  it('draws at most five marks — a crowded board turns to hash at /live scale', () => {
+    expect(inkStrokes()).toBeLessThanOrEqual(5);
   });
 
-  it('draws an empty board for an empty team rather than throwing', () => {
+  it('still draws a diagram — an empty board is not the fix', () => {
+    expect(inkStrokes()).toBeGreaterThanOrEqual(3);
+  });
+});
+
+/**
+ * The books. Packing is a pure function so it can be checked without a canvas — the interesting
+ * behaviour is all in the numbers (does a shelf vary, does it stay inside its carcass, is it stable
+ * across repaints), and none of it needs a pixel to assert.
+ */
+describe('packShelf — the books are not a texture swatch', () => {
+  const shelf = () => packShelf(0, 0, 58, false);
+
+  it('varies spine width, height and colour across one shelf', () => {
+    const run = shelf();
+    expect(run.length).toBeGreaterThan(4);
+    expect(new Set(run.map((b) => b.w)).size).toBeGreaterThan(1);
+    expect(new Set(run.map((b) => b.h)).size).toBeGreaterThan(1);
+    expect(new Set(run.map((b) => b.color)).size).toBeGreaterThan(2);
+  });
+
+  it('offers a white and a black spine — a shelf of mid-tones reads as a picked palette', () => {
+    expect(BOOK_COLORS).toContain('#f4f1ea');
+    expect(BOOK_COLORS).toContain('#22201d');
+  });
+
+  it('leans a few books and leaves most upright', () => {
+    // Sample several shelves: one row is a small sample, and the point is the *proportion*.
+    const all = [0, 1, 2, 3].flatMap((si) => [0, 1].flatMap((r) => packShelf(si, r, 58, false)));
+    const leaning = all.filter((b) => b.lean !== 0);
+    expect(leaning.length).toBeGreaterThan(0);
+    expect(leaning.length).toBeLessThan(all.length / 2);
+  });
+
+  it('is deterministic — a baked layer that changes between repaints flickers', () => {
+    expect(packShelf(2, 1, 58, false)).toEqual(packShelf(2, 1, 58, false));
+    expect(shelfRnd(1, 2, 3)).toBe(shelfRnd(1, 2, 3));
+  });
+
+  it('gives different shelves different books', () => {
+    expect(packShelf(0, 0, 58, false)).not.toEqual(packShelf(1, 0, 58, false));
+  });
+
+  it('keeps every book inside the carcass', () => {
+    for (const long of [44, 58, 76]) {
+      for (const b of packShelf(1, 0, long, false)) {
+        expect(Math.abs(b.along) + b.w / 2).toBeLessThanOrEqual(long / 2);
+      }
+    }
+  });
+
+  it('shelves a reversed unit as page edges with no lettering to read', () => {
+    const run = packShelf(1, 0, 76, true);
+    expect(run.every((b) => b.title === '')).toBe(true);
+    expect(run.every((b) => b.color !== '#22201d')).toBe(true);
+  });
+
+  it('titles every spine on a normal shelf', () => {
+    const run = [0, 1, 2, 3].flatMap((si) => packShelf(si, 0, 58, false));
+    expect(run.every((b) => b.title.length > 0)).toBe(true);
+    expect(new Set(run.map((b) => b.title)).size).toBeGreaterThan(2);
+  });
+
+  it('letters in more than one ink — a shelf of all-white titles reads as one printing run', () => {
+    const run = [0, 1, 2, 3].flatMap((si) => [0, 1].flatMap((r) => packShelf(si, r, 58, false)));
+    expect(new Set(run.map((b) => b.ink)).size).toBeGreaterThan(2);
+  });
+
+  it('packs the books nearly shoulder to shoulder — an airy row reads as a colour swatch', () => {
+    const run = packShelf(0, 0, 58, false);
+    for (let i = 1; i < run.length; i++) {
+      const gap = (run[i]!.along - run[i]!.w / 2) - (run[i - 1]!.along + run[i - 1]!.w / 2);
+      expect(gap).toBeLessThan(2);
+    }
+  });
+});
+
+describe('the wall clock has a numbered dial', () => {
+  const fit = fitFloor(1200, 900);
+  const roster = (nodes: OfficeNode[]): Map<string, OfficeNode> => new Map(nodes.map((n) => [n.name, n]));
+
+  it('sets twelve numerals with the quarters heavier', () => {
+    expect(CLOCK_NUMERALS).toHaveLength(12);
+    const heavy = CLOCK_NUMERALS.filter((n) => n.big).map((n) => n.hour);
+    expect([...heavy].sort((a, b) => a - b)).toEqual([3, 6, 9, 12]);
+  });
+
+  it('runs the hours in clock order from 12', () => {
+    expect(CLOCK_NUMERALS.map((n) => n.hour)).toEqual([12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  });
+
+  /** Collects every string the scene sets with `fillText`. */
+  function sceneText(): string[] {
     const texts: string[] = [];
-    expect(() => renderScene(textCtx([], texts), fit, new Map(), new Map(), new Map())).not.toThrow();
-    expect(texts).toContain('0/0');
+    const ctx = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient')
+            return () => ({ addColorStop() {} });
+          if (prop === 'measureText') return () => ({ width: 0 });
+          if (prop === 'fillText') return (s: string) => void texts.push(s);
+          return () => undefined;
+        },
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    renderScene(ctx, fit, new Map(), roster([node('ada', 'working')]), new Map());
+    return texts;
+  }
+
+  it('sets the quarters as real type — twelve scribbles on a 26px face is grit, not a clock', () => {
+    const texts = sceneText();
+    for (const n of CLOCK_NUMERALS.filter((c) => c.big)) {
+      expect(texts).toContain(String(n.hour));
+    }
+  });
+
+  it('leaves the other eight hours as ticks rather than cramming in more numerals', () => {
+    const texts = sceneText();
+    for (const n of CLOCK_NUMERALS.filter((c) => !c.big)) {
+      expect(texts).not.toContain(String(n.hour));
+    }
+  });
+
+  it('labels the whiteboard diagram — a diagram somebody drew has words on it', () => {
+    const texts = sceneText();
+    for (const word of ['web', 'api', 'db']) expect(texts).toContain(word);
   });
 });
 

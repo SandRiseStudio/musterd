@@ -1,4 +1,4 @@
-import type { Posture } from '@musterd/protocol';
+import type { LaneState, Posture } from '@musterd/protocol';
 import type { ActTone } from '../format';
 
 /** Facing on the isometric floor. S = toward the viewer (front), N = away, E/W = profiles. */
@@ -23,6 +23,15 @@ export interface OfficeNode {
   /** The member's signature colour — `memberColor(name, kind)`, an `hsl()` string. */
   color: string;
   role: string;
+  /** Live presence surface (harness) — for the floating nameplate identity line. */
+  surface: string | null;
+  /** Harness-attested model id (ADR 101) — for the floating nameplate identity line. */
+  model: string | null;
+  /** What they are on: freshest in-flight lane title or status line (see `workingOn.ts`). */
+  workTitle: string | null;
+  workSource: 'lane' | 'status' | null;
+  laneState: LaneState | null;
+  moreLanes: number;
 }
 
 /** The office has no arcs — relationships show as choreography, not edges. */

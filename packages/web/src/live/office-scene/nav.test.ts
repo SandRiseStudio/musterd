@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+
+  FRONT_DESK,
+  CHECK_IN_MARKS,
   COFFEE_STAND,
   COOLER_STAND,
   DESK_SLOTS,
@@ -208,5 +211,25 @@ describe('routes never pass through furniture', () => {
       if (nearest === Infinity) bad.push(`spot ${i} (${s.zone}): no walkable floor within 60 units`);
     }
     expect(bad).toEqual([]);
+  });
+});
+
+describe('the front desk blocks', () => {
+  it('routes an arrival around the counter, never through it', () => {
+    const path = findPath({ lx: ENTRANCE.lx, ly: ENTRANCE.ly }, { lx: DESK_SLOTS[0]!.lx, ly: DESK_SLOTS[0]!.ly - 60 }, []);
+    for (const step of path) {
+      const inDesk =
+        Math.abs(step.lx - FRONT_DESK.lx) < FRONT_DESK.long / 2 &&
+        Math.abs(step.ly - FRONT_DESK.ly) < FRONT_DESK.deep / 2;
+      expect(inDesk).toBe(false);
+    }
+  });
+
+  it('keeps the check-in marks on walkable floor', () => {
+    // A mark inside a blocked cell would get nudged by nearestFree and the pause would land somewhere
+    // other than in front of the desk. The receptionist deliberately is NOT held to this: she stands
+    // inside the counter's padded footprint (that is what "behind the desk" means to the nav grid),
+    // and she never walks, so the grid owes her nothing.
+    for (const m of CHECK_IN_MARKS) expect(walkable(m.lx, m.ly), `mark ${m.lx},${m.ly}`).toBe(true);
   });
 });

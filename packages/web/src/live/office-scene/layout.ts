@@ -190,16 +190,30 @@ export const NOOK_RUG: Rug = { shape: 'diamond', weave: 'border', fill: '#ce9256
  * the kitchenette (fridge · counter+machine · water cooler) lines the back, well clear of the seating.
  */
 export const LOUNGE = {
-  // kitchenette across the back, spaced apart
-  fridge: { dx: -110, dy: -48, w: 32, d: 28, h: 54 },
-  counter: { dx: -54, dy: -76, w: 78, d: 24, h: 32 },
+  // Kitchenette across the back, spaced apart.
+  //
+  // Sized against the desks, not against itself (nick, 2026-07-30: "the scale of the sink and that
+  // kitchenette is off — it's a little small compared to the rest of the office space"). A desk is
+  // 100 x 68; a 78-wide counter beside it read as a side table with a bowl on it. The run now grows
+  // to the RIGHT — the left end is pinned by the fridge, and extending that way would have buried it.
+  fridge: { dx: -114, dy: -48, w: 36, d: 30, h: 72 },
+  counter: { dx: -33, dy: -76, w: 120, d: 30, h: 34 },
   machine: { dx: -74, dy: -76 },
-  cooler: { dx: 42, dy: -82, w: 22, d: 22, h: 48 }, // water cooler
+  cooler: { dx: 44, dy: -82, w: 26, d: 26, h: 52 }, // water cooler
   // (a nook plant used to sit at dx 112 — removed to thin the nook's right edge, which already has the
   // big floor plant at 830,330 and the right-wall bookshelf beside it.)
-  // conversation set in the front, with breathing room between each piece
-  couch: { dx: 6, dy: 2, len: 108, dep: 44 }, // faces S (toward the room)
-  table: { dx: 6, dy: 66, w: 56, d: 40 },
+  // Conversation set in the front. The gaps are the point: a coffee table sits a stride from a couch,
+  // not against it, and the old 64-unit centre spacing put the table's edge within a few units of the
+  // couch front (couch dep 44, table d 40 — 42 units of furniture across a 64-unit gap).
+  couch: { dx: 6, dy: -4, len: 108, dep: 44 }, // faces S (toward the room)
+  table: { dx: 6, dy: 74, w: 56, d: 40 },
+  // The chairs stay where they were. Pushing them out with the table walked chairW into a reading
+  // spot (MIN_SPOT_GAP) and put an away member's stand point on furniture — the gap this set needed
+  // was between the couch and the table, and widening everything just moved the crowding outward.
+  // The chairs do not move. Pushing them out with the table walked chairW into a reading spot
+  // (MIN_SPOT_GAP) and closed the aisle behind them onto the away members' stand points — the gap
+  // this set actually needed was between the couch and the table, and widening everything else just
+  // moved the crowding outward into the arc of people standing behind it.
   chairE: { dx: -62, dy: 64, size: 52 }, // left of the table, facing it
   chairW: { dx: 72, dy: 64, size: 52 }, // right of the table, facing it
 } as const;
@@ -252,6 +266,29 @@ export interface Huddle {
   poufs: [string, string, string];
 }
 
+/**
+ * Where the three poufs sit, as offsets from the huddle centre, and how far each is knocked off
+ * square.
+ *
+ * **One source for both the painter and the leisure spots.** These offsets used to be written out
+ * twice — once in `huddleItems`, once in `LEISURE_SPOTS` — which means a pouf could be moved in one
+ * place and leave its occupant sitting on bare floor in the other.
+ *
+ * The distances are what stop the cluster reading as one welded object (nick, 2026-07-30: the chairs
+ * "look like they are basically attached to the coffee table"). The table is 66 across and a pouf is
+ * 42, so anything under ~64 from centre is literally touching; the old ring sat at 54 and 61. `spin`
+ * is the other half: three poufs at identical angles is a CAD assembly, and used furniture is never
+ * square to its table.
+ */
+export const HUDDLE_POUFS: ReadonlyArray<{ dx: number; dy: number; spin: number; dir: Dir }> = [
+  { dx: 0, dy: -72, spin: -0.09, dir: 'S' },
+  { dx: 68, dy: 42, spin: 0.13, dir: 'W' },
+  { dx: -66, dy: 44, spin: -0.05, dir: 'E' },
+];
+
+/** The huddle's low table footprint. */
+export const HUDDLE_TABLE = 66;
+
 /** One huddle space, in the clearing the three pods leave in the middle of the room. */
 export const HUDDLES: Huddle[] = [
   {
@@ -264,7 +301,10 @@ export const HUDDLES: Huddle[] = [
     // Softened toward the muted pod-rug treatment: a calmer clay field with a low-contrast border, so the
     // huddle rug seats onto the floor instead of popping forward like a floating slab.
     rug: { shape: 'rect', weave: 'border', fill: '#d4a483', mark: '#c69172' },
-    rugSize: 168,
+    // Widened with the cluster: pushing the poufs off the table ran them over the old 168 edge, and a
+    // seat half on the rug reads worse than no rug at all. Kept modest so the bare floor between this
+    // and the pod rugs survives — that gap is what makes each one an area rather than a stain.
+    rugSize: 190,
     poufs: ['#f06d5a', '#e3a72b', '#8b6fd6'],
   },
 ];
@@ -323,6 +363,31 @@ export const RECEPTION = {
   plant: { lx: 335, ly: 690 },
 } as const;
 
+/**
+ * The front desk (reception design 2026-07-30): a counter on the reception rug, facing the arrivals
+ * path, anchoring the couch/table/plant cluster that used to wait for nothing. The receptionist
+ * stands NORTH of the counter — smaller lx+ly, so the counter paints in front of her and occludes
+ * her lower body, which is what makes a figure behind a desk read as behind it. The check-in marks
+ * sit SOUTH, on the walk path, side by side: simultaneous arrivals check in **in parallel**, never
+ * as a queue — the beat is ceremony, and ceremony that queues is the gate the design rejected.
+ */
+// Sized against the DESKS, not against itself. It was 88x30x34 next to 100x68x36 workstations, which
+// read as a hall table (nick, 2026-07-30: "the front desk is very small compared to the rest of the
+// desks"). A reception counter is a shade wider and shallower than a workstation, at the same height.
+export const FRONT_DESK = { lx: 112, ly: 690, long: 108, deep: 62, high: DESK_UP, dir: 'S' as Dir };
+/** She sits behind it exactly like a member sits at a desk — same SEAT_BACK, same chair, same size. */
+export const RECEPTIONIST = { lx: FRONT_DESK.lx, ly: FRONT_DESK.ly - SEAT_BACK, dir: 'S' as Dir };
+// South of the overflow queue strip, not across it: the counter grew to desk scale and pushed both
+// the strip and the marks apart. A mark inside a blocked cell gets nudged by `nearestFree` and the
+// pause lands somewhere other than in front of the desk, so `nav.test.ts` holds all three walkable.
+export const CHECK_IN_MARKS: ReadonlyArray<{ lx: number; ly: number }> = [
+  { lx: 92, ly: 800 },
+  { lx: 146, ly: 812 },
+  { lx: 196, ly: 826 },
+];
+/** The pause at the mark, seconds. A beat, not a gate. */
+export const CHECK_IN_S = 1.2;
+
 /** The printer/supply station against the back wall. */
 export const PRINTER = { lx: 390, ly: 60, w: 46, d: 34, h: 32 };
 
@@ -357,36 +422,166 @@ export interface Win {
   t1: number;
   u0: number;
   u1: number;
+  /** Vertical pane divisions — 2 gives the classic four-light, 3 a taller-lit unit. */
+  mullions: 2 | 3;
+  /** What stands on the ledge, if anything. */
+  sill: 'plant' | 'mug' | null;
+  /** Glass brightness multiplier. Monotone along the wall: one sun, not four. */
+  bright: number;
 }
-/** Two windows per back wall — spaced so the wall reads as a facade, not a single porthole. */
+
+/**
+ * Where the art hangs. `wall` indexes `WALL_EDGES` — 0 is the back-left (its `+t` runs screen-LEFT,
+ * so it mirrors text and can only take type-free pieces), 1 the back-right.
+ *
+ * Six pieces rather than two identical ones, varied on three independent axes — size, orientation and
+ * treatment — because two of anything at the same size and height reads as a pattern rather than as a
+ * collection. The salon cluster is three small pieces hung as a group, which is the arrangement that
+ * most obviously says "somebody chose these" instead of "one print was centred on each wall".
+ */
+export interface ArtPiece {
+  wall: 0 | 1;
+  tc: number;
+  uc: number;
+  w: number;
+  h: number;
+  motif: 'sunrise' | 'cairn' | 'arches' | 'bauhaus';
+  frame: 'thin' | 'thick' | 'none';
+}
+
+export const ART: readonly ArtPiece[] = [
+  // back-left wall: a large landscape near the corner, then the salon cluster of three past the
+  // far window. Both walls are mostly glass, so the only places a picture can hang are the corner
+  // stretch (t < 0.28), the gap between the windows (0.46–0.58) and the far end (t > 0.78) —
+  // `layout.test.ts` holds this, because the first cut hung three of these ON a window.
+  { wall: 0, tc: 0.14, uc: 0.56, w: 54, h: 42, motif: 'arches', frame: 'thick' },
+  { wall: 0, tc: 0.83, uc: 0.68, w: 26, h: 26, motif: 'bauhaus', frame: 'none' },
+  { wall: 0, tc: 0.92, uc: 0.66, w: 22, h: 30, motif: 'cairn', frame: 'thin' },
+  { wall: 0, tc: 0.87, uc: 0.46, w: 30, h: 22, motif: 'sunrise', frame: 'thin' },
+  // back-right wall: the big one, and a small square under the clock.
+  //
+  // It used to hang at tc 0.15, directly over the corner bookshelf — which was fine when that unit
+  // was 66 tall and is not now that the tall-narrow archetype took it to 88 plus a plant on top. The
+  // shelf ate the picture's bottom third (nick, 2026-07-30: "a piece of art hidden behind a
+  // bookcase"). Moved along the wall into the clear stretch between that shelf and the near window
+  // rather than raised, because the wall crops at the top near this corner.
+  { wall: 1, tc: 0.23, uc: 0.58, w: 60, h: 44, motif: 'sunrise', frame: 'thick' },
+  { wall: 1, tc: 0.52, uc: 0.34, w: 24, h: 24, motif: 'cairn', frame: 'thin' },
+];
+/**
+ * Two windows per back wall — spaced so the wall reads as a facade, not a single porthole.
+ *
+ * They are no longer four copies of one window (nick, 2026-07-30: "make these windows more magical
+ * looking, more warm looking, but let's not overdo it so that it looks like they're not realistic or
+ * don't have actual utility"). Every difference below is something that happens in a real room:
+ *
+ * · `mullions` alternates the pane pattern, the way a real facade mixes units.
+ * · `sill` puts an object on the ledge — a sill is what makes a window part of a room rather than a
+ *   hole in a wall, and the thing standing on it is the proof someone lives here.
+ * · `bright` is the one that buys most of the warmth for nothing: windows nearer the sun are
+ *   brighter. It MUST stay monotone along the wall — a random brightness reads as broken glass
+ *   rather than as sunlight, and the daylight beams on the floor derive from the same numbers.
+ */
 export const WINDOWS: readonly Win[] = [
-  { t0: 0.28, t1: 0.46, u0: 0.34, u1: 0.82 },
-  { t0: 0.58, t1: 0.78, u0: 0.34, u1: 0.82 },
+  { t0: 0.28, t1: 0.46, u0: 0.34, u1: 0.82, mullions: 2, sill: 'plant', bright: 1 },
+  { t0: 0.58, t1: 0.78, u0: 0.34, u1: 0.82, mullions: 3, sill: 'mug', bright: 0.88 },
 ];
 
 /** How far into the room a window's daylight beam reaches (logical units), and its sideways sun-shear. */
 export const BEAM_LEN = 150;
 export const BEAM_SHEAR = 46;
 
+/** What sits on a shelf top. A credenza-height top is a real surface — leaving it bare repeats the
+ *  same uniformity problem one shelf down. */
+export type ShelfDecor = 'plant' | 'photo' | 'books' | 'trophy';
+
 export interface Bookshelf {
   lx: number;
   ly: number;
   /** Which way the shelf's open (book) face points — set so it faces into the room. */
   dir: Dir;
+  /** Along the wall. */
+  long: number;
+  /** Into the room. */
+  deep: number;
+  high: number;
+  /** Book bands up the carcass — scales with height, so a low unit is not a tall one squashed. */
+  rows: number;
+  /** Carcass tone multiplier off `PAL.wood`. */
+  tone: number;
+  /** Shelved spine-in, page-edges to the room. Exactly one unit, and it is deliberate. */
+  reversed?: boolean;
+  decor: ShelfDecor;
 }
 
-/** Bookshelf footprint (logical): a slim unit that lines a wall — wide along the wall, shallow, tall. */
+/** Default bookshelf footprint (logical): wide along the wall, shallow, tall. Each unit overrides
+ *  these — they are the baseline the archetypes vary from, not the shape of every shelf. */
 export const SHELF_LONG = 58;
 export const SHELF_DEEP = 20;
 export const SHELF_H = 66;
 
-/** Freestanding bookshelves flush to the open wall stretches (back of footprint on the perimeter,
- * same pattern as the entrance door) — warm decor, block nav. */
+/**
+ * Freestanding bookshelves flush to the open wall stretches (back of footprint on the perimeter,
+ * same pattern as the entrance door) — warm decor, block nav.
+ *
+ * Three archetypes rather than four copies of one box (nick, 2026-07-30: "right now we have the same
+ * uniform bookshelves throughout the office space"). A tall-narrow reads as a bookcase; a low-wide
+ * puts its top at a height where an object actually reads, which is what makes `decor` worth having;
+ * the standard is the baseline. The carcass `tone` varies too — a room accumulates furniture over
+ * years, it does not buy a matched set in one afternoon.
+ */
+const DEEP_WIDE = 22; // the low-wide archetype is a touch deeper than the slim units
+
 export const BOOKSHELVES: Bookshelf[] = [
-  { lx: 130, ly: SHELF_DEEP / 2, dir: 'S' }, // back wall, in the corner behind pod 0
-  { lx: FLOOR - SHELF_DEEP / 2, ly: 320, dir: 'W' }, // right wall, below the lounge
-  { lx: SHELF_DEEP / 2, ly: 240, dir: 'E' }, // left wall, beside pod 0
-  { lx: SHELF_DEEP / 2, ly: 560, dir: 'E' }, // left wall, beside pod 2
+  // back wall, corner behind pod 0 — tall narrow
+  {
+    lx: 130,
+    ly: SHELF_DEEP / 2,
+    dir: 'S',
+    long: 44,
+    deep: SHELF_DEEP,
+    high: 88,
+    rows: 4,
+    tone: 1.0,
+    decor: 'plant',
+  },
+  // right wall below the lounge — low wide, and the one shelved backwards
+  {
+    lx: FLOOR - DEEP_WIDE / 2,
+    ly: 320,
+    dir: 'W',
+    long: 76,
+    deep: DEEP_WIDE,
+    high: 46,
+    rows: 2,
+    tone: 0.94,
+    reversed: true,
+    decor: 'photo',
+  },
+  // left wall beside pod 0 — the standard unit, i.e. the constants above
+  {
+    lx: SHELF_DEEP / 2,
+    ly: 240,
+    dir: 'E',
+    long: SHELF_LONG,
+    deep: SHELF_DEEP,
+    high: SHELF_H,
+    rows: 3,
+    tone: 1.05,
+    decor: 'books',
+  },
+  // left wall beside pod 2 — low wide
+  {
+    lx: DEEP_WIDE / 2,
+    ly: 560,
+    dir: 'E',
+    long: 70,
+    deep: DEEP_WIDE,
+    high: 48,
+    rows: 2,
+    tone: 0.97,
+    decor: 'trophy',
+  },
 ];
 
 // ── Leisure spots ─────────────────────────────────────────────────────────────────────────────────────
@@ -481,11 +676,13 @@ export const LEISURE_SPOTS: LeisureSpot[] = (() => {
     { zone: 'lounge', lx: NOOK.lx + L.chairW.dx - 5, ly: NOOK.ly + L.chairW.dy, dir: 'W', sit: 1 },
   ];
   // Poufs are backless: the occupant sits on the centre, turned toward the huddle's low table.
-  const huddle: LeisureSpot[] = [
-    { zone: 'huddle', lx: h.lx, ly: h.ly - 54, dir: 'S', sit: 1 },
-    { zone: 'huddle', lx: h.lx + 52, ly: h.ly + 32, dir: 'W', sit: 1 },
-    { zone: 'huddle', lx: h.lx - 52, ly: h.ly + 32, dir: 'E', sit: 1 },
-  ];
+  const huddle: LeisureSpot[] = HUDDLE_POUFS.map((p) => ({
+    zone: 'huddle' as const,
+    lx: h.lx + p.dx,
+    ly: h.ly + p.dy,
+    dir: p.dir,
+    sit: 1,
+  }));
   // All four meeting chairs are seats — see MEETING for why they sit along one side and the two ends
   // rather than down both sides. `nav.test.ts` holds every offered spot to having open floor beside it,
   // so an arrangement that walls a chair in fails a test rather than shipping as a seat nobody can
