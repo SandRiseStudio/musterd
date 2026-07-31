@@ -165,7 +165,7 @@ describe('provisionWorkspace', () => {
     expect(name).toBe('June (musterd seat)');
   });
 
-  it('setSeatGitIdentity rewrites the team domain on re-bind (ADR 196)', () => {
+  it('setSeatGitIdentity rewrites the team domain on re-bind (ADR 197)', () => {
     // claim/join call this after saveBinding; without it a folder that moves teams keeps
     // seat@oldTeam.musterd and splits one seat across two emails on main.
     const repo = tmp('mwd-rebind-');

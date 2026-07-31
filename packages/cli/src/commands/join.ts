@@ -73,7 +73,7 @@ export async function joinCommand(parsed: Parsed): Promise<number> {
     ...(grant !== undefined ? { grant } : {}),
   };
   saveBinding(process.cwd(), binding);
-  // ADR 196: agent re-bind refreshes worktree git identity. Humans keep their real email — a
+  // ADR 197: agent re-bind refreshes worktree git identity. Humans keep their real email — a
   // synthetic `nick@<team>.musterd` would break GitHub attribution (same gate as doctor).
   if (key.startsWith(TOKEN_PREFIXES.agent_key)) {
     setSeatGitIdentity(seat, process.cwd(), slug);

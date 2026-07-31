@@ -1,4 +1,4 @@
-# 196 — Re-bind refreshes the ADR 109 seat git identity
+# 197 — Re-bind refreshes the ADR 109 seat git identity
 
 - Status: accepted
 - Date: 2026-07-31

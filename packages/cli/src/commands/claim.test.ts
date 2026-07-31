@@ -226,7 +226,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     expect(b.claim).toEqual({ mode: 'seat', name: 'Ada' });
   });
 
-  it('rewrites worktree git identity to the claimed team (ADR 196)', async () => {
+  it('rewrites worktree git identity to the claimed team (ADR 197)', async () => {
     // Simulate a seat worktree that still carries an old-team email after a re-bind.
     execFileSync('git', ['init', '-q'], { cwd });
     execFileSync('git', ['config', 'extensions.worktreeConfig', 'true'], { cwd });

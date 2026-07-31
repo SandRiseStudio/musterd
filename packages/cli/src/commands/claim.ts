@@ -193,7 +193,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
           ...(binding?.model !== undefined ? { model: binding.model } : {}),
         };
         saveBinding(process.cwd(), next);
-        // ADR 196: re-bind refreshes the worktree git identity. Provision writes it once; without
+        // ADR 197: re-bind refreshes the worktree git identity. Provision writes it once; without
         // this, a folder that moves to another team (or seat) keeps `seat@oldTeam.musterd`.
         setSeatGitIdentity(seat, process.cwd(), team);
 
