@@ -449,6 +449,13 @@ export function mountOffice(
           plate.appendChild(toggle);
         }
 
+        // Divider sits before the provider icon: the icon belongs to the identity detail
+        // (model/harness/role), not to the name + chevron on the left.
+        const plateRule = document.createElement('span');
+        plateRule.className = 'lc-gl-label__rule';
+        plateRule.setAttribute('aria-hidden', 'true');
+        plate.appendChild(plateRule);
+
         const provider = modelProvider(node.model);
         const icon = document.createElement('span');
         icon.className = 'lc-gl-label__provider';
@@ -466,11 +473,13 @@ export function mountOffice(
               role: node.role,
             })
           : plateDetailParts({ model: node.model }).filter((p) => p.kind === 'model');
-        for (const part of detailParts) {
-          const divider = document.createElement('span');
-          divider.className = 'lc-gl-label__rule';
-          divider.setAttribute('aria-hidden', 'true');
-          detail.appendChild(divider);
+        for (const [i, part] of detailParts.entries()) {
+          if (i > 0) {
+            const divider = document.createElement('span');
+            divider.className = 'lc-gl-label__rule';
+            divider.setAttribute('aria-hidden', 'true');
+            detail.appendChild(divider);
+          }
           const segEl = document.createElement('span');
           segEl.className = `lc-gl-label__seg lc-gl-label__seg--${part.kind}`;
           segEl.textContent = part.text;
