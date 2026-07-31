@@ -1,4 +1,4 @@
-import type { LaneBoard, MemberSummary, OpenLane, UpdateLane } from '@musterd/protocol';
+import type { LaneBoard, MemberSummary } from '@musterd/protocol';
 import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Board } from '../live/Board';
@@ -9,13 +9,12 @@ import {
 } from '../live/MemberSignIn';
 import {
   acquireObserver,
-  createLane,
   forgetObserver,
   redeemSignin,
-  updateLane,
   type LiveConfig,
 } from '../live/client';
-import { applyLaneEcho, filterLanes, UNOWNED } from '../live/boardWrite';
+import { filterLanes, UNOWNED } from '../live/boardWrite';
+import { useBoardData } from '../live/useBoardData';
 import { initial, kindOf, memberColor } from '../live/format';
 import { InsightRail } from '../live/InsightRail';
 import { useLiveStream } from '../live/useLiveStream';
@@ -70,16 +69,12 @@ function BoardPage() {
   const [isMember, setIsMember] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The one polite status line for write outcomes ("lane opened", "handed to izzo", errors).
-  const [note, setNote] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
 
   const disconnect = useCallback((message?: string) => {
     setCfg(null);
     setIsMember(false);
     setComposing(false);
-    setNote(null);
     if (message) setError(message);
   }, []);
 
@@ -105,6 +100,10 @@ function BoardPage() {
   const base = useWorkingOn(cfg, envelopes);
   const report = useReport(cfg, envelopes);
 
+  // The board's data half — optimistic writes, the write gate, the status line — shared with the
+  // office overlay on /live (which supplies its own `base`).
+  const { board, me, busyId, note, doCreate, doPatch } = useBoardData(cfg, roster, base);
+
   // View + rail preferences — sticky per browser, read once on mount (client-only).
   const [view, setView] = useState<'columns' | 'goals'>('columns');
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -122,12 +121,6 @@ function BoardPage() {
     window.localStorage.setItem(RAIL_KEY, c ? 'collapsed' : 'open');
   };
 
-  // Optimistic overlay: our own writes fold in from the daemon's echo (the firehose skips the sender,
-  // so the echo is the only copy we see). Any fresh base fetch is daemon truth and supersedes it.
-  const [optimistic, setOptimistic] = useState<LaneBoard | null>(null);
-  useEffect(() => setOptimistic(null), [base]);
-  const board = optimistic ?? base;
-
   // The member filter — a lens over the same lanes, session-scoped, empty = everyone.
   const [ownerFilter, setOwnerFilter] = useState<ReadonlySet<string>>(new Set());
   const toggleOwner = (key: string) =>
@@ -139,14 +132,9 @@ function BoardPage() {
     });
   const shownLanes = board ? filterLanes(board.lanes, ownerFilter) : [];
 
-  // The write gate, verbatim from AsksStrip (ADR 149): the auto-provisioned observer is hidden from
-  // the roster, so membership is exactly "connected as a real seat".
-  const me = cfg != null && roster.some((m) => m.name === cfg.as) ? cfg.as : null;
-
   const connect = useCallback(
     async (slug: string, member?: { as: string; token: string }) => {
       setError(null);
-      setNote(null);
       setTeam(slug);
       window.localStorage.setItem(TEAM_KEY, slug);
       if (member) {
@@ -224,46 +212,6 @@ function BoardPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const doCreate = useCallback(
-    async (input: OpenLane): Promise<boolean> => {
-      if (!cfg) return false;
-      setBusyId('compose');
-      setNote(null);
-      try {
-        const result = await createLane(cfg, input);
-        setOptimistic((prev) => applyLaneEcho(prev ?? base ?? { lanes: [], warnings: [] }, result));
-        setNote({ tone: 'ok', text: `lane opened — "${result.lane.title}"` });
-        return true;
-      } catch (e) {
-        setNote({ tone: 'err', text: e instanceof Error ? e.message : String(e) });
-        return false;
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [cfg, base],
-  );
-
-  const doPatch = useCallback(
-    async (id: string, patch: UpdateLane): Promise<boolean> => {
-      if (!cfg) return false;
-      setBusyId(id);
-      setNote(null);
-      try {
-        const result = await updateLane(cfg, id, patch);
-        setOptimistic((prev) => applyLaneEcho(prev ?? base ?? { lanes: [], warnings: [] }, result));
-        setNote({ tone: 'ok', text: noteFor(patch, result.lane.title, cfg.as) });
-        return true;
-      } catch (e) {
-        setNote({ tone: 'err', text: e instanceof Error ? e.message : String(e) });
-        return false;
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [cfg, base],
-  );
 
   const connected = cfg != null;
 
@@ -471,22 +419,4 @@ function FilterStrip({
       )}
     </div>
   );
-}
-
-/** The status line's phrasing per verb — same vocabulary as the pills, in the room's voice. */
-function noteFor(patch: UpdateLane, title: string, meName: string): string {
-  if (patch.owner_seat === meName) return `claimed — "${title}"`;
-  if (patch.owner_seat) return `handed to ${patch.owner_seat} — they'll see it`;
-  switch (patch.state) {
-    case 'active':
-      return `in flight — "${title}"`;
-    case 'blocked':
-      return `marked stuck — "${title}"`;
-    case 'done':
-      return `done — "${title}" shipped`;
-    case 'abandoned':
-      return 'let it go.';
-    default:
-      return 'updated';
-  }
 }
