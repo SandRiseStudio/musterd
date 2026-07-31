@@ -215,9 +215,14 @@ describe('pickReviewCounterpart — risky-lane human requirement (ADR 172)', () 
       risk: ['production'],
       claim: true,
     });
-    const { pickReviewCounterpart } = await import('./review.js');
-    // botty is live, cross-family, AND carries a stale admin bit — still not a human. Null pick.
-    expect(pickReviewCounterpart(db, team.id, lane, 'ada', TIMEOUT)).toBeNull();
+    const { pickReviewCounterpart, pickHumanReviewer } = await import('./review.js');
+    // ADR 188: botty IS routable — as the stage-one PEER (an intended agent review). What the
+    // stale admin bit must never do is satisfy the HUMAN stage: pickHumanReviewer is kind-only.
+    expect(pickReviewCounterpart(db, team.id, lane, 'ada', TIMEOUT)).toMatchObject({
+      reviewer: 'botty',
+      grade: 'cross_family',
+    });
+    expect(pickHumanReviewer(db, team.id, 'ada', TIMEOUT)).toBeNull();
   });
 });
 

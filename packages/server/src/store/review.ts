@@ -242,39 +242,40 @@ export function pickReviewCounterpart(
   );
 
   if (lane.risk.length > 0) {
-    // `kind === 'human'` alone, deliberately not `|| is_admin`: admins can only be humans (ADR 172),
-    // so on a coherent db the disjunct adds nothing — and on an incoherent one (a pre-clamp row
-    // where an agent's capabilities JSON still carries is_admin) it would route the one review that
-    // exists to demand a human's judgment to an agent. The predicate holds the invariant even
-    // against stale rows.
-    const authority = candidates.find((m) => m.kind === 'human');
-    if (authority) {
-      return {
-        reviewer: authority.name,
-        route: 'human_admin',
-        grade: 'human',
-        reviewer_family: memberFamily(db, authority),
-      };
-    }
-    // No live authority for a risky lane: NO fall-through to agent review (ADR 172). This used to
-    // fall through — "a diverse agent review beats none" — but that quietly substituted agent
-    // review for a *requirement*: risky work (user-facing / expensive / destructive / prod) wants a
-    // HUMAN's judgment, which is a different question from model diversity. Returning null makes
-    // the miss loud: the caller records `human_required` at ready time and the close derives
-    // `human_review_missed` instead of a plain `no_candidate`.
-    return null;
+    // ADR 188 two-stage: a risky lane's FIRST review is the peer (agents-only ladder — humans are
+    // stage two, reached when the peer's accept lands, so their scarce attention reviews an
+    // already-screened change). The human requirement (ADR 172) is unchanged in strength: the
+    // caller records it at ready time either way, and the close still derives
+    // `human_review_missed` when no human ever confirmed. With no eligible peer the caller falls
+    // back to pickHumanReviewer directly — the requirement is not gated behind a stage that
+    // cannot happen.
+    return pickLadder(db, teamId, worker, candidates, { agentsOnly: true });
   }
 
-  // The graded ladder (ADR 188). Decorrelation is a spectrum, and the old boolean rule treated
-  // its middle as its bottom: 16 of the first 17 review episodes closed no_candidate on an
-  // all-claude roster while a *different claude model* was live and would have caught different
-  // mistakes. Order: human (cross-family by construction, and the stronger claim) > cross_family >
-  // cross_model. same_model and ungradeable seats are never routed — a same-checkpoint review
-  // re-runs the worker's blind spots, and an unattested seat cannot prove anything (ADR 158).
+  return pickLadder(db, teamId, worker, candidates, { agentsOnly: false });
+}
+
+/**
+ * The graded ladder (ADR 188). Decorrelation is a spectrum, and the old boolean rule treated
+ * its middle as its bottom: 16 of the first 17 review episodes closed no_candidate on an
+ * all-claude roster while a *different claude model* was live and would have caught different
+ * mistakes. Order: human (cross-family by construction, and the stronger claim) > cross_family >
+ * cross_model. same_model and ungradeable seats are never routed — a same-checkpoint review
+ * re-runs the worker's blind spots, and an unattested seat cannot prove anything (ADR 158).
+ * `agentsOnly` is the risky lane's stage-one shape: humans are stage two there, not rungs here.
+ */
+function pickLadder(
+  db: Database,
+  teamId: string,
+  worker: string,
+  candidates: MemberRow[],
+  opts: { agentsOnly: boolean },
+): ReviewPick | null {
   const workerSeat = listMembers(db, teamId).find((x) => x.name === worker);
   const workerModel = workerSeat ? latestAttestedModel(db, workerSeat.id) : null;
   const LADDER = ['human', 'cross_family', 'cross_model'] as const;
   const graded = candidates
+    .filter((m) => !opts.agentsOnly || m.kind !== 'human')
     .map((m) => ({
       m,
       grade:
@@ -283,7 +284,7 @@ export function pickReviewCounterpart(
           : reviewGrade(workerModel, latestAttestedModel(db, m.id)),
     }))
     .filter(
-      (c): c is { m: (typeof candidates)[number]; grade: (typeof LADDER)[number] } =>
+      (c): c is { m: MemberRow; grade: (typeof LADDER)[number] } =>
         c.grade !== null && c.grade !== 'same_model',
     )
     // Stable sort: among equal grades the roster order stands — no new tie-break policy here.
@@ -292,9 +293,35 @@ export function pickReviewCounterpart(
   if (!best) return null;
   return {
     reviewer: best.m.name,
-    // Wire-compat: `route` keeps its two historical values; `grade` carries the finer truth.
+    // Wire-compat: `route` keeps its historical value on this path; `grade` carries the finer truth.
     route: 'cross_family',
     grade: best.grade,
     reviewer_family: memberFamily(db, best.m),
+  };
+}
+
+/**
+ * The stage-two (or no-peer fallback) human reviewer for a risky lane (ADR 172/188): a live human
+ * seat, kind-only — never `is_admin`, which a stale agent row can still carry.
+ */
+export function pickHumanReviewer(
+  db: Database,
+  teamId: string,
+  worker: string,
+  presenceTimeoutMs: number,
+): ReviewPick | null {
+  const human = listMembers(db, teamId).find(
+    (m) =>
+      m.name !== worker &&
+      !m.observer &&
+      m.kind === 'human' &&
+      hasLivePresence(db, m.id, presenceTimeoutMs),
+  );
+  if (!human) return null;
+  return {
+    reviewer: human.name,
+    route: 'human_admin',
+    grade: 'human',
+    reviewer_family: memberFamily(db, human),
   };
 }

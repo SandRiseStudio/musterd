@@ -3234,7 +3234,7 @@ describe('two-stage close (ADR 169)', () => {
     expect(rows[0].detail.owner).toBe('ada');
   });
 
-  it('a risk-tagged lane routes the review ask to the live human first', async () => {
+  it('a risk-tagged lane routes the PEER first; the human requirement is recorded gated (ADR 188)', async () => {
     const { nickTok, ada } = await setup();
     const lane = await post(
       '/teams/dawn/lanes',
@@ -3242,8 +3242,9 @@ describe('two-stage close (ADR 169)', () => {
       ada,
     );
     const ready = await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
-    expect(ready.json.review.reviewer).toBe('nick');
-    expect(ready.json.review.route).toBe('human_admin');
+    expect(ready.json.review.reviewer).toBe('gee'); // stage one: the peer, not nick
+    expect(ready.json.review.human_review_required).toBe(true);
+    expect(ready.json.review.human_ask).toBe('gated');
     void nickTok;
   });
 
@@ -3290,31 +3291,122 @@ describe('two-stage close (ADR 169)', () => {
     };
 
     const ready = await patch({ state: 'ready_for_review' }, ada);
-    expect(ready.json.review.reviewer).toBeUndefined(); // gee is live + cross-family — and NOT picked
+    // ADR 188 two-stage: gee (agent, cross-family) IS picked — as the PEER, stage one. The human
+    // requirement stands (recorded, still unmet with no human live) but no longer suppresses the
+    // peer review that is possible right now.
+    expect(ready.json.review.reviewer).toBe('gee');
+    expect(ready.json.review.tier).toBe('standard'); // peer stage rides standard, not blocking
     expect(ready.json.review.human_review_required).toBe(true);
-    expect(ready.json.review.close_records).toBe('human_review_missed');
-    expect(ready.json.review.self_close_sanctioned).toBeUndefined(); // this is not the sanction
+    expect(ready.json.review.human_ask).toBe('gated');
 
     // The close is still possible (never a wedge) — and the record says what was missed.
     const closed = await patch({ state: 'done' }, ada);
     expect(closed.status).toBe(200);
     const rows = await auditRowsFor(bossTok, 'risky', 'lane.closed');
     const row = rows.find((r: any) => r.detail.lane === laneId)!;
-    expect(row.detail.reason).toBe('human_review_missed');
+    // ADR 188: a peer WAS asked (gee), so the unanswered close is honestly a review_timeout — and
+    // the human miss is carried by its own flag, not folded into the reason.
+    expect(row.detail.reason).toBe('review_timeout');
+    expect(row.detail.human_review_missed).toBe(true);
+    expect(row.detail.peer_review).toBe('none');
     expect(row.detail.verified).toBe(false);
   });
 
-  it('a risky lane routes to the live human at the BLOCKING tier — required, not preferred', async () => {
-    const { nickTok, ada } = await setup();
+  it('a risky lane asks the PEER first; the human ask fires when the peer accepts (ADR 188)', async () => {
+    const { nickTok, ada, gee } = await setup();
     const lane = await post(
       '/teams/dawn/lanes',
       { title: 'drop the old table', risk: ['destructive'], claim: true },
       ada,
     );
-    const ready = await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
-    expect(ready.json.review.reviewer).toBe('nick');
-    expect(ready.json.review.tier).toBe('blocking'); // ADR 172; non-risky review asks stay standard
+    const laneId = lane.json.lane.id as string;
+    const ready = await patchLane(laneId, { state: 'ready_for_review' }, ada);
+    // Stage one: the peer (gee, cross_family), standard tier — nick is NOT asked yet.
+    expect(ready.json.review.reviewer).toBe('gee');
+    expect(ready.json.review.tier).toBe('standard');
+    expect(ready.json.review.human_ask).toBe('gated');
+    const nickInboxBefore = await get('/teams/dawn/inbox?unread=1', nickTok);
+    expect(
+      nickInboxBefore.json.messages.filter((m: any) => m.act === 'ask' && m.meta?.lane_review),
+    ).toHaveLength(0);
+
+    // gee accepts the peer ask → the human ask fires at BLOCKING with gee's findings in the body.
+    const geeInbox = await get('/teams/dawn/inbox?unread=1', gee);
+    const peerAsk = geeInbox.json.messages.find((m: any) => m.act === 'ask' && m.meta?.lane_review);
+    expect(peerAsk).toBeDefined();
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          v: 'musterd/0.3',
+          id: 'peeraccept0000000000000000',
+          team: 'dawn',
+          from: 'gee',
+          to: { kind: 'member', name: 'ada' },
+          act: 'accept',
+          body: 'diff read end-to-end; boundary cases covered; ship it',
+          meta: { in_reply_to: peerAsk.id },
+          ts: Date.now(),
+        },
+      },
+      gee,
+    );
+
+    const nickInbox = await get('/teams/dawn/inbox?unread=1', nickTok);
+    const humanAsk = nickInbox.json.messages.find(
+      (m: any) => m.act === 'ask' && m.meta?.lane_review,
+    );
+    expect(humanAsk).toBeDefined();
+    expect(humanAsk.meta.tier).toBe('blocking');
+    expect(humanAsk.body).toContain('ship it'); // the peer's findings ride along
+    const confirmed = await auditRows(nickTok, 'lane.review_peer_confirmed');
+    expect(confirmed).toHaveLength(1);
+    expect(confirmed[0].detail).toMatchObject({
+      lane: laneId,
+      peer: 'gee',
+      grade: 'cross_family',
+      human_ask_fired: true,
+    });
+
+    // nick confirms — the close records both reviews.
+    const closed = await patchLane(laneId, { state: 'done' }, nickTok);
+    expect(closed.status).toBe(200);
+    const rows = await auditRows(nickTok, 'lane.closed');
+    const row = rows.find((r: any) => r.detail.lane === laneId)!;
+    expect(row.detail.verified).toBe(true);
+    expect(row.detail.review_grade).toBe('human');
+    expect(row.detail.peer_review).toBe('cross_family');
+    expect(row.detail.human_review_missed).toBeUndefined();
+  });
+
+  it('risky with NO peer candidate: the human ask fires immediately at blocking (ADR 188)', async () => {
+    const { nickTok, ada } = await setup();
+    // gee exists but we make the lane while only ada (worker) + nick (human) matter: use a lane
+    // whose worker is gee-family… simpler: a fresh team with one agent + one live human.
+    const t = await post('/teams', { slug: 'lone', creator: { name: 'n4', kind: 'human' } });
+    const n4 = t.json.human_credential as string;
+    await get('/teams/lone/inbox', n4); // n4 present
+    await post('/teams/lone/members', { name: 'solo', kind: 'agent' }, n4);
+    const solo: Auth = { key: t.json.agent_key as string, seat: 'solo' };
+    await fetch(base + '/teams/lone/inbox', {
+      headers: { ...authHeaders(solo), 'x-musterd-model': 'claude-opus-5' },
+    });
+    const lane = await post(
+      '/teams/lone/lanes',
+      { title: 'wipe cache', risk: ['destructive'], claim: true },
+      solo,
+    );
+    const r = await fetch(base + `/teams/lone/lanes/${lane.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(solo) },
+      body: JSON.stringify({ state: 'ready_for_review' }),
+    }).then(async (x) => ({ status: x.status, json: (await x.json()) as Record<string, any> }));
+    // No agent peer exists — the requirement is not gated behind a stage that cannot happen.
+    expect(r.json.review.reviewer).toBe('n4');
+    expect(r.json.review.tier).toBe('blocking');
+    expect(r.json.review.human_ask).toBe('immediate');
     void nickTok;
+    void ada;
   });
 
   it('an agent confirm on a risky lane is verified but flagged human_review_missed (ADR 172)', async () => {
