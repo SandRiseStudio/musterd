@@ -402,10 +402,24 @@ function ccdSessionsDir(env: NodeJS.ProcessEnv): string {
   );
 }
 
-/** Index every CCD record by sessionId, cliSessionId, and file stem — list_sessions may hand any. */
-function buildCcdIndex(dir: string): Map<string, { createdAt?: number; titleSource?: string }> {
-  const index = new Map<string, { createdAt?: number; titleSource?: string }>();
-  if (!existsSync(dir)) return index;
+type CcdMeta = { createdAt?: number; titleSource?: string };
+type CcdIndex = Map<string, CcdMeta>;
+
+export interface CcdScan {
+  rows: SessionRow[];
+  index: CcdIndex;
+}
+
+/**
+ * One walk of the CCD tree: SessionRows for the due-check **and** the enrichment index
+ * resolveLabels needs. Measured 2026-07-31 (lane 01KYWGMXYY / #538 review): labelSweepDue used
+ * to walk+parse twice (~155ms each → 311ms every UserPromptSubmit). Hand the parse forward.
+ * Returns null when the tree is missing/unreadable (ADR 173 abstention).
+ */
+export function scanCcd(dir: string): CcdScan | null {
+  if (!existsSync(dir)) return null;
+  const rows: SessionRow[] = [];
+  const index: CcdIndex = new Map();
   try {
     for (const org of readdirSync(dir)) {
       const orgDir = join(dir, org);
@@ -429,10 +443,14 @@ function buildCcdIndex(dir: string): Map<string, { createdAt?: number; titleSour
             const rec = JSON.parse(readFileSync(join(projDir, file), 'utf8')) as {
               sessionId?: string;
               cliSessionId?: string;
+              title?: string;
+              cwd?: string;
+              isArchived?: boolean;
+              lastActivityAt?: number;
               createdAt?: number;
               titleSource?: string;
             };
-            const meta = {
+            const meta: CcdMeta = {
               ...(rec.createdAt !== undefined ? { createdAt: rec.createdAt } : {}),
               ...(rec.titleSource !== undefined ? { titleSource: rec.titleSource } : {}),
             };
@@ -440,34 +458,48 @@ function buildCcdIndex(dir: string): Map<string, { createdAt?: number; titleSour
             index.set(stem, meta);
             if (rec.sessionId) index.set(rec.sessionId, meta);
             if (rec.cliSessionId) index.set(rec.cliSessionId, meta);
+
+            const sessionId = rec.cliSessionId ?? rec.sessionId;
+            if (!sessionId) continue;
+            rows.push({
+              sessionId,
+              ...(rec.title !== undefined ? { title: rec.title } : {}),
+              ...(rec.cwd !== undefined ? { cwd: rec.cwd } : {}),
+              ...(rec.isArchived !== undefined ? { isArchived: rec.isArchived } : {}),
+              ...(typeof rec.lastActivityAt === 'number'
+                ? { lastActivityAt: new Date(rec.lastActivityAt).toISOString() }
+                : {}),
+            });
           } catch {
-            // one bad record — keep indexing
+            // one bad record — keep scanning
           }
         }
       }
     }
   } catch {
-    // dir unreadable
+    return null;
   }
-  return index;
+  return { rows, index };
 }
 
-/** The desktop app's record for a session: created-at (ms) + who last set the title. */
-function ccdMeta(
-  dir: string,
-  sessionId: string,
-  index?: Map<string, { createdAt?: number; titleSource?: string }>,
-): { createdAt?: number; titleSource?: string } {
-  if (index) {
-    return (
-      index.get(sessionId) ??
-      index.get(
-        sessionId.startsWith('local_') ? sessionId.slice('local_'.length) : `local_${sessionId}`,
-      ) ??
-      {}
-    );
-  }
-  return buildCcdIndex(dir).get(sessionId) ?? {};
+/** Index every CCD record by sessionId, cliSessionId, and file stem — list_sessions may hand any. */
+function buildCcdIndex(dir: string): CcdIndex {
+  return scanCcd(dir)?.index ?? new Map();
+}
+
+/**
+ * The desktop app's record for a session: created-at (ms) + who last set the title.
+ * Always tries the `local_` prefix/strip fallback (list_sessions ids and file stems disagree).
+ * When `index` is omitted, builds one once — never per-key (the old no-index branch rebuilt the
+ * whole tree on every call *and* skipped the `local_` fallback, which is the forever-loop bug
+ * waiting for a second caller — #538 review / lane 01KYWGMXYY).
+ */
+export function lookupCcdMeta(dir: string, sessionId: string, index?: CcdIndex): CcdMeta {
+  const idx = index ?? buildCcdIndex(dir);
+  const alt = sessionId.startsWith('local_')
+    ? sessionId.slice('local_'.length)
+    : `local_${sessionId}`;
+  return idx.get(sessionId) ?? idx.get(alt) ?? {};
 }
 
 /**
@@ -504,11 +536,16 @@ function seatForCwd(cwd: string | undefined): string | null {
  */
 export function resolveLabels(
   sessions: SessionRow[],
-  opts: { now?: number; env?: NodeJS.ProcessEnv } = {},
+  opts: {
+    now?: number;
+    env?: NodeJS.ProcessEnv;
+    /** Pre-built CCD index — labelSweepDue hands the scan forward so we don't parse twice. */
+    ccdIndex?: CcdIndex;
+  } = {},
 ): ResolveLabelsResult {
   const now = opts.now ?? Date.now();
   const dir = ccdSessionsDir(opts.env ?? process.env);
-  const ccdIndex = buildCcdIndex(dir);
+  const ccdIndex = opts.ccdIndex ?? buildCcdIndex(dir);
   const apply: ResolveLabelsResult['apply'] = [];
   const skipped: Record<string, number> = {};
   const skip = (reason: string): void => {
@@ -530,7 +567,7 @@ export function resolveLabels(
       skip('not-a-seat');
       continue;
     }
-    const meta = ccdMeta(dir, s.sessionId, ccdIndex);
+    const meta = lookupCcdMeta(dir, s.sessionId, ccdIndex);
     const parse = parseSeatLabel(title, seat);
     if (parse.chipped && parse.seated) {
       skip('already-labeled');
@@ -616,69 +653,21 @@ export function stampLabelSweep(now = Date.now(), env: NodeJS.ProcessEnv = proce
  * we cannot see whether work remains, so the caller falls back to stamp age.
  */
 export function ccdSessionRows(env: NodeJS.ProcessEnv = process.env): SessionRow[] | null {
-  const root = ccdSessionsDir(env);
-  if (!existsSync(root)) return null;
-  const rows: SessionRow[] = [];
-  try {
-    for (const org of readdirSync(root)) {
-      const orgDir = join(root, org);
-      let projects: string[];
-      try {
-        projects = readdirSync(orgDir);
-      } catch {
-        continue;
-      }
-      for (const proj of projects) {
-        const projDir = join(orgDir, proj);
-        let files: string[];
-        try {
-          files = readdirSync(projDir);
-        } catch {
-          continue;
-        }
-        for (const file of files) {
-          if (!file.endsWith('.json')) continue;
-          try {
-            const rec = JSON.parse(readFileSync(join(projDir, file), 'utf8')) as {
-              sessionId?: string;
-              cliSessionId?: string;
-              title?: string;
-              cwd?: string;
-              isArchived?: boolean;
-              lastActivityAt?: number;
-            };
-            const sessionId = rec.cliSessionId ?? rec.sessionId;
-            if (!sessionId) continue;
-            rows.push({
-              sessionId,
-              ...(rec.title !== undefined ? { title: rec.title } : {}),
-              ...(rec.cwd !== undefined ? { cwd: rec.cwd } : {}),
-              ...(rec.isArchived !== undefined ? { isArchived: rec.isArchived } : {}),
-              ...(typeof rec.lastActivityAt === 'number'
-                ? { lastActivityAt: new Date(rec.lastActivityAt).toISOString() }
-                : {}),
-            });
-          } catch {
-            // one bad record must not kill the due-check
-          }
-        }
-      }
-    }
-  } catch {
-    return null;
-  }
-  return rows;
+  return scanCcd(ccdSessionsDir(env))?.rows ?? null;
 }
 
 /**
  * True when the nudge should fire. Prefer evidence (unlabeled sessions resolveLabels would still
  * propose) over stamp age. Stamp age is the fallback when CCD records are absent — never treat
  * "I cannot see" as "nothing to do" (ADR 173).
+ *
+ * One `scanCcd` feeds both the rows and the index into resolveLabels — never walk the tree twice
+ * on the hot UserPromptSubmit path (lane 01KYWGMXYY).
  */
 export function labelSweepDue(now = Date.now(), env: NodeJS.ProcessEnv = process.env): boolean {
-  const rows = ccdSessionRows(env);
-  if (rows !== null) {
-    return resolveLabels(rows, { now, env }).apply.length > 0;
+  const scan = scanCcd(ccdSessionsDir(env));
+  if (scan !== null) {
+    return resolveLabels(scan.rows, { now, env, ccdIndex: scan.index }).apply.length > 0;
   }
   try {
     const rec = JSON.parse(readFileSync(labelStampPath(env), 'utf8')) as { swept_at?: unknown };
