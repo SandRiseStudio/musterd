@@ -212,4 +212,30 @@ describe('the flip (ADR 166 increment 2)', () => {
     ]);
     expect(out).toMatchObject({ state: 'resumable', slotState: 'live', demoted: true });
   });
+
+  it('ADR 199: clean ended_at outranks warm mtime when enumeration names the same session', () => {
+    const binding: Binding = {
+      server: 'http://127.0.0.1:1',
+      team: 'dawn',
+      surface: 'claude-code',
+      claim: { mode: 'seat', name: 'scout' },
+      agent_key: 'mskey_test',
+      session: {
+        harness: 'claude-code',
+        id: 's1',
+        transcript_path: join(ws, 't.jsonl'),
+        started_at: NOW - 60_000,
+        ended_at: NOW - 1_000,
+      },
+    };
+    mkdirSync(join(ws, '.musterd'), { recursive: true });
+    writeFileSync(join(ws, '.musterd', 'binding.json'), JSON.stringify(binding) + '\n');
+    const out = localSessionLiveness(ws, NOW, () => [
+      { id: 's1', path: '/t/s1.jsonl', mtime: NOW - 5_000, bytes: 100 },
+    ]);
+    expect(out.state).toBe('resumable');
+    expect(out.source).toBe('enumerated');
+    expect(out.enumerated?.state).toBe('live'); // raw enum still saw warm mtime
+    expect(out.slotState).toBe('resumable');
+  });
 });

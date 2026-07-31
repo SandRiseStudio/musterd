@@ -140,6 +140,32 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(specs[2]!.bounds.timeout_ms).toBe(60_000); // absent bounds ⇒ the operator flag
   });
 
+  it('work_order derivation does not clamp below order.bounds.timeout_ms (ADR 199)', async () => {
+    const { client } = fakeClient([
+      order({
+        lease_id: 'L-wo',
+        act_id: 'H1',
+        derivation: 'work_order',
+        lane_id: 'lane1',
+        bounds: { timeout_ms: 1_800_000 },
+      }),
+    ]);
+    const { backend, specs } = fakeBackend();
+    const lines: string[] = [];
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+        log: (l) => lines.push(l),
+      }),
+    );
+    expect(specs).toHaveLength(1);
+    expect(specs[0]!.bounds.timeout_ms).toBe(1_800_000);
+    expect(lines.join('\n')).toMatch(/work_order using policy timeout/);
+    expect(lines.join('\n')).not.toMatch(/clamped/);
+  });
+
   it('an order for a seat this machine does not hold is reported failed, never dropped', async () => {
     const { client, calls } = fakeClient([order({ seat: 'ghost', lease_id: 'L9' })]);
     await pollHostOnce(

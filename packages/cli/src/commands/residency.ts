@@ -44,8 +44,8 @@ import { findWorkspaceDir, resolve, resolveRead } from './helpers.js';
  */
 const POLICY_FLAGS_USAGE =
   '[--lane both|interrupt|batched] [--cooldown <15m>] [--hourly-cap <n>] [--attempt-cap <n>] ' +
-  '[--tool-policy reply-only|seat-policy] [--timeout <5m>] [--max-turns <n>] [--budget <usd>] ' +
-  '[--transcript-max <MiB, fractions OK>]';
+  '[--tool-policy reply-only|seat-policy] [--timeout <5m>] [--work-timeout <30m>] ' +
+  '[--flow manual|auto] [--max-turns <n>] [--budget <usd>] [--transcript-max <MiB, fractions OK>]';
 
 /**
  * The remediation every drift line points at. It carries `--as <admin>` because enrollment is an
@@ -142,6 +142,15 @@ function collectPolicyFlags(parsed: Parsed): ResidencyPolicyOverride | undefined
   if (toolPolicy !== undefined) out['tool_policy'] = toolPolicy;
   const timeout = flagStr(parsed.flags, 'timeout');
   if (timeout !== undefined) out['timeout_ms'] = parseDurationMs(timeout, '--timeout');
+  const workTimeout = flagStr(parsed.flags, 'work-timeout');
+  if (workTimeout !== undefined)
+    out['work_timeout_ms'] = parseDurationMs(workTimeout, '--work-timeout');
+  const flow = flagStr(parsed.flags, 'flow');
+  if (flow !== undefined) {
+    if (flow !== 'manual' && flow !== 'auto')
+      throw new CliError(`--flow wants manual|auto (got "${flow}")`, 2);
+    out['flow'] = flow;
+  }
   num('max-turns', 'max_turns');
   const budget = flagStr(parsed.flags, 'budget');
   if (budget !== undefined) {
@@ -168,6 +177,8 @@ function renderPolicy(policy: ResidencyPolicy, override?: ResidencyPolicyOverrid
     `${policy.attempt_cap} attempts${star('attempt_cap')}`,
     `${policy.tool_policy}${star('tool_policy')}`,
     `timeout ${fmtDurationMs(policy.timeout_ms)}${star('timeout_ms')}`,
+    `work-timeout ${fmtDurationMs(policy.work_timeout_ms)}${star('work_timeout_ms')}`,
+    `flow ${policy.flow}${star('flow')}`,
   ];
   if (policy.max_turns !== undefined) bits.push(`${policy.max_turns} turns${star('max_turns')}`);
   if (policy.budget_usd !== undefined)

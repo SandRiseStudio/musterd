@@ -8,6 +8,7 @@ import type {
 } from '@musterd/protocol';
 import {
   isAwaitingAcceptance,
+  LANE_TERMINAL_STATES,
   ResidencyPolicyOverrideSchema,
   ResidencyPolicySchema,
 } from '@musterd/protocol';
@@ -16,7 +17,7 @@ import { ulid } from 'ulid';
 import { appendAudit } from './audit.js';
 import { getCursor } from './cursors.js';
 import { openDirectedLedger } from './delivery.js';
-import { getLane } from './lanes.js';
+import { getLane, listLanes } from './lanes.js';
 import { getMemberById } from './members.js';
 import { listInbox, pendingInterrupts, rowToEnvelope } from './messages.js';
 import { hasLivePresence, listReclaimableMemberIds } from './presence.js';
@@ -67,12 +68,25 @@ export interface WakeLeaseRow {
   id: string;
   team_id: string;
   member_id: string;
-  act_id: string;
+  /** Null on board-continuation work-orders (ADR 199). */
+  act_id: string | null;
+  /** Lane id for work-orders; used when act_id is null for exhaustion keys. */
+  lane_id: string | null;
   host: string;
   lane: string;
   status: string;
   created_at: number;
   expires_at: number;
+}
+
+/** Rate/exhaustion key: message id, or `lane:<id>` for board continuation (ADR 199). */
+export function wakeExhaustionKey(
+  actId: string | null | undefined,
+  laneId?: string | null,
+): string {
+  if (actId) return actId;
+  if (laneId) return `lane:${laneId}`;
+  return '?';
 }
 
 /**
@@ -341,22 +355,34 @@ function composeWakeLine(seat: string, teamSlug: string, act: string, sender: st
   );
 }
 
-/** Work-order line (ADR 179 / 191): lane id only — never a title, never free text. */
-function composeWorkOrderLine(seat: string, teamSlug: string, laneId: string): string {
+/** Work-order line (ADR 179 / 191 / 199): lane id only — never a title, never free text. */
+function composeWorkOrderLine(
+  seat: string,
+  teamSlug: string,
+  laneId: string,
+  kind: 'review' | 'dispatch',
+): string {
+  if (kind === 'review') {
+    return (
+      `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
+      `review. Orient via team_next / team_inbox_check and begin.`
+    );
+  }
   return (
-    `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
-    `review. Orient via team_next / team_inbox_check and begin.`
+    `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} is yours — ` +
+    `orient via team_next and begin.`
   );
 }
 
-/** A due-wake candidate before leasing: the triggering act + its lane. */
+/** A due-wake candidate before leasing. Act fields optional on board continuation (ADR 199). */
 interface WakeCandidate {
-  act_id: string;
-  act: string;
-  sender: string;
+  act_id?: string;
+  act?: string;
+  sender?: string;
   lane: WakeLane;
   derivation: WakeDerivation;
   lane_id?: string;
+  work_order_kind?: 'review' | 'dispatch';
 }
 
 /**
@@ -409,6 +435,88 @@ function dueReviewWorkOrders(
       lane: 'batched',
       derivation: 'work_order',
       lane_id: laneId,
+      work_order_kind: 'review',
+    });
+  }
+  return out;
+}
+
+/**
+ * Unanswered lane handoffs to this seat (ADR 199 dispatch handoff edge). Oldest first. Not folded
+ * into inbox candidates — when the dispatch loop is on they become work_orders; when off they
+ * still wake as reply doorbells via `dueCandidates` / `openDirectedLedger`.
+ */
+function dueDispatchHandoffWorkOrders(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  member: MemberRow,
+): WakeCandidate[] {
+  const rows = db
+    .prepare<[string, string], MessageRow>(
+      `SELECT m.* FROM messages m
+        WHERE m.team_id = ?
+          AND m.act = 'handoff'
+          AND m.to_kind = 'member'
+          AND m.to_member = ?
+          AND json_extract(m.meta, '$.lane_handoff.lane') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM messages r
+             WHERE r.team_id = m.team_id AND r.act IN ('accept','decline')
+               AND json_extract(r.meta, '$.in_reply_to') = m.id)
+          AND NOT EXISTS (
+            SELECT 1 FROM messages v
+             WHERE v.team_id = m.team_id AND v.act = 'resolve'
+               AND v.thread_id = COALESCE(m.thread_id, m.id))
+        ORDER BY m.ts ASC`,
+    )
+    .all(teamId, member.id);
+  const out: WakeCandidate[] = [];
+  for (const row of rows) {
+    let laneId: string | undefined;
+    try {
+      laneId = (JSON.parse(row.meta ?? '{}') as { lane_handoff?: { lane?: string } }).lane_handoff
+        ?.lane;
+    } catch {
+      continue;
+    }
+    if (!laneId) continue;
+    const lane = getLane(db, teamId, laneId, teamSlug);
+    if (!lane || lane.owner_seat !== member.name) continue;
+    if (isAwaitingAcceptance(lane.state) || LANE_TERMINAL_STATES.has(lane.state)) continue;
+    const sender = getMemberById(db, row.from_member);
+    out.push({
+      act_id: row.id,
+      act: row.act,
+      sender: sender?.name ?? '?',
+      lane: 'batched',
+      derivation: 'work_order',
+      lane_id: laneId,
+      work_order_kind: 'dispatch',
+    });
+  }
+  return out;
+}
+
+/**
+ * Board-owned claimed/active lanes with no triggering act (ADR 199 continuation edge).
+ * Never wakes for unowned open work.
+ */
+function dueDispatchContinuationWorkOrders(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  member: MemberRow,
+): WakeCandidate[] {
+  const out: WakeCandidate[] = [];
+  for (const lane of listLanes(db, teamId, teamSlug, { owner: member.name })) {
+    if (lane.state !== 'claimed' && lane.state !== 'active') continue;
+    if (isAwaitingAcceptance(lane.state) || LANE_TERMINAL_STATES.has(lane.state)) continue;
+    out.push({
+      lane: 'batched',
+      derivation: 'work_order',
+      lane_id: lane.id,
+      work_order_kind: 'dispatch',
     });
   }
   return out;
@@ -534,6 +642,7 @@ export function claimWakeLeases(
     const teamPolicy = getPolicy(db, teamId);
     const teamDefaults = teamPolicy.residency;
     const reviewLoopOn = teamPolicy.loops?.review === true;
+    const dispatchLoopOn = teamPolicy.loops?.dispatch === true;
     for (const enrollment of enrollments) {
       const member = getMemberById(db, enrollment.member_id);
       if (!member || member.left_at !== null) continue;
@@ -551,23 +660,27 @@ export function claimWakeLeases(
         immediate: policy.lane !== 'batched',
         batched: cooled && policy.lane !== 'interrupt',
       });
-      // ADR 191: board-triggered review work-orders — only when the team enabled the loop AND this
-      // seat opted into flow:auto. Prefer them ahead of inbox candidates so a review ask is not
-      // starved by an older handoff on the same seat.
+      // ADR 199: dispatch work-orders (continuation then handoff — handoff unshifted last so it
+      // leads). ADR 191: review work-orders prefer ahead of both + inbox.
+      if (dispatchLoopOn && policy.flow === 'auto' && cooled) {
+        candidates.unshift(...dueDispatchContinuationWorkOrders(db, teamId, teamSlug, member));
+        candidates.unshift(...dueDispatchHandoffWorkOrders(db, teamId, teamSlug, member));
+      }
       if (reviewLoopOn && policy.flow === 'auto' && cooled) {
         candidates.unshift(...dueReviewWorkOrders(db, teamId, teamSlug, member));
       }
       for (const candidate of candidates) {
-        if (isExhausted(db, teamId, candidate.act_id)) continue;
-        if (attemptsForAct(db, teamId, candidate.act_id) >= policy.attempt_cap) {
+        const exhKey = wakeExhaustionKey(candidate.act_id, candidate.lane_id);
+        if (isExhausted(db, teamId, exhKey)) continue;
+        if (attemptsForAct(db, teamId, exhKey) >= policy.attempt_cap) {
           appendAudit(db, teamId, {
             actor: null,
             action: 'residency.wake_exhausted',
             target: member.name,
             result: 'deny',
             detail: {
-              act: candidate.act_id,
-              sender: candidate.sender,
+              act: exhKey,
+              sender: candidate.sender ?? 'board',
               attempts: policy.attempt_cap,
               derivation: candidate.derivation,
               ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
@@ -579,7 +692,8 @@ export function claimWakeLeases(
           id: ulid(),
           team_id: teamId,
           member_id: member.id,
-          act_id: candidate.act_id,
+          act_id: candidate.act_id ?? null,
+          lane_id: candidate.lane_id ?? null,
           host,
           lane: candidate.lane,
           status: 'leased',
@@ -587,8 +701,8 @@ export function claimWakeLeases(
           expires_at: now + WAKE_LEASE_TTL_MS,
         };
         db.prepare(
-          `INSERT INTO wake_leases (id, team_id, member_id, act_id, host, lane, status, created_at, expires_at)
-           VALUES (@id, @team_id, @member_id, @act_id, @host, @lane, @status, @created_at, @expires_at)`,
+          `INSERT INTO wake_leases (id, team_id, member_id, act_id, lane_id, host, lane, status, created_at, expires_at)
+           VALUES (@id, @team_id, @member_id, @act_id, @lane_id, @host, @lane, @status, @created_at, @expires_at)`,
         ).run(lease);
         appendAudit(db, teamId, {
           actor: null,
@@ -597,8 +711,8 @@ export function claimWakeLeases(
           result: 'allow',
           detail: {
             lease_id: lease.id,
-            act: candidate.act_id,
-            sender: candidate.sender,
+            act: exhKey,
+            sender: candidate.sender ?? 'board',
             lane: candidate.lane,
             host,
             derivation: candidate.derivation,
@@ -606,16 +720,22 @@ export function claimWakeLeases(
           },
         });
         const isWorkOrder = candidate.derivation === 'work_order';
+        const kind = candidate.work_order_kind ?? 'dispatch';
         orders.push({
           lease_id: lease.id,
           seat: member.name,
-          act_id: candidate.act_id,
-          act: candidate.act,
-          sender: candidate.sender,
+          ...(candidate.act_id !== undefined ? { act_id: candidate.act_id } : {}),
+          ...(candidate.act !== undefined ? { act: candidate.act } : {}),
+          ...(candidate.sender !== undefined ? { sender: candidate.sender } : {}),
           lane: candidate.lane,
           composed_line: isWorkOrder
-            ? composeWorkOrderLine(member.name, teamSlug, candidate.lane_id!)
-            : composeWakeLine(member.name, teamSlug, candidate.act, candidate.sender),
+            ? composeWorkOrderLine(member.name, teamSlug, candidate.lane_id!, kind)
+            : composeWakeLine(
+                member.name,
+                teamSlug,
+                candidate.act ?? 'message',
+                candidate.sender ?? '?',
+              ),
           expires_at: lease.expires_at,
           tool_policy: isWorkOrder ? 'seat-policy' : policy.tool_policy,
           bounds: {

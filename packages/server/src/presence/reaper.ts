@@ -6,7 +6,7 @@ import { getMemberById, reapExcessIdleObservers, reapStaleObservers } from '../s
 import { hasLivePresence, reapStale } from '../store/presence.js';
 import { expireRequests } from '../store/requests.js';
 import type { RequestRow } from '../store/requests.js';
-import { expireWakeLeases } from '../store/residency.js';
+import { expireWakeLeases, wakeExhaustionKey } from '../store/residency.js';
 
 /** Periodically remove stale presence rows and emit offline events for members who lost all presence. */
 export function startReaper(ctx: Ctx): () => void {
@@ -55,9 +55,10 @@ export function startReaper(ctx: Ctx): () => void {
         target: seat?.name ?? '?',
         result: 'deny',
         detail: {
-          act: lease.act_id,
+          act: wakeExhaustionKey(lease.act_id, lease.lane_id),
           lease_id: lease.id,
           lane: lease.lane,
+          ...(lease.lane_id ? { lane_id: lease.lane_id } : {}),
           reason: 'lease_expired',
         },
       });

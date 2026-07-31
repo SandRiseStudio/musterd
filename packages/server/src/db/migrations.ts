@@ -520,6 +520,33 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`UPDATE lanes SET state = 'awaiting_acceptance' WHERE state = 'ready_for_review'`);
     },
   },
+  {
+    // v28 — dispatch continuation (ADR 199): board-derived work-orders have no triggering act.
+    // Rebuild wake_leases so act_id is nullable; add lane_id for exhaustion / report detail.
+    version: 28,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE wake_leases_v28 (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          act_id      TEXT,
+          lane_id     TEXT,
+          host        TEXT NOT NULL,
+          lane        TEXT NOT NULL CHECK (lane IN ('immediate','batched')),
+          status      TEXT NOT NULL DEFAULT 'leased' CHECK (status IN ('leased','reported','expired')),
+          created_at  INTEGER NOT NULL,
+          expires_at  INTEGER NOT NULL
+        );
+        INSERT INTO wake_leases_v28 (id, team_id, member_id, act_id, lane_id, host, lane, status, created_at, expires_at)
+          SELECT id, team_id, member_id, act_id, NULL, host, lane, status, created_at, expires_at FROM wake_leases;
+        DROP TABLE wake_leases;
+        ALTER TABLE wake_leases_v28 RENAME TO wake_leases;
+        CREATE INDEX idx_wake_leases_member ON wake_leases(member_id, status);
+        CREATE INDEX idx_wake_leases_team ON wake_leases(team_id, status);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

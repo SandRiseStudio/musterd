@@ -605,3 +605,134 @@ describe('claimWakeLeases — work_order derivation (ADR 191 review loop)', () =
     expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
   });
 });
+
+describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', () => {
+  it('handoff with lane_handoff becomes seat-policy work_order when loops.dispatch + flow:auto', async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    const lane = openLane(db, team.id, team.slug, nick.name, {
+      title: 'secret title',
+      claim: true,
+    });
+    updateLane(db, team.id, lane.id, team.slug, { owner_seat: ada.name, state: 'claimed' });
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000, {
+      meta: { lane_handoff: { lane: lane.id, branch: 'feat/x' } },
+    });
+
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({
+      seat: 'Ada',
+      act_id: 'h1',
+      act: 'handoff',
+      derivation: 'work_order',
+      lane_id: lane.id,
+      tool_policy: 'seat-policy',
+    });
+    expect(orders[0]!.bounds?.timeout_ms).toBe(WAKE_POLICY_DEFAULTS.work_timeout_ms);
+    expect(orders[0]!.composed_line).toContain(lane.id);
+    expect(orders[0]!.composed_line).toContain('is yours');
+    expect(orders[0]!.composed_line).not.toContain('secret title');
+  });
+
+  it('does not promote handoff to work_order when loops.dispatch is off (reply doorbell remains)', async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    const lane = openLane(db, team.id, team.slug, nick.name, {
+      title: 'a change',
+      claim: true,
+    });
+    updateLane(db, team.id, lane.id, team.slug, { owner_seat: ada.name, state: 'claimed' });
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000, {
+      meta: { lane_handoff: { lane: lane.id } },
+    });
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.derivation).toBe('batched');
+    expect(orders[0]!.tool_policy).not.toBe('seat-policy');
+  });
+
+  it('does not derive dispatch work_order when the seat is flow:manual', async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'manual' });
+    const lane = openLane(db, team.id, team.slug, nick.name, {
+      title: 'a change',
+      claim: true,
+    });
+    updateLane(db, team.id, lane.id, team.slug, { owner_seat: ada.name, state: 'claimed' });
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000, {
+      meta: { lane_handoff: { lane: lane.id } },
+    });
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.derivation).toBe('batched');
+  });
+
+  it('continuation: owned claimed lane with no act → work_order with null act_id', async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    const lane = openLane(db, team.id, team.slug, nick.name, {
+      title: 'keep going',
+      claim: true,
+    });
+    updateLane(db, team.id, lane.id, team.slug, { owner_seat: ada.name, state: 'claimed' });
+
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({
+      seat: 'Ada',
+      derivation: 'work_order',
+      lane_id: lane.id,
+      tool_policy: 'seat-policy',
+    });
+    expect(orders[0]!.act_id).toBeUndefined();
+    expect(orders[0]!.composed_line).toContain(lane.id);
+    expect(orders[0]!.composed_line).not.toContain('keep going');
+    const leased = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_leased');
+    expect(JSON.parse(leased[0]!.detail as string)).toMatchObject({
+      act: `lane:${lane.id}`,
+      derivation: 'work_order',
+      lane_id: lane.id,
+    });
+  });
+
+  it('continuation does not auto-pick unowned open lanes', async () => {
+    const { openLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    openLane(db, team.id, team.slug, nick.name, { title: 'unowned work', claim: false });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('continuation skips blocked and awaiting_acceptance lanes', async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    const blocked = openLane(db, team.id, team.slug, nick.name, {
+      title: 'blocked',
+      claim: true,
+    });
+    updateLane(db, team.id, blocked.id, team.slug, {
+      owner_seat: ada.name,
+      state: 'blocked',
+    });
+    const awaiting = openLane(db, team.id, team.slug, nick.name, {
+      title: 'awaiting',
+      claim: true,
+    });
+    updateLane(db, team.id, awaiting.id, team.slug, {
+      owner_seat: ada.name,
+      state: 'awaiting_acceptance',
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+});

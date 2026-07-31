@@ -134,6 +134,7 @@ import {
   revokeResidency,
   settleWakeLease,
   toResidency,
+  wakeExhaustionKey,
 } from '../store/residency.js';
 import {
   memberIsHuman,
@@ -1726,8 +1727,8 @@ export async function handleHttp(
           const settled = ctx.db
             .prepare<
               [string, string],
-              { member_id: string; act_id: string }
-            >('SELECT member_id, act_id FROM wake_leases WHERE team_id = ? AND id = ?')
+              { member_id: string; act_id: string | null; lane_id: string | null }
+            >('SELECT member_id, act_id, lane_id FROM wake_leases WHERE team_id = ? AND id = ?')
             .get(team.id, body.lease_id);
           if (!settled)
             throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
@@ -1743,7 +1744,7 @@ export async function handleHttp(
               target: getMemberById(ctx.db, settled.member_id)?.name ?? '?',
               result: 'allow',
               detail: {
-                act: settled.act_id,
+                act: wakeExhaustionKey(settled.act_id, settled.lane_id),
                 lease_id: body.lease_id,
                 ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
                 ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),
@@ -1758,12 +1759,14 @@ export async function handleHttp(
           throw new MusterdError('conflict', `lease "${body.lease_id}" is already reported`);
         }
         const seat = getMemberById(ctx.db, lease.member_id);
-        const sender = ctx.db
-          .prepare<[string, string], { name: string }>(
-            `SELECT mem.name AS name FROM messages m JOIN members mem ON mem.id = m.from_member
+        const sender = lease.act_id
+          ? ctx.db
+              .prepare<[string, string], { name: string }>(
+                `SELECT mem.name AS name FROM messages m JOIN members mem ON mem.id = m.from_member
               WHERE m.team_id = ? AND m.id = ?`,
-          )
-          .get(team.id, lease.act_id);
+              )
+              .get(team.id, lease.act_id)
+          : undefined;
         const enrollment = getResidency(ctx.db, team.id, lease.member_id);
         // A deferral (increment 4's local-session guard) is its own verb, NOT a failure: it is
         // excluded by construction from the derived rate/attempt reads (they count woke+wake_failed
@@ -1780,10 +1783,11 @@ export async function handleHttp(
           target: seat?.name ?? '?',
           result: body.occupied || body.deferred ? 'allow' : 'deny',
           detail: {
-            act: lease.act_id,
-            sender: sender?.name ?? '?',
+            act: wakeExhaustionKey(lease.act_id, lease.lane_id),
+            sender: sender?.name ?? (lease.act_id ? '?' : 'board'),
             lease_id: lease.id,
             lane: lease.lane,
+            ...(lease.lane_id ? { lane_id: lease.lane_id } : {}),
             ...(enrollment?.grant_id ? { grant_id: enrollment.grant_id } : {}),
             ...(body.session ? { session: body.session } : {}),
             ...(body.answered !== undefined ? { answered: body.answered } : {}),
