@@ -560,10 +560,11 @@ const RAW: RawItem[] = [
     blurb:
       'Every agent-facing feature ships with its traces and an eval, the way it ships with tests — an ADR-template section and a format:check guard enforce it. Cheap and compounding, so later features inherit it.',
     detail:
-      'The cheap, compounding half of the trace → eval → experiment flywheel: an "Observability & Evaluation" section in the ADR template (traces, eval metric + dataset + baseline, experiment) plus an obs-evals:check step in format:check, modeled on the arch-tree checker (presence and shape, not content). ADRs from 060 on must carry the section (earlier ones grandfathered); features built through later waves now carry telemetry by default and batond never retrofits.',
+      'The cheap, compounding half of the trace → eval → experiment flywheel: an "Observability & Evaluation" section in the ADR template (traces, eval metric + dataset + baseline, experiment) plus an obs-evals:check step in format:check, modeled on the arch-tree checker (presence and shape, not content). ADRs from 060 on must carry the section (earlier ones grandfathered); features built through later waves now carry telemetry by default. The productized engine half is parked as batond (ADR 194) — this gate does not wait on it.',
     refs: [
       adr(52, 'ADR 052'),
-      adr(51, 'ADR 051'),
+      adr(194, 'ADR 194'),
+      adr(51, 'ADR 051 (superseded)'),
       doc('docs/design/observability.md', 'observability.md'),
     ],
   },
@@ -738,16 +739,21 @@ const RAW: RawItem[] = [
   // ── reserved ──────────────────────────────────────────────────────────────
   {
     id: 'eval-experiment-engine',
-    frozenBy: 51,
+    unfrozen:
+      'ADR 194 parks batond as optional later product; musterd R&D flywheel does not wait on it',
     wave: 'later',
     title: 'Eval & experiment engine (batond)',
     plan: 'reserved',
     category: 'observability',
     blurb:
-      'The batond half of the flywheel: team-outcome evals and side-by-side experiments over model × prompt × harness × team topology — built on a bought, Langfuse-shaped backend, never a from-scratch store.',
+      'Parked standalone product: team-outcome evals and side-by-side experiments over model × prompt × harness × team topology — on a bought, Langfuse-shaped backend if built. Not required for musterd’s R&D flywheel (ADR 194).',
     detail:
-      'Emit in musterd, engine in batond (ADR 051). OTel wire + Langfuse semantics for scores/datasets/experiments, plus the coordination-native additions no single-agent vendor can do: evals scored against a Goal’s definition-of-done (ADR 048/050), experiments that vary the team itself, judge calibration as meta-evals, and the harness-decay measurement that says when to delete complexity models have absorbed.',
-    refs: [adr(51, 'ADR 051'), doc('docs/design/observability.md', 'observability.md')],
+      'Per ADR 194, musterd’s compare→promote→observe loop lives in the research practice; batond is a parked later product (third-party coordination lens + optional Langfuse-shaped scores/datasets/experiments), not the missing half of the flywheel. Emit stays in musterd; core still builds no eval platform. If batond is ever built: OTel ingest, coordination-native evals (Goal DoD, team topology), judge calibration, harness-decay measurement. Formerly frozen by ADR 051 (superseded).',
+    refs: [
+      adr(194, 'ADR 194'),
+      adr(51, 'ADR 051 (superseded)'),
+      doc('docs/design/observability.md', 'observability.md'),
+    ],
     dependsOn: ['telemetry-l2', 'insight-engine'],
   },
   {
@@ -1094,7 +1100,7 @@ const RAW: RawItem[] = [
     refs: [
       adr(101, 'ADR 101'),
       doc('docs/design/model-experimentation.md', 'model-experimentation'),
-      adr(51, 'ADR 051'),
+      adr(194, 'ADR 194'),
       adr(56, 'ADR 056'),
     ],
     dependsOn: ['telemetry-l2'],
@@ -1131,7 +1137,7 @@ const RAW: RawItem[] = [
     refs: [
       adr(122, 'ADR 122'),
       adr(123, 'ADR 123'),
-      adr(51, 'ADR 051'),
+      adr(194, 'ADR 194'),
       doc('docs/design/cookoff-experiment.md', 'cookoff-experiment'),
       doc('docs/design/cookoff-run-manifest.md', 'run-manifest'),
     ],
@@ -1147,8 +1153,13 @@ const RAW: RawItem[] = [
     blurb:
       'The first research artifact: an open, redacted dataset of real human+agent coordination traces on HuggingFace, plus MAST failure detectors over the act-typed log — the data no single-agent vendor can produce.',
     detail:
-      'Dataset-first on the HF ladder (dataset → benchmark + leaderboard → paper → judge model), MAST-in-the-wild as the first thesis (ADR 056). Substrate is telemetry-l2 + coordination-density; reproducibility rides on the flywheel’s pinned experiment manifests (ADR 051) and baselines (ADR 052). Pulled up 2026-07-10 into the cookoff wave: ADR 122 makes every flagship cookoff run a labeled coordination transcript, so the dataset is now a *byproduct* of the experiment, not an independent build — sequenced directly behind the run ladder. Release stays gated on the opt-in + redaction posture (ADR 051) — no dataset ships before consent/redaction is enforced.',
-    refs: [adr(56, 'ADR 056'), doc('docs/research/README.md', 'docs/research/')],
+      'Dataset-first on the HF ladder (dataset → benchmark + leaderboard → paper → judge model), MAST-in-the-wild as the first thesis (ADR 056). Substrate is telemetry-l2 + coordination-density; reproducibility rides on the research practice’s pinned experiment manifests (ADR 194) and baselines (ADR 052). Pulled up 2026-07-10 into the cookoff wave: ADR 122 makes every flagship cookoff run a labeled coordination transcript, so the dataset is now a *byproduct* of the experiment, not an independent build — sequenced directly behind the run ladder. Release stays gated on ADR 184 (accepted: structural-only v1; no agent prose on operator consent alone) — no dataset ships before that gate’s DoD holds.',
+    refs: [
+      adr(56, 'ADR 056'),
+      adr(184, 'ADR 184'),
+      adr(194, 'ADR 194'),
+      doc('docs/research/README.md', 'docs/research/'),
+    ],
     dependsOn: ['telemetry-l2', 'coordination-density', 'cookoff-value-experiment'],
   },
   {
@@ -1491,7 +1502,7 @@ const RAW: RawItem[] = [
     blurb:
       'musterd records coordination acts, never tool calls. Emit a per-tool-call event — tool name, latency, error, caller role, estimated schema weight — so we can see how the MCP surface is actually used and what it costs.',
     detail:
-      'The gap, confirmed 2026-07-14: the audit ledger is coordination-level (claim.occupied, residency.*, git.pr_merged, memory.save — 769 rows over 12 days), and the messages table records acts (status_update 510, message 181, accept 101, steer/handoff/request_help/challenge/defer in single digits), but nothing records which `team_*`/`lane_*` tool was invoked, how long it took, or how many tokens its schema cost. The one exception is the inc-5 `residency.wake_cost` (~$1.21/wake) — proof the ledger can carry a real measured cost once someone instruments it. The PostHog taxonomy defines `$mcp_tool_call`/`$ai_generation` but the Sandrise project collects none of them. The work: emit one event/span per MCP tool call (name, wall-clock, error state, caller role) plus an estimated per-seat schema-token weight, land it in the audit ledger + report engine, honoring the ADR 051 opt-in/redaction posture. It serves two masters — it tells the MCP-surface redesign which tools and descriptions earn their bytes, and it feeds the broader observability product (cost accounting, coordination density, the MAST-in-the-wild dataset). Split out from the surface item on 2026-07-14 so it is not lost as a sub-bullet. Design frozen 2026-07-15 as increment 1 of the ADR 144 measure-then-craft arc (event fields + report-engine aggregates frozen; ledger-vs-aggregate storage is the increment’s call); still sequenced later. Builds on the telemetry emission path (ADRs 015, 089–091) and the wake-cost precedent (ADR 131).',
+      'The gap, confirmed 2026-07-14: the audit ledger is coordination-level (claim.occupied, residency.*, git.pr_merged, memory.save — 769 rows over 12 days), and the messages table records acts (status_update 510, message 181, accept 101, steer/handoff/request_help/challenge/defer in single digits), but nothing records which `team_*`/`lane_*` tool was invoked, how long it took, or how many tokens its schema cost. The one exception is the inc-5 `residency.wake_cost` (~$1.21/wake) — proof the ledger can carry a real measured cost once someone instruments it. The PostHog taxonomy defines `$mcp_tool_call`/`$ai_generation` but the Sandrise project collects none of them. The work: emit one event/span per MCP tool call (name, wall-clock, error state, caller role) plus an estimated per-seat schema-token weight, land it in the audit ledger + report engine, honoring emission redaction (never tool-arg bodies / ADR 184 publication posture for any export). It serves two masters — it tells the MCP-surface redesign which tools and descriptions earn their bytes, and it feeds the broader observability product (cost accounting, coordination density, the MAST-in-the-wild dataset). Split out from the surface item on 2026-07-14 so it is not lost as a sub-bullet. Design frozen 2026-07-15 as increment 1 of the ADR 144 measure-then-craft arc (event fields + report-engine aggregates frozen; ledger-vs-aggregate storage is the increment’s call); still sequenced later. Builds on the telemetry emission path (ADRs 015, 089–091) and the wake-cost precedent (ADR 131).',
     refs: [
       adr(144, 'ADR 144'),
       doc('docs/design/mcp-tool-surface.md', 'mcp-tool-surface.md'),

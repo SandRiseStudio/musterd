@@ -7,12 +7,13 @@
 
 musterd is already a research *consumer* — MAST, Co-Gym, AgentOps, LumiMAS are load-bearing in
 `research-foundation.md` and `landscape.md`, and the founding thesis rests on Co-Gym's measured result.
-The flywheel decision (ADR 051: trace → eval → experiment, engine in batond) plus the dogfood
+The flywheel decision ([ADR 194](194-flywheel-practice-not-batond.md); was ADR 051) plus the dogfood
 practice (developing musterd on musterd) generate the rarest ingredient in this field: **real
 human+agent coordination data nobody else has.** Nick wants research to be a first-class musterd
 priority — to the point of publishing — and, symmetrically, wants musterd to keep **ingesting** new
-research that shapes it. This ADR extends ADR 051: research is the publishable *output* of the flywheel
-and a standing *input* to the roadmap.
+research that shapes it. This ADR extends the flywheel: research is the publishable *output* of the
+loop and a standing *input* to the roadmap. Compare→promote for musterd R&D is this practice, not a
+batond engine.
 
 ## Problem
 
@@ -26,7 +27,8 @@ external research into musterd decisions.
 ### Produce (musterd → the field)
 
 - **Dataset-first.** The first artifact is an **open, redacted coordination-traces dataset** on
-  HuggingFace (OTel/Langfuse-shaped — ADR 051), the corpus no single-agent vendor can produce. HF artifact
+  HuggingFace (structural fields first per [ADR 184](184-dataset-consent-and-redaction.md)), the corpus
+  no single-agent vendor can produce. HF artifact
   ladder, in order: **dataset → benchmark + leaderboard (Space) → paper (arXiv → HF Papers) →
   fine-tuned coordination-judge model** (the tiny-model dogfood track, as both a
   real HF model and cheap experiment compute). Build down the ladder; don't skip to the paper.
@@ -37,10 +39,11 @@ external research into musterd decisions.
   transcripts.
 - **Bar: start whitepaper-grade, escalate to peer-reviewed contribution.** Whitepaper/blog for fast
   credibility now; the dataset + benchmark are the durable peer-reviewable path.
-- **Research-grade by construction, not retrofit.** Reproducibility rides on ADR 051's pinned experiment
-  manifests (model/prompt/config/topology) and ADR 052's baseline requirement — together they *are* a
-  methods section. The open-data release depends on ADR 051's **opt-in + redaction** posture being real:
-  no dataset ships before consent/redaction is enforced.
+- **Research-grade by construction, not retrofit.** Reproducibility rides on pinned experiment
+  manifests ([ADR 194](194-flywheel-practice-not-batond.md) / research practice) and ADR 052's baseline
+  requirement — together they *are* a methods section. The open-data release depends on
+  [ADR 184](184-dataset-consent-and-redaction.md)'s consent + redaction posture being real: no dataset
+  ships before that gate's DoD holds (v1 = structural-only).
 - **Honest-N discipline.** Solo-studio dogfood is small-N; frame findings as case studies / a dataset
   contribution until N is real. Automated experiment runs + the tiny model scale N cheaply and honestly.
   Every published metric carries the Goodhart / human-vs-agent-measurement cautions
@@ -64,17 +67,19 @@ external research into musterd decisions.
 ## Consequences
 
 - Research is a **harvest of the flywheel**, not a separate program — the cost is the discipline (every
-  experiment reproducible + baselined), which ADRs 051/052 already impose.
-- Named seams, each its own ADR/build when it lands: the dataset release pipeline (consent/redaction), the
+  experiment reproducible + baselined), which ADRs 192/052 already impose.
+- Named seams, each its own ADR/build when it lands: the dataset release pipeline (ADR 184), the
   radar automation, the benchmark + leaderboard, the judge model. Roadmap: `coordination-dataset` and
   `research-intake`.
-- Composes with ADR 051 (reproducible experiments + redaction), ADR 052 (baselines), telemetry-l2 +
-  coordination-density (the MAST detectors), and the tiny-model dogfood track.
-- The open-data release is **gated** on redaction/consent — a hard precondition, not a later nicety.
+- Composes with ADR 194 (flywheel / research practice), ADR 184 (publication gate), ADR 052
+  (baselines), telemetry-l2 + coordination-density (the MAST detectors), and the tiny-model dogfood
+  track.
+- The open-data release is **gated** on ADR 184 — a hard precondition, not a later nicety.
 
 ## Observability & Evaluation
 
 n/a as a shippable feature (this is a research/process ADR), but central to it: the **dataset is the eval
 corpus** and the **MAST detectors are the evals** this practice produces. Their metric is detector
-precision/recall against a hand-labeled golden set (the meta-eval / judge-calibration loop of ADR 051);
-the baseline is MAST's published taxonomy. Reproducibility is the experiment-manifest posture above.
+precision/recall against a hand-labeled golden set (meta-eval / judge-calibration as a research-practice
+arm per ADR 194 — not blocked on batond); the baseline is MAST's published taxonomy. Reproducibility is
+the experiment-manifest posture above.

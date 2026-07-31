@@ -1,6 +1,8 @@
 # 051 — The trace → eval → experiment flywheel: coordination-native, emit-in-musterd / engine-in-batond
 
-- Status: proposed
+- Status: superseded by [ADR 194](194-flywheel-practice-not-batond.md) (2026-07-31) — emit stays;
+  musterd R&D compare→promote→observe lives in the research practice; batond parked. Body below is
+  historical.
 - Date: 2026-06-24
 
 ## Context

@@ -4,7 +4,10 @@
 
 ## Direction (ADR 056)
 
-Research is the publishable output of the trace → eval → experiment flywheel (ADR 051), made citable by reproducible experiment manifests (ADR 051) + the baseline requirement (ADR 052). It runs both ways:
+Research is the publishable output of the trace → eval → experiment flywheel
+([ADR 194](../decisions/194-flywheel-practice-not-batond.md); supersedes ADR 051), made citable by
+reproducible experiment manifests (research practice / ADR 194) + the baseline requirement (ADR 052).
+Compare → promote → observe for musterd R&D lives here — not in a batond product. It runs both ways:
 
 - **Produce** — dataset-first. The HuggingFace artifact ladder, in order: **dataset → benchmark + leaderboard → paper (arXiv → HF Papers) → fine-tuned coordination-judge model**.
 - **Ingest** — the research radar feeds `../design/research-foundation.md`; findings that change a decision graduate to an ADR. M1–M3 live: scaffold under `./radar/` + `pnpm radar:sweep` (+ `--triage` for tier-1/tier-2). Digest emit / schedule = M4–M5. Plan: `../design/research-radar-plan.md`.
@@ -14,7 +17,12 @@ Research is the publishable output of the trace → eval → experiment flywheel
 
 Operationalize MAST's multi-agent failure taxonomy ([arXiv 2503.13657](https://arxiv.org/abs/2503.13657)) as live detectors over musterd's act-typed message log — ignored `request_help`, circular handoffs, stalled threads, broadcast-only "journal" coordination. Substrate: the shipped `coordination-density` insight (ADR 050, PR #84) and Telemetry Layer 2. Contribution vs MAST: the first **dataset + detectors of real coordination failures**, not annotated transcripts.
 
-**First artifact:** an open, redacted coordination-traces dataset (OTel/Langfuse-shaped). Release is **gated on the consent + redaction posture of [ADR 184](../decisions/184-dataset-consent-and-redaction.md)** — which states the gate's definition of done as four checkable conditions, so "no dataset ships before consent/redaction is real" has a test. _Previously this cited ADR 051; that pointer was wrong twice over — 051 is still `proposed` (so the gate waited on a product-boundary debate it is not part of), and its posture governs prompt text inside spans, while this artifact is built from the message log. See ADR 184 §Context._
+**First artifact:** an open, redacted coordination-traces dataset (structural fields first —
+OTel/Langfuse-shaped layout is fine; prose omitted in v1). Release is **gated on the consent +
+redaction posture of [ADR 184](../decisions/184-dataset-consent-and-redaction.md)** (accepted
+2026-07-31: structural-only; agent prose not publishable on operator consent alone) — four checkable
+DoD conditions. Flywheel product boundary is [ADR 194](../decisions/194-flywheel-practice-not-batond.md);
+do not cite superseded ADR 051 for the dataset gate.
 
 ## How to add a finding
 

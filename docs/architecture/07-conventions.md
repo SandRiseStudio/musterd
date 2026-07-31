@@ -95,7 +95,7 @@ Sequential, never renumbered. Template:
 ```
 
 The **Observability & Evaluation** section (ADR 052) answers, for any agent-facing feature: **Traces** —
-what spans/coordination acts + agent-turn detail it emits (ADR 051); **Eval** — its success metric, the
+what spans/coordination acts + agent-turn detail it emits ([ADR 194](../decisions/194-flywheel-practice-not-batond.md)); **Eval** — its success metric, the
 dataset, and the **baseline** to compare against; **Experiment** — what would validate it (may be "none
 yet", but named). The `obs-evals:check` guard (`scripts/check-obs-evals.ts`, modeled on
 `check-arch-trees.ts`) enforces presence and shape, not content, and **is wired into `format:check`**
