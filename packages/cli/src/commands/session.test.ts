@@ -9,6 +9,7 @@ import {
   LABEL_SWEEP_STALE_MS,
   labelSweepDue,
   lookupCcdMeta,
+  observeCursorSession,
   OBSERVATION_REFRESH_MS,
   refreshModelObservation,
   resolveLabels,
@@ -214,6 +215,55 @@ describe('musterd session (capture)', () => {
       await captureSession('start', { session_id: 'sid-1', cwd: wsA }); // no transcript on start
       await captureSession('end', { session_id: 'sid-1', transcript_path: t, cwd: wsA });
       expect(readBinding(wsA).model_observed).toBeUndefined();
+    });
+  });
+
+  describe('observeCursorSession (ADR 198)', () => {
+    it('stamps harness:cursor and observes model_id without a transcript', async () => {
+      writeBinding(wsA, bindingOf({ model: 'grok-4.5', surface: 'cursor' }));
+      const got = await observeCursorSession({
+        session_id: 'conv-1',
+        model_id: 'claude-opus-4-7',
+        model: 'thinking-slug',
+        cwd: wsA,
+      });
+      expect(got).toBe('claude-opus-4-7');
+      const a = readBinding(wsA);
+      expect(a.session).toMatchObject({ harness: 'cursor', id: 'conv-1' });
+      expect(a.model_observed).toMatchObject({ model: 'claude-opus-4-7', harness: 'cursor' });
+      expect(a.model).toBe('grok-4.5'); // declaration untouched
+    });
+
+    it('prefers model_id over model, and falls back to model', async () => {
+      await observeCursorSession({ session_id: 'c1', model: 'gpt-5.6-sol', cwd: wsA });
+      expect(readBinding(wsA).model_observed?.model).toBe('gpt-5.6-sol');
+    });
+
+    it('throttles identical observations within OBSERVATION_REFRESH_MS', async () => {
+      await observeCursorSession({
+        session_id: 'c1',
+        model_id: 'claude-opus-4-7',
+        cwd: wsA,
+      });
+      const firstAt = readBinding(wsA).model_observed!.observed_at;
+      const again = await observeCursorSession({
+        session_id: 'c1',
+        model_id: 'claude-opus-4-7',
+        cwd: wsA,
+      });
+      expect(again).toBeUndefined();
+      expect(readBinding(wsA).model_observed!.observed_at).toBe(firstAt);
+    });
+
+    it('re-observes when the dropdown switches to a new model_id', async () => {
+      await observeCursorSession({ session_id: 'c1', model_id: 'claude-opus-4-7', cwd: wsA });
+      const got = await observeCursorSession({
+        session_id: 'c1',
+        model_id: 'gpt-5.6-sol',
+        cwd: wsA,
+      });
+      expect(got).toBe('gpt-5.6-sol');
+      expect(readBinding(wsA).model_observed?.model).toBe('gpt-5.6-sol');
     });
   });
 

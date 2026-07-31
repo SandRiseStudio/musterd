@@ -8,8 +8,23 @@ interface CursorConfig {
   mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
 }
 
-function projectConfigPath(): string {
-  return join(process.cwd(), '.cursor', 'mcp.json');
+/** Cursor's project hooks file (ADR 198) — versioned map of event → command hooks. */
+interface CursorHooksFile {
+  version: number;
+  hooks?: Record<string, CursorHookDef[]>;
+}
+
+interface CursorHookDef {
+  command: string;
+  matcher?: string;
+  timeout?: number;
+}
+
+function projectConfigPath(dir: string = process.cwd()): string {
+  return join(dir, '.cursor', 'mcp.json');
+}
+function projectHooksPath(dir: string = process.cwd()): string {
+  return join(dir, '.cursor', 'hooks.json');
 }
 function globalConfigPath(): string {
   return join(homedir(), '.cursor', 'mcp.json');
@@ -33,6 +48,103 @@ function hasMusterd(path: string): boolean {
   return Boolean(cfg?.mcpServers?.['musterd']);
 }
 
+function readHooksSafe(path: string): CursorHooksFile | null {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as CursorHooksFile;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, hooks: {} };
+    return null; // unparseable — never clobber
+  }
+}
+
+/** Markers so upsert/drop target our entries without absorbing the user's other hooks. */
+export const CURSOR_OBSERVE_HOOK_MARKER = 'musterd-cursor-observe';
+export const CURSOR_END_HOOK_MARKER = 'musterd-cursor-end';
+
+function observeHookCommand(): string {
+  // ADR 198: pipe Cursor's common-schema stdin (conversation_id, model_id, …) into session observe.
+  // cd to the project so binding resolves; never-fail; silent so Agent context stays clean.
+  return (
+    'cd "${CURSOR_PROJECT_DIR:-.}" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd session observe --stdin >/dev/null 2>&1 || true ' +
+    `# ${CURSOR_OBSERVE_HOOK_MARKER}`
+  );
+}
+
+function sessionEndHookCommand(): string {
+  return (
+    'cd "${CURSOR_PROJECT_DIR:-.}" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd session end --stdin >/dev/null 2>&1 || true ' +
+    `# ${CURSOR_END_HOOK_MARKER}`
+  );
+}
+
+function isMusterdCursorHook(h: CursorHookDef, marker: string): boolean {
+  return h.command.includes(marker);
+}
+
+/**
+ * Idempotent upsert of a Cursor hook command under `event`. Replaces a prior musterd entry with the
+ * same marker; leaves every other hook alone. Returns a warning when the file is unreadable.
+ */
+function upsertCursorHook(
+  path: string,
+  event: string,
+  marker: string,
+  command: string,
+): string | undefined {
+  const file = readHooksSafe(path);
+  if (!file) {
+    return `could not parse ${path} — left untouched (fix or remove it, then re-run init)`;
+  }
+  file.version = file.version || 1;
+  file.hooks = file.hooks ?? {};
+  const list = file.hooks[event] ?? [];
+  const kept = list.filter((h) => !isMusterdCursorHook(h, marker));
+  kept.push({ command });
+  file.hooks[event] = kept;
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(file, null, 2) + '\n', 'utf8');
+  return undefined;
+}
+
+function dropCursorHook(path: string, event: string, marker: string): void {
+  const file = readHooksSafe(path);
+  if (!file?.hooks?.[event]) return;
+  const kept = file.hooks[event]!.filter((h) => !isMusterdCursorHook(h, marker));
+  if (kept.length === file.hooks[event]!.length) return;
+  if (kept.length > 0) file.hooks[event] = kept;
+  else delete file.hooks[event];
+  if (file.hooks && Object.keys(file.hooks).length === 0) delete file.hooks;
+  writeFileSync(path, JSON.stringify(file, null, 2) + '\n', 'utf8');
+}
+
+/**
+ * Install musterd's Cursor Agent hooks (ADR 198): sessionStart + postToolUse observe the live
+ * `model_id`; sessionEnd stamps ended_at. Project-local `.cursor/hooks.json` only.
+ */
+export function installMusterdCursorHooks(dir: string = process.cwd()): string[] {
+  const path = projectHooksPath(dir);
+  const warnings: string[] = [];
+  for (const [event, marker, command] of [
+    ['sessionStart', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
+    ['postToolUse', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
+    ['sessionEnd', CURSOR_END_HOOK_MARKER, sessionEndHookCommand()] as const,
+  ]) {
+    const w = upsertCursorHook(path, event, marker, command);
+    if (w) warnings.push(w);
+  }
+  return warnings;
+}
+
+export function removeMusterdCursorHooks(dir: string = process.cwd()): void {
+  const path = projectHooksPath(dir);
+  if (!existsSync(path)) return;
+  dropCursorHook(path, 'sessionStart', CURSOR_OBSERVE_HOOK_MARKER);
+  dropCursorHook(path, 'postToolUse', CURSOR_OBSERVE_HOOK_MARKER);
+  dropCursorHook(path, 'sessionEnd', CURSOR_END_HOOK_MARKER);
+}
+
 /** Cursor: configured via .cursor/mcp.json. We write the project-scoped file in cwd. */
 export const cursor: Harness = {
   id: 'cursor',
@@ -49,12 +161,13 @@ export const cursor: Harness = {
     selfLabelSkillPath: '.cursor/rules/musterd-label-session.mdc',
   },
 
-  // Cursor runs no hooks and exposes no per-session record we can read, so there is nothing to
-  // observe. The slot is declared anyway — that is the even contract — and returns `undefined`: a
-  // visible, declared gap that falls back to the declared tier, never a pretence of knowledge.
-  // Ignores any `transcript_path` a caller passes: Cursor does not produce one, so a path arriving
-  // here belongs to some other harness and must not be read as if it were Cursor's.
-  observeModel: () => undefined,
+  // ADR 198: Cursor Agent hooks carry `model_id` / `model` on the common schema. Prefer the
+  // structured id; ignore transcript_path — Cursor JSONL still has no message.model (Claude/Codex
+  // pattern does not apply). Empty payload → undefined (honest degradation).
+  observeModel: (payload) => {
+    const id = payload.model_id?.trim() || payload.model?.trim();
+    return id || undefined;
+  },
 
   async detect() {
     const installed = existsSync(join(homedir(), '.cursor'));
@@ -72,13 +185,28 @@ export const cursor: Harness = {
     cfg.mcpServers = cfg.mcpServers ?? {};
     cfg.mcpServers['musterd'] = { command: entry.command, args: entry.args, env: entry.env };
     writeConfig(path, cfg);
+    let hookWarnings: string[] = [];
+    try {
+      hookWarnings = installMusterdCursorHooks();
+    } catch {
+      /* non-fatal — MCP wiring is what matters; hooks are the observation seam */
+    }
     return {
       target: path,
       activation:
         'open this folder in Cursor (or reload the window) so Cursor starts the musterd MCP server',
       scope: `wired into this folder only (${path}) — another project needs its own \`musterd init\`, and a second agent needs its own folder`,
       secretPath: path,
+      ...(hookWarnings.length > 0 ? { warnings: hookWarnings } : {}),
     };
+  },
+
+  refreshHooks: {
+    applies: (dir) => existsSync(projectConfigPath(dir)) || existsSync(projectHooksPath(dir)),
+    run: (dir) => {
+      const warnings = installMusterdCursorHooks(dir);
+      return { files: [projectHooksPath(dir)], warnings };
+    },
   },
 
   // Provision a role's MCP servers into the project-local `.cursor/mcp.json` map, additively
@@ -117,5 +245,10 @@ export const cursor: Harness = {
       }
     }
     if (changed) writeConfig(path, cfg);
+    try {
+      removeMusterdCursorHooks();
+    } catch {
+      /* best-effort */
+    }
   },
 };
