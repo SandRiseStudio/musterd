@@ -284,6 +284,7 @@ function LivePage() {
               liveIds={liveIds}
               collapsed={collapsed.office}
               entries={entries}
+              board={board}
               status={status}
               onCollapse={() => toggleCollapse('office')}
               onActClick={onActClick}

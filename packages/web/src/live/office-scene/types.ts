@@ -1,5 +1,6 @@
 import type { LaneState, Posture } from '@musterd/protocol';
 import type { ActTone } from '../format';
+import type { WallBoard } from './wallboard';
 
 /** Facing on the isometric floor. S = toward the viewer (front), N = away, E/W = profiles. */
 export type Dir = 'S' | 'E' | 'N' | 'W';
@@ -39,6 +40,8 @@ export interface OfficeData {
   /** Stable visual seed for desk moods; absent in previews, where the default seed is used. */
   teamName?: string;
   nodes: OfficeNode[];
+  /** The lane board projected for the wall's agile board (wallboard.ts). Absent/null → empty board. */
+  wallBoard?: WallBoard | null;
 }
 
 /** A thought/urgency bubble over an actor's head while it's mid-choreography. */

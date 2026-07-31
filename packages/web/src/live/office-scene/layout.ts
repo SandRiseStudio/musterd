@@ -491,6 +491,20 @@ export const WINDOWS: readonly Win[] = [
 export const BEAM_LEN = 150;
 export const BEAM_SHEAR = 46;
 
+/**
+ * The agile board — the wall object that replaced the dry-erase whiteboard (nick, 2026-07-31). It is
+ * the one data-bearing thing on either wall: real lanes as sticky notes, and on /live the click
+ * target that opens the work board itself. Geometry lives here (not at the draw call) so the
+ * collision guards in `layout.test.ts` hold it to the same rules as the art: never over a window,
+ * never behind a shelf, never off the end of the wall.
+ *
+ * Wall 1 is load-bearing, same reason as the clock: `+t` runs screen-left on the other wall, and a
+ * kanban read right-to-left is wrong in a way a viewer feels before they can say why. It sits in the
+ * whiteboard's old slot, widened into the free stretch at the wall's far end (six columns need the
+ * elbow room; every neighbour stays where it was).
+ */
+export const WALL_BOARD = { wall: 1 as const, tc: 0.87, uc: 0.6, w: 150, h: 74 };
+
 /** What sits on a shelf top. A credenza-height top is a real surface — leaving it bare repeats the
  *  same uniformity problem one shelf down. */
 export type ShelfDecor = 'plant' | 'photo' | 'books' | 'trophy';

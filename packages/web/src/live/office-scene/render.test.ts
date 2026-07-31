@@ -8,6 +8,7 @@ import type { PetMode, PetState } from './pet';
 import {
   actorSortAnchor,
   animatedDeskAnchors,
+  boardAnchor,
   BOOK_COLORS,
   CLOCK_NUMERALS,
   coffeeAnchor,
@@ -21,6 +22,33 @@ import {
 } from './render';
 import { assignSeats } from './seating';
 import type { OfficeNode, Pose } from './types';
+import { projectWallBoard, STICKY_CAP, type WallBoard } from './wallboard';
+import type { Lane, LaneState } from '@musterd/protocol';
+
+/** A minimal lane for wall-board fixtures — only id and state matter to the wall. */
+function laneFix(id: string, state: LaneState): Lane {
+  return {
+    id,
+    team: 'revive',
+    project: 'default',
+    title: 't',
+    detail: null,
+    owner_seat: null,
+    role: null,
+    surface_globs: [],
+    depends_on: [],
+    branch: null,
+    goal_id: null,
+    risk: [],
+    merged: null,
+    state,
+    created_by: 'nick',
+    created_at: 1,
+    claimed_at: null,
+    resolved_at: null,
+    updated_at: 1,
+  };
+}
 
 function node(name: string, activity: OfficeNode['activity']): OfficeNode {
   return {
@@ -141,11 +169,24 @@ describe('coffeeAnchor (the ambient steam source)', () => {
 });
 
 /**
- * The wall whiteboard (`wallWhiteboard`). Set dressing only — white face, mustard marker ink. Not a
- * roster: no member colours, no present/total count.
+ * The wall agile board (`wallLaneBoard`) — the object that replaced the whiteboard. It draws REAL
+ * lane data as sticky notes in state-toned columns; the only type it sets is the `+N` overflow
+ * badge. Member colours stay off the wall: identity lives on the floor, state lives on the board.
  */
-describe('the wall whiteboard', () => {
+describe('the wall agile board', () => {
   const fit = fitFloor(1200, 900);
+
+  /** A little board: two open, one active, one blocked. */
+  const wallData = (): WallBoard =>
+    projectWallBoard({
+      lanes: [
+        laneFix('a', 'open'),
+        laneFix('b', 'open'),
+        laneFix('c', 'active'),
+        laneFix('d', 'blocked'),
+      ],
+      warnings: [],
+    })!;
 
   /** A ctx that also records `fillText` / stroke colours. */
   function textCtx(paints: string[], texts: string[]): CanvasRenderingContext2D {
@@ -169,61 +210,62 @@ describe('the wall whiteboard', () => {
   }
 
   const roster = (nodes: OfficeNode[]): Map<string, OfficeNode> => new Map(nodes.map((n) => [n.name, n]));
+  const scene = (ctx: CanvasRenderingContext2D, wall: WallBoard | null): void =>
+    void renderScene(ctx, fit, new Map(), roster([node('ada', 'working')]), new Map(), 0, 'revive', undefined, null, undefined, null, wall);
 
-  it('paints the white face and mustard ink, not member roster colours', () => {
+  it('paints the face and the lanes in state tones, never member roster colours', () => {
     const paints: string[] = [];
     const nodes = ['ada', 'bo'].map((n) => node(n, 'working'));
-    renderScene(textCtx(paints, []), fit, new Map(), roster(nodes), new Map());
-    expect(paints).toContain('#F7F7F5');
-    expect(paints.some((c) => c === '#E1AD01' || c.includes('225, 173, 1'))).toBe(true);
+    renderScene(textCtx(paints, []), fit, new Map(), roster(nodes), new Map(), 0, 'revive', undefined, null, undefined, null, wallData());
+    expect(paints).toContain('#F7F7F5'); // the board face
+    expect(paints).toContain('#5A52C9'); // the active cap — --lc-lane's hex twin
+    expect(paints).toContain('#D1503F'); // the blocked cap
+    expect(paints).toContain('#EFE8D8'); // an open sticky's paper wash
     for (const n of nodes) expect(paints).not.toContain(n.color);
   });
 
-  it('does not write a present/total count (no longer a roster)', () => {
+  it('hangs an empty board when no team is connected: face and caps, zero paper', () => {
+    const paints: string[] = [];
+    scene(textCtx(paints, []), null);
+    expect(paints).toContain('#F7F7F5');
+    expect(paints).toContain('#5A52C9'); // caps announce their column even bare
+    expect(paints).not.toContain('#EFE8D8'); // …but no sticky paper hangs under them
+    expect(paints).not.toContain('#D8D4F3');
+  });
+
+  it('writes only the overflow badge — a column past its cap says +N, nothing else says anything', () => {
     const texts: string[] = [];
-    renderScene(textCtx([], texts), fit, new Map(), roster([node('ada', 'working')]), new Map());
-    expect(texts.some((t) => /^\d+\/\d+$/.test(t))).toBe(false);
+    const crowded = projectWallBoard({
+      lanes: Array.from({ length: STICKY_CAP + 2 }, (_, i) => laneFix(`L${i}`, 'open')),
+      warnings: [],
+    })!;
+    scene(textCtx([], texts), crowded);
+    expect(texts).toContain('+2');
+    const quiet: string[] = [];
+    scene(textCtx([], quiet), wallData());
+    expect(quiet.some((t) => /^\+\d+$/.test(t))).toBe(false);
   });
 
-  /**
-   * Counts `stroke()` calls made *while the marker ink is loaded* — a scene-wide stroke count would
-   * drown in the rest of the office. This is the whiteboard's mark budget, and it is a budget because
-   * the board renders at roughly half size under wall shear: past a handful of marks the diagram
-   * stops being countable and turns to hash, which is the exact regression this describe exists for.
-   */
-  function inkStrokes(): number {
-    let current = '';
-    let count = 0;
-    const ctx = new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'canvas') return { width: 1200, height: 900 };
-          if (prop === 'createLinearGradient' || prop === 'createRadialGradient')
-            return () => ({ addColorStop() {} });
-          if (prop === 'measureText') return () => ({ width: 0 });
-          if (prop === 'stroke')
-            return () => {
-              if (current === '#E1AD01' || current.includes('225, 173, 1')) count++;
-            };
-          return () => undefined;
-        },
-        set(_t, prop, value) {
-          if (prop === 'strokeStyle' && typeof value === 'string') current = value;
-          return true;
-        },
-      },
-    ) as unknown as CanvasRenderingContext2D;
-    renderScene(ctx, fit, new Map(), roster([node('ada', 'working')]), new Map());
-    return count;
-  }
-
-  it('draws at most five marks — a crowded board turns to hash at /live scale', () => {
-    expect(inkStrokes()).toBeLessThanOrEqual(5);
+  /** Fills painted in sticky-paper colours — the wall's DOM-cap analogue: never more than 6 columns
+   * of STICKY_CAP notes (each note is two fills: paper + header edge), however big the real board. */
+  it('never pins more paper than the cap allows, however many lanes exist', () => {
+    const paints: string[] = [];
+    const flood = projectWallBoard({
+      lanes: Array.from({ length: 80 }, (_, i) => laneFix(`L${i}`, (['open', 'active', 'blocked', 'done'] as const)[i % 4]!)),
+      warnings: [],
+    })!;
+    scene(textCtx(paints, []), flood);
+    const paper = new Set(['#EFE8D8', '#E6E3F8', '#D8D4F3', '#F5DAD4', '#DFDCF6', '#D5ECDF']);
+    const notes = paints.filter((c) => paper.has(c)).length;
+    expect(notes).toBeGreaterThan(0);
+    expect(notes).toBeLessThanOrEqual(6 * STICKY_CAP);
   });
 
-  it('still draws a diagram — an empty board is not the fix', () => {
-    expect(inkStrokes()).toBeGreaterThanOrEqual(3);
+  it('boardAnchor returns a finite on-screen box for the hotspot to sit on', () => {
+    const a = boardAnchor(fit);
+    for (const v of [a.x, a.y, a.w, a.h]) expect(Number.isFinite(v)).toBe(true);
+    expect(a.w).toBeGreaterThan(0);
+    expect(a.h).toBeGreaterThan(0);
   });
 });
 
@@ -348,9 +390,9 @@ describe('the wall clock has a numbered dial', () => {
     }
   });
 
-  it('labels the whiteboard diagram — a diagram somebody drew has words on it', () => {
+  it('writes no words on the agile board by default — an empty board has nothing to say', () => {
     const texts = sceneText();
-    for (const word of ['web', 'api', 'db']) expect(texts).toContain(word);
+    expect(texts.some((t) => /^\+\d+$/.test(t))).toBe(false);
   });
 });
 

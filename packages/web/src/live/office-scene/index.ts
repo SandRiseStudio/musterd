@@ -39,6 +39,7 @@ import {
   type ScenePalette,
 } from './render';
 import { GESTURE } from './skeleton';
+import type { WallBoard } from './wallboard';
 import { shapeSpeech, speechLength, speechTokens, typeCadence, type SpeechToken } from './speech';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
@@ -189,6 +190,7 @@ export function mountOffice(
   let clock = 0;
   let placements = new Map<string, Placement>();
   let teamName = 'revive';
+  let wallBoard: WallBoard | null = null; // the wall's agile board (bake-time data)
   let heads = new Map<string, Pt>(); // home head anchors — where in-place cues sit
   let occupied = false; // any online member on the floor → overhead lights on
   let lightEnv: LightEnv = computeLightEnv(pstNowHours(), occupied); // office lighting from the PST clock
@@ -331,7 +333,7 @@ export function mountOffice(
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
     const poses = actors.poses();
-    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv, pet, actors.sceneFx(), recep);
+    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv, pet, actors.sceneFx(), recep, wallBoard);
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
@@ -779,7 +781,7 @@ export function mountOffice(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, pet, actors.sceneFx(), recep);
+    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, pet, actors.sceneFx(), recep, wallBoard);
     drawCues();
     positionLabels(anchors.heads);
   }
@@ -1077,6 +1079,7 @@ export function mountOffice(
 
   function update(next: OfficeData) {
     teamName = next.teamName ?? 'revive';
+    wallBoard = next.wallBoard ?? null;
     placements = assignSeats(next.nodes);
     const byName = new Map(next.nodes.map((n) => [n.name, n]));
     // The overhead lights follow occupancy: on while anyone's online on the floor, off once the room empties.
