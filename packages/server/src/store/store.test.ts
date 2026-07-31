@@ -4,6 +4,7 @@ import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
 import { resolveActivity } from './activity.js';
 import { getCursor, setCursor } from './cursors.js';
+import { getLane, openLane } from './lanes.js';
 import {
   addMember,
   authMember,
@@ -16,7 +17,6 @@ import {
   reapExcessIdleObservers,
   reapStaleObservers,
 } from './members.js';
-import { getLane, openLane } from './lanes.js';
 import { insertMessage, latestStatusUpdate, listInbox, listTeamMessages } from './messages.js';
 import {
   attach,
