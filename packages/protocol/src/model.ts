@@ -56,6 +56,40 @@ export function modelFamily(model: string | null | undefined): string {
   return match ? match[0] : MODEL_UNKNOWN;
 }
 
+/** The review-diversity spectrum (ADR 188): how decorrelated the reviewer is from the worker. */
+export const REVIEW_GRADES = ['cross_family', 'cross_model', 'same_model'] as const;
+export type ReviewGrade = (typeof REVIEW_GRADES)[number];
+
+/**
+ * Canonical model identity (ADR 188): trimmed, lowercased, with one trailing date stamp removed —
+ * `claude-haiku-4-5-20251001` is the same MODEL as `claude-haiku-4-5`, just pinned. No other
+ * inference: two IDs that differ after this are different models, full stop.
+ */
+export function normalizeModelId(model: string | null | undefined): string {
+  if (!model) return MODEL_UNKNOWN;
+  const normalized = model.normalize('NFC').trim().toLowerCase();
+  if (normalized === '' || normalized === MODEL_UNKNOWN) return MODEL_UNKNOWN;
+  return normalized.replace(/-\d{8}$/, '');
+}
+
+/**
+ * Grade a worker/reviewer pairing, or null when either side cannot prove what it runs — an
+ * ungradeable pairing is ineligible for routing and ungraded at close (ADR 158 posture).
+ * Decorrelation is a spectrum (ADR 056): cross_family (claude → gpt) is the ideal, cross_model
+ * (opus-5 → opus-4.8) is accepted — different checkpoints make different mistakes — and
+ * same_model proves nothing and is never routed.
+ */
+export function reviewGrade(
+  workerModel: string | null | undefined,
+  reviewerModel: string | null | undefined,
+): ReviewGrade | null {
+  const worker = normalizeModelId(workerModel);
+  const reviewer = normalizeModelId(reviewerModel);
+  if (worker === MODEL_UNKNOWN || reviewer === MODEL_UNKNOWN) return null;
+  if (modelFamily(worker) !== modelFamily(reviewer)) return 'cross_family';
+  return worker === reviewer ? 'same_model' : 'cross_model';
+}
+
 /** Which tier supplied the attested model. `observed` outranks both declarations. */
 export type AttestationSource = 'observed' | 'environment' | 'binding' | 'unknown';
 

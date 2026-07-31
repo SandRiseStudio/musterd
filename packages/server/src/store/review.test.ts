@@ -220,3 +220,49 @@ describe('pickReviewCounterpart — risky-lane human requirement (ADR 172)', () 
     expect(pickReviewCounterpart(db, team.id, lane, 'ada', TIMEOUT)).toBeNull();
   });
 });
+
+describe('pickReviewCounterpart — graded ladder (ADR 188)', () => {
+  async function pick(setup: (h: ReturnType<typeof seed>) => void, risk: string[] = []) {
+    const { openLane } = await import('./lanes.js');
+    const { pickReviewCounterpart } = await import('./review.js');
+    const h = seed();
+    agent(h.db, h.team, 'worker', 'claude-opus-5');
+    setup(h);
+    const lane = openLane(h.db, h.team.id, 'dawn', 'worker', {
+      title: 'a change',
+      risk,
+      claim: true,
+    });
+    return pickReviewCounterpart(h.db, h.team.id, lane, 'worker', TIMEOUT);
+  }
+
+  it('cross_model is now routable: opus-5 worker, opus-4.8 reviewer', async () => {
+    const p = await pick(({ db, team }) => agent(db, team, 'dolly', 'claude-opus-4-8'));
+    expect(p).toMatchObject({ reviewer: 'dolly', grade: 'cross_model' });
+  });
+
+  it('cross_family beats cross_model when both are live', async () => {
+    const p = await pick(({ db, team }) => {
+      agent(db, team, 'dolly', 'claude-opus-4-8');
+      agent(db, team, 'gptbot', 'gpt-5.6-sol');
+    });
+    expect(p).toMatchObject({ reviewer: 'gptbot', grade: 'cross_family' });
+  });
+
+  it('same_model is never routed — two opus-5 seats still find no candidate', async () => {
+    expect(await pick(({ db, team }) => agent(db, team, 'twin', 'claude-opus-5'))).toBeNull();
+  });
+
+  it('an unattested live seat stays ineligible (null grade is not a grade)', async () => {
+    expect(await pick(({ db, team }) => agent(db, team, 'mist'))).toBeNull();
+  });
+
+  it('a live human outranks every agent grade and reads grade "human"', async () => {
+    const p = await pick(({ db, team }) => {
+      agent(db, team, 'gptbot', 'gpt-5.6-sol');
+      const { row } = addMember(db, team, { kind: 'human', name: 'nick', role: '' });
+      attach(db, row.id, 'cli', 'conn-nick');
+    });
+    expect(p).toMatchObject({ reviewer: 'nick', grade: 'human' });
+  });
+});

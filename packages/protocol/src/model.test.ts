@@ -3,7 +3,9 @@ import {
   describeFamilyPosture,
   MODEL_UNKNOWN,
   modelFamily,
+  normalizeModelId,
   resolveAttestation,
+  reviewGrade,
   resolveAttestedModel,
 } from './model.js';
 
@@ -165,5 +167,33 @@ describe('describeFamilyPosture (ADR 172) — one bounded line', () => {
     expect(
       describeFamilyPosture({ ...base, state: 'unknown', attesting: 1, families: { claude: 1 } }),
     ).toContain('only 1 agent attesting a known family');
+  });
+});
+
+describe('reviewGrade (ADR 188) — the diversity spectrum', () => {
+  it('normalizeModelId strips a trailing date stamp and nothing else', () => {
+    expect(normalizeModelId('claude-haiku-4-5-20251001')).toBe('claude-haiku-4-5');
+    expect(normalizeModelId('claude-opus-5')).toBe('claude-opus-5');
+    expect(normalizeModelId('gpt-5.6-sol')).toBe('gpt-5.6-sol'); // no date — untouched
+    expect(normalizeModelId('  Claude-Opus-5 ')).toBe('claude-opus-5');
+    expect(normalizeModelId('')).toBe(MODEL_UNKNOWN);
+    expect(normalizeModelId(null)).toBe(MODEL_UNKNOWN);
+  });
+
+  it('grades the spectrum: family beats model beats identity', () => {
+    expect(reviewGrade('claude-opus-5', 'gpt-5.6-sol')).toBe('cross_family');
+    expect(reviewGrade('claude-opus-5', 'claude-opus-4-8')).toBe('cross_model');
+    expect(reviewGrade('claude-opus-5', 'claude-fable-5')).toBe('cross_model');
+    expect(reviewGrade('claude-opus-5', 'claude-opus-5')).toBe('same_model');
+  });
+
+  it('a date-stamped ID is the same model, not a different one', () => {
+    expect(reviewGrade('claude-haiku-4-5', 'claude-haiku-4-5-20251001')).toBe('same_model');
+  });
+
+  it('unknown on either side grades nothing — null, never a guess', () => {
+    expect(reviewGrade('claude-opus-5', null)).toBeNull();
+    expect(reviewGrade(undefined, 'claude-opus-5')).toBeNull();
+    expect(reviewGrade('unknown', 'claude-opus-5')).toBeNull();
   });
 });
