@@ -4,6 +4,7 @@ import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
 import { resolveActivity } from './activity.js';
 import { getCursor, setCursor } from './cursors.js';
+import { getLane, openLane } from './lanes.js';
 import {
   addMember,
   authMember,
@@ -13,6 +14,7 @@ import {
   leaveMember,
   listMembers,
   mintCredential,
+  reapExcessIdleObservers,
   reapStaleObservers,
 } from './members.js';
 import { insertMessage, latestStatusUpdate, listInbox, listTeamMessages } from './messages.js';
@@ -88,6 +90,21 @@ describe('teams + members', () => {
     const row = getMemberByName(db, team.id, 'Ada');
     expect(row).toBeDefined();
     expect(row?.left_at).not.toBeNull();
+  });
+
+  it('leaveMember releases in-flight claims so the board cannot name a ghost owner (ADR 196)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const wip = openLane(db, team.id, 'dawn', 'Ada', { title: 'wip', claim: true });
+    const awaiting = openLane(db, team.id, 'dawn', 'Ada', { title: 'merged', claim: true });
+    db.prepare(`UPDATE lanes SET state = 'awaiting_acceptance' WHERE id = ?`).run(awaiting.id);
+
+    leaveMember(db, ada.row.id);
+    expect(getLane(db, team.id, wip.id, 'dawn')).toMatchObject({ state: 'open', owner_seat: null });
+    expect(getLane(db, team.id, awaiting.id, 'dawn')).toMatchObject({
+      state: 'awaiting_acceptance',
+      owner_seat: 'Ada',
+    });
   });
 
   it('re-adding a soft-removed name revives it instead of dead-ending on UNIQUE (ADR 065)', () => {
@@ -779,6 +796,27 @@ describe('observer seat reaping (ADR 064)', () => {
       .map((m) => m.name)
       .sort();
     expect(remaining).toEqual(['nick', 'web-fresh', 'web-live', 'web-ref'].sort());
+  });
+
+  it('reapExcessIdleObservers keeps the freshest N idle seats per team (ADR 196)', () => {
+    const { db, team } = freshTeam();
+    const now = Date.now();
+    for (let i = 0; i < 5; i++) {
+      const m = addMember(db, team, { name: `web-${i}`, kind: 'human', observer: true });
+      db.prepare('UPDATE members SET updated_at = ? WHERE id = ?').run(
+        now - (5 - i) * 1_000,
+        m.row.id,
+      );
+    }
+    // Cap of 2 → keep web-4, web-3 (freshest); reap web-0..web-2.
+    const reaped = reapExcessIdleObservers(db, 2, now - 45_000);
+    expect(reaped.map((m) => m.name).sort()).toEqual(['web-0', 'web-1', 'web-2']);
+    expect(
+      listMembers(db, team.id)
+        .filter((m) => m.observer)
+        .map((m) => m.name)
+        .sort(),
+    ).toEqual(['web-3', 'web-4']);
   });
 });
 

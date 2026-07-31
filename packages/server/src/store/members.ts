@@ -9,6 +9,7 @@ import {
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { MusterdError } from '../errors.js';
+import { releaseInFlightClaimsForSeat } from './lanes.js';
 import type { MemberRow, TeamRow } from './rows.js';
 import { resolveCapabilities } from './rows.js';
 import { getAgentKeyHash, requireTeam } from './teams.js';
@@ -50,6 +51,52 @@ export function reapStaleObservers(
     })();
   }
   return stale;
+}
+
+/**
+ * Cap concurrent idle observers per team (ADR 196): after the ADR 064 TTL pass, keep at most
+ * `maxIdlePerTeam` idle (no live presence) observers per team — freshest `updated_at` first —
+ * and hard-delete the rest. Same message-FK skip as {@link reapStaleObservers}. Live-connected
+ * seats are never capped out. Returns the reaped members for logging.
+ */
+export function reapExcessIdleObservers(
+  db: Database,
+  maxIdlePerTeam: number,
+  liveCutoffTs: number,
+): { id: string; name: string; team_id: string }[] {
+  if (maxIdlePerTeam < 1) return [];
+  const idle = db
+    .prepare<[number], { id: string; name: string; team_id: string; updated_at: number }>(
+      `SELECT id, name, team_id, updated_at FROM members
+       WHERE observer = 1
+         AND left_at IS NULL
+         AND id NOT IN (SELECT member_id FROM presence WHERE held_until IS NULL AND last_seen_at > ?)
+         AND id NOT IN (SELECT from_member FROM messages)
+         AND id NOT IN (SELECT to_member FROM messages WHERE to_member IS NOT NULL)
+       ORDER BY team_id, updated_at DESC`,
+    )
+    .all(liveCutoffTs);
+  const excess: { id: string; name: string; team_id: string }[] = [];
+  let currentTeam = '';
+  let kept = 0;
+  for (const row of idle) {
+    if (row.team_id !== currentTeam) {
+      currentTeam = row.team_id;
+      kept = 0;
+    }
+    if (kept < maxIdlePerTeam) {
+      kept += 1;
+      continue;
+    }
+    excess.push({ id: row.id, name: row.name, team_id: row.team_id });
+  }
+  if (excess.length > 0) {
+    const del = db.prepare('DELETE FROM members WHERE id = ?');
+    db.transaction(() => {
+      for (const m of excess) del.run(m.id);
+    })();
+  }
+  return excess;
 }
 
 /**
@@ -441,10 +488,16 @@ export function setAvailability(
 }
 
 export function leaveMember(db: Database, memberId: string): void {
+  const member = getMemberById(db, memberId);
   const now = Date.now();
   db.prepare(
     "UPDATE members SET left_at = ?, last_offline_reason = 'signed_off', updated_at = ? WHERE id = ?",
   ).run(now, now, memberId);
+  // ADR 196: soft-remove must free in-flight WIP — otherwise the board asserts ownership for a
+  // name every roster filter already drops. awaiting_acceptance keeps the owner (verified-ness).
+  if (member && member.left_at === null) {
+    releaseInFlightClaimsForSeat(db, member.team_id, member.name, now);
+  }
 }
 
 /** Sticky offline reason for an intentional seat release (unbind) — ADR 141. */

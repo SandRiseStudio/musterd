@@ -22,6 +22,8 @@ export interface ResolvedConfig {
   resumeTtlMs: number;
   /** Idle TTL after which an unused observer seat is reaped (ADR 064). */
   observerTtlMs: number;
+  /** Max idle observers kept per team after the TTL pass (ADR 196); live seats are never capped. */
+  observerIdleCap: number;
   /** Grace a same-workspace successor must stay attached before it reaps its predecessor (ADR 092):
    * long enough that a transient health-check probe disconnects first (so it never evicts the live
    * seat), short enough that a real reload orphan is reaped promptly. */
@@ -51,6 +53,8 @@ export const REAPER_INTERVAL_MS = 15_000;
 export const RECLAIM_GRACE_MS = 45_000;
 /** Idle observer seats (ADR 063) are reaped after this long with no connection (ADR 064). */
 export const OBSERVER_TTL_MS = 86_400_000; // 24h
+/** Concurrent idle observers kept per team after the TTL pass (ADR 196). */
+export const OBSERVER_IDLE_CAP = 8;
 /** A seat resume grant (ADR 087) is valid for this long, refreshed on every clean occupy. */
 export const RESUME_TTL_MS = 86_400_000; // 24h
 /** A same-workspace successor waits this long, still attached, before reaping its predecessor (ADR
@@ -161,6 +165,7 @@ export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
     reclaimGraceMs: envMs('MUSTERD_RECLAIM_GRACE_MS', RECLAIM_GRACE_MS),
     resumeTtlMs: envMs('MUSTERD_RESUME_TTL_MS', RESUME_TTL_MS),
     observerTtlMs: envMs('MUSTERD_OBSERVER_TTL_MS', OBSERVER_TTL_MS),
+    observerIdleCap: envMs('MUSTERD_OBSERVER_IDLE_CAP', OBSERVER_IDLE_CAP),
     supersedeGraceMs: envMs('MUSTERD_SUPERSEDE_GRACE_MS', SUPERSEDE_GRACE_MS),
     tls,
     trustProxy: opts?.trustProxy ?? envBool('MUSTERD_INSECURE_TRUST_PROXY'),

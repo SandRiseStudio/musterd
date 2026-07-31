@@ -4,13 +4,17 @@ import { openDb } from '../db/open.js';
 import {
   boardWarnings,
   deriveGoalStatus,
+  getLane,
   globsOverlap,
   laneWarnings,
   lanesForGoal,
   listLanes,
   openLane,
+  releaseDepartedSeatClaims,
+  releaseInFlightClaimsForSeat,
   updateLane,
 } from './lanes.js';
+import { addMember } from './members.js';
 import { createTeam } from './teams.js';
 
 function seed() {
@@ -309,5 +313,45 @@ describe('deriveGoalStatus (the pinned rule, ADR 048 as amended by 084)', () => 
     const shipped = [lane('done'), lane('done')];
     expect(deriveGoalStatus(shipped)).toBe('shipped');
     expect(deriveGoalStatus([...shipped, lane('open')])).toBe('in-flight');
+  });
+});
+
+describe('departed-seat claim release (ADR 196)', () => {
+  it('releaseInFlightClaimsForSeat opens claimed/active/blocked but keeps awaiting_acceptance', () => {
+    const { db, team } = seed();
+    const claimed = openLane(db, team.id, 'bravo', 'June', { title: 'wip', claim: true });
+    const active = openLane(db, team.id, 'bravo', 'June', { title: 'building', claim: true });
+    updateLane(db, team.id, active.id, 'bravo', { state: 'active' });
+    const awaiting = openLane(db, team.id, 'bravo', 'June', { title: 'shipped', claim: true });
+    updateLane(db, team.id, awaiting.id, 'bravo', { state: 'awaiting_acceptance' });
+
+    const released = releaseInFlightClaimsForSeat(db, team.id, 'June');
+    expect(released.map((r) => r.id).sort()).toEqual([active.id, claimed.id].sort());
+    expect(getLane(db, team.id, claimed.id, 'bravo')).toMatchObject({
+      state: 'open',
+      owner_seat: null,
+    });
+    expect(getLane(db, team.id, active.id, 'bravo')?.owner_seat).toBeNull();
+    expect(getLane(db, team.id, awaiting.id, 'bravo')).toMatchObject({
+      state: 'awaiting_acceptance',
+      owner_seat: 'June',
+    });
+  });
+
+  it('releaseDepartedSeatClaims sweeps lanes still owned by soft-removed seats', () => {
+    const { db, team } = seed();
+    const june = addMember(db, team, { name: 'June', kind: 'agent' });
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'ghost wip', claim: true });
+    // Bypass leaveMember's composition — the historical ghost ADR 196's reaper sweep clears.
+    db.prepare('UPDATE members SET left_at = ? WHERE id = ?').run(Date.now(), june.row.id);
+
+    const swept = releaseDepartedSeatClaims(db);
+    expect(swept).toEqual([
+      { team_id: team.id, seat: 'June', lane: lane.id, state_before: 'claimed' },
+    ]);
+    expect(getLane(db, team.id, lane.id, 'bravo')).toMatchObject({
+      state: 'open',
+      owner_seat: null,
+    });
   });
 });

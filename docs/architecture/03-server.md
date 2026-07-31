@@ -26,7 +26,7 @@ src/
     seed.ts           // seedDawn(db) test helper
   store/
     teams.ts          // createTeam, getTeamBySlug, listMembers, archiveTeam
-    members.ts        // addMember (issues token), getMember, authMember(token), leaveMember
+    members.ts        // addMember (issues token), getMember, authMember(token), leaveMember (releases in-flight claims — ADR 196), reapStaleObservers + reapExcessIdleObservers
     messages.ts       // insertMessage, listInbox(memberId, since), listTeamMessages
     presence.ts       // attach, heartbeat, detach/release, listPresence, reapStale (kind-scoped single-active, ADR 042)
     activity.ts       // resolveActivity: the two-clocks rule → offline/idle/working (v0.2 M2; ADR 140)
@@ -63,7 +63,7 @@ src/
     ws.ts             // WS upgrade, handshake state machine, frame dispatch
     hub.ts            // in-memory connection registry: member -> Set<conn>; broadcast/deliver
   presence/
-    reaper.ts         // setInterval: mark/remove presence rows past timeout; emit offline events
+    reaper.ts         // setInterval: presence timeout, request/wake expiry, departed-seat claim release + observer TTL/cap (ADR 064/196); emit offline events
   projection/
     load.ts           // read .musterd/team.toml + seats/*.toml -> TeamSpec; fail-closed per seat (ADR 058)
     reconcile.ts      // match-by-name delta: ADD/UPDATE/REVIVE/REMOVE the projection from the files
@@ -133,7 +133,7 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 
 ## Presence heartbeat rules (load-bearing constants)
 
-> These four constants are the **defaults**; each is **env-overridable** for WAN-tuned teams (ADR 040) via `MUSTERD_HEARTBEAT_INTERVAL_MS`, `MUSTERD_PRESENCE_TIMEOUT_MS`, `MUSTERD_REAPER_INTERVAL_MS`, `MUSTERD_RECLAIM_GRACE_MS` (positive-integer ms, zod-validated). The same-workspace reap grace (ADR 092) is likewise `MUSTERD_SUPERSEDE_GRACE_MS` (default 5s). Out of the box the values below are unchanged. The reaper and the WS close path read them from `ctx.config`, so an override takes effect everywhere; the newest-wins self-heal (ADR 017) is tested at WAN-like timing.
+> These four constants are the **defaults**; each is **env-overridable** for WAN-tuned teams (ADR 040) via `MUSTERD_HEARTBEAT_INTERVAL_MS`, `MUSTERD_PRESENCE_TIMEOUT_MS`, `MUSTERD_REAPER_INTERVAL_MS`, `MUSTERD_RECLAIM_GRACE_MS` (positive-integer ms, zod-validated). The same-workspace reap grace (ADR 092) is likewise `MUSTERD_SUPERSEDE_GRACE_MS` (default 5s); observer idle TTL / concurrent idle cap are `MUSTERD_OBSERVER_TTL_MS` (ADR 064, default 24h) and `MUSTERD_OBSERVER_IDLE_CAP` (ADR 196, default 8). Out of the box the values below are unchanged. The reaper and the WS close path read them from `ctx.config`, so an override takes effect everywhere; the newest-wins self-heal (ADR 017) is tested at WAN-like timing.
 
 - `HEARTBEAT_INTERVAL_MS = 15_000` — clients send `heartbeat` (or any frame) at this cadence.
 - `PRESENCE_TIMEOUT_MS = 45_000` — 3 missed intervals. A presence row with `now - last_seen_at > timeout` is stale.
