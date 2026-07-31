@@ -94,10 +94,36 @@ ops can flip without raw policy JSON.
 - Defaults keep every team bit-identical until an admin flips both knobs.
 - ADR 179 stays the umbrella (still proposed); this ADR is the accepted increment, mirroring 191.
 
+**Scope limit — presence-live is the upstream veto, and "parked" is not a state (recorded
+2026-07-31, decision unchanged).** §5 governs a seat whose session **ended** while its transcript is
+still warm. It is not reachable for a session that is merely idle, because `claimWakeLeases` vetoes
+on `hasLivePresence` (step 2, `packages/server/src/store/residency.ts`) **before** the local-session
+snooze (step 3b) and long before any `ended_at` read. The MCP adapter heartbeats presence every 15s
+(`HEARTBEAT_MS`, `packages/mcp/src/client.ts`) for as long as the harness **process** is alive — so
+presence measures process aliveness, never attention.
+
+Two consequences worth stating outright, because a careful reading of §5 alone suggests otherwise:
+
+- **The continuation edge only ever serves seats whose harness process is gone.** A live-but-idle
+  seat is reachable by the ADR 088 interrupt line, not by a wake. That is coherent — you do not
+  spawn a session beside a session — but it is not deducible from §5.
+- **An agent cannot make itself wake-eligible from inside its own session.** Announcing "parked" in
+  a `status_update` is a social convention with no system representation; the seat stays
+  presence-live until the process exits. Any exercise that needs a genuinely wakeable enrolled seat
+  needs that seat's session **closed**, not merely idle.
+
+Measured on 2026-07-31 (dolly's handoff-edge exercise, lane `01KYX37RKH`): a seat that reported
+parking twice held presence continuously (sampled age 4/14/9/4/14s against a 45s timeout) with
+`ended_at` unset, while its transcript went 19 minutes cold — past `LOCAL_SESSION_LIVE_MS`, so the
+mtime guard would already have passed. The veto was presence, not mtime and not `ended_at`. The
+hook path itself is sound: a sibling seat's binding carried `ended_at` from a real SessionEnd in the
+same window, and the only bindings missing it were the four whose sessions were open. No code change
+followed: the behaviour is correct, the documentation was not.
+
 ## Observability & Evaluation
 
 - **Traces.** `residency.wake_leased` / `woke` / `wake_failed` carry `detail.derivation:
-  'work_order'` and `detail.lane_id`; continuation rows use `detail.act = lane:<id>` when
+'work_order'` and `detail.lane_id`; continuation rows use `detail.act = lane:<id>` when
   `act_id` is null.
 - **Eval.** Baseline: handoff → batched reply doorbell (pre-this). Success after enable: a
   `lane_handoff` to an offline `flow: auto` seat under `loops.dispatch` produces a seat-policy
@@ -105,3 +131,7 @@ ops can flip without raw policy JSON.
   produces a continuation lease without a 10-minute defer veto.
 - **Experiment.** Flip `loops.dispatch` + one enrolled seat to `flow: auto`; leave siblings
   manual. Pre-register: does chaining cut manual session starts without ugly wake spend?
+  **Setup precondition (learned 2026-07-31):** the target seat's session must be genuinely
+  **closed**, not idle — see the §5 scope limit. On a machine where every enrolled seat is in
+  active use, the eligible set is empty by construction, and the exercise cannot run at all until a
+  seat exits or a non-dogfooded seat is enrolled.
