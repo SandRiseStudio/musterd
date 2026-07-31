@@ -147,8 +147,9 @@ export interface OfficeHandle {
   pokeErrand: (kind: 'fridge' | 'water' | 'coffee' | 'phone') => string | null;
   /** Cumulative render counters, for a capture harness probing the scene from CDP (see
    * `scripts/perf/broadcast-baseline.mjs`). `ticks` counts rAF callbacks, `draws` counts the ones that
-   * actually painted — under broadcast today those are equal, which is the waste the capture-perf work
-   * is measuring. Two integer increments per frame; not gated, because gating costs more than it saves. */
+   * actually painted — under broadcast the gap is the draw-rate cap (capture fps); without it they
+   * were equal (full rAF waste). Two integer increments per frame; not gated, because gating costs
+   * more than it saves. */
   stats: () => OfficeStats;
 }
 

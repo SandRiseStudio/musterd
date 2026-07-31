@@ -37,6 +37,14 @@ function stageSize(): { w: number; h: number } {
   return { w: (h * 16) / 9, h };
 }
 
+/** Encode fps from `?fps=` — the office coalesces draws to this rate. Defaults to 30 (ADR 157). */
+function captureFpsFromUrl(): number {
+  const raw =
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('fps');
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 && n <= 60 ? n : 30;
+}
+
 /** Hooks a capturer (or a headless check) probes — see ADR 157 "Observability & Evaluation". */
 interface BroadcastWindow {
   __office?: OfficeHandle | null;
@@ -68,6 +76,7 @@ function BroadcastPage() {
   // Read once per page load — a stream source's URL is its whole configuration, and it never
   // changes under a running capture.
   const [stage] = useState(stageSize);
+  const [captureFps] = useState(captureFpsFromUrl);
 
   // A stream has no operator to click "reconnect": if the observer credential goes stale (daemon reset,
   // 24h observer TTL — ADR 064), drop it and mint a fresh one. `recovering` is a one-at-a-time guard,
@@ -152,6 +161,7 @@ function BroadcastPage() {
             entries={entries}
             status={status}
             broadcast
+            captureFps={captureFps}
             onReady={onSceneReady}
           />
         )}
