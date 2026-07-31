@@ -169,7 +169,7 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
     for (const order of response.orders) {
       orders += 1;
       deps.log(
-        `wake due: ${order.seat} [${order.lane}] — ${order.act} from ${order.sender} ` +
+        `wake due: ${order.seat} [${order.lane}] — ${order.act ?? 'work_order'} from ${order.sender ?? 'board'} ` +
           `(lease ${order.lease_id})`,
       );
       const entry = spawnable.get(order.seat);
@@ -230,7 +230,7 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
         attributes: {
           'musterd.seat': order.seat,
           'musterd.lane': order.lane,
-          'musterd.act': order.act,
+          'musterd.act': order.act ?? 'work_order',
           'musterd.lease_id': order.lease_id,
           'musterd.harness': entry.harness,
         },
@@ -254,18 +254,26 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
         span.end();
         continue;
       }
-      // Effective bounds (increment 5): the order carries the seat's policy knobs, but the
-      // operator's local `--timeout` stays the ceiling — a wake must never run longer than this
-      // machine's owner allowed, so policy can only tighten it.
+      // Effective bounds (increment 5 / ADR 199): reply wakes only tighten the operator
+      // `--timeout` ceiling. Work-orders use the seat's `work_timeout_ms` without that clamp —
+      // a coding session under a 5m host flag must not silently die at 5m.
       const policyTimeout = order.bounds?.timeout_ms;
+      const isWorkOrder = order.derivation === 'work_order';
       const timeoutMs =
         policyTimeout !== undefined
-          ? Math.min(policyTimeout, deps.bounds.timeout_ms)
+          ? isWorkOrder
+            ? policyTimeout
+            : Math.min(policyTimeout, deps.bounds.timeout_ms)
           : deps.bounds.timeout_ms;
-      if (policyTimeout !== undefined && policyTimeout > deps.bounds.timeout_ms)
+      if (policyTimeout !== undefined && policyTimeout > deps.bounds.timeout_ms && !isWorkOrder)
         deps.log(
           `wake bounds: ${order.seat} policy timeout ${policyTimeout}ms clamped to the ` +
             `host's --timeout ${deps.bounds.timeout_ms}ms ceiling`,
+        );
+      if (isWorkOrder && policyTimeout !== undefined && policyTimeout > deps.bounds.timeout_ms)
+        deps.log(
+          `wake bounds: ${order.seat} work_order using policy timeout ${policyTimeout}ms ` +
+            `(host --timeout ${deps.bounds.timeout_ms}ms is not a ceiling for work_orders)`,
         );
       const actuation = await backend.wake(
         {

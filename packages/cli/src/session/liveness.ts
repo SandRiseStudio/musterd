@@ -105,9 +105,20 @@ export function localSessionLiveness(
   const slot = slotLiveness(workspace, now);
   const enumerated = enumeratedLiveness(workspace, now, enumerate);
   if (!enumerated) return { source: 'slot', ...slot };
-  const disagreed = enumerated.state !== slot.state;
+  // ADR 199 / ADR 179: clean SessionEnd outranks a still-warm transcript on the deciding
+  // (enumerated) path — but only when the "live" evidence is that same ended session. A
+  // different concurrent session beside an ended capture stays live (ADR 166 guardrail).
+  let state = enumerated.state;
+  if (
+    state === 'live' &&
+    slot.session?.ended_at !== undefined &&
+    enumerated.id === slot.session.id
+  ) {
+    state = slot.state;
+  }
+  const disagreed = state !== slot.state;
   return {
-    state: enumerated.state,
+    state,
     source: 'enumerated',
     // Resume material rides along regardless of verdict — the ladder judges it separately.
     ...(slot.session ? { session: slot.session } : {}),

@@ -51,14 +51,15 @@ export const ResidencyPolicySchema = z.object({
    *  ~23x past the point where resume stops being the cheap option. */
   transcript_max_bytes: z.number().int().min(65_536).max(268_435_456).default(262_144),
   /**
-   * Board-triggered work-order trust (ADR 179 / ADR 191). At `manual` (launch default) the seat is
-   * never a work-order wake *target* — bit-identical to pre-179. `auto` opts the seat into the
-   * review loop (and later dispatch/merge) when the matching team `loops.*` switch is also on.
+   * Board-triggered work-order trust (ADR 179 / ADR 191 / ADR 199). At `manual` (launch default)
+   * the seat is never a work-order wake *target* — bit-identical to pre-179. `auto` opts the seat
+   * into review / dispatch (and later merge) when the matching team `loops.*` switch is also on.
    * Inbox reply wakes (immediate/batched) are unchanged by this knob.
    */
   flow: z.enum(['manual', 'auto']).default('manual'),
-  /** Watchdog for work-order wakes only (ADR 191) — a coding session, not a reply. Default 30m.
-   *  The host `--timeout` ceiling still clamps; raise it when enabling the review loop. */
+  /** Watchdog for work-order wakes only (ADR 191 / 199) — a coding session, not a reply. Default
+   *  30m. Work-orders do not clamp below this on the host (ADR 199); reply wakes still honor the
+   *  operator `--timeout` ceiling. */
   work_timeout_ms: z.number().int().min(60_000).max(3_600_000).default(1_800_000),
 });
 export type ResidencyPolicy = z.infer<typeof ResidencyPolicySchema>;
@@ -164,44 +165,83 @@ export type WakeLeasesBody = z.infer<typeof WakeLeasesBodySchema>;
  * what to actuate. Structured fields only — **no message bodies ever cross here** (ADR 088/128);
  * the woken session reads its inbox through the same governed tools as any session.
  */
-/** How a wake was derived (ADR 191). Inbox lanes stay `immediate`/`batched`; board-triggered
- *  review (and later dispatch) wakes are `work_order`. Optional on the wire for older hosts. */
+/** How a wake was derived (ADR 191 / 199). Inbox lanes stay `immediate`/`batched`; board-triggered
+ *  review and dispatch wakes are `work_order`. Optional on the wire for older hosts. */
 export const WAKE_DERIVATIONS = ['immediate', 'batched', 'work_order'] as const;
 export type WakeDerivation = (typeof WAKE_DERIVATIONS)[number];
 export const WakeDerivationSchema = z.enum(WAKE_DERIVATIONS);
 
-export const WakeOrderSchema = z.object({
-  lease_id: z.string(),
-  seat: z.string(),
-  /** The message id of the directed act that made this wake due. */
-  act_id: z.string(),
-  /** The act enum of the triggering act (never its body). */
-  act: z.string(),
-  /** Delimited sender name — identity is always present so the model can weigh the source. */
-  sender: z.string(),
-  lane: WakeLaneSchema,
-  /** The daemon-composed one-line spawn prompt (structured fields only, ADR 088 §4). */
-  composed_line: z.string(),
-  /** Lease expiry (ms epoch, ~120s): report before this or the wake re-becomes due. */
-  expires_at: z.number().int(),
-  /** Effective tool policy for the run (increment 5). Absent (older daemon) ⇒ reply-only. */
-  tool_policy: z.enum(['reply-only', 'seat-policy']).optional(),
-  /** Effective run bounds. `timeout_ms` can only tighten the actuator's local `--timeout` ceiling;
-   *  `max_turns`/`budget_usd` apply where the backend supports them. */
-  bounds: z
-    .object({
-      timeout_ms: z.number().int(),
-      max_turns: z.number().int().optional(),
-      budget_usd: z.number().optional(),
-    })
-    .optional(),
-  /** Effective resume-hygiene bound for this seat (increment 5). Absent ⇒ backend default. */
-  transcript_max_bytes: z.number().int().optional(),
-  /** Why this wake was derived (ADR 191). Absent ⇒ treat as the `lane` value (older daemons). */
-  derivation: WakeDerivationSchema.optional(),
-  /** Lane id on a work-order wake (ADR 179 injection bar — id only, never a title). */
-  lane_id: z.string().optional(),
-});
+/**
+ * One wake order. Inbox / review wakes carry a triggering act. Dispatch **continuation**
+ * work-orders (ADR 199) have no act — `act_id`/`act`/`sender` are omitted and `lane_id` is
+ * required when `derivation === 'work_order'` without an act.
+ */
+export const WakeOrderSchema = z
+  .object({
+    lease_id: z.string(),
+    seat: z.string(),
+    /** The message id of the directed act that made this wake due. Absent on board continuation. */
+    act_id: z.string().optional(),
+    /** The act enum of the triggering act (never its body). Absent on board continuation. */
+    act: z.string().optional(),
+    /** Delimited sender name. Absent on board continuation (the board is the work order). */
+    sender: z.string().optional(),
+    lane: WakeLaneSchema,
+    /** The daemon-composed one-line spawn prompt (structured fields only, ADR 088 §4). */
+    composed_line: z.string(),
+    /** Lease expiry (ms epoch, ~120s): report before this or the wake re-becomes due. */
+    expires_at: z.number().int(),
+    /** Effective tool policy for the run (increment 5). Absent (older daemon) ⇒ reply-only. */
+    tool_policy: z.enum(['reply-only', 'seat-policy']).optional(),
+    /** Effective run bounds. For reply wakes, `timeout_ms` only tightens the host `--timeout`
+     *  ceiling; work-orders (ADR 199) use this value without that clamp. */
+    bounds: z
+      .object({
+        timeout_ms: z.number().int(),
+        max_turns: z.number().int().optional(),
+        budget_usd: z.number().optional(),
+      })
+      .optional(),
+    /** Effective resume-hygiene bound for this seat (increment 5). Absent ⇒ backend default. */
+    transcript_max_bytes: z.number().int().optional(),
+    /** Why this wake was derived (ADR 191). Absent ⇒ treat as the `lane` value (older daemons). */
+    derivation: WakeDerivationSchema.optional(),
+    /** Lane id on a work-order wake (ADR 179 injection bar — id only, never a title). */
+    lane_id: z.string().optional(),
+  })
+  .superRefine((o, ctx) => {
+    const boardContinuation =
+      o.derivation === 'work_order' && o.lane_id !== undefined && o.act_id === undefined;
+    if (boardContinuation) return;
+    if (o.act_id === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'act_id required unless board work_order',
+        path: ['act_id'],
+      });
+    }
+    if (o.act === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'act required unless board work_order',
+        path: ['act'],
+      });
+    }
+    if (o.sender === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'sender required unless board work_order',
+        path: ['sender'],
+      });
+    }
+    if (o.derivation === 'work_order' && o.lane_id === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'lane_id required on work_order wakes',
+        path: ['lane_id'],
+      });
+    }
+  });
 export type WakeOrder = z.infer<typeof WakeOrderSchema>;
 
 /** Response of the wake-leases poll. */
