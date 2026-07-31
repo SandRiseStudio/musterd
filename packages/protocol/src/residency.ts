@@ -50,6 +50,16 @@ export const ResidencyPolicySchema = z.object({
    *  ADR 131 "Observability & Evaluation"). The previous 10MiB counted lives, not dollars, and sat
    *  ~23x past the point where resume stops being the cheap option. */
   transcript_max_bytes: z.number().int().min(65_536).max(268_435_456).default(262_144),
+  /**
+   * Board-triggered work-order trust (ADR 179 / ADR 191). At `manual` (launch default) the seat is
+   * never a work-order wake *target* — bit-identical to pre-179. `auto` opts the seat into the
+   * review loop (and later dispatch/merge) when the matching team `loops.*` switch is also on.
+   * Inbox reply wakes (immediate/batched) are unchanged by this knob.
+   */
+  flow: z.enum(['manual', 'auto']).default('manual'),
+  /** Watchdog for work-order wakes only (ADR 191) — a coding session, not a reply. Default 30m.
+   *  The host `--timeout` ceiling still clamps; raise it when enabling the review loop. */
+  work_timeout_ms: z.number().int().min(60_000).max(3_600_000).default(1_800_000),
 });
 export type ResidencyPolicy = z.infer<typeof ResidencyPolicySchema>;
 
@@ -154,6 +164,12 @@ export type WakeLeasesBody = z.infer<typeof WakeLeasesBodySchema>;
  * what to actuate. Structured fields only — **no message bodies ever cross here** (ADR 088/128);
  * the woken session reads its inbox through the same governed tools as any session.
  */
+/** How a wake was derived (ADR 191). Inbox lanes stay `immediate`/`batched`; board-triggered
+ *  review (and later dispatch) wakes are `work_order`. Optional on the wire for older hosts. */
+export const WAKE_DERIVATIONS = ['immediate', 'batched', 'work_order'] as const;
+export type WakeDerivation = (typeof WAKE_DERIVATIONS)[number];
+export const WakeDerivationSchema = z.enum(WAKE_DERIVATIONS);
+
 export const WakeOrderSchema = z.object({
   lease_id: z.string(),
   seat: z.string(),
@@ -181,6 +197,10 @@ export const WakeOrderSchema = z.object({
     .optional(),
   /** Effective resume-hygiene bound for this seat (increment 5). Absent ⇒ backend default. */
   transcript_max_bytes: z.number().int().optional(),
+  /** Why this wake was derived (ADR 191). Absent ⇒ treat as the `lane` value (older daemons). */
+  derivation: WakeDerivationSchema.optional(),
+  /** Lane id on a work-order wake (ADR 179 injection bar — id only, never a title). */
+  lane_id: z.string().optional(),
 });
 export type WakeOrder = z.infer<typeof WakeOrderSchema>;
 

@@ -331,3 +331,54 @@ export function pickHumanReviewer(
     reviewer_family: memberFamily(db, human),
   };
 }
+
+/**
+ * Offline reviewer from the marked wake_pool (ADR 191). Same ladder as the live picker (ADR 188),
+ * graded against the worker's live attestation and each idle seat's *durable* model (ADR 187).
+ * Only `wakeability === 'wakeable'` seats are spendable (ADR 189). Never routes same_model /
+ * ungradeable / the worker themselves.
+ */
+export function pickWakeReviewer(
+  db: Database,
+  teamId: string,
+  worker: string,
+  posture: FamilyPosture,
+): ReviewPick | null {
+  const workerSeat = listMembers(db, teamId).find((x) => x.name === worker);
+  const workerModel = workerSeat ? latestAttestedModel(db, workerSeat.id) : null;
+  const durable = durableAttestations(db, teamId);
+  const LADDER = ['cross_family', 'cross_model'] as const;
+  const graded = posture.wake_pool
+    .filter((c) => c.wakeability === 'wakeable' && c.seat !== worker)
+    .map((c) => ({
+      c,
+      grade: reviewGrade(workerModel, durable.get(c.seat)?.model ?? null),
+    }))
+    .filter(
+      (x): x is { c: WakeCandidate; grade: (typeof LADDER)[number] } =>
+        x.grade === 'cross_family' || x.grade === 'cross_model',
+    )
+    .sort((a, b) => LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade));
+  const best = graded[0];
+  if (!best) return null;
+  return {
+    reviewer: best.c.seat,
+    route: 'cross_family',
+    grade: best.grade,
+    reviewer_family: best.c.family,
+  };
+}
+
+/** Circuit-breaker trip threshold (ADR 191 §5) — after this many ready entries, wake no more. */
+export const REVIEW_LOOP_BREAKER_N = 3;
+
+/** How many times this lane has entered `ready_for_review` (each is one bounce into the review loop). */
+export function reviewLoopBounceCount(db: Database, teamId: string, laneId: string): number {
+  const row = db
+    .prepare<[string, string], { n: number }>(
+      `SELECT COUNT(*) AS n FROM audit
+        WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?`,
+    )
+    .get(teamId, laneId);
+  return row?.n ?? 0;
+}

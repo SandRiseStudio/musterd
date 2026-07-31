@@ -2,6 +2,7 @@ import type {
   Residency,
   ResidencyPolicy,
   ResidencyPolicyOverride,
+  WakeDerivation,
   WakeLane,
   WakeOrder,
 } from '@musterd/protocol';
@@ -11,10 +12,11 @@ import { ulid } from 'ulid';
 import { appendAudit } from './audit.js';
 import { getCursor } from './cursors.js';
 import { openDirectedLedger } from './delivery.js';
+import { getLane } from './lanes.js';
 import { getMemberById } from './members.js';
 import { listInbox, pendingInterrupts, rowToEnvelope } from './messages.js';
 import { hasLivePresence, listReclaimableMemberIds } from './presence.js';
-import type { MemberRow } from './rows.js';
+import type { MemberRow, MessageRow } from './rows.js';
 import { getPolicy } from './teams.js';
 
 /**
@@ -335,12 +337,77 @@ function composeWakeLine(seat: string, teamSlug: string, act: string, sender: st
   );
 }
 
+/** Work-order line (ADR 179 / 191): lane id only — never a title, never free text. */
+function composeWorkOrderLine(seat: string, teamSlug: string, laneId: string): string {
+  return (
+    `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
+    `review. Orient via team_next / team_inbox_check and begin.`
+  );
+}
+
 /** A due-wake candidate before leasing: the triggering act + its lane. */
 interface WakeCandidate {
   act_id: string;
   act: string;
   sender: string;
   lane: WakeLane;
+  derivation: WakeDerivation;
+  lane_id?: string;
+}
+
+/**
+ * Unanswered lane-review asks addressed to this seat whose lane is still `ready_for_review`
+ * (ADR 191 work_order derivation). Oldest first. Deliberately NOT folded into `openDirectedLedger`
+ * — arbitrary asks stay non-wakeable; only this board edge spends.
+ */
+function dueReviewWorkOrders(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  member: MemberRow,
+): WakeCandidate[] {
+  const rows = db
+    .prepare<[string, string], MessageRow>(
+      `SELECT m.* FROM messages m
+        WHERE m.team_id = ?
+          AND m.act = 'ask'
+          AND m.to_kind = 'member'
+          AND m.to_member = ?
+          AND json_extract(m.meta, '$.lane_review.lane') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM messages r
+             WHERE r.team_id = m.team_id AND r.act IN ('accept','decline')
+               AND json_extract(r.meta, '$.in_reply_to') = m.id)
+          AND NOT EXISTS (
+            SELECT 1 FROM messages v
+             WHERE v.team_id = m.team_id AND v.act = 'resolve'
+               AND v.thread_id = COALESCE(m.thread_id, m.id))
+        ORDER BY m.ts ASC`,
+    )
+    .all(teamId, member.id);
+  const out: WakeCandidate[] = [];
+  for (const row of rows) {
+    let laneId: string | undefined;
+    try {
+      laneId = (JSON.parse(row.meta ?? '{}') as { lane_review?: { lane?: string } }).lane_review
+        ?.lane;
+    } catch {
+      continue;
+    }
+    if (!laneId) continue;
+    const lane = getLane(db, teamId, laneId, teamSlug);
+    if (!lane || lane.state !== 'ready_for_review') continue;
+    const sender = getMemberById(db, row.from_member);
+    out.push({
+      act_id: row.id,
+      act: row.act,
+      sender: sender?.name ?? '?',
+      lane: 'batched',
+      derivation: 'work_order',
+      lane_id: laneId,
+    });
+  }
+  return out;
 }
 
 /** Was this act sent from a provenance-`wake` occupancy? Server-stamped at insert (v21) — the
@@ -396,6 +463,7 @@ function dueCandidates(
         act: env.act,
         sender: env.from,
         lane: demoted ? 'batched' : 'immediate',
+        derivation: demoted ? 'batched' : 'immediate',
       };
       if (demoted) {
         if (lanes.batched) batched.push(candidate);
@@ -416,6 +484,7 @@ function dueCandidates(
         act: delivery.act,
         sender: delivery.from,
         lane: 'batched',
+        derivation: 'batched',
       });
     }
   }
@@ -458,7 +527,9 @@ export function claimWakeLeases(
     const orders: WakeOrder[] = [];
     const reclaimable = listReclaimableMemberIds(db, teamId, now);
     const enrollments = listResidency(db, teamId).filter((r) => r.host === host);
-    const teamDefaults = getPolicy(db, teamId).residency;
+    const teamPolicy = getPolicy(db, teamId);
+    const teamDefaults = teamPolicy.residency;
+    const reviewLoopOn = teamPolicy.loops?.review === true;
     for (const enrollment of enrollments) {
       const member = getMemberById(db, enrollment.member_id);
       if (!member || member.left_at !== null) continue;
@@ -476,6 +547,12 @@ export function claimWakeLeases(
         immediate: policy.lane !== 'batched',
         batched: cooled && policy.lane !== 'interrupt',
       });
+      // ADR 191: board-triggered review work-orders — only when the team enabled the loop AND this
+      // seat opted into flow:auto. Prefer them ahead of inbox candidates so a review ask is not
+      // starved by an older handoff on the same seat.
+      if (reviewLoopOn && policy.flow === 'auto' && cooled) {
+        candidates.unshift(...dueReviewWorkOrders(db, teamId, teamSlug, member));
+      }
       for (const candidate of candidates) {
         if (isExhausted(db, teamId, candidate.act_id)) continue;
         if (attemptsForAct(db, teamId, candidate.act_id) >= policy.attempt_cap) {
@@ -488,6 +565,8 @@ export function claimWakeLeases(
               act: candidate.act_id,
               sender: candidate.sender,
               attempts: policy.attempt_cap,
+              derivation: candidate.derivation,
+              ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
             },
           });
           continue;
@@ -518,8 +597,11 @@ export function claimWakeLeases(
             sender: candidate.sender,
             lane: candidate.lane,
             host,
+            derivation: candidate.derivation,
+            ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
           },
         });
+        const isWorkOrder = candidate.derivation === 'work_order';
         orders.push({
           lease_id: lease.id,
           seat: member.name,
@@ -527,15 +609,19 @@ export function claimWakeLeases(
           act: candidate.act,
           sender: candidate.sender,
           lane: candidate.lane,
-          composed_line: composeWakeLine(member.name, teamSlug, candidate.act, candidate.sender),
+          composed_line: isWorkOrder
+            ? composeWorkOrderLine(member.name, teamSlug, candidate.lane_id!)
+            : composeWakeLine(member.name, teamSlug, candidate.act, candidate.sender),
           expires_at: lease.expires_at,
-          tool_policy: policy.tool_policy,
+          tool_policy: isWorkOrder ? 'seat-policy' : policy.tool_policy,
           bounds: {
-            timeout_ms: policy.timeout_ms,
+            timeout_ms: isWorkOrder ? policy.work_timeout_ms : policy.timeout_ms,
             ...(policy.max_turns !== undefined ? { max_turns: policy.max_turns } : {}),
             ...(policy.budget_usd !== undefined ? { budget_usd: policy.budget_usd } : {}),
           },
           transcript_max_bytes: policy.transcript_max_bytes,
+          derivation: candidate.derivation,
+          ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
         });
         break; // one lease per seat per poll
       }

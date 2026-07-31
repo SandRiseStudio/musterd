@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EnforcementPolicySchema } from './enforcement.js';
+import { LoopsPolicySchema } from './loops.js';
 import { ResidencyPolicyOverrideSchema, ResidencyPolicySchema } from './residency.js';
 
 /**
@@ -77,6 +78,12 @@ export const PolicySchema = z.object({
    * `policy.change`); the hook reads it so the gate is consistent across a team's seats.
    */
   enforcement: EnforcementPolicySchema.default({}),
+  /**
+   * Board-triggered loop enables (ADR 179 / ADR 191). Each switch is independently installable;
+   * `parse({})` yields every loop off. A wake fires only where the matching loop is on *and* the
+   * target seat's residency `flow` is `auto`.
+   */
+  loops: LoopsPolicySchema.default({}),
 });
 export type Policy = z.infer<typeof PolicySchema>;
 
@@ -94,6 +101,7 @@ export type Policy = z.infer<typeof PolicySchema>;
 export const PolicyOverrideSchema = PolicySchema.partial().extend({
   residency: ResidencyPolicyOverrideSchema.optional(),
   enforcement: EnforcementPolicySchema.partial().optional(),
+  loops: LoopsPolicySchema.partial().optional(),
 });
 export type PolicyOverride = z.infer<typeof PolicyOverrideSchema>;
 
@@ -104,7 +112,7 @@ function sameValue(a: unknown, b: unknown): boolean {
 /** Strip the keys of one sub-object that equal their current schema default; undefined if none survive. */
 function sparsifySub(
   value: unknown,
-  schema: typeof ResidencyPolicySchema | typeof EnforcementPolicySchema,
+  schema: typeof ResidencyPolicySchema | typeof EnforcementPolicySchema | typeof LoopsPolicySchema,
 ): Record<string, unknown> | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const defaults = schema.parse({}) as Record<string, unknown>;
@@ -132,10 +140,14 @@ export function sparsifyPolicy(stored: unknown): PolicyOverride {
   const defaults = PolicySchema.parse({}) as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(stored)) {
-    if (key === 'residency' || key === 'enforcement') {
+    if (key === 'residency' || key === 'enforcement' || key === 'loops') {
       const sub = sparsifySub(
         value,
-        key === 'residency' ? ResidencyPolicySchema : EnforcementPolicySchema,
+        key === 'residency'
+          ? ResidencyPolicySchema
+          : key === 'enforcement'
+            ? EnforcementPolicySchema
+            : LoopsPolicySchema,
       );
       if (sub) out[key] = sub;
       continue;
