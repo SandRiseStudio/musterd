@@ -52,20 +52,31 @@ export function plateModel(model: string | null | undefined): string | null {
   return short ? short : null;
 }
 
+export type PlateDetailKind = 'model' | 'harness' | 'role';
+
+/** Typed segments for the expanded plate, in display order: model → harness → role. */
+export function plateDetailParts(opts: {
+  surface?: string | null;
+  model?: string | null;
+  role?: string | null;
+}): Array<{ kind: PlateDetailKind; text: string }> {
+  const parts: Array<{ kind: PlateDetailKind; text: string }> = [];
+  const mod = plateModel(opts.model);
+  if (mod) parts.push({ kind: 'model', text: mod });
+  const surf = shortSurface(opts.surface);
+  if (surf) parts.push({ kind: 'harness', text: surf });
+  const role = opts.role?.trim() ?? '';
+  if (role) parts.push({ kind: 'role', text: role });
+  return parts;
+}
+
 /** Text segments for the expanded plate, in display order: model → harness → role. */
 export function plateDetailSegments(opts: {
   surface?: string | null;
   model?: string | null;
   role?: string | null;
 }): string[] {
-  const parts: string[] = [];
-  const mod = plateModel(opts.model);
-  if (mod) parts.push(mod);
-  const surf = shortSurface(opts.surface);
-  if (surf) parts.push(surf);
-  const role = opts.role?.trim() ?? '';
-  if (role) parts.push(role);
-  return parts;
+  return plateDetailParts(opts).map((p) => p.text);
 }
 
 export function identityMeta(opts: {
