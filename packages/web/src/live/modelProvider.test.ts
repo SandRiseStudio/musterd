@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { modelProvider } from './modelProvider';
+import { providerIconHtml } from './modelProviderIcon';
 
 describe('modelProvider', () => {
   it('maps Claude families (including fable) to claude chip colors', () => {
@@ -37,5 +38,28 @@ describe('modelProvider', () => {
     expect(modelProvider(null).id).toBe('unknown');
     expect(modelProvider('unknown').id).toBe('unknown');
     expect(modelProvider('').id).toBe('unknown');
+  });
+});
+
+describe('providerIconHtml', () => {
+  it('returns an svg for claude and openai', () => {
+    const claude = providerIconHtml(modelProvider('claude-opus-5'));
+    expect(claude).toContain('<svg');
+    expect(claude).toContain('#D97757');
+
+    const openai = providerIconHtml(modelProvider('gpt-5.6'));
+    expect(openai).toContain('<svg');
+    expect(openai).toContain('#10A37F');
+  });
+
+  it('returns a letter mark for glm (no deck logo)', () => {
+    const html = providerIconHtml(modelProvider('glm-5.2'));
+    expect(html).toContain('G');
+    expect(html).not.toMatch(/<svg[\s\S]*path/i);
+  });
+
+  it('returns a neutral mark for unknown', () => {
+    const html = providerIconHtml(modelProvider(null));
+    expect(html.length).toBeGreaterThan(0);
   });
 });
