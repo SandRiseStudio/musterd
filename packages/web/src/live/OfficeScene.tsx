@@ -67,6 +67,8 @@ export function OfficeScene({
   collapsed = false,
   onCollapse,
   onActClick,
+  onBoardOpen,
+  onBoardHover,
   broadcast = false,
   captureFps,
   entries = [],
@@ -87,6 +89,11 @@ export function OfficeScene({
   onCollapse?: () => void;
   /** Speech-bubble click-through: called with the act's envelope id (the route scrolls the stream). */
   onActClick?: (id: string) => void;
+  /** The wall's agile board clicked — hands back its viewport rect (the overlay's zoom origin).
+   * `/live` only; leaving it unset (as `/broadcast` does) renders the board as plain paint. */
+  onBoardOpen?: (rect: DOMRect) => void;
+  /** First hover/focus on the board — preload the overlay's lazy chunk. */
+  onBoardHover?: () => void;
   /** Broadcast mode (ADR 157) — only `/broadcast` sets it: the scene is a stream source, so it keeps
    * animating unseen, pins DPR to 1, and ignores reduced-motion (the viewer of a stream is not the
    * person whose OS preference this is). */
@@ -133,11 +140,15 @@ export function OfficeScene({
   // reads them.
   const dataRef = useRef(data);
   const onActClickRef = useRef(onActClick);
+  const onBoardOpenRef = useRef(onBoardOpen);
+  const onBoardHoverRef = useRef(onBoardHover);
   const onReadyRef = useRef(onReady);
   const collapsedRef = useRef(collapsed);
   useEffect(() => {
     dataRef.current = data;
     onActClickRef.current = onActClick;
+    onBoardOpenRef.current = onBoardOpen;
+    onBoardHoverRef.current = onBoardHover;
     onReadyRef.current = onReady;
     collapsedRef.current = collapsed;
   });
@@ -158,6 +169,14 @@ export function OfficeScene({
         if (disposed || !host || !labelHost) return;
         const handle = mountOffice(host, labelHost, reduced, {
           onActClick: (id) => onActClickRef.current?.(id),
+          // Presence decides whether the hotspot exists at all, so gate on the mount-time prop —
+          // stable per route (/live wires it, /broadcast never does) — and read through the ref after.
+          ...(onBoardOpenRef.current
+            ? {
+                onBoardClick: (rect: DOMRect) => onBoardOpenRef.current?.(rect),
+                onBoardHover: () => onBoardHoverRef.current?.(),
+              }
+            : {}),
           broadcast,
           ...(captureFps !== undefined ? { captureFps } : {}),
           interactiveLabels: !broadcast,

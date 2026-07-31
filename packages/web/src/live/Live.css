@@ -1304,6 +1304,56 @@
     0 12px 26px -8px var(--lc-paper-drop),
     0 3px 22px -4px color-mix(in srgb, var(--lc-speech-tone) 58%, transparent);
 }
+/* ── the agile board's hotspot ─────────────────────────────────────────────────────────────────────
+   A real <button> laid over the painted wall board (the canvas takes no pointer events). Invisible at
+   rest — the board is scenery until you reach for it — then a warm ring + a small mono caption on
+   hover/focus. Sits in the label layer BELOW bubbles/nameplates (DOM order), and never on /broadcast
+   (the scene only creates it under interactiveLabels). No backdrop-filter: office-block house rule. */
+.lc-boardspot {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 6px;
+  transition: box-shadow 220ms var(--lc-ease, ease);
+}
+.lc-boardspot:hover,
+.lc-boardspot:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--lc-accent) 60%, transparent),
+    0 4px 22px -4px color-mix(in srgb, var(--lc-accent) 35%, transparent);
+}
+.lc-boardspot__tag {
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  transform: translate(-50%, 100%) translateY(-2px);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--lc-text);
+  background: color-mix(in srgb, var(--lc-surface) 92%, transparent);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-r-sm, 6px);
+  padding: 2px 7px;
+  opacity: 0;
+  transition:
+    opacity 180ms var(--lc-ease, ease),
+    transform 260ms var(--lc-ease, ease);
+  pointer-events: none;
+}
+.lc-boardspot:hover .lc-boardspot__tag,
+.lc-boardspot:focus-visible .lc-boardspot__tag {
+  opacity: 1;
+  transform: translate(-50%, 100%) translateY(0);
+}
+
 /* the soft acknowledge pulse the moment a bubble is clicked (focus hands off to the stream flash) */
 .lc-speech.is-picked .lc-speech__inner {
   animation: lc-speech-picked 460ms cubic-bezier(0.22, 1, 0.36, 1);

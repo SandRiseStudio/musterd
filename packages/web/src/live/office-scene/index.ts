@@ -27,6 +27,7 @@ import { assignSeats, type Placement } from './seating';
 import {
   animatedDeskAnchors,
   chairKindFor,
+  boardAnchor,
   coffeeAnchor,
   DARK_PALETTE,
   deskHasProp,
@@ -129,6 +130,13 @@ export interface OfficeOptions {
   /** Called with the act's envelope id when a speech bubble is clicked — the route uses it to scroll
    * to / highlight that act in the stream panel. Bubbles without an id (or no handler) aren't clickable. */
   onActClick?: (id: string) => void;
+  /** `/live` only: the wall's agile board becomes a click target that hands back its viewport rect —
+   * the route opens the work-board overlay zooming out FROM that rect. Requires `interactiveLabels`;
+   * broadcast passes nothing and the wall stays paint. */
+  onBoardClick?: (rect: DOMRect) => void;
+  /** First hover/focus on the board hotspot — the route uses it to preload the overlay's lazy chunk
+   * so the click meets code that is already here. */
+  onBoardHover?: () => void;
   /** Broadcast mode (ADR 157): this office is a *stream source*, not a viewer's panel. The loop keeps
    * running while the tab is hidden or headless, DPR is pinned to 1 for a deterministic capture size,
    * and suspend requests are ignored. Only `/broadcast` passes it — see ./broadcast.ts. */
@@ -168,6 +176,42 @@ export function mountOffice(
   const canvas = document.createElement('canvas');
   canvas.style.display = 'block';
   host.appendChild(canvas);
+
+  // The agile board's hotspot — a real button laid over the painted board (the canvas takes no
+  // pointer events; every click target in the office is DOM in the label layer). Created before any
+  // nameplate or speech bubble so those stay above it in paint order: a bubble drifting across the
+  // wall must stay clickable. Positioned from `boardAnchor` on every bake, so it tracks resizes the
+  // same way the labels do.
+  const boardSpot =
+    interactiveLabels && options.onBoardClick
+      ? (() => {
+          const el = document.createElement('button');
+          el.type = 'button';
+          el.className = 'lc-boardspot';
+          el.setAttribute('aria-label', 'Open the work board');
+          const tag = document.createElement('span');
+          tag.className = 'lc-boardspot__tag';
+          tag.textContent = 'work board';
+          el.appendChild(tag);
+          el.addEventListener('click', () => options.onBoardClick!(el.getBoundingClientRect()));
+          if (options.onBoardHover) {
+            const warm = () => options.onBoardHover!();
+            el.addEventListener('pointerenter', warm, { once: true });
+            el.addEventListener('focus', warm, { once: true });
+          }
+          labelHost.appendChild(el);
+          return el;
+        })()
+      : null;
+
+  function positionBoardSpot(): void {
+    if (!boardSpot) return;
+    const a = boardAnchor(fit);
+    boardSpot.style.left = `${a.x}px`;
+    boardSpot.style.top = `${a.y}px`;
+    boardSpot.style.width = `${a.w}px`;
+    boardSpot.style.height = `${a.h}px`;
+  }
   const ctx = canvas.getContext('2d')!;
   // Warm the izzocam chyron face the canvas labels/glyphs paint in, so they land on-brand from the
   // first cue instead of flashing the system fallback (canvas never triggers the load itself).
@@ -337,6 +381,7 @@ export function mountOffice(
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
+    positionBoardSpot();
     if (!reduced) {
       positionSteam();
       syncDeskProps();
@@ -1323,6 +1368,7 @@ export function mountOffice(
       for (const el of labels.values()) el.remove();
       labels.clear();
       ambientHost.remove(); // removes the day-cycle wash, steam, and the animated desk props
+      boardSpot?.remove();
       canvas.remove();
     },
   };
