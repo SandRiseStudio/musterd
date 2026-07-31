@@ -111,9 +111,20 @@ Phantom Presence now drops within the 45s reclaim grace instead of lingering. Th
 
 ## Standing context — the primer as MCP `instructions` (ADR 012 follow-up)
 
-`buildMcpServer` sets the server's **`instructions`** (returned on `initialize`) to the agent primer — `renderPrimer` from `@musterd/protocol`, the **same source** the CLI writes into `AGENTS.md`. This is the _file-free_ onboarding surface: any MCP-speaking harness injects `instructions` as standing context, so the agent learns it's on a team and how to coordinate **without touching `CLAUDE.md` or any per-harness file** (the boundary ADR 012 set; `AGENTS.md` remains the surface for the CLI / no-MCP path). `primerInstructions(config)` is the pure wiring: a **provisioned** session (`config.member` set) gets a named-seat primer; an **unclaimed** session gets the "claim a seat first" variant. The primer is channel-aware — it documents both the `team_*` tools and the `musterd` CLI.
+`buildMcpServer` sets the server's **`instructions`** (returned on `initialize` under the legacy handshake; served from `server/discover` once a modern era is negotiated — same field, same contract) to the agent primer — `renderPrimer` from `@musterd/protocol`, the **same source** the CLI writes into `AGENTS.md`. This is the _file-free_ onboarding surface: any MCP-speaking harness injects `instructions` as standing context, so the agent learns it's on a team and how to coordinate **without touching `CLAUDE.md` or any per-harness file** (the boundary ADR 012 set; `AGENTS.md` remains the surface for the CLI / no-MCP path). `primerInstructions(config)` is the pure wiring: a **provisioned** session (`config.member` set) gets a named-seat primer; an **unclaimed** session gets the "claim a seat first" variant. The primer is channel-aware — it documents both the `team_*` tools and the `musterd` CLI.
 
-> **Forward note (ADR 175):** MCP spec RC `2026-07-28` removes the `initialize` handshake; `instructions` moves to the mandatory `server/discover` response (same field, same contract). This doc describes the shipped SDK (1.30.0, pre-RC); the facts above are rewritten when the SDK-gated adoption lane executes — see [ADR 175](../decisions/175-mcp-spec-2026-07-28-readiness.md).
+> **Era note (ADR 175, adoption executed 2026-07-31).** The 2026-07-28 spec removes the
+> `initialize` handshake; `instructions` moves to the mandatory `server/discover` response (same
+> field, same contract). musterd ships the v2 SDK (`@modelcontextprotocol/server` 2.0.0) with every
+> adoption seam armed — but **the modern era has not reached musterd's wire yet**: this SDK release
+> serves 2026-07-28 only via its per-request HTTP entry (`createMcpHandler`), while a stdio
+> connection negotiates the legacy list (max `2025-11-25`), and musterd is stdio-only. So on the
+> live wire, `initialize` still happens and `instructions` still rides it; `server/discover`,
+> `tools/list` cache fields, and required `resultType` are armed in config and canaried but absent
+> from stdio traffic. A tripwire test in `sdkSeams.test.ts` goes red when an SDK bump lets stdio
+> negotiate a modern era — that is the signal to swap tripwires for real wire assertions and update
+> this note. See [ADR 175](../decisions/175-mcp-spec-2026-07-28-readiness.md) for the executed
+> checklist.
 
 ## The core tools (JSON schemas — verbatim contract)
 
