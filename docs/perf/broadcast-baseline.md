@@ -107,7 +107,9 @@ half-believed.
 
 ## Optimization log
 
-_Empty. Nothing has been changed yet — that is the point of the plan._
+| Date | Change | Result |
+| ---- | ------ | ------ |
+| 2026-07-31 | Cap broadcast draw rate to capture fps | Code: `ambientFrameBudgetMs` returns `1000/fps`; `shouldCoalesceDraw` applies under broadcast even during walks/cues (closes the known gap). CLI threads `?fps=` via `broadcastUrl`. **Re-measure on Fly `performance-4x` 720p25 before/after** — queue growth + delivered fps + chrome %CPU. Eye-check walking members for #368 judder. |
 
 ## Deliberately not done
 
@@ -118,17 +120,9 @@ _Empty. Nothing has been changed yet — that is the point of the plan._
 - **Single-run comparisons.** Interleaved A/B under matched load is the standard; it is what caught
   the JPEG-quality hypothesis.
 
-## Known gap in the plan's candidate #1
+## Known gap in the plan's candidate #1 — closed 2026-07-31
 
-The plan proposes capping the broadcast draw rate by making `ambientFrameBudgetMs` return `1000/fps`
-instead of `0`. **That alone caps only ambient-only stretches.** The budget is consulted behind the
-`capped` predicate at `packages/web/src/live/office-scene/index.ts:614`:
-
-```ts
-const capped = noRealMotion && cues.length === 0 && !inAfterglow;
-```
-
-During a walk, a cue, or the afterglow tail — i.e. whenever the office is most expensive to draw —
-`capped` is false and the loop paints every rAF tick regardless of the budget. Capping the draw rate
-to the capture fps therefore needs the `capped` predicate itself to be broadcast-aware, not just the
-budget it consults. Measure first; the draws/delivered ratio will say how much this is worth.
+The budget alone only fired when `ambientOnly`. `shouldCoalesceDraw(broadcast, ambientOnly)` now
+returns true whenever `broadcast`, so walks/cues also coalesce to the capture fps. Content rate
+matches encode rate → no #368 judder from under-sampling; compositor stops painting frames the
+encoder never sees.

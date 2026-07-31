@@ -61,6 +61,7 @@ export function OfficeScene({
   onCollapse,
   onActClick,
   broadcast = false,
+  captureFps,
   entries = [],
   status = 'idle',
   onReady,
@@ -82,6 +83,8 @@ export function OfficeScene({
    * animating unseen, pins DPR to 1, and ignores reduced-motion (the viewer of a stream is not the
    * person whose OS preference this is). */
   broadcast?: boolean;
+  /** Encode fps when broadcasting — office coalesces draws to this rate. From `?fps=` on `/broadcast`. */
+  captureFps?: number;
   /** The overlay's reel — everyone in the room and what they are on, already derived by the route
    * (see `roomEntries`). */
   entries?: RoomEntry[];
@@ -143,6 +146,7 @@ export function OfficeScene({
         const handle = mountOffice(host, labelHost, reduced, {
           onActClick: (id) => onActClickRef.current?.(id),
           broadcast,
+          ...(captureFps !== undefined ? { captureFps } : {}),
           interactiveLabels: !broadcast,
           showWorkCues: workCues === 'hybrid',
         });
@@ -160,7 +164,7 @@ export function OfficeScene({
       handleRef.current = null;
       onReadyRef.current?.(null);
     };
-  }, [broadcast, workCues]);
+  }, [broadcast, captureFps, workCues]);
 
   useEffect(() => {
     handleRef.current?.update(data);

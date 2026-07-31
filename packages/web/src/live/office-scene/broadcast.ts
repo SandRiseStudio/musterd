@@ -1,16 +1,19 @@
 /**
- * Broadcast-mode gates (ADR 157).
+ * Broadcast-mode gates (ADR 157 + capture-perf draw-rate cap).
  *
  * The office is normally a *viewer's* scene: it parks its RAF loop the moment the tab is hidden, and
  * renders at the device's DPR. Both are load-bearing perf rules (packages/web/AGENTS.md — "loops stop
  * when unseen"), and both are exactly wrong for a stream source, where nobody is looking at the tab and
  * the frame has to be a deterministic 1920×1080.
  *
- * So the three decisions broadcast mode inverts live here, as pure predicates the scene consults —
- * small enough to be obvious, separate enough to be tested without a Canvas2D context (the scene itself
+ * So the decisions broadcast mode inverts live here, as pure predicates the scene consults — small
+ * enough to be obvious, separate enough to be tested without a Canvas2D context (the scene itself
  * cannot mount under vitest's node environment; the end-to-end proof is the headless-CDP check in
  * ADR 157's Observability section).
  */
+
+/** ADR 157 / CLI default encode rate — used when `?fps=` is absent on `/broadcast`. */
+export const DEFAULT_CAPTURE_FPS = 30;
 
 /**
  * Should the render loop run? Broadcast mode is *always* visible — the whole point is that a headless
@@ -41,13 +44,33 @@ export function suspendIgnored(broadcast: boolean, on: boolean): boolean {
 }
 
 /**
- * The ambient idle-FPS budget (ADR 086 Phase 2): a viewer's office coalesces ambient-only motion
- * toward ~20fps (visually identical, ~3× cheaper — a measured, standing win). But a *broadcast* is
- * resampled to an exact 30fps encode, and 20fps content on a 30fps timeline is textbook cadence
- * judder: every third frame duplicates, an evenly-paced stutter on every viewer's player (observed
- * on the first live Twitch stream). Broadcast renders ambient at full rate — the capture machine is
- * the one place that cost buys smoothness for everyone watching.
+ * Minimum wall-ms between drawn frames when the loop is coalescing.
+ *
+ * A viewer coalesces ambient-only motion toward ~20fps (`viewerCapMs`, typically 50) — a measured,
+ * standing win. A *broadcast* used to return `0` (full rAF) because a 20fps content rate on a 30fps
+ * encode is cadence judder (#368). That fixed judder by overshooting: the page painted ~60 while the
+ * encoder consumed 25–30. The principled rate is **the capture fps** — content and encode match, so
+ * there is no duplicate-frame judder and the compositor stops painting frames nobody encodes.
  */
-export function ambientFrameBudgetMs(broadcast: boolean, capMs: number): number {
-  return broadcast ? 0 : capMs;
+export function ambientFrameBudgetMs(
+  broadcast: boolean,
+  viewerCapMs: number,
+  captureFps: number = DEFAULT_CAPTURE_FPS,
+): number {
+  if (!broadcast) return viewerCapMs;
+  const fps =
+    Number.isFinite(captureFps) && captureFps > 0 ? captureFps : DEFAULT_CAPTURE_FPS;
+  return 1000 / fps;
+}
+
+/**
+ * Should this tick consult the frame budget and possibly skip the draw?
+ *
+ * Viewers only coalesce when the room is ambient-only (no walks, cues, or afterglow). Broadcast
+ * always coalesces — including during walks, which is when the office is most expensive to paint.
+ * Without this, `ambientFrameBudgetMs` alone only fires on idle stretches and the cap buys almost
+ * nothing on a live team (docs/perf/broadcast-baseline.md "Known gap").
+ */
+export function shouldCoalesceDraw(broadcast: boolean, ambientOnly: boolean): boolean {
+  return broadcast || ambientOnly;
 }

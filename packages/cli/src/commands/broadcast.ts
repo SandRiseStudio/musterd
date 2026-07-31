@@ -147,11 +147,15 @@ export function broadcastUrl(
   server: string,
   team: string,
   resolution: BroadcastOptions['resolution'] = '1080p',
+  fps: number = 30,
 ): string {
   // `h` sizes the page's stage itself. Without it a 720p window would CSS-scale a 1080p render and
   // keep paying the full raster cost — the exact cost the 720p rung exists to remove.
+  // `fps` tells the office how fast to paint so canvas draws match the encode (capture-perf draw-rate
+  // cap). Absent on older captures → page defaults to 30.
   const h = resolution === '1080p' ? '' : `&h=${stagePixels(resolution).height}`;
-  return `${server.replace(/\/$/, '')}/broadcast?team=${encodeURIComponent(team)}${h}`;
+  const f = Number.isFinite(fps) && fps > 0 ? `&fps=${Math.round(fps)}` : '';
+  return `${server.replace(/\/$/, '')}/broadcast?team=${encodeURIComponent(team)}${h}${f}`;
 }
 
 /**
@@ -853,7 +857,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   const opts = parseOptions(parsed.flags);
   if (!opts.team) throw new CliError('which team? — pass --team <slug>', 2);
   const sink = await resolveSink(opts, keychainLookup);
-  const url = broadcastUrl(opts.server, opts.team, opts.resolution);
+  const url = broadcastUrl(opts.server, opts.team, opts.resolution, opts.fps);
   const stage = stagePixels(opts.resolution);
 
   const chromeBin = process.env['CHROME_BIN'] ?? chromeDefault();

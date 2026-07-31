@@ -73,19 +73,25 @@ describe('broadcast parseOptions', () => {
 describe('broadcastUrl', () => {
   it('builds the Inc 1 observer-only page URL, slug encoded, trailing slash tolerated', () => {
     expect(broadcastUrl('http://127.0.0.1:4849/', 'revive')).toBe(
-      'http://127.0.0.1:4849/broadcast?team=revive',
+      'http://127.0.0.1:4849/broadcast?team=revive&fps=30',
     );
     expect(broadcastUrl('https://box.example', 'my team')).toBe(
-      'https://box.example/broadcast?team=my%20team',
+      'https://box.example/broadcast?team=my%20team&fps=30',
     );
   });
 
-  it('sizes the page stage for 720p and leaves the 1080p contract URL untouched', () => {
+  it('sizes the page stage for 720p and leaves the 1080p contract URL untouched aside from fps', () => {
     expect(broadcastUrl('http://127.0.0.1:4849', 'revive', '720p')).toBe(
-      'http://127.0.0.1:4849/broadcast?team=revive&h=720',
+      'http://127.0.0.1:4849/broadcast?team=revive&h=720&fps=30',
     );
     expect(broadcastUrl('http://127.0.0.1:4849', 'revive', '1080p')).toBe(
-      'http://127.0.0.1:4849/broadcast?team=revive',
+      'http://127.0.0.1:4849/broadcast?team=revive&fps=30',
+    );
+  });
+
+  it('threads the encode fps so the office coalesces draws to the capture rate', () => {
+    expect(broadcastUrl('http://127.0.0.1:4849', 'revive', '720p', 25)).toBe(
+      'http://127.0.0.1:4849/broadcast?team=revive&h=720&fps=25',
     );
   });
 });

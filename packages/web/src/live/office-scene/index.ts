@@ -3,7 +3,14 @@ import { preloadCanvasFont } from '../canvasFont';
 import { roomTone, type LifeContext } from '../sound';
 import { identityMeta, plateModel, shortLaneState, shortSurface, shortWorkTitle } from '../presenceLabel';
 import { createActors, type Actors } from './actors';
-import { ambientFrameBudgetMs, officeDpr, officeVisible, suspendIgnored } from './broadcast';
+import {
+  ambientFrameBudgetMs,
+  DEFAULT_CAPTURE_FPS,
+  officeDpr,
+  officeVisible,
+  shouldCoalesceDraw,
+  suspendIgnored,
+} from './broadcast';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { createReceptionist, stepReceptionist } from './receptionist';
 import { fitFloor, project, type Fit, type Pt } from './iso';
@@ -119,6 +126,11 @@ export interface OfficeOptions {
    * and suspend requests are ignored. Only `/broadcast` passes it — see ./broadcast.ts. */
   broadcast?: boolean;
   /**
+   * Encode fps when `broadcast` — the office coalesces draws to this rate so paint matches capture
+   * (capture-perf plan). Defaults to 30 (CLI / ADR 157). Hosted streams pass 25 via `?fps=`.
+   */
+  captureFps?: number;
+  /**
    * `/live` only: labels accept pointer/hover so the identity+work tip can open. Broadcast keeps
    * labels non-interactive (no cursor on a stream capture).
    */
@@ -137,6 +149,10 @@ export function mountOffice(
   options: OfficeOptions = {},
 ): OfficeHandle {
   const broadcast = options.broadcast === true;
+  const captureFps =
+    typeof options.captureFps === 'number' && options.captureFps > 0
+      ? options.captureFps
+      : DEFAULT_CAPTURE_FPS;
   const interactiveLabels = options.interactiveLabels === true;
   const showWorkCues = options.showWorkCues !== false;
   const dpr = officeDpr(broadcast, DPR_CAP);
@@ -684,25 +700,24 @@ export function mountOffice(
   let last = 0;
   let acc = 0; // wall time accrued since the last drawn frame — coalesced under the ambient FPS cap
   let wasActive = false;
-  // Render counters for a capture harness (OfficeHandle.stats). Under broadcast `ticks === draws`,
-  // because ambientFrameBudgetMs returns 0 — the scene paints at full rAF while an encoder downstream
-  // consumes 30fps. Making that gap measurable rather than inferred is the point.
+  // Render counters for a capture harness (OfficeHandle.stats). Under broadcast, `draws` tracks the
+  // capture fps while `ticks` tracks rAF — the gap is the waste the draw-rate cap removes.
   let ticks = 0;
   let draws = 0;
   const since = performance.now();
   function tick(now: number) {
     ticks++;
-    // Idle-FPS cap (ADR 086 Phase 2): when the only motion is ambient — a coffee-stroll beat, or just a
-    // room of people breathing and typing at their desks — don't redraw every frame; accrue wall time and
-    // coalesce toward ~20fps. Real acts and cues keep the full frame rate. `dt` accumulates either way, so
-    // the walk maths stay correct with fewer samples.
+    // Frame-rate coalescing: viewers cap ambient-only motion to ~20fps (ADR 086 Phase 2). Broadcast
+    // coalesces *every* stretch to the capture fps so paint matches encode (no #368 judder, no full-rAF
+    // waste). `dt` accumulates either way, so walk maths stay correct with fewer samples.
     const inAfterglow = lastActive > 0 && now - lastActive < AFTERGLOW_MS;
     const noRealMotion = actors.ambientOnly() || !actors.active();
-    const capped = noRealMotion && cues.length === 0 && !inAfterglow;
+    const ambientOnly = noRealMotion && cues.length === 0 && !inAfterglow;
+    const capped = shouldCoalesceDraw(broadcast, ambientOnly);
     acc += last ? now - last : 1000 / 60;
     last = now;
-    if (capped && acc < ambientFrameBudgetMs(broadcast, AMBIENT_FRAME_MS)) {
-      raf = requestAnimationFrame(tick); // too soon for the next ambient frame — keep the loop, skip the draw
+    if (capped && acc < ambientFrameBudgetMs(broadcast, AMBIENT_FRAME_MS, captureFps)) {
+      raf = requestAnimationFrame(tick); // too soon for the next coalesced frame — keep the loop, skip the draw
       return;
     }
     draws++;
