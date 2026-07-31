@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import {
+  type Act,
   MemberKindSchema,
   LifecycleSchema,
   SurfaceSchema,
@@ -631,10 +632,18 @@ function laneWarningKey(w: LaneWarning): string {
 }
 
 /**
- * Send one directed lane act from the acting member to another seat — an ordinary `message` envelope
- * with structured meta, so it rides the whole existing wake path (inbox, ADR 053/054 hooks, ADR 024/035
- * notify) with no new act and no SPEC bump (ADR 083 §4). Best-effort: a missing target never fails the
+ * Send one directed lane act from the acting member to another seat — structured meta on an existing
+ * act, so it rides the whole existing delivery path (inbox, ADR 053/054 hooks, ADR 024/035 notify)
+ * with no new act token and no SPEC bump (ADR 083 §4). Best-effort: a missing target never fails the
  * lane verb.
+ *
+ * `act` defaults to `message`, and that default is the safe one **on purpose**. The wake ledger
+ * (`openDirectedLedger`, and so every candidate `claimWakeLeases` derives) matches
+ * `act IN ('request_help','handoff')` or an urgent flag — nothing else. So the act chosen here decides
+ * whether an offline recipient is *spawned*, at real cost. Only a caller whose event is genuinely
+ * work-directed-at-a-person should pass one: today that is the handoff, which transfers ownership.
+ * Surface-overlap advisories keep the default — waking an offline seat to tell it two lanes touch the
+ * same glob is exactly the spend this default exists to prevent.
  */
 function deliverLaneAct(
   ctx: Ctx,
@@ -643,6 +652,7 @@ function deliverLaneAct(
   to: string,
   body: string,
   meta: Record<string, unknown>,
+  act: Act = 'message',
 ): void {
   try {
     const env = makeEnvelope({
@@ -650,7 +660,7 @@ function deliverLaneAct(
       team: team.slug,
       from: from.name,
       to: { kind: 'member', name: to },
-      act: 'message',
+      act,
       body,
       meta,
     });
@@ -2322,6 +2332,10 @@ export async function handleHttp(
         );
         // A handoff (ownership moved to someone else) tells the recipient — with the branch, which is
         // the whole point (the redone-lane fix): the work arrives as an artifact, not a description.
+        // It goes out as act `handoff`, not `message`: the act is what the wake ledger reads, so a
+        // lane handed to an *offline* seat only reaches them if the act names the transfer. It rode as
+        // a plain message until 2026-07-30, which made `lane_handoff`'s "the recipient gets a directed
+        // wake" a promise the daemon never kept — measured, 10 minutes of host polling, zero leases.
         if (
           body.owner_seat !== undefined &&
           body.owner_seat !== before.owner_seat &&
@@ -2334,6 +2348,7 @@ export async function handleHttp(
             body.owner_seat,
             `[lane] "${lane.title}" handed to you${lane.branch ? ` — branch ${lane.branch}` : ''}`,
             { lane_handoff: { lane: lane.id, branch: lane.branch } },
+            'handoff',
           );
         }
         // A self-claim (the actor took ownership of a lane that wasn't theirs) — the "who took it" the

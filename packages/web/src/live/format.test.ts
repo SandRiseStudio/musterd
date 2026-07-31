@@ -9,6 +9,7 @@ import {
   formatClock,
   goalEvent,
   isFeatureBehind,
+  laneEvent,
   laneEventDetail,
   postureMeta,
   proseSegments,
@@ -41,6 +42,23 @@ describe('actLabel — steering acts', () => {
     expect(actLabel('steer')).toBe('steer');
     expect(actLabel('challenge')).toBe('challenge');
     expect(actLabel('defer')).toBe('defer');
+  });
+});
+
+describe('laneEvent — recovering the lane sub-type from meta', () => {
+  it('recovers a lane handoff whether it rides as a message or as a typed handoff act', () => {
+    // The daemon now names the transfer `handoff` so it enters the directed ledger and can wake an
+    // offline recipient. The stream must keep badging it as a lane event either way — before this,
+    // the act check silently collapsed the new form back into a generic "handoff" row with no lane
+    // glyph and no office choreography.
+    const meta = { lane_handoff: { lane: 'x', branch: 'feat/x' } };
+    expect(laneEvent({ act: 'message', meta })).toBe('lane_handoff');
+    expect(laneEvent({ act: 'handoff', meta })).toBe('lane_handoff');
+  });
+
+  it('leaves a teammate-composed handoff alone — no lane meta, no lane badge', () => {
+    expect(laneEvent({ act: 'handoff', meta: null })).toBeNull();
+    expect(laneEvent({ act: 'handoff', meta: { progress: 0.5 } })).toBeNull();
   });
 });
 

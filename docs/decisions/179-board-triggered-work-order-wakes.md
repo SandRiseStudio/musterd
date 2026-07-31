@@ -160,11 +160,23 @@ _Route:_ work-order wake to the owner. _Outcome:_ the owner's session works the 
 
 One routing rule, two trigger edges, shipped in order:
 
-- **Handoff edge (first).** A lane newly owned via `lane_handoff` is already a directed act, so the
-  existing inbox-derivation path in `claimWakeLeases` yields the candidate — only the derivation
-  label (`work_order`) and the composed line change (`composeWakeLine` grows an exported lane-id
-  arm). No doctrine change and no schema change: the human (or a teammate) queues; execution
-  automates.
+- **Handoff edge (first).** A lane newly owned via `lane_handoff` is a directed act, so the existing
+  inbox-derivation path in `claimWakeLeases` yields the candidate — only the derivation label
+  (`work_order`) and the composed line change (`composeWakeLine` grows an exported lane-id arm). No
+  doctrine change and no schema change: the human (or a teammate) queues; execution automates.
+
+  _Corrected 2026-07-30._ This edge was drafted as the free one — "already a directed act, the
+  derivation already yields it" — and that premise was false when written. `lane_handoff` emitted
+  `act: 'message'`, and `openDirectedLedger` matches only `request_help`/`handoff` or an urgent flag,
+  so the handoff never entered the ledger and never became a candidate. Measured on the gate-item-2
+  probe: a lane handed to an offline seat produced ten minutes of host polling and zero leases, while
+  a typed `team_send {act:'handoff'}` leased in seven seconds. The gap is now closed at the source —
+  the daemon emits the lane handoff as act `handoff` — but the correction is recorded rather than
+  quietly absorbed, because "the derivation already yields it" was the reason this edge was sequenced
+  first, and a reader deciding what to build next deserves to know the prerequisite was work, not a
+  given. What remains genuinely free is what the bullet claims beyond the premise: the label and the
+  composed line.
+
 - **Continuation edge (second — the chaining primitive).** An enrolled `flow: auto` seat that owns
   a `claimed` lane (not `blocked`, not `ready_for_review`), has **no live session**, and is under
   caps, derives a fresh-session work-order wake. This edge has no triggering act, and that is where
@@ -197,7 +209,7 @@ ceiling per-derivation) the day this loop ships.
 
 **Work-order wakes are fresh-first in effect, and no new derivation is needed to get there.** ADR 131
 chose resume-first for continuity — one life, one transcript — in a **reply** context, where the
-session's job is to answer the act that woke it and its own history *is* the context. A work-order
+session's job is to answer the act that woke it and its own history _is_ the context. A work-order
 wake has a different job: the board is the work order, the composed line carries a lane id and
 nothing else, and the session orients through `team_next` and the ADR 048/049 spine. Paying to
 re-ingest history the design deliberately does not rely on is waste, and the 2026-07-29 measurement
@@ -221,7 +233,11 @@ expensive quickly, and its trip threshold should be chosen with that in mind rat
 loop-stability grounds. Second, whether the `work_order` derivation deserves a **hard** cap — the
 first bound that would actually kill a run — is left open here deliberately: it is an owner call
 about money, it cannot be answered from the reply-wake ledger, and the honest first step is that the
-`work_order` rows make per-loop spend visible before anything is promised about capping it.
+`work_order` rows make per-loop spend visible before anything is promised about capping it. _(Unit,
+per ADR 131's 2026-07-30 correction: these dollar figures are `total_cost_usd` as the `claude` CLI
+reports it, and today's wakes authenticate on a subscription — so the budget being drawn down is
+allowance, not money billed. The exposure argument is unaffected, and "an owner call about money"
+becomes literally true the day an API key reaches the host's environment.)_
 
 ### The review loop
 

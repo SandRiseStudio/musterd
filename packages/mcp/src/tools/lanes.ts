@@ -179,7 +179,8 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     {
       description:
         'Hand a lane to another seat, carrying its branch so the work arrives as an artifact, ' +
-        'not a description. The recipient gets a directed wake.',
+        'not a description. Lands in the recipient’s inbox as a handoff act — and if they are ' +
+        'offline and host-enrolled, it is wake-eligible.',
       inputSchema: {
         id: z.string().describe('lane id'),
         to: z.string().describe('recipient seat name'),
