@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 /**
@@ -22,14 +22,18 @@ import { z } from 'zod';
 /** The same anchor `toolTelemetry.ts` classifies bounces by — a handler's own prose can't spoof it. */
 const BOUNCE_RE = /^(MCP error -32602: )?Input validation error:/;
 
-/** The zod issue fields the hints read. Everything is optional-defensive: issue shapes vary by code. */
+/** The zod issue fields the hints read — both eras: zod 3 (`invalid_enum_value`/`options`/
+ * `received`) and zod 4 (`invalid_value`/`values`/`input`). Everything is optional-defensive:
+ * issue shapes vary by code and major. */
 interface ZodIssueLike {
   code?: string;
-  path?: (string | number)[];
+  path?: (string | number | symbol)[];
   message?: string;
   options?: unknown[];
+  values?: unknown[];
   expected?: string;
   received?: string;
+  input?: unknown;
 }
 
 /** Extract the zod issues array embedded in the SDK's bounce text; null when there isn't one. */
@@ -84,21 +88,34 @@ export function closestOption(received: string, options: unknown[]): string | un
   return bestDist <= Math.max(2, Math.floor(received.length / 2)) ? best : undefined;
 }
 
-function hintForIssue(issue: ZodIssueLike): string {
-  const field = issue.path?.length ? issue.path.join('.') : 'input';
-  if (issue.code === 'invalid_enum_value' && Array.isArray(issue.options)) {
-    const opts = issue.options.filter((o): o is string => typeof o === 'string');
+function hintForIssue(issue: ZodIssueLike, sent?: unknown): string {
+  const field = issue.path?.length ? issue.path.map(String).join('.') : 'input';
+  // zod 3 named the enum failure `invalid_enum_value` with `options`; zod 4 renames it
+  // `invalid_value` with `values`. The sent value moved too: zod 3 put it on `received`, zod 4 on
+  // `input` — with the caller's own lookup from the bounced args as the final fallback.
+  const enumValues =
+    issue.code === 'invalid_enum_value' && Array.isArray(issue.options)
+      ? issue.options
+      : issue.code === 'invalid_value' && Array.isArray(issue.values)
+        ? issue.values
+        : undefined;
+  if (enumValues) {
+    const opts = enumValues.filter((o): o is string => typeof o === 'string');
     let hint = `${field} must be one of ${opts.join('|')}`;
+    const received = issue.received ?? issue.input ?? sent;
     const near =
-      issue.received !== undefined ? closestOption(String(issue.received), opts) : undefined;
+      received !== undefined && typeof received !== 'object'
+        ? closestOption(String(received), opts)
+        : undefined;
     if (near) hint += `; closest to what you sent is '${near}'`;
     return hint;
   }
-  if (issue.code === 'invalid_type' && issue.received === 'undefined') {
+  const received = issue.received ?? (issue.input === undefined ? undefined : typeof issue.input);
+  if (issue.code === 'invalid_type' && (received === 'undefined' || received === undefined)) {
     return `missing required field '${field}' (${issue.expected ?? 'value'})`;
   }
   if (issue.code === 'invalid_type') {
-    return `'${field}' must be ${issue.expected ?? 'another type'} (got ${issue.received ?? 'something else'})`;
+    return `'${field}' must be ${issue.expected ?? 'another type'} (got ${received ?? 'something else'})`;
   }
   return `'${field}': ${issue.message ?? issue.code ?? 'invalid'}`;
 }
@@ -142,17 +159,28 @@ export function bounceRepair(text: string, call?: { tool?: unknown; args?: unkno
   // parse — appending would only add a generic second hint under a specific first one.
   if (text.includes('\nrepair: ')) return '';
   const issues = reValidateIssues(call?.tool, call?.args) ?? parseIssues(text);
-  const hints = issues?.slice(0, MAX_ISSUES).map(hintForIssue) ?? [];
+  // The sent value for an issue, looked up from the bounced args by the issue's own path — the
+  // zod-4 fallback for the closest-option hint (its issues don't carry `received`).
+  const sentAt = (path?: (string | number | symbol)[]): unknown => {
+    let v: unknown = call?.args;
+    for (const key of path ?? []) {
+      if (typeof v !== 'object' || v === null) return undefined;
+      v = (v as Record<string | number | symbol, unknown>)[key];
+    }
+    return v === call?.args ? undefined : v;
+  };
+  const hints = issues?.slice(0, MAX_ISSUES).map((i) => hintForIssue(i, sentAt(i.path))) ?? [];
   const body = hints.length ? hints.join('; ') : 'check the fields against the tool input schema';
   return `\nrepair: ${body} — fix and retry the same call`;
 }
 
 type RequestHandler = (request: unknown, extra: unknown) => unknown;
 
-/** The Zod method literal off an SDK request schema — same defensive read as `toolTelemetry.ts`. */
-function methodOf(schema: unknown): string | undefined {
-  const value = (schema as { shape?: { method?: { value?: unknown } } } | undefined)?.shape?.method
-    ?.value;
+/** The registered method — v2 string key or v1 zod schema literal; same read as `toolTelemetry.ts`. */
+function methodOf(schemaOrMethod: unknown): string | undefined {
+  if (typeof schemaOrMethod === 'string') return schemaOrMethod;
+  const value = (schemaOrMethod as { shape?: { method?: { value?: unknown } } } | undefined)?.shape
+    ?.method?.value;
   return typeof value === 'string' ? value : undefined;
 }
 
@@ -191,15 +219,12 @@ function captureSchemaShapes(server: McpServer): void {
 export function instrumentToolRepair(server: McpServer): void {
   captureSchemaShapes(server);
   const inner = server.server;
-  const original = inner.setRequestHandler.bind(inner) as (
-    schema: unknown,
-    handler: RequestHandler,
-  ) => unknown;
-  (inner as { setRequestHandler: unknown }).setRequestHandler = (
-    schema: unknown,
-    handler: RequestHandler,
-  ) => {
-    if (methodOf(schema) !== 'tools/call') return original(schema, handler);
+  const original = inner.setRequestHandler.bind(inner) as (...args: unknown[]) => unknown;
+  // Variadic pass-through: v2 keys by method string, v1 by schema; handler is always last.
+  (inner as { setRequestHandler: unknown }).setRequestHandler = (...args: unknown[]) => {
+    const handler = args[args.length - 1] as RequestHandler;
+    if (methodOf(args[0]) !== 'tools/call' || typeof handler !== 'function')
+      return original(...args);
     const wrapped: RequestHandler = async (request, extra) => {
       const result = await handler(request, extra);
       const r = result as {
@@ -217,6 +242,6 @@ export function instrumentToolRepair(server: McpServer): void {
       if (!repair) return result;
       return { ...r, content: [{ ...first, text: text + repair }, ...r.content!.slice(1)] };
     };
-    return original(schema, wrapped);
+    return original(...args.slice(0, -1), wrapped);
   };
 }

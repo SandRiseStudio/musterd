@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { MusterdClient } from '../client.js';
 import { buildSkewWarning, errorResult, formatRoster, textResult } from './format.js';
 

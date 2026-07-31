@@ -79,29 +79,41 @@ Only a test through the real SDK could see it.
 
 ### Adoption checklist (SDK-gated — the Phase B lane executes this)
 
-1. Bump the SDK and run the canaries **first**; fix where each points. Expected failure sites:
-   `methodOf` (if request schemas move to zod 4 / standard-schema), `BOUNCE_RE` in both files (if
-   the prose changes), `hintForIssue` in `repair.ts` (zod 4 renames `invalid_enum_value` →
-   `invalid_value`, `options` → `values`), `harness.test.ts` (a stateless client never sends
-   `initialize`).
-2. Verify `server/discover` serves the primer `instructions`, the ADR 154 icons, and the correct
-   serverInfo from existing `McpServer` config. Pin that discover does **not** arm the ADR 108
-   autojoin: discover + `tools/list` from a fresh client, assert no seat claimed.
-3. Set `tools/list` `ttlMs: 3_600_000` and the private/session-scoped `cacheScope` value (exact
-   enum name from the final schema). The surface is static per process but seat/role-scoped — it
-   must never be cached across identities. Assert registration order is deterministic rather than
-   adding a sort.
-4. Tolerate `resultType` everywhere results are inspected: `classifyToolResult`, and the
-   `computeSurface` byte-weight capture (reads only `res.tools`; pin it).
-5. Migrate ADR 120 capture: read `_meta['io.modelcontextprotocol/clientInfo']` (or the SDK's parsed
-   accessor) at the tools/call seam via a pure `harnessFromClientInfo` reusing the existing
-   `sanitize` bounds; memoize once per process; keep the `oninitialized` path for legacy-handshake
-   clients; first capture wins.
-6. Echo serverInfo in result `_meta` only if the SDK does it automatically — never hand-patch
-   results.
-7. Rewrite the protocol facts in `docs/architecture/05-mcp.md` (instructions-on-initialize becomes
-   instructions-on-discover; the validate-before-handler seam note if the SDK's flow changed) and
-   close this checklist in place.
+**Executed 2026-07-31** (lane `01KYN3CKJESBYW55NZGBFXY6XD`, stanley steps 1–5 / dolly step 7). The
+gate fired differently than predicted: the supporting release was not a major of
+`@modelcontextprotocol/sdk` but a **package split** — `@modelcontextprotocol/server` 2.0.0 (+
+`/client` as dev-dep for the canaries), zod ^4.2.0, with `sdk` frozen at 1.30.0. zod 4 is confined
+to `packages/mcp`; protocol/server stay zod 3, so `team_send` rebuilds its act enum locally from
+`ACTS` rather than importing a zod-3 schema object into a zod-4 `registerTool`.
+
+**The era finding (the fact that shapes everything below):** SDK 2.0.0 serves the 2026-07-28 era
+**only via its per-request HTTP entry** (`createMcpHandler` → `installModernOnlyHandlers`); a
+stdio/in-memory `connect` negotiates the legacy list (max `2025-11-25`), and the client's
+`versionNegotiation.mode` defaults to legacy. musterd is stdio-only, so `server/discover`, cache
+fields, and required `resultType` **cannot reach musterd's wire in this release**. Everything is
+armed in config and pinned by canaries; a tripwire in `sdkSeams.test.ts` goes red when an SDK bump
+lets stdio negotiate a modern era — the signal to swap tripwires for real wire assertions.
+
+1. ✅ Done, canaries-first as prescribed — each expected site caught red before its fix: `methodOf`
+   (v2 keys handlers by string method), the three `setRequestHandler` monkey-patches (v2 handler
+   signature is variadic; handler = last arg), `hintForIssue` (speaks both zod issue dialects),
+   `harness.test.ts` (dual-era).
+2. ✅ As far as stdio allows: discover-never-arms-autojoin is pinned by canary (fresh client,
+   discover + `tools/list`, no seat claimed); instructions/icons/serverInfo verified from existing
+   `McpServer` config. Real-wire discover assertion lands when the tripwire fires.
+3. ✅ Armed: `cacheHints` config validates at construction (`ttlMs: 3_600_000`, `cacheScope:
+   'private'`); tripwire pins that the fields do **not** appear on the legacy wire. Registration
+   order asserted deterministic.
+4. ✅ `classifyToolResult` canaried indifferent to `resultType` in every class; `computeSurface`
+   pinned to read only `res.tools`.
+5. ✅ Dual-era capture: `observeHarnessRequests` reads per-request
+   `_meta['io.modelcontextprotocol/clientInfo']` (SDK `getClientVersion()` fallback) at the
+   tools/call seam, memoized first-capture-wins; the `oninitialized` path kept for legacy clients.
+6. ✅ Nothing hand-patched — the SDK does not echo serverInfo in result `_meta` on the legacy wire;
+   revisit rides the tripwire.
+7. ✅ `05-mcp.md` rewritten as an era note (instructions-on-initialize stays literally true on the
+   live wire until the tripwire fires; discover documented as the successor); this checklist closed
+   in place.
 
 If the SDK requires zod-4 tool schemas, migrating the 20 flat shapes in `tools/*.ts` becomes its
 own increment inside the adoption lane — mechanical but wide, and not to be smuggled into the bump

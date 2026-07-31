@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type {
   SurfaceRender,
   ToolCallEvent,
@@ -164,15 +164,18 @@ export class ToolCallRecorder {
   }
 }
 
-/** The Zod method literal off an SDK request schema (`schema.shape.method.value`) — defensive:
- * anything unexpected reads as "not ours" and passes through untouched. That defensiveness is also
- * a silent failure mode: if an SDK bump reshapes its request schemas, all three seam wrappers
- * degrade to pass-through and telemetry/repair/coercion just stop.
+/** The method a `setRequestHandler` call registers for. SDK v2 (spec 2026-07-28) keys the handler
+ * by method STRING; v1 keyed it by a zod request schema whose literal lived at
+ * `schema.shape.method.value` — kept as the fallback read so the wrappers survive either arity.
+ * Defensive: anything unexpected reads as "not ours" and passes through untouched. That
+ * defensiveness is also a silent failure mode: if an SDK bump reshapes this again, all three seam
+ * wrappers degrade to pass-through and telemetry/repair/coercion just stop.
  * @internal exported as a canary anchor only — `sdkSeams.test.ts` pins it against the SDK's real
  * request schemas so the detachment is a red test, not a quiet telemetry gap (ADR 175). */
-export function methodOf(schema: unknown): string | undefined {
-  const value = (schema as { shape?: { method?: { value?: unknown } } } | undefined)?.shape?.method
-    ?.value;
+export function methodOf(schemaOrMethod: unknown): string | undefined {
+  if (typeof schemaOrMethod === 'string') return schemaOrMethod;
+  const value = (schemaOrMethod as { shape?: { method?: { value?: unknown } } } | undefined)?.shape
+    ?.method?.value;
   return typeof value === 'string' ? value : undefined;
 }
 
@@ -187,20 +190,18 @@ type RequestHandler = (request: unknown, extra: unknown) => unknown;
  */
 export function instrumentToolTransport(server: McpServer, recorder: ToolCallRecorder): void {
   const inner = server.server;
-  const original = inner.setRequestHandler.bind(inner) as (
-    schema: unknown,
-    handler: RequestHandler,
-  ) => unknown;
-  (inner as { setRequestHandler: unknown }).setRequestHandler = (
-    schema: unknown,
-    handler: RequestHandler,
-  ) => {
-    const method = methodOf(schema);
+  const original = inner.setRequestHandler.bind(inner) as (...args: unknown[]) => unknown;
+  // Variadic pass-through: v2 registers `(method, handler)` and has a 3-arg custom-schema form;
+  // v1 registered `(schema, handler)`. The handler is always the LAST argument either way.
+  (inner as { setRequestHandler: unknown }).setRequestHandler = (...args: unknown[]) => {
+    const method = methodOf(args[0]);
+    const handler = args[args.length - 1] as RequestHandler;
+    if (typeof handler !== 'function') return original(...args);
     if (method === 'tools/list') {
       recorder.captureListHandler(() => handler({ method: 'tools/list', params: {} }, {}));
-      return original(schema, handler);
+      return original(...args);
     }
-    if (method !== 'tools/call') return original(schema, handler);
+    if (method !== 'tools/call') return original(...args);
     const wrapped: RequestHandler = async (request, extra) => {
       const name = (request as { params?: { name?: unknown } } | undefined)?.params?.name;
       const tool = typeof name === 'string' ? name : UNKNOWN_TOOL;
@@ -223,7 +224,7 @@ export function instrumentToolTransport(server: McpServer, recorder: ToolCallRec
         throw err;
       }
     };
-    return original(schema, wrapped);
+    return original(...args.slice(0, -1), wrapped);
   };
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { McpServer } from '@modelcontextprotocol/server';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { renderPrimer } from '@musterd/protocol';
 import { bind } from './bind.js';
 import { MCP_ICONS } from './brand.js';
@@ -8,7 +8,11 @@ import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
 import { MusterdClient } from './client.js';
 import { instrumentToolCoercion } from './coerce.js';
 import { isClaimedConfig, loadMcpConfig, type McpConfig } from './config.js';
-import { observeHarnessInitialization } from './harness.js';
+import {
+  type HarnessContext,
+  observeHarnessInitialization,
+  observeHarnessRequests,
+} from './harness.js';
 import { readAndConsumeResolution, writePendingMarker } from './pending.js';
 import { instrumentToolRepair } from './repair.js';
 import { instrumentTools, recordAdapterInitialization, startMcpTelemetry } from './telemetry.js';
@@ -173,13 +177,24 @@ function armAutojoinOnFirstToolCall(
 export function buildMcpServer(
   client: MusterdClient,
   config: ReturnType<typeof loadMcpConfig>,
-  opts: { onFirstToolCall?: () => Promise<void>; recorder?: ToolCallRecorder } = {},
+  opts: {
+    onFirstToolCall?: () => Promise<void>;
+    recorder?: ToolCallRecorder;
+    onHarness?: (harness: HarnessContext) => void;
+  } = {},
 ): McpServer {
   const server = new McpServer(
-    // version is package truth (ADR 175): serverInfo rides initialize today and, under MCP spec
-    // 2026-07-28, `server/discover` and every result's `_meta` — a literal here re-drifts.
+    // version is package truth (ADR 175): serverInfo rides `server/discover` and every result's
+    // `_meta` under MCP spec 2026-07-28 — a literal here re-drifts.
     { name: 'musterd', version: ADAPTER_VERSION, icons: [...MCP_ICONS] },
-    { instructions: primerInstructions(config) },
+    {
+      instructions: primerInstructions(config),
+      // ADR 175 step 3: the surface is static per process, so a long TTL is honest — but it is
+      // seat/role-scoped, so it must NEVER be cached across identities: `private`, not `public`.
+      // Registration order is deterministic (the fixed register* sequence below), which is what
+      // makes the cached listing stable rather than sorted.
+      cacheHints: { 'tools/list': { ttlMs: 3_600_000, cacheScope: 'private' } },
+    },
   );
   // Patch registerTool before any tool registers, so every handler runs inside a
   // `musterd.tool.call` span (ADR 089) — the active span the ADR 011 meta.otel plumbing needs.
@@ -197,6 +212,16 @@ export function buildMcpServer(
   // LAST so it wraps INNERMOST — it must rewrite the arguments before the SDK validates them, while
   // telemetry stays outermost to classify the final result (a repaired call lands as `coerced`).
   instrumentToolCoercion(server);
+  // Modern-era ADR 120 capture (ADR 175 step 5): clientInfo rides `_meta` per request under the
+  // stateless protocol, read once at the tools/call seam. Installed here with the sibling patches
+  // because it must precede the first registerTool — the legacy `oninitialized` path stays wired
+  // in main(), and the caller's memo makes whichever fires first win.
+  if (opts.onHarness) {
+    observeHarnessRequests(
+      server.server as unknown as Parameters<typeof observeHarnessRequests>[0],
+      opts.onHarness,
+    );
+  }
   // Patched second so the deferred autojoin runs INSIDE the first tool's span — the join latency it
   // causes is attributed to the call that triggered it.
   if (opts.onFirstToolCall) armAutojoinOnFirstToolCall(server, opts.onFirstToolCall, client);
@@ -296,16 +321,24 @@ async function main(): Promise<void> {
   // The tool-call recorder (ADR 144 inc 1) is probe-safe by the same construction: it only ever
   // sends after a real tool call gave the session a seat to attribute to.
   const recorder = new ToolCallRecorder();
+  // ADR 120 capture, both protocol eras (ADR 175 step 5): a legacy client still sends initialize
+  // (`oninitialized` fires); a 2026-07-28 client never does — its clientInfo rides `_meta` on every
+  // request and is read once at the tools/call seam (installed inside buildMcpServer, before the
+  // tools register). First capture wins; bounded adapter-local diagnostics either way, never a
+  // model or Envelope field.
+  let harnessSeen = false;
+  const captureHarnessOnce = (harness: HarnessContext | undefined): void => {
+    if (!harness || harnessSeen) return;
+    harnessSeen = true;
+    recordAdapterInitialization(config, harness);
+  };
   const server = buildMcpServer(client, config, {
     onFirstToolCall: () => autojoin(client, config),
     recorder,
+    onHarness: captureHarnessOnce,
   });
   const stopToolTelemetry = startToolTelemetryFlush(client, recorder);
-  // The SDK stores clientInfo only after the client's initialize request finishes. Retain it as
-  // bounded adapter-local diagnostics, never as a model or Envelope field (ADR 120).
-  observeHarnessInitialization(server.server, (harness) =>
-    recordAdapterInitialization(config, harness),
-  );
+  observeHarnessInitialization(server.server, captureHarnessOnce);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 

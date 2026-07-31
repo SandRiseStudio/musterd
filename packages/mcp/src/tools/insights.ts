@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { Report } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
