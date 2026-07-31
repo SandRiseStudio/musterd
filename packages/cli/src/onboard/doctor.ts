@@ -12,6 +12,7 @@ import {
 } from '@musterd/protocol';
 import { HttpClient } from '../client.js';
 import { findBinding, loadConfig } from '../config.js';
+import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
 import { cliBuild } from '../version.js';
@@ -748,6 +749,17 @@ export async function runInitDoctor(json: boolean, cwd: string = process.cwd()):
   const report = await inspectProvisioning(cwd);
   // ADR 135: freshness notes ride the report (warn-only, never drift/exit-1).
   report.notes.push(...(await buildSkewNotes()));
+  // The binary a WAKE would resolve is a different question from the one this shell resolves, and
+  // nothing asked it until a poisoned shim went a day unnoticed. Warn-only for the same reason as
+  // the skew notes: it is a fact about the machine, not this folder's provisioning.
+  const wake = inspectWakeMusterd();
+  if (wake.problem) {
+    report.notes.push(
+      `a woken session's \`musterd\` is broken — ${wake.problem}. Its hooks (session attestation, ` +
+        `autojoin, the interrupt line) would all fail silently, because \`command -v musterd\` still ` +
+        `succeeds. The running host rewrites ${wake.shim} on its next wake; delete it to fall back to PATH.`,
+    );
+  }
   if (json) {
     process.stdout.write(JSON.stringify(report) + '\n');
     return report.drift.length > 0 ? 1 : 0;
