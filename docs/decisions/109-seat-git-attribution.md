@@ -98,6 +98,10 @@ daemon records, not a proof it checks.
 
 ## Consequences
 
+- **Honesty limit (ADR 200):** the join is seat → PR → **whoever's credential was presented**, which is
+  not proof of which actor authorized it ([ADR 200](200-credential-custody-and-the-real-use-gate.md)).
+  Accepted for dogfood; forbidden in any build promoted for real use.
+
 - "What did seat X implement?" becomes answerable three ways, cheapest first: `git log
 --author=<seat>` on branches, seat trailers in squash bodies on `main`, and `musterd audit` rows
   joining seats → PRs/SHAs → authorizing humans.

@@ -110,6 +110,10 @@ human_ask_fired }`. The 17-row baseline table stays queryable and is the before-
 
 ## Consequences
 
+- **Honesty limit (ADR 200):** the ladder grades what was **recorded**, and no rung can detect a seat
+  presenting a human credential ([ADR 200](200-credential-custody-and-the-real-use-gate.md)).
+  Accepted for dogfood; forbidden in any build promoted for real use.
+
 - The review stage can produce reviews on a one-family roster, graded honestly, at zero new spend.
 - `verified: true` stops implying diversity it cannot show; readers who need the strength read the
   grade.

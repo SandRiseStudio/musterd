@@ -222,6 +222,10 @@ count**, never a headline rate alone.
 
 ## Consequences
 
+- **Honesty limit (ADR 200):** the gate fires on the identity the caller **presented**,
+  and a local process can present another member's ([ADR 200](200-credential-custody-and-the-real-use-gate.md)).
+  Accepted for dogfood; forbidden in any build promoted for real use.
+
 - **Reconciles enforcement with the founder ethos:** warn-never-block stays the default; block is a
   scoped, opt-in team decision. A team that wants a swarm keeps warn; a team that wants guardrails
   escalates specific classes.
