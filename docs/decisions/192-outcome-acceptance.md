@@ -79,6 +79,11 @@ human asks get the same framing plus peer findings.
 
 ## Consequences
 
+- **Honesty limit (ADR 200):** a co-sign records that a **different credential** was presented, not that a
+  different **actor** looked — on one machine any local process can read the vault and present a
+  human credential ([ADR 200](200-credential-custody-and-the-real-use-gate.md)). Accepted for
+  dogfood; forbidden in any build promoted for real use.
+
 - Agents are taught: merge → `lane_submit` → wait for acceptor → self-resolve only on silence
   (unconfirmed). Auto-merge is correct; skipping submit is the anti-pattern.
 - Board column / chips / verbs follow the new words (“Awaiting acceptance”, accept/reject,
