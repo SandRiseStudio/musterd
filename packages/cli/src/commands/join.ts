@@ -1,8 +1,9 @@
-import { type Binding, type Surface } from '@musterd/protocol';
+import { TOKEN_PREFIXES, type Binding, type Surface } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig, rememberIdentity, saveBinding, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
+import { setSeatGitIdentity } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 
@@ -72,6 +73,11 @@ export async function joinCommand(parsed: Parsed): Promise<number> {
     ...(grant !== undefined ? { grant } : {}),
   };
   saveBinding(process.cwd(), binding);
+  // ADR 196: agent re-bind refreshes worktree git identity. Humans keep their real email — a
+  // synthetic `nick@<team>.musterd` would break GitHub attribution (same gate as doctor).
+  if (key.startsWith(TOKEN_PREFIXES.agent_key)) {
+    setSeatGitIdentity(seat, process.cwd(), slug);
+  }
 
   if (parsed.flags['json']) {
     process.stdout.write(JSON.stringify({ team: slug, member: seat, surface }) + '\n');

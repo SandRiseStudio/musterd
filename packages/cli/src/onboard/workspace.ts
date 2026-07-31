@@ -38,18 +38,22 @@ export interface WorkspaceOpts {
 }
 
 /**
- * Seat-attributed commits (ADR 109): give the worktree its own git identity so `git log` answers
- * "which seat wrote this" natively. `--worktree` (not `--local`) is load-bearing — repo-local config
- * is shared across all worktrees, so without `extensions.worktreeConfig` the last-provisioned seat
- * would silently rename every other seat's commits. Best-effort: identity is attribution, never a
- * gate on provisioning.
+ * Seat-attributed commits (ADR 109 / ADR 196): give the worktree its own git identity so `git log`
+ * answers "which seat wrote this" natively. `--worktree` (not `--local`) is load-bearing — repo-local
+ * config is shared across all worktrees, so without `extensions.worktreeConfig` the last-provisioned
+ * seat would silently rename every other seat's commits. Best-effort: identity is attribution, never
+ * a gate on provisioning or re-bind.
+ *
+ * Call on every agent re-bind (`claim` / `join`), not only at provision — otherwise a folder that
+ * moves to another team keeps `seat@oldTeam.musterd` and splits one seat across two emails on `main`
+ * (ADR 196). Agent seats only; never call for a human credential (`mscr_`).
  *
  * `top` is resolved from `dir` rather than passed in, because the callers that most need this are the
  * ones that never computed a toplevel: `--here` and `--path` (§ {@link provisionWorkspace}). Outside a
  * repo there is no toplevel and nothing to write, which is fine — a plain folder has no git identity
  * to carry.
  */
-function setSeatGitIdentity(name: string, dir: string, team?: string): void {
+export function setSeatGitIdentity(name: string, dir: string, team?: string): void {
   try {
     const top = gitToplevel(dir);
     if (!top) return; // a plain folder: nothing to attribute
