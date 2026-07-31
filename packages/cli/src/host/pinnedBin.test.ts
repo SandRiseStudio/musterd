@@ -1,8 +1,14 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ensurePinnedMusterd, pinnedPath, wakeEnv } from './pinnedBin.js';
+import {
+  ensurePinnedMusterd,
+  inspectWakeMusterd,
+  owningPackageName,
+  pinnedPath,
+  wakeEnv,
+} from './pinnedBin.js';
 
 /**
  * A woken session's hooks call a BARE `musterd` (`command -v musterd && musterd …`), so PATH alone
@@ -90,5 +96,112 @@ describe('wakeEnv', () => {
 
   it('passes the rest of the inherited env through', () => {
     expect(wakeEnv({ PATH: HOST_PATH, HOME: '/h' }, '/pin')['HOME']).toBe('/h');
+  });
+});
+
+describe('owningPackageName', () => {
+  it('names the package a file belongs to, and is undefined when it cannot tell', () => {
+    const pkg = join(home, 'node_modules', 'thing');
+    mkdirSync(join(pkg, 'dist'), { recursive: true });
+    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'thing' }));
+    writeFileSync(join(pkg, 'dist', 'entry.js'), '');
+    expect(owningPackageName(join(pkg, 'dist', 'entry.js'))).toBe('thing');
+    // Nothing above it — "cannot tell", which callers must not read as "wrong".
+    expect(owningPackageName('/nonexistent-root-xyz/dist/bin.js')).toBeUndefined();
+  });
+});
+
+describe('ensurePinnedMusterd — refuses an entry that belongs to something else', () => {
+  /**
+   * The regression guard for the live incident of 2026-07-30: the shared shim was left exec'ing
+   * tinypool's worker entry, because `process.argv[1]` under a test runner is the WORKER's entry and
+   * the only check was `isAbsolute`. Every woken session then had a `musterd` on PATH that crashed.
+   */
+  const pkgEntry = (name: string): string => {
+    const root = join(home, 'pkgs', name.replace(/[^a-z]/g, ''));
+    mkdirSync(join(root, 'dist'), { recursive: true });
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name }));
+    const entry = join(root, 'dist', 'bin.js');
+    writeFileSync(entry, '');
+    return entry;
+  };
+
+  it('refuses a foreign package’s entry — the tinypool case', () => {
+    expect(ensurePinnedMusterd({ node: '/n/node', binJs: pkgEntry('tinypool') })).toBeUndefined();
+    expect(existsSync(pinnedPath(join(home, 'bin')))).toBe(false);
+  });
+
+  it('still pins musterd’s own entry', () => {
+    expect(ensurePinnedMusterd({ node: '/n/node', binJs: pkgEntry('@musterd/cli') })).toBe(
+      join(home, 'bin'),
+    );
+  });
+
+  it('still pins an UNIDENTIFIABLE entry — a stripped tarball must not lose the pin', () => {
+    // #516 exists partly for installs with no package.json above the entry. Failing closed there
+    // would silently restore PATH roulette for exactly those users, which is worse than the risk.
+    expect(ensurePinnedMusterd({ node: '/n/node', binJs: '/opt/strays/bin.js' })).toBe(
+      join(home, 'bin'),
+    );
+  });
+});
+
+describe('inspectWakeMusterd — what a woken session’s `musterd` would actually be', () => {
+  const shimBody = (node: string, bin: string) => `#!/bin/sh\nexec "${node}" "${bin}" "$@"\n`;
+
+  it('is silent when there is no shim — that is the un-pinned fallback, not a fault', () => {
+    const w = inspectWakeMusterd({ dir: '/pin', exists: () => false });
+    expect(w.problem).toBeUndefined();
+    expect(w.shim).toBe('/pin/musterd');
+  });
+
+  it('is silent when the shim execs a real musterd', () => {
+    const w = inspectWakeMusterd({
+      dir: '/pin',
+      exists: () => true,
+      read: () => shimBody('/n/node', '/live/dist/bin.js'),
+      owner: () => '@musterd/cli',
+    });
+    expect(w.problem).toBeUndefined();
+    expect(w.binJs).toBe('/live/dist/bin.js');
+  });
+
+  it('names the foreign package when the shim was poisoned', () => {
+    const w = inspectWakeMusterd({
+      dir: '/pin',
+      exists: () => true,
+      read: () => shimBody('/n/node', '/x/tinypool/dist/entry/process.js'),
+      owner: () => 'tinypool',
+    });
+    expect(w.problem).toContain('tinypool');
+    expect(w.problem).toContain('not musterd');
+  });
+
+  it('reports a missing entry and a missing interpreter distinctly', () => {
+    const gone = inspectWakeMusterd({
+      dir: '/pin',
+      exists: (p) => p !== '/live/dist/bin.js',
+      read: () => shimBody('/n/node', '/live/dist/bin.js'),
+      owner: () => '@musterd/cli',
+    });
+    expect(gone.problem).toContain('/live/dist/bin.js) is missing');
+
+    const noNode = inspectWakeMusterd({
+      dir: '/pin',
+      exists: (p) => p !== '/n/node',
+      read: () => shimBody('/n/node', '/live/dist/bin.js'),
+      owner: () => '@musterd/cli',
+    });
+    expect(noNode.problem).toContain('interpreter /n/node is missing');
+  });
+
+  it('reports a shim that is not ours rather than guessing', () => {
+    const w = inspectWakeMusterd({
+      dir: '/pin',
+      exists: () => true,
+      read: () => '#!/bin/sh\necho hello\n',
+      owner: () => '@musterd/cli',
+    });
+    expect(w.problem).toContain('not in the expected exec form');
   });
 });

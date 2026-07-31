@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { configPath } from '../config.js';
 
@@ -36,6 +36,89 @@ export function pinnedPath(dir: string): string {
   return join(dir, 'musterd');
 }
 
+/** Package names whose `bin.js` legitimately IS the musterd CLI. */
+const MUSTERD_ENTRY_PACKAGES = new Set(['@musterd/cli', 'musterd']);
+
+/**
+ * The `name` of the package that owns `file`, by walking up to the nearest `package.json` — the same
+ * ascent {@link readBuildStamp} uses, and for the same reason: it works from `src/` and `dist/`, at
+ * any nesting depth. `undefined` when no package.json is found or it does not parse, which callers
+ * must read as "cannot tell", never as "wrong".
+ */
+export function owningPackageName(file: string): string | undefined {
+  try {
+    let dir = dirname(file);
+    for (let i = 0; i < 8; i++) {
+      const manifest = join(dir, 'package.json');
+      if (existsSync(manifest)) {
+        const name = (JSON.parse(readFileSync(manifest, 'utf8')) as { name?: unknown }).name;
+        return typeof name === 'string' ? name : undefined;
+      }
+      const up = dirname(dir);
+      if (up === dir) return undefined;
+      dir = up;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What a woken session's `musterd` would actually be. `problem` set ⇒ its hooks are broken. */
+export interface WakeMusterd {
+  /** The shim the wake prepends to PATH. */
+  shim: string;
+  /** The entry it execs, when the shim is present and parseable. */
+  binJs?: string;
+  /** Set when a wake's musterd would not work; a human-readable one-liner. */
+  problem?: string;
+}
+
+/**
+ * Inspect the binary a wake would resolve — the report that did not exist when the shim above was
+ * found poisoned, which is why it stayed broken for a day. Pure apart from the two file reads, and
+ * `exists`/`read` are injectable so the states can be tested without a $HOME.
+ *
+ * Silent (no `problem`) when there is no shim at all: that is the un-pinned fallback, which is a
+ * different lane's concern (PATH roulette) and not a fault of this file.
+ */
+export function inspectWakeMusterd(deps?: {
+  dir?: string;
+  exists?: (p: string) => boolean;
+  read?: (p: string) => string;
+  owner?: (p: string) => string | undefined;
+}): WakeMusterd {
+  const dir = deps?.dir ?? join(dirname(configPath()), 'bin');
+  const exists = deps?.exists ?? existsSync;
+  const read = deps?.read ?? ((p: string) => readFileSync(p, 'utf8'));
+  const owner = deps?.owner ?? owningPackageName;
+  const shim = pinnedPath(dir);
+  if (!exists(shim)) return { shim };
+
+  let body: string;
+  try {
+    body = read(shim);
+  } catch {
+    return { shim, problem: `the pinned shim ${shim} cannot be read` };
+  }
+  // The shim is ours and one line: exec "<node>" "<binJs>" "$@".
+  const match = /^exec\s+"([^"]+)"\s+"([^"]+)"/m.exec(body);
+  if (!match) return { shim, problem: `the pinned shim ${shim} is not in the expected exec form` };
+  const [, node, binJs] = match as unknown as [string, string, string];
+
+  if (!exists(node)) return { shim, binJs, problem: `its interpreter ${node} is missing` };
+  if (!exists(binJs)) return { shim, binJs, problem: `the entry it execs (${binJs}) is missing` };
+  const pkg = owner(binJs);
+  if (pkg !== undefined && !MUSTERD_ENTRY_PACKAGES.has(pkg)) {
+    return {
+      shim,
+      binJs,
+      problem: `it execs ${binJs}, which belongs to "${pkg}" — not musterd`,
+    };
+  }
+  return { shim, binJs };
+}
+
 export interface PinnedMusterdOpts {
   /** The actuator's own interpreter — `process.execPath`. */
   node: string;
@@ -53,6 +136,19 @@ export function ensurePinnedMusterd(opts: PinnedMusterdOpts): string | undefined
   // A relative entry would resolve against the *seat's* cwd inside the woken session, silently
   // pinning nothing (or the wrong thing). Absolute or not at all.
   if (!isAbsolute(opts.node) || !isAbsolute(opts.binJs)) return undefined;
+  // …and absolute is not enough. `binJs` is `process.argv[1]`, which is only musterd's entry when
+  // this code runs as musterd. Under a test runner it is the WORKER's entry, and that passed the
+  // absolute check happily. Observed on the dogfood machine 2026-07-30: the shared shim was left
+  // exec'ing `…/tinypool/dist/entry/process.js`, so every woken session got a `musterd` on PATH that
+  // crashed on `process.send.bind` — `command -v musterd` succeeded, every hook call died, and the
+  // session lost attestation, autojoin, and the interrupt line in silence for ~19 hours.
+  //
+  // Refuse only when the entry provably belongs to something else. An unidentifiable entry (no
+  // package.json above it — a stripped tarball layout, say) still pins, because #516's whole point
+  // was to serve installs like that, and failing closed there would silently restore PATH roulette
+  // for the users it was written for.
+  const owner = owningPackageName(opts.binJs);
+  if (owner !== undefined && !MUSTERD_ENTRY_PACKAGES.has(owner)) return undefined;
 
   const dir = join(dirname(configPath()), 'bin');
   const shim = pinnedPath(dir);
