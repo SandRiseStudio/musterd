@@ -55,11 +55,7 @@ import { deliveryHintFor } from '../protocol/nudge.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
-import {
-  appendAudit,
-  hasInterruptRaised,
-  listAudit,
-} from '../store/audit.js';
+import { appendAudit, hasInterruptRaised, listAudit } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import { actDelivery, crossedBySeen } from '../store/delivery.js';
 import { listGoals } from '../store/goals.js';
