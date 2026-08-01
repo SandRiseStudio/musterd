@@ -184,16 +184,109 @@ describe('team_memory_save headline derivation', () => {
     expect(headline).not.toContain('wor…'); // clipped between words, not mid-word
   });
 
-  it('never touches an explicit headline — over the cap it must bounce, not lose the words', () => {
-    const over = 'x'.repeat(130);
-    const { args, applied } = coerceToolArgs('team_memory_save', { headline: over, body: 'b' });
-    expect(args['headline']).toBe(over);
-    expect(applied).toEqual([]);
-  });
-
   it('cannot derive from an absent or blank body', () => {
     expect(coerceToolArgs('team_memory_save', {}).applied).toEqual([]);
     expect(coerceToolArgs('team_memory_save', { body: '   \n\n' }).applied).toEqual([]);
+  });
+});
+
+describe('team_memory_save headline overflow (2026-08-01 re-measurement)', () => {
+  // The top measured bounce source post-#417: an explicit headline 121–160 chars, cap already in
+  // the description. The repair is lossless — the full line moves to the body, the clipped version
+  // is only the display pointer — which is why the earlier "never truncate explicit" stance
+  // (whose objection was data loss) does not apply to it.
+  it('moves an over-cap headline into the body and clips the pointer', () => {
+    const over = `${'word '.repeat(27)}tail-of-the-sentence`.trim(); // 155 chars
+    const { args, applied } = coerceToolArgs('team_memory_save', {
+      headline: over,
+      body: 'existing body',
+    });
+    expect(applied).toEqual(['headline:overflow→body']);
+    expect((args['headline'] as string).length).toBeLessThanOrEqual(120);
+    expect((args['headline'] as string).endsWith('…')).toBe(true);
+    expect(args['body']).toBe(`${over}\n\nexisting body`); // every word survives
+  });
+
+  it('an over-cap headline with no body becomes the body', () => {
+    const over = 'x'.repeat(134);
+    const { args } = coerceToolArgs('team_memory_save', { headline: over });
+    expect(args['body']).toBe(over);
+    expect((args['headline'] as string).length).toBeLessThanOrEqual(120);
+  });
+
+  it('a headline at exactly the cap is untouched', () => {
+    const at = 'y'.repeat(120);
+    const { args, applied } = coerceToolArgs('team_memory_save', { headline: at, body: 'b' });
+    expect(args['headline']).toBe(at);
+    expect(args['body']).toBe('b');
+    expect(applied).toEqual([]);
+  });
+});
+
+describe('surface_globs sent as a string (2026-08-01 re-measurement)', () => {
+  it('parses a JSON-stringified array', () => {
+    const { args, applied } = coerceToolArgs('lane_open', {
+      title: 't',
+      surface_globs: '["packages/mcp/src/**", "docs/**"]',
+    });
+    expect(args['surface_globs']).toEqual(['packages/mcp/src/**', 'docs/**']);
+    expect(applied).toEqual(['surface_globs:json-string→array']);
+  });
+
+  it('wraps a bare single glob', () => {
+    const { args, applied } = coerceToolArgs('lane_update', {
+      id: 'x',
+      surface_globs: 'packages/web/src/live/**',
+    });
+    expect(args['surface_globs']).toEqual(['packages/web/src/live/**']);
+    expect(applied).toEqual(['surface_globs:string→[string]']);
+  });
+
+  it('never splits on commas — a brace glob is one glob', () => {
+    const { args } = coerceToolArgs('lane_open', {
+      title: 't',
+      surface_globs: 'packages/{mcp,cli}/src/**',
+    });
+    expect(args['surface_globs']).toEqual(['packages/{mcp,cli}/src/**']);
+  });
+
+  it('composes with the surface alias: a string under the taught name still lands as a list', () => {
+    const { args, applied } = coerceToolArgs('lane_open', {
+      title: 't',
+      surface: 'packages/mcp/src/**',
+    });
+    expect(args['surface_globs']).toEqual(['packages/mcp/src/**']);
+    expect(applied).toEqual(['surface→surface_globs', 'surface_globs:string→[string]']);
+  });
+
+  it('leaves a real array alone', () => {
+    const { applied } = coerceToolArgs('lane_open', { title: 't', surface_globs: ['a/**'] });
+    expect(applied).toEqual([]);
+  });
+});
+
+describe('lane prose aliases: note/notes/summary → detail (2026-08-01 re-measurement)', () => {
+  it('lane_update forgives note', () => {
+    const { args, applied } = coerceToolArgs('lane_update', { id: 'x', note: 'merged as #421' });
+    expect(args['detail']).toBe('merged as #421');
+    expect(args['note']).toBeUndefined();
+    expect(applied).toEqual(['note→detail']);
+  });
+
+  it('lane_open forgives summary and notes', () => {
+    expect(coerceToolArgs('lane_open', { title: 't', summary: 's' }).args['detail']).toBe('s');
+    expect(coerceToolArgs('lane_open', { title: 't', notes: 'n' }).args['detail']).toBe('n');
+  });
+
+  it('an explicit detail always wins over the alias', () => {
+    const { args } = coerceToolArgs('lane_update', { id: 'x', detail: 'real', note: 'guess' });
+    expect(args['detail']).toBe('real');
+  });
+
+  it('lane_resolve does NOT forgive note — no prose field exists to carry it', () => {
+    const { args, applied } = coerceToolArgs('lane_resolve', { id: 'x', note: 'closing note' });
+    expect(args['note']).toBe('closing note'); // left to bounce with the unknown-key repair line
+    expect(applied).toEqual([]);
   });
 });
 
