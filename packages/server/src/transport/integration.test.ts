@@ -2671,6 +2671,67 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(((await res.json()) as { lane: { owner_seat: string } }).lane.owner_seat).toBe('bo');
   });
 
+  // The acquisition ledger (ADR 203) exists because the collision could not be reconstructed from
+  // the audit log. These pin the rows themselves — the kind/previous_owner shape was previously held
+  // only by the code, and the most common acquisition (a lane born owned via {claim:true}) wrote no
+  // row at all, so a ledger reconstruction would still have missed the ordinary case.
+  it('audits every acquisition edge: open-with-claim, PATCH claim, and handoff', async () => {
+    const team = await post('/teams', { slug: 'ledger', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/ledger/members', { name: 'bo', kind: 'human' }, nickTok);
+    const teamId = getTeamBySlug(server.db, 'ledger')!.id;
+    const claimedRows = () =>
+      listAudit(server.db, teamId)
+        .filter((r) => r.action === 'lane.claimed')
+        .map((r) => ({
+          actor: r.actor,
+          target: r.target,
+          detail: JSON.parse(r.detail!) as {
+            kind?: string;
+            owner?: string;
+            previous_owner?: string | null;
+            at_open?: boolean;
+          },
+        }));
+
+    // Edge 1: born owned — lane_open {claim:true}.
+    const born = await post('/teams/ledger/lanes', { title: 'born owned', claim: true }, nickTok);
+    const atOpen = claimedRows().find((r) => r.target === born.json.lane.id);
+    expect(atOpen).toBeDefined();
+    expect(atOpen!.actor).toBe('nick');
+    expect(atOpen!.detail.kind).toBe('claim');
+    expect(atOpen!.detail.owner).toBe('nick');
+    expect(atOpen!.detail.previous_owner ?? null).toBeNull();
+    expect(atOpen!.detail.at_open).toBe(true);
+
+    // Edge 2: a PATCH claim of an open lane.
+    const open = await post('/teams/ledger/lanes', { title: 'left open' }, nickTok);
+    await fetch(base + `/teams/ledger/lanes/${open.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },
+      body: JSON.stringify({ owner_seat: 'nick' }),
+    });
+    const patchClaim = claimedRows().find((r) => r.target === open.json.lane.id);
+    expect(patchClaim?.detail.kind).toBe('claim');
+    expect(patchClaim?.detail.previous_owner ?? null).toBeNull();
+    expect(patchClaim?.detail.at_open).toBeUndefined();
+
+    // Edge 3: a handoff — same PATCH, distinguished (and recorded) by who the new owner is.
+    await fetch(base + `/teams/ledger/lanes/${born.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },
+      body: JSON.stringify({ owner_seat: 'bo' }),
+    });
+    const handoff = claimedRows().find(
+      (r) => r.target === born.json.lane.id && r.detail.kind === 'handoff',
+    );
+    expect(handoff).toBeDefined();
+    expect(handoff!.detail.owner).toBe('bo');
+    expect(handoff!.detail.previous_owner).toBe('nick');
+    // …and the birth row is still the only OTHER acquisition of that lane — no double-write.
+    expect(claimedRows().filter((r) => r.target === born.json.lane.id)).toHaveLength(2);
+  });
+
   it('warns inline + wakes the affected owner exactly once; board reflects live state', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

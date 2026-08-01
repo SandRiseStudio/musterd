@@ -2340,6 +2340,27 @@ export async function handleHttp(
         const { team, member } = authTouch(ctx, slug, req);
         const body = parseOrBadRequest(OpenLaneSchema, await readJson(req));
         const lane = openLane(ctx.db, team.id, team.slug, member.name, body);
+        // The acquisition ledger (ADR 203) must cover every edge that decides who owns work. The
+        // PATCH handler records claims and handoffs; this is the third edge — a lane born owned via
+        // `{claim:true}` — which is the most common acquisition of all and was the one left
+        // unwritten, so a ledger reconstruction would have missed the ordinary case. No collision is
+        // possible here (the lane did not exist), hence no guard: just the row, marked `at_open` so
+        // a reader can tell a birth from a takeover.
+        if (lane.owner_seat) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'lane.claimed',
+            target: lane.id,
+            result: 'allow',
+            detail: {
+              lane: lane.id,
+              owner: lane.owner_seat,
+              previous_owner: null,
+              kind: 'claim',
+              at_open: true,
+            },
+          });
+        }
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
         deliverLaneWarnings(ctx, team, member, warnings); // all warnings are fresh at open
         deliverLaneTeamAct(ctx, team, member, `[lane] opened "${lane.title}"`, {
