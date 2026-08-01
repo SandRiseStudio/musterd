@@ -69,7 +69,7 @@ work-order timeout exceeds the host flag.
 
 In `localSessionLiveness`, when enumeration decides `live` but the binding session has
 `ended_at` **and** the enumerated live session id is that same session, use the slot's non-live
-verdict (`resumable` / `gc-expired`). A *different* live session beside an ended capture stays
+verdict (`resumable` / `gc-expired`). A _different_ live session beside an ended capture stays
 `live` (ADR 166 guardrail preserved).
 
 Daemon-side end attestation remains open (ADR 179); this increment is host-local only.
@@ -135,3 +135,31 @@ followed: the behaviour is correct, the documentation was not.
   **closed**, not idle — see the §5 scope limit. On a machine where every enrolled seat is in
   active use, the eligible set is empty by construction, and the exercise cannot run at all until a
   seat exits or a non-dogfooded seat is enrolled.
+
+### Eval status, measured 2026-08-01 — HALF-MET (dolly)
+
+Counted directly off the live `wake_leases` ledger, keyed on the shape each edge writes:
+
+| Edge             | Signature                  | Leases     |
+| ---------------- | -------------------------- | ---------- |
+| **Handoff**      | `act_id` **and** `lane_id` | **0**      |
+| **Continuation** | `act_id` null, `lane_id`   | 1          |
+| Reply doorbell   | `act_id`, `lane_id` null   | all others |
+
+So the Eval bullet above is satisfied on one edge only. **Continuation is proven live** (seat `izzo`,
+lease `01KYX17NRG`, 5.1s, no defer veto). **The handoff edge has never fired in production** — it is
+implemented and unit-tested (`residency.test.ts:610`) and nothing more. That is not a defect in what
+shipped: implementation was the lane's brief. It is recorded here because the Eval bullet reads as a
+single success criterion, and a later reader would otherwise take a green lane as meaning both halves
+were exercised.
+
+Closing it for real is lane `01KYX37RKH`, blocked on the setup precondition above — and blocked
+structurally, not incidentally: only `izzo`, `miley` and `dolly` are residency-enrolled, and all
+three are in constant use, so the eligible set is empty **by construction**. The durable unblock is
+enrolling a dormant seat (`grokbot` / `compo` / `gptbot`) as a permanent idle wake target, which is
+worth doing on its own merits.
+
+Recorded in the ADR rather than only in the acceptance record because this lane closed
+**unconfirmed**: no eligible acceptor existed (the two live seats had converged on one model, and the
+ADR 188 ladder correctly refuses `same_model`), and the author declined to have a model switched back
+to buy a passing grade. Where the acceptance trail cannot carry a finding, the decision record has to.
