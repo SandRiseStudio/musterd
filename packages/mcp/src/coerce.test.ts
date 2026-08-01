@@ -278,6 +278,12 @@ describe('lane prose aliases: note/notes/summary → detail (2026-08-01 re-measu
     expect(coerceToolArgs('lane_open', { title: 't', notes: 'n' }).args['detail']).toBe('n');
   });
 
+  it('lane_update forgives summary — the same synonym set on both lane tools', () => {
+    const { args, applied } = coerceToolArgs('lane_update', { id: 'x', summary: 's' });
+    expect(args['detail']).toBe('s');
+    expect(applied).toEqual(['summary→detail']);
+  });
+
   it('an explicit detail always wins over the alias', () => {
     const { args } = coerceToolArgs('lane_update', { id: 'x', detail: 'real', note: 'guess' });
     expect(args['detail']).toBe('real');
