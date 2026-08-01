@@ -624,7 +624,10 @@ export class MusterdClient {
         // The seat's effective capabilities (ADR 144 inc 5), same handling as the grant/model above:
         // learned at claim, persisted by `persistBinding`, and read at the NEXT boot to scope the
         // rendered tool surface before this session can ask. Never consulted for enforcement here.
-        if (frame.seat.capabilities) this.config.capabilities = frame.seat.capabilities;
+        // Synced unconditionally: a frame that omits capabilities (an older daemon) must CLEAR the
+        // cached record, not preserve it — a stale `can_message:'none'` would otherwise mute the
+        // surface across every future occupy, when unknown is defined to fail open (full surface).
+        this.config.capabilities = frame.seat.capabilities;
         ws.send(JSON.stringify({ type: 'subscribe', scope: 'team' }));
         this.heartbeat = setInterval(() => {
           if (ws.readyState === ws.OPEN) {

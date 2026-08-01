@@ -106,13 +106,11 @@ const HEADLINE_MAX = 120;
 
 /**
  * Derive the memory headline from the body's first line when it was omitted — the single most
- * common shape in the measured data (every `team_memory_save` bounce: a long, carefully-written
- * `body` rejected over a missing one-line subject).
+ * common shape in the 2026-07-24 measured data (a long, carefully-written `body` rejected over a
+ * missing one-line subject).
  *
- * Safe to truncate here, and *only* here: the body keeps every word, so a clipped headline loses
- * nothing — it is a display pointer into text the seat still has. An explicitly-provided headline
- * over the cap is NOT truncated; that would silently discard what the caller actually wrote, so it
- * bounces with a repair hint instead. Same limit, opposite answer, because the data loss differs.
+ * Safe to truncate here: the body keeps every word, so a clipped headline loses nothing — it is a
+ * display pointer into text the seat still has.
  */
 const deriveHeadline: Rule = (args) => {
   if (args['headline'] !== undefined) return null;
@@ -135,6 +133,51 @@ function clip(s: string, max: number): string {
 }
 
 /**
+ * An explicit headline over the cap — the top bounce source in the 2026-08-01 re-measurement
+ * (16 of 47 team-wide bounces, every one in a 121–160 near-miss band, with the cap already stated
+ * in the description). The earlier increment refused to truncate here because truncation discards
+ * what the caller wrote; this repair discards nothing: the full headline line moves to the front of
+ * the body, and the clipped version stands in as the display pointer — the same headline↔body
+ * relationship {@link deriveHeadline} already relies on, run in the other direction.
+ */
+const headlineOverflow: Rule = (args) => {
+  const headline = args['headline'];
+  if (typeof headline !== 'string' || headline.length <= HEADLINE_MAX) return null;
+  const body = args['body'];
+  args['body'] = typeof body === 'string' && body.trim() ? `${headline}\n\n${body}` : headline;
+  args['headline'] = clip(headline, HEADLINE_MAX);
+  return 'headline:overflow→body';
+};
+
+/**
+ * A glob list that arrived as one string — 5 measured `lane_open` bounces since 2026-07-27, every
+ * one an `invalid_type: expected array, received string`. Two shapes are mechanically unambiguous:
+ * a JSON-stringified array (parse it) and a bare single glob (wrap it). A comma-joined string is
+ * deliberately NOT split — brace expansion (`packages/{mcp,cli}/src`) makes a comma part of one
+ * valid glob, so a comma is not a separator here.
+ */
+function stringToList(field: string): Rule {
+  return (args) => {
+    const v = args[field];
+    if (typeof v !== 'string') return null;
+    const t = v.trim();
+    if (t.startsWith('[')) {
+      try {
+        const parsed: unknown = JSON.parse(t);
+        if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')) {
+          args[field] = parsed;
+          return `${field}:json-string→array`;
+        }
+      } catch {
+        // not JSON after all — fall through to the wrap
+      }
+    }
+    args[field] = [t];
+    return `${field}:string→[string]`;
+  };
+}
+
+/**
  * The measured rule table. `lane`/`lane_id` → `id` is the big one: 70% of every bounce in the
  * window, from five distinct seats across two harnesses — including a seat that hit it on its first
  * day, which is what makes it a standing tax rather than one agent's habit. The cause is our own
@@ -153,8 +196,25 @@ function clip(s: string, max: number): string {
 const RULES: Record<string, Rule[]> = {
   lane_claim: [alias('lane', 'id'), alias('lane_id', 'id')],
   lane_handoff: [alias('lane', 'id'), alias('lane_id', 'id'), recipientShape('to')],
-  lane_open: [alias('surface', 'surface_globs')],
-  lane_update: [alias('lane', 'id'), alias('lane_id', 'id'), alias('surface', 'surface_globs')],
+  // `note`/`notes`/`summary` → `detail`: 8 measured unknown-key bounces since 2026-07-27, from
+  // three seats, all trying to attach prose to a lane — `detail` is the field that means that.
+  // (On lane_resolve there is no prose field to alias onto; that demand is a closing-note design
+  // question for the ADR 192/202 acceptance flow, recorded in ADR 144, not a schema bolt-on here.)
+  lane_open: [
+    alias('surface', 'surface_globs'),
+    stringToList('surface_globs'),
+    alias('note', 'detail'),
+    alias('notes', 'detail'),
+    alias('summary', 'detail'),
+  ],
+  lane_update: [
+    alias('lane', 'id'),
+    alias('lane_id', 'id'),
+    alias('surface', 'surface_globs'),
+    stringToList('surface_globs'),
+    alias('note', 'detail'),
+    alias('notes', 'detail'),
+  ],
   lane_resolve: [alias('lane', 'id'), alias('lane_id', 'id'), numericString('pr')],
   team_send: [
     recipientShape('to'),
@@ -162,7 +222,12 @@ const RULES: Record<string, Rule[]> = {
     alias('content', 'body'),
     alias('message', 'body'),
   ],
-  team_memory_save: [alias('note', 'body'), alias('content', 'body'), deriveHeadline],
+  team_memory_save: [
+    alias('note', 'body'),
+    alias('content', 'body'),
+    deriveHeadline,
+    headlineOverflow,
+  ],
 };
 
 /** Leading/trailing whitespace is never meaningful in these arguments — normalize, don't count. */

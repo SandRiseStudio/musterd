@@ -151,6 +151,47 @@ counter anywhere records it. Two calls, in this order:
   the failure being fixed. Forgiveness where the meaning is mechanically knowable, a loud bounce
   where it is not, and never a silent drop.
 
+**Re-argued 2026-08-01 — the arc's close-out measurement (the re-sequencing note's condition).**
+1,784 calls over 2026-07-27..08-01 (post-#417): 47 bounces, 31 coerced, and the coercion layer
+demonstrably survived the zod-4 migration (coerced events recorded on 07-31/08-01, after #565).
+The verdicts, each from the data:
+
+- **No split, no merge — reconfirmed and now closed.** `team_send` carried 611 calls with zero
+  act-shaped bounces; no bounce anywhere was a caller reaching for the wrong tool. The split/merge
+  question this increment was originally scoped around is answered twice on live data and does not
+  stay open.
+- **The `lane`→`id` alias decays: 16/8/2/3/1 coercions per day across the window.** By this ADR's
+  own eval rule (a decaying coerced rate says the surface taught itself), the alias stays an alias
+  — no rename, now or later, absent a reversal in the trend.
+- **Repair hints do their job: 34 of 37 bounces recovered on the immediately-next call.** The
+  one-turn-retry metric this arc pre-registered is effectively at ceiling; the remaining craft is
+  about not spending the turn at all.
+- **Three narrow repairs were justified and built** (all deterministic, all measured, none
+  speculative): (1) `team_memory_save` became the top bouncer — 16 of the 47, every one an explicit
+  headline in a 121–160 near-miss band with the cap _already stated in the description_, so
+  teaching had hit its limit; the repair is a **lossless overflow** (full headline line moves to
+  the front of the body, clipped version stands in as the display pointer) — the earlier "never
+  truncate an explicit headline" stance objected to data loss, and this variant has none.
+  (2) `surface_globs` sent as a string (5× `invalid_type` on `lane_open`): a JSON-stringified
+  array parses, a bare glob wraps; a comma is never a separator because `{a,b}` braces make it
+  part of one glob. (3) `note`/`notes`/`summary` → `detail` on `lane_open`/`lane_update` (8×
+  across three seats — agents keep trying to attach prose to a lane, and `detail` is the field
+  that means that).
+- **One demand is recorded, not repaired: a closing note on `lane_resolve`.** Four callers tried
+  `note` (plus `state:'done'`, redundantly) on the resolve itself. There is no prose field to alias
+  onto, and bolting one on would duplicate what the ADR 192/202 acceptance flow already carries —
+  the accept act's body _is_ the closing prose. Routed to that design; the bounce (with its
+  valid-keys repair line, 8/8 next-call recovery) stays.
+- **Increment 5's accepted-with-note defect is fixed in passing**: the cached `binding.capabilities`
+  was write-only-when-present, so an occupy against a daemon that omits capabilities preserved a
+  stale record (a stale `can_message:'none'` would mute a surface indefinitely — failing _narrow_
+  where this ADR defines unknown as failing _open_). The occupy frame now syncs the field
+  unconditionally; omitted clears the cache and the next connect renders the full surface.
+
+With this, increment 4 is **done as a line of work**: the standing instruments (bounce rate,
+coerced rate and its trend, one-turn recovery) remain live in the report engine, and the
+pre-registered conditional in § Observability & Evaluation is the only re-entry path.
+
 ### 5. Scope by role (increment 5)
 
 The adapter renders only the tools a seat's role can meaningfully use — an observer never loads acting
@@ -243,6 +284,7 @@ increments 2–5 are done.
   Measured on the build: a muted seat drops 11 acting tools, 12,898 → ~3,022 bytes of `tools/list`
   (~77%). First live subject is the dogfood `observer` role (`can_message: none`), assigned to
   `wanderer` when revive's roster moved onto git the same day.
+
 - Deliberate deferrals, named: model-in-the-path input conforming (researchable, Track B tiny-model
   fixture candidate); external-tool governance (Scalekit-style brokering, enterprise-managed MCP
   authorization) — landscape material, not this arc; programmatic-calling-specific affordances beyond
