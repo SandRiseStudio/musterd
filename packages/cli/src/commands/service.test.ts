@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import {
@@ -563,21 +563,41 @@ describe('serviceCommand', () => {
   });
 
   // ADR 130: status names the running daemon's build and its skew against origin/main.
-  function gitScriptedRunner(over: { revList?: RunResult }): Runner {
+  function gitScriptedRunner(over: {
+    revList?: RunResult;
+    /** `launchctl print` for the auto-refresher: absent/failed = not installed. */
+    autoRefresherLoaded?: boolean;
+    /** What `git rev-parse origin/main` resolves to, for the debounce-stamp comparison. */
+    originTip?: string;
+  }): Runner {
     return (cmd, args) => {
       calls.push({ cmd, args });
-      if (cmd !== 'git') return { status: 0, stdout: '\tpid = 7\n\tstate = running\n', stderr: '' };
+      if (cmd !== 'git')
+        return over.autoRefresherLoaded === false
+          ? { status: 1, stdout: '', stderr: 'could not find service\n' }
+          : { status: 0, stdout: '\tpid = 7\n\tstate = running\n', stderr: '' };
       const verb = args[2];
-      if (verb === 'rev-parse') return { status: 0, stdout: 'true\n', stderr: '' };
+      if (verb === 'rev-parse')
+        return args.includes('origin/main')
+          ? { status: 0, stdout: `${over.originTip ?? 'b'.repeat(40)}\n`, stderr: '' }
+          : { status: 0, stdout: 'true\n', stderr: '' };
       if (verb === 'fetch') return { status: 0, stdout: '', stderr: '' };
       if (verb === 'rev-list') return over.revList ?? { status: 0, stdout: '0\n', stderr: '' };
       return { status: 0, stdout: '', stderr: '' };
     };
   }
   const buildSha = 'a'.repeat(40);
+  const behind3: RunResult = { status: 0, stdout: '3\n', stderr: '' };
 
-  it('status warns when the daemon build is behind origin/main, naming service refresh', async () => {
-    const c = ctx(gitScriptedRunner({ revList: { status: 0, stdout: '3\n', stderr: '' } }));
+  /** The debounce stamp the auto-refresher writes (§ autoRefreshStampPath), under the ADR 190 tmp config. */
+  function writeAttemptedSha(sha: string): void {
+    const p = join(dirname(process.env['MUSTERD_CONFIG'] ?? ''), 'autorefresh', '.attempted-sha');
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, sha, 'utf8');
+  }
+
+  it('status names service refresh when NO auto-refresher is installed (the manual verb is the answer)', async () => {
+    const c = ctx(gitScriptedRunner({ revList: behind3, autoRefresherLoaded: false }));
     const { code, out } = await capture(() =>
       serviceCommand(parseArgs(['status']), {
         platform: 'darwin',
@@ -590,6 +610,42 @@ describe('serviceCommand', () => {
     expect(out).toContain('musterd service refresh');
     // The comparison ran against the daemon's own checkout.
     expect(calls.some((x) => x.cmd === 'git' && x.args.join(' ').includes('/repo'))).toBe(true);
+  });
+
+  // The regression this pair exists for: musterd used to prescribe a manual refresh unconditionally,
+  // so on a machine where the auto-refresher owns the job it was instructing its own agents to bypass
+  // its own infra (nick, 2026-07-31). Skew under a healthy refresher is benign drift — say so, calmly.
+  it('status does NOT prescribe a manual refresh while a healthy auto-refresher is watching', async () => {
+    const c = ctx(gitScriptedRunner({ revList: behind3, autoRefresherLoaded: true }));
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['status']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0, build: buildSha }),
+      }),
+    );
+    expect(out).toContain('3 commits behind origin/main');
+    expect(out).toContain('the auto-refresher will pick this up');
+    expect(out).not.toContain('musterd service refresh');
+    expect(out).not.toContain('⚠');
+  });
+
+  it('status goes loud when the auto-refresher already attempted this tip — the daemon is pinned, nothing will retry', async () => {
+    const tip = 'c'.repeat(40);
+    writeAttemptedSha(tip); // the tick tried this exact commit and its build failed
+    const c = ctx(
+      gitScriptedRunner({ revList: behind3, autoRefresherLoaded: true, originTip: tip }),
+    );
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['status']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0, build: buildSha }),
+      }),
+    );
+    expect(out).toContain('pinned on old code');
+    expect(out).toContain('refresh.log');
+    expect(out).toContain('pnpm install'); // the known repair: a lockfile change the tick never installed
   });
 
   it('status reports up-to-date when the daemon build matches origin/main', async () => {
