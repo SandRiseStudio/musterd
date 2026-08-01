@@ -70,6 +70,12 @@ that made a takeover indistinguishable from a first claim.
 With `kind: 'claim' | 'handoff'` and `previous_owner`, because after the fact those are the same
 PATCH and only the audit can separate them.
 
+> **Completed 2026-08-01 (#579).** As shipped, this section covered the PATCH edge only — a lane
+> _born_ owned (`lane_open {claim:true}`, the most common acquisition there is) wrote no row, so
+> the heading overclaimed. The birth edge now writes `lane.claimed` too, marked `at_open: true`
+> with `previous_owner: null` so a reader can tell a birth from a takeover. A lane opened
+> _without_ `claim` writes nothing — an unowned lane being born is not an acquisition.
+
 ## Consequences
 
 - The board's core guarantee is enforced rather than advised; `lane_claim`'s description now matches
