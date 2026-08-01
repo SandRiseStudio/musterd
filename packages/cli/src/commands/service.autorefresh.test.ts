@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -169,6 +169,27 @@ describe('service refresh --auto (the tick)', () => {
     expect(code).toBe(0);
     expect(out).toContain('already attempted');
     expect(calls.some((x) => x.cmd === 'pnpm')).toBe(false);
+  });
+
+  // The #565 retry hole: an attempt that died for want of an install left the tip parked forever —
+  // the debounce blocked every retry, and the only escape was a human `pnpm install` (2026-08-01).
+  // node_modules out of sync with the lockfile means a retry runs an install first, so it has
+  // genuinely new odds; the debounce must yield to that one state.
+  it('retries a parked tip when node_modules is out of sync with the lockfile', async () => {
+    const repo = mkdtempSync(join(dir, 'pinned-repo-'));
+    mkdirSync(join(repo, 'node_modules', '.pnpm'), { recursive: true });
+    writeFileSync(join(repo, 'pnpm-lock.yaml'), 'lock-v2\n');
+    writeFileSync(join(repo, 'node_modules', '.pnpm', 'lock.yaml'), 'lock-v1\n');
+    const { code, out } = await tick({
+      ctx: { ...ctx(autoRunner({ behind: 2, tip: 'deadbeef99' })), workingDir: repo },
+      health: async () => ({ connections: 0, build: 'oldsha0' }),
+      autoState: memState('deadbeef99'), // parked — but the checkout is inconsistent
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('retrying deadbee');
+    const pnpm = calls.filter((x) => x.cmd === 'pnpm').map((x) => x.args.join(' '));
+    expect(pnpm[0]).toContain('install --frozen-lockfile');
+    expect(pnpm.some((a) => a.includes('build'))).toBe(true);
   });
 
   it('marks the attempted tip BEFORE building, so a build failure debounces next time', async () => {
