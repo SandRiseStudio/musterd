@@ -92,6 +92,19 @@ describe('human command', () => {
     expect(config.rosterHome).toEqual({});
   });
 
+  it('guards the home against committing the credential it just wrote there', async () => {
+    // `team export` guards this folder too, but the home is committable long before anyone exports a
+    // roster into it: standing a person up writes an `mscr_` at a visible path under `~`, and `git
+    // init` there is a perfectly ordinary next move. So the exclusion belongs to the home's creation.
+    const out = await json(['lin', '--team', 'dawn', '--home', home]);
+    const ignore = readFileSync(join(home, '.gitignore'), 'utf8');
+    expect(ignore).toContain('.musterd/binding.json');
+    expect(ignore).toContain('.musterd/pending/');
+    // Stated as the property rather than the mechanism: the live credential is on disk under a path
+    // this .gitignore excludes.
+    expect(readHomeBinding().agent_key).toBe(out.credential);
+  });
+
   it('is idempotent: a re-run reuses the recorded home and the same credential', async () => {
     const first = await json(['lin', '--team', 'dawn', '--home', home]);
     // No --home this time: the recorded teamHome must answer, not the ~/musterd default.

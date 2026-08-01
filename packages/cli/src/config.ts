@@ -15,6 +15,7 @@ import {
   BindingSchema,
   bindingSeat,
   assertWritableBinding,
+  PENDING_DIR,
   WORKSPACE_SPEC_FILE,
   WorkspaceSpecSchema,
   type Binding,
@@ -381,6 +382,89 @@ export function defaultTeamHome(slug: string): string {
  */
 export function readBindingAt(dir: string): Binding | null {
   return readBinding(join(dir, BINDING_DIR, BINDING_FILE));
+}
+
+/**
+ * The paths inside a folder that must never reach a commit: the binding (a live `mscr_`/`mskey_`) and
+ * the pending-claim directory beside it.
+ */
+const CREDENTIAL_EXCLUSIONS = [
+  `${BINDING_DIR}/${BINDING_FILE}`,
+  `${BINDING_DIR}/${PENDING_DIR}/`,
+] as const;
+
+/**
+ * Every way a `.gitignore` could already be excluding `target`, derived from the target itself rather
+ * than hand-listed: the path, its basename, `**` forms, and each ancestor directory with its `/*` and
+ * `/**` variants. Deriving them is what keeps the check honest — a hand-written `.musterd/` covers the
+ * binding just as well as the exact path does, and appending a redundant line over someone's working
+ * exclusion would be noise presented as a fix.
+ */
+function excludingSpellings(target: string): Set<string> {
+  const clean = target.replace(/\/+$/, '');
+  const base = clean.slice(clean.lastIndexOf('/') + 1);
+  const out = new Set([clean, base, `**/${base}`]);
+  const parts = clean.split('/');
+  for (let i = 1; i < parts.length; i++) {
+    const anc = parts.slice(0, i).join('/');
+    out.add(anc);
+    out.add(`${anc}/*`);
+    out.add(`${anc}/**`);
+    out.add(`**/${parts[i - 1]}`);
+  }
+  return out;
+}
+
+/** Compare ignore lines on their meaning, not their punctuation: `/.musterd/` and `.musterd` match. */
+function normalizeIgnoreLine(line: string): string {
+  return line.trim().replace(/^\/+/, '').replace(/\/+$/, '');
+}
+
+/**
+ * Make `dir` safe to `git add`, and answer whether it now is.
+ *
+ * `musterd team export` ends by telling you these files are the source of truth and to commit them —
+ * but it writes the roster into the same `.musterd/` that holds `binding.json` and its live
+ * credential, so following that instruction with `git add -A` commits the key. The first real export
+ * of the `revive` team hit exactly this; a hand-written `.gitignore` is the only reason that key is
+ * not in git. Nobody else would know to write one, so the command writes it.
+ *
+ * Appends, never overwrites — an existing `.gitignore` is somebody's work. Each target is checked
+ * independently, so a file that covers the binding but not `pending/` gains only the missing line, and
+ * a commented-out `# .musterd/binding.json` deliberately does **not** count as cover: that is the case
+ * a naive substring check gets wrong, and it gets it wrong in the dangerous direction.
+ *
+ * Returns "is this folder safe to commit", not "did anything change" — an exclusion that was already
+ * present is the caller's happy path, not a reason to suppress the instruction. It never throws: an
+ * unwritable directory returns false so the caller can withhold the `git add` line instead of
+ * aborting an export whose roster is already on disk.
+ *
+ * Deliberately not `missingGitignoreEntries` (onboard/init.ts), which asks a human before appending
+ * and matches ignore lines exactly. Both differences are wrong here: nothing on this path is
+ * interactive, and an exact match would append a redundant line over the hand-written `.musterd/`
+ * that is currently the only thing keeping the real team's key out of git.
+ */
+export function excludeCredentialFromGit(dir: string): boolean {
+  const p = join(dir, '.gitignore');
+  try {
+    const existing = existsSync(p) ? readFileSync(p, 'utf8') : '';
+    const present = existing
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('#'))
+      .map(normalizeIgnoreLine)
+      .filter(Boolean);
+    const missing = CREDENTIAL_EXCLUSIONS.filter((target) => {
+      const spellings = excludingSpellings(target);
+      return !present.some((l) => spellings.has(l));
+    });
+    if (missing.length === 0) return true;
+    const lead = existing === '' || existing.endsWith('\n') ? '' : '\n';
+    const block = `${lead}# musterd credential — never commit (ADR 176)\n${missing.join('\n')}\n`;
+    writeFileSync(p, existing + block);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Upsert an identity into the vault (ADR 059), keyed by (team, name). */
