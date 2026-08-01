@@ -499,10 +499,13 @@ export function countBehind(build: string, dir: string, run: Runner): number | n
  * - `watching` — a loaded auto-refresher will pick the skew up on its own interval. Skew here is
  *   benign, transient drift and must NOT read as a chore (the ADR 148 lesson: a chip that cries wolf
  *   on drift the machine already handles gets ignored, and then it can't warn about anything).
- * - `stalled` — the auto-refresher already ATTEMPTED this exact tip and parked on the debounce, so
- *   the build failed and the daemon is pinned on old code. Nothing will retry until a new commit
- *   lands or a human intervenes. This is the state that has to be loud: it is invisible everywhere
- *   else, because the daemon answers /health cheerfully from the previous build.
+ * - `stalled` — the auto-refresher already ATTEMPTED this exact tip and the daemon still is not on
+ *   it. The tick marks the attempt *before* building (the debounce), so this covers two cases: a
+ *   build in flight right now, and a build that failed and will never be retried until a new commit
+ *   lands. We cannot tell them apart from here and do not pretend to — but the failed case has to be
+ *   surfaced, because it is invisible everywhere else: the daemon answers /health cheerfully from
+ *   the previous build. A successful tick clears the marker, so a healthy settled machine never
+ *   reaches this branch (and a settled machine is not behind at all).
  */
 type SkewOwner = 'off' | 'watching' | 'stalled';
 
@@ -549,12 +552,16 @@ export function buildSkewNote(
     return `${short} ${theme.meta(`· ${commits} — the auto-refresher will pick this up`)}`;
   }
   if (ownership === 'stalled') {
+    // Deliberately not naming a directory: `dir` is whatever checkout this CLI was invoked from,
+    // which on a seat's worktree is NOT the daemon's — naming it would print a confident, wrong
+    // repair path. The log names the checkout the tick actually syncs.
     return (
       `${short} · ` +
       theme.warn(
-        `⚠ ${commits} — the auto-refresher already tried this tip and its build failed, so the ` +
-          `daemon is pinned on old code. See ~/.musterd/autorefresh/refresh.log; a merge that ` +
-          `changed pnpm-lock.yaml needs \`pnpm install\` in ${dir} first.`,
+        `⚠ ${commits} — the auto-refresher already attempted this tip; either its build is still ` +
+          `running or it failed, in which case the daemon is pinned on old code until a new commit ` +
+          `lands. Check ~/.musterd/autorefresh/refresh.log — a merge that changed pnpm-lock.yaml ` +
+          `needs \`pnpm install\` in the daemon's checkout, which the tick never runs.`,
       )
     );
   }

@@ -630,7 +630,7 @@ describe('serviceCommand', () => {
     expect(out).not.toContain('⚠');
   });
 
-  it('status goes loud when the auto-refresher already attempted this tip — the daemon is pinned, nothing will retry', async () => {
+  it('status goes loud when the auto-refresher already attempted this tip (pinned, or a build in flight)', async () => {
     const tip = 'c'.repeat(40);
     writeAttemptedSha(tip); // the tick tried this exact commit and its build failed
     const c = ctx(
@@ -643,9 +643,13 @@ describe('serviceCommand', () => {
         health: async () => ({ connections: 0, build: buildSha }),
       }),
     );
+    expect(out).toContain('already attempted this tip');
     expect(out).toContain('pinned on old code');
     expect(out).toContain('refresh.log');
     expect(out).toContain('pnpm install'); // the known repair: a lockfile change the tick never installed
+    // It must NOT name a checkout: `dir` here is the invoking CLI's, not necessarily the daemon's,
+    // so a confident path would be a confidently wrong repair instruction.
+    expect(out).not.toContain('/repo`');
   });
 
   it('status reports up-to-date when the daemon build matches origin/main', async () => {
