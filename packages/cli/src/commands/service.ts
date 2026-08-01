@@ -885,6 +885,29 @@ function bounceSiblings(ctx: ServiceCtx, dir: string, ok: (s: string) => void): 
   }
 }
 
+/**
+ * Whether `<dir>/node_modules` matches `<dir>/pnpm-lock.yaml`. The evidence is pnpm's own
+ * installed-state record: every successful install writes the lockfile it installed to
+ * `node_modules/.pnpm/lock.yaml` (verified byte-identical to the project lockfile on the healthy
+ * daemon checkout, 2026-08-01). Missing copy or any difference → the checkout needs an install,
+ * whatever hop history led here. A checkout with no `pnpm-lock.yaml` at all is not a pnpm workspace
+ * this check can judge — leave it alone. Unreadable-but-present states fall toward `true`, which
+ * costs one idempotent install rather than a pinned daemon: the failure modes are asymmetric.
+ */
+function needsInstall(dir: string): boolean {
+  let want: Buffer;
+  try {
+    want = readFileSync(join(dir, 'pnpm-lock.yaml'));
+  } catch {
+    return false; // no lockfile → nothing to be consistent with
+  }
+  try {
+    return !want.equals(readFileSync(join(dir, 'node_modules', '.pnpm', 'lock.yaml')));
+  } catch {
+    return true; // lockfile exists but no installed-state record → never installed (or wiped)
+  }
+}
+
 async function refreshDaemon(
   ctx: ServiceCtx,
   health: () => Promise<DaemonHealth>,
@@ -937,28 +960,29 @@ async function refreshDaemon(
       : `synced ${dir} → ${after} ${theme.meta(`(was ${before})`)}`,
   );
 
-  // Install ONLY when the sync actually moved the lockfile. A refresh is sync → build → restart, with
-  // no install — fast and correct for the ~99% of merges that touch no dependency. The other 1% used
-  // to pin the daemon silently: the build fails on a package that was never installed, the refresh
-  // correctly refuses to bounce, and the daemon then sits on old code across every LATER merge too,
-  // answering /health cheerfully the whole time (hit live by #565, which added
-  // `@modelcontextprotocol/server`). Deciding on the lockfile diff rather than on the build's error
-  // prose is deliberate: `before..after` is a fact the tick already has, where an
-  // `ERR_MODULE_NOT_FOUND` match would be one more prose anchor to rot (the ADR 175 lesson).
-  if (after !== before) {
-    const moved = git('diff', '--name-only', `${before}..${after}`, '--', 'pnpm-lock.yaml');
-    if (moved.status === 0 && moved.stdout.trim()) {
-      process.stdout.write(theme.meta('  lockfile moved — installing…') + '\n');
-      const installed = ctx.run('pnpm', ['--dir', dir, 'install', '--frozen-lockfile']);
-      // Advisory, not fatal: if the install fails the build below will say so with a better error,
-      // and a refresh that could still succeed (a lockfile touched with no new package) must not be
-      // aborted by this. Never silent, though — a skipped install is the thing that hid last time.
-      ok(
-        installed.status === 0
-          ? 'installed new dependencies'
-          : theme.meta('install failed — continuing to the build, which will name what is missing'),
-      );
-    }
+  // Install when `node_modules` does not match the (post-sync) lockfile. A refresh is sync → build
+  // → restart, with no install — fast and correct for the ~99% of merges that touch no dependency.
+  // The predecessor of this check decided on the lockfile diff of the CURRENT hop
+  // (`before..after`, #570), which had a retry hole: an install that failed — or a hop whose build
+  // died before its lockfile change was ever installed — left the lockfile-moving commit behind
+  // `before` forever, so no later refresh would install and the daemon stayed pinned until a human
+  // ran `pnpm install` by hand (exactly how the #565 incident actually healed, 2026-08-01).
+  // Consistency is a standing fact where the hop diff is a one-shot event: it stays true until the
+  // install succeeds, so every refresh retries and the checkout self-heals — including a daemon
+  // pinned AT the tip, where there is no hop at all.
+  if (needsInstall(dir)) {
+    process.stdout.write(
+      theme.meta('  node_modules out of sync with pnpm-lock.yaml — installing…') + '\n',
+    );
+    const installed = ctx.run('pnpm', ['--dir', dir, 'install', '--frozen-lockfile']);
+    // Advisory, not fatal: if the install fails the build below will say so with a better error,
+    // and a refresh that could still succeed (a lockfile touched with no new package) must not be
+    // aborted by this. Never silent, though — a skipped install is the thing that hid last time.
+    ok(
+      installed.status === 0
+        ? 'installed new dependencies'
+        : theme.meta('install failed — continuing to the build, which will name what is missing'),
+    );
   }
 
   process.stdout.write(theme.meta('  building…') + '\n');
@@ -1055,13 +1079,24 @@ async function autoRefreshTick(
     ok(`daemon up to date with origin/main (${health0.build.slice(0, 7)})`);
     return 0;
   }
-  // Debounce: don't re-attempt a tip we already tried that didn't stick (a failed build).
+  // Debounce: don't re-attempt a tip we already tried that didn't stick (a failed build) — UNLESS
+  // the checkout's node_modules is out of sync with its lockfile. That state means the failed
+  // attempt died for want of an install (the #565 pin), and a retry now runs one, so the retry has
+  // genuinely new odds — where re-building a broken main would just fail identically every interval.
+  // If the install keeps failing the tick keeps retrying, which is deliberate: an inconsistent
+  // checkout is an outage-in-waiting for every seat adapter loading its dist, not a parkable state.
   if (tip && autoState.read() === tip) {
+    if (!needsInstall(dir)) {
+      ok(
+        `already attempted ${tip.slice(0, 7)} (build did not stick) — waiting for a new commit ` +
+          `or a manual \`musterd service refresh\``,
+      );
+      return 0;
+    }
     ok(
-      `already attempted ${tip.slice(0, 7)} (build did not stick) — waiting for a new commit ` +
-        `or a manual \`musterd service refresh\``,
+      `retrying ${tip.slice(0, 7)} — node_modules is out of sync with pnpm-lock.yaml, ` +
+        `so this attempt will install first`,
     );
-    return 0;
   }
   const s = (n: number) => (n === 1 ? '' : 's');
   const conns = health0.connections ?? 0;

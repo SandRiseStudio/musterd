@@ -5,6 +5,10 @@
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
     "strict": true,
+    // A failed build must not emit: seats spawn their MCP adapters from the shared checkout's dist,
+    // so a half-emitted dist (importing packages that failed to resolve) crashes every adapter even
+    // when the daemon itself was correctly left unbounced (the 2026-08-01 #565 incident).
+    "noEmitOnError": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,

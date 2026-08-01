@@ -266,8 +266,6 @@ describe('serviceCommand', () => {
       buildStatus?: number;
       before?: string;
       after?: string;
-      /** `git diff --name-only <before>..<after> -- pnpm-lock.yaml` — non-empty = deps moved. */
-      lockfileMoved?: boolean;
       installStatus?: number;
     } = {},
   ): Runner {
@@ -279,12 +277,6 @@ describe('serviceCommand', () => {
           return { status: 0, stdout: 'true', stderr: '' };
         if (args.includes('--porcelain'))
           return { status: 0, stdout: over.dirty ?? '', stderr: '' };
-        if (args.includes('diff'))
-          return {
-            status: 0,
-            stdout: over.lockfileMoved ? 'pnpm-lock.yaml\n' : '',
-            stderr: '',
-          };
         if (args.includes('HEAD'))
           return {
             status: 0,
@@ -299,6 +291,25 @@ describe('serviceCommand', () => {
           : { status: over.buildStatus ?? 0, stdout: '', stderr: 'build boom' };
       return { status: 0, stdout: '', stderr: '' }; // launchctl (restart)
     };
+  }
+
+  /**
+   * A real checkout dir for the install-consistency check, which reads FILES, not git: the project
+   * lockfile against pnpm's installed-state copy (`node_modules/.pnpm/lock.yaml`).
+   */
+  function repoWith(
+    state: 'consistent' | 'inconsistent' | 'never-installed' | 'no-lockfile',
+  ): string {
+    const repo = mkdtempSync(join(dir, 'refresh-repo-')); // under `dir` → cleaned by afterEach
+    if (state !== 'no-lockfile') writeFileSync(join(repo, 'pnpm-lock.yaml'), 'lock-v2\n');
+    if (state === 'consistent' || state === 'inconsistent') {
+      mkdirSync(join(repo, 'node_modules', '.pnpm'), { recursive: true });
+      writeFileSync(
+        join(repo, 'node_modules', '.pnpm', 'lock.yaml'),
+        state === 'consistent' ? 'lock-v2\n' : 'lock-v1\n',
+      );
+    }
+    return repo;
   }
 
   it('refresh syncs to main, rebuilds, and restarts', async () => {
@@ -321,11 +332,14 @@ describe('serviceCommand', () => {
     expect(out).toContain('restarted the musterd daemon on bbb222');
   });
 
-  // The silent-pin bug (#565): a merge that adds a dependency fails the build on a package that was
-  // never installed, refresh correctly refuses to bounce, and the daemon then sits on old code across
-  // every LATER merge while /health answers cheerfully. Decide on the lockfile diff, not on error prose.
-  it('refresh installs when the sync moved pnpm-lock.yaml, before building', async () => {
-    const c = ctx(refreshRunner({ lockfileMoved: true }));
+  // The silent-pin bug (#565) and its retry hole: the first fix (#570) decided on the lockfile diff
+  // of the current hop, so a missed install — the hop's build failed, or the install itself failed —
+  // was never retried once the lockfile-moving commit fell behind `before`, and the daemon stayed
+  // pinned until a human ran `pnpm install` (how the 2026-08-01 incident actually healed). Deciding
+  // on CONSISTENCY (project lockfile vs pnpm's installed-state copy) makes the condition standing
+  // rather than one-shot: it stays true until an install succeeds, whatever hop history led here.
+  it('refresh installs when node_modules is out of sync with the lockfile, before building', async () => {
+    const c = { ...ctx(refreshRunner()), workingDir: repoWith('inconsistent') };
     const { code, out } = await capture(() =>
       serviceCommand(parseArgs(['refresh']), {
         platform: 'darwin',
@@ -340,8 +354,21 @@ describe('serviceCommand', () => {
     expect(out).toContain('installed new dependencies');
   });
 
-  it('refresh does NOT install when the lockfile did not move (the fast path stays fast)', async () => {
-    const c = ctx(refreshRunner({ lockfileMoved: false }));
+  it('refresh installs when the checkout was never installed at all', async () => {
+    const c = { ...ctx(refreshRunner()), workingDir: repoWith('never-installed') };
+    const { code } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(calls.some((x) => x.cmd === 'pnpm' && x.args.includes('install'))).toBe(true);
+  });
+
+  it('refresh does NOT install when node_modules matches the lockfile (the fast path stays fast)', async () => {
+    const c = { ...ctx(refreshRunner()), workingDir: repoWith('consistent') };
     const { code } = await capture(() =>
       serviceCommand(parseArgs(['refresh']), {
         platform: 'darwin',
@@ -353,22 +380,48 @@ describe('serviceCommand', () => {
     expect(calls.some((x) => x.cmd === 'pnpm' && x.args.includes('install'))).toBe(false);
   });
 
-  it('refresh does not even ask about the lockfile when the sync moved nothing', async () => {
-    const c = ctx(refreshRunner({ before: 'same111', after: 'same111', lockfileMoved: true }));
-    await capture(() =>
+  // The regression test for the incident's terminal state: a daemon pinned with a missed install and
+  // no new commits. The hop-diff gate could never fire here (`after === before`, no hop); the
+  // consistency check does, and the checkout self-heals.
+  it('refresh installs even when the sync moved nothing — a pinned checkout self-heals', async () => {
+    const c = {
+      ...ctx(refreshRunner({ before: 'same111', after: 'same111' })),
+      workingDir: repoWith('inconsistent'),
+    };
+    const { code, out } = await capture(() =>
       serviceCommand(parseArgs(['refresh']), {
         platform: 'darwin',
         ctx: c,
         health: async () => ({ connections: 0 }),
       }),
     );
-    expect(calls.some((x) => x.cmd === 'git' && x.args.includes('diff'))).toBe(false);
+    expect(code).toBe(0);
+    expect(calls.some((x) => x.cmd === 'pnpm' && x.args.includes('install'))).toBe(true);
+    expect(out).toContain('out of sync with pnpm-lock.yaml');
+  });
+
+  it('a checkout with no pnpm-lock.yaml is not judged — no install', async () => {
+    const c = { ...ctx(refreshRunner()), workingDir: repoWith('no-lockfile') };
+    const { code } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(calls.some((x) => x.cmd === 'pnpm' && x.args.includes('install'))).toBe(false);
   });
 
   // Advisory by design: the build below names what is missing with a far better error than a bare
-  // install failure, and a refresh that could still succeed must not be aborted by this.
+  // install failure, and a refresh that could still succeed must not be aborted by this. The retry
+  // comes from the condition being standing, not from aborting: node_modules is still out of sync
+  // next refresh, so the install runs again.
   it('a failed install does not abort the refresh — it says so and lets the build speak', async () => {
-    const c = ctx(refreshRunner({ lockfileMoved: true, installStatus: 1 }));
+    const c = {
+      ...ctx(refreshRunner({ installStatus: 1 })),
+      workingDir: repoWith('inconsistent'),
+    };
     const { code, out } = await capture(() =>
       serviceCommand(parseArgs(['refresh']), {
         platform: 'darwin',
