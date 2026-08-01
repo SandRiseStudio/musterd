@@ -492,22 +492,80 @@ export function countBehind(build: string, dir: string, run: Runner): number | n
 }
 
 /**
+ * Who owns the skew: is an auto-refresher watching this daemon, and has it already tried and failed?
+ *
+ * Three states, because each asks a different thing of the reader:
+ * - `off` — nothing is watching; the manual verb is genuinely the answer.
+ * - `watching` — a loaded auto-refresher will pick the skew up on its own interval. Skew here is
+ *   benign, transient drift and must NOT read as a chore (the ADR 148 lesson: a chip that cries wolf
+ *   on drift the machine already handles gets ignored, and then it can't warn about anything).
+ * - `stalled` — the auto-refresher already ATTEMPTED this exact tip and the daemon still is not on
+ *   it. The tick marks the attempt *before* building (the debounce), so this covers two cases: a
+ *   build in flight right now, and a build that failed and will never be retried until a new commit
+ *   lands. We cannot tell them apart from here and do not pretend to — but the failed case has to be
+ *   surfaced, because it is invisible everywhere else: the daemon answers /health cheerfully from
+ *   the previous build. A successful tick clears the marker, so a healthy settled machine never
+ *   reaches this branch (and a settled machine is not behind at all).
+ */
+type SkewOwner = 'off' | 'watching' | 'stalled';
+
+export function autoRefreshOwnership(dir: string, run: Runner, loaded: boolean): SkewOwner {
+  if (!loaded) return 'off';
+  // The debounce stamp names the tip the tick last *attempted*. If it already equals origin/main
+  // while the daemon is still behind, the attempt failed — the tick is not going to try again.
+  try {
+    const attempted = readFileSync(autoRefreshStampPath(), 'utf8').trim();
+    if (!attempted) return 'watching';
+    const tip = run('git', ['-C', dir, 'rev-parse', 'origin/main']);
+    if (tip.status !== 0) return 'watching'; // no verdict — assume the watcher is fine (never alarm on ignorance)
+    return attempted === tip.stdout.trim() ? 'stalled' : 'watching';
+  } catch {
+    return 'watching'; // no stamp yet: it has not attempted anything to fail at
+  }
+}
+
+/**
  * Name the running daemon's build skew against `origin/main` (ADR 130) — the detector half of
  * `service refresh`. Best-effort by design: the daemon may not run from a checkout, the fetch may be
  * offline, the commit may be unknown locally — every failure degrades to just naming the build ref.
  * `status` must never fail because of this check (watcher, never gatekeeper).
+ *
+ * It also must not tell the reader to do the auto-refresher's job. The unconditional "run `musterd
+ * service refresh`" this used to emit was read by every agent on a dogfood machine where the
+ * auto-refresher is installed — so musterd was instructing its own team to bypass its own infra, and
+ * no amount of documentation beats a live string (nick, 2026-07-31). `ownership` is injected so the
+ * launchd probe stays out of this pure formatter and its tests.
  */
-export function buildSkewNote(build: string, dir: string, run: Runner): string {
+export function buildSkewNote(
+  build: string,
+  dir: string,
+  run: Runner,
+  ownership: SkewOwner = 'off',
+): string {
   const short = build.slice(0, 7) + (build.endsWith('-dirty') ? '-dirty' : '');
   const behind = countBehind(build, dir, run);
   if (behind === null) return short;
   if (behind === 0) return `${short} ${theme.meta('· up to date with origin/main')}`;
-  return (
-    `${short} · ` +
-    theme.warn(
-      `⚠ ${behind} commit${behind === 1 ? '' : 's'} behind origin/main — run \`musterd service refresh\``,
-    )
-  );
+  const commits = `${behind} commit${behind === 1 ? '' : 's'} behind origin/main`;
+  if (ownership === 'watching') {
+    // Calm on purpose: no command, no ⚠. The machine owns this one.
+    return `${short} ${theme.meta(`· ${commits} — the auto-refresher will pick this up`)}`;
+  }
+  if (ownership === 'stalled') {
+    // Deliberately not naming a directory: `dir` is whatever checkout this CLI was invoked from,
+    // which on a seat's worktree is NOT the daemon's — naming it would print a confident, wrong
+    // repair path. The log names the checkout the tick actually syncs.
+    return (
+      `${short} · ` +
+      theme.warn(
+        `⚠ ${commits} — the auto-refresher already attempted this tip; either its build is still ` +
+          `running or it failed, in which case the daemon is pinned on old code until a new commit ` +
+          `lands. Check ~/.musterd/autorefresh/refresh.log — a merge that changed pnpm-lock.yaml ` +
+          `needs \`pnpm install\` in the daemon's checkout, which the tick never runs.`,
+      )
+    );
+  }
+  return `${short} · ` + theme.warn(`⚠ ${commits} — run \`musterd service refresh\``);
 }
 
 /**
@@ -879,6 +937,30 @@ async function refreshDaemon(
       : `synced ${dir} → ${after} ${theme.meta(`(was ${before})`)}`,
   );
 
+  // Install ONLY when the sync actually moved the lockfile. A refresh is sync → build → restart, with
+  // no install — fast and correct for the ~99% of merges that touch no dependency. The other 1% used
+  // to pin the daemon silently: the build fails on a package that was never installed, the refresh
+  // correctly refuses to bounce, and the daemon then sits on old code across every LATER merge too,
+  // answering /health cheerfully the whole time (hit live by #565, which added
+  // `@modelcontextprotocol/server`). Deciding on the lockfile diff rather than on the build's error
+  // prose is deliberate: `before..after` is a fact the tick already has, where an
+  // `ERR_MODULE_NOT_FOUND` match would be one more prose anchor to rot (the ADR 175 lesson).
+  if (after !== before) {
+    const moved = git('diff', '--name-only', `${before}..${after}`, '--', 'pnpm-lock.yaml');
+    if (moved.status === 0 && moved.stdout.trim()) {
+      process.stdout.write(theme.meta('  lockfile moved — installing…') + '\n');
+      const installed = ctx.run('pnpm', ['--dir', dir, 'install', '--frozen-lockfile']);
+      // Advisory, not fatal: if the install fails the build below will say so with a better error,
+      // and a refresh that could still succeed (a lockfile touched with no new package) must not be
+      // aborted by this. Never silent, though — a skipped install is the thing that hid last time.
+      ok(
+        installed.status === 0
+          ? 'installed new dependencies'
+          : theme.meta('install failed — continuing to the build, which will name what is missing'),
+      );
+    }
+  }
+
   process.stdout.write(theme.meta('  building…') + '\n');
   const built = ctx.run('pnpm', ['--dir', dir, 'build']);
   if (built.status !== 0) {
@@ -997,7 +1079,23 @@ async function autoRefreshTick(
     ok(`${conns} live session${s(conns)} — notified the operator, forcing the bounce`);
   }
   if (tip) autoState.write(tip); // mark the attempt BEFORE building, so a failed build debounces next tick
-  return refreshDaemon(ctx, health, force, ok, fail);
+  try {
+    return await refreshDaemon(ctx, health, force, ok, fail);
+  } catch (err) {
+    // A failed tick is the one state nothing else surfaces. The debounce then parks it, so the
+    // daemon stays pinned on old code across every later merge while /health answers cheerfully —
+    // and the only evidence is a log nobody reads unprompted. Say it out loud, once per tip (the
+    // debounce above guarantees that), then rethrow so the log keeps the full error.
+    notify({
+      id: 'musterd-autorefresh-failed',
+      title: 'musterd auto-refresh failed',
+      body:
+        `The daemon is pinned on ${health0.build.slice(0, 7)} — the refresh to ${tip.slice(0, 7)} ` +
+        `did not build, and nothing will retry until a new commit lands. ` +
+        `See ~/.musterd/autorefresh/refresh.log.`,
+    });
+    throw err;
+  }
 }
 
 /**
@@ -1475,10 +1573,15 @@ async function renderStatus(
     process.stdout.write(
       `  ${theme.meta('hosts:')}  ${hosts} ${theme.meta('(plist-derived; ADR 040 allow-list)')}\n`,
     );
-  // Build provenance + skew (ADR 130): the running daemon names its commit; we name the gap.
+  // Build provenance + skew (ADR 130): the running daemon names its commit; we name the gap — and
+  // who owns closing it, so a machine with the auto-refresher installed never reads as a chore.
   if (health?.build) {
+    const loaded = statusAutoRefresh(
+      resolveAutoRefreshCtx(ctx.run, { flags: {}, positionals: [], metaPairs: [] }),
+    ).loaded;
+    const ownership = autoRefreshOwnership(ctx.workingDir, ctx.run, loaded);
     process.stdout.write(
-      `  ${theme.meta('build:')}  ${buildSkewNote(health.build, ctx.workingDir, ctx.run)}\n`,
+      `  ${theme.meta('build:')}  ${buildSkewNote(health.build, ctx.workingDir, ctx.run, ownership)}\n`,
     );
   }
   return 0;

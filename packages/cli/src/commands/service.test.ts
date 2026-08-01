@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import {
@@ -261,7 +261,15 @@ describe('serviceCommand', () => {
 
   // ADR 118: `service refresh` = sync main → build → restart, in one guarded verb.
   function refreshRunner(
-    over: { dirty?: string; buildStatus?: number; before?: string; after?: string } = {},
+    over: {
+      dirty?: string;
+      buildStatus?: number;
+      before?: string;
+      after?: string;
+      /** `git diff --name-only <before>..<after> -- pnpm-lock.yaml` — non-empty = deps moved. */
+      lockfileMoved?: boolean;
+      installStatus?: number;
+    } = {},
   ): Runner {
     let head = 0;
     return (cmd, args) => {
@@ -271,6 +279,12 @@ describe('serviceCommand', () => {
           return { status: 0, stdout: 'true', stderr: '' };
         if (args.includes('--porcelain'))
           return { status: 0, stdout: over.dirty ?? '', stderr: '' };
+        if (args.includes('diff'))
+          return {
+            status: 0,
+            stdout: over.lockfileMoved ? 'pnpm-lock.yaml\n' : '',
+            stderr: '',
+          };
         if (args.includes('HEAD'))
           return {
             status: 0,
@@ -280,7 +294,9 @@ describe('serviceCommand', () => {
         return { status: 0, stdout: '', stderr: '' }; // fetch / switch
       }
       if (cmd === 'pnpm')
-        return { status: over.buildStatus ?? 0, stdout: '', stderr: 'build boom' };
+        return args.includes('install')
+          ? { status: over.installStatus ?? 0, stdout: '', stderr: 'install boom' }
+          : { status: over.buildStatus ?? 0, stdout: '', stderr: 'build boom' };
       return { status: 0, stdout: '', stderr: '' }; // launchctl (restart)
     };
   }
@@ -303,6 +319,66 @@ describe('serviceCommand', () => {
     expect(out).toContain('synced');
     expect(out).toContain('rebuilt dist');
     expect(out).toContain('restarted the musterd daemon on bbb222');
+  });
+
+  // The silent-pin bug (#565): a merge that adds a dependency fails the build on a package that was
+  // never installed, refresh correctly refuses to bounce, and the daemon then sits on old code across
+  // every LATER merge while /health answers cheerfully. Decide on the lockfile diff, not on error prose.
+  it('refresh installs when the sync moved pnpm-lock.yaml, before building', async () => {
+    const c = ctx(refreshRunner({ lockfileMoved: true }));
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    const pnpm = calls.filter((x) => x.cmd === 'pnpm').map((x) => x.args.join(' '));
+    expect(pnpm[0]).toContain('install --frozen-lockfile');
+    expect(pnpm[1]).toContain('build'); // install lands BEFORE the build that would have failed
+    expect(out).toContain('installed new dependencies');
+  });
+
+  it('refresh does NOT install when the lockfile did not move (the fast path stays fast)', async () => {
+    const c = ctx(refreshRunner({ lockfileMoved: false }));
+    const { code } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(calls.some((x) => x.cmd === 'pnpm' && x.args.includes('install'))).toBe(false);
+  });
+
+  it('refresh does not even ask about the lockfile when the sync moved nothing', async () => {
+    const c = ctx(refreshRunner({ before: 'same111', after: 'same111', lockfileMoved: true }));
+    await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(calls.some((x) => x.cmd === 'git' && x.args.includes('diff'))).toBe(false);
+  });
+
+  // Advisory by design: the build below names what is missing with a far better error than a bare
+  // install failure, and a refresh that could still succeed must not be aborted by this.
+  it('a failed install does not abort the refresh — it says so and lets the build speak', async () => {
+    const c = ctx(refreshRunner({ lockfileMoved: true, installStatus: 1 }));
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain('install failed');
+    expect(calls.some((x) => x.cmd === 'pnpm' && x.args.includes('build'))).toBe(true);
   });
 
   // Issue #289: run from a seat worktree, refresh must still target the DAEMON's own checkout —
@@ -563,21 +639,41 @@ describe('serviceCommand', () => {
   });
 
   // ADR 130: status names the running daemon's build and its skew against origin/main.
-  function gitScriptedRunner(over: { revList?: RunResult }): Runner {
+  function gitScriptedRunner(over: {
+    revList?: RunResult;
+    /** `launchctl print` for the auto-refresher: absent/failed = not installed. */
+    autoRefresherLoaded?: boolean;
+    /** What `git rev-parse origin/main` resolves to, for the debounce-stamp comparison. */
+    originTip?: string;
+  }): Runner {
     return (cmd, args) => {
       calls.push({ cmd, args });
-      if (cmd !== 'git') return { status: 0, stdout: '\tpid = 7\n\tstate = running\n', stderr: '' };
+      if (cmd !== 'git')
+        return over.autoRefresherLoaded === false
+          ? { status: 1, stdout: '', stderr: 'could not find service\n' }
+          : { status: 0, stdout: '\tpid = 7\n\tstate = running\n', stderr: '' };
       const verb = args[2];
-      if (verb === 'rev-parse') return { status: 0, stdout: 'true\n', stderr: '' };
+      if (verb === 'rev-parse')
+        return args.includes('origin/main')
+          ? { status: 0, stdout: `${over.originTip ?? 'b'.repeat(40)}\n`, stderr: '' }
+          : { status: 0, stdout: 'true\n', stderr: '' };
       if (verb === 'fetch') return { status: 0, stdout: '', stderr: '' };
       if (verb === 'rev-list') return over.revList ?? { status: 0, stdout: '0\n', stderr: '' };
       return { status: 0, stdout: '', stderr: '' };
     };
   }
   const buildSha = 'a'.repeat(40);
+  const behind3: RunResult = { status: 0, stdout: '3\n', stderr: '' };
 
-  it('status warns when the daemon build is behind origin/main, naming service refresh', async () => {
-    const c = ctx(gitScriptedRunner({ revList: { status: 0, stdout: '3\n', stderr: '' } }));
+  /** The debounce stamp the auto-refresher writes (§ autoRefreshStampPath), under the ADR 190 tmp config. */
+  function writeAttemptedSha(sha: string): void {
+    const p = join(dirname(process.env['MUSTERD_CONFIG'] ?? ''), 'autorefresh', '.attempted-sha');
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, sha, 'utf8');
+  }
+
+  it('status names service refresh when NO auto-refresher is installed (the manual verb is the answer)', async () => {
+    const c = ctx(gitScriptedRunner({ revList: behind3, autoRefresherLoaded: false }));
     const { code, out } = await capture(() =>
       serviceCommand(parseArgs(['status']), {
         platform: 'darwin',
@@ -590,6 +686,46 @@ describe('serviceCommand', () => {
     expect(out).toContain('musterd service refresh');
     // The comparison ran against the daemon's own checkout.
     expect(calls.some((x) => x.cmd === 'git' && x.args.join(' ').includes('/repo'))).toBe(true);
+  });
+
+  // The regression this pair exists for: musterd used to prescribe a manual refresh unconditionally,
+  // so on a machine where the auto-refresher owns the job it was instructing its own agents to bypass
+  // its own infra (nick, 2026-07-31). Skew under a healthy refresher is benign drift — say so, calmly.
+  it('status does NOT prescribe a manual refresh while a healthy auto-refresher is watching', async () => {
+    const c = ctx(gitScriptedRunner({ revList: behind3, autoRefresherLoaded: true }));
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['status']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0, build: buildSha }),
+      }),
+    );
+    expect(out).toContain('3 commits behind origin/main');
+    expect(out).toContain('the auto-refresher will pick this up');
+    expect(out).not.toContain('musterd service refresh');
+    expect(out).not.toContain('⚠');
+  });
+
+  it('status goes loud when the auto-refresher already attempted this tip (pinned, or a build in flight)', async () => {
+    const tip = 'c'.repeat(40);
+    writeAttemptedSha(tip); // the tick tried this exact commit and its build failed
+    const c = ctx(
+      gitScriptedRunner({ revList: behind3, autoRefresherLoaded: true, originTip: tip }),
+    );
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['status']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0, build: buildSha }),
+      }),
+    );
+    expect(out).toContain('already attempted this tip');
+    expect(out).toContain('pinned on old code');
+    expect(out).toContain('refresh.log');
+    expect(out).toContain('pnpm install'); // the known repair: a lockfile change the tick never installed
+    // It must NOT name a checkout: `dir` here is the invoking CLI's, not necessarily the daemon's,
+    // so a confident path would be a confidently wrong repair instruction.
+    expect(out).not.toContain('/repo`');
   });
 
   it('status reports up-to-date when the daemon build matches origin/main', async () => {

@@ -184,6 +184,38 @@ describe('service refresh --auto (the tick)', () => {
     expect(state.write).toHaveBeenCalledWith('freshtip77');
   });
 
+  // The failure this whole loop hides: the debounce then parks the tip, so the daemon stays pinned on
+  // old code across every LATER merge while /health answers cheerfully — and the only evidence is a
+  // log nobody reads unprompted. An unattended tick must say so out loud, exactly once per tip.
+  it('notifies the operator when the tick fails — a pinned daemon must not be log-only', async () => {
+    const notify = vi.fn();
+    await expect(
+      serviceCommand(parseArgs(['refresh', '--auto', '--mode', 'notice']), {
+        platform: 'darwin',
+        ctx: ctx(autoRunner({ behind: 1, tip: 'freshtip77', buildStatus: 1 })),
+        health: async () => ({ connections: 0, build: 'oldsha0' }),
+        notify,
+        autoState: memState(null),
+      }),
+    ).rejects.toThrow(/build failed/);
+    const n = notify.mock.calls.at(-1)?.[0] as { title: string; body: string };
+    expect(n.title).toContain('failed');
+    expect(n.body).toContain('pinned');
+    expect(n.body).toContain('refresh.log');
+  });
+
+  it('does NOT notify a failure when the tick succeeds', async () => {
+    const notify = vi.fn();
+    await tick({
+      ctx: ctx(autoRunner({ behind: 2 })),
+      health: async () => ({ connections: 0, build: 'oldsha0' }),
+      notify,
+    });
+    expect(
+      notify.mock.calls.some((c) => String((c[0] as { title: string }).title).includes('failed')),
+    ).toBe(false);
+  });
+
   it('no-ops when the daemon is unreachable (watcher, never gatekeeper)', async () => {
     const { code, out } = await tick({
       ctx: ctx(autoRunner({ behind: 5 })),

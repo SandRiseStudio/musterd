@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 11;
+export const GUIDANCE_CONTENT_VERSION = 13;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -230,6 +230,25 @@ export function renderSkillBody(opts: { team: string }): string {
     '  `team_*` tools (two identities). Pick one channel.',
     '- **You cannot tell what is real** → invoke the tool and use what it returns. Never write down an',
     '  imagined inbox or reply; if you did not call it, you do not know what is there.',
+    '',
+    '## Daemon refresh — the machine owns it, not you',
+    '',
+    'Where an auto-refresher LaunchAgent is installed it syncs the daemon checkout to `origin/main`,',
+    'rebuilds, and bounces the daemon (and the wake actuator) on its own interval. **Your merge reaches',
+    'the daemon without you.** Do not close a status update with "needs a `service refresh`" — that hands',
+    'a human a chore the machine already owns, and it reads as though you never looked.',
+    '',
+    '- **To check whether the daemon has your commit:** read `~/.musterd/autorefresh/refresh.log` (the tick',
+    '  logs every sync, build and bounce), and compare the `build` in `GET /health` against `origin/main`.',
+    '  `musterd service status` names the same skew, and says who owns closing it.',
+    '- **`service refresh` is still correct where nothing is watching** — a host with no auto-refresher, or',
+    '  a tick you have just seen fail. It is an escape hatch, not the routine path.',
+    '- **When a tick fails, the daemon is PINNED, not down.** The refresher refuses to bounce onto a broken',
+    '  build — correct, but it then answers `/health` from the previous commit while the debounce parks the',
+    '  tip, so nothing retries until a new commit lands. A failed tick now raises an OS notification and',
+    '  `musterd service status` says so; the log line is "build failed — the daemon is still running the',
+    '  previous code". If it was a dependency change, `pnpm install` in the daemon checkout is the repair',
+    '  (the tick installs on its own when the lockfile moved, so this should be rare).',
     '',
     '---',
     '',
