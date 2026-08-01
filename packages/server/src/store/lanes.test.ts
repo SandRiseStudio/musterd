@@ -245,6 +245,25 @@ describe('the release invariant — open ⟺ unowned', () => {
     expect(reclaimed.claimed_at).toBe(5_000);
   });
 
+  // The direct owner -> owner move never passes through the release that clears the stamp, so the
+  // new holder used to inherit the old one's claimed_at. That is what let a takeover read as a first
+  // claim on 2026-08-01: the response said "claimed_at 22:00" and the taker read it as their own.
+  it("a DIRECT owner-to-owner move stamps a fresh tenure, never the previous holder's", () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'work', claim: true }, 1_000);
+    expect(lane.claimed_at).toBe(1_000);
+    const handed = updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'Cleo' }, 9_000)!;
+    expect(handed.owner_seat).toBe('Cleo');
+    expect(handed.claimed_at).toBe(9_000); // Cleo's tenure, not June's 1_000
+  });
+
+  it('re-patching the SAME owner keeps the original stamp (no tenure restart on an unrelated edit)', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'work', claim: true }, 1_000);
+    const same = updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'June' }, 9_000)!;
+    expect(same.claimed_at).toBe(1_000);
+  });
+
   it('an owner named on the same patch as state:open still releases — state wins', () => {
     const { db, team } = seed();
     const lane = openLane(db, team.id, 'bravo', 'June', { title: 'parked', claim: true });

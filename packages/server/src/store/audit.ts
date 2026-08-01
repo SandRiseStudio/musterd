@@ -81,6 +81,11 @@ export type AuditAction =
   // open ⟺ unowned invariant turns into a release (detail: { lane, released_by, owner_before }).
   // Traceable for the same reason a claim is — "who stopped carrying this, and when".
   | 'lane.released'
+  // Taking one up: every ownership acquisition, whether a self-claim or the receiving half of a
+  // handoff (`kind` says which; detail: { lane, owner, previous_owner, kind }). The sentence above
+  // assumed this row existed — it did not, and its absence is why a 2026-08-01 double-claim left
+  // nothing in the audit log but the release that undid it.
+  | 'lane.claimed'
   // ADR 131: harness residency — the six wake-ledger verbs. `enrolled`/`revoked` are the
   // authorization events (actor = the deciding caller, detail carries `authorized_by`, ADR 127).
   // `wake_leased` is the daemon ordering an actuation (actor null — machine decision); `woke` /
