@@ -214,6 +214,7 @@ const RULES: Record<string, Rule[]> = {
     stringToList('surface_globs'),
     alias('note', 'detail'),
     alias('notes', 'detail'),
+    alias('summary', 'detail'),
   ],
   lane_resolve: [alias('lane', 'id'), alias('lane_id', 'id'), numericString('pr')],
   team_send: [
