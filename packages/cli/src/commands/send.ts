@@ -22,21 +22,46 @@ import { kindLookup, resolve } from './helpers.js';
  * not `inbox --json | parse the id | --reply-to <id>`. Returns the envelope to reply to, or undefined
  * if nothing is open (then the caller errors with guidance). Best-effort: a read failure → undefined.
  */
-async function latestOpenRequest(
-  http: HttpClient,
-  team: string,
-  me: string,
-): Promise<Envelope | undefined> {
+async function openRequests(http: HttpClient, team: string, me: string): Promise<Envelope[]> {
   try {
     const res = await http.inbox(team, { unread: false });
     const open = openActionNeeded(res.messages, me).filter(
       (m) =>
         m.act === 'request_help' || m.act === 'handoff' || m.act === 'challenge' || m.act === 'ask',
     );
-    return open.sort((a, b) => b.ts - a.ts)[0];
+    return open.sort((a, b) => b.ts - a.ts);
   } catch {
-    return undefined;
+    return [];
   }
+}
+
+/** Does this envelope carry a lane acceptance ask (ADR 192)? Those are verdicts about a NAMED
+ *  artifact, which is why they are never auto-targeted. Parity with the MCP adapter's `send`. */
+function isLaneReviewAsk(m: Envelope): boolean {
+  const meta = m.meta as { lane_review?: { lane?: string } } | null | undefined;
+  return typeof meta?.lane_review?.lane === 'string';
+}
+
+/**
+ * The refusal, worded as the adapter words it. A lane acceptance is a verdict about a NAMED
+ * artifact, so "newest open ask" is never a safe guess: writing a considered verdict takes minutes,
+ * and any ask arriving meanwhile silently steals it. Observed live 2026-07-31 — an accept whose body
+ * read "Lane A accepted" bound to lane B's ask 90s newer. Since ADR 202 that also CLOSES lane B.
+ * Plain request_help/handoff keep the ADR 067 convenience: answering the wrong one of those is
+ * recoverable, and answering the wrong lane is not.
+ */
+function chooseOneMessage(act: string, open: Envelope[]): string {
+  const lines = open
+    .slice(0, 6)
+    .map((m) => {
+      const lane = (m.meta as { lane_review?: { lane?: string } } | null)?.lane_review?.lane;
+      return `  --reply-to ${m.id}  ${m.act} from ${m.from}${lane ? ` — lane ${lane}` : ''}`;
+    })
+    .join('\n');
+  return (
+    `${open.length} open asks and the newest is a lane acceptance — name the one you are ` +
+    `answering with --reply-to, so the verdict lands on the lane you actually reviewed:\n${lines}`
+  );
 }
 
 function parseRecipient(to: string): Recipient {
@@ -63,12 +88,16 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
   // one command. An explicit --reply-to / --meta in_reply_to / --thread always wins.
   let thread = flagStr(parsed.flags, 'thread');
   if ((act === 'accept' || act === 'decline') && !replyTo && !meta['in_reply_to']) {
-    const target = await latestOpenRequest(http, team, identity.name);
+    const open = await openRequests(http, team, identity.name);
+    const target = open[0];
     if (!target) {
       throw new CliError(
         `no open request to ${act} — name one with --reply-to <id> (see musterd inbox --json)`,
         2,
       );
+    }
+    if (isLaneReviewAsk(target) && open.length > 1) {
+      throw new CliError(chooseOneMessage(act, open), 2);
     }
     meta['in_reply_to'] = target.id;
     thread ??= target.thread ?? target.id;

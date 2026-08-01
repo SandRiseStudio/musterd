@@ -12,7 +12,8 @@ import { MusterdError } from '../errors.js';
 import { log } from '../log.js';
 import { formatAskSlackText, postSlackWebhook } from '../notify/slack.js';
 import { appendAudit } from '../store/audit.js';
-import { getLane } from '../store/lanes.js';
+import { recordLaneClose } from '../store/laneClose.js';
+import { getLane, updateLane } from '../store/lanes.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
 import { currentAttestedModel } from '../store/presence.js';
@@ -187,11 +188,26 @@ function routeEnvelopeInner(
     // ADR 188 stage two: a peer's accept on a risky lane's review ask fires the HUMAN ask, with
     // the peer's findings in the body — the human reviews an already-screened change. Best-effort
     // like every lane delivery: a failure here must never fail the accept itself.
+    let escalatedToHuman = false;
     if (env.act === 'accept' && typeof ref === 'string') {
       try {
-        fireGatedHumanAsk(ctx, team, sender, ref, env.body);
+        escalatedToHuman = fireGatedHumanAsk(ctx, team, sender, ref, env.body);
       } catch (err) {
         log.warn({ msg: 'gated_human_ask_failed', err: String(err) });
+      }
+    }
+    // ADR 202: the verdict MOVES the lane it judges. Before this, an accept wrote telemetry and
+    // nothing else — the acceptor had to remember a second, separate call to close the lane, and
+    // when they didn't (measured: three lanes in one evening) the owner eventually self-closed and
+    // the audit recorded `self_close`/unverified for work that had in fact been reviewed. The
+    // acceptance record understated itself, silently and in the safe-looking direction.
+    // Skipped when the accept just escalated: a risky lane's peer review hands off to the human it
+    // demanded, and that human's verdict is the one that closes.
+    if ((env.act === 'accept' || env.act === 'decline') && typeof ref === 'string') {
+      try {
+        if (!escalatedToHuman) applyAcceptanceVerdict(ctx, team, sender, ref, env.act);
+      } catch (err) {
+        log.warn({ msg: 'acceptance_verdict_failed', err: String(err) });
       }
     }
   } else if (env.act === 'resolve' && env.thread) {
@@ -272,6 +288,10 @@ function routeEnvelopeInner(
  *
  * A peer accept on a NON-risky lane's review ask does nothing here: one review is that lane's whole
  * contract. Recursion is bounded — the composed act is an `ask`, which this hook never matches.
+ *
+ * Returns whether it ESCALATED — i.e. whether a human was asked and the lane is now waiting on them.
+ * The caller needs that answer: since ADR 202 an accept also closes the lane it accepts, and a risky
+ * lane whose peer review just escalated must stay open for the human whose verdict was demanded.
  */
 function fireGatedHumanAsk(
   ctx: Ctx,
@@ -279,25 +299,25 @@ function fireGatedHumanAsk(
   peer: MemberRow,
   repliedToId: string,
   peerFindings: string,
-): void {
+): boolean {
   const replied = ctx.db
     .prepare<
       [string, string],
       { meta: string | null }
     >('SELECT meta FROM messages WHERE team_id = ? AND id = ?')
     .get(team.id, repliedToId);
-  if (!replied?.meta) return;
+  if (!replied?.meta) return false;
   let laneReview: { lane?: string; title?: string; grade?: string } | undefined;
   try {
     laneReview = (JSON.parse(replied.meta) as { lane_review?: typeof laneReview }).lane_review;
   } catch {
-    return;
+    return false;
   }
-  if (!laneReview?.lane) return;
+  if (!laneReview?.lane) return false;
   const lane = getLane(ctx.db, team.id, laneReview.lane, team.slug);
-  if (!lane || lane.risk.length === 0 || !isAwaitingAcceptance(lane.state)) return;
+  if (!lane || lane.risk.length === 0 || !isAwaitingAcceptance(lane.state)) return false;
   const owner = lane.owner_seat ? getMemberByName(ctx.db, team.id, lane.owner_seat) : null;
-  if (!owner) return;
+  if (!owner) return false;
 
   const human = pickHumanReviewer(ctx.db, team.id, owner.name, ctx.config.presenceTimeoutMs);
   appendAudit(ctx.db, team.id, {
@@ -312,7 +332,7 @@ function fireGatedHumanAsk(
       human_ask_fired: human !== null,
     },
   });
-  if (!human) return;
+  if (!human) return false;
 
   const findings = peerFindings.length > 500 ? `${peerFindings.slice(0, 500)}…` : peerFindings;
   const checklist =
@@ -346,6 +366,97 @@ function fireGatedHumanAsk(
     },
   });
   routeEnvelope(ctx, team, owner, ask);
+  return true;
+}
+
+/**
+ * ADR 202 — an acceptance verdict moves the lane it judges.
+ *
+ * `accept` closes the lane the ask named; `decline` sends it back to `active`, which is exactly what
+ * the board's two acceptor verbs do (`boardWrite.laneActions`). This is the same transition by the
+ * other door: the acceptor who answers in chat and the acceptor who clicks on the board now leave
+ * the same record, and neither has to know that the other surface exists.
+ *
+ * Deliberately narrow, because this mutates state from a message path:
+ * · Only from a real `lane_review` ask — the ask carries the lane id, so nothing is inferred.
+ * · Only while the lane is still awaiting acceptance. That makes it idempotent (a second accept on
+ *   the same ask does nothing) and keeps a stale ask from reopening or re-closing settled work.
+ * · The close audit goes through `recordLaneClose`, the same derivation the board's PATCH uses, so
+ *   verified-ness cannot come out differently depending on which door the verdict came through.
+ *   An owner who accepts their own lane records `verified: false` by that same derivation — the
+ *   honesty is structural, not a check I have to remember to write here.
+ */
+function applyAcceptanceVerdict(
+  ctx: Ctx,
+  team: TeamRow,
+  decider: MemberRow,
+  repliedToId: string,
+  act: 'accept' | 'decline',
+): void {
+  const replied = ctx.db
+    .prepare<
+      [string, string],
+      { meta: string | null }
+    >('SELECT meta FROM messages WHERE team_id = ? AND id = ?')
+    .get(team.id, repliedToId);
+  if (!replied?.meta) return;
+  let laneId: string | undefined;
+  try {
+    laneId = (JSON.parse(replied.meta) as { lane_review?: { lane?: string } }).lane_review?.lane;
+  } catch {
+    return;
+  }
+  if (!laneId) return;
+  const before = getLane(ctx.db, team.id, laneId, team.slug);
+  if (!before || !isAwaitingAcceptance(before.state)) return;
+
+  const lane = updateLane(ctx.db, team.id, laneId, team.slug, {
+    state: act === 'accept' ? 'done' : 'active',
+  });
+  if (!lane) return;
+
+  if (act === 'accept') {
+    recordLaneClose(ctx.db, team.id, decider, before, lane);
+  } else {
+    // ADR 192: an acceptor moving an awaiting_acceptance lane back to a live state is the rejection
+    // — the counterpart said "not what we wanted". Audit action stays `lane.review_sent_back`
+    // (frozen), and the reason rides along so a sent-back lane can be told from a manual reopen.
+    appendAudit(ctx.db, team.id, {
+      actor: decider.name,
+      action: 'lane.review_sent_back',
+      target: lane.id,
+      result: 'allow',
+      detail: { lane: lane.id, reviewer: decider.name, owner: before.owner_seat },
+    });
+  }
+
+  // The board-shape change the team sees, composed by the daemon (ADR 102) exactly as the PATCH
+  // path composes it — same body, same meta, so a reader of the stream cannot tell which surface
+  // the verdict arrived on, because it does not matter.
+  const note =
+    act === 'accept'
+      ? {
+          body: `[lane] resolved "${lane.title}"`,
+          meta: { lane_resolve: { lane: lane.id, title: lane.title, state: lane.state } },
+        }
+      : {
+          body: `[lane] "${lane.title}" → ${lane.state}`,
+          meta: { lane_state: { lane: lane.id, title: lane.title, state: lane.state } },
+        };
+  routeEnvelope(
+    ctx,
+    team,
+    decider,
+    makeEnvelope({
+      id: ulid(),
+      team: team.slug,
+      from: decider.name,
+      to: { kind: 'team' },
+      act: 'message',
+      body: note.body,
+      meta: note.meta,
+    }),
+  );
 }
 
 /**
