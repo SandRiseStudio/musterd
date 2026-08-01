@@ -17,6 +17,7 @@ import {
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import {
+  excludeCredentialFromGit,
   findBinding,
   loadConfig,
   recordRosterHome,
@@ -26,7 +27,7 @@ import {
 } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
-import { hint, success } from '../render/ui.js';
+import { hint, success, sym } from '../render/ui.js';
 import { writeSeatFile } from '../roster.js';
 import { findWorkspaceDir, inherited, resolve } from './helpers.js';
 
@@ -668,12 +669,19 @@ async function teamExport(parsed: Parsed): Promise<number> {
   recordRosterHome(config, slug, dir);
   saveConfig(config);
 
+  // This command's last words are "git add + commit them", and the roster it just wrote shares
+  // `.musterd/` with a live credential — so earn that instruction before giving it. Unconditional,
+  // including when `dir` fell back to cwd and holds no binding: "a repo does not commit a musterd
+  // credential" is true of that repo too, and a condition here is only a way to get it wrong later.
+  const safeToCommit = excludeCredentialFromGit(dir);
+
   const count = Object.keys(seatFiles).length;
   if (parsed.flags['json']) {
     process.stdout.write(
       JSON.stringify({
         slug,
         rosterHome: dir,
+        credentialExcluded: safeToCommit,
         // Say WHY it landed there, so a default that moved the files somewhere other than the folder
         // you typed in is legible rather than surprising.
         destination: explicitTo ? 'flag' : home ? 'teamHome' : 'cwd',
@@ -694,11 +702,22 @@ async function teamExport(parsed: Parsed): Promise<number> {
         '\n',
     );
   }
-  process.stdout.write(
-    theme.meta(
-      'these files are now the source of truth — git add + commit them for a reviewable roster.',
-    ) + '\n',
-  );
+  if (safeToCommit) {
+    process.stdout.write(
+      theme.meta(
+        'these files are now the source of truth — git add + commit them for a reviewable roster.',
+      ) + '\n',
+    );
+  } else {
+    // The roster is written and the export succeeded; what failed is the guard. Say so instead of
+    // handing over an instruction that would commit a credential.
+    process.stdout.write(
+      theme.warn(
+        `${sym.warn} could not write ${join(dir, '.gitignore')} — not telling you to commit yet: ` +
+          `${join('.musterd', 'binding.json')} there holds a live credential. Exclude it, then commit the roster.`,
+      ) + '\n',
+    );
+  }
   process.stdout.write(
     theme.meta(
       'provisioning (team add/claim) is file-backed immediately; `musterd reload` makes the daemon track edits.',

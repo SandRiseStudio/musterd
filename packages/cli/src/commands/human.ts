@@ -6,6 +6,7 @@ import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import {
   defaultTeamHome,
+  excludeCredentialFromGit,
   loadConfig,
   readBindingAt,
   recordTeamHome,
@@ -236,6 +237,10 @@ function resolveHome(config: Config, team: string, flag: string | undefined): st
     );
   }
   mkdirSync(dir, { recursive: true });
+  // Guard the floor the moment it exists, before a credential lands on it. `team export` guards it too,
+  // but a home is committable long before anyone exports a roster into it — the binding written just
+  // below is already the secret, and the person may well `git init` here first.
+  excludeCredentialFromGit(dir);
   return dir;
 }
 
