@@ -15,6 +15,7 @@ import {
 } from './harness.js';
 import { readAndConsumeResolution, writePendingMarker } from './pending.js';
 import { instrumentToolRepair } from './repair.js';
+import { scopeToolSurface } from './scope.js';
 import { instrumentTools, recordAdapterInitialization, startMcpTelemetry } from './telemetry.js';
 import { registerGoals } from './tools/goals.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
@@ -225,6 +226,14 @@ export function buildMcpServer(
   // Patched second so the deferred autojoin runs INSIDE the first tool's span — the join latency it
   // causes is attributed to the call that triggered it.
   if (opts.onFirstToolCall) armAutojoinOnFirstToolCall(server, opts.onFirstToolCall, client);
+  // Scope by role (ADR 144 inc 5), installed LAST among the registerTool patches so it wraps
+  // OUTERMOST: a tool this seat may not use is dropped before any sibling patch captures its schema,
+  // so the skipped tool leaves no trace anywhere rather than half-existing. Fail-open by
+  // construction — absent capabilities render everything (see `scope.ts`).
+  scopeToolSurface(
+    server as unknown as Parameters<typeof scopeToolSurface>[0],
+    config.capabilities,
+  );
   registerJoin(server, client, config);
   registerLeave(server, client, config);
   registerSend(server, client, config);

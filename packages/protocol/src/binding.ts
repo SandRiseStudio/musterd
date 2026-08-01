@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SurfaceSchema } from './acts.js';
+import { CapabilitiesSchema } from './capabilities.js';
 import { ClaimPolicySchema } from './claim.js';
 
 /**
@@ -103,6 +104,16 @@ export const BindingSchema = WorkspaceSpecSchema.extend({
    *  `unknown`. Kept out of the committed `workspace.json` (a model is a per-machine choice, not shared).
    *  Attested, never verified; absent ⇒ `unknown` (warn-never-block). */
   model: z.string().max(120).optional(),
+  /** The seat's effective capabilities as of its last successful occupy (ADR 144 inc 5), cached so the
+   *  NEXT session can scope its rendered MCP tool surface at connect — before it has claimed and can
+   *  ask the server. Same shape as the `model` field above and written by the same path: a fact
+   *  learned at claim that must survive to the next boot. A cache, never authority — the daemon
+   *  enforces capabilities in-band on every send regardless (`route.ts`), and the adapter fails OPEN
+   *  when this is absent (renders everything), so a stale or missing entry costs tokens, never
+   *  access. One consequence, deliberately accepted: a role change reaches the tool surface on the
+   *  connect AFTER the next claim, not instantly. Per-machine like `model`, so kept out of the
+   *  committed `workspace.json`. */
+  capabilities: CapabilitiesSchema.optional(),
   /** The captured harness session (ADR 131 §5) — see {@link SessionCaptureSchema} for the strict
    *  local-only contract. Hook-written; per-machine like `model`, so kept out of `workspace.json`. */
   session: SessionCaptureSchema.optional(),
