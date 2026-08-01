@@ -314,6 +314,60 @@ describe('team_send handler', () => {
     expect(sent[0]!.thread).toBe('root2'); // inherited the request's thread
   });
 
+  // The mis-attribution observed live 2026-07-31: an accept whose body read "Lane A accepted" bound
+  // to lane B's ask, 90s newer, because auto-targeting takes the NEWEST open ask. Writing a considered
+  // verdict takes minutes, which is exactly the window another ask arrives in — so a lane acceptance
+  // must never be guessed at.
+  const laneAsk = (id: string, ts: number, lane: string): Envelope =>
+    req({ id, ts, act: 'ask', meta: { lane_review: { lane } } as never });
+
+  it('refuses to guess which lane an accept answers when the newest open ask is a lane review', async () => {
+    const { client, sent } = sendClient({
+      fetchInbox: (async () => ({
+        messages: [
+          laneAsk('askA', 1, '01LANEA'),
+          laneAsk('askB', 5, '01LANEB'), // newest — would have silently stolen the verdict
+        ],
+        cursor: null,
+      })) as any,
+    });
+    const handler = capture(registerSend, client, config);
+    const r = await handler({ to: 'nick', act: 'accept', body: 'Lane 01LANEA accepted' });
+    expect(sent).toHaveLength(0); // nothing sent — a mis-attributed verdict is worse than none
+    const out = text(r);
+    expect(out).toContain('reply_to:askA');
+    expect(out).toContain('01LANEA'); // names the candidates so answering is one copy-paste
+    expect(out).toContain('reply_to:askB');
+  });
+
+  it('still auto-targets a lone lane-review ask — one candidate is not a guess', async () => {
+    const { client, sent } = sendClient({
+      fetchInbox: (async () => ({
+        messages: [laneAsk('only1', 3, '01LANEA')],
+        cursor: null,
+      })) as any,
+    });
+    const handler = capture(registerSend, client, config);
+    await handler({ to: 'nick', act: 'accept', body: 'looks right' });
+    expect(sent[0]!.meta?.['in_reply_to']).toBe('only1');
+  });
+
+  it('keeps ADR 067 convenience for plain requests even with several open', async () => {
+    const { client, sent } = sendClient({
+      fetchInbox: (async () => ({
+        messages: [
+          req({ id: 'r1', ts: 1 }),
+          req({ id: 'r2', ts: 9, act: 'handoff', thread: 'root2' }),
+        ],
+        cursor: null,
+      })) as any,
+    });
+    const handler = capture(registerSend, client, config);
+    await handler({ to: 'nick', act: 'accept', body: 'on it' });
+    // Answering the wrong request_help is recoverable; answering the wrong lane is not.
+    expect(sent[0]!.meta?.['in_reply_to']).toBe('r2');
+  });
+
   it('sends a steer (the ADR 103 steering vocabulary is selectable from MCP)', async () => {
     const { client, sent } = sendClient();
     const handler = capture(registerSend, client, config);
