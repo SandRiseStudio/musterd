@@ -4,10 +4,10 @@
 - Date: 2026-07-31
 - Authored by dolly, nick-directed (lanes `01KYX89VFBVRA2895TMSZD1N82`, `01KYX7YGNKJAAF4W7TKDDX6XBA`)
 - Builds on: [ADR 118](118-service-refresh.md) (`service refresh`, the manual verb),
-  [ADR 130](130-build-provenance-skew.md) (the skew detector this reshapes),
+  [ADR 130](130-daemon-build-provenance.md) (the skew detector this reshapes),
   [ADR 148](148-feature-epoch-roster-skew.md) (the crying-wolf lesson: a chip that alarms on benign
   drift gets ignored), [ADR 085](085-layered-guidance-surface.md) (primer = kernel, skill = depth),
-  [ADR 024](024-os-notify.md) (the notification rail an unattended tick can reach).
+  [ADR 024](024-human-reachability-nudge.md) (the notification rail an unattended tick can reach).
 
 ## Context
 
@@ -17,8 +17,8 @@ installed and it works.
 
 Agents did not know. Over one afternoon, seats repeatedly closed status updates with "needs a
 `musterd service refresh` whenever nick wants it on /live" — handing a human a chore the machine
-already owns, on a schedule, and signalling that the seat had not looked. nick: *"musterd agents
-including you keep forgetting that we have an autorefresh thing from musterd infra."*
+already owns, on a schedule, and signalling that the seat had not looked. nick: _"musterd agents
+including you keep forgetting that we have an autorefresh thing from musterd infra."_
 
 ## Problem
 
@@ -32,7 +32,7 @@ a tool an agent is already reading.
 
 Underneath sat a second, quieter problem. A refresh is sync → build → restart with **no install** —
 fast and correct for the ~99% of merges that touch no dependency. The other 1% pins the daemon
-*silently*: PR #565 added `@modelcontextprotocol/server`, the build failed on a package that was never
+_silently_: PR #565 added `@modelcontextprotocol/server`, the build failed on a package that was never
 installed, the refresher correctly **refused to bounce**, and the daemon then sat on the old commit
 across every later merge while `/health` answered cheerfully. The only evidence was a log nobody reads
 unprompted — least of all the PR author, whose own worktree installed the dependency fine.
@@ -56,7 +56,7 @@ the escape hatch after a tick you have just watched fail.
 
 ### 2. The stalled verdict claims only what it can prove
 
-The tick writes its debounce stamp *before* building, so `stamp == tip` with the daemon behind covers
+The tick writes its debounce stamp _before_ building, so `stamp == tip` with the daemon behind covers
 both a build in flight and a build that failed. Those are indistinguishable from the status command,
 so the message says both rather than asserting the alarming one. It also **names no checkout**: the
 `dir` in hand is whatever checkout the CLI was invoked from, which from a seat worktree is not the
@@ -92,7 +92,7 @@ zero. Every primer line is a per-session token tax and the cap is load-bearing, 
 - Agents on an auto-refreshed machine are no longer instructed to bypass the refresher, and carry the
   rule as standing context rather than as something to remember.
 - A dependency-adding merge self-heals instead of pinning the daemon.
-- A tick that fails for any *other* reason is now loud, so the next unknown failure mode surfaces in
+- A tick that fails for any _other_ reason is now loud, so the next unknown failure mode surfaces in
   minutes rather than whenever a human happens to read the log.
 - `GUIDANCE_CONTENT_VERSION` 11 → 13 (two content changes, each bumped per the ADR 085 ritual).
 - The manual verb keeps working, so hosts without a refresher are unaffected.
@@ -106,6 +106,12 @@ zero. Every primer line is a per-session token tax and the cap is load-bearing, 
   only when a human asked why the board was not live, and the status command told every reader to run
   a manual refresh. Success: a lockfile-changing merge reaches the daemon with no human step, and a
   tick that fails produces a notification within one interval instead of silence.
+- **Experiment.** The behavioural claim is that agents stop prescribing the manual verb once the tool
+  stops prescribing it. Pre-register on the delivery ledger: count `service refresh` mentions in
+  `status_update` / `message` act bodies per week, before and after this lands. The prediction is that
+  the rate falls to ~0 without any further reminders — and if it does not, the primer/skill line is not
+  the lever and the next move is enforcement (a hook), not more prose. n/a for a control arm: this is a
+  single shared machine, so there is no unexposed population to compare against.
 - **Watch for.** False `stalled` verdicts during a normal in-flight build — the window is one build
   per tick, and the wording covers both cases, but if operators report noise the fix is to distinguish
   in-flight from failed (a completion marker beside the attempt stamp), not to soften the alarm.
