@@ -114,7 +114,8 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_claim',
     {
       description:
-        'Take ownership of an open lane. Runs the contention checks; returns the lane + warnings.',
+        'Take ownership of an open lane. Refuses a lane a live teammate already owns — ask them to ' +
+        'hand it over or release it. Returns the lane + contention warnings.',
       inputSchema: { id: z.string().describe('lane id') },
     },
     async (args) => {

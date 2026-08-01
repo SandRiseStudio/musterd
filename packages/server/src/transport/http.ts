@@ -2355,10 +2355,64 @@ export async function handleHttp(
         const body = parseOrBadRequest(UpdateLaneSchema, await readJson(req));
         const before = getLane(ctx.db, team.id, laneId, team.slug);
         if (!before) throw new MusterdError('not_found', `no lane "${laneId}" on ${slug}`);
+        // Claiming a lane someone else already holds is the one thing the board exists to prevent
+        // ("never build in a lane a teammate owns"), and until now nothing checked it: `lane_claim`
+        // is a bare PATCH of `owner_seat`, so a second claimant silently took the lane, got a
+        // success back, and broadcast `[lane] claimed` to the team. Two seats then built the same
+        // lane ~6 minutes apart (2026-08-01, lanes 01KYX8J5XD / 01KYXWNX9R).
+        //
+        // A CLAIM is distinguishable from a HANDOFF by the one signal the server already holds: who
+        // the new owner is. Taking it for yourself is a claim; naming someone else is a handoff, a
+        // deliberate give-away that must keep working. So this refuses only self-directed takeovers,
+        // and only while the incumbent is LIVE — an offline or departed owner stays claimable, which
+        // is the same posture ADR 196 took when it released departed seats' in-flight lanes.
+        const takingForSelf =
+          body.owner_seat !== undefined &&
+          body.owner_seat === member.name &&
+          before.owner_seat !== null &&
+          before.owner_seat !== member.name;
+        if (takingForSelf) {
+          const incumbent = getMemberByName(ctx.db, team.id, before.owner_seat!);
+          const incumbentLive =
+            incumbent !== undefined &&
+            hasLivePresence(ctx.db, incumbent.id, ctx.config.presenceTimeoutMs);
+          if (incumbentLive) {
+            throw new MusterdError(
+              'conflict',
+              `lane "${laneId}" is owned by ${before.owner_seat}, who is live — claiming it would ` +
+                `duplicate their work. Pick another lane, or ask them to hand it over ` +
+                `(lane_handoff) or release it.`,
+            );
+          }
+        }
         const beforeKeys = new Set(
           laneWarnings(ctx.db, team.id, team.slug, before).map(laneWarningKey),
         );
         const lane = updateLane(ctx.db, team.id, laneId, team.slug, body)!;
+        // The claim edge is the one that decides who owns work, and it was the only lane edge
+        // writing no audit row at all — which is why reconstructing the collision above from the
+        // audit log turned up nothing but the release. Record every ownership acquisition.
+        if (
+          body.owner_seat !== undefined &&
+          lane.owner_seat &&
+          lane.owner_seat !== before.owner_seat
+        ) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'lane.claimed',
+            target: lane.id,
+            result: 'allow',
+            detail: {
+              lane: lane.id,
+              owner: lane.owner_seat,
+              previous_owner: before.owner_seat,
+              // A handoff and a self-claim are the same PATCH; only the audit can tell them apart
+              // after the fact, so say which this was rather than leaving it to be inferred.
+              kind: lane.owner_seat === member.name ? 'claim' : 'handoff',
+              ...(before.owner_seat ? { takeover_of_offline_owner: true } : {}),
+            },
+          });
+        }
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
         // Directed-wake dedup (ADR 083 §4): only warnings the mutation *introduced* wake the other
         // owner — re-surfacing unchanged conditions is the board's job, not the inbox's.

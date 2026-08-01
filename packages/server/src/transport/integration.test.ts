@@ -2624,6 +2624,53 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
 });
 
 describe('coordination lanes, Phase 1 (ADR 083)', () => {
+  // "Never build in a lane a teammate owns" is the board's whole promise, and nothing enforced it:
+  // lane_claim is a bare PATCH of owner_seat, so a second claimant silently took the lane and got a
+  // success back. Two seats built the same lane ~6 minutes apart (2026-08-01).
+  it('refuses to claim a lane a LIVE teammate owns, and says who holds it', async () => {
+    const team = await post('/teams', { slug: 'race', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bo = await post('/teams/race/members', { name: 'bo', kind: 'human' }, nickTok);
+    const boTok = bo.json.human_credential;
+
+    const lane = await post('/teams/race/lanes', { title: 'contested', claim: true }, nickTok);
+    expect(lane.json.lane.owner_seat).toBe('nick');
+
+    // bo authenticates (authTouch marks presence), then tries to take it for himself.
+    const grab = await fetch(base + `/teams/race/lanes/${lane.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(boTok) },
+      body: JSON.stringify({ owner_seat: 'bo' }),
+    });
+    expect(grab.status).toBe(409);
+    const err = (await grab.json()) as { error?: { message?: string } };
+    expect(JSON.stringify(err)).toContain('nick'); // names the incumbent, not just "conflict"
+
+    // and the lane is untouched — a refused claim must not half-apply.
+    const after = await get(`/teams/race/lanes`, nickTok);
+    const row = (after.json.lanes as { id: string; owner_seat: string }[]).find(
+      (l) => l.id === lane.json.lane.id,
+    );
+    expect(row?.owner_seat).toBe('nick');
+  });
+
+  // A handoff is the sanctioned transfer and must keep working — it is distinguishable from a
+  // takeover by the one signal the server holds: a claim names YOURSELF, a handoff names someone else.
+  it('still allows a handoff to another seat while the owner is live', async () => {
+    const team = await post('/teams', { slug: 'hand', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/hand/members', { name: 'bo', kind: 'human' }, nickTok);
+    const lane = await post('/teams/hand/lanes', { title: 'passed', claim: true }, nickTok);
+
+    const res = await fetch(base + `/teams/hand/lanes/${lane.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },
+      body: JSON.stringify({ owner_seat: 'bo' }),
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { lane: { owner_seat: string } }).lane.owner_seat).toBe('bo');
+  });
+
   it('warns inline + wakes the affected owner exactly once; board reflects live state', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

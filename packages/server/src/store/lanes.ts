@@ -164,7 +164,19 @@ export function updateLane(
     state,
     // claimed_at describes the CURRENT tenure: sticky while held, cleared by the release above so a
     // re-claim stamps fresh rather than inheriting the previous holder's timestamp.
-    claimed_at: ownerSeat === null ? null : (existing.claimed_at ?? now),
+    //
+    // "Cleared by the release above" only covers owner -> open -> owner. A DIRECT owner -> owner
+    // move (a handoff, or the takeover this used to permit) never passes through null, so the new
+    // holder inherited the old one's stamp — and the field that should have read "owned since
+    // 22:00" instead read as the new holder's own claim. That is not cosmetic: it is precisely what
+    // let a takeover be misread as a first claim on 2026-08-01. A new owner always starts a new
+    // tenure, so stamp fresh whenever the owner actually changes.
+    claimed_at:
+      ownerSeat === null
+        ? null
+        : ownerSeat !== existing.owner_seat
+          ? now
+          : (existing.claimed_at ?? now),
     resolved_at: LANE_TERMINAL_STATES.has(state as LaneState)
       ? (existing.resolved_at ?? now)
       : null,
