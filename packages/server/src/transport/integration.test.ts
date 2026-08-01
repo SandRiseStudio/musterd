@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
   type WSServerFrame,
 } from '@musterd/protocol';
+import { ulid } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { openDb } from '../db/open.js';
@@ -3142,6 +3143,183 @@ describe('two-stage close (ADR 169)', () => {
     expect(merged[0].detail.pr).toBe(42);
     expect(merged[0].detail.sha).toBe('abc123');
     expect(merged[0].detail.attested_by).toBe('ada');
+  });
+
+  /**
+   * ADR 202 — the verdict moves the lane it judges. Before this, an `accept` answering an acceptance
+   * ask wrote telemetry and left the lane sitting in awaiting_acceptance; the acceptor had to
+   * remember a second, separate close. Measured on the live team: three reviewed lanes in one
+   * evening recorded as unreviewed because the second call never came.
+   */
+  describe('an acceptance verdict moves the lane (ADR 202)', () => {
+    /** Post `act` as `who`, answering the acceptance ask `askId`. */
+    async function verdict(who: Auth | string, from: string, askId: string, act: string) {
+      return post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id: ulid(),
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from,
+            to: { kind: 'team' },
+            act,
+            body: `${act} — exercised it`,
+            meta: { in_reply_to: askId },
+            ts: Date.now(),
+          },
+        },
+        who,
+      );
+    }
+
+    /** A lane in awaiting_acceptance, plus the acceptance ask's id from the reviewer's inbox. */
+    async function laneAwaitingAcceptance(nickTok: string, ada: Auth, gee: Auth) {
+      const lane = await post(
+        '/teams/dawn/lanes',
+        { title: 'the verdict lane', branch: 'ada/verdict', claim: true },
+        ada,
+      );
+      const laneId = lane.json.lane.id as string;
+      const ready = await patchLane(
+        laneId,
+        { state: 'ready_for_review', merged: { pr: 7, sha: 'deadbee', authorized_by: 'nick' } },
+        ada,
+      );
+      const reviewer = ready.json.review.reviewer as string;
+      const auth: Auth | string = reviewer === 'nick' ? nickTok : gee;
+      const inbox = await get('/teams/dawn/inbox?unread=1', auth);
+      const ask = inbox.json.messages.find(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      return { laneId, reviewer, auth, askId: ask.id as string };
+    }
+
+    it('closes the lane on accept, with the same verified derivation the board produces', async () => {
+      const { nickTok, ada, gee } = await setup();
+      const { laneId, reviewer, auth, askId } = await laneAwaitingAcceptance(nickTok, ada, gee);
+
+      const sent = await verdict(auth, reviewer, askId, 'accept');
+      expect(sent.status).toBe(201);
+
+      const lane = await get(`/teams/dawn/lanes`, nickTok);
+      const closed = (lane.json.lanes as { id: string; state: string }[]).find(
+        (l) => l.id === laneId,
+      );
+      expect(closed!.state).toBe('done');
+
+      // The audit is the point: this must read exactly as a board close by the same seat, or the
+      // record would depend on which door the verdict came through.
+      const rows = await auditRows(nickTok, 'lane.closed');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].detail.lane).toBe(laneId);
+      expect(rows[0].detail.closed_by).toBe(reviewer);
+      expect(rows[0].detail.owner_at_close).toBe('ada');
+      expect(rows[0].detail.verified).toBe(true);
+      expect(rows[0].detail.reason).toBe('counterpart_confirm');
+      // ADR 109: the worker's stage-one attestation still flows into the merge join.
+      const merged = await auditRows(nickTok, 'git.pr_merged');
+      expect(merged[0].detail.pr).toBe(7);
+      expect(merged[0].detail.attested_by).toBe('ada');
+    });
+
+    it('sends the lane back to active on decline, and audits the rejection', async () => {
+      const { nickTok, ada, gee } = await setup();
+      const { laneId, reviewer, auth, askId } = await laneAwaitingAcceptance(nickTok, ada, gee);
+
+      expect((await verdict(auth, reviewer, askId, 'decline')).status).toBe(201);
+
+      const lanes = await get('/teams/dawn/lanes', nickTok);
+      const back = (lanes.json.lanes as { id: string; state: string }[]).find(
+        (l) => l.id === laneId,
+      );
+      expect(back!.state).toBe('active');
+      const sentBack = await auditRows(nickTok, 'lane.review_sent_back');
+      expect(sentBack).toHaveLength(1);
+      expect(sentBack[0].detail.reviewer).toBe(reviewer);
+      expect(await auditRows(nickTok, 'lane.closed')).toHaveLength(0);
+    });
+
+    it('is idempotent — a second accept on the same ask does not re-close or reopen', async () => {
+      const { nickTok, ada, gee } = await setup();
+      const { reviewer, auth, askId } = await laneAwaitingAcceptance(nickTok, ada, gee);
+
+      await verdict(auth, reviewer, askId, 'accept');
+      await verdict(auth, reviewer, askId, 'accept');
+
+      expect(await auditRows(nickTok, 'lane.closed')).toHaveLength(1);
+    });
+
+    it('a risky lane escalates instead of closing — stage one hands off, it does not decide', async () => {
+      // The ADR 188 interaction this feature could quietly break: on a risky lane the PEER's accept
+      // is a screening, not the verdict. If the accept closed the lane here, the human review the
+      // risk tag demands would be asked for and then made irrelevant by the same act.
+      const { nickTok, ada, gee } = await setup();
+      const lane = await post(
+        '/teams/dawn/lanes',
+        { title: 'drop the old table', risk: ['destructive'], claim: true },
+        ada,
+      );
+      const laneId = lane.json.lane.id as string;
+      const ready = await patchLane(laneId, { state: 'ready_for_review' }, ada);
+      expect(ready.json.review.reviewer).toBe('gee'); // the peer, stage one
+      const geeInbox = await get('/teams/dawn/inbox?unread=1', gee);
+      const peerAsk = geeInbox.json.messages.find(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+
+      await verdict(gee, 'gee', peerAsk.id as string, 'accept');
+
+      const lanes = await get('/teams/dawn/lanes', nickTok);
+      const still = (lanes.json.lanes as { id: string; state: string }[]).find(
+        (l) => l.id === laneId,
+      );
+      expect(still!.state).toBe('awaiting_acceptance'); // waiting on the human, not closed
+      expect(await auditRows(nickTok, 'lane.closed')).toHaveLength(0);
+      // …and the human really was asked, at the blocking tier (the stage-two handoff).
+      const nickInbox = await get('/teams/dawn/inbox?unread=1', nickTok);
+      const humanAsk = nickInbox.json.messages.find(
+        (m: { act: string; meta?: { lane_review?: { lane?: string }; tier?: string } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      expect(humanAsk).toBeDefined();
+      expect(humanAsk.meta.tier).toBe('blocking');
+    });
+
+    it('leaves ordinary accepts alone — an act answering a non-lane ask touches no lane', async () => {
+      const { nickTok, ada, gee } = await setup();
+      const { laneId, askId, reviewer, auth } = await laneAwaitingAcceptance(nickTok, ada, gee);
+      // A plain directed ask, nothing to do with lanes.
+      const plain = await post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id: ulid(),
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from: 'ada',
+            to: { kind: 'member', name: reviewer },
+            act: 'ask',
+            body: 'unrelated question',
+            meta: { species: 'consult', tier: 'advisory' },
+            ts: Date.now(),
+          },
+        },
+        ada,
+      );
+      expect(plain.status).toBe(201);
+      await verdict(auth, reviewer, plain.json.ack.id as string, 'accept');
+
+      const lanes = await get('/teams/dawn/lanes', nickTok);
+      const still = (lanes.json.lanes as { id: string; state: string }[]).find(
+        (l) => l.id === laneId,
+      );
+      expect(still!.state).toBe('awaiting_acceptance');
+      expect(await auditRows(nickTok, 'lane.closed')).toHaveLength(0);
+      expect(askId).toBeDefined();
+    });
   });
 
   it('owner self-close from review derives verified:false / review_timeout; legacy direct close derives self_close', async () => {
