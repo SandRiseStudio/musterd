@@ -937,6 +937,30 @@ async function refreshDaemon(
       : `synced ${dir} → ${after} ${theme.meta(`(was ${before})`)}`,
   );
 
+  // Install ONLY when the sync actually moved the lockfile. A refresh is sync → build → restart, with
+  // no install — fast and correct for the ~99% of merges that touch no dependency. The other 1% used
+  // to pin the daemon silently: the build fails on a package that was never installed, the refresh
+  // correctly refuses to bounce, and the daemon then sits on old code across every LATER merge too,
+  // answering /health cheerfully the whole time (hit live by #565, which added
+  // `@modelcontextprotocol/server`). Deciding on the lockfile diff rather than on the build's error
+  // prose is deliberate: `before..after` is a fact the tick already has, where an
+  // `ERR_MODULE_NOT_FOUND` match would be one more prose anchor to rot (the ADR 175 lesson).
+  if (after !== before) {
+    const moved = git('diff', '--name-only', `${before}..${after}`, '--', 'pnpm-lock.yaml');
+    if (moved.status === 0 && moved.stdout.trim()) {
+      process.stdout.write(theme.meta('  lockfile moved — installing…') + '\n');
+      const installed = ctx.run('pnpm', ['--dir', dir, 'install', '--frozen-lockfile']);
+      // Advisory, not fatal: if the install fails the build below will say so with a better error,
+      // and a refresh that could still succeed (a lockfile touched with no new package) must not be
+      // aborted by this. Never silent, though — a skipped install is the thing that hid last time.
+      ok(
+        installed.status === 0
+          ? 'installed new dependencies'
+          : theme.meta('install failed — continuing to the build, which will name what is missing'),
+      );
+    }
+  }
+
   process.stdout.write(theme.meta('  building…') + '\n');
   const built = ctx.run('pnpm', ['--dir', dir, 'build']);
   if (built.status !== 0) {
@@ -1055,7 +1079,23 @@ async function autoRefreshTick(
     ok(`${conns} live session${s(conns)} — notified the operator, forcing the bounce`);
   }
   if (tip) autoState.write(tip); // mark the attempt BEFORE building, so a failed build debounces next tick
-  return refreshDaemon(ctx, health, force, ok, fail);
+  try {
+    return await refreshDaemon(ctx, health, force, ok, fail);
+  } catch (err) {
+    // A failed tick is the one state nothing else surfaces. The debounce then parks it, so the
+    // daemon stays pinned on old code across every later merge while /health answers cheerfully —
+    // and the only evidence is a log nobody reads unprompted. Say it out loud, once per tip (the
+    // debounce above guarantees that), then rethrow so the log keeps the full error.
+    notify({
+      id: 'musterd-autorefresh-failed',
+      title: 'musterd auto-refresh failed',
+      body:
+        `The daemon is pinned on ${health0.build.slice(0, 7)} — the refresh to ${tip.slice(0, 7)} ` +
+        `did not build, and nothing will retry until a new commit lands. ` +
+        `See ~/.musterd/autorefresh/refresh.log.`,
+    });
+    throw err;
+  }
 }
 
 /**

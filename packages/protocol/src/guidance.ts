@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 12;
+export const GUIDANCE_CONTENT_VERSION = 13;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -243,11 +243,12 @@ export function renderSkillBody(opts: { team: string }): string {
     '  `musterd service status` names the same skew, and says who owns closing it.',
     '- **`service refresh` is still correct where nothing is watching** — a host with no auto-refresher, or',
     '  a tick you have just seen fail. It is an escape hatch, not the routine path.',
-    '- **The one failure mode to know:** the tick builds but never installs. A merge that changed',
-    '  `pnpm-lock.yaml` fails its build, and the refresher then correctly REFUSES to bounce — so the daemon',
-    '  is not down, it is **pinned on the old commit**, silently, across every later merge. The log says',
-    '  "build failed — the daemon is still running the previous code". Repair: `pnpm install` in the daemon',
-    '  checkout; the next tick self-heals.',
+    '- **When a tick fails, the daemon is PINNED, not down.** The refresher refuses to bounce onto a broken',
+    '  build — correct, but it then answers `/health` from the previous commit while the debounce parks the',
+    '  tip, so nothing retries until a new commit lands. A failed tick now raises an OS notification and',
+    '  `musterd service status` says so; the log line is "build failed — the daemon is still running the',
+    '  previous code". If it was a dependency change, `pnpm install` in the daemon checkout is the repair',
+    '  (the tick installs on its own when the lockfile moved, so this should be rare).',
     '',
     '---',
     '',

@@ -89,7 +89,8 @@ describe('version-bump discipline (ADR 085)', () => {
     9: '6d3004fc8347d2e4', // + label-sessions: the sweep stamps the machine-wide file that quiets the per-turn label-nudge
     10: '1cd5b6236f2b64d0', // + forever-loop fix prose + Cursor self-label skill (ADR 186)
     11: 'a5bf07c7b3b2c44a', // + outcome acceptance close loop (ADR 192): lane_submit + checklist
-    12: '30bf29a8c1e89fc9', // + daemon refresh: the auto-refresher owns the bounce; never prescribe `service refresh`
+    12: '30bf29a8c1e89fc9',
+    13: '18db5d31ab51fe37', // + the tick installs when the lockfile moved; a failed tick notifies (pinned, not down) // + daemon refresh: the auto-refresher owns the bounce; never prescribe `service refresh`
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

@@ -261,7 +261,15 @@ describe('serviceCommand', () => {
 
   // ADR 118: `service refresh` = sync main → build → restart, in one guarded verb.
   function refreshRunner(
-    over: { dirty?: string; buildStatus?: number; before?: string; after?: string } = {},
+    over: {
+      dirty?: string;
+      buildStatus?: number;
+      before?: string;
+      after?: string;
+      /** `git diff --name-only <before>..<after> -- pnpm-lock.yaml` — non-empty = deps moved. */
+      lockfileMoved?: boolean;
+      installStatus?: number;
+    } = {},
   ): Runner {
     let head = 0;
     return (cmd, args) => {
@@ -271,6 +279,12 @@ describe('serviceCommand', () => {
           return { status: 0, stdout: 'true', stderr: '' };
         if (args.includes('--porcelain'))
           return { status: 0, stdout: over.dirty ?? '', stderr: '' };
+        if (args.includes('diff'))
+          return {
+            status: 0,
+            stdout: over.lockfileMoved ? 'pnpm-lock.yaml\n' : '',
+            stderr: '',
+          };
         if (args.includes('HEAD'))
           return {
             status: 0,
@@ -280,7 +294,9 @@ describe('serviceCommand', () => {
         return { status: 0, stdout: '', stderr: '' }; // fetch / switch
       }
       if (cmd === 'pnpm')
-        return { status: over.buildStatus ?? 0, stdout: '', stderr: 'build boom' };
+        return args.includes('install')
+          ? { status: over.installStatus ?? 0, stdout: '', stderr: 'install boom' }
+          : { status: over.buildStatus ?? 0, stdout: '', stderr: 'build boom' };
       return { status: 0, stdout: '', stderr: '' }; // launchctl (restart)
     };
   }
@@ -303,6 +319,66 @@ describe('serviceCommand', () => {
     expect(out).toContain('synced');
     expect(out).toContain('rebuilt dist');
     expect(out).toContain('restarted the musterd daemon on bbb222');
+  });
+
+  // The silent-pin bug (#565): a merge that adds a dependency fails the build on a package that was
+  // never installed, refresh correctly refuses to bounce, and the daemon then sits on old code across
+  // every LATER merge while /health answers cheerfully. Decide on the lockfile diff, not on error prose.
+  it('refresh installs when the sync moved pnpm-lock.yaml, before building', async () => {
+    const c = ctx(refreshRunner({ lockfileMoved: true }));
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    const pnpm = calls.filter((x) => x.cmd === 'pnpm').map((x) => x.args.join(' '));
+    expect(pnpm[0]).toContain('install --frozen-lockfile');
+    expect(pnpm[1]).toContain('build'); // install lands BEFORE the build that would have failed
+    expect(out).toContain('installed new dependencies');
+  });
+
+  it('refresh does NOT install when the lockfile did not move (the fast path stays fast)', async () => {
+    const c = ctx(refreshRunner({ lockfileMoved: false }));
+    const { code } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(calls.some((x) => x.cmd === 'pnpm' && x.args.includes('install'))).toBe(false);
+  });
+
+  it('refresh does not even ask about the lockfile when the sync moved nothing', async () => {
+    const c = ctx(refreshRunner({ before: 'same111', after: 'same111', lockfileMoved: true }));
+    await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(calls.some((x) => x.cmd === 'git' && x.args.includes('diff'))).toBe(false);
+  });
+
+  // Advisory by design: the build below names what is missing with a far better error than a bare
+  // install failure, and a refresh that could still succeed must not be aborted by this.
+  it('a failed install does not abort the refresh — it says so and lets the build speak', async () => {
+    const c = ctx(refreshRunner({ lockfileMoved: true, installStatus: 1 }));
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain('install failed');
+    expect(calls.some((x) => x.cmd === 'pnpm' && x.args.includes('build'))).toBe(true);
   });
 
   // Issue #289: run from a seat worktree, refresh must still target the DAEMON's own checkout —
