@@ -7,9 +7,10 @@ import type {
   OpenLane,
   UpdateLane,
 } from '@musterd/protocol';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import {
   capColumn,
+  centerScroll,
   groupByGoal,
   handoffPatch,
   laneActions,
@@ -98,6 +99,11 @@ export interface BoardProps {
   onCreate: (input: OpenLane) => Promise<boolean>;
   /** Patch a lane (claim / advance / handoff / resolve). */
   onPatch: (id: string, patch: UpdateLane) => Promise<boolean>;
+  /**
+   * A lane someone was sent here to look at (`/board?lane=<id>`, the acceptance deep link). It is
+   * pinned past its column's cap, ringed, and scrolled to. Null/absent = the ordinary board.
+   */
+  focusLane?: string | null;
 }
 
 export function Board({
@@ -112,6 +118,7 @@ export function Board({
   onComposeClose,
   onCreate,
   onPatch,
+  focusLane = null,
 }: BoardProps) {
   // Lanes carrying a live warning (unmet dependency / surface overlap) — advisory, warn-never-block.
   const warned = useMemo(() => new Map(warnings.map((w) => [w.subject, w.detail])), [warnings]);
@@ -152,9 +159,85 @@ export function Board({
   // Per-column "…and K more" expansion — session-scoped, resets on reconnect.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  // The deep link's arrival: bring the named lane into view.
+  //
+  // Gated on `entering` rather than a timer, and that gate is the whole correctness of this. The
+  // entrance stagger animates cards into place for 900ms; a scroll computed while they are still
+  // moving reads mid-animation geometry and lands somewhere else entirely — measured: the card
+  // finished below the fold AND clipped behind the insight rail, with the horizontal scroller
+  // barely moved (18px of an available 440). Waiting for the board to settle puts it dead centre.
+  // The card is usually there before the stagger ends anyway, so nothing is perceptibly slower.
+  const pin = useMemo(
+    () => (focusLane ? (l: Lane) => l.id === focusLane : undefined),
+    [focusLane],
+  );
+  const focusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!focusLane || entering) return;
+    const el = focusRef.current;
+    if (!el) return;
+    // Aimed by arithmetic (`centerScroll`), not by `scrollIntoView`. The board scrolls both axes in
+    // one container whose content height changes as lanes stream in, and the browser's own
+    // bring-into-view heuristics were measured landing this card above the fold and clipped behind
+    // the insight rail. Offsets are accumulated up to the scroller because a card's `offsetParent`
+    // is its column, not the scrollport.
+    //
+    // `hidden` decides the manner, and it is not a test artifact: deep links are routinely opened in
+    // a background tab (cmd-click, or a CLI handing the URL to a browser), where a smooth scroll's
+    // animation never runs — so when nobody is watching, jump, and be in the right place by the time
+    // they look. Glide only for an eye that can follow it, and only where motion is welcome.
+    const scroller = el.closest<HTMLElement>('.lc-board__main');
+    if (!scroller) return;
+
+    /** Aim once. Returns false when the page cannot be measured yet, so the caller can try later. */
+    const aim = (): boolean => {
+      // A scroller with no measurable box is the trap this whole function exists around: a hidden or
+      // not-yet-laid-out page reports clientWidth 0, and centring against 0 resolves to "as far as
+      // this thing goes" — measured, that slammed the board to its bottom-right corner with the card
+      // nowhere on screen. Refusing to aim while blind is the fix; `visibilitychange` below covers
+      // the case that made us blind, which is a deep link opened in a background tab.
+      if (scroller.clientWidth === 0 || scroller.clientHeight === 0) return false;
+      let x = 0;
+      let y = 0;
+      for (
+        let n: HTMLElement | null = el;
+        n && n !== scroller;
+        n = n.offsetParent as HTMLElement | null
+      ) {
+        x += n.offsetLeft;
+        y += n.offsetTop;
+      }
+      scroller.scrollTo({
+        left: centerScroll(x, el.offsetWidth, scroller.clientWidth, scroller.scrollWidth),
+        top: centerScroll(y, el.offsetHeight, scroller.clientHeight, scroller.scrollHeight),
+        // Glide only for an eye that can follow it: a hidden tab never runs the animation, so it
+        // would sit un-scrolled until shown. Jump, and be in place by the time they look.
+        behavior:
+          document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'auto'
+            : 'smooth',
+      });
+      return true;
+    };
+
+    // Now, and once more after the entrance settles and the first live refetch has had its say —
+    // the second pass is a no-op when nothing moved. Plus one on becoming visible, for the link
+    // that was opened into a background tab and could not be aimed until now.
+    const timers = [0, 400].map((d) => window.setTimeout(aim, d));
+    const onShow = (): void => {
+      if (!document.hidden) aim();
+    };
+    document.addEventListener('visibilitychange', onShow);
+    return () => {
+      timers.forEach(window.clearTimeout);
+      document.removeEventListener('visibilitychange', onShow);
+    };
+  }, [focusLane, lanes, entering]);
+
   let cardIndex = 0;
   const renderCard = (lane: Lane) => {
     const i = cardIndex++;
+    const focused = lane.id === focusLane;
     return (
       <LaneCard
         key={lane.id}
@@ -167,6 +250,8 @@ export function Board({
         flourish={flourished.has(lane.id)}
         enterDelay={entering ? Math.min(i, 9) * 60 : null}
         onPatch={onPatch}
+        focused={focused}
+        cardRef={focused ? focusRef : null}
       />
     );
   };
@@ -208,6 +293,7 @@ export function Board({
                     items,
                     col.key === 'done' ? DONE_CAP : COLUMN_CAP,
                     expanded.has(key),
+                    pin,
                   );
                   return (
                     <div key={col.key} className={`lc-col lc-col--${col.tone}`}>
@@ -242,7 +328,7 @@ export function Board({
       {COLUMNS.map((col) => {
         const items = byState.get(col.key) ?? [];
         const cap = col.key === 'done' ? DONE_CAP : COLUMN_CAP;
-        const { shown, hidden } = capColumn(items, cap, expanded.has(col.key));
+        const { shown, hidden } = capColumn(items, cap, expanded.has(col.key), pin);
         const composeHere = composing && col.key === 'open';
         return (
           <section
@@ -295,6 +381,8 @@ function LaneCard({
   flourish,
   enterDelay,
   onPatch,
+  focused = false,
+  cardRef = null,
 }: {
   lane: Lane;
   warnDetail: string | null;
@@ -305,6 +393,9 @@ function LaneCard({
   flourish: boolean;
   enterDelay: number | null;
   onPatch: (id: string, patch: UpdateLane) => Promise<boolean>;
+  /** This is the lane the deep link named — ringed, and announced to assistive tech. */
+  focused?: boolean;
+  cardRef?: MutableRefObject<HTMLElement | null> | null;
 }) {
   // Done cards age from resolved_at; live cards from claimed_at (how long in flight), else created.
   const stamp =
@@ -324,13 +415,18 @@ function LaneCard({
     breathe && 'lc-card--breathe',
     flourish ? 'lc-card--flourish' : landed ? 'lc-card--landed' : null,
     enterDelay != null && 'lc-card--enter',
+    focused && 'lc-card--focused',
   ]
     .filter(Boolean)
     .join(' ');
 
   return (
     <article
+      ref={cardRef}
       className={classes}
+      // The deep link points at this card; say so rather than relying on the ring alone, which a
+      // screen reader cannot see and a colour-blind reader may not distinguish.
+      {...(focused ? { 'aria-current': 'true' as const } : {})}
       style={enterDelay != null ? { animationDelay: `${enterDelay}ms` } : undefined}
     >
       <p className="lc-card__title">{lane.title}</p>

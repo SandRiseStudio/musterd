@@ -3319,6 +3319,42 @@
   }
 }
 
+/* The lane a deep link named (`/board?lane=<id>`) — someone was sent here to look at THIS one.
+   A held accent ring says which card for as long as you are on it, and one soft knock on arrival
+   says "here", borrowing the flourish's own glow so the board keeps a single motion vocabulary.
+   The ring is what carries the meaning; the knock is a courtesy and drops under reduced motion. */
+/* Doubled class on purpose: `.lc-card:hover` is (0,2,0) and would otherwise wipe the ring off the
+   one card the reader was sent to look at, the moment they moved the pointer toward it. */
+.lc-card.lc-card--focused {
+  border-color: color-mix(in srgb, var(--lc-accent) 62%, var(--lc-border));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--lc-accent) 42%, transparent),
+    0 10px 28px -14px color-mix(in srgb, var(--lc-accent) 45%, transparent);
+  animation: lc-card-knock 900ms var(--lc-ease) 180ms 1;
+}
+/* Hover still lifts it — it just keeps its ring while doing so. */
+.lc-card.lc-card--focused:hover {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--lc-accent) 52%, transparent),
+    0 10px 28px -12px color-mix(in srgb, var(--lc-accent) 55%, transparent);
+}
+@keyframes lc-card-knock {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  38% {
+    transform: translateY(-3px) scale(1.014);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-card--focused {
+    animation: none;
+  }
+}
+
 /* waiting on a human, made ambient: a human-owned blocked card breathes softly in rose */
 .lc-card--breathe {
   animation: lc-card-breathe 2.4s var(--lc-ease) infinite;

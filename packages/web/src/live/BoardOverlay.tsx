@@ -33,13 +33,17 @@ export function BoardOverlay({
   roster,
   base,
   origin,
+  focusLane = null,
   onClose,
 }: {
   cfg: LiveConfig | null;
   roster: MemberSummary[];
   base: LaneBoard | null;
-  /** The wall hotspot's viewport rect — the zoom's origin and its destination on close. */
+  /** The wall hotspot's viewport rect — the zoom's origin and its destination on close. Null when
+   * the board was opened by a deep link rather than a click: there is no object to grow out of. */
   origin: DOMRect | null;
+  /** A lane to arrive focused on (`/live?lane=<id>`) — Board pins, rings and scrolls to it. */
+  focusLane?: string | null;
   onClose: () => void;
 }) {
   const { board, me, busyId, note, doCreate, doPatch } = useBoardData(cfg, roster, base);
@@ -157,6 +161,7 @@ export function BoardOverlay({
                 onComposeClose={() => setComposing(false)}
                 onCreate={doCreate}
                 onPatch={doPatch}
+                focusLane={focusLane}
               />
             </Suspense>
           )}
