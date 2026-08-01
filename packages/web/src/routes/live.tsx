@@ -162,6 +162,32 @@ function LivePage() {
     setCfg({ team: slug, as: creds.name, token: creds.token });
   };
 
+  // The wall's agile board, opened. Two ways in, and they differ only in where the panel comes
+  // from: a click on the wall hands us the hotspot's rect and the panel grows out of it, while a
+  // `?lane=` deep link has no object to grow from and simply arrives. Either way `boardOpen` is
+  // what mounts the overlay — closed, /live pays nothing for the board at all.
+  //
+  // Declared above the URL hydration below because that effect opens the deep-linked board, and a
+  // `const` read before its declaration is a temporal-dead-zone error, not a hoisting nicety.
+  //
+  // The opener is captured in `openBoard`, before the canvas goes inert (inert blurs it — an
+  // activeElement read any later sees only <body>), and focus goes home after the close commits.
+  const [boardOrigin, setBoardOrigin] = useState<DOMRect | null>(null);
+  const [boardLane, setBoardLane] = useState<string | null>(null);
+  const boardOpen = boardOrigin != null || boardLane != null;
+  const boardOpener = useRef<HTMLElement | null>(null);
+  const openBoard = useCallback((rect: DOMRect) => {
+    boardOpener.current = (document.activeElement as HTMLElement | null) ?? null;
+    setBoardOrigin(rect);
+  }, []);
+  const closeBoard = useCallback(() => {
+    setBoardOrigin(null);
+    setBoardLane(null);
+    // A macrotask, not rAF: focus must go home even in a hidden tab (rAF stalls there), and by the
+    // time this runs React has committed the close and lifted `inert`.
+    window.setTimeout(() => boardOpener.current?.focus?.({ preventScroll: true }), 0);
+  }, []);
+
   // Hydrate from the URL or the last team (SSR-safe; runs once on the client). Two URL shapes:
   //   /live?team=<slug>&as=<observer>#w=<credential>  — a shared, team-controlled watch link: connect
   //     straight to that one read-only observer seat (fans out, no per-viewer seat). The credential
@@ -179,6 +205,11 @@ function LivePage() {
       window.location.replace(`/broadcast?team=${encodeURIComponent(urlTeam)}`);
       return;
     }
+    // `?lane=<id>` — the acceptance deep link, arriving at the office instead of `/board`. The
+    // room's own board opens on that lane; there is no hotspot rect to grow out of, so the overlay
+    // fades in rather than zooming (see BoardOverlay's `origin`).
+    const urlLane = params.get('lane');
+    if (urlLane) setBoardLane(urlLane);
     const watchTok = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('w');
     if (urlTeam && urlAs && watchTok) {
       setTeam(urlTeam);
@@ -217,23 +248,6 @@ function LivePage() {
 
   // A clicked office speech bubble navigates to its act in the stream. If the stream rail is collapsed,
   // expand it first and let the expand transition land before scrolling — one smooth motion, no jump cut.
-  // The wall's agile board, opened: the hotspot's rect is the overlay's zoom origin. Null = closed
-  // (nothing mounted — a closed /live pays nothing for the board). The opener is captured HERE,
-  // before the canvas goes inert (inert blurs it — activeElement read any later sees only <body>),
-  // and focus goes home a frame after the close commits and inert lifts.
-  const [boardOrigin, setBoardOrigin] = useState<DOMRect | null>(null);
-  const boardOpener = useRef<HTMLElement | null>(null);
-  const openBoard = useCallback((rect: DOMRect) => {
-    boardOpener.current = (document.activeElement as HTMLElement | null) ?? null;
-    setBoardOrigin(rect);
-  }, []);
-  const closeBoard = useCallback(() => {
-    setBoardOrigin(null);
-    // A macrotask, not rAF: focus must go home even in a hidden tab (rAF stalls there), and by the
-    // time this runs React has committed the close and lifted `inert`.
-    window.setTimeout(() => boardOpener.current?.focus?.({ preventScroll: true }), 0);
-  }, []);
-
   const onActClick = useCallback(
     (id: string) => {
       if (collapsed.stream) {
@@ -296,7 +310,7 @@ function LivePage() {
             }
             // A modal means it: while the board overlay is up, the room behind it takes no focus and
             // no clicks (the AsksStrip inert precedent, promoted to page scope).
-            inert={boardOrigin != null}
+            inert={boardOpen}
           >
             <OfficeScene
               teamName={team}
@@ -331,12 +345,13 @@ function LivePage() {
               onCollapse={() => toggleCollapse('stream')}
             />
           </div>
-          {boardOrigin && (
+          {boardOpen && (
             <BoardOverlay
               cfg={cfg}
               roster={roster}
               base={board}
               origin={boardOrigin}
+              focusLane={boardLane}
               onClose={closeBoard}
             />
           )}

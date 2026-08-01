@@ -1,6 +1,6 @@
 import type { LaneBoard, MemberSummary } from '@musterd/protocol';
 import { createFileRoute, useRouter } from '@tanstack/react-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Board } from '../live/Board';
 import {
   MemberSignInFields,
@@ -121,6 +121,9 @@ function BoardPage() {
     window.localStorage.setItem(RAIL_KEY, c ? 'collapsed' : 'open');
   };
 
+  // The acceptance deep link's subject (`?lane=<id>`) — read from the URL on mount, below.
+  const [focusLane, setFocusLane] = useState<string | null>(null);
+
   // The member filter — a lens over the same lanes, session-scoped, empty = everyone.
   const [ownerFilter, setOwnerFilter] = useState<ReadonlySet<string>>(new Set());
   const toggleOwner = (key: string) =>
@@ -130,7 +133,28 @@ function BoardPage() {
       else next.add(key);
       return next;
     });
-  const shownLanes = board ? filterLanes(board.lanes, ownerFilter) : [];
+  // Memoised because the focus effect below depends on it: a fresh array every render would re-run
+  // that effect every render, and it can call setState.
+  const shownLanes = useMemo(
+    () => (board ? filterLanes(board.lanes, ownerFilter) : []),
+    [board, ownerFilter],
+  );
+
+  // A deep link means "show me this lane", so an owner filter left over from earlier in the session
+  // must not be the reason it isn't on screen. Clearing beats fighting: the filter is a lens the
+  // reader can re-apply in one click, and a link that silently lands on a board without its own
+  // subject is the failure this lane exists to prevent.
+  useEffect(() => {
+    if (focusLane && ownerFilter.size > 0 && !shownLanes.some((l) => l.id === focusLane)) {
+      setOwnerFilter(new Set());
+    }
+  }, [focusLane, ownerFilter, shownLanes]);
+
+  // The link named a lane this board does not have (stale id, wrong team, already-abandoned lane).
+  // Say so plainly — a deep link that quietly degrades to the whole board leaves the reader hunting
+  // for something that was never here.
+  const focusMissing =
+    focusLane != null && board != null && !board.lanes.some((l) => l.id === focusLane);
 
   const connect = useCallback(
     async (slug: string, member?: { as: string; token: string }) => {
@@ -178,10 +202,16 @@ function BoardPage() {
   //                   resolves, so a slow answer never leaves it sitting in the address bar.
   //   `?team=<slug>` — the plain board, signed in from a remembered credential when we have one.
   //   nothing        — restore the last team into the form field.
+  //
+  // `?lane=<id>` rides alongside any of the three (ADR 200 §3, the acceptance deep link): it names
+  // the one lane the reader was sent to look at. It is read here and kept in the address bar — the
+  // link is meant to be shareable and to survive a reload — and it survives the nonce strip above
+  // because that rebuilds the URL as pathname + SEARCH, dropping only the fragment.
   // Client-only so none of it runs during prerender.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const urlTeam = new URLSearchParams(window.location.search).get('team');
+    setFocusLane(new URLSearchParams(window.location.search).get('lane'));
     const nonce = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('s');
     if (urlTeam && nonce) {
       const clean = `${window.location.pathname}${window.location.search}`;
@@ -319,6 +349,12 @@ function BoardPage() {
             >
               {note?.text ?? ''}
             </p>
+            {focusMissing && (
+              <p className="lc-board__note lc-board__note--err" role="status">
+                That lane isn&apos;t on this board — it may have been abandoned, or the link may be
+                for another team. Here&apos;s everything else.
+              </p>
+            )}
             {board != null && (
               <FilterStrip
                 roster={roster}
@@ -343,6 +379,7 @@ function BoardPage() {
                 onComposeClose={() => setComposing(false)}
                 onCreate={doCreate}
                 onPatch={doPatch}
+                focusLane={focusLane}
               />
             )}
           </div>

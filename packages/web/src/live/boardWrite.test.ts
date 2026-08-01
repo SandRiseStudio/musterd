@@ -3,6 +3,7 @@ import type { Goal, Lane, LaneBoard, LaneResult, LaneWarning } from '@musterd/pr
 import {
   applyLaneEcho,
   capColumn,
+  centerScroll,
   filterLanes,
   groupByGoal,
   handoffPatch,
@@ -230,6 +231,51 @@ describe('capColumn — the column DOM guardrail', () => {
 
   it('expanded shows everything', () => {
     expect(capColumn(items, 30, true)).toEqual({ shown: items, hidden: 0 });
+  });
+
+  // The deep link's guarantee: someone sent to look at one lane must see it, cap or no cap.
+  it('pulls a pinned item up from below the fold, without growing the column', () => {
+    const { shown, hidden } = capColumn(items, 30, false, (n) => n === 37);
+    expect(shown).toHaveLength(30); // the cap still holds
+    expect(shown).toContain(37);
+    expect(shown[29]).toBe(37); // it came from below, so it sits at the bottom of what is shown
+    expect(shown.slice(0, 29)).toEqual(items.slice(0, 29)); // board order otherwise untouched
+    expect(hidden).toBe(10); // the remainder is still the truth
+  });
+
+  it('leaves the slice alone when the pinned item is already shown', () => {
+    expect(capColumn(items, 30, false, (n) => n === 3).shown).toEqual(items.slice(0, 30));
+  });
+
+  it('is a no-op when nothing matches the pin, or when there is no cap to fight', () => {
+    expect(capColumn(items, 30, false, (n) => n === 999).shown).toEqual(items.slice(0, 30));
+    expect(capColumn(items, 0, false, (n) => n === 37)).toEqual({ shown: [], hidden: 40 });
+  });
+});
+
+/**
+ * The deep link's aim. This is arithmetic rather than `scrollIntoView` precisely so it can be
+ * checked here: the browser's own bring-into-view heuristics were measured putting the card above
+ * the fold and behind the insight rail, and a board that scrolls both axes in one container is not
+ * something to verify by eye alone.
+ */
+describe('centerScroll — putting one card in the middle of the board', () => {
+  it('centres an item that has room on both sides', () => {
+    // item at 800..1000 in a 2000-long strip, 400 of it visible → 900 - 200
+    expect(centerScroll(800, 200, 400, 2000)).toBe(700);
+  });
+
+  it('never scrolls past the end — a card near the tail sits as far in as the scroller goes', () => {
+    expect(centerScroll(1900, 100, 400, 2000)).toBe(1600); // max = 2000 - 400
+  });
+
+  it('never scrolls before the start — a card at the head needs no scroll at all', () => {
+    expect(centerScroll(0, 200, 400, 2000)).toBe(0);
+    expect(centerScroll(10, 20, 400, 2000)).toBe(0);
+  });
+
+  it('stays at zero when everything already fits', () => {
+    expect(centerScroll(100, 50, 800, 400)).toBe(0);
   });
 });
 

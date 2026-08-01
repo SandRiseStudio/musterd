@@ -138,14 +138,48 @@ export function filterLanes(lanes: Lane[], owners: ReadonlySet<string>): Lane[] 
   return lanes.filter((l) => owners.has(l.owner_seat ?? UNOWNED));
 }
 
-/** Column DOM guardrail (perf contract: no unbounded lists) — cap with an "…and K more" remainder. */
+/**
+ * Column DOM guardrail (perf contract: no unbounded lists) — cap with an "…and K more" remainder.
+ *
+ * `pin` is the deep link's escape hatch: a lane someone was sent here to look at must be on screen
+ * even when it sits past the cap, or the link lands on a board that does not visibly contain it.
+ * The cap still holds — the pinned item takes the last shown slot rather than being added to it, so
+ * the column never renders more than `cap` cards and `hidden` stays the true remainder.
+ */
 export function capColumn<T>(
   items: T[],
   cap: number,
   expanded: boolean,
+  pin?: (item: T) => boolean,
 ): { shown: T[]; hidden: number } {
   if (expanded || items.length <= cap) return { shown: items, hidden: 0 };
-  return { shown: items.slice(0, cap), hidden: items.length - cap };
+  const shown = items.slice(0, cap);
+  const hidden = items.length - cap;
+  if (!pin || cap === 0 || shown.some(pin)) return { shown, hidden };
+  const pinned = items.slice(cap).find(pin);
+  if (!pinned) return { shown, hidden };
+  // Board order is preserved among the kept cards: the pinned one came from below the fold, so it
+  // belongs at the bottom of what is shown.
+  return { shown: [...shown.slice(0, cap - 1), pinned], hidden };
+}
+
+/**
+ * Where a scroller must sit to put one item in the middle of it — the deep link's aim, as arithmetic
+ * rather than a plea to `scrollIntoView`.
+ *
+ * The board scrolls both axes in a single container whose content height changes as lanes stream in,
+ * and the browser's own "bring this into view" heuristics were measured landing the card above the
+ * fold and clipped behind the insight rail. One number per axis, clamped to what the scroller can
+ * actually do, is both correct and testable without a browser.
+ */
+export function centerScroll(
+  itemStart: number,
+  itemSize: number,
+  viewSize: number,
+  scrollSize: number,
+): number {
+  const max = Math.max(0, scrollSize - viewSize);
+  return Math.min(max, Math.max(0, itemStart + itemSize / 2 - viewSize / 2));
 }
 
 /** The two motion sets the board hands its cards: which moved, and which earned the flourish. */
