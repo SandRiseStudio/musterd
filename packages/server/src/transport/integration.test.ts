@@ -2704,8 +2704,12 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(atOpen!.detail.previous_owner ?? null).toBeNull();
     expect(atOpen!.detail.at_open).toBe(true);
 
-    // Edge 2: a PATCH claim of an open lane.
+    // Edge 2: a PATCH claim of an open lane. First, the non-edge it pairs with: a lane opened
+    // WITHOUT claim is not an acquisition and must write nothing — asserted here beside its
+    // sibling because a guard tested on one path and not the other is how the birth-edge gap
+    // survived #574 in the first place.
     const open = await post('/teams/ledger/lanes', { title: 'left open' }, nickTok);
+    expect(claimedRows().find((r) => r.target === open.json.lane.id)).toBeUndefined();
     await fetch(base + `/teams/ledger/lanes/${open.json.lane.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },

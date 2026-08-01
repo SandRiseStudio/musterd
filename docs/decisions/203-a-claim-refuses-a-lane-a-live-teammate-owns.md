@@ -72,6 +72,12 @@ PATCH and only the audit can separate them.
 
 ## Consequences
 
+- **Completed 2026-08-01 (#579).** §3 as first shipped covered the PATCH edge only — a lane _born_
+  owned (`lane_open {claim:true}`, the most common acquisition there is) wrote no row, so the
+  heading overclaimed until the birth edge landed. It now writes `lane.claimed` too, marked
+  `at_open: true` with `previous_owner: null` so a reader can tell a birth from a takeover. A lane
+  opened _without_ `claim` writes nothing — an unowned lane being born is not an acquisition.
+
 - The board's core guarantee is enforced rather than advised; `lane_claim`'s description now matches
   what it does.
 - A seat that meets the refusal has a named person to talk to — the coordination move, not a retry.
