@@ -214,6 +214,35 @@ increments 2–5 are done.
 - Increment 5 makes the per-seat render diverge by role for the first time; the ADR 060 provisioning
   verify and `init --check` drift detector must learn that two seats legitimately see different tool
   lists.
+
+  **SHIPPED 2026-07-31.** `scope.ts` holds the whole policy as data — a `WRITE_TOOLS` set plus a
+  predicate on `can_message` — and `scopeToolSurface` applies it by dropping out-of-scope
+  `registerTool` calls, installed outermost so a skipped tool never reaches the sibling
+  coercion/repair schema captures. Three decisions worth recording, because none is deducible from
+  §5:
+
+  - **The render is not the security boundary, so it fails OPEN.** The daemon already refuses a
+    muted seat's send in-band and audits `send.denied` (`route.ts`, ADR 071 P2) whether or not the
+    tool was rendered. Scoping buys context economy and clarity, not access control — so unknown
+    capabilities render the full surface. A missing tool is a dead end for the agent; an extra one
+    costs bytes the server refuses anyway.
+  - **Capabilities are cached on the binding at claim, not fetched at connect.** There is no
+    pre-claim capability read: the roster projection deliberately shows capabilities only to an
+    admin or the seat itself (`summarize`), and a team-level `mskey_` identifies no seat, while the
+    claim that would reveal them is deferred to the first tool call for probe safety (ADR 108). So
+    the occupy frame's `seat.capabilities` is persisted into `binding.capabilities` by the same path
+    that already carries `model` through a re-claim (ADR 101), and the NEXT connect scopes from it.
+    The accepted cost: a role change reaches the tool surface on the connect after the next claim,
+    not instantly — a sharper reading of this section's own "a role change between sessions simply
+    re-renders on the next connect".
+  - **The drift detectors needed no teaching after all.** `check-guidance.ts` asserts the skill's
+    tool names against the static `TOOL_NAMES` catalog, not against any rendered surface, and
+    `init --check` never compares tool lists — so a scoped seat is already legitimate to both. The
+    consequence above anticipated a problem that the existing designs had structurally avoided.
+
+  Measured on the build: a muted seat drops 11 acting tools, 12,898 → ~3,022 bytes of `tools/list`
+  (~77%). First live subject is the dogfood `observer` role (`can_message: none`), assigned to
+  `wanderer` when revive's roster moved onto git the same day.
 - Deliberate deferrals, named: model-in-the-path input conforming (researchable, Track B tiny-model
   fixture candidate); external-tool governance (Scalekit-style brokering, enterprise-managed MCP
   authorization) — landscape material, not this arc; programmatic-calling-specific affordances beyond

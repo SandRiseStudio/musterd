@@ -110,6 +110,9 @@ function persistBinding(config: McpConfig, seat: string): void {
     // it — without this, every autojoin/reclaim silently wiped a `--model`-provisioned seat back to
     // `unknown` and the diversity flag went dark on the next boot.
     ...(config.model !== undefined ? { model: config.model } : {}),
+    // The capabilities this occupancy resolved (ADR 144 inc 5) — cached for the NEXT session to scope
+    // its tool surface at connect, exactly as `model` above is carried through for attestation.
+    ...(config.capabilities !== undefined ? { capabilities: config.capabilities } : {}),
   };
   try {
     // Write back to the workspace this session was resolved from — NEVER ambient process.cwd(). An

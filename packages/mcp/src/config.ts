@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  type Capabilities,
   FEATURE_EPOCH,
   parseClaimPolicy,
   SURFACES,
@@ -55,6 +56,10 @@ export interface McpConfig {
   modelSource: ModelSource;
   /** Set when an observation contradicted a declaration — the tripwire signal. Never blocks. */
   modelDrift?: { declared: string; observed: string } | undefined;
+  /** The seat's effective capabilities as of its last occupy (ADR 144 inc 5), read from
+   *  `binding.capabilities` at load and refreshed in place when this session occupies. Scopes the
+   *  rendered tool surface; absent ⇒ the full surface (fail-open — see `scope.ts`). */
+  capabilities?: Capabilities | undefined;
   /**
    * This adapter dist's own build ref (ADR 135) — the `dist/build.json` stamp read once at load, so
    * the *running process* reports the code it booted with (a rebuilt dist under a live session still
@@ -169,6 +174,9 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
       env['MUSTERD_AUTOJOIN'] !== undefined
         ? env['MUSTERD_AUTOJOIN'] === '1'
         : (binding?.autojoin ?? false),
+    // Last occupy's resolved capabilities (ADR 144 inc 5) — binding-only, like `model`: never from
+    // the committed spec, because a seat's authority is per-seat, not shared by everyone who clones.
+    ...(binding?.capabilities ? { capabilities: binding.capabilities } : {}),
     // Never from the committed spec (a model is a per-machine choice, not shared). Absent ⇒ `unknown`.
     model: attestation.model,
     modelSource: attestation.source,
