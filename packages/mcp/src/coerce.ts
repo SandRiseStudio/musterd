@@ -214,6 +214,9 @@ const RULES: Record<string, Rule[]> = {
     stringToList('surface_globs'),
     alias('note', 'detail'),
     alias('notes', 'detail'),
+    // `summary` belongs here too, not only on lane_open: the comment above and ADR 144 both name all
+    // three spellings for both verbs, and this table had two. lane_update is if anything the likelier
+    // site — it is the verb a seat reaches for MID-lane, which is when you have a summary to attach.
     alias('summary', 'detail'),
   ],
   lane_resolve: [alias('lane', 'id'), alias('lane_id', 'id'), numericString('pr')],

@@ -278,11 +278,23 @@ describe('lane prose aliases: note/notes/summary → detail (2026-08-01 re-measu
     expect(coerceToolArgs('lane_open', { title: 't', notes: 'n' }).args['detail']).toBe('n');
   });
 
-  it('lane_update forgives summary — the same synonym set on both lane tools', () => {
-    const { args, applied } = coerceToolArgs('lane_update', { id: 'x', summary: 's' });
-    expect(args['detail']).toBe('s');
-    expect(applied).toEqual(['summary→detail']);
-  });
+  // Asserted as a MATRIX rather than a case per verb, because the gap #576 closed was invisible
+  // exactly where the tests were: `summary` was checked on lane_open only, so a rule table missing
+  // it on lane_update passed clean. Pinning the PRODUCT of spellings × verbs means a spelling added
+  // to one verb can never silently skip the other. (This subsumes the single lane_update/summary
+  // case it replaces — same assertion, closed over the whole set.)
+  it.each(['note', 'notes', 'summary'])(
+    'both lane_open and lane_update forgive "%s" — the synonym set does not diverge per verb',
+    (spelling) => {
+      const open = coerceToolArgs('lane_open', { title: 't', [spelling]: 'prose' });
+      const update = coerceToolArgs('lane_update', { id: 'x', [spelling]: 'prose' });
+      expect(open.args['detail']).toBe('prose');
+      expect(update.args['detail']).toBe('prose');
+      expect(open.args[spelling]).toBeUndefined();
+      expect(update.args[spelling]).toBeUndefined();
+      expect(update.applied).toEqual([`${spelling}→detail`]);
+    },
+  );
 
   it('an explicit detail always wins over the alias', () => {
     const { args } = coerceToolArgs('lane_update', { id: 'x', detail: 'real', note: 'guess' });
