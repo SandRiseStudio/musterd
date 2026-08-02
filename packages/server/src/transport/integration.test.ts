@@ -3142,6 +3142,95 @@ describe('two-stage close (ADR 169)', () => {
     expect(['human', 'cross_family']).toContain(rows[0].detail.review_grade);
     expect(ask.meta.lane_review.grade).toBe(rows[0].detail.review_grade);
     expect(ready.json.review.grade).toBe(rows[0].detail.review_grade);
+    // No overlap notice when the acceptor never owned the lane — the common case must stay quiet,
+    // or the warning becomes wallpaper and the one that matters is not read.
+    expect(ask.body).not.toContain('you previously owned this lane');
+  });
+
+  // The hole nick observed on 2026-07-31 (lane 01KYN3CKJE): the picker excludes only the CURRENT
+  // owner, so a lane that changed hands can route acceptance to a previous owner — an author of the
+  // artifact. Deliberately NOT fixed by exclusion: the pool already finds nobody on most attempts,
+  // and narrowing it converts confirmed closes into unconfirmed ones. The ask names the overlap and
+  // the acceptor recuses by judgment.
+  it('names the overlap when the acceptor previously owned the lane, and still routes to them', async () => {
+    // An isolated team so the pick is DETERMINISTIC: exactly one eligible candidate, who is the
+    // prior owner. On the shared `dawn` fixture the live human would outrank ada and the branch
+    // under test would never run — a test that passes without exercising its own subject.
+    const t = await post('/teams', { slug: 'coauth', creator: { name: 'nick3', kind: 'human' } });
+    const nick3 = t.json.human_credential as string;
+    const mk = async (name: string, model: string): Promise<Auth> => {
+      await post('/teams/coauth/members', { name, kind: 'agent' }, nick3);
+      const auth: Auth = { key: t.json.agent_key as string, seat: name };
+      await fetch(base + '/teams/coauth/inbox', {
+        headers: { ...authHeaders(auth), 'x-musterd-model': model },
+      });
+      return auth;
+    };
+    const first = await mk('first', 'claude-opus-5'); // opens, owns, writes it
+    const shipper = await mk('shipper', 'gpt-5'); // takes the handoff and ships it
+    // nick3 stays OFFLINE after creation, so `first` is the only eligible acceptor.
+
+    const lane = await post(
+      '/teams/coauth/lanes',
+      { title: 'handed over mid-flight', branch: 'first/work', claim: true },
+      first,
+    );
+    const laneId = lane.json.lane.id as string;
+
+    // The handoff — after this, `first` is a prior owner and invisible to the picker's one exclusion.
+    const handed = await fetch(base + `/teams/coauth/lanes/${laneId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(first) },
+      body: JSON.stringify({ owner_seat: 'shipper' }),
+    }).then(async (r) => (await r.json()) as Record<string, any>);
+    expect(handed.lane.owner_seat).toBe('shipper');
+
+    const ready = await fetch(base + `/teams/coauth/lanes/${laneId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(shipper) },
+      body: JSON.stringify({
+        state: 'ready_for_review',
+        merged: { pr: 7, sha: 'deadbee', authorized_by: 'nick3' },
+      }),
+    }).then(async (r) => ({ status: r.status, json: (await r.json()) as Record<string, any> }));
+    expect(ready.status).toBe(200);
+    // The pool was NOT narrowed: the prior owner is still routable, which is the whole design.
+    expect(ready.json.review.reviewer).toBe('first');
+
+    const inbox = await get('/teams/coauth/inbox?unread=1', first);
+    const ask = inbox.json.messages.find(
+      (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+        m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+    );
+    expect(ask).toBeDefined();
+    // Routed to the prior owner — allowed, but said out loud, with both options named.
+    expect(ask.body).toContain('you previously owned this lane');
+    expect(ask.body).toContain('recusing');
+    // …and it is still a real acceptance ask, not a refusal.
+    expect(ask.body).toContain('acceptance requested');
+    expect(ask.meta.lane_review.lane).toBe(laneId);
+  });
+
+  // The ledger read is the whole mechanism, so pin it directly rather than only through the ask:
+  // ownership history must survive a handoff and list both holders, newest first.
+  it('lane ownership history lists every prior owner from the lane.claimed ledger', async () => {
+    const { nickTok, ada } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'history', branch: 'ada/hist', claim: true },
+      ada,
+    );
+    const laneId = lane.json.lane.id as string;
+    await patchLane(laneId, { owner_seat: 'gee' }, ada);
+
+    const rows = (await auditRows(nickTok, 'lane.claimed')).filter(
+      (r: { target?: string }) => r.target === laneId,
+    ) as { detail: { owner?: string; kind?: string; at_open?: boolean } }[];
+    // Two acquisitions: the birth claim (#579) and the handoff — the birth row is why a lane that
+    // was born owned is legible here at all.
+    expect(rows.map((r) => r.detail.owner).sort()).toEqual(['ada', 'gee']);
+    expect(rows.find((r) => r.detail.at_open)?.detail.owner).toBe('ada');
+    expect(rows.find((r) => r.detail.kind === 'handoff')?.detail.owner).toBe('gee');
   });
 
   it('a cross_model counterpart is routable and graded as such (ADR 188)', async () => {

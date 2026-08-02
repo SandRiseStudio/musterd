@@ -75,7 +75,21 @@ catch-up strategy. The full playbook lives in [`AGENTS.md`](../../AGENTS.md); th
 
 ## ADRs (`docs/decisions/NNN-<slug>.md`)
 
-Sequential, never renumbered. Template:
+Sequential, never renumbered.
+
+**Amending an accepted ADR — two ways to trip `change-adr:check`, both hit live on 2026-08-01.**
+The gate refuses any edit to an **accepted** ADR's `## Decision`, and it is right to: a frozen
+decision is the record of what was decided, not a place to record what happened next.
+
+- **Put follow-up notes in `## Consequences`, never in `## Decision`.** A dated "completed / scope
+  limit / superseded by" note belongs there — it constrains how the Decision is read without
+  rewriting it.
+- **Never run Prettier on `docs/`.** `format:check` covers `packages/**/*.ts`, `tests/**` and the
+  root only, so `docs/` is deliberately not format-gated — and `prettier --write` on an ADR will
+  happily restyle a frozen section (`*x*` → `_x_`) and fail the gate on a change nobody meant to
+  make. Format the files your change actually touches, and leave ADR prose alone.
+
+Template:
 
 ```md
 # NNN — <title>
