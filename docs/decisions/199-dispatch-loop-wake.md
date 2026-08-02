@@ -69,7 +69,7 @@ work-order timeout exceeds the host flag.
 
 In `localSessionLiveness`, when enumeration decides `live` but the binding session has
 `ended_at` **and** the enumerated live session id is that same session, use the slot's non-live
-verdict (`resumable` / `gc-expired`). A _different_ live session beside an ended capture stays
+verdict (`resumable` / `gc-expired`). A *different* live session beside an ended capture stays
 `live` (ADR 166 guardrail preserved).
 
 Daemon-side end attestation remains open (ADR 179); this increment is host-local only.
