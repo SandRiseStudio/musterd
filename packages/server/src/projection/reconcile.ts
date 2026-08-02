@@ -12,6 +12,7 @@ import {
   updateMemberIdentity,
 } from '../store/members.js';
 import { deleteRoles, listRoleNames, roleDefaultsMap, upsertRole } from '../store/roles.js';
+import { resolveCapabilities } from '../store/rows.js';
 import { createTeam, getTeamBySlug, updateTeam } from '../store/teams.js';
 import { type LoadedSeat, loadTeamSpec, type TeamSpec } from './load.js';
 
@@ -126,6 +127,12 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
   // reconcile is the single writer of capabilities + the admin account-status override. Effective caps
   // = role defaults ⊕ per-seat narrowing (clampNarrow, never widening); the account-status override is
   // taken straight from the file (provisioned/active are derived at read time, not stored).
+  // Count the authority we hold BEFORE projecting, so the check below can tell a LOSS from a team
+  // that simply never had an admin. Only the loss is worth saying out loud.
+  const adminsBefore = listMembers(db, team.id).filter(
+    (m) => resolveCapabilities(m).is_admin,
+  ).length;
+
   for (const { name, seat } of spec.seats) {
     const m = getMemberByName(db, team.id, name);
     if (!m) continue;
@@ -155,6 +162,26 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
     if (!desired.has(m.name) && m.observer !== 1) {
       leaveMember(db, m.id);
       result.removed.push(m.name);
+    }
+  }
+
+  // A projection that removes the LAST admin is reported, never silently applied. This is the exact
+  // shape that took revive's authority on 2026-08-01: `team export` wrote seat files carrying only
+  // kind+role, reconcile rebuilt the creator as a plain generalist, and the team was left with no
+  // admin at all — with no audit row, and no way back through the API, because every admin-gated
+  // route was now closed to everyone. Loud, not fatal, and for the same reason the agent-is_admin
+  // clamp above is loud: reconcile's contract is that the files win, so refusing would wedge a
+  // roster its owner may have meant to write. Saying so is what was missing.
+  if (adminsBefore > 0) {
+    const adminsAfter = listMembers(db, team.id).filter(
+      (m) => resolveCapabilities(m).is_admin,
+    ).length;
+    if (adminsAfter === 0) {
+      result.errors.push(
+        `this roster leaves team "${team.slug}" with NO admin (it had ${adminsBefore}) — every ` +
+          `admin-gated route is now closed to everyone, and only a file edit can restore it. Give a ` +
+          `human seat a role whose capabilities carry is_admin.`,
+      );
     }
   }
   return result;

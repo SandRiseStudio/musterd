@@ -3,6 +3,8 @@ import { join, resolve as resolvePath } from 'node:path';
 import {
   type Binding,
   bindingSeat,
+  type Capabilities,
+  effectiveCapabilities,
   type EnforcementClass,
   type EnforcementPosture,
   type Lifecycle,
@@ -576,6 +578,8 @@ export interface RosterMember {
   role: string;
   lifecycle: Lifecycle;
   lifecycle_until?: number | null;
+  /** The seat's EFFECTIVE capabilities. Admin-visible only, and load-bearing — see below. */
+  capabilities?: Capabilities | undefined;
 }
 
 /**
@@ -584,6 +588,39 @@ export interface RosterMember {
  * (serialize → parse reproduces each seat's identity) so a serializer bug aborts the export instead
  * of silently writing files that don't reproduce the roster.
  */
+/**
+ * Capability fields a round-trip through this seat file would LOSE, for a seat with no role.
+ *
+ * Only decidable without a role: the ceiling is then the generalist default, which both sides know,
+ * so `effectiveCapabilities({}, override)` here is exactly what reconcile will compute there. A
+ * seat carrying a role is not judged — its ceiling lives in the db and is not readable from the CLI.
+ */
+function capabilitiesLostOnReconcile(
+  seat: SeatFile,
+  parsedBack: SeatFile,
+  live: Capabilities | undefined,
+): string[] {
+  if ((seat.role ?? '') !== '' || !live) return [];
+  const rebuilt = effectiveCapabilities({}, parsedBack.capabilities ?? {});
+  return (Object.keys(live) as Array<keyof Capabilities>).filter(
+    (k) => JSON.stringify(rebuilt[k]) !== JSON.stringify(live[k]),
+  );
+}
+
+/**
+ * The capability fields that differ from the generalist default, or undefined when none do. Keeps a
+ * seat file to the lines a reviewer needs — the point of putting the roster in git in the first place.
+ */
+function capabilityDiff(caps: Capabilities | undefined): Capabilities | undefined {
+  if (!caps) return undefined;
+  const g = effectiveCapabilities({}, {});
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(g) as Array<keyof Capabilities>) {
+    if (JSON.stringify(caps[k]) !== JSON.stringify(g[k])) out[k] = caps[k];
+  }
+  return Object.keys(out).length > 0 ? (out as unknown as Capabilities) : undefined;
+}
+
 export function rosterToFiles(
   slug: string,
   members: RosterMember[],
@@ -598,6 +635,22 @@ export function rosterToFiles(
         seat.until = new Date(m.lifecycle_until).toISOString();
       }
     }
+    // Capabilities are part of the roster, so a file set that omits them does not reproduce it.
+    // Dropping them here is what silently de-admined revive on 2026-08-01: reconcile REBUILDS every
+    // seat's capabilities from `effectiveCapabilities(roleDefaults[role], seat.capabilities)`, so a
+    // seat file carrying only kind+role tells it to rebuild the creator as a plain generalist — and
+    // the team ended up with no admin at all, with no audit row and no way back through the API.
+    //
+    // Writing the effective set is safe in both directions: an override can only NARROW, so this
+    // can never grant a seat more than its role allows; and where the role already grants it, the
+    // clamp returns the same value. What it cannot do is manufacture authority the role withholds —
+    // which is exactly the case the parity check below refuses rather than writes.
+    // Only the fields that differ from the generalist default, so a roster stays readable in a diff
+    // — these files exist to be reviewed in git (ADR 058), and seven lines per seat restating the
+    // defaults would bury the one line that matters. Omitted fields fall back to the role ceiling,
+    // which is what reconcile does anyway, so a plain seat still writes exactly kind+role.
+    const narrowed = capabilityDiff(m.capabilities);
+    if (narrowed) seat.capabilities = narrowed;
     const text = serializeSeat(seat);
     const back = parseSeatFile(text, m.name);
     if (
@@ -608,6 +661,22 @@ export function rosterToFiles(
     ) {
       throw new CliError(
         `parity check failed for seat "${m.name}" — the roster files would not reproduce the live roster`,
+        1,
+      );
+    }
+    // The capability half of the parity check, for the case this side can actually decide. With no
+    // role the ceiling IS the generalist default, which is known here, so reconcile's result is
+    // reproducible exactly — and any field that would come back lower is authority the export is
+    // about to destroy. A seat WITH a role is left to the server: role defaults live only in the db
+    // (there is no `/roles` read), and guessing a ceiling we cannot see is how this bug was written
+    // the first time. Reconcile's own zero-admin check is the backstop there.
+    const lost = capabilitiesLostOnReconcile(seat, back, m.capabilities);
+    if (lost.length > 0) {
+      throw new CliError(
+        `export would DESTROY authority on seat "${m.name}": [${lost.join(', ')}] cannot survive a ` +
+          `seat file, because a seat override only narrows and "${m.name}" holds no role granting ` +
+          `them. Give the seat a role whose capabilities carry them, then export again. ` +
+          `(Writing these files would leave the roster quietly weaker than the live team.)`,
         1,
       );
     }
@@ -658,6 +727,9 @@ async function teamExport(parsed: Parsed): Promise<number> {
       role: m.role,
       lifecycle: m.lifecycle,
       lifecycle_until: m.lifecycle_until ?? null,
+      // Admin-visible only; when the roster does not carry them the seat file simply omits them and
+      // reconcile keeps rebuilding from the role, exactly as before this change.
+      capabilities: m.capabilities,
     })),
   );
 
