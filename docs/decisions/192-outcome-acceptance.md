@@ -84,6 +84,20 @@ human asks get the same framing plus peer findings.
   human credential ([ADR 200](200-credential-custody-and-the-real-use-gate.md)). Accepted for
   dogfood; forbidden in any build promoted for real use.
 
+- **The picker excludes one seat, not every author (added 2026-08-02, lane `01KYX6QY5N`).** The
+  candidate filter drops the lane's owner _at submit time_ and nobody else, so a lane that changed
+  hands can route acceptance to a **previous owner** — an author of the artifact being judged
+  (observed on `01KYN3CKJE`, where most of the code was the acceptor's). Deliberately not closed by
+  exclusion: measured on this team, the picker already finds no candidate on **55% of its 51 runs**
+  and only **11% of 105 closes are verified**, while a lane has changed hands **3 times ever** — so
+  excluding prior owners would trade confirmed closes for unconfirmed ones to close a rare hole.
+  Instead the ask **names the overlap** and the acceptor recuses by judgment, which also preserves
+  the property that makes exclusion lossy: acceptance is intent-vs-brief, and a brief's author is
+  often its best judge. Ownership history is read from the `lane.claimed` ledger, so this costs one
+  audit query and never touches git. **Known limit:** a contributor who never _owned_ the lane
+  (co-author on the branch only) is still invisible — closing that would require the picker to
+  learn about commits, which is the dependency this design refuses.
+
 - Agents are taught: merge → `lane_submit` → wait for acceptor → self-resolve only on silence
   (unconfirmed). Auto-merge is correct; skipping submit is the anti-pattern.
 - Board column / chips / verbs follow the new words (“Awaiting acceptance”, accept/reject,
@@ -99,5 +113,15 @@ human asks get the same framing plus peer findings.
 - **Eval.** Unconfirmed-close rate and acceptance-catch rate (send-backs / routed asks) keep the
   ADR 169 baselines; the hypothesis is that clearer vocabulary + checklist raises routed asks
   *and* send-back rate above rubber-stamp zero once a counterpart exists.
+
+  **Measured 2026-08-01/02, and it reframes the target.** All-time: 105 closes, **12 verified
+  (11.4%)** — 57 self_close, 21 no_candidate, 15 review_timeout; the picker found nobody on 28 of
+  51 runs. Scoped to a single active day the shape differs and that difference is the finding:
+  review_timeout 10, counterpart_confirm 9, no_candidate 7, self_close 2 — so on a live roster the
+  largest failure is **not** "no acceptor exists" but "an acceptor was found, asked, and the
+  window closed first" (dolly, lane `01KYZATZ6M`). Diversity work would not have saved one of
+  those ten. Read together: the all-time rate is dominated by thin-roster history, today's by the
+  acceptance window, and neither is improved by narrowing the candidate pool — which is why the
+  co-author overlap above is surfaced rather than excluded.
 - **Experiment.** First week after deploy: fraction of closes that used `lane_submit` /
   `awaiting_acceptance` vs direct `lane_resolve`; spot-check ask bodies contain the checklist.

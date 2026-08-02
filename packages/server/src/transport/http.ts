@@ -55,7 +55,7 @@ import { deliveryHintFor } from '../protocol/nudge.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
-import { appendAudit, hasInterruptRaised, listAudit } from '../store/audit.js';
+import { appendAudit, hasInterruptRaised, laneOwnerHistory, listAudit } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import { actDelivery, crossedBySeen } from '../store/delivery.js';
 import { listGoals } from '../store/goals.js';
@@ -711,10 +711,29 @@ function deliverLaneAskAct(
   }
 }
 
+/**
+ * The overlap line (ADR 192, lane 01KYX6QY5N). The picker excludes the lane's CURRENT owner and
+ * nobody else, so a lane that changed hands can route its acceptance to a previous owner — an
+ * author of the very artifact being judged. Rather than exclude them (which would narrow a pool
+ * that already finds nobody on most attempts, to close a hole seen on 3 lanes ever), the ask NAMES
+ * the overlap and leaves the call to the acceptor: recusal is a judgment, not a computation.
+ *
+ * Phrased as a fact plus the two honest options, never as an accusation — the acceptor may well be
+ * the right judge (ADR 192 acceptance is intent-vs-brief, and a brief's author knows the brief).
+ */
+function priorOwnerNotice(reviewer: string, priorOwners: string[]): string {
+  return priorOwners.includes(reviewer)
+    ? ' NOTE — you previously owned this lane, so you are named on the artifact you are judging. ' +
+        'That is allowed and may even make you the best judge of intent, but it is yours to weigh: ' +
+        'accept if you can judge it independently, or decline and say "recusing — I authored this" ' +
+        'so it routes to someone else.'
+    : '';
+}
+
 /** ADR 192 acceptor checklist — judge the landed outcome, not the diff. */
 function acceptanceAskBody(
   title: string,
-  opts: { human?: boolean; peerFindings?: string } = {},
+  opts: { human?: boolean; peerFindings?: string; overlapNotice?: string } = {},
 ): string {
   const checklist =
     'Judge the LANDED OUTCOME (not a code review): ' +
@@ -723,13 +742,15 @@ function acceptanceAskBody(
     '(3) Usable — exercise the path enough to say it works? ' +
     '(4) Feel — only if UI/copy/brand is in surface, else N/A. ' +
     'Accept → move the lane to done; reject → send it back to active with a concrete note.';
+  const overlap = opts.overlapNotice ?? '';
   if (opts.human && opts.peerFindings !== undefined) {
     return (
       `[lane] human acceptance required: "${title}" — peer accepted with: "${opts.peerFindings}". ` +
-      checklist
+      checklist +
+      overlap
     );
   }
-  return `[lane] acceptance requested: "${title}" — ${checklist}`;
+  return `[lane] acceptance requested: "${title}" — ${checklist}${overlap}`;
 }
 
 /**
@@ -2642,21 +2663,34 @@ export async function handleHttp(
             },
           });
           if (pick && !breakerTripped) {
-            deliverLaneAskAct(ctx, team, member, pick.reviewer, acceptanceAskBody(lane.title), {
-              species: 'approve',
-              // ADR 172/188: the HUMAN acceptance ask carries the holding tier (required has teeth);
-              // a risky lane's stage-one PEER ask rides standard like any peer acceptance — the
-              // blocking ask is composed at stage two, when the peer's accept lands (route.ts).
-              tier: humanRequired && pick.grade === 'human' ? 'blocking' : 'standard',
-              lane_review: {
-                lane: lane.id,
-                title: lane.title,
-                branch: lane.branch,
-                ...(lane.merged ? { merged: lane.merged } : {}),
-                route: pick.route,
-                grade: pick.grade,
+            // Name the overlap when the picked acceptor previously owned this lane (see
+            // `priorOwnerNotice`). Read from the `lane.claimed` ledger, so it costs one indexed
+            // audit query and never narrows the candidate pool.
+            const priorOwners = laneOwnerHistory(ctx.db, team.id, lane.id);
+            const overlapNotice = priorOwnerNotice(pick.reviewer, priorOwners);
+            deliverLaneAskAct(
+              ctx,
+              team,
+              member,
+              pick.reviewer,
+              acceptanceAskBody(lane.title, { overlapNotice }),
+              {
+                species: 'approve',
+                // ADR 172/188: the HUMAN acceptance ask carries the holding tier (required has
+                // teeth); a risky lane's stage-one PEER ask rides standard like any peer
+                // acceptance — the blocking ask is composed at stage two, when the peer's accept
+                // lands (route.ts).
+                tier: humanRequired && pick.grade === 'human' ? 'blocking' : 'standard',
+                lane_review: {
+                  lane: lane.id,
+                  title: lane.title,
+                  branch: lane.branch,
+                  ...(lane.merged ? { merged: lane.merged } : {}),
+                  route: pick.route,
+                  grade: pick.grade,
+                },
               },
-            });
+            );
             review = {
               reviewer: pick.reviewer,
               route: pick.route,

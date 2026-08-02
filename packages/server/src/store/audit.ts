@@ -417,3 +417,45 @@ export function peerReviewGradeOf(db: Database, teamId: string, laneId: string):
     return 'none';
   }
 }
+
+/**
+ * Every seat that has ever owned this lane, newest acquisition first (ADR 169 §4 / ADR 192).
+ *
+ * The acceptance picker excludes exactly one seat — the lane's owner at submit time — so a lane that
+ * CHANGED HANDS leaves its previous owner fully eligible to accept work they largely wrote
+ * (observed 2026-07-31 on lane 01KYN3CKJE, where the ask routed to an author of most of the
+ * artifact). This is the seam that lets the ask say so without the picker learning about git: the
+ * `lane.claimed` ledger records every acquisition with its owner, so ownership history is a plain
+ * audit read. Completing that ledger to cover the birth edge (#579) is what makes this answer whole
+ * rather than blind to the majority of lanes.
+ *
+ * Deliberately returns owners, not a verdict. Naming the overlap is the whole design (option (d) of
+ * the lane brief): on a roster where the picker already finds nobody on more than half its
+ * attempts, EXCLUDING prior owners would convert confirmed closes into unconfirmed ones to close a
+ * hole that has arisen on 3 lanes ever. So the acceptor is told and recuses by judgment; the system
+ * does not decide who is tainted.
+ *
+ * Legacy-blind by construction: lanes closed before `lane.claimed` existed have no rows and read as
+ * an empty history. That is an honest absence — it under-reports, and the failure mode of
+ * under-reporting here is the status quo, never a false accusation.
+ */
+export function laneOwnerHistory(db: Database, teamId: string, laneId: string): string[] {
+  const rows = db
+    .prepare<[string, string], { detail: string | null }>(
+      `SELECT detail FROM audit
+         WHERE team_id = ? AND action = 'lane.claimed' AND target = ?
+       ORDER BY ts DESC, id DESC`,
+    )
+    .all(teamId, laneId);
+  const seen: string[] = [];
+  for (const r of rows) {
+    if (!r.detail) continue;
+    try {
+      const owner = (JSON.parse(r.detail) as { owner?: unknown }).owner;
+      if (typeof owner === 'string' && owner && !seen.includes(owner)) seen.push(owner);
+    } catch {
+      /* a malformed row contributes no owner — never a guess */
+    }
+  }
+  return seen;
+}
