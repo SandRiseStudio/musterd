@@ -149,6 +149,20 @@ move — keep it out of this ADR so the durable/live line stays crisp.
   `.musterd/` to learn the team instead of learning a verb vocabulary first.
 - Cost: a projection/reconcile loop and a drift test to build; a real risk of file⇄db skew if
   the isomorphism check is weak — so the check is load-bearing, not optional.
+
+- **The isomorphism check WAS weak, and it cost a team its authority (2026-08-01, fixed 2026-08-02).**
+  `team export` wrote `kind` + `role` + lifecycle and nothing else, while reconcile _rebuilds_ every
+  seat's capabilities from `effectiveCapabilities(roleDefaults[role], seat.capabilities)`. So
+  exporting a live roster told the daemon to rebuild the team's only admin — the ADR 071 creator
+  grant, written straight to the member row with no role to hold it — as a plain generalist. revive
+  ended up with **zero admins**: no audit row, and no route back, because every admin-gated surface
+  was then closed to everyone, so only a hand-edit of the files could restore it. The guard missed it
+  because it only proved **files → db → files**, seeding from files that never carried capabilities;
+  `export` runs the other direction, and nothing tested that one. Three things changed: export writes
+  the capability diff (and **refuses** rather than exporting authority a seat file cannot express — a
+  seat override only narrows, so an admin with no admin role is inexpressible by construction);
+  reconcile reports a projection that would strip a team's last admin; and the round trip is now
+  guarded in the **db → files → db** direction that `export` actually uses.
 - Settled here: **format** = one TOML file per seat under `.musterd/seats/` (Decision 2);
   **concurrency** = the file is the single writer, races resolve as git merges (Decision 5);
   **scope** = message-log git export is deferred to batond, not this ADR (Decision 7).

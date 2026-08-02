@@ -1,7 +1,12 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseSeatFile, parseTeamFile } from '@musterd/protocol';
+import {
+  effectiveCapabilities,
+  GENERALIST_CAPABILITIES,
+  parseSeatFile,
+  parseTeamFile,
+} from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
@@ -19,6 +24,65 @@ describe('rosterToFiles — db→file projection for `team export`', () => {
     expect(seatFiles['david.toml']).toBe('kind = "human"\nrole = "lead"\n');
     // No token, ever.
     expect(JSON.stringify(seatFiles)).not.toMatch(/mskd_|token/);
+  });
+
+  // The 2026-08-01 incident: export wrote kind+role only, so reconcile — which REBUILDS every
+  // seat's capabilities from its role — rebuilt the team's only admin as a plain generalist. revive
+  // was left with zero admins, silently, with no audit row, and unrecoverable through the API
+  // because every admin-gated route was then closed to everyone.
+  it('carries a narrowing capability into the seat file, so the roster survives reconcile', () => {
+    const { seatFiles } = rosterToFiles('alpha', [
+      {
+        name: 'quiet',
+        kind: 'agent',
+        role: '',
+        lifecycle: 'forever',
+        capabilities: { ...GENERALIST_CAPABILITIES, can_message: 'none' },
+      },
+    ]);
+    const back = parseSeatFile(seatFiles['quiet.toml']!, 'quiet');
+    expect(back.capabilities?.can_message).toBe('none');
+    // …and it still reproduces exactly what reconcile will compute from it.
+    expect(effectiveCapabilities({}, back.capabilities ?? {}).can_message).toBe('none');
+  });
+
+  it('REFUSES to export authority a seat file cannot express, instead of dropping it', () => {
+    // An admin with no admin role — precisely revive's creator. A seat override only narrows, so no
+    // file can carry this; the honest answer is to abort the export, not to write a weaker roster.
+    expect(() =>
+      rosterToFiles('alpha', [
+        {
+          name: 'boss',
+          kind: 'human',
+          role: '',
+          lifecycle: 'forever',
+          capabilities: { ...GENERALIST_CAPABILITIES, is_admin: true },
+        },
+      ]),
+    ).toThrow(/DESTROY authority.*boss.*is_admin/s);
+  });
+
+  it('exports a seat whose authority its ROLE grants — the representable case still works', () => {
+    // Same admin, but the role is what carries it. The CLI cannot read role defaults (there is no
+    // /roles endpoint), so it must not judge this one — reconcile rebuilds it from the role.
+    const { seatFiles } = rosterToFiles('alpha', [
+      {
+        name: 'boss',
+        kind: 'human',
+        role: 'admin',
+        lifecycle: 'forever',
+        capabilities: { ...GENERALIST_CAPABILITIES, is_admin: true },
+      },
+    ]);
+    expect(seatFiles['boss.toml']).toContain('role = "admin"');
+    expect(parseSeatFile(seatFiles['boss.toml']!, 'boss').capabilities?.is_admin).toBe(true);
+  });
+
+  it('a roster with no capability data exports exactly as before (no behaviour change)', () => {
+    const { seatFiles } = rosterToFiles('alpha', [
+      { name: 'olive', kind: 'agent', role: 'reviewer', lifecycle: 'forever' },
+    ]);
+    expect(seatFiles['olive.toml']).toBe('kind = "agent"\nrole = "reviewer"\n');
   });
 
   it('renders an until-lifecycle seat with a canonical ISO timestamp', () => {

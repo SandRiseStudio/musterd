@@ -5,7 +5,13 @@ import { GENERALIST_CAPABILITIES, parseSeatFile, parseTeamFile } from '@musterd/
 import type { Database } from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
-import { getMemberByName, isHeld, listMembers, markBound } from '../store/members.js';
+import {
+  getMemberByName,
+  isHeld,
+  listMembers,
+  markBound,
+  setMemberGovernance,
+} from '../store/members.js';
 import { listRoleNames } from '../store/roles.js';
 import { toMember } from '../store/rows.js';
 import { getTeamBySlug } from '../store/teams.js';
@@ -169,6 +175,92 @@ describe('reconcile — guard 1: db projection round-trips to the files', () => 
         'temp',
       ),
     );
+  });
+});
+
+// Guard 1 above only proves files → db → files: it seeds from files that never had capabilities, so
+// the round trip is faithful by construction. `team export` runs the OTHER direction — a LIVE db
+// whose capabilities were written by paths that have no file (the ADR 071 creator-admin grant is
+// written straight to the member row at team create). Nothing guarded that direction, and the
+// projection dropped capabilities entirely: exporting revive's roster on 2026-08-01 rebuilt its only
+// admin as a plain generalist, leaving the team with ZERO admins, silently and unrecoverably through
+// the API (every admin-gated route was then closed to everyone).
+describe('reconcile — guard 1b: a LIVE db round-trips through files without losing authority', () => {
+  it('projects per-seat capabilities so db → files → db is a fixed point', () => {
+    writeRole(
+      'lead',
+      'charter = "x"\n\n[capabilities]\nis_admin = true\nvisibility_level = "admin"\n',
+    );
+    writeRoster('slug = "alpha"\n', {
+      boss: 'kind = "human"\nrole = "lead"\n',
+      quiet: 'kind = "agent"\nrole = ""\n',
+    });
+    reconcile();
+    const team = getTeamBySlug(db, 'alpha')!;
+
+    // A narrowing written straight to the row, as governance ops do — no file says this.
+    const quiet = getMemberByName(db, team.id, 'quiet')!;
+    setMemberGovernance(
+      db,
+      quiet.id,
+      null,
+      JSON.stringify({ ...GENERALIST_CAPABILITIES, can_message: 'none' }),
+    );
+
+    // Export: project the LIVE db back to files, then reconcile those files into a fresh db.
+    const { seatFiles, teamToml } = serializeProjectedTeam(projectTeamToFiles(db, 'alpha')!);
+    writeRoster(teamToml, {
+      boss: seatFiles['boss.toml']!,
+      quiet: seatFiles['quiet.toml']!,
+    });
+    reconcile();
+
+    // Authority survives the round trip — this is the bug: it used to come back is_admin false.
+    const bossAfter = toMember(getMemberByName(db, team.id, 'boss')!);
+    expect(bossAfter.capabilities.is_admin).toBe(true);
+    expect(bossAfter.capabilities.visibility_level).toBe('admin');
+    // …and so does a per-seat narrowing that no role expresses.
+    const quietAfter = toMember(getMemberByName(db, team.id, 'quiet')!);
+    expect(quietAfter.capabilities.can_message).toBe('none');
+  });
+
+  it('reports a seat whose capabilities no role can express, instead of dropping them', () => {
+    writeRoster('slug = "alpha"\n', { solo: 'kind = "human"\nrole = ""\n' });
+    reconcile();
+    const team = getTeamBySlug(db, 'alpha')!;
+    const solo = getMemberByName(db, team.id, 'solo')!;
+    // Admin with no admin ROLE: unrepresentable, because a seat override can only narrow. This is
+    // exactly revive's creator — the shape that got silently downgraded.
+    setMemberGovernance(
+      db,
+      solo.id,
+      null,
+      JSON.stringify({ ...GENERALIST_CAPABILITIES, is_admin: true }),
+    );
+
+    const projected = projectTeamToFiles(db, 'alpha')!;
+    expect(projected.unrepresentable).toHaveLength(1);
+    expect(projected.unrepresentable[0]).toContain('solo');
+    expect(projected.unrepresentable[0]).toMatch(/is_admin/);
+  });
+});
+
+describe('reconcile — a projection must not silently leave a team with no admin', () => {
+  it('errors when the roster would strip the last admin', () => {
+    writeRole('lead', 'charter = "x"\n\n[capabilities]\nis_admin = true\n');
+    writeRoster('slug = "alpha"\n', { boss: 'kind = "human"\nrole = "lead"\n' });
+    expect(reconcile().errors).toHaveLength(0); // healthy: one admin
+
+    // The roster is rewritten with the role dropped — the exact shape `team export` produced.
+    writeRoster('slug = "alpha"\n', { boss: 'kind = "human"\nrole = ""\n' });
+    const r = reconcile();
+    expect(r.errors.some((e) => /no admin/i.test(e))).toBe(true);
+  });
+
+  it('stays quiet for a team that never had an admin — this reports a LOSS, not a lint', () => {
+    writeRoster('slug = "beta"\n', { hand: 'kind = "agent"\nrole = ""\n' });
+    expect(reconcile().errors).toHaveLength(0);
+    expect(reconcile().errors).toHaveLength(0); // and stays quiet on re-reconcile
   });
 });
 
