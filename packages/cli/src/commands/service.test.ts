@@ -696,6 +696,8 @@ describe('serviceCommand', () => {
     revList?: RunResult;
     /** `launchctl print` for the auto-refresher: absent/failed = not installed. */
     autoRefresherLoaded?: boolean;
+    /** A PID means the one-shot refresh tick is actively building or restarting. */
+    autoRefresherPid?: number | null;
     /** What `git rev-parse origin/main` resolves to, for the debounce-stamp comparison. */
     originTip?: string;
   }): Runner {
@@ -704,7 +706,13 @@ describe('serviceCommand', () => {
       if (cmd !== 'git')
         return over.autoRefresherLoaded === false
           ? { status: 1, stdout: '', stderr: 'could not find service\n' }
-          : { status: 0, stdout: '\tpid = 7\n\tstate = running\n', stderr: '' };
+          : {
+              status: 0,
+              stdout: over.autoRefresherPid
+                ? `\tpid = ${over.autoRefresherPid}\n\tstate = running\n`
+                : '\tstate = waiting\n\tlast exit code = 0\n',
+              stderr: '',
+            };
       const verb = args[2];
       if (verb === 'rev-parse')
         return args.includes('origin/main')
@@ -780,7 +788,7 @@ describe('serviceCommand', () => {
     expect(out).not.toContain('⚠');
   });
 
-  it('status goes loud when the auto-refresher already attempted this tip (pinned, or a build in flight)', async () => {
+  it('status goes loud when the auto-refresher already attempted this tip and is no longer running', async () => {
     const tip = 'c'.repeat(40);
     writeAttemptedSha(tip); // the tick tried this exact commit and its build failed
     const c = ctx(
@@ -800,6 +808,29 @@ describe('serviceCommand', () => {
     // It must NOT name a checkout: `dir` here is the invoking CLI's, not necessarily the daemon's,
     // so a confident path would be a confidently wrong repair instruction.
     expect(out).not.toContain('/repo`');
+  });
+
+  it('status identifies a matching attempt as in progress while the auto-refresher has a PID', async () => {
+    const tip = 'd'.repeat(40);
+    writeAttemptedSha(tip);
+    const c = ctx(
+      gitScriptedRunner({
+        revList: behind3,
+        autoRefresherLoaded: true,
+        autoRefresherPid: 7,
+        originTip: tip,
+      }),
+    );
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['status']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0, build: buildSha }),
+      }),
+    );
+    expect(out).toContain('refresh in progress');
+    expect(out).not.toContain('pinned on old code');
+    expect(out).not.toContain('⚠');
   });
 
   it('status reports up-to-date when the daemon build matches origin/main', async () => {
