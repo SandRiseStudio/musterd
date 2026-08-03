@@ -101,6 +101,21 @@ informational—no Presence or schedule enforcement is performed (ADR 206).
 
 The WS `send` and HTTP `POST …/messages` share one validation+route path on the server (`03-server.md`).
 
+### Portable wake context (ADR 204)
+
+`WakeContextRequestSchema` is a strict `{ act_id? , lane_id? }` body that requires exactly one
+canonical target. `WakeContextPacketSchema` is the strict, body-free orientation index: wake kind
+and IDs; an action enum; bounded lane/thread metadata; ADR 093's `MemoryEnvelope` (never its body);
+explicit fetch categories; and typed continuity requirement plus intended delivery. The additive
+`WakeContextResponseSchema` wraps it as `{ context }` for the later authenticated
+`POST /teams/:slug/wake-context` surface.
+
+The protocol also exports three distinct delivery vocabularies: `ContinuityRequirement`
+(`portable|transcript_required`), daemon `WakeDelivery` (`fresh|resume`), and host-observed
+`WakeDeliveryOutcome` (`fresh|resumed|fresh_fallback`). `WakeOrderSchema` and
+`WakeReportBodySchema` carry them only as optional fields for mixed-version compatibility; report
+metadata may include inspected transcript byte/age values but never a path, ID, or content.
+
 **Serving the web UI (ADR 062).** With `--web-root <dir>` / `MUSTERD_WEB_ROOT` the daemon also serves a built web UI from that directory: any unmatched `GET` outside the API namespaces (`/health`, `/teams/*`) returns a file, with extensionless client routes (e.g. `/live`) falling back to `index.html`. This puts the dashboard, the HTTP API, and the WS on one origin — no CORS, no proxy — and the WS upgrade gate (above) admits a **same-origin** `Origin` (its host:port equals the `Host` header) so the daemon-served page can connect. Off by default (API-only).
 
 ## Error codes (shared by WS `error` frames and HTTP)
