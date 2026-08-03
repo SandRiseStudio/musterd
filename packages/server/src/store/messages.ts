@@ -1,4 +1,9 @@
-import { PROTOCOL_VERSION, type Envelope } from '@musterd/protocol';
+import {
+  DeferUntilSchema,
+  PROTOCOL_VERSION,
+  type DeferUntil,
+  type Envelope,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import type { MessageRow } from './rows.js';
 
@@ -231,6 +236,81 @@ export function pendingInterrupts(messages: Envelope[], me: string): Envelope[] 
         (m.act !== 'steer' || m.id === winningSteerId),
     )
     .sort((a, b) => b.ts - a.ts);
+}
+
+/** One act `me` has postponed, and what will bring it back (ADR 211 §1). */
+export interface Deferral {
+  /** the directed act being postponed */
+  target: string;
+  /** the deferring `wait`'s id */
+  by: string;
+  /** the deferring `wait`'s ts — the bar every condition is measured against */
+  ts: number;
+  until: DeferUntil;
+}
+
+/**
+ * The deferrals `me` currently holds, latest-wins per target (ADR 211 §3).
+ *
+ * A deferring `wait` (`meta.defer_ref` + `meta.until`) postpones one directed act. Re-deferring is
+ * appending another `wait`, so this is a pure read-side collapse — no supersede column, no
+ * write-path side-effect — the same shape as the steer supersession above. A ts tie breaks on id,
+ * as ULIDs sort deterministically, so the fold never depends on input order.
+ *
+ * Only waits authored by `me` count: deferring someone else's inbox item is not expressible here,
+ * and the transport rejects it besides.
+ */
+export function deferrals(messages: Envelope[], me: string): Map<string, Deferral> {
+  const out = new Map<string, Deferral>();
+  for (const m of messages) {
+    if (m.act !== 'wait' || m.from !== me) continue;
+    const meta = (m.meta ?? {}) as { defer_ref?: unknown; until?: unknown };
+    if (typeof meta.defer_ref !== 'string' || meta.defer_ref.trim().length === 0) continue;
+    const until = DeferUntilSchema.safeParse(meta.until);
+    if (!until.success) continue;
+    const prev = out.get(meta.defer_ref);
+    if (prev && (prev.ts > m.ts || (prev.ts === m.ts && prev.by >= m.id))) continue;
+    out.set(meta.defer_ref, { target: meta.defer_ref, by: m.id, ts: m.ts, until: until.data });
+  }
+  return out;
+}
+
+/**
+ * The deferred targets whose condition has since fired (ADR 211 §2).
+ *
+ * Both conditions reduce to one question — does an act exist on this subject with a ts later than
+ * the deferral's? — so there is one predicate over two subjects, and no clock anywhere (ADR 179).
+ *
+ * `{ lane }` is deliberately LOOSE: it fires on the first lane-state act for that lane after the
+ * wait, which may not be the state the deferrer wanted. Naming a target state would be more precise
+ * and more to get wrong; evidence can argue for the precise form later.
+ *
+ * The bar is the NEWEST wait per target (whatever `deferrals` folded), so re-deferring genuinely
+ * re-postpones rather than leaving a raise latched from a superseded wait. A target whose thread is
+ * closed (ADR 025 `resolve`) never raises — the work it postponed is over.
+ */
+export function raisedDeferrals(messages: Envelope[], me: string): Set<string> {
+  const held = deferrals(messages, me);
+  const out = new Set<string>();
+  if (held.size === 0) return out;
+
+  const threadOf = new Map<string, string>();
+  for (const m of messages) threadOf.set(m.id, m.thread ?? m.id);
+  const resolved = new Set<string>();
+  for (const m of messages) if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
+
+  for (const [target, d] of held) {
+    const thread = threadOf.get(target) ?? target;
+    if (resolved.has(thread)) continue;
+    const fired = messages.some((m) => {
+      if (m.ts <= d.ts) return false;
+      if ('reply' in d.until) return m.from !== me && (m.thread ?? m.id) === thread;
+      const laneState = (m.meta ?? {}) as { lane_state?: { lane?: unknown } };
+      return laneState.lane_state?.lane === d.until.lane;
+    });
+    if (fired) out.add(target);
+  }
+  return out;
 }
 
 /**
