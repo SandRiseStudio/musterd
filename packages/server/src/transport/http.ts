@@ -120,6 +120,7 @@ import {
   listReclaimableMemberIds,
   touchAmbientPresence,
 } from '../store/presence.js';
+import { quietestBusyMs } from '../store/quiescence.js';
 import { unblockerReachable } from '../store/reachability.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import {
@@ -1025,6 +1026,14 @@ export async function handleHttp(
         db: ctx.config.dbPath,
         schema: schemaVersion(ctx.db),
         connections: countLivePresences(ctx.db, ctx.config.presenceTimeoutMs),
+        // Quiescence (2026-08-03 design): age of the newest audited action across live agent seats,
+        // for the auto-refresher's quiet-floor — `connections` says who is ATTACHED, this says who
+        // is WORKING (measured: gating a bounce on connections would defer 95% of refreshes).
+        // Omitted when unknown (no live agent action in the lookback) — absence, never zero.
+        ...(() => {
+          const q = quietestBusyMs(ctx.db, { presenceTimeoutMs: ctx.config.presenceTimeoutMs });
+          return q === null ? {} : { quietest_busy_ms: q };
+        })(),
         // The commit this daemon booted from (ADR 130) — lets `service status` name build skew
         // against origin/main. Omitted when not running from a git checkout.
         ...(ctx.config.buildRef ? { build: ctx.config.buildRef } : {}),

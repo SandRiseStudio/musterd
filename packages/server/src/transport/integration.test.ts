@@ -208,6 +208,10 @@ describe('HTTP API', () => {
     expect(r.json).not.toHaveProperty('build');
     // ADR 148: the daemon always names its own feature epoch — the roster's skew reference.
     expect(r.json.epoch).toBe(FEATURE_EPOCH);
+    // Quiescence (2026-08-03): a fresh daemon has no live agent action to age, so the field is
+    // OMITTED — unknown must read as absence, never as 0 (0 would mean "someone acted just now",
+    // the exact opposite, and would hold the auto-refresher's quiet-floor open forever).
+    expect(r.json).not.toHaveProperty('quietest_busy_ms');
   });
 
   it('health names the boot commit when the embedder passes buildRef (ADR 130)', async () => {
