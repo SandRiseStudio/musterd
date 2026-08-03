@@ -62,9 +62,8 @@ try {
 const bytes = (s: string) => Buffer.byteLength(s, 'utf8');
 
 const toolsDefault = (await measureToolSurface(GENERALIST_CAPABILITIES)).bytes;
-const toolsMuted = (
-  await measureToolSurface({ ...GENERALIST_CAPABILITIES, can_message: 'none' })
-).bytes;
+const toolsMuted = (await measureToolSurface({ ...GENERALIST_CAPABILITIES, can_message: 'none' }))
+  .bytes;
 const primer = bytes(renderPrimer({ member: 'seat', team: 'team' }));
 const sessionStart =
   bytes(HOOK_NUDGE_TEXTS['orientation_joined'] ?? '') +
@@ -72,7 +71,9 @@ const sessionStart =
   bytes(HOOK_NUDGE_TEXTS['orientation_init_fix'] ?? '');
 const promptSubmit = bytes(HOOK_NUDGE_TEXTS['prompt_submit_ritual'] ?? '');
 if (sessionStart === 0 || promptSubmit === 0 || primer === 0 || toolsDefault === 0) {
-  console.error('context:check: a surface measured 0 bytes — a source of truth moved; failing loud.');
+  console.error(
+    'context:check: a surface measured 0 bytes — a source of truth moved; failing loud.',
+  );
   process.exit(1);
 }
 
@@ -92,7 +93,9 @@ const rows: string[] = [];
 for (const [item, value] of Object.entries(measured)) {
   const entry = budgets.items[item];
   if (!entry) {
-    failures.push(`${item}: measured ${value} B but no budget line in ${relative(repoRoot, budgetsPath)}`);
+    failures.push(
+      `${item}: measured ${value} B but no budget line in ${relative(repoRoot, budgetsPath)}`,
+    );
     continue;
   }
   const est = Math.round(value / 4);
@@ -107,7 +110,8 @@ for (const [item, value] of Object.entries(measured)) {
   }
 }
 for (const item of Object.keys(budgets.items)) {
-  if (!(item in measured)) failures.push(`${item}: budgeted but never measured — stale budget line.`);
+  if (!(item in measured))
+    failures.push(`${item}: budgeted but never measured — stale budget line.`);
 }
 
 console.log('standing-context budgets (spec 2026-08-03)\n');

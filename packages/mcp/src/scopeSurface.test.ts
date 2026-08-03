@@ -5,9 +5,9 @@ import { describe, expect, it } from 'vitest';
 import type { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
 import { WRITE_TOOLS } from './scope.js';
+import { measureToolSurface } from './surfaceMeasure.js';
 import { TOOL_NAMES } from './toolNames.js';
 import { buildMcpServer } from './index.js';
-import { measureToolSurface } from './surfaceMeasure.js';
 
 /**
  * Scope-by-role end to end (ADR 144 inc 5): what a harness actually receives from `tools/list`.

@@ -301,7 +301,9 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     // command stops embedding one, the budget silently measures dead text — so pin the embedding.
     installMusterdHooks();
     const global = read(globalPath());
-    const commands = [cmdFor(global, 'SessionStart'), cmdFor(global, 'UserPromptSubmit')].join('\n');
+    const commands = [cmdFor(global, 'SessionStart'), cmdFor(global, 'UserPromptSubmit')].join(
+      '\n',
+    );
     for (const [key, text] of Object.entries(HOOK_NUDGE_TEXTS)) {
       expect(commands, key).toContain(text);
     }

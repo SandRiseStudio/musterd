@@ -351,6 +351,7 @@ src/
   version.ts      // ADAPTER_VERSION read from package.json so serverInfo can never drift from the published version (ADR 175)
   coerce.ts       // deterministic input coercion at the same seam, but BEFORE validation — measured alias/shape rules so near-miss input succeeds instead of bouncing (ADR 144 inc 4)
   scope.ts        // scope the rendered surface by capability — a muted seat never loads acting tools (ADR 144 inc 5); declarative WRITE_TOOLS data, applied by dropping registrations, FAIL-OPEN (the daemon, not the render, enforces)
+  surfaceMeasure.ts // measure a seat's tools/list weight from an in-memory connect (SurfaceRender shape) — shared by the scope tests and the standing-context budget gate (pnpm context:check)
   tools/
     join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)

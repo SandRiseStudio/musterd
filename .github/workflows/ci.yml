@@ -53,6 +53,11 @@ jobs:
       - name: Perf budgets
         run: pnpm perf:check
 
+      # Standing-context byte budgets (spec 2026-08-03) — every byte musterd injects into a seat's
+      # context (tools/list, primer, hook nudges) can only grow deliberately. Needs Build first.
+      - name: Context budgets
+        run: pnpm context:check
+
       # Lint is a gate, not a suggestion: without it, import/order and dead eslint-disables drift into
       # main between the rare manual `pnpm lint` (8 had accumulated by #248). Runs after Build because
       # the import resolver follows workspace packages to their ./dist, which does not exist pre-build.
