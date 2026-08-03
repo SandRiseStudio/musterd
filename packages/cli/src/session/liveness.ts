@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import type { SessionCapture } from '@musterd/protocol';
 import { findBinding } from '../config.js';
-import { enumerateClaudeSessions } from './enumerate.js';
+import { enumerateClaudeSessions, enumerateCodexSessions, type SessionFile } from './enumerate.js';
 
 /**
  * Local session liveness (ADR 131 §5 inc 4; ADR 166) — the machine-local judgement over a
@@ -70,6 +70,10 @@ export interface LocalSessionLiveness {
   demoted?: boolean;
 }
 
+/** A harness-owned, read-only workspace session scan. `undefined` remains the crucial
+ * "cannot tell" verdict; callers must never coerce it to an empty list. */
+export type SessionEnumerator = (workspace: string) => SessionFile[] | undefined;
+
 /**
  * Judge the workspace by asking the harness what sessions it has (ADR 166). Returns undefined when
  * the harness cannot enumerate — "cannot tell", which must never be laundered into "none".
@@ -77,7 +81,7 @@ export interface LocalSessionLiveness {
 function enumeratedLiveness(
   workspace: string,
   now: number,
-  enumerate: (workspace: string) => ReturnType<typeof enumerateClaudeSessions>,
+  enumerate: SessionEnumerator,
 ): EnumeratedJudgement | undefined {
   const files = enumerate(workspace);
   if (files === undefined) return undefined;
@@ -99,11 +103,21 @@ function enumeratedLiveness(
 export function localSessionLiveness(
   workspace: string,
   now = Date.now(),
-  enumerate: (workspace: string) => ReturnType<typeof enumerateClaudeSessions> = (w) =>
-    enumerateClaudeSessions(w),
+  enumerate?: SessionEnumerator,
+  harness?: string,
 ): LocalSessionLiveness {
   const slot = slotLiveness(workspace, now);
-  const enumerated = enumeratedLiveness(workspace, now, enumerate);
+  // The host names a harness from the enrollment registry, which beats an old capture whose
+  // harness is stale. CLI readers that have no registry retain the binding's surface/capture as
+  // the selection evidence. Unknown harnesses preserve the historical Claude fallback rather than
+  // treating an unavailable scanner as proof that a workspace is idle.
+  const selectedHarness = harness ?? slot.session?.harness ?? findBinding(workspace, {})?.surface;
+  const selected =
+    enumerate ??
+    (selectedHarness === 'codex'
+      ? (dir: string) => enumerateCodexSessions(dir)
+      : (dir: string) => enumerateClaudeSessions(dir));
+  const enumerated = enumeratedLiveness(workspace, now, selected);
   if (!enumerated) return { source: 'slot', ...slot };
   // ADR 199 / ADR 179: clean SessionEnd outranks a still-warm transcript on the deciding
   // (enumerated) path — but only when the "live" evidence is that same ended session. A

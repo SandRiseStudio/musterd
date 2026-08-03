@@ -51,7 +51,7 @@ export interface HostPollDeps {
   loadRegistry?: () => { entries: HostRegistryEntry[] };
   readAgentKey?: (workspace: string) => string | undefined;
   clientFor?: (server: string, agentKey: string) => WakeClient;
-  liveness?: (workspace: string) => LocalSessionLiveness;
+  liveness?: (workspace: string, harness?: string) => LocalSessionLiveness;
   verifyWindowMs?: number;
   verifyPollMs?: number;
 }
@@ -242,7 +242,9 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
       // session beside a live human). A live capture ⇒ defer: settle the lease with
       // `deferred: true` — audited as `residency.wake_deferred`, burning no attempt/rate budget —
       // and let the daemon's snooze keep the seat un-leased while the session works.
-      const live = (deps.liveness ?? localSessionLiveness)(entry.workspace);
+      const live = deps.liveness
+        ? deps.liveness(entry.workspace, entry.harness)
+        : localSessionLiveness(entry.workspace, Date.now(), undefined, entry.harness);
       if (live.state === 'live') {
         deps.log(
           `wake deferred: ${order.seat} — a live local session holds ${entry.workspace} ` +

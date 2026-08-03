@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { enumerateClaudeSessions, resetSessionScan } from './enumerate.js';
+import { enumerateClaudeSessions, enumerateCodexSessions, resetSessionScan } from './enumerate.js';
 
 /**
  * ADR 166. Attribution is by the transcript's RECORDED `cwd` walked up to a workspace — never by
@@ -105,5 +105,76 @@ describe('enumerateClaudeSessions (ADR 166)', () => {
     transcript('d1', 'a', { cwd: ws });
     writeFileSync(join(home, '.claude', 'projects', 'd1', 'notes.txt'), 'x');
     expect(enumerateClaudeSessions(ws, home)?.map((f) => f.id)).toEqual(['a']);
+  });
+});
+
+describe('enumerateCodexSessions (ADR 204)', () => {
+  let home: string;
+  let ws: string;
+
+  const workspace = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'adr204-ws-'));
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(join(dir, '.musterd', 'binding.json'), '{}');
+    return dir;
+  };
+
+  const rollout = (
+    id: string,
+    opts: { cwd?: string; ageMin?: number; sessionId?: string; padFirstLine?: boolean } = {},
+  ): void => {
+    const dir = join(home, '.codex', 'sessions', '2026', '08', '03');
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `rollout-2026-08-03T00-00-00-${id}.jsonl`);
+    const first = opts.padFirstLine
+      ? JSON.stringify({ type: 'event_msg', payload: { pad: 'x'.repeat(200_000) } })
+      : JSON.stringify({
+          type: 'session_meta',
+          payload: { session_id: opts.sessionId ?? id, ...(opts.cwd ? { cwd: opts.cwd } : {}) },
+        });
+    const second = opts.padFirstLine
+      ? JSON.stringify({
+          type: 'session_meta',
+          payload: { session_id: opts.sessionId ?? id, ...(opts.cwd ? { cwd: opts.cwd } : {}) },
+        })
+      : '';
+    writeFileSync(path, `${first}\n${second}\n`);
+    const t = new Date(Date.now() - (opts.ageMin ?? 0) * 60_000);
+    utimesSync(path, t, t);
+  };
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'adr204-home-'));
+    ws = workspace();
+    resetSessionScan();
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true });
+    resetSessionScan();
+  });
+
+  it('returns undefined when the Codex rollout tree is unavailable', () => {
+    expect(enumerateCodexSessions(ws, join(home, 'nope'))).toBeUndefined();
+  });
+
+  it('attributes a rollout by the recorded session_meta cwd and session_id', () => {
+    rollout('file-name-is-not-the-thread', { cwd: ws, sessionId: 'thread-to-resume' });
+    const found = enumerateCodexSessions(ws, home);
+    expect(found?.map((f) => f.id)).toEqual(['thread-to-resume']);
+    expect(found?.[0]?.path).toContain('rollout-2026-08-03T00-00-00-file-name-is-not-the-thread');
+  });
+
+  it('includes a rollout from a subdirectory but never guesses an absent cwd', () => {
+    const sub = join(ws, 'packages', 'cli');
+    mkdirSync(sub, { recursive: true });
+    rollout('subdirectory', { cwd: sub });
+    rollout('unknown');
+    expect(enumerateCodexSessions(ws, home)?.map((f) => f.id)).toEqual(['subdirectory']);
+  });
+
+  it('keeps a rollout whose session_meta falls outside the probe window unattributed', () => {
+    rollout('buried', { cwd: ws, padFirstLine: true });
+    expect(enumerateCodexSessions(ws, home)).toEqual([]);
   });
 });

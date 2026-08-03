@@ -25,6 +25,7 @@ src/
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; HttpClient forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
+  codexBin.ts         // PATH-robust, shell-free `codex` binary resolution for the residency backend; an unresolved install stays non-wakeable (ADR 204)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   runtime.ts          // Node ≥22 gate + packaged-vs-checkout detection for doctor / bin (ADR 156)
@@ -52,8 +53,8 @@ src/
     backends/
       claudeCode.ts   // backend #1: explicit portable/fresh orders bypass resume; legacy orders retain the resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to fresh `claude -p` in the same lease; reports actual delivery + local byte/age metadata only (ADR 131 §5 / ADR 209)
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
-    liveness.ts       // localSessionLiveness(workspace): binding.session + transcript stat → none|live|resumable|gc-expired; shared by the host's local-session guard and `session show`; also carries the ADR 166 inc-1 SHADOW judgement (computed, never acted on)
-    enumerate.ts      // ADR 166: ask the harness what sessions it HAS — scans ~/.claude/projects and attributes each transcript by its RECORDED cwd walked up to a workspace (never by decoding the directory name, an inconsistent encoding); undefined = "cannot tell" (never laundered into "none")
+    liveness.ts       // localSessionLiveness(workspace): harness-selected binding/session scan + transcript stat → none|live|resumable|gc-expired; shared by the host guard and `session show`, with registry harness outranking stale capture provenance (ADR 166/204)
+    enumerate.ts      // harness-owned read-only session scan: Claude transcripts and Codex rollouts are attributed only by their RECORDED cwd and exact identity (never filename/path guesses); undefined = "cannot tell" (never laundered into "none")
     sweep-series.ts   // ADR 166 follow-through: the one path + row shape for the slot-sweep's append-only JSONL, plus the repeat gate (a workspace demoted by two consecutive runs) read by `report` and by the sweep itself
     transcript-model.ts // readModelFromTranscript(path): the ONLY module that knows a harness transcript's on-disk shape — newest assistant turn's model, bounded tail, never throws (ADR 158)
   service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)

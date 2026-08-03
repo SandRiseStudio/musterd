@@ -425,8 +425,9 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
         loadRegistry: () => ({ entries: [entryOf()] }),
         clientFor: () => client,
         log: (l) => lines.push(l),
-        liveness: (workspace) => {
+        liveness: (workspace, harness) => {
           expect(workspace).toBe('/ws/scout'); // judged through the registry's workspace path
+          expect(harness).toBe('claude-code');
           return {
             state: 'live',
             session: { harness: 'claude-code', id: 'cap-1', started_at: 1 },
@@ -439,6 +440,25 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
       { lease_id: 'L1', occupied: false, deferred: true, reason: 'local-session-live' },
     ]);
     expect(lines.join('\n')).toContain('wake deferred: scout');
+  });
+
+  it('passes a Codex registry harness to the local-session guard', async () => {
+    const { client } = fakeClient([order()]);
+    const { backend, specs } = fakeBackend('codex');
+    let seen: string | undefined;
+    await pollHostOnce(
+      deps({
+        backends: new Map([['codex', backend]]),
+        loadRegistry: () => ({ entries: [entryOf({ harness: 'codex' })] }),
+        clientFor: () => client,
+        liveness: (_workspace, harness) => {
+          seen = harness;
+          return { state: 'none' };
+        },
+      }),
+    );
+    expect(seen).toBe('codex');
+    expect(specs).toHaveLength(1);
   });
 
   it('a FAILED wake is loud in the host log — the reason, not a placid "polling"', async () => {
