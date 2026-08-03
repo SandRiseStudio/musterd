@@ -747,6 +747,11 @@ function wallClock(
  * `+N` overflow badge at 9 units (the floor at which lettering survives; see the old diagram's
  * hard-won sizing notes in git history). Everything else the board says, it says with paper.
  *
+ * It is a **pin board**, not a whiteboard (nick, 2026-08-02) — cork in a thin pale-oak frame, notes
+ * held by washi tabs. The whiteboard reading was never only the white face: it was the face plus the
+ * marker tray below it, and the tray is gone with it. What the material change buys is that the
+ * notes now read as *paper someone put there*, which is what the board is actually claiming.
+ *
  * `data` is null when no team is connected (previews, the connect form): the board still hangs,
  * face + caps + dividers, an empty week rather than a missing object.
  */
@@ -776,17 +781,36 @@ function wallLaneBoard(
     ctx.restore();
   };
 
-  rect(-W / 2 + 4, -H / 2 - 4, W / 2 + 4, H / 2 - 4, WHITEBOARD.shadow); // soft cast, no frame
-  rect(-W / 2, -H / 2, W / 2, H / 2, WHITEBOARD.face);
+  rect(-W / 2 + 4, -H / 2 - 4, W / 2 + 4, H / 2 - 4, PINBOARD.cast); // soft cast
 
-  // Six columns, edge margin 4, hairline dividers between them. The dividers are what make the bare
-  // board read as a kanban waiting for work instead of a blank sheet.
-  const M = 4;
-  const colW = (W - M * 2) / WALLBOARD_TONES.length;
-  for (let i = 1; i < WALLBOARD_TONES.length; i++) {
-    const a = -W / 2 + M + i * colW;
-    stroke([[a, -H / 2 + M], [a, H / 2 - M]], 0.7, WHITEBOARD.rim);
+  // The frame is LIGHTER than the cork, which is the whole reason it works: a dark surround would
+  // make the board a hole in the wall, while a pale one reads as a lit edge and lets the cork become
+  // the dark field the notes sit off. Thin, too — 3 units, a picture-frame lip, not a bulletin-board
+  // slab (nick, 2026-08-02: "I like the pale oak but make the frame thin").
+  const FR = 3;
+  rect(-W / 2, -H / 2, W / 2, H / 2, PINBOARD.oak);
+  stroke([[-W / 2, H / 2], [W / 2, H / 2]], 1, PINBOARD.oakLit); // sunlit top lip
+  stroke([[-W / 2, -H / 2], [W / 2, -H / 2]], 1, PINBOARD.oakShade); // shaded underside
+  rect(-W / 2 + FR, -H / 2 + FR, W / 2 - FR, H / 2 - FR, PINBOARD.cork);
+
+  // Cork freckle. Seeded off the index alone (not off lane data) so the surface is *the same cork*
+  // every frame — a texture that reshuffles on repaint reads as static, not as material. Kept to 150
+  // flecks: each one is four wall projections, and this paints inside the ambient loop.
+  for (let i = 0; i < 150; i++) {
+    const h = Math.imul(i + 1, 2654435761) >>> 0;
+    const a = -W / 2 + FR + 1.5 + ((h % 4096) / 4096) * (W - FR * 2 - 3);
+    const b = -H / 2 + FR + 1.5 + (((h >>> 12) % 4096) / 4096) * (H - FR * 2 - 3);
+    const sz = 0.9 + ((h >>> 24) % 3) * 0.35;
+    rect(a, b, a + sz, b + sz, PINBOARD.fleck[h % 3]!);
   }
+  // Where the cork meets the frame's top lip, one darker line — the shadow the frame casts onto the
+  // cork. It is what seats the cork *inside* the frame instead of flush with it.
+  stroke([[-W / 2 + FR, H / 2 - FR], [W / 2 - FR, H / 2 - FR]], 1, PINBOARD.inner);
+
+  // Six columns inside the frame. No ruled dividers any more: cork has no lines on it, and the cap
+  // strips alone carry the column read.
+  const M = FR + 2;
+  const colW = (W - M * 2) / WALLBOARD_TONES.length;
 
   for (let i = 0; i < WALLBOARD_TONES.length; i++) {
     const tone = WALLBOARD_TONES[i]!;
@@ -806,9 +830,16 @@ function wallLaneBoard(
       const ja = (((seed >>> (s * 3)) % 7) - 3) * 0.5;
       const jb = (((seed >>> (s * 5 + 2)) % 5) - 2) * 0.4;
       const top = H / 2 - M - 6 - s * (noteH + 2.5) + jb;
-      rect(mid - noteW / 2 + ja, top - noteH, mid + noteW / 2 + ja, top, tone.note);
-      // A thin darker header edge on each note — the "written on" line that sells it as paper.
-      rect(mid - noteW / 2 + ja, top - 2, mid + noteW / 2 + ja, top, tone.cap);
+      const l = mid - noteW / 2 + ja;
+      const r = mid + noteW / 2 + ja;
+      // Shadow first, offset down-right: paper held a hair off the cork rather than printed on it.
+      rect(l + 0.8, top - noteH - 0.8, r + 0.8, top - 0.8, PINBOARD.noteCast);
+      rect(l, top - noteH, r, top, tone.note);
+      // The washi tab, straddling the note's top edge onto the cork — the tape is doing the holding,
+      // so it has to overlap both. Its own sheen line is what stops it reading as a painted stripe.
+      const tw = 8;
+      rect(mid - tw / 2 + ja, top - 1.6, mid + tw / 2 + ja, top + 1.6, tone.tape);
+      rect(mid - tw / 2 + ja, top + 1, mid + tw / 2 + ja, top + 1.6, PINBOARD.tapeSheen);
     }
     // The overflow badge — the one piece of type, at the size that survives the downscale.
     if (col.count > STICKY_CAP) {
@@ -817,8 +848,8 @@ function wallLaneBoard(
     }
   }
 
-  // Board thickness, not a frame: the hairline aluminium edge the whiteboard had, kept.
-  stroke([[-W / 2, -H / 2], [W / 2, -H / 2], [W / 2, H / 2], [-W / 2, H / 2], [-W / 2, -H / 2]], 0.9, WHITEBOARD.rim);
+  // Frame thickness — the outer edge of the oak, so the board reads as an object standing off the wall.
+  stroke([[-W / 2, -H / 2], [W / 2, -H / 2], [W / 2, H / 2], [-W / 2, H / 2], [-W / 2, -H / 2]], 0.9, PINBOARD.oakShade);
 }
 
 /**
@@ -826,77 +857,50 @@ function wallLaneBoard(
  * these mirror Live.css's lane/danger/success tones as hex the way `WHITEBOARD` already does: `cap`
  * is the full-value state colour, `note` its paper-pastel wash. Board columns, left to right:
  * open · claimed · active · blocked · awaiting_acceptance · done.
+ *
+ * `tape` is the washi tab holding each note to the cork: the cap colour at ~75%, so the tab reads as
+ * translucent paper tape over both the note and the cork behind it. Written out rather than derived
+ * because canvas takes a colour string, and a per-note hex→rgba conversion would run every frame.
  */
-const WALLBOARD_TONES: ReadonlyArray<{ cap: string; note: string }> = [
-  { cap: '#B4A88F', note: '#EFE8D8' }, // open — warm unbleached paper
-  { cap: '#948DDE', note: '#E6E3F8' }, // claimed — lane indigo, lightened: picked up, not yet moving
-  { cap: '#5A52C9', note: '#D8D4F3' }, // active — the lane tone itself (--lc-lane)
-  { cap: '#D1503F', note: '#F5DAD4' }, // blocked — --lc-danger
-  { cap: '#7A72D6', note: '#DFDCF6' }, // awaiting acceptance — indigo leaning patient
-  { cap: '#2F9E6A', note: '#D5ECDF' }, // done — --lc-success
+const WALLBOARD_TONES: ReadonlyArray<{ cap: string; note: string; tape: string }> = [
+  // open — warm unbleached paper
+  { cap: '#B4A88F', note: '#EFE8D8', tape: 'rgba(180, 168, 143, 0.75)' },
+  // claimed — lane indigo, lightened: picked up, not yet moving
+  { cap: '#948DDE', note: '#E6E3F8', tape: 'rgba(148, 141, 222, 0.75)' },
+  // active — the lane tone itself (--lc-lane)
+  { cap: '#5A52C9', note: '#D8D4F3', tape: 'rgba(90, 82, 201, 0.75)' },
+  // blocked — --lc-danger
+  { cap: '#D1503F', note: '#F5DAD4', tape: 'rgba(209, 80, 63, 0.75)' },
+  // awaiting acceptance — indigo leaning patient
+  { cap: '#7A72D6', note: '#DFDCF6', tape: 'rgba(122, 114, 214, 0.75)' },
+  // done — --lc-success
+  { cap: '#2F9E6A', note: '#D5ECDF', tape: 'rgba(47, 158, 106, 0.75)' },
 ];
 
 /**
- * The marker tray under the board: a real iso `box()` ledge protruding into the room, with pens lying
- * on it and a felt eraser. It uses the furniture shade language rather than the wall's, because it is
- * furniture — a thing sticking out of the wall, not a shape painted on it, and that is exactly what
- * sells the board as an object.
+ * The pin board's materials: pale oak, cork, and the shadows that seat one inside the other.
  *
- * Only valid on the back-right wall (`ly = 0`, into-room is `+ly`), which is the only wall the board
- * hangs on anyway.
+ * The frame is deliberately *lighter* than the cork it holds. The instinct with a bulletin board is a
+ * dark surround, and it is wrong here for a specific reason: this wall is warm cream, and a dark
+ * frame on it reads as a hole punched through the wall. A pale one reads as a lit edge — and it
+ * demotes the frame, which matters, because the loudest thing on this object has to stay the notes.
  */
-function whiteboardTray(
-  ctx: CanvasRenderingContext2D,
-  fit: Fit,
-  tc: number,
-  uc: number,
-  boardW: number,
-  boardH: number,
-): void {
-  const trayH = 5;
-  const trayDepth = 14;
-  const along = boardW - 10;
-  const lx = tc * FLOOR;
-  const ly = trayDepth / 2 + 1.5; // proud of the wall plane
-  const up = uc * WALL_H - boardH / 2 - trayH - 1.5; // top of the ledge just under the board
-  box(ctx, fit, lx, ly, along, trayDepth, trayH, WHITEBOARD.tray, up);
-  // Front catch-lip — darker and a touch taller, so the ledge reads as a tray and not a slab.
-  box(ctx, fit, lx, ly + trayDepth / 2 - 1.5, along - 2, 3, trayH + 2.5, WHITEBOARD.trayLip, up);
-  const propUp = up + trayH;
-
-  /** A dry-erase marker lying on the tray: barrel, fatter cap at one end, felt tip at the other. */
-  const marker = (offset: number, color: string): void => {
-    const mx = lx + offset;
-    const my = ly - 1; // nestled behind the lip
-    box(ctx, fit, mx, my, 15, 4.2, 4.2, color, propUp);
-    box(ctx, fit, mx + 8.5, my, 5, 4.6, 4.6, WHITEBOARD.cap, propUp);
-    box(ctx, fit, mx - 7.5, my, 2.5, 2.8, 2.8, shade(color, 0.7), propUp + 0.7);
-  };
-  marker(-along / 2 + 16, WHITEBOARD.markerBlack);
-  marker(-along / 2 + 36, WHITEBOARD.markerBlue);
-  marker(-along / 2 + 56, WHITEBOARD.ink);
-
-  // The felt eraser — a squat block with a darker pad on top.
-  const ex = lx + along / 2 - 14;
-  box(ctx, fit, ex, ly - 0.5, 13, 9, 5.5, WHITEBOARD.eraser, propUp);
-  box(ctx, fit, ex, ly - 0.5, 12, 8, 1.8, WHITEBOARD.eraserEdge, propUp + 5.5);
-}
-
-/** White dry-erase face, musterd-orange marker ink (`mustard-500`), and the tray's own greys. */
-const WHITEBOARD = {
-  face: '#F7F7F5',
-  ink: '#E1AD01',
-  inkDim: 'rgba(225, 173, 1, 0.55)',
-  shadow: 'rgba(58, 34, 12, 0.16)',
-  /** Hairline aluminium edge — board thickness, NOT a frame. */
-  rim: 'rgba(160, 158, 152, 0.55)',
-  tray: '#B8B5AD',
-  trayLip: '#9A978E',
-  cap: '#E8E6E0',
-  markerBlack: '#2C2C2C',
-  markerBlue: '#3B6FBF',
-  eraser: '#EDE6DA',
-  eraserEdge: '#C9BFAE',
+const PINBOARD = {
+  oak: '#DCBF8E',
+  /** The top lip, where the window light lands. */
+  oakLit: '#F0DCB4',
+  /** Underside and outer edge — the frame's own thickness. */
+  oakShade: '#B9915F',
+  cork: '#C98F52',
+  /** Three freckle tones: two lighter than the cork, one darker, so the surface reads as grain. */
+  fleck: ['#B87C42', '#D9A468', '#AB7038'],
+  /** The frame's shadow falling onto the cork, along the inside of the top lip. */
+  inner: 'rgba(80, 45, 15, 0.35)',
+  cast: 'rgba(58, 34, 12, 0.16)',
+  /** Under each note — paper held off the cork by its tape, not printed onto it. */
+  noteCast: 'rgba(60, 35, 10, 0.26)',
+  /** The washi tab's own highlight; without it the tape is just a painted stripe. */
+  tapeSheen: 'rgba(255, 251, 240, 0.5)',
 } as const;
 
 /**
@@ -1049,7 +1053,6 @@ function drawWalls(
       // The agile board — far-right gap. Must be THIS wall: `+t` runs screen-left on the other one
       // (same constraint that fixed the clock here), and a kanban has a reading direction.
       wallLaneBoard(ctx, fit, edge, wallBoard);
-      whiteboardTray(ctx, fit, WALL_BOARD.tc, WALL_BOARD.uc, WALL_BOARD.w, WALL_BOARD.h);
       return;
     }
     wallHanger(ctx, fit, edge, 0.52, 0.76); // between the windows — where you'd really hang one

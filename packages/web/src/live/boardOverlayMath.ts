@@ -15,12 +15,21 @@ export interface Rect {
  * board's on-screen rect. The panel mounts wearing this (plus opacity 0), then flips to identity a
  * frame later — so opening reads as the wall object growing into your hands, and closing as putting
  * it back. Top-left origin: both rects are viewport-space, so the delta is a plain translate.
+ *
+ * `tiltDeg` is what makes it an *object* rather than a rectangle being scaled. A board lifted off
+ * the wall comes away at a slight angle and swings level as it settles, so the folded state carries
+ * a few degrees of rotation that the flip to identity unwinds through the same easing curve. Zero
+ * tilt emits no `rotate()` at all — there is no reason to hand the compositor a no-op.
  */
-export function zoomTransform(origin: Rect, panel: Rect): string {
+export function zoomTransform(origin: Rect, panel: Rect, tiltDeg = 0): string {
   const sx = panel.width > 0 ? origin.width / panel.width : 1;
   const sy = panel.height > 0 ? origin.height / panel.height : 1;
-  return `translate(${(origin.x - panel.x).toFixed(1)}px, ${(origin.y - panel.y).toFixed(1)}px) scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`;
+  const fold = `translate(${(origin.x - panel.x).toFixed(1)}px, ${(origin.y - panel.y).toFixed(1)}px) scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`;
+  return tiltDeg === 0 ? fold : `${fold} rotate(${tiltDeg}deg)`;
 }
+
+/** How far off square the panel sits while folded onto the wall (degrees). */
+export const OPEN_TILT = -4;
 
 /**
  * Board chrome that owns its own Escape — the compose card and the handoff seat picker close
