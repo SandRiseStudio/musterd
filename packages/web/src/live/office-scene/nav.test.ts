@@ -230,4 +230,25 @@ describe('the front desk blocks', () => {
     // and she never walks, so the grid owes her nothing.
     for (const m of CHECK_IN_MARKS) expect(walkable(m.lx, m.ly), `mark ${m.lx},${m.ly}`).toBe(true);
   });
+
+  it('stands every errand dweller and reader on open floor', () => {
+    // The same failure as the check-in marks, and the one the 2026-08-02 re-cut actually shipped: an
+    // errand stand point inside a footprint still *routes* (findPath nudges the endpoint), so nothing
+    // throws and no other test notices — the walker simply stops somewhere other than where the leg
+    // says, which on screen is a member standing inside the kitchenette. Three of the four were doing
+    // exactly that. Every dwell point a body holds a pose at belongs on floor a body can stand on.
+    const dwells: [string, { lx: number; ly: number }][] = [
+      ['coffee', COFFEE_STAND],
+      ['fridge', FRIDGE_STAND],
+      ['cooler', COOLER_STAND],
+      ['sink', SINK_STAND],
+    ];
+    for (const [name, p] of dwells) expect(walkable(p.lx, p.ly), `${name} (${p.lx},${p.ly})`).toBe(true);
+    // Reading spots are the one leisure "spot" that is a standing place rather than a seat, so they are
+    // held to the same rule. (The seated ones are *meant* to be on furniture.)
+    for (let i = 0; i < LEISURE_SPOTS.length; i++) {
+      const s = LEISURE_SPOTS[i]!;
+      if (s.sit === 0) expect(walkable(s.lx, s.ly), `leisure ${i} ${s.zone} (${s.lx},${s.ly})`).toBe(true);
+    }
+  });
 });
