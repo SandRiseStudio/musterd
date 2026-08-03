@@ -388,3 +388,101 @@ describe('roster resumable_at (ADR 131 inc 5, finding b)', () => {
     expect(ada.resumable_at).toBeGreaterThan(0);
   });
 });
+
+describe('POST /wake-context — residency.context_read audit (ADR 209 follow-up)', () => {
+  async function postAsAda(path: string, body: unknown) {
+    const res = await fetch(base + path, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${agentKey}`,
+        'x-musterd-seat': 'Ada',
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
+  }
+
+  async function directedToAda(id = 'wc1'): Promise<void> {
+    const send = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: makeEnvelope({
+          id,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'Ada' },
+          act: 'message',
+          body: 'orient from the packet',
+        }),
+      },
+      nickCred,
+    );
+    expect(send.status).toBe(201);
+  }
+
+  it('allow path records kind, version, bytes, fetch categories/count, and delivery', async () => {
+    await directedToAda();
+    const r = await postAsAda('/teams/dawn/wake-context', { act_id: 'wc1' });
+    expect(r.status).toBe(200);
+    expect(r.json.context.wake.kind).toBe('reply');
+
+    const rows = audits('residency.context_read');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actor).toBe('Ada');
+    expect(rows[0]!.target).toBe('wc1');
+    expect(rows[0]!.result).toBe('allow');
+    const detail = JSON.parse(rows[0]!.detail as string);
+    expect(detail).toMatchObject({
+      kind: 'reply',
+      version: 1,
+      fetch: ['inbox_thread', 'seat_memory'],
+      fetch_count: 2,
+      delivery: { requirement: 'portable', intended: 'fresh' },
+    });
+    expect(detail.bytes).toBeGreaterThan(0);
+    // Never a body — categories and counts only.
+    expect(JSON.stringify(detail)).not.toContain('orient from the packet');
+  });
+
+  it('forbidden path audits deny without disclosing whether the target exists', async () => {
+    await directedToAda('secret-act');
+    // Bob is not a member yet — use a second agent who is not the recipient.
+    await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nickCred);
+    const res = await fetch(base + '/teams/dawn/wake-context', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${agentKey}`,
+        'x-musterd-seat': 'Bob',
+      },
+      body: JSON.stringify({ act_id: 'secret-act' }),
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error?.code ?? body.code).toBe('forbidden');
+
+    const rows = audits('residency.context_read');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actor).toBe('Bob');
+    expect(rows[0]!.target).toBe('secret-act');
+    expect(rows[0]!.result).toBe('deny');
+    expect(JSON.parse(rows[0]!.detail as string)).toEqual({
+      reason: 'forbidden',
+      target_kind: 'act',
+    });
+  });
+
+  it('forbidden for a missing target looks identical in the audit (no existence leak)', async () => {
+    const r = await postAsAda('/teams/dawn/wake-context', { act_id: 'no-such-act' });
+    expect(r.status).toBe(403);
+    const rows = audits('residency.context_read');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.result).toBe('deny');
+    expect(JSON.parse(rows[0]!.detail as string)).toEqual({
+      reason: 'forbidden',
+      target_kind: 'act',
+    });
+  });
+});

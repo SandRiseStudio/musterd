@@ -2347,19 +2347,44 @@ export async function handleHttp(
       if (method === 'POST' && rest === '/wake-context') {
         const { team, member } = authTouch(ctx, slug, req);
         const target = parseOrBadRequest(WakeContextRequestSchema, await readJson(req));
-        const context = buildWakeContext(ctx.db, team, member, target);
-        const response = WakeContextResponseSchema.parse({ context });
-        appendAudit(ctx.db, team.id, {
-          actor: member.name,
-          action: 'residency.context_read',
-          target: target.act_id ?? target.lane_id ?? '?',
-          result: 'allow',
-          detail: {
-            kind: context.wake.kind,
-            bytes: Buffer.byteLength(JSON.stringify(context), 'utf8'),
-          },
-        });
-        return sendJson(res, 200, response);
+        // Audit both allow and deny (ADR 209 follow-up): an authorization boundary that only records
+        // successes cannot answer "did anyone probe for lanes they do not own". The deny row uses the
+        // request's named id as `target` — same shape as allow — without disclosing whether it exists
+        // (the HTTP response stays a uniform forbidden).
+        try {
+          const context = buildWakeContext(ctx.db, team, member, target);
+          const response = WakeContextResponseSchema.parse({ context });
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'residency.context_read',
+            target: target.act_id ?? target.lane_id ?? '?',
+            result: 'allow',
+            detail: {
+              kind: context.wake.kind,
+              version: context.version,
+              bytes: Buffer.byteLength(JSON.stringify(context), 'utf8'),
+              fetch: context.fetch,
+              fetch_count: context.fetch.length,
+              delivery: context.delivery,
+            },
+          });
+          return sendJson(res, 200, response);
+        } catch (e) {
+          if (e instanceof MusterdError && e.code === 'forbidden') {
+            appendAudit(ctx.db, team.id, {
+              actor: member.name,
+              action: 'residency.context_read',
+              target: target.act_id ?? target.lane_id ?? '?',
+              result: 'deny',
+              detail: {
+                reason: 'forbidden',
+                // Request shape only — not derived from whether the target exists.
+                target_kind: target.act_id !== undefined ? 'act' : 'lane',
+              },
+            });
+          }
+          throw e;
+        }
       }
 
       // The insight report (ADR 050/084) — one server-side projection: flow metrics, the waiting-on
