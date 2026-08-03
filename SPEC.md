@@ -15,7 +15,7 @@ The keywords MUST, SHOULD, MAY are used per RFC 2119.
 musterd coordinates **Teams** of **Members** with shared messaging.
 
 - A **Team** is a named, persistent group — a **standing roster**, not a project. It outlives any task, session, or repository.
-- A **Member** is a durable identity within exactly one Team. `kind` is `agent` or `human` — **humans are first-class Members, not approvers**. A Member has a name (unique within its Team), a free-text role, a **lifecycle** (`forever | session | until <ts>`), an optional **availability** schedule (stored, not enforced), and an optional recurring **working_hours** schedule. A Team may set the default schedule; a Member schedule replaces it for that Member (ADR 204).
+- A **Member** is a durable identity within exactly one Team. `kind` is `agent` or `human` — **humans are first-class Members, not approvers**. A Member has a name (unique within its Team), a free-text role, a **lifecycle** (`forever | session | until <ts>`), an optional **availability** schedule (stored, not enforced), and an optional recurring **working_hours** schedule. A Team may set the default schedule; a Member schedule replaces it for that Member (ADR 205).
 - A **Presence** is where a Member is currently attached — a **Surface** such as `cli`, `claude-code`, or `codex`. One Member MAY have multiple simultaneous Presences (like a person on desktop + phone). **A Member is not a session.**
 - The server routes each message to wherever the recipient is present; an offline recipient's messages remain in the durable log and surface via their **Inbox** (cursor-based).
 

@@ -548,7 +548,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    // v29 — recurring Team/Member working hours (ADR 204). Nullable JSON keeps the schedule
+    // v29 — recurring Team/Member working hours (ADR 205). Nullable JSON keeps the schedule
     // informational and preserves the v1 DDL; the shared WorkingHoursSchema validates writes.
     version: 29,
     up: (db) => {
@@ -557,7 +557,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    // v30 — initial revive Team schedule (ADR 204). Only fill an unset value: an operator's
+    // v30 — initial revive Team schedule (ADR 205). Only fill an unset value: an operator's
     // explicit schedule must survive an upgrade, while the shipped revive Team gets its first
     // durable schedule without requiring a settings surface.
     version: 30,

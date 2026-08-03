@@ -62,7 +62,7 @@ hand someone a spectator view without provisioning them a real seat.
   a distance-driven walk cycle, a seated pose with the hands typing on the desk, and eased sit/stride
   blends. ADR 086 layers ambient life (idle strolls, gestures) on top; the scene idle-parks to 0 rAF/sec
   when nobody is working. A read-only working-hours sign is painted from the Team schedule projection
-  (Member inheritance is resolved by the daemon), including timezone and weekday grouping (ADR 204).
+  (Member inheritance is resolved by the daemon), including timezone and weekday grouping (ADR 205).
 - **Stream** (`live/Stream.tsx`) — the legible half: the act feed, newest-last, live rows type out,
   threaded replies indent, day/now dividers. This is where a human reads the team.
 - **Roster** (`live/RosterPanel.tsx`) — posture + offline reason + governance (ADR 138/141/070):

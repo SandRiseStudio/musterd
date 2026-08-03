@@ -93,7 +93,7 @@ export const TeamFileSchema = z.object({
   slug: z.string().regex(/^[a-z0-9-]{1,32}$/),
   display: z.string().optional(),
   lifecycle: LifecycleSchema.default('forever'),
-  working_hours: WorkingHoursSchema.optional(), // recurring informational schedule (ADR 204)
+  working_hours: WorkingHoursSchema.optional(), // recurring informational schedule (ADR 205)
 });
 export const SeatFileSchema = z
   .object({

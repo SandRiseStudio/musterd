@@ -19,7 +19,7 @@ export interface TeamRow {
   agent_key_hash: string | null;
   /** v0.3 P3 (ADR 076): team governance policy as JSON (`{ allow_pre_issued_grants }`). NULL ⇒ defaults. */
   policy: string | null;
-  /** Recurring Team schedule, JSON-encoded; null means no Team default (ADR 204). */
+  /** Recurring Team schedule, JSON-encoded; null means no Team default (ADR 205). */
   working_hours: string | null;
   created_at: number;
   updated_at: number;
@@ -34,7 +34,7 @@ export interface MemberRow {
   lifecycle: 'forever' | 'session' | 'until';
   lifecycle_until: number | null;
   availability: string | null;
-  /** Recurring Member schedule, JSON-encoded; null inherits the Team default (ADR 204). */
+  /** Recurring Member schedule, JSON-encoded; null inherits the Team default (ADR 205). */
   working_hours: string | null;
   token_hash: string | null;
   /** Held-since (ADR 058): set on first authenticated touch, cleared on rotation/reclaim. Null ⇒

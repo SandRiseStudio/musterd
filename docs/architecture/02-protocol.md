@@ -97,7 +97,7 @@ Base `http://localhost:4849`. JSON in/out. Auth via `Authorization: Bearer <memb
 
 Roster projections also carry optional `working_hours`. A Team schedule is inherited by Members
 without their own schedule; a Member schedule replaces it wholesale. The value is recurring and
-informational—no Presence or schedule enforcement is performed (ADR 204).
+informational—no Presence or schedule enforcement is performed (ADR 205).
 
 The WS `send` and HTTP `POST …/messages` share one validation+route path on the server (`03-server.md`).
 
