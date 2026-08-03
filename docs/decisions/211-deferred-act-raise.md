@@ -171,6 +171,11 @@ expired.
 - No new act, table, column, migration, or wake kind. The acts enum is untouched.
 - Deferring a lane is out of scope: lane state and `depends_on` already express parked work, and a
   second vocabulary for blocked work is a cost without a case.
+- 2026-08-03: [ADR 214](214-raised-deferral-wakes.md) supersedes §4's closing sentence. That sentence
+  named `loops.*` and the seat's `flow` as the controls a later increment would enable raised acts
+  behind; both gate board-triggered **work-order** wakes and state that inbox reply wakes are
+  unchanged by them, so neither could gate a raised deferral. ADR 214 records the control that
+  actually fits and the lane a raised act takes.
 
 ## Observability & Evaluation
 

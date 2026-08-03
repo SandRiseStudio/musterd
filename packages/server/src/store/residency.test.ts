@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { appendAudit, listAudit } from './audit.js';
 import { openLane } from './lanes.js';
-import { addMember } from './members.js';
+import { addMember, getMemberByName } from './members.js';
 import { insertMessage } from './messages.js';
 import { attach } from './presence.js';
 import {
@@ -398,6 +398,76 @@ describe('claimWakeLeases — a deferred act is not a wake reason (ADR 211 §4)'
       meta: { defer_ref: 'u1', until: { reply: true } },
     });
     expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+});
+
+describe('claimWakeLeases — raised deferrals as wake candidates (ADR 211 increment 2)', () => {
+  /** Ada defers an urgent directed act until lane L1, then L1 moves. */
+  function deferredThenRaised(policy?: Record<string, unknown>) {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, policy);
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+    msg(db, team, ada, null, 'wait', 'w1', 2_000, {
+      meta: { defer_ref: 'u1', until: { lane: 'L1' } },
+    });
+    msg(db, team, nick, null, 'message', 'l1', 3_000, {
+      meta: { lane_state: { lane: 'L1', state: 'done' } },
+    });
+    return { db, team };
+  }
+
+  it('stays suppressed while the knob is off — the launch default', () => {
+    const { db, team } = deferredThenRaised();
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('wakes once the knob is on', () => {
+    const { db, team } = deferredThenRaised({ raised_deferral_wakes: true });
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.act_id).toBe('u1');
+  });
+
+  it('takes the BATCHED lane even though the act was urgent — a deferral must not jump the line', () => {
+    const { db, team } = deferredThenRaised({ raised_deferral_wakes: true });
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders[0]!.lane).toBe('batched');
+    expect(orders[0]!.derivation).toBe('batched');
+  });
+
+  it('does not wake a deferral whose condition has NOT fired, knob on', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { raised_deferral_wakes: true });
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+    msg(db, team, ada, null, 'wait', 'w1', 2_000, {
+      meta: { defer_ref: 'u1', until: { lane: 'L1' } },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('respects a seat pinned to the interrupt lane: batched is closed, so nothing is ordered', () => {
+    const { db, team } = deferredThenRaised({ raised_deferral_wakes: true, lane: 'interrupt' });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('re-deferring after a raise suppresses it again', () => {
+    const { db, team } = deferredThenRaised({ raised_deferral_wakes: true });
+    const ada = getMemberByName(db, team.id, 'Ada')!;
+    const nick = getMemberByName(db, team.id, 'nick')!;
+    msg(db, team, ada, null, 'wait', 'w2', 4_000, {
+      meta: { defer_ref: 'u1', until: { lane: 'L2' } },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+    // ...and raises again when the NEW condition fires.
+    msg(db, team, nick, null, 'message', 'l2', 5_000, {
+      meta: { lane_state: { lane: 'L2', state: 'done' } },
+    });
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.map((o) => o.act_id)).toEqual(['u1']);
   });
 });
 
