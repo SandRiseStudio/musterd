@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   BINDING_DIR,
   BINDING_FILE,
@@ -36,6 +37,55 @@ function walkUpForBinding(startDir: string): string | null {
     if (parent === dir) return null;
     dir = parent;
   }
+}
+
+/**
+ * Seat workspace root that owns `startDir`, if any — the directory holding `.musterd/binding.json`
+ * on the walk-up. `null` when no seat binding is found (packaged installs, bare clones with only a
+ * committed workspace.json, etc.).
+ */
+export function seatWorkspaceRoot(startDir: string): string | null {
+  const bindingFile = walkUpForBinding(startDir);
+  return bindingFile ? resolve(dirname(dirname(bindingFile))) : null;
+}
+
+/** Warn-once pairs — see ADR 213. stderr is safe: the MCP protocol channel is stdout. */
+const warnedForeignBinary = new Set<string>();
+
+/**
+ * **The reverse ADR 143 guard** (ADR 213). ADR 143 refuses a foreign `MUSTERD_BINDING` when cwd has
+ * its own seat. This warns when the *running module* lives under a different seat workspace than the
+ * identity we just resolved — the measured 2026-08-03 shape (miley's `dist/index.js`, izzo's cwd).
+ *
+ * Warn-only, never throws: a hard refuse would kill intentional shared-checkout launches; make the
+ * disagreement loud the same way unattested-seat / contested-surface warnings do. Packaged installs
+ * (no seat binding above the module path) stay silent.
+ */
+export function warnForeignAdapterWorkspace(moduleUrl: string | URL, identityDir: string): void {
+  let modulePath: string;
+  try {
+    modulePath =
+      typeof moduleUrl === 'string' && moduleUrl.startsWith('file:')
+        ? fileURLToPath(moduleUrl)
+        : typeof moduleUrl === 'string'
+          ? moduleUrl
+          : fileURLToPath(moduleUrl);
+  } catch {
+    return;
+  }
+  const binaryRoot = seatWorkspaceRoot(dirname(modulePath));
+  if (!binaryRoot) return; // not running from inside a seat worktree — packaged / bare path
+  const identityRoot = resolve(identityDir);
+  if (binaryRoot === identityRoot) return;
+  const key = `${binaryRoot}\0${identityRoot}`;
+  if (warnedForeignBinary.has(key)) return;
+  warnedForeignBinary.add(key);
+  console.error(
+    `[musterd] adapter binary lives under seat workspace ${binaryRoot}, but this session's ` +
+      `identity resolves to ${identityRoot}. You are running one seat's code as another seat — ` +
+      `the reverse of the ADR 143 env leak (ADR 213). Point this harness's MCP entry at this ` +
+      `workspace's own packages/mcp dist (or a packaged @musterd/mcp), then reload.`,
+  );
 }
 
 /**

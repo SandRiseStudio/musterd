@@ -82,6 +82,13 @@ launch, an explicit `team_join {as:X}` **re-reads `binding.json`** from `binding
 in-session identity repair (a re-provisioned grant for that seat) takes effect without a full MCP
 reconnect. A binding for a _different_ seat is left untouched.
 
+**Cross-worktree binary guard (ADR 213).** ADR 143 refuses a foreign `MUSTERD_BINDING` when the cwd
+workspace already has a seat. The reverse shape — adapter module under seat workspace A, identity
+resolved to seat workspace B (measured: miley's `dist/index.js` with izzo's cwd) — warns once on
+stderr at config load and does not refuse to boot. Packaged installs (no seat binding above the
+module path) stay silent. Fix by pointing the harness MCP entry at this workspace's own dist (or a
+packaged `@musterd/mcp`) and reloading.
+
 On `team_join` the adapter sends two attach-time facts on the `hello` (provenance/where seed, ADR 014): **`provenance`** (from `MUSTERD_PROVENANCE`, default `session`) and a **`workspace`** label resolved once at load — the declared `MUSTERD_WORKSPACE` if set, else a gracefully-degrading auto-label (`cwd` folder, qualified by git branch when informative, else the cwd subpath within the repo, else the bare folder). Both are read context only — they carry no routing/auth meaning — and surface dim on the roster (`online via claude-code (session) · repo@branch`).
 
 ### Dormant by default (v0.2 M3 / ADR 007)
@@ -341,7 +348,7 @@ src/
   claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() + adoptIdentity() (live claim, ADR 034)
   harness.ts      // bounded MCP clientInfo capture: adapter-local harness diagnostics, never model inference (ADR 120)
   pending.ts      // pending markers (.musterd/pending/<code>.json) + resolution sidecars (ADR 034)
-  binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI); clearGrantFromBinding on stale-grant refuse (ADR 193)
+  binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI); clearGrantFromBinding on stale-grant refuse (ADR 193); ADR 143 env leak guard + ADR 213 foreign-binary warn
   brand.ts        // canonical chip SVG + MCP serverInfo.icons data URI (ADR 154)
   workspace.ts    // the gracefully-degrading "where" label captured at join (ADR 014)
   otel.ts         // cross-runtime trace-context propagation through the envelope (ADR 011)

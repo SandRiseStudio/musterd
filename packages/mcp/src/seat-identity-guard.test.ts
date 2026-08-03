@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { findBinding, resolveBindingDir } from './binding.js';
+import { findBinding, resolveBindingDir, warnForeignAdapterWorkspace } from './binding.js';
 
 /**
  * The seat-identity guard (ADR 143) — a regression suite for a real incident, written to reproduce it.
@@ -118,5 +118,55 @@ describe('what the guard must NOT break', () => {
     mkdirSync(sub, { recursive: true });
     expect(findBinding(sub, {})?.claim.name).toBe('miley');
     expect(resolveBindingDir(sub, {})).toBe(miley);
+  });
+});
+
+describe('the reverse leak — foreign binary, local identity (ADR 213)', () => {
+  /** Measured 2026-08-03: miley's dist running with izzo's cwd. */
+  const foreignModule = (): string => join(miley, 'packages', 'mcp', 'dist', 'index.js');
+
+  it('warns when the adapter module lives under a different seat workspace than the identity', () => {
+    const err = vi.spyOn(console, 'error');
+    warnForeignAdapterWorkspace(foreignModule(), dolly);
+    expect(err).toHaveBeenCalledOnce();
+    expect(err.mock.calls[0]?.[0]).toMatch(/adapter binary lives under seat workspace/);
+    expect(err.mock.calls[0]?.[0]).toMatch(/ADR 213/);
+  });
+
+  it('is quiet when the module and the identity share a workspace', () => {
+    const err = vi.spyOn(console, 'error');
+    warnForeignAdapterWorkspace(foreignModule(), miley);
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  it('is quiet for a packaged install (no seat binding above the module path)', () => {
+    const bare = join(
+      root,
+      'npm-global',
+      'lib',
+      'node_modules',
+      '@musterd',
+      'mcp',
+      'dist',
+      'index.js',
+    );
+    mkdirSync(dirname(bare), { recursive: true });
+    writeFileSync(bare, '// stub\n');
+    const err = vi.spyOn(console, 'error');
+    warnForeignAdapterWorkspace(bare, dolly);
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  it('warns on stderr, never stdout — stdout is the MCP stdio transport', () => {
+    const out = vi.spyOn(console, 'log').mockImplementation(() => {});
+    warnForeignAdapterWorkspace(foreignModule(), dolly);
+    expect(out).not.toHaveBeenCalled();
+  });
+
+  it('warns at most once per binary/identity pair in a process', () => {
+    const err = vi.spyOn(console, 'error');
+    warnForeignAdapterWorkspace(foreignModule(), dolly);
+    warnForeignAdapterWorkspace(foreignModule(), dolly);
+    expect(err).toHaveBeenCalledOnce();
   });
 });
