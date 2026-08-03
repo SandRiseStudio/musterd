@@ -773,15 +773,19 @@ export function labelSweepDue(now = Date.now(), env: NodeJS.ProcessEnv = process
   }
 }
 
+/**
+ * The label-sweep nudge text, budgeted by the standing-context gate (`pnpm context:check`, ADR 212).
+ * It rides the per-turn UserPromptSubmit hook whenever a sweep is due, so it is paid at per-turn
+ * rates — trimmed to the trigger, with the procedure left to the skill it names.
+ */
+export const LABEL_NUDGE_TEXT =
+  'musterd: unlabeled seat sessions need a sidebar chip — run the musterd-label-sessions skill now.';
+
 /** `session label-nudge` — hook-driven, hence silent-or-one-line and never failing. */
 function labelNudgeCommand(): number {
   try {
     if (labelSweepDue()) {
-      process.stdout.write(
-        'musterd: unlabeled seat sessions still need a sidebar chip — run the musterd-label-sessions ' +
-          'skill NOW (list sessions, pipe through `musterd session resolve-labels --stdin`, apply ' +
-          'the renames). The nudge stays quiet once nothing labelable remains.\n',
-      );
+      process.stdout.write(`${LABEL_NUDGE_TEXT}\n`);
     }
   } catch {
     // hook contract: never fail, never noise
