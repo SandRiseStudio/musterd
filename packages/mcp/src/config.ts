@@ -11,7 +11,12 @@ import {
 } from '@musterd/protocol';
 import { readBuildStamp } from '@musterd/protocol/build-stamp';
 import { ulid } from 'ulid';
-import { findBinding, findWorkspaceSpec, resolveBindingDir } from './binding.js';
+import {
+  findBinding,
+  findWorkspaceSpec,
+  resolveBindingDir,
+  warnForeignAdapterWorkspace,
+} from './binding.js';
 import { resolveDriver, resolveModel, resolveProvenance, resolveWorkspace } from './workspace.js';
 
 /**
@@ -248,6 +253,9 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   // must be unique per live socket; the collapse-by-seat request dedup already handles its churn.
   const codeSeed =
     claim.mode === 'seat' ? [team, workspace, claim.name, surface].join('\0') : undefined;
+  const bindingDir = resolveBindingDir(process.cwd(), env);
+  // ADR 213 — reverse of ADR 143: binary under seat A, identity under seat B.
+  warnForeignAdapterWorkspace(import.meta.url, bindingDir);
   return {
     server,
     team,
@@ -277,7 +285,7 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     claim,
     connId: ulid(),
     claimCode: shortCode(codeSeed),
-    bindingDir: resolveBindingDir(process.cwd(), env),
+    bindingDir,
   };
 }
 
