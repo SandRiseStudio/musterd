@@ -7,13 +7,22 @@ import type { McpConfig } from './config.js';
 import { WRITE_TOOLS } from './scope.js';
 import { TOOL_NAMES } from './toolNames.js';
 import { buildMcpServer } from './index.js';
+import { measureToolSurface } from './surfaceMeasure.js';
 
 /**
  * Scope-by-role end to end (ADR 144 inc 5): what a harness actually receives from `tools/list`.
  * `scope.test.ts` pins the pure projection; this pins that `buildMcpServer` honours it through the
- * real SDK — the registration seam is a monkey-patch, so only a real listing proves it took.
+ * real SDK — the registration seam is a monkey-patch, so only a real listing proves it took. The
+ * in-memory listing itself lives in `surfaceMeasure.ts`, shared with the standing-context budget.
  */
 
+async function listToolsFor(capabilities?: Capabilities) {
+  const s = await measureToolSurface(capabilities);
+  return { names: (s.breakdown ?? []).map((b) => b.tool), bytes: s.bytes };
+}
+
+// Kept for the one test that must CALL a scoped-out tool (listing alone can't prove the handler
+// is gone); the listing measurements above go through the shared `measureToolSurface`.
 const fakeClient = { member: 'Ada' } as unknown as MusterdClient;
 
 function configWith(capabilities?: Capabilities): McpConfig {
@@ -28,21 +37,6 @@ function configWith(capabilities?: Capabilities): McpConfig {
     bindingDir: process.cwd(),
     ...(capabilities ? { capabilities } : {}),
   } as McpConfig;
-}
-
-async function listToolsFor(capabilities?: Capabilities) {
-  const mcp = buildMcpServer(fakeClient, configWith(capabilities), {});
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const harness = new Client({ name: 'scope-harness', version: '0.0.0' });
-  await Promise.all([mcp.connect(serverTransport), harness.connect(clientTransport)]);
-  try {
-    const { tools } = await harness.listTools();
-    const bytes = tools.reduce((n, t) => n + Buffer.byteLength(JSON.stringify(t), 'utf8'), 0);
-    return { names: tools.map((t) => t.name), bytes };
-  } finally {
-    await harness.close();
-    await mcp.close();
-  }
 }
 
 const muted: Capabilities = { ...GENERALIST_CAPABILITIES, can_message: 'none' };

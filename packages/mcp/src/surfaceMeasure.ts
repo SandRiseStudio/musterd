@@ -1,0 +1,45 @@
+import { Client } from '@modelcontextprotocol/client';
+import { InMemoryTransport } from '@modelcontextprotocol/server';
+import type { Capabilities, SurfaceRender } from '@musterd/protocol';
+import type { MusterdClient } from './client.js';
+import type { McpConfig } from './config.js';
+import { buildMcpServer } from './index.js';
+
+/**
+ * Measure what a seat's `tools/list` actually weighs, from the exact listing a harness receives —
+ * an in-memory `buildMcpServer` connect, no daemon. One measurement, two consumers:
+ * `scopeSurface.test.ts` (scope-by-role pins, ADR 144 inc 5) and the standing-context budget gate
+ * (`pnpm context:check`, spec 2026-08-03). The byte formula is `computeSurface`'s
+ * (`toolTelemetry.ts`), so the budget and the inc-1 telemetry attestation can never disagree.
+ */
+export async function measureToolSurface(capabilities?: Capabilities): Promise<SurfaceRender> {
+  const fakeClient = { member: 'Ada' } as unknown as MusterdClient;
+  const config = {
+    server: 'http://127.0.0.1:1',
+    team: 'dawn',
+    agent_key: 'mskey_unused',
+    surface: 'claude-code',
+    provenance: 'session',
+    workspace: 'repo',
+    claim: { mode: 'seat', name: 'Ada' },
+    bindingDir: process.cwd(),
+    ...(capabilities ? { capabilities } : {}),
+  } as McpConfig;
+  const mcp = buildMcpServer(fakeClient, config, {});
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const harness = new Client({ name: 'surface-measure', version: '0.0.0' });
+  await Promise.all([mcp.connect(serverTransport), harness.connect(clientTransport)]);
+  try {
+    const { tools } = await harness.listTools();
+    const breakdown = tools.map((t) => ({
+      tool: t.name.slice(0, 64),
+      bytes: Buffer.byteLength(JSON.stringify(t), 'utf8'),
+      description_bytes: Buffer.byteLength(t.description ?? '', 'utf8'),
+    }));
+    const bytes = breakdown.reduce((n, b) => n + b.bytes, 0);
+    return { tools: tools.length, bytes, est_tokens: Math.round(bytes / 4), breakdown };
+  } finally {
+    await harness.close();
+    await mcp.close();
+  }
+}
