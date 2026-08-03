@@ -138,9 +138,13 @@ export const PODS: Pod[] = [
     rug: { shape: 'rect', weave: 'border', fill: '#93a9a4', mark: '#75908a' },
   },
   {
+    // The room's other quad. It sat at (620, 570) hard against the right column and was the hub of
+    // the last crowding: 18 units to the meeting rug, 21 to one window desk, 31 to the other. West
+    // into the middle is where the space is — the huddle, the centre duo and pod 3's second desk all
+    // came out of that band, and nothing had moved in to use it.
     id: 1,
-    cx: 620,
-    cy: 570,
+    cx: 560,
+    cy: 545,
     axis: 'ew',
     size: 4,
     rug: { shape: 'rect', weave: 'stripes', fill: '#97a7b8', mark: '#7c8ca0' },
@@ -413,11 +417,12 @@ export const ENTRANCE = { lx: 47, ly: 815 };
  * seats, all of them approachable, and a head seat at each end reads more like a meeting anyway.
  */
 export const MEETING = {
-  // 700 → 580. West far enough that the front-right window desk clears its rug, which is what lets
-  // both window desks sit on the right wall without touching pod 1. The front strip now reads
-  // left-to-right as reception · lane · centre duo · meeting, with a clear band between each.
-  lx: 580,
-  ly: 800,
+  // 700 → 580 → 500. Each step west has been paying for the same thing: the front-right corner was
+  // carrying the meeting zone AND a standalone window desk AND the bottom of pod 1, and 21 units
+  // between a rug and a desk is not a gap, it is a collision that happens to miss. At 500 the corner
+  // holds one desk, and the meeting rug is 101 units clear of it.
+  lx: 500,
+  ly: 805,
   // Downsized 170×92 → 150×80 (2026-08-02), and no further — this table's size is pinned by its SEATS,
   // not by taste. Shrinking it pulls the head chairs inward, and a head chair that closes on the
   // near side chair collapses the two into one smeared avatar on screen (the exact failure `MIN_SPOT_GAP`
