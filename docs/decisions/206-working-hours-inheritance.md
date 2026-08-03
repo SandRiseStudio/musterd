@@ -1,4 +1,4 @@
-# ADR 205 — Team and Member working-hours inheritance
+# ADR 206 — Team and Member working-hours inheritance
 
 **Date:** 2026-08-03
 **Status:** accepted

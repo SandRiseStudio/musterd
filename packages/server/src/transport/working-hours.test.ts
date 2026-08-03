@@ -12,7 +12,7 @@ afterEach(async () => {
   server = undefined;
 });
 
-describe('working-hours roster projection (ADR 205)', () => {
+describe('working-hours roster projection (ADR 206)', () => {
   it('inherits Team hours and lets a Member replace them', async () => {
     const db = openDb(':memory:');
     const teamHours = {
