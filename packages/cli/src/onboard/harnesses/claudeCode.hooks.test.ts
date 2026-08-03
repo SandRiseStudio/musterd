@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Real fs here (unlike claudeCode.test.ts, which mocks node:fs) so the hook writer round-trips to disk.
 import {
+  HOOK_NUDGE_TEXTS,
   inspectClaudeHookDrift,
   installMusterdHooks,
   NOTIFICATION_HOOK_MARKER,
@@ -293,6 +294,19 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
       expect(drift[0]).toContain('present but STALE');
       expect(drift[0]).toContain('installed epoch 0');
     });
+  });
+
+  it('every budgeted nudge text appears verbatim inside its installed hook command', () => {
+    // The constants are the standing-context budget's source of truth (spec 2026-08-03); if a
+    // command stops embedding one, the budget silently measures dead text — so pin the embedding.
+    installMusterdHooks();
+    const global = read(globalPath());
+    const commands = [cmdFor(global, 'SessionStart'), cmdFor(global, 'UserPromptSubmit')].join(
+      '\n',
+    );
+    for (const [key, text] of Object.entries(HOOK_NUDGE_TEXTS)) {
+      expect(commands, key).toContain(text);
+    }
   });
 
   it('removal reverses the local Notification hook and preserves the user’s own hooks', () => {

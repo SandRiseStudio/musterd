@@ -190,6 +190,30 @@ function sessionMsgHookCommand(): string {
   );
 }
 
+/**
+ * The model-readable nudge texts, budgeted by the standing-context gate (spec 2026-08-03,
+ * `pnpm context:check`). Each is embedded verbatim in exactly one `echo` in the hook commands
+ * below — the hooks test pins the embedding, so a reword here is a reword on the wire.
+ */
+export const HOOK_NUDGE_TEXTS = {
+  orientation_joined:
+    'You are on a musterd team (your seat auto-claims on your first team_* tool call). Run ' +
+    'team_inbox_check now to join and see anything waiting. Only call team_join if a tool says you ' +
+    'are not joined.',
+  orientation_wire_fix:
+    'musterd: this repo has a committed musterd launch spec but the MCP server is NOT ' +
+    'registered on this machine — run `musterd wire` in this folder (no prompts), then reload this ' +
+    'session to pick up the team_* tools.',
+  orientation_init_fix:
+    'musterd: this folder has the musterd:start primer but the musterd MCP server is NOT ' +
+    'registered here — the team_* tools are unavailable. Run `musterd init` in this folder (or ' +
+    '`musterd init --check` to confirm), then reload this session.',
+  prompt_submit_ritual:
+    'musterd: if you finished a unit of work since your last update, post a one-line ' +
+    'team_send status_update (flips you to working: on the roster); then team_inbox_check for ' +
+    'replies.',
+} as const;
+
 function sessionStartHookCommand(): string {
   // Global self-gating verify-then-orient (ADR 060): exit silently unless this folder carries the
   // committed `musterd:start` primer; else cd in, and if `claude` is on PATH and `mcp get musterd`
@@ -205,15 +229,9 @@ function sessionStartHookCommand(): string {
     'cd "$d" 2>/dev/null; ' +
     'if command -v claude >/dev/null 2>&1 && ! claude mcp get musterd >/dev/null 2>&1; then ' +
     'if [ -f "$d/.musterd/workspace.json" ]; then ' +
-    "echo 'musterd: this repo has a committed musterd launch spec but the MCP server is NOT " +
-    'registered on this machine — run `musterd wire` in this folder (no prompts), then reload this ' +
-    "session to pick up the team_* tools.'; else " +
-    "echo 'musterd: this folder has the musterd:start primer but the musterd MCP server is NOT " +
-    'registered here — the team_* tools are unavailable. Run `musterd init` in this folder (or ' +
-    "`musterd init --check` to confirm), then reload this session.'; fi; else " +
-    "echo 'You are on a musterd team (your seat auto-claims on your first team_* tool call). Run " +
-    'team_inbox_check now to join and see anything waiting. Only call team_join if a tool says you ' +
-    "are not joined.'; fi; " +
+    `echo '${HOOK_NUDGE_TEXTS.orientation_wire_fix}'; else ` +
+    `echo '${HOOK_NUDGE_TEXTS.orientation_init_fix}'; fi; else ` +
+    `echo '${HOOK_NUDGE_TEXTS.orientation_joined}'; fi; ` +
     // ADR 135 freshness probe: one line when this checkout's CLI dist differs from the daemon, so a
     // stale worktree learns at minute 0 instead of after an hour of "but I merged it". Guarded (only
     // when `musterd` resolves), read-only, ≤2s, and never failing — the hook contract stays intact.
@@ -241,9 +259,7 @@ function promptSubmitHookCommand(): string {
   // epoch-guards like every other musterd hook.
   return (
     'f="${CLAUDE_PROJECT_DIR:-.}/AGENTS.md"; test -f "$f" && grep -q musterd:start "$f" || exit 0; ' +
-    "echo 'musterd: if you finished a unit of work since your last update, post a one-line " +
-    'team_send status_update (flips you to working: on the roster); then team_inbox_check for ' +
-    "replies.'; " +
+    `echo '${HOOK_NUDGE_TEXTS.prompt_submit_ritual}'; ` +
     'command -v musterd >/dev/null 2>&1 && musterd session label-nudge 2>/dev/null || true ' +
     `# ${PROMPTSUBMIT_HOOK_MARKER} ${epochTag(FEATURE_EPOCH)}`
   );

@@ -104,6 +104,7 @@ export function primerInstructions(config: McpConfig): string {
 /** The canonical registered-tool names (ADR 085) — kept in a dependency-free module so the guidance
  * drift check can import it without the MCP SDK; re-exported here for normal consumers. */
 export { TOOL_NAMES } from './toolNames.js';
+export { measureToolSurface } from './surfaceMeasure.js';
 
 /** Tools that must NOT trigger the deferred launch autojoin: an explicit `team_join` supersedes the
  * implicit one (firing both would claim twice), and a `team_leave` must never cause a join. */
