@@ -147,6 +147,52 @@ function warnUnattestedSeat(
 }
 
 /**
+ * **Surface drift.** The harness a seat *declares* contradicted by the one that actually ran.
+ *
+ * `surface` resolves `env > binding.json > committed workspace.json` and is then simply believed.
+ * `model` outgrew that — ADR 158 gave it an observation path that corrects it at the tool boundary —
+ * and surface was left on whatever declaration it was born with. It is not cosmetic: it labels every
+ * presence row, every audit entry, and the roster, all of which present it as fact.
+ *
+ * A capture in the binding is the evidence the declaration lacks. Hooks are harness-specific by
+ * construction — the Claude Code capture writes `harness: 'claude-code'`, the Cursor hook writes
+ * `'cursor'` — so a capture is proof that harness ran *here*. Measured across eleven seat worktrees
+ * on 2026-08-03, exactly one disagreed: a seat declaring `cursor` whose session and model observation
+ * were both written by `claude-code`, from a `MUSTERD_SURFACE` baked into a pre-ADR-165
+ * `.cursor/mcp.json` — the top of the ladder, where nothing can correct it.
+ *
+ * This warns; it deliberately does not re-rank. Promoting the observation above `binding` would not
+ * even fix the measured seat (its stale value is in `env`, a rung higher), and promoting it above
+ * `env` would break the documented manual override. Whatever order you pick, a baked value at the
+ * top can still lie — so make the contradiction visible rather than re-rank the liars.
+ *
+ * Silent unless something was actually captured: a declaration alone is not a contradiction, and
+ * Codex has no hook path at all, so warning on absence would fire forever on every Codex seat.
+ */
+function warnContestedSurface(
+  claim: ClaimPolicy,
+  surface: Surface,
+  binding: ReturnType<typeof findBinding>,
+  fromEnv: boolean,
+): void {
+  if (claim.mode !== 'seat' || !binding) return;
+  // Either capture is the same class of evidence — a hook of that harness fired in this workspace.
+  // The session is preferred: it is the harness running *now*, where the observation may predate a
+  // switch. `?? undefined` because a binding read from disk may carry neither.
+  const ran = binding.session?.harness ?? binding.model_observed?.harness;
+  if (!ran || ran === surface) return;
+  const source = fromEnv
+    ? `MUSTERD_SURFACE=${surface} in this harness's MCP entry (a baked value outranks binding.json and no observation can correct it — \`musterd wire\` rewrites the entry without it)`
+    : `"surface": "${surface}" in .musterd/binding.json (\`musterd agent ${claim.name}\` here rewrites it)`;
+  console.error(
+    `[musterd] seat "${claim.name}" reports surface "${surface}", but the session in this workspace ` +
+      `was captured by "${ran}" — a ${ran} hook only fires under ${ran}, so the declaration is the ` +
+      `stale one. It is what the roster, presence and audit will say this seat is running. ` +
+      `Fix: ${source}.`,
+  );
+}
+
+/**
  * Read + validate the MCP server's identity binding (05-mcp.md). Aligned with the CLI (ADR 018):
  * `MUSTERD_*` env wins (the host-injection contract / hosted setups with no writable fs), then the
  * workspace `.musterd/binding.json` — the same file the CLI reads, so the two can't drift.
@@ -195,6 +241,7 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   // is what makes it true; see there.
   const attestation = attestationFor(binding, env);
   warnUnattestedSeat(claim, attestation.model, binding !== null);
+  warnContestedSurface(claim, surface, binding, env['MUSTERD_SURFACE'] !== undefined);
   // A seat-mode session gets a stable disambiguation code (ADR 087) keyed by what makes it the same
   // seat across relaunches: team + workspace + seat name + surface. Role/chat sessions keep a fresh
   // per-process code (see shortCode). `connId` stays a fresh ulid — it's the transport/hub identity and

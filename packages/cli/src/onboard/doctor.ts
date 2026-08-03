@@ -500,6 +500,22 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
         `in the harness MCP entry, which provisioning no longer writes).`,
     );
   }
+  // The same tripwire, one field over. `surface` never got the observation path `model` did (ADR 158),
+  // so it is believed on the strength of a declaration alone — while labelling every presence row,
+  // audit entry and roster line as fact. A capture is the evidence the declaration lacks: hooks are
+  // harness-specific by construction, so a `claude-code` capture is proof Claude Code ran here.
+  // Measured across eleven seat worktrees 2026-08-03 — one disagreed, declaring `cursor` while both
+  // its session and its model observation were written by `claude-code`.
+  const ranHarness = binding?.session?.harness ?? binding?.model_observed?.harness;
+  if (ranHarness && binding?.surface && binding.surface !== ranHarness) {
+    drift.push(
+      `this workspace declares surface "${binding.surface}" but its session here was captured by ` +
+        `"${ranHarness}" — a ${ranHarness} hook only fires under ${ranHarness}, so the declaration is ` +
+        `the stale one, and it is what the roster, presence and audit report this seat is running. ` +
+        `Correct it in .musterd/binding.json (and check for a baked MUSTERD_SURFACE in the harness ` +
+        `MCP entry, which outranks the binding and which no observation can reach).`,
+    );
+  }
 
   const installed = harnesses.filter((h) => h.installed);
   const anyConfigured = installed.some((h) => h.configured);
