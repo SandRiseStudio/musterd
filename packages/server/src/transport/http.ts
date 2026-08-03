@@ -2628,6 +2628,16 @@ export async function handleHttp(
               ...(lane.merged ? { merged: lane.merged } : {}),
               // ADR 188: the achieved rung of the diversity ladder rides beside the historical
               // two-value route, so a cross_model routing is never mistaken for a cross_family one.
+              //
+              // THIS GRADE IS THE ROUTING DECISION, NOT THE VERDICT'S WORTH. It is true when the ask
+              // is composed and is never revised — deliberately, because rewriting it to match the
+              // outcome would destroy the ability to ask why a seat was chosen. The grade that says
+              // what the review was actually worth is re-derived from LIVE attestations at close
+              // (`laneClose.ts`), and the two legitimately disagree when a seat changes model
+              // between being asked and answering — which happens: a reviewer routed cross_model
+              // re-attested to the worker's own model inside one 5-minute window on 2026-08-02.
+              // Read the CLOSE row for diversity claims (ADR 056 counts from there); read this one
+              // for routing behaviour. Mistaking the two reads a false defect into a healthy system.
               ...(pick
                 ? {
                     reviewer: pick.reviewer,
