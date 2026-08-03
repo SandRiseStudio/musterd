@@ -45,7 +45,7 @@ describe('walkability grid', () => {
     // a desk slab is solid
     expect(walkable(DESK_SLOTS[0]!.lx, DESK_SLOTS[0]!.ly)).toBe(false);
     // reception's waiting chair is solid, but the rug it stands on is floor
-    expect(walkable(RECEPTION.chairA.lx, RECEPTION.chairA.ly)).toBe(false);
+    expect(walkable(RECEPTION.chair.lx, RECEPTION.chair.ly)).toBe(false);
     expect(walkable(RECEPTION.rug.lx - 90, RECEPTION.rug.ly)).toBe(true);
     // the nook couch is solid; the open rug in front of the away arc is floor
     expect(walkable(NOOK.lx + 34, NOOK.ly - 2)).toBe(false);

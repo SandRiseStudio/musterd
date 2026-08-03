@@ -80,10 +80,9 @@ function solidRects(): Rect[] {
   for (const c of MEETING.chairs) {
     out.push(rect(MEETING.lx + c.dx, MEETING.ly + c.dy, MEETING.chairSize, MEETING.chairSize, 4));
   }
-  // Reception's waiting pair. Padded like the other chairs so each one's own seat spot stays
-  // reachable — a chair that blocks its own approach is a seat nobody can walk to.
-  out.push(rect(RECEPTION.chairA.lx, RECEPTION.chairA.ly, WAIT_CHAIR, WAIT_CHAIR, 4));
-  out.push(rect(RECEPTION.chairB.lx, RECEPTION.chairB.ly, WAIT_CHAIR, WAIT_CHAIR, 4));
+  // Reception's waiting chair. Padded like the other chairs so its own seat spot stays reachable —
+  // a chair that blocks its own approach is a seat nobody can walk to.
+  out.push(rect(RECEPTION.chair.lx, RECEPTION.chair.ly, WAIT_CHAIR, WAIT_CHAIR, 4));
   out.push(rect(RECEPTION.endTable.lx, RECEPTION.endTable.ly, END_TABLE, END_TABLE));
   out.push(rect(RECEPTION.plant.lx, RECEPTION.plant.ly, 26, 26));
   out.push(rect(PRINTER.lx, PRINTER.ly, PRINTER.w, PRINTER.d));

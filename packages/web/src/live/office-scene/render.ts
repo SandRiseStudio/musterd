@@ -1573,14 +1573,10 @@ function receptionItems(ctx: CanvasRenderingContext2D, fit: Fit, recep: Receptio
       fn: () => drawReceptionist(ctx, fit, recep ?? SLEEPING_RECEPTIONIST, t),
     },
     { d: depth(FRONT_DESK.lx, FRONT_DESK.ly), fn: () => frontDesk(ctx, fit, t, recep?.mode === 'typing') },
-    {
-      d: depth(R.chairA.lx, R.chairA.ly),
-      fn: () => armchair(ctx, fit, R.chairA.lx, R.chairA.ly, PAL.couch, R.chairA.dir, WAIT_CHAIR),
-    },
     { d: depth(R.endTable.lx, R.endTable.ly), fn: () => endTable(ctx, fit, R.endTable.lx, R.endTable.ly) },
     {
-      d: depth(R.chairB.lx, R.chairB.ly),
-      fn: () => armchair(ctx, fit, R.chairB.lx, R.chairB.ly, PAL.couch, R.chairB.dir, WAIT_CHAIR),
+      d: depth(R.chair.lx, R.chair.ly),
+      fn: () => armchair(ctx, fit, R.chair.lx, R.chair.ly, PAL.couch, R.chair.dir, WAIT_CHAIR),
     },
     { d: depth(R.plant.lx, R.plant.ly), fn: () => drawPlant(ctx, fit, R.plant.lx, R.plant.ly, 'fiddle') },
   ];
@@ -2919,11 +2915,46 @@ function chairBase(
   const sn = FWD[dir][1] !== 0;
   const p: [number, number] = [-FWD[dir][1], FWD[dir][0]]; // across-seat unit
   if (style.caster) {
-    // A 5-star caster base: five little wheels on the floor + a central column up to the cushion.
+    // A 5-star caster base: a central column, five ARMS radiating from it, and a wheel at each tip.
+    //
+    // The arms are the whole point of this block. Without them the base was five ellipses and a post
+    // with nothing between — five dots hovering under the seat (nick, 2026-08-03: "it just looks like
+    // 4 floats dots at the bottom"). A star base is *legs*; the wheels are only what the legs stand
+    // on, and drawing the wheels without the legs draws the wrong half of the object.
+    //
+    // `box()` is axis-aligned so it cannot draw a spoke pointing anywhere but N/S/E/W. Each arm is a
+    // projected quad instead: two points at the hub, two at the wheel, tapering outward the way a
+    // real cast-alloy leg does, and lifted just off the floor so it reads as sitting ON the castors.
+    const ARM_R = 14;
+    const LIFT = 3.4;
+    const arms: { d: number; a: number }[] = [];
     for (let i = 0; i < 5; i++) {
       const a = (i / 5) * Math.PI * 2 + 0.4;
-      const wp = project(lx + Math.cos(a) * 14, ly + Math.sin(a) * 14, fit);
-      ellipse(ctx, wp, 4 * fit.scale, 2.3 * fit.scale, dim(color, 0.5));
+      arms.push({ a, d: Math.cos(a) + Math.sin(a) }); // iso depth of the tip
+    }
+    // Back arms before front ones, or a near arm is painted over by the far one across the hub.
+    arms.sort((m, n) => m.d - n.d);
+    for (const { a } of arms) {
+      const ux = Math.cos(a);
+      const uy = Math.sin(a);
+      const px = -uy;
+      const py = ux;
+      const at = (r: number, w: number): Pt => {
+        const s = project(lx + ux * r + px * w, ly + uy * r + py * w, fit);
+        return { x: s.x, y: s.y - LIFT * fit.scale };
+      };
+      quad(ctx, [at(1.5, 3.4), at(ARM_R, 2.1), at(ARM_R, -2.1), at(1.5, -3.4)], dim(color, 0.62));
+      // The castor at the tip: a dark tyre with a highlight, so it reads as a wheel under the leg
+      // rather than a smudge at the end of it.
+      const wp = project(lx + ux * ARM_R, ly + uy * ARM_R, fit);
+      ellipse(ctx, wp, 4 * fit.scale, 2.3 * fit.scale, dim(color, 0.42));
+      ellipse(
+        ctx,
+        { x: wp.x, y: wp.y - 1.4 * fit.scale },
+        2.4 * fit.scale,
+        1.2 * fit.scale,
+        dim(color, 0.72),
+      );
     }
     box(ctx, fit, lx, ly, 6, 6, CHAIR_LIFT, dim(color, 0.55));
   } else {
