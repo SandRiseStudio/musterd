@@ -70,13 +70,19 @@ bounce.
 
 ## Observability & Evaluation
 
-- `/health.quietest_busy_ms` is itself the observable: any client can watch the signal the tick
-  decides from, and the tick logs every quiet-floor hold with the seat-age and cap it weighed
-  (`a seat is actively working (last action Ns ago; quiet floor Fs) — holding…`), so a hold is
-  never silent and "waiting for a lull" is distinguishable from "stuck" in refresh.log.
-- Evaluation of the first consumer replays the merge trace: bounce count per day and
-  interrupted-mid-action bounces (a bounce within the quiet floor of an audited action) are both
-  derivable from refresh.log + the audit table. Success = fewer mid-action bounces at equal
-  freshness (staleness still capped by #612's `--settle-cap`).
-- The `unknown` rate is auditable from the same data (live agent seats with no audited action in
-  the lookback); a rising rate is the signal to build the harness tier rather than tune thresholds.
+**Traces.** `/health.quietest_busy_ms` is itself the instrument — any client can watch the exact
+signal the tick decides from. Every quiet-floor hold is logged with the seat-age and cap it weighed
+(`a seat is actively working (last action Ns ago; quiet floor Fs) — holding…`), so a hold is never
+silent and "waiting for a lull" stays distinguishable from "stuck" in refresh.log. The inputs
+(audit-row timestamps, live presences) already exist; no new emission.
+
+**Eval.** Replay the merge trace: bounce count per day and mid-action bounces (a bounce landing
+within the quiet floor of an audited action) are both derivable from refresh.log + the audit table.
+Success = fewer mid-action bounces at equal freshness (staleness stays capped by #612's
+`--settle-cap`); the pre-change baseline is measured in this ADR's Context (19 bounces/day, 95%
+with live sessions). Regression watched: total deferral time per catch-up, which the cap bounds.
+
+**Experiment.** The `unknown` rate — live agent seats with no audited action in the lookback — is
+auditable from the same tables and is the decision variable for the pre-registered harness tier: a
+rising `unknown` rate (or measured mid-turn bounces that the audit proxy missed) triggers building
+turn-boundary hook capture, rather than tuning thresholds on a signal that lacks the information.
