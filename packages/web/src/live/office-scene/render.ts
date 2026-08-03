@@ -43,6 +43,7 @@ import {
   SINK,
   WAIT_CHAIR,
   WALL_BOARD,
+  WORKING_HOURS_CALENDAR,
   WINDOWS,
   type Bookshelf,
   type DeskSlot,
@@ -1056,7 +1057,7 @@ function drawWalls(
     }
     if (wallIndex === 1) {
       wallClock(ctx, fit, edge, 0.52, 0.62, env.hours); // dead centre, between the windows
-      if (teamWorkingHours) workingHoursSign(ctx, fit, edge, teamWorkingHours, 0.52, 0.44, t);
+      if (teamWorkingHours) workingHoursSign(ctx, fit, edge, teamWorkingHours, t);
       // The agile board — far-right gap. Must be THIS wall: `+t` runs screen-left on the other one
       // (same constraint that fixed the clock here), and a kanban has a reading direction.
       wallLaneBoard(ctx, fit, edge, wallBoard);
@@ -1157,67 +1158,41 @@ function workingHoursSign(
   fit: Fit,
   edge: (t: number) => [number, number],
   schedule: WorkingHours,
-  tc: number,
-  uc: number,
   t: number,
 ): void {
   const copy = formatWorkingHours(schedule);
   if (!copy) return;
-  const W = 174;
-  const H = 64;
-  const r = fit.scale;
-  const centre = wallPt(edge, tc, uc, fit);
-  const p = (t: number, u: number) => wallPt(edge, t, u, fit);
+  const { tc, uc, w: W, h: H } = WORKING_HOURS_CALENDAR;
   const left = tc - W / FLOOR / 2;
   const right = tc + W / FLOOR / 2;
   const bottom = uc - H / WALL_H / 2;
   const top = uc + H / WALL_H / 2;
 
   ctx.save();
-  ctx.globalAlpha = 0.18;
-  wallRect(ctx, fit, edge, left + 0.008, bottom - 0.012, right + 0.008, top - 0.012, '#6b4a32');
+  // A modest paper calendar — a fixture in the clock's wall bay, not a floating banner.
+  ctx.globalAlpha = 0.22;
+  wallRect(ctx, fit, edge, left + 0.007, bottom - 0.014, right + 0.007, top - 0.014, '#503522');
   ctx.globalAlpha = 1;
-  wallRect(ctx, fit, edge, left, bottom, right, top, '#e9c987');
-  wallRect(ctx, fit, edge, left + 0.012, bottom + 0.016, right - 0.012, top - 0.016, '#fff1cf');
-  // Two tiny washi tabs make the sign feel placed by a person, not stamped into the wall.
-  wallRect(ctx, fit, edge, left + 0.02, top - 0.008, left + 0.13, top + 0.014, 'rgba(225,173,1,0.82)');
-  wallRect(ctx, fit, edge, right - 0.13, top - 0.008, right - 0.02, top + 0.014, 'rgba(239,201,76,0.82)');
+  wallRect(ctx, fit, edge, left, bottom, right, top, '#735034'); // oak frame
+  wallRect(ctx, fit, edge, left + 0.003, bottom + 0.006, right - 0.003, top - 0.006, '#bd943c'); // brass trim
+  wallRect(ctx, fit, edge, left + 0.006, bottom + 0.012, right - 0.006, top - 0.012, '#f9edcf'); // paper
+  wallRect(ctx, fit, edge, left + 0.006, top - 0.06, right - 0.006, top - 0.012, '#e1ad01'); // mustard heading
 
-  const dot = p(left + 0.06, top - 0.06);
-  ctx.fillStyle = '#e1ad01';
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.globalAlpha = 0.3 + Math.sin(t * 1.2) * 0.04;
-  ctx.beginPath();
-  ctx.arc(dot.x, dot.y, 9 * r, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = '#e1ad01';
-  ctx.beginPath();
-  ctx.arc(dot.x, dot.y, 3.5 * r, 0, Math.PI * 2);
-  ctx.fill();
-
-  const textX = centre.x + 8 * r;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#6f4a23';
-  ctx.font = canvasFont(Math.max(5, 10 * r), '--font-display', 700);
-  ctx.fillText('TEAM WORKING HOURS', textX, centre.y - 17 * r);
-  ctx.fillStyle = '#3d3025';
-  ctx.font = canvasFont(Math.max(5, 9 * r), '--font-sans', 700);
-  ctx.fillText(`${copy.days} · ${copy.hours}`, textX, centre.y - 2 * r);
-  ctx.fillStyle = '#8e6d4b';
-  ctx.font = canvasFont(Math.max(4, 7 * r), '--font-mono', 700);
-  ctx.fillText(copy.timezone, textX, centre.y + 12 * r);
-
-  // Four little stars turn the empty corners into a soft, quirky signature.
-  ctx.fillStyle = '#d29a32';
-  for (const [dx, dy] of [[-63, -20], [67, -17], [-61, 19], [64, 19]] as const) {
-    const star = p(tc + dx / FLOOR, uc + dy / WALL_H);
-    ctx.beginPath();
-    ctx.arc(star.x, star.y, Math.max(1, 1.4 * r), 0, Math.PI * 2);
-    ctx.fill();
+  // Binder loops sit on the frame rather than in screen space, so even their small gleam belongs to the wall.
+  for (const offset of [-0.018, 0.018]) {
+    wallDisc(ctx, fit, edge, tc + offset, top + 0.006, 2.6, '#b58b3a');
+    wallDisc(ctx, fit, edge, tc + offset, top + 0.006, 1.25, '#5f452d');
   }
+
+  wallText(ctx, fit, edge, tc, top - 0.029, 'TEAM WORKING HOURS', 7, '#4e331f', 'center');
+  wallText(ctx, fit, edge, tc, uc + 0.006, `${copy.days} · ${copy.hours}`, 6.5, '#33261c', 'center');
+  wallText(ctx, fit, edge, tc, bottom + 0.038, copy.timezone, 5.2, '#806146', 'center');
+
+  // A pin gives the card a restrained life. t=0 is its complete, static reduced-motion posture.
+  const pinAlpha = 0.72 + Math.sin(t * 1.2) * 0.08;
+  ctx.globalAlpha = pinAlpha;
+  wallDisc(ctx, fit, edge, left + 0.014, top - 0.087, 2.2, '#b8872d');
+  ctx.globalAlpha = 1;
   ctx.restore();
 }
 

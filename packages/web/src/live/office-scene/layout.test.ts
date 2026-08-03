@@ -19,6 +19,7 @@ import {
   RECEPTION,
   SEAT_BACK,
   WALL_BOARD,
+  WORKING_HOURS_CALENDAR,
   WINDOWS,
   BENCH,
   WINDOW_DESKS,
@@ -176,8 +177,9 @@ describe('the front desk', () => {
 });
 
 describe('the walls are not a matched set', () => {
-  it('hangs six pieces of art, varied in size and shape', () => {
-    expect(ART).toHaveLength(6);
+  it('hangs five pieces of art, varied in size and shape', () => {
+    // The sixth piece was the small cairn under the clock; the working-hours calendar now owns that wall slot.
+    expect(ART).toHaveLength(5);
     expect(new Set(ART.map((a) => `${a.w}x${a.h}`)).size).toBeGreaterThan(3);
     expect(ART.some((a) => a.w > a.h)).toBe(true); // landscape
     expect(ART.some((a) => a.h > a.w)).toBe(true); // portrait
@@ -253,6 +255,31 @@ describe('the walls are not a matched set', () => {
     // Vertically: on the wall (u ∈ [0,1]), above the bookshelf line the art also respects.
     expect(WALL_BOARD.uc * WALL_H - WALL_BOARD.h / 2).toBeGreaterThan(0);
     expect(WALL_BOARD.uc * WALL_H + WALL_BOARD.h / 2).toBeLessThan(WALL_H);
+  });
+
+  it('reserves the former under-clock art slot for the compact working-hours calendar', () => {
+    const half = WORKING_HOURS_CALENDAR.w / 2 / FLOOR;
+    const t0 = WORKING_HOURS_CALENDAR.tc - half;
+    const t1 = WORKING_HOURS_CALENDAR.tc + half;
+    const u0 = WORKING_HOURS_CALENDAR.uc * WALL_H - WORKING_HOURS_CALENDAR.h / 2;
+    const u1 = WORKING_HOURS_CALENDAR.uc * WALL_H + WORKING_HOURS_CALENDAR.h / 2;
+    expect(WORKING_HOURS_CALENDAR.wall).toBe(1);
+    expect(t0).toBeGreaterThan(0);
+    expect(t1).toBeLessThan(1);
+    expect(u0).toBeGreaterThan(0);
+    expect(u1).toBeLessThan(WALL_H);
+
+    const CLOCK = { tc: 0.52, r: 27.5 / FLOOR, u0: 0.62 * WALL_H - 27.5, u1: 0.62 * WALL_H + 27.5 };
+    // The binder loops rise above the paper rectangle, so their physical extent—not only the card face—must clear the dial.
+    const fixtureTop = u1 + WORKING_HOURS_CALENDAR.loopOverhang;
+    expect(t0 > CLOCK.tc + CLOCK.r || t1 < CLOCK.tc - CLOCK.r || fixtureTop < CLOCK.u0 || u0 > CLOCK.u1).toBe(true);
+    for (const art of ART.filter((piece) => piece.wall === WORKING_HOURS_CALENDAR.wall)) {
+      const artT0 = art.tc - art.w / 2 / FLOOR;
+      const artT1 = art.tc + art.w / 2 / FLOOR;
+      const artU0 = art.uc * WALL_H - art.h / 2;
+      const artU1 = art.uc * WALL_H + art.h / 2;
+      expect(t1 < artT0 || t0 > artT1 || u1 < artU0 || u0 > artU1, `calendar overlaps ${art.motif}`).toBe(true);
+    }
   });
 
   it('does not make four copies of one window', () => {
