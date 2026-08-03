@@ -8,6 +8,7 @@ import {
   buildPlist,
   kickstartArgs,
   agentFailureNote,
+  intervalAgentLabel,
   parseLaunchctlPrint,
   stableNodePath,
   type LaunchctlStatus,
@@ -184,6 +185,51 @@ describe('parseLaunchctlPrint', () => {
       state: 'spawn scheduled',
       lastExit: 78,
     });
+  });
+});
+
+// Measured 2026-08-03: `service status --auto` printed `✓ daemon auto-refresher: not running` for a
+// perfectly healthy refresher — 2775 runs, last exit 0, ticking every 120s, observed live. `not
+// running` is launchd's literal `state` for a periodic one-shot BETWEEN ticks, so the raw string is
+// accurate and the reading is inverted: nick read it as an outage and asked for an investigation of
+// failures that did not exist. A health line whose healthy case says "not running" is a broken
+// health line, however true the string is.
+describe('intervalAgentLabel (an idle interval agent is healthy, not down)', () => {
+  const st = (over: Partial<LaunchctlStatus> = {}): LaunchctlStatus => ({
+    loaded: true,
+    pid: null,
+    state: 'not running',
+    lastExit: 0,
+    ...over,
+  });
+
+  it('reads an idle tick as idle, never as "not running"', () => {
+    const label = intervalAgentLabel(st());
+    expect(label).toContain('idle');
+    expect(label).not.toContain('not running');
+  });
+
+  it('says a tick is in flight when one actually is', () => {
+    expect(intervalAgentLabel(st({ pid: 4242, state: 'running' }))).toContain('running');
+  });
+
+  it('distinguishes never-ticked from ticked-and-idle', () => {
+    // `last exit code` is absent until the first run completes — "loaded but nothing has happened
+    // yet" is a different fact from "ran and is waiting", and right after `install` it is the
+    // expected one.
+    expect(intervalAgentLabel(st({ lastExit: null }))).toContain('no tick yet');
+  });
+
+  it('does not dress up a real failure as idle', () => {
+    // The dead case still has to read as dead — agentFailureNote prints the ✗ detail beneath, but
+    // the headline must not say "idle" over a non-zero exit.
+    const label = intervalAgentLabel(st({ lastExit: 78 }));
+    expect(label).not.toContain('idle');
+    expect(label).toContain('not running');
+  });
+
+  it('leaves a not-loaded agent to the caller', () => {
+    expect(intervalAgentLabel(st({ loaded: false }))).toBeNull();
   });
 });
 

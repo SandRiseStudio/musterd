@@ -804,7 +804,11 @@ describe('serviceCommand', () => {
     expect(out).toContain('already attempted this tip');
     expect(out).toContain('pinned on old code');
     expect(out).toContain('refresh.log');
-    expect(out).toContain('pnpm install'); // the known repair: a lockfile change the tick never installed
+    // It must NOT hand the reader `pnpm install` any more. That advice was true when the tick had no
+    // install step, but #578 gave it a self-healing one keyed on node_modules-vs-lockfile
+    // consistency, so it retries every tick until it sticks. Telling a human to do it is now telling
+    // them to do the auto-refresher's job — the exact failure `buildSkewNote` exists to avoid.
+    expect(out).not.toContain('pnpm install');
     // It must NOT name a checkout: `dir` here is the invoking CLI's, not necessarily the daemon's,
     // so a confident path would be a confidently wrong repair instruction.
     expect(out).not.toContain('/repo`');
