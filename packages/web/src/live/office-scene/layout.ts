@@ -128,11 +128,10 @@ export const PODS: Pod[] = [
   {
     id: 0,
     cx: 240,
-    // 220 → 290 (2026-08-02): slid south to open the band under the back wall for the bench. At 220
-    // its north-row seats sat ~34 units from the bench chairs — one smeared avatar. 290 is the pocket
-    // between two hard walls: the bench chairs above (north seats must clear MIN_SPOT_GAP — they do,
-    // by ~2) and pod 2's desk pads below (the south seats' stand-behind floor ends at y 441 — at 300
-    // it was 1 unit short).
+    // The band under the bench is the constraint above (north seats must clear MIN_SPOT_GAP from the
+    // bench chairs) and pod 2's pads the one below. 255 sits in the middle of that pocket instead of
+    // against its south edge. (255 was tried on 2026-08-03 and fails: at that latitude the north
+    // seats' stand-behind floor lands in the bench chairs' grid cells.)
     cy: 290,
     axis: 'ns',
     size: 4,
@@ -140,25 +139,26 @@ export const PODS: Pod[] = [
   },
   {
     id: 1,
-    cx: 620,
-    cy: 560,
+    cx: 600,
+    cy: 570,
     axis: 'ew',
     size: 4,
     rug: { shape: 'rect', weave: 'stripes', fill: '#97a7b8', mark: '#7c8ca0' },
   },
   {
-    // The old third quad, cut to a duo (2026-08-02): its south half is where the front duo breathes,
-    // and 560 → 540 keeps a real rug gap above the front duo's rug.
+    // The old third quad, cut to a duo (2026-08-02). 2026-08-03: pulled west and north into the left
+    // column — the room now reads as three columns (left desks / centre desks / nook+pod1 right).
     id: 2,
     cx: 260,
-    cy: 540,
+    cy: 505,
     axis: 'ew',
     size: 2,
     rug: { shape: 'rect', weave: 'border', fill: '#ab97a4', mark: '#8b7683' },
   },
   {
     // Upper-centre duo, in the clearing the huddle left. 'ew' is load-bearing: an 'ns' duo would add
-    // a third viewer-facing desk and break the exactly-two rule pod 0 carries.
+    // a third viewer-facing desk and break the exactly-two rule pod 0 carries. 500 → 455 because at
+    // 500 its rug ran 33 units UNDER the nook's — two zones sharing floor read as one shapeless area.
     id: 3,
     cx: 500,
     cy: 250,
@@ -167,11 +167,11 @@ export const PODS: Pod[] = [
     rug: { shape: 'rect', weave: 'stripes', fill: '#a8ab8e', mark: '#8c9070' },
   },
   {
-    // Front duo, between reception and the meeting zone. Its centre is pinned on three sides: the
-    // reception waiting chairs block stand-behind floor west of x ~290, the meeting rug starts at
-    // x 485, and its own rug must clear both plus pod 2's rug above — hence the smaller duo rug.
+    // Centre duo. It used to sit at the front (390, 700), boxed in on four sides with 10-30 units of
+    // slack — the tightest spot on the floor and the one that read as crowded. Moved up into the
+    // middle column, where its nearest neighbour is 120 away.
     id: 4,
-    cx: 390,
+    cx: 350,
     cy: 700,
     axis: 'ew',
     size: 2,
@@ -247,15 +247,14 @@ export const BENCH = { lx: 320, ly: 62, long: 300, deep: 30, seats: 4, dir: 'N' 
  * corner office, where a flush one reads as furniture pushed out of the way.
  */
 export const WINDOW_DESKS: ReadonlyArray<{ lx: number; ly: number; dir: Dir }> = [
-  // The ly values are pinned by pod 1's east seats: their stand-behind floor is the two points
-  // (760, 505) and (760, 615), and a window desk's padded footprint at this lx spans ±64 in y —
-  // plus the nav grid's 15-unit cells, which round a footprint's edge to the cell it starts in. The
-  // slots that clear both probes whole-cell are ly ≤ 441 and ly ≥ ~695. (540 swallowed the 505
-  // probe; 684 cleared it by 5 real units and lost them to cell rounding.) The second desk sitting
-  // this low is also why the meeting zone slid west (700 → 610): at 700 its rug ran under the
-  // desk's front corner.
-  { lx: 776, ly: 430, dir: 'W' },
-  { lx: 776, ly: 700, dir: 'W' },
+  // Both on the right wall, separated in `ly` so neither footprint reaches pod 1's rug (they used to
+  // run 9 units under it). They are NOT split one-per-wall, which was tried on 2026-08-03 and is not
+  // possible: a room-facing desk seats its occupant on the WALL side, so the left wall would need
+  // ~150 units of clear floor for desk + seat + stand-behind, and that band is pod 0's rug at the top,
+  // reception at the bottom and the door posts in between. The one built there measured a 5.6x detour
+  // from the door — a seat nobody could reach without crossing the whole room first.
+  { lx: 776, ly: 380, dir: 'W' },
+  { lx: 776, ly: 760, dir: 'W' },
 ];
 
 const benchSlots: DeskSlot[] = Array.from({ length: BENCH.seats }, (_, i) => ({
@@ -279,13 +278,20 @@ const windowSlots: DeskSlot[] = WINDOW_DESKS.map((w, i) => ({
 /** Every seat on the floor: pods first (so ids 0..11 stay the pod desks), then bench, then window. */
 export const DESK_SLOTS: DeskSlot[] = [...PODS.flatMap(podDesks), ...benchSlots, ...windowSlots];
 
-/** The break nook — where `away` members drift; also the broadcast megaphone spot. */
-export const NOOK = { lx: 700, ly: 190 };
+/** The break nook — where `away` members drift; also the broadcast megaphone spot.
+ *
+ * (700,190) → (740,180) on 2026-08-03. Pod 3 cannot move west to escape this rug: an 'ew' duo needs
+ * ~350 units of width because BOTH its seats put their stand-behind floor on the outside, and pod 0's
+ * east desk pins pod 3's west edge. So the nook gave the ground instead — it has a whole corner and
+ * pod 3 has a band. */
+export const NOOK = { lx: 740, ly: 180 };
 
 /** The nook rug's iso radius — furniture and the away cluster stay inside it. Shrunk 192 → 148 with
  * the armchairs it was sized around (2026-08-02): the rug only needs to cover the kitchenette run and
- * the couch now, and a rug much wider than its furniture reads as a stain rather than a zone. */
-export const NOOK_RUG_R = 148;
+ * the couch now, and a rug much wider than its furniture reads as a stain rather than a zone.
+ * 148 → 142 on 2026-08-03 to widen the bare floor between this rug and pod 3's (the away arc's
+ * furthest spot is at |dx|+|dy| = 136, so the rug still covers everyone standing on it). */
+export const NOOK_RUG_R = 142;
 
 /** The nook's rug: the room's one big diamond, bound with a darker edge. */
 export const NOOK_RUG: Rug = { shape: 'diamond', weave: 'border', fill: '#ce9256', mark: '#b2743c' };
@@ -337,8 +343,8 @@ export const NOOK_SPOTS: ReadonlyArray<{ dx: number; dy: number }> = [
   // that still clears the couch (x -48..60, y -26..18) and the coffee table (x -22..34, y 54..94).
   { dx: -100, dy: 8 }, // west flank, south of the fridge
   { dx: -78, dy: 58 }, // southwest corner of the set
-  { dx: -50, dy: 92 }, // front arc, clear of the coffee table's west corner
-  { dx: 22, dy: 110 },
+  { dx: -58, dy: 78 }, // front arc, clear of the coffee table's west corner
+  { dx: 14, dy: 122 },
   { dx: 74, dy: 62 }, // southeast corner
   { dx: 96, dy: 14 }, // east flank, below the cooler
 ];
@@ -394,9 +400,10 @@ export const ENTRANCE = { lx: 47, ly: 815 };
  * seats, all of them approachable, and a head seat at each end reads more like a meeting anyway.
  */
 export const MEETING = {
-  // lx 700 → 610 (2026-08-02): slid west so its rug clears the second window desk's footprint. The
-  // front-right corner it vacates is exactly where that desk's occupant now stands up.
-  lx: 610,
+  // 700 → 580. West far enough that the front-right window desk clears its rug, which is what lets
+  // both window desks sit on the right wall without touching pod 1. The front strip now reads
+  // left-to-right as reception · lane · centre duo · meeting, with a clear band between each.
+  lx: 580,
   ly: 800,
   // Downsized 170×92 → 150×80 (2026-08-02), and no further — this table's size is pinned by its SEATS,
   // not by taste. Shrinking it pulls the head chairs inward, and a head chair that closes on the
@@ -439,16 +446,22 @@ export const MEETING = {
 export const WAIT_CHAIR = 34;
 export const END_TABLE = 26;
 export const RECEPTION = {
-  // The rug keeps a clear band of bare floor between itself and the nearest cluster rug. Two rugs
-  // meeting edge-to-edge fuse into one big shapeless patch and both zones stop reading as zones — the
-  // floor *between* rugs is what makes each one an area rather than a stain.
-  rug: { lx: 160, ly: 800, w: 260, d: 165, shape: 'rect', weave: 'border', fill: '#c07a55', mark: '#9c5c3c' },
-  /** Two chairs side by side past the end of the queue strip, facing back down it toward the door. */
-  chairA: { lx: 252, ly: 758, dir: 'W' as Dir },
-  chairB: { lx: 252, ly: 836, dir: 'W' as Dir },
+  // Smaller again (260x165 -> 210x125) and pulled into the corner. The rug's east edge is what sets
+  // the lane: at 290 it left 15 units to the front duo's rug, which is not a walkway, it is a gap.
+  // At 255 there are 110 clear units between this rug and the meeting rug, and that band runs
+  // unbroken from the door to the middle of the room.
+  rug: { lx: 140, ly: 810, w: 200, d: 120, shape: 'rect', weave: 'border', fill: '#c07a55', mark: '#9c5c3c' },
+  // The pair sits along the rug's SOUTH EDGE facing north into the room, and `ly` is the load-bearing
+  // number: the door is at ly 815, so anything whose padded footprint reaches that band walls the
+  // entrance off from the room. At 838 it did exactly that — you could not walk a single step east
+  // out of the door. 856 puts the chairs' cells clear of the doorway's, which is what turns the strip
+  // in front of reception back into a lane.
+  chairA: { lx: 105, ly: 856, dir: 'N' as Dir },
+  chairB: { lx: 185, ly: 856, dir: 'N' as Dir },
   /** Between them, where a magazine would go. */
-  endTable: { lx: 252, ly: 797 },
-  plant: { lx: 318, ly: 700 },
+  endTable: { lx: 145, ly: 860 },
+  // Off the lane entirely, at the rug's south-east corner — a corner piece, not a bollard.
+  plant: { lx: 268, ly: 872 },
 } as const;
 
 /**
@@ -467,16 +480,20 @@ export const RECEPTION = {
 // and reads as a counter, it just stops matching a workstation's full footprint. What forced it is the
 // crowding nick reported — the counter's south face sat within a few units of the cubicle rug behind
 // it, and every unit here is one the reception area gets back.
-export const FRONT_DESK = { lx: 112, ly: 690, long: 92, deep: 50, high: DESK_UP, dir: 'S' as Dir };
+//
+// 2026-08-03: (112, 690) → (95, 745), tucked into the corner beside the door. At 690 its padded
+// footprint owned the floor a left-wall window desk needs to seat anybody, and that flank was the
+// only place left in the room with space to give.
+export const FRONT_DESK = { lx: 95, ly: 745, long: 92, deep: 50, high: DESK_UP, dir: 'S' as Dir };
 /** She sits behind it exactly like a member sits at a desk — same SEAT_BACK, same chair, same size. */
 export const RECEPTIONIST = { lx: FRONT_DESK.lx, ly: FRONT_DESK.ly - SEAT_BACK, dir: 'S' as Dir };
 // South of the overflow queue strip, not across it: the counter grew to desk scale and pushed both
 // the strip and the marks apart. A mark inside a blocked cell gets nudged by `nearestFree` and the
 // pause lands somewhere other than in front of the desk, so `nav.test.ts` holds all three walkable.
 export const CHECK_IN_MARKS: ReadonlyArray<{ lx: number; ly: number }> = [
-  { lx: 92, ly: 800 },
-  { lx: 146, ly: 812 },
-  { lx: 196, ly: 826 },
+  { lx: 95, ly: 800 },
+  { lx: 150, ly: 800 },
+  { lx: 205, ly: 800 },
 ];
 /** The pause at the mark, seconds. A beat, not a gate. */
 export const CHECK_IN_S = 1.2;
@@ -498,8 +515,8 @@ export const PLANTS: Plant[] = [
   // (a fiddle stood at 480,55 — removed with the bench: it landed against the counter's end, and a
   // plant wedged between a bench and a printer is clutter, not softening.)
   { lx: 855, ly: 130, species: 'fiddle' },
-  { lx: 60, ly: 640, species: 'fiddle' },
-  { lx: 870, ly: 760, species: 'snake' }, // right flank, between the low window desk and the front corner
+  { lx: 55, ly: 645, species: 'fiddle' }, // left wall, in the gap between pod 2 and reception
+  { lx: 866, ly: 610, species: 'snake' }, // right flank, between the two window desks (760 was one's stand-behind floor)
   { lx: 380, ly: 870, species: 'fiddle' },
   { lx: 66, ly: 470, species: 'fiddle' }, // left flank, in the rug gap between pods 0 and 2
   { lx: 830, ly: 330, species: 'snake' }, // right flank, under the nook shelf

@@ -49,7 +49,7 @@ describe('walkability grid', () => {
     expect(walkable(RECEPTION.rug.lx - 90, RECEPTION.rug.ly)).toBe(true);
     // the nook couch is solid; the open rug in front of the away arc is floor
     expect(walkable(NOOK.lx + 34, NOOK.ly - 2)).toBe(false);
-    expect(walkable(NOOK.lx - 50, NOOK.ly + 92)).toBe(true);
+    expect(walkable(NOOK.lx - 58, NOOK.ly + 78)).toBe(true);
   });
 
   it('stands every away member on open rug — clear of the lounge furniture', () => {
