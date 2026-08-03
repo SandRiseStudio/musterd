@@ -102,7 +102,9 @@ import { clearMemory, getMemory, memoryEnvelope, saveMemory } from '../store/mem
 import {
   countInbox,
   latestStatusUpdate,
+  deferrals,
   listInbox,
+  raisedDeferrals,
   listTeamMessages,
   pendingInterrupts,
   rowToEnvelope,
@@ -186,6 +188,14 @@ const negotiatedEncoding = new WeakMap<ServerResponse, 'br' | 'gzip' | null>();
  * clear this easily.
  */
 const JSON_COMPRESS_MIN_BYTES = 1400;
+
+/**
+ * How far back an inbox read scans for deferring `wait`s (ADR 211 §3). The fold needs history
+ * reaching back to the deferral itself, so it cannot use the default team-timeline window. Bounded
+ * deliberately: past this, a deferral stops being tracked and its target is simply unread again —
+ * the pre-ADR-211 behaviour, which is a degradation rather than a wrong answer.
+ */
+const DEFERRAL_SCAN_LIMIT = 2000;
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -2887,13 +2897,48 @@ export async function handleHttp(
           ...(since ? { since: Number(since) } : {}),
           ...(limit ? { limit } : {}),
         });
-        const messages = rows.map((r) => {
+        const toEnvelope = (r: (typeof rows)[number]) => {
           const from = getMemberById(ctx.db, r.from_member);
           const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
           return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
-        });
+        };
+        const messages = rows.map(toEnvelope);
+
+        // ADR 211 §3: pendingness is unread-by-cursor OR deferred-and-raised. The cursor is a single
+        // monotonic ts and is NOT touched here — a raised act is re-included after the query, so an
+        // act the cursor already sailed past still comes back. That is the whole primitive.
+        //
+        // The fold reads the PARTY-SCOPED TEAM TIMELINE, not the inbox: `listInbox` excludes the
+        // member's own sends (`from_member != me`), and a deferring `wait` is the member's own send,
+        // so folding over the inbox would find no deferrals at all. The scan is bounded — a deferral
+        // older than this many messages stops being tracked, which degrades to today's behaviour
+        // (the act is simply unread) rather than to a wrong answer.
+        const scan = listTeamMessages(ctx.db, team.id, {
+          forMemberId: member.id,
+          limit: DEFERRAL_SCAN_LIMIT,
+        }).map(toEnvelope);
+        const held = deferrals(scan, member.name);
+        const raised = raisedDeferrals(scan, member.name);
+        if (raised.size > 0) {
+          const shown = new Set(messages.map((m) => m.id));
+          for (const r of listInbox(ctx.db, member, {})) {
+            if (raised.has(r.id) && !shown.has(r.id)) messages.push(toEnvelope(r));
+          }
+          messages.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
+        }
+        const deferred = [...held.values()].map((d) => ({
+          target: d.target,
+          until: d.until,
+          raised: raised.has(d.target),
+        }));
+
         // `total` is the full inbox size (visibility-scoped) so a bounded client can show "N of total".
-        return sendJson(res, 200, { messages, cursor, total: countInbox(ctx.db, member) });
+        return sendJson(res, 200, {
+          messages,
+          cursor,
+          total: countInbox(ctx.db, member),
+          deferred,
+        });
       }
 
       // The team timeline for the firehose's history backfill (ADR 061), then live-tailed via
