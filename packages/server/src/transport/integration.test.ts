@@ -3306,6 +3306,60 @@ describe('two-stage close (ADR 169)', () => {
     expect(rows[0].detail.review_grade).toBe('same_model'); // and the grade says what it was worth
   });
 
+  // The grade a lane is ROUTED with and the grade its confirm is WORTH are two different facts, and
+  // a seat can change model between them: observed live 2026-08-02, when a reviewer routed at
+  // cross_model re-attested to the worker's own model six minutes later, inside one acceptance
+  // window. Model switches take seconds here and the window is five minutes, so this is ordinary,
+  // not exotic. The close edge already re-derives from LIVE attestations and downgrades correctly
+  // (three real lanes in the dogfood ledger routed cross_model and closed same_model) — but nothing
+  // pinned it: the sibling test above only covers a confirm that was never routed at all. Untested
+  // correct behaviour is one refactor from becoming a false diversity claim, and this particular
+  // number feeds ADR 056's conclusions, so it fails in the direction that matters.
+  it('a reviewer who re-attests to the worker model is graded on what it was worth, not what it was routed as', async () => {
+    const t = await post('/teams', { slug: 'switch', creator: { name: 'n4', kind: 'human' } });
+    const n4 = t.json.human_credential as string;
+    const mk = async (name: string, model: string): Promise<Auth> => {
+      await post('/teams/switch/members', { name, kind: 'agent' }, n4);
+      const auth: Auth = { key: t.json.agent_key as string, seat: name };
+      await fetch(base + '/teams/switch/inbox', {
+        headers: { ...authHeaders(auth), 'x-musterd-model': model },
+      });
+      return auth;
+    };
+    const worker = await mk('worker', 'claude-opus-5');
+    const reviewer = await mk('reviewer', 'claude-opus-4-8'); // different model ⇒ routable
+    // n4 stays offline so the human rung cannot outrank the cross_model one under test.
+
+    const lane = await post('/teams/switch/lanes', { title: 'switched', claim: true }, worker);
+    const patch = (body: unknown, auth: Auth) =>
+      fetch(base + `/teams/switch/lanes/${lane.json.lane.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', ...authHeaders(auth) },
+        body: JSON.stringify(body),
+      }).then(async (r) => ({ status: r.status, json: (await r.json()) as Record<string, any> }));
+
+    const ready = await patch({ state: 'ready_for_review' }, worker);
+    expect(ready.json.review.reviewer).toBe('reviewer');
+    expect(ready.json.review.grade).toBe('cross_model'); // true AT ROUTING TIME
+
+    // …then the reviewer's session comes back on the worker's own model, as a real one did.
+    await fetch(base + '/teams/switch/inbox', {
+      headers: { ...authHeaders(reviewer), 'x-musterd-model': 'claude-opus-5' },
+    });
+    const closed = await patch({ state: 'done' }, reviewer);
+    expect(closed.status).toBe(200);
+
+    const readyRows = await auditRowsFor(n4, 'switch', 'lane.ready_for_review');
+    const closedRows = await auditRowsFor(n4, 'switch', 'lane.closed');
+    // The routing row keeps its own truth — it records the decision that was made, and rewriting
+    // history to match the outcome would destroy the ability to ask why a seat was chosen.
+    expect(readyRows[0].detail.review_grade).toBe('cross_model');
+    // The close records what the review was actually WORTH. These two disagreeing is correct.
+    expect(closedRows[0].detail.verified).toBe(true); // a different seat did confirm
+    expect(closedRows[0].detail.review_grade).toBe('same_model');
+    expect(closedRows[0].detail.reviewer_family).toBeDefined();
+  });
+
   it('counterpart confirm derives verified:true and carries the stage-one attestation into git.pr_merged', async () => {
     const { nickTok, ada } = await setup();
     const lane = await post(
