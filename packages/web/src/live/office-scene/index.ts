@@ -261,11 +261,8 @@ export function mountOffice(
     const el = labels.get(name);
     if (!el) return;
     el.classList.toggle('is-expanded', expanded);
-    const btn = el.querySelector('.lc-gl-label__toggle');
-    if (btn) {
-      btn.textContent = expanded ? '▾' : '▸';
-      btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    }
+    // The plate is the toggle now, so it carries the state a screen reader announces.
+    el.querySelector('.lc-gl-label__plate')?.setAttribute('aria-expanded', expanded ? 'true' : 'false');
   }
 
   function scheduleCollapse(name: string) {
@@ -441,8 +438,8 @@ export function mountOffice(
    * actors are left unlabelled — their names bunch at a glance and the roster panel is the name source of
    * truth; the "+N" pills and location carry the secondary read.
    *
-   * Present members: collapsed plate is name + chevron + provider icon; expand reveals
-   * model · harness · role. Broadcast: icon + short model only (no toggle). */
+   * Present members: collapsed plate is dot + name + provider icon; expand grows a divider after the
+   * name and reveals model · harness · role behind it. Broadcast: icon + short model only. */
   function syncLabels(headMap: Map<string, Pt>, nodes: Map<string, OfficeNode>, poses: Map<string, Pose>) {
     const seen = new Set<string>();
     for (const [name, head] of headMap) {
@@ -482,22 +479,10 @@ export function mountOffice(
       plate.appendChild(who);
 
       if (present) {
-        if (interactiveLabels) {
-          const toggle = document.createElement('button');
-          toggle.type = 'button';
-          toggle.className = 'lc-gl-label__toggle';
-          toggle.textContent = expanded ? '▾' : '▸';
-          toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-          toggle.setAttribute('aria-label', `Expand ${name} identity`);
-          toggle.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleExpand(name);
-          });
-          plate.appendChild(toggle);
-        }
-
-        // Divider sits before the provider icon: the icon belongs to the identity detail
-        // (model/harness/role), not to the name + chevron on the left.
+        // The divider only exists once there is detail to divide from the name. Collapsed, the plate
+        // is a dot, a name and the provider mark — the chevron is gone because the plate itself has
+        // always been the click target, so the arrow was a second affordance for the same gesture
+        // paying rent in the one dimension that matters at twenty seats.
         const plateRule = document.createElement('span');
         plateRule.className = 'lc-gl-label__rule';
         plateRule.setAttribute('aria-hidden', 'true');
@@ -535,6 +520,11 @@ export function mountOffice(
         plate.appendChild(detail);
 
         if (interactiveLabels) {
+          // The chevron's semantics move onto the plate along with its job — the expand state has to
+          // stay announced somewhere, and the plate is now the only thing there is to announce it on.
+          plate.setAttribute('role', 'button');
+          plate.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+          plate.setAttribute('aria-label', `${name} identity`);
           plate.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleExpand(name);

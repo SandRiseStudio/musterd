@@ -995,20 +995,24 @@
   white-space: nowrap;
   transition: opacity var(--lc-med) var(--lc-ease);
 }
-/* The nameplate: compact paper pill — collapsed is dot + name + chevron + provider icon; expand
-   grows right to reveal model · harness · role (icon stays). Broadcast always shows icon + short
-   model (no chevron). See 2026-07-31-expandable-nameplates-design. */
+/* The nameplate: compact paper pill — collapsed is dot + name + provider icon; expand grows a
+   divider after the name and reveals model · harness · role behind it. Broadcast always shows icon +
+   short model. See 2026-07-31-expandable-nameplates-design, re-cut 2026-08-02.
+
+   The metrics below are tight on purpose. Collapsed width is what decides whether plates collide
+   over the desks, and the floor is going to twenty seats — so the chevron went (the plate was always
+   the click target), the icon dropped 14→11px, and the padding and rules roughly halved. */
 .lc-gl-label__plate {
   display: inline-flex;
   align-items: center;
   gap: 0;
   max-width: 18rem;
-  padding: 2px 8px 2px 7px;
+  padding: 1.5px 5px 1.5px 6px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--lc-paper) 90%, transparent);
   border: 1px solid color-mix(in srgb, var(--lc-accent) 26%, var(--lc-paper-rim));
   font-family: var(--font-mono, monospace);
-  font-size: 8.5px;
+  font-size: 8px;
   letter-spacing: -0.01em;
   color: var(--lc-paper-ink);
   box-shadow:
@@ -1026,44 +1030,51 @@
    two words; a 1px rule at reduced height reads as structure. */
 .lc-gl-label__rule {
   width: 1px;
-  height: 0.9em;
-  margin: 0 0.55em;
+  height: 0.85em;
+  margin: 0 0.38em;
   background: color-mix(in srgb, var(--lc-paper-ink) 28%, transparent);
   flex: none;
+}
+/* Collapsed, there is nothing on the far side of the plate's divider, and a rule dividing a name
+   from an icon is just a tick mark. It appears with the detail it introduces. */
+.lc-gl-label:not(.is-expanded):not(.is-broadcast) > .lc-gl-label__plate > .lc-gl-label__rule {
+  display: none;
 }
 .lc-gl-label__who {
   font-weight: 700;
   color: var(--lc-paper-ink);
 }
-.lc-gl-label__toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-left: 3px;
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: color-mix(in srgb, var(--lc-paper-ink) 55%, transparent);
-  font: inherit;
-  font-size: 7px;
-  line-height: 1;
-  cursor: pointer;
-}
+/* The provider mark as an enamel pin: a domed, colour-filled badge with a specular cap, seated into
+   the paper with a shadow beneath. At 11px the highlight is doing the legibility work — a flat chip
+   this size reads as a coloured square, where a lit dome reads as an object. */
 .lc-gl-label__provider {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  margin-left: 5px;
+  width: 11px;
+  height: 11px;
+  margin-left: 4px;
   border-radius: 4px;
   border: 1px solid transparent;
   flex: none;
   overflow: hidden;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.85),
+    inset 0 -1.5px 2px color-mix(in srgb, var(--lc-paper-ink) 34%, transparent),
+    0 1px 2px -0.5px var(--lc-paper-drop);
+}
+.lc-gl-label__provider::after {
+  content: '';
+  position: absolute;
+  inset: 1px 1px 55% 1px;
+  border-radius: 3px 3px 6px 6px;
+  background: linear-gradient(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  pointer-events: none;
 }
 .lc-gl-label__provider svg {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   display: block;
 }
 .lc-gl-label__provider-letter {
@@ -1094,10 +1105,7 @@
   text-transform: lowercase;
   color: color-mix(in srgb, var(--lc-paper-ink) 78%, transparent);
 }
-/* Broadcast: always show compact model crumb after the icon; never a toggle */
-.lc-gl-label.is-broadcast .lc-gl-label__toggle {
-  display: none;
-}
+/* Broadcast: always show the compact model crumb after the icon — nothing to click out there. */
 .lc-gl-label.is-broadcast .lc-gl-label__detail {
   display: inline-flex;
 }
@@ -1170,21 +1178,33 @@
 .lc-gl-label__name {
   display: none;
 }
-/* the roster panel's presence dot, miniaturised, leading the floating name */
+/* The roster panel's presence dot, miniaturised, leading the floating name. It stays at the LEFT
+   edge even though the provider mark moved right: status is what you scan a full room for, and the
+   left edge is where the eye lands first.
+
+   The bead — a bright ring and a top highlight — is the enamel treatment applied at 5px. Note it is
+   in the base rule, NOT a glow: `--idle` is deliberately unglowed (see below), so a halo here would
+   quietly undo that. */
 .lc-gl-label__dot {
   display: inline-block;
   width: 5px;
   height: 5px;
-  margin-right: 5px;
+  margin-right: 4px;
   margin-bottom: 1px;
   border-radius: 50%;
   vertical-align: middle;
   flex: 0 0 auto;
   align-self: center;
+  box-shadow:
+    0 0 0 1px var(--lc-paper-sheen),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.75);
 }
 .lc-gl-label__dot--on {
   background: var(--lc-success);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--lc-success) 70%, transparent);
+  box-shadow:
+    0 0 0 1px var(--lc-paper-sheen),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.75),
+    0 0 6px color-mix(in srgb, var(--lc-success) 70%, transparent);
 }
 /* Live but holding no task (ADR 140). Amber, and *unglowed* — the green dot's halo is what reads as
    "lit up and running" from across the panel, so an idle dot must not have one. */
