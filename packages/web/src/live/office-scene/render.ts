@@ -1192,7 +1192,7 @@ function workingHoursSign(
   wallRect(ctx, fit, edge, T(-halfW), U(-halfH), T(halfW), U(halfH), '#735034'); // oak frame
   wallRect(ctx, fit, edge, T(-halfW + 1.5), U(-halfH + 1.5), T(halfW - 1.5), U(halfH - 1.5), '#bd943c'); // brass trim
   wallRect(ctx, fit, edge, T(-halfW + 3), U(-halfH + 3), T(halfW - 3), U(halfH - 3), '#f9edcf'); // paper
-  wallRect(ctx, fit, edge, T(-halfW + 3), U(halfH - 14), T(halfW - 3), U(halfH - 3), '#e1ad01'); // mustard heading
+  wallRect(ctx, fit, edge, T(-halfW + 3), U(halfH - 15), T(halfW - 3), U(halfH - 3), '#e1ad01'); // mustard heading
 
   // Binder loops sit on the frame rather than in screen space, so even their small gleam belongs to the wall.
   for (const offset of [-16, 16]) {
@@ -1200,14 +1200,16 @@ function workingHoursSign(
     wallDisc(ctx, fit, edge, T(offset), U(halfH + 1), 1.25, '#5f452d');
   }
 
-  // One row per fact, each shrunk to the paper rather than allowed to overrun it: the days can be a
-  // run ("MON–FRI") or a list ("MON · WED · FRI"), and the card is only as wide as the window bay allows.
+  // Three short rows, not a paragraph. The card is ~60 screen px at the office's usual fit, where a
+  // sixth line of 6-unit type is a grey smudge — so the sign says only what a sign says (the days, the
+  // hours, the zone), each big enough to read, and drops the caption the fixture's own shape already
+  // gives. Every row is still shrunk to the paper: days can be a list ("MON · WED · FRI"), not just a
+  // run, and the card is only as wide as the window bay allows.
   const line = (dy: number, text: string, size: number, fill: string): void =>
     wallText(ctx, fit, edge, tc, U(dy), text, fitTextSize(ctx, text, size, INNER), fill, 'center');
-  line(halfH - 10.5, 'TEAM WORKING HOURS', 6, '#4e331f');
-  line(1, copy.days, 10, '#33261c');
-  line(-9, copy.hours, 7, '#33261c');
-  line(-16.5, copy.timezone, 5.5, '#806146');
+  line(halfH - 11, copy.days, 10, '#4e331f'); // the days ride the header band, like a calendar's month bar
+  line(-7, copy.hoursShort, 12.5, '#33261c'); // clear of the band: at this size the digits' ascenders reach it
+  line(-16, copy.timezoneShort, 7, '#806146');
 
   // A brass tack in the header gives the card a restrained life. t=0 is its complete, static
   // reduced-motion posture.

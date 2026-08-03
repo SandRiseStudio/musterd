@@ -282,10 +282,9 @@ describe('the wall agile board', () => {
       null,
       hours,
     );
-    expect(texts).toContain('TEAM WORKING HOURS');
     expect(texts).toContain('MON–FRI');
-    expect(texts).toContain('11:00 AM–3:00 PM');
-    expect(texts).toContain('PACIFIC TIME');
+    expect(texts).toContain('11a–3p');
+    expect(texts).toContain('PT');
   });
 
   it('writes only the overflow badge — a column past its cap says +N, nothing else says anything', () => {
@@ -482,7 +481,7 @@ describe('the working-hours clock companion', () => {
 
     renderScene(ctx, fit, new Map(), new Map(), new Map(), 4, 'revive', computeLightEnv(12, false), null, undefined, null, null, schedule);
 
-    for (const text of ['TEAM WORKING HOURS', 'MON–FRI', '11:00 AM–3:00 PM', 'PACIFIC TIME']) {
+    for (const text of ['MON–FRI', '11a–3p', 'PT']) {
       const matches = textEvents.filter((event) => event.text === text);
       expect(matches, text).not.toHaveLength(0);
       expect(matches.every((event) => event.wallTransforms > 0), text).toBe(true);
@@ -519,7 +518,7 @@ describe('the working-hours clock companion', () => {
     renderScene(ctx, fit, new Map(), new Map(), new Map(), 4, 'revive', computeLightEnv(12, false), null, undefined, null, null, listed);
 
     const inner = WORKING_HOURS_CALENDAR.w - 18;
-    for (const text of ['TEAM WORKING HOURS', 'MON · WED · FRI', '11:00 AM–3:00 PM', 'PACIFIC TIME']) {
+    for (const text of ['MON · WED · FRI', '11a–3p', 'PT']) {
       const hit = drawn.find((event) => event.text === text);
       expect(hit, text).toBeDefined();
       expect(text.length * advance * hit!.size, text).toBeLessThanOrEqual(inner);
