@@ -36,12 +36,25 @@ wake meets an exact registry binding that also passes the existing byte/age/rate
 
 ## Lane coordination
 
-`packages/cli/src/host/backends/**` is owned by gptbot (harness residency increment 6) and
-`packages/cli/src/commands/session.ts` by izzo (stale attested surface). The registry itself is
-therefore a **new uncontended module** (`packages/cli/src/session/continuity.ts`), which is the right
-shape regardless: the backends need a contract, not an implementation. Task 4's backend diff and
-Task 3's `session.ts` subcommand are deliberately the last and smallest edits, to be sequenced after
-those lanes land or taken by handoff.
+`packages/cli/src/host/backends/**` is owned by gptbot (harness residency increment 6). The registry
+itself is therefore a **new uncontended module** (`packages/cli/src/session/continuity.ts`), which is
+the right shape regardless: the backends need a contract, not an implementation. Task 4's backend
+diff is deliberately the smallest edit in its task so it can wait on that lane without blocking the
+rest.
+
+`packages/cli/src/commands/session.ts` was released by izzo on 2026-08-03 — their surface-drift lane
+turned out not to touch it (the transcript parser is chosen by `session.harness`, a per-hook
+constant, not by `binding.surface`). Task 3 may proceed there.
+
+**Harness dependency (izzo, 2026-08-03).** `captureSession` hardcodes harness `claude-code` and
+`observeCursorSession` hardcodes `cursor`; there is **no Codex hook path at all**, so a Codex seat
+never writes `binding.session`. Since the registry fills from that capture, a harness with no hook
+path can never hold a binding and every one of its wakes stays fresh — the correct failure direction,
+and no correctness risk. But it means ADR 210's "all harnesses implement the shared binding contract
+before any harness advertises resume capability" **cannot be satisfied for Codex** until izzo's lane
+(`Codex seats have no hook path, so their model and surface are declaration-only forever`) lands.
+Task 5 therefore ships the registry off by default and records this as a named blocker on advertising
+resume capability, rather than quietly shipping a claude-code-only resume path that reads as general.
 
 ---
 
