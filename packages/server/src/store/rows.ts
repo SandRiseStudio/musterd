@@ -1,6 +1,7 @@
 import {
   type AccountStatus,
   AvailabilitySchema,
+  WorkingHoursSchema,
   type Capabilities,
   CapabilitiesSchema,
   GENERALIST_CAPABILITIES,
@@ -18,6 +19,8 @@ export interface TeamRow {
   agent_key_hash: string | null;
   /** v0.3 P3 (ADR 076): team governance policy as JSON (`{ allow_pre_issued_grants }`). NULL ⇒ defaults. */
   policy: string | null;
+  /** Recurring Team schedule, JSON-encoded; null means no Team default (ADR 204). */
+  working_hours: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -31,6 +34,8 @@ export interface MemberRow {
   lifecycle: 'forever' | 'session' | 'until';
   lifecycle_until: number | null;
   availability: string | null;
+  /** Recurring Member schedule, JSON-encoded; null inherits the Team default (ADR 204). */
+  working_hours: string | null;
   token_hash: string | null;
   /** Held-since (ADR 058): set on first authenticated touch, cleared on rotation/reclaim. Null ⇒
    * declared-but-unheld (a stray `claim` may rotate it); non-null ⇒ held, only adoptable. */
@@ -131,6 +136,16 @@ export function resolveObserverScope(row: MemberRow): 'full' | 'public' {
   return row.observer_scope === 'public' ? 'public' : 'full';
 }
 
+/** Parse persisted working-hours JSON defensively; malformed legacy data means no schedule. */
+export function parseWorkingHours(raw: string | null | undefined) {
+  if (!raw) return null;
+  try {
+    return WorkingHoursSchema.safeParse(JSON.parse(raw)).data ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * May this seat read the team's *directed* traffic — every DM, not just its own?
  *
@@ -161,6 +176,7 @@ export function toMember(row: MemberRow, teamSlug: string): Member {
     availability: row.availability
       ? (AvailabilitySchema.safeParse(JSON.parse(row.availability)).data ?? null)
       : null,
+    working_hours: parseWorkingHours(row.working_hours),
     account_status: resolveAccountStatus(row),
     capabilities: resolveCapabilities(row),
     created_at: row.created_at,

@@ -10,6 +10,7 @@ import {
 import { AccountStatusSchema, CapabilitiesSchema } from './capabilities.js';
 import { OfflineReasonSchema } from './offline.js';
 import { PostureSchema } from './posture.js';
+import { WorkingHoursSchema, type WorkingHours } from './working-hours.js';
 
 /**
  * The self-set availability axis (SPEC A.6 Axis 2) — explicit, **never inferred**. `away_until(ts)`
@@ -36,6 +37,8 @@ export const MemberSchema = z.object({
   lifecycle: LifecycleSchema.default('forever'),
   lifecycle_until: z.number().int().nullish(),
   availability: AvailabilitySchema.nullish(),
+  /** Optional recurring schedule; a Member value replaces the Team default (ADR 204). */
+  working_hours: WorkingHoursSchema.nullish(),
   /** Account status — Axis 1 (ADR 070). Optional for back-compat; the server always resolves it. */
   account_status: AccountStatusSchema.optional(),
   /** Effective capabilities (ADR 070). Optional for back-compat; the server always resolves it. */
@@ -43,6 +46,7 @@ export const MemberSchema = z.object({
   created_at: z.number().int(),
 });
 export type Member = z.infer<typeof MemberSchema>;
+export type { WorkingHours };
 
 /** One active attachment of a Member to a Surface. */
 export const PresenceSchema = z.object({

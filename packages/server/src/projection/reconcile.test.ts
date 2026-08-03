@@ -78,6 +78,49 @@ describe('reconcile — match-by-name delta', () => {
     expect(r2.minted).toEqual({});
   });
 
+  it('projects Team and Member working hours, preserving the Member override', () => {
+    writeRoster(
+      `slug = "alpha"
+
+[working_hours]
+timezone = "America/Los_Angeles"
+days = ["mon", "tue", "wed", "thu", "fri"]
+start = "11:00"
+end = "15:00"
+`,
+      {
+        inherited: 'kind = "agent"\n',
+        custom: `kind = "agent"
+
+[working_hours]
+timezone = "America/New_York"
+days = ["mon", "wed", "fri"]
+start = "09:00"
+end = "12:00"
+`,
+      },
+    );
+    reconcile();
+    const team = getTeamBySlug(db, 'alpha')!;
+    expect(team.working_hours).toBe(
+      JSON.stringify({
+        timezone: 'America/Los_Angeles',
+        days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+        start: '11:00',
+        end: '15:00',
+      }),
+    );
+    expect(getMemberByName(db, team.id, 'inherited')?.working_hours).toBeNull();
+    expect(getMemberByName(db, team.id, 'custom')?.working_hours).toBe(
+      JSON.stringify({
+        timezone: 'America/New_York',
+        days: ['mon', 'wed', 'fri'],
+        start: '09:00',
+        end: '12:00',
+      }),
+    );
+  });
+
   it('UPDATEs a role in place, preserving id + token_hash + bound_at', () => {
     writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
     reconcile();

@@ -142,6 +142,7 @@ import {
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import {
   hasFullMessageVisibility,
+  parseWorkingHours,
   resolveAccountStatus,
   resolveCapabilities,
   toMember,
@@ -151,6 +152,7 @@ import { staleLaneWarnings } from '../store/staleness.js';
 import {
   archiveTeam,
   createTeam,
+  getTeamBySlug,
   getAgentKeyHash,
   getPolicy,
   getStoredPolicy,
@@ -925,6 +927,7 @@ function summarize(
   teamId: string,
   viewer: MemberRow | null = null,
 ): MemberSummary[] {
+  const teamWorkingHours = parseWorkingHours(getTeamBySlug(ctx.db, teamSlug)?.working_hours);
   const viewerIsAdmin = viewer ? resolveCapabilities(viewer).is_admin : false;
   // Seats held within their ADR 010 reclaim grace — read `offline` above, but a reservation the clobber
   // guard (ADR 066/105) must treat as occupied. Computed once for the team, not per-member.
@@ -955,6 +958,7 @@ function summarize(
       s.member.kind === 'human' ? ctx.config.presenceTimeoutMs : undefined,
     );
     const member = toMember(s.member, teamSlug);
+    const effectiveWorkingHours = member.working_hours ?? teamWorkingHours;
     const seesCaps = viewerIsAdmin || viewer?.id === s.member.id;
     const { capabilities: _caps, ...needToKnow } = member;
     const isReclaimable = reclaimable.has(s.member.id);
@@ -968,6 +972,7 @@ function summarize(
     });
     return {
       ...(seesCaps ? member : needToKnow),
+      working_hours: effectiveWorkingHours,
       presence: presenceStatus,
       presences: s.presences,
       ...activity,
@@ -1061,7 +1066,12 @@ export async function handleHttp(
       if (method === 'GET' && rest === '') {
         const team = requireTeam(ctx.db, slug);
         return sendJson(res, 200, {
-          team: { id: team.id, slug: team.slug, display: team.display },
+          team: {
+            id: team.id,
+            slug: team.slug,
+            display: team.display,
+            working_hours: parseWorkingHours(team.working_hours),
+          },
           members: summarize(ctx, slug, team.id, tryAuth(ctx, slug, req)),
         });
       }

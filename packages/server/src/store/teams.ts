@@ -5,6 +5,7 @@ import {
   PolicyOverrideSchema,
   PolicySchema,
   TOKEN_PREFIXES,
+  type WorkingHours,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
@@ -17,7 +18,12 @@ const SLUG_RE = /^[a-z0-9-]{1,32}$/;
 
 export function createTeam(
   db: Database,
-  input: { slug: string; display?: string | null; defaultLifecycle?: string },
+  input: {
+    slug: string;
+    display?: string | null;
+    defaultLifecycle?: string;
+    workingHours?: WorkingHours | null;
+  },
 ): TeamRow {
   if (!SLUG_RE.test(input.slug)) {
     throw new MusterdError(
@@ -43,12 +49,13 @@ export function createTeam(
     archived_at: null,
     agent_key_hash: null,
     policy: null,
+    working_hours: input.workingHours ? JSON.stringify(input.workingHours) : null,
     created_at: now,
     updated_at: now,
   };
   db.prepare(
-    `INSERT INTO teams (id, slug, display, default_lifecycle, archived_at, created_at, updated_at)
-     VALUES (@id, @slug, @display, @default_lifecycle, @archived_at, @created_at, @updated_at)`,
+    `INSERT INTO teams (id, slug, display, default_lifecycle, archived_at, working_hours, created_at, updated_at)
+     VALUES (@id, @slug, @display, @default_lifecycle, @archived_at, @working_hours, @created_at, @updated_at)`,
   ).run(row);
   return row;
 }
@@ -146,11 +153,21 @@ export function getStoredPolicy(db: Database, teamId: string): PolicyOverride {
 export function updateTeam(
   db: Database,
   id: string,
-  fields: { display: string | null; defaultLifecycle: string },
+  fields: {
+    display: string | null;
+    defaultLifecycle: string;
+    workingHours?: WorkingHours | null;
+  },
 ): void {
   db.prepare(
-    'UPDATE teams SET display = ?, default_lifecycle = ?, updated_at = ? WHERE id = ?',
-  ).run(fields.display, fields.defaultLifecycle, Date.now(), id);
+    'UPDATE teams SET display = ?, default_lifecycle = ?, working_hours = ?, updated_at = ? WHERE id = ?',
+  ).run(
+    fields.display,
+    fields.defaultLifecycle,
+    fields.workingHours ? JSON.stringify(fields.workingHours) : null,
+    Date.now(),
+    id,
+  );
 }
 
 /**

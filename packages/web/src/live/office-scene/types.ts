@@ -1,4 +1,4 @@
-import type { LaneState, Posture } from '@musterd/protocol';
+import type { LaneState, Posture, WorkingHours } from '@musterd/protocol';
 import type { ActTone } from '../format';
 import type { WallBoard } from './wallboard';
 
@@ -39,6 +39,8 @@ export interface OfficeNode {
 export interface OfficeData {
   /** Stable visual seed for desk moods; absent in previews, where the default seed is used. */
   teamName?: string;
+  /** Optional Team schedule rendered by the wall sign; absent means no sign. */
+  teamWorkingHours?: WorkingHours | null;
   nodes: OfficeNode[];
   /** The lane board projected for the wall's agile board (wallboard.ts). Absent/null → empty board. */
   wallBoard?: WallBoard | null;

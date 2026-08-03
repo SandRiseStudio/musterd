@@ -244,6 +244,12 @@ function OfficePreviewPage() {
 
   const buildData = useCallback(
     (): OfficeData => ({
+      teamWorkingHours: {
+        timezone: 'America/Los_Angeles',
+        days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+        start: '11:00',
+        end: '15:00',
+      },
       nodes: POOL.filter((m) => present.has(m.name)).map((m) => {
         const isAway = away.has(m.name);
         const isStale = stale.has(m.name);

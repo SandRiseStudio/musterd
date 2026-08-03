@@ -11,7 +11,7 @@ import {
 import type { Database } from 'better-sqlite3';
 import { listMembers } from '../store/members.js';
 import { roleDefaultsMap } from '../store/roles.js';
-import type { MemberRow, TeamRow } from '../store/rows.js';
+import { parseWorkingHours, type MemberRow, type TeamRow } from '../store/rows.js';
 import { getTeamBySlug } from '../store/teams.js';
 
 /** The capability fields, as the single list both the diff and the verification walk. */
@@ -36,6 +36,9 @@ export function teamRowToFile(row: TeamRow): TeamFile {
     slug: row.slug,
     ...(row.display ? { display: row.display } : {}),
     lifecycle: row.default_lifecycle as Lifecycle,
+    ...(parseWorkingHours(row.working_hours)
+      ? { working_hours: parseWorkingHours(row.working_hours)! }
+      : {}),
   };
 }
 
@@ -56,6 +59,8 @@ export function memberRowToSeat(
       seat.until = new Date(row.lifecycle_until).toISOString();
     }
   }
+  const workingHours = parseWorkingHours(row.working_hours);
+  if (workingHours) seat.working_hours = workingHours;
   const capsResult = seatCapabilities(row, roleDefaults);
   if (capsResult.override) seat.capabilities = capsResult.override;
   return capsResult.unrepresentable

@@ -1,4 +1,5 @@
 import { canvasFont } from '../canvasFont';
+import type { WorkingHours } from '@musterd/protocol';
 import type { Appearance } from './appearance';
 import { drawCharacter } from './character';
 import { depth, FLOOR, KX, KY, project, THICK, WALL_H, type Fit, type Pt } from './iso';
@@ -53,6 +54,7 @@ import { deskMoodFor, deskMoodStyle } from './moods';
 import type { Placement } from './seating';
 import { chairShift, chairYaw, GESTURE, handsInLap, seedOf, solveSkeleton, typingBurst } from './skeleton';
 import type { Dir, OfficeNode, Pose } from './types';
+import { formatWorkingHours } from './workingHours';
 
 /**
  * Canvas-2D drawing for the office. Everything is painter-ordered by logical depth (lx+ly) so seated
@@ -1035,7 +1037,9 @@ function drawWalls(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   env: LightEnv,
+  teamWorkingHours: WorkingHours | null = null,
   wallBoard: WallBoard | null = null,
+  t = 0,
 ): void {
   /**
    * What each wall carries. The right wall gets the clock (it is the only one whose `+t` runs screen-right,
@@ -1052,6 +1056,7 @@ function drawWalls(
     }
     if (wallIndex === 1) {
       wallClock(ctx, fit, edge, 0.52, 0.62, env.hours); // dead centre, between the windows
+      if (teamWorkingHours) workingHoursSign(ctx, fit, edge, teamWorkingHours, 0.52, 0.44, t);
       // The agile board — far-right gap. Must be THIS wall: `+t` runs screen-left on the other one
       // (same constraint that fixed the clock here), and a kanban has a reading direction.
       wallLaneBoard(ctx, fit, edge, wallBoard);
@@ -1144,6 +1149,76 @@ function drawWalls(
   wall(WALL_EDGES[0]!, 0.9);
   // back-right wall (ly=0 edge) catches more of that light.
   wall(WALL_EDGES[1]!, 0.99);
+}
+
+/** A tiny wall placard that turns the Team's recurring schedule into a warm office ritual. */
+function workingHoursSign(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  edge: (t: number) => [number, number],
+  schedule: WorkingHours,
+  tc: number,
+  uc: number,
+  t: number,
+): void {
+  const copy = formatWorkingHours(schedule);
+  if (!copy) return;
+  const W = 174;
+  const H = 64;
+  const r = fit.scale;
+  const centre = wallPt(edge, tc, uc, fit);
+  const p = (t: number, u: number) => wallPt(edge, t, u, fit);
+  const left = tc - W / FLOOR / 2;
+  const right = tc + W / FLOOR / 2;
+  const bottom = uc - H / WALL_H / 2;
+  const top = uc + H / WALL_H / 2;
+
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  wallRect(ctx, fit, edge, left + 0.008, bottom - 0.012, right + 0.008, top - 0.012, '#6b4a32');
+  ctx.globalAlpha = 1;
+  wallRect(ctx, fit, edge, left, bottom, right, top, '#e9c987');
+  wallRect(ctx, fit, edge, left + 0.012, bottom + 0.016, right - 0.012, top - 0.016, '#fff1cf');
+  // Two tiny washi tabs make the sign feel placed by a person, not stamped into the wall.
+  wallRect(ctx, fit, edge, left + 0.02, top - 0.008, left + 0.13, top + 0.014, 'rgba(225,173,1,0.82)');
+  wallRect(ctx, fit, edge, right - 0.13, top - 0.008, right - 0.02, top + 0.014, 'rgba(239,201,76,0.82)');
+
+  const dot = p(left + 0.06, top - 0.06);
+  ctx.fillStyle = '#e1ad01';
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.3 + Math.sin(t * 1.2) * 0.04;
+  ctx.beginPath();
+  ctx.arc(dot.x, dot.y, 9 * r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#e1ad01';
+  ctx.beginPath();
+  ctx.arc(dot.x, dot.y, 3.5 * r, 0, Math.PI * 2);
+  ctx.fill();
+
+  const textX = centre.x + 8 * r;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#6f4a23';
+  ctx.font = canvasFont(Math.max(5, 10 * r), '--font-display', 700);
+  ctx.fillText('TEAM WORKING HOURS', textX, centre.y - 17 * r);
+  ctx.fillStyle = '#3d3025';
+  ctx.font = canvasFont(Math.max(5, 9 * r), '--font-sans', 700);
+  ctx.fillText(`${copy.days} · ${copy.hours}`, textX, centre.y - 2 * r);
+  ctx.fillStyle = '#8e6d4b';
+  ctx.font = canvasFont(Math.max(4, 7 * r), '--font-mono', 700);
+  ctx.fillText(copy.timezone, textX, centre.y + 12 * r);
+
+  // Four little stars turn the empty corners into a soft, quirky signature.
+  ctx.fillStyle = '#d29a32';
+  for (const [dx, dy] of [[-63, -20], [67, -17], [-61, 19], [64, 19]] as const) {
+    const star = p(tc + dx / FLOOR, uc + dy / WALL_H);
+    ctx.beginPath();
+    ctx.arc(star.x, star.y, Math.max(1, 1.4 * r), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /** Deterministic 0..1 hash — the ambient-magic anchors must not shuffle on every rebake. */
@@ -3721,6 +3796,8 @@ export function renderScene(
   recep: ReceptionistState | null = null,
   /** The real lane board squinted down for the wall (wallboard.ts). Null → the empty board hangs. */
   wallBoard: WallBoard | null = null,
+  /** Optional Team schedule for the wall sign. */
+  teamWorkingHours: WorkingHours | null = null,
 ): SceneAnchors {
   // Grounds the diorama on the panel surface before anything else paints (the floor covers its middle).
   drawGroundShadow(ctx, fit);
@@ -3728,7 +3805,7 @@ export function renderScene(
   // The room shell: back walls + windows as a backdrop (behind every item), then the daylight beams they
   // cast onto the floor (under every item). Both before the depth-sorted loop — see the walls note above.
   // Roster order (Map insertion order), so a member keeps the same spot on the in/out board.
-  drawWalls(ctx, fit, env, wallBoard);
+  drawWalls(ctx, fit, env, teamWorkingHours, wallBoard, t);
   drawWindowBeams(ctx, fit, env);
 
   // desk → seat owner (for the monitor's working glow); the owner may be walking but the seat stays lit.

@@ -10,6 +10,7 @@ import {
   AuditResponseSchema,
   LaneBoardSchema,
   LaneResultSchema,
+  MemberSummarySchema,
   ReportSchema,
   type Report,
   makeEnvelope,
@@ -22,6 +23,8 @@ import {
   type OpenLane,
   type Request,
   type UpdateLane,
+  type WorkingHours,
+  WorkingHoursSchema,
 } from '@musterd/protocol';
 
 // Re-export so the audit view + route keep importing the entry type from this client module.
@@ -80,12 +83,22 @@ async function apiGet<T>(cfg: LiveConfig, path: string): Promise<T> {
 }
 
 /** Full team roster with presence/activity (`GET /teams/:slug`). */
-export async function fetchRoster(cfg: LiveConfig): Promise<MemberSummary[]> {
-  const r = await apiGet<{ members: MemberSummary[] }>(
-    cfg,
-    `/teams/${encodeURIComponent(cfg.team)}`,
-  );
-  return r.members;
+export interface TeamRoster {
+  members: MemberSummary[];
+  working_hours: WorkingHours | null;
+}
+
+export async function fetchRoster(cfg: LiveConfig): Promise<TeamRoster> {
+  const raw = await apiGet<unknown>(cfg, `/teams/${encodeURIComponent(cfg.team)}`);
+  if (!raw || typeof raw !== 'object') throw new Error('invalid team roster response');
+  const response = raw as { members?: unknown; team?: unknown };
+  const members = MemberSummarySchema.array().parse(response.members);
+  const team =
+    response.team && typeof response.team === 'object'
+      ? (response.team as { working_hours?: unknown })
+      : undefined;
+  const working_hours = WorkingHoursSchema.nullish().parse(team?.working_hours);
+  return { members, working_hours: working_hours ?? null };
 }
 
 /** Whole-team history for backfill (`GET /teams/:slug/messages`, the firehose's history side). */

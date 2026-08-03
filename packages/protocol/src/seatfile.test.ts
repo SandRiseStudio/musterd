@@ -65,6 +65,19 @@ describe('seat file — guard 2: canonical byte-equality + idempotence', () => {
     'slug = "alpha"\ndisplay = "Team Alpha"\nlifecycle = "session"\n',
   ];
 
+  it('round-trips a recurring working-hours table on Team and seat files', () => {
+    const working_hours = {
+      timezone: 'America/Los_Angeles',
+      days: ['mon', 'tue', 'wed', 'thu', 'fri'] as const,
+      start: '11:00',
+      end: '15:00',
+    };
+    const team = { slug: 'revive', lifecycle: 'forever' as const, working_hours };
+    const seat = { kind: 'agent' as const, role: 'builder', working_hours };
+    expect(parseTeamFile(serializeTeam(team))).toEqual(team);
+    expect(parseSeatFile(serializeSeat(seat), 'miley')).toEqual({ ...seat, name: 'miley' });
+  });
+
   it('round-trips each canonical team file byte-for-byte', () => {
     for (const text of canonicalTeams) {
       expect(serializeTeam(parseTeamFile(text))).toBe(text);

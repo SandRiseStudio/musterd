@@ -93,6 +93,7 @@ export const TeamFileSchema = z.object({
   slug: z.string().regex(/^[a-z0-9-]{1,32}$/),
   display: z.string().optional(),
   lifecycle: LifecycleSchema.default('forever'),
+  working_hours: WorkingHoursSchema.optional(), // recurring informational schedule (ADR 204)
 });
 export const SeatFileSchema = z
   .object({
@@ -101,6 +102,7 @@ export const SeatFileSchema = z
     lifecycle: LifecycleSchema.optional(),
     until: z.string().datetime().optional(),
     name: z.string().optional(), // if present, must equal the filename stem
+    working_hours: WorkingHoursSchema.optional(), // Member override; replaces the Team schedule
   })
   .refine((s) => s.lifecycle !== 'until' || s.until, {
     message: 'lifecycle "until" requires an `until` timestamp',

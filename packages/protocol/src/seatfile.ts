@@ -1,6 +1,7 @@
 import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
 import { LifecycleSchema, MemberKindSchema } from './acts.js';
+import { WorkingHoursSchema } from './working-hours.js';
 import {
   AdminAccountStatusSchema,
   type PartialCapabilities,
@@ -31,6 +32,7 @@ export const TeamFileSchema = z.object({
   slug: z.string().regex(SLUG_RE, 'team slug must match [a-z0-9-]{1,32}'),
   display: z.string().optional(),
   lifecycle: LifecycleSchema.default('forever'),
+  working_hours: WorkingHoursSchema.optional(),
 });
 export type TeamFile = z.infer<typeof TeamFileSchema>;
 
@@ -53,6 +55,7 @@ export const SeatFileSchema = z
     /** Per-seat capability **narrowing** (ADR 070) — a partial that may only narrow the seat's role
      *  defaults, never widen (enforced by the daemon's projection via `clampNarrow`). */
     capabilities: PartialCapabilitiesSchema.optional(),
+    working_hours: WorkingHoursSchema.optional(),
   })
   .refine((s) => s.lifecycle !== 'until' || Boolean(s.until), {
     message: 'lifecycle "until" requires an `until` timestamp',
@@ -158,6 +161,16 @@ function arrayLine(key: string, values: string[]): string {
   return `${key} = [${values.map(tomlString).join(', ')}]\n`;
 }
 
+function serializeWorkingHours(value: NonNullable<SeatFile['working_hours']>): string {
+  return (
+    '[working_hours]\n' +
+    `timezone = ${tomlString(value.timezone)}\n` +
+    `days = [${value.days.map(tomlString).join(', ')}]\n` +
+    `start = ${tomlString(value.start)}\n` +
+    `end = ${tomlString(value.end)}\n`
+  );
+}
+
 /**
  * Canonical `[capabilities]` table body (shared by seat + role files). Fixed key order; only
  * **present** keys emitted (a partial), so an empty override produces no output and the caller omits
@@ -185,6 +198,7 @@ export function serializeTeam(team: TeamFile): string {
   let out = line('slug', team.slug);
   if (team.display) out += line('display', team.display);
   if (team.lifecycle && team.lifecycle !== 'forever') out += line('lifecycle', team.lifecycle);
+  if (team.working_hours) out += serializeWorkingHours(team.working_hours);
   return out;
 }
 
@@ -204,6 +218,7 @@ export function serializeSeat(seat: SeatFile): string {
   // Admin-set account status (top-level key — must precede any table). Omitted when unset (the common
   // active/provisioned case is derived, never written).
   if (seat.account_status) out += line('account_status', seat.account_status);
+  if (seat.working_hours) out += serializeWorkingHours(seat.working_hours);
   // Per-seat capability narrowing as a trailing `[capabilities]` table (TOML requires tables after
   // top-level keys). Omitted entirely when the override is absent or empty (a known normalization).
   if (seat.capabilities) {
