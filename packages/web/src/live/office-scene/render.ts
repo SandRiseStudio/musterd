@@ -1165,7 +1165,10 @@ function drawWalls(
   wall(WALL_EDGES[1]!, 0.99);
 }
 
-/** A tiny wall placard that turns the Team's recurring schedule into a warm office ritual. */
+/** Monday-first, the order the week strip reads in. */
+const WEEK = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+
+/** The wall calendar that turns the Team's recurring schedule into a warm office ritual. */
 function workingHoursSign(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -1184,35 +1187,48 @@ function workingHoursSign(
   const halfH = H / 2;
   const INNER = W - 18; // the paper's printable width: card less frame, trim and a breathing margin either side
 
+  const BAND = halfH - 16; // the mustard header's lower edge — the paper proper starts here
+
+  // No hanging cord: the clock's dial comes within a few units of the frame, and a cord tall enough to
+  // read would cross it. The card sits flush, like the art on the same wall.
   ctx.save();
-  // A modest paper calendar — a fixture in the clock's wall bay, not a floating banner.
   ctx.globalAlpha = 0.22;
-  wallRect(ctx, fit, edge, T(-halfW + 6), U(-halfH - 5), T(halfW + 6), U(halfH - 5), '#503522');
+  wallRect(ctx, fit, edge, T(-halfW + 6), U(-halfH - 6), T(halfW + 6), U(halfH - 6), '#503522');
   ctx.globalAlpha = 1;
-  wallRect(ctx, fit, edge, T(-halfW), U(-halfH), T(halfW), U(halfH), '#735034'); // oak frame
-  wallRect(ctx, fit, edge, T(-halfW + 1.5), U(-halfH + 1.5), T(halfW - 1.5), U(halfH - 1.5), '#bd943c'); // brass trim
-  wallRect(ctx, fit, edge, T(-halfW + 3), U(-halfH + 3), T(halfW - 3), U(halfH - 3), '#f9edcf'); // paper
-  wallRect(ctx, fit, edge, T(-halfW + 3), U(halfH - 15), T(halfW - 3), U(halfH - 3), '#e1ad01'); // mustard heading
+  wallRect(ctx, fit, edge, T(-halfW), U(-halfH), T(halfW), U(halfH), '#6a4a30'); // oak frame
+  wallRect(ctx, fit, edge, T(-halfW), U(halfH - 2), T(halfW), U(halfH), '#8a6440'); // its sunlit top edge
+  wallRect(ctx, fit, edge, T(-halfW + 2), U(-halfH + 2), T(halfW - 2), U(halfH - 2), '#c39a41'); // brass trim
+  wallRect(ctx, fit, edge, T(-halfW + 4), U(-halfH + 4), T(halfW - 4), U(halfH - 4), '#fbf1d8'); // paper
 
-  // Binder loops sit on the frame rather than in screen space, so even their small gleam belongs to the wall.
-  for (const offset of [-16, 16]) {
-    wallDisc(ctx, fit, edge, T(offset), U(halfH + 1), 2.6, '#b58b3a');
-    wallDisc(ctx, fit, edge, T(offset), U(halfH + 1), 1.25, '#5f452d');
-  }
+  // The header: mustard, with a hairline of shadow under it so the band sits *on* the sheet.
+  wallRect(ctx, fit, edge, T(-halfW + 4), U(BAND), T(halfW - 4), U(halfH - 4), '#e1ad01');
+  wallRect(ctx, fit, edge, T(-halfW + 4), U(BAND - 1.5), T(halfW - 4), U(BAND), 'rgba(120,84,20,0.28)');
+  // Two punched holes in the band, the way a wall calendar's top sheet is punched.
+  for (const dx of [-halfW + 12, halfW - 12]) wallDisc(ctx, fit, edge, T(dx), U(halfH - 9), 2.2, '#b8862a');
 
-  // Two rows: the days and the hours. The card is ~60 screen px at the office's usual fit, so every row
-  // that isn't one of those two facts steals size from the ones that are. Both are still shrunk to the
-  // paper — days can be a list ("MON · WED · FRI"), not just a run, and the card is only as wide as the
-  // window bay allows.
+  // The days on the band, the hours across the sheet. Both shrink to the paper rather than overrun it:
+  // days can be a list ("MON · WED · FRI"), not just a run.
   const line = (dy: number, text: string, size: number, fill: string): void =>
     wallText(ctx, fit, edge, tc, U(dy), text, fitTextSize(ctx, text, size, INNER), fill, 'center');
-  line(halfH - 10.5, copy.days, 10, '#4e331f'); // the days ride the header band, like a calendar's month bar
-  line(-9.5, copy.hours, 12, '#33261c');
+  line(halfH - 13, copy.days, 11.5, '#4e331f');
+  line(-7, copy.hours, 16, '#33261c');
+
+  // A hairline rule, then a week strip: seven marks, the working ones filled. The strip says what the
+  // days line says in the one language that survives being eight pixels tall, and gives the sheet a
+  // foot to stand on rather than trailing off into blank paper.
+  wallRect(ctx, fit, edge, T(-halfW + 13), U(-12), T(halfW - 13), U(-11.3), 'rgba(120,96,60,0.18)');
+  const on = new Set(schedule.days);
+  WEEK.forEach((day, i) => {
+    const dx = (i - 3) * 11;
+    const lit = on.has(day);
+    wallDisc(ctx, fit, edge, T(dx), U(-17.5), 3.4, lit ? '#e1ad01' : 'rgba(120,96,60,0.2)');
+    if (lit) wallDisc(ctx, fit, edge, T(dx), U(-17.5), 1.5, '#7a5a1c');
+  });
 
   // A brass tack in the header gives the card a restrained life. t=0 is its complete, static
   // reduced-motion posture.
   ctx.globalAlpha = 0.72 + Math.sin(t * 1.2) * 0.08;
-  wallDisc(ctx, fit, edge, T(-halfW + 7), U(halfH - 8.5), 2.2, '#b8872d');
+  wallDisc(ctx, fit, edge, T(-halfW + 12), U(halfH - 9), 1.1, '#f4dc9a');
   ctx.globalAlpha = 1;
   ctx.restore();
 }

@@ -282,6 +282,17 @@ describe('the walls are not a matched set', () => {
     }
   });
 
+  it('keeps the working-hours calendar inside the window bay it hangs in', () => {
+    // The card fills the gap between the two windows, so its width is now bounded by them, not by taste.
+    const half = WORKING_HOURS_CALENDAR.w / 2 / FLOOR;
+    for (const win of WINDOWS) {
+      const clearsSideways =
+        WORKING_HOURS_CALENDAR.tc + half < win.t0 || WORKING_HOURS_CALENDAR.tc - half > win.t1;
+      const clearsBelow = WORKING_HOURS_CALENDAR.uc + WORKING_HOURS_CALENDAR.h / 2 / WALL_H < win.u0;
+      expect(clearsSideways || clearsBelow, `calendar overlaps a window at t${win.t0}`).toBe(true);
+    }
+  });
+
   it('does not make four copies of one window', () => {
     expect(new Set(WINDOWS.map((w) => w.mullions)).size).toBeGreaterThan(1);
     expect(WINDOWS.some((w) => w.sill)).toBe(true);

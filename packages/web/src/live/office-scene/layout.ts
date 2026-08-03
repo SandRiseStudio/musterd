@@ -600,9 +600,17 @@ export const ART: readonly ArtPiece[] = [
   { wall: 1, tc: 0.23, uc: 0.58, w: 60, h: 44, motif: 'sunrise', frame: 'thick' },
 ];
 
-/** The compact Team-schedule calendar, directly beneath the right-wall clock. Its geometry is shared
- * with layout tests so the two wall fixtures retain a hand's breadth of clear plaster between them. */
-export const WORKING_HOURS_CALENDAR = { wall: 1 as const, tc: 0.52, uc: 0.34, w: 72, h: 36, loopOverhang: 4 };
+/**
+ * The Team-schedule calendar, directly beneath the right-wall clock — the clock's companion, and read
+ * as a pair with it. Geometry is shared with layout tests so the two fixtures keep a hand's breadth of
+ * clear plaster between them and the card stays inside the window bay.
+ *
+ * It fills that bay rather than perching in it: the wall between the two windows is `t ∈ 0.46…0.58`
+ * (≈108 units) and free all the way down, so the card can be the size a real one would be. Nothing
+ * about the copy wanted it small — the first version was small *and* overfull, which is how it ended
+ * up illegible.
+ */
+export const WORKING_HOURS_CALENDAR = { wall: 1 as const, tc: 0.52, uc: 0.3, w: 92, h: 52, loopOverhang: 4 };
 /**
  * Two windows per back wall — spaced so the wall reads as a facade, not a single porthole.
  *
