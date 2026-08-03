@@ -243,6 +243,10 @@ Runs the daemon as a background **service** so it survives a closed terminal/ses
 
 The one-time **db→file migration** for a team's durable roster (ADR 058 / migration-bootstrap.md). Run in the folder that should own the roster: reads the live roster, writes canonical `.musterd/team.toml` + one `seats/<name>.toml` per member (identity only — **no token touches a file**), runs the format-layer parity self-check, and records `rosterHome[slug]` in the global config (the per-team cutover signal — the daemon then treats this team as file-backed). Token-preserving by construction: the next reconcile is a match-by-name no-op, so live sessions keep their tokens. Refuses if `team.toml` already exists. Output: `✓ exported "<slug>" roster → .musterd/ (N seats)`.
 
+### `musterd team policy [--dispatch-loop on|off]`
+
+Shows or updates the Team's admin-only governance policy. `--dispatch-loop on` arms ADR 199's dispatch work-order loop; `off` restores its default. The command reads the sparse stored policy, updates only `loops.dispatch`, then writes it back, so it never clobbers another policy setting or another loop switch. The human-readable view shows whether the setting is explicit or inherited; `--json` includes effective `loops` plus the sparse `stored` policy. Dispatch still also requires the target seat's residency `flow: auto`; the command only controls the Team-wide half of the gate.
+
 ### `musterd fmt [--check]`
 
 Canonicalize this folder's `.musterd/team.toml` + `seats/*.toml` — the ADR 058 **guard-2 (tidiness)** tool, so roster diffs stay minimal and blame clean. `--check` asserts the committed files are already canonical (exit 1 + the offending files on drift), the CI-style sibling of `format:check`. Purely cosmetic — correctness rides on the semantic round-trip (guard 1), never byte-equality of hand edits.

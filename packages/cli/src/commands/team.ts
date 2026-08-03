@@ -51,7 +51,7 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
 
 /**
  * `musterd team policy [--reseat-known-agents on|off] [--ask-fallback-to-nonadmin on|off]
- * [--ask-slack-webhook <url|off>]` — show or set the team governance policy (admin-only, audited
+ * [--dispatch-loop on|off] [--ask-slack-webhook <url|off>]` — show or set the team governance policy (admin-only, audited
  * `policy.change`). ADR 146: `--reseat-known-agents on` opts the team into dogfood-mode re-seat — an
  * already-held agent seat re-occupies without an admin decision. ADR 147:
  * `--ask-fallback-to-nonadmin on` lets an admin-unanswered ask fall back to non-admin humans past its
@@ -84,6 +84,13 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     merged.ask_fallback_to_nonadmin = askFallback;
     changed = true;
   }
+  // ADR 199: dispatch work-orders remain dark until a Team admin explicitly arms this loop. Preserve
+  // the other loop switches (and every unrelated sparse policy setting) while changing only dispatch.
+  const dispatchLoop = onOff(parsed.flags['dispatch-loop'], '--dispatch-loop');
+  if (dispatchLoop !== undefined) {
+    merged.loops = { ...merged.loops, dispatch: dispatchLoop };
+    changed = true;
+  }
   // ADR 149: the ask stream's Slack delivery — a webhook URL, or `off` to clear it (delete the key so
   // the daemon's "unset = no outbound call ever" default is restored, not stored as an empty string).
   const webhook = flagStr(parsed.flags, 'ask-slack-webhook');
@@ -109,7 +116,7 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     const { policy: updated } = await http.setPolicy(team, merged);
     process.stdout.write(
       success(
-        `team policy updated — ${team}: re-seat known agents ${updated.standing_reseat_known_agents ? theme.accent('on') : 'off'}, ask fallback to non-admins ${updated.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}`,
+        `team policy updated — ${team}: re-seat known agents ${updated.standing_reseat_known_agents ? theme.accent('on') : 'off'}, ask fallback to non-admins ${updated.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}, dispatch loop ${updated.loops.dispatch ? theme.accent('on') : 'off'}`,
       ) + '\n',
     );
     if (updated.standing_reseat_known_agents)
@@ -157,6 +164,9 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     `  ask fallback to non-admins: ${current.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}${inherited(stored, 'ask_fallback_to_nonadmin')}\n`,
   );
   process.stdout.write(
+    `  dispatch loop: ${current.loops.dispatch ? theme.accent('on') : 'off'}${inherited(stored.loops, 'dispatch')}\n`,
+  );
+  process.stdout.write(
     `  allow pre-issued grants: ${current.allow_pre_issued_grants ? 'on' : 'off'}${inherited(stored, 'allow_pre_issued_grants')}\n`,
   );
   // ADR 149: the webhook URL is a secret — show only that it's set, and where it points (host).
@@ -180,6 +190,7 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
       theme.meta('  every value is inherited — this team tracks the shipped defaults') + '\n',
     );
   process.stdout.write(theme.meta('  set: musterd team policy --reseat-known-agents on') + '\n');
+  process.stdout.write(theme.meta('       musterd team policy --dispatch-loop on') + '\n');
   process.stdout.write(
     theme.meta(
       "       musterd team policy --enforce-surface 'src/tariff.ts' --enforce-posture block",
