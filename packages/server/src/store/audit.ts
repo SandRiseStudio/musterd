@@ -130,8 +130,10 @@ export type AuditAction =
   // the rate/attempt derivations (one actuation must not count twice); the wake metrics dedupe
   // cost by lease_id, preferring this row over the primary's.
   | 'residency.wake_cost'
-  // ADR 209: a recipient read a server-derived portable wake-context index. Detail holds only
-  // metadata such as target kind and serialized byte count; content bodies never cross this seam.
+  // ADR 209: a recipient read (or was refused) a server-derived portable wake-context index.
+  // Allow detail: wake kind, packet version/bytes, fetch categories/count, delivery selection —
+  // never Act/memory/source bodies (Observability §). Deny detail: `{ reason:'forbidden',
+  // target_kind }` only — same verb so probes are visible without disclosing target existence.
   | 'residency.context_read'
   // ADR 211: a recipient postponed one directed act with a deferring `wait`. Detail is the condition
   // KIND only (`{ until: 'lane' | 'reply' }`) — never the lane id, never a body (ADR 051). There is
