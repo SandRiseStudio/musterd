@@ -1,6 +1,7 @@
 import {
   type AskSpecies,
   type AskTier,
+  DeferUntilSchema,
   type Envelope,
   isAwaitingAcceptance,
   makeEnvelope,
@@ -66,6 +67,31 @@ function routeEnvelopeInner(
   // Observer seats (ADR 063) are read-only — they watch the firehose but cannot speak.
   if (sender.observer) {
     throw new MusterdError('forbidden', 'observer seats are read-only and cannot send');
+  }
+
+  // ADR 211 §1: only the RECIPIENT of an act may defer it. The fold already ignores other people's
+  // waits, so a stray deferral could never suppress anyone else's inbox — but "only the recipient"
+  // is a stated boundary, and a boundary that is merely inert is not enforced. An unauthorized
+  // target is indistinguishable from a missing one (ADR 209 §4): same error either way, so the
+  // response never discloses that some other seat's act exists.
+  if (env.act === 'wait') {
+    const deferRef = (env.meta as { defer_ref?: unknown } | null | undefined)?.defer_ref;
+    if (typeof deferRef === 'string' && deferRef.length > 0) {
+      const target = ctx.db
+        .prepare<
+          [string, string],
+          { to_kind: string; to_member: string | null }
+        >('SELECT to_kind, to_member FROM messages WHERE team_id = ? AND id = ?')
+        .get(team.id, deferRef);
+      const deliveredToSender =
+        target &&
+        (target.to_member === sender.id ||
+          target.to_kind === 'team' ||
+          target.to_kind === 'broadcast');
+      if (!deliveredToSender) {
+        throw new MusterdError('forbidden', 'cannot defer an act that was not delivered to you');
+      }
+    }
   }
 
   // v0.3 P2 send gates (ADR 071) on the existing token auth. The sender's effective capabilities +
@@ -540,6 +566,27 @@ function recordAskLifecycle(ctx: Ctx, team: TeamRow, actor: string, env: Envelop
       result: 'allow',
       detail: { ask_ref: askRef, until: meta['until'] },
     });
+  }
+  // The recipient's own postponement (rides `wait`, ADR 211 §1). Distinct from `ask.deferred` above
+  // in both actor and meaning: that one is the SENDER saying "deciding, check back"; this is the
+  // RECIPIENT saying "not now, raise it when ⟨cond⟩".
+  //
+  // Detail is the condition KIND only. Not the lane id, not the body (ADR 051) — the eval needs the
+  // split between condition kinds and the deferral→raise interval, and neither needs content. There
+  // is deliberately no `raised` counterpart: a raise is derived at read time and has no event, and
+  // emitting one would invent a fact the system does not have (ADR 189).
+  const deferRef = meta['defer_ref'];
+  if (env.act === 'wait' && typeof deferRef === 'string' && deferRef.length > 0) {
+    const until = DeferUntilSchema.safeParse(meta['until']);
+    if (until.success) {
+      appendAudit(ctx.db, team.id, {
+        actor,
+        action: 'inbox.deferred',
+        target: deferRef,
+        result: 'allow',
+        detail: { until: 'reply' in until.data ? 'reply' : 'lane' },
+      });
+    }
   }
 }
 

@@ -23,7 +23,13 @@ import { openDirectedLedger } from './delivery.js';
 import { getLane, listLanes } from './lanes.js';
 import { getMemberById } from './members.js';
 import { memoryEnvelope } from './memory.js';
-import { listInbox, pendingInterrupts, rowToEnvelope } from './messages.js';
+import {
+  deferrals,
+  listInbox,
+  listTeamMessages,
+  pendingInterrupts,
+  rowToEnvelope,
+} from './messages.js';
 import { hasLivePresence, listReclaimableMemberIds } from './presence.js';
 import type { MemberRow, MessageRow } from './rows.js';
 import { getPolicy } from './teams.js';
@@ -50,6 +56,16 @@ export const WAKE_POLICY_DEFAULTS: ResidencyPolicy = ResidencyPolicySchema.parse
  *  every poll tick. Deferrals consume NO attempt/cooldown/hourly budget (they are neither
  *  `residency.woke` nor `residency.wake_failed`), so the act stays fully due afterwards. */
 export const WAKE_DEFER_SNOOZE_MS = 5 * 60_000;
+/**
+ * How far back the wake derivation scans for deferring `wait`s (ADR 211 §4). Matches the inbox
+ * read's bound: past this a deferral stops suppressing, and the act becomes a wake reason again —
+ * the pre-ADR-211 behaviour.
+ *
+ * Note this is the inverse of `WAKE_DEFER_SNOOZE_MS` above despite the shared word: that one is the
+ * host's local-session guard, which suppresses a wake for a window and leaves the act fully due.
+ * This one is the recipient's own decision to postpone one named act.
+ */
+const DEFERRAL_SCAN_LIMIT = 2000;
 
 export interface ResidencyRow {
   id: string;
@@ -700,7 +716,30 @@ function dueCandidates(
       });
     }
   }
-  return [...immediate, ...batched];
+
+  // ADR 211 §4: an act its recipient deferred is not a wake reason — they said "not now", and
+  // spawning them for it anyway would make the primitive a lie. Suppressed here for BOTH candidate
+  // sources above, since either can surface the same act.
+  //
+  // Deferred targets are suppressed whether or not their condition has fired. A raised act would
+  // otherwise become a wake candidate the moment the fold landed, shipping a wake nobody decided to
+  // ship; enabling raised acts is its own increment, behind the existing loop and seat controls.
+  //
+  // The fold reads the party-scoped team timeline, not the inbox: `listInbox` excludes the member's
+  // own sends and a deferring `wait` IS the member's own send.
+  const held = deferrals(
+    listTeamMessages(db, member.team_id, {
+      forMemberId: member.id,
+      limit: DEFERRAL_SCAN_LIMIT,
+    }).map((r) => {
+      const from = getMemberById(db, r.from_member);
+      const to = r.to_member ? getMemberById(db, r.to_member) : null;
+      return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
+    }),
+    member.name,
+  );
+  const due = [...immediate, ...batched];
+  return held.size === 0 ? due : due.filter((c) => !c.act_id || !held.has(c.act_id));
 }
 
 /**

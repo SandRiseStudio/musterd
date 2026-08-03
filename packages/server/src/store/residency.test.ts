@@ -331,6 +331,76 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
   });
 });
 
+describe('claimWakeLeases — a deferred act is not a wake reason (ADR 211 §4)', () => {
+  it('does not wake a seat for an act it deferred', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+    // Ada says "not now" — the act stays durably unread, but it stops being a reason to spawn her.
+    msg(db, team, ada, null, 'wait', 'w1', 2_000, {
+      meta: { defer_ref: 'u1', until: { lane: 'L1' } },
+    });
+
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('does not wake for a RAISED deferral either — increment 2 turns that on deliberately', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+    msg(db, team, ada, null, 'wait', 'w1', 2_000, {
+      meta: { defer_ref: 'u1', until: { lane: 'L1' } },
+    });
+    // The condition fires: the act is pending again in the inbox, but wake eligibility for raised
+    // deferrals is withheld until its own increment, so nothing is leased here.
+    msg(db, team, nick, null, 'message', 'l1', 3_000, {
+      meta: { lane_state: { lane: 'L1', state: 'done' } },
+    });
+
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('still wakes for a NON-deferred act alongside a deferred one', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'deferred one' },
+    });
+    msg(db, team, ada, null, 'wait', 'w1', 2_000, {
+      meta: { defer_ref: 'u1', until: { lane: 'L1' } },
+    });
+    msg(db, team, nick, ada, 'message', 'u2', 3_000, {
+      meta: { urgent: true, urgent_reason: 'this one still counts' },
+    });
+
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.act_id).toBe('u2');
+  });
+
+  it('wakes again once the deferral is withdrawn by a newer wait naming a fired condition', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+    msg(db, team, ada, null, 'wait', 'w1', 2_000, {
+      meta: { defer_ref: 'u1', until: { lane: 'L1' } },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+
+    // A deferral by a seat OTHER than the recipient must not suppress anything.
+    msg(db, team, nick, null, 'wait', 'w2', 2_500, {
+      meta: { defer_ref: 'u1', until: { reply: true } },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+});
+
 describe('wake-lease settlement + expiry', () => {
   it('settles a lease once; an unknown or already-reported lease returns null', () => {
     const { db, team, nick, ada } = seed();

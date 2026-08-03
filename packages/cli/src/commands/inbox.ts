@@ -1,8 +1,10 @@
 import { resolveWorkspace } from '@musterd/mcp';
-import type { Envelope, MemberKind } from '@musterd/protocol';
+import { makeEnvelope, type DeferUntil, type Envelope, type MemberKind } from '@musterd/protocol';
+import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
 import { watchClaim } from '../client.js';
 import { wsBase, type Identity } from '../config.js';
+import { CliError } from '../errors.js';
 import { isActionNeeded, renderInbox, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { kindLookup, resolve, resolveRead } from './helpers.js';
@@ -24,6 +26,12 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   // tool boundary, so it must be resolved *before* the acting `resolve()` below (which throws on an
   // ambient/unbound folder) and must be silent-or-one-line, best-effort, and never fail a tool call.
   if (parsed.flags['interrupt-check']) return interruptCheck(parsed);
+
+  // `musterd inbox defer <act_id> --until-lane <id> | --until-reply` (ADR 211 §6): the recipient's
+  // "not now, raise it when ⟨cond⟩". The CLI takes the surface investment because ADR 145 §4 spends
+  // surfaces before verbs — agents reach the same primitive through
+  // `team_send {act:'wait', meta:{defer_ref, until}}`, so no new MCP tool is minted for it.
+  if (parsed.positionals[0] === 'defer') return deferAct(parsed);
 
   const { config, team, identity, http } = resolve(parsed.flags);
   const roster = await http.roster(team).catch(() => ({ members: [] }));
@@ -65,6 +73,30 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(
       theme.meta('musterd inbox --watch --all to follow the firehose live') + '\n',
     );
+    return 0;
+  }
+
+  // --deferred (ADR 211 §5): the detail behind the footer count. A lens, like --from/--act: it never
+  // advances the read cursor, so inspecting what you postponed cannot consume it.
+  if (parsed.flags['deferred']) {
+    const res = await http.inbox(team);
+    const deferred = res.deferred ?? [];
+    if (parsed.flags['json']) {
+      process.stdout.write(JSON.stringify(deferred) + '\n');
+      return 0;
+    }
+    process.stdout.write(
+      `${theme.accent('deferred')} — ${team} ${theme.meta(`· ${deferred.length} postponed`)}\n`,
+    );
+    if (deferred.length === 0) {
+      process.stdout.write(theme.meta('nothing deferred') + '\n');
+      return 0;
+    }
+    for (const d of deferred) {
+      const cond = 'reply' in d.until ? 'a reply on its thread' : `lane ${d.until.lane} moves`;
+      const mark = d.raised ? theme.ok('● raised') : theme.meta('○ waiting');
+      process.stdout.write(`  ${mark}  ${theme.accent(d.target)} ${theme.meta(`until ${cond}`)}\n`);
+    }
     return 0;
   }
 
@@ -117,8 +149,67 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
     const newestUnread = [...messages].reverse().find((m) => m.ts > cursorTs);
     if (newestUnread) await http.markRead(team, newestUnread.id).catch(() => undefined);
   }
+  // ADR 211 §5: ADR 117 requires the default view to include every unread, and a deferred act is
+  // still unread. It is demoted to an honest footer line rather than hidden — the count is never
+  // silently reduced, and a raised deferral says so, because that is the one a reader should act on.
+  const deferred = res.deferred ?? [];
+  if (deferred.length > 0) {
+    const raised = deferred.filter((d) => d.raised).length;
+    const line =
+      raised > 0 ? `${deferred.length} deferred, ${raised} raised` : `${deferred.length} deferred`;
+    process.stdout.write('\n' + theme.meta(`${line} — musterd inbox --deferred for detail`) + '\n');
+  }
+
   const more = !filtering && total > shown ? 'musterd inbox --limit 0 for all history · ' : '';
   process.stdout.write('\n' + theme.meta(`${more}musterd inbox --watch to follow live`) + '\n');
+  return 0;
+}
+
+/**
+ * `musterd inbox defer <act_id> --until-lane <id> | --until-reply` (ADR 211 §6).
+ *
+ * Sends a deferring `wait` — the recipient's postponement. Exactly one condition: the two are
+ * different questions ("blocked on that work" vs "waiting on that person"), and accepting both would
+ * leave which one fires ambiguous. There is deliberately no duration form: ADR 179's doctrine is
+ * that the daemon runs no clocks, so "later" is a state edge in this system.
+ */
+async function deferAct(parsed: Parsed): Promise<number> {
+  const target = parsed.positionals[1];
+  if (!target) {
+    process.stderr.write(
+      `${theme.err('✗')} musterd inbox defer <act_id> --until-lane <lane_id> | --until-reply\n`,
+    );
+    return 2;
+  }
+  const lane = flagStr(parsed.flags, 'until-lane');
+  const reply = parsed.flags['until-reply'] === true;
+  if ((lane === undefined) === !reply) {
+    process.stderr.write(
+      `${theme.err('✗')} name exactly one condition: --until-lane <lane_id> or --until-reply\n`,
+    );
+    return 2;
+  }
+
+  const { team, identity, http } = resolve(parsed.flags);
+  const until: DeferUntil = reply ? { reply: true } : { lane: lane! };
+  let envelope;
+  try {
+    envelope = makeEnvelope({
+      id: ulid(),
+      team,
+      from: identity.name,
+      to: { kind: 'team' },
+      act: 'wait',
+      body: 'deferred',
+      meta: { defer_ref: target, until },
+    });
+  } catch (err) {
+    throw new CliError(`invalid deferral: ${(err as Error).message}`, 3);
+  }
+  await http.send(team, envelope);
+  process.stdout.write(
+    `${theme.ok('✓')} deferred ${theme.accent(target)} until ${reply ? 'a reply on its thread' : `lane ${lane} moves`}\n`,
+  );
   return 0;
 }
 

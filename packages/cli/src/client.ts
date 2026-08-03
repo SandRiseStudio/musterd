@@ -43,6 +43,7 @@ import {
   type DeclareGoal,
   type DecideRequest,
   type DecideResponse,
+  type DeferUntil,
   type Envelope,
   type Goal,
   type GoalList,
@@ -249,7 +250,13 @@ export class HttpClient {
   inbox(
     slug: string,
     opts: { unread?: boolean; limit?: number } = {},
-  ): Promise<{ messages: Envelope[]; cursor: { last_read_ts: number }; total?: number }> {
+  ): Promise<{
+    messages: Envelope[];
+    cursor: { last_read_ts: number };
+    total?: number;
+    /** ADR 211: what this seat has postponed, and whether each one's condition has fired. */
+    deferred?: { target: string; until: DeferUntil; raised: boolean }[];
+  }> {
     const q = new URLSearchParams();
     if (opts.unread) q.set('unread', '1');
     if (opts.limit) q.set('limit', String(opts.limit));

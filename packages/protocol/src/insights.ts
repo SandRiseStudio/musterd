@@ -363,6 +363,20 @@ export const FamilyPostureSchema: z.ZodType<FamilyPosture> = z.object({
   computed_at: z.number().int(),
 });
 
+/**
+ * A deferral that has gone quiet (ADR 211): postponed long ago and its condition still has not
+ * fired. The loss mode the deferral primitive risks, made visible — warn-never-block, never
+ * auto-un-deferred. Condition KIND only; the lane id is not a report fact.
+ */
+export const LongDeferredSchema = z.object({
+  seat: z.string(),
+  target: z.string(),
+  until: z.enum(['lane', 'reply']),
+  deferred_ts: z.number().int(),
+  age_days: z.number().int(),
+});
+export type LongDeferred = z.infer<typeof LongDeferredSchema>;
+
 export const ReportSchema = z.object({
   team: z.string(),
   generated_ts: z.number().int(),
@@ -398,5 +412,8 @@ export const ReportSchema = z.object({
    *  without an admin credential (ADR 052 amendment). Optional for back-compat with pre-169
    *  daemons — the server always sets it. */
   review: ReviewMetricsSchema.optional(),
+  /** Deferrals that never raised (ADR 211 Failure mode). Optional for back-compat with pre-211
+   *  daemons — the server always sets it. */
+  long_deferred: z.array(LongDeferredSchema).optional(),
 });
 export type Report = z.infer<typeof ReportSchema>;

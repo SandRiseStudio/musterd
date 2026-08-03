@@ -52,19 +52,19 @@ Validation: an Envelope with an unknown `act` MUST be rejected. Unknown `meta` k
 
 Acts are the typed intents of coordination, grounded in the **Co-Gym** collaboration-act taxonomy (Shao et al., _Collaborative Gym_, arXiv 2412.15701). v0.1 defined seven; **v0.3 adds `resolve`** (ADR 025) and the **steering trio `steer`/`challenge`/`defer`** (ADR 103) for eleven:
 
-| Act             | Meaning                                                        | Required `meta`/fields    | Optional `meta`                         |
-| --------------- | -------------------------------------------------------------- | ------------------------- | --------------------------------------- |
-| `message`       | plain communication, no protocol semantics                     | —                         | —                                       |
-| `status_update` | report what you are doing / have done                          | —                         | `progress` (0..1), `state` (string)     |
-| `request_help`  | ask a Member or the Team to assist / unblock you               | —                         | `blocking` (bool), `topic` (string)     |
-| `handoff`       | transfer a unit of work to someone                             | —                         | `artifact` (string), `summary` (string) |
-| `accept`        | accept a prior `request_help`/`handoff`/`challenge`            | `meta.in_reply_to` (ULID) | —                                       |
-| `decline`       | decline a prior `request_help`/`handoff`/`challenge`           | `meta.in_reply_to` (ULID) | `reason` (string)                       |
-| `wait`          | signal you are paused / blocked                                | —                         | `until` (epoch ms), `reason` (string)   |
-| `resolve`       | close a thread — mark the work it tracks **done**              | `thread` (ULID)           | `reason` (string)                       |
-| `steer`         | change direction — a directive that supersedes prior direction | —                         | `urgent`+`urgent_reason`                |
-| `challenge`     | ask a Member to justify a task/assumption or reconsider        | —                         | `urgent`+`urgent_reason`                |
-| `defer`         | reorder/defer a Goal on the plan                               | `meta.goal_id` (string)   | `meta.wave` (int \| `"later"`)          |
+| Act             | Meaning                                                                   | Required `meta`/fields    | Optional `meta`                                                                               |
+| --------------- | ------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------- |
+| `message`       | plain communication, no protocol semantics                                | —                         | —                                                                                             |
+| `status_update` | report what you are doing / have done                                     | —                         | `progress` (0..1), `state` (string)                                                           |
+| `request_help`  | ask a Member or the Team to assist / unblock you                          | —                         | `blocking` (bool), `topic` (string)                                                           |
+| `handoff`       | transfer a unit of work to someone                                        | —                         | `artifact` (string), `summary` (string)                                                       |
+| `accept`        | accept a prior `request_help`/`handoff`/`challenge`                       | `meta.in_reply_to` (ULID) | —                                                                                             |
+| `decline`       | decline a prior `request_help`/`handoff`/`challenge`                      | `meta.in_reply_to` (ULID) | `reason` (string)                                                                             |
+| `wait`          | paused / blocked — bare, deciding (`ask_ref`), or deferring (`defer_ref`) | —                         | `reason`; `ask_ref`+`until` (duration string); `defer_ref`+`until` (`{lane}`\|`{reply:true}`) |
+| `resolve`       | close a thread — mark the work it tracks **done**                         | `thread` (ULID)           | `reason` (string)                                                                             |
+| `steer`         | change direction — a directive that supersedes prior direction            | —                         | `urgent`+`urgent_reason`                                                                      |
+| `challenge`     | ask a Member to justify a task/assumption or reconsider                   | —                         | `urgent`+`urgent_reason`                                                                      |
+| `defer`         | reorder/defer a Goal on the plan                                          | `meta.goal_id` (string)   | `meta.wave` (int \| `"later"`)                                                                |
 
 Rules:
 

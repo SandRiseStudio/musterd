@@ -133,6 +133,11 @@ export type AuditAction =
   // ADR 209: a recipient read a server-derived portable wake-context index. Detail holds only
   // metadata such as target kind and serialized byte count; content bodies never cross this seam.
   | 'residency.context_read'
+  // ADR 211: a recipient postponed one directed act with a deferring `wait`. Detail is the condition
+  // KIND only (`{ until: 'lane' | 'reply' }`) — never the lane id, never a body (ADR 051). There is
+  // no `raised` counterpart by design: a raise is derived at read time and has no event, and
+  // emitting one would invent a fact the system does not have (ADR 189).
+  | 'inbox.deferred'
   // ADR 144 increment 1: a seat's adapter attested what its rendered MCP tool surface weighs —
   // once per session, on the first telemetry flush. detail carries `{ tools, bytes, est_tokens,
   // breakdown? }` (byte counts and tool names only, never content). Append-only like the model/

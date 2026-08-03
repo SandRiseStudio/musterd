@@ -14,6 +14,21 @@ export type Recipient = z.infer<typeof RecipientSchema>;
 const TEAM_SLUG = /^[a-z0-9-]{1,32}$/;
 
 /**
+ * ADR 211 §1: what ends a deferral. A condition, never a clock — ADR 179's doctrine is that the
+ * daemon runs no clocks on anyone's behalf, so there is deliberately no `{ at: <timestamp> }` arm
+ * and a duration string is rejected here (that is the DECIDING wait's shape, ADR 147 §5).
+ *
+ * `{ lane }` raises on the next lane-state act for that lane; `{ reply: true }` raises on the next
+ * act from someone else on the deferred act's own thread. `.strict()` on both arms is load-bearing:
+ * it is what rejects `{ lane, reply }` and any future field smuggled in beside them.
+ */
+export const DeferUntilSchema = z.union([
+  z.object({ lane: z.string().min(1) }).strict(),
+  z.object({ reply: z.literal(true) }).strict(),
+]);
+export type DeferUntil = z.infer<typeof DeferUntilSchema>;
+
+/**
  * The on-wire message. `actMetaRules` enforces per-act meta requirements
  * (accept/decline must reference what they answer). Imported identically by
  * server, CLI, and MCP so validation never diverges.
@@ -143,13 +158,46 @@ export function actMetaRules(
   // The human "deciding — check back in ⟨dur⟩" reply (ADR 147 §5) rides `wait`: when a `wait` names an ask
   // (`meta.ask_ref`), it MUST carry `meta.until` (a duration like "1h", or "indefinite") — the clock the
   // waiting agent extends to. A bare `wait` (no ask_ref) is the ordinary "paused" act, unaffected.
-  if (env.act === 'wait' && meta['ask_ref'] !== undefined) {
+  if (env.act === 'wait' && meta['ask_ref'] !== undefined && meta['defer_ref'] === undefined) {
     const until = meta['until'];
     if (typeof until !== 'string' || until.trim().length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['meta', 'until'],
         message: 'a "deciding" wait (meta.ask_ref) requires meta.until (e.g. "1h" or "indefinite")',
+      });
+    }
+  }
+  // The recipient's "not now, bring this back when ⟨cond⟩" (ADR 211 §1) also rides `wait` rather than
+  // a thirteenth act — ADR 145 §4 spends surfaces before verbs. When a `wait` names the act it
+  // postpones (`meta.defer_ref`), it MUST carry a well-formed `meta.until` CONDITION.
+  //
+  // `wait` therefore has three shapes, keyed by which meta field is present: bare (paused), `ask_ref`
+  // (deciding), `defer_ref` (deferring). The two annotated shapes both spell their target `until` but
+  // mean different types — a duration string vs a condition object — so an envelope carrying both is
+  // rejected outright rather than resolved by precedence. Ambiguity here would be silent and durable.
+  if (env.act === 'wait' && meta['defer_ref'] !== undefined) {
+    const ref = meta['defer_ref'];
+    if (typeof ref !== 'string' || ref.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'defer_ref'],
+        message: 'meta.defer_ref must be the id of the act being deferred',
+      });
+    }
+    if (meta['ask_ref'] !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'defer_ref'],
+        message: 'a wait is either deciding (meta.ask_ref) or deferring (meta.defer_ref), not both',
+      });
+    }
+    if (!DeferUntilSchema.safeParse(meta['until']).success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'until'],
+        message:
+          'a deferring wait (meta.defer_ref) requires meta.until — { lane: "<lane_id>" } or { reply: true }',
       });
     }
   }
