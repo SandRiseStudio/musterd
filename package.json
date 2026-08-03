@@ -32,6 +32,7 @@
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "test:scenarios": "vitest run tests/scenarios",
+    "test:codex-cli-real": "vitest run tests/codex-cli.acceptance.test.ts",
     "typecheck": "pnpm -r exec tsc --noEmit",
     "change-adr:check": "node --disable-warning=ExperimentalWarning scripts/check-change-adr.ts"
   },

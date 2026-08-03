@@ -15,30 +15,33 @@ Test runner: **vitest** (one config per package, plus a root `pnpm test` that ru
 All three are automated and use `seedDawn`-style setup. By placement: **Scenario C** is the dedicated end-to-end test in [`tests/scenarios/flagship.test.ts`](../../tests/scenarios/flagship.test.ts) (run via `pnpm test:scenarios`). **Scenario A** is realized as the CLI end-to-end test [`packages/cli/src/cli.e2e.test.ts`](../../packages/cli/src/cli.e2e.test.ts), and **Scenario B**'s behavior (agent + human `request_help`→`accept` across MCP + CLI) is covered by [`packages/mcp/src/mcp.test.ts`](../../packages/mcp/src/mcp.test.ts) — they live next to the package they exercise rather than under `tests/scenarios/`. All run under the root `pnpm test`.
 
 ### Scenario A — two humans on one team
+
 1. `POST /teams {dawn, creator: nick}` → token_nick.
 2. `team add bo --kind human` → token_bo.
 3. nick (WS) and bo (WS) both `hello`/subscribe.
 4. nick `send --to bo --act message "hi"` → bo receives a `deliver`; nick gets `ack`.
 5. bo offline (close WS); nick `send --to bo` again; bo `GET /inbox` shows 1 unread, then cursor advance → 0.
-**Pass:** message delivered live AND durably; unread counts correct.
+   **Pass:** message delivered live AND durably; unread counts correct.
 
 ### Scenario B — agent + human
+
 1. team `dawn`, members nick (human) + Ada (agent).
 2. Boot the **MCP adapter** with Ada's env/token → Ada presence online (surface claude-code).
 3. Ada `team_send {act:status_update, body:"scaffolded auth", meta:{progress:0.4}}`.
 4. nick `inbox` shows Ada's status_update.
 5. nick `send --to Ada --act request_help "tests failing on token hash"`; Ada `team_inbox_check` returns it once; Ada `team_send {act:accept, reply_to:<id>, body:"on it"}`.
 6. nick `inbox` shows the accept, threaded under the request_help.
-**Pass:** full request_help → accept loop across CLI + MCP surfaces, threading intact, at-least-once dedupe holds.
+   **Pass:** full request_help → accept loop across CLI + MCP surfaces, threading intact, at-least-once dedupe holds.
 
 ### Scenario C — the flagship 3-pane scenario (also the README demo)
+
 1. team `dawn`: nick (human), Ada (agent, backend), Lin (agent, frontend).
 2. Boot two MCP adapters: Ada (surface claude-code), Lin (surface codex). nick runs `inbox --watch` (WS, present).
 3. Ada and Lin each `status_update` as they "split work".
 4. Lin `request_help --to Ada` (or to nick); the request surfaces in nick's `--watch` stream highlighted.
 5. nick answers as a peer: `send --to Lin --act message "..."`; Ada `handoff` to Lin; Lin `accept`.
 6. Assert the full transcript ordering and that all three surfaces saw the relevant messages.
-**Pass:** three members across three surfaces coordinate end-to-end; transcript matches expected act sequence. This same script drives the recorded demo.
+   **Pass:** three members across three surfaces coordinate end-to-end; transcript matches expected act sequence. This same script drives the recorded demo.
 
 ## Per-module acceptance (must pass before the next package in build order)
 
@@ -58,7 +61,7 @@ Wired into the root `vitest.config.ts` (`coverage`, v8 provider) and enforced by
 Floors are **CI-enforced** ([ADR 106](../decisions/106-unified-git-workflow.md)): the `gates` job runs `pnpm coverage`, so a drop below a floor **fails the merge**. They only ratchet **up** — never lower a floor to make a change pass; earn coverage back with tests.
 
 - `@musterd/protocol`: ≥ 95% lines (it's small and pure) — met (~100%).
-- `@musterd/server`: floor **≥ 85%**, with route/presence/inbox/auth paths covered by integration tests specifically. It had drifted to ~82 while no CI ran coverage; the 85 target was earned back (server ~90) by in-package tests for the stateless `POST /claim` handshake + `POST /requests/{id}/decide` request-lane decide (the CLI tests exercise these but import the *built* server, so they don't count toward `server/src`), plus unit tests for the presence reaper and roster watcher. The floor ratchets **up**, never down.
+- `@musterd/server`: floor **≥ 85%**, with route/presence/inbox/auth paths covered by integration tests specifically. It had drifted to ~82 while no CI ran coverage; the 85 target was earned back (server ~90) by in-package tests for the stateless `POST /claim` handshake + `POST /requests/{id}/decide` request-lane decide (the CLI tests exercise these but import the _built_ server, so they don't count toward `server/src`), plus unit tests for the presence reaper and roster watcher. The floor ratchets **up**, never down.
 - `musterd` (cli): floor **≥ 75%** — the command/tool dispatch and error→exit mapping must be covered; it had also drifted below 75 pre-gate and was earned back (cli ~82) with behavioral tests for the previously-untested `lane`/`goal`/`next`/`done`/`report` commands, driven against an in-process server. `@musterd/mcp`: **≥ 75%**. The interactive onboarding wizard (`cli/src/onboard`) and the MCP tool handlers (`mcp/src/tools`) are covered by behavioral tests that drive `runInit` with `@clack/prompts` mocked and call each tool handler against a stub client (mcp went 57→64 with the OTel-propagation tests, then to 75 with the tool-handler tests).
 - Root `pnpm test` runs unit+integration+scenario and must be green for any milestone to be "done" (`07-conventions.md` definition of done); `pnpm coverage` additionally enforces the floors above.
 - **CI is the authoritative gate** ([ADR 106](../decisions/106-unified-git-workflow.md)): `.github/workflows/ci.yml`, job **`gates`**, runs `pnpm install` → `pnpm build` (workspace packages resolve to gitignored `dist/`, so build precedes) → `pnpm typecheck` → **`pnpm coverage`** (runs the full suite and enforces the line floors) → `pnpm format:check` on every PR, and branch protection **requires it green to merge**. Use root **`pnpm test`**/`pnpm coverage` (not `pnpm -r test` — that trips a cwd/include quirk in `@musterd/telemetry`). Tests must be environment-stable: CI sets `CI=1` (color libs emit ANSI) and checks out a detached HEAD, so `vitest.config.ts` pins `NO_COLOR=1` and env-dependent assertions must not rely on ambient TTY/git/branch state.
@@ -74,7 +77,15 @@ pnpm test:scenarios  # just tests/scenarios (root script)
 
 ## Codex harness evidence (ADR 204)
 
-Codex CLI has hermetic backend tests under `packages/cli/src/host/backends/codex.test.ts`; a paid
-real-harness run is deliberately owner-gated and is not part of this suite or CI. Codex desktop is
-separately checked using [`tests/codex-desktop.md`](../../tests/codex-desktop.md). Desktop wake is
-manual-resume until its stable supported API probe passes.
+Codex CLI has hermetic backend tests under `packages/cli/src/host/backends/codex.test.ts`. Its
+owner-gated real acceptance test is deliberately excluded from CI and requires a built workspace:
+
+```
+MUSTERD_REAL_CODEX=1 MUSTERD_REAL_CODEX_CONFIRM=1 pnpm test:codex-cli-real
+```
+
+It creates an isolated Git workspace, in-process daemon, project-local Codex MCP entry, and
+mode-600 binding; it proves MCP join, directed-inbox drain, and exact thread resume without a trust
+or configuration bypass. Codex desktop is separately checked using
+[`tests/codex-desktop.md`](../../tests/codex-desktop.md). Desktop wake is manual-resume until its
+stable supported API probe passes.

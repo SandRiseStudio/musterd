@@ -201,7 +201,12 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
           },
           settled: Promise.resolve(undefined),
         };
-      const liveness = (deps.readSession ?? localSessionLiveness)(spec.workspace);
+      // This backend is itself the harness authority. Before its first fresh capture there is no
+      // `binding.session` to select a scanner, so leaving the harness unspecified would fall back to
+      // Claude's scanner and could mistake a live Codex task for an idle workspace.
+      const liveness =
+        deps.readSession?.(spec.workspace) ??
+        localSessionLiveness(spec.workspace, Date.now(), undefined, 'codex');
       if (liveness.state === 'live')
         return {
           outcome: { occupied: false, deferred: true, reason: 'local-session-live' },
