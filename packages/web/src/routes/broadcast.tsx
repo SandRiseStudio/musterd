@@ -31,11 +31,27 @@ export const Route = createFileRoute('/broadcast')({
  * exactly the serial-thread cost the 720p arm exists to remove (hosting spec, run D). Two rungs
  * only — this is a capture contract, not a slider. */
 const STAGE_HEIGHTS = [720, 1080] as const;
-function stageSize(): { w: number; h: number } {
-  const raw =
-    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('h');
-  const h = STAGE_HEIGHTS.find((s) => s === Number(raw)) ?? 1080;
-  return { w: (h * 16) / 9, h };
+
+/** What the server renders, and therefore what the client's FIRST render must be. See `stageSize`. */
+export const DEFAULT_STAGE = { w: 1920, h: 1080 } as const;
+
+/**
+ * The stage for a `?h=` query — pure, and deliberately NOT read during render.
+ *
+ * This route is server-rendered and the server has no URL query to read, so a stage derived from the
+ * URL at first render disagrees with the markup the server already wrote. React does not patch
+ * mismatched attributes when it hydrates — it adopts the server's DOM — and nothing re-renders this
+ * element afterwards, so the wrong size would stick for the life of the page while the component's own
+ * state said otherwise. The office sizes its canvas off the host element, not off React state, so the
+ * cost of that is a 1080p room painted into a 720p frame: clipped, and silent.
+ *
+ * Hence: render `DEFAULT_STAGE`, then apply this in a mount effect, which is an ordinary re-render and
+ * gets patched.
+ */
+export function stageSize(search: string): { w: number; h: number } {
+  const raw = new URLSearchParams(search).get('h');
+  const h = STAGE_HEIGHTS.find((s) => s === Number(raw));
+  return h ? { w: (h * 16) / 9, h } : { ...DEFAULT_STAGE };
 }
 
 /** Encode fps from `?fps=` — the office coalesces draws to this rate. Defaults to 30 (ADR 157). */
@@ -76,7 +92,12 @@ function BroadcastPage() {
   const [scale, setScale] = useState(1);
   // Read once per page load — a stream source's URL is its whole configuration, and it never
   // changes under a running capture.
-  const [stage] = useState(stageSize);
+  const [stage, setStage] = useState<{ w: number; h: number }>(DEFAULT_STAGE);
+  // The URL's stage rung, applied after hydration so React patches the element rather than inheriting
+  // the server's. Runs once: a capture never changes rung mid-stream.
+  useEffect(() => {
+    setStage(stageSize(window.location.search));
+  }, []);
   const [captureFps] = useState(captureFpsFromUrl);
 
   // A stream has no operator to click "reconnect": if the observer credential goes stale (daemon reset,
