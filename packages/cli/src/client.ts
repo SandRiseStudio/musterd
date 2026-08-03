@@ -25,6 +25,8 @@ import {
   ResidencyListResponseSchema,
   SessionAttestationResponseSchema,
   WakeLeasesResponseSchema,
+  WakeContextRequestSchema,
+  WakeContextResponseSchema,
   type EnrollResidencyBody,
   type EnrollResidencyResponse,
   type ResidencyListResponse,
@@ -32,6 +34,8 @@ import {
   type SessionAttestationResponse,
   type WakeLeasesResponse,
   type WakeReportBody,
+  type WakeContextPacket,
+  type WakeContextRequest,
   type ActDelivery,
   type AskContract,
   type AuditResponse,
@@ -303,6 +307,17 @@ export class HttpClient {
   }
   clearMemory(slug: string): Promise<void> {
     return this.request('DELETE', `/teams/${slug}/memory`);
+  }
+  /** ADR 204's recipient-scoped, body-free wake orientation index. */
+  async wakeContext(slug: string, request: WakeContextRequest): Promise<WakeContextPacket> {
+    const target = WakeContextRequestSchema.safeParse(request);
+    if (!target.success)
+      throw new CliError('wake context requires exactly one act_id or lane_id', 2);
+    const json = await this.request('POST', `/teams/${slug}/wake-context`, target.data);
+    const response = WakeContextResponseSchema.safeParse(json);
+    if (!response.success)
+      throw new CliError('wake-context response did not match the protocol schema', 1);
+    return response.data.context;
   }
   reclaim(slug: string, member: string): Promise<{ ok: boolean; member: string }> {
     return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(member)}/reclaim`);

@@ -23,6 +23,7 @@ export const TOOL_NAMES = [
   'team_members',
   'team_memory_save',
   'team_memory_read',
+  'team_wake_context',
   'lane_open',
   'lane_claim',
   'lane_release',

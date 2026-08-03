@@ -21,6 +21,7 @@ import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
 import { laneCommand, lanesCommand } from './commands/lane.js';
 import { memoryCommand } from './commands/memory.js';
+import { wakeContextCommand } from './commands/wake-context.js';
 import { nextCommand } from './commands/next.js';
 import { notifyCommand } from './commands/notify.js';
 import { nudgeCommand } from './commands/nudge.js';
@@ -226,6 +227,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return availabilityCommand(rest);
     case 'memory':
       return memoryCommand(rest);
+    case 'wake-context':
+      return wakeContextCommand(rest);
     case 'notify':
       return notifyCommand(rest);
     case 'claim':

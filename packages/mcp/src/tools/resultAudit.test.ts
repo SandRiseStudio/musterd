@@ -11,6 +11,7 @@ import { registerMembers } from './members.js';
 import { registerMemory } from './memory.js';
 import { registerSend } from './send.js';
 import { registerStatus } from './status.js';
+import { registerWakeContext } from './wakeContext.js';
 
 /**
  * The results & empty-states audit (ADR 144 inc 3) — the "audited standard" the ADR asks for, held
@@ -165,6 +166,9 @@ describe('a known failure class carries its repair line', () => {
     readMemory: async () => {
       throw new Error('fetch failed');
     },
+    wakeContext: async () => {
+      throw new Error('fetch failed');
+    },
   };
 
   const cases: [string, Record<string, Handler>, string, any][] = [];
@@ -195,6 +199,7 @@ describe('a known failure class carries its repair line', () => {
     ['team_memory_save', { headline: 'h' }],
     ['team_memory_read'],
   ]);
+  add(captureAll(registerWakeContext, downClient), [['team_wake_context', { act_id: 'a1' }]]);
 
   it.each(cases.map(([name, handlers, tool, args]) => [name, handlers[tool]!, args] as const))(
     '%s repairs a daemon-unreachable failure',
@@ -258,5 +263,21 @@ describe('structured-first results carry structuredContent', () => {
     const resolved = await handlers['lane_resolve']!({ id: 'l1' });
     // The branch-cleanup next action rides as a field, not only inside the prose.
     expect(resolved.structuredContent.hint).toContain('git branch -D feat/x');
+  });
+
+  it('team_wake_context returns its bounded packet as structured content', async () => {
+    const handler = captureAll(registerWakeContext, {
+      holdsSeat: true,
+      wakeContext: async () => ({
+        version: 1,
+        wake: { kind: 'reply', act_id: 'a1' },
+        objective: { action: 'reply' },
+        state: {},
+        fetch: ['inbox_thread'],
+        delivery: { requirement: 'portable', intended: 'fresh' },
+      }),
+    })['team_wake_context']!;
+    const result = await handler({ act_id: 'a1' });
+    expect(result.structuredContent.context.wake.act_id).toBe('a1');
   });
 });

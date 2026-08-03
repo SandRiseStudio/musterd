@@ -2,7 +2,7 @@
 
 > **Living document.** This is the initial direction, not gospel. It will evolve. If you (the executing agent) find an error, contradiction, or better approach during implementation: (1) do not silently deviate — record the issue and your proposed change in `docs/decisions/NNN-<slug>.md` (a short ADR: context, problem, decision, consequences), (2) make the smallest correct change, (3) update the affected doc in the same commit. Docs and code must never disagree at the end of a commit.
 
-The **universal harness adapter**. One MCP (stdio) server exposing **eighteen tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the lane, goal, seat-memory, and report tools added by later ADRs (083/084/091/093). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
+The **universal harness adapter**. One MCP (stdio) server exposing **twenty-two tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the lane, goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/204). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
 
 ## Stack
 
@@ -129,7 +129,7 @@ Phantom Presence now drops within the 45s reclaim grace instead of lingering. Th
 ## The core tools (JSON schemas — verbatim contract)
 
 This section contracts the **six core team tools** verbatim; the lane, goal, seat-memory, and report
-tools (18 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093). Two lifecycle
+tools (22 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093/204). Two lifecycle
 tools (`team_join` / `team_leave`) gate the working tools. Inspection (`team_status` / `team_members`) works while dormant/pending; sending and inbox draining require a live join.
 
 Tool names are stable; descriptions are written for the _agent_ reading them — concise,
@@ -280,6 +280,10 @@ Delivery is **envelope-on-occupy / body-on-demand**: the `occupied` frame carrie
 
 — so a fresh session pays ~30 tokens and makes an informed fetch decision. Both tools require a live join (the seat is resolved from the session's occupancy). HTTP surface: `PUT`/`GET` `/teams/:slug/memory`.
 
+### `team_wake_context` (ADR 204)
+
+`team_wake_context({act_id? , lane_id?})` accepts exactly one directed Act or owned Lane target after the Member occupies. It returns a structured, server-derived packet with only canonical IDs, metadata, intended delivery, and named follow-up reads. It never automatically loads an Act, thread, memory, or artifact body; the Member chooses the named explicit read instead.
+
 ## Results & empty states — the audited standard (ADR 144 inc 3)
 
 Every tool result — success, empty, and error — is **action-naming**: it says what to do next, not just what happened. The standard is held by `tools/resultAudit.test.ts`, not by convention:
@@ -355,6 +359,7 @@ src/
     status.ts     // works while dormant/pending; appends the ADR 135 build-skew warning
     members.ts    // works while dormant/pending
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
+    wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 204)
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next orientation brief (ADR 083/084)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084/125)

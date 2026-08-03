@@ -112,6 +112,7 @@ src/
     status.ts         // status
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)
+    wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 204)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036)
     lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal join (ADR 083/084)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
@@ -298,6 +299,10 @@ Prints the seat this folder resolves to — `<member> on <team> (<surface> · <s
 ### `musterd memory [show] | save --headline "<subject>" [body...] | clear`
 
 The seat's private **cross-session continuity note** (ADR 093) over `PUT`/`GET`/`DELETE /teams/:slug/memory` — all seat-authenticated, operating on the caller's **own** seat only (no cross-seat path, admins included). `save` is last-write-wins with the headline-first discipline (headline ≤120 chars, body ≤8KB — over-cap is rejected with the limit named); the playbook is **save before handing off / wrapping up**. `show` (the default) is the explicit body read — a seat with nothing saved is a normal exit-0 message, not an error. Delivery is envelope-on-occupy / body-on-demand: `musterd claim` prints the one-liner off the `occupied` frame's envelope, and `musterd status` prints the same line (best-effort, silent for an ambient identity or an empty seat) — `saved memory from <age> ago: "<headline>" — \`musterd memory\` to load it` — never the body. Needs an **active identity** like any act (ADR 036).
+
+### `musterd wake-context --act <id> | --lane <id>`
+
+The explicit CLI read for ADR 204's recipient-scoped portable wake index. It sends exactly one canonical target to `POST /teams/:slug/wake-context` and renders only wake kind/ID, objective, intended delivery, and the named explicit fetch categories. `--json` returns the same bounded packet. It never reads an Act, thread, memory, or artifact body as a side effect.
 
 ### `musterd claim <name> | --role <role> [--for <code>] [--surface <s>] [--key mskey_…] [--grant msgr_…] [--force] [--timeout <s>]`
 
