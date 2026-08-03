@@ -50,7 +50,7 @@ src/
     loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); agent-key auth read through workspace bindings; one wake span per actuation
     pinnedBin.ts      // a wake exports the actuator's OWN build: shim execing this process's node+entry, PREPENDED to the woken harness's PATH — woken hooks call a bare `musterd`, and the host's PATH resolved a frozen Homebrew tarball; best-effort, degrades to inherited PATH
     backends/
-      claudeCode.ts   // backend #1: explicit portable/fresh orders bypass resume; legacy orders retain the resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to fresh `claude -p` in the same lease; reports actual delivery + local byte/age metadata only (ADR 131 §5 / ADR 204)
+      claudeCode.ts   // backend #1: explicit portable/fresh orders bypass resume; legacy orders retain the resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to fresh `claude -p` in the same lease; reports actual delivery + local byte/age metadata only (ADR 131 §5 / ADR 207)
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
     liveness.ts       // localSessionLiveness(workspace): binding.session + transcript stat → none|live|resumable|gc-expired; shared by the host's local-session guard and `session show`; also carries the ADR 166 inc-1 SHADOW judgement (computed, never acted on)
     enumerate.ts      // ADR 166: ask the harness what sessions it HAS — scans ~/.claude/projects and attributes each transcript by its RECORDED cwd walked up to a workspace (never by decoding the directory name, an inconsistent encoding); undefined = "cannot tell" (never laundered into "none")
@@ -112,7 +112,7 @@ src/
     status.ts         // status
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)
-    wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 204)
+    wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 207)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036)
     lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal join (ADR 083/084)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
@@ -302,7 +302,7 @@ The seat's private **cross-session continuity note** (ADR 093) over `PUT`/`GET`/
 
 ### `musterd wake-context --act <id> | --lane <id>`
 
-The explicit CLI read for ADR 204's recipient-scoped portable wake index. It sends exactly one canonical target to `POST /teams/:slug/wake-context` and renders only wake kind/ID, objective, intended delivery, and the named explicit fetch categories. `--json` returns the same bounded packet. It never reads an Act, thread, memory, or artifact body as a side effect.
+The explicit CLI read for ADR 207's recipient-scoped portable wake index. It sends exactly one canonical target to `POST /teams/:slug/wake-context` and renders only wake kind/ID, objective, intended delivery, and the named explicit fetch categories. `--json` returns the same bounded packet. It never reads an Act, thread, memory, or artifact body as a side effect.
 
 ### `musterd claim <name> | --role <role> [--for <code>] [--surface <s>] [--key mskey_…] [--grant msgr_…] [--force] [--timeout <s>]`
 

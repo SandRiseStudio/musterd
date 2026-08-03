@@ -2332,7 +2332,7 @@ export async function handleHttp(
         return sendJson(res, 200, deriveNext(ctx.db, team.id, team.slug, member.name));
       }
 
-      // Portable wake context (ADR 204): the recipient gets a bounded, server-derived index after
+      // Portable wake context (ADR 207): the recipient gets a bounded, server-derived index after
       // occupying. It names explicit reads but never carries an Act or memory body.
       if (method === 'POST' && rest === '/wake-context') {
         const { team, member } = authTouch(ctx, slug, req);

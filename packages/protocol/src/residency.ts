@@ -51,7 +51,7 @@ export const ResidencyPolicySchema = z.object({
    *  ADR 131 "Observability & Evaluation"). The previous 10MiB counted lives, not dollars, and sat
    *  ~23x past the point where resume stops being the cheap option. */
   transcript_max_bytes: z.number().int().min(65_536).max(268_435_456).default(262_144),
-  /** ADR 204 rollout gate. Off preserves the legacy resume ladder for ordinary inbox wakes; when
+  /** ADR 207 rollout gate. Off preserves the legacy resume ladder for ordinary inbox wakes; when
    * enabled, those wakes receive portable context and intentionally start fresh. Typed handoffs,
    * reviews, and work-orders are portable regardless of this cohort flag. */
   portable_inbox_replies: z.boolean().default(false),
@@ -176,7 +176,7 @@ export const WAKE_DERIVATIONS = ['immediate', 'batched', 'work_order'] as const;
 export type WakeDerivation = (typeof WAKE_DERIVATIONS)[number];
 export const WakeDerivationSchema = z.enum(WAKE_DERIVATIONS);
 
-/** ADR 204: whether durable, fetchable context is enough, or active dialogue is required. */
+/** ADR 207: whether durable, fetchable context is enough, or active dialogue is required. */
 export const CONTINUITY_REQUIREMENTS = ['portable', 'transcript_required'] as const;
 export type ContinuityRequirement = (typeof CONTINUITY_REQUIREMENTS)[number];
 export const ContinuityRequirementSchema = z.enum(CONTINUITY_REQUIREMENTS);
@@ -223,7 +223,7 @@ export const WakeContextRequestSchema = z
   });
 export type WakeContextRequest = z.infer<typeof WakeContextRequestSchema>;
 
-/** The server-derived, body-free context index (ADR 204). */
+/** The server-derived, body-free context index (ADR 207). */
 export const WakeContextPacketSchema = z
   .object({
     version: z.literal(1),
@@ -319,9 +319,9 @@ export const WakeOrderSchema = z
       .optional(),
     /** Effective resume-hygiene bound for this seat (increment 5). Absent ⇒ backend default. */
     transcript_max_bytes: z.number().int().optional(),
-    /** ADR 204: portable (fresh) is default; transcript_required is a narrow reply-only exception. */
+    /** ADR 207: portable (fresh) is default; transcript_required is a narrow reply-only exception. */
     continuity_requirement: ContinuityRequirementSchema.optional(),
-    /** ADR 204: daemon intent; host reports the observed delivery separately. */
+    /** ADR 207: daemon intent; host reports the observed delivery separately. */
     intended_delivery: WakeDeliverySchema.optional(),
     /** Why this wake was derived (ADR 191). Absent ⇒ treat as the `lane` value (older daemons). */
     derivation: WakeDerivationSchema.optional(),
@@ -382,7 +382,7 @@ export const WakeReportBodySchema = z.object({
   answered: z.boolean().optional(),
   /** Fresh spawn or resumed session (the fresh-first doctrine's outcome axis). */
   session: z.enum(['fresh', 'resumed']).optional(),
-  /** ADR 204: actual delivery, distinguishing an initial fresh spawn from a failed-resume fallback. */
+  /** ADR 207: actual delivery, distinguishing an initial fresh spawn from a failed-resume fallback. */
   delivery_outcome: WakeDeliveryOutcomeSchema.optional(),
   /** Local transcript size examined by the host; no path or content crosses the boundary. */
   transcript_bytes: z.number().int().nonnegative().optional(),

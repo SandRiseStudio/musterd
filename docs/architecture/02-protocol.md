@@ -101,7 +101,7 @@ informational—no Presence or schedule enforcement is performed (ADR 206).
 
 The WS `send` and HTTP `POST …/messages` share one validation+route path on the server (`03-server.md`).
 
-### Portable wake context (ADR 204)
+### Portable wake context (ADR 207)
 
 `WakeContextRequestSchema` is a strict `{ act_id? , lane_id? }` body that requires exactly one
 canonical target. `WakeContextPacketSchema` is the strict, body-free orientation index: wake kind

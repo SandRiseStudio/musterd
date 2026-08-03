@@ -129,7 +129,7 @@ export function effectiveWakePolicy(
 }
 
 /**
- * Derive ADR 204's bounded orientation index for one recipient. It intentionally reads canonical
+ * Derive ADR 207's bounded orientation index for one recipient. It intentionally reads canonical
  * rows only: an Act body or memory body never crosses this seam. An unauthorized target is
  * indistinguishable from a missing one to the caller.
  */
@@ -477,7 +477,7 @@ interface WakeCandidate {
   work_order_kind?: 'review' | 'dispatch';
 }
 
-/** ADR 204 rollout: typed handoff/review/work-order wakes are portable now. Ordinary inbox
+/** ADR 207 rollout: typed handoff/review/work-order wakes are portable now. Ordinary inbox
  * deliveries enter the fresh cohort only when the team has explicitly enabled it. */
 function isPortableWakeCandidate(candidate: WakeCandidate, portableInboxReplies: boolean): boolean {
   return (

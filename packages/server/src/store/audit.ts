@@ -130,7 +130,7 @@ export type AuditAction =
   // the rate/attempt derivations (one actuation must not count twice); the wake metrics dedupe
   // cost by lease_id, preferring this row over the primary's.
   | 'residency.wake_cost'
-  // ADR 204: a recipient read a server-derived portable wake-context index. Detail holds only
+  // ADR 207: a recipient read a server-derived portable wake-context index. Detail holds only
   // metadata such as target kind and serialized byte count; content bodies never cross this seam.
   | 'residency.context_read'
   // ADR 144 increment 1: a seat's adapter attested what its rendered MCP tool surface weighs —

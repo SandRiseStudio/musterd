@@ -1,4 +1,4 @@
-# 204 — Portable wake context: fresh by default, transcript by exception
+# 207 — Portable wake context: fresh by default, transcript by exception
 
 - Status: accepted
 - Date: 2026-08-03

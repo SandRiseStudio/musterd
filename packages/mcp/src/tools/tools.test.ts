@@ -647,7 +647,7 @@ describe('team_status handler', () => {
   });
 });
 
-describe('team_wake_context (ADR 204)', () => {
+describe('team_wake_context (ADR 207)', () => {
   it('refuses before join and returns only bounded fields after join', async () => {
     const dormant = capture(registerWakeContext, { holdsSeat: false });
     expect(text(await dormant({ act_id: 'a1' }))).toContain('team_join');

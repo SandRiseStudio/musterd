@@ -17,7 +17,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
 ## Global Constraints
 
-- Write ADR 204 and update `SPEC.md` before changing any `@musterd/protocol` schema.
+- Write ADR 207 and update `SPEC.md` before changing any `@musterd/protocol` schema.
 - The spawn line contains canonical IDs only: never an Act body, lane title, memory body, or
   agent-authored summary (ADR 088/128).
 - Packet data is derived, bounded, and recipient-scoped; it creates no new durable context store.
@@ -32,10 +32,10 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
 ---
 
-### Task 1: Make the context-delivery contract normative (ADR 204 + SPEC)
+### Task 1: Make the context-delivery contract normative (ADR 207 + SPEC)
 
 **Files:**
-- Create: `docs/decisions/204-portable-wake-context.md`
+- Create: `docs/decisions/207-portable-wake-context.md`
 - Modify: `SPEC.md` (wake-order and wake-report contract sections)
 
 **Interfaces:**
@@ -47,7 +47,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
   delivered to that Member, or for a Lane on which the Member is the owner/reviewer under the live
   wake derivation; all other requests return `forbidden` without revealing existence.
 
-- [ ] **Step 1: Write ADR 204 before code**
+- [ ] **Step 1: Write ADR 207 before code**
 
   Use the repository ADR template. Its Decision section must fix all of the following:
 
@@ -89,7 +89,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
 - [ ] **Step 3: Document evaluation before implementing it**
 
-  Add ADR 204 Observability & Evaluation with: packet byte size; requirement/intended/actual
+  Add ADR 207 Observability & Evaluation with: packet byte size; requirement/intended/actual
   delivery; transcript bytes/age examined by the host; fetch category/count; duration and
   allowance-equivalent cost. Set the comparison: fresh reply cohort versus present resume ladder,
   with no material regression in failed/duplicate wakes or lane completion latency.
@@ -98,14 +98,14 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
   Run: `pnpm vocab:check && pnpm format:check`
 
-  Expected: PASS. Confirm `change-adr:check` sees ADR 204 as a new decision and no accepted ADR's
+  Expected: PASS. Confirm `change-adr:check` sees ADR 207 as a new decision and no accepted ADR's
   Decision section changed.
 
 - [ ] **Step 5: Commit**
 
   ```bash
-  git add SPEC.md docs/decisions/204-portable-wake-context.md
-  git commit -m "docs: specify portable wake context (ADR 204)"
+  git add SPEC.md docs/decisions/207-portable-wake-context.md
+  git commit -m "docs: specify portable wake context (ADR 207)"
   ```
 
 ### Task 2: Add additive protocol schemas and delivery telemetry fields
@@ -117,7 +117,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 - Modify: `docs/architecture/02-protocol.md` (file-tree description if a new protocol file is used)
 
 **Interfaces:**
-- Consumes: ADR 204's exact vocabulary from Task 1.
+- Consumes: ADR 207's exact vocabulary from Task 1.
 - Produces:
 
   ```ts
@@ -178,7 +178,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
   ```bash
   git add packages/protocol/src/residency.ts packages/protocol/src/residency.test.ts \
     packages/protocol/src/index.ts docs/architecture/02-protocol.md
-  git commit -m "protocol: add portable wake-context contracts (ADR 204)"
+  git commit -m "protocol: add portable wake-context contracts (ADR 207)"
   ```
 
 ### Task 3: Derive and authorize packet reads on the daemon
@@ -261,7 +261,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
   git add packages/server/src/store/residency.ts packages/server/src/store/residency.test.ts \
     packages/server/src/transport/http.ts packages/server/src/transport/integration.test.ts \
     packages/server/src/store/audit.ts docs/architecture/03-server.md
-  git commit -m "server: derive recipient-scoped wake context (ADR 204)"
+  git commit -m "server: derive recipient-scoped wake context (ADR 207)"
   ```
 
 ### Task 4: Expose explicit context retrieval on CLI and MCP surfaces
@@ -342,7 +342,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
   ```bash
   git add packages/cli/src packages/mcp/src docs/architecture/04-cli.md docs/architecture/05-mcp.md
-  git commit -m "cli: expose bounded wake context (ADR 204)"
+  git commit -m "cli: expose bounded wake context (ADR 207)"
   ```
 
 ### Task 5: Make portable wake types fresh by default and report actual delivery
@@ -440,7 +440,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
     packages/server/src/store/residency.test.ts packages/server/src/transport/http.ts \
     packages/server/src/transport/integration.test.ts docs/architecture/03-server.md \
     docs/architecture/04-cli.md
-  git commit -m "server: select fresh delivery for portable wakes (ADR 204)"
+  git commit -m "server: select fresh delivery for portable wakes (ADR 207)"
   ```
 
 ### Task 6: Add the narrow active-reply resume exception and evaluate it
@@ -454,7 +454,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 - Modify: `packages/cli/src/host/backends/claudeCode.test.ts`
 - Modify: `packages/cli/src/commands/residency.ts`
 - Modify: `packages/cli/src/commands/residency.test.ts`
-- Modify: `docs/decisions/204-portable-wake-context.md` (Consequences and evaluation results only)
+- Modify: `docs/decisions/207-portable-wake-context.md` (Consequences and evaluation results only)
 - Modify: `docs/architecture/03-server.md`
 - Modify: `docs/architecture/04-cli.md`
 
@@ -510,7 +510,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
   checks; report `delivery_outcome: 'fresh'` and the measured reason. Never let sender text set the
   classification.
 
-- [ ] **Step 4: Update ADR 204's Consequences with the rollout result**
+- [ ] **Step 4: Update ADR 207's Consequences with the rollout result**
 
   Add only a dated result note outside its immutable Decision section: cohort, observation count,
   p50/p95 cost comparison, byte distribution, fetch pattern, and whether the exception remains
@@ -538,9 +538,9 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
     packages/server/src/store/residency.ts packages/server/src/store/residency.test.ts \
     packages/cli/src/host/backends/claudeCode.ts packages/cli/src/host/backends/claudeCode.test.ts \
     packages/cli/src/commands/residency.ts packages/cli/src/commands/residency.test.ts \
-    docs/decisions/204-portable-wake-context.md docs/architecture/03-server.md \
+    docs/decisions/207-portable-wake-context.md docs/architecture/03-server.md \
     docs/architecture/04-cli.md
-  git commit -m "server: gate reply resume on active context (ADR 204)"
+  git commit -m "server: gate reply resume on active context (ADR 207)"
   ```
 
 ## Plan self-review

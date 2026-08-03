@@ -308,7 +308,7 @@ export class HttpClient {
   clearMemory(slug: string): Promise<void> {
     return this.request('DELETE', `/teams/${slug}/memory`);
   }
-  /** ADR 204's recipient-scoped, body-free wake orientation index. */
+  /** ADR 207's recipient-scoped, body-free wake orientation index. */
   async wakeContext(slug: string, request: WakeContextRequest): Promise<WakeContextPacket> {
     const target = WakeContextRequestSchema.safeParse(request);
     if (!target.success)

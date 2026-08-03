@@ -518,7 +518,7 @@ export const CATALOG: readonly CommandEntry[] = [
     group: 'inbox',
     primary: false,
     detail:
-      'Read ADR 204 portable wake context for a directed Act or owned Lane. It names only canonical IDs, state, delivery intent, and explicit follow-up reads; it never loads an Act or memory body.',
+      'Read ADR 207 portable wake context for a directed Act or owned Lane. It names only canonical IDs, state, delivery intent, and explicit follow-up reads; it never loads an Act or memory body.',
   },
   {
     name: 'availability',

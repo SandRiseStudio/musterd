@@ -142,7 +142,7 @@ describe('residency enrollment (ADR 131)', () => {
   });
 });
 
-describe('buildWakeContext (ADR 204)', () => {
+describe('buildWakeContext (ADR 207)', () => {
   it('derives a body-free reply packet only for the directed recipient', () => {
     const { db, team, nick, ada, bob } = seed();
     msg(db, team, nick, ada, 'message', 'm1', 1_000, { thread: 't1' });
