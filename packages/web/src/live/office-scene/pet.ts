@@ -6,7 +6,6 @@ import {
   DESK_SLOTS,
   DESK_W,
   ENTRANCE,
-  HUDDLES,
   MEETING,
   NOOK,
   PODS,
@@ -173,7 +172,6 @@ export function napSpots(daylight: number): PetSpot[] {
   out.push({ lx: NOOK.lx - 24, ly: NOOK.ly + 96, w: rugW }); // nook rug, front arc
   out.push({ lx: RECEPTION.rug.lx - 60, ly: RECEPTION.rug.ly - 40, w: rugW }); // reception rug
   out.push({ lx: MEETING.lx - 110, ly: MEETING.ly + 40, w: rugW }); // meeting rug, off the table's end
-  for (const h of HUDDLES) out.push({ lx: h.lx + 58, ly: h.ly - 42, w: rugW }); // huddle rug, between poufs
   // Every candidate so far is checked against the nav grid, so the dog never beds down inside furniture.
   return [...out, ...deskSpots(sunny ? 0.28 : 0.55)].filter((s) => walkable(s.lx, s.ly));
 }

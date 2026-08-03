@@ -35,7 +35,7 @@ import {
   STRETCH_S,
   type PetState,
 } from './pet';
-import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK } from './layout';
+import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, MEETING, NOOK } from './layout';
 import { walkable } from './nav';
 
 /** A tiny deterministic LCG so behaviour tests never depend on Math.random. */
@@ -124,7 +124,10 @@ describe('petBeat', () => {
   it('only settles at walkable work-side spots', () => {
     const rng = () => 0.1; // forces the supervise branch and the first spot
     const pet = createPet(lcg(5));
-    const blocked = { lx: 450, ly: 350 }; // the huddle table footprint — solid
+    // Any solid footprint will do; this one is the meeting table. (It used to be the huddle's low
+    // table at 450,350 — that floor is open now, and a "blocked" point that stopped being blocked
+    // made this test pass for no reason, which is worse than failing.)
+    const blocked = { lx: MEETING.lx, ly: MEETING.ly };
     expect(walkable(blocked.lx, blocked.ly)).toBe(false);
     // With only a blocked work spot on offer, the beat falls through to nap spots — never the furniture.
     petBeat(pet, { daylight: 1, workSpots: [blocked], rng });

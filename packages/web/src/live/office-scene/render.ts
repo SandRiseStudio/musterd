@@ -9,8 +9,6 @@ import {
   BEAM_SHEAR,
   ART,
   BOOKSHELVES,
-  HUDDLE_POUFS,
-  HUDDLE_TABLE,
   CHAIR_LIFT,
   CHAIR_OFF,
   CHAIR_SEAT_H,
@@ -18,13 +16,13 @@ import {
   DESK_LEG_H,
   DESK_SLAB,
   DESK_SLOTS,
+  END_TABLE,
   DESK_UP,
   DESK_W,
   ENTRANCE,
   FRONT_DESK,
   RECEPTIONIST,
   FWD,
-  HUDDLES,
   KEYBOARD_ALONG,
   LEISURE_SPOTS,
   LOUNGE,
@@ -39,10 +37,10 @@ import {
   RECEPTION,
   SEAT_TOP,
   SINK,
+  WAIT_CHAIR,
   WALL_BOARD,
   WINDOWS,
   type Bookshelf,
-  type Huddle,
   type Rug,
 } from './layout';
 import { STICKY_CAP, type WallBoard } from './wallboard';
@@ -1572,10 +1570,31 @@ function receptionItems(ctx: CanvasRenderingContext2D, fit: Fit, recep: Receptio
       fn: () => drawReceptionist(ctx, fit, recep ?? SLEEPING_RECEPTIONIST, t),
     },
     { d: depth(FRONT_DESK.lx, FRONT_DESK.ly), fn: () => frontDesk(ctx, fit, t, recep?.mode === 'typing') },
-    { d: depth(R.couch.lx, R.couch.ly), fn: () => couch(ctx, fit, R.couch.lx, R.couch.ly, PAL.couch, R.couch.dir) },
-    { d: depth(R.table.lx, R.table.ly), fn: () => ctable(ctx, fit, R.table.lx, R.table.ly) },
+    {
+      d: depth(R.chairA.lx, R.chairA.ly),
+      fn: () => armchair(ctx, fit, R.chairA.lx, R.chairA.ly, PAL.couch, R.chairA.dir, WAIT_CHAIR),
+    },
+    { d: depth(R.endTable.lx, R.endTable.ly), fn: () => endTable(ctx, fit, R.endTable.lx, R.endTable.ly) },
+    {
+      d: depth(R.chairB.lx, R.chairB.ly),
+      fn: () => armchair(ctx, fit, R.chairB.lx, R.chairB.ly, PAL.couch, R.chairB.dir, WAIT_CHAIR),
+    },
     { d: depth(R.plant.lx, R.plant.ly), fn: () => drawPlant(ctx, fit, R.plant.lx, R.plant.ly, 'fiddle') },
   ];
+}
+
+/**
+ * Reception's end table: a small square top between the two waiting chairs, with a fanned pair of
+ * magazines on it. The magazines are the whole point — an empty side table is a plinth, and a waiting
+ * area reads as one the moment there is something on it somebody could have been reading.
+ */
+function endTable(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number): void {
+  const s = project(lx, ly, fit);
+  ellipse(ctx, { x: s.x, y: s.y }, 20 * fit.scale, 7 * fit.scale, 'rgba(0,0,0,0.12)');
+  box(ctx, fit, lx, ly, END_TABLE, END_TABLE, 16, woodTop());
+  // Two magazines, offset so the lower one shows along one edge.
+  box(ctx, fit, lx - 2, ly + 1, 15, 11, 1.1, '#d9c7a8', 16);
+  box(ctx, fit, lx + 1, ly - 1, 15, 11, 1.1, '#c98f6a', 17.1);
 }
 
 function couch(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, c: string, dir: Dir): void {
@@ -1603,10 +1622,24 @@ function couch(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, 
   }
 }
 
-function armchair(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number, c: string, dir: Dir): void {
+/**
+ * An upholstered chair with a back. The break nook's armchairs were the only callers until the nook
+ * lost them (2026-08-02); reception's waiting pair uses the same painter at a smaller `size`, because
+ * a waiting-room chair *is* a small armchair and inventing a second one would put two upholstery
+ * languages in one room.
+ */
+function armchair(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  lx: number,
+  ly: number,
+  c: string,
+  dir: Dir,
+  size: number,
+): void {
   const f = FWD[dir];
   const sn = f[1] !== 0;
-  const S = LOUNGE.chairW.size;
+  const S = size;
   box(ctx, fit, lx - f[0] * (S / 2 - 6), ly - f[1] * (S / 2 - 6), sn ? S - 2 : 10, sn ? 10 : S - 2, 32, dim(c, 0.9));
   box(ctx, fit, lx, ly, sn ? S - 2 : S, sn ? S : S - 2, 20, c);
   const seat = project(lx + f[0] * 5, ly + f[1] * 5, fit);
@@ -1674,9 +1707,7 @@ function nookItems(
       }),
       at(L.cooler.dx, L.cooler.dy, () => watercooler(ctx, fit, lx + L.cooler.dx, ly + L.cooler.dy)),
       at(L.couch.dx, L.couch.dy, () => couch(ctx, fit, lx + L.couch.dx, ly + L.couch.dy, PAL.couch, 'S')),
-      at(L.chairE.dx, L.chairE.dy, () => armchair(ctx, fit, lx + L.chairE.dx, ly + L.chairE.dy, '#c9744a', 'E')),
       at(L.table.dx, L.table.dy, () => ctable(ctx, fit, lx + L.table.dx, ly + L.table.dy)),
-      at(L.chairW.dx, L.chairW.dy, () => armchair(ctx, fit, lx + L.chairW.dx, ly + L.chairW.dy, '#c9744a', 'W')),
     ],
   };
 }
@@ -1986,33 +2017,6 @@ function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf, si: nu
     }
   }
   shelfDecor(ctx, fit, s);
-}
-
-/** A huddle, as depth items (same reasoning as the nook). Sized up to read proportionate to the desks:
- * roomier poufs and a bigger low table on a wider rug. */
-function huddleItems(ctx: CanvasRenderingContext2D, fit: Fit, h: Huddle): { rug: () => void; items: DepthItem[] } {
-  const at = (dx: number, dy: number, fn: () => void): DepthItem => ({ d: depth(h.lx + dx, h.ly + dy), fn });
-  /** `spin` knocks a pouf off square. `box()` is axis-aligned, so the turn is faked by trading width
-   *  for depth — at this size that reads as a seat nudged round, which is all it needs to do. */
-  const pouf = (lx: number, ly: number, color: string, spin: number): void => {
-    const p = project(lx, ly, fit);
-    const w = 42 * (1 - Math.abs(spin) * 0.5);
-    const d = 42 * (1 + Math.abs(spin) * 0.5);
-    ellipse(ctx, { x: p.x, y: p.y + 3 * fit.scale }, 23 * fit.scale, 8 * fit.scale, 'rgba(64, 39, 25, 0.13)');
-    box(ctx, fit, lx, ly, w, d, 20, dim(color, 0.93));
-    ellipse(ctx, { x: p.x, y: p.y - 20 * fit.scale }, 20 * fit.scale, 8 * fit.scale, mul(color, 1.07));
-    // The dimple slides with the spin, so the seat reads as turned rather than merely reshaped.
-    ellipse(ctx, { x: p.x + spin * 40 * fit.scale, y: p.y - 23 * fit.scale }, 7 * fit.scale, 2.2 * fit.scale, 'rgba(255,255,255,0.18)');
-  };
-  return {
-    rug: () => drawRug(ctx, fit, h.rug, h.lx, h.ly, h.rugSize, h.rugSize),
-    items: [
-      ...HUDDLE_POUFS.map((p, i) =>
-        at(p.dx, p.dy, () => pouf(h.lx + p.dx, h.ly + p.dy, h.poufs[i]!, p.spin)),
-      ),
-      at(0, 0, () => box(ctx, fit, h.lx, h.ly, HUDDLE_TABLE, HUDDLE_TABLE, 18, woodTop())),
-    ],
-  };
 }
 
 /** A faint floor pad marking one spot in the entrance waiting queue (drawn under an overflow member). */
@@ -3695,11 +3699,6 @@ export function renderScene(
   const nook = nookItems(ctx, fit, fx?.fridgeOpen ?? false);
   nook.rug();
   items.push(...nook.items);
-  for (const h of HUDDLES) {
-    const hud = huddleItems(ctx, fit, h);
-    hud.rug();
-    items.push(...hud.items);
-  }
   items.push({ d: depth(MEETING.lx, MEETING.ly), fn: () => meetingTable(ctx, fit) });
   for (const c of MEETING.chairs) {
     const cx = MEETING.lx + c.dx;

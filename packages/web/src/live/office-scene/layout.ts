@@ -13,8 +13,13 @@ import type { Dir } from './types';
  * louder.
  *
  * The pods leave the middle and the front of the floor open, and that space is programmed rather than
- * left as bare floor: a break nook (right), a huddle in the centre, a meeting table and a reception
- * area across the front, and wall pieces (bookshelves, plants, a printer) around the edges.
+ * left as bare floor: a break nook (right), a meeting table and a reception area across the front, and
+ * wall pieces (bookshelves, plants, a printer) around the edges.
+ *
+ * **2026-08-02 — the floor is being re-cut for twenty desks.** The huddle space in the middle is gone,
+ * the nook lost its armchairs, the meeting table shrank and reception became a small counter with two
+ * waiting chairs. Every one of those was floor spent on furniture that seated one or two people; the
+ * middle they free is where the extra desks go.
  */
 
 /** Unit "forward" vector (logical dx,dy) for each facing — shared by drawing and the actor system. */
@@ -175,9 +180,10 @@ export const DESK_SLOTS: DeskSlot[] = PODS.flatMap(podDesks);
 /** The break nook — where `away` members drift; also the broadcast megaphone spot. */
 export const NOOK = { lx: 700, ly: 190 };
 
-/** The nook rug's iso radius — furniture and the away cluster stay inside it. Roomy enough that the
- * lounge set + kitchenette can breathe with real gaps between pieces. */
-export const NOOK_RUG_R = 192;
+/** The nook rug's iso radius — furniture and the away cluster stay inside it. Shrunk 192 → 148 with
+ * the armchairs it was sized around (2026-08-02): the rug only needs to cover the kitchenette run and
+ * the couch now, and a rug much wider than its furniture reads as a stain rather than a zone. */
+export const NOOK_RUG_R = 148;
 
 /** The nook's rug: the room's one big diamond, bound with a darker edge. */
 export const NOOK_RUG: Rug = { shape: 'diamond', weave: 'border', fill: '#ce9256', mark: '#b2743c' };
@@ -214,19 +220,25 @@ export const LOUNGE = {
   // (MIN_SPOT_GAP) and closed the aisle behind them onto the away members' stand points — the gap
   // this set actually needed was between the couch and the table, and widening everything else just
   // moved the crowding outward into the arc of people standing behind it.
-  chairE: { dx: -62, dy: 64, size: 52 }, // left of the table, facing it
-  chairW: { dx: 72, dy: 64, size: 52 }, // right of the table, facing it
+  // The two armchairs are GONE with the 2026-08-02 downsizing. They were the nook's widest pieces and
+  // the reason its rug had to be 192 — and a lounge set for three is more seating than a break nook
+  // needs once the floor has twenty desks competing for the same square units. The couch stays: it is
+  // what makes the corner read as a place to sit rather than a kitchen.
 } as const;
 
 /** Where the six visible `away` members stand — an arc on the rug around the lounge set's open (front)
  * side. Hand-placed (offsets from NOOK) so nobody stands inside the couch/armchairs/table/kitchenette. */
 export const NOOK_SPOTS: ReadonlyArray<{ dx: number; dy: number }> = [
-  { dx: -116, dy: 40 }, // west flank, beside the fridge
-  { dx: -70, dy: 112 }, // front arc, south of the seating cluster
-  { dx: -34, dy: 122 },
-  { dx: 2, dy: 126 },
-  { dx: 40, dy: 118 },
-  { dx: 74, dy: 110 },
+  // Re-placed for the 148 rug (2026-08-02). The old arc sat as far out as |dx|+|dy| = 184, which was
+  // inside the 192 rug and is well outside this one — an away member standing off the rug reads as
+  // someone who wandered out of the nook rather than someone in it. Pulled into a tighter horseshoe
+  // that still clears the couch (x -48..60, y -26..18) and the coffee table (x -22..34, y 54..94).
+  { dx: -100, dy: 8 }, // west flank, south of the fridge
+  { dx: -78, dy: 58 }, // southwest corner of the set
+  { dx: -50, dy: 92 }, // front arc, clear of the coffee table's west corner
+  { dx: 22, dy: 110 },
+  { dx: 74, dy: 62 }, // southeast corner
+  { dx: 96, dy: 14 }, // east flank, below the cooler
 ];
 
 /** Where an ambient coffee-stroll pauses: standing just in front of the break-nook machine, facing it
@@ -258,56 +270,15 @@ export const NOOK_CAP = 6;
  * overflow strip anchor. `lx` is the mat centre just inside the doorway; the door plane sits ~42 back. */
 export const ENTRANCE = { lx: 47, ly: 815 };
 
-export interface Huddle {
-  lx: number;
-  ly: number;
-  rug: Rug;
-  rugSize: number;
-  poufs: [string, string, string];
-}
-
-/**
- * Where the three poufs sit, as offsets from the huddle centre, and how far each is knocked off
- * square.
+/*
+ * The huddle space is GONE (nick, 2026-08-02: "the huddle space in the middle, I'm not in love with
+ * it"). It was three poufs and a low table on a clay rug at (450, 350), and it cost the room the one
+ * thing this floor is now short of: middle. The desks are going from twelve to twenty, and the
+ * clearing the huddle sat in is where the new clusters go.
  *
- * **One source for both the painter and the leisure spots.** These offsets used to be written out
- * twice — once in `huddleItems`, once in `LEISURE_SPOTS` — which means a pouf could be moved in one
- * place and leave its occupant sitting on bare floor in the other.
- *
- * The distances are what stop the cluster reading as one welded object (nick, 2026-07-30: the chairs
- * "look like they are basically attached to the coffee table"). The table is 66 across and a pouf is
- * 42, so anything under ~64 from centre is literally touching; the old ring sat at 54 and 61. `spin`
- * is the other half: three poufs at identical angles is a CAD assembly, and used furniture is never
- * square to its table.
+ * Its three leisure spots are not simply lost — the reception waiting chairs take over that job (see
+ * `RECEPTION` and `LEISURE_SPOTS`), which keeps four interleaved leisure zones rather than three.
  */
-export const HUDDLE_POUFS: ReadonlyArray<{ dx: number; dy: number; spin: number; dir: Dir }> = [
-  { dx: 0, dy: -72, spin: -0.09, dir: 'S' },
-  { dx: 68, dy: 42, spin: 0.13, dir: 'W' },
-  { dx: -66, dy: 44, spin: -0.05, dir: 'E' },
-];
-
-/** The huddle's low table footprint. */
-export const HUDDLE_TABLE = 66;
-
-/** One huddle space, in the clearing the three pods leave in the middle of the room. */
-export const HUDDLES: Huddle[] = [
-  {
-    // Shifted east of the north pod's rug; the old centre overlapped that zone and made the huddle
-    // look partially tucked beneath its desks.
-    lx: 450,
-    ly: 350,
-    // A logical rectangle projects as an iso diamond on the floor. The former logical diamond projected
-    // as a screen-space rectangle, which read like translucent panels attached to the poufs.
-    // Softened toward the muted pod-rug treatment: a calmer clay field with a low-contrast border, so the
-    // huddle rug seats onto the floor instead of popping forward like a floating slab.
-    rug: { shape: 'rect', weave: 'border', fill: '#d4a483', mark: '#c69172' },
-    // Widened with the cluster: pushing the poufs off the table ran them over the old 168 edge, and a
-    // seat half on the rug reads worse than no rug at all. Kept modest so the bare floor between this
-    // and the pod rugs survives — that gap is what makes each one an area rather than a stain.
-    rugSize: 190,
-    poufs: ['#f06d5a', '#e3a72b', '#8b6fd6'],
-  },
-];
 
 /**
  * The meeting table in the front corner: a long table with four chairs, on its own rug.
@@ -323,8 +294,13 @@ export const HUDDLES: Huddle[] = [
 export const MEETING = {
   lx: 700,
   ly: 800,
-  w: 170,
-  d: 92,
+  // Downsized 170×92 → 150×80 (2026-08-02), and no further — this table's size is pinned by its SEATS,
+  // not by taste. Shrinking it pulls the head chairs inward, and a head chair that closes on the
+  // near side chair collapses the two into one smeared avatar on screen (the exact failure `MIN_SPOT_GAP`
+  // exists to catch; at 130 wide the pair measured 47 against a floor of 52). Most of the floor this
+  // zone gives back comes from its rug, which shrank much harder.
+  w: 150,
+  d: 80,
   h: 30,
   /**
    * Chair centres, as offsets — two along the room side, one at each head.
@@ -335,32 +311,40 @@ export const MEETING = {
    * the floor plan suggests it would (`MIN_SPOT_GAP`, held by layout.test.ts).
    */
   chairs: [
-    { dx: -40, dy: -80, dir: 'S' as Dir },
-    { dx: 40, dy: -80, dir: 'S' as Dir },
+    { dx: -40, dy: -72, dir: 'S' as Dir },
+    { dx: 40, dy: -72, dir: 'S' as Dir },
     { dx: -124, dy: 0, dir: 'E' as Dir },
     { dx: 124, dy: 0, dir: 'W' as Dir },
   ],
   chairSize: 36,
-  rug: { w: 300, d: 196, shape: 'rect', weave: 'stripes', fill: '#9aa886', mark: '#7e8c6b' },
+  rug: { w: 250, d: 175, shape: 'rect', weave: 'stripes', fill: '#9aa886', mark: '#7e8c6b' },
 } as const;
 
 /**
- * Reception, in the left corner: the rug the entrance queue waits on, a waiting couch turned back toward
- * the door, and a low table. The queue strip (`ENTRANCE` + `STRIP_CAP`) already lands here, so this
- * dresses a space members genuinely stand in rather than adding a decorative island somewhere pretty.
+ * Reception, in the left corner: the rug the entrance queue waits on, two waiting chairs turned back
+ * toward the door, and an end table between them. The queue strip (`ENTRANCE` + `STRIP_CAP`) already
+ * lands here, so this dresses a space members genuinely stand in rather than adding a decorative
+ * island somewhere pretty.
  *
- * The pieces are the *same* couch and coffee table the break nook uses — a second furniture vocabulary
- * for one corner would read as a different building.
+ * **A waiting room, not a second lounge** (nick, 2026-08-02). It used to borrow the break nook's
+ * three-seat couch and coffee table, which was the right instinct — one furniture vocabulary for the
+ * building — carried one size too far: a couch that big made the corner read as a second lounge
+ * competing with the real one, and it ate the floor the cubicles needed. Two chairs and an end table
+ * say "wait here a moment" instead of "settle in", in a fraction of the footprint.
  */
+export const WAIT_CHAIR = 34;
+export const END_TABLE = 26;
 export const RECEPTION = {
-  // The rug keeps a clear band of bare floor between itself and pod 2's rug (which reaches ly 685). Two
-  // rugs meeting edge-to-edge fuse into one big shapeless patch and both zones stop reading as zones —
-  // the floor *between* rugs is what makes each one an area rather than a stain.
-  rug: { lx: 170, ly: 800, w: 300, d: 170, shape: 'rect', weave: 'border', fill: '#c07a55', mark: '#9c5c3c' },
-  /** Past the far end of the queue strip, facing back down it toward the door. */
-  couch: { lx: 330, ly: 800, dir: 'W' as Dir },
-  table: { lx: 258, ly: 800 },
-  plant: { lx: 335, ly: 690 },
+  // The rug keeps a clear band of bare floor between itself and the nearest cluster rug. Two rugs
+  // meeting edge-to-edge fuse into one big shapeless patch and both zones stop reading as zones — the
+  // floor *between* rugs is what makes each one an area rather than a stain.
+  rug: { lx: 160, ly: 800, w: 260, d: 165, shape: 'rect', weave: 'border', fill: '#c07a55', mark: '#9c5c3c' },
+  /** Two chairs side by side past the end of the queue strip, facing back down it toward the door. */
+  chairA: { lx: 252, ly: 758, dir: 'W' as Dir },
+  chairB: { lx: 252, ly: 836, dir: 'W' as Dir },
+  /** Between them, where a magazine would go. */
+  endTable: { lx: 252, ly: 797 },
+  plant: { lx: 318, ly: 700 },
 } as const;
 
 /**
@@ -374,7 +358,12 @@ export const RECEPTION = {
 // Sized against the DESKS, not against itself. It was 88x30x34 next to 100x68x36 workstations, which
 // read as a hall table (nick, 2026-07-30: "the front desk is very small compared to the rest of the
 // desks"). A reception counter is a shade wider and shallower than a workstation, at the same height.
-export const FRONT_DESK = { lx: 112, ly: 690, long: 108, deep: 62, high: DESK_UP, dir: 'S' as Dir };
+//
+// Trimmed 108x62 → 92x50 on 2026-08-02, which is NOT a walk-back of that fix: it stays at desk HEIGHT
+// and reads as a counter, it just stops matching a workstation's full footprint. What forced it is the
+// crowding nick reported — the counter's south face sat within a few units of the cubicle rug behind
+// it, and every unit here is one the reception area gets back.
+export const FRONT_DESK = { lx: 112, ly: 690, long: 92, deep: 50, high: DESK_UP, dir: 'S' as Dir };
 /** She sits behind it exactly like a member sits at a desk — same SEAT_BACK, same chair, same size. */
 export const RECEPTIONIST = { lx: FRONT_DESK.lx, ly: FRONT_DESK.ly - SEAT_BACK, dir: 'S' as Dir };
 // South of the overflow queue strip, not across it: the counter grew to desk scale and pushed both
@@ -608,7 +597,7 @@ export const BOOKSHELVES: Bookshelf[] = [
 
 export interface LeisureSpot {
   /** Which programmed zone this belongs to — the read the spot is meant to give at a glance. */
-  zone: 'lounge' | 'huddle' | 'meeting' | 'reading';
+  zone: 'lounge' | 'waiting' | 'meeting' | 'reading';
   lx: number;
   ly: number;
   dir: Dir;
@@ -686,23 +675,26 @@ export const MIN_SPOT_GAP = 52;
  */
 export const LEISURE_SPOTS: LeisureSpot[] = (() => {
   const L = LOUNGE;
-  const h = HUDDLES[0]!;
-  // One on the couch, flanked by the two armchairs facing the coffee table — a lounge conversation.
-  // `armchair()` paints its cushion 5 toward the facing; each armchair is a small box centred on its own
-  // occupant, so unlike the couch it needs no `depthAt`.
+  // The couch cushion is the nook's only seat now — the two armchairs went with the 2026-08-02
+  // downsizing. `couchSeats` still offers exactly one cushion, for the reason it always did: three
+  // sitters on one couch render as a single smear of overlapping heads.
   const lounge: LeisureSpot[] = [
     ...couchSeats('lounge', NOOK.lx + L.couch.dx, NOOK.ly + L.couch.dy, 'S'),
-    { zone: 'lounge', lx: NOOK.lx + L.chairE.dx + 5, ly: NOOK.ly + L.chairE.dy, dir: 'E', sit: 1 },
-    { zone: 'lounge', lx: NOOK.lx + L.chairW.dx - 5, ly: NOOK.ly + L.chairW.dy, dir: 'W', sit: 1 },
   ];
-  // Poufs are backless: the occupant sits on the centre, turned toward the huddle's low table.
-  const huddle: LeisureSpot[] = HUDDLE_POUFS.map((p) => ({
-    zone: 'huddle' as const,
-    lx: h.lx + p.dx,
-    ly: h.ly + p.dy,
-    dir: p.dir,
-    sit: 1,
-  }));
+  // Reception's two waiting chairs, which inherit the huddle's job of being the second leisure zone.
+  // Someone idling in the waiting chairs is a true thing for an office to show, and it keeps four
+  // zones to interleave — with three, a probe walking off the end of one zone lands in its neighbour
+  // too often and idle members clump.
+  const waiting: LeisureSpot[] = [RECEPTION.chairA, RECEPTION.chairB].map((c) => {
+    const f = FWD[c.dir];
+    return {
+      zone: 'waiting' as const,
+      lx: c.lx + f[0] * CHAIR_SEAT_FWD,
+      ly: c.ly + f[1] * CHAIR_SEAT_FWD,
+      dir: c.dir,
+      sit: 1,
+    };
+  });
   // All four meeting chairs are seats — see MEETING for why they sit along one side and the two ends
   // rather than down both sides. `nav.test.ts` holds every offered spot to having open floor beside it,
   // so an arrangement that walls a chair in fails a test rather than shipping as a seat nobody can
@@ -731,7 +723,7 @@ export const LEISURE_SPOTS: LeisureSpot[] = (() => {
     };
   });
   // Interleave: round-robin the zones so consecutive indices are in different parts of the room.
-  const zones = [lounge, huddle, meeting, reading];
+  const zones = [lounge, waiting, meeting, reading];
   const out: LeisureSpot[] = [];
   for (let i = 0; out.length < zones.reduce((n, z) => n + z.length, 0); i++) {
     for (const z of zones) if (z[i]) out.push(z[i]!);
