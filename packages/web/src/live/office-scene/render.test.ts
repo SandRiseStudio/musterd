@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { homePoses } from './actors';
 import { memberColor } from '../format';
 import { fitFloor, project } from './iso';
-import { DESK_SLOTS, LOUNGE, NOOK } from './layout';
+import { DESK_SLOTS, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
 import {
@@ -282,9 +282,8 @@ describe('the wall agile board', () => {
       null,
       hours,
     );
-    expect(texts).toContain('TEAM WORKING HOURS');
-    expect(texts).toContain('MON–FRI · 11:00 AM–3:00 PM');
-    expect(texts).toContain('PACIFIC TIME');
+    expect(texts).toContain('MON–FRI');
+    expect(texts).toContain('11am–3pm');
   });
 
   it('writes only the overflow badge — a column past its cap says +N, nothing else says anything', () => {
@@ -481,10 +480,48 @@ describe('the working-hours clock companion', () => {
 
     renderScene(ctx, fit, new Map(), new Map(), new Map(), 4, 'revive', computeLightEnv(12, false), null, undefined, null, null, schedule);
 
-    for (const text of ['TEAM WORKING HOURS', 'MON–FRI · 11:00 AM–3:00 PM', 'PACIFIC TIME']) {
+    for (const text of ['MON–FRI', '11am–3pm']) {
       const matches = textEvents.filter((event) => event.text === text);
       expect(matches, text).not.toHaveLength(0);
       expect(matches.every((event) => event.wallTransforms > 0), text).toBe(true);
+    }
+  });
+
+  it('keeps every line inside the card, even when the days are a list rather than a run', () => {
+    // A monospace stand-in: `measureText` is what the renderer shrinks against, so the same model has
+    // to answer both the fit query and the assertion.
+    const advance = 0.6;
+    const drawn: Array<{ text: string; size: number }> = [];
+    let font = '700 10px mono';
+    const ctx = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'font') return font;
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => ({ addColorStop() {} });
+          if (prop === 'measureText')
+            return (text: string) => ({ width: text.length * advance * Number(/ (\d+(?:\.\d+)?)px /.exec(font)?.[1] ?? 10) });
+          if (prop === 'fillText')
+            return (text: string) => drawn.push({ text, size: Number(/ (\d+(?:\.\d+)?)px /.exec(font)?.[1] ?? 10) });
+          return () => undefined;
+        },
+        set: (_target, prop, value) => {
+          if (prop === 'font') font = String(value);
+          return true;
+        },
+      },
+    ) as unknown as CanvasRenderingContext2D;
+
+    const listed: WorkingHours = { ...schedule, days: ['mon', 'wed', 'fri'] };
+    renderScene(ctx, fit, new Map(), new Map(), new Map(), 4, 'revive', computeLightEnv(12, false), null, undefined, null, null, listed);
+
+    const inner = WORKING_HOURS_CALENDAR.w - 18;
+    for (const text of ['MON · WED · FRI', '11am–3pm']) {
+      const hit = drawn.find((event) => event.text === text);
+      expect(hit, text).toBeDefined();
+      // A line shrunk to exactly the limit lands on it to within a float wobble, so allow one.
+      expect(text.length * advance * hit!.size, text).toBeLessThanOrEqual(inner + 1e-6);
     }
   });
 });

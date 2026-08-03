@@ -33,33 +33,27 @@ function formatDays(days: readonly WorkingDay[]): string {
   return groups.join(' · ');
 }
 
+/**
+ * `11am`, `3pm`, `9:30am` — a wall sign is read at a glance from across a room, where `11:00 AM` spends
+ * four glyphs saying nothing. The minutes survive only when there are any; o'clock is the common case.
+ */
 function formatTime(value: string): string {
   const [rawHours, rawMinutes] = value.split(':').map(Number);
   const hours = rawHours ?? 0;
   const minutes = rawMinutes ?? 0;
-  const suffix = hours >= 12 ? 'PM' : 'AM';
+  const suffix = hours >= 12 ? 'pm' : 'am';
   const hour = hours % 12 || 12;
-  return `${hour}:${String(minutes).padStart(2, '0')} ${suffix}`;
+  return minutes === 0 ? `${hour}${suffix}` : `${hour}:${String(minutes).padStart(2, '0')}${suffix}`;
 }
 
-function formatTimezone(timezone: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      timeZoneName: 'longGeneric',
-    }).formatToParts(new Date('2026-01-15T12:00:00Z'));
-    const label = parts.find((part) => part.type === 'timeZoneName')?.value;
-    if (label) return label.toUpperCase();
-  } catch {
-    /* The protocol rejects invalid zones; this keeps a defensive renderer total. */
-  }
-  return timezone.replaceAll('_', ' ').toUpperCase();
-}
-
+/**
+ * What the sign says, and nothing else: the days and the hours. No caption (the card's own shape is the
+ * caption) and no timezone — the fixture is ~60px of wall in the room, and a third line is a smudge.
+ * The Team's timezone still lives in the schedule data; it just isn't wall copy.
+ */
 export interface WorkingHoursCopy {
   days: string;
   hours: string;
-  timezone: string;
 }
 
 export function formatWorkingHours(hours: WorkingHoursInput | null | undefined): WorkingHoursCopy | null {
@@ -67,6 +61,5 @@ export function formatWorkingHours(hours: WorkingHoursInput | null | undefined):
   return {
     days: formatDays(hours.days),
     hours: `${formatTime(hours.start)}–${formatTime(hours.end)}`,
-    timezone: formatTimezone(hours.timezone),
   };
 }

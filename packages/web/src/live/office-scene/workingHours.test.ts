@@ -12,8 +12,13 @@ describe('formatWorkingHours', () => {
   it('formats the revive schedule as a readable sign payload', () => {
     expect(formatWorkingHours(weekdays)).toEqual({
       days: 'MON–FRI',
-      hours: '11:00 AM–3:00 PM',
-      timezone: 'PACIFIC TIME',
+      hours: '11am–3pm',
+    });
+  });
+
+  it('abbreviates for the sign without losing a half hour', () => {
+    expect(formatWorkingHours({ ...weekdays, start: '09:30', end: '17:45' })).toMatchObject({
+      hours: '9:30am–5:45pm',
     });
   });
 

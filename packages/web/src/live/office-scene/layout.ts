@@ -327,10 +327,17 @@ export const LOUNGE = {
   // kitchenette is off — it's a little small compared to the rest of the office space"). A desk is
   // 100 x 68; a 78-wide counter beside it read as a side table with a bowl on it. The run now grows
   // to the RIGHT — the left end is pinned by the fridge, and extending that way would have buried it.
-  fridge: { dx: -104, dy: -44, w: 36, d: 30, h: 72 },
-  counter: { dx: -30, dy: -70, w: 120, d: 30, h: 34 },
-  machine: { dx: -71, dy: -70 },
-  cooler: { dx: 42, dy: -76, w: 26, d: 26, h: 52 }, // water cooler
+  //
+  // The whole run sits 16 further back than it did (2026-08-03). The 2026-08-02 downsizing left 29
+  // units of floor between the counter's front face and the couch's back — one unit more than a body
+  // is wide, and less than the nav grid can represent — so the aisle every kitchenette errand walks
+  // down was sealed. Three of the four errand dwell points ended up inside furniture. Pushing the run
+  // back opens a walkable lane in front of it without touching the seating nick tuned; the counter was
+  // never on the rug anyway, so there is nothing behind it to give up.
+  fridge: { dx: -104, dy: -60, w: 36, d: 30, h: 72 },
+  counter: { dx: -30, dy: -86, w: 120, d: 30, h: 34 },
+  machine: { dx: -71, dy: -86 },
+  cooler: { dx: 42, dy: -92, w: 26, d: 26, h: 52 }, // water cooler
   // (a nook plant used to sit at dx 112 — removed to thin the nook's right edge, which already has the
   // big floor plant at 830,330 and the right-wall bookshelf beside it.)
   // Conversation set in the front. The gaps are the point: a coffee table sits a stride from a couch,
@@ -366,25 +373,34 @@ export const NOOK_SPOTS: ReadonlyArray<{ dx: number; dy: number }> = [
   { dx: 96, dy: 14 }, // east flank, below the cooler
 ];
 
-/** Where an ambient coffee-stroll pauses: standing just in front of the break-nook machine, facing it
- * (ADR 086 Phase 2). Clear of the lounge furniture and the seated nook cluster. */
-export const COFFEE_STAND = { lx: NOOK.lx - 74, ly: NOOK.ly - 46 };
+/**
+ * Where an ambient coffee-stroll pauses: standing in the kitchenette lane, facing the machine (ADR 086
+ * Phase 2). Nudged 8 east of the machine itself — the lane runs out where the fridge's footprint starts,
+ * so the spot directly in front of the machine is the one place along the counter a body cannot stand.
+ */
+export const COFFEE_STAND = { lx: NOOK.lx + LOUNGE.machine.dx + 8, ly: NOOK.ly + LOUNGE.counter.dy + 38 };
 
 /** The kitchenette sink's spot on the counter (centre-run, between the machine and the bean bag) —
  * shared by the counter painter and the fridge errand's plate drop-off. */
-export const SINK = { dx: -49, dy: -70 };
+export const SINK = { dx: -49, dy: -86 };
 
 // ── errand stand points (ADR 086 Phase 3: purposeful errands) ─────────────────────────────────────────
 // Each is where the walker *stands* during the errand's dwell, just clear of the appliance's inflated
 // nav footprint (`nav.solidRects` pads by the body radius), facing it ('N' — the kitchenette lines the
 // nook's back edge). Endpoints inside a blocked cell would get nudged by `nearestFree`, so standing
-// clear keeps the dwell exactly where the leg says it is.
-/** In front of the fridge, for the open-and-browse dwell. */
+// clear keeps the dwell exactly where the leg says it is — and when it stops being clear, the dwell
+// silently moves to wherever the nudge lands, which is how three of these ended up standing inside the
+// kitchenette after the 2026-08-02 re-cut. `layout.test.ts` now holds every one of them to `walkable`.
+//
+// They share the counter lane's latitude (`counter.dy + 38`): one lane, one queue, and a single number
+// to move if the run ever shifts again.
+/** In front of the fridge, for the open-and-browse dwell. Off the lane — the fridge stands proud of the
+ * counter run, and its own footprint fills the lane in front of it. */
 export const FRIDGE_STAND = { lx: NOOK.lx + LOUNGE.fridge.dx, ly: NOOK.ly + LOUNGE.fridge.dy + 44 };
 /** In front of the water cooler, for the bottle-fill dwell. */
-export const COOLER_STAND = { lx: NOOK.lx + LOUNGE.cooler.dx, ly: NOOK.ly + LOUNGE.cooler.dy + 34 };
+export const COOLER_STAND = { lx: NOOK.lx + LOUNGE.cooler.dx, ly: NOOK.ly + LOUNGE.counter.dy + 38 };
 /** In front of the counter sink, where an empty plate is set down. */
-export const SINK_STAND = { lx: NOOK.lx + SINK.dx, ly: NOOK.ly + LOUNGE.counter.dy + 38 };
+export const SINK_STAND = { lx: NOOK.lx + SINK.dx + 6, ly: NOOK.ly + LOUNGE.counter.dy + 38 };
 
 /** How many overflow-queue / nook avatars render individually before the rest collapse into a "+N" pill,
  * so a very large roster stays bounded instead of marching avatars off the floor. */
@@ -600,9 +616,17 @@ export const ART: readonly ArtPiece[] = [
   { wall: 1, tc: 0.23, uc: 0.58, w: 60, h: 44, motif: 'sunrise', frame: 'thick' },
 ];
 
-/** The compact Team-schedule calendar, directly beneath the right-wall clock. Its geometry is shared
- * with layout tests so the two wall fixtures retain a hand's breadth of clear plaster between them. */
-export const WORKING_HOURS_CALENDAR = { wall: 1 as const, tc: 0.52, uc: 0.35, w: 72, h: 34, loopOverhang: 4 };
+/**
+ * The Team-schedule calendar, directly beneath the right-wall clock — the clock's companion, and read
+ * as a pair with it. Geometry is shared with layout tests so the two fixtures keep a hand's breadth of
+ * clear plaster between them and the card stays inside the window bay.
+ *
+ * It fills that bay rather than perching in it: the wall between the two windows is `t ∈ 0.46…0.58`
+ * (≈108 units) and free all the way down, so the card can be the size a real one would be. Nothing
+ * about the copy wanted it small — the first version was small *and* overfull, which is how it ended
+ * up illegible.
+ */
+export const WORKING_HOURS_CALENDAR = { wall: 1 as const, tc: 0.52, uc: 0.3, w: 92, h: 52, loopOverhang: 4 };
 /**
  * Two windows per back wall — spaced so the wall reads as a facade, not a single porthole.
  *
@@ -666,6 +690,12 @@ export interface Bookshelf {
   tone: number;
   /** Shelved spine-in, page-edges to the room. Exactly one unit, and it is deliberate. */
   reversed?: boolean;
+  /**
+   * Slide this shelf's reading spot along the wall (logical units, `+` = along `long`'s positive axis).
+   * A reader stands head-on by default; where something else already occupies that floor — the big
+   * corner plant, for the right-wall unit — they step along the shelf rather than into it.
+   */
+  readAlong?: number;
   decor: ShelfDecor;
 }
 
@@ -711,6 +741,8 @@ export const BOOKSHELVES: Bookshelf[] = [
     rows: 2,
     tone: 0.94,
     reversed: true,
+    // The big corner plant (830,330) stands exactly where this shelf's reader would: step north.
+    readAlong: 34,
     decor: 'photo',
   },
   // left wall beside pod 0 — the standard unit, i.e. the constants above
@@ -860,10 +892,11 @@ export const LEISURE_SPOTS: LeisureSpot[] = (() => {
   const reading: LeisureSpot[] = BOOKSHELVES.map((s) => {
     const f = FWD[s.dir];
     const back: Dir = s.dir === 'S' ? 'N' : s.dir === 'N' ? 'S' : s.dir === 'E' ? 'W' : 'E';
+    const along = s.readAlong ?? 0; // perpendicular to the facing — a step along the shelf, not into it
     return {
       zone: 'reading' as const,
-      lx: s.lx + f[0] * (SHELF_DEEP / 2 + 28),
-      ly: s.ly + f[1] * (SHELF_DEEP / 2 + 28),
+      lx: s.lx + f[0] * (SHELF_DEEP / 2 + 28) + f[1] * along,
+      ly: s.ly + f[1] * (SHELF_DEEP / 2 + 28) + f[0] * along,
       dir: back,
       sit: 0,
     };
