@@ -1318,14 +1318,27 @@
   border: 0;
   padding: 0;
   border-radius: 6px;
-  transition: box-shadow 220ms var(--lc-ease, ease);
+  transition:
+    box-shadow 220ms var(--lc-ease, ease),
+    transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1.4);
 }
+/* Hover lifts the board a hair off the wall and warms the light around it — the promise that this
+   object comes off the wall, made before you click. Lives on the DOM hotspot, not the canvas, so
+   pointing at the board never costs a scene repaint. */
 .lc-boardspot:hover,
 .lc-boardspot:focus-visible {
   outline: none;
+  transform: translateY(-2px);
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--lc-accent) 60%, transparent),
-    0 4px 22px -4px color-mix(in srgb, var(--lc-accent) 35%, transparent);
+    0 6px 24px -4px color-mix(in srgb, var(--lc-accent) 42%, transparent),
+    0 0 18px -4px rgba(255, 190, 110, 0.85);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-boardspot:hover,
+  .lc-boardspot:focus-visible {
+    transform: none;
+  }
 }
 .lc-boardspot__tag {
   position: absolute;
@@ -2954,40 +2967,65 @@
   }
 }
 
-/* ─── the board overlay — the wall's agile board, opened (first true modal) ────────────────────────
-   The panel grows out of the wall board's on-screen rect (transform set inline from zoomTransform)
-   and shrinks back into it on close; the scrim is a warm plain wash — NO backdrop-filter, the
-   office-block rule, and a modal should not make the room behind it more interesting. Transform +
-   opacity only, per the perf contract. */
+/* ─── the board overlay — the wall's pin board, taken off the wall (first true modal) ──────────────
+   The panel comes off the wall out of the board's on-screen rect (transform set inline from
+   zoomTransform + OPEN_TILT) and goes back onto it to close. NO backdrop-filter — the office-block
+   rule, and a modal should not make the room behind it more interesting. Transform + opacity only,
+   per the perf contract; the scrim animates opacity on a pseudo-element rather than `background`,
+   which is not a compositable property.
+
+   Sized to ~62vw. It used to be 96vw/92vh, and at that size the office vanished behind it — which
+   made an overlay read as a page you had navigated to (nick, 2026-08-02). The visible room around
+   the panel is doing real work: it is the only thing saying you never left. */
 .lc-boardoverlay {
   position: fixed;
   inset: 0;
   z-index: calc(var(--lc-z-overlay) + 2);
   display: grid;
   place-items: center;
-  background: color-mix(in srgb, var(--lc-ground) 0%, transparent);
-  transition: background 240ms var(--lc-ease);
 }
-.lc-boardoverlay.is-in {
-  background: color-mix(in srgb, var(--lc-ground) 62%, transparent);
+/* The scrim: warm, and brighter toward the wall the board came off, so the room stays lit where
+   you were just looking rather than dimming to a flat neutral sheet. */
+.lc-boardoverlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    120% 100% at 72% 18%,
+    color-mix(in srgb, var(--lc-ground) 30%, transparent),
+    color-mix(in srgb, var(--lc-ground) 68%, transparent)
+  );
+  opacity: 0;
+  transition: opacity 280ms var(--lc-ease);
+  pointer-events: none;
+}
+.lc-boardoverlay.is-in::before {
+  opacity: 1;
 }
 .lc-boardoverlay__panel {
+  position: relative;
   display: flex;
   flex-direction: column;
-  width: min(96vw, 1500px);
-  height: min(92vh, 860px);
-  min-height: 0;
+  width: min(62vw, 1100px);
+  height: min(62vh, 720px);
+  min-width: min(96vw, 720px);
+  min-height: min(88vh, 480px);
   transform-origin: top left;
   opacity: 0;
   background: var(--lc-surface);
-  border: 1px solid var(--lc-border);
+  /* The same pale oak the board wears on the wall — the thing in your hands is the thing that was
+     hanging there, and a different frame would break that in the one moment you can check. */
+  border: 3px solid #dcbf8e;
   border-radius: var(--lc-r-lg);
   box-shadow:
+    inset 0 1px 0 rgba(255, 244, 220, 0.7),
     0 8px 22px -8px color-mix(in srgb, var(--lc-ground) 70%, transparent),
     0 32px 80px -24px color-mix(in srgb, var(--lc-ground) 85%, transparent);
+  /* The overshoot lives in the curve's tail (>1), not in a keyframe: the panel passes its resting
+     size by ~3% and swings back, which is what a held object does and a scaling rectangle doesn't. */
   transition:
-    transform 300ms cubic-bezier(0.2, 0.9, 0.25, 1.05),
-    opacity 220ms var(--lc-ease);
+    transform 620ms cubic-bezier(0.2, 0.9, 0.25, 1.08),
+    opacity 260ms var(--lc-ease);
   outline: none;
 }
 .lc-boardoverlay.is-in .lc-boardoverlay__panel {
@@ -3003,7 +3041,10 @@
   align-items: center;
   gap: var(--lc-4);
   padding: var(--lc-4) var(--lc-5);
-  border-bottom: 1px solid var(--lc-border);
+  /* The oak carries onto the header, so the frame reads as one continuous piece of wood around the
+     board rather than a border drawn on a card. */
+  background: linear-gradient(#e9d3ab, #dcbf8e);
+  border-bottom: 1px solid rgba(120, 78, 42, 0.4);
 }
 .lc-boardoverlay__title {
   font-family: var(--font-mono);

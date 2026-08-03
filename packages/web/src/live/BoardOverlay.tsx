@@ -1,6 +1,6 @@
 import type { LaneBoard, MemberSummary } from '@musterd/protocol';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ESCAPE_SCOPES, shouldDismiss, zoomTransform } from './boardOverlayMath';
+import { ESCAPE_SCOPES, OPEN_TILT, shouldDismiss, zoomTransform } from './boardOverlayMath';
 import type { LiveConfig } from './client';
 import { useBoardData } from './useBoardData';
 
@@ -15,13 +15,18 @@ export function preloadBoard(): void {
 }
 
 /** How long the close transition holds the DOM before unmounting (matches the CSS duration). */
-const CLOSE_MS = 260;
+const CLOSE_MS = 320;
 
 /**
- * The office's work board, opened from the wall — the app's first true modal. Clicking the agile
- * board on the wall hands us its viewport rect, and the panel *grows out of that rect* into the
- * room (`zoomTransform`), then shrinks back into the wall on close: the object you reached for is
- * the thing in your hands. Reduced motion swaps the zoom for a plain fade.
+ * The office's work board, opened from the wall — the app's first true modal. Clicking the pin
+ * board on the wall hands us its viewport rect, and the panel *comes off the wall out of that rect*
+ * (`zoomTransform` + `OPEN_TILT`), then goes back on it to close: the object you reached for is the
+ * thing in your hands. Reduced motion swaps the flight for a plain fade.
+ *
+ * It opens at ~62% of the viewport, not full-bleed, and that size is load-bearing. At 92% the panel
+ * covered the office so completely that people read the open board as having *navigated* to the
+ * standalone `/board` page (nick, 2026-08-02 — reported it as navigation, which it never was). Room
+ * left visible around the panel is the entire signal that you are still standing in the office.
  *
  * Data-wise this is the same board as `/board`: the same `useBoardData` half (optimistic echo fold,
  * write gate, status line) over the same `base` the route already fetched for the reel — nothing is
@@ -63,7 +68,7 @@ export function BoardOverlay({
     const panel = panelRef.current;
     if (!panel) return;
     if (origin && !reduced) {
-      panel.style.transform = zoomTransform(origin, panel.getBoundingClientRect());
+      panel.style.transform = zoomTransform(origin, panel.getBoundingClientRect(), OPEN_TILT);
     }
     const raf = requestAnimationFrame(() =>
       requestAnimationFrame(() => {
@@ -85,7 +90,7 @@ export function BoardOverlay({
     const panel = panelRef.current;
     rootRef.current?.classList.remove('is-in');
     if (panel && origin && !reduced) {
-      panel.style.transform = zoomTransform(origin, panel.getBoundingClientRect());
+      panel.style.transform = zoomTransform(origin, panel.getBoundingClientRect(), OPEN_TILT);
     }
     closeTimer.current = window.setTimeout(onClose, CLOSE_MS);
   }, [closing, origin, reduced, onClose]);
