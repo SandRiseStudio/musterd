@@ -149,7 +149,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -216,6 +216,74 @@ function parseAutoRefreshMode(parsed: Parsed): AutoRefreshMode {
   throw new CliError(`--mode must be 'idle' or 'notice' (got '${m}')`, 2);
 }
 
+/**
+ * The settle window: how long `origin/main` must hold still before the tick bounces onto it, and the
+ * hard cap on how long that deferral may accumulate.
+ *
+ * The tick used to bounce on ANY skew, so a merge burst became a bounce storm — each merge paying a
+ * full sync → build → restart daemon → restart wake actuator, an operator notification, and every
+ * live seat dropping and reconnecting. Measured 2026-08-03: 19 merges in a day, 11 of them inside
+ * three hours, including two complete bounces two minutes apart (#610 15:27, #611 15:29) for a
+ * daemon that landed on the same tip either way. The operator read the volume as autorefresh
+ * failures; there were none. `--mode notice` is right about the *tradeoff* (interrupt live seats to
+ * stay current) and was simply paying it per commit rather than per catch-up.
+ *
+ * Defaults are fitted to that real trace, not guessed: replaying it, 600s/900s turns 19 bounces into
+ * 12 while bounding worst-case staleness at 15 minutes. (300s saves only 3; 900s saves 12 but lets
+ * the daemon sit 55 minutes behind.) `--settle 0` restores the old bounce-immediately behaviour.
+ *
+ * The cap is measured from the OLDEST unapplied commit, which is what makes this safe: a
+ * continuously busy main can delay a bounce but can never cancel one, so the daemon's staleness is
+ * bounded by wall-clock rather than by whether anyone stops merging.
+ */
+const DEFAULT_AUTOREFRESH_SETTLE = 600;
+const DEFAULT_AUTOREFRESH_SETTLE_CAP = 900;
+
+function parseSeconds(parsed: Parsed, flag: string, fallback: number): number {
+  const raw = flagStr(parsed.flags, flag);
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) throw new CliError(`--${flag} must be seconds >= 0`, 2);
+  return Math.floor(n);
+}
+
+/**
+ * Should this tick bounce now, or wait for the burst to settle? Pure so the policy is testable
+ * without git, and so the two clocks stay legible as the different things they are.
+ *
+ * `tipAge` is how long the newest commit has sat (is main still moving?); `oldestAge` is how long
+ * the daemon has been behind (how stale are we allowed to get?). Deliberately NOT the `.attempted-sha`
+ * debounce, which answers a third question — "did the build for this tip already fail?" — and whose
+ * conflation with tick liveness produced #587 and #600.
+ *
+ * Unknown ages mean bounce: degrade to the old behaviour, never to an indefinite hold.
+ */
+export function shouldWaitForSettle(a: {
+  tipAgeSeconds: number | null;
+  oldestAgeSeconds: number | null;
+  settleSeconds: number;
+  capSeconds: number;
+}): boolean {
+  if (a.settleSeconds <= 0) return false;
+  if (a.tipAgeSeconds === null) return false; // can't tell → don't hold the daemon back
+  if (a.tipAgeSeconds >= a.settleSeconds) return false; // main has held still: go
+  // Main is still moving. Wait — unless we've already waited long enough.
+  if (a.oldestAgeSeconds !== null && a.oldestAgeSeconds >= a.capSeconds) return false;
+  return true;
+}
+
+/** Committer time (epoch seconds) of `rev`, or null when it can't be read. */
+function commitTime(dir: string, rev: string, run: Runner, oldestSince?: string): number | null {
+  const args = oldestSince
+    ? ['-C', dir, 'log', '--reverse', '--format=%ct', `${oldestSince}..${rev}`]
+    : ['-C', dir, 'log', '-1', '--format=%ct', rev];
+  const r = run('git', args);
+  if (r.status !== 0) return null;
+  const first = r.stdout.trim().split('\n')[0];
+  const n = Number(first);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /** Where the auto-refresher records the last origin/main tip it *attempted* to refresh onto, so a
  *  build that fails against a given tip isn't re-attempted every interval (the debounce mirrors the
  *  /live publisher's `.published-sha`). Cleared once the daemon actually reaches that tip. */
@@ -265,13 +333,22 @@ function resolveAutoRefreshCtx(run: Runner, parsed: Parsed): AutoRefreshCtx {
   const home = dirname(configPath()); // ~/.musterd
   const mode = parseAutoRefreshMode(parsed);
   const interval = flagStr(parsed.flags, 'interval');
+  // Bake `--settle` only when it differs from the default, so an existing plist keeps working AND
+  // picks up a changed default on the next build — the same reason the entry bakes as little as
+  // possible elsewhere (ADR 165): a value frozen in a plist is a value no later change can correct.
+  const settle = parseSeconds(parsed, 'settle', DEFAULT_AUTOREFRESH_SETTLE);
+  const settleCap = parseSeconds(parsed, 'settle-cap', DEFAULT_AUTOREFRESH_SETTLE_CAP);
+  const settleArgs = [
+    ...(settle === DEFAULT_AUTOREFRESH_SETTLE ? [] : ['--settle', String(settle)]),
+    ...(settleCap === DEFAULT_AUTOREFRESH_SETTLE_CAP ? [] : ['--settle-cap', String(settleCap)]),
+  ];
   return {
     uid: typeof process.getuid === 'function' ? process.getuid() : '',
     label: AUTOREFRESH_LABEL,
     plistPath: join(homedir(), 'Library', 'LaunchAgents', `${AUTOREFRESH_LABEL}.plist`),
     node: agentNode(),
     binJs,
-    refreshArgs: ['refresh', '--auto', '--mode', mode],
+    refreshArgs: ['refresh', '--auto', '--mode', mode, ...settleArgs],
     workingDir: resolvePath(binJs, '../../../..'),
     logPath: join(home, 'autorefresh', 'refresh.log'),
     errLogPath: join(home, 'autorefresh', 'refresh.log'),
@@ -737,9 +814,13 @@ export async function serviceCommand(
   if (parsed.flags['auto'] === true) {
     if (sub === 'refresh') {
       const mode = parseAutoRefreshMode(parsed);
+      const settle = {
+        seconds: parseSeconds(parsed, 'settle', DEFAULT_AUTOREFRESH_SETTLE),
+        capSeconds: parseSeconds(parsed, 'settle-cap', DEFAULT_AUTOREFRESH_SETTLE_CAP),
+      };
       const notify = deps.notify ?? osNotify;
       const autoState = deps.autoState ?? fileAutoState();
-      return autoRefreshTick(ctx, health, mode, notify, autoState, ok, fail);
+      return autoRefreshTick(ctx, health, mode, settle, notify, autoState, ok, fail);
     }
     const arCtx = deps.autoRefreshCtx ?? resolveAutoRefreshCtx(ctx.run, parsed);
     return autoRefreshServiceCommand(sub, arCtx, parsed, ok, fail);
@@ -1062,6 +1143,7 @@ async function autoRefreshTick(
   ctx: ServiceCtx,
   health: () => Promise<DaemonHealth>,
   mode: AutoRefreshMode,
+  settle: { seconds: number; capSeconds: number },
   notify: (n: { id: string; title: string; body: string }) => void,
   autoState: { read: () => string | null; write: (sha: string) => void },
   ok: (s: string) => void,
@@ -1108,6 +1190,31 @@ async function autoRefreshTick(
       `retrying ${tip.slice(0, 7)} — node_modules is out of sync with pnpm-lock.yaml, ` +
         `so this attempt will install first`,
     );
+  }
+  // The settle window: main is still moving, so wait for the burst rather than bouncing per commit
+  // (each bounce costs every live seat a reconnect). Checked AFTER the debounce so a failed build
+  // still parks, and BEFORE any build so a deferred tick is genuinely free. Said out loud, because a
+  // silent wait is indistinguishable from the stuck daemon this whole surface exists to make visible.
+  const nowSec = Math.floor(Date.now() / 1000);
+  const tipTime = commitTime(dir, 'origin/main', ctx.run);
+  const oldestTime = commitTime(dir, 'origin/main', ctx.run, health0.build);
+  const tipAgeSeconds = tipTime === null ? null : nowSec - tipTime;
+  const oldestAgeSeconds = oldestTime === null ? null : nowSec - oldestTime;
+  if (
+    shouldWaitForSettle({
+      tipAgeSeconds,
+      oldestAgeSeconds,
+      settleSeconds: settle.seconds,
+      capSeconds: settle.capSeconds,
+    })
+  ) {
+    const mins = (n: number) => `${Math.round(n / 60)}m`;
+    ok(
+      `origin/main is still moving (newest commit ${mins(tipAgeSeconds ?? 0)} old, settling for ` +
+        `${mins(settle.seconds)}) — holding the bounce so a merge burst costs one restart, not one ` +
+        `per commit. Will refresh once the tip holds still, or after ${mins(settle.capSeconds)} behind.`,
+    );
+    return 0;
   }
   const s = (n: number) => (n === 1 ? '' : 's');
   const conns = health0.connections ?? 0;

@@ -63,6 +63,39 @@ describe('service refresh --auto (the tick)', () => {
     };
   }
 
+  /**
+   * A runner whose `origin/main` tip carries a committer timestamp, so the settle window has
+   * something real to age. `tipAgeSeconds` is how long ago the newest commit landed; `oldestAge`
+   * how long the daemon has been behind (the staleness the cap bounds).
+   */
+  function agedRunner(o: {
+    behind: number;
+    tipAgeSeconds: number;
+    oldestAgeSeconds?: number;
+    tip?: string;
+  }): Runner {
+    const now = Math.floor(Date.now() / 1000);
+    let head = 0;
+    return (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd !== 'git') return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('--is-inside-work-tree')) return { status: 0, stdout: 'true', stderr: '' };
+      if (args.includes('--porcelain')) return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-list')) return { status: 0, stdout: String(o.behind), stderr: '' };
+      if (args.includes('rev-parse') && args.includes('origin/main'))
+        return { status: 0, stdout: o.tip ?? 'newtip1111', stderr: '' };
+      // The two commit-time probes the settle window asks for (`git log … --format=%ct`).
+      if (args.includes('log')) {
+        const oldest = args.includes('--reverse');
+        const age = oldest ? (o.oldestAgeSeconds ?? o.tipAgeSeconds) : o.tipAgeSeconds;
+        return { status: 0, stdout: String(now - age) + '\n', stderr: '' };
+      }
+      if (args.includes('--short'))
+        return { status: 0, stdout: head++ === 0 ? 'aaa1111' : 'bbb2222', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+  }
+
   const memState = (initial: string | null = null) => {
     let v = initial;
     return {
@@ -264,6 +297,94 @@ describe('service refresh --auto (the tick)', () => {
     expect(code).toBe(0);
     expect(out).toContain('unreachable');
     expect(calls.some((x) => x.cmd === 'pnpm')).toBe(false);
+  });
+  /**
+   * The settle window (measured 2026-08-03). The tick bounced the daemon on ANY skew, so a merge
+   * burst became a bounce storm: 19 merges in a day meant 19 full sync → build → restart cycles,
+   * each interrupting every live seat and pushing the operator a notification — including #610 at
+   * 15:27 and #611 at 15:29, two complete bounces two minutes apart for a daemon that landed on the
+   * same tip either way. nick read the volume as "even more autorefresh failures"; there were none.
+   *
+   * Modelled against that real merge trace, settle=600s with cap=900s turns 19 bounces into 12 while
+   * bounding worst-case staleness at 15 minutes — which is where the defaults come from.
+   */
+  describe('the settle window (a merge burst is one bounce, not eleven)', () => {
+    it('defers while the tip is still moving, and says so rather than looking stuck', async () => {
+      const { code, out } = await tick({
+        argv: ['refresh', '--auto', '--mode', 'notice', '--settle', '600'],
+        ctx: ctx(agedRunner({ behind: 2, tipAgeSeconds: 30 })),
+        health: async () => ({ connections: 3, build: 'old111' }),
+      });
+      expect(code).toBe(0);
+      expect(out).toMatch(/settl|still moving/i);
+      // The whole point: no build, no bounce, no interruption of those 3 live sessions.
+      expect(calls.some((c) => c.cmd === 'pnpm')).toBe(false);
+      expect(calls.some((c) => c.args.includes('kickstart'))).toBe(false);
+    });
+
+    it('bounces once the tip has held still for the window', async () => {
+      const { code } = await tick({
+        argv: ['refresh', '--auto', '--mode', 'notice', '--settle', '600'],
+        ctx: ctx(agedRunner({ behind: 2, tipAgeSeconds: 900 })),
+        health: async () => ({ connections: 0, build: 'old111' }),
+      });
+      expect(code).toBe(0);
+      expect(calls.some((c) => c.cmd === 'pnpm')).toBe(true); // it built → it bounced
+    });
+
+    it('bounces anyway once the staleness cap is hit, however busy main stays', async () => {
+      // The failure mode a naive settle window creates: a steadily-merging repo defers forever and
+      // the daemon never updates. The cap is measured from the OLDEST unapplied commit, so a busy
+      // main delays the bounce but can never cancel it.
+      const { code } = await tick({
+        argv: ['refresh', '--auto', '--mode', 'notice', '--settle', '600', '--settle-cap', '900'],
+        ctx: ctx(agedRunner({ behind: 9, tipAgeSeconds: 20, oldestAgeSeconds: 1200 })),
+        health: async () => ({ connections: 2, build: 'old111' }),
+      });
+      expect(code).toBe(0);
+      expect(calls.some((c) => c.cmd === 'pnpm')).toBe(true);
+    });
+
+    it('is off by default at --settle 0, so the old behaviour is one flag away', async () => {
+      const { code } = await tick({
+        argv: ['refresh', '--auto', '--mode', 'notice', '--settle', '0'],
+        ctx: ctx(agedRunner({ behind: 1, tipAgeSeconds: 5 })),
+        health: async () => ({ connections: 0, build: 'old111' }),
+      });
+      expect(code).toBe(0);
+      expect(calls.some((c) => c.cmd === 'pnpm')).toBe(true);
+    });
+
+    it('never defers a daemon that is already current — settle only gates a bounce', async () => {
+      const { out } = await tick({
+        argv: ['refresh', '--auto', '--mode', 'notice', '--settle', '600'],
+        ctx: ctx(agedRunner({ behind: 0, tipAgeSeconds: 5 })),
+        health: async () => ({ connections: 0, build: 'old111' }),
+      });
+      expect(out).toContain('up to date');
+    });
+
+    it('bounces when the commit time is unreadable — never defer on ignorance', async () => {
+      // An unreadable timestamp must degrade to today's behaviour, not to an indefinite hold.
+      const runner: Runner = (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd !== 'git') return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('--is-inside-work-tree'))
+          return { status: 0, stdout: 'true', stderr: '' };
+        if (args.includes('--porcelain')) return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('rev-list')) return { status: 0, stdout: '2', stderr: '' };
+        if (args.includes('rev-parse') && args.includes('origin/main'))
+          return { status: 0, stdout: 'newtip1111', stderr: '' };
+        if (args.includes('log')) return { status: 128, stdout: '', stderr: 'bad object' };
+        return { status: 0, stdout: 'aaa1111', stderr: '' };
+      };
+      await tick({
+        argv: ['refresh', '--auto', '--mode', 'notice', '--settle', '600'],
+        ctx: ctx(runner),
+        health: async () => ({ connections: 0, build: 'old111' }),
+      });
+      expect(calls.some((c) => c.cmd === 'pnpm')).toBe(true);
+    });
   });
 });
 
