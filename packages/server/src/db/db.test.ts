@@ -1,9 +1,9 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { createTeam, getTeamBySlug } from '../store/teams.js';
 import { MIGRATIONS, runMigrations } from './migrations.js';
 import { openDb } from './open.js';
 import { seedDawn } from './seed.js';
-import { createTeam, getTeamBySlug } from '../store/teams.js';
 
 describe('db', () => {
   it('opens in-memory, migrates to the latest schema, sets foreign_keys', () => {

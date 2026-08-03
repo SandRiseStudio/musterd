@@ -14,7 +14,7 @@ describe('working-hours persistence', () => {
   it('stores optional Team and Member schedules as JSON', () => {
     const db = openDb(':memory:');
     const team = createTeam(db, { slug: 'revive', workingHours: hours });
-    const member = addMember(db, team, {
+    addMember(db, team, {
       name: 'miley',
       kind: 'agent',
       workingHours: hours,

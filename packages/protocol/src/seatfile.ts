@@ -1,12 +1,12 @@
 import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
 import { LifecycleSchema, MemberKindSchema } from './acts.js';
-import { WorkingHoursSchema } from './working-hours.js';
 import {
   AdminAccountStatusSchema,
   type PartialCapabilities,
   PartialCapabilitiesSchema,
 } from './capabilities.js';
+import { WorkingHoursSchema } from './working-hours.js';
 
 /**
  * The durable seat-roster file format (ADR 058 + seat-file-format.md). A team's durable tier
