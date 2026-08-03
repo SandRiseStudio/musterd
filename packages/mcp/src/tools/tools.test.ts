@@ -87,7 +87,12 @@ function member(over: Partial<MemberSummary> = {}): MemberSummary {
     lifecycle_until: null,
     created_at: 0,
     presence: 'online',
-    presences: [{ surface: 'claude-code', status: 'active', last_seen_at: 0 }],
+    // A live agent normally attests its model. The fixture carries one so these tests keep testing
+    // facet composition rather than tripping the `model unattested` warn facet — which has its own
+    // test below, and is the whole point of it being loud.
+    presences: [
+      { surface: 'claude-code', status: 'active', last_seen_at: 0, model: 'claude-opus-5' },
+    ],
     ...over,
   };
 }
@@ -508,11 +513,45 @@ describe('team_members handler', () => {
       roster: (async () => ({ members: [member()] })) as any,
     });
     const out = text(await handler({}));
-    expect(out).toContain('Ada (agent · backend · claude-code)');
+    expect(out).toContain('Ada (agent · backend · claude-opus-5 · claude-code)');
     // the old `key=value` dump printed `role=—` / `lifecycle=forever` — an empty field is not a fact
     expect(out).not.toContain('kind=');
     expect(out).not.toContain('role=');
     expect(out).not.toContain('lifecycle=forever');
+  });
+
+  // This is the surface a seat reads before handing off or routing a review, so an unattested
+  // teammate has to be visible here: ADR 158 will refuse them as an acceptor, and better to see
+  // that before routing than to discover it as a silent `no_candidate`.
+  it('marks a live agent attesting no model, and leaves humans and offline seats alone', async () => {
+    const roster = (members: MemberSummary[]) =>
+      capture(registerMembers, { roster: (async () => ({ members })) as any });
+
+    const unattested = text(
+      await roster([
+        member({ presences: [{ surface: 'codex', status: 'active', last_seen_at: 0 }] }),
+      ])({}),
+    );
+    expect(unattested).toContain('model unattested');
+
+    // a human has no harness to attest with (ADR 121) — never marked
+    const human = text(
+      await roster([
+        member({
+          name: 'nick',
+          kind: 'human',
+          role: '',
+          presences: [{ surface: 'cli', status: 'active', last_seen_at: 0 }],
+        }),
+      ])({}),
+    );
+    expect(human).not.toContain('model unattested');
+
+    // an offline seat attests nothing by definition — silence, not a wall of warnings
+    const offline = text(
+      await roster([member({ name: 'Lin', presence: 'offline', presences: [] })])({}),
+    );
+    expect(offline).not.toContain('model unattested');
   });
 
   it('renders an until-lifecycle and a not-present member, and filters by name', async () => {
@@ -608,7 +647,7 @@ describe('team_status handler', () => {
     });
     const out = text(await handler({}));
     expect(out).toContain('2 members · 1 present');
-    expect(out).toContain('Ada (agent · backend · claude-code)');
+    expect(out).toContain('Ada (agent · backend · claude-opus-5 · claude-code)');
     expect(out).toContain('here:');
     expect(out).toContain('out:');
     expect(out).toContain('nick (human)');

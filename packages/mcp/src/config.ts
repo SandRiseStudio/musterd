@@ -106,6 +106,47 @@ function shortCode(seed?: string): string {
 }
 
 /**
+ * **The attestation gap.** A seat that resolves an identity but no model occupies, works, and ships
+ * while attesting nothing — and until this warning, did so in silence.
+ *
+ * Two ladders, each individually right, disagree about how many rungs they have:
+ *
+ *   identity  =  env  >  binding.json  >  committed workspace.json
+ *   model     =  env  >  binding.json
+ *
+ * The spec carries no model on purpose (a model is a per-machine fact, not one everybody who clones
+ * inherits) and ADR 165 stopped provisioning baking `MUSTERD_MODEL` on purpose (a snapshot at the top
+ * of the ladder rots, and outranks every later correction — one seat attested `grok-4.5` for weeks).
+ * Both stand. But a seat whose identity comes from the third source falls off the model ladder, and
+ * the cost is not "one field is empty": ADR 158 refuses an acceptor whose diversity claim cannot be
+ * proven, so the seat is dropped from every review pool, from the ADR 056 diversity conclusion, and
+ * from the per-model loop-closure telemetry — silently, while looking perfectly healthy.
+ *
+ * Measured 2026-08-01: a seat worked and shipped PRs all day like this, and reading the presence
+ * table directly was the only way to find out. So: say it, at the moment it happens, by name.
+ *
+ * stderr, never stdout — stdout is the MCP stdio transport. Never throws: an unattested seat is
+ * degraded, not broken, and refusing to boot over it would trade a quiet hole for a dead seat.
+ */
+function warnUnattestedSeat(
+  claim: ClaimPolicy,
+  model: string | undefined,
+  hasBinding: boolean,
+): void {
+  // Seats only. A chat-mode session holds no seat, so it grades nothing and reviews nothing —
+  // warning there would just train the reader to ignore the warning that matters.
+  if (claim.mode !== 'seat' || model !== undefined) return;
+  const fix = hasBinding
+    ? `add "model" to this workspace's .musterd/binding.json (or \`musterd agent ${claim.name} --model <id>\`)`
+    : `this workspace has no .musterd/binding.json — its identity came from the committed workspace.json, which carries no model by design; run \`musterd agent ${claim.name}\` here, or set MUSTERD_MODEL`;
+  console.error(
+    `[musterd] seat "${claim.name}" is attesting no model. It will still work, but musterd cannot ` +
+      `prove what it is running, so it is excluded from every diversity decision (ADR 158) and ` +
+      `missing from the model telemetry rather than counted as unknown. Fix: ${fix}.`,
+  );
+}
+
+/**
  * Read + validate the MCP server's identity binding (05-mcp.md). Aligned with the CLI (ADR 018):
  * `MUSTERD_*` env wins (the host-injection contract / hosted setups with no writable fs), then the
  * workspace `.musterd/binding.json` — the same file the CLI reads, so the two can't drift.
@@ -153,6 +194,7 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   // this usually resolves to a declaration or a previous session's observation. `refreshAttestation`
   // is what makes it true; see there.
   const attestation = attestationFor(binding, env);
+  warnUnattestedSeat(claim, attestation.model, binding !== null);
   // A seat-mode session gets a stable disambiguation code (ADR 087) keyed by what makes it the same
   // seat across relaunches: team + workspace + seat name + surface. Role/chat sessions keep a fresh
   // per-process code (see shortCode). `connId` stays a fresh ulid — it's the transport/hub identity and

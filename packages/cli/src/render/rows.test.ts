@@ -1,4 +1,9 @@
-import { PROTOCOL_VERSION, type Envelope, type MemberSummary } from '@musterd/protocol';
+import {
+  MODEL_UNKNOWN,
+  PROTOCOL_VERSION,
+  type Envelope,
+  type MemberSummary,
+} from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   isActionNeeded,
@@ -136,6 +141,45 @@ describe('renderRoster', () => {
     // unknown member build, or no daemon reference → silence
     expect(renderRoster([withBuild('Ada')], 0, 120, sha('d'))).not.toContain('build');
     expect(renderRoster([withBuild('Ada', sha('a'))], 0, 120, undefined)).not.toContain('build');
+  });
+
+  // A live agent seat attesting no model is a hole in the ADR 056/158/188 evidence, and it used to
+  // look identical to a healthy row: an absent model was silence. Measured 2026-08-01 — miley worked
+  // and shipped all day attesting nothing, and the only way to see it was reading the presence table.
+  it('marks a live agent seat that attests no model, and stays silent for humans and offline seats', () => {
+    const seat = (
+      name: string,
+      kind: 'agent' | 'human',
+      presence: 'online' | 'offline',
+      model?: string,
+    ): MemberSummary => ({
+      ...base,
+      id: name,
+      name,
+      kind,
+      role: '',
+      presence,
+      activity: 'idle',
+      presences:
+        presence === 'offline'
+          ? []
+          : [{ surface: 'claude-code', status: 'online', last_seen_at: 0, model }],
+    });
+
+    // live agent, no attestation → the hole is named on the row
+    expect(renderRoster([seat('Ada', 'agent', 'online')], 0, 120)).toContain('unattested');
+    // an explicit `unknown` is the same hole wearing a value
+    expect(renderRoster([seat('Ada', 'agent', 'online', MODEL_UNKNOWN)], 0, 120)).toContain(
+      'unattested',
+    );
+    // live agent that attests → silence (the facet prints the model, as before)
+    const attested = renderRoster([seat('Ada', 'agent', 'online', 'claude-opus-5')], 0, 120);
+    expect(attested).not.toContain('unattested');
+    expect(attested).toContain('claude-opus-5');
+    // a human seat has no harness to attest — never marked (ADR 121: attestation is a harness fact)
+    expect(renderRoster([seat('nick', 'human', 'online')], 0, 120)).not.toContain('unattested');
+    // an offline seat is not attesting anything by definition — silence, not a wall of warnings
+    expect(renderRoster([seat('Lin', 'agent', 'offline')], 0, 120)).not.toContain('unattested');
   });
 
   it('groups the roster by working / here / out, with counts', () => {
