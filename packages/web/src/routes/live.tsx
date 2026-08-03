@@ -21,6 +21,7 @@ import {
 } from '../live/client';
 import { firehoseSound, roomTone } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
+import { officeRoom } from '../live/officeRoom';
 import { useWorkingOn } from '../live/useWorkingOn';
 import { roomEntries } from '../live/workingOn';
 
@@ -117,13 +118,11 @@ function LivePage() {
     recoverAttempts.current = 0;
   }, []);
 
-  const { envelopes, roster, teamWorkingHours, status, error, liveIds, daemonBuild, daemonEpoch } = useLiveStream(
-    cfg,
-    {
-      onCredentialInvalid: recoverObserver,
-      onConnected: armRecovery,
-    },
-  );
+  const stream = useLiveStream(cfg, {
+    onCredentialInvalid: recoverObserver,
+    onConnected: armRecovery,
+  });
+  const { envelopes, roster, error, liveIds, daemonBuild, daemonEpoch } = stream;
 
   // The office overlay's reel: everyone in the room and what they are on. Derived here (not in the
   // scene) so both routes hand the scene the same already-projected shape.
@@ -313,15 +312,8 @@ function LivePage() {
             inert={boardOpen}
           >
             <OfficeScene
-              teamName={team}
-              teamWorkingHours={teamWorkingHours}
-              roster={roster}
-              envelopes={envelopes}
-              liveIds={liveIds}
+              {...officeRoom(team, stream, { entries, board })}
               collapsed={collapsed.office}
-              entries={entries}
-              board={board}
-              status={status}
               onCollapse={() => toggleCollapse('office')}
               onActClick={onActClick}
               onBoardOpen={openBoard}

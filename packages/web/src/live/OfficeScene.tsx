@@ -1,14 +1,14 @@
-import type { Envelope, LaneBoard, MemberSummary, WorkingHours } from '@musterd/protocol';
+import type { LaneBoard, MemberSummary, WorkingHours } from '@musterd/protocol';
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { MusterdWord } from '../brand/MusterdWord';
 import { actLabel, actTone, memberColor, memberPosture } from './format';
 import type { OfficeData, OfficeHandle } from './office-scene';
 import { actToEvent } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
-import type { ConnStatus } from './client';
 import { OfficeOverlay } from './OfficeOverlay';
 import { WorkStack } from './WorkStack';
 import { presentCount, type RoomEntry } from './workingOn';
+import type { OfficeRoomProps } from './officeRoom';
 import { projectWallBoard } from './office-scene/wallboard';
 
 /**
@@ -63,7 +63,7 @@ function computeData(
  */
 export function OfficeScene({
   teamName,
-  teamWorkingHours = null,
+  teamWorkingHours,
   roster,
   envelopes,
   liveIds,
@@ -74,21 +74,16 @@ export function OfficeScene({
   onBoardHover,
   broadcast = false,
   captureFps,
-  entries = [],
-  board = null,
-  status = 'idle',
+  entries,
+  board,
+  status,
   onReady,
   topSlot,
   bandSlot,
   /** Hybrid nameplate work cues vs in-panel WorkStack (`stack`) vs neither. Default none on the
    *  plate — work lives in WorkStack on `/live` (nick, 2026-07-30). */
   workCues = 'none',
-}: {
-  teamName: string;
-  teamWorkingHours?: WorkingHours | null;
-  roster: MemberSummary[];
-  envelopes: Envelope[];
-  liveIds: Set<string>;
+}: OfficeRoomProps & {
   collapsed?: boolean;
   onCollapse?: () => void;
   /** Speech-bubble click-through: called with the act's envelope id (the route scrolls the stream). */
@@ -104,13 +99,6 @@ export function OfficeScene({
   broadcast?: boolean;
   /** Encode fps when broadcasting — office coalesces draws to this rate. From `?fps=` on `/broadcast`. */
   captureFps?: number;
-  /** The overlay's reel — everyone in the room and what they are on, already derived by the route
-   * (see `roomEntries`). */
-  entries?: RoomEntry[];
-  /** The full lane board — the wall's agile board draws from it (routes already hold it for the reel). */
-  board?: LaneBoard | null;
-  /** Connection state, for the overlay's honest LIVE/CONNECTING signal. */
-  status?: ConnStatus;
   /** Handed the scene handle once it mounts (and `null` on teardown) — the broadcast route publishes it
    * as `window.__office` so a capturer can probe the scene. */
   onReady?: (handle: OfficeHandle | null) => void;

@@ -7,6 +7,7 @@ import { OfficeScene } from '../live/OfficeScene';
 import { acquireObserver, forgetObserver, type LiveConfig } from '../live/client';
 import type { OfficeHandle } from '../live/office-scene';
 import { useLiveStream } from '../live/useLiveStream';
+import { officeRoom } from '../live/officeRoom';
 import { useWorkingOn } from '../live/useWorkingOn';
 import { roomEntries } from '../live/workingOn';
 
@@ -99,9 +100,10 @@ function BroadcastPage() {
     })();
   }, [cfg?.team]);
 
-  const { envelopes, roster, status, liveIds } = useLiveStream(cfg, {
+  const stream = useLiveStream(cfg, {
     onCredentialInvalid: recoverObserver,
   });
+  const { envelopes, roster, status } = stream;
 
   // The overlay's reel: everyone in the room and what they are on. Uncapped — the stream's chyron
   // cycles one at a time, so the roster costs dwell time rather than stage area.
@@ -154,13 +156,7 @@ function BroadcastPage() {
       >
         {team && (
           <OfficeScene
-            teamName={team}
-            roster={roster}
-            envelopes={envelopes}
-            liveIds={liveIds}
-            entries={entries}
-            board={board}
-            status={status}
+            {...officeRoom(team, stream, { entries, board })}
             broadcast
             captureFps={captureFps}
             workCues="stack"
