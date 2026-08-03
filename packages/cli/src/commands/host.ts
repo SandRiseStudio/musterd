@@ -3,6 +3,7 @@ import type { Parsed } from '../args.js';
 import { flagStr } from '../args.js';
 import type { ActuatorBackend } from '../host/backend.js';
 import { claudeCodeBackend } from '../host/backends/claudeCode.js';
+import { codexBackend } from '../host/backends/codex.js';
 import { pollHostOnce, type HostPollDeps } from '../host/loop.js';
 import { hostRegistryPath, loadHostRegistry } from '../host/registry.js';
 import { theme } from '../render/theme.js';
@@ -47,6 +48,8 @@ export async function hostCommand(
   const backends = new Map<string, ActuatorBackend>();
   const claude = claudeCodeBackend();
   backends.set(claude.harness, claude);
+  const codex = codexBackend();
+  backends.set(codex.harness, codex);
 
   const log = deps.log ?? ((line: string) => process.stdout.write(theme.meta(`  ${line}`) + '\n'));
   const hostLabel = flagStr(parsed.flags, 'host');
