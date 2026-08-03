@@ -139,7 +139,7 @@ export const PODS: Pod[] = [
   },
   {
     id: 1,
-    cx: 600,
+    cx: 620,
     cy: 570,
     axis: 'ew',
     size: 4,
@@ -149,8 +149,8 @@ export const PODS: Pod[] = [
     // The old third quad, cut to a duo (2026-08-02). 2026-08-03: pulled west and north into the left
     // column — the room now reads as three columns (left desks / centre desks / nook+pod1 right).
     id: 2,
-    cx: 260,
-    cy: 505,
+    cx: 245,
+    cy: 560,
     axis: 'ew',
     size: 2,
     rug: { shape: 'rect', weave: 'border', fill: '#ab97a4', mark: '#8b7683' },
@@ -166,18 +166,14 @@ export const PODS: Pod[] = [
     size: 2,
     rug: { shape: 'rect', weave: 'stripes', fill: '#a8ab8e', mark: '#8c9070' },
   },
-  {
-    // Centre duo. It used to sit at the front (390, 700), boxed in on four sides with 10-30 units of
-    // slack — the tightest spot on the floor and the one that read as crowded. Moved up into the
-    // middle column, where its nearest neighbour is 120 away.
-    id: 4,
-    cx: 350,
-    cy: 700,
-    axis: 'ew',
-    size: 2,
-    rug: { shape: 'rect', weave: 'plain', fill: '#b1a08c', mark: '#96856f' },
-  },
 ];
+
+/*
+ * There is no pod 4. The centre duo that stood at (350, 700) is gone with the 2026-08-03 declutter:
+ * the floor drops 20 → 18 desks, and this is the cluster that bought the most room per seat removed.
+ * It was the piece with the least air around it — 20 units to the meeting rug, 25 to reception's —
+ * and it stood in the front strip, which is the one band the door has to cross to reach anything.
+ */
 
 /** Desk centre offsets from the pod centre: along the pairing axis, and across it (two desks per row). */
 export const POD_ALONG = 40; // desk centre to pod centre, across the shared screen (68-deep desks → a 12 gap)
@@ -451,15 +447,16 @@ export const RECEPTION = {
   // At 255 there are 110 clear units between this rug and the meeting rug, and that band runs
   // unbroken from the door to the middle of the room.
   rug: { lx: 140, ly: 810, w: 200, d: 120, shape: 'rect', weave: 'border', fill: '#c07a55', mark: '#9c5c3c' },
-  // The pair sits along the rug's SOUTH EDGE facing north into the room, and `ly` is the load-bearing
-  // number: the door is at ly 815, so anything whose padded footprint reaches that band walls the
-  // entrance off from the room. At 838 it did exactly that — you could not walk a single step east
-  // out of the door. 856 puts the chairs' cells clear of the doorway's, which is what turns the strip
-  // in front of reception back into a lane.
-  chairA: { lx: 105, ly: 856, dir: 'N' as Dir },
-  chairB: { lx: 185, ly: 856, dir: 'N' as Dir },
-  /** Between them, where a magazine would go. */
-  endTable: { lx: 145, ly: 860 },
+  // ONE chair now (2026-08-03), on the rug's SOUTH EDGE facing north into the room. `ly` is the
+  // load-bearing number: the door is at ly 815, so anything whose padded footprint reaches that band
+  // walls the entrance off from the room — at 838 you could not walk a single step east out of the
+  // door. 856 keeps the chair's cells clear of the doorway's.
+  //
+  // A waiting room with two chairs was still furnishing for a queue this room does not form; one
+  // chair and a magazine table says the same thing and gives the corner back its floor.
+  chair: { lx: 205, ly: 856, dir: 'N' as Dir },
+  /** Beside it, where a magazine would go. */
+  endTable: { lx: 152, ly: 860 },
   // Off the lane entirely, at the rug's south-east corner — a corner piece, not a bollard.
   plant: { lx: 268, ly: 872 },
 } as const;
@@ -481,19 +478,20 @@ export const RECEPTION = {
 // crowding nick reported — the counter's south face sat within a few units of the cubicle rug behind
 // it, and every unit here is one the reception area gets back.
 //
-// 2026-08-03: (112, 690) → (95, 745), tucked into the corner beside the door. At 690 its padded
-// footprint owned the floor a left-wall window desk needs to seat anybody, and that flank was the
-// only place left in the room with space to give.
-export const FRONT_DESK = { lx: 95, ly: 745, long: 92, deep: 50, high: DESK_UP, dir: 'S' as Dir };
+// 2026-08-03: (112, 690) → (95, 745) → (165, 742). The first move tucked it into the corner beside
+// the door; the second pushes it back off the door, because a counter that close to the entrance
+// reads as blocking the way in rather than greeting it (nick: "a tiny bit further to the right").
+// The receptionist still stands north of it and the check-in marks still land south.
+export const FRONT_DESK = { lx: 165, ly: 742, long: 92, deep: 50, high: DESK_UP, dir: 'S' as Dir };
 /** She sits behind it exactly like a member sits at a desk — same SEAT_BACK, same chair, same size. */
 export const RECEPTIONIST = { lx: FRONT_DESK.lx, ly: FRONT_DESK.ly - SEAT_BACK, dir: 'S' as Dir };
 // South of the overflow queue strip, not across it: the counter grew to desk scale and pushed both
 // the strip and the marks apart. A mark inside a blocked cell gets nudged by `nearestFree` and the
 // pause lands somewhere other than in front of the desk, so `nav.test.ts` holds all three walkable.
 export const CHECK_IN_MARKS: ReadonlyArray<{ lx: number; ly: number }> = [
-  { lx: 95, ly: 800 },
-  { lx: 150, ly: 800 },
-  { lx: 205, ly: 800 },
+  { lx: 120, ly: 800 },
+  { lx: 175, ly: 800 },
+  { lx: 230, ly: 800 },
 ];
 /** The pause at the mark, seconds. A beat, not a gate. */
 export const CHECK_IN_S = 1.2;
@@ -808,7 +806,7 @@ export const LEISURE_SPOTS: LeisureSpot[] = (() => {
   // Someone idling in the waiting chairs is a true thing for an office to show, and it keeps four
   // zones to interleave — with three, a probe walking off the end of one zone lands in its neighbour
   // too often and idle members clump.
-  const waiting: LeisureSpot[] = [RECEPTION.chairA, RECEPTION.chairB].map((c) => {
+  const waiting: LeisureSpot[] = [RECEPTION.chair].map((c) => {
     const f = FWD[c.dir];
     return {
       zone: 'waiting' as const,
