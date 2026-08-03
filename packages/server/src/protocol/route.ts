@@ -205,7 +205,7 @@ function routeEnvelopeInner(
     // demanded, and that human's verdict is the one that closes.
     if ((env.act === 'accept' || env.act === 'decline') && typeof ref === 'string') {
       try {
-        if (!escalatedToHuman) applyAcceptanceVerdict(ctx, team, sender, ref, env.act);
+        if (!escalatedToHuman) applyAcceptanceVerdict(ctx, team, sender, ref, env.act, env.body);
       } catch (err) {
         log.warn({ msg: 'acceptance_verdict_failed', err: String(err) });
       }
@@ -392,6 +392,7 @@ function applyAcceptanceVerdict(
   decider: MemberRow,
   repliedToId: string,
   act: 'accept' | 'decline',
+  body: string,
 ): void {
   const replied = ctx.db
     .prepare<
@@ -421,12 +422,21 @@ function applyAcceptanceVerdict(
     // ADR 192: an acceptor moving an awaiting_acceptance lane back to a live state is the rejection
     // — the counterpart said "not what we wanted". Audit action stays `lane.review_sent_back`
     // (frozen), and the reason rides along so a sent-back lane can be told from a manual reopen.
+    const note = body.trim();
     appendAudit(ctx.db, team.id, {
       actor: decider.name,
       action: 'lane.review_sent_back',
       target: lane.id,
       result: 'allow',
-      detail: { lane: lane.id, reviewer: decider.name, owner: before.owner_seat },
+      // Keep the human's concrete rejection reason with the frozen audit action. Bound it like
+      // peer findings: the message is already durable, but audit detail is used in reports and
+      // must not become an unbounded copy of an arbitrary Act body.
+      detail: {
+        lane: lane.id,
+        reviewer: decider.name,
+        owner: before.owner_seat,
+        ...(note ? { note: note.length > 500 ? `${note.slice(0, 500)}…` : note } : {}),
+      },
     });
   }
 
