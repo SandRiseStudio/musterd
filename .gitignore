@@ -12,6 +12,10 @@ coverage/
 # re-stamps to its own identity — a perpetual uncommitted drift — so we ignore it here. The self-wire
 # feature is unaffected (it lives in CLI code; a user repo still `git add`s its own workspace.json).
 **/.musterd/workspace.json
+# ADR 210: the local continuity registry maps a thread to the harness session that holds its
+# dialogue. It carries session ids and transcript paths, which never leave the host — so like
+# binding.json it is 0600 and ignored in any folder. Committing it would publish local identity.
+**/.musterd/continuity.json
 # ADR 033: client-side pending-presence markers are transient local state, never committed.
 **/.musterd/pending/
 # musterd provisioning state — regenerated per-workspace by `musterd init` (ADR 060/085), never committed.

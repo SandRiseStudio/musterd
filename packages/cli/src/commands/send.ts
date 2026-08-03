@@ -11,10 +11,12 @@ import {
 import { ulid } from 'ulid';
 import { flagStr, parseMeta, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
+import { readBindingAt } from '../config.js';
 import { CliError } from '../errors.js';
 import { openActionNeeded, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
-import { kindLookup, resolve } from './helpers.js';
+import { bindThread } from '../session/continuity.js';
+import { findWorkspaceDir, kindLookup, resolve } from './helpers.js';
 
 /**
  * The act `accept`/`decline` answers, when the caller didn't name one (ADR 067). Auto-targets the
@@ -130,6 +132,29 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
   }
 
   const ackBody = await http.send(team, envelope);
+
+  // ADR 210: a successful threaded send means this session IS the dialogue on that thread, which is
+  // exactly the causal fact a later wake needs and the daemon can never learn. Bind it locally.
+  // Deliberately after the send and deliberately swallowing failure: the registry is an
+  // optimization, and a send that succeeded must never report failure because a local cache write
+  // did. The worst case is a fresh wake, which is always correct.
+  if (envelope.thread) {
+    try {
+      const dir = findWorkspaceDir();
+      const binding = dir ? readBindingAt(dir) : null;
+      if (dir && binding?.session) {
+        bindThread(dir, {
+          team,
+          seat: identity.name,
+          thread_id: envelope.thread,
+          capture: binding.session,
+          now: Date.now(),
+        });
+      }
+    } catch {
+      // never fatal — see above
+    }
+  }
 
   // The ask's tier contract (ADR 147 §2), at parity with the MCP `team_send` response: when an agent
   // raises an `ask` from the CLI it gets the same marching orders — how long to wait, and what to do on

@@ -15,6 +15,7 @@ import { findBinding, findWorkspaceSpec, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { clock, theme } from '../render/theme.js';
+import { bindThread, readRegistry } from '../session/continuity.js';
 import { enumerateClaudeSessions } from '../session/enumerate.js';
 import {
   LOCAL_SESSION_LIVE_MS,
@@ -50,9 +51,10 @@ export async function sessionCommand(parsed: Parsed): Promise<number> {
   if (sub === 'observe') return observeCommand(parsed);
   if (sub === 'resolve-labels') return resolveLabelsCommand(parsed);
   if (sub === 'label-nudge') return labelNudgeCommand();
+  if (sub === 'bind') return bindCommand(parsed);
   if (sub === 'show' || sub === undefined) return showCommand(parsed);
   throw new CliError(
-    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | show  ' +
+    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | bind --thread <id> | show  ' +
       '(start/end/observe are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
     2,
   );
@@ -824,6 +826,56 @@ function writeVerdict(liveness: LocalSessionLiveness): 0 {
   };
   process.stdout.write(
     `  ${theme.accent(verdicts[liveness.state])} ${theme.meta(`(judged by ${liveness.source === 'enumerated' ? 'session files' : 'the captured slot'})`)}\n`,
+  );
+  return 0;
+}
+
+/**
+ * `musterd session bind --thread <id>` — the repair half of ADR 210's continuity registry.
+ *
+ * A threaded send binds automatically, so this exists for the cases where that never happened: a
+ * capture that arrived after the send, an inherited session, or a thread whose dialogue moved to a
+ * new session. It binds the CURRENT capture and nothing else — it cannot name a session by hand,
+ * because a hand-named session is exactly the unprovable claim the whole ADR refuses to act on.
+ */
+async function bindCommand(parsed: Parsed): Promise<number> {
+  const thread = flagStr(parsed.flags, 'thread');
+  if (!thread) throw new CliError('usage: musterd session bind --thread <thread-id>', 2);
+
+  const dir = findWorkspaceDir();
+  const binding = dir ? findBinding() : null;
+  if (!dir || !binding)
+    throw new CliError('no workspace binding here — run: musterd claim <name>', 2);
+
+  const seat = binding.claim?.mode === 'seat' ? binding.claim.name : null;
+  if (!seat)
+    throw new CliError('this workspace holds no seat claim — nothing to bind a thread to', 2);
+
+  if (!binding.session) {
+    // Not an error: a harness with no hook path (a Codex seat writes no capture at all today) simply
+    // has nothing to bind, and every wake on this thread stays fresh — the correct failure direction.
+    process.stdout.write(
+      theme.dim('no captured session in this workspace — wakes on this thread stay fresh\n'),
+    );
+    return 0;
+  }
+
+  const bound = bindThread(dir, {
+    team: binding.team,
+    seat,
+    thread_id: thread,
+    capture: binding.session,
+    now: Date.now(),
+  });
+  if (!bound) {
+    process.stdout.write(
+      theme.dim('the captured session names no transcript — wakes on this thread stay fresh\n'),
+    );
+    return 0;
+  }
+  const count = readRegistry(dir, { team: binding.team, seat }).bindings.length;
+  process.stdout.write(
+    `bound thread ${theme.bold(thread)} to this session (${count} thread${count === 1 ? '' : 's'} bound)\n`,
   );
   return 0;
 }
