@@ -55,6 +55,33 @@ export function listServers(toml: string): string[] {
 }
 
 /**
+ * Read one server's `[mcp_servers.<name>.env]` subtable back as a plain record.
+ *
+ * The inverse of what {@link renderServer} writes, and the reason it exists: the doctor's baked-env
+ * inspection could not see a Codex entry at all, because the only entry anything ever read back was
+ * Claude Code's (via `claude mcp get`). A per-seat secret or a stale `MUSTERD_SURFACE` sitting in
+ * `.codex/config.toml` was therefore unreportable by construction.
+ *
+ * Scoped like the rest of this file: only the named server's `.env` section, only simple
+ * `key = "value"` lines, everything else ignored rather than parsed. Values are unescaped with the
+ * same rules {@link str} writes; a non-string value (number, bool, array) is skipped, since every
+ * env var musterd writes is a string and guessing at the rest is how a minimal parser becomes a bad
+ * general one.
+ */
+export function readServerEnv(toml: string, name: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const section of splitSections(toml)) {
+    if (sectionHeader(section) !== `mcp_servers.${name}.env`) continue;
+    for (const line of section.split('\n').slice(1)) {
+      const m = /^\s*([A-Za-z0-9_-]+|"(?:[^"\\]|\\.)*")\s*=\s*"((?:[^"\\]|\\.)*)"\s*$/.exec(line);
+      if (!m) continue;
+      out[unquoteKey(m[1]!)] = m[2]!.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    }
+  }
+  return out;
+}
+
+/**
  * Add/replace a server: drop any existing `[mcp_servers.<name>]` (+ `.env`) sections, then append a
  * freshly rendered one. Per-server idempotency — only this name's tables change; the rest is kept.
  */

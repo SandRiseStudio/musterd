@@ -1,7 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { Harness, ProvisionPlan, UnprovisionPlan } from '../harness.js';
+import {
+  registeredFromEnv,
+  type Harness,
+  type ProvisionPlan,
+  type UnprovisionPlan,
+} from '../harness.js';
 import type { McpServerEntry } from '../mcpEntry.js';
 
 interface CursorConfig {
@@ -46,6 +51,11 @@ function writeConfig(path: string, cfg: CursorConfig): void {
 function hasMusterd(path: string): boolean {
   const cfg = readConfig(path);
   return Boolean(cfg?.mcpServers?.['musterd']);
+}
+
+/** Our own registered entry from a Cursor config, or null when this file does not carry one. */
+function musterdEntry(path: string): NonNullable<CursorConfig['mcpServers']>[string] | null {
+  return readConfig(path)?.mcpServers?.['musterd'] ?? null;
 }
 
 function readHooksSafe(path: string): CursorHooksFile | null {
@@ -150,6 +160,8 @@ export const cursor: Harness = {
   id: 'cursor',
   label: 'Cursor',
   surface: 'cursor',
+  // `.cursor/mcp.json` is per-folder — and lives in the working tree, so a secret here is committable.
+  entryScope: 'folder',
   // ADR 085: Cursor's closest skill equivalent is a description-gated ("Agent Requested") rule; slash
   // commands land as project commands. Same body as the canonical skill, different frontmatter shell.
   guidance: {
@@ -171,11 +183,22 @@ export const cursor: Harness = {
 
   async detect() {
     const installed = existsSync(join(homedir(), '.cursor'));
+    // The project entry is the one musterd writes, so it is the one to inspect; fall back to the
+    // global entry only when this folder has none, mirroring `configured` below.
+    const entry =
+      musterdEntry(projectConfigPath()) ??
+      (hasMusterd(globalConfigPath()) ? musterdEntry(globalConfigPath()) : null);
     const configured = hasMusterd(projectConfigPath()) || hasMusterd(globalConfigPath());
     return {
       installed,
       configured,
       detail: installed ? '~/.cursor present' : '~/.cursor not found',
+      // Read our own entry back so the doctor can flag a baked legacy value here too. This is where
+      // the gap was measured (2026-08-03): a pre-ADR-165 `.cursor/mcp.json` carrying a per-seat
+      // AGENT KEY and GRANT plus a stale MUSTERD_SURFACE, none of it reportable because nothing
+      // outside Claude Code's `claude mcp get` was ever parsed.
+      ...registeredFromEnv(entry?.env),
+      ...(entry?.args ? { registeredArgs: entry.args } : {}),
     };
   },
 

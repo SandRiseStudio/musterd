@@ -48,8 +48,51 @@ export interface DetectResult {
    * human, corrupting ADR 155 driver co-presence. Drift on presence.
    */
   registeredDriver?: string;
+  /**
+   * The `MUSTERD_SURFACE` baked into the registered server, if readable. Same legacy-snapshot story
+   * as {@link registeredModel}, and it was the one this set was missing: measured 2026-08-03, a seat
+   * reported surface `cursor` while a `claude-code` hook was demonstrably the thing capturing its
+   * sessions, because a pre-ADR-165 `.cursor/mcp.json` still baked `MUSTERD_SURFACE=cursor` at the
+   * top of the adapter's ladder — above binding.json, where no observation can reach it (PR #607).
+   */
+  registeredSurface?: string;
   /** The registered launch args, so the doctor can spot an adapter inside another seat's workspace. */
   registeredArgs?: string[];
+}
+
+/** The `MUSTERD_*` names provisioning no longer emits, so a baked one is legacy drift by presence. */
+const REGISTERED_ENV = {
+  MUSTERD_CLAIM: 'registeredClaim',
+  MUSTERD_MODEL: 'registeredModel',
+  MUSTERD_GRANT: 'registeredGrant',
+  MUSTERD_AGENT_KEY: 'registeredAgentKey',
+  MUSTERD_AUTOJOIN: 'registeredAutojoin',
+  MUSTERD_DRIVER: 'registeredDriver',
+  MUSTERD_SURFACE: 'registeredSurface',
+} as const;
+
+/**
+ * Map a registered entry's `env` block onto the `registered*` fields the doctor inspects.
+ *
+ * Shared so the three harnesses cannot drift on WHICH vars count as legacy drift — which is exactly
+ * what happened: the set lived only inside Claude Code's `claude mcp get` regexes, so a baked value
+ * in `.cursor/mcp.json` or `.codex/config.toml` was invisible to the doctor no matter which var it
+ * was. Measured 2026-08-03: one `.cursor/mcp.json` carried a per-seat AGENT KEY and GRANT plus a
+ * stale surface, none of it reportable.
+ *
+ * Empty-string values are dropped: an env key present but blank is not a baked value, and flagging it
+ * would send the reader looking for something that is not there.
+ */
+export function registeredFromEnv(
+  env: Record<string, string | undefined> | undefined,
+): Partial<DetectResult> {
+  if (!env) return {};
+  const out: Record<string, string> = {};
+  for (const [name, field] of Object.entries(REGISTERED_ENV)) {
+    const value = env[name];
+    if (typeof value === 'string' && value.trim() !== '') out[field] = value;
+  }
+  return out as Partial<DetectResult>;
 }
 
 export interface ConfigureResult {
@@ -160,6 +203,22 @@ export interface Harness {
   label: string;
   /** The Presence surface a member in this harness attaches with. */
   surface: Surface;
+  /**
+   * How far one registered MCP entry reaches — which decides what a baked secret in it actually
+   * costs, and therefore how the doctor must explain it.
+   *
+   * - `repo-shared` — Claude Code: local-scope config is keyed by **repo root**, so every git
+   *   worktree of one repo reads a SINGLE entry (ADR 143). A per-seat secret there is every sibling
+   *   seat's credential, which is the family-bleed the ADR 165 unbake was argued from.
+   * - `folder` — Cursor (`.cursor/mcp.json`) and Codex (`.codex/config.toml`): one file per folder,
+   *   so there is no sibling to bleed onto. The secret is still drift, for a different and equally
+   *   real reason — the file lives **inside the working tree** and can be committed (which is why
+   *   {@link ConfigureResult.secretPath} exists) — and a baked snapshot still outranks binding.json.
+   *
+   * Recording it stops the doctor asserting Claude Code's repo-root story about a per-folder file,
+   * which is what it did the moment these checks began firing for Cursor and Codex.
+   */
+  entryScope: 'repo-shared' | 'folder';
   /** Where this harness carries the skill + slash commands (ADR 085); omitted ⇒ canonical file only. */
   guidance?: HarnessGuidance;
   detect: () => Promise<DetectResult>;

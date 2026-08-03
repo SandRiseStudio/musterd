@@ -2,9 +2,20 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
-import type { Harness, ProvisionPlan, UnprovisionPlan } from '../harness.js';
+import {
+  registeredFromEnv,
+  type Harness,
+  type ProvisionPlan,
+  type UnprovisionPlan,
+} from '../harness.js';
 import type { McpServerEntry } from '../mcpEntry.js';
-import { hasServer, removeServers, upsertServer, type CodexServer } from './codexToml.js';
+import {
+  hasServer,
+  readServerEnv,
+  removeServers,
+  upsertServer,
+  type CodexServer,
+} from './codexToml.js';
 
 /**
  * Codex (OpenAI Codex CLI). Codex reads MCP servers from `[mcp_servers.<name>]` tables in a TOML
@@ -43,6 +54,8 @@ export const codex: Harness = {
   id: 'codex',
   label: 'Codex',
   surface: 'codex',
+  // `.codex/config.toml` is per-folder — and in-tree, so a secret here is committable (ADR 031).
+  entryScope: 'folder',
   // No `guidance` (ADR 085): Codex has no project-level skill/rule or slash-command mechanism, so it
   // relies on the harness-neutral `.musterd/skill/SKILL.md` (always written) that the primer points at.
 
@@ -53,12 +66,17 @@ export const codex: Harness = {
     payload.transcript_path ? readModelFromTranscript(payload.transcript_path) : undefined,
 
   async detect() {
+    const toml = readToml(projectConfigPath());
     const installed = existsSync(join(homedir(), '.codex'));
-    const configured = hasServer(readToml(projectConfigPath()), 'musterd');
+    const configured = hasServer(toml, 'musterd');
     return {
       installed,
       configured,
       detail: installed ? '~/.codex present' : '~/.codex not found',
+      // Read our own entry's env back so the doctor can flag a baked legacy value here too. Before
+      // this, only Claude Code's entry was ever inspected, so a per-seat secret or a stale
+      // MUSTERD_SURFACE in `.codex/config.toml` was invisible by construction.
+      ...(configured ? registeredFromEnv(readServerEnv(toml, 'musterd')) : {}),
     };
   },
 

@@ -645,6 +645,8 @@ export const claudeCode: Harness = {
   id: 'claude-code',
   label: 'Claude Code',
   surface: 'claude-code',
+  // Local-scope MCP config is keyed by repo ROOT, so every worktree of one repo shares this entry.
+  entryScope: 'repo-shared',
   // ADR 085: the skill lands as a native Claude Code skill; slash commands as project commands.
   guidance: {
     skillPath: '.claude/skills/musterd/SKILL.md',
@@ -683,6 +685,7 @@ export const claudeCode: Harness = {
     const agentKeyMatch = got.ok ? /MUSTERD_AGENT_KEY=(\S+)/.exec(got.out) : null;
     const autojoinMatch = got.ok ? /MUSTERD_AUTOJOIN=(\S+)/.exec(got.out) : null;
     const driverMatch = got.ok ? /MUSTERD_DRIVER=(\S+)/.exec(got.out) : null;
+    const surfaceMatch = got.ok ? /MUSTERD_SURFACE=(\S+)/.exec(got.out) : null;
     const argsMatch = got.ok ? /^\s*Args:\s*(.+)$/m.exec(got.out) : null;
     return {
       installed: true,
@@ -694,6 +697,7 @@ export const claudeCode: Harness = {
       ...(agentKeyMatch ? { registeredAgentKey: agentKeyMatch[1] } : {}),
       ...(autojoinMatch ? { registeredAutojoin: autojoinMatch[1] } : {}),
       ...(driverMatch ? { registeredDriver: driverMatch[1] } : {}),
+      ...(surfaceMatch ? { registeredSurface: surfaceMatch[1] } : {}),
       ...(argsMatch?.[1] ? { registeredArgs: argsMatch[1].trim().split(/\s+/) } : {}),
     };
   },

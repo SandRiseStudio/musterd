@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildEntry } from '../mcpEntry.js';
 import { codex } from './codex.js';
-import { hasServer } from './codexToml.js';
+import { hasServer, renderServer } from './codexToml.js';
 
 const binding = {
   server: 'http://localhost:4849',
@@ -97,5 +97,53 @@ describe('codex.provision / unprovision', () => {
     await expect(
       codex.unprovision!({ servers: ['musterd'], permissions: { allow: [], ask: [], deny: [] } }),
     ).resolves.toBeUndefined();
+  });
+});
+
+// The doctor's baked-env inspection used to see only Claude Code, because it was the only harness
+// that read its own entry back. A per-seat secret or a stale MUSTERD_SURFACE in `.codex/config.toml`
+// was therefore unreportable by construction (measured 2026-08-03).
+describe('codex detect reads its own entry back', () => {
+  it('surfaces baked legacy env as registered* fields', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-codex-detect-'));
+    const prev = process.cwd();
+    try {
+      mkdirSync(join(dir, '.codex'), { recursive: true });
+      writeFileSync(
+        join(dir, '.codex', 'config.toml'),
+        renderServer('musterd', {
+          command: 'node',
+          args: ['/x/bin.js'],
+          env: {
+            MUSTERD_SURFACE: 'codex',
+            MUSTERD_AGENT_KEY: 'mskey_secret',
+            MUSTERD_MODEL: 'gpt-5.6-luna',
+          },
+        }),
+      );
+      process.chdir(dir);
+      const d = await codex.detect();
+      expect(d.registeredSurface).toBe('codex');
+      expect(d.registeredAgentKey).toBe('mskey_secret');
+      expect(d.registeredModel).toBe('gpt-5.6-luna');
+    } finally {
+      process.chdir(prev);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports nothing when the folder has no codex entry at all', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-codex-detect-none-'));
+    const prev = process.cwd();
+    try {
+      process.chdir(dir);
+      const d = await codex.detect();
+      expect(d.configured).toBe(false);
+      expect(d.registeredSurface).toBeUndefined();
+      expect(d.registeredAgentKey).toBeUndefined();
+    } finally {
+      process.chdir(prev);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

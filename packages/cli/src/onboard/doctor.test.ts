@@ -67,10 +67,13 @@ function harnessWithEntry(
     registeredArgs?: string[];
     registeredGrant?: string;
     registeredAgentKey?: string;
+    registeredSurface?: string;
   },
+  entryScope: 'repo-shared' | 'folder' = 'repo-shared',
 ) {
   return {
     label,
+    entryScope,
     detect: async () => ({ installed: true, configured: true, detail: label, ...extra }),
   };
 }
@@ -268,6 +271,20 @@ describe('inspectProvisioning', () => {
     expect(line).toContain('musterd wire');
   });
 
+  // MUSTERD_SURFACE was the one missing from the inspected set, and it is what pinned a seat's
+  // reported surface to `cursor` while a claude-code hook was demonstrably capturing its sessions
+  // (measured 2026-08-03, PR #607). Same legacy-snapshot argument as MUSTERD_MODEL.
+  it('flags a registered MUSTERD_SURFACE as a legacy baked snapshot', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' }, surface: 'claude-code' };
+    h.harnesses = [harnessWithEntry('Cursor', { registeredSurface: 'cursor' })];
+    const r = await inspectProvisioning('/x');
+    const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'));
+    expect(line).toBeDefined();
+    expect(line).toContain('cursor');
+    expect(line).toContain('musterd wire');
+  });
+
   // INVERTED by ADR 165. This used to fire only on a MISMATCH, which missed the common case: the
   // entry is shared by every worktree of the repo, so a grant that happens to match THIS folder's
   // binding is still a per-seat credential sitting in a slot every sibling reads.
@@ -279,6 +296,36 @@ describe('inspectProvisioning', () => {
     const line = r.drift.find((d) => d.includes('MUSTERD_GRANT'));
     expect(line).toBeDefined();
     expect(line).toContain('musterd wire');
+  });
+
+  // The reason a baked secret is drift depends on how far the entry reaches, and asserting one
+  // harness's story about another's file is a confidently wrong repair instruction. Claude Code's
+  // local scope is keyed by repo ROOT (every worktree shares it); `.cursor/mcp.json` and
+  // `.codex/config.toml` are per-folder — no sibling to bleed onto, but in-tree and committable.
+  it("explains a baked secret by the entry's actual reach, never the wrong harness's story", async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+
+    h.harnesses = [harnessWithEntry('Cursor', { registeredAgentKey: 'mskey_x' }, 'folder')];
+    const folder = (await inspectProvisioning('/x')).drift.find((d) =>
+      d.includes('MUSTERD_AGENT_KEY'),
+    );
+    // Not "committable": musterd's init gitignores `.cursor/mcp.json`, so that would be a claim the
+    // doctor cannot stand behind. The reason that survives is precedence — a baked credential
+    // outranks binding.json, so re-minting the seat writes a key the adapter never reads.
+    expect(folder).toContain('outranks binding.json');
+    expect(folder).not.toContain('committable');
+    expect(folder).not.toContain('repo ROOT');
+    expect(folder).not.toContain('sibling');
+
+    h.harnesses = [
+      harnessWithEntry('Claude Code', { registeredAgentKey: 'mskey_x' }, 'repo-shared'),
+    ];
+    const repo = (await inspectProvisioning('/x')).drift.find((d) =>
+      d.includes('MUSTERD_AGENT_KEY'),
+    );
+    expect(repo).toContain('repo ROOT');
+    expect(repo).toContain('sibling');
   });
 
   it("flags a baked agent key — a sibling seat's team credential, not just a grant", async () => {
