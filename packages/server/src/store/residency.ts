@@ -736,10 +736,11 @@ function dueCandidates(
   const held = deferrals(scan, member.name);
   if (held.size === 0) return due;
 
-  // Increment 2: once a deferral's condition fires the act is pending again, and `raised_deferral_wakes`
+  // ADR 214 (ADR 211 inc 2): once a deferral's condition fires the act is pending again, and
+  // `raised_deferral_wakes`
   // decides whether that also makes it wake-eligible. Off (launch default) keeps every deferred target
-  // suppressed, raised or not — the pre-increment-2 behaviour, where a raised act simply waits in the
-  // inbox for the seat to return on its own.
+  // suppressed, raised or not — the ADR 211 increment-1 behaviour, where a raised act simply waits in
+  // the inbox for the seat to return on its own.
   //
   // A raised act is forced onto the **batched** lane regardless of how it was derived: the Member chose
   // to put it down, so its return must not jump the interrupt line their deferral took it out of. That
