@@ -246,6 +246,59 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
     expect(JSON.stringify(report.long_deferred)).not.toContain('never-moves');
   });
 
+  it('refuses a deferral of an act that was not delivered to the sender (ADR 211 §1)', async () => {
+    // nick asks Ada. nick may not defer it — it is Ada's to postpone.
+    const ask = await send('nick', nickCred, undefined, {
+      to: { kind: 'member', name: 'Ada' },
+      act: 'ask',
+      body: 'x',
+      meta: { species: 'consult', tier: 'advisory' },
+    });
+    clock += 100;
+    const env = makeEnvelope({
+      id: `m-${clock}`,
+      team: 'dawn',
+      from: 'nick',
+      ts: clock,
+      to: { kind: 'team' },
+      act: 'wait',
+      body: 'not mine to defer',
+      meta: { defer_ref: ask.id, until: { reply: true } },
+    } as Parameters<typeof makeEnvelope>[0]);
+    const r = await post('/teams/dawn/messages', { envelope: env }, nickCred);
+    expect(r.status).toBe(403);
+
+    // An act that does not exist at all fails identically — no disclosure either way.
+    clock += 100;
+    const ghost = makeEnvelope({
+      id: `m-${clock}`,
+      team: 'dawn',
+      from: 'nick',
+      ts: clock,
+      to: { kind: 'team' },
+      act: 'wait',
+      body: 'x',
+      meta: { defer_ref: 'no-such-act', until: { reply: true } },
+    } as Parameters<typeof makeEnvelope>[0]);
+    const g = await post('/teams/dawn/messages', { envelope: ghost }, nickCred);
+    expect(g.status).toBe(403);
+    expect(g.json.error.message).toBe(r.json.error.message);
+  });
+
+  it('allows deferring a team-addressed act — it was delivered to everyone', async () => {
+    const shout = await send('nick', nickCred, undefined, {
+      act: 'request_help',
+      body: 'anyone free?',
+    });
+    await send('Ada', agentKey, 'Ada', {
+      act: 'wait',
+      body: 'not now',
+      meta: { defer_ref: shout.id, until: { reply: true } },
+    });
+    const inbox = await get('/teams/dawn/inbox', agentKey, 'Ada').then((r) => r.json);
+    expect(inbox.deferred).toEqual([{ target: shout.id, until: { reply: true }, raised: false }]);
+  });
+
   it('reports an empty deferred list when nothing is deferred', async () => {
     const inbox = await get('/teams/dawn/inbox', agentKey, 'Ada').then((r) => r.json);
     expect(inbox.deferred).toEqual([]);
