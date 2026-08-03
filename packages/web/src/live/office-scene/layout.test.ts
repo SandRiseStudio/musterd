@@ -6,9 +6,6 @@ import {
   FRONT_DESK,
   RECEPTIONIST,
   BOOKSHELVES,
-  HUDDLE_POUFS,
-  HUDDLE_TABLE,
-  HUDDLES,
   DESK_D,
   DESK_SLOTS,
   DESK_W,
@@ -112,7 +109,7 @@ describe('LEISURE_SPOTS', () => {
   });
 
   it('offers every zone, so idle members spread instead of filling one corner', () => {
-    for (const zone of ['lounge', 'huddle', 'meeting', 'reading']) {
+    for (const zone of ['lounge', 'waiting', 'meeting', 'reading']) {
       expect(LEISURE_SPOTS.some((s) => s.zone === zone)).toBe(true);
     }
   });
@@ -253,37 +250,6 @@ describe('the walls are not a matched set', () => {
     const bright = WINDOWS.map((w) => w.bright);
     expect(new Set(bright).size).toBeGreaterThan(1);
     expect([...bright]).toEqual([...bright].sort((a, b) => b - a));
-  });
-});
-
-describe('the huddle is furniture, not one welded object', () => {
-  it('leaves a real gap between every pouf and the table', () => {
-    const POUF = 42;
-    for (const p of HUDDLE_POUFS) {
-      expect(Math.hypot(p.dx, p.dy)).toBeGreaterThan(HUDDLE_TABLE / 2 + POUF / 2 + 8);
-    }
-  });
-
-  it('knocks each pouf off square by a different amount', () => {
-    expect(new Set(HUDDLE_POUFS.map((p) => p.spin)).size).toBe(HUDDLE_POUFS.length);
-    for (const p of HUDDLE_POUFS) expect(p.spin).not.toBe(0);
-  });
-
-  it('keeps the whole cluster on its rug', () => {
-    const h = HUDDLES[0]!;
-    for (const p of HUDDLE_POUFS) {
-      expect(Math.abs(p.dx) + 21).toBeLessThanOrEqual(h.rugSize / 2);
-      expect(Math.abs(p.dy) + 21).toBeLessThanOrEqual(h.rugSize / 2);
-    }
-  });
-
-  it('seats an occupant on every pouf — the spots derive from the same table', () => {
-    const h = HUDDLES[0]!;
-    const spots = LEISURE_SPOTS.filter((s) => s.zone === 'huddle');
-    expect(spots).toHaveLength(HUDDLE_POUFS.length);
-    for (const p of HUDDLE_POUFS) {
-      expect(spots.some((s) => s.lx === h.lx + p.dx && s.ly === h.ly + p.dy)).toBe(true);
-    }
   });
 });
 

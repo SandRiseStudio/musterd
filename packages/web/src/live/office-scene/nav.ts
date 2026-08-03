@@ -7,21 +7,23 @@ import {
   DESK_D,
   DESK_SLOTS,
   DESK_W,
+  END_TABLE,
   ENTRANCE,
   FWD,
-  HUDDLES,
   LOUNGE,
   MEETING,
   NOOK,
   PLANTS,
   PRINTER,
   RECEPTION,
+  WAIT_CHAIR,
 } from './layout';
 
 /**
  * Office navigation: a coarse walkability grid over the logical floor + A* with string-pulling, so
  * actors *navigate* the room instead of gliding through furniture. Solid pieces (desks + chairs, the
- * lounge set, huddle poufs/table, plants, the entrance posts) block; rugs are just paint — walkable.
+ * lounge set, the reception waiting pair, plants, the entrance posts) block; rugs are just paint —
+ * walkable.
  * Footprints derive from the same layout data render.ts draws, so the grid matches the picture.
  *
  * Everything is logical-space; callers get back a waypoint polyline whose first/last points are the
@@ -66,20 +68,15 @@ function solidRects(): Rect[] {
   out.push(rect(NOOK.lx + L.cooler.dx, NOOK.ly + L.cooler.dy, L.cooler.w, L.cooler.d));
   out.push(rect(NOOK.lx + L.couch.dx, NOOK.ly + L.couch.dy, L.couch.len, L.couch.dep));
   out.push(rect(NOOK.lx + L.table.dx, NOOK.ly + L.table.dy, L.table.w, L.table.d));
-  out.push(rect(NOOK.lx + L.chairW.dx, NOOK.ly + L.chairW.dy, L.chairW.size, L.chairW.size));
-  out.push(rect(NOOK.lx + L.chairE.dx, NOOK.ly + L.chairE.dy, L.chairE.size, L.chairE.size));
-  for (const h of HUDDLES) {
-    out.push(rect(h.lx, h.ly - 54, 44, 44)); // poufs (see huddleItems)
-    out.push(rect(h.lx + 52, h.ly + 32, 44, 44));
-    out.push(rect(h.lx - 52, h.ly + 32, 44, 44));
-    out.push(rect(h.lx, h.ly, 66, 66)); // low table
-  }
   out.push(rect(MEETING.lx, MEETING.ly, MEETING.w, MEETING.d));
   for (const c of MEETING.chairs) {
     out.push(rect(MEETING.lx + c.dx, MEETING.ly + c.dy, MEETING.chairSize, MEETING.chairSize, 4));
   }
-  out.push(rect(RECEPTION.couch.lx, RECEPTION.couch.ly, LOUNGE.couch.dep, LOUNGE.couch.len)); // faces W
-  out.push(rect(RECEPTION.table.lx, RECEPTION.table.ly, LOUNGE.table.w, LOUNGE.table.d));
+  // Reception's waiting pair. Padded like the other chairs so each one's own seat spot stays
+  // reachable — a chair that blocks its own approach is a seat nobody can walk to.
+  out.push(rect(RECEPTION.chairA.lx, RECEPTION.chairA.ly, WAIT_CHAIR, WAIT_CHAIR, 4));
+  out.push(rect(RECEPTION.chairB.lx, RECEPTION.chairB.ly, WAIT_CHAIR, WAIT_CHAIR, 4));
+  out.push(rect(RECEPTION.endTable.lx, RECEPTION.endTable.ly, END_TABLE, END_TABLE));
   out.push(rect(RECEPTION.plant.lx, RECEPTION.plant.ly, 26, 26));
   out.push(rect(PRINTER.lx, PRINTER.ly, PRINTER.w, PRINTER.d));
   // The front desk blocks like the bookshelves do — a counter you can walk through is a rug.

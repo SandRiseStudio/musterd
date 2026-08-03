@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-
   FRONT_DESK,
   CHECK_IN_MARKS,
   COFFEE_STAND,
@@ -9,11 +8,11 @@ import {
   ENTRANCE,
   FRIDGE_STAND,
   FWD,
-  HUDDLES,
   LEISURE_SPOTS,
   NOOK,
   NOOK_RUG_R,
   NOOK_SPOTS,
+  RECEPTION,
   SEAT_BACK,
   SINK_STAND,
 } from './layout';
@@ -45,13 +44,12 @@ describe('walkability grid', () => {
   it('blocks furniture but keeps rugs walkable', () => {
     // a desk slab is solid
     expect(walkable(DESK_SLOTS[0]!.lx, DESK_SLOTS[0]!.ly)).toBe(false);
-    // the huddle's low table is solid, but its rug (south of the poufs) is floor
-    const h = HUDDLES[0]!;
-    expect(walkable(h.lx, h.ly)).toBe(false);
-    expect(walkable(h.lx, h.ly + 70)).toBe(true);
+    // reception's waiting chair is solid, but the rug it stands on is floor
+    expect(walkable(RECEPTION.chairA.lx, RECEPTION.chairA.ly)).toBe(false);
+    expect(walkable(RECEPTION.rug.lx - 90, RECEPTION.rug.ly)).toBe(true);
     // the nook couch is solid; the open rug in front of the away arc is floor
     expect(walkable(NOOK.lx + 34, NOOK.ly - 2)).toBe(false);
-    expect(walkable(NOOK.lx - 40, NOOK.ly + 130)).toBe(true);
+    expect(walkable(NOOK.lx - 50, NOOK.ly + 92)).toBe(true);
   });
 
   it('stands every away member on open rug — clear of the lounge furniture', () => {
