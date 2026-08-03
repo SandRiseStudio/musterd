@@ -133,6 +133,25 @@ ship. The first increment therefore suppresses deferred targets whether or not t
 later increment enables raised acts as wake candidates deliberately, behind the existing loop and
 seat controls.
 
+**2026-08-03, increment 2 — this section named the wrong controls.** `loops.review` /
+`loops.dispatch` and the seat's `flow: manual | auto` gate board-triggered **work-order** wakes, and
+say so explicitly: "Inbox reply wakes (immediate/batched) are unchanged by this knob." A raised
+deferral is an ordinary inbox act, so no existing control gated it and reusing `flow` would have
+overloaded a knob whose documented meaning is work-order trust — the same category error that
+produced this paragraph.
+
+Increment 2 therefore adds a residency policy knob of its own, `raised_deferral_wakes` (default
+`false`, per-seat via the existing override ⊕ team defaults). It mirrors `portable_inbox_replies`,
+the other ADR-rollout gate on the inbox wake path. Off, every deferred target stays suppressed
+whether or not it raised — the increment-1 behaviour, where a raised act waits in the inbox for the
+seat to return on its own.
+
+A raised act always takes the **batched** lane, whatever lane its underlying act would otherwise
+derive, and even when that act is urgent. The Member chose to put it down; its return must not jump
+the interrupt line their deferral took it out of. A seat pinned to the interrupt lane therefore
+never receives one — batched is closed for it. Rate limiting is unchanged: the act id is already the
+exhaustion key, so cooldown, hourly cap, and attempt cap apply as they do to any batched wake.
+
 ### 5. The bounded view stays honest
 
 ADR 117 requires the default inbox view to include every unread and the cursor to advance only to
@@ -192,3 +211,11 @@ Members a tidier way to lose work, and this ADR should be revisited rather than 
 
 **Experiment.** Keep the long-deferred report exception on from the first increment that ships a
 surface, so the loss mode is observable before wake eligibility is enabled.
+
+For increment 2, enable `raised_deferral_wakes` on one dogfood seat first and read the existing wake
+ledger for it: a raised-deferral wake lands as an ordinary batched `residency.woke`, so its cost and
+outcome are already measured by the ADR 131 wake metrics — no new trace. The question that decides
+whether the knob should ever default on is whether those wakes are **answered**. A raised deferral
+that wakes a seat which then defers it again, or leaves it, is a wake the Member paid for and did
+not want; if that is the common shape, the knob stays opt-in and the honest conclusion is that a
+raised deferral belongs in the inbox rather than in a spawn.

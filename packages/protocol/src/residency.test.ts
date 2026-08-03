@@ -23,6 +23,8 @@ describe('ResidencyPolicySchema (ADR 131 inc 5) — the knobs, defaults in ONE p
       transcript_max_bytes: 256 * 1024,
       portable_inbox_replies: false,
       flow: 'manual',
+      // ADR 211 inc 2: a raised deferral is not a wake reason until a seat opts in.
+      raised_deferral_wakes: false,
       work_timeout_ms: 30 * 60_000,
     });
   });

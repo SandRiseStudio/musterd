@@ -62,6 +62,21 @@ export const ResidencyPolicySchema = z.object({
    * Inbox reply wakes (immediate/batched) are unchanged by this knob.
    */
   flow: z.enum(['manual', 'auto']).default('manual'),
+  /**
+   * ADR 211 increment 2. When a Member defers an act (`wait` + `meta.defer_ref`) it stops being a
+   * wake reason — they said "not now". When its condition later fires the act becomes pending
+   * again; this knob decides whether that also makes it wake-eligible. Off (launch default) means a
+   * raised deferral waits in the inbox for the seat to come back on its own.
+   *
+   * Deliberately NOT `flow`/`loops.*`: those gate board-triggered WORK-ORDER wakes and say so — a
+   * raised deferral is an ordinary inbox act. This mirrors `portable_inbox_replies` instead, the
+   * other ADR-rollout gate on the inbox wake path.
+   *
+   * A raised act always takes the **batched** lane, never the interrupt line, even when the
+   * original act was urgent: the Member already chose to put it down, so its return must not jump
+   * the queue their deferral took it out of.
+   */
+  raised_deferral_wakes: z.boolean().default(false),
   /** Watchdog for work-order wakes only (ADR 191 / 199) — a coding session, not a reply. Default
    *  30m. Work-orders do not clamp below this on the host (ADR 199); reply wakes still honor the
    *  operator `--timeout` ceiling. */

@@ -342,6 +342,19 @@ Ordinary inbox reply wakes retain legacy delivery unless the team residency poli
 `portable_inbox_replies` cohort flag is enabled (its default is `false`). When enabled, those
 orders are also portable/fresh. This is a rollout selector, not a sender-controlled field.
 
+### Deferred acts and wake eligibility
+
+An act its recipient deferred (a `wait` carrying `meta.defer_ref`) is not a wake reason: the
+Member said "not now". Deferred targets are suppressed from the wake candidate set whether or not
+their condition has since fired.
+
+When the team residency policy's `raised_deferral_wakes` flag is enabled (default `false`), a
+deferral whose condition HAS fired becomes a candidate again. Such an order always takes the
+`batched` lane, whatever lane its act would otherwise derive and even when that act is urgent — a
+deferral must not jump the interrupt line it removed the act from. A seat pinned to the `interrupt`
+lane therefore never receives one. Rate limiting is unchanged: the act id remains the exhaustion
+key.
+
 Wake reports MAY add `delivery_outcome: "fresh"|"resumed"|"fresh_fallback"`, plus non-content
 measurements `transcript_bytes` and `transcript_age_ms`. No report carries a session ID or transcript
 path. A `fresh_fallback` outcome means a resume attempt failed and the fallback fresh session

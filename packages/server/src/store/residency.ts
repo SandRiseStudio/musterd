@@ -28,6 +28,7 @@ import {
   listInbox,
   listTeamMessages,
   pendingInterrupts,
+  raisedDeferrals,
   rowToEnvelope,
 } from './messages.js';
 import { hasLivePresence, listReclaimableMemberIds } from './presence.js';
@@ -668,7 +669,7 @@ function dueCandidates(
   db: Database,
   teamSlug: string,
   member: MemberRow,
-  lanes: { immediate: boolean; batched: boolean },
+  lanes: { immediate: boolean; batched: boolean; raisedDeferralWakes: boolean },
 ): WakeCandidate[] {
   const immediate: WakeCandidate[] = [];
   const batched: WakeCandidate[] = [];
@@ -721,25 +722,37 @@ function dueCandidates(
   // spawning them for it anyway would make the primitive a lie. Suppressed here for BOTH candidate
   // sources above, since either can surface the same act.
   //
-  // Deferred targets are suppressed whether or not their condition has fired. A raised act would
-  // otherwise become a wake candidate the moment the fold landed, shipping a wake nobody decided to
-  // ship; enabling raised acts is its own increment, behind the existing loop and seat controls.
-  //
   // The fold reads the party-scoped team timeline, not the inbox: `listInbox` excludes the member's
   // own sends and a deferring `wait` IS the member's own send.
-  const held = deferrals(
-    listTeamMessages(db, member.team_id, {
-      forMemberId: member.id,
-      limit: DEFERRAL_SCAN_LIMIT,
-    }).map((r) => {
-      const from = getMemberById(db, r.from_member);
-      const to = r.to_member ? getMemberById(db, r.to_member) : null;
-      return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
-    }),
-    member.name,
-  );
   const due = [...immediate, ...batched];
-  return held.size === 0 ? due : due.filter((c) => !c.act_id || !held.has(c.act_id));
+  const scan = listTeamMessages(db, member.team_id, {
+    forMemberId: member.id,
+    limit: DEFERRAL_SCAN_LIMIT,
+  }).map((r) => {
+    const from = getMemberById(db, r.from_member);
+    const to = r.to_member ? getMemberById(db, r.to_member) : null;
+    return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
+  });
+  const held = deferrals(scan, member.name);
+  if (held.size === 0) return due;
+
+  // Increment 2: once a deferral's condition fires the act is pending again, and `raised_deferral_wakes`
+  // decides whether that also makes it wake-eligible. Off (launch default) keeps every deferred target
+  // suppressed, raised or not — the pre-increment-2 behaviour, where a raised act simply waits in the
+  // inbox for the seat to return on its own.
+  //
+  // A raised act is forced onto the **batched** lane regardless of how it was derived: the Member chose
+  // to put it down, so its return must not jump the interrupt line their deferral took it out of. That
+  // also means a seat pinned to the interrupt lane never receives one — batched is closed for it.
+  const raised =
+    lanes.raisedDeferralWakes && lanes.batched
+      ? raisedDeferrals(scan, member.name)
+      : new Set<string>();
+  return due.flatMap((c) => {
+    if (!c.act_id || !held.has(c.act_id)) return [c];
+    if (!raised.has(c.act_id)) return [];
+    return [{ ...c, lane: 'batched' as const, derivation: 'batched' as const }];
+  });
 }
 
 /**
@@ -798,6 +811,7 @@ export function claimWakeLeases(
       const candidates = dueCandidates(db, teamSlug, member, {
         immediate: policy.lane !== 'batched',
         batched: cooled && policy.lane !== 'interrupt',
+        raisedDeferralWakes: policy.raised_deferral_wakes,
       });
       // ADR 199: dispatch work-orders (continuation then handoff — handoff unshifted last so it
       // leads). ADR 191: review work-orders prefer ahead of both + inbox.
