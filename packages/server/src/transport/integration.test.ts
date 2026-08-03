@@ -3673,6 +3673,41 @@ describe('two-stage close (ADR 169)', () => {
     expect(rows[0].detail.owner).toBe('ada');
   });
 
+  it('chat rejection persists its concrete note in lane.review_sent_back', async () => {
+    const { nickTok, ada } = await setup();
+    const lane = await post('/teams/dawn/lanes', { title: 'needs a note', claim: true }, ada);
+    await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
+    const inbox = await get('/teams/dawn/inbox?unread=1', nickTok);
+    const ask = inbox.json.messages.find(
+      (m: any) => m.act === 'ask' && m.meta?.lane_review?.lane === lane.json.lane.id,
+    );
+    expect(ask).toBeDefined();
+
+    const declined = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          v: 'musterd/0.3',
+          id: 'declinenote0000000000000000',
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'ada' },
+          act: 'decline',
+          body: 'the error path is untested — please add the boundary case',
+          meta: { in_reply_to: ask.id },
+          ts: Date.now(),
+        },
+      },
+      nickTok,
+    );
+    expect(declined.status).toBe(201);
+
+    const rows = await auditRows(nickTok, 'lane.review_sent_back');
+    expect(rows.at(-1)?.detail.note).toBe(
+      'the error path is untested — please add the boundary case',
+    );
+  });
+
   it('a risk-tagged lane routes the PEER first; the human requirement is recorded gated (ADR 188)', async () => {
     const { nickTok, ada } = await setup();
     const lane = await post(
