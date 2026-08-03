@@ -602,7 +602,7 @@ export const ART: readonly ArtPiece[] = [
 
 /** The compact Team-schedule calendar, directly beneath the right-wall clock. Its geometry is shared
  * with layout tests so the two wall fixtures retain a hand's breadth of clear plaster between them. */
-export const WORKING_HOURS_CALENDAR = { wall: 1 as const, tc: 0.52, uc: 0.35, w: 72, h: 34, loopOverhang: 4 };
+export const WORKING_HOURS_CALENDAR = { wall: 1 as const, tc: 0.52, uc: 0.32, w: 72, h: 44, loopOverhang: 4 };
 /**
  * Two windows per back wall — spaced so the wall reads as a facade, not a single porthole.
  *

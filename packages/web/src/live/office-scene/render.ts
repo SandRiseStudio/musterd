@@ -945,6 +945,19 @@ function wallText(
 }
 
 
+/**
+ * The largest of `size` that still fits `text` inside `maxUnits` logical wall units. Measured with the
+ * wall transform *off*: one text unit is one logical FLOOR unit either way, and `measureText` is the only
+ * honest answer once copy is data (a schedule can say `MON · WED · FRI` as easily as `MON–FRI`).
+ */
+function fitTextSize(ctx: CanvasRenderingContext2D, text: string, size: number, maxUnits: number): number {
+  ctx.save();
+  ctx.font = canvasFont(size, '--font-mono', 700);
+  const width = ctx.measureText(text).width;
+  ctx.restore();
+  return width > maxUnits ? (size * maxUnits) / width : size;
+}
+
 /** A planter hung off the wall on a bracket, trailing vines — the one piece of dressing with some droop. */
 function wallHanger(
   ctx: CanvasRenderingContext2D,
@@ -1163,35 +1176,43 @@ function workingHoursSign(
   const copy = formatWorkingHours(schedule);
   if (!copy) return;
   const { tc, uc, w: W, h: H } = WORKING_HOURS_CALENDAR;
-  const left = tc - W / FLOOR / 2;
-  const right = tc + W / FLOOR / 2;
-  const bottom = uc - H / WALL_H / 2;
-  const top = uc + H / WALL_H / 2;
+  // Everything below is laid out in logical wall units off the card's centre, because that is the space
+  // the copy is measured in too — mixing the two is what let the schedule line run off the paper.
+  const T = (dx: number): number => tc + dx / FLOOR;
+  const U = (dy: number): number => uc + dy / WALL_H;
+  const halfW = W / 2;
+  const halfH = H / 2;
+  const INNER = W - 18; // the paper's printable width: card less frame, trim and a breathing margin either side
 
   ctx.save();
   // A modest paper calendar — a fixture in the clock's wall bay, not a floating banner.
   ctx.globalAlpha = 0.22;
-  wallRect(ctx, fit, edge, left + 0.007, bottom - 0.014, right + 0.007, top - 0.014, '#503522');
+  wallRect(ctx, fit, edge, T(-halfW + 6), U(-halfH - 5), T(halfW + 6), U(halfH - 5), '#503522');
   ctx.globalAlpha = 1;
-  wallRect(ctx, fit, edge, left, bottom, right, top, '#735034'); // oak frame
-  wallRect(ctx, fit, edge, left + 0.003, bottom + 0.006, right - 0.003, top - 0.006, '#bd943c'); // brass trim
-  wallRect(ctx, fit, edge, left + 0.006, bottom + 0.012, right - 0.006, top - 0.012, '#f9edcf'); // paper
-  wallRect(ctx, fit, edge, left + 0.006, top - 0.06, right - 0.006, top - 0.012, '#e1ad01'); // mustard heading
+  wallRect(ctx, fit, edge, T(-halfW), U(-halfH), T(halfW), U(halfH), '#735034'); // oak frame
+  wallRect(ctx, fit, edge, T(-halfW + 1.5), U(-halfH + 1.5), T(halfW - 1.5), U(halfH - 1.5), '#bd943c'); // brass trim
+  wallRect(ctx, fit, edge, T(-halfW + 3), U(-halfH + 3), T(halfW - 3), U(halfH - 3), '#f9edcf'); // paper
+  wallRect(ctx, fit, edge, T(-halfW + 3), U(halfH - 14), T(halfW - 3), U(halfH - 3), '#e1ad01'); // mustard heading
 
   // Binder loops sit on the frame rather than in screen space, so even their small gleam belongs to the wall.
-  for (const offset of [-0.018, 0.018]) {
-    wallDisc(ctx, fit, edge, tc + offset, top + 0.006, 2.6, '#b58b3a');
-    wallDisc(ctx, fit, edge, tc + offset, top + 0.006, 1.25, '#5f452d');
+  for (const offset of [-16, 16]) {
+    wallDisc(ctx, fit, edge, T(offset), U(halfH + 1), 2.6, '#b58b3a');
+    wallDisc(ctx, fit, edge, T(offset), U(halfH + 1), 1.25, '#5f452d');
   }
 
-  wallText(ctx, fit, edge, tc, top - 0.029, 'TEAM WORKING HOURS', 7, '#4e331f', 'center');
-  wallText(ctx, fit, edge, tc, uc + 0.006, `${copy.days} · ${copy.hours}`, 6.5, '#33261c', 'center');
-  wallText(ctx, fit, edge, tc, bottom + 0.038, copy.timezone, 5.2, '#806146', 'center');
+  // One row per fact, each shrunk to the paper rather than allowed to overrun it: the days can be a
+  // run ("MON–FRI") or a list ("MON · WED · FRI"), and the card is only as wide as the window bay allows.
+  const line = (dy: number, text: string, size: number, fill: string): void =>
+    wallText(ctx, fit, edge, tc, U(dy), text, fitTextSize(ctx, text, size, INNER), fill, 'center');
+  line(halfH - 10.5, 'TEAM WORKING HOURS', 6, '#4e331f');
+  line(1, copy.days, 10, '#33261c');
+  line(-9, copy.hours, 7, '#33261c');
+  line(-16.5, copy.timezone, 5.5, '#806146');
 
-  // A pin gives the card a restrained life. t=0 is its complete, static reduced-motion posture.
-  const pinAlpha = 0.72 + Math.sin(t * 1.2) * 0.08;
-  ctx.globalAlpha = pinAlpha;
-  wallDisc(ctx, fit, edge, left + 0.014, top - 0.087, 2.2, '#b8872d');
+  // A brass tack in the header gives the card a restrained life. t=0 is its complete, static
+  // reduced-motion posture.
+  ctx.globalAlpha = 0.72 + Math.sin(t * 1.2) * 0.08;
+  wallDisc(ctx, fit, edge, T(-halfW + 7), U(halfH - 8.5), 2.2, '#b8872d');
   ctx.globalAlpha = 1;
   ctx.restore();
 }
