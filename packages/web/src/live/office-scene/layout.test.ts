@@ -25,10 +25,10 @@ import {
 } from './layout';
 
 describe('desk pods', () => {
-  it('seats exactly eighteen, sized per pod, with stable unique ids', () => {
-    // 20 on 2026-08-02, 18 on 2026-08-03: the centre duo came out because the floor read as crowded,
-    // and two seats bought more air than any amount of shuffling had.
-    expect(DESK_SLOTS).toHaveLength(18);
+  it('seats exactly seventeen, sized per pod, with stable unique ids', () => {
+    // 20 on 2026-08-02; 18 when the centre duo came out because the floor read as crowded; 17 when
+    // pod 3 dropped to a solo to unbox the lounge. Each cut bought air no amount of shuffling could.
+    expect(DESK_SLOTS).toHaveLength(17);
     const podSeats = PODS.reduce((n, p) => n + p.size, 0);
     expect(DESK_SLOTS).toHaveLength(podSeats + BENCH.seats + WINDOW_DESKS.length);
     expect(new Set(DESK_SLOTS.map((s) => s.id)).size).toBe(DESK_SLOTS.length);
