@@ -1515,7 +1515,8 @@ const RAW: RawItem[] = [
   {
     id: 'mcp-tool-surface',
     frozenBy: 144,
-    building: 'increments 5 (scope by role) and 6 (discovery, conditional) — 1–4 landed',
+    building:
+      'increment 4 (schemas/tool shape) remains — 1–3 and 5 landed; increment 6 resolved build-nothing per ADR 175',
     wave: 'later',
     title: 'musterd’s MCP server, examined — names, descriptions, schemas, results & discovery',
     plan: 'reserved',
