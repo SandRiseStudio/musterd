@@ -88,6 +88,7 @@ What your change needs depends entirely on _what you changed_:
 5. **Never log secrets.** The team **agent key**, **grants**, and human **credentials** (`mskey_`/`msgr_`/`mscr_`) are shown once and stored only as `sha256` on the server / chmod-600 config on clients.
 6. **No new runtime dependency without an ADR** noting why and the alternative considered.
 7. **One Member is not one session.** Presence is where a Member is attached; the Member persists. Don't conflate them in schema, code, or naming.
+8. **Write work stays in a seat.** Do not use `superpowers:subagent-driven-development` or dispatch subagents that edit, claim, build, or commit — implement in your own seat, or hand the work to another seat with `team_send {act:'handoff'}`. A subagent writes under *your* identity with no seat, lane, or model of its own, so the [ADR 150](docs/decisions/150-structural-inducement-pretooluse-gates.md) lane gate cannot see it, [ADR 109](docs/decisions/109-seat-git-attribution.md) git attribution cannot trace it, and ADR 101/158 model attestation records its work as yours, at your model. Read-only fan-out — searching, mapping the codebase — is fine: knowledge needs no provenance.
 
 ## Course-correction / deviation protocol
 
