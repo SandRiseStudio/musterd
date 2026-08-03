@@ -71,3 +71,10 @@ pnpm --filter @musterd/server test
 pnpm --filter @musterd/server test -- --watch
 pnpm test:scenarios  # just tests/scenarios (root script)
 ```
+
+## Codex harness evidence (ADR 204)
+
+Codex CLI has hermetic backend tests under `packages/cli/src/host/backends/codex.test.ts`; a paid
+real-harness run is deliberately owner-gated and is not part of this suite or CI. Codex desktop is
+separately checked using [`tests/codex-desktop.md`](../../tests/codex-desktop.md). Desktop wake is
+manual-resume until its stable supported API probe passes.
