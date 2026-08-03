@@ -718,9 +718,30 @@ describe('serviceCommand', () => {
   const buildSha = 'a'.repeat(40);
   const behind3: RunResult = { status: 0, stdout: '3\n', stderr: '' };
 
-  /** The debounce stamp the auto-refresher writes (§ autoRefreshStampPath), under the ADR 190 tmp config. */
+  /**
+   * The debounce stamp the auto-refresher writes (§ autoRefreshStampPath), under the ADR 190 tmp
+   * config.
+   *
+   * The throw is the whole point. This helper rebuilds the production path by hand instead of
+   * calling `autoRefreshStampPath()`, which means it also opts out of `machineStatePath`'s ADR 190
+   * guard — and the `?? ''` this used to carry turned an unset MUSTERD_CONFIG into `dirname('')`,
+   * i.e. `.`, i.e. a write relative to the cwd the suite happened to run in.
+   *
+   * That is not hypothetical. On 2026-08-01 a run from `packages/cli` left a stray
+   * `packages/cli/autorefresh/.attempted-sha` in the DAEMON's own checkout; `service refresh`
+   * refuses to run on a dirty tree, so the auto-refresher wedged for a full day and the shared
+   * daemon sat 9 commits behind. A test that silently writes outside its sandbox can take down the
+   * thing it is testing, so this fails loudly instead.
+   */
   function writeAttemptedSha(sha: string): void {
-    const p = join(dirname(process.env['MUSTERD_CONFIG'] ?? ''), 'autorefresh', '.attempted-sha');
+    const cfg = process.env['MUSTERD_CONFIG'];
+    if (!cfg) {
+      throw new Error(
+        'MUSTERD_CONFIG must be set before writing the attempted-sha stamp (ADR 190). ' +
+          'Without it this writes ./autorefresh/.attempted-sha into whatever cwd the suite ran in.',
+      );
+    }
+    const p = join(dirname(cfg), 'autorefresh', '.attempted-sha');
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, sha, 'utf8');
   }
