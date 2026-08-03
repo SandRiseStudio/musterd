@@ -1,6 +1,7 @@
 import {
   type AskSpecies,
   type AskTier,
+  DeferUntilSchema,
   type Envelope,
   isAwaitingAcceptance,
   makeEnvelope,
@@ -540,6 +541,27 @@ function recordAskLifecycle(ctx: Ctx, team: TeamRow, actor: string, env: Envelop
       result: 'allow',
       detail: { ask_ref: askRef, until: meta['until'] },
     });
+  }
+  // The recipient's own postponement (rides `wait`, ADR 211 §1). Distinct from `ask.deferred` above
+  // in both actor and meaning: that one is the SENDER saying "deciding, check back"; this is the
+  // RECIPIENT saying "not now, raise it when ⟨cond⟩".
+  //
+  // Detail is the condition KIND only. Not the lane id, not the body (ADR 051) — the eval needs the
+  // split between condition kinds and the deferral→raise interval, and neither needs content. There
+  // is deliberately no `raised` counterpart: a raise is derived at read time and has no event, and
+  // emitting one would invent a fact the system does not have (ADR 189).
+  const deferRef = meta['defer_ref'];
+  if (env.act === 'wait' && typeof deferRef === 'string' && deferRef.length > 0) {
+    const until = DeferUntilSchema.safeParse(meta['until']);
+    if (until.success) {
+      appendAudit(ctx.db, team.id, {
+        actor,
+        action: 'inbox.deferred',
+        target: deferRef,
+        result: 'allow',
+        detail: { until: 'reply' in until.data ? 'reply' : 'lane' },
+      });
+    }
   }
 }
 

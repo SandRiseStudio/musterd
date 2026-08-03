@@ -2,6 +2,8 @@ import { makeEnvelope } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
+import { listAudit } from '../store/audit.js';
+import { getTeamBySlug } from '../store/teams.js';
 
 /**
  * The deferred-act surface on `GET /inbox` (ADR 211 §3/§5).
@@ -161,6 +163,49 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
     inbox = await get('/teams/dawn/inbox?unread=1', agentKey, 'Ada').then((r) => r.json);
     expect(inbox.deferred[0].raised).toBe(true);
     expect(inbox.messages.map((m: { id: string }) => m.id)).toContain(ask.id);
+  });
+
+  it('audits the deferral with the condition KIND only — never the lane id or a body', async () => {
+    const ask = await send('nick', nickCred, undefined, {
+      to: { kind: 'member', name: 'Ada' },
+      act: 'ask',
+      body: 'x',
+      meta: { species: 'consult', tier: 'advisory' },
+    });
+    await send('Ada', agentKey, 'Ada', {
+      act: 'wait',
+      body: 'not now, blocked on L1',
+      meta: { defer_ref: ask.id, until: { lane: 'L1' } },
+    });
+
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const rows = listAudit(server.db, team.id).filter((r) => r.action === 'inbox.deferred');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actor).toBe('Ada');
+    expect(rows[0]!.target).toBe(ask.id);
+    expect(JSON.parse(rows[0]!.detail as string)).toEqual({ until: 'lane' });
+    // Shapes only (ADR 051): the lane id and the body never reach the audit log.
+    expect(rows[0]!.detail).not.toContain('L1');
+    expect(rows[0]!.detail).not.toContain('blocked');
+  });
+
+  it('does not audit a bare wait or a deciding wait as a deferral', async () => {
+    await send('Ada', agentKey, 'Ada', { act: 'wait', body: 'paused' });
+    const ask = await send('Ada', agentKey, 'Ada', {
+      to: { kind: 'member', name: 'nick' },
+      act: 'ask',
+      body: 'ship it?',
+      meta: { species: 'approve', tier: 'standard' },
+    });
+    await send('nick', nickCred, undefined, {
+      act: 'wait',
+      body: 'deciding',
+      meta: { ask_ref: ask.id, until: '1h' },
+    });
+
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const rows = listAudit(server.db, team.id).filter((r) => r.action === 'inbox.deferred');
+    expect(rows).toHaveLength(0);
   });
 
   it('reports an empty deferred list when nothing is deferred', async () => {
