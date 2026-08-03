@@ -15,6 +15,7 @@ import {
   DESK_D,
   DESK_LEG_H,
   DESK_SLAB,
+  BENCH,
   DESK_SLOTS,
   END_TABLE,
   DESK_UP,
@@ -41,6 +42,7 @@ import {
   WALL_BOARD,
   WINDOWS,
   type Bookshelf,
+  type DeskSlot,
   type Rug,
 } from './layout';
 import { STICKY_CAP, type WallBoard } from './wallboard';
@@ -3503,6 +3505,37 @@ function drawWorkstation(
   for (const pr of props) pr.fn();
 }
 
+/**
+ * The back-wall bench counter, drawn ONCE (not per seat): a long worktop in the desk vocabulary —
+ * same leg height, same slab overhang — so it reads as workspace, not kitchenette. Sitters face the
+ * wall; each seat's monitor and keyboard are per-slot items (`benchStation`) sorted a hair after the
+ * counter, because a long box sorted at its centre would otherwise paint over the gear at its ends —
+ * the couch/`depthAt` problem, solved the same way.
+ */
+function benchCounter(ctx: CanvasRenderingContext2D, fit: Fit): void {
+  const B = BENCH;
+  // Legs at the ends and thirds, then the top with a small overhang — a worktop, not a slab wall.
+  for (const along of [-B.long / 2 + 8, -B.long / 6, B.long / 6, B.long / 2 - 8]) {
+    box(ctx, fit, B.lx + along, B.ly, 8, 8, DESK_LEG_H, dim(PAL.wood, 0.9));
+  }
+  box(ctx, fit, B.lx, B.ly, B.long, B.deep, DESK_SLAB, PAL.wood, DESK_LEG_H);
+}
+
+/** One bench seat's gear: monitor + keyboard on the shared counter. The screen faces the sitter —
+ * which is also toward the camera, so a working bench member still shows a lit screen to the room. */
+function benchStation(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  slot: DeskSlot,
+  node: OfficeNode | null,
+  t: number,
+): void {
+  const working = node?.posture === 'working';
+  const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(slot.id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
+  monitor(ctx, fit, slot.lx, slot.ly - (BENCH.deep / 2 - 12), slot.dir, working, DESK_UP, slot.id, t);
+  deskKeyboard(ctx, fit, slot.lx, slot.ly - KEYBOARD_ALONG, true, DESK_UP, kbShoulder);
+}
+
 export interface SceneAnchors {
   heads: Map<string, Pt>;
   bases: Map<string, Pt>;
@@ -3712,6 +3745,9 @@ export function renderScene(
   // The office dog sorts with everything else at its own floor position (behaviour lives in pet.ts).
   if (pet) items.push({ d: depth(pet.lx, pet.ly) + 0.08, fn: () => drawDog(ctx, fit, pet, t) });
 
+  // The bench's shared counter, once — its seats' gear rides per-slot below.
+  items.push({ d: depth(BENCH.lx, BENCH.ly), fn: () => benchCounter(ctx, fit) });
+
   for (const slot of DESK_SLOTS) {
     const name = slotMember.get(slot.id) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
@@ -3728,7 +3764,13 @@ export function renderScene(
     if (sipping) hidden.push('coffee');
     if (name && fx?.bottleCarriers.has(name)) hidden.push('water');
     const hide = hidden.length ? new Set<PropKind>(hidden) : undefined;
-    items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, t, hide) });
+    if (slot.kind === 'bench') {
+      // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
+      // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
+      items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t) });
+    } else {
+      items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, t, hide) });
+    }
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
     // the two instead of being swallowed by a single chair box.

@@ -73,8 +73,15 @@ export interface DeskSlot {
   ly: number;
   /** Which way the seated member faces — decides monitor + member draw order. */
   dir: Dir;
-  /** Which pod this desk belongs to (index into `PODS`). */
+  /** Which pod this desk belongs to (index into `PODS`) — `-1` for bench and window desks. */
   pod: number;
+  /**
+   * Which desk species this is (2026-08-02, scaling to twenty seats). A `pod` desk is the full
+   * workstation; `bench` seats share one wall counter and face the wall (heads-down focus — the one
+   * arrangement where backs to the room is the honest read); a `window` desk stands alone off the
+   * right wall, facing the room with the window light behind it.
+   */
+  kind: 'pod' | 'bench' | 'window';
 }
 
 /**
@@ -118,7 +125,12 @@ export const PODS: Pod[] = [
   {
     id: 0,
     cx: 240,
-    cy: 220,
+    // 220 → 290 (2026-08-02): slid south to open the band under the back wall for the bench. At 220
+    // its north-row seats sat ~34 units from the bench chairs — one smeared avatar. 290 is the pocket
+    // between two hard walls: the bench chairs above (north seats must clear MIN_SPOT_GAP — they do,
+    // by ~2) and pod 2's desk pads below (the south seats' stand-behind floor ends at y 441 — at 300
+    // it was 1 unit short).
+    cy: 290,
     axis: 'ns',
     rug: { shape: 'rect', weave: 'border', fill: '#93a9a4', mark: '#75908a' },
   },
@@ -166,6 +178,7 @@ function podDesks(pod: Pod): DeskSlot[] {
     ly: pod.cy + (ns ? along : across),
     dir,
     pod: pod.id,
+    kind: 'pod',
   });
   return [
     at(-POD_ALONG, -POD_ACROSS, near, 0),
@@ -175,7 +188,59 @@ function podDesks(pod: Pod): DeskSlot[] {
   ];
 }
 
-export const DESK_SLOTS: DeskSlot[] = PODS.flatMap(podDesks);
+/**
+ * The back-wall bench (2026-08-02): one long counter under the windows, four seats, sitters facing
+ * the wall. Backs to the room is a real cost here — a face is what makes a member a person — and it
+ * is paid deliberately: the bench is the room's heads-down row, and turned backs are the honest way
+ * to draw that. The window desks below are the counterweight (they face the room).
+ *
+ * `lx` had to thread a needle: bookshelf 0 ends at x≈152, the kitchenette's fridge starts at 568,
+ * and pod 0 slid south (cy 220 → 300) specifically so bench chairs at ly≈104 clear its north-row
+ * seats by a full MIN_SPOT_GAP. The printer moved out of the run (it stood at lx 390, mid-bench).
+ */
+export const BENCH = { lx: 320, ly: 62, long: 300, deep: 30, seats: 4, dir: 'N' as Dir };
+
+/**
+ * The two standalone window desks on the right flank — facing the ROOM, window light behind them.
+ *
+ * They stand ~60 off the wall rather than flush against it, and that is forced, not styled: the
+ * navigability invariant demands 60 units of open floor behind every seat (the "push the chair back
+ * and stand" test), and a room-facing seat flush to the wall has the wall there instead. The float
+ * also happens to be the better picture — a desk pulled out from the window reads as an earned
+ * corner office, where a flush one reads as furniture pushed out of the way.
+ */
+export const WINDOW_DESKS: ReadonlyArray<{ lx: number; ly: number; dir: Dir }> = [
+  // The ly values are pinned by pod 1's east seats: their stand-behind floor is the two points
+  // (760, 505) and (760, 615), and a window desk's padded footprint at this lx spans ±64 in y —
+  // plus the nav grid's 15-unit cells, which round a footprint's edge to the cell it starts in. The
+  // slots that clear both probes whole-cell are ly ≤ 441 and ly ≥ ~695. (540 swallowed the 505
+  // probe; 684 cleared it by 5 real units and lost them to cell rounding.) The second desk sitting
+  // this low is also why the meeting zone slid west (700 → 610): at 700 its rug ran under the
+  // desk's front corner.
+  { lx: 776, ly: 430, dir: 'W' },
+  { lx: 776, ly: 700, dir: 'W' },
+];
+
+const benchSlots: DeskSlot[] = Array.from({ length: BENCH.seats }, (_, i) => ({
+  id: PODS.length * 4 + i,
+  lx: BENCH.lx - BENCH.long / 2 + (i + 0.5) * (BENCH.long / BENCH.seats),
+  ly: BENCH.ly,
+  dir: BENCH.dir,
+  pod: -1,
+  kind: 'bench' as const,
+}));
+
+const windowSlots: DeskSlot[] = WINDOW_DESKS.map((w, i) => ({
+  id: PODS.length * 4 + BENCH.seats + i,
+  lx: w.lx,
+  ly: w.ly,
+  dir: w.dir,
+  pod: -1,
+  kind: 'window' as const,
+}));
+
+/** Every seat on the floor: pods first (so ids 0..11 stay the pod desks), then bench, then window. */
+export const DESK_SLOTS: DeskSlot[] = [...PODS.flatMap(podDesks), ...benchSlots, ...windowSlots];
 
 /** The break nook — where `away` members drift; also the broadcast megaphone spot. */
 export const NOOK = { lx: 700, ly: 190 };
@@ -292,7 +357,9 @@ export const ENTRANCE = { lx: 47, ly: 815 };
  * seats, all of them approachable, and a head seat at each end reads more like a meeting anyway.
  */
 export const MEETING = {
-  lx: 700,
+  // lx 700 → 610 (2026-08-02): slid west so its rug clears the second window desk's footprint. The
+  // front-right corner it vacates is exactly where that desk's occupant now stands up.
+  lx: 610,
   ly: 800,
   // Downsized 170×92 → 150×80 (2026-08-02), and no further — this table's size is pinned by its SEATS,
   // not by taste. Shrinking it pulls the head chairs inward, and a head chair that closes on the
@@ -377,8 +444,9 @@ export const CHECK_IN_MARKS: ReadonlyArray<{ lx: number; ly: number }> = [
 /** The pause at the mark, seconds. A beat, not a gate. */
 export const CHECK_IN_S = 1.2;
 
-/** The printer/supply station against the back wall. */
-export const PRINTER = { lx: 390, ly: 60, w: 46, d: 34, h: 32 };
+/** The printer/supply station against the back wall — moved out of the bench run (it stood at
+ * lx 390, which is now mid-counter), into the band between the bench's end and the kitchenette. */
+export const PRINTER = { lx: 505, ly: 60, w: 46, d: 34, h: 32 };
 
 export interface Plant {
   lx: number;
@@ -390,12 +458,13 @@ export interface Plant {
  * floor between zones without standing in a walking line. */
 export const PLANTS: Plant[] = [
   { lx: 70, ly: 110, species: 'snake' },
-  { lx: 480, ly: 55, species: 'fiddle' },
+  // (a fiddle stood at 480,55 — removed with the bench: it landed against the counter's end, and a
+  // plant wedged between a bench and a printer is clutter, not softening.)
   { lx: 855, ly: 130, species: 'fiddle' },
   { lx: 60, ly: 640, species: 'fiddle' },
-  { lx: 862, ly: 690, species: 'snake' },
+  { lx: 870, ly: 760, species: 'snake' }, // right flank, between the low window desk and the front corner
   { lx: 380, ly: 870, species: 'fiddle' },
-  { lx: 110, ly: 380, species: 'fiddle' }, // left flank, between the huddle and the wall
+  { lx: 66, ly: 470, species: 'fiddle' }, // left flank, in the rug gap between pods 0 and 2
   { lx: 830, ly: 330, species: 'snake' }, // right flank, under the nook shelf
   // Front corner, past the meeting table. Kept clear of the aisle the east head chair is pulled out
   // into (that chair's occupant stands around lx 842 to sit down), so the corner stays decoration

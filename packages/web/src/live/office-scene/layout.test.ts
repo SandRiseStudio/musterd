@@ -20,15 +20,21 @@ import {
   SEAT_BACK,
   WALL_BOARD,
   WINDOWS,
+  BENCH,
+  WINDOW_DESKS,
 } from './layout';
 
 describe('desk pods', () => {
-  it('gives every pod four desks, with stable unique ids', () => {
-    expect(DESK_SLOTS).toHaveLength(PODS.length * 4);
+  it('gives every pod four desks, plus the bench and window seats, with stable unique ids', () => {
+    expect(DESK_SLOTS).toHaveLength(PODS.length * 4 + BENCH.seats + WINDOW_DESKS.length);
     expect(new Set(DESK_SLOTS.map((s) => s.id)).size).toBe(DESK_SLOTS.length);
     for (const pod of PODS) {
       expect(DESK_SLOTS.filter((s) => s.pod === pod.id)).toHaveLength(4);
     }
+    expect(DESK_SLOTS.filter((s) => s.kind === 'bench')).toHaveLength(BENCH.seats);
+    expect(DESK_SLOTS.filter((s) => s.kind === 'window')).toHaveLength(WINDOW_DESKS.length);
+    // Pod ids stay 0..11 — the bench and window seats append, they do not renumber anybody.
+    for (const s of DESK_SLOTS) if (s.kind === 'pod') expect(s.id).toBeLessThan(PODS.length * 4);
   });
 
   it('keeps exactly two desks facing the viewer', () => {
@@ -42,23 +48,27 @@ describe('desk pods', () => {
     for (const slot of DESK_SLOTS) {
       const f = FWD[slot.dir];
       const seat = { lx: slot.lx - f[0] * SEAT_BACK, ly: slot.ly - f[1] * SEAT_BACK };
+      for (const v of [seat.lx, seat.ly]) {
+        expect(v).toBeGreaterThan(0);
+        expect(v).toBeLessThan(FLOOR);
+      }
+      if (slot.kind !== 'pod') continue; // bench/window seats have no pod centre to sit outside of
       const pod = PODS[slot.pod]!;
       // the seat is further from the pod centre than the desk is — i.e. the member sits on the outside,
       // backs to the aisle, not squeezed between their desk and the shared screen
       const deskGap = Math.hypot(slot.lx - pod.cx, slot.ly - pod.cy);
       expect(Math.hypot(seat.lx - pod.cx, seat.ly - pod.cy)).toBeGreaterThan(deskGap);
-      for (const v of [seat.lx, seat.ly]) {
-        expect(v).toBeGreaterThan(0);
-        expect(v).toBeLessThan(FLOOR);
-      }
     }
   });
 
   it('never overlaps two desk slabs', () => {
+    // Per-kind footprints: a bench seat owns its stretch of the shared counter, a window desk is a
+    // full workstation turned 'ew'. Sizing everything as a pod desk would report the counter's four
+    // abutting segments as a pileup.
     const box = (s: (typeof DESK_SLOTS)[number]) => {
       const sn = s.dir === 'S' || s.dir === 'N';
-      const w = sn ? DESK_W : DESK_D;
-      const d = sn ? DESK_D : DESK_W;
+      const w = s.kind === 'bench' ? BENCH.long / BENCH.seats - 1 : sn ? DESK_W : DESK_D;
+      const d = s.kind === 'bench' ? BENCH.deep : sn ? DESK_D : DESK_W;
       return { x0: s.lx - w / 2, x1: s.lx + w / 2, y0: s.ly - d / 2, y1: s.ly + d / 2 };
     };
     for (let i = 0; i < DESK_SLOTS.length; i++) {
