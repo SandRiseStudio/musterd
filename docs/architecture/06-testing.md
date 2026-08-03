@@ -89,3 +89,7 @@ mode-600 binding; it proves MCP join, directed-inbox drain, and exact thread res
 or configuration bypass. Codex desktop is separately checked using
 [`tests/codex-desktop.md`](../../tests/codex-desktop.md). Desktop wake is manual-resume until its
 stable supported API probe passes.
+
+`musterd residency on` also performs a non-billing Codex preflight (`--version`, `exec --help`, and
+`exec resume --help`): a configured Codex that lacks JSONL fresh execution or exact-session resume
+continues to coordinate manually but is not advertised as daemon-wakeable.

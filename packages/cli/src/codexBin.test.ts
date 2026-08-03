@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { codexCandidates, resetCodexBinCache, resolveCodexBin } from './codexBin.js';
+import { codexCandidates, probeCodexCli, resetCodexBinCache, resolveCodexBin } from './codexBin.js';
 
 describe('resolveCodexBin', () => {
   it('probes PATH without a shell and caches a runnable executable', async () => {
@@ -31,5 +31,27 @@ describe('resolveCodexBin', () => {
         '/usr/local/bin/codex',
       ]),
     );
+  });
+});
+
+describe('probeCodexCli', () => {
+  it('requires JSONL fresh exec and resume with an exact session id', async () => {
+    const run = async (args: string[]) => {
+      if (args[0] === '--version') return { ok: true, out: 'codex-cli 0.146.0\n' };
+      if (args[1] === '--help') return { ok: true, out: 'Usage: codex exec [OPTIONS]\n  --json\n' };
+      return {
+        ok: true,
+        out: 'Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]\n  --json\n',
+      };
+    };
+    await expect(probeCodexCli(run)).resolves.toEqual({ supported: true, version: '0.146.0' });
+  });
+
+  it('returns a short reason rather than command output for an incompatible install', async () => {
+    const run = async () => ({ ok: true, out: 'untrusted diagnostic mskey_never-print' });
+    await expect(probeCodexCli(run)).resolves.toEqual({
+      supported: false,
+      reason: 'Codex CLI does not advertise exec --json',
+    });
   });
 });

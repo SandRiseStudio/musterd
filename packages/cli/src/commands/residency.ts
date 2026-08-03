@@ -11,6 +11,7 @@ import {
   type ResidencyPolicyOverride,
 } from '@musterd/protocol';
 import { flagStr, fmtBytes, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
+import { codexCapability } from '../codexBin.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import {
@@ -223,6 +224,15 @@ async function onCommand(parsed: Parsed): Promise<number> {
   const harness = flagStr(parsed.flags, 'harness') ?? binding?.surface;
   if (!harness) {
     throw new CliError('no harness — pass --harness <class> (e.g. claude-code)', 2);
+  }
+  if (harness === 'codex') {
+    const capability = await codexCapability();
+    if (!capability.supported) {
+      throw new CliError(
+        `Codex can coordinate manually but cannot enroll for daemon wake: ${capability.reason}`,
+        2,
+      );
+    }
   }
   const host = flagStr(parsed.flags, 'host') ?? hostname();
   const policy = collectPolicyFlags(parsed);

@@ -19,6 +19,36 @@ export function codexCandidates(): string[] {
 
 let codexBinCache: string | null | undefined;
 
+export type CodexCapability =
+  | { supported: true; version: string }
+  | { supported: false; reason: string };
+
+/** Read-only CLI preflight for residency. It deliberately never invokes `codex exec`. */
+export async function probeCodexCli(
+  run: (args: string[]) => Promise<{ ok: boolean; out: string }>,
+): Promise<CodexCapability> {
+  const version = await run(['--version']);
+  if (!version.ok) return { supported: false, reason: 'Codex CLI did not answer --version' };
+  const versionMatch = /(?:codex(?:-cli)?\s+)?v?(\d+\.\d+(?:\.\d+)?[^\s]*)/i.exec(version.out);
+  const renderedVersion = versionMatch?.[1] ?? 'installed';
+  const fresh = await run(['exec', '--help']);
+  if (!fresh.ok || !/\B--json\b/.test(fresh.out))
+    return { supported: false, reason: 'Codex CLI does not advertise exec --json' };
+  const resume = await run(['exec', 'resume', '--help']);
+  if (!resume.ok || !/\B--json\b/.test(resume.out) || !/SESSION_ID/i.test(resume.out)) {
+    return { supported: false, reason: 'Codex CLI does not advertise JSONL exact-session resume' };
+  }
+  return { supported: true, version: renderedVersion };
+}
+
+/** Probe the resolved executable with only read-only help/version requests. */
+export async function codexCapability(): Promise<CodexCapability> {
+  const bin = await resolveCodexBin();
+  if (!bin)
+    return { supported: false, reason: 'Codex CLI not found (PATH + known install locations)' };
+  return probeCodexCli((args) => hasRunnable(bin, args));
+}
+
 /** Drop the process-local resolution result after a spawn proves a prior path stale. */
 export function resetCodexBinCache(): void {
   codexBinCache = undefined;

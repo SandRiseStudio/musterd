@@ -25,7 +25,7 @@ src/
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; HttpClient forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
-  codexBin.ts         // PATH-robust, shell-free `codex` binary resolution for the residency backend; an unresolved install stays non-wakeable (ADR 204)
+  codexBin.ts         // PATH-robust, shell-free `codex` binary resolution plus read-only `--version`/help capability probe; an unresolved or incompatible install stays non-wakeable (ADR 204)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   runtime.ts          // Node ≥22 gate + packaged-vs-checkout detection for doctor / bin (ADR 156)
