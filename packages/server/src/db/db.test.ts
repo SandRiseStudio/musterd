@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { createTeam, getTeamBySlug } from '../store/teams.js';
 import { MIGRATIONS, runMigrations } from './migrations.js';
 import { openDb } from './open.js';
 import { seedDawn } from './seed.js';
@@ -10,7 +11,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('28');
+    expect(ver?.value).toBe('30');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -67,6 +68,39 @@ describe('db', () => {
     );
     expect(cols).toContain('last_offline_reason');
     db.close();
+  });
+
+  it('v30 seeds revive working hours without overwriting an explicit schedule (ADR 205)', () => {
+    const db = openDb(':memory:');
+    createTeam(db, { slug: 'revive' });
+    db.prepare("UPDATE schema_meta SET value = '29' WHERE key = 'schema_version'").run();
+    runMigrations(db);
+    expect(getTeamBySlug(db, 'revive')?.working_hours).toBe(
+      JSON.stringify({
+        timezone: 'America/Los_Angeles',
+        days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+        start: '11:00',
+        end: '15:00',
+      }),
+    );
+
+    const explicit = openDb(':memory:');
+    createTeam(explicit, {
+      slug: 'revive',
+      workingHours: {
+        timezone: 'UTC',
+        days: ['sat'],
+        start: '09:00',
+        end: '10:00',
+      },
+    });
+    explicit.prepare("UPDATE schema_meta SET value = '29' WHERE key = 'schema_version'").run();
+    runMigrations(explicit);
+    expect(getTeamBySlug(explicit, 'revive')?.working_hours).toBe(
+      JSON.stringify({ timezone: 'UTC', days: ['sat'], start: '09:00', end: '10:00' }),
+    );
+    db.close();
+    explicit.close();
   });
 
   it('v25 indexes audit by action, and the planner actually picks it over (team_id, ts)', () => {
@@ -192,7 +226,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(28); // runs v18…v28 (… + outcome-acceptance rename + dispatch nullable act_id)
+    expect(runMigrations(db)).toBe(30); // runs v18…v30 (… + outcome-acceptance rename + dispatch nullable act_id + working hours)
 
     const scope = (id: string) =>
       db
@@ -256,7 +290,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(28);
+    expect(runMigrations(db)).toBe(30);
 
     const policy = (id: string) =>
       db

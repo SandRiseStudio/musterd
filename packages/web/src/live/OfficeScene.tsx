@@ -1,4 +1,4 @@
-import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
+import type { Envelope, LaneBoard, MemberSummary, WorkingHours } from '@musterd/protocol';
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { MusterdWord } from '../brand/MusterdWord';
 import { actLabel, actTone, memberColor, memberPosture } from './format';
@@ -20,6 +20,7 @@ import { projectWallBoard } from './office-scene/wallboard';
  */
 function computeData(
   teamName: string,
+  teamWorkingHours: WorkingHours | null,
   roster: MemberSummary[],
   entries: RoomEntry[],
   board: LaneBoard | null,
@@ -27,6 +28,7 @@ function computeData(
   const byName = new Map(entries.map((e) => [e.name, e]));
   return {
     teamName,
+    teamWorkingHours,
     wallBoard: projectWallBoard(board),
     nodes: roster.map((m) => {
       const kind = m.kind === 'human' ? 'human' : 'agent';
@@ -61,6 +63,7 @@ function computeData(
  */
 export function OfficeScene({
   teamName,
+  teamWorkingHours = null,
   roster,
   envelopes,
   liveIds,
@@ -82,6 +85,7 @@ export function OfficeScene({
   workCues = 'none',
 }: {
   teamName: string;
+  teamWorkingHours?: WorkingHours | null;
   roster: MemberSummary[];
   envelopes: Envelope[];
   liveIds: Set<string>;
@@ -128,8 +132,8 @@ export function OfficeScene({
   const emittedRef = useRef<Set<string>>(new Set());
 
   const data = useMemo(
-    () => computeData(teamName, roster, entries, board),
-    [teamName, roster, entries, board],
+    () => computeData(teamName, teamWorkingHours, roster, entries, board),
+    [teamName, teamWorkingHours, roster, entries, board],
   );
   // Latest-value refs for the mount effect below, which subscribes ONCE and must not re-run when a
   // prop identity changes (re-running it would tear down and rebuild the whole canvas scene).

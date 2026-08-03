@@ -23,7 +23,7 @@ import {
 import { assignSeats } from './seating';
 import type { OfficeNode, Pose } from './types';
 import { projectWallBoard, STICKY_CAP, type WallBoard } from './wallboard';
-import type { Lane, LaneState } from '@musterd/protocol';
+import type { Lane, LaneState, WorkingHours } from '@musterd/protocol';
 
 /** A minimal lane for wall-board fixtures — only id and state matter to the wall. */
 function laneFix(id: string, state: LaneState): Lane {
@@ -234,6 +234,34 @@ describe('the wall agile board', () => {
     expect(paints).not.toContain('#EFE8D8'); // …but no sticky paper hangs under them
     expect(paints).not.toContain('#D8D4F3');
     expect(paints).not.toContain('rgba(180, 168, 143, 0.75)'); // and no tape holding nothing
+  });
+
+  it('paints the Team working-hours sign from schedule data', () => {
+    const texts: string[] = [];
+    const hours: WorkingHours = {
+      timezone: 'America/Los_Angeles',
+      days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+      start: '11:00',
+      end: '15:00',
+    };
+    renderScene(
+      textCtx([], texts),
+      fit,
+      new Map(),
+      roster([node('ada', 'working')]),
+      new Map(),
+      0,
+      'revive',
+      undefined,
+      null,
+      undefined,
+      null,
+      null,
+      hours,
+    );
+    expect(texts).toContain('TEAM WORKING HOURS');
+    expect(texts).toContain('MON–FRI · 11:00 AM–3:00 PM');
+    expect(texts).toContain('PACIFIC TIME');
   });
 
   it('writes only the overflow badge — a column past its cap says +N, nothing else says anything', () => {

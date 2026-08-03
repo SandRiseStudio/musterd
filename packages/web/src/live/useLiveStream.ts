@@ -1,4 +1,4 @@
-import type { Envelope, MemberSummary } from '@musterd/protocol';
+import type { Envelope, MemberSummary, WorkingHours } from '@musterd/protocol';
 import { useEffect, useRef, useState } from 'react';
 import {
   LiveClient,
@@ -22,6 +22,7 @@ export interface LiveStreamHooks {
 export interface LiveState {
   envelopes: Envelope[];
   roster: MemberSummary[];
+  teamWorkingHours: WorkingHours | null;
   status: ConnStatus;
   error: string | null;
   /** Ids that arrived live over the socket (vs the initial backfill) — drives the typewriter. */
@@ -51,6 +52,7 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
   // The daemon's feature epoch (ADR 148) — the reference the roster compares member epochs against.
   const [daemonEpoch, setDaemonEpoch] = useState<number | undefined>(undefined);
   const [roster, setRoster] = useState<MemberSummary[]>([]);
+  const [teamWorkingHours, setTeamWorkingHours] = useState<WorkingHours | null>(null);
   const [status, setStatus] = useState<ConnStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [liveIds, setLiveIds] = useState<Set<string>>(new Set());
@@ -106,7 +108,8 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
     Promise.all([fetchRoster(cfg), fetchHistory(cfg, { limit: 200 })])
       .then(([r, h]) => {
         if (!alive) return;
-        setRoster(r);
+        setRoster(r.members);
+        setTeamWorkingHours(r.working_hours);
         add(h);
         hooksRef.current.onConnected?.(); // backfill worked → re-arm the route's recovery guard
       })
@@ -140,7 +143,11 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
       onPresence: () => {
         if (!alive) return;
         fetchRoster(cfg)
-          .then((r) => alive && setRoster(r))
+          .then((r) => {
+            if (!alive) return;
+            setRoster(r.members);
+            setTeamWorkingHours(r.working_hours);
+          })
           .catch(() => {});
       },
       onStatus: (s) => alive && setStatus(s),
@@ -155,5 +162,14 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
     };
   }, [team, as, token]);
 
-  return { envelopes, roster, status, error, liveIds, daemonBuild, daemonEpoch };
+  return {
+    envelopes,
+    roster,
+    teamWorkingHours,
+    status,
+    error,
+    liveIds,
+    daemonBuild,
+    daemonEpoch,
+  };
 }

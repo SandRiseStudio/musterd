@@ -37,6 +37,7 @@ CREATE TABLE members (
   lifecycle   TEXT NOT NULL DEFAULT 'forever' CHECK (lifecycle IN ('forever','session','until')),
   lifecycle_until INTEGER,                   -- epoch ms; required iff lifecycle='until'
   availability TEXT,                         -- JSON schedule; STORED, NOT ENFORCED in v1 (roadmap)
+  working_hours TEXT,                        -- recurring JSON schedule; STORED, NOT ENFORCED (ADR 205)
   token_hash  TEXT,                          -- sha256 of the member's join token (null until issued)
   left_at     INTEGER,                       -- null = still a member
   created_at  INTEGER NOT NULL,
@@ -112,6 +113,8 @@ CREATE TABLE schema_meta (
 
 - Single forward-only migration runner. `schema_meta.schema_version` gates it. v1 ships version `1` = the DDL above. A migration is a `(version, up(db))` pair in `packages/server/src/db/migrations.ts`; the runner applies any with version > current inside a transaction, then bumps `schema_version`.
 - No down-migrations in v1.
+- **v29 (`musterd/0.3`, ADR 205):** `ALTER TABLE teams ADD COLUMN working_hours TEXT` + `ALTER TABLE members ADD COLUMN working_hours TEXT`. The nullable JSON value stores a validated recurring schedule (`timezone`, weekday list, `start`, `end`); a Member value replaces the Team value for that Member, and missing values inherit. It is informational and never enforces Presence.
+- **v30 (`musterd/0.3`, ADR 205):** initialize the existing `revive` Team to Monday–Friday, 11:00–15:00 `America/Los_Angeles` only when its Team schedule is still unset. Explicit operator values are preserved.
 - **v2 (`musterd/0.2`, ADR 010):** `ALTER TABLE presence ADD COLUMN held_until INTEGER`. Non-null once a connection has cleanly dropped — the row becomes a _reclaim hold_ (`conn_id` cleared, `held_until = now + 45s`) instead of being deleted, so the member can reconnect within the grace window. Agent single-active is decided by _active_ presence (`conn_id` set, `held_until` NULL); held rows are excluded from the live roster and swept by the reaper when `held_until` passes. (Single-active is kind-scoped — agents only; a human seat holds multiple live rows, ADR 042.) The v1 DDL block above is unchanged; this is an additive ALTER.
 - **v3 (`musterd/0.2`, ADR 014):** `ALTER TABLE presence ADD COLUMN provenance TEXT` + `ADD COLUMN workspace TEXT`. The provenance/where-on-attach seed: `provenance` (`session | asked | hook | scheduled | daemon`) records _why_ this attachment exists; `workspace` records the gracefully-degrading "where" label (folder, qualified by branch/subpath). Both are nullable, captured once at attach from the client's `hello`, surfaced on the roster, and never guessed by the server. Additive ALTERs; pre-v3 rows read `null`.
 - **v4 (`musterd/0.2`, ADR 021):** `ALTER TABLE presence ADD COLUMN driver TEXT`. Driver co-presence: `driver` records the human steering this session, when one is, so the roster reads `driven by <name>` instead of showing the driving human offline. Nullable, captured once at attach from the client's `hello` (the MCP adapter sets it from `MUSTERD_DRIVER`), surfaced on the roster, never guessed. Additive ALTER; pre-v4 rows read `null`.

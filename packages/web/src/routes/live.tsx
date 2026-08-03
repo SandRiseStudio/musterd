@@ -117,7 +117,7 @@ function LivePage() {
     recoverAttempts.current = 0;
   }, []);
 
-  const { envelopes, roster, status, error, liveIds, daemonBuild, daemonEpoch } = useLiveStream(
+  const { envelopes, roster, teamWorkingHours, status, error, liveIds, daemonBuild, daemonEpoch } = useLiveStream(
     cfg,
     {
       onCredentialInvalid: recoverObserver,
@@ -314,6 +314,7 @@ function LivePage() {
           >
             <OfficeScene
               teamName={team}
+              teamWorkingHours={teamWorkingHours}
               roster={roster}
               envelopes={envelopes}
               liveIds={liveIds}

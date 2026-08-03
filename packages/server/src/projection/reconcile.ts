@@ -55,11 +55,13 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       slug: spec.team.slug,
       display: spec.team.display ?? null,
       defaultLifecycle: teamLifecycle,
+      workingHours: spec.team.working_hours ?? null,
     });
   } else {
     updateTeam(db, team.id, {
       display: spec.team.display ?? null,
       defaultLifecycle: teamLifecycle,
+      workingHours: spec.team.working_hours ?? null,
     });
   }
 
@@ -93,6 +95,7 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       role: seat.role ?? '',
       lifecycle,
       lifecycleUntil,
+      workingHours: seat.working_hours ?? null,
     };
     const existing = getMemberByName(db, team.id, name); // includes tombstoned rows
     if (!existing) {
@@ -103,6 +106,7 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
         role: fields.role,
         lifecycle: fields.lifecycle,
         lifecycleUntil: fields.lifecycleUntil,
+        workingHours: fields.workingHours ?? null,
       });
       result.added.push(name);
       result.minted[name] = token;
@@ -115,7 +119,8 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       existing.kind !== fields.kind ||
       existing.role !== fields.role ||
       existing.lifecycle !== fields.lifecycle ||
-      existing.lifecycle_until !== fields.lifecycleUntil
+      existing.lifecycle_until !== fields.lifecycleUntil ||
+      existing.working_hours !== (fields.workingHours ? JSON.stringify(fields.workingHours) : null)
     ) {
       // UPDATE in place — id, token_hash, bound_at preserved (live session unaffected).
       updateMemberIdentity(db, existing.id, fields);

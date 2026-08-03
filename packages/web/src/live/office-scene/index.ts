@@ -234,6 +234,7 @@ export function mountOffice(
   let clock = 0;
   let placements = new Map<string, Placement>();
   let teamName = 'revive';
+  let teamWorkingHours: OfficeData['teamWorkingHours'] = null;
   let wallBoard: WallBoard | null = null; // the wall's agile board (bake-time data)
   let heads = new Map<string, Pt>(); // home head anchors — where in-place cues sit
   let occupied = false; // any online member on the floor → overhead lights on
@@ -374,7 +375,21 @@ export function mountOffice(
     bctx.clearRect(0, 0, width, height);
     const nodes = actors.nodes();
     const poses = actors.poses();
-    const anchors = renderScene(bctx, fit, placements, nodes, poses, clock, teamName, lightEnv, pet, actors.sceneFx(), recep, wallBoard);
+    const anchors = renderScene(
+      bctx,
+      fit,
+      placements,
+      nodes,
+      poses,
+      clock,
+      teamName,
+      lightEnv,
+      pet,
+      actors.sceneFx(),
+      recep,
+      wallBoard,
+      teamWorkingHours,
+    );
     heads = anchors.heads;
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
@@ -836,7 +851,21 @@ export function mountOffice(
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, width, height);
-    const anchors = renderScene(ctx, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, pet, actors.sceneFx(), recep, wallBoard);
+    const anchors = renderScene(
+      ctx,
+      fit,
+      placements,
+      actors.nodes(),
+      actors.poses(),
+      clock,
+      teamName,
+      lightEnv,
+      pet,
+      actors.sceneFx(),
+      recep,
+      wallBoard,
+      teamWorkingHours,
+    );
     drawCues();
     positionLabels(anchors.heads);
   }
@@ -1136,6 +1165,7 @@ export function mountOffice(
 
   function update(next: OfficeData) {
     teamName = next.teamName ?? 'revive';
+    teamWorkingHours = next.teamWorkingHours ?? null;
     wallBoard = next.wallBoard ?? null;
     placements = assignSeats(next.nodes);
     const byName = new Map(next.nodes.map((n) => [n.name, n]));

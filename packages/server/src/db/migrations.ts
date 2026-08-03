@@ -547,6 +547,34 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // v29 — recurring Team/Member working hours (ADR 205). Nullable JSON keeps the schedule
+    // informational and preserves the v1 DDL; the shared WorkingHoursSchema validates writes.
+    version: 29,
+    up: (db) => {
+      db.exec('ALTER TABLE teams ADD COLUMN working_hours TEXT');
+      db.exec('ALTER TABLE members ADD COLUMN working_hours TEXT');
+    },
+  },
+  {
+    // v30 — initial revive Team schedule (ADR 205). Only fill an unset value: an operator's
+    // explicit schedule must survive an upgrade, while the shipped revive Team gets its first
+    // durable schedule without requiring a settings surface.
+    version: 30,
+    up: (db) => {
+      db.prepare(
+        `UPDATE teams SET working_hours = ?
+         WHERE slug = 'revive' AND working_hours IS NULL`,
+      ).run(
+        JSON.stringify({
+          timezone: 'America/Los_Angeles',
+          days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+          start: '11:00',
+          end: '15:00',
+        }),
+      );
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {
