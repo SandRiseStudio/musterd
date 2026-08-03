@@ -179,7 +179,7 @@ git commit -m "feat(cli): probe and enumerate Codex CLI sessions" -m "Refs ADR-2
 
 - [ ] **Step 1: Write failing pure argv/environment tests**
 
-Assert fresh uses `codex exec --json`; resume uses `codex exec resume <captured-thread> --json`. Both use the daemon-composed line verbatim, workspace `-C`, existing `MUSTERD_PROVENANCE=wake`, and no secret-bearing argv. Assert neither builder contains:
+Assert fresh uses `codex exec --json -C <workspace>`; resume uses `codex exec resume <captured-thread> --json` and does **not** invent `-C` (Codex 0.146 does not accept it). The spawned child’s `cwd` is the enrolled workspace for both paths. Both use the daemon-composed line verbatim, existing `MUSTERD_PROVENANCE=wake`, and no secret-bearing argv. Assert neither builder contains:
 
 ```ts
 '--dangerously-bypass-hook-trust'
