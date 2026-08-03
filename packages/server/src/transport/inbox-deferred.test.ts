@@ -208,6 +208,44 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
     expect(rows).toHaveLength(0);
   });
 
+  it('surfaces a deferral that never raised as a report exception (ADR 211 Failure mode)', async () => {
+    const ask = await send('nick', nickCred, undefined, {
+      to: { kind: 'member', name: 'Ada' },
+      act: 'ask',
+      body: 'x',
+      meta: { species: 'consult', tier: 'advisory' },
+    });
+    await send('Ada', agentKey, 'Ada', {
+      act: 'wait',
+      body: 'not now',
+      meta: { defer_ref: ask.id, until: { lane: 'never-moves' } },
+    });
+
+    // This harness stamps a synthetic clock, so the wait's ts is arbitrary relative to the real
+    // threshold — set it explicitly for each half of the assertion.
+    const setWaitTs = (ts: number) =>
+      server.db.prepare('UPDATE messages SET ts = ? WHERE act = ?').run(ts, 'wait');
+
+    // Fresh: nothing is old enough to warn about.
+    setWaitTs(Date.now() - 1000);
+    let report = await get('/teams/dawn/report', nickCred).then((r) => r.json);
+    expect(report.long_deferred).toEqual([]);
+
+    // Aged past the threshold, condition still never fired.
+    setWaitTs(Date.now() - 8 * 24 * 60 * 60 * 1000);
+
+    report = await get('/teams/dawn/report', nickCred).then((r) => r.json);
+    expect(report.long_deferred).toHaveLength(1);
+    expect(report.long_deferred[0]).toMatchObject({
+      seat: 'Ada',
+      target: ask.id,
+      until: 'lane',
+      age_days: 8,
+    });
+    // Condition kind only — the lane id is not a report fact.
+    expect(JSON.stringify(report.long_deferred)).not.toContain('never-moves');
+  });
+
   it('reports an empty deferred list when nothing is deferred', async () => {
     const inbox = await get('/teams/dawn/inbox', agentKey, 'Ada').then((r) => r.json);
     expect(inbox.deferred).toEqual([]);

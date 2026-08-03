@@ -2,6 +2,7 @@ import type {
   BlockedLane,
   CoordinationDensity,
   FlowMetrics,
+  LongDeferred,
   Report,
   ReviewMetrics,
   SteeringMetrics,
@@ -10,11 +11,15 @@ import type {
   WakeSeatCost,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+
+/** Matches the inbox/wake reads' bound (ADR 211 §3). */
+const DEFERRAL_SCAN_LIMIT = 2000;
 import { actAnswered, openDirectedLedger } from './delivery.js';
 import { listGoals } from './goals.js';
 import { listLanes } from './lanes.js';
 import { deriveMast } from './mast.js';
-import { getMemberByName } from './members.js';
+import { getMemberById, getMemberByName } from './members.js';
+import { listTeamMessages, longDeferred, rowToEnvelope } from './messages.js';
 import { effectiveWakePolicy, getResidency } from './residency.js';
 import { teamFamilyPosture } from './review.js';
 import type { MessageRow } from './rows.js';
@@ -608,6 +613,32 @@ export function deriveWakeMetrics(
 }
 
 /** The whole report projection (ADR 050) — altitude-agnostic; the surfaces frame it per altitude. */
+/**
+ * The long-deferred exception (ADR 211 Failure mode), per seat. An act deferred until a lane that
+ * never moves again is never raised, so postponement can quietly become dropping. Surfacing it is
+ * the whole mitigation: warn, never block, never auto-un-defer — the system does not decide on a
+ * Member's behalf that their deferral has expired.
+ */
+function deriveLongDeferred(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  now: number,
+): LongDeferred[] {
+  const rows = listTeamMessages(db, teamId, { limit: DEFERRAL_SCAN_LIMIT });
+  const envelopes = rows.map((r) => {
+    const from = getMemberById(db, r.from_member);
+    const to = r.to_member ? getMemberById(db, r.to_member) : null;
+    return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
+  });
+  const seats = new Set(envelopes.filter((e) => e.act === 'wait').map((e) => e.from));
+  const out: LongDeferred[] = [];
+  for (const seat of seats) {
+    for (const d of longDeferred(envelopes, seat, now)) out.push({ seat, ...d });
+  }
+  return out.sort((a, b) => a.deferred_ts - b.deferred_ts);
+}
+
 export function deriveReport(
   db: Database,
   teamId: string,
@@ -634,6 +665,7 @@ export function deriveReport(
     wake: deriveWakeMetrics(db, teamId, now),
     tool_calls: deriveToolCallMetrics(db, teamId, now),
     review: deriveReviewMetrics(db, teamId, now),
+    long_deferred: deriveLongDeferred(db, teamId, teamSlug, now),
     // ADR 172: the model-family posture snapshot — derived, never stored. Sustained monoculture is
     // read off the SERIES of reports, not off any single one.
     ...(presenceTimeoutMs !== undefined

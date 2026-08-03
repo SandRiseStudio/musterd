@@ -313,6 +313,40 @@ export function raisedDeferrals(messages: Envelope[], me: string): Set<string> {
   return out;
 }
 
+/** A deferral this old that has not raised is the ADR 211 loss mode — surfaced, never actuated. */
+export const LONG_DEFERRED_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The deferrals that have gone quiet (ADR 211 Failure mode): older than the threshold and still not
+ * raised. An act deferred until a lane that never moves again is never raised, so postponement
+ * becomes a tidy way to drop work — this is the exception that makes that visible.
+ *
+ * Warn, never block, never auto-un-defer. The system does not get to decide on a Member's behalf
+ * that their deferral has expired; it only says the condition has not fired in a long time.
+ */
+export function longDeferred(
+  messages: Envelope[],
+  me: string,
+  now: number,
+  thresholdMs: number = LONG_DEFERRED_MS,
+): { target: string; until: 'lane' | 'reply'; deferred_ts: number; age_days: number }[] {
+  const raised = raisedDeferrals(messages, me);
+  const out: { target: string; until: 'lane' | 'reply'; deferred_ts: number; age_days: number }[] =
+    [];
+  for (const d of deferrals(messages, me).values()) {
+    if (raised.has(d.target)) continue;
+    const age = now - d.ts;
+    if (age < thresholdMs) continue;
+    out.push({
+      target: d.target,
+      until: 'reply' in d.until ? 'reply' : 'lane',
+      deferred_ts: d.ts,
+      age_days: Math.floor(age / (24 * 60 * 60 * 1000)),
+    });
+  }
+  return out.sort((a, b) => a.deferred_ts - b.deferred_ts);
+}
+
 /**
  * The member's most recent `status_update` reduced to a roster label + when it was set.
  * The label is `meta.state` (the SPEC field) or, if absent, the message body. Returns null

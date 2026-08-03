@@ -1,6 +1,6 @@
 import { PROTOCOL_VERSION, type Envelope } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { deferrals, raisedDeferrals } from './messages.js';
+import { LONG_DEFERRED_MS, deferrals, longDeferred, raisedDeferrals } from './messages.js';
 
 /**
  * The pure deferral fold behind "raise this again later" (ADR 211). A deferring `wait`
@@ -169,5 +169,66 @@ describe('raisedDeferrals (ADR 211 §2)', () => {
       deferUntil('w2', 300, { reply: true }),
     ];
     expect(raisedDeferrals(msgs, 'me').has('a1')).toBe(false);
+  });
+});
+
+describe('longDeferred (ADR 211 Failure mode)', () => {
+  const now = 1_785_790_000_000;
+  const old = now - LONG_DEFERRED_MS - 1000;
+
+  it('reports a deferral older than the threshold that has never raised', () => {
+    const msgs = [
+      env({ id: 'a1', from: 'stanley', to: toMe, act: 'ask', ts: old - 100 }),
+      env({
+        id: 'w1',
+        from: 'me',
+        act: 'wait',
+        ts: old,
+        meta: { defer_ref: 'a1', until: { lane: 'L1' } },
+      }),
+    ];
+    expect(longDeferred(msgs, 'me', now)).toEqual([
+      { target: 'a1', until: 'lane', deferred_ts: old, age_days: 7 },
+    ]);
+  });
+
+  it('stays quiet on a recent deferral', () => {
+    const msgs = [ask, deferUntil('w1', now - 1000, { lane: 'L1' })];
+    expect(longDeferred(msgs, 'me', now)).toEqual([]);
+  });
+
+  it('stays quiet on an old deferral that has since raised', () => {
+    const msgs = [
+      env({ id: 'a1', from: 'stanley', to: toMe, act: 'ask', ts: old - 100 }),
+      env({
+        id: 'w1',
+        from: 'me',
+        act: 'wait',
+        ts: old,
+        meta: { defer_ref: 'a1', until: { lane: 'L1' } },
+      }),
+      env({
+        id: 'l1',
+        from: 'izzo',
+        act: 'message',
+        ts: now - 100,
+        meta: { lane_state: { lane: 'L1', state: 'done' } },
+      }),
+    ];
+    expect(longDeferred(msgs, 'me', now)).toEqual([]);
+  });
+
+  it('names the condition kind only — never the lane id', () => {
+    const msgs = [
+      env({ id: 'a1', from: 'stanley', to: toMe, act: 'ask', ts: old - 100 }),
+      env({
+        id: 'w1',
+        from: 'me',
+        act: 'wait',
+        ts: old,
+        meta: { defer_ref: 'a1', until: { lane: 'secret-lane' } },
+      }),
+    ];
+    expect(JSON.stringify(longDeferred(msgs, 'me', now))).not.toContain('secret-lane');
   });
 });
