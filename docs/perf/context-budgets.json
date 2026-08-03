@@ -1,0 +1,33 @@
+{
+  "note": "Standing-context byte budgets (spec 2026-08-03, `pnpm context:check`). Every byte musterd injects into a seat's context \u2014 tools/list render, primer, hook nudges \u2014 measured statically from source-of-truth exports. Raising any budget requires replacing that item's `justification`. bytes are UTF-8 of the model-readable text; estTokens = bytes/4 (the SurfaceRender formula).",
+  "items": {
+    "toolsListDefaultBytes": {
+      "budget": 14138,
+      "justification": "baseline 2026-08-03 (13464 B) + 5% headroom"
+    },
+    "toolsListMutedBytes": {
+      "budget": 4694,
+      "justification": "baseline 2026-08-03 (4470 B) + 5% headroom"
+    },
+    "primerBytes": {
+      "budget": 2607,
+      "justification": "baseline 2026-08-03 (2482 B) + 5% headroom"
+    },
+    "sessionStartNudgesBytes": {
+      "budget": 678,
+      "justification": "baseline 2026-08-03 (645 B) + 5% headroom"
+    },
+    "promptSubmitNudgeBytes": {
+      "budget": 186,
+      "justification": "baseline 2026-08-03 (177 B) + 5% headroom"
+    },
+    "perTurnTotalBytes": {
+      "budget": 14324,
+      "justification": "baseline 2026-08-03 (13641 B) + 5% headroom"
+    },
+    "perSessionTotalBytes": {
+      "budget": 17607,
+      "justification": "baseline 2026-08-03 (16768 B) + 5% headroom"
+    }
+  }
+}

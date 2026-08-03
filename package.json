@@ -16,6 +16,7 @@
     "source-nul:check": "node --disable-warning=ExperimentalWarning scripts/check-source-nul.ts",
     "vocab:check": "node --disable-warning=ExperimentalWarning scripts/check-vocab.ts",
     "perf:check": "node --disable-warning=ExperimentalWarning scripts/perf/check-budgets.ts",
+    "context:check": "node --disable-warning=ExperimentalWarning scripts/context/check-budgets.ts",
     "guidance:check": "node --disable-warning=ExperimentalWarning scripts/check-guidance.ts",
     "roadmap:gen": "node --disable-warning=ExperimentalWarning scripts/gen-roadmap.ts",
     "roadmap:check": "node --disable-warning=ExperimentalWarning scripts/gen-roadmap.ts --check",
