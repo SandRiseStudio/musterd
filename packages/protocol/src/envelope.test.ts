@@ -178,6 +178,76 @@ describe('EnvelopeSchema', () => {
       });
       expect(ok.meta).toMatchObject({ ask_ref: 'msg-0', until: '1h' });
     });
+
+    describe('the deferring wait (ADR 211 §1)', () => {
+      it('accepts a lane condition and a reply condition', () => {
+        const lane = makeEnvelope({
+          ...base,
+          act: 'wait',
+          meta: { defer_ref: 'msg-0', until: { lane: 'lane-1' } },
+        });
+        expect(lane.meta).toMatchObject({ defer_ref: 'msg-0', until: { lane: 'lane-1' } });
+        const reply = makeEnvelope({
+          ...base,
+          act: 'wait',
+          meta: { defer_ref: 'msg-0', until: { reply: true } },
+        });
+        expect(reply.meta).toMatchObject({ defer_ref: 'msg-0', until: { reply: true } });
+      });
+
+      it('requires meta.until when a wait names the act it defers', () => {
+        expect(() =>
+          makeEnvelope({ ...base, act: 'wait', meta: { defer_ref: 'msg-0' } }),
+        ).toThrow();
+        expect(() =>
+          makeEnvelope({ ...base, act: 'wait', meta: { defer_ref: '  ', until: { reply: true } } }),
+        ).toThrow();
+      });
+
+      it('rejects a condition that is neither a lane nor a reply', () => {
+        expect(() =>
+          makeEnvelope({ ...base, act: 'wait', meta: { defer_ref: 'msg-0', until: { at: 1 } } }),
+        ).toThrow();
+        expect(() =>
+          makeEnvelope({
+            ...base,
+            act: 'wait',
+            meta: { defer_ref: 'msg-0', until: { reply: false } },
+          }),
+        ).toThrow();
+        expect(() =>
+          makeEnvelope({
+            ...base,
+            act: 'wait',
+            meta: { defer_ref: 'msg-0', until: { lane: 'l1', reply: true } },
+          }),
+        ).toThrow();
+      });
+
+      // ADR 179: the daemon runs no clocks. A duration is the DECIDING wait's shape, never this one.
+      it('rejects a wall-clock until on a deferring wait', () => {
+        expect(() =>
+          makeEnvelope({ ...base, act: 'wait', meta: { defer_ref: 'msg-0', until: '1h' } }),
+        ).toThrow();
+        expect(() =>
+          makeEnvelope({
+            ...base,
+            act: 'wait',
+            meta: { defer_ref: 'msg-0', until: { at: 1785790000000 } },
+          }),
+        ).toThrow();
+      });
+
+      it('rejects a wait that is both deciding and deferring — until would be ambiguous', () => {
+        expect(() =>
+          makeEnvelope({
+            ...base,
+            act: 'wait',
+            meta: { ask_ref: 'msg-0', defer_ref: 'msg-0', until: { reply: true } },
+          }),
+        ).toThrow();
+      });
+    });
   });
 
   it('rejects a wrong protocol version', () => {
