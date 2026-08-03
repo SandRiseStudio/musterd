@@ -118,7 +118,7 @@ export interface Pod {
   axis: 'ns' | 'ew';
   /** Four desks (two facing pairs) or two (one facing pair) — the 2026-08-02 re-cut mixes sizes so
    * the room reads grown-organically rather than stamped from a grid. */
-  size: 2 | 4;
+  size: 1 | 2 | 4;
   /** The pod's floor rug — a zone marker under the whole cluster, seats included. With no divider to carry
    * it, the rug is the *only* thing that makes a pod a place: it is what lets a member say "the blue pod". */
   rug: Rug;
@@ -127,7 +127,7 @@ export interface Pod {
 export const PODS: Pod[] = [
   {
     id: 0,
-    cx: 240,
+    cx: 215,
     // The band under the bench is the constraint above (north seats must clear MIN_SPOT_GAP from the
     // bench chairs) and pod 2's pads the one below. 255 sits in the middle of that pocket instead of
     // against its south edge. (255 was tried on 2026-08-03 and fails: at that latitude the north
@@ -156,14 +156,19 @@ export const PODS: Pod[] = [
     rug: { shape: 'rect', weave: 'border', fill: '#ab97a4', mark: '#8b7683' },
   },
   {
-    // Upper-centre duo, in the clearing the huddle left. 'ew' is load-bearing: an 'ns' duo would add
-    // a third viewer-facing desk and break the exactly-two rule pod 0 carries. 500 → 455 because at
-    // 500 its rug ran 33 units UNDER the nook's — two zones sharing floor read as one shapeless area.
+    // Upper-centre, in the clearing the huddle left. 'ew' is load-bearing: an 'ns' pod here would add
+    // a third viewer-facing desk and break the exactly-two rule pod 0 carries.
+    //
+    // A DUO until 2026-08-03, now a solo — the one desk this round spends. It was the lounge's west
+    // wall, 13 units off the nook's rug, and it could not move: a duo's two seats put their
+    // stand-behind floor on OPPOSITE sides, so it needed ~350 units of width in a band that had ~190.
+    // One desk needs that clearance on one side only, which is what let it move 45 west and hand the
+    // lounge a 55-unit margin where it had 13.
     id: 3,
-    cx: 500,
+    cx: 455,
     cy: 250,
     axis: 'ew',
-    size: 2,
+    size: 1,
     rug: { shape: 'rect', weave: 'stripes', fill: '#a8ab8e', mark: '#8c9070' },
   },
 ];
@@ -194,6 +199,8 @@ export const POD_RUG = { along: 230, across: 250 };
 /** A duo's rug — the facing pair sits on the pod's axis, so the rug is narrow across it. The 170
  * along is what lets the front duo fit between reception's rug and the meeting zone's. */
 export const POD_RUG_DUO = { along: 170, across: 140 };
+/** A solo's rug — one desk's worth, and no bigger: the whole point of a solo is the floor it gives back. */
+export const POD_RUG_SOLO = { along: 130, across: 120 };
 
 /** The four desks of a pod, in pod-local order (north/west row first). */
 function podDesks(pod: Pod): DeskSlot[] {
@@ -208,6 +215,12 @@ function podDesks(pod: Pod): DeskSlot[] {
     pod: pod.id,
     kind: 'pod',
   });
+  if (pod.size === 1) {
+    // The desk sits ON the pod centre and faces `near`, so its seat — and the 60 units of floor the
+    // occupant needs to push back and stand — land on the side AWAY from whatever this pod was moved
+    // to make room for.
+    return [at(0, 0, near, 0)];
+  }
   if (pod.size === 2) {
     // One facing pair on the pod's axis. Ids keep the *4 stride (0 and 2), so a duo's desks hash to
     // the same props/chair-styles they would as the corresponding quad rows — and ids stay unique.
@@ -249,7 +262,7 @@ export const WINDOW_DESKS: ReadonlyArray<{ lx: number; ly: number; dir: Dir }> =
   // ~150 units of clear floor for desk + seat + stand-behind, and that band is pod 0's rug at the top,
   // reception at the bottom and the door posts in between. The one built there measured a 5.6x detour
   // from the door — a seat nobody could reach without crossing the whole room first.
-  { lx: 776, ly: 380, dir: 'W' },
+  { lx: 776, ly: 390, dir: 'W' },
   { lx: 776, ly: 760, dir: 'W' },
 ];
 
@@ -276,18 +289,22 @@ export const DESK_SLOTS: DeskSlot[] = [...PODS.flatMap(podDesks), ...benchSlots,
 
 /** The break nook — where `away` members drift; also the broadcast megaphone spot.
  *
- * (700,190) → (740,180) on 2026-08-03. Pod 3 cannot move west to escape this rug: an 'ew' duo needs
- * ~350 units of width because BOTH its seats put their stand-behind floor on the outside, and pod 0's
- * east desk pins pod 3's west edge. So the nook gave the ground instead — it has a whole corner and
- * pod 3 has a band. */
-export const NOOK = { lx: 740, ly: 180 };
+ * (700,190) → (740,180) → (725,185). The middle step shoved it east to escape pod 3's rug and left it
+ * 18 units off the east wall and 38 off the north — boxed on all four sides at once (13/24/18/38).
+ * Pod 3 becoming a solo desk is what let it come back off the walls. */
+export const NOOK = { lx: 725, ly: 175 };
 
 /** The nook rug's iso radius — furniture and the away cluster stay inside it. Shrunk 192 → 148 with
  * the armchairs it was sized around (2026-08-02): the rug only needs to cover the kitchenette run and
  * the couch now, and a rug much wider than its furniture reads as a stain rather than a zone.
- * 148 → 142 on 2026-08-03 to widen the bare floor between this rug and pod 3's (the away arc's
- * furthest spot is at |dx|+|dy| = 136, so the rug still covers everyone standing on it). */
-export const NOOK_RUG_R = 142;
+ * 142 → 150 once pod 3 stopped crowding it.
+ *
+ * It is sized to the SEATING — couch, coffee table, and the arc of away members — and NOT to the
+ * kitchenette, which stands proud of it on bare floor. That is deliberate and it is why this rug can
+ * stay modest: the run is 200 units wide sitting 70 back from centre, so a diamond that reached its
+ * far corner would need r≈195 and would swallow the whole corner of the room. Nobody puts a rug under
+ * a kitchen counter anyway. */
+export const NOOK_RUG_R = 150;
 
 /** The nook's rug: the room's one big diamond, bound with a darker edge. */
 export const NOOK_RUG: Rug = { shape: 'diamond', weave: 'border', fill: '#ce9256', mark: '#b2743c' };
@@ -306,17 +323,17 @@ export const LOUNGE = {
   // kitchenette is off — it's a little small compared to the rest of the office space"). A desk is
   // 100 x 68; a 78-wide counter beside it read as a side table with a bowl on it. The run now grows
   // to the RIGHT — the left end is pinned by the fridge, and extending that way would have buried it.
-  fridge: { dx: -114, dy: -48, w: 36, d: 30, h: 72 },
-  counter: { dx: -33, dy: -76, w: 120, d: 30, h: 34 },
-  machine: { dx: -74, dy: -76 },
-  cooler: { dx: 44, dy: -82, w: 26, d: 26, h: 52 }, // water cooler
+  fridge: { dx: -104, dy: -44, w: 36, d: 30, h: 72 },
+  counter: { dx: -30, dy: -70, w: 120, d: 30, h: 34 },
+  machine: { dx: -71, dy: -70 },
+  cooler: { dx: 42, dy: -76, w: 26, d: 26, h: 52 }, // water cooler
   // (a nook plant used to sit at dx 112 — removed to thin the nook's right edge, which already has the
   // big floor plant at 830,330 and the right-wall bookshelf beside it.)
   // Conversation set in the front. The gaps are the point: a coffee table sits a stride from a couch,
   // not against it, and the old 64-unit centre spacing put the table's edge within a few units of the
   // couch front (couch dep 44, table d 40 — 42 units of furniture across a 64-unit gap).
   couch: { dx: 6, dy: -4, len: 108, dep: 44 }, // faces S (toward the room)
-  table: { dx: 6, dy: 74, w: 56, d: 40 },
+  table: { dx: 6, dy: 86, w: 56, d: 40 },
   // The chairs stay where they were. Pushing them out with the table walked chairW into a reading
   // spot (MIN_SPOT_GAP) and put an away member's stand point on furniture — the gap this set needed
   // was between the couch and the table, and widening everything just moved the crowding outward.
@@ -340,7 +357,7 @@ export const NOOK_SPOTS: ReadonlyArray<{ dx: number; dy: number }> = [
   { dx: -100, dy: 8 }, // west flank, south of the fridge
   { dx: -78, dy: 58 }, // southwest corner of the set
   { dx: -58, dy: 78 }, // front arc, clear of the coffee table's west corner
-  { dx: 14, dy: 122 },
+  { dx: 10, dy: 134 },
   { dx: 74, dy: 62 }, // southeast corner
   { dx: 96, dy: 14 }, // east flank, below the cooler
 ];
@@ -351,7 +368,7 @@ export const COFFEE_STAND = { lx: NOOK.lx - 74, ly: NOOK.ly - 46 };
 
 /** The kitchenette sink's spot on the counter (centre-run, between the machine and the bean bag) —
  * shared by the counter painter and the fridge errand's plate drop-off. */
-export const SINK = { dx: -52, dy: -76 };
+export const SINK = { dx: -49, dy: -70 };
 
 // ── errand stand points (ADR 086 Phase 3: purposeful errands) ─────────────────────────────────────────
 // Each is where the walker *stands* during the errand's dwell, just clear of the appliance's inflated
