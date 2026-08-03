@@ -418,6 +418,20 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // A legacy baked MUSTERD_MODEL. Provisioning stopped emitting it, but entries written before that
     // still carry one at the TOP of the adapter's ladder, where no observation can correct it — the
     // exact shape that had a seat attesting `grok-4.5` for weeks while running `claude-opus-4-8`.
+    // MUSTERD_SURFACE, the one this set was missing. Same legacy-snapshot argument as the model above,
+    // and measured biting on 2026-08-03: a pre-ADR-165 `.cursor/mcp.json` still baked
+    // `MUSTERD_SURFACE=cursor`, which outranks binding.json and — unlike model — has no observation
+    // path that could ever correct it, so the seat reported `cursor` while a claude-code hook was
+    // demonstrably capturing its sessions (PR #607 made the contradiction visible; this names the
+    // entry that causes it).
+    if (d.registeredSurface !== undefined) {
+      entryDrift.push(
+        `${h.label}'s musterd server bakes MUSTERD_SURFACE=${d.registeredSurface} — a wire-time ` +
+          `snapshot that outranks .musterd/binding.json and that no observation can correct, so the ` +
+          `roster, presence and audit report whatever it says. Run \`musterd wire\` here to rewrite ` +
+          `the entry without it.`,
+      );
+    }
     if (d.registeredModel !== undefined) {
       entryDrift.push(
         `${h.label}'s musterd server bakes MUSTERD_MODEL=${d.registeredModel} — a wire-time snapshot ` +
@@ -425,28 +439,44 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
           `correct. Run \`musterd wire\` here to rewrite the entry without it.`,
       );
     }
-    // Per-seat SECRETS in a slot shared by every seat worktree of this repo (ADR 143/165). Flagged on
-    // PRESENCE, not on mismatch: the entry is keyed by repo root, so a grant that matches *this*
-    // folder is still the credential every sibling worktree reads — and it outranks their own
-    // binding.json in the adapter's ladder. Provisioning no longer writes either one.
+    // Per-seat SECRETS in a registered entry (ADR 143/165). Flagged on PRESENCE, not on mismatch —
+    // but the REASON depends on how far the entry reaches, so the note must not assert one harness's
+    // story about another's file. A repo-shared entry (Claude Code, keyed by repo root) is a
+    // family-bleed: a grant that matches *this* folder is still every sibling worktree's credential.
+    // A per-folder entry (`.cursor/mcp.json`, `.codex/config.toml`) has no sibling to bleed onto, and
+    // musterd's own init gitignores it — so "committable" would be a claim this cannot make (checked:
+    // `.gitignore` already lists `.cursor/mcp.json`). What survives is precedence: a baked credential
+    // sits ABOVE binding.json in the adapter's ladder, so once it goes stale, re-minting the seat
+    // (`musterd agent <seat>`) writes a fresh key the adapter never reads, and the seat keeps failing
+    // to claim with a repair that looks like it should have worked.
+    const shared = h.entryScope === 'repo-shared';
     for (const [name, value, why] of [
       [
         'MUSTERD_GRANT',
         d.registeredGrant,
-        'so a sibling seat presents this grant at claim time and gets denied or sent to approval',
+        shared
+          ? 'so a sibling seat presents this grant at claim time and gets denied or sent to approval'
+          : 'and it outranks binding.json, so re-minting the seat cannot repair a stale one',
       ],
       [
         'MUSTERD_AGENT_KEY',
         d.registeredAgentKey,
-        'so a sibling seat may authenticate with this team key rather than its own',
+        shared
+          ? 'so a sibling seat may authenticate with this team key rather than its own'
+          : 'and it outranks binding.json, so re-minting the seat cannot repair a stale one',
       ],
     ] as const) {
       if (value === undefined) continue;
       entryDrift.push(
-        `${h.label}'s musterd server bakes ${name} — a per-seat secret in an entry Claude Code keys ` +
-          `by repo ROOT, which every git worktree of this repo shares, ${why}. ` +
-          `Run \`musterd wire\` here: it rewrites the entry from .musterd/binding.json without ` +
-          `secrets, and because the entry is shared, one run repairs every seat in the family.`,
+        `${h.label}'s musterd server bakes ${name} — a per-seat secret in ` +
+          (shared
+            ? `an entry ${h.label} keys by repo ROOT, which every git worktree of this repo shares, `
+            : `the entry itself, `) +
+          `${why}. Run \`musterd wire\` here: it rewrites the entry from .musterd/binding.json ` +
+          `without secrets` +
+          (shared
+            ? `, and because the entry is shared, one run repairs every seat in the family.`
+            : `.`),
       );
     }
     // Per-worktree POLICY in the shared slot (ADR 165 inc 2) — not secrets, but the same family-bleed
@@ -456,15 +486,19 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     if (d.registeredAutojoin !== undefined) {
       entryDrift.push(
         `${h.label}'s musterd server bakes MUSTERD_AUTOJOIN=${d.registeredAutojoin} — join-on-launch ` +
-          `policy in an entry every worktree of this repo shares, so it applies family-wide instead of ` +
-          `per seat. Provisioning now records it in .musterd/binding.json; run \`musterd wire\` here to ` +
-          `rewrite the entry without it (one run repairs the family).`,
+          (shared
+            ? `policy in an entry every worktree of this repo shares, so it applies family-wide instead of per seat. `
+            : `policy pinned in the entry, where it outranks the per-workspace setting. `) +
+          `Provisioning now records it in .musterd/binding.json; run \`musterd wire\` here to ` +
+          `rewrite the entry without it.`,
       );
     }
     if (d.registeredDriver !== undefined) {
       entryDrift.push(
-        `${h.label}'s musterd server bakes MUSTERD_DRIVER=${d.registeredDriver} — a driver in the ` +
-          `repo-root-shared entry marks EVERY sibling worktree as driven by ${d.registeredDriver}, ` +
+        `${h.label}'s musterd server bakes MUSTERD_DRIVER=${d.registeredDriver} — ` +
+          (shared
+            ? `a driver in the repo-root-shared entry marks EVERY sibling worktree as driven by ${d.registeredDriver}, `
+            : `a driver pinned in the entry outranks the per-workspace setting, `) +
           `corrupting driver co-presence (ADR 155). Provisioning now records the driver in ` +
           `.musterd/binding.json; run \`musterd wire\` here to rewrite the entry without it.`,
       );

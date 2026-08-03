@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { hasServer, listServers, removeServers, renderServer, upsertServer } from './codexToml.js';
+import {
+  hasServer,
+  listServers,
+  readServerEnv,
+  removeServers,
+  renderServer,
+  upsertServer,
+} from './codexToml.js';
 
 const USER = `# my codex config
 model = "o3"
@@ -96,5 +103,42 @@ describe('listServers / hasServer', () => {
     expect(listServers(USER)).toEqual(['context7']);
     const two = upsertServer(USER, 'musterd', { command: 'n', args: [], env: { A: 'b' } });
     expect(listServers(two).sort()).toEqual(['context7', 'musterd']);
+  });
+});
+
+// The doctor could not see a baked value in `.codex/config.toml` at all, because nothing read the
+// env subtable back — only Claude Code's `claude mcp get` was ever parsed (measured 2026-08-03).
+describe('readServerEnv', () => {
+  it("reads a server's env subtable back", () => {
+    const toml = renderServer('musterd', {
+      command: 'node',
+      args: ['/x/bin.js'],
+      env: { MUSTERD_SURFACE: 'codex', MUSTERD_AGENT_KEY: 'mskey_secret' },
+    });
+    expect(readServerEnv(toml, 'musterd')).toEqual({
+      MUSTERD_SURFACE: 'codex',
+      MUSTERD_AGENT_KEY: 'mskey_secret',
+    });
+  });
+
+  it('returns an empty record for a server with no env, or one that is absent', () => {
+    const bare = renderServer('musterd', { command: 'node', args: [], env: {} });
+    expect(readServerEnv(bare, 'musterd')).toEqual({});
+    expect(readServerEnv(bare, 'other')).toEqual({});
+    expect(readServerEnv('', 'musterd')).toEqual({});
+  });
+
+  it("reads only the named server's env, never a neighbour's", () => {
+    const toml =
+      renderServer('musterd', { command: 'node', args: [], env: { MUSTERD_SURFACE: 'codex' } }) +
+      '\n' +
+      renderServer('other', { command: 'node', args: [], env: { MUSTERD_SURFACE: 'cursor' } });
+    expect(readServerEnv(toml, 'musterd')).toEqual({ MUSTERD_SURFACE: 'codex' });
+    expect(readServerEnv(toml, 'other')).toEqual({ MUSTERD_SURFACE: 'cursor' });
+  });
+
+  it('unescapes quoted values and tolerates a quoted key', () => {
+    const toml = '[mcp_servers.musterd.env]\n"MUSTERD_DRIVER" = "a \\"quoted\\" name"\n';
+    expect(readServerEnv(toml, 'musterd')).toEqual({ MUSTERD_DRIVER: 'a "quoted" name' });
   });
 });
