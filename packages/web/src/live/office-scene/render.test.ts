@@ -148,6 +148,29 @@ describe('animatedDeskAnchors', () => {
   });
 });
 
+describe('working monitor desktop', () => {
+  const fit = fitFloor(1200, 900);
+
+  function paintsFor(activity: OfficeNode['activity']): string[] {
+    const member = node('stanley', activity);
+    const members = new Map([[member.name, member]]);
+    const placements = assignSeats([member]);
+    const paints: string[] = [];
+    renderScene(mockCtx(paints), fit, placements, members, homePoses(placements, members), 2.4);
+    return paints;
+  }
+
+  it('renders Stanley’s working window desk as a living desktop', () => {
+    // Stanley hashes to desk-slot index 15, whose stable desk ID is 20. The layout's sparse IDs must
+    // never make this working, camera-facing screen fall back to the dark idle slab.
+    expect(paintsFor('working')).toContain('#2f9a8a');
+  });
+
+  it('keeps Stanley’s idle monitor dim', () => {
+    expect(paintsFor('idle')).not.toContain('#2f9a8a');
+  });
+});
+
 /** The full painter's-order pass. An *empty* office still draws all 12 workstations — every chair (the
  * per-desk style variety), every monitor setup, keyboard and mouse — so this exercises the whole furniture
  * surface, including the stable per-desk chair/monitor/peripheral variation, without needing live actors. */
