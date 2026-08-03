@@ -189,6 +189,52 @@ describe('inspectProvisioning', () => {
     expect(r.drift).toEqual([]);
   });
 
+  // The same tripwire one field over: `surface` never got `model`'s observation path, so it is
+  // believed on a declaration alone while labelling presence, audit and the roster as fact.
+  it('flags a declared surface contradicted by the harness that captured the session', async () => {
+    h.primer = 'managed';
+    h.binding = {
+      claim: { mode: 'seat', name: 'Miley' },
+      surface: 'cursor',
+      session: { harness: 'claude-code', id: 's1', started_at: 1 },
+    };
+    h.harnesses = [harness('Claude Code', true, true)];
+    const r = await inspectProvisioning('/x');
+    const line = r.drift.find((d) => d.includes('surface'));
+    expect(line).toBeDefined();
+    expect(line).toContain('cursor'); // the stale declaration
+    expect(line).toContain('claude-code'); // what actually ran
+    expect(line).toContain('MUSTERD_SURFACE'); // the rung above the binding, where it can also hide
+  });
+
+  it('falls back to the model observation when no session was captured', async () => {
+    h.primer = 'managed';
+    h.binding = {
+      claim: { mode: 'seat', name: 'Miley' },
+      surface: 'cursor',
+      model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 1 },
+    };
+    h.harnesses = [harness('Claude Code', true, true)];
+    const r = await inspectProvisioning('/x');
+    expect(r.drift.find((d) => d.includes('surface'))).toBeDefined();
+  });
+
+  it('is quiet about surface when the capture agrees, or when nothing was ever captured', async () => {
+    h.primer = 'managed';
+    h.binding = {
+      claim: { mode: 'seat', name: 'Miley' },
+      surface: 'claude-code',
+      session: { harness: 'claude-code', id: 's1', started_at: 1 },
+    };
+    h.harnesses = [harness('Claude Code', true, true)];
+    expect((await inspectProvisioning('/x')).drift).toEqual([]);
+
+    // A declaration with no capture is not a contradiction. Codex has no hook path at all, so it
+    // lives here permanently — warning would fire forever on every Codex seat.
+    h.binding = { claim: { mode: 'seat', name: 'Miley' }, surface: 'codex' };
+    expect((await inspectProvisioning('/x')).drift).toEqual([]);
+  });
+
   it('is quiet when there is an observation but nothing was ever declared', async () => {
     // Nothing to contradict: the seat attests the observation and is not drifting.
     h.primer = 'managed';
