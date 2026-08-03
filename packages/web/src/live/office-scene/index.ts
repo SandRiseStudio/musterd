@@ -961,7 +961,9 @@ export function mountOffice(
       if (pl.kind === 'desk') {
         const slot = DESK_SLOTS[pl.slot];
         if (slot) {
-          zone = `pod-${slot.pod}`;
+          // Bench neighbours and the two window desks are proximity zones of their own — two bench
+          // sitters are exactly the "near each other" pair the room tone listens for.
+          zone = slot.kind === 'pod' ? `pod-${slot.pod}` : slot.kind;
           at = { lx: slot.lx, ly: slot.ly };
         }
       } else if (pl.kind === 'leisure') {

@@ -1,5 +1,6 @@
 import { FLOOR } from './iso';
 import {
+  BENCH,
   BOOKSHELVES,
   FRONT_DESK,
   CHAIR_OFF,
@@ -56,8 +57,15 @@ function rect(lx: number, ly: number, w: number, d: number, pad = BODY_R): Rect 
 function solidRects(): Rect[] {
   const out: Rect[] = [];
   for (const slot of DESK_SLOTS) {
-    const sn = slot.dir === 'S' || slot.dir === 'N';
-    out.push(rect(slot.lx, slot.ly, sn ? DESK_W : DESK_D, sn ? DESK_D : DESK_W));
+    if (slot.kind === 'bench') {
+      // One counter segment per seat — sized to the drawn counter (BENCH.deep), not to DESK_D: the
+      // grid must match the picture, and a 68-deep blocker under a 30-deep counter would make
+      // walkers skirt furniture that is not there.
+      out.push(rect(slot.lx, slot.ly, BENCH.long / BENCH.seats, BENCH.deep));
+    } else {
+      const sn = slot.dir === 'S' || slot.dir === 'N';
+      out.push(rect(slot.lx, slot.ly, sn ? DESK_W : DESK_D, sn ? DESK_D : DESK_W));
+    }
     const f = FWD[slot.dir];
     // the task chair sits behind the desk; pad it lightly so its own seat spot stays reachable
     out.push(rect(slot.lx - f[0] * CHAIR_OFF, slot.ly - f[1] * CHAIR_OFF, CHAIR_SIZE, CHAIR_SIZE, 4));

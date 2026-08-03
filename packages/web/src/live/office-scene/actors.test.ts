@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createActors, homePoses, travelDir } from './actors';
-import { COFFEE_STAND, ENTRANCE, NOOK, NOOK_CAP, NOOK_RUG_R, STRIP_CAP } from './layout';
+import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK, NOOK_CAP, NOOK_RUG_R, STRIP_CAP } from './layout';
 import { GESTURE } from './skeleton';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
@@ -63,9 +63,9 @@ describe('homePoses', () => {
     expect(poses.has('Gone')).toBe(false);
   });
 
-  it('queues overflow (past the 12 desks) single-file receding from the entrance', () => {
-    // 15 present-and-working members → 3 spill past the 12 desks onto the entrance queue.
-    const nodes = Array.from({ length: 15 }, (_, i) => node(`M${String(i).padStart(2, '0')}`));
+  it('queues overflow (past every desk) single-file receding from the entrance', () => {
+    // Three more present-and-working members than the floor has desks → 3 spill onto the queue.
+    const nodes = Array.from({ length: DESK_SLOTS.length + 3 }, (_, i) => node(`M${String(i).padStart(2, '0')}`));
     const { placements, byName } = world(nodes);
     const poses = homePoses(placements, byName);
     const strip = [...placements.entries()]
@@ -85,8 +85,8 @@ describe('homePoses', () => {
   });
 
   it('caps the queue avatars past STRIP_CAP (rest collapse into the "+N" pill)', () => {
-    // 12 desks + a big overflow → only STRIP_CAP queued avatars get a pose; the rest are placed but undrawn.
-    const nodes = Array.from({ length: 12 + STRIP_CAP + 4 }, (_, i) => node('Q' + String(i).padStart(2, '0')));
+    // every desk + a big overflow → only STRIP_CAP queued avatars get a pose; the rest are placed but undrawn.
+    const nodes = Array.from({ length: DESK_SLOTS.length + STRIP_CAP + 4 }, (_, i) => node('Q' + String(i).padStart(2, '0')));
     const { placements, byName } = world(nodes);
     const poses = homePoses(placements, byName);
     const strip = [...placements.entries()].filter(([, p]) => p.kind === 'strip');
