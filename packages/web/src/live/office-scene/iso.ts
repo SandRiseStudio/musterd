@@ -57,7 +57,11 @@ export function depth(lx: number, ly: number): number {
 export function fitFloor(panelW: number, panelH: number): Fit {
   const projW = FLOOR * KX * 2;
   const projH = SCENE_RISE + FLOOR * KY * 2 + SCENE_DROP;
-  const margin = 0.94;
+  // 0.94 → 0.96 (nick, 2026-08-03): the scene is height-bound at every aspect the product uses, so this
+  // number is the room's size on screen, and 6% of unused height on a 720p stream is a wasted 43 pixels.
+  // It stays under 1 because the margin is what keeps the wall tops and the contact shadow off the panel
+  // edge — the scene is drawn to its box, not inset within it.
+  const margin = 0.96;
   const scale = Math.max(
     0.05,
     Math.min((panelW * margin) / projW, (panelH * margin) / projH),
