@@ -427,6 +427,7 @@ async function verifyDaemonUp(
   what: string,
   ok: (s: string) => void,
   sleep?: (ms: number) => Promise<void>,
+  baseline?: DaemonHealth,
 ): Promise<DaemonHealth | null> {
   // BASELINE FIRST — this is what makes the check honest. `/health` being unreachable can mean the
   // daemon is down, or merely that this CLI cannot see it (a daemon bound off-loopback, a `server`
@@ -434,10 +435,12 @@ async function verifyDaemonUp(
   // BEFORE the bounce and not after is evidence of an outage. Without a baseline we say so and warn,
   // rather than hard-failing a working system: the pre-existing "fail open when health is
   // unreachable" contract stays intact exactly where it was meant to apply.
-  const wasUp = await health().then(
-    () => true,
-    () => false,
-  );
+  const wasUp =
+    baseline !== undefined ||
+    (await health().then(
+      () => true,
+      () => false,
+    ));
   // The long budget buys a booting daemon time before we accuse it of being down. With no baseline
   // we can only ever warn, so a long wait buys nothing but latency on every no-daemon install.
   const up = await awaitDaemon(health, {
@@ -915,6 +918,7 @@ async function refreshDaemon(
   ok: (s: string) => void,
   fail: (step: string, r: RunResult) => never,
   sleep?: (ms: number) => Promise<void>,
+  baseline?: DaemonHealth,
 ): Promise<number> {
   // The checkout the daemon ACTUALLY runs from — read back from its installed plist, not derived
   // from where this CLI was invoked. `restart` already cycles the daemon by launchd label, but the
@@ -1001,7 +1005,7 @@ async function refreshDaemon(
   ok(`restarted the musterd daemon on ${after}`);
   // Confirm it is actually serving before claiming the refresh worked — a rebuilt dist that fails to
   // boot (a bad native module, a bad merge) looks identical to success at the launchctl layer.
-  await verifyDaemonUp(ctx, health, 'refresh', ok, sleep);
+  await verifyDaemonUp(ctx, health, 'refresh', ok, sleep, baseline);
   // The rebuild above is checkout-wide, so anything else running from it is now stale too.
   bounceSiblings(ctx, dir, ok);
   return 0;
@@ -1115,7 +1119,7 @@ async function autoRefreshTick(
   }
   if (tip) autoState.write(tip); // mark the attempt BEFORE building, so a failed build debounces next tick
   try {
-    return await refreshDaemon(ctx, health, force, ok, fail);
+    return await refreshDaemon(ctx, health, force, ok, fail, undefined, health0);
   } catch (err) {
     // A failed tick is the one state nothing else surfaces. The debounce then parks it, so the
     // daemon stays pinned on old code across every later merge while /health answers cheerfully —

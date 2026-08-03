@@ -237,6 +237,23 @@ describe('service refresh --auto (the tick)', () => {
     ).toBe(false);
   });
 
+  it('keeps the full confirmation budget after a known-healthy daemon bounces', async () => {
+    let probes = 0;
+    const health = async () => {
+      probes++;
+      // Initial tick + pre-bounce guard are healthy. The restarted daemon takes five polls
+      // before it serves again; the short no-baseline budget must not turn this into a false fail.
+      if (probes > 2 && probes < 8) throw new Error('ECONNREFUSED');
+      return { connections: 0, build: probes < 8 ? 'oldsha0' : 'newtip1111' };
+    };
+    const { code, out } = await tick({
+      ctx: ctx(autoRunner({ behind: 1 })),
+      health,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('answered /health');
+  });
+
   it('no-ops when the daemon is unreachable (watcher, never gatekeeper)', async () => {
     const { code, out } = await tick({
       ctx: ctx(autoRunner({ behind: 5 })),
