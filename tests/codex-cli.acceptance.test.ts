@@ -20,9 +20,29 @@ interface Run {
   threadId?: string;
 }
 
+/** Keep the operator's Codex account/config, but make the fixture binding its only musterd identity. */
+export function codexAcceptanceEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of ['HOME', 'PATH', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM']) {
+    if (base[key] !== undefined) env[key] = base[key];
+  }
+  return env;
+}
+
+/** Diagnostics are useful on an owner-run failure, but credentials must never enter a test assertion. */
+export function redactCodexDiagnostic(value: string): string {
+  return value
+    .replace(/\bms(?:key|gr|cr)_[A-Za-z0-9_-]+\b/g, '[redacted musterd credential]')
+    .replace(/\bBearer\s+[^\s]+/gi, 'Bearer [redacted]');
+}
+
 function runCodex(bin: string, args: string[], cwd: string, timeoutMs = 75_000): Promise<Run> {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, {
+      cwd,
+      env: codexAcceptanceEnv(process.env),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     let threadId: string | undefined;
@@ -45,7 +65,12 @@ function runCodex(bin: string, args: string[], cwd: string, timeoutMs = 75_000):
       clearTimeout(timer);
       if (timedOut) return reject(new Error('Codex real acceptance timed out'));
       threadId ??= parseCodexThreadLine(stdoutRemainder);
-      resolve({ code, stdout, stderr, ...(threadId ? { threadId } : {}) });
+      resolve({
+        code,
+        stdout: redactCodexDiagnostic(stdout),
+        stderr: redactCodexDiagnostic(stderr),
+        ...(threadId ? { threadId } : {}),
+      });
     });
   });
 }
@@ -87,6 +112,20 @@ describe('Codex CLI real acceptance (owner-gated)', () => {
     expect(enabled).toBe(
       process.env['MUSTERD_REAL_CODEX'] === '1' &&
         process.env['MUSTERD_REAL_CODEX_CONFIRM'] === '1',
+    );
+  });
+
+  it('uses only fixture-safe Codex environment values and redacts credentials from failures', () => {
+    const env = codexAcceptanceEnv({
+      HOME: '/home/nick',
+      PATH: '/bin',
+      MUSTERD_AGENT_KEY: 'mskey_should-not-pass',
+      MUSTERD_GRANT: 'msgr_should-not-pass',
+      MUSTERD_BINDING: '/another/worktree/.musterd/binding.json',
+    });
+    expect(env).toEqual({ HOME: '/home/nick', PATH: '/bin' });
+    expect(redactCodexDiagnostic('mskey_secret Bearer secret msgr_secret mscr_secret')).toBe(
+      '[redacted musterd credential] Bearer [redacted] [redacted musterd credential] [redacted musterd credential]',
     );
   });
 
