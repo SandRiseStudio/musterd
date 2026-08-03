@@ -1003,6 +1003,8 @@
    over the desks, and the floor is going to twenty seats — so the chevron went (the plate was always
    the click target), the icon dropped 14→11px, and the padding and rules roughly halved. */
 .lc-gl-label__plate {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   gap: 0;
@@ -1082,17 +1084,129 @@
   font-weight: 700;
   line-height: 1;
 }
+/* ── the expand, animated ───────────────────────────────────────────────────────────────────────
+   The detail used to be a `display: none` -> `inline-flex` swap, which is a jump cut: there is no
+   in-between state to animate, so the plate teleported to its wide size.
+
+   It is a **grid track** now. `grid-template-columns: 0fr -> 1fr` is the one technique that slides
+   open to a width nobody can know in advance (the detail is model + harness + role, all variable),
+   and unlike `display` it interpolates — so the plate *grows*. The inner element holds the content
+   at its natural width and `min-width: 0` lets the track clip it instead of being propped open.
+
+   This is a layout animation, which the perf contract otherwise rules out. The carve-out is
+   deliberate and bounded: it runs on /live only, on the ONE plate a viewer clicked, and never on the
+   broadcast capture (those plates have no toggle and sit permanently open). Every other part of the
+   sequence — segments, caret, sheen — is transform + opacity. */
 .lc-gl-label__detail {
-  display: none;
+  display: grid;
+  grid-template-columns: 0fr;
+  transition: grid-template-columns 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lc-gl-label__detailin {
+  display: inline-flex;
   align-items: center;
+  min-width: 0;
   max-width: 11rem;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .lc-gl-label.is-expanded .lc-gl-label__detail {
-  display: inline-flex;
+  grid-template-columns: 1fr;
+}
+/* The segments arrive one after another rather than together — the stagger is what makes the plate
+   read as unpacking itself rather than resizing. Each starts a little left of home and drifts in. */
+.lc-gl-label__detail .lc-gl-label__seg,
+.lc-gl-label__detail .lc-gl-label__rule {
+  opacity: 0;
+  transform: translateX(-5px);
+  transition:
+    opacity 260ms var(--lc-ease),
+    transform 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lc-gl-label.is-expanded .lc-gl-label__detail .lc-gl-label__seg,
+.lc-gl-label.is-expanded .lc-gl-label__detail .lc-gl-label__rule,
+.lc-gl-label.is-broadcast .lc-gl-label__detail .lc-gl-label__seg,
+.lc-gl-label.is-broadcast .lc-gl-label__detail .lc-gl-label__rule {
+  opacity: 1;
+  transform: none;
+}
+.lc-gl-label.is-expanded .lc-gl-label__detailin > * {
+  transition-delay: calc(90ms + var(--i, 0) * 50ms);
+}
+
+/* The caret — the affordance, back because removing it went too far. The plate got 34% narrower for
+   the twenty-seat floor and nothing on it said it could open (nick, 2026-08-03: "i cant tell i am
+   able to expand the nameplate"). Drawn from two borders because a glyph at 7px is mush; points
+   right while there is more to see, and turns a quarter-turn down once it is open. */
+.lc-gl-label__caret {
+  width: 7px;
+  height: 7px;
+  margin-left: 4px;
+  flex: none;
+  border-right: 1.4px solid color-mix(in srgb, var(--lc-paper-ink) 50%, transparent);
+  border-bottom: 1.4px solid color-mix(in srgb, var(--lc-paper-ink) 50%, transparent);
+  border-radius: 0 0 1.5px 0;
+  transform: rotate(-45deg) scale(0.86);
+  transform-origin: 60% 60%;
+  transition:
+    transform 460ms cubic-bezier(0.34, 1.4, 0.5, 1),
+    border-color 200ms var(--lc-ease);
+}
+.lc-gl-label.is-expanded .lc-gl-label__caret {
+  transform: rotate(45deg) scale(0.86);
+  border-color: color-mix(in srgb, var(--lc-accent) 78%, var(--lc-paper-ink));
+}
+.lc-gl-label:hover .lc-gl-label__caret,
+.lc-gl-label:focus-within .lc-gl-label__caret {
+  border-color: color-mix(in srgb, var(--lc-accent) 70%, var(--lc-paper-ink));
+}
+.lc-gl-label.is-broadcast .lc-gl-label__caret {
+  display: none;
+}
+
+/* A warm sweep crosses the plate once, on open. This is the magic beat: light travelling over paper,
+   which is what the room's own windows do to everything else in it. Transform + opacity, one pass. */
+.lc-gl-label__plate::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in srgb, var(--lc-accent) 26%, transparent) 50%,
+    transparent 80%
+  );
+}
+.lc-gl-label.is-expanded .lc-gl-label__plate::after {
+  animation: lc-plate-sweep 620ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes lc-plate-sweep {
+  from {
+    opacity: 0.9;
+    transform: translateX(-70%);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(70%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-gl-label__detail,
+  .lc-gl-label__detail .lc-gl-label__seg,
+  .lc-gl-label__detail .lc-gl-label__rule,
+  .lc-gl-label__caret {
+    transition: none;
+  }
+  .lc-gl-label.is-expanded .lc-gl-label__plate::after {
+    animation: none;
+  }
 }
 /* The detail's leading rule now lives in the plate, ahead of the provider icon —
    so the first segment supplies its own gap off that icon. */
-.lc-gl-label__detail > .lc-gl-label__seg:first-child {
+.lc-gl-label__detailin > .lc-gl-label__seg:first-child {
   margin-left: 0.45em;
 }
 .lc-gl-label__seg {
@@ -1107,7 +1221,7 @@
 }
 /* Broadcast: always show the compact model crumb after the icon — nothing to click out there. */
 .lc-gl-label.is-broadcast .lc-gl-label__detail {
-  display: inline-flex;
+  grid-template-columns: 1fr;
 }
 .lc-gl-label.is-broadcast .lc-gl-label__seg--harness,
 .lc-gl-label.is-broadcast .lc-gl-label__seg--role {

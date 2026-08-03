@@ -496,8 +496,13 @@ export function mountOffice(
         icon.innerHTML = providerIconHtml(provider);
         plate.appendChild(icon);
 
+        // The detail is a two-part nest on purpose: the outer element is the animating *track* (a
+        // 0fr→1fr grid column, which is the only way to slide open to a width nobody knows in
+        // advance), and the inner one holds the content at its natural size so the track can clip it.
         const detail = document.createElement('span');
         detail.className = 'lc-gl-label__detail';
+        const detailIn = document.createElement('span');
+        detailIn.className = 'lc-gl-label__detailin';
         const detailParts = interactiveLabels
           ? plateDetailParts({
               surface: node.surface,
@@ -510,18 +515,33 @@ export function mountOffice(
             const divider = document.createElement('span');
             divider.className = 'lc-gl-label__rule';
             divider.setAttribute('aria-hidden', 'true');
-            detail.appendChild(divider);
+            detailIn.appendChild(divider);
           }
           const segEl = document.createElement('span');
           segEl.className = `lc-gl-label__seg lc-gl-label__seg--${part.kind}`;
           segEl.textContent = part.text;
-          detail.appendChild(segEl);
+          detailIn.appendChild(segEl);
         }
+        // Each child carries its own position so ONE css rule can stagger them. Five nth-child rules
+        // did the same job and cost enough gzip to sit on the CSS budget's ceiling.
+        for (const [i, child] of [...detailIn.children].entries()) {
+          (child as HTMLElement).style.setProperty('--i', String(i));
+        }
+        detail.appendChild(detailIn);
         plate.appendChild(detail);
 
         if (interactiveLabels) {
-          // The chevron's semantics move onto the plate along with its job — the expand state has to
-          // stay announced somewhere, and the plate is now the only thing there is to announce it on.
+          // The caret is the affordance, and it is back because removing it went too far: the plate
+          // got 34% narrower for the twenty-seat floor, and nothing on it said it could open
+          // (nick, 2026-08-03: "i cant tell i am able to expand the nameplate"). It rides the plate's
+          // right edge, turns a quarter-turn on open, and costs ~7px — the width is worth paying for
+          // a control nobody can find otherwise.
+          const caret = document.createElement('span');
+          caret.className = 'lc-gl-label__caret';
+          caret.setAttribute('aria-hidden', 'true');
+          plate.appendChild(caret);
+
+          // The plate itself is the button — the caret is a picture of one, not a second target.
           plate.setAttribute('role', 'button');
           plate.setAttribute('aria-expanded', expanded ? 'true' : 'false');
           plate.setAttribute('aria-label', `${name} identity`);
