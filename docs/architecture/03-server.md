@@ -30,6 +30,7 @@ src/
     messages.ts       // insertMessage, listInbox(memberId, since), listTeamMessages
     presence.ts       // attach, heartbeat, detach/release, listPresence, reapStale (kind-scoped single-active, ADR 042)
     activity.ts       // resolveActivity: the two-clocks rule → offline/idle/working (v0.2 M2; ADR 140)
+    quiescence.ts     // decision-grade busy/quiet/unknown from newest audited action; /health quietest_busy_ms (2026-08-03 design; split from display activity)
     cursors.ts        // getCursor, setCursor, unreadCount
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
     lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084)
