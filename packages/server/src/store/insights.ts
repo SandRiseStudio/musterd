@@ -11,9 +11,6 @@ import type {
   WakeSeatCost,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-
-/** Matches the inbox/wake reads' bound (ADR 211 §3). */
-const DEFERRAL_SCAN_LIMIT = 2000;
 import { actAnswered, openDirectedLedger } from './delivery.js';
 import { listGoals } from './goals.js';
 import { listLanes } from './lanes.js';
@@ -25,6 +22,9 @@ import { teamFamilyPosture } from './review.js';
 import type { MessageRow } from './rows.js';
 import { getPolicy } from './teams.js';
 import { deriveToolCallMetrics } from './toolCalls.js';
+
+/** Matches the inbox/wake reads' bound (ADR 211 §3). */
+const DEFERRAL_SCAN_LIMIT = 2000;
 
 /**
  * The insight engine (ADR 050, server-side per ADR 084) — leadership projections over lanes + the act

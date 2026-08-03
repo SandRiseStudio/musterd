@@ -37,16 +37,26 @@ Every message on the wire is an Envelope:
 
 ## The 8 Acts (Co-Gym-grounded)
 
-| Act             | Meaning                                                           | Required `meta`/fields    | Optional `meta`                             |
-| --------------- | ----------------------------------------------------------------- | ------------------------- | ------------------------------------------- |
-| `message`       | plain communication, no protocol semantics                        | —                         | —                                           |
-| `status_update` | "here's what I'm doing / did"                                     | —                         | `progress` (0..1), `state` (free text)      |
-| `request_help`  | asking a specific member or the team to assist/unblock            | —                         | `blocking` (bool), `topic` (string)         |
-| `handoff`       | transferring a piece of work to someone                           | —                         | `artifact` (string ref), `summary` (string) |
-| `accept`        | accepting a prior `request_help`/`handoff`                        | `meta.in_reply_to` (ULID) | —                                           |
-| `decline`       | declining a prior `request_help`/`handoff`                        | `meta.in_reply_to` (ULID) | `reason` (string)                           |
-| `wait`          | "hold / I'm blocked / pause for me"                               | —                         | `until` (epoch ms), `reason` (string)       |
-| `resolve`       | closing a thread — the work it tracks is **done** (v0.3, ADR 025) | `thread` (ULID)           | `reason` (string)                           |
+| Act             | Meaning                                                           | Required `meta`/fields    | Optional `meta`                                           |
+| --------------- | ----------------------------------------------------------------- | ------------------------- | --------------------------------------------------------- |
+| `message`       | plain communication, no protocol semantics                        | —                         | —                                                         |
+| `status_update` | "here's what I'm doing / did"                                     | —                         | `progress` (0..1), `state` (free text)                    |
+| `request_help`  | asking a specific member or the team to assist/unblock            | —                         | `blocking` (bool), `topic` (string)                       |
+| `handoff`       | transferring a piece of work to someone                           | —                         | `artifact` (string ref), `summary` (string)               |
+| `accept`        | accepting a prior `request_help`/`handoff`                        | `meta.in_reply_to` (ULID) | —                                                         |
+| `decline`       | declining a prior `request_help`/`handoff`                        | `meta.in_reply_to` (ULID) | `reason` (string)                                         |
+| `wait`          | "hold / I'm blocked / pause for me" — three shapes, see below     | —                         | `reason` (string); `ask_ref`+`until`; `defer_ref`+`until` |
+| `resolve`       | closing a thread — the work it tracks is **done** (v0.3, ADR 025) | `thread` (ULID)           | `reason` (string)                                         |
+
+**The three shapes of `wait`.** One verb, distinguished by which `meta` key is present — ADR 145 §4 spends surfaces before verbs, so the annotated forms ride `wait` rather than minting new acts.
+
+1. **bare** — the ordinary "paused" act. No required meta.
+2. **deciding** (`meta.ask_ref`, ADR 147 §5) — the _sender_ of an ask replying "deciding, check back in ⟨dur⟩". Requires `meta.until` as a **duration string** (`"1h"`, `"indefinite"`).
+3. **deferring** (`meta.defer_ref`, ADR 211) — the _recipient_ postponing one directed act. Requires `meta.until` as a **condition object**: `{ lane: "<lane_id>" }` (raise when that lane's state moves) or `{ reply: true }` (raise when someone else acts on the deferred act's thread).
+
+Shapes 2 and 3 both spell their target `until` but mean different types, so an envelope carrying both `ask_ref` and `defer_ref` is **rejected** rather than resolved by precedence. There is no duration form of a deferral: ADR 179's doctrine is that the daemon runs no clocks, so "later" is a state edge in this system, never a time.
+
+A deferred act stays unread; it is demoted in the inbox view, and it re-enters as pending when its condition fires — _even if the read cursor has since passed it_, because pendingness is derived from the deferral fold rather than from the cursor. Deferring is not interrupt-class, and only the recipient of an act may defer it.
 
 Rules:
 
