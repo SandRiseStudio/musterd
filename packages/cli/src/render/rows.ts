@@ -301,6 +301,17 @@ function memberFacets(m: MemberSummary, group: Group, daemonBuild?: string): str
   if (m.role) parts.push(m.role);
   const model = m.presences[0]?.model?.trim();
   if (model && model !== MODEL_UNKNOWN) parts.push(model);
+  // A LIVE agent seat attesting nothing is not a quiet absence — it is a hole in the evidence, and
+  // silence made it look identical to a healthy row. Measured 2026-08-01: a seat worked and shipped
+  // all day attesting nothing, and reading the presence table was the only way to see it. That seat
+  // is excluded from every acceptor pool (ADR 158 refuses an unprovable diversity claim, correctly)
+  // and missing from the ADR 056 diversity conclusion and the per-model loop-closure telemetry — so
+  // the roster has to say so. Scoped tightly, because a warn facet only works if it is rare:
+  //   - agents only (ADR 121: attestation is a harness fact; a human shell has none to give);
+  //   - live only (`out` seats attest nothing by definition — marking them is a wall of noise).
+  else if (m.kind === 'agent' && group !== 'out' && m.presences[0]) {
+    parts.push(theme.warn('model unattested'));
+  }
   // ADR 135: a member running a different build than the daemon is worth a warn facet; a matching or
   // unknown build is silence (most rows, most of the time — this only speaks when something's off).
   const build = m.presences[0]?.build?.trim();

@@ -66,6 +66,11 @@ export function formatMember(
   if (m.role) facets.push(m.role);
   const model = p?.model?.trim();
   if (model && model !== MODEL_UNKNOWN) facets.push(model);
+  // A live agent seat attesting nothing is a hole in the evidence, not a quiet absence — same rule
+  // and same scoping as the CLI roster (`packages/cli/src/render/rows.ts`). It matters more here:
+  // this is the surface a seat reads when picking someone to hand off to or route a review at, and
+  // an unattested seat is one ADR 158 will refuse as an acceptor. Better to see that before routing.
+  else if (m.kind === 'agent' && group !== 'out' && p) facets.push('model unattested');
   if (group !== 'out' && p?.surface) facets.push(p.surface);
   if (m.lifecycle === 'session') facets.push('session');
   // `!= null`, not truthiness: an epoch-0 timestamp is falsy and would silently drop the date.
