@@ -3808,7 +3808,9 @@ export function renderScene(
   drawWalls(ctx, fit, env, teamWorkingHours, wallBoard, t);
   drawWindowBeams(ctx, fit, env);
 
-  // desk → seat owner (for the monitor's working glow); the owner may be walking but the seat stays lit.
+  // Desk-slot index → seat owner (for the monitor's working glow). Placement stores an index into
+  // `DESK_SLOTS`; IDs are deliberately stable but sparse after pod sizes change, so they are not
+  // interchangeable.
   const slotMember = new Map<number, string>();
   for (const [name, pl] of placements) if (pl.kind === 'desk') slotMember.set(pl.slot, name);
 
@@ -3859,8 +3861,8 @@ export function renderScene(
   // The bench's shared counter, once — its seats' gear rides per-slot below.
   items.push({ d: depth(BENCH.lx, BENCH.ly), fn: () => benchCounter(ctx, fit) });
 
-  for (const slot of DESK_SLOTS) {
-    const name = slotMember.get(slot.id) ?? null;
+  for (const [slotIndex, slot] of DESK_SLOTS.entries()) {
+    const name = slotMember.get(slotIndex) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
     const ownerPose = name ? poses.get(name) : undefined;
     // Sip beat: while the owner's mug is in their hand, the desk copy vanishes — one mug, not two.
