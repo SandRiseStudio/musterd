@@ -116,6 +116,9 @@ export interface Pod {
   cx: number;
   cy: number;
   axis: 'ns' | 'ew';
+  /** Four desks (two facing pairs) or two (one facing pair) — the 2026-08-02 re-cut mixes sizes so
+   * the room reads grown-organically rather than stamped from a grid. */
+  size: 2 | 4;
   /** The pod's floor rug — a zone marker under the whole cluster, seats included. With no divider to carry
    * it, the rug is the *only* thing that makes a pod a place: it is what lets a member say "the blue pod". */
   rug: Rug;
@@ -132,6 +135,7 @@ export const PODS: Pod[] = [
     // it was 1 unit short).
     cy: 290,
     axis: 'ns',
+    size: 4,
     rug: { shape: 'rect', weave: 'border', fill: '#93a9a4', mark: '#75908a' },
   },
   {
@@ -139,14 +143,39 @@ export const PODS: Pod[] = [
     cx: 620,
     cy: 560,
     axis: 'ew',
+    size: 4,
     rug: { shape: 'rect', weave: 'stripes', fill: '#97a7b8', mark: '#7c8ca0' },
   },
   {
+    // The old third quad, cut to a duo (2026-08-02): its south half is where the front duo breathes,
+    // and 560 → 540 keeps a real rug gap above the front duo's rug.
     id: 2,
     cx: 260,
-    cy: 560,
+    cy: 540,
     axis: 'ew',
+    size: 2,
     rug: { shape: 'rect', weave: 'border', fill: '#ab97a4', mark: '#8b7683' },
+  },
+  {
+    // Upper-centre duo, in the clearing the huddle left. 'ew' is load-bearing: an 'ns' duo would add
+    // a third viewer-facing desk and break the exactly-two rule pod 0 carries.
+    id: 3,
+    cx: 500,
+    cy: 250,
+    axis: 'ew',
+    size: 2,
+    rug: { shape: 'rect', weave: 'stripes', fill: '#a8ab8e', mark: '#8c9070' },
+  },
+  {
+    // Front duo, between reception and the meeting zone. Its centre is pinned on three sides: the
+    // reception waiting chairs block stand-behind floor west of x ~290, the meeting rug starts at
+    // x 485, and its own rug must clear both plus pod 2's rug above — hence the smaller duo rug.
+    id: 4,
+    cx: 390,
+    cy: 700,
+    axis: 'ew',
+    size: 2,
+    rug: { shape: 'rect', weave: 'plain', fill: '#b1a08c', mark: '#96856f' },
   },
 ];
 
@@ -166,6 +195,9 @@ export const POD_ACROSS = 55; // the two desks of a row, side by side (100-wide 
  * What makes a pod read as a pod is the desks facing each other across a shared rug, not a panel.
  */
 export const POD_RUG = { along: 230, across: 250 };
+/** A duo's rug — the facing pair sits on the pod's axis, so the rug is narrow across it. The 170
+ * along is what lets the front duo fit between reception's rug and the meeting zone's. */
+export const POD_RUG_DUO = { along: 170, across: 140 };
 
 /** The four desks of a pod, in pod-local order (north/west row first). */
 function podDesks(pod: Pod): DeskSlot[] {
@@ -180,6 +212,11 @@ function podDesks(pod: Pod): DeskSlot[] {
     pod: pod.id,
     kind: 'pod',
   });
+  if (pod.size === 2) {
+    // One facing pair on the pod's axis. Ids keep the *4 stride (0 and 2), so a duo's desks hash to
+    // the same props/chair-styles they would as the corresponding quad rows — and ids stay unique.
+    return [at(-POD_ALONG, 0, near, 0), at(POD_ALONG, 0, far, 2)];
+  }
   return [
     at(-POD_ALONG, -POD_ACROSS, near, 0),
     at(-POD_ALONG, POD_ACROSS, near, 1),

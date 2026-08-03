@@ -25,11 +25,14 @@ import {
 } from './layout';
 
 describe('desk pods', () => {
-  it('gives every pod four desks, plus the bench and window seats, with stable unique ids', () => {
-    expect(DESK_SLOTS).toHaveLength(PODS.length * 4 + BENCH.seats + WINDOW_DESKS.length);
+  it('seats exactly twenty, sized per pod, with stable unique ids', () => {
+    // The number the whole 2026-08-02 re-cut exists to reach.
+    expect(DESK_SLOTS).toHaveLength(20);
+    const podSeats = PODS.reduce((n, p) => n + p.size, 0);
+    expect(DESK_SLOTS).toHaveLength(podSeats + BENCH.seats + WINDOW_DESKS.length);
     expect(new Set(DESK_SLOTS.map((s) => s.id)).size).toBe(DESK_SLOTS.length);
     for (const pod of PODS) {
-      expect(DESK_SLOTS.filter((s) => s.pod === pod.id)).toHaveLength(4);
+      expect(DESK_SLOTS.filter((s) => s.pod === pod.id)).toHaveLength(pod.size);
     }
     expect(DESK_SLOTS.filter((s) => s.kind === 'bench')).toHaveLength(BENCH.seats);
     expect(DESK_SLOTS.filter((s) => s.kind === 'window')).toHaveLength(WINDOW_DESKS.length);

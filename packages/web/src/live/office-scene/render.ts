@@ -34,6 +34,7 @@ import {
   PLANTS,
   PODS,
   POD_RUG,
+  POD_RUG_DUO,
   PRINTER,
   RECEPTION,
   SEAT_TOP,
@@ -3723,8 +3724,9 @@ export function renderScene(
   // standing anywhere on a rug is never over-painted by it. Solid pieces self-sort at their footprints.
   for (const pod of PODS) {
     const ns = pod.axis === 'ns';
-    const w = ns ? POD_RUG.across : POD_RUG.along;
-    const d = ns ? POD_RUG.along : POD_RUG.across;
+    const dims = pod.size === 2 ? POD_RUG_DUO : POD_RUG;
+    const w = ns ? dims.across : dims.along;
+    const d = ns ? dims.along : dims.across;
     drawRug(ctx, fit, pod.rug, pod.cx, pod.cy, w, d);
   }
   drawRug(ctx, fit, MEETING.rug, MEETING.lx, MEETING.ly, MEETING.rug.w, MEETING.rug.d);
