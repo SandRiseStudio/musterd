@@ -55,6 +55,14 @@ export const ResidencyPolicySchema = z.object({
    * enabled, those wakes receive portable context and intentionally start fresh. Typed handoffs,
    * reviews, and work-orders are portable regardless of this cohort flag. */
   portable_inbox_replies: z.boolean().default(false),
+  /** ADR 210 master switch, off at launch. While off the daemon marks NOTHING `resume_eligible`,
+   *  so every wake stays on ADR 209's portable/fresh path regardless of any other knob. Checked
+   *  before every other eligibility condition — an un-enrolled team cannot be marked by any path. */
+  exact_match_resume: z.boolean().default(false),
+  /** ADR 210: how recent a directed threaded reply must be to be worth *considering* a resume for.
+   *  Not a resume decision — the host still has to prove an exact local match. Bounds are held at
+   *  the ADR 209 defaults until the Eval gate has observations; do not retune them by feel. */
+  resume_eligible_ms: z.number().int().min(60_000).max(900_000).default(300_000),
   /**
    * Board-triggered work-order trust (ADR 179 / ADR 191 / ADR 199). At `manual` (launch default)
    * the seat is never a work-order wake *target* — bit-identical to pre-179. `auto` opts the seat
@@ -336,6 +344,10 @@ export const WakeOrderSchema = z
     transcript_max_bytes: z.number().int().optional(),
     /** ADR 209: portable (fresh) is default; transcript_required is a narrow reply-only exception. */
     continuity_requirement: ContinuityRequirementSchema.optional(),
+    /** ADR 210: the daemon judges this wake worth *considering* a local resume for — permission,
+     *  never an instruction. The host resumes only if it can also prove an exact local thread
+     *  match; a host that ignores this bit entirely stays correct, because fresh always is. */
+    resume_eligible: z.boolean().optional(),
     /** ADR 209: daemon intent; host reports the observed delivery separately. */
     intended_delivery: WakeDeliverySchema.optional(),
     /** Why this wake was derived (ADR 191). Absent ⇒ treat as the `lane` value (older daemons). */

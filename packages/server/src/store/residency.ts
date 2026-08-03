@@ -492,6 +492,11 @@ interface WakeCandidate {
   derivation: WakeDerivation;
   lane_id?: string;
   work_order_kind?: 'review' | 'dispatch';
+  /** ADR 210: set only when the triggering act is a reply INTO an existing thread. The thread id
+   *  itself never leaves the daemon on the order — it is read here purely to judge eligibility. */
+  thread_id?: string;
+  /** ADR 210: when the triggering act was sent, for the eligibility recency test. */
+  act_ts?: number;
 }
 
 /** ADR 209 rollout: typed handoff/review/work-order wakes are portable now. Ordinary inbox
@@ -500,6 +505,32 @@ function isPortableWakeCandidate(candidate: WakeCandidate, portableInboxReplies:
   return (
     candidate.derivation === 'work_order' || candidate.act === 'handoff' || portableInboxReplies
   );
+}
+
+/**
+ * ADR 210: may this wake even be *considered* for a local resume?
+ *
+ * This is the daemon's whole contribution, and it is deliberately tiny. The daemon knows the thread
+ * but never the session — so it cannot decide to resume, only decline to rule it out. Everything
+ * that could prove causality (session id, transcript path, harness class) lives on the host and
+ * stays there.
+ *
+ * Eligible means all of: the master switch is on, the wake is an ordinary directed reply (not a
+ * work-order, review, or handoff — those are portable by ADR 209 and stay that way), the triggering
+ * act sits INSIDE an existing thread, and it is recent enough that a live session plausibly still
+ * holds that dialogue. Sender text is never consulted.
+ */
+function isResumeEligible(
+  candidate: WakeCandidate,
+  policy: { exact_match_resume: boolean; resume_eligible_ms: number },
+  now: number,
+): boolean {
+  if (!policy.exact_match_resume) return false;
+  if (candidate.derivation === 'work_order') return false;
+  if (candidate.act === 'handoff') return false;
+  if (candidate.thread_id === undefined) return false;
+  if (candidate.act_ts === undefined) return false;
+  return now - candidate.act_ts <= policy.resume_eligible_ms;
 }
 
 /**
@@ -693,6 +724,10 @@ function dueCandidates(
         sender: env.from,
         lane: demoted ? 'batched' : 'immediate',
         derivation: demoted ? 'batched' : 'immediate',
+        // ADR 210: an explicit thread means this act is a reply INTO a dialogue. An act that opens
+        // its own thread has no prior exchange to resume into, so it is never eligible.
+        ...(env.thread ? { thread_id: env.thread } : {}),
+        act_ts: env.ts,
       };
       if (demoted) {
         if (lanes.batched) batched.push(candidate);
@@ -873,6 +908,9 @@ export function claimWakeLeases(
             ...(isPortableWakeCandidate(candidate, policy.portable_inbox_replies)
               ? { continuity_requirement: 'portable', intended_delivery: 'fresh' }
               : {}),
+            // ADR 210: the eligibility BIT is audited; the thread id that produced it is not. The
+            // ledger records that a resume was permitted, never anything about the local session.
+            ...(isResumeEligible(candidate, policy, now) ? { resume_eligible: true } : {}),
             ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
           },
         });
@@ -905,6 +943,7 @@ export function claimWakeLeases(
           ...(isPortable
             ? { continuity_requirement: 'portable' as const, intended_delivery: 'fresh' as const }
             : {}),
+          ...(isResumeEligible(candidate, policy, now) ? { resume_eligible: true as const } : {}),
           derivation: candidate.derivation,
           ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
         });

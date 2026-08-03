@@ -960,3 +960,110 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
     expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
   });
 });
+
+describe('claimWakeLeases — resume eligibility (ADR 210 exact-match continuity)', () => {
+  // The daemon may only MARK a wake resume_eligible. That mark is permission to consider a local
+  // resume, never an instruction to perform one — the host still has to prove an exact match.
+  const REPLY_TS = 1_000_000;
+  const soon = REPLY_TS + 30_000;
+
+  function threadedReply(over: { ts?: number; thread?: string } = {}) {
+    const seeded = seed();
+    const { db, team, nick, ada } = seeded;
+    enroll(db, team, ada);
+    setPolicy(db, team.id, {
+      residency: { portable_inbox_replies: true, exact_match_resume: true },
+    });
+    msg(db, team, nick, ada, 'steer', 'm1', over.ts ?? REPLY_TS, {
+      thread: over.thread ?? 'T1',
+    });
+    return seeded;
+  }
+
+  it('marks a recent directed threaded reply resume_eligible', () => {
+    const { db, team } = threadedReply();
+    const [order] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS, soon);
+    expect(order).toMatchObject({ resume_eligible: true, intended_delivery: 'fresh' });
+  });
+
+  it('does not mark a reply older than the eligibility horizon', () => {
+    const { db, team } = threadedReply();
+    const late = REPLY_TS + WAKE_POLICY_DEFAULTS.resume_eligible_ms + 1;
+    const [order] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS, late);
+    expect(order).not.toHaveProperty('resume_eligible');
+  });
+
+  it('does not mark an un-threaded directed reply — there is no join key to prove a match', () => {
+    const seeded = seed();
+    const { db, team, nick, ada } = seeded;
+    enroll(db, team, ada);
+    setPolicy(db, team.id, {
+      residency: { portable_inbox_replies: true, exact_match_resume: true },
+    });
+    msg(db, team, nick, ada, 'steer', 'm1', REPLY_TS);
+    const [order] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS, soon);
+    // A message with no explicit thread still has a canonical thread of its own id, but it is the
+    // FIRST act in it — there is no prior dialogue to resume into.
+    expect(order).not.toHaveProperty('resume_eligible');
+  });
+
+  it('never marks a handoff, even inside a live thread — the derivation wins', () => {
+    const seeded = seed();
+    const { db, team, nick, ada } = seeded;
+    enroll(db, team, ada);
+    setPolicy(db, team.id, {
+      residency: { portable_inbox_replies: true, exact_match_resume: true },
+    });
+    msg(db, team, nick, ada, 'message', 'root', REPLY_TS - 1_000, { thread: 'T1' });
+    msg(db, team, nick, ada, 'handoff', 'h1', REPLY_TS, { thread: 'T1' });
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS, soon);
+    for (const o of orders) expect(o).not.toHaveProperty('resume_eligible');
+  });
+
+  it('never marks a work_order wake', async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { review: true }, residency: { exact_match_resume: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    const lane = openLane(db, team.id, team.slug, nick.name, { title: 'a change', claim: true });
+    updateLane(db, team.id, lane.id, team.slug, { state: 'ready_for_review' });
+    msg(db, team, nick, ada, 'ask', 'ask1', 1_000, {
+      meta: {
+        species: 'approve',
+        tier: 'standard',
+        lane_review: {
+          lane: lane.id,
+          title: lane.title,
+          route: 'cross_family',
+          grade: 'cross_model',
+        },
+      },
+    });
+    const [order] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(order!.derivation).toBe('work_order');
+    expect(order).not.toHaveProperty('resume_eligible');
+  });
+
+  it('marks nothing while the exact_match_resume switch is off (the launch default)', () => {
+    const seeded = seed();
+    const { db, team, nick, ada } = seeded;
+    enroll(db, team, ada);
+    setPolicy(db, team.id, { residency: { portable_inbox_replies: true } });
+    expect(getPolicy(db, team.id).residency.exact_match_resume).toBe(false);
+    msg(db, team, nick, ada, 'message', 'root', REPLY_TS - 1_000, { thread: 'T1' });
+    msg(db, team, nick, ada, 'steer', 'm1', REPLY_TS, { thread: 'T1' });
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS, soon);
+    for (const o of orders) expect(o).not.toHaveProperty('resume_eligible');
+  });
+
+  it('records the eligibility bit in the wake_leased audit row and no local identity', () => {
+    const { db, team } = threadedReply();
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS, soon);
+    const leased = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_leased');
+    const detail = JSON.parse(leased[0]!.detail as string);
+    expect(detail).toMatchObject({ resume_eligible: true });
+    expect(detail).not.toHaveProperty('session_id');
+    expect(detail).not.toHaveProperty('transcript_path');
+    expect(detail).not.toHaveProperty('thread_id');
+  });
+});
