@@ -502,8 +502,14 @@ export const BEAM_SHEAR = 46;
  * kanban read right-to-left is wrong in a way a viewer feels before they can say why. It sits in the
  * whiteboard's old slot, widened into the free stretch at the wall's far end (six columns need the
  * elbow room; every neighbour stays where it was).
+ *
+ * `tc` is off the window on purpose. At 0.87 the board's left edge landed ~6 units from window 2's
+ * right edge (`t1` 0.78 → 702; 0.87·900 − 75 = 708), which is close enough that the two objects read
+ * as one crowded strip rather than as a window and a board (nick, 2026-08-02: "very snug against the
+ * window"). At 0.885 the gap is ~22 — a hand's breadth of bare wall — and the far edge still stops
+ * ~28 short of the wall's end, so it is a shift, not a slide into the corner.
  */
-export const WALL_BOARD = { wall: 1 as const, tc: 0.87, uc: 0.6, w: 150, h: 74 };
+export const WALL_BOARD = { wall: 1 as const, tc: 0.885, uc: 0.6, w: 150, h: 74 };
 
 /** What sits on a shelf top. A credenza-height top is a real surface — leaving it bare repeats the
  *  same uniformity problem one shelf down. */

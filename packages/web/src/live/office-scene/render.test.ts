@@ -217,20 +217,23 @@ describe('the wall agile board', () => {
     const paints: string[] = [];
     const nodes = ['ada', 'bo'].map((n) => node(n, 'working'));
     renderScene(textCtx(paints, []), fit, new Map(), roster(nodes), new Map(), 0, 'revive', undefined, null, undefined, null, wallData());
-    expect(paints).toContain('#F7F7F5'); // the board face
+    expect(paints).toContain('#C98F52'); // the cork face
+    expect(paints).toContain('#DCBF8E'); // the pale oak frame
     expect(paints).toContain('#5A52C9'); // the active cap — --lc-lane's hex twin
     expect(paints).toContain('#D1503F'); // the blocked cap
     expect(paints).toContain('#EFE8D8'); // an open sticky's paper wash
+    expect(paints).toContain('rgba(180, 168, 143, 0.75)'); // its washi tab, at the cap's tone
     for (const n of nodes) expect(paints).not.toContain(n.color);
   });
 
   it('hangs an empty board when no team is connected: face and caps, zero paper', () => {
     const paints: string[] = [];
     scene(textCtx(paints, []), null);
-    expect(paints).toContain('#F7F7F5');
+    expect(paints).toContain('#C98F52'); // cork
     expect(paints).toContain('#5A52C9'); // caps announce their column even bare
     expect(paints).not.toContain('#EFE8D8'); // …but no sticky paper hangs under them
     expect(paints).not.toContain('#D8D4F3');
+    expect(paints).not.toContain('rgba(180, 168, 143, 0.75)'); // and no tape holding nothing
   });
 
   it('writes only the overflow badge — a column past its cap says +N, nothing else says anything', () => {
