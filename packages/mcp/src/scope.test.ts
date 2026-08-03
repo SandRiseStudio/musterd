@@ -70,7 +70,7 @@ describe('scopedToolNames (ADR 144 inc 5)', () => {
   });
 
   it('cuts the surface materially for an observer — the increment-5 headline', () => {
-    // Measured 2026-08-03 against the built server: 22 tools, including the read-only ADR 207
+    // Measured 2026-08-03 against the built server: 22 tools, including the read-only ADR 209
     // context index; of the original surface the acting
     // tools are 9,876 (77%). The exact byte count belongs to the telemetry attestation, not here;
     // what this pins is that scoping removes at least half, so a regression that quietly stops dropping

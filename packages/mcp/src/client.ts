@@ -428,7 +428,7 @@ export class MusterdClient {
     return this.request('GET', `/teams/${this.config.team}/memory`);
   }
 
-  /** ADR 207's recipient-scoped, body-free wake orientation index. */
+  /** ADR 209's recipient-scoped, body-free wake orientation index. */
   async wakeContext(request: WakeContextRequest): Promise<WakeContextPacket> {
     const target = WakeContextRequestSchema.safeParse(request);
     if (!target.success) throw new Error('wake context requires exactly one act_id or lane_id');

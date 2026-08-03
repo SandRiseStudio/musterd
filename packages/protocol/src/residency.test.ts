@@ -65,7 +65,7 @@ describe('resolveAttestedProvenance (ADR 131 §6 amendment)', () => {
   });
 });
 
-describe('portable wake context (ADR 207)', () => {
+describe('portable wake context (ADR 209)', () => {
   const packet = {
     version: 1,
     wake: { kind: 'reply' as const, act_id: 'A1' },

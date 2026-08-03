@@ -3,7 +3,7 @@ import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 import { resolve } from './helpers.js';
 
-/** Read ADR 207's bounded wake orientation index without loading an Act or memory body. */
+/** Read ADR 209's bounded wake orientation index without loading an Act or memory body. */
 export async function wakeContextCommand(parsed: Parsed): Promise<number> {
   const act = flagStr(parsed.flags, 'act');
   const lane = flagStr(parsed.flags, 'lane');

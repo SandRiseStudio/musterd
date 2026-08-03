@@ -17,7 +17,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
 ## Global Constraints
 
-- Write ADR 207 and update `SPEC.md` before changing any `@musterd/protocol` schema.
+- Write ADR 209 and update `SPEC.md` before changing any `@musterd/protocol` schema.
 - The spawn line contains canonical IDs only: never an Act body, lane title, memory body, or
   agent-authored summary (ADR 088/128).
 - Packet data is derived, bounded, and recipient-scoped; it creates no new durable context store.
@@ -32,13 +32,15 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
 ---
 
-### Task 1: Make the context-delivery contract normative (ADR 207 + SPEC)
+### Task 1: Make the context-delivery contract normative (ADR 209 + SPEC)
 
 **Files:**
-- Create: `docs/decisions/207-portable-wake-context.md`
+
+- Create: `docs/decisions/209-portable-wake-context.md`
 - Modify: `SPEC.md` (wake-order and wake-report contract sections)
 
 **Interfaces:**
+
 - Produces the normative vocabulary used by later tasks:
   `ContinuityRequirement = 'portable' | 'transcript_required'`,
   `WakeDelivery = 'fresh' | 'resume'`, and
@@ -47,7 +49,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
   delivered to that Member, or for a Lane on which the Member is the owner/reviewer under the live
   wake derivation; all other requests return `forbidden` without revealing existence.
 
-- [ ] **Step 1: Write ADR 207 before code**
+- [ ] **Step 1: Write ADR 209 before code**
 
   Use the repository ADR template. Its Decision section must fix all of the following:
 
@@ -74,7 +76,11 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
   type WakeContextPacket = {
     version: 1;
-    wake: { kind: 'reply' | 'handoff' | 'review' | 'work_order'; act_id?: string; lane_id?: string };
+    wake: {
+      kind: 'reply' | 'handoff' | 'review' | 'work_order';
+      act_id?: string;
+      lane_id?: string;
+    };
     objective: { action: 'reply' | 'review' | 'continue_lane' | 'begin_lane' };
     state: { lane?: WakeContextLane; thread?: WakeContextThread; memory?: MemoryEnvelope };
     fetch: Array<'inbox_thread' | 'lane_detail' | 'seat_memory' | 'git_artifact'>;
@@ -89,7 +95,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
 - [ ] **Step 3: Document evaluation before implementing it**
 
-  Add ADR 207 Observability & Evaluation with: packet byte size; requirement/intended/actual
+  Add ADR 209 Observability & Evaluation with: packet byte size; requirement/intended/actual
   delivery; transcript bytes/age examined by the host; fetch category/count; duration and
   allowance-equivalent cost. Set the comparison: fresh reply cohort versus present resume ladder,
   with no material regression in failed/duplicate wakes or lane completion latency.
@@ -98,26 +104,28 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
   Run: `pnpm vocab:check && pnpm format:check`
 
-  Expected: PASS. Confirm `change-adr:check` sees ADR 207 as a new decision and no accepted ADR's
+  Expected: PASS. Confirm `change-adr:check` sees ADR 209 as a new decision and no accepted ADR's
   Decision section changed.
 
 - [ ] **Step 5: Commit**
 
   ```bash
-  git add SPEC.md docs/decisions/207-portable-wake-context.md
-  git commit -m "docs: specify portable wake context (ADR 207)"
+  git add SPEC.md docs/decisions/209-portable-wake-context.md
+  git commit -m "docs: specify portable wake context (ADR 209)"
   ```
 
 ### Task 2: Add additive protocol schemas and delivery telemetry fields
 
 **Files:**
+
 - Modify: `packages/protocol/src/residency.ts`
 - Modify: `packages/protocol/src/residency.test.ts`
 - Modify: `packages/protocol/src/index.ts`
 - Modify: `docs/architecture/02-protocol.md` (file-tree description if a new protocol file is used)
 
 **Interfaces:**
-- Consumes: ADR 207's exact vocabulary from Task 1.
+
+- Consumes: ADR 209's exact vocabulary from Task 1.
 - Produces:
 
   ```ts
@@ -143,14 +151,22 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
   expect(WakeContextRequestSchema.safeParse({ act_id: 'A1', lane_id: 'L1' }).success).toBe(false);
 
   expect(WakeContextPacketSchema.parse(packet).state.memory).toEqual({
-    headline: 'resume checkout review', saved_at: 1, size_bytes: 42,
+    headline: 'resume checkout review',
+    saved_at: 1,
+    size_bytes: 42,
   });
-  expect(() => WakeContextPacketSchema.parse({ ...packet, state: { thread: { body: 'leak' } } }))
-    .toThrow();
-  expect(WakeReportBodySchema.parse({
-    lease_id: 'L1', occupied: true, delivery_outcome: 'fresh_fallback',
-    transcript_bytes: 262144, transcript_age_ms: 3_000,
-  }).delivery_outcome).toBe('fresh_fallback');
+  expect(() =>
+    WakeContextPacketSchema.parse({ ...packet, state: { thread: { body: 'leak' } } }),
+  ).toThrow();
+  expect(
+    WakeReportBodySchema.parse({
+      lease_id: 'L1',
+      occupied: true,
+      delivery_outcome: 'fresh_fallback',
+      transcript_bytes: 262144,
+      transcript_age_ms: 3_000,
+    }).delivery_outcome,
+  ).toBe('fresh_fallback');
   ```
 
 - [ ] **Step 2: Run the focused test and confirm it fails**
@@ -178,12 +194,13 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
   ```bash
   git add packages/protocol/src/residency.ts packages/protocol/src/residency.test.ts \
     packages/protocol/src/index.ts docs/architecture/02-protocol.md
-  git commit -m "protocol: add portable wake-context contracts (ADR 207)"
+  git commit -m "protocol: add portable wake-context contracts (ADR 209)"
   ```
 
 ### Task 3: Derive and authorize packet reads on the daemon
 
 **Files:**
+
 - Modify: `packages/server/src/store/residency.ts`
 - Modify: `packages/server/src/store/residency.test.ts`
 - Modify: `packages/server/src/transport/http.ts`
@@ -192,6 +209,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 - Modify: `docs/architecture/03-server.md`
 
 **Interfaces:**
+
 - Consumes: `WakeContextRequestSchema`, `WakeContextPacketSchema`, and delivery types from Task 2;
   existing recipient-delivery records, Lane store, and `MemoryEnvelope` projection.
 - Produces: `POST /teams/:slug/wake-context` authenticated as the calling Member and returning
@@ -211,9 +229,12 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
     delivery: { requirement: 'portable', intended: 'fresh' },
     fetch: ['inbox_thread', 'seat_memory'],
   });
-  expect(buildWakeContext(db, team, reviewer, { act_id: review.id }).objective.action).toBe('review');
-  expect(buildWakeContext(db, team, owner, { lane_id: lane.id }).objective.action)
-    .toBe('continue_lane');
+  expect(buildWakeContext(db, team, reviewer, { act_id: review.id }).objective.action).toBe(
+    'review',
+  );
+  expect(buildWakeContext(db, team, owner, { lane_id: lane.id }).objective.action).toBe(
+    'continue_lane',
+  );
   expect(() => buildWakeContext(db, team, unrelated, { act_id: reply.id })).toThrow(/forbidden/i);
   ```
 
@@ -230,12 +251,12 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
   In `store/residency.ts`, derive kind/action only from canonical Act metadata and Lane state:
 
-  | Source | `wake.kind` | `objective.action` | required fetch |
-  | --- | --- | --- | --- |
-  | directed reply/message | `reply` | `reply` | `inbox_thread` |
-  | typed handoff | `handoff` | `continue_lane` | `inbox_thread`, `lane_detail`, `git_artifact` |
-  | `meta.lane_review` Act | `review` | `review` | `inbox_thread`, `lane_detail`, `git_artifact` |
-  | board continuation/work-order Lane | `work_order` | `begin_lane` or `continue_lane` from Lane state | `lane_detail`, `git_artifact` |
+  | Source                             | `wake.kind`  | `objective.action`                              | required fetch                                |
+  | ---------------------------------- | ------------ | ----------------------------------------------- | --------------------------------------------- |
+  | directed reply/message             | `reply`      | `reply`                                         | `inbox_thread`                                |
+  | typed handoff                      | `handoff`    | `continue_lane`                                 | `inbox_thread`, `lane_detail`, `git_artifact` |
+  | `meta.lane_review` Act             | `review`     | `review`                                        | `inbox_thread`, `lane_detail`, `git_artifact` |
+  | board continuation/work-order Lane | `work_order` | `begin_lane` or `continue_lane` from Lane state | `lane_detail`, `git_artifact`                 |
 
   Include the recipient's ADR 093 memory envelope when present, never its body. Define
   `transcript_required` nowhere in this increment: all returned packets are portable/fresh. Add
@@ -261,12 +282,13 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
   git add packages/server/src/store/residency.ts packages/server/src/store/residency.test.ts \
     packages/server/src/transport/http.ts packages/server/src/transport/integration.test.ts \
     packages/server/src/store/audit.ts docs/architecture/03-server.md
-  git commit -m "server: derive recipient-scoped wake context (ADR 207)"
+  git commit -m "server: derive recipient-scoped wake context (ADR 209)"
   ```
 
 ### Task 4: Expose explicit context retrieval on CLI and MCP surfaces
 
 **Files:**
+
 - Modify: `packages/cli/src/client.ts`
 - Create: `packages/cli/src/commands/wake-context.ts`
 - Modify: `packages/cli/src/bin.ts`
@@ -282,6 +304,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 - Modify: `docs/architecture/05-mcp.md`
 
 **Interfaces:**
+
 - Consumes: `POST /teams/:slug/wake-context` and `WakeContextPacket` from Task 3.
 - Produces: `musterd wake-context --act <id>` and `musterd wake-context --lane <id>`.
 - Produces: `team_wake_context({act_id? , lane_id?})`, with exactly-one validation matching the
@@ -342,12 +365,13 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
   ```bash
   git add packages/cli/src packages/mcp/src docs/architecture/04-cli.md docs/architecture/05-mcp.md
-  git commit -m "cli: expose bounded wake context (ADR 207)"
+  git commit -m "cli: expose bounded wake context (ADR 209)"
   ```
 
 ### Task 5: Make portable wake types fresh by default and report actual delivery
 
 **Files:**
+
 - Modify: `packages/cli/src/host/backends/claudeCode.ts`
 - Modify: `packages/cli/src/host/backends/claudeCode.test.ts`
 - Modify: `packages/cli/src/host/backend.ts`
@@ -361,6 +385,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 - Modify: `docs/architecture/04-cli.md`
 
 **Interfaces:**
+
 - Consumes: `WakeOrder.intended_delivery`; host-local liveness/transcript facts remain local.
 - Produces: `WakeOutcome.delivery_outcome` plus optional `transcript_bytes` and
   `transcript_age_ms`; an intended `fresh` order skips `resumeLadder` entirely.
@@ -371,13 +396,19 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 
   ```ts
   it('portable fresh orders never invoke --resume even with a valid local capture', async () => {
-    const outcome = await backend.wake(spec({ order: order({ intended_delivery: 'fresh' }) }), ctx());
+    const outcome = await backend.wake(
+      spec({ order: order({ intended_delivery: 'fresh' }) }),
+      ctx(),
+    );
     expect(spawnedArgs()).not.toContain('--resume');
     expect(outcome.outcome).toMatchObject({ session: 'fresh', delivery_outcome: 'fresh' });
   });
 
   it('resume failure reports fresh_fallback after the fallback occupies', async () => {
-    const outcome = await backend.wake(spec({ order: order({ intended_delivery: 'resume' }) }), ctx());
+    const outcome = await backend.wake(
+      spec({ order: order({ intended_delivery: 'resume' }) }),
+      ctx(),
+    );
     expect(outcome.outcome).toMatchObject({ session: 'fresh', delivery_outcome: 'fresh_fallback' });
   });
   ```
@@ -440,12 +471,20 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
     packages/server/src/store/residency.test.ts packages/server/src/transport/http.ts \
     packages/server/src/transport/integration.test.ts docs/architecture/03-server.md \
     docs/architecture/04-cli.md
-  git commit -m "server: select fresh delivery for portable wakes (ADR 207)"
+  git commit -m "server: select fresh delivery for portable wakes (ADR 209)"
   ```
 
 ### Task 6: Add the narrow active-reply resume exception and evaluate it
 
+> **Superseded and deferred (2026-08-03).** ADR 210 replaces this task's server-only
+> `transcript_required` classification with local exact-match continuity: the daemon may only mark a
+> wake `resume_eligible`, and a gitignored per-workspace registry keyed by `(team, seat, thread_id)`
+> proves the causal match host-side. The `resume_freshness_ms` / `resume_rate_cap` knobs below are
+> not to be built as written. Task 6 therefore ships as its own increment against ADR 210, after the
+> fresh path in Tasks 1–5 has run long enough to supply the rollout numbers Step 4 asks for.
+
 **Files:**
+
 - Modify: `packages/protocol/src/residency.ts`
 - Modify: `packages/protocol/src/residency.test.ts`
 - Modify: `packages/server/src/store/residency.ts`
@@ -454,11 +493,12 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
 - Modify: `packages/cli/src/host/backends/claudeCode.test.ts`
 - Modify: `packages/cli/src/commands/residency.ts`
 - Modify: `packages/cli/src/commands/residency.test.ts`
-- Modify: `docs/decisions/207-portable-wake-context.md` (Consequences and evaluation results only)
+- Modify: `docs/decisions/209-portable-wake-context.md` (Consequences and evaluation results only)
 - Modify: `docs/architecture/03-server.md`
 - Modify: `docs/architecture/04-cli.md`
 
 **Interfaces:**
+
 - Consumes: portable-fresh path and report metadata from Task 5.
 - Produces: effective policy fields `resume_freshness_ms` and `resume_rate_cap`; both are evaluated
   only for the reply-only `transcript_required` classification.
@@ -468,17 +508,29 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
   Add cases that assert:
 
   ```ts
-  expect(classifyReplyContinuity({
-    isDirectedReply: true, age_ms: 30_000, policy: { resume_freshness_ms: 60_000 },
-  })).toEqual({ requirement: 'transcript_required', intended_delivery: 'resume' });
+  expect(
+    classifyReplyContinuity({
+      isDirectedReply: true,
+      age_ms: 30_000,
+      policy: { resume_freshness_ms: 60_000 },
+    }),
+  ).toEqual({ requirement: 'transcript_required', intended_delivery: 'resume' });
 
-  expect(classifyReplyContinuity({
-    isDirectedReply: false, age_ms: 1, policy,
-  })).toEqual({ requirement: 'portable', intended_delivery: 'fresh' });
+  expect(
+    classifyReplyContinuity({
+      isDirectedReply: false,
+      age_ms: 1,
+      policy,
+    }),
+  ).toEqual({ requirement: 'portable', intended_delivery: 'fresh' });
 
-  expect(classifyReplyContinuity({
-    isDirectedReply: true, age_ms: 60_001, policy: { resume_freshness_ms: 60_000 },
-  })).toEqual({ requirement: 'portable', intended_delivery: 'fresh' });
+  expect(
+    classifyReplyContinuity({
+      isDirectedReply: true,
+      age_ms: 60_001,
+      policy: { resume_freshness_ms: 60_000 },
+    }),
+  ).toEqual({ requirement: 'portable', intended_delivery: 'fresh' });
   ```
 
   Add CLI residency-policy parsing/render tests for both new knobs. Add backend tests proving an
@@ -510,7 +562,7 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
   checks; report `delivery_outcome: 'fresh'` and the measured reason. Never let sender text set the
   classification.
 
-- [ ] **Step 4: Update ADR 207's Consequences with the rollout result**
+- [ ] **Step 4: Update ADR 209's Consequences with the rollout result**
 
   Add only a dated result note outside its immutable Decision section: cohort, observation count,
   p50/p95 cost comparison, byte distribution, fetch pattern, and whether the exception remains
@@ -538,9 +590,9 @@ measurements, and preserves the existing same-lease fresh fallback after a faile
     packages/server/src/store/residency.ts packages/server/src/store/residency.test.ts \
     packages/cli/src/host/backends/claudeCode.ts packages/cli/src/host/backends/claudeCode.test.ts \
     packages/cli/src/commands/residency.ts packages/cli/src/commands/residency.test.ts \
-    docs/decisions/207-portable-wake-context.md docs/architecture/03-server.md \
+    docs/decisions/209-portable-wake-context.md docs/architecture/03-server.md \
     docs/architecture/04-cli.md
-  git commit -m "server: gate reply resume on active context (ADR 207)"
+  git commit -m "server: gate reply resume on active context (ADR 209)"
   ```
 
 ## Plan self-review

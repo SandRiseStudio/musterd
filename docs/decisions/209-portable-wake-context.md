@@ -1,4 +1,4 @@
-# 207 — Portable wake context: fresh by default, transcript by exception
+# 209 — Portable wake context: fresh by default, transcript by exception
 
 - Status: accepted
 - Date: 2026-08-03
@@ -135,6 +135,10 @@ this ADR and `SPEC.md` carry the accepted, not-yet-shipped contract.
 - The first implementation touches protocol schemas and therefore updates `SPEC.md` in the same PR.
 - No runtime dependency, generic prompt policy, transcript store, or automatic memory summarizer is
   introduced.
+- 2026-08-03: [ADR 210](210-exact-match-local-continuity.md) supersedes §2's server-only
+  `transcript_required` classification. The shipped increment implements the portable/fresh path
+  only; the daemon marks eligibility and the host proves an exact local match. The rollout result
+  this section calls for is recorded once that fresh path has run against a dogfood cohort.
 
 ## Observability & Evaluation
 

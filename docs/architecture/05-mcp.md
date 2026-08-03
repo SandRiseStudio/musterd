@@ -280,7 +280,7 @@ Delivery is **envelope-on-occupy / body-on-demand**: the `occupied` frame carrie
 
 — so a fresh session pays ~30 tokens and makes an informed fetch decision. Both tools require a live join (the seat is resolved from the session's occupancy). HTTP surface: `PUT`/`GET` `/teams/:slug/memory`.
 
-### `team_wake_context` (ADR 207)
+### `team_wake_context` (ADR 209)
 
 `team_wake_context({act_id? , lane_id?})` accepts exactly one directed Act or owned Lane target after the Member occupies. It returns a structured, server-derived packet with only canonical IDs, metadata, intended delivery, and named follow-up reads. It never automatically loads an Act, thread, memory, or artifact body; the Member chooses the named explicit read instead.
 
@@ -359,7 +359,7 @@ src/
     status.ts     // works while dormant/pending; appends the ADR 135 build-skew warning
     members.ts    // works while dormant/pending
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
-    wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 207)
+    wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 209)
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next orientation brief (ADR 083/084)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084/125)

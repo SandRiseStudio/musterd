@@ -16,13 +16,13 @@ import {
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
+import { MusterdError } from '../errors.js';
 import { appendAudit } from './audit.js';
 import { getCursor } from './cursors.js';
 import { openDirectedLedger } from './delivery.js';
 import { getLane, listLanes } from './lanes.js';
-import { memoryEnvelope } from './memory.js';
-import { MusterdError } from '../errors.js';
 import { getMemberById } from './members.js';
+import { memoryEnvelope } from './memory.js';
 import { listInbox, pendingInterrupts, rowToEnvelope } from './messages.js';
 import { hasLivePresence, listReclaimableMemberIds } from './presence.js';
 import type { MemberRow, MessageRow } from './rows.js';
@@ -129,7 +129,7 @@ export function effectiveWakePolicy(
 }
 
 /**
- * Derive ADR 207's bounded orientation index for one recipient. It intentionally reads canonical
+ * Derive ADR 209's bounded orientation index for one recipient. It intentionally reads canonical
  * rows only: an Act body or memory body never crosses this seam. An unauthorized target is
  * indistinguishable from a missing one to the caller.
  */
@@ -477,7 +477,7 @@ interface WakeCandidate {
   work_order_kind?: 'review' | 'dispatch';
 }
 
-/** ADR 207 rollout: typed handoff/review/work-order wakes are portable now. Ordinary inbox
+/** ADR 209 rollout: typed handoff/review/work-order wakes are portable now. Ordinary inbox
  * deliveries enter the fresh cohort only when the team has explicitly enabled it. */
 function isPortableWakeCandidate(candidate: WakeCandidate, portableInboxReplies: boolean): boolean {
   return (

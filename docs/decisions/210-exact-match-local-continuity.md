@@ -1,12 +1,12 @@
-# ADR 208 — Exact-match local continuity for wake resume
+# 210 — Exact-match local continuity for wake resume
 
 - Status: accepted
 - Date: 2026-08-03
-- Supersedes: ADR 207 §2's speculative server-only `transcript_required` classification.
+- Supersedes: ADR 209 §2's speculative server-only `transcript_required` classification.
 
 ## Context
 
-ADR 207 establishes portable context as the normal, fresh-first wake path. The daemon knows an Act's
+ADR 209 establishes portable context as the normal, fresh-first wake path. The daemon knows an Act's
 thread but intentionally never receives a harness session ID, transcript path, or durable
 session-to-thread relation. Therefore recency alone cannot prove that a transcript is the dialogue
 that the wake is answering.
@@ -43,7 +43,20 @@ the shared binding contract before any harness advertises resume capability.
 
 ## Observability & Evaluation
 
-- Audit records only eligibility, exact-match result, delivery outcome, and non-content byte/age
-  measurements; no local identity or path crosses the host boundary.
-- Compare exact-match resume against fresh wakes before retuning byte, rate, or freshness bounds.
-- Tests cover multi-session isolation, privacy, pruning, exact-match resume, and fresh fallback.
+**Traces.** `residency.wake_leased` carries the daemon's `resume_eligible` mark;
+`residency.woke` and `residency.wake_cost` carry the host's exact-match result
+(`bound` / `missing` / `stale` / `mismatched`), the resulting `delivery_outcome`, and non-content
+byte/age measurements. No local session ID, transcript path, or workspace path crosses the host
+boundary into audit, telemetry, the workspace manifest, or a prompt.
+
+**Eval.** Dataset: wakes marked `resume_eligible` over one dogfood cohort, split by observed
+delivery outcome. Baseline: the ADR 209 portable/fresh reply cohort measured under the same wake
+kinds. Exact-match resume must lower p50/p95 allowance-equivalent cost per completed reply without a
+material increase in failed or duplicate wakes, incorrect replies, or lane completion latency. Byte,
+rate, and freshness bounds stay fixed until this comparison has repeated observations behind it.
+
+**Experiment.** Keep the registry off by default and enable it for one workspace cohort first.
+Bindings are compared against the fresh path in the same period rather than against the pre-ADR 209
+resume ladder, so the registry is measured as an optimization over fresh, not over the ladder it
+already replaced. Tests cover multi-session isolation, privacy, pruning, exact-match resume, and the
+same-lease fresh fallback.

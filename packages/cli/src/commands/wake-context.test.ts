@@ -8,7 +8,7 @@ import { sendCommand } from './send.js';
 import { teamCommand } from './team.js';
 import { wakeContextCommand } from './wake-context.js';
 
-describe('wake-context command (ADR 207)', () => {
+describe('wake-context command (ADR 209)', () => {
   let server: RunningServer;
   let dir: string;
   let previousEnv: Record<string, string | undefined>;

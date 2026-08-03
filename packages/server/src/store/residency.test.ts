@@ -3,9 +3,9 @@ import type { Database } from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { appendAudit, listAudit } from './audit.js';
+import { openLane } from './lanes.js';
 import { addMember } from './members.js';
 import { insertMessage } from './messages.js';
-import { openLane } from './lanes.js';
 import { attach } from './presence.js';
 import {
   WAKE_DEFER_SNOOZE_MS,
@@ -142,7 +142,7 @@ describe('residency enrollment (ADR 131)', () => {
   });
 });
 
-describe('buildWakeContext (ADR 207)', () => {
+describe('buildWakeContext (ADR 209)', () => {
   it('derives a body-free reply packet only for the directed recipient', () => {
     const { db, team, nick, ada, bob } = seed();
     msg(db, team, nick, ada, 'message', 'm1', 1_000, { thread: 't1' });

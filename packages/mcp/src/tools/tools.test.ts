@@ -18,9 +18,9 @@ import { registerLanes } from './lanes.js';
 import { registerLeave } from './leave.js';
 import { registerMembers } from './members.js';
 import { memoryLine, registerMemory } from './memory.js';
-import { registerWakeContext } from './wakeContext.js';
 import { registerSend } from './send.js';
 import { registerStatus } from './status.js';
+import { registerWakeContext } from './wakeContext.js';
 
 type Handler = (args: any) => Promise<{ content: { text: string }[]; structuredContent?: any }>;
 
@@ -647,7 +647,7 @@ describe('team_status handler', () => {
   });
 });
 
-describe('team_wake_context (ADR 207)', () => {
+describe('team_wake_context (ADR 209)', () => {
   it('refuses before join and returns only bounded fields after join', async () => {
     const dormant = capture(registerWakeContext, { holdsSeat: false });
     expect(text(await dormant({ act_id: 'a1' }))).toContain('team_join');

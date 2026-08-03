@@ -25,9 +25,9 @@ import { registerLanes } from './tools/lanes.js';
 import { registerLeave } from './tools/leave.js';
 import { registerMembers } from './tools/members.js';
 import { registerMemory } from './tools/memory.js';
-import { registerWakeContext } from './tools/wakeContext.js';
 import { registerSend } from './tools/send.js';
 import { registerStatus } from './tools/status.js';
+import { registerWakeContext } from './tools/wakeContext.js';
 import {
   instrumentToolTransport,
   startToolTelemetryFlush,
