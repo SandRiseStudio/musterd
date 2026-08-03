@@ -514,6 +514,33 @@ export function parseLaunchctlPrint(stdout: string, ok: boolean): LaunchctlStatu
 }
 
 /**
+ * The health headline for a **periodic one-shot** agent (`StartInterval`), or null when it is not
+ * loaded and the caller owns that wording.
+ *
+ * launchd reports an interval agent as `state = not running` for almost its entire life — that is
+ * simply what "idle between ticks" looks like, since the process only exists during a tick. Printing
+ * that string as a status inverts its meaning for a human reader. Measured 2026-08-03: `service
+ * status --auto` rendered `✓ daemon auto-refresher: not running` for a refresher with 2775 runs, a
+ * zero last exit, and ticks observed landing on schedule — and it was read, reasonably, as an outage
+ * worth investigating. A health line whose healthy case reads as "down" is broken however accurate
+ * the underlying string is; the ✓ cannot out-argue the words next to it.
+ *
+ * So: name the state the *agent* is in, not the state the process is in. A real failure still reads
+ * as one — `agentFailureNote` prints the detail beneath, and this refuses to say "idle" over a
+ * non-zero exit rather than paper over it.
+ */
+export function intervalAgentLabel(st: LaunchctlStatus): string | null {
+  if (!st.loaded) return null;
+  if (st.pid !== null) return 'running a tick now';
+  // Never ticked: `last exit code` is absent until the first run finishes. Distinct from idle —
+  // right after `install` it is the expected state, and calling it "idle · last tick ok" would
+  // claim a success that has not happened.
+  if (st.lastExit === null) return 'loaded · no tick yet';
+  if (st.lastExit !== 0) return `not running · last tick exited ${st.lastExit}`;
+  return 'idle between ticks · last tick ok';
+}
+
+/**
  * A human-readable warning when a "loaded" agent is in fact dead, or null when it looks fine.
  *
  * The failure this exists for is quiet by construction: launchd keeps a crash-looping agent

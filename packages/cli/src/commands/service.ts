@@ -35,6 +35,7 @@ import {
   LIVE_SYNC_LABEL,
   SWEEP_LABEL,
   agentFailureNote,
+  intervalAgentLabel,
   parsePlistEnvironment,
   parsePlistProgramArguments,
   SERVICE_LABEL,
@@ -570,8 +571,7 @@ export function buildSkewNote(
       theme.warn(
         `⚠ ${commits} — the auto-refresher already attempted this tip; either its build is still ` +
           `running or it failed, in which case the daemon is pinned on old code until a new commit ` +
-          `lands. Check ~/.musterd/autorefresh/refresh.log — a merge that changed pnpm-lock.yaml ` +
-          `needs \`pnpm install\` in the daemon's checkout, which the tick never runs.`,
+          `lands. Check ~/.musterd/autorefresh/refresh.log for what the tick actually said.`,
       )
     );
   }
@@ -1205,8 +1205,13 @@ async function autoRefreshServiceCommand(
     }
     case 'status': {
       const st = statusAutoRefresh(ctx);
+      // `intervalAgentLabel`, not the raw launchd `state`: this agent is a periodic one-shot, so its
+      // healthy steady state is literally `not running`, and printing that after a ✓ read as an
+      // outage to the one person who most needed to trust this line (2026-08-03).
       ok(
-        `daemon auto-refresher: ${st.loaded ? theme.ok(st.state ?? 'loaded') : theme.warn('not installed')}`,
+        `daemon auto-refresher: ${
+          st.loaded ? theme.ok(intervalAgentLabel(st) ?? 'loaded') : theme.warn('not installed')
+        }`,
       );
       const autoDead = agentFailureNote(st, agentProgramExists(ctx.plistPath));
       if (autoDead) process.stdout.write(`  ${theme.err('✗')} ${autoDead}\n`);
