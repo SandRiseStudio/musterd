@@ -51,6 +51,10 @@ export const ResidencyPolicySchema = z.object({
    *  ADR 131 "Observability & Evaluation"). The previous 10MiB counted lives, not dollars, and sat
    *  ~23x past the point where resume stops being the cheap option. */
   transcript_max_bytes: z.number().int().min(65_536).max(268_435_456).default(262_144),
+  /** ADR 204 rollout gate. Off preserves the legacy resume ladder for ordinary inbox wakes; when
+   * enabled, those wakes receive portable context and intentionally start fresh. Typed handoffs,
+   * reviews, and work-orders are portable regardless of this cohort flag. */
+  portable_inbox_replies: z.boolean().default(false),
   /**
    * Board-triggered work-order trust (ADR 179 / ADR 191 / ADR 199). At `manual` (launch default)
    * the seat is never a work-order wake *target* — bit-identical to pre-179. `auto` opts the seat

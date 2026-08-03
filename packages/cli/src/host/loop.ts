@@ -329,6 +329,15 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
             .wakeReport(group.team, {
               lease_id: order.lease_id,
               occupied: actuation.outcome.occupied,
+              ...(actuation.outcome.delivery_outcome
+                ? { delivery_outcome: actuation.outcome.delivery_outcome }
+                : {}),
+              ...(actuation.outcome.transcript_bytes !== undefined
+                ? { transcript_bytes: actuation.outcome.transcript_bytes }
+                : {}),
+              ...(actuation.outcome.transcript_age_ms !== undefined
+                ? { transcript_age_ms: actuation.outcome.transcript_age_ms }
+                : {}),
               ...completion,
             })
             .then(() =>

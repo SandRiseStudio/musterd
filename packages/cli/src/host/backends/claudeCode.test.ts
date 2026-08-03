@@ -377,6 +377,25 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
     await actuation.settled;
   });
 
+  it('portable fresh orders bypass --resume even with a valid local capture', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, { readSession: () => resumable() });
+    const actuation = await backend.wake(
+      spec({ order: order({ intended_delivery: 'fresh', continuity_requirement: 'portable' }) }),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args).not.toContain('--resume');
+    expect(actuation.outcome).toMatchObject({
+      occupied: true,
+      session: 'fresh',
+      delivery_outcome: 'fresh',
+      transcript_bytes: 4096,
+    });
+    child.exit(0);
+    await actuation.settled;
+  });
+
   it('resume that never occupies: killed, then a fresh fallback in the same wake call', async () => {
     const resumeChild = new FakeChild();
     const freshChild = new FakeChild();

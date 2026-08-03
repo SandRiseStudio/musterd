@@ -1773,6 +1773,13 @@ export async function handleHttp(
                 lease_id: body.lease_id,
                 ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
                 ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),
+                ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
+                ...(body.transcript_bytes !== undefined
+                  ? { transcript_bytes: body.transcript_bytes }
+                  : {}),
+                ...(body.transcript_age_ms !== undefined
+                  ? { transcript_age_ms: body.transcript_age_ms }
+                  : {}),
               },
             });
             return sendJson(res, 200, {
@@ -1815,6 +1822,13 @@ export async function handleHttp(
             ...(lease.lane_id ? { lane_id: lease.lane_id } : {}),
             ...(enrollment?.grant_id ? { grant_id: enrollment.grant_id } : {}),
             ...(body.session ? { session: body.session } : {}),
+            ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
+            ...(body.transcript_bytes !== undefined
+              ? { transcript_bytes: body.transcript_bytes }
+              : {}),
+            ...(body.transcript_age_ms !== undefined
+              ? { transcript_age_ms: body.transcript_age_ms }
+              : {}),
             ...(body.answered !== undefined ? { answered: body.answered } : {}),
             ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
             ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),

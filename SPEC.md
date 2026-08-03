@@ -338,6 +338,10 @@ the initial implementation permits only for a recent directed reply; it is never
 Envelope body. The host MAY resume only if local capture and policy checks pass and must retain the
 same-lease fresh fallback. Handoff, review, and work-order wakes are portable.
 
+Ordinary inbox reply wakes retain legacy delivery unless the team residency policy's
+`portable_inbox_replies` cohort flag is enabled (its default is `false`). When enabled, those
+orders are also portable/fresh. This is a rollout selector, not a sender-controlled field.
+
 Wake reports MAY add `delivery_outcome: "fresh"|"resumed"|"fresh_fallback"`, plus non-content
 measurements `transcript_bytes` and `transcript_age_ms`. No report carries a session ID or transcript
 path. A `fresh_fallback` outcome means a resume attempt failed and the fallback fresh session

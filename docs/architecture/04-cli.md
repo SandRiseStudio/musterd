@@ -50,7 +50,7 @@ src/
     loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); agent-key auth read through workspace bindings; one wake span per actuation
     pinnedBin.ts      // a wake exports the actuator's OWN build: shim execing this process's node+entry, PREPENDED to the woken harness's PATH — woken hooks call a bare `musterd`, and the host's PATH resolved a frozen Homebrew tarball; best-effort, degrades to inherited PATH
     backends/
-      claudeCode.ts   // backend #1: resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to the fresh `claude -p` spawn in the same lease (pre-minted --session-id, reply-only allowedTools, mandatory watchdog, no skip-permissions ever) (ADR 131 §5)
+      claudeCode.ts   // backend #1: explicit portable/fresh orders bypass resume; legacy orders retain the resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to fresh `claude -p` in the same lease; reports actual delivery + local byte/age metadata only (ADR 131 §5 / ADR 204)
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
     liveness.ts       // localSessionLiveness(workspace): binding.session + transcript stat → none|live|resumable|gc-expired; shared by the host's local-session guard and `session show`; also carries the ADR 166 inc-1 SHADOW judgement (computed, never acted on)
     enumerate.ts      // ADR 166: ask the harness what sessions it HAS — scans ~/.claude/projects and attributes each transcript by its RECORDED cwd walked up to a workspace (never by decoding the directory name, an inconsistent encoding); undefined = "cannot tell" (never laundered into "none")

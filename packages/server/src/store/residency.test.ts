@@ -602,6 +602,8 @@ describe('claimWakeLeases — work_order derivation (ADR 191 review loop)', () =
       derivation: 'work_order',
       lane_id: lane.id,
       tool_policy: 'seat-policy',
+      continuity_requirement: 'portable',
+      intended_delivery: 'fresh',
     });
     expect(orders[0]!.bounds?.timeout_ms).toBe(WAKE_POLICY_DEFAULTS.work_timeout_ms);
     expect(orders[0]!.composed_line).toContain(lane.id);
@@ -610,6 +612,8 @@ describe('claimWakeLeases — work_order derivation (ADR 191 review loop)', () =
     expect(JSON.parse(leased[0]!.detail as string)).toMatchObject({
       derivation: 'work_order',
       lane_id: lane.id,
+      continuity_requirement: 'portable',
+      intended_delivery: 'fresh',
     });
   });
 
@@ -700,6 +704,10 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
     expect(orders).toHaveLength(1);
     expect(orders[0]!.derivation).toBe('batched');
     expect(orders[0]!.tool_policy).not.toBe('seat-policy');
+    expect(orders[0]).toMatchObject({
+      continuity_requirement: 'portable',
+      intended_delivery: 'fresh',
+    });
   });
 
   it('does not derive dispatch work_order when the seat is flow:manual', async () => {
@@ -718,6 +726,35 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
     const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
     expect(orders).toHaveLength(1);
     expect(orders[0]!.derivation).toBe('batched');
+    expect(orders[0]).toMatchObject({
+      continuity_requirement: 'portable',
+      intended_delivery: 'fresh',
+    });
+  });
+
+  it('keeps ordinary inbox wakes on the legacy ladder until the portable reply cohort is enabled', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'steer', 'm1', 1_000);
+
+    const [legacy] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS, 10_000);
+    expect(legacy).not.toHaveProperty('intended_delivery');
+
+    db.prepare('DELETE FROM wake_leases WHERE team_id = ?').run(team.id);
+    setPolicy(db, team.id, { residency: { portable_inbox_replies: true } });
+    expect(getPolicy(db, team.id).residency.portable_inbox_replies).toBe(true);
+    const [portable] = claimWakeLeases(
+      db,
+      team.id,
+      team.slug,
+      HOST,
+      PRESENCE_TIMEOUT_MS,
+      2_000_000,
+    );
+    expect(portable).toMatchObject({
+      continuity_requirement: 'portable',
+      intended_delivery: 'fresh',
+    });
   });
 
   it('continuation: owned claimed lane with no act → work_order with null act_id', async () => {

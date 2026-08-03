@@ -477,6 +477,14 @@ interface WakeCandidate {
   work_order_kind?: 'review' | 'dispatch';
 }
 
+/** ADR 204 rollout: typed handoff/review/work-order wakes are portable now. Ordinary inbox
+ * deliveries enter the fresh cohort only when the team has explicitly enabled it. */
+function isPortableWakeCandidate(candidate: WakeCandidate, portableInboxReplies: boolean): boolean {
+  return (
+    candidate.derivation === 'work_order' || candidate.act === 'handoff' || portableInboxReplies
+  );
+}
+
 /**
  * Unanswered lane-acceptance asks addressed to this seat whose lane is still awaiting acceptance
  * (ADR 191 work_order derivation / ADR 192 vocab). Oldest first. Deliberately NOT folded into
@@ -808,10 +816,14 @@ export function claimWakeLeases(
             lane: candidate.lane,
             host,
             derivation: candidate.derivation,
+            ...(isPortableWakeCandidate(candidate, policy.portable_inbox_replies)
+              ? { continuity_requirement: 'portable', intended_delivery: 'fresh' }
+              : {}),
             ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
           },
         });
         const isWorkOrder = candidate.derivation === 'work_order';
+        const isPortable = isPortableWakeCandidate(candidate, policy.portable_inbox_replies);
         const kind = candidate.work_order_kind ?? 'dispatch';
         orders.push({
           lease_id: lease.id,
@@ -836,6 +848,9 @@ export function claimWakeLeases(
             ...(policy.budget_usd !== undefined ? { budget_usd: policy.budget_usd } : {}),
           },
           transcript_max_bytes: policy.transcript_max_bytes,
+          ...(isPortable
+            ? { continuity_requirement: 'portable' as const, intended_delivery: 'fresh' as const }
+            : {}),
           derivation: candidate.derivation,
           ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
         });

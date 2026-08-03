@@ -21,6 +21,7 @@ describe('ResidencyPolicySchema (ADR 131 inc 5) — the knobs, defaults in ONE p
       tool_policy: 'reply-only',
       timeout_ms: 300_000,
       transcript_max_bytes: 256 * 1024,
+      portable_inbox_replies: false,
       flow: 'manual',
       work_timeout_ms: 30 * 60_000,
     });
