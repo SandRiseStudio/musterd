@@ -40,6 +40,22 @@ the shared binding contract before any harness advertises resume capability.
 - The resume path becomes a measured local optimization instead of a server guess.
 - Local registry pruning removes bindings for missing/expired transcripts, resolved threads, and
   workspace/team/seat mismatch.
+- 2026-08-03 rollout: shipped **off**. `residency.exact_match_resume` defaults false, so the daemon
+  marks nothing eligible and every wake stays on ADR 209's portable/fresh path. No numeric bound was
+  tuned; the binding horizon reuses the existing `RESUME_GC_HORIZON_MS`, past which a resume would
+  fail anyway. **The Eval comparison below has not run** — it needs an ADR 209 fresh-path baseline
+  that does not exist yet, since that path merged the same day. No cost or byte figures are recorded
+  here because none have been measured.
+- **Blocker on the all-harnesses precondition.** The registry fills from `binding.session`, and
+  there is no Codex hook path today (`captureSession` hardcodes `claude-code`,
+  `observeCursorSession` hardcodes `cursor`), so a Codex seat never writes a capture and can never
+  hold a binding. Its wakes therefore stay fresh — the correct failure direction, and no correctness
+  risk — but this ADR's "all harnesses implement the shared binding contract before any harness
+  advertises resume capability" is **not yet satisfied**. Resume capability must not be advertised
+  as general until the Codex hook path lands.
+- Thread resolution is daemon knowledge, so the host prunes resolved threads only when a caller
+  supplies them. The two conditions the host can check itself — missing transcript, past horizon —
+  are checked against the real filesystem on every bind and on session end.
 
 ## Observability & Evaluation
 

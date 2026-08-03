@@ -15,7 +15,7 @@ import { findBinding, findWorkspaceSpec, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { clock, theme } from '../render/theme.js';
-import { bindThread, readRegistry } from '../session/continuity.js';
+import { bindThread, pruneOnDisk, readRegistry } from '../session/continuity.js';
 import { enumerateClaudeSessions } from '../session/enumerate.js';
 import {
   LOCAL_SESSION_LIVE_MS,
@@ -259,6 +259,18 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
     : binding.model_observed;
 
   saveBinding(dir, { ...binding, session, ...(model_observed ? { model_observed } : {}) });
+
+  // ADR 210: sweep dead continuity bindings when a session ends. Transcripts vanish and horizons
+  // pass between sessions, and a dead binding is a resume attempt that will fail and spend a
+  // fallback. Best-effort and after the durable write — a hook must never fail over a cache.
+  if (event === 'end') {
+    try {
+      const owner = bindingSeat(binding);
+      if (owner) pruneOnDisk(dir, { team: binding.team, seat: owner }, { now: Date.now() });
+    } catch {
+      // never fatal — the registry is an optimization
+    }
+  }
 
   // The resumable attestation (harness class only), best-effort AFTER the durable local write:
   // a dead daemon must never fail the hook, and capture is complete without it.

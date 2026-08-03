@@ -1,10 +1,12 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ContinuityRegistrySchema,
+  pruneRegistry,
   type ContinuityRegistry,
   type SessionCapture,
 } from '@musterd/protocol';
+import { RESUME_GC_HORIZON_MS } from './liveness.js';
 
 const BINDING_DIR = '.musterd';
 const CONTINUITY_FILE = 'continuity.json';
@@ -71,6 +73,43 @@ export function writeRegistry(dir: string, registry: ContinuityRegistry): string
   return p;
 }
 
+export interface PruneOnDiskOptions {
+  now: number;
+  /**
+   * Threads the CALLER knows have resolved. The host cannot derive this on its own — thread
+   * resolution is daemon knowledge — so it is passed in by whoever happens to hold it, and omitted
+   * otherwise. A resolved thread whose binding lingers is only wasted space: the wake that would
+   * have used it is never issued, because the daemon stops marking a resolved thread eligible.
+   */
+  resolvedThreads?: ReadonlySet<string>;
+}
+
+/**
+ * Prune the on-disk registry, rewriting it only when something actually dropped.
+ *
+ * Pruning is not housekeeping. An unusable binding that survives is a resume attempt that will fail
+ * and spend a fallback, so the two conditions the host CAN check itself — the transcript is gone,
+ * or the binding is past the harness GC horizon where a resume would fail anyway — are checked here
+ * against the real filesystem. {@link RESUME_GC_HORIZON_MS} is reused deliberately rather than
+ * inventing a second horizon: one number, one meaning.
+ */
+export function pruneOnDisk(
+  dir: string,
+  owner: RegistryOwner,
+  { now, resolvedThreads = new Set<string>() }: PruneOnDiskOptions,
+): ContinuityRegistry {
+  const registry = readRegistry(dir, owner);
+  if (registry.bindings.length === 0) return registry;
+  const pruned = pruneRegistry(registry, {
+    now,
+    maxAgeMs: RESUME_GC_HORIZON_MS,
+    transcriptExists: (p) => existsSync(p),
+    resolvedThreads,
+  });
+  if (pruned.bindings.length !== registry.bindings.length) writeRegistry(dir, pruned);
+  return pruned;
+}
+
 export interface BindThreadOptions extends RegistryOwner {
   thread_id: string;
   /** The workspace's current session capture (`binding.session`). Absent ⇒ nothing to bind. */
@@ -91,7 +130,10 @@ export function bindThread(dir: string, opts: BindThreadOptions): boolean {
   const { capture } = opts;
   if (!capture || capture.transcript_path === undefined) return false;
 
-  const registry = readRegistry(dir, opts);
+  // Prune as a side effect of binding: without it the file only ever grows, and every dead entry
+  // is a resume that would fail. Binding is the natural moment — it is the one write that happens
+  // on the same cadence as the dialogue itself.
+  const registry = pruneOnDisk(dir, opts, { now: opts.now });
   const next = {
     thread_id: opts.thread_id,
     harness: capture.harness,
