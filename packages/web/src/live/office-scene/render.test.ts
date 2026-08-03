@@ -450,6 +450,45 @@ describe('the wall clock has a numbered dial', () => {
   });
 });
 
+describe('the working-hours clock companion', () => {
+  const fit = fitFloor(1200, 900);
+  const schedule: WorkingHours = {
+    timezone: 'America/Los_Angeles',
+    days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+    start: '11:00',
+    end: '15:00',
+  };
+
+  it('sets every schedule line through the wall-plane text transform', () => {
+    const textEvents: Array<{ text: string; wallTransforms: number }> = [];
+    const transforms: number[] = [0];
+    const ctx = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => ({ addColorStop() {} });
+          if (prop === 'measureText') return () => ({ width: 0 });
+          if (prop === 'save') return () => transforms.push(transforms.at(-1)!);
+          if (prop === 'restore') return () => void transforms.pop();
+          if (prop === 'transform') return () => { transforms[transforms.length - 1]! += 1; };
+          if (prop === 'fillText') return (text: string) => textEvents.push({ text, wallTransforms: transforms.at(-1)! });
+          return () => undefined;
+        },
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+
+    renderScene(ctx, fit, new Map(), new Map(), new Map(), 4, 'revive', computeLightEnv(12, false), null, undefined, null, null, schedule);
+
+    for (const text of ['TEAM WORKING HOURS', 'MON–FRI · 11:00 AM–3:00 PM', 'PACIFIC TIME']) {
+      const matches = textEvents.filter((event) => event.text === text);
+      expect(matches, text).not.toHaveLength(0);
+      expect(matches.every((event) => event.wallTransforms > 0), text).toBe(true);
+    }
+  });
+});
+
 describe('renderScene draws the whole office without throwing', () => {
   const fit = fitFloor(1200, 900);
   const empty = new Map();

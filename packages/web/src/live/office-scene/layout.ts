@@ -590,7 +590,7 @@ export const ART: readonly ArtPiece[] = [
   { wall: 0, tc: 0.83, uc: 0.68, w: 26, h: 26, motif: 'bauhaus', frame: 'none' },
   { wall: 0, tc: 0.92, uc: 0.66, w: 22, h: 30, motif: 'cairn', frame: 'thin' },
   { wall: 0, tc: 0.87, uc: 0.46, w: 30, h: 22, motif: 'sunrise', frame: 'thin' },
-  // back-right wall: the big one, and a small square under the clock.
+  // back-right wall: the big one. The former small square under the clock is now the calendar fixture.
   //
   // It used to hang at tc 0.15, directly over the corner bookshelf — which was fine when that unit
   // was 66 tall and is not now that the tall-narrow archetype took it to 88 plus a plant on top. The
@@ -598,8 +598,11 @@ export const ART: readonly ArtPiece[] = [
   // bookcase"). Moved along the wall into the clear stretch between that shelf and the near window
   // rather than raised, because the wall crops at the top near this corner.
   { wall: 1, tc: 0.23, uc: 0.58, w: 60, h: 44, motif: 'sunrise', frame: 'thick' },
-  { wall: 1, tc: 0.52, uc: 0.34, w: 24, h: 24, motif: 'cairn', frame: 'thin' },
 ];
+
+/** The compact Team-schedule calendar, directly beneath the right-wall clock. Its geometry is shared
+ * with layout tests so the two wall fixtures retain a hand's breadth of clear plaster between them. */
+export const WORKING_HOURS_CALENDAR = { wall: 1 as const, tc: 0.52, uc: 0.35, w: 72, h: 34, loopOverhang: 4 };
 /**
  * Two windows per back wall — spaced so the wall reads as a facade, not a single porthole.
  *
