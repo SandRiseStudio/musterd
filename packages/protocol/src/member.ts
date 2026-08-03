@@ -119,3 +119,33 @@ export const MemberSummarySchema = MemberSchema.extend({
   resumable_at: z.number().int().nullish(),
 });
 export type MemberSummary = z.infer<typeof MemberSummarySchema>;
+
+/**
+ * The decision-grade "is this seat busy right now" read (2026-08-03 quiescence design) — split from
+ * `activity` on purpose, because the two answer different questions with different failure modes.
+ * `activity` is a *display* fact ("has this live seat self-reported a task?", ADR 010/140) and for
+ * agents it is sticky: one status_update reads `working` until the seat goes offline. A wrong
+ * display is cosmetic. Quiescence is what machines decide from — when a daemon bounce is least
+ * disruptive, whether a supposedly-idle seat is actually mid-something before spending a wake — and
+ * a wrong answer there interrupts someone mid-turn or spends money badly.
+ *
+ * Derived at read time from the newest *audited action* (tool call, send, lane op), never stored.
+ * `unknown` is honest and load-bearing: no audited action inside the lookback window is not
+ * "quiet", it is unknowable — the ADR 169/189 absent-vs-unknown discipline. Every consumer must
+ * treat `unknown` as "degrade to behaving as if this signal did not exist", never as license to act.
+ *
+ * Thresholds live in the CONSUMER: the wire carries `quiet_for_ms` and the busy/quiet line is drawn
+ * by whoever reads it (autorefresh's quiet-floor, wake's spend guard). One server-side threshold
+ * would recreate the one-size-fits-nobody problem `activity` has.
+ *
+ * `source` is the capture-tier seam: `audit` (universal, works for hook-less harnesses like Codex)
+ * now; `harness` (turn-boundary hooks, ground truth for "mid-turn") pre-registered for later — it
+ * slots in by overriding the audit tier per seat without changing this shape.
+ */
+export const QuiescenceSchema = z.object({
+  state: z.enum(['busy', 'quiet', 'unknown']),
+  /** Milliseconds since the newest audited action; null iff `state` is `unknown`. */
+  quiet_for_ms: z.number().int().nullable(),
+  source: z.enum(['audit', 'harness']),
+});
+export type Quiescence = z.infer<typeof QuiescenceSchema>;

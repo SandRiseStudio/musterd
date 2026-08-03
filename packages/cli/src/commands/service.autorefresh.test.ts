@@ -364,6 +364,77 @@ describe('service refresh --auto (the tick)', () => {
       expect(out).toContain('up to date');
     });
 
+    // Inc 2 of the quiescence design (spec: docs/superpowers/specs/2026-08-03-quiescence-signal-
+    // design.md): after the settle window passes, prefer a moment when no agent seat has acted for
+    // the quiet floor. Same safety shape as settle: delay toward a lull, never cancel — the
+    // staleness cap forces through both gates, and unknown degrades to bouncing.
+    it('holds the bounce while an agent seat is actively working (quiet floor)', async () => {
+      const { code, out } = await tick({
+        argv: ['refresh', '--auto', '--mode', 'notice', '--settle', '0', '--quiet-floor', '120'],
+        // oldestAge stays under the cap — the cap forcing through the floor has its own test below.
+        ctx: ctx(agedRunner({ behind: 2, tipAgeSeconds: 900, oldestAgeSeconds: 300 })),
+        // A seat acted 5s ago — mid-burst of tool calls. Do not drop its socket now.
+        health: async () => ({ connections: 3, build: 'old111', quietest_busy_ms: 5_000 }),
+      });
+      expect(code).toBe(0);
+      expect(out).toMatch(/quiet|working/i);
+      expect(calls.some((c) => c.cmd === 'pnpm')).toBe(false);
+    });
+
+    it('bounces into a lull once every seat has been quiet past the floor', async () => {
+      const { code } = await tick({
+        argv: ['refresh', '--auto', '--mode', 'notice', '--settle', '0', '--quiet-floor', '120'],
+        ctx: ctx(agedRunner({ behind: 2, tipAgeSeconds: 900 })),
+        health: async () => ({ connections: 3, build: 'old111', quietest_busy_ms: 180_000 }),
+      });
+      expect(code).toBe(0);
+      expect(calls.some((c) => c.cmd === 'pnpm')).toBe(true);
+    });
+
+    it('bounces when the daemon does not report quiescence — unknown is not a hold', async () => {
+      // An old daemon (or a fresh one with no agent action) omits the field. Degrade to today's
+      // behaviour: the floor only ever acts on positive evidence of work.
+      const { code } = await tick({
+        argv: ['refresh', '--auto', '--mode', 'notice', '--settle', '0', '--quiet-floor', '120'],
+        ctx: ctx(agedRunner({ behind: 2, tipAgeSeconds: 900 })),
+        health: async () => ({ connections: 3, build: 'old111' }),
+      });
+      expect(code).toBe(0);
+      expect(calls.some((c) => c.cmd === 'pnpm')).toBe(true);
+    });
+
+    it('the staleness cap forces through the quiet floor, same as through settle', async () => {
+      const { code } = await tick({
+        argv: [
+          'refresh',
+          '--auto',
+          '--mode',
+          'notice',
+          '--settle',
+          '600',
+          '--settle-cap',
+          '900',
+          '--quiet-floor',
+          '120',
+        ],
+        ctx: ctx(agedRunner({ behind: 9, tipAgeSeconds: 1000, oldestAgeSeconds: 1200 })),
+        // Busy right now — but we are past the cap, so freshness wins.
+        health: async () => ({ connections: 4, build: 'old111', quietest_busy_ms: 3_000 }),
+      });
+      expect(code).toBe(0);
+      expect(calls.some((c) => c.cmd === 'pnpm')).toBe(true);
+    });
+
+    it('--quiet-floor 0 disables the gate entirely', async () => {
+      const { code } = await tick({
+        argv: ['refresh', '--auto', '--mode', 'notice', '--settle', '0', '--quiet-floor', '0'],
+        ctx: ctx(agedRunner({ behind: 1, tipAgeSeconds: 900 })),
+        health: async () => ({ connections: 3, build: 'old111', quietest_busy_ms: 1_000 }),
+      });
+      expect(code).toBe(0);
+      expect(calls.some((c) => c.cmd === 'pnpm')).toBe(true);
+    });
+
     it('bounces when the commit time is unreadable — never defer on ignorance', async () => {
       // An unreadable timestamp must degrade to today's behaviour, not to an indefinite hold.
       const runner: Runner = (cmd, args) => {

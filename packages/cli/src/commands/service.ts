@@ -238,6 +238,8 @@ function parseAutoRefreshMode(parsed: Parsed): AutoRefreshMode {
  */
 const DEFAULT_AUTOREFRESH_SETTLE = 600;
 const DEFAULT_AUTOREFRESH_SETTLE_CAP = 900;
+/** Quiet floor default (quiescence inc 2): hold a bounce while an agent acted in the last 2 min. */
+const DEFAULT_AUTOREFRESH_QUIET_FLOOR = 120;
 
 function parseSeconds(parsed: Parsed, flag: string, fallback: number): number {
   const raw = flagStr(parsed.flags, flag);
@@ -269,6 +271,31 @@ export function shouldWaitForSettle(a: {
   if (a.tipAgeSeconds >= a.settleSeconds) return false; // main has held still: go
   // Main is still moving. Wait — unless we've already waited long enough.
   if (a.oldestAgeSeconds !== null && a.oldestAgeSeconds >= a.capSeconds) return false;
+  return true;
+}
+
+/**
+ * The quiet floor (quiescence inc 2 — spec: docs/superpowers/specs/2026-08-03-quiescence-signal-
+ * design.md). The settle window answers "is MAIN still moving?"; this answers "is a SEAT still
+ * moving?" — hold the bounce while an agent acted within the floor, so the restart lands in a lull
+ * instead of mid-tool-call. Measured basis: gating on connections would defer 95% of refreshes
+ * (seats stay attached all day), while the audit trail shows 44 lulls ≥ 2 min in 6 busy hours — a
+ * lull is almost always near, so this delays by seconds-to-minutes, not hours.
+ *
+ * Same safety shape as settle, deliberately: the staleness cap forces through BOTH gates, so
+ * quiet-seeking can only steer a bounce toward a lull, never cancel it. And `undefined` (an old
+ * daemon, or no evidence) means bounce — the floor acts only on positive evidence of work.
+ */
+export function shouldWaitForQuiet(a: {
+  quietestBusyMs: number | undefined;
+  oldestAgeSeconds: number | null;
+  floorSeconds: number;
+  capSeconds: number;
+}): boolean {
+  if (a.floorSeconds <= 0) return false;
+  if (a.quietestBusyMs === undefined) return false; // unknown → degrade to today, never hold
+  if (a.quietestBusyMs >= a.floorSeconds * 1000) return false; // the lull is here: go
+  if (a.oldestAgeSeconds !== null && a.oldestAgeSeconds >= a.capSeconds) return false; // cap wins
   return true;
 }
 
@@ -407,6 +434,9 @@ export function resolveLiveCtx(ctx: ServiceCtx): LiveCtx {
 /** The daemon's `/health` shape as this command reads it (ADR 016 + 047 + 130). */
 export interface DaemonHealth {
   connections?: number;
+  /** Quiescence (2026-08-03 design): ms since the newest audited action by a live agent seat.
+   *  Absent = unknown (old daemon, or no agent action in the lookback) — never treated as 0. */
+  quietest_busy_ms?: number;
   v?: string;
   db?: string;
   schema?: number;
@@ -817,6 +847,7 @@ export async function serviceCommand(
       const settle = {
         seconds: parseSeconds(parsed, 'settle', DEFAULT_AUTOREFRESH_SETTLE),
         capSeconds: parseSeconds(parsed, 'settle-cap', DEFAULT_AUTOREFRESH_SETTLE_CAP),
+        quietFloorSeconds: parseSeconds(parsed, 'quiet-floor', DEFAULT_AUTOREFRESH_QUIET_FLOOR),
       };
       const notify = deps.notify ?? osNotify;
       const autoState = deps.autoState ?? fileAutoState();
@@ -1143,7 +1174,7 @@ async function autoRefreshTick(
   ctx: ServiceCtx,
   health: () => Promise<DaemonHealth>,
   mode: AutoRefreshMode,
-  settle: { seconds: number; capSeconds: number },
+  settle: { seconds: number; capSeconds: number; quietFloorSeconds: number },
   notify: (n: { id: string; title: string; body: string }) => void,
   autoState: { read: () => string | null; write: (sha: string) => void },
   ok: (s: string) => void,
@@ -1213,6 +1244,24 @@ async function autoRefreshTick(
       `origin/main is still moving (newest commit ${mins(tipAgeSeconds ?? 0)} old, settling for ` +
         `${mins(settle.seconds)}) — holding the bounce so a merge burst costs one restart, not one ` +
         `per commit. Will refresh once the tip holds still, or after ${mins(settle.capSeconds)} behind.`,
+    );
+    return 0;
+  }
+  // The quiet floor (quiescence inc 2): main has settled — now land the restart in a lull rather
+  // than mid-tool-call. Reads /health's quietest_busy_ms (audit-derived, agents only). The same
+  // staleness cap forces through this gate too; unknown (absent field) bounces.
+  if (
+    shouldWaitForQuiet({
+      quietestBusyMs: health0.quietest_busy_ms,
+      oldestAgeSeconds,
+      floorSeconds: settle.quietFloorSeconds,
+      capSeconds: settle.capSeconds,
+    })
+  ) {
+    ok(
+      `a seat is actively working (last action ${Math.round((health0.quietest_busy_ms ?? 0) / 1000)}s ` +
+        `ago; quiet floor ${settle.quietFloorSeconds}s) — holding the bounce for a lull. ` +
+        `The staleness cap (${Math.round(settle.capSeconds / 60)}m) still forces a refresh.`,
     );
     return 0;
   }
