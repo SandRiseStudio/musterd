@@ -2,6 +2,8 @@ import type {
   Residency,
   ResidencyPolicy,
   ResidencyPolicyOverride,
+  WakeContextPacket,
+  WakeContextRequest,
   WakeDerivation,
   WakeLane,
   WakeOrder,
@@ -18,6 +20,8 @@ import { appendAudit } from './audit.js';
 import { getCursor } from './cursors.js';
 import { openDirectedLedger } from './delivery.js';
 import { getLane, listLanes } from './lanes.js';
+import { memoryEnvelope } from './memory.js';
+import { MusterdError } from '../errors.js';
 import { getMemberById } from './members.js';
 import { listInbox, pendingInterrupts, rowToEnvelope } from './messages.js';
 import { hasLivePresence, listReclaimableMemberIds } from './presence.js';
@@ -122,6 +126,94 @@ export function effectiveWakePolicy(
     if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
   }
   return merged;
+}
+
+/**
+ * Derive ADR 204's bounded orientation index for one recipient. It intentionally reads canonical
+ * rows only: an Act body or memory body never crosses this seam. An unauthorized target is
+ * indistinguishable from a missing one to the caller.
+ */
+export function buildWakeContext(
+  db: Database,
+  team: { id: string; slug: string },
+  recipient: MemberRow,
+  request: WakeContextRequest,
+): WakeContextPacket {
+  if (request.act_id !== undefined) {
+    const row = db
+      .prepare<[string, string], MessageRow>('SELECT * FROM messages WHERE team_id = ? AND id = ?')
+      .get(team.id, request.act_id);
+    if (!row || row.to_kind !== 'member' || row.to_member !== recipient.id)
+      throw new MusterdError('forbidden', 'forbidden wake context target');
+    const threadId = row.thread_id ?? row.id;
+    const meta = JSON.parse(row.meta ?? '{}') as {
+      lane_handoff?: { lane?: string };
+      lane_review?: { lane?: string };
+    };
+    const laneId = meta.lane_review?.lane ?? meta.lane_handoff?.lane;
+    const lane = laneId ? getLane(db, team.id, laneId, team.slug) : null;
+    const counts = db
+      .prepare<[string, string, string, string], { participants: number; unread: number }>(
+        `SELECT COUNT(DISTINCT from_member) AS participants,
+                SUM(CASE WHEN to_member = ? THEN 1 ELSE 0 END) AS unread
+           FROM messages WHERE team_id = ? AND (id = ? OR thread_id = ?)`,
+      )
+      .get(recipient.id, team.id, row.id, threadId);
+    const memory = memoryEnvelope(db, recipient.id);
+    const kind = meta.lane_review ? 'review' : meta.lane_handoff ? 'handoff' : 'reply';
+    return {
+      version: 1,
+      wake: { kind, act_id: row.id },
+      objective: {
+        action: kind === 'review' ? 'review' : kind === 'handoff' ? 'continue_lane' : 'reply',
+      },
+      state: {
+        thread: {
+          id: threadId,
+          participant_count: counts?.participants ?? 0,
+          unread_count: counts?.unread ?? 0,
+          latest_act: row.act,
+        },
+        ...(lane
+          ? {
+              lane: {
+                id: lane.id,
+                state: lane.state,
+                owner_seat: lane.owner_seat,
+                ...(lane.branch ? { branch: lane.branch } : {}),
+              },
+            }
+          : {}),
+        ...(memory ? { memory } : {}),
+      },
+      fetch: [
+        'inbox_thread',
+        ...(lane ? (['lane_detail', 'git_artifact'] as const) : []),
+        'seat_memory',
+      ],
+      delivery: { requirement: 'portable', intended: 'fresh' },
+    };
+  }
+  const lane = getLane(db, team.id, request.lane_id!, team.slug);
+  if (!lane || lane.owner_seat !== recipient.name)
+    throw new MusterdError('forbidden', 'forbidden wake context target');
+  const memory = memoryEnvelope(db, recipient.id);
+  return {
+    version: 1,
+    wake: { kind: 'work_order', lane_id: lane.id },
+    objective: { action: lane.state === 'claimed' ? 'begin_lane' : 'continue_lane' },
+    state: {
+      lane: {
+        id: lane.id,
+        state: lane.state,
+        owner_seat: lane.owner_seat,
+        ...(lane.branch ? { branch: lane.branch } : {}),
+      },
+      ...(memory ? { memory } : {}),
+    },
+    fetch: ['lane_detail', 'git_artifact', 'seat_memory'],
+    delivery: { requirement: 'portable', intended: 'fresh' },
+  };
 }
 
 /** Project a stored enrollment to the public shape (seat name resolved by the caller-provided row). */
