@@ -127,6 +127,7 @@ async function attempt(
     for (const line of lines) threadId ??= parseCodexThreadLine(line);
   });
   let timedOut = false;
+  let spawnError = false;
   const watchdog = setTimeout(() => {
     timedOut = true;
     killTree(child, deps.killGraceMs ?? KILL_GRACE_MS);
@@ -134,7 +135,10 @@ async function attempt(
   watchdog.unref();
   const exited = new Promise<number | null>((resolve) => {
     child.once('exit', (code) => resolve(code));
-    child.once('error', () => resolve(null));
+    child.once('error', () => {
+      spawnError = true;
+      resolve(null);
+    });
   });
   const settled = exited.then(() => {
     clearTimeout(watchdog);
@@ -158,7 +162,9 @@ async function attempt(
   const exact = threadId !== undefined && (expectedId === undefined || threadId === expectedId);
   if (label === 'fresh' && threadId)
     (deps.recordFreshThread ?? recordFreshThread)(spec.workspace, threadId, startedAt);
-  if (verified.occupied && verified.provenance === 'wake' && exact && child.exitCode !== 1) {
+  const processOk =
+    !spawnError && child.signalCode === null && (child.exitCode === null || child.exitCode === 0);
+  if (verified.occupied && verified.provenance === 'wake' && exact && processOk) {
     ctx.log(`⚡ woke ${spec.order.seat}: session=${label} provenance=wake`);
     return { occupied: true, exactCleanWithoutPresence: false, reason: '', settled };
   }
@@ -171,11 +177,13 @@ async function attempt(
       ? expectedId
         ? 'thread id missing or mismatched'
         : 'thread id missing'
-      : timedOut
-        ? `watchdog timeout (${timeoutMs}ms)`
-        : !verified.occupied
-          ? 'no wake-provenance roster Presence'
-          : `roster provenance ${verified.provenance ?? 'none'} is not wake`,
+      : !processOk
+        ? `run exited with code ${child.exitCode ?? 'error'}`
+        : timedOut
+          ? `watchdog timeout (${timeoutMs}ms)`
+          : !verified.occupied
+            ? 'no wake-provenance roster Presence'
+            : `roster provenance ${verified.provenance ?? 'none'} is not wake`,
     settled,
   };
 }

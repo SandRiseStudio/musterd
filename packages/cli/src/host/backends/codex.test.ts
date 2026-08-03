@@ -121,4 +121,20 @@ describe('codexBackend', () => {
     child.exit();
     await result.settled;
   });
+  it('never credits a nonzero child exit, even if a stale roster probe says occupied', async () => {
+    const child = new Child();
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      spawn: (() => child) as never,
+      recordFreshThread: () => undefined,
+    });
+    const wake = backend.wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    child.exit(2);
+    const result = await wake;
+    expect(result.outcome).toMatchObject({ occupied: false, session: 'fresh' });
+    expect(result.outcome.reason).toContain('code 2');
+    await result.settled;
+  });
 });
