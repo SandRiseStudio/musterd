@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { PolicySchema } from './credentials.js';
 import { resolveAttestedProvenance } from './model.js';
-import { ResidencyPolicyOverrideSchema, ResidencyPolicySchema } from './residency.js';
+import {
+  WakeContextPacketSchema,
+  WakeContextRequestSchema,
+  WakeContextResponseSchema,
+  WakeReportBodySchema,
+  ResidencyPolicyOverrideSchema,
+  ResidencyPolicySchema,
+} from './residency.js';
 
 describe('ResidencyPolicySchema (ADR 131 inc 5) — the knobs, defaults in ONE place', () => {
   it('parse({}) yields the launch defaults (owner call 2026-07-11)', () => {
@@ -14,6 +21,7 @@ describe('ResidencyPolicySchema (ADR 131 inc 5) — the knobs, defaults in ONE p
       tool_policy: 'reply-only',
       timeout_ms: 300_000,
       transcript_max_bytes: 256 * 1024,
+      portable_inbox_replies: false,
       flow: 'manual',
       work_timeout_ms: 30 * 60_000,
     });
@@ -54,5 +62,58 @@ describe('resolveAttestedProvenance (ADR 131 §6 amendment)', () => {
     expect(resolveAttestedProvenance({ MUSTERD_PROVENANCE: 'wake' })).toBe('wake');
     expect(resolveAttestedProvenance({ MUSTERD_PROVENANCE: 'root' })).toBeUndefined();
     expect(resolveAttestedProvenance({})).toBeUndefined();
+  });
+});
+
+describe('portable wake context (ADR 209)', () => {
+  const packet = {
+    version: 1,
+    wake: { kind: 'reply' as const, act_id: 'A1' },
+    objective: { action: 'reply' as const },
+    state: {
+      memory: { headline: 'resume checkout review', saved_at: 1, size_bytes: 42 },
+    },
+    fetch: ['inbox_thread', 'seat_memory'] as const,
+    delivery: { requirement: 'portable' as const, intended: 'fresh' as const },
+  };
+
+  it('requires exactly one canonical context target', () => {
+    expect(WakeContextRequestSchema.safeParse({ act_id: 'A1' }).success).toBe(true);
+    expect(WakeContextRequestSchema.safeParse({ lane_id: 'L1' }).success).toBe(true);
+    expect(WakeContextRequestSchema.safeParse({}).success).toBe(false);
+    expect(WakeContextRequestSchema.safeParse({ act_id: 'A1', lane_id: 'L1' }).success).toBe(false);
+  });
+
+  it('accepts the bounded memory envelope and response wrapper', () => {
+    expect(WakeContextPacketSchema.parse(packet).state.memory).toEqual({
+      headline: 'resume checkout review',
+      saved_at: 1,
+      size_bytes: 42,
+    });
+    expect(WakeContextResponseSchema.parse({ context: packet }).context.delivery).toEqual({
+      requirement: 'portable',
+      intended: 'fresh',
+    });
+  });
+
+  it('rejects a free-form body in its strict bounded packet shapes', () => {
+    expect(() =>
+      WakeContextPacketSchema.parse({
+        ...packet,
+        state: { thread: { id: 'T1', participant_count: 2, unread_count: 1, body: 'leak' } },
+      }),
+    ).toThrow();
+  });
+
+  it('accepts non-content delivery outcome measurements', () => {
+    expect(
+      WakeReportBodySchema.parse({
+        lease_id: 'L1',
+        occupied: true,
+        delivery_outcome: 'fresh_fallback',
+        transcript_bytes: 262_144,
+        transcript_age_ms: 3_000,
+      }).delivery_outcome,
+    ).toBe('fresh_fallback');
   });
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MemoryEnvelopeSchema } from './claim-handshake.js';
 import { WAKEABILITIES } from './model.js';
 
 /**
@@ -50,6 +51,10 @@ export const ResidencyPolicySchema = z.object({
    *  ADR 131 "Observability & Evaluation"). The previous 10MiB counted lives, not dollars, and sat
    *  ~23x past the point where resume stops being the cheap option. */
   transcript_max_bytes: z.number().int().min(65_536).max(268_435_456).default(262_144),
+  /** ADR 209 rollout gate. Off preserves the legacy resume ladder for ordinary inbox wakes; when
+   * enabled, those wakes receive portable context and intentionally start fresh. Typed handoffs,
+   * reviews, and work-orders are portable regardless of this cohort flag. */
+  portable_inbox_replies: z.boolean().default(false),
   /**
    * Board-triggered work-order trust (ADR 179 / ADR 191 / ADR 199). At `manual` (launch default)
    * the seat is never a work-order wake *target* — bit-identical to pre-179. `auto` opts the seat
@@ -171,6 +176,116 @@ export const WAKE_DERIVATIONS = ['immediate', 'batched', 'work_order'] as const;
 export type WakeDerivation = (typeof WAKE_DERIVATIONS)[number];
 export const WakeDerivationSchema = z.enum(WAKE_DERIVATIONS);
 
+/** ADR 209: whether durable, fetchable context is enough, or active dialogue is required. */
+export const CONTINUITY_REQUIREMENTS = ['portable', 'transcript_required'] as const;
+export type ContinuityRequirement = (typeof CONTINUITY_REQUIREMENTS)[number];
+export const ContinuityRequirementSchema = z.enum(CONTINUITY_REQUIREMENTS);
+
+/** The daemon's intended host delivery path. The host reports its actual outcome separately. */
+export const WAKE_DELIVERIES = ['fresh', 'resume'] as const;
+export type WakeDelivery = (typeof WAKE_DELIVERIES)[number];
+export const WakeDeliverySchema = z.enum(WAKE_DELIVERIES);
+
+/** The host-observed outcome, including a resume that fell through to a fresh occupant. */
+export const WAKE_DELIVERY_OUTCOMES = ['fresh', 'resumed', 'fresh_fallback'] as const;
+export type WakeDeliveryOutcome = (typeof WAKE_DELIVERY_OUTCOMES)[number];
+export const WakeDeliveryOutcomeSchema = z.enum(WAKE_DELIVERY_OUTCOMES);
+
+export const WAKE_CONTEXT_KINDS = ['reply', 'handoff', 'review', 'work_order'] as const;
+export type WakeContextKind = (typeof WAKE_CONTEXT_KINDS)[number];
+export const WakeContextKindSchema = z.enum(WAKE_CONTEXT_KINDS);
+
+export const WAKE_CONTEXT_ACTIONS = ['reply', 'review', 'continue_lane', 'begin_lane'] as const;
+export type WakeContextAction = (typeof WAKE_CONTEXT_ACTIONS)[number];
+export const WakeContextActionSchema = z.enum(WAKE_CONTEXT_ACTIONS);
+
+export const WAKE_CONTEXT_FETCHES = [
+  'inbox_thread',
+  'lane_detail',
+  'seat_memory',
+  'git_artifact',
+] as const;
+export type WakeContextFetch = (typeof WAKE_CONTEXT_FETCHES)[number];
+export const WakeContextFetchSchema = z.enum(WAKE_CONTEXT_FETCHES);
+
+/** Recipient request for the bounded context index; exactly one canonical target is required. */
+export const WakeContextRequestSchema = z
+  .object({ act_id: z.string().min(1).optional(), lane_id: z.string().min(1).optional() })
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.act_id === undefined) === (value.lane_id === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'exactly one of act_id or lane_id is required',
+        path: ['act_id'],
+      });
+    }
+  });
+export type WakeContextRequest = z.infer<typeof WakeContextRequestSchema>;
+
+/** The server-derived, body-free context index (ADR 209). */
+export const WakeContextPacketSchema = z
+  .object({
+    version: z.literal(1),
+    wake: z
+      .object({
+        kind: WakeContextKindSchema,
+        act_id: z.string().min(1).optional(),
+        lane_id: z.string().min(1).optional(),
+      })
+      .strict(),
+    objective: z.object({ action: WakeContextActionSchema }).strict(),
+    state: z
+      .object({
+        lane: z
+          .object({
+            id: z.string().min(1),
+            state: z.string().min(1),
+            owner_seat: z.string().min(1).nullable(),
+            branch: z.string().min(1).optional(),
+          })
+          .strict()
+          .optional(),
+        thread: z
+          .object({
+            id: z.string().min(1),
+            participant_count: z.number().int().nonnegative(),
+            unread_count: z.number().int().nonnegative(),
+            latest_act: z.string().min(1).optional(),
+          })
+          .strict()
+          .optional(),
+        memory: MemoryEnvelopeSchema.optional(),
+      })
+      .strict(),
+    fetch: z.array(WakeContextFetchSchema),
+    delivery: z
+      .object({ requirement: ContinuityRequirementSchema, intended: WakeDeliverySchema })
+      .strict(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const wantsAct = value.wake.kind !== 'work_order';
+    if (wantsAct && value.wake.act_id === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'act_id required outside work_order',
+        path: ['wake', 'act_id'],
+      });
+    }
+    if (!wantsAct && value.wake.lane_id === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'lane_id required on work_order',
+        path: ['wake', 'lane_id'],
+      });
+    }
+  });
+export type WakeContextPacket = z.infer<typeof WakeContextPacketSchema>;
+
+export const WakeContextResponseSchema = z.object({ context: WakeContextPacketSchema }).strict();
+export type WakeContextResponse = z.infer<typeof WakeContextResponseSchema>;
+
 /**
  * One wake order. Inbox / review wakes carry a triggering act. Dispatch **continuation**
  * work-orders (ADR 199) have no act — `act_id`/`act`/`sender` are omitted and `lane_id` is
@@ -204,6 +319,10 @@ export const WakeOrderSchema = z
       .optional(),
     /** Effective resume-hygiene bound for this seat (increment 5). Absent ⇒ backend default. */
     transcript_max_bytes: z.number().int().optional(),
+    /** ADR 209: portable (fresh) is default; transcript_required is a narrow reply-only exception. */
+    continuity_requirement: ContinuityRequirementSchema.optional(),
+    /** ADR 209: daemon intent; host reports the observed delivery separately. */
+    intended_delivery: WakeDeliverySchema.optional(),
     /** Why this wake was derived (ADR 191). Absent ⇒ treat as the `lane` value (older daemons). */
     derivation: WakeDerivationSchema.optional(),
     /** Lane id on a work-order wake (ADR 179 injection bar — id only, never a title). */
@@ -263,6 +382,12 @@ export const WakeReportBodySchema = z.object({
   answered: z.boolean().optional(),
   /** Fresh spawn or resumed session (the fresh-first doctrine's outcome axis). */
   session: z.enum(['fresh', 'resumed']).optional(),
+  /** ADR 209: actual delivery, distinguishing an initial fresh spawn from a failed-resume fallback. */
+  delivery_outcome: WakeDeliveryOutcomeSchema.optional(),
+  /** Local transcript size examined by the host; no path or content crosses the boundary. */
+  transcript_bytes: z.number().int().nonnegative().optional(),
+  /** Local capture age examined by the host; no session identifier crosses the boundary. */
+  transcript_age_ms: z.number().int().nonnegative().optional(),
   /** True ⇒ the host skipped this wake because a live local session already holds the workspace
    *  (the local-session guard — roster-offline ≠ workspace-idle). Settles the lease, audits
    *  `residency.wake_deferred`, and consumes NO attempt/cooldown/hourly budget: a working human

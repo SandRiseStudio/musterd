@@ -463,15 +463,33 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
         ...(spec.order.tool_policy !== undefined ? { toolPolicy: spec.order.tool_policy } : {}),
         ...(spec.bounds.max_turns !== undefined ? { maxTurns: spec.bounds.max_turns } : {}),
       };
+      const deliveryTracked = spec.order.intended_delivery !== undefined;
+      const deliveryMetadata = () =>
+        !deliveryTracked
+          ? {}
+          : {
+              ...(liveness.transcriptBytes !== undefined
+                ? { transcript_bytes: liveness.transcriptBytes }
+                : {}),
+              ...(liveness.transcriptMtime !== undefined
+                ? { transcript_age_ms: Math.max(0, Date.now() - liveness.transcriptMtime) }
+                : {}),
+            };
+      // Absent is legacy: mixed daemon/host versions retain the existing resume ladder. An explicit
+      // portable/fresh order bypasses every transcript read decision and spawns fresh immediately.
+      const wantsResume = spec.order.intended_delivery !== 'fresh';
+      let resumeAttempted = false;
 
       // ── The resume upgrade (increment 4) ──────────────────────────────────────────────────
-      const rung = resumeLadder(
-        liveness,
-        spec.order.transcript_max_bytes ?? RESUME_TRANSCRIPT_MAX_BYTES,
-      );
-      if ('skip' in rung) {
+      const rung = wantsResume
+        ? resumeLadder(liveness, spec.order.transcript_max_bytes ?? RESUME_TRANSCRIPT_MAX_BYTES)
+        : { skip: null as string | null };
+      if (!wantsResume) {
+        ctx.log(`portable delivery for ${seat}: fresh spawn (resume bypassed)`);
+      } else if ('skip' in rung) {
         if (rung.skip) ctx.log(`resume skipped for ${seat}: ${rung.skip} — fresh spawn`);
       } else {
+        resumeAttempted = true;
         if (rung.via === 'enumerated')
           ctx.log(
             `resume target for ${seat} from enumeration (${rung.id}) — the slot named nothing usable`,
@@ -494,7 +512,12 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
           settledParts.push(resumed.settled);
           if (resumed.occupied) {
             return {
-              outcome: { occupied: true, session: 'resumed' },
+              outcome: {
+                occupied: true,
+                session: 'resumed',
+                ...(deliveryTracked ? { delivery_outcome: 'resumed' as const } : {}),
+                ...deliveryMetadata(),
+              },
               settled: settleAll(),
             };
           }
@@ -532,7 +555,19 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
         const healed = await respawnAfterStaleBin(deps, bin, fresh.spawnFailure);
         if (!healed) {
           return {
-            outcome: { occupied: false, session: 'fresh', reason: fresh.spawnFailure },
+            outcome: {
+              occupied: false,
+              session: 'fresh',
+              ...(deliveryTracked
+                ? {
+                    delivery_outcome: resumeAttempted
+                      ? ('fresh_fallback' as const)
+                      : ('fresh' as const),
+                  }
+                : {}),
+              ...deliveryMetadata(),
+              reason: fresh.spawnFailure,
+            },
             settled: settleAll(),
           };
         }
@@ -551,7 +586,19 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
         );
         if ('spawnFailure' in retry) {
           return {
-            outcome: { occupied: false, session: 'fresh', reason: retry.spawnFailure },
+            outcome: {
+              occupied: false,
+              session: 'fresh',
+              ...(deliveryTracked
+                ? {
+                    delivery_outcome: resumeAttempted
+                      ? ('fresh_fallback' as const)
+                      : ('fresh' as const),
+                  }
+                : {}),
+              ...deliveryMetadata(),
+              reason: retry.spawnFailure,
+            },
             settled: settleAll(),
           };
         }
@@ -561,6 +608,14 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
           outcome: {
             occupied: healedOutcome.occupied,
             session: 'fresh',
+            ...(deliveryTracked
+              ? {
+                  delivery_outcome: resumeAttempted
+                    ? ('fresh_fallback' as const)
+                    : ('fresh' as const),
+                }
+              : {}),
+            ...deliveryMetadata(),
             ...(healedOutcome.reason ? { reason: healedOutcome.reason } : {}),
           },
           settled: settleAll(),
@@ -572,6 +627,14 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
         outcome: {
           occupied: outcome.occupied,
           session: 'fresh',
+          ...(deliveryTracked
+            ? {
+                delivery_outcome: resumeAttempted
+                  ? ('fresh_fallback' as const)
+                  : ('fresh' as const),
+              }
+            : {}),
+          ...deliveryMetadata(),
           ...(outcome.reason ? { reason: outcome.reason } : {}),
           // Fast-fail merge: an already-settled run's summary rides the primary report.
           ...(outcome.completion?.cost_usd !== undefined

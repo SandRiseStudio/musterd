@@ -50,7 +50,7 @@ src/
     loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); agent-key auth read through workspace bindings; one wake span per actuation
     pinnedBin.ts      // a wake exports the actuator's OWN build: shim execing this process's node+entry, PREPENDED to the woken harness's PATH — woken hooks call a bare `musterd`, and the host's PATH resolved a frozen Homebrew tarball; best-effort, degrades to inherited PATH
     backends/
-      claudeCode.ts   // backend #1: resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to the fresh `claude -p` spawn in the same lease (pre-minted --session-id, reply-only allowedTools, mandatory watchdog, no skip-permissions ever) (ADR 131 §5)
+      claudeCode.ts   // backend #1: explicit portable/fresh orders bypass resume; legacy orders retain the resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to fresh `claude -p` in the same lease; reports actual delivery + local byte/age metadata only (ADR 131 §5 / ADR 209)
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
     liveness.ts       // localSessionLiveness(workspace): binding.session + transcript stat → none|live|resumable|gc-expired; shared by the host's local-session guard and `session show`; also carries the ADR 166 inc-1 SHADOW judgement (computed, never acted on)
     enumerate.ts      // ADR 166: ask the harness what sessions it HAS — scans ~/.claude/projects and attributes each transcript by its RECORDED cwd walked up to a workspace (never by decoding the directory name, an inconsistent encoding); undefined = "cannot tell" (never laundered into "none")
@@ -112,6 +112,7 @@ src/
     status.ts         // status
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)
+    wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 209)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036)
     lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal join (ADR 083/084)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
@@ -298,6 +299,10 @@ Prints the seat this folder resolves to — `<member> on <team> (<surface> · <s
 ### `musterd memory [show] | save --headline "<subject>" [body...] | clear`
 
 The seat's private **cross-session continuity note** (ADR 093) over `PUT`/`GET`/`DELETE /teams/:slug/memory` — all seat-authenticated, operating on the caller's **own** seat only (no cross-seat path, admins included). `save` is last-write-wins with the headline-first discipline (headline ≤120 chars, body ≤8KB — over-cap is rejected with the limit named); the playbook is **save before handing off / wrapping up**. `show` (the default) is the explicit body read — a seat with nothing saved is a normal exit-0 message, not an error. Delivery is envelope-on-occupy / body-on-demand: `musterd claim` prints the one-liner off the `occupied` frame's envelope, and `musterd status` prints the same line (best-effort, silent for an ambient identity or an empty seat) — `saved memory from <age> ago: "<headline>" — \`musterd memory\` to load it` — never the body. Needs an **active identity** like any act (ADR 036).
+
+### `musterd wake-context --act <id> | --lane <id>`
+
+The explicit CLI read for ADR 209's recipient-scoped portable wake index. It sends exactly one canonical target to `POST /teams/:slug/wake-context` and renders only wake kind/ID, objective, intended delivery, and the named explicit fetch categories. `--json` returns the same bounded packet. It never reads an Act, thread, memory, or artifact body as a side effect.
 
 ### `musterd claim <name> | --role <role> [--for <code>] [--surface <s>] [--key mskey_…] [--grant msgr_…] [--force] [--timeout <s>]`
 

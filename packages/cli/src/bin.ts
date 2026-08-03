@@ -40,6 +40,7 @@ import { streamCommand } from './commands/stream.js';
 import { teamCommand } from './commands/team.js';
 import { unbindCommand } from './commands/unbind.js';
 import { uninstallCommand } from './commands/uninstall.js';
+import { wakeContextCommand } from './commands/wake-context.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { wireCommand } from './commands/wire.js';
 import { CliError } from './errors.js';
@@ -226,6 +227,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return availabilityCommand(rest);
     case 'memory':
       return memoryCommand(rest);
+    case 'wake-context':
+      return wakeContextCommand(rest);
     case 'notify':
       return notifyCommand(rest);
     case 'claim':

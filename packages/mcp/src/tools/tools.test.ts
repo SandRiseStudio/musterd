@@ -20,6 +20,7 @@ import { registerMembers } from './members.js';
 import { memoryLine, registerMemory } from './memory.js';
 import { registerSend } from './send.js';
 import { registerStatus } from './status.js';
+import { registerWakeContext } from './wakeContext.js';
 
 type Handler = (args: any) => Promise<{ content: { text: string }[]; structuredContent?: any }>;
 
@@ -643,6 +644,34 @@ describe('team_status handler', () => {
       }) as any,
     });
     expect(text(await err({}))).toContain('error: down');
+  });
+});
+
+describe('team_wake_context (ADR 209)', () => {
+  it('refuses before join and returns only bounded fields after join', async () => {
+    const dormant = capture(registerWakeContext, { holdsSeat: false });
+    expect(text(await dormant({ act_id: 'a1' }))).toContain('team_join');
+
+    const wakeContext = vi.fn(async () => ({
+      version: 1,
+      wake: { kind: 'reply', act_id: 'a1' },
+      objective: { action: 'reply' },
+      state: { memory: { headline: 'safe headline', saved_at: 1, size_bytes: 32 } },
+      fetch: ['inbox_thread', 'seat_memory'],
+      delivery: { requirement: 'portable', intended: 'fresh' },
+    }));
+    const handler = capture(registerWakeContext, { holdsSeat: true, wakeContext } as any);
+    const result = await handler({ act_id: 'a1' });
+    expect(wakeContext).toHaveBeenCalledWith({ act_id: 'a1' });
+    expect(text(result)).toContain('next action: reply');
+    expect(text(result)).toContain('team_memory_read');
+    expect(result.structuredContent.context.wake).toEqual({ kind: 'reply', act_id: 'a1' });
+  });
+
+  it('requires exactly one canonical target', async () => {
+    const handler = capture(registerWakeContext, { holdsSeat: true } as any);
+    expect(text(await handler({}))).toContain('exactly one');
+    expect(text(await handler({ act_id: 'a1', lane_id: 'l1' }))).toContain('exactly one');
   });
 });
 

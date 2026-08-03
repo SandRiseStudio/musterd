@@ -22,6 +22,8 @@ import {
   SessionAttestationBodySchema,
   WakeLeasesBodySchema,
   WakeReportBodySchema,
+  WakeContextRequestSchema,
+  WakeContextResponseSchema,
   ToolTelemetryReportSchema,
   OpenLaneSchema,
   UpdateLaneSchema,
@@ -120,6 +122,7 @@ import { unblockerReachable } from '../store/reachability.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import {
   claimWakeLeases,
+  buildWakeContext,
   effectiveWakePolicy,
   enrollResidency,
   getResidency,
@@ -1770,6 +1773,13 @@ export async function handleHttp(
                 lease_id: body.lease_id,
                 ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
                 ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),
+                ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
+                ...(body.transcript_bytes !== undefined
+                  ? { transcript_bytes: body.transcript_bytes }
+                  : {}),
+                ...(body.transcript_age_ms !== undefined
+                  ? { transcript_age_ms: body.transcript_age_ms }
+                  : {}),
               },
             });
             return sendJson(res, 200, {
@@ -1812,6 +1822,13 @@ export async function handleHttp(
             ...(lease.lane_id ? { lane_id: lease.lane_id } : {}),
             ...(enrollment?.grant_id ? { grant_id: enrollment.grant_id } : {}),
             ...(body.session ? { session: body.session } : {}),
+            ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
+            ...(body.transcript_bytes !== undefined
+              ? { transcript_bytes: body.transcript_bytes }
+              : {}),
+            ...(body.transcript_age_ms !== undefined
+              ? { transcript_age_ms: body.transcript_age_ms }
+              : {}),
             ...(body.answered !== undefined ? { answered: body.answered } : {}),
             ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
             ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),
@@ -2313,6 +2330,26 @@ export async function handleHttp(
       if (method === 'GET' && rest === '/next') {
         const { team, member } = authTouch(ctx, slug, req);
         return sendJson(res, 200, deriveNext(ctx.db, team.id, team.slug, member.name));
+      }
+
+      // Portable wake context (ADR 209): the recipient gets a bounded, server-derived index after
+      // occupying. It names explicit reads but never carries an Act or memory body.
+      if (method === 'POST' && rest === '/wake-context') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const target = parseOrBadRequest(WakeContextRequestSchema, await readJson(req));
+        const context = buildWakeContext(ctx.db, team, member, target);
+        const response = WakeContextResponseSchema.parse({ context });
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'residency.context_read',
+          target: target.act_id ?? target.lane_id ?? '?',
+          result: 'allow',
+          detail: {
+            kind: context.wake.kind,
+            bytes: Buffer.byteLength(JSON.stringify(context), 'utf8'),
+          },
+        });
+        return sendJson(res, 200, response);
       }
 
       // The insight report (ADR 050/084) — one server-side projection: flow metrics, the waiting-on

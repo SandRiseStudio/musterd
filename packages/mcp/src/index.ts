@@ -27,6 +27,7 @@ import { registerMembers } from './tools/members.js';
 import { registerMemory } from './tools/memory.js';
 import { registerSend } from './tools/send.js';
 import { registerStatus } from './tools/status.js';
+import { registerWakeContext } from './tools/wakeContext.js';
 import {
   instrumentToolTransport,
   startToolTelemetryFlush,
@@ -241,6 +242,7 @@ export function buildMcpServer(
   registerStatus(server, client);
   registerMembers(server, client);
   registerMemory(server, client);
+  registerWakeContext(server, client);
   registerLanes(server, client);
   registerGoals(server, client);
   registerInsights(server, client);

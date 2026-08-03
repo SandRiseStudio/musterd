@@ -280,3 +280,69 @@ Add `claim_conflict` (seat occupied; 409), `expired_grant` (410/403). Reuse `for
 - `members` → `seats` (+ `role`, `account_status`; drop `token_hash`). Add `roles`, `grants`, `requests`, `audit`, and team `policy`/`agent_key_hash`, per-human `credential_hash`.
 - Schema migration; since musterd is pre-1.0 and local, a one-shot reset of existing local DBs is acceptable (documented), or a best-effort migration that mints an agent key, creates one role per distinct `members.role`, turns members into `active` seats, and marks the creator admin.
 - Surface changes: `team add` provisions a seat (no token); MCP env `MUSTERD_TOKEN` → `MUSTERD_AGENT_KEY` (+ optional pre-issued `MUSTERD_GRANT`) — the seat is resolved from `.musterd/binding.json` (`claim`), not baked into the env (`MUSTERD_CLAIM` survives only as a manual override for binding-less/CI folders, PR #58); `init` and CLI `join` move to the claim/request flow.
+
+## A.10 Portable wake context (unreleased — ADR 209)
+
+This section specifies the additive portable-continuity contract before implementation. It does not
+change a Team’s wake authorization: enrollment, loop toggles, rate caps, and the host actuator stay
+the ADR 131/179/191/199 mechanism.
+
+### Wake context request and response
+
+```jsonc
+// recipient-authenticated client → server
+POST /teams/:slug/wake-context
+{ "act_id": "01J…" } // exactly one of act_id or lane_id is required
+
+// server → recipient
+{
+  "context": {
+    "version": 1,
+    "wake": {
+      "kind": "reply|handoff|review|work_order",
+      "act_id": "01J…"?,
+      "lane_id": "01J…"?
+    },
+    "objective": { "action": "reply|review|continue_lane|begin_lane" },
+    "state": {
+      "lane": { "id":"01J…", "state":"…", "owner_seat":"Ada"?, "branch":"…"? }?,
+      "thread": { "id":"01J…", "participant_count":2, "unread_count":1, "latest_act":"handoff"? }?,
+      "memory": { "headline":"…", "saved_at":<ms>, "size_bytes":<int> }?
+    },
+    "fetch": ["inbox_thread", "lane_detail", "seat_memory", "git_artifact"],
+    "delivery": {
+      "requirement": "portable|transcript_required",
+      "intended": "fresh|resume"
+    }
+  }
+}
+```
+
+The packet is a server-derived orientation index. It MUST NOT contain an Envelope body, a seat-memory
+body, a lane title, source text, or other agent-authored free text. The full bodies remain explicit,
+recipient-scoped reads. The packet creates no durable context store.
+
+A server MUST authorize an `act_id` request only when the Act was delivered to the calling Member. It
+MUST authorize a `lane_id` request only when the caller owns the Lane or is the recipient of the
+current review/handoff derivation for it. A disallowed request MUST return `forbidden` without
+revealing whether the Act or Lane exists.
+
+### Delivery selection and reporting
+
+Wake Orders MAY add `continuity_requirement: "portable"|"transcript_required"` and
+`intended_delivery: "fresh"|"resume"`. Omission preserves legacy behavior for a mixed-version
+daemon/host pair.
+
+`portable` selects a fresh spawn. `transcript_required` is a server-controlled classification that
+the initial implementation permits only for a recent directed reply; it is never selected by an
+Envelope body. The host MAY resume only if local capture and policy checks pass and must retain the
+same-lease fresh fallback. Handoff, review, and work-order wakes are portable.
+
+Ordinary inbox reply wakes retain legacy delivery unless the team residency policy's
+`portable_inbox_replies` cohort flag is enabled (its default is `false`). When enabled, those
+orders are also portable/fresh. This is a rollout selector, not a sender-controlled field.
+
+Wake reports MAY add `delivery_outcome: "fresh"|"resumed"|"fresh_fallback"`, plus non-content
+measurements `transcript_bytes` and `transcript_age_ms`. No report carries a session ID or transcript
+path. A `fresh_fallback` outcome means a resume attempt failed and the fallback fresh session
+occupied.

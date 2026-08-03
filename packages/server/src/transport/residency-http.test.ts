@@ -311,7 +311,14 @@ describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
     const leaseId = leases.json.orders[0].lease_id as string;
     const primary = await post(
       '/teams/dawn/residency/wake-report',
-      { lease_id: leaseId, occupied: true, session: 'fresh' },
+      {
+        lease_id: leaseId,
+        occupied: true,
+        session: 'fresh',
+        delivery_outcome: 'fresh',
+        transcript_bytes: 4096,
+        transcript_age_ms: 12_000,
+      },
       agentKey,
     );
     expect(primary.status).toBe(200);
@@ -322,7 +329,15 @@ describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
     const leaseId = await reportedLease();
     const supplement = await post(
       '/teams/dawn/residency/wake-report',
-      { lease_id: leaseId, occupied: true, cost_usd: 0.42, duration_ms: 34_000 },
+      {
+        lease_id: leaseId,
+        occupied: true,
+        cost_usd: 0.42,
+        duration_ms: 34_000,
+        delivery_outcome: 'fresh',
+        transcript_bytes: 4096,
+        transcript_age_ms: 12_000,
+      },
       agentKey,
     );
     expect(supplement.status).toBe(200);
@@ -333,6 +348,9 @@ describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
       lease_id: leaseId,
       cost_usd: 0.42,
       duration_ms: 34_000,
+      delivery_outcome: 'fresh',
+      transcript_bytes: 4096,
+      transcript_age_ms: 12_000,
     });
     // The wake report projection folds it in.
     const report = await get('/teams/dawn/report', nickCred);

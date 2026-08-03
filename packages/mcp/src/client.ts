@@ -13,6 +13,10 @@ import {
   type NextBrief,
   type Report,
   type ToolTelemetryReport,
+  type WakeContextPacket,
+  type WakeContextRequest,
+  WakeContextRequestSchema,
+  WakeContextResponseSchema,
   type WSServerFrame,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
@@ -422,6 +426,17 @@ export class MusterdClient {
 
   readMemory(): Promise<{ headline: string; body: string; saved_at: number }> {
     return this.request('GET', `/teams/${this.config.team}/memory`);
+  }
+
+  /** ADR 209's recipient-scoped, body-free wake orientation index. */
+  async wakeContext(request: WakeContextRequest): Promise<WakeContextPacket> {
+    const target = WakeContextRequestSchema.safeParse(request);
+    if (!target.success) throw new Error('wake context requires exactly one act_id or lane_id');
+    const json = await this.request('POST', `/teams/${this.config.team}/wake-context`, target.data);
+    const response = WakeContextResponseSchema.safeParse(json);
+    if (!response.success)
+      throw new Error('wake-context response did not match the protocol schema');
+    return response.data.context;
   }
 
   /**

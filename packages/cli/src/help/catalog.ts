@@ -512,6 +512,15 @@ export const CATALOG: readonly CommandEntry[] = [
       'show the one-line pointer. No cross-seat read.',
   },
   {
+    name: 'wake-context',
+    signature: '--act <id> | --lane <id>',
+    summary: 'read a bounded, body-free wake orientation index',
+    group: 'inbox',
+    primary: false,
+    detail:
+      'Read ADR 209 portable wake context for a directed Act or owned Lane. It names only canonical IDs, state, delivery intent, and explicit follow-up reads; it never loads an Act or memory body.',
+  },
+  {
     name: 'availability',
     signature: '<available|away|dnd> [--until <iso>]',
     summary: 'set your availability (away holds notifications; dnd passes urgent)',

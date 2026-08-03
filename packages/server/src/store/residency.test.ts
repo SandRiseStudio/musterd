@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { appendAudit, listAudit } from './audit.js';
+import { openLane } from './lanes.js';
 import { addMember } from './members.js';
 import { insertMessage } from './messages.js';
 import { attach } from './presence.js';
@@ -10,6 +11,7 @@ import {
   WAKE_DEFER_SNOOZE_MS,
   WAKE_LEASE_TTL_MS,
   WAKE_POLICY_DEFAULTS,
+  buildWakeContext,
   claimWakeLeases,
   effectiveWakePolicy,
   enrollResidency,
@@ -137,6 +139,51 @@ describe('residency enrollment (ADR 131)', () => {
     expect(getResidency(db, team.id, ada.id)).toBeNull();
     expect(listWakeableMemberIds(db, team.id).has(ada.id)).toBe(false);
     expect(revokeResidency(db, team.id, ada.id)).toBeNull();
+  });
+});
+
+describe('buildWakeContext (ADR 209)', () => {
+  it('derives a body-free reply packet only for the directed recipient', () => {
+    const { db, team, nick, ada, bob } = seed();
+    msg(db, team, nick, ada, 'message', 'm1', 1_000, { thread: 't1' });
+
+    expect(buildWakeContext(db, team, ada, { act_id: 'm1' })).toMatchObject({
+      wake: { kind: 'reply', act_id: 'm1' },
+      objective: { action: 'reply' },
+      fetch: ['inbox_thread', 'seat_memory'],
+      delivery: { requirement: 'portable', intended: 'fresh' },
+    });
+    expect(() => buildWakeContext(db, team, bob, { act_id: 'm1' })).toThrow(/forbidden/i);
+  });
+
+  it('derives handoff, review, and owned work-order packets without stored bodies', () => {
+    const { db, team, nick, ada } = seed();
+    const lane = openLane(db, team.id, team.slug, ada.name, {
+      title: 'Portable context',
+      branch: 'feat/context',
+      claim: true,
+    });
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000, {
+      meta: { lane_handoff: { lane: lane.id } },
+    });
+    msg(db, team, nick, ada, 'ask', 'r1', 1_001, {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+    });
+
+    expect(buildWakeContext(db, team, ada, { act_id: 'h1' })).toMatchObject({
+      wake: { kind: 'handoff' },
+      objective: { action: 'continue_lane' },
+      state: { lane: { id: lane.id, branch: 'feat/context' } },
+      fetch: ['inbox_thread', 'lane_detail', 'git_artifact', 'seat_memory'],
+    });
+    expect(buildWakeContext(db, team, ada, { act_id: 'r1' })).toMatchObject({
+      wake: { kind: 'review' },
+      objective: { action: 'review' },
+    });
+    expect(buildWakeContext(db, team, ada, { lane_id: lane.id })).toMatchObject({
+      wake: { kind: 'work_order', lane_id: lane.id },
+      objective: { action: 'begin_lane' },
+    });
   });
 });
 
@@ -555,6 +602,8 @@ describe('claimWakeLeases — work_order derivation (ADR 191 review loop)', () =
       derivation: 'work_order',
       lane_id: lane.id,
       tool_policy: 'seat-policy',
+      continuity_requirement: 'portable',
+      intended_delivery: 'fresh',
     });
     expect(orders[0]!.bounds?.timeout_ms).toBe(WAKE_POLICY_DEFAULTS.work_timeout_ms);
     expect(orders[0]!.composed_line).toContain(lane.id);
@@ -563,6 +612,8 @@ describe('claimWakeLeases — work_order derivation (ADR 191 review loop)', () =
     expect(JSON.parse(leased[0]!.detail as string)).toMatchObject({
       derivation: 'work_order',
       lane_id: lane.id,
+      continuity_requirement: 'portable',
+      intended_delivery: 'fresh',
     });
   });
 
@@ -653,6 +704,10 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
     expect(orders).toHaveLength(1);
     expect(orders[0]!.derivation).toBe('batched');
     expect(orders[0]!.tool_policy).not.toBe('seat-policy');
+    expect(orders[0]).toMatchObject({
+      continuity_requirement: 'portable',
+      intended_delivery: 'fresh',
+    });
   });
 
   it('does not derive dispatch work_order when the seat is flow:manual', async () => {
@@ -671,6 +726,35 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
     const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
     expect(orders).toHaveLength(1);
     expect(orders[0]!.derivation).toBe('batched');
+    expect(orders[0]).toMatchObject({
+      continuity_requirement: 'portable',
+      intended_delivery: 'fresh',
+    });
+  });
+
+  it('keeps ordinary inbox wakes on the legacy ladder until the portable reply cohort is enabled', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'steer', 'm1', 1_000);
+
+    const [legacy] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS, 10_000);
+    expect(legacy).not.toHaveProperty('intended_delivery');
+
+    db.prepare('DELETE FROM wake_leases WHERE team_id = ?').run(team.id);
+    setPolicy(db, team.id, { residency: { portable_inbox_replies: true } });
+    expect(getPolicy(db, team.id).residency.portable_inbox_replies).toBe(true);
+    const [portable] = claimWakeLeases(
+      db,
+      team.id,
+      team.slug,
+      HOST,
+      PRESENCE_TIMEOUT_MS,
+      2_000_000,
+    );
+    expect(portable).toMatchObject({
+      continuity_requirement: 'portable',
+      intended_delivery: 'fresh',
+    });
   });
 
   it('continuation: owned claimed lane with no act → work_order with null act_id', async () => {
