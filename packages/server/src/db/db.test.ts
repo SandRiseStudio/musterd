@@ -70,7 +70,7 @@ describe('db', () => {
     db.close();
   });
 
-  it('v30 seeds revive working hours without overwriting an explicit schedule (ADR 205)', () => {
+  it('v30 seeds revive working hours without overwriting an explicit schedule (ADR 206)', () => {
     const db = openDb(':memory:');
     createTeam(db, { slug: 'revive' });
     db.prepare("UPDATE schema_meta SET value = '29' WHERE key = 'schema_version'").run();

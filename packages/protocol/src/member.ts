@@ -37,7 +37,7 @@ export const MemberSchema = z.object({
   lifecycle: LifecycleSchema.default('forever'),
   lifecycle_until: z.number().int().nullish(),
   availability: AvailabilitySchema.nullish(),
-  /** Optional recurring schedule; a Member value replaces the Team default (ADR 205). */
+  /** Optional recurring schedule; a Member value replaces the Team default (ADR 206). */
   working_hours: WorkingHoursSchema.nullish(),
   /** Account status — Axis 1 (ADR 070). Optional for back-compat; the server always resolves it. */
   account_status: AccountStatusSchema.optional(),
