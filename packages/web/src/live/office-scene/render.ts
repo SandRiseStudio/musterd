@@ -1200,16 +1200,14 @@ function workingHoursSign(
     wallDisc(ctx, fit, edge, T(offset), U(halfH + 1), 1.25, '#5f452d');
   }
 
-  // Three short rows, not a paragraph. The card is ~60 screen px at the office's usual fit, where a
-  // sixth line of 6-unit type is a grey smudge — so the sign says only what a sign says (the days, the
-  // hours, the zone), each big enough to read, and drops the caption the fixture's own shape already
-  // gives. Every row is still shrunk to the paper: days can be a list ("MON · WED · FRI"), not just a
-  // run, and the card is only as wide as the window bay allows.
+  // Two rows: the days and the hours. The card is ~60 screen px at the office's usual fit, so every row
+  // that isn't one of those two facts steals size from the ones that are. Both are still shrunk to the
+  // paper — days can be a list ("MON · WED · FRI"), not just a run, and the card is only as wide as the
+  // window bay allows.
   const line = (dy: number, text: string, size: number, fill: string): void =>
     wallText(ctx, fit, edge, tc, U(dy), text, fitTextSize(ctx, text, size, INNER), fill, 'center');
-  line(halfH - 11, copy.days, 10, '#4e331f'); // the days ride the header band, like a calendar's month bar
-  line(-7, copy.hoursShort, 12.5, '#33261c'); // clear of the band: at this size the digits' ascenders reach it
-  line(-16, copy.timezoneShort, 7, '#806146');
+  line(halfH - 10.5, copy.days, 10, '#4e331f'); // the days ride the header band, like a calendar's month bar
+  line(-9.5, copy.hours, 12, '#33261c');
 
   // A brass tack in the header gives the card a restrained life. t=0 is its complete, static
   // reduced-motion posture.
