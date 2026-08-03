@@ -40,6 +40,7 @@ import {
   SERVICE_LABEL,
   serviceSupported,
   stableNodePath,
+  type LaunchctlStatus,
 } from '../service/launchd.js';
 import {
   installLive,
@@ -502,18 +503,20 @@ export function countBehind(build: string, dir: string, run: Runner): number | n
  * - `watching` — a loaded auto-refresher will pick the skew up on its own interval. Skew here is
  *   benign, transient drift and must NOT read as a chore (the ADR 148 lesson: a chip that cries wolf
  *   on drift the machine already handles gets ignored, and then it can't warn about anything).
- * - `stalled` — the auto-refresher already ATTEMPTED this exact tip and the daemon still is not on
- *   it. The tick marks the attempt *before* building (the debounce), so this covers two cases: a
- *   build in flight right now, and a build that failed and will never be retried until a new commit
- *   lands. We cannot tell them apart from here and do not pretend to — but the failed case has to be
- *   surfaced, because it is invisible everywhere else: the daemon answers /health cheerfully from
- *   the previous build. A successful tick clears the marker, so a healthy settled machine never
- *   reaches this branch (and a settled machine is not behind at all).
+ * - `refreshing` — the auto-refresher already attempted this exact tip and launchd shows its one-shot
+ *   tick is still running. The daemon is behind only because the sync/build/bounce has not completed.
+ * - `stalled` — the same attempt exists but no tick is running. The build or restart failed and the
+ *   debounce will hold the daemon on the previous build until a new tip lands. A successful tick
+ *   clears the marker, so a healthy settled machine never reaches this branch.
  */
-type SkewOwner = 'off' | 'watching' | 'stalled';
+type SkewOwner = 'off' | 'watching' | 'refreshing' | 'stalled';
 
-export function autoRefreshOwnership(dir: string, run: Runner, loaded: boolean): SkewOwner {
-  if (!loaded) return 'off';
+export function autoRefreshOwnership(
+  dir: string,
+  run: Runner,
+  autoRefresh: Pick<LaunchctlStatus, 'loaded' | 'pid'>,
+): SkewOwner {
+  if (!autoRefresh.loaded) return 'off';
   // The debounce stamp names the tip the tick last *attempted*. If it already equals origin/main
   // while the daemon is still behind, the attempt failed — the tick is not going to try again.
   try {
@@ -521,7 +524,8 @@ export function autoRefreshOwnership(dir: string, run: Runner, loaded: boolean):
     if (!attempted) return 'watching';
     const tip = run('git', ['-C', dir, 'rev-parse', 'origin/main']);
     if (tip.status !== 0) return 'watching'; // no verdict — assume the watcher is fine (never alarm on ignorance)
-    return attempted === tip.stdout.trim() ? 'stalled' : 'watching';
+    if (attempted !== tip.stdout.trim()) return 'watching';
+    return autoRefresh.pid !== null ? 'refreshing' : 'stalled';
   } catch {
     return 'watching'; // no stamp yet: it has not attempted anything to fail at
   }
@@ -553,6 +557,9 @@ export function buildSkewNote(
   if (ownership === 'watching') {
     // Calm on purpose: no command, no ⚠. The machine owns this one.
     return `${short} ${theme.meta(`· ${commits} — the auto-refresher will pick this up`)}`;
+  }
+  if (ownership === 'refreshing') {
+    return `${short} ${theme.meta(`· ${commits} — refresh in progress`)}`;
   }
   if (ownership === 'stalled') {
     // Deliberately not naming a directory: `dir` is whatever checkout this CLI was invoked from,
@@ -1615,10 +1622,10 @@ async function renderStatus(
   // Build provenance + skew (ADR 130): the running daemon names its commit; we name the gap — and
   // who owns closing it, so a machine with the auto-refresher installed never reads as a chore.
   if (health?.build) {
-    const loaded = statusAutoRefresh(
+    const autoRefresh = statusAutoRefresh(
       resolveAutoRefreshCtx(ctx.run, { flags: {}, positionals: [], metaPairs: [] }),
-    ).loaded;
-    const ownership = autoRefreshOwnership(ctx.workingDir, ctx.run, loaded);
+    );
+    const ownership = autoRefreshOwnership(ctx.workingDir, ctx.run, autoRefresh);
     process.stdout.write(
       `  ${theme.meta('build:')}  ${buildSkewNote(health.build, ctx.workingDir, ctx.run, ownership)}\n`,
     );
