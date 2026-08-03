@@ -187,4 +187,90 @@ describe('inbox command', () => {
     expect(after.model_observed?.model).toBe('claude-opus-5');
     expect(after.model).toBe('claude-declared-1'); // observed over declared, never instead of
   });
+  describe('defer (ADR 211)', () => {
+    /** Ada asks nick something; returns the ask id nick will postpone. */
+    async function askNick(): Promise<string> {
+      const id = ulid();
+      await ada.send(
+        'dawn',
+        makeEnvelope({
+          id,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'member', name: 'nick' },
+          act: 'ask',
+          body: 'judge this',
+          ts: base,
+          thread: null,
+          meta: { species: 'approve', tier: 'standard' },
+        }),
+      );
+      return id;
+    }
+
+    it('defers an act until a lane moves, and lists it as waiting', async () => {
+      const id = await askNick();
+      const r = await capture(() => inboxCommand(parseArgs(['defer', id, '--until-lane', 'L1'])));
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('deferred');
+      expect(r.out).toContain('lane L1 moves');
+
+      const listed = await capture(() => inboxCommand(parseArgs(['--deferred', '--json'])));
+      expect(JSON.parse(listed.out)).toEqual([
+        { target: id, until: { lane: 'L1' }, raised: false },
+      ]);
+    });
+
+    it('defers until a reply, and flips to raised when someone answers the thread', async () => {
+      const id = await askNick();
+      await capture(() => inboxCommand(parseArgs(['defer', id, '--until-reply'])));
+
+      await ada.send(
+        'dawn',
+        makeEnvelope({
+          id: ulid(),
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'member', name: 'nick' },
+          act: 'message',
+          body: 'ping',
+          // AFTER the deferring wait, which the CLI stamps with the real clock — the fixture's
+          // `base` is a fixed July date, so a base-relative ts would predate the deferral and
+          // (correctly) not raise it.
+          ts: Date.now() + 60_000,
+          thread: id,
+          meta: null,
+        }),
+      );
+
+      const listed = await capture(() => inboxCommand(parseArgs(['--deferred', '--json'])));
+      expect(JSON.parse(listed.out)).toEqual([
+        { target: id, until: { reply: true }, raised: true },
+      ]);
+      const human = await capture(() => inboxCommand(parseArgs(['--deferred'])));
+      expect(human.out).toContain('raised');
+    });
+
+    it('shows the deferred count in the inbox footer', async () => {
+      const id = await askNick();
+      await capture(() => inboxCommand(parseArgs(['defer', id, '--until-lane', 'L1'])));
+      const r = await capture(() => inboxCommand(parseArgs(['--peek'])));
+      expect(r.out).toContain('1 deferred');
+    });
+
+    it('refuses a defer with no condition, both conditions, or no target', async () => {
+      const id = await askNick();
+      expect(await inboxCommand(parseArgs(['defer', id]))).toBe(2);
+      expect(
+        await inboxCommand(parseArgs(['defer', id, '--until-lane', 'L1', '--until-reply'])),
+      ).toBe(2);
+      expect(await inboxCommand(parseArgs(['defer']))).toBe(2);
+    });
+
+    it('reports nothing deferred on a clean inbox', async () => {
+      const r = await capture(() => inboxCommand(parseArgs(['--deferred'])));
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('nothing deferred');
+    });
+  });
 });
