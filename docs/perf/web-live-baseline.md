@@ -255,3 +255,72 @@ So the guidance inverts cleanly, and each `perf:check` failure now carries the r
 _that_ number: lazy-loading for `initialJsGzipBytes`, and deleting code or dropping a dependency for
 `totalJsGzipBytes`. **The removal shape still works for both, and is the only thing that works for
 the total.**
+
+## CSS budget RAISED 22,000 → 25,300 bytes gzip (2026-08-04) — a raise, not a re-baseline
+
+**This is a deliberate raise and it should be read as one.** ADR 183's re-baseline ritual resets a
+budget to measured + 15% and **may only tighten**; here measured + 15% is 25,290 bytes against a
+22,000-byte budget, so it loosens, which makes it a raise no matter what it is called. Recording it
+under the honest name is the whole point of the ritual.
+
+### What forced it
+
+`perf:check` failed on a 68-byte CSS addition (four small rules for the ADR 221 asks-rail sign-in).
+The failure was correct and the addition was not the problem:
+
+| Measurement (node `zlib.gzipSync`, as `check-budgets.ts` uses) | Bytes  | Headroom |
+| -------------------------------------------------------------- | ------ | -------- |
+| Before the ADR 221 rail change                                 | 21,923 | **77**   |
+| After it                                                       | 21,991 | **9**    |
+
+**The budget was already 99.65% consumed before the change that tripped it.** Note the measurement
+trap: the `gzip` CLI reports ~10 bytes/file more than `zlib.gzipSync` because it writes a filename
+and mtime header. Over 8 CSS files that is ~170 bytes — enough to make a passing build look like a
+failing one. Measure with node, the way the gate does.
+
+Per-file, gzip, at the time of the raise:
+
+| file                 | gzip   |
+| -------------------- | ------ |
+| `Live.css`           | 15,190 |
+| `global.css`         | 2,272  |
+| `routes-D.css`       | 1,902  |
+| `ReceptionScene.css` | 1,668  |
+| `approvals.css`      | 393    |
+| `Broadcast.css`      | 291    |
+| `audit.css`          | 217    |
+| `brand.css`          | 58     |
+| **total**            | 21,991 |
+
+### Trimming was attempted first, and there is nothing to trim
+
+Each of these was measured, not assumed. **Do not re-chase them without new evidence:**
+
+1. **Dead selectors: zero of 373.** A naive "class in CSS but not in `src/`" sweep flags 57, and all
+   57 are false positives — they are built dynamically (`` `lc-ask__tier--${tier}` ``,
+   `` `lc-ask lc-ask--${ask.state}` ``, `` `lc-badge--${kind}` ``). Matching on constructed prefixes
+   takes it to 0. **A dead-CSS sweep on this codebase must resolve template-literal prefixes or it
+   will confidently delete live styles.**
+2. **Comments are already free.** `Live.css` is 146,305 raw bytes of which 43,391 are comments, but
+   the shipped chunk is 15,190 gzipped — the minifier strips them. Deleting comments buys nothing
+   and costs the reasoning, which in this file is most of its value.
+3. **`cssMinify: 'lightningcss'` is byte-identical** to the default esbuild minifier here: 21,991
+   either way. Tried and reverted.
+4. **Duplicate declaration blocks total ~500 raw bytes** across the whole file (the largest is a
+   3× `color: var(--lc-dim); border-color: var(--lc-border-2);`). Below the noise floor after gzip.
+
+### The growth is real feature work
+
+Since the 2026-07-29 re-baseline, `Live.css` took **+1,019 / −245 lines across 13 shipped commits** —
+the cork pin board and board-off-the-wall overlay (#586), enamel nameplates, the reception lane and
+nameplate expand animation (#591), task-chair legs and the 18-desk floor (#593), presence chrome and
+room dressing (#548). None of it is waste. CSS grew 19.1 KB → 21.99 KB, consuming a 15% headroom in
+**six days**.
+
+### The thing to watch
+
+**A 15% headroom lasted six days at current office-CSS velocity, so this raise buys roughly a week.**
+If the next ceiling arrives on the same schedule, the answer is not a third raise: it is either a
+deliberate decision that the office's visual richness is worth a permanently larger CSS budget (say
+so, and set it once, high), or a structural change — `Live.css` is 4,500+ lines and 69% of all shipped
+CSS, and it is the only file that has ever moved this number.
