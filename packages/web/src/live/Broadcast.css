@@ -54,111 +54,211 @@
   font-size: 15px;
 }
 
-/* The asks reel (ADR 228). Sized for a 720p encode, not a desk: the stage is 1080p and the stream
-   is downscaled ×0.667, so /live's 11.5px rail would land near 7.7px before Twitch's encoder. This
-   is why the reel is not styled off .lc-asks — the two answer to different resolutions. */
+/* ─── the asks reel (ADR 228) ─────────────────────────────────────────────
+   The floor card's sibling, not a page banner. First version shipped as a full-bleed washed-out
+   bar and nick called it on the live stream — the fix is structural: the reel inherits the
+   scene-chrome paper set and the workstack frame (gradient, rim, sheen, drop), announces itself
+   with the same mono eyebrow the floor card uses, and caps its width instead of spanning the
+   stage. Type runs ~1.5× /live's rail so it survives the 720p encode (the reason this is not
+   simply .lc-asks reused). */
+
+/* The slot: /live gives topSlot the full top edge (its rail is a full-width pill). On the
+   broadcast stage that read as emptiness — cap it and anchor left, diagonal to the floor card. */
+.bc .lc-office__asks {
+  inset: var(--lc-5) auto auto var(--lc-5);
+  width: min(880px, 62%);
+}
+
 .bc-reel {
+  /* The scene-chrome paper set — same values the floor card scopes for itself. */
+  --lc-paper: #f3e2c3;
+  --lc-paper-2: #e9d3ab;
+  --lc-paper-ink: #2b1f13;
+  --lc-paper-dim: rgba(43, 31, 19, 0.72);
+  --lc-paper-rim: rgba(120, 78, 42, 0.42);
+  --lc-paper-drop: rgba(58, 34, 12, 0.38);
+  --lc-paper-sheen: rgba(255, 252, 245, 0.55);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px 12px;
+  border-radius: 14px;
+  color: var(--lc-paper-ink);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--lc-paper) 94%, var(--lc-accent)) 0%,
+    color-mix(in srgb, var(--lc-paper) 91%, transparent) 48%,
+    color-mix(in srgb, var(--lc-paper-2) 90%, transparent) 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 30%, var(--lc-paper-rim));
+  box-shadow:
+    inset 0 1px 0 var(--lc-paper-sheen),
+    inset 0 0 22px -10px color-mix(in srgb, var(--lc-accent) 24%, transparent),
+    0 3px 10px -2px var(--lc-paper-drop),
+    0 0 20px -6px color-mix(in srgb, var(--lc-accent) 30%, transparent);
+  animation: lc-fade var(--lc-med) var(--lc-ease) both;
+}
+/* Loud breathes AMBER, exactly like /live's strip — urgency in this room is mustard, not red. */
+.bc-reel--loud {
+  border-color: color-mix(in srgb, var(--lc-accent) 55%, var(--lc-paper-rim));
+  animation:
+    lc-fade var(--lc-med) var(--lc-ease) both,
+    bc-reel-breathe 2.4s ease-in-out infinite;
+}
+@keyframes bc-reel-breathe {
+  50% {
+    box-shadow:
+      inset 0 1px 0 var(--lc-paper-sheen),
+      inset 0 0 22px -10px color-mix(in srgb, var(--lc-accent) 24%, transparent),
+      0 3px 12px -2px var(--lc-paper-drop),
+      0 0 30px -4px color-mix(in srgb, var(--lc-accent) 55%, transparent);
+  }
+}
+
+/* Eyebrow row — the floor card's head, at stream scale. */
+.bc-reel__head {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 18px;
-  font-size: 19px;
-  line-height: 1.25;
-  color: var(--lc-text);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--lc-ground) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--lc-text) 12%, transparent);
-  backdrop-filter: blur(6px);
-}
-.bc-reel--loud {
-  border-color: color-mix(in srgb, var(--lc-danger) 45%, transparent);
+  gap: 10px;
+  padding: 0 2px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--lc-accent) 22%, transparent);
+  margin-bottom: 9px;
+  white-space: nowrap;
 }
 .bc-reel__bell {
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   flex: none;
   fill: none;
-  stroke: currentColor;
-  stroke-width: 1.1;
+  stroke: var(--lc-accent);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .bc-reel--loud .bc-reel__bell {
   animation: lc-asks-ring 2.4s ease-in-out infinite;
+  transform-origin: 50% 22%;
 }
-.bc-reel__who {
-  width: 28px;
-  height: 28px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  color: #fff;
-  font-size: 15px;
-  font-weight: 600;
-}
-.bc-reel__lead {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-  animation: bc-reel-in 420ms ease-out both;
-}
-.bc-reel__verb {
-  opacity: 0.72;
-}
-.bc-reel__gist {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 46ch;
-  opacity: 0.85;
-}
-.bc-reel__tier {
-  flex: none;
-  font-size: 15px;
+.bc-reel__label {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid currentColor;
-  opacity: 0.8;
-}
-.bc-reel__clock {
-  flex: none;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.8;
-}
-.bc-reel__clock--over {
-  color: var(--lc-danger);
-  opacity: 1;
-}
-.bc-reel__spacer {
-  flex: 1;
+  color: #8a6508;
 }
 .bc-reel__meta {
   flex: none;
-  font-size: 16px;
-  opacity: 0.65;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  color: var(--lc-paper-dim);
+}
+.bc-reel__meta--dim {
+  opacity: 0.6;
+}
+.bc-reel__spacer {
+  flex: 1;
 }
 .bc-reel__dots {
   display: flex;
   gap: 5px;
   flex: none;
+  margin-left: 4px;
 }
 .bc-reel__dots i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--lc-text) 25%, transparent);
+  background: color-mix(in srgb, var(--lc-paper-ink) 22%, transparent);
 }
 .bc-reel__dots i.is-on {
-  background: color-mix(in srgb, var(--lc-text) 70%, transparent);
+  background: var(--lc-accent);
+}
+
+/* The ask line — one strict line, everything nowrap, only the gist gives ground. */
+.bc-reel__row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  height: 34px;
+  font-size: 18px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  animation: bc-reel-in 420ms var(--lc-ease, ease-out) both;
+}
+.bc-reel__row--quiet {
+  color: var(--lc-paper-dim);
+  font-size: 16px;
+}
+.bc-reel__who {
+  width: 27px;
+  height: 27px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--lc-paper-sheen);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 650;
+}
+.bc-reel__lead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  overflow: hidden;
+}
+.bc-reel__lead b {
+  flex: none;
+  font-weight: 680;
+}
+.bc-reel__verb {
+  flex: none;
+  color: var(--lc-paper-dim);
+}
+.bc-reel__gist {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--lc-paper-dim);
+  font-style: italic;
+}
+.bc-reel__tier {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--lc-paper-rim);
+  color: var(--lc-paper-dim);
+}
+.bc-reel__tier--blocking {
+  color: var(--lc-danger);
+  border-color: color-mix(in srgb, var(--lc-danger) 45%, transparent);
+  background: color-mix(in srgb, var(--lc-danger) 9%, transparent);
+}
+.bc-reel__tier--standard {
+  color: #8a6508;
+  border-color: color-mix(in srgb, var(--lc-accent) 50%, transparent);
+}
+.bc-reel__clock {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 14.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--lc-paper-dim);
+}
+.bc-reel__clock--over {
+  color: var(--lc-danger);
 }
 @keyframes bc-reel-in {
   from {
     opacity: 0;
     transform: translateY(4px);
   }
-}
-.bc-reel__lead--quiet {
-  opacity: 0.75;
 }
