@@ -12,8 +12,44 @@ import { listLanes } from './lanes.js';
  * declared Goals. Neither is required for the floor to work.
  */
 
-/** Owned + live = what you're carrying right now. */
-const LIVE: ReadonlySet<string> = new Set(['claimed', 'active', 'blocked']);
+/**
+ * Owned + live = what you're carrying right now.
+ *
+ * `awaiting_acceptance` is carried, which `NextBriefSchema` has always documented and this set used
+ * to contradict. A lane waiting on an acceptance is in no other bucket either — `up_next` takes only
+ * `open` — so leaving it out made it invisible to the one seat still answerable for it, and nothing
+ * else times it out (lane `01KZ7D582V`). Submitting is not putting it down.
+ */
+const LIVE: ReadonlySet<string> = new Set(['claimed', 'active', 'blocked', 'awaiting_acceptance']);
+
+/** A handoff pointing at one of these is describing finished work — see `why` below. */
+const TERMINAL: ReadonlySet<string> = new Set(['done', 'abandoned']);
+
+/**
+ * How far back to look for a handoff that still describes live work. Bounded on purpose: a team
+ * whose last 20 handoffs all closed has no live why, and saying so beats scanning its whole history
+ * to prove it.
+ */
+const WHY_SCAN_DEPTH = 20;
+
+function parseMeta(meta: string | null): Record<string, unknown> {
+  if (meta === null) return {};
+  try {
+    const parsed: unknown = JSON.parse(meta);
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    // A malformed meta is not a reason to lose the human's words.
+    return {};
+  }
+}
+
+/** The lane a handoff carries (`meta.lane_handoff.lane`), or null when it names none. */
+function laneOf(meta: Record<string, unknown>): string | null {
+  const h = meta['lane_handoff'];
+  if (typeof h !== 'object' || h === null) return null;
+  const lane = (h as Record<string, unknown>)['lane'];
+  return typeof lane === 'string' ? lane : null;
+}
 
 interface HandoffRow {
   from_name: string;
@@ -43,9 +79,17 @@ export function deriveNext(
     .sort((a, b) => a.created_at - b.created_at)
     .slice(0, upNextLimit);
 
-  // The why: the latest handoff addressed to me or the team (not one I sent). Enrichment, never required.
-  const row = db
-    .prepare<[string, string, string], HandoffRow>(
+  // The why: the latest handoff addressed to me or the team (not one I sent). Enrichment, never
+  // required — but it is read as a live instruction, so a handoff whose lane has since closed is
+  // worse than no handoff at all. This brief served a four-day-old "finish step 7" for a lane whose
+  // PR had merged, and the seat reading it went looking for work that did not exist. So walk back
+  // from the newest and take the first that still describes something unfinished.
+  //
+  // Deliberately NOT a `stale` marker on the payload: that forks `NextBriefSchema` for what the
+  // brief can answer on its own. And deliberately not a SQL join — a handoff's lane lives in
+  // `meta.lane_handoff.lane`, so filtering here keeps the JSON shape in one place.
+  const rows = db
+    .prepare<[string, string, string, number], HandoffRow>(
       `SELECT mf.name AS from_name, m.body AS body, m.meta AS meta, m.ts AS ts
          FROM messages m
          JOIN members mf ON mf.id = m.from_member
@@ -55,20 +99,30 @@ export function deriveNext(
           AND (mt.name = ? OR m.to_kind IN ('team','broadcast'))
           AND mf.name != ?
         ORDER BY m.ts DESC, m.id DESC
-        LIMIT 1`,
+        LIMIT ?`,
     )
-    .get(teamId, member, member);
+    .all(teamId, member, member, WHY_SCAN_DEPTH);
+
+  const byId = new Map(all.map((l) => [l.id, l]));
+  const row = rows.find((r) => {
+    const meta = parseMeta(r.meta);
+    const laneId = laneOf(meta);
+    // Abstains by SHOWING, never by hiding (ADR 173): a handoff naming no lane, or naming one this
+    // team cannot resolve, is unjudgeable — and an unjudgeable why is still the human's words.
+    if (laneId === null) return true;
+    const lane = byId.get(laneId);
+    return lane === undefined || !TERMINAL.has(lane.state);
+  });
 
   const why = row
     ? {
         from: row.from_name,
         body: row.body,
         ts: row.ts,
-        goal_id:
-          row.meta &&
-          typeof (JSON.parse(row.meta) as Record<string, unknown>)['goal_id'] === 'string'
-            ? ((JSON.parse(row.meta) as Record<string, string>)['goal_id'] as string)
-            : null,
+        goal_id: (() => {
+          const g = parseMeta(row.meta)['goal_id'];
+          return typeof g === 'string' ? g : null;
+        })(),
       }
     : null;
 
