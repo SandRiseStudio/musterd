@@ -1,8 +1,15 @@
 # Roles & stewardship — capture for a future design session
 
-> **Status: capture, not design.** This document records the owner's intent (2026-07-13) so the
-> eventual brainstorm/design session starts from the full picture instead of re-discovering it. It
-> deliberately makes no decisions. The roadmap item `roles-and-stewardship` points here.
+> **Status: designed 2026-08-04 — see [ADR 227](../decisions/227-roles-as-the-aptitude-layer.md).**
+> The design session ran (nick + izzo) and froze the buildable subset: the multi-role model,
+> discovery as increment 1, the warn-only infra-touch guardrail as increment 2, and a four-role v1
+> library — with role-addressed sends, the guardian on-call agent, autonomy-as-policy, and free
+> capability tags deferred on named reopening triggers. This document remains the capture of the
+> full ambition (the wishlist library, the guardian sketch, the eight questions) that the ADR
+> deliberately did not decide.
+>
+> _Original status (2026-07-13): capture, not design — recorded so the session could start from the
+> full picture instead of re-discovering it._
 
 ## The prompting problem: who may touch running infrastructure?
 
