@@ -343,6 +343,29 @@ export const WakeMetricsSchema = z.object({
   cost_usd_per_wake: z.number().nullable(),
   /** How many woke acts carried a cost — the honesty denominator for the averages. */
   cost_reported: z.number().int(),
+  /**
+   * ADR 209/210 Eval split. `delivery` counts woken acts by the delivery the host observed;
+   * `exact_match` counts the `resume_eligible` cohort by why the exact-match rung resolved as it
+   * did. Both carry their own honesty denominator for the same reason `cost_reported` exists: an
+   * UNMEASURED cohort must read as unmeasured, never as a row of zeros. Wakes predating ADR 209
+   * report no delivery at all, and until they age out of the window every count here is 0 with a
+   * `_measured` of 0 — which is the true statement, and the one a baseline doc should record.
+   */
+  delivery: z.object({
+    fresh: z.number().int(),
+    resumed: z.number().int(),
+    fresh_fallback: z.number().int(),
+  }),
+  /** Woken acts whose report carried a `delivery_outcome` at all. */
+  delivery_measured: z.number().int(),
+  exact_match: z.object({
+    bound: z.number().int(),
+    missing: z.number().int(),
+    mismatched: z.number().int(),
+    stale: z.number().int(),
+  }),
+  /** Woken acts that were `resume_eligible` — the ADR 210 cohort's denominator. */
+  exact_match_measured: z.number().int(),
   by_seat: z.array(WakeSeatCostSchema),
 });
 export type WakeMetrics = z.infer<typeof WakeMetricsSchema>;

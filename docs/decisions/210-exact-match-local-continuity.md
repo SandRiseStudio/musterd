@@ -91,6 +91,14 @@ kinds. Exact-match resume must lower p50/p95 allowance-equivalent cost per compl
 material increase in failed or duplicate wakes, incorrect replies, or lane completion latency. Byte,
 rate, and freshness bounds stay fixed until this comparison has repeated observations behind it.
 
+_Baseline status 2026-08-04 — n=0._ The ADR 209 cohort this Eval compares against is **empty**, and
+the log is `docs/perf/wake-delivery-baseline.md`. The last successful wake was 2026-08-01, two days
+before ADR 209 merged, so no wake in the ledger carries a `delivery_outcome` and the portable/fresh
+cohort has no members. The read side now exists — `deriveWakeMetrics` splits woken acts by delivery
+outcome and exact-match result, with `_measured` denominators so an unmeasured cohort can never be
+misread as a measured zero — but the comparison stays unrunnable until wakes actually occur on the
+portable path. Enabling `exact_match_resume` before then would produce an anecdote, not evidence.
+
 **Experiment.** Keep the registry off by default and enable it for one workspace cohort first.
 Bindings are compared against the fresh path in the same period rather than against the pre-ADR 209
 resume ladder, so the registry is measured as an optimization over fresh, not over the ladder it

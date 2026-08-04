@@ -488,6 +488,10 @@ interface WakeAuditRow {
     lease_id?: string;
     session?: string;
     cost_usd?: number;
+    /** ADR 209: what delivery the host observed. Absent on every wake predating that ADR. */
+    delivery_outcome?: string;
+    /** ADR 210: why the exact-match rung resolved. Absent unless the order was resume_eligible. */
+    exact_match?: string;
   };
 }
 
@@ -601,10 +605,37 @@ export function deriveWakeMetrics(
 
   const costs = [...costByLease.values()].map((c) => c.cost);
   const costTotal = costs.length > 0 ? costs.reduce((a, b) => a + b, 0) : null;
+
+  // The ADR 209/210 Eval split, over the SAME attempt-deduped act set as every other wake number
+  // here — so the cohorts are comparable by construction rather than by a reader's assumption.
+  // Counted from the classifying (last) woke row; a supplementary wake_cost row re-states the same
+  // values and must not double-count. Absent fields are skipped, never defaulted: a wake that
+  // reported no delivery is not a `fresh` wake, it is an unmeasured one.
+  const delivery = { fresh: 0, resumed: 0, fresh_fallback: 0 };
+  const exact = { bound: 0, missing: 0, mismatched: 0, stale: 0 };
+  let deliveryMeasured = 0;
+  let exactMeasured = 0;
+  for (const r of byAct.values()) {
+    const d = r.detail.delivery_outcome;
+    if (d !== undefined && d in delivery) {
+      delivery[d as keyof typeof delivery] += 1;
+      deliveryMeasured += 1;
+    }
+    const e = r.detail.exact_match;
+    if (e !== undefined && e in exact) {
+      exact[e as keyof typeof exact] += 1;
+      exactMeasured += 1;
+    }
+  }
+
   return {
     window_days: WAKE_WINDOW_DAYS,
     wakes: byAct.size,
     resumed: [...byAct.values()].filter((r) => r.detail.session === 'resumed').length,
+    delivery,
+    delivery_measured: deliveryMeasured,
+    exact_match: exact,
+    exact_match_measured: exactMeasured,
     failed,
     deferred,
     exhausted,
