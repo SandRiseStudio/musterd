@@ -5771,3 +5771,82 @@ describe('the identity vault lookup cannot be answered by Object.prototype (ADR 
     },
   );
 });
+
+/**
+ * ADR 227 increment 2 — the warn-only infra-touch gate. The daemon owns both halves: it resolves
+ * whether the calling seat holds `platform` AND writes the audit row, so the CLI never supplies
+ * audit content and the check degrades to silence when the daemon is unreachable (the CLI side).
+ * Watcher, never gatekeeper: the response carries a warning or null; nothing here blocks anything.
+ */
+describe('infra-touch gate (ADR 227 inc 2): GET /teams/:slug/infra-gate', () => {
+  async function seedTeam() {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential as string;
+    await post('/teams/dawn/members', { name: 'izzo', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'dolly', kind: 'agent' }, tok);
+    return { tok, key: team.json.agent_key as string };
+  }
+
+  function holdPlatform(name: string) {
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const m = getMemberByName(server.db, team.id, name)!;
+    setMemberGovernance(server.db, m.id, null, JSON.stringify(GENERALIST_CAPABILITIES), [
+      'platform',
+    ]);
+  }
+
+  it('warns a non-holder agent seat, naming the current holders, and audits infra.touch.warned', async () => {
+    const { key } = await seedTeam();
+    holdPlatform('izzo');
+    const r = await get('/teams/dawn/infra-gate?verb=restart', { key, seat: 'dolly' });
+    expect(r.status).toBe(200);
+    expect(r.json.warn.holders).toEqual(['izzo']);
+    expect(r.json.warn.text).toContain('izzo holds platform');
+    expect(r.json.warn.text).toContain('route an ask');
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const rows = server.db
+      .prepare(
+        "SELECT actor, action, detail FROM audit WHERE team_id = ? AND action = 'infra.touch.warned'",
+      )
+      .all(team.id) as Array<{ actor: string; detail: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actor).toBe('dolly');
+    expect(JSON.parse(rows[0]!.detail)).toMatchObject({ verb: 'restart', holders: ['izzo'] });
+  });
+
+  it('stays silent for a platform holder — no warn, no audit row', async () => {
+    const { key } = await seedTeam();
+    holdPlatform('izzo');
+    const r = await get('/teams/dawn/infra-gate?verb=refresh', { key, seat: 'izzo' });
+    expect(r.status).toBe(200);
+    expect(r.json.warn).toBeNull();
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const rows = server.db
+      .prepare("SELECT id FROM audit WHERE team_id = ? AND action = 'infra.touch.warned'")
+      .all(team.id);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('stays silent for a human seat — the audience is agents, not the operator in their own shell', async () => {
+    const { tok } = await seedTeam();
+    holdPlatform('izzo');
+    const r = await get('/teams/dawn/infra-gate?verb=install', tok);
+    expect(r.status).toBe(200);
+    expect(r.json.warn).toBeNull();
+  });
+
+  it('with no platform holder, says the team has none yet (still warn-shaped, still audited)', async () => {
+    const { key } = await seedTeam();
+    const r = await get('/teams/dawn/infra-gate?verb=restart', { key, seat: 'dolly' });
+    expect(r.status).toBe(200);
+    expect(r.json.warn.holders).toEqual([]);
+    expect(r.json.warn.text).toContain('no seat holds platform');
+  });
+
+  it('unauthenticated → silent null (never a prerequisite for the command that fixes health)', async () => {
+    await seedTeam();
+    const r = await get('/teams/dawn/infra-gate?verb=restart');
+    expect(r.status).toBe(200);
+    expect(r.json.warn).toBeNull();
+  });
+});

@@ -2,7 +2,9 @@
 
 - **Status:** accepted — increment 1 (discovery: multi-role seat files + `roles[]` on the wire,
   role-file `summary`, `mergeRoleDefaults`, the `team_members` role filter, `musterd role assign`,
-  migration v31, epoch 7) shipped 2026-08-04; increment 2 (the warn-only guardrail) pending
+  migration v31, epoch 7) shipped 2026-08-04; increment 2 (the warn-only guardrail:
+  `GET /teams/:slug/infra-gate` + the `infra.touch.warned` audit row, wired into
+  `service install|restart|refresh` and `reset`) shipped 2026-08-04
 - **Date:** 2026-08-04
 - **Owner:** izzo (design session with nick, 2026-08-04)
 - **Supersedes / relates to:** ADR 069/070 (the capability substrate this extends), ADR 112 (steward — the first worked role), ADR 145 (admins are human-only), ADR 150 (structural inducement — the gate pattern increment 2 reuses), ADR 191/219/131 (the liveness trio discovery composes with), ADR 026–030 (provisioning templates — the per-harness rendering half), landscape.md §9 (the AgentField survey that widened the scope)
@@ -85,12 +87,12 @@ shouldn't?) and flipped by an admin via team policy, never by a code change land
 
 ### 4. The v1 library — four live roles, the rest stay templates
 
-| role       | holder   | charter anchor                                                                 |
-| ---------- | -------- | ------------------------------------------------------------------------------ |
+| role       | holder   | charter anchor                                                                                                                                                                                                             |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `platform` | izzo     | Designated toucher of running infrastructure: daemon lifecycle, service verbs, shared checkouts, migrations; supervises the ADR 152 auto-refresher. (stanley is the named alternate; assignment is nick's call at review.) |
-| `designer` | miley    | Owns the design surfaces (/live, office, CLI output contract, Figma frames); the standing owner rule — frontend is miley's, magical/warm/on-brand — as a charter instead of tribal memory. |
-| `steward`  | (Action) | Re-anchor the ADR 112 charter (`scripts/steward/CHARTER.md`) as `roles/steward.toml`; the seat-residency migration stays with ADR 131. |
-| `observer` | wanderer | Fold the `observer` role already live in MCP scope-by-role (ADR 144 inc 5) into the library, so the library describes reality rather than adding a parallel one. |
+| `designer` | miley    | Owns the design surfaces (/live, office, CLI output contract, Figma frames); the standing owner rule — frontend is miley's, magical/warm/on-brand — as a charter instead of tribal memory.                                 |
+| `steward`  | (Action) | Re-anchor the ADR 112 charter (`scripts/steward/CHARTER.md`) as `roles/steward.toml`; the seat-residency migration stays with ADR 131.                                                                                     |
+| `observer` | wanderer | Fold the `observer` role already live in MCP scope-by-role (ADR 144 inc 5) into the library, so the library describes reality rather than adding a parallel one.                                                           |
 
 The rest of the seed-doc wishlist (product manager, facilitator/brainstorm, experimenter,
 researcher, support, database guru) stays as documented templates, unheld — the library is
@@ -101,18 +103,18 @@ durable-on-git like everything else about a seat (ADR 058), no new ceremony.
 
 ### 5. Deferred, each with its reopening trigger
 
-| deferred                          | reopens when                                                                    |
-| --------------------------------- | ------------------------------------------------------------------------------- |
-| Role-addressed sends              | dogfood shows senders re-implementing the holder pick (§2)                       |
-| Platform guardian on-call agent   | its own ADR, as a later increment of the `platform` role; needs the probe design (seed doc, guardian sketch) |
-| Autonomy tiers as team policy     | needed only once the guardian exists (its `observe`/`alert`/`auto` dial)         |
-| Free capability tags on seats     | roles prove too coarse for real discovery queries — at ~8 seats a folksonomy is noise, and the git role file is the trust story |
+| deferred                        | reopens when                                                                                                                    |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Role-addressed sends            | dogfood shows senders re-implementing the holder pick (§2)                                                                      |
+| Platform guardian on-call agent | its own ADR, as a later increment of the `platform` role; needs the probe design (seed doc, guardian sketch)                    |
+| Autonomy tiers as team policy   | needed only once the guardian exists (its `observe`/`alert`/`auto` dial)                                                        |
+| Free capability tags on seats   | roles prove too coarse for real discovery queries — at ~8 seats a folksonomy is noise, and the git role file is the trust story |
 
 ### What we deliberately do not copy
 
 From the AgentField comparison: no central control plane (routing every call through an enforcer is
 the opposite of seats that can decline), no inline blocking enforcement (warn-never-block is
-load-bearing), no tag/credential ceremony. The borrow is the *question* their registry answers, not
+load-bearing), no tag/credential ceremony. The borrow is the _question_ their registry answers, not
 their architecture.
 
 ## Consequences

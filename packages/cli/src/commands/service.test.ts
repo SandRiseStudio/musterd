@@ -231,6 +231,52 @@ describe('serviceCommand', () => {
     expect(out).toContain('restarted');
   });
 
+  // ADR 227 inc 2: the warn-only infra-touch gate — one added line, never a block.
+  it('restart prints the infra-touch warning for a non-platform seat, and still proceeds', async () => {
+    const c = ctx(recorder());
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['restart', '--force']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+        infraGate: async (verb) => `izzo holds platform — route an ask instead (${verb}, ADR 227)`,
+      }),
+    );
+    expect(code).toBe(0); // warned, not blocked
+    expect(out).toContain('izzo holds platform');
+    expect(out).toContain('(restart, ADR 227)');
+    expect(out).toContain('restarted');
+  });
+
+  it('restart stays clean when the gate is silent (holder / human / no daemon)', async () => {
+    const c = ctx(recorder());
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['restart', '--force']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+        infraGate: async () => null,
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).not.toContain('ADR 227');
+  });
+
+  it('the --live publisher verbs skip the infra gate (no daemon touched, no teammate dropped)', async () => {
+    const gate = vi.fn(async () => 'should not be called');
+    const c = ctx(recorder());
+    const { code } = await capture(() =>
+      serviceCommand(parseArgs(['status', '--live']), {
+        platform: 'darwin',
+        ctx: c,
+        infraGate: gate,
+        probeViewer: async () => false,
+      }),
+    );
+    expect(code).toBe(0);
+    expect(gate).not.toHaveBeenCalled();
+  });
+
   it('stop proceeds when no sessions are connected', async () => {
     const c = ctx(recorder());
     const { code, out } = await capture(() =>

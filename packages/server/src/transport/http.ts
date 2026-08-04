@@ -91,6 +91,7 @@ import {
   isHeld,
   hashToken,
   leaveMember,
+  listMembers,
   markBound,
   markSignedOff,
   mintCredential,
@@ -1202,6 +1203,38 @@ export async function handleHttp(
             ? { human_credential: mintCredential(ctx.db, row.id).credential }
             : {}),
         });
+      }
+
+      /* ─── the infra-touch gate (ADR 227 inc 2) ─────────────────────────────────────────────────
+       * The daemon owns both halves of the warn-only check: it resolves whether the calling seat
+       * holds `platform` AND writes the audit row, so the CLI supplies no audit content and the
+       * whole check degrades to silence when anything here is missing. Watcher, never gatekeeper:
+       * the answer is a warning (or null) — nothing blocks, and the CLI proceeds either way. */
+      if (method === 'GET' && rest.startsWith('/infra-gate')) {
+        const team = requireTeam(ctx.db, slug);
+        const verb = new URL(req.url ?? '', 'http://local').searchParams.get('verb') ?? 'unknown';
+        const caller = tryAuth(ctx, slug, req);
+        // Silent unless the caller is a known AGENT seat: unauthenticated shells and humans are not
+        // the audience — the operator touching their own infra is exactly who this must not nag.
+        if (!caller || caller.kind !== 'agent') return sendJson(res, 200, { warn: null });
+        if (toMember(caller, team.slug).roles.includes('platform')) {
+          return sendJson(res, 200, { warn: null });
+        }
+        const holders = listMembers(ctx.db, team.id)
+          .filter((m) => m.observer !== 1 && toMember(m, team.slug).roles.includes('platform'))
+          .map((m) => m.name)
+          .sort();
+        const text = holders.length
+          ? `${holders.join(', ')} holds platform — route an ask instead of touching this yourself (ADR 227)`
+          : 'no seat holds platform yet — this team has no designated infra toucher (ADR 227)';
+        appendAudit(ctx.db, team.id, {
+          actor: caller.name,
+          action: 'infra.touch.warned',
+          target: null,
+          result: 'allow', // the touch proceeds — this row is the record, not a denial
+          detail: { verb, holders },
+        });
+        return sendJson(res, 200, { warn: { text, holders } });
       }
 
       if (method === 'GET' && rest === '/members') {

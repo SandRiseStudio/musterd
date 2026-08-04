@@ -5,6 +5,7 @@ import { createInterface } from 'node:readline';
 import { flagStr, type Parsed } from '../args.js';
 import { configPath, loadConfig, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
+import { infraTouchWarning } from '../infra-gate.js';
 import { theme } from '../render/theme.js';
 import { hint, success, sym } from '../render/ui.js';
 
@@ -14,7 +15,19 @@ import { hint, success, sym } from '../render/ui.js';
  * starts empty. Pure filesystem + config — it never imports the server (ADR 002) or opens the db;
  * it talks to a running daemon only through the read-only `/health` probe to refuse while live.
  */
-export async function resetCommand(parsed: Parsed): Promise<number> {
+export async function resetCommand(
+  parsed: Parsed,
+  deps: {
+    /** ADR 227 inc 2: the warn-only infra-touch gate (injected so tests never reach a daemon). */
+    infraGate?: (verb: string) => Promise<string | null>;
+  } = {},
+): Promise<number> {
+  // The warn-only infra-touch gate (ADR 227 inc 2): wiping the shared db is the most infra a verb
+  // gets. One added line for a non-`platform` agent seat, then proceed — the confirm prompt below
+  // remains the actual brake.
+  const gateWarn = await (deps.infraGate ?? infraTouchWarning)('reset');
+  if (gateWarn) process.stdout.write(`${theme.warn(sym.warn)} ${theme.warn(gateWarn)}\n`);
+
   const force = Boolean(parsed.flags['force'] || parsed.flags['yes']);
   const noBackup = Boolean(parsed.flags['no-backup']);
   const dbPath = resolveDbPath();
