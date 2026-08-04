@@ -2,11 +2,13 @@ import type { Ctx } from '../context.js';
 import { log } from '../log.js';
 import { appendAudit } from '../store/audit.js';
 import { releaseDepartedSeatClaims } from '../store/lanes.js';
+import { sweepAbandonedAcceptance } from '../store/laneSweep.js';
 import { getMemberById, reapExcessIdleObservers, reapStaleObservers } from '../store/members.js';
 import { hasLivePresence, reapStale } from '../store/presence.js';
 import { expireRequests } from '../store/requests.js';
 import type { RequestRow } from '../store/requests.js';
 import { expireWakeLeases, wakeExhaustionKey } from '../store/residency.js';
+import { getPolicy, listActiveTeams } from '../store/teams.js';
 
 /** Periodically remove stale presence rows and emit offline events for members who lost all presence. */
 export function startReaper(ctx: Ctx): () => void {
@@ -72,6 +74,23 @@ export function startReaper(ctx: Ctx): () => void {
     const releasedClaims = releaseDepartedSeatClaims(ctx.db, now);
     if (releasedClaims.length > 0) {
       log.info({ msg: 'reap_departed_claims', count: releasedClaims.length });
+    }
+
+    // ADR 229: the acceptance backstop. A lane past the grace in `awaiting_acceptance` has no actor
+    // left to close it — the ADR 217 reasons label a close, they never cause one. Per team, and only
+    // where an admin armed `loops.sweep`; every team is bit-identical to pre-229 until they do.
+    for (const team of listActiveTeams(ctx.db)) {
+      if (getPolicy(ctx.db, team.id).loops?.sweep !== true) continue;
+      const swept = sweepAbandonedAcceptance(ctx.db, team.id, team.slug, now);
+      for (const lane of swept) {
+        log.info({
+          msg: 'sweep_abandoned_acceptance',
+          team: team.slug,
+          lane: lane.id,
+          owner: lane.owner_seat,
+          waited_hours: Math.round(lane.waited_ms / 3_600_000),
+        });
+      }
     }
 
     // Reap idle observer seats (ADR 064) so the auto-provisioned `web-xxxx` seats don't accumulate.

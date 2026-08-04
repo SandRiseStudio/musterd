@@ -65,7 +65,7 @@ describe('team policy command', () => {
     expect(set.out).toContain('dispatch loop on');
 
     const show = await capture(() => teamCommand(parseArgs(['policy', '--json'])));
-    expect(JSON.parse(show.out).loops).toEqual({ review: false, dispatch: true });
+    expect(JSON.parse(show.out).loops).toEqual({ review: false, dispatch: true, sweep: false });
   });
 
   it('turns the review loop on and reads it back', async () => {
@@ -74,7 +74,7 @@ describe('team policy command', () => {
     expect(set.out).toContain('review loop on');
 
     const show = await capture(() => teamCommand(parseArgs(['policy', '--json'])));
-    expect(JSON.parse(show.out).loops).toEqual({ review: true, dispatch: false });
+    expect(JSON.parse(show.out).loops).toEqual({ review: true, dispatch: false, sweep: false });
   });
 
   it('changes the dispatch loop without clobbering another policy knob', async () => {
@@ -83,7 +83,7 @@ describe('team policy command', () => {
 
     const show = await capture(() => teamCommand(parseArgs(['policy', '--json'])));
     expect(JSON.parse(show.out).standing_reseat_known_agents).toBe(true);
-    expect(JSON.parse(show.out).loops).toEqual({ review: false, dispatch: true });
+    expect(JSON.parse(show.out).loops).toEqual({ review: false, dispatch: true, sweep: false });
   });
 
   it('changes the review loop without clobbering dispatch', async () => {
@@ -91,7 +91,7 @@ describe('team policy command', () => {
     await capture(() => teamCommand(parseArgs(['policy', '--review-loop', 'on'])));
 
     const show = await capture(() => teamCommand(parseArgs(['policy', '--json'])));
-    expect(JSON.parse(show.out).loops).toEqual({ review: true, dispatch: true });
+    expect(JSON.parse(show.out).loops).toEqual({ review: true, dispatch: true, sweep: false });
   });
 
   it('rejects a dispatch-loop value other than on or off', async () => {

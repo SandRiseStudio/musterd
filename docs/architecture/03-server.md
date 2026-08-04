@@ -35,6 +35,7 @@ src/
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
     lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084)
     laneClose.ts      // recordLaneClose: the terminal edge's audit (verified/reason/grade + the ADR 109 merge join), shared by the board PATCH and an acceptor's accept (ADR 169/188/192/202)
+    laneSweep.ts      // sweepAbandonedAcceptance: the backstop — closes a lane parked past the 24h grace in awaiting_acceptance as `review_swept`, never verified, since the ADR 217 reasons label a close and never cause one (ADR 229)
     orientation.ts    // deriveNext: the `musterd next` orientation brief over lanes + the latest handoff (ADR 049/084)
     goals.ts          // declared-Goal seam: listGoals (meta.goal messages, status + epoch derived) + nextGoal + goalEpochBumps (ADR 048/084/111)
     staleness.ts      // stale-plan detection: stale_plan/stale_dependency lane warnings from goal-epoch vs claim-time (ADR 111)

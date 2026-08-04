@@ -51,12 +51,14 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
 
 /**
  * `musterd team policy [--reseat-known-agents on|off] [--ask-fallback-to-nonadmin on|off]
- * [--review-loop on|off] [--dispatch-loop on|off] [--ask-slack-webhook <url|off>]` — show or set the
+ * [--review-loop on|off] [--dispatch-loop on|off] [--sweep-loop on|off]
+ * [--ask-slack-webhook <url|off>]` — show or set the
  * team governance policy (admin-only, audited `policy.change`). ADR 146: `--reseat-known-agents on`
  * opts the team into dogfood-mode re-seat — an already-held agent seat re-occupies without an admin
  * decision. ADR 147: `--ask-fallback-to-nonadmin on` lets an admin-unanswered ask fall back to
  * non-admin humans past its tier timeout. ADR 191: `--review-loop on` arms the review work-order
- * loop; ADR 199: `--dispatch-loop on` arms the dispatch work-order loop. ADR 149:
+ * loop; ADR 199: `--dispatch-loop on` arms the dispatch work-order loop; ADR 229: `--sweep-loop on`
+ * arms the acceptance backstop, which closes a lane nobody accepted after the grace. ADR 149:
  * `--ask-slack-webhook <url>` points the ask stream's loud reach at a Slack incoming webhook (`off`
  * clears it); the URL is a secret, so the display masks it to its host. Reads → merges the named
  * knob(s) → POSTs the policy (the residency-policy read-merge-write pattern), so setting one knob
@@ -99,6 +101,11 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     merged.loops = { ...merged.loops, dispatch: dispatchLoop };
     changed = true;
   }
+  const sweepLoop = onOff(parsed.flags['sweep-loop'], '--sweep-loop');
+  if (sweepLoop !== undefined) {
+    merged.loops = { ...merged.loops, sweep: sweepLoop };
+    changed = true;
+  }
   // ADR 149: the ask stream's Slack delivery — a webhook URL, or `off` to clear it (delete the key so
   // the daemon's "unset = no outbound call ever" default is restored, not stored as an empty string).
   const webhook = flagStr(parsed.flags, 'ask-slack-webhook');
@@ -124,7 +131,7 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     const { policy: updated } = await http.setPolicy(team, merged);
     process.stdout.write(
       success(
-        `team policy updated — ${team}: re-seat known agents ${updated.standing_reseat_known_agents ? theme.accent('on') : 'off'}, ask fallback to non-admins ${updated.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}, review loop ${updated.loops.review ? theme.accent('on') : 'off'}, dispatch loop ${updated.loops.dispatch ? theme.accent('on') : 'off'}`,
+        `team policy updated — ${team}: re-seat known agents ${updated.standing_reseat_known_agents ? theme.accent('on') : 'off'}, ask fallback to non-admins ${updated.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}, review loop ${updated.loops.review ? theme.accent('on') : 'off'}, dispatch loop ${updated.loops.dispatch ? theme.accent('on') : 'off'}, sweep loop ${updated.loops.sweep ? theme.accent('on') : 'off'}`,
       ) + '\n',
     );
     if (updated.standing_reseat_known_agents)
@@ -136,6 +143,12 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
       process.stdout.write(
         hint(
           'an admin-unanswered ask may now fall back to non-admin humans past its tier timeout',
+        ) + '\n',
+      );
+    if (updated.loops.sweep)
+      process.stdout.write(
+        hint(
+          'a lane nobody accepts is now closed by the daemon after the grace, recorded review_swept and never verified',
         ) + '\n',
       );
     if (webhook !== undefined)
@@ -176,6 +189,9 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   );
   process.stdout.write(
     `  dispatch loop: ${current.loops.dispatch ? theme.accent('on') : 'off'}${inherited(stored.loops, 'dispatch')}\n`,
+  );
+  process.stdout.write(
+    `  sweep loop: ${current.loops.sweep ? theme.accent('on') : 'off'}${inherited(stored.loops, 'sweep')}\n`,
   );
   process.stdout.write(
     `  allow pre-issued grants: ${current.allow_pre_issued_grants ? 'on' : 'off'}${inherited(stored, 'allow_pre_issued_grants')}\n`,

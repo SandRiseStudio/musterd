@@ -65,6 +65,20 @@ export function getTeamBySlug(db: Database, slug: string): TeamRow | undefined {
 }
 
 /**
+ * Every non-archived team, for the daemon's own periodic passes (ADR 229's sweep). Archived teams are
+ * excluded on the same principle as `requireTeam`: a soft-archived team drops off every surface at
+ * once, and a background job acting on one would be the exception that makes that untrue.
+ */
+export function listActiveTeams(db: Database): { id: string; slug: string }[] {
+  return db
+    .prepare<
+      [],
+      { id: string; slug: string }
+    >('SELECT id, slug FROM teams WHERE archived_at IS NULL')
+    .all();
+}
+
+/**
  * Like getTeamBySlug but throws not_found. An archived team is invisible here too: every team-scoped
  * route (auth, roster, status, ws join, claim) resolves through this, so soft-archiving a team makes
  * it drop off every surface at once while its rows (history, audit, provenance) survive in the db.
