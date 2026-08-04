@@ -126,6 +126,9 @@ describe('the reverse leak — foreign binary, local identity (ADR 213)', () => 
   const foreignModule = (): string => join(miley, 'packages', 'mcp', 'dist', 'index.js');
 
   it('warns when the adapter module lives under a different seat workspace than the identity', () => {
+    // Both sides need a .git marker — otherwise ADR 218 treats the identity as an ephemeral fixture.
+    writeFileSync(join(miley, '.git'), 'gitdir: /tmp/fake-miley\n');
+    writeFileSync(join(dolly, '.git'), 'gitdir: /tmp/fake-dolly\n');
     const err = vi.spyOn(console, 'error');
     warnForeignAdapterWorkspace(foreignModule(), dolly);
     expect(err).toHaveBeenCalledOnce();
@@ -157,13 +160,29 @@ describe('the reverse leak — foreign binary, local identity (ADR 213)', () => 
     expect(err).not.toHaveBeenCalled();
   });
 
+  it('is quiet when the identity root is a tmpdir fixture with a binding but no .git (ADR 218)', () => {
+    // surface-drift.test.ts (and peers) mock cwd to mkdtemp + write a fixture binding.json.
+    // That is two binding roots, but not two seat checkouts — warning there is false-positive noise.
+    const fixture = join(root, 'musterd-surface-drift-fixture');
+    seat(fixture, 'fixture');
+    // Give the binary side a .git marker so only the identity side fails the real-checkout gate.
+    writeFileSync(join(miley, '.git'), 'gitdir: /tmp/fake\n');
+    const err = vi.spyOn(console, 'error');
+    warnForeignAdapterWorkspace(foreignModule(), fixture);
+    expect(err).not.toHaveBeenCalled();
+  });
+
   it('warns on stderr, never stdout — stdout is the MCP stdio transport', () => {
+    writeFileSync(join(miley, '.git'), 'gitdir: /tmp/fake-miley\n');
+    writeFileSync(join(dolly, '.git'), 'gitdir: /tmp/fake-dolly\n');
     const out = vi.spyOn(console, 'log').mockImplementation(() => {});
     warnForeignAdapterWorkspace(foreignModule(), dolly);
     expect(out).not.toHaveBeenCalled();
   });
 
   it('warns at most once per binary/identity pair in a process', () => {
+    writeFileSync(join(miley, '.git'), 'gitdir: /tmp/fake-miley\n');
+    writeFileSync(join(dolly, '.git'), 'gitdir: /tmp/fake-dolly\n');
     const err = vi.spyOn(console, 'error');
     warnForeignAdapterWorkspace(foreignModule(), dolly);
     warnForeignAdapterWorkspace(foreignModule(), dolly);

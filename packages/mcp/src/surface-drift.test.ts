@@ -105,7 +105,10 @@ describe('a declared surface contradicted by the harness that actually ran', () 
       model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 1 },
     });
     loadMcpConfig({});
-    expect(warning()).not.toContain('surface');
+    // Match the contested-surface warning shape — not the bare substring "surface", which also
+    // appears in tmpdir prefixes like `musterd-surface-drift-…` (and used to fail these cases when
+    // ADR 213 false-positived on fixture identities; ADR 218).
+    expect(warning()).not.toMatch(/reports surface/);
   });
 
   it('stays silent when nothing has ever been captured — a declaration alone is not a contradiction', () => {
@@ -114,7 +117,7 @@ describe('a declared surface contradicted by the harness that actually ran', () 
     // forever on every Codex seat and teach the reader to ignore it.
     writeBinding({ surface: 'codex' });
     loadMcpConfig({});
-    expect(warning()).not.toContain('surface');
+    expect(warning()).not.toMatch(/reports surface/);
   });
 
   it('does not change what the seat actually reports — this warns, it does not re-rank', () => {

@@ -49,17 +49,25 @@ export function seatWorkspaceRoot(startDir: string): string | null {
   return bindingFile ? resolve(dirname(dirname(bindingFile))) : null;
 }
 
+/** True when `root` looks like a real git checkout (dir or worktree gitfile) — not a tmp fixture. */
+function isGitCheckout(root: string): boolean {
+  return existsSync(join(root, '.git'));
+}
+
 /** Warn-once pairs — see ADR 213. stderr is safe: the MCP protocol channel is stdout. */
 const warnedForeignBinary = new Set<string>();
 
 /**
- * **The reverse ADR 143 guard** (ADR 213). ADR 143 refuses a foreign `MUSTERD_BINDING` when cwd has
- * its own seat. This warns when the *running module* lives under a different seat workspace than the
- * identity we just resolved — the measured 2026-08-03 shape (miley's `dist/index.js`, izzo's cwd).
+ * **The reverse ADR 143 guard** (ADR 213, narrowed by ADR 218). ADR 143 refuses a foreign
+ * `MUSTERD_BINDING` when cwd has its own seat. This warns when the *running module* lives under a
+ * different seat workspace than the identity we just resolved — the measured 2026-08-03 shape
+ * (miley's `dist/index.js`, izzo's cwd).
  *
  * Warn-only, never throws: a hard refuse would kill intentional shared-checkout launches; make the
  * disagreement loud the same way unattested-seat / contested-surface warnings do. Packaged installs
- * (no seat binding above the module path) stay silent.
+ * (no seat binding above the module path) stay silent. Ephemeral identity roots (tmpdir fixtures
+ * with a test `binding.json` but no `.git`) also stay silent — they are not peer seat checkouts
+ * (ADR 218); crying leak there trains readers to ignore the real warning.
  */
 export function warnForeignAdapterWorkspace(moduleUrl: string | URL, identityDir: string): void {
   let modulePath: string;
@@ -75,8 +83,13 @@ export function warnForeignAdapterWorkspace(moduleUrl: string | URL, identityDir
   }
   const binaryRoot = seatWorkspaceRoot(dirname(modulePath));
   if (!binaryRoot) return; // not running from inside a seat worktree — packaged / bare path
-  const identityRoot = resolve(identityDir);
+  // Identity side must also be a seat workspace (binding on walk-up), not merely the resolveBindingDir
+  // fallback path. Then both sides must look like real checkouts — otherwise a mkdtemp fixture that
+  // writes `.musterd/binding.json` falsely trips every MCP test that mocks cwd (ADR 218).
+  const identityRoot = seatWorkspaceRoot(identityDir);
+  if (!identityRoot) return;
   if (binaryRoot === identityRoot) return;
+  if (!isGitCheckout(binaryRoot) || !isGitCheckout(identityRoot)) return;
   const key = `${binaryRoot}\0${identityRoot}`;
   if (warnedForeignBinary.has(key)) return;
   warnedForeignBinary.add(key);
