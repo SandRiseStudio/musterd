@@ -211,12 +211,25 @@ human actually watches cannot act, which is the whole defect.
 
 ## Observability & Evaluation
 
-**Traces.** Two audit rows on the existing member-audit channel: `signin.local_offered`
-(`{member, surface: 'web-live'}`) when the daemon confirms a local identity to a page, and
-`signin.local_redeemed` (`{member, surface: 'web-live'}`) when a page connects with one. The
-off-machine refusal reuses ADR 170's `signin.handoff_missed` with `reason: off_machine`, so the
-cross-device signal is one series across both mechanisms rather than two half-series. No credential
-is logged, and neither is the identity-vault path, in any row.
+**Traces — this ADR adds no audit action, and that is a decision, not an omission.**
+
+The first draft audited the successful offer (`signin.local_offered`). The exercise run killed it:
+three page loads produced four rows, with nobody having done anything. ADR 170's rows record
+discrete human **acts** — running `musterd board`, redeeming a nonce once. This route is probed
+automatically on every load of a surface the founder leaves open all day, so a row here would not
+record an act; it would record **when the human had the office on screen**. That is exactly the
+human-activity trail [ADR 155](155-human-presence-ladder.md) refuses to create — _"no new record of
+when the human was at their desk"_ — under the surveillance-asymmetry principle in ADR 145. A
+sign-in mechanism is not a licence to start logging attendance.
+
+Nothing is lost by dropping it, because the evaluation below never depended on it.
+
+The **off-machine refusal is** audited, reusing ADR 170's `signin.handoff_missed` with
+`reason: off_machine`. That asymmetry is the point: a refused cross-machine attempt is a security
+event about something someone did, not a note about where a human was sitting. Reusing ADR 170's
+action rather than minting a second keeps the cross-device signal one series across both sign-in
+mechanisms instead of two half-series nobody thinks to add up. No credential is logged, and neither
+is the identity-vault path, in any row.
 
 **Evaluation.** The claim is that a human cannot answer asks because the surface they live on will
 not let them be themselves. The measure is therefore not adoption but **the first ask ever answered
@@ -245,5 +258,5 @@ split. The honest instrument is the answer count above.
 3. **The rail** — the action-slot sign-in, the seat chip in both states, answer buttons that follow
    the ask, the expired-sign-in notice. Works against the paste path immediately.
 4. **`GET /teams/:slug/local-identity`** — localhost-gated, `readLocalIdentity` beside
-   `resolveRosterRoots`, `{available: false}` off-machine, both audit rows.
+   `resolveRosterRoots`, `{available: false}` off-machine, and the off-machine refusal counted as an ADR 170 `off_machine` miss. No audit row on the successful offer — see Observability.
 5. **`musterd live`** — `signinUrl()` gains a surface parameter; `#s=` redemption becomes shared code.

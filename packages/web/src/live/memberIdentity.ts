@@ -68,6 +68,33 @@ export function forgetMemberIdentity(team: string): void {
   }
 }
 
+/**
+ * Ask the daemon whether THIS machine has a sign-in identity for the team (ADR 221).
+ *
+ * **Never throws.** "No CLI identity here", "you are not on this machine" (the localhost gate, which
+ * must refuse — the route returns a credential) and "the daemon is unreachable" are three different
+ * causes with one meaning for the caller: there is no one-click path, offer the credential form
+ * instead. An error banner for any of them would be noise about a button that was never promised.
+ */
+export async function fetchLocalIdentity(
+  team: string,
+): Promise<{ as: string; credential: string } | null> {
+  try {
+    const res = await fetch(`/teams/${encodeURIComponent(team)}/local-identity`);
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      available?: boolean;
+      as?: string;
+      credential?: string;
+    };
+    return json.available && json.as && json.credential
+      ? { as: json.as, credential: json.credential }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** How the connected seat was chosen. The rail needs this to tell "not signed in" from "not you". */
 export type ResolvedIdentity =
   | { kind: 'member'; as: string; token: string }

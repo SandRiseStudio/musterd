@@ -4,6 +4,7 @@ import {
   loadMemberIdentity,
   resolveIdentity,
   saveMemberIdentity,
+  fetchLocalIdentity,
 } from './memberIdentity';
 
 const LEGACY = (team: string) => `musterd.board.member.v1.${team}`;
@@ -108,5 +109,53 @@ describe('resolveIdentity — the precedence chain', () => {
       as: 'nick',
       token: 'mscr_legacy',
     });
+  });
+});
+
+describe('fetchLocalIdentity — never throws, because every failure means the same thing', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('returns null when this machine has no identity for the team', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ available: false }), { status: 200 })),
+    );
+    await expect(fetchLocalIdentity('revive')).resolves.toBeNull();
+  });
+
+  it('returns null on the off-machine refusal rather than surfacing an error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 403 })));
+    await expect(fetchLocalIdentity('revive')).resolves.toBeNull();
+  });
+
+  it('returns null when the daemon is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection refused')));
+    await expect(fetchLocalIdentity('revive')).resolves.toBeNull();
+  });
+
+  it('hands back the identity when this machine has one', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ available: true, as: 'nick', credential: 'mscr_x' }), {
+            status: 200,
+          }),
+        ),
+    );
+    await expect(fetchLocalIdentity('revive')).resolves.toEqual({ as: 'nick', credential: 'mscr_x' });
+  });
+
+  it('treats a half-shaped answer as no identity — available without a credential is not an identity', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ available: true, as: 'nick' }), { status: 200 }),
+        ),
+    );
+    await expect(fetchLocalIdentity('revive')).resolves.toBeNull();
   });
 });

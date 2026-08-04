@@ -1265,13 +1265,18 @@ export async function handleHttp(
         if (!local || !getMemberByName(ctx.db, team.id, local.name)) {
           return sendJson(res, 200, { available: false });
         }
-        appendAudit(ctx.db, team.id, {
-          actor: local.name,
-          action: 'signin.local_offered',
-          target: local.name,
-          result: 'allow',
-          detail: { surface: 'web-live' },
-        });
+        // **The successful offer is deliberately NOT audited.** ADR 170's rows record discrete human
+        // acts — running `musterd board`, redeeming a nonce once. This route is probed automatically
+        // on every page load of an ambient surface the founder leaves open, so a row here would not
+        // record an act at all: it would record *when the human had the office on screen*. That is
+        // precisely the human-activity trail ADR 155 refuses to create ("no new record of when the
+        // human was at their desk", surveillance-asymmetry, ADR 145). Measured in the exercise run:
+        // four rows from three page loads, nobody having done anything.
+        //
+        // Nothing is lost. The ADR's evaluation measure is the first ask ever ANSWERED from a
+        // browser, which is read off `accept`/`decline`/`wait` envelopes, not off this route. The
+        // refusal below stays audited because a refused cross-machine attempt is a security event
+        // about an action someone took, not a note about where a human was sitting.
         return sendJson(res, 200, { available: true, as: local.name, credential: local.key });
       }
 

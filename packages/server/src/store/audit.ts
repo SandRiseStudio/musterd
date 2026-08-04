@@ -223,14 +223,12 @@ export type AuditAction =
   | 'signin.handoff_staged'
   | 'signin.handoff_redeemed'
   | 'signin.handoff_missed'
-  // ADR 221: the in-page sign-in — the daemon confirming to a page on THIS machine that a CLI
-  // identity exists for the team (`local_offered`, `{ surface: 'web-live' }`). No nonce is involved:
-  // ADR 170's nonce exists to make a CLI→browser *link* inert, and a browser asking the daemon
-  // directly creates no link. The off-machine refusal deliberately reuses `handoff_missed` with
-  // `reason: 'off_machine'` rather than minting a second action, so the cross-device signal stays
-  // ONE series across both sign-in mechanisms instead of two half-series nobody thinks to add up.
-  // The credential and the identity-vault path are never logged, in any row.
-  | 'signin.local_offered'
+  // ADR 221 adds NO action of its own, on purpose. Its in-page sign-in route is probed automatically
+  // on every load of an ambient surface, so auditing a successful offer would record when the human
+  // had the office on screen rather than anything they did — the human-activity trail ADR 155
+  // refuses to create. Its off-machine refusal reuses `signin.handoff_missed` with
+  // `reason: 'off_machine'` instead of minting a second action, so the cross-device signal stays ONE
+  // series across both sign-in mechanisms rather than two half-series nobody thinks to add up.
   | 'team.archive';
 
 export interface AuditEntry {

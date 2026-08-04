@@ -264,21 +264,22 @@ export function AsksStrip({
 
         {/* Who you are about to answer as (ADR 221). Not decoration: with several teams on one
             machine you may be a different person on each, and approving as the wrong identity is
-            unrecoverable — so the connected seat is never implicit. Signed in, it is also the way
-            back out, the escape a cached seat never had. */}
-        <button
-          type="button"
-          className="lc-ask__btn lc-asks__me"
-          onClick={canAnswer ? onSignOut : undefined}
-          disabled={!canAnswer}
-          title={
-            canAnswer
-              ? `signed in as ${cfg.as} on ${cfg.team} — watch as an observer instead`
-              : 'watching — not signed in as a seat'
-          }
-        >
-          {canAnswer ? `${cfg.as} · ${cfg.team}` : 'watching'}
-        </button>
+            unrecoverable — so the connected seat is never implicit. It is also the way back out,
+            the escape a cached seat never had.
+            Only rendered when you CAN answer. The chip answers "who would I be answering as?", and
+            where you cannot answer there is no such question — the sign-in button beside it already
+            names who you would become. Inside the office panel the rail is ~470px, and rendering
+            both spends ~60px it does not have. */}
+        {canAnswer && (
+          <button
+            type="button"
+            className="lc-ask__btn lc-asks__me"
+            onClick={onSignOut}
+            title={`signed in as ${cfg.as} on ${cfg.team} — watch as an observer instead`}
+          >
+            {cfg.as} · {cfg.team}
+          </button>
+        )}
       </div>
 
       {error && <div className="lc-asks__error">{error}</div>}
