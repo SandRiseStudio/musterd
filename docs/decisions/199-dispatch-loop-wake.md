@@ -187,8 +187,11 @@ join. Re-measured that way:
 | — (`detail.act = lane:<id>`)  | 1      | set, `act_id` null | continuation   |
 
 So 25 handoff acts have been sent on this team and **not one produced a work-order lease** — they all
-went through the doorbell path. Handoff remains **0**, for the same reason as before, now established
-by a test that cannot be confused by a neighbouring loop.
+went through the doorbell path. Handoff was **0** at the moment of this re-measurement, for the same
+reason as before, now established by a test that cannot be confused by a neighbouring loop.
+
+**It is no longer 0 — see "Eval MET" below. The count above is the pre-exercise baseline, kept
+because a first firing is only meaningful against the zero it replaced.**
 
 **Why it decayed, and the general lesson.** The signature was never wrong — it was _unowned_. It read
 off two nullable columns whose meaning is set by whichever loops happen to be armed, so arming an
@@ -205,6 +208,41 @@ armed**, so there is no dispatch loop to derive a work order from and a `lane_ha
 doorbell by configuration, not by defect. Arming it is an admin action and a standing cost decision,
 so it is nick's call rather than a step the exercise can take for itself; the lane carries the
 write-up.
+
+### Eval MET — the handoff edge fired in production, 2026-08-04 14:56 (dolly)
+
+nick armed `loops.dispatch`; the exercise ran; **the handoff edge fired for the first time.**
+
+| Fact                     | Value                                                        |
+| ------------------------ | ------------------------------------------------------------ |
+| Lease                    | `01KZ7CEFQG2GJFJD1WPZSA0Y0T`                                  |
+| `residency.wake_leased`  | `derivation: work_order`, `lane_id 01KZ4QH585…` — **14:56:32** |
+| Originating act          | **`handoff`** (the discriminator above, not `ask`, not null)   |
+| `residency.woke`         | 14:57:05                                                      |
+| Occupied                 | gptbot presence online **14:57:04** — 33s from lease to seat   |
+| Lease status             | `reported`                                                    |
+
+Both halves of the Eval bullet are now satisfied live: continuation on 2026-07-31, handoff here. The
+lane handed over was real work, not a probe — `01KZ4QH585` ("Codex seats have no hook path"), which
+izzo's own lane detail had already routed to gptbot's Codex-parity scope.
+
+**Sequencing that turned out to matter, recorded for whoever runs the next one.** `loops.dispatch` is
+a **team-wide** switch, not a per-seat one, and arming it makes every enrolled `flow: auto` seat
+continuation-eligible at once. gptbot still held a stale `claimed` lane (`01KXY9YRQW`, an owner-gated
+roadmap tracker) when dispatch was first armed, which made it a **continuation** candidate — and §2
+ranks work-orders ahead of inbox candidates, so the next wake would have re-proven the already-proven
+edge and, worse, told a seat to "orient and begin" on work nobody had scheduled. The fix was ordering,
+not code: disarm, let the doorbell deliver the release request, have gptbot release the lane, re-arm,
+then hand off. **A seat holding any `claimed`/`active` lane cannot cleanly exercise the handoff edge —
+clear its board first.**
+
+Two further preconditions bind and are easy to miss, both discovered by tripping them:
+
+- **Presence-live vetoes before anything else** (the §5 scope limit). Waking gptbot to ask for the
+  release put it *online*, which made it wake-ineligible until its session closed again. Any exercise
+  that wakes a seat to prepare it must then wait for that seat to exit.
+- **The cooldown is real.** 30m between leases; the release wake at 14:26 pushed the handoff to 14:56.
+  Budget roughly an hour of wall-clock for a two-wake sequence.
 
 Recorded in the ADR rather than only in the acceptance record because this lane closed
 **unconfirmed**: no eligible acceptor existed (the two live seats had converged on one model, and the
