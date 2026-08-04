@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { parseSeatFile, seatNameFromPath, seatRoles, serializeSeat } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import {
@@ -25,7 +26,82 @@ export async function roleCommand(parsed: Parsed): Promise<number> {
   if (sub === 'list') return roleList(parsed);
   if (sub === 'show') return roleShow(parsed);
   if (sub === 'create') return roleCreate(parsed);
-  throw new CliError('usage: musterd role <list|show|create> ...', 2);
+  if (sub === 'assign') return roleAssign(parsed);
+  throw new CliError('usage: musterd role <list|show|create|assign> ...', 2);
+}
+
+/**
+ * Assign (or `--remove`) a **roster role** on a seat (ADR 227) — the durable `roles/<name>.toml`
+ * kind, not the provisioning templates the other subcommands manage. Runs in the roster home
+ * (the checkout holding `.musterd/team.toml`): edits `seats/<seat>.toml` canonically and leaves the
+ * commit to the operator — the file is the single writer (ADR 058); the daemon reconciles on merge.
+ * An unknown role is refused with the library named (a typo-guard, not enforcement — `--force`
+ * writes it anyway and reconcile will warn).
+ */
+async function roleAssign(parsed: Parsed): Promise<number> {
+  const seatName = parsed.positionals[1];
+  const roleName = parsed.positionals[2];
+  if (!seatName || !roleName) {
+    throw new CliError('usage: musterd role assign <seat> <role> [--remove] [--force]', 2);
+  }
+  const home = process.cwd();
+  const musterdDir = join(home, '.musterd');
+  if (!existsSync(join(musterdDir, 'team.toml'))) {
+    throw new CliError(
+      `${home} is not a roster home (no .musterd/team.toml) — run this in the checkout that holds the durable roster`,
+      2,
+    );
+  }
+  const seatPath = join(musterdDir, 'seats', `${seatName}.toml`);
+  if (!existsSync(seatPath)) {
+    throw new CliError(`no seat "${seatName}" — no ${seatPath}`, 4);
+  }
+
+  const remove = Boolean(parsed.flags['remove']);
+  if (!remove && !parsed.flags['force']) {
+    const library = listRosterRoles(musterdDir);
+    if (!library.includes(roleName)) {
+      throw new CliError(
+        `unknown role "${roleName}" — this team's roles/: ${library.length ? library.join(', ') : '(none)'}` +
+          `\ncreate .musterd/roles/${roleName}.toml first, or pass --force to write the label anyway`,
+        4,
+      );
+    }
+  }
+
+  const seat = parseSeatFile(readFileSync(seatPath, 'utf8'), seatName);
+  const held = seatRoles(seat);
+  const next = remove ? held.filter((r) => r !== roleName) : [...new Set([...held, roleName])];
+  const roles = next.length ? next : undefined;
+  const body = { ...seat, role: next[0] ?? '', ...(roles ? { roles } : {}) };
+  if (!roles) delete (body as { roles?: string[] }).roles;
+  writeFileSync(seatPath, serializeSeat(body), 'utf8');
+
+  if (parsed.flags['json']) {
+    process.stdout.write(JSON.stringify({ seat: seatName, roles: next }) + '\n');
+    return 0;
+  }
+  process.stdout.write(
+    success(
+      remove
+        ? `removed ${theme.accent(roleName)} from ${theme.accent(seatName)}${next.length ? ` (still: ${next.join(', ')})` : ' (now roleless — the generalist)'}`
+        : `${theme.accent(seatName)} now holds ${theme.accent(next.join(', '))}`,
+      { next: 'commit the seat file — the daemon reconciles on merge' },
+    ) + '\n',
+  );
+  return 0;
+}
+
+/** The durable roster-role library: `.musterd/roles/*.toml` stems, sorted. */
+function listRosterRoles(musterdDir: string): string[] {
+  try {
+    return readdirSync(join(musterdDir, 'roles'))
+      .filter((f) => f.toLowerCase().endsWith('.toml'))
+      .map((f) => seatNameFromPath(f))
+      .sort();
+  } catch {
+    return [];
+  }
 }
 
 function roleList(parsed: Parsed): number {

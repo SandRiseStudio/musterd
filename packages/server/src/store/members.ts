@@ -187,6 +187,9 @@ export function addMember(
     name: input.name,
     kind: input.kind,
     role: input.role ?? '',
+    // Projected by reconcile (ADR 227), like capabilities — a fresh seat is NULL (⇒ derived from
+    // the single `role` label) until the file-backed roles are reconciled in.
+    roles: null,
     lifecycle,
     lifecycle_until: input.lifecycleUntil ?? null,
     availability: input.availability ? JSON.stringify(input.availability) : null,
@@ -470,10 +473,19 @@ export function setMemberGovernance(
   id: string,
   accountStatus: string | null,
   capabilities: string,
+  roles?: string[],
 ): void {
+  // `roles` (ADR 227) rides the governance write because reconcile is its single writer, like
+  // capabilities; callers that don't project roles (admin routes, tests) leave the column untouched.
+  if (roles === undefined) {
+    db.prepare(
+      'UPDATE members SET account_status = ?, capabilities = ?, updated_at = ? WHERE id = ?',
+    ).run(accountStatus, capabilities, Date.now(), id);
+    return;
+  }
   db.prepare(
-    'UPDATE members SET account_status = ?, capabilities = ?, updated_at = ? WHERE id = ?',
-  ).run(accountStatus, capabilities, Date.now(), id);
+    'UPDATE members SET account_status = ?, capabilities = ?, roles = ?, updated_at = ? WHERE id = ?',
+  ).run(accountStatus, capabilities, JSON.stringify(roles), Date.now(), id);
 }
 
 /**

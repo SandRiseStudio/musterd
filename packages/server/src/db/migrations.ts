@@ -575,6 +575,20 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    // v31 — discoverable roles (ADR 227 increment 1): `members.roles` is every role the seat holds
+    // (JSON array, projected by reconcile; NULL ⇒ derive from the legacy single `role` display
+    // label), and `roles.summary` is the role file's one-line discoverable face.
+    version: 31,
+    up: (db) => {
+      // Guarded ALTERs: the version-rewind pattern the migration tests use (set schema_version back,
+      // re-run the tail) replays this on a schema that already has the columns.
+      const memberCols = db.prepare("SELECT name FROM pragma_table_info('members')").pluck().all();
+      if (!memberCols.includes('roles')) db.exec('ALTER TABLE members ADD COLUMN roles TEXT');
+      const roleCols = db.prepare("SELECT name FROM pragma_table_info('roles')").pluck().all();
+      if (!roleCols.includes('summary')) db.exec('ALTER TABLE roles ADD COLUMN summary TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

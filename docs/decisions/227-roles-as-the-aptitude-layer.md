@@ -1,6 +1,8 @@
 # 227 — Roles as the aptitude layer
 
-- **Status:** proposed
+- **Status:** accepted — increment 1 (discovery: multi-role seat files + `roles[]` on the wire,
+  role-file `summary`, `mergeRoleDefaults`, the `team_members` role filter, `musterd role assign`,
+  migration v31, epoch 7) shipped 2026-08-04; increment 2 (the warn-only guardrail) pending
 - **Date:** 2026-08-04
 - **Owner:** izzo (design session with nick, 2026-08-04)
 - **Supersedes / relates to:** ADR 069/070 (the capability substrate this extends), ADR 112 (steward — the first worked role), ADR 145 (admins are human-only), ADR 150 (structural inducement — the gate pattern increment 2 reuses), ADR 191/219/131 (the liveness trio discovery composes with), ADR 026–030 (provisioning templates — the per-harness rendering half), landscape.md §9 (the AgentField survey that widened the scope)

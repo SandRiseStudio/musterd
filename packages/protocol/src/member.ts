@@ -34,6 +34,10 @@ export const MemberSchema = z.object({
   name: z.string(),
   kind: MemberKindSchema,
   role: z.string().default(''),
+  /** Every role this seat holds (ADR 227 multi-role); `role` stays the display label (first entry).
+   *  Defaulted for back-compat — an older daemon omits it and a single-role seat reads as `[role]`
+   *  via the display field. Empty ⇒ the roleless generalist. */
+  roles: z.array(z.string()).default([]),
   lifecycle: LifecycleSchema.default('forever'),
   lifecycle_until: z.number().int().nullish(),
   availability: AvailabilitySchema.nullish(),

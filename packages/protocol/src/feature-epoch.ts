@@ -42,5 +42,9 @@
 // path) and the AsksReel stream chrome. A daemon behind this epoch serves a /broadcast that neither
 // sounds nor shows asks — the roster's calm `behind` chip (ADR 148) is the operator's cue that the
 // stream is running older capability than the capturer expects.
-export const FEATURE_EPOCH = 6 as const;
+// Epoch 7 — ADR 227 increment 1: discoverable roles. Seats carry `roles[]` (multi-role, validated
+// against the library), role files carry a `summary`, and `team_members` grows a role filter composed
+// with the liveness trio. An older seat still renders the single `role` display label and simply
+// cannot filter by role; the roster's `behind` hint is the cue.
+export const FEATURE_EPOCH = 7 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

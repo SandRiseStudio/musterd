@@ -115,6 +115,54 @@ export function clampNarrow(
 }
 
 /**
+ * Merge the default capabilities of **every role a seat holds** (ADR 227 multi-role) into the one
+ * partial `effectiveCapabilities` takes. Only **explicit** fields combine, restrictively — a grant
+ * one role carries survives roles that are silent about it, and an explicit restriction in *any*
+ * held role holds (booleans AND, scopes take the lower rank, explicit non-empty lists intersect; an
+ * explicit empty list keeps ceiling semantics: unrestricted). Holding more roles therefore never
+ * self-widens past what each admin-authored role file allows. Pure.
+ */
+export function mergeRoleDefaults(partials: PartialCapabilities[]): PartialCapabilities {
+  const out: PartialCapabilities = {};
+  const bool = (a: boolean | undefined, b: boolean | undefined) =>
+    a === undefined ? b : b === undefined ? a : a && b;
+  const list = (a: string[] | undefined, b: string[] | undefined) => {
+    if (a === undefined) return b;
+    if (b === undefined) return a;
+    if (a.length === 0) return b; // explicit [] = unrestricted (ceiling semantics)
+    if (b.length === 0) return a;
+    return a.filter((x) => b.includes(x));
+  };
+  for (const p of partials) {
+    const isAdmin = bool(out.is_admin, p.is_admin);
+    if (isAdmin !== undefined) out.is_admin = isAdmin;
+    const urgent = bool(out.can_flag_urgent, p.can_flag_urgent);
+    if (urgent !== undefined) out.can_flag_urgent = urgent;
+    const observe = bool(out.can_observe, p.can_observe);
+    if (observe !== undefined) out.can_observe = observe;
+    if (p.can_message !== undefined) {
+      out.can_message =
+        out.can_message === undefined ||
+        CAN_MESSAGE_RANK[p.can_message] < CAN_MESSAGE_RANK[out.can_message]
+          ? p.can_message
+          : out.can_message;
+    }
+    if (p.visibility_level !== undefined) {
+      out.visibility_level =
+        out.visibility_level === undefined ||
+        VISIBILITY_RANK[p.visibility_level] < VISIBILITY_RANK[out.visibility_level]
+          ? p.visibility_level
+          : out.visibility_level;
+    }
+    const tools = list(out.tool_allowlist, p.tool_allowlist);
+    if (tools !== undefined) out.tool_allowlist = tools;
+    const scopes = list(out.declared_resource_scopes, p.declared_resource_scopes);
+    if (scopes !== undefined) out.declared_resource_scopes = scopes;
+  }
+  return out;
+}
+
+/**
  * Resolve a seat's effective capabilities: `generalist ⊕ roleDefaults` is the **ceiling** (roles are
  * admin-defined, so they set the ceiling freely — including `is_admin` for an admin role), then the
  * per-seat `override` **narrows** it (never widens). The single source of truth for what a seat may do,

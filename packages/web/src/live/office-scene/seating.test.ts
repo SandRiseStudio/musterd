@@ -12,6 +12,7 @@ function member(name: string, over: Partial<MemberSummary> = {}): Seatable {
     name,
     kind: 'agent',
     role: '',
+    roles: [],
     lifecycle: 'forever',
     created_at: 0,
     presence: 'online',

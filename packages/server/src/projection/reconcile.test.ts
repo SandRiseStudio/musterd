@@ -12,7 +12,7 @@ import {
   markBound,
   setMemberGovernance,
 } from '../store/members.js';
-import { listRoleNames } from '../store/roles.js';
+import { listRoleNames, roleSummariesMap } from '../store/roles.js';
 import { toMember } from '../store/rows.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { loadTeamSpec } from './load.js';
@@ -392,6 +392,66 @@ describe('reconcile — governance projection (ADR 070, v0.3 P1)', () => {
     });
     reconcile();
     expect(memberView('olive').account_status).toBe('banned');
+  });
+
+  it('projects a multi-role seat: roles[] on the member, capabilities merged restrictively (ADR 227)', () => {
+    writeRole('designer', 'summary = "Owns the design surfaces"\n');
+    writeRole('observer', '[capabilities]\ncan_flag_urgent = false\ncan_message = "none"\n');
+    writeRoster('slug = "alpha"\n', {
+      miley: 'kind = "agent"\nrole = "designer"\nroles = ["designer", "observer"]\n',
+    });
+    reconcile();
+    const m = memberView('miley');
+    expect(m.roles).toEqual(['designer', 'observer']);
+    expect(m.role).toBe('designer'); // display label = first entry
+    // the observer role's explicit restrictions hold across the pair
+    expect(m.capabilities!.can_message).toBe('none');
+    expect(m.capabilities!.can_flag_urgent).toBe(false);
+  });
+
+  it('warns on an unknown role name in the roles array without dropping the seat (ADR 227 roster truth)', () => {
+    writeRoster('slug = "alpha"\n', {
+      izzo: 'kind = "agent"\nrole = "platfrom"\nroles = ["platfrom"]\n', // typo'd, no roles/platfrom.toml
+    });
+    const r = reconcile();
+    expect(r.errors.some((e) => e.includes('izzo') && e.includes('platfrom'))).toBe(true);
+    // the seat itself is projected — a typo is a warning, not an outage
+    expect(memberView('izzo').capabilities).toEqual(GENERALIST_CAPABILITIES);
+  });
+
+  it('a legacy bare role label stays unvalidated (back-compat — "tester" is a label, not drift)', () => {
+    writeRoster('slug = "alpha"\n', { tinybot: 'kind = "agent"\nrole = "tester"\n' });
+    const r = reconcile();
+    expect(r.errors).toEqual([]);
+    expect(memberView('tinybot').roles).toEqual(['tester']);
+  });
+
+  it('a roleless seat stays the generalist and warns nothing (roles are optional)', () => {
+    writeRoster('slug = "alpha"\n', { dolly: 'kind = "agent"\nrole = ""\n' });
+    const r = reconcile();
+    expect(r.errors).toEqual([]);
+    const m = memberView('dolly');
+    expect(m.roles).toEqual([]);
+    expect(m.capabilities).toEqual(GENERALIST_CAPABILITIES);
+  });
+
+  it('projects the role summary into the roles table (ADR 227)', () => {
+    writeRole('designer', 'summary = "Owns the design surfaces"\ncharter = "The standing rule."\n');
+    writeRoster('slug = "alpha"\n', { miley: 'kind = "agent"\nrole = "designer"\n' });
+    reconcile();
+    const team = getTeamBySlug(db, 'alpha')!;
+    expect(roleSummariesMap(db, team.id).get('designer')).toBe('Owns the design surfaces');
+  });
+
+  it('an agent reaching admin through ANY held role is clamped, multi-role included (ADR 172)', () => {
+    writeRole('admin', '[capabilities]\nis_admin = true\n');
+    writeRole('designer', 'summary = "Owns the design surfaces"\n');
+    writeRoster('slug = "alpha"\n', {
+      sneaky: 'kind = "agent"\nrole = "designer"\nroles = ["designer", "admin"]\n',
+    });
+    const r = reconcile();
+    expect(memberView('sneaky').capabilities!.is_admin).toBe(false);
+    expect(r.errors.some((e) => e.includes('sneaky'))).toBe(true);
   });
 
   it('drops a role from the projection when its file is removed', () => {

@@ -30,6 +30,74 @@ function parsed(positionals: string[], flags: Record<string, string | boolean> =
   return { positionals, flags, metaPairs: [] };
 }
 
+describe('role assign (ADR 227 — roster roles, run in the roster home)', () => {
+  function writeRosterHome() {
+    const m = join(cwd, '.musterd');
+    mkdirSync(join(m, 'seats'), { recursive: true });
+    mkdirSync(join(m, 'roles'), { recursive: true });
+    writeFileSync(join(m, 'team.toml'), 'slug = "alpha"\n');
+    writeFileSync(join(m, 'seats', 'izzo.toml'), 'kind = "agent"\nrole = ""\n');
+    writeFileSync(
+      join(m, 'roles', 'platform.toml'),
+      'summary = "Designated toucher of running infrastructure"\n',
+    );
+    writeFileSync(join(m, 'roles', 'designer.toml'), 'summary = "Owns the design surfaces"\n');
+    return m;
+  }
+
+  it('assigns a library role to a seat (single role → the bare label form)', async () => {
+    const m = writeRosterHome();
+    expect(await roleCommand(parsed(['assign', 'izzo', 'platform']))).toBe(0);
+    expect(readFileSync(join(m, 'seats', 'izzo.toml'), 'utf8')).toBe(
+      'kind = "agent"\nrole = "platform"\n',
+    );
+  });
+
+  it('appends a second role, emitting the canonical roles array', async () => {
+    const m = writeRosterHome();
+    await roleCommand(parsed(['assign', 'izzo', 'platform']));
+    expect(await roleCommand(parsed(['assign', 'izzo', 'designer']))).toBe(0);
+    expect(readFileSync(join(m, 'seats', 'izzo.toml'), 'utf8')).toBe(
+      'kind = "agent"\nrole = "platform"\nroles = ["platform", "designer"]\n',
+    );
+  });
+
+  it('is idempotent — assigning a held role changes nothing', async () => {
+    const m = writeRosterHome();
+    await roleCommand(parsed(['assign', 'izzo', 'platform']));
+    const before = readFileSync(join(m, 'seats', 'izzo.toml'), 'utf8');
+    expect(await roleCommand(parsed(['assign', 'izzo', 'platform']))).toBe(0);
+    expect(readFileSync(join(m, 'seats', 'izzo.toml'), 'utf8')).toBe(before);
+  });
+
+  it('removes a role with --remove', async () => {
+    const m = writeRosterHome();
+    await roleCommand(parsed(['assign', 'izzo', 'platform']));
+    await roleCommand(parsed(['assign', 'izzo', 'designer']));
+    expect(await roleCommand(parsed(['assign', 'izzo', 'platform'], { remove: true }))).toBe(0);
+    expect(readFileSync(join(m, 'seats', 'izzo.toml'), 'utf8')).toBe(
+      'kind = "agent"\nrole = "designer"\n',
+    );
+  });
+
+  it('refuses an unknown role, naming the library (typo-guard; --force overrides)', async () => {
+    const m = writeRosterHome();
+    await expect(roleCommand(parsed(['assign', 'izzo', 'platfrom']))).rejects.toThrow(
+      /platfrom.*designer, platform/s,
+    );
+    expect(await roleCommand(parsed(['assign', 'izzo', 'platfrom'], { force: true }))).toBe(0);
+    expect(readFileSync(join(m, 'seats', 'izzo.toml'), 'utf8')).toContain('role = "platfrom"');
+  });
+
+  it('errors helpfully outside a roster home and on a missing seat', async () => {
+    await expect(roleCommand(parsed(['assign', 'izzo', 'platform']))).rejects.toThrow(
+      /roster home/,
+    );
+    writeRosterHome();
+    await expect(roleCommand(parsed(['assign', 'ghost', 'platform']))).rejects.toThrow(/ghost/);
+  });
+});
+
 describe('role list', () => {
   it('lists the built-ins, marking generalist', async () => {
     expect(await roleCommand(parsed(['list']))).toBe(0);

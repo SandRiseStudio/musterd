@@ -63,7 +63,9 @@ export function formatMember(
 ): string {
   const p = m.presences[0];
   const facets: string[] = [m.kind];
-  if (m.role) facets.push(m.role);
+  // Every held role (ADR 227 multi-role), joined; an older daemon serves only the single label.
+  const roles = m.roles?.length ? m.roles.join('+') : m.role;
+  if (roles) facets.push(roles);
   const model = p?.model?.trim();
   if (model && model !== MODEL_UNKNOWN) facets.push(model);
   // A live agent seat attesting nothing is a hole in the evidence, not a quiet absence — same rule

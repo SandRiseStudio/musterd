@@ -5,6 +5,7 @@ import {
   clampNarrow,
   effectiveCapabilities,
   GENERALIST_CAPABILITIES,
+  mergeRoleDefaults,
   RoleSchema,
 } from './capabilities.js';
 
@@ -121,6 +122,32 @@ describe('capability model (ADR 070)', () => {
           expect(r.tool_allowlist.every((x) => c.tool_allowlist.includes(x))).toBe(true);
       }
     }
+  });
+
+  it('mergeRoleDefaults combines explicit fields restrictively — a restriction in any held role holds (ADR 227)', () => {
+    // designer sets nothing; admin grants — the grant survives (only explicit fields combine)
+    expect(mergeRoleDefaults([{}, { is_admin: true, visibility_level: 'admin' }])).toEqual({
+      is_admin: true,
+      visibility_level: 'admin',
+    });
+    // observer mutes; a second role that says nothing about messaging cannot unmute
+    expect(mergeRoleDefaults([{ can_message: 'none' }, {}])).toEqual({ can_message: 'none' });
+    // both explicit and disagreeing → the restrictive value wins
+    expect(mergeRoleDefaults([{ can_message: 'none' }, { can_message: 'team' }])).toEqual({
+      can_message: 'none',
+    });
+    expect(mergeRoleDefaults([{ can_flag_urgent: false }, { can_flag_urgent: true }])).toEqual({
+      can_flag_urgent: false,
+    });
+    // explicit non-empty lists intersect; an explicit empty list means unrestricted (ceiling semantics)
+    expect(
+      mergeRoleDefaults([{ tool_allowlist: ['a', 'b'] }, { tool_allowlist: ['b', 'c'] }]),
+    ).toEqual({ tool_allowlist: ['b'] });
+    expect(mergeRoleDefaults([{ tool_allowlist: [] }, { tool_allowlist: ['x'] }])).toEqual({
+      tool_allowlist: ['x'],
+    });
+    // no roles / all-empty → the empty partial (generalist fallback happens downstream)
+    expect(mergeRoleDefaults([])).toEqual({});
   });
 
   it('RoleSchema parses a role file shape with partial caps + charter', () => {
