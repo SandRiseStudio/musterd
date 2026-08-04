@@ -1044,6 +1044,28 @@ const RAW: RawItem[] = [
     ],
     dependsOn: ['wake-on-message'],
   },
+  {
+    id: 'codex-harness-parity',
+    frozenBy: 216,
+    building: 'increment 1 — capability, identity, and liveness contract; then the CLI backend, owner-gated acceptance, and desktop evidence matrix',
+    wave: 6,
+    title: 'Codex harness parity — CLI residency and desktop evidence',
+    plan: 'near-term',
+    category: 'harness',
+    blurb:
+      'Codex CLI becomes a native, safe residency backend with the same coordination outcomes as Claude Code; Codex desktop is verified separately and stays manual-resume until a stable supported wake API exists.',
+    detail:
+      'Parity means equal user-visible coordination outcomes, not pretending the two products expose identical controls. Codex CLI joins the existing host loop as a second ActuatorBackend: it uses a capability probe, exact machine-readable thread identity, workspace-scoped local capture/liveness, an exact resume before a bounded fresh fallback, wake-provenance Presence verification, sanitized child environment, and the existing watchdog/lease/report machinery. A malformed or clean-but-unverified resume fails; it never receives an untracked second launch. Paid real-harness execution remains an owner-run, double-gated acceptance command, never default CI. Codex desktop remains a distinct verified surface for project MCP wiring/reload, join/claim, inbox, reconnect, workspace isolation, and model/build attestation. It is deliberately not daemon-wakeable unless a versioned capability probe proves a stable supported desktop API for targeting, lifecycle observation, and safe resume; until then offline desktop seats receive durable delivery plus a manual-resume instruction.',
+    refs: [
+      adr(216, 'ADR 216'),
+      adr(131, 'ADR 131'),
+      adr(166, 'ADR 166'),
+      adr(179, 'ADR 179'),
+      adr(199, 'ADR 199'),
+      doc('docs/design/harness-residency.md', 'residency contract'),
+    ],
+    dependsOn: ['harness-residency', 'harness-adapters'],
+  },
 
   // ── Wave 5 — depth (priority order set 2026-07-04) ──
   // Interrupt line inc1 (Wave 4) shipped; steer/challenge acts lead Wave 4. This is the ordered batch

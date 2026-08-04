@@ -2,7 +2,7 @@
 
 > **Living document.** This is the initial direction, not gospel. It will evolve. If you (the executing agent) find an error, contradiction, or better approach during implementation: (1) do not silently deviate — record the issue and your proposed change in `docs/decisions/NNN-<slug>.md` (a short ADR: context, problem, decision, consequences), (2) make the smallest correct change, (3) update the affected doc in the same commit. Docs and code must never disagree at the end of a commit.
 
-The **universal harness adapter**. One MCP (stdio) server exposing **twenty-two tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the lane, goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/204). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
+The **universal harness adapter**. One MCP (stdio) server exposing **twenty-two tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the lane, goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/209). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
 
 ## Stack
 
@@ -136,7 +136,7 @@ Phantom Presence now drops within the 45s reclaim grace instead of lingering. Th
 ## The core tools (JSON schemas — verbatim contract)
 
 This section contracts the **six core team tools** verbatim; the lane, goal, seat-memory, and report
-tools (22 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093/204). Two lifecycle
+tools (22 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093/209). Two lifecycle
 tools (`team_join` / `team_leave`) gate the working tools. Inspection (`team_status` / `team_members`) works while dormant/pending; sending and inbox draining require a live join.
 
 Tool names are stable; descriptions are written for the _agent_ reading them — concise,
@@ -380,6 +380,11 @@ src/
 - While **joined**, a background WS drop → exponential backoff reconnect (1s,2s,4s… cap 30s), re-`hello`, presence re-registered. Missed messages are recovered on the next `team_inbox_check` via the cursor (the buffer may be empty after a drop; the cursor is the source of truth). No message loss because the server log + cursor are authoritative.
 - A **dormant** session holds no socket and no presence — there is nothing to reconnect until it calls `team_join`.
 - If the server is unreachable at tool-call time, tools return a clear error string (not throw) so the agent can decide to retry — but never silently drop a `team_send`.
+
+Codex desktop is a normal MCP Surface: it can join, receive durable inbox delivery, and reconnect
+through its project or global configuration. It is not a residency actuator. The repeatable desktop
+evidence procedure is [`tests/codex-desktop.md`](../../tests/codex-desktop.md); a manual app reopen or
+`/mcp reload` proves coordination only, not daemon wake.
 
 ## Trace-context propagation (ADR 011 — `otel.ts`)
 
