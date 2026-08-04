@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { TOKEN_PREFIXES } from '@musterd/protocol';
 import { z } from 'zod';
 
 export interface TlsConfig {
@@ -98,6 +99,38 @@ export function resolveRosterRoots(env: NodeJS.ProcessEnv = process.env): string
     // no global config / unreadable → env-only roots
   }
   return [...roots];
+}
+
+/**
+ * This machine's CLI identity for a team, read from the global `~/.musterd/config.json` (ADR 221).
+ *
+ * Same file and same rationale as {@link resolveRosterRoots} directly above — reading the global
+ * config keeps the daemon decoupled from the CLI package while sharing the `~/.musterd/` home the db
+ * already lives in — so this is an established pattern applied to a second key, not a new coupling.
+ *
+ * Best-effort by construction: an absent, unreadable, or malformed config is simply "no local
+ * identity", never an error, because a machine without one is an ordinary machine and the caller's
+ * remedy (offer the credential form instead) is the same for every cause.
+ */
+export function readLocalIdentity(
+  team: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { name: string; key: string } | null {
+  try {
+    const cfgPath = env['MUSTERD_CONFIG'] ?? join(homedir(), '.musterd', 'config.json');
+    const raw = JSON.parse(readFileSync(cfgPath, 'utf8')) as {
+      identities?: Record<string, { name?: unknown; key?: unknown }>;
+    };
+    const id = raw.identities?.[team];
+    if (!id || typeof id.name !== 'string' || typeof id.key !== 'string') return null;
+    // Only a human credential signs a human in. An agent seat authenticates with the team agent key,
+    // which is a harness fact rather than a person — the same gate `musterd board` applies before it
+    // will stage a handoff.
+    if (!id.key.startsWith(TOKEN_PREFIXES.credential)) return null;
+    return { name: id.name, key: id.key };
+  } catch {
+    return null;
+  }
 }
 
 /** A positive-integer millisecond env value (ADR 040 tunable resilience constants). */

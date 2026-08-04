@@ -48,7 +48,7 @@ import {
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { z } from 'zod';
-import { isLocalPeer, resolveRosterRoots } from '../config.js';
+import { isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
@@ -1231,6 +1231,48 @@ export async function handleHttp(
           detail: { surface: 'cli' },
         });
         return sendJson(res, 201, staged);
+      }
+
+      /**
+       * `GET /teams/:slug/local-identity` (ADR 221) — hand a page on THIS machine the identity the
+       * CLI already holds, so signing into the office costs one click and no human ever handles a
+       * secret by hand.
+       *
+       * **No nonce, deliberately.** ADR 170's nonce exists to make a CLI→browser *link* inert; when
+       * the browser asks the daemon directly there is no link to make inert, nothing to expire, and
+       * nothing to leak into history.
+       *
+       * `isLocalPeer` is the entire security boundary and is load-bearing rather than a hardening
+       * detail: this route returns a member CREDENTIAL, so off-machine it would hand a second admin
+       * the FIRST admin's identity. The refusal is counted as ADR 170's `off_machine` miss — the
+       * pre-registered signal that earns the bounded-credential work both ADRs declined to do.
+       */
+      if (method === 'GET' && rest === '/local-identity') {
+        const team = requireTeam(ctx.db, slug);
+        requireLocalPeer(ctx, req, "read this machine's sign-in identity", () =>
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'signin.handoff_missed',
+            target: null,
+            result: 'deny',
+            detail: { reason: 'off_machine' },
+          }),
+        );
+        const local = readLocalIdentity(team.slug);
+        // The vault can name a seat this team has never heard of — a stale entry, a renamed seat, a
+        // team recreated under the same slug. Confirm before offering, so the page is never handed a
+        // credential that cannot connect and then blamed for the failure.
+        if (!local || !getMemberByName(ctx.db, team.id, local.name)) {
+          return sendJson(res, 200, { available: false });
+        }
+        appendAudit(ctx.db, team.id, {
+          actor: local.name,
+          action: 'signin.local_offered',
+          target: local.name,
+          result: 'allow',
+          detail: { surface: 'web-live' },
+        });
+        return sendJson(res, 200, { available: true, as: local.name, credential: local.key });
       }
 
       const handoffMatch = rest.match(/^\/signin-handoff\/([^/]+)$/);

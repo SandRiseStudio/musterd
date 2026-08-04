@@ -5591,3 +5591,112 @@ describe('human credential rotate: off-host requires an admin credential', () =>
     expect(JSON.parse(rows[0]!.detail!)).toEqual({ via: 'admin' });
   });
 });
+
+/**
+ * ADR 221 — `GET /teams/:slug/local-identity`. The daemon hands a page on THIS machine the identity
+ * the CLI already holds, so signing into the office costs one click and no human ever handles a
+ * secret.
+ *
+ * `isLocalPeer` is the entire security boundary here, and it is load-bearing rather than decorative:
+ * the route returns a member CREDENTIAL, so off-machine it would hand a second admin the first
+ * admin's identity. These tests bind on loopback and flip `trustProxy` to model the ADR 040
+ * off-loopback deployment, the same shape the observer-disclosure suite above uses.
+ */
+describe("local sign-in identity: this machine's CLI seat, and nobody else's (ADR 221)", () => {
+  const configPath = join(mkdtempSync(join(tmpdir(), 'musterd-localid-')), 'config.json');
+
+  beforeEach(() => {
+    process.env['MUSTERD_CONFIG'] = configPath;
+  });
+
+  it('offers nothing when this machine has no CLI identity for the team', async () => {
+    writeFileSync(configPath, JSON.stringify({ identities: {} }));
+    await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
+
+    const res = await get('/teams/dusk/local-identity');
+    // Not an error: a machine with no CLI identity is an ordinary machine, and the rail simply
+    // offers the credential form instead of a button that cannot work.
+    expect(res.status).toBe(200);
+    expect(res.json.available).toBe(false);
+    expect(res.json.credential).toBeUndefined();
+  });
+
+  it('offers the identity when the vault has one for this team', async () => {
+    const team = await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
+    writeFileSync(
+      configPath,
+      JSON.stringify({ identities: { dusk: { name: 'nick', key: team.json.human_credential } } }),
+    );
+
+    const res = await get('/teams/dusk/local-identity');
+    expect(res.status).toBe(200);
+    expect(res.json.available).toBe(true);
+    expect(res.json.as).toBe('nick');
+    expect(res.json.credential).toBe(team.json.human_credential);
+  });
+
+  it('refuses an agent-keyed vault entry — an agent key is a harness fact, not a person', async () => {
+    await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
+    writeFileSync(
+      configPath,
+      JSON.stringify({ identities: { dusk: { name: 'nick', key: 'mskey_notacredential' } } }),
+    );
+
+    const res = await get('/teams/dusk/local-identity');
+    expect(res.json.available).toBe(false);
+  });
+
+  it('offers nothing for a member the team has never heard of (a stale or renamed vault entry)', async () => {
+    await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
+    writeFileSync(
+      configPath,
+      JSON.stringify({ identities: { dusk: { name: 'ghost', key: 'mscr_whatever' } } }),
+    );
+
+    const res = await get('/teams/dusk/local-identity');
+    expect(res.json.available).toBe(false);
+  });
+});
+
+describe('local sign-in identity is refused off this machine (ADR 221)', () => {
+  let proxied: RunningServer;
+  let pbase: string;
+  const configPath = join(mkdtempSync(join(tmpdir(), 'musterd-localid-off-')), 'config.json');
+
+  beforeEach(async () => {
+    process.env['MUSTERD_CONFIG'] = configPath;
+    proxied = createServer({ db: openDb(':memory:'), port: 0, trustProxy: true });
+    const { port } = await proxied.listen();
+    pbase = `http://127.0.0.1:${port}`;
+  });
+  afterEach(async () => {
+    await proxied.close();
+  });
+
+  it('refuses, and records the off_machine miss that earns the cross-device thread', async () => {
+    const created = await fetch(`${pbase}/teams`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ slug: 'dusk', creator: { name: 'nick', kind: 'human' } }),
+    });
+    const team = (await created.json()) as any;
+    // A real, usable identity is present — so the ONLY thing standing between an off-machine caller
+    // and nick's credential is the peer check.
+    writeFileSync(
+      configPath,
+      JSON.stringify({ identities: { dusk: { name: 'nick', key: team.human_credential } } }),
+    );
+
+    const res = await fetch(`${pbase}/teams/dusk/local-identity`);
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as any;
+    expect(JSON.stringify(body)).not.toContain(team.human_credential);
+
+    const audit = await fetch(`${pbase}/teams/dusk/audit`, {
+      headers: { authorization: `Bearer ${team.human_credential}` },
+    });
+    const rows = (await audit.json()) as any;
+    const miss = rows.audit.find((r: any) => r.action === 'signin.handoff_missed');
+    expect(miss.detail.reason).toBe('off_machine');
+  });
+});
