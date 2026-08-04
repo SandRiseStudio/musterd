@@ -1,0 +1,122 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Envelope, MemberSummary } from '@musterd/protocol';
+import { askTierHolds } from '@musterd/protocol';
+import { askIsLoud, byUrgency, deriveAsks, type AskView } from './asks';
+import { initial, kindOf, memberColor } from './format';
+import { reelIndex } from './reel';
+
+const SPECIES_VERB = {
+  consult: 'asks what you think',
+  escalate: 'escalated to you',
+  approve: 'needs your approval',
+} as const;
+
+/**
+ * The asks rail as stream chrome (ADR 226) — what `AsksStrip` is to `/live`, minus every part that
+ * takes input.
+ *
+ * **Why a separate component rather than a `broadcast` prop on `AsksStrip`.** Two reasons, and the
+ * second is the one that settles it. `AsksStrip` is ~460 lines of *answerability* — `sendAct`,
+ * sign-in offers, an Escape/click-outside sheet, `document.title` — and threading a mode through all
+ * of it would couple a stream chyron to a form. And the two have genuinely different legibility
+ * constraints: the 1080p stage is encoded at 720p, so `/live`'s 11.5px rail lands near 7.7px before
+ * Twitch's encoder ever sees it. One stylesheet cannot serve both. What they *do* share is the
+ * derivation, and that already lives in `asks.ts` as pure functions — which is the real seam.
+ *
+ * Nobody watching can click "see all", so the rail rotates instead: one ask at a time, by urgency.
+ */
+export function AsksReel({
+  envelopes,
+  roster,
+}: {
+  envelopes: Envelope[];
+  roster: MemberSummary[];
+}) {
+  const asks = useMemo(() => deriveAsks(envelopes), [envelopes]);
+  const loud = asks.filter((a) => askIsLoud(a.state)).sort((a, b) => byUrgency(a, b));
+  const deferred = asks.filter((a) => a.state === 'deferred');
+  const settled = asks.length - loud.length - deferred.length;
+  const cards = [...loud, ...deferred];
+
+  // One clock drives both the rotation and the countdowns. It ticks only while something is loud —
+  // idle cost is paid by every viewer, forever (packages/web/AGENTS.md), and a stream runs for hours.
+  const mountedAt = useRef(Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (loud.length === 0) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [loud.length]);
+
+  if (cards.length === 0) return null;
+
+  const shown = cards[reelIndex(cards.length, now - mountedAt.current)]!;
+  const idx = new Map(roster.map((m) => [m.name, m]));
+
+  return (
+    <section
+      className={`bc-reel${loud.length > 0 ? ' bc-reel--loud' : ''}`}
+      aria-label="asks and approvals"
+    >
+      <BellIcon />
+      <span
+        className="bc-reel__who"
+        style={{ background: memberColor(shown.env.from, kindOf(shown.env.from, idx)) }}
+        aria-hidden="true"
+      >
+        {initial(shown.env.from)}
+      </span>
+      {/* Keyed on the envelope id so React remounts on rotation and the entry animation replays —
+          without it the text swaps in place and the change is easy to miss on a stream. */}
+      <span className="bc-reel__lead" key={shown.env.id}>
+        <b>{shown.env.from}</b>
+        <span className="bc-reel__verb">{SPECIES_VERB[shown.species]}</span>
+        {shown.env.body && <span className="bc-reel__gist">{shown.env.body}</span>}
+      </span>
+      <span className={`bc-reel__tier bc-reel__tier--${shown.tier}`}>{shown.tier}</span>
+      <ReelClock ask={shown} now={now} />
+      <span className="bc-reel__spacer" />
+      {loud.length > 0 && <span className="bc-reel__meta">{loud.length} waiting</span>}
+      {deferred.length > 0 && <span className="bc-reel__meta">{deferred.length} deciding</span>}
+      {settled > 0 && <span className="bc-reel__meta">{settled} settled</span>}
+      {cards.length > 1 && (
+        <span className="bc-reel__dots" aria-hidden="true">
+          {cards.map((c) => (
+            <i key={c.env.id} className={c.env.id === shown.env.id ? 'is-on' : undefined} />
+          ))}
+        </span>
+      )}
+    </section>
+  );
+}
+
+/** The tier clock. Same semantics as /live's, reading the caller's `now` so one interval drives all. */
+function ReelClock({ ask, now }: { ask: AskView; now: number }) {
+  if (ask.state === 'held') return <Elapsed holding />;
+  if (ask.state !== 'open') return null;
+  const left = ask.deadline - now;
+  if (left <= 0) return <Elapsed holding={askTierHolds(ask.tier)} />;
+  const m = Math.floor(left / 60_000);
+  const s = Math.floor((left % 60_000) / 1000);
+  return (
+    <span className="bc-reel__clock">
+      {m}:{String(s).padStart(2, '0')} left
+    </span>
+  );
+}
+
+function Elapsed({ holding }: { holding: boolean }) {
+  return (
+    <span className="bc-reel__clock bc-reel__clock--over">
+      timed out{holding && <span className="bc-reel__holding"> — agent holding</span>}
+    </span>
+  );
+}
+
+function BellIcon() {
+  return (
+    <svg className="bc-reel__bell" viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M6 1.8a2.9 2.9 0 0 1 2.9 2.9v1.9l1 1.6H2.1l1-1.6V4.7A2.9 2.9 0 0 1 6 1.8zM4.9 9.6a1.15 1.15 0 0 0 2.2 0" />
+    </svg>
+  );
+}

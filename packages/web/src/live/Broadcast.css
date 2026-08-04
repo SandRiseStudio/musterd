@@ -53,3 +53,109 @@
   font-family: var(--font-mono);
   font-size: 15px;
 }
+
+/* The asks reel (ADR 226). Sized for a 720p encode, not a desk: the stage is 1080p and the stream
+   is downscaled ×0.667, so /live's 11.5px rail would land near 7.7px before Twitch's encoder. This
+   is why the reel is not styled off .lc-asks — the two answer to different resolutions. */
+.bc-reel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  font-size: 19px;
+  line-height: 1.25;
+  color: var(--lc-text);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--lc-ground) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc-text) 12%, transparent);
+  backdrop-filter: blur(6px);
+}
+.bc-reel--loud {
+  border-color: color-mix(in srgb, var(--lc-danger) 45%, transparent);
+}
+.bc-reel__bell {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.1;
+}
+.bc-reel--loud .bc-reel__bell {
+  animation: lc-asks-ring 2.4s ease-in-out infinite;
+}
+.bc-reel__who {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+.bc-reel__lead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  animation: bc-reel-in 420ms ease-out both;
+}
+.bc-reel__verb {
+  opacity: 0.72;
+}
+.bc-reel__gist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46ch;
+  opacity: 0.85;
+}
+.bc-reel__tier {
+  flex: none;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  opacity: 0.8;
+}
+.bc-reel__clock {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.bc-reel__clock--over {
+  color: var(--lc-danger);
+  opacity: 1;
+}
+.bc-reel__spacer {
+  flex: 1;
+}
+.bc-reel__meta {
+  flex: none;
+  font-size: 16px;
+  opacity: 0.65;
+}
+.bc-reel__dots {
+  display: flex;
+  gap: 5px;
+  flex: none;
+}
+.bc-reel__dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--lc-text) 25%, transparent);
+}
+.bc-reel__dots i.is-on {
+  background: color-mix(in srgb, var(--lc-text) 70%, transparent);
+}
+@keyframes bc-reel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
