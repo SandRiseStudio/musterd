@@ -33,5 +33,10 @@
 // UserPromptSubmit hook, and the SessionStart orientation's label clause going due-gated. The bump is
 // what stops an older checkout's `init` from rewriting the machine-wide hooks back to the one-shot
 // text (ADR 168 downgrade guard — equal epochs overwrite). An older seat simply never nudges.
-export const FEATURE_EPOCH = 4 as const;
+// Epoch 5 — the standing-context trim (ADR 212 increment 2): the SessionStart orientation and the
+// per-turn PromptSubmit ritual shrink to triggers, with the autojoin rule moved into the committed
+// primer. Same rationale as epoch 4 — the ADR 168 downgrade guard only refuses a *newer* epoch, so
+// without the bump an older checkout's `init` would rewrite the trimmed hooks back to the fat text.
+// An older seat is unaffected: it just carries the longer nudges.
+export const FEATURE_EPOCH = 5 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

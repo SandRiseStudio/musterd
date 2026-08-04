@@ -44,6 +44,7 @@ let measureToolSurface: (caps?: unknown) => Promise<{ bytes: number }>;
 let renderPrimer: (opts: { member?: string; team: string }) => string;
 let GENERALIST_CAPABILITIES: Record<string, unknown>;
 let HOOK_NUDGE_TEXTS: Record<string, string>;
+let LABEL_NUDGE_TEXT: string;
 try {
   ({ measureToolSurface } = await import(distUrl('packages/mcp/dist/index.js')));
   ({ renderPrimer, GENERALIST_CAPABILITIES } = await import(
@@ -52,6 +53,7 @@ try {
   ({ HOOK_NUDGE_TEXTS } = await import(
     distUrl('packages/cli/dist/onboard/harnesses/claudeCode.js')
   ));
+  ({ LABEL_NUDGE_TEXT } = await import(distUrl('packages/cli/dist/commands/session.js')));
 } catch (err) {
   console.error(
     `context:check: failed to import the workspace dists — run \`pnpm build\` first (dist/ is gitignored, same as the typecheck trap).\n${String(err)}`,
@@ -70,7 +72,16 @@ const sessionStart =
   bytes(HOOK_NUDGE_TEXTS['orientation_wire_fix'] ?? '') +
   bytes(HOOK_NUDGE_TEXTS['orientation_init_fix'] ?? '');
 const promptSubmit = bytes(HOOK_NUDGE_TEXTS['prompt_submit_ritual'] ?? '');
-if (sessionStart === 0 || promptSubmit === 0 || primer === 0 || toolsDefault === 0) {
+// Due-gated, but it rides the same per-turn UserPromptSubmit hook — so it is budgeted, and the
+// per-turn headline is the worst case (a sweep due) rather than the flattering case.
+const labelNudge = bytes(LABEL_NUDGE_TEXT ?? '');
+if (
+  sessionStart === 0 ||
+  promptSubmit === 0 ||
+  primer === 0 ||
+  toolsDefault === 0 ||
+  labelNudge === 0
+) {
   console.error(
     'context:check: a surface measured 0 bytes — a source of truth moved; failing loud.',
   );
@@ -83,9 +94,10 @@ const measured: Record<string, number> = {
   primerBytes: primer,
   sessionStartNudgesBytes: sessionStart,
   promptSubmitNudgeBytes: promptSubmit,
-  // The headline: what multiplies on EVERY turn of every seat session.
-  perTurnTotalBytes: toolsDefault + promptSubmit,
-  perSessionTotalBytes: toolsDefault + primer + sessionStart + promptSubmit,
+  labelNudgeBytes: labelNudge,
+  // The headline: what multiplies on EVERY turn of every seat session (label nudge due = worst case).
+  perTurnTotalBytes: toolsDefault + promptSubmit + labelNudge,
+  perSessionTotalBytes: toolsDefault + primer + sessionStart + promptSubmit + labelNudge,
 };
 
 const failures: string[] = [];

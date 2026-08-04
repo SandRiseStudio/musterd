@@ -196,10 +196,11 @@ function sessionMsgHookCommand(): string {
  * below — the hooks test pins the embedding, so a reword here is a reword on the wire.
  */
 export const HOOK_NUDGE_TEXTS = {
+  // Trimmed to a trigger (standing-context spec 2026-08-03): the autojoin rule and the team_join
+  // caveat now live in the primer's loop, which is committed and always present. This nudge only
+  // has to fire the action at session start.
   orientation_joined:
-    'You are on a musterd team (your seat auto-claims on your first team_* tool call). Run ' +
-    'team_inbox_check now to join and see anything waiting. Only call team_join if a tool says you ' +
-    'are not joined.',
+    'musterd: run team_inbox_check now — it joins your seat and shows what waits.',
   orientation_wire_fix:
     'musterd: this repo has a committed musterd launch spec but the MCP server is NOT ' +
     'registered on this machine — run `musterd wire` in this folder (no prompts), then reload this ' +
@@ -208,10 +209,10 @@ export const HOOK_NUDGE_TEXTS = {
     'musterd: this folder has the musterd:start primer but the musterd MCP server is NOT ' +
     'registered here — the team_* tools are unavailable. Run `musterd init` in this folder (or ' +
     '`musterd init --check` to confirm), then reload this session.',
+  // Paid every turn — the tightest text that still fires both halves of the ritual. What a
+  // status_update buys (the roster flip) is primer material, not per-turn material.
   prompt_submit_ritual:
-    'musterd: if you finished a unit of work since your last update, post a one-line ' +
-    'team_send status_update (flips you to working: on the roster); then team_inbox_check for ' +
-    'replies.',
+    'musterd: finished a unit of work? team_send status_update (one line), then team_inbox_check.',
 } as const;
 
 function sessionStartHookCommand(): string {

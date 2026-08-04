@@ -67,3 +67,22 @@ join/inbox/status ritual is caught by the probe before merge.
 **Experiment.** n/a — no paid eval runs by decision (the cheap-gate scope call in the spec); if a
 future deep trim needs behavioral evidence beyond the probe, it pre-registers a cookoff-style cell
 under ADR 056 rather than widening this gate.
+
+**Increment 2 outcome (2026-08-03).** Trim landed: per-turn 13,891 → 13,654 B, per-session
+17,018 → 16,720 B, ritual probe green (`packages/mcp/src/ritualProbe.test.ts`), budgets lowered to
+measured + 5%. Two structural changes came out of the measurement rather than the plan: the
+due-gated **label nudge is now a budgeted line item** (`LABEL_NUDGE_TEXT`, 250 → 98 B) because it
+rides the per-turn hook, and the per-turn headline now counts it — the headline is the worst case,
+not the flattering one; and the autojoin rule moved from the SessionStart nudge into the primer,
+resolving a live contradiction (the primer said call `team_join`, the nudge said don't).
+`FEATURE_EPOCH` 4 → 5, because the ADR 168 downgrade guard only refuses a _newer_ epoch and an older
+checkout's `init` would otherwise rewrite the trimmed hooks back.
+
+**The measurement's own verdict on where the cost is.** Tool descriptions were left untouched: the
+plan's premise that they restate primer guidance does not survive the per-tool breakdown (the heavy
+ones are call-time act/parameter semantics), and ADR 144 inc 2/4 already adjudicated that surface
+with data. After the trim, guidance text is **1.4% of the per-turn surface** and 4.4% of the
+session; **tool schemas are 98.6% of per-turn cost.** This is the standing finding for anyone
+reaching for this budget later: role scoping (ADR 144 inc 5, −77% for a muted seat) is the lever
+that moves the number, and rewording nudges is not. A future increment that wants a materially
+smaller standing context should act on the tool surface or not bother.
