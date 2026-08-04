@@ -223,7 +223,7 @@ export type AuditAction =
   | 'signin.handoff_staged'
   | 'signin.handoff_redeemed'
   | 'signin.handoff_missed'
-  // ADR 221 adds NO action of its own, on purpose. Its in-page sign-in route is probed automatically
+  // ADR 222 adds NO action of its own, on purpose. Its in-page sign-in route is probed automatically
   // on every load of an ambient surface, so auditing a successful offer would record when the human
   // had the office on screen rather than anything they did — the human-activity trail ADR 155
   // refuses to create. Its off-machine refusal reuses `signin.handoff_missed` with

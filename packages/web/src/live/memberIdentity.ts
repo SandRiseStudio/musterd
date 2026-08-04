@@ -1,6 +1,6 @@
 /**
  * The signed-in member identity for a team — **one slot per browser per team, shared by every
- * route** (ADR 221).
+ * route** (ADR 222).
  *
  * /live and /board used to keep separate ideas of who you are, and /live's was always an observer
  * (ADR 063), so the office could show you exactly what was waiting on your decision and never let
@@ -69,7 +69,7 @@ export function forgetMemberIdentity(team: string): void {
 }
 
 /**
- * Ask the daemon whether THIS machine has a sign-in identity for the team (ADR 221).
+ * Ask the daemon whether THIS machine has a sign-in identity for the team (ADR 222).
  *
  * **Never throws.** "No CLI identity here", "you are not on this machine" (the localhost gate, which
  * must refuse — the route returns a credential) and "the daemon is unreachable" are three different
@@ -101,7 +101,7 @@ export type ResolvedIdentity =
   | { kind: 'watch'; as: string; token: string };
 
 /**
- * The total precedence order for who this page connects as (ADR 221):
+ * The total precedence order for who this page connects as (ADR 222):
  *
  *   1. an explicit watch link (`?as=…#w=…`) — a URL instruction, and how a team deliberately hands
  *      the office to someone else; it must never be overridden by whoever last signed in here, or

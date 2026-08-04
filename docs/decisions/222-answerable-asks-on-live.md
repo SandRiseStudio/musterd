@@ -1,11 +1,18 @@
-# 221 — Answerable asks on /live: the surface a human watches is the one they can act on
+# 222 — Answerable asks on /live: the surface a human watches is the one they can act on
 
 - Status: proposed — 2026-08-04. Authored by miley (lane `01KZ6Z1M71YT2YYBPRXZRRKSKN`). Raised by
   nick from the office itself: _"I can read them but I can't actually do anything about them."_
-  Number **221**, allocated with `pnpm adr:next` — this ADR lost 219 to izzo (PR #628) and then 220
-  to stanley (PR #630) while it was being written, which is the collision
-  [ADR 220](220-adr-numbers-allocated-against-open-prs.md) landed to end: read main by hand and two
-  authors correctly compute the same free number and are both wrong.
+  Number **222**, and the fourth number this ADR has worn. It lost 219 to izzo (#628), 220 to
+  stanley (#630), and 221 to stanley again (#633), all while being written.
+  **The first two were hand-reading `origin/main`** — exactly the failure
+  [ADR 220](220-adr-numbers-allocated-against-open-prs.md) landed to end, and a fair cop.
+  **The third happened with `pnpm adr:next` used as directed, by both authors.** The tool allocates
+  against the working tree, `origin/main` and every _open PR_; this branch was never pushed, so its
+  claim on 221 was invisible to stanley's tool, and stanley's claim was invisible to mine. Two
+  correct reads, both right at the time, same number. That is ADR 220's own pre-registered
+  counter-signal firing on the day it shipped, and it is evidence for that ADR's Eval rather than a
+  reason to reopen this one: a read cannot reserve, and the cheap mitigation is to **push a branch as
+  a draft PR the moment it carries an ADR number**.
 - Date: 2026-08-04
 - Builds on: [ADR 149](149-ask-surfaces.md) (the asks rail this makes answerable),
   [ADR 147](147-human-ask-stream.md) (the ask stream and its answer acts),

@@ -102,7 +102,7 @@ export function resolveRosterRoots(env: NodeJS.ProcessEnv = process.env): string
 }
 
 /**
- * This machine's CLI identity for a team, read from the global `~/.musterd/config.json` (ADR 221).
+ * This machine's CLI identity for a team, read from the global `~/.musterd/config.json` (ADR 222).
  *
  * Same file and same rationale as {@link resolveRosterRoots} directly above — reading the global
  * config keeps the daemon decoupled from the CLI package while sharing the `~/.musterd/` home the db

@@ -4445,7 +4445,7 @@
   font-size: 10px;
 }
 
-/* ─── the way in, and who you are (ADR 221) ───────────────────────────────────────────────────────
+/* ─── the way in, and who you are (ADR 222) ───────────────────────────────────────────────────────
    The sign-in button occupies the slot Approve/Deny will occupy, so signing in swaps it in place and
    the rail never reflows. Accent rather than success/danger on purpose: it is the way to an answer,
    not an answer, and the two irreversible colours stay reserved for the two irreversible acts. */

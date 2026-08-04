@@ -59,7 +59,7 @@ function LivePage() {
   const [team, setTeam] = useState('');
   const [advanced, setAdvanced] = useState({ open: false, as: '', token: '' });
   const [cfg, setCfg] = useState<LiveConfig | null>(null);
-  /** True when `cfg` is a real member (ADR 221) rather than an observer or a watch-link seat — the
+  /** True when `cfg` is a real member (ADR 222) rather than an observer or a watch-link seat — the
    *  difference between an office you can act in and one you can only read. */
   const [signedIn, setSignedIn] = useState(false);
   /** Connected via an explicit watch link — read-only by the team's choice, not by accident. */
@@ -105,7 +105,7 @@ function LivePage() {
     const staleToken = cfg?.token;
     if (!team || !staleToken) return;
     if (recoveredToken.current === staleToken) return; // already handling this exact credential
-    // A signed-in human is NOT silently demoted to an observer (ADR 221). Doing that would take the
+    // A signed-in human is NOT silently demoted to an observer (ADR 222). Doing that would take the
     // answer buttons away again with no explanation — the exact defect this arc exists to fix — so a
     // dead member credential drops back to watching and says why.
     if (signedIn) {
@@ -156,7 +156,7 @@ function LivePage() {
   const entries = roomEntries(roster, board);
 
   /**
-   * Does this machine hold an identity we could sign in as with one click (ADR 221)? Probed once per
+   * Does this machine hold an identity we could sign in as with one click (ADR 222)? Probed once per
    * connected team and never polled — it is a fact about this machine, not a live signal, and the
    * perf contract is unambiguous that idle cost is paid by every viewer forever. Skipped entirely
    * once signed in, because then the answer cannot change anything.
@@ -181,7 +181,7 @@ function LivePage() {
   }, [cfg?.team, signedIn]);
 
   /**
-   * Route back to the credential form (ADR 221). The sign-in fields live on the connect screen, so
+   * Route back to the credential form (ADR 222). The sign-in fields live on the connect screen, so
    * an already-connected observer has to return to it — which is exactly the dead end the rail was
    * reporting: there was no way back at all once a seat was cached.
    */
@@ -191,7 +191,7 @@ function LivePage() {
     setCfg(null);
   }, []);
 
-  /** Become yourself on this browser: remember the identity and reconnect as it (ADR 221). */
+  /** Become yourself on this browser: remember the identity and reconnect as it (ADR 222). */
   const signIn = useCallback((slug: string, id: { as: string; token: string }) => {
     saveMemberIdentity(slug, id);
     setSignedIn(true);
@@ -200,7 +200,7 @@ function LivePage() {
   }, []);
 
   /** Hand the screen back: drop the identity and fall back to watching. The escape hatch a cached
-   *  seat never had — before ADR 221 the only way out was clearing localStorage by hand. */
+   *  seat never had — before ADR 222 the only way out was clearing localStorage by hand. */
   const signOut = useCallback(() => {
     const slug = cfg?.team;
     if (!slug) return;
@@ -212,7 +212,7 @@ function LivePage() {
   }, [cfg?.team]);
 
   /**
-   * The rail's one button, both meanings (ADR 221). If this machine has an identity, becoming
+   * The rail's one button, both meanings (ADR 222). If this machine has an identity, becoming
    * yourself is a click and nothing else happens. If it does not — off-machine, or no CLI identity
    * here — the same button falls back to the credential form, which does work over the network.
    */
@@ -236,7 +236,7 @@ function LivePage() {
       return;
     }
 
-    // A remembered member identity outranks this browser's observer (ADR 221): once you have signed
+    // A remembered member identity outranks this browser's observer (ADR 222): once you have signed
     // in on this browser you are yourself, on every surface, until you say otherwise.
     const member = loadMemberIdentity(slug);
     if (member) {
@@ -322,7 +322,7 @@ function LivePage() {
         /* private mode */
       }
       setWatchLink(true);
-      // A watch link outranks a stored member identity (ADR 221) and is explicitly NOT you: handing
+      // A watch link outranks a stored member identity (ADR 222) and is explicitly NOT you: handing
       // the office to someone else must never hand them whoever last signed in on this browser.
       setSignedIn(false);
       setCfg({ team: urlTeam, as: urlAs, token: watchTok });

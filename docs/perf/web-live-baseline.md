@@ -265,12 +265,12 @@ under the honest name is the whole point of the ritual.
 
 ### What forced it
 
-`perf:check` failed on a 68-byte CSS addition (four small rules for the ADR 221 asks-rail sign-in).
+`perf:check` failed on a 68-byte CSS addition (four small rules for the ADR 222 asks-rail sign-in).
 The failure was correct and the addition was not the problem:
 
 | Measurement (node `zlib.gzipSync`, as `check-budgets.ts` uses) | Bytes  | Headroom |
 | -------------------------------------------------------------- | ------ | -------- |
-| Before the ADR 221 rail change                                 | 21,923 | **77**   |
+| Before the ADR 222 rail change                                 | 21,923 | **77**   |
 | After it                                                       | 21,991 | **9**    |
 
 **The budget was already 99.65% consumed before the change that tripped it.** Note the measurement

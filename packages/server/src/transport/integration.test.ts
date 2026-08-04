@@ -5593,7 +5593,7 @@ describe('human credential rotate: off-host requires an admin credential', () =>
 });
 
 /**
- * ADR 221 — `GET /teams/:slug/local-identity`. The daemon hands a page on THIS machine the identity
+ * ADR 222 — `GET /teams/:slug/local-identity`. The daemon hands a page on THIS machine the identity
  * the CLI already holds, so signing into the office costs one click and no human ever handles a
  * secret.
  *
@@ -5602,7 +5602,7 @@ describe('human credential rotate: off-host requires an admin credential', () =>
  * admin's identity. These tests bind on loopback and flip `trustProxy` to model the ADR 040
  * off-loopback deployment, the same shape the observer-disclosure suite above uses.
  */
-describe("local sign-in identity: this machine's CLI seat, and nobody else's (ADR 221)", () => {
+describe("local sign-in identity: this machine's CLI seat, and nobody else's (ADR 222)", () => {
   const configPath = join(mkdtempSync(join(tmpdir(), 'musterd-localid-')), 'config.json');
 
   beforeEach(() => {
@@ -5658,7 +5658,7 @@ describe("local sign-in identity: this machine's CLI seat, and nobody else's (AD
   });
 });
 
-describe('local sign-in identity is refused off this machine (ADR 221)', () => {
+describe('local sign-in identity is refused off this machine (ADR 222)', () => {
   let proxied: RunningServer;
   let pbase: string;
   const configPath = join(mkdtempSync(join(tmpdir(), 'musterd-localid-off-')), 'config.json');

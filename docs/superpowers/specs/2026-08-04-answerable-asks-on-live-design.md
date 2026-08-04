@@ -153,7 +153,7 @@ observer **and says so**: _"your sign-in expired — sign in again."_
 
 ## Increments
 
-1. **ADR 221** — the decision, the boundary, the zero baseline. Number confirmed against fresh
+1. **ADR 222** — the decision, the boundary, the zero baseline. Number confirmed against fresh
    `origin/main` at branch time (219 is taken on izzo's branch; re-confirm at the last moment).
 2. **Shared member identity** — `musterd.member.v1.<team>`, both routes prefer it, board key migrated
    on read. Web only, no daemon change. Ships value alone: `musterd board` starts reaching `/live`.

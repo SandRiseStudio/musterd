@@ -1234,7 +1234,7 @@ export async function handleHttp(
       }
 
       /**
-       * `GET /teams/:slug/local-identity` (ADR 221) — hand a page on THIS machine the identity the
+       * `GET /teams/:slug/local-identity` (ADR 222) — hand a page on THIS machine the identity the
        * CLI already holds, so signing into the office costs one click and no human ever handles a
        * secret by hand.
        *
