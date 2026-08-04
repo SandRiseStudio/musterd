@@ -31,6 +31,9 @@ export interface MemberRow {
   name: string;
   kind: 'agent' | 'human';
   role: string;
+  /** Every role the seat holds (ADR 227), JSON array projected by reconcile. NULL ⇒ derive from the
+   * legacy single `role` (db-only teams, pre-v31 rows). */
+  roles: string | null;
   lifecycle: 'forever' | 'session' | 'until';
   lifecycle_until: number | null;
   availability: string | null;
@@ -161,6 +164,20 @@ export function hasFullMessageVisibility(row: MemberRow): boolean {
   return row.observer === 1 && resolveObserverScope(row) === 'full';
 }
 
+/** The roles a seat holds (ADR 227). Defensive parse; NULL/corrupt falls back to the legacy single
+ * `role` as a one-entry list (empty ⇒ the roleless generalist). */
+function parseRoles(row: MemberRow): string[] {
+  if (row.roles) {
+    try {
+      const parsed: unknown = JSON.parse(row.roles);
+      if (Array.isArray(parsed) && parsed.every((r) => typeof r === 'string')) return parsed;
+    } catch {
+      // fall through to the legacy derivation
+    }
+  }
+  return row.role ? [row.role] : [];
+}
+
 /** Map a member row (+ its team slug) to the public protocol Member shape (no token_hash). */
 export function toMember(row: MemberRow, teamSlug: string): Member {
   return {
@@ -169,6 +186,7 @@ export function toMember(row: MemberRow, teamSlug: string): Member {
     name: row.name,
     kind: row.kind,
     role: row.role,
+    roles: parseRoles(row),
     lifecycle: row.lifecycle,
     lifecycle_until: row.lifecycle_until,
     // Parse defensively: a malformed/legacy availability blob degrades to `null` (implicit-available)

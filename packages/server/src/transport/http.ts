@@ -99,6 +99,7 @@ import {
   setMemberGovernance,
   teamHasAdmin,
 } from '../store/members.js';
+import { listRoles } from '../store/roles.js';
 import { clearMemory, getMemory, memoryEnvelope, saveMemory } from '../store/memory.js';
 import {
   countInbox,
@@ -1197,6 +1198,10 @@ export async function handleHttp(
         const team = requireTeam(ctx.db, slug);
         return sendJson(res, 200, {
           members: summarize(ctx, slug, team.id, tryAuth(ctx, slug, req)),
+          // The team's role library (ADR 227 discovery): the roster answers "who can do X" only if
+          // the roles themselves are visible beside the seats that hold them. Additive — an older
+          // client ignores it.
+          roles: listRoles(ctx.db, team.id),
         });
       }
 

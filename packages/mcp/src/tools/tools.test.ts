@@ -83,6 +83,7 @@ function member(over: Partial<MemberSummary> = {}): MemberSummary {
     name: 'Ada',
     kind: 'agent',
     role: 'backend',
+    roles: ['backend'],
     lifecycle: 'forever',
     lifecycle_until: null,
     created_at: 0,
@@ -541,6 +542,7 @@ describe('team_members handler', () => {
           name: 'nick',
           kind: 'human',
           role: '',
+          roles: [],
           presences: [{ surface: 'cli', status: 'active', last_seen_at: 0 }],
         }),
       ])({}),
@@ -558,7 +560,14 @@ describe('team_members handler', () => {
     const handler = capture(registerMembers, {
       roster: (async () => ({
         members: [
-          member({ name: 'Lin', role: '', lifecycle: 'until', lifecycle_until: 0, presences: [] }),
+          member({
+            name: 'Lin',
+            role: '',
+            roles: [],
+            lifecycle: 'until',
+            lifecycle_until: 0,
+            presences: [],
+          }),
           member({ name: 'Ada' }),
         ],
       })) as any,
@@ -579,6 +588,61 @@ describe('team_members handler', () => {
     expect(text(await named({ name: 'Zed' }))).toBe(
       'no member "Zed" — team_status lists the roster',
     );
+  });
+
+  it('filters by role, leading with the role summary (ADR 227 discovery)', async () => {
+    const handler = capture(registerMembers, {
+      roster: (async () => ({
+        members: [
+          member({ name: 'izzo', role: 'platform', roles: ['platform'] }),
+          member({ name: 'miley', role: 'designer', roles: ['designer', 'platform'] }),
+          member({ name: 'dolly', role: '', roles: [] }),
+        ],
+        roles: [{ name: 'platform', summary: 'Designated toucher of running infrastructure' }],
+      })) as any,
+    });
+    const out = text(await handler({ role: 'platform' }));
+    expect(out).toContain('platform — Designated toucher of running infrastructure');
+    expect(out).toContain('izzo');
+    expect(out).toContain('miley'); // multi-role holder matches too
+    expect(out).not.toContain('dolly');
+  });
+
+  it('renders every held role on a multi-role seat', async () => {
+    const handler = capture(registerMembers, {
+      roster: (async () => ({
+        members: [member({ name: 'miley', role: 'designer', roles: ['designer', 'platform'] })],
+      })) as any,
+    });
+    expect(text(await handler({}))).toContain('designer+platform');
+  });
+
+  it('names the team roles in the no-holder empty state', async () => {
+    const handler = capture(registerMembers, {
+      roster: (async () => ({
+        members: [member()],
+        roles: [
+          { name: 'admin', summary: null },
+          { name: 'observer', summary: 'You watch, you do not act' },
+        ],
+      })) as any,
+    });
+    expect(text(await handler({ role: 'platform' }))).toBe(
+      'no seat holds role "platform" — team roles: admin, observer',
+    );
+  });
+
+  it('appends the quiescence read when the daemon serves one (ADR 219 liveness trio)', async () => {
+    const handler = capture(registerMembers, {
+      roster: (async () => ({
+        members: [
+          member({
+            quiescence: { state: 'quiet', quiet_for_ms: 120_000, source: 'audit' },
+          }),
+        ],
+      })) as any,
+    });
+    expect(text(await handler({}))).toContain('quiet 2m');
   });
 
   it('returns an error result when roster throws', async () => {
@@ -641,7 +705,14 @@ describe('team_status handler', () => {
       roster: (async () => ({
         members: [
           member({ name: 'Ada', presence: 'online' }),
-          member({ name: 'nick', kind: 'human', role: '', presence: 'offline', presences: [] }),
+          member({
+            name: 'nick',
+            kind: 'human',
+            role: '',
+            roles: [],
+            presence: 'offline',
+            presences: [],
+          }),
         ],
       })) as any,
     });

@@ -324,7 +324,12 @@ export class MusterdClient {
     }>;
   }
 
-  roster(): Promise<{ members: MemberSummary[] }> {
+  roster(): Promise<{
+    members: MemberSummary[];
+    /** The team's role library (ADR 227 discovery): name + one-line summary. Absent from an older
+     *  daemon — every consumer degrades to members-only. */
+    roles?: Array<{ name: string; summary: string | null }>;
+  }> {
     return this.request('GET', `/teams/${this.config.team}/members`);
   }
 

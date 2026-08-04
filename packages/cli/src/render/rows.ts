@@ -298,7 +298,9 @@ const STATUS_MAX_LINES = 2;
  */
 function memberFacets(m: MemberSummary, group: Group, daemonBuild?: string): string {
   const parts: string[] = [m.kind];
-  if (m.role) parts.push(m.role);
+  // Every held role (ADR 227 multi-role), joined; an older daemon serves only the single label.
+  const roles = m.roles?.length ? m.roles.join('+') : m.role;
+  if (roles) parts.push(roles);
   const model = m.presences[0]?.model?.trim();
   if (model && model !== MODEL_UNKNOWN) parts.push(model);
   // A LIVE agent seat attesting nothing is not a quiet absence — it is a hole in the evidence, and

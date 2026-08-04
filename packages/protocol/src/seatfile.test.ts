@@ -6,6 +6,7 @@ import {
   parseTeamFile,
   type RoleFile,
   seatNameFromPath,
+  seatRoles,
   serializeRole,
   serializeSeat,
   serializeTeam,
@@ -223,6 +224,59 @@ describe('role file — roles/<name>.toml (ADR 070)', () => {
     for (const body of bodies) {
       expect(parseRoleFile(serializeRole(body))).toEqual(body);
     }
+  });
+});
+
+describe('seat file — multi-role (ADR 227)', () => {
+  it('parses a roles array, with role normalized to the first entry', () => {
+    const seat = parseSeatFile(
+      'kind = "agent"\nrole = "designer"\nroles = ["designer", "platform"]\n',
+      'miley',
+    );
+    expect(seat.roles).toEqual(['designer', 'platform']);
+    expect(seat.role).toBe('designer');
+  });
+
+  it('roles is authoritative over a disagreeing role key (hand-edit tolerance)', () => {
+    const seat = parseSeatFile('kind = "agent"\nrole = "stale"\nroles = ["platform"]\n', 'izzo');
+    expect(seat.roles).toEqual(['platform']);
+    expect(seat.role).toBe('platform');
+  });
+
+  it('a single-role file stays byte-identical (no roles array emitted)', () => {
+    const text = 'kind = "agent"\nrole = "observer"\n';
+    expect(serializeSeat(parseSeatFile(text, 'wanderer'))).toBe(text);
+  });
+
+  it('a multi-role seat round-trips byte-for-byte with role = first entry', () => {
+    const text = 'kind = "agent"\nrole = "designer"\nroles = ["designer", "platform"]\n';
+    expect(serializeSeat(parseSeatFile(text, 'miley'))).toBe(text);
+  });
+
+  it('seatRoles normalizes the two shapes to one list', () => {
+    expect(seatRoles(parseSeatFile('kind = "agent"\nrole = "observer"\n', 'w'))).toEqual([
+      'observer',
+    ]);
+    expect(seatRoles(parseSeatFile('kind = "agent"\nrole = ""\n', 'w'))).toEqual([]);
+    expect(
+      seatRoles(parseSeatFile('kind = "agent"\nrole = "a"\nroles = ["a", "b"]\n', 'w')),
+    ).toEqual(['a', 'b']);
+  });
+});
+
+describe('role file — summary (ADR 227)', () => {
+  it('parses and round-trips the one-line summary', () => {
+    const text = 'summary = "Owns the design surfaces"\ncharter = "The standing rule."\n';
+    const role = parseRoleFile(text);
+    expect(role.summary).toBe('Owns the design surfaces');
+    expect(serializeRole(role)).toBe(text);
+  });
+
+  it('a summary-less role file parses and stays byte-identical (back-compat)', () => {
+    const text = 'charter = "lead"\n[capabilities]\nis_admin = true\n';
+    const role = parseRoleFile(text);
+    expect(role.summary).toBeUndefined();
+    expect(serializeRole(role)).toBe(text);
   });
 });
 

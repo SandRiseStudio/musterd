@@ -1,4 +1,9 @@
-import { effectiveCapabilities, type Lifecycle } from '@musterd/protocol';
+import {
+  effectiveCapabilities,
+  type Lifecycle,
+  mergeRoleDefaults,
+  seatRoles,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { log } from '../log.js';
 import {
@@ -68,7 +73,14 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
   // Project role defaults (ADR 070): upsert the roles present in the files, drop the ones absent.
   const desiredRoles = new Set(spec.roles.map((r) => r.name));
   for (const { name, role } of spec.roles) {
-    upsertRole(db, team.id, name, role.capabilities ?? {}, role.charter ?? null);
+    upsertRole(
+      db,
+      team.id,
+      name,
+      role.capabilities ?? {},
+      role.charter ?? null,
+      role.summary ?? null,
+    );
   }
   deleteRoles(
     db,
@@ -141,8 +153,24 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
   for (const { name, seat } of spec.seats) {
     const m = getMemberByName(db, team.id, name);
     if (!m) continue;
+    // Multi-role (ADR 227): the ceiling is the restrictive merge of every held role's defaults.
+    // Roster truth is validated on the NEW `roles = [...]` form only — an unknown name there is
+    // drift, warned loudly, never a reason to drop the seat (a typo is a warning, not an outage).
+    // A legacy bare `role` string stays what it always was: an unvalidated display label (teams
+    // use it freely — "tester", "lead" — and flooding them with warnings would teach everyone to
+    // ignore the channel that matters).
+    const held = seatRoles(seat);
+    if (seat.roles !== undefined) {
+      for (const r of held) {
+        if (!roleDefaults.has(r)) {
+          result.errors.push(
+            `seat "${name}" names unknown role "${r}" — no roles/${r}.toml declares it; its defaults are ignored`,
+          );
+        }
+      }
+    }
     const caps = effectiveCapabilities(
-      roleDefaults.get(seat.role ?? '') ?? {},
+      mergeRoleDefaults(held.map((r) => roleDefaults.get(r) ?? {})),
       seat.capabilities ?? {},
     );
     // Admins can only be humans (ADR 145's authority overlay, made explicit by nick 2026-07-28 in
@@ -156,7 +184,7 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
         `seat "${name}" is an agent declaring is_admin — clamped to false (admins are human-only, ADR 172)`,
       );
     }
-    setMemberGovernance(db, m.id, seat.account_status ?? null, JSON.stringify(caps));
+    setMemberGovernance(db, m.id, seat.account_status ?? null, JSON.stringify(caps), held);
   }
 
   // REMOVE — a live member with no file is soft-tombstoned (never hard-deleted: the message log FK

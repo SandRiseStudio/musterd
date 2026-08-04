@@ -46,6 +46,11 @@ export const SeatFileSchema = z
   .object({
     kind: MemberKindSchema,
     role: z.string().default(''),
+    /** Multi-role (ADR 227): every role this seat holds, validated against `roles/*.toml` by the
+     *  daemon's reconcile (unknown names warn, never drop the seat). Absent on the common single-role
+     *  file — `role` alone reads as a one-entry list ({@link seatRoles}). When present it is
+     *  authoritative and `role` normalizes to its first entry (the display label). */
+    roles: z.array(z.string()).optional(),
     lifecycle: LifecycleSchema.optional(),
     until: z.string().datetime({ offset: true }).optional(),
     name: z.string().optional(),
@@ -68,6 +73,9 @@ export type SeatFile = z.infer<typeof SeatFileSchema>;
  * and an optional charter. Role defaults are the ceiling a seat's per-seat capabilities narrow under.
  */
 export const RoleFileSchema = z.object({
+  /** One-line summary the roster surfaces (ADR 227) — the discoverable face of the role; the full
+   *  `charter` stays prose for humans and primers. Optional on parse for pre-227 files. */
+  summary: z.string().optional(),
   capabilities: PartialCapabilitiesSchema.default({}),
   charter: z.string().optional(),
 });
@@ -97,7 +105,22 @@ export function parseSeatFile(text: string, name: string): SeatFile & { name: st
       `seat file body name "${seat.name}" disagrees with its filename "${name}" — the filename is authoritative`,
     );
   }
+  // Multi-role normalization (ADR 227): when `roles` is present it is authoritative and `role`
+  // becomes its first entry — hand-edit tolerance, so a stale `role` line never disagrees silently.
+  if (seat.roles !== undefined) {
+    return { ...seat, role: seat.roles[0] ?? '', name };
+  }
   return { ...seat, name };
+}
+
+/**
+ * The one list of roles a seat holds (ADR 227), normalized across the two file shapes: a `roles`
+ * array when present, else the legacy single `role` string as a one-entry list (empty ⇒ none —
+ * the roleless generalist).
+ */
+export function seatRoles(seat: Pick<SeatFile, 'role' | 'roles'>): string[] {
+  if (seat.roles !== undefined) return seat.roles;
+  return seat.role ? [seat.role] : [];
 }
 
 /** Extract the seat name (filename stem) from a `seats/<name>.toml` path. */
@@ -210,7 +233,12 @@ export function serializeTeam(team: TeamFile): string {
  */
 export function serializeSeat(seat: SeatFile): string {
   let out = line('kind', seat.kind);
-  out += line('role', seat.role ?? '');
+  // Multi-role (ADR 227): `role` stays the always-present display label (first role) so pre-227
+  // parsers keep working; the `roles` array is emitted only when it says more than `role` does
+  // (≥2 entries), so the common single-role file is byte-identical to its pre-227 form.
+  const roles = seatRoles(seat);
+  out += line('role', roles[0] ?? '');
+  if (roles.length >= 2) out += arrayLine('roles', roles);
   if (seat.lifecycle && seat.lifecycle !== 'forever') {
     out += line('lifecycle', seat.lifecycle);
     if (seat.until) out += line('until', seat.until);
@@ -229,12 +257,14 @@ export function serializeSeat(seat: SeatFile): string {
 }
 
 /**
- * Canonical `roles/<name>.toml`. Key order: `charter` (top-level) then the `[capabilities]` table.
+ * Canonical `roles/<name>.toml`. Key order: `summary`, `charter` (top-level) then the
+ * `[capabilities]` table.
  * An empty role (no charter, no caps) serializes to the empty string — the minimal form; the role
  * still exists by virtue of its filename.
  */
 export function serializeRole(role: RoleFile): string {
   let out = '';
+  if (role.summary) out += line('summary', role.summary);
   if (role.charter) out += line('charter', role.charter);
   const body = serializeCapabilities(role.capabilities ?? {});
   if (body) out += `[capabilities]\n${body}`;
