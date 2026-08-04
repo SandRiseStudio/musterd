@@ -3,11 +3,19 @@ import type { Database } from 'better-sqlite3';
 import { appendAudit, peerReviewGradeOf, reviewRouting } from './audit.js';
 import { memberIsHuman, memberModelByName, workerFamily } from './review.js';
 
-/** The closing seat, as much of it as the audit needs. */
+/**
+ * The closing seat, as much of it as the audit needs.
+ *
+ * `kind` carries a third value beyond the member kinds: `'system'`, the daemon closing a lane no
+ * seat was left to close (ADR 229). It is not cosmetic — see `verified` below.
+ */
 export interface Closer {
   name: string;
   kind: string;
 }
+
+/** ADR 229: the daemon itself, which is not a counterpart and can never confirm anything. */
+const SYSTEM_KIND = 'system';
 
 /** A merge attestation supplied by the closing patch itself (ADR 109), if any. */
 export interface MergedAttestation {
@@ -42,7 +50,15 @@ export function recordLaneClose(
   // time (pinned in this row so post-close handoffs can't flip the verdict). reason distinguishes
   // the counterpart confirm from the two honest self-close shapes.
   const ownerAtClose = before.owner_seat;
-  const verified = lane.state === 'done' && ownerAtClose !== null && closer.name !== ownerAtClose;
+  // ADR 229: the system is excluded EXPLICITLY, and this is the whole reason `kind: 'system'` exists.
+  // "A seat other than the owner closed it" is satisfied trivially by a daemon sweep, so without
+  // this clause every swept lane would record `verified: true` and a `counterpart_confirm` reason —
+  // a cross-seat review that never happened, fed straight into the ADR 056 diversity conclusions,
+  // which read this exact field. The failure would be silent and would corrupt research data rather
+  // than break anything visible. Pinned by `laneSweep.test.ts`.
+  const systemClosed = closer.kind === SYSTEM_KIND;
+  const verified =
+    !systemClosed && lane.state === 'done' && ownerAtClose !== null && closer.name !== ownerAtClose;
   // ADR 169/172: what the ready edge recorded — routed-or-not, and whether the lane's risk made a
   // human review REQUIRED. Read once; feeds both the reason and the missed flag.
   const routing = isAwaitingAcceptance(before.state)
@@ -92,31 +108,38 @@ export function recordLaneClose(
       reason:
         lane.state === 'abandoned'
           ? 'abandoned'
-          : verified
-            ? 'counterpart_confirm'
-            : isAwaitingAcceptance(before.state)
-              ? // A timeout means somebody was asked and did not answer. When the picker found
-                // nobody, no ask was ever sent, and calling that a timeout is simply false. Two
-                // no-ask shapes (ADR 172): an empty cross-family pool is the sanctioned
-                // `no_candidate` degradation; a risky lane whose REQUIRED human was never live is
-                // `human_review_missed` — a requirement with no one to meet it, not a shrug.
-                // `undefined` routing (a lane that entered review before the outcome was recorded)
-                // keeps the old label rather than inventing a verdict about the past.
-                routing.routed === false
-                ? // Same discipline one level down: only a RECORDED requirement earns the
-                  // `human_review_missed` label. A row that abstains keeps the older, weaker
-                  // `no_candidate` — the label it would have carried before the requirement was
-                  // ever recorded — rather than a verdict about a past that never wrote one down.
-                  routing.human_required === true
-                  ? 'human_review_missed'
-                  : 'no_candidate'
-                : // ADR 217: an ask WAS sent and the owner closed it themselves — but "timeout" was
-                  // asserting an elapsed wait nobody had measured. 11 of the first 18 such closes
-                  // happened inside five minutes, the fastest after 8 seconds, while the median
-                  // successful confirm took 22 minutes. The reason now says which of the two
-                  // opposite failures this was, and abstains when the promise is unknowable.
-                  waitVerdict
-              : 'self_close',
+          : // ADR 229: its own reason, ahead of every seat-authored one. Reusing `review_timeout`
+            // would undo the ADR 217 increment that separated "the owner gave up early" from
+            // "nobody ever answered" — a swept lane is a third, categorically different edge:
+            // nobody was even present to give up. The ledger has to be able to answer "did a seat
+            // decide this, or did the clock?".
+            systemClosed
+            ? 'review_swept'
+            : verified
+              ? 'counterpart_confirm'
+              : isAwaitingAcceptance(before.state)
+                ? // A timeout means somebody was asked and did not answer. When the picker found
+                  // nobody, no ask was ever sent, and calling that a timeout is simply false. Two
+                  // no-ask shapes (ADR 172): an empty cross-family pool is the sanctioned
+                  // `no_candidate` degradation; a risky lane whose REQUIRED human was never live is
+                  // `human_review_missed` — a requirement with no one to meet it, not a shrug.
+                  // `undefined` routing (a lane that entered review before the outcome was recorded)
+                  // keeps the old label rather than inventing a verdict about the past.
+                  routing.routed === false
+                  ? // Same discipline one level down: only a RECORDED requirement earns the
+                    // `human_review_missed` label. A row that abstains keeps the older, weaker
+                    // `no_candidate` — the label it would have carried before the requirement was
+                    // ever recorded — rather than a verdict about a past that never wrote one down.
+                    routing.human_required === true
+                    ? 'human_review_missed'
+                    : 'no_candidate'
+                  : // ADR 217: an ask WAS sent and the owner closed it themselves — but "timeout" was
+                    // asserting an elapsed wait nobody had measured. 11 of the first 18 such closes
+                    // happened inside five minutes, the fastest after 8 seconds, while the median
+                    // successful confirm took 22 minutes. The reason now says which of the two
+                    // opposite failures this was, and abstains when the promise is unknowable.
+                    waitVerdict
+                : 'self_close',
       // ADR 172: flagged even on a verified close — an agent counterpart's confirm on a risky lane
       // is a real review, but not the human one the risk tag demanded.
       ...(humanReviewMissed ? { human_review_missed: true } : {}),
