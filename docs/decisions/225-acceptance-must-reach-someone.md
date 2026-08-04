@@ -120,8 +120,13 @@ live, wake when offline — with the wake carrying a `derivation` of its own so 
 answerable without a join. ADR 209 already classes review wakes as portable, so that contract exists
 and is applied inconsistently.
 
-**2. The promise matches the measurement.** `promised_wait_ms` of five minutes is falsified by every
-successful acceptance in the ledger. The submit-time promise must be set from the measured
+**2. The promise matches the measurement.** — **WEAKENED, do not implement on this evidence.** See
+"What this ADR's evidence is actually worth": where a promise is actually recorded, confirms land at
+6.7 min against a 5.0-min promise. The claim below averaged pre-ADR-217 rows that record no promise
+at all, and does not survive.
+
+~~`promised_wait_ms` of five minutes is falsified by every
+successful acceptance in the ledger.~~ The submit-time promise must be set from the measured
 distribution, not from a round number — and the honest shape is not a short synchronous wait at all.
 Acceptance is asynchronous: the worker should be told so plainly at submit, and should never be
 implicitly encouraged to burn a dead five minutes before self-closing.
@@ -158,8 +163,18 @@ acceptor; an interrupt-line delivery record for each routed to a _live_ one, so 
 are separable in the ledger rather than pooled; and a new `no_reachable_acceptor` reason on
 `lane.closed`. All ride existing schemas.
 
-**Eval — and the blended number must not be the headline.** ryder's second finding is that the
-routed closes are **bimodal**, not one distribution with variance. Re-measured 2026-08-04:
+> **Retraction (2026-08-04, same day).** The bimodality argument below is **withdrawn**. ryder
+> retracted it and I confirmed the retraction: `review_timeout` and `review_unanswered` are not two
+> acceptor populations, they are two **labelling epochs**. All 22 `review_timeout` rows carry a NULL
+> `promised_wait_ms` and span 07-28→08-04; all 7 `review_unanswered` rows carry one and fall on
+> 08-04 alone. ADR 217 had already made this split: `laneClose.ts` emits `review_timeout` as the
+> **abstaining** label when `promised_ms` or `time_in_review` is unknowable. So the contrast is a
+> week of pre-217 abstentions against one day of post-217 measurement — it says nothing about
+> acceptor state. The table is kept below, struck, because the error is more instructive than its
+> absence. See "What this ADR's evidence is actually worth."
+
+**~~Eval — the blended number must not be the headline.~~ ~~ryder's second finding is that the
+routed closes are bimodal, not one distribution with variance.~~** ~~Re-measured 2026-08-04:~~
 
 | Reason                | n   | Mean time in review | Range        |
 | --------------------- | --- | ------------------- | ------------ |
@@ -167,15 +182,46 @@ routed closes are **bimodal**, not one distribution with variance. Re-measured 2
 | `counterpart_confirm` | 19  | 62.3 min            | 1.6–423 min  |
 | `review_timeout`      | 22  | **737.6 min**       | 0.1–5589 min |
 
-A 12-minute give-up and a 12-hour give-up are not the same failure with different luck. The tight
-`review_unanswered` cluster looks like ryder's 13:49 case — a live seat, asked, never told, worker
-gives up fast. The 12-hour tail looks like nobody was there at all. **The original "36% answered"
-pooled these two populations, which is precisely why a single primitive looked sufficient.**
+## What this ADR's evidence is actually worth
 
-So the Eval reports the answer rate **split by acceptor state at submit time** — live versus offline
-— never blended. If that split does not separate the two clusters, ryder's live-vs-offline argument
-collapses and the single-primitive framing was right; that check comes before the experiment is
-designed, not after.
+Chasing the retraction above showed the same flaw runs deeper, and it takes a second headline claim
+with it. **Only 13 of 152 recorded closes carry a `promised_wait_ms` at all** — the rest predate
+ADR 217 and abstain. Split the confirms on that line:
+
+| Confirms                    | n   | Mean time in review | Mean promise |
+| --------------------------- | --- | ------------------- | ------------ |
+| **with** a recorded promise | 5   | **6.7 min**         | **5.0 min**  |
+| without one (pre-217)       | 14  | 83.7 min            | —            |
+
+So the original claim — _"a successful acceptance takes 73 minutes against a five-minute promise; the
+promise is contradicted by its own successes"_ — is **false**. It averaged 14 rows that never
+recorded a promise together with 5 that did. Where the promise is actually measured, acceptance
+lands at **6.7 minutes against a 5.0-minute promise**: modestly over, essentially honest. Decision 2
+below is therefore substantially weakened and should not be implemented on this evidence.
+
+**The honest position.** This ADR's Context table is a week of mostly pre-217 rows whose labels no
+longer mean what the current code makes them mean. Every aggregate in it should be read as
+provisional until re-measured over the post-217 window, which is currently n=13 — too small to
+conclude anything.
+
+**What survives, and it is the part worth keeping:** the mechanism gap is verified _in code, not
+inferred from aggregates_. `pendingInterrupts` admits only `isUrgent || steer`, so a routed
+acceptance cannot reach a live seat through the ADR 088 interrupt line regardless of how the close is
+later labelled. ryder's n=4 is direct observation, not a ledger average. And the 92%-reached-nobody
+wake figure came from joining leases to causing acts, which is not epoch-sensitive in the same way.
+The residency split stands on those; nothing else here is load-bearing.
+
+**My error, twice in one evening, and it is one error.** dolly caught me keying a measurement on an
+incidental column (`derivation`) rather than on what caused the row. I then verified ryder's
+bimodality by _reproducing the arithmetic_ and called that verification — never asking what wrote the
+labels or whether they meant the same thing across the window. **Reproducing a number is not
+verifying a claim about what the number means.** The check that was missing both times is the same
+one: _what wrote this row, and over what period does this label mean one thing?_
+
+**Eval.** Report the answer rate **split by acceptor state at submit time** — live versus offline —
+never blended, and **only over the post-217 window** where the labels are commensurable. That split
+is now motivated by the mechanism (live and offline are genuinely different delivery paths), not by
+the retracted bimodality.
 
 (Note also that the baseline drifts: the first draft's 16 confirms became 19 within the hour as a
 human answered four pending asks. These are snapshots of a live ledger, not fixtures.)
