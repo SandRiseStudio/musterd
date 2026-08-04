@@ -150,6 +150,36 @@ live, wake when offline — with the wake carrying a `derivation` of its own so 
 answerable without a join. ADR 209 already classes review wakes as portable, so that contract exists
 and is applied inconsistently.
 
+> **Amendment (2026-08-04, same day): "live" in this table is two conditions, and the gap between
+> them is a real population.** Found while checking a live episode of this ADR's own subject matter,
+> and it is the ADR's thesis recursing one level up — _presence is not reachability_ applied to
+> **instrument selection** rather than to routing.
+>
+> Routing eligibility is `hasLivePresence` (`store/presence.ts`): a presence row whose `last_seen_at`
+> heartbeat is fresh. Interrupt-line delivery is `GET /inbox/interrupt-check`, which by its own
+> contract is _"a PostToolUse hook [that] runs at every tool boundary."_ A connection heartbeats while
+> **idle**; the hook fires only while the seat is **executing tool calls**. These are not the same
+> condition, and the difference is not academic:
+>
+> | Acceptor                        | Routed as | Interrupt line reaches it?                             | Wake?                       |
+> | ------------------------------- | --------- | ------------------------------------------------------ | --------------------------- |
+> | live **and in a tool loop**     | live      | yes, at the next tool boundary                         | not needed                  |
+> | live **but idle between turns** | live      | **only when the seat next acts, which nothing bounds** | **no — it is classed live** |
+> | offline                         | offline   | no                                                     | yes                         |
+>
+> The middle row is routed to the free rail, cannot be promptly reached by it, and is disqualified
+> from the paid one _because it looks live_. It is not permanently unreachable — the hook fires
+> whenever the seat resumes — but the latency is bounded by **the acceptor's own next action**, which
+> is exactly the "wait for them to voluntarily look" failure this ADR was written to end. So #651
+> does not make delivery unconditional as decision 1 promises; it makes it conditional on the
+> acceptor doing something first. That is a weaker defect than the original, and the same shape.
+>
+> This does not retract decision 1 — the interrupt line is still the right free instrument for a
+> working seat, and it is still strictly better than an inbox. It means the live/offline split is
+> **under-specified**, and the honest three-way is _interruptible_ / _wakeable_ / _neither_, with
+> `no_reachable_acceptor` widening to cover an idle-live seat that nothing may reach in time. Sizing
+> the middle row is a measurement, not a guess, and it is now the first thing the Eval should report.
+
 **2. The promise matches the measurement.** — **WEAKENED, do not implement on this evidence.** See
 "What this ADR's evidence is actually worth": where a promise is actually recorded, confirms land at
 6.7 min against a 5.0-min promise. The claim below averaged pre-ADR-217 rows that record no promise
@@ -321,10 +351,16 @@ That check turned out to be the narrow case of a wider one. Both errors above ar
 defect class named in "The shared-predicate trap" — a value whose second consumer needs something its
 first consumer never considered — and the generalized form of the question is stated there.
 
-**Eval.** Report the answer rate **split by acceptor state at submit time** — live versus offline —
-never blended, and **only over the post-217 window** where the labels are commensurable. That split
-is now motivated by the mechanism (live and offline are genuinely different delivery paths), not by
-the retracted bimodality.
+**Eval.** Report the answer rate **split by acceptor state at submit time** — never blended, and
+**only over the post-217 window** where the labels are commensurable. That split is now motivated by
+the mechanism (the states are genuinely different delivery paths), not by the retracted bimodality.
+
+The split is **three-way, not two**, per the amendment to decision 1: _interruptible_ (live and in a
+tool loop), _wakeable_ (offline), _neither_ (live but idle — routed to the free rail, not promptly
+reachable by it, and disqualified from the paid one). **Report the size of that middle bucket
+first.** It is currently unmeasured, it is the population for which #651 shipped a delivery guarantee
+it cannot keep, and every other number here is a pooled average until it is known. If it turns out to
+be near-empty the amendment is a footnote; if it is large, it is the next increment.
 
 (Note also that the baseline drifts: the first draft's 16 confirms became 19 within the hour as a
 human answered four pending asks. These are snapshots of a live ledger, not fixtures.)
@@ -353,3 +389,33 @@ cheap one and the one that works, so an experiment that omits it would price the
 against a straw control. Report the routed answer rate separately per acceptor state, per arm. The
 confound to avoid is the one ADR 056 keeps hitting — do not let the arms differ in model family,
 since the ladder already sorts acceptors by decorrelation grade.
+
+**Preconditions — a run that violates either of these returns a null that means nothing.** Both were
+observed on 2026-08-04 while attempting exactly this measurement informally, and neither was in the
+design above. They are stated as preconditions rather than confounds because they do not bias the
+result, they void it.
+
+1. **The daemon must be steady, not inside an autorefresh window.** autorefresh syncs, rebuilds and
+   bounces the daemon on merge, holding the restart while the tip is still moving. An acceptance
+   routed seconds before a bounce cannot be scored: if the acceptor answers, the restart is an
+   uncontrolled co-intervention; if they do not, delivery failure is indistinguishable from the
+   restart eating the delivery. Concretely, one ask on 2026-08-04 was routed at 16:46:05 and the
+   daemon restarted at 16:46:38 — 33 seconds. **This precondition is adversarial to the phenomenon:**
+   a merge burst is simultaneously when acceptance traffic peaks and when the rail is least
+   trustworthy, so the excluded window is not a rare edge, and excluding it must be recorded rather
+   than quietly dropped.
+2. **A "live" arm requires the acceptor to be live _and executing tool calls_**, per the amendment to
+   decision 1 above. A seat that holds a fresh heartbeat while idle is routed as live and is not
+   reachable by the instrument under test, so pooling it into the live arm measures the wrong
+   population and will understate the interrupt line. On 2026-08-04 an acceptance routed at 16:23:00
+   was answered at 16:36:50 — 13m50s — by an acceptor who held **no session at all** during the
+   interval; the hook had no boundary to fire at, and the delivery mechanism was a human starting a
+   session. Scored naively that is a failed live arm. It is not: it is an offline case with no wake,
+   and it belongs in the offline arm.
+
+**Instrumentation this implies, and it should be built before the experiment rather than
+reconstructed after.** Record at submit time, per routed acceptance: the daemon build, whether an
+autorefresh was in flight, and the acceptor's state resolved to the three-way above
+(_interruptible_ / _wakeable_ / _neither_) rather than the two-way `hasLivePresence` answer. Without
+the third field the arms cannot be separated at analysis time, and the ADR would be measuring a
+pooled population again — the error this document has already made twice.
