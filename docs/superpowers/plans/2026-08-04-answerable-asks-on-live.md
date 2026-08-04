@@ -1,5 +1,7 @@
 # Answerable asks on /live — Implementation Plan
 
+> **COMPLETE (2026-08-04).** All nine tasks shipped on `docs/adr-222-answerable-asks-on-live` ([PR #635](https://github.com/SandRiseStudio/musterd/pull/635)). Four corrections the plan got wrong, kept here because the next reader should not repeat them: tasks 4 and 5 were not separable (`signOut` has no consumer until the seat chip exists, so lint fails); the daemon member lookup is `getMemberByName`, not `findMemberByName`; the `#s=` strip must go through the ROUTER's history, not `window.history.replaceState`; and a new CLI file must be described in `docs/architecture/04-cli.md` or `arch-trees:check` fails.
+
 > **For agentic workers:** implement task-by-task in your own musterd lane. Steps use checkbox (`- [ ]`) syntax for tracking. Do **not** dispatch writing subagents (global CLAUDE.md): a lane per unit of work, a `handoff` per owner.
 
 **Goal:** A human watching `/live` can sign in as themselves and answer the asks that are waiting on them, from the office, without handling a secret.
@@ -53,7 +55,7 @@
 
 - Produces: the ADR number every later commit message references.
 
-- [ ] **Step 1: Re-confirm the number is still free**
+- [x] **Step 1: Re-confirm the number is still free**
 
 ```bash
 pnpm adr:next
@@ -61,18 +63,18 @@ pnpm adr:next
 
 Expected: `next free ADR number: 222`. It allocates against the working tree, `origin/main` **and every open PR**. Note its blind spot, which bit this arc for real: a number claimed on a branch nobody has pushed is invisible to it, so two authors can both run the tool, both get the same answer, and both be right at the time. **Push a branch as a draft PR as soon as it carries an ADR number.** If the tool says something other than 222, take that number and update every reference in this plan.
 
-- [ ] **Step 2: Write the ADR**
+- [x] **Step 2: Write the ADR**
 
 H1 must be exactly `# 222 — Answerable asks on /live: the surface a human watches is the one they can act on`, matching the filename. Carry over from the spec, in this order: Context (the ADR 149 read-only-by-design decision and the transition it never specified), Problem, the measured baseline table, Decision (the four numbered parts), the two constraints nick raised, Consequences, Alternatives considered, `## Observability & Evaluation`, Increments.
 
 State the layering question honestly and then resolve it: the daemon already reads `~/.musterd/config.json` in `resolveRosterRoots` ([packages/server/src/config.ts:81](../../../packages/server/src/config.ts)), whose own comment gives the rationale — _"Reading the global config keeps the daemon decoupled from the CLI package while sharing the `~/.musterd/` home the db already lives in."_ The new reader is the same pattern applied to a second key, not a new coupling.
 
-- [ ] **Step 3: Run the doc gates**
+- [x] **Step 3: Run the doc gates**
 
 Run: `pnpm adr-numbers:check && pnpm vocab:check`
 Expected: PASS. `vocab:check` fails on `epic`/`milestone`/`sprint` — say Goal, Lane, increment.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 pnpm exec prettier --write docs/decisions/222-answerable-asks-on-live.md
@@ -93,7 +95,7 @@ git commit -m "ADR 222: answerable asks on /live"
 
 - Produces: `MemberIdentity = { as: string; token: string }`, `loadMemberIdentity(team: string): MemberIdentity | null`, `saveMemberIdentity(team: string, id: MemberIdentity): void`, `forgetMemberIdentity(team: string): void`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // packages/web/src/live/memberIdentity.test.ts
@@ -152,12 +154,12 @@ describe('memberIdentity', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `pnpm vitest run packages/web/src/live/memberIdentity.test.ts`
 Expected: FAIL — cannot resolve `./memberIdentity`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 // packages/web/src/live/memberIdentity.ts
@@ -227,12 +229,12 @@ export function forgetMemberIdentity(team: string): void {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `pnpm vitest run packages/web/src/live/memberIdentity.test.ts`
 Expected: PASS, 6 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 pnpm exec prettier --write packages/web/src/live/memberIdentity.ts packages/web/src/live/memberIdentity.test.ts
@@ -252,7 +254,7 @@ git commit -m "One member identity slot per browser per team (ADR 222)"
 
 - Consumes: `loadMemberIdentity`, `saveMemberIdentity`, `forgetMemberIdentity` from Task 2.
 
-- [ ] **Step 1: Replace the private key with the shared module**
+- [x] **Step 1: Replace the private key with the shared module**
 
 Delete the `MEMBER_KEY` constant and the local `loadMember` function at `board.tsx:42-56`. Add to the existing `../live/...` import block:
 
@@ -271,12 +273,12 @@ Then four call-site swaps:
 - `:194` `if (cfg) window.localStorage.removeItem(MEMBER_KEY(cfg.team))` → `if (cfg) forgetMemberIdentity(cfg.team)`
 - `:238` `loadMember(urlTeam)` → `loadMemberIdentity(urlTeam)`
 
-- [ ] **Step 2: Typecheck and run the board tests**
+- [x] **Step 2: Typecheck and run the board tests**
 
 Run: `pnpm build && pnpm typecheck && pnpm vitest run packages/web/src/live/boardWrite.test.ts`
 Expected: PASS, no reference to `MEMBER_KEY` remains (`grep -rn "MEMBER_KEY" packages/web/src` returns nothing).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 pnpm exec prettier --write packages/web/src/routes/board.tsx
@@ -297,7 +299,7 @@ git commit -m "/board reads its identity from the shared slot (ADR 222)"
 - Consumes: Task 2's module.
 - Produces: a `signedIn: boolean` React state in `LivePage`, and `signIn(team, id)` / `signOut()` callbacks passed to `AsksStrip` in Task 5.
 
-- [ ] **Step 1: Write the failing test for the precedence rule**
+- [x] **Step 1: Write the failing test for the precedence rule**
 
 The rule is pure, so extract and test it rather than testing the component. Add to `packages/web/src/live/memberIdentity.test.ts`:
 
@@ -331,12 +333,12 @@ describe('resolveIdentity — the precedence chain', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `pnpm vitest run packages/web/src/live/memberIdentity.test.ts`
 Expected: FAIL — `resolveIdentity` is not exported.
 
-- [ ] **Step 3: Add `resolveIdentity` to `memberIdentity.ts`**
+- [x] **Step 3: Add `resolveIdentity` to `memberIdentity.ts`**
 
 ```ts
 /** How the connected seat was chosen — the rail needs this to know whether it may answer. */
@@ -361,12 +363,12 @@ export function resolveIdentity(
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `pnpm vitest run packages/web/src/live/memberIdentity.test.ts`
 Expected: PASS, 9 tests.
 
-- [ ] **Step 5: Wire the chain into `live.tsx`**
+- [x] **Step 5: Wire the chain into `live.tsx`**
 
 In `LivePage`, add state and callbacks:
 
@@ -406,7 +408,7 @@ setSignedIn(false);
 
 In the URL hydration effect, the `?as=…#w=…` branch at `:213` already sets cfg directly — add `setSignedIn(false)` inside it, because a watch link is explicitly not you.
 
-- [ ] **Step 6: Make an expired member credential say so**
+- [x] **Step 6: Make an expired member credential say so**
 
 `recoverObserver` at `:84` currently reprovisions an observer on any 401. Silently doing that to a _member_ would remove the answer buttons again — the exact defect this arc fixes. Guard it:
 
@@ -428,7 +430,7 @@ const recoverObserver = useCallback(() => {
 
 Add `const cfgRef = useRef(cfg); useEffect(() => { cfgRef.current = cfg; }, [cfg]);` above it — the callback is memoised and must not close over a stale `cfg`.
 
-- [ ] **Step 7: Verify in the browser**
+- [x] **Step 7: Verify in the browser**
 
 Run: `pnpm build && pnpm --filter @musterd/web preview`
 
@@ -436,7 +438,7 @@ Run: `pnpm build && pnpm --filter @musterd/web preview`
 
 Open `/live?team=<slug>`, sign into `/board` first with a member credential, then reload `/live`. Expected: `/live` connects as that member without being asked. Confirm with `localStorage.getItem('musterd.member.v1.<slug>')` in the console.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 pnpm exec prettier --write packages/web/src/routes/live.tsx packages/web/src/live/memberIdentity.ts packages/web/src/live/memberIdentity.test.ts
@@ -459,7 +461,7 @@ git commit -m "/live prefers a signed-in member over an observer (ADR 222)"
 - Consumes: `signedIn`, `signIn`, `signOut` from Task 4.
 - Produces: `AsksStrip` props `signedIn: boolean`, `onSignIn: () => void`, `onSignOut: () => void`, `localIdentity: string | null` (Task 8 fills the last one; pass `null` until then).
 
-- [ ] **Step 1: Extend the props and derive the four states**
+- [x] **Step 1: Extend the props and derive the four states**
 
 Replace the `canAnswer` line at `:93`:
 
@@ -482,7 +484,7 @@ Add below it:
 const wayIn: 'offer' | 'paste' | 'none' = watchLink ? 'none' : localIdentity ? 'offer' : 'paste';
 ```
 
-- [ ] **Step 2: Render the sign-in slot and the seat chip**
+- [x] **Step 2: Render the sign-in slot and the seat chip**
 
 In the rail, replace the `{askIsLoud(lead.state) && canAnswer && (…)}` block with:
 
@@ -525,7 +527,7 @@ And immediately before the closing `</div>` of `lc-asks__rail`, after the `seat 
 </button>;
 ```
 
-- [ ] **Step 3: Add the styles**
+- [x] **Step 3: Add the styles**
 
 ```css
 /* The way in sits where the answer will sit, so one click swaps it for Approve/Deny in place and
@@ -562,7 +564,7 @@ And immediately before the closing `</div>` of `lc-asks__rail`, after the `seat 
 }
 ```
 
-- [ ] **Step 4: Pass the new props at both call sites**
+- [x] **Step 4: Pass the new props at both call sites**
 
 `live.tsx:323`:
 
@@ -582,13 +584,13 @@ topSlot={
 
 `asks-preview.tsx:176` gets `signedIn={false} localIdentity={null} onSignIn={() => {}} onSignOut={() => {}}`.
 
-- [ ] **Step 5: Verify all four states in the browser**
+- [x] **Step 5: Verify all four states in the browser**
 
 Run: `pnpm build && pnpm --filter @musterd/web preview` (restart preview after the build).
 
 Check, in order: signed out on-machine → the ghost paste button and a `watching` chip; signed in → Approve/Deny/Deciding and a `nick · <team>` chip; a watch link → no sign-in affordance at all. Screenshot the rail in each state. Confirm the rail is still exactly one line at 1280px and at 380px.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 pnpm exec prettier --write packages/web/src/live/AsksStrip.tsx packages/web/src/live/Live.css packages/web/src/routes/live.tsx packages/web/src/routes/asks-preview.tsx
@@ -609,7 +611,7 @@ git commit -m "The asks rail says why it is read-only and offers the way in (ADR
 
 - Consumes: `AskView.state` and `askIsLoud` from `asks.ts` (already exported).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // append to packages/web/src/live/asks.test.ts
@@ -640,12 +642,12 @@ it('an ask answered by another admin stops being loud the moment their answer ar
 });
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `pnpm vitest run packages/web/src/live/asks.test.ts`
 Expected: PASS if `deriveAsks` already folds a third party's answer (it keys on `in_reply_to`, not on sender). **If it passes, that is the point** — the derivation is already correct and only the component is wrong. Record the result and continue.
 
-- [ ] **Step 3: Fix the component's disabled rule**
+- [x] **Step 3: Fix the component's disabled rule**
 
 `busy` is keyed on this browser's own in-flight send, so a second admin sees live buttons on an ask that is already answered. The buttons must follow the _ask_, not the sender. In `AskCard` and the inline quick-actions, replace every `disabled={busy}` / `disabled={busy === lead.env.id}` with:
 
@@ -655,12 +657,12 @@ disabled={busy === ask.env.id || !askIsLoud(ask.state)}
 
 (and `busy === lead.env.id || !askIsLoud(lead.state)` for the rail's inline pair). The existing `{askIsLoud(...) && canAnswer && …}` guards already unmount them on the next render; the `disabled` is what closes the window between the firehose delivering the other admin's answer and React committing.
 
-- [ ] **Step 4: Run the web tests**
+- [x] **Step 4: Run the web tests**
 
 Run: `pnpm vitest run packages/web/src/live`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 pnpm exec prettier --write packages/web/src/live/AsksStrip.tsx packages/web/src/live/asks.test.ts
@@ -683,7 +685,7 @@ git commit -m "Answer buttons follow the ask, not the sender (ADR 222)"
 
 - Produces: `GET /teams/:slug/local-identity` → `{available: false}` or `{available: true, as: string, credential: string}`; `readLocalIdentity(team: string, env?: NodeJS.ProcessEnv): {name: string; key: string} | null`.
 
-- [ ] **Step 1: Write the failing integration tests**
+- [x] **Step 1: Write the failing integration tests**
 
 ```ts
 // append near the other signin-handoff tests in packages/server/src/transport/integration.test.ts
@@ -709,12 +711,12 @@ it("offers this machine's identity to a local page, and never off-machine (ADR 2
 
 Follow the surrounding file's helpers for `get`/`post` and for simulating a non-local peer — reuse whatever the existing `requireLocalPeer` tests do rather than inventing a mechanism.
 
-- [ ] **Step 2: Run and watch it fail**
+- [x] **Step 2: Run and watch it fail**
 
 Run: `pnpm build && pnpm vitest run packages/server/src/transport/integration.test.ts -t 'local-identity'`
 Expected: FAIL — 404, no such route.
 
-- [ ] **Step 3: Add the vault reader**
+- [x] **Step 3: Add the vault reader**
 
 ```ts
 // packages/server/src/config.ts, beside resolveRosterRoots
@@ -747,11 +749,11 @@ export function readLocalIdentity(
 }
 ```
 
-- [ ] **Step 4: Add the audit actions**
+- [x] **Step 4: Add the audit actions**
 
 In `packages/server/src/store/audit.ts`, beside `'signin.handoff_staged'` at `:223`, add `| 'signin.local_offered'` and `| 'signin.local_redeemed'`, and extend the comment block above to say what they mean.
 
-- [ ] **Step 5: Add the route**
+- [x] **Step 5: Add the route**
 
 ```ts
 // packages/server/src/transport/http.ts, immediately after the signin-handoff GET
@@ -798,12 +800,12 @@ if (method === 'GET' && rest === '/local-identity') {
 
 Import `readLocalIdentity` from `../config.js` alongside the existing `isLocalPeer, resolveRosterRoots` at `:50`. Check the actual member-lookup helper name in `ctx.db` and use it rather than `findMemberByName` if it differs.
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 Run: `pnpm build && pnpm vitest run packages/server/src/transport/integration.test.ts`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 pnpm exec prettier --write packages/server/src/config.ts packages/server/src/store/audit.ts packages/server/src/transport/http.ts packages/server/src/transport/integration.test.ts
@@ -826,7 +828,7 @@ git commit -m "The daemon offers this machine's sign-in identity, localhost only
 - Consumes: Task 7's route, Task 5's `localIdentity` prop.
 - Produces: `fetchLocalIdentity(team: string): Promise<{as: string; credential: string} | null>`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // append to packages/web/src/live/client.test.ts
@@ -856,12 +858,12 @@ it('fetchLocalIdentity hands back the identity when this machine has one', async
 });
 ```
 
-- [ ] **Step 2: Run and watch it fail**
+- [x] **Step 2: Run and watch it fail**
 
 Run: `pnpm vitest run packages/web/src/live/client.test.ts`
 Expected: FAIL — `fetchLocalIdentity` is not exported.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 /**
@@ -889,7 +891,7 @@ export async function fetchLocalIdentity(
 }
 ```
 
-- [ ] **Step 4: Probe once per team in `live.tsx`**
+- [x] **Step 4: Probe once per team in `live.tsx`**
 
 ```ts
 // Probed once per connected team, never polled: it is a fact about this machine, not a live signal.
@@ -919,13 +921,13 @@ onSignIn={() => {
 }}
 ```
 
-- [ ] **Step 5: Run tests and verify end to end**
+- [x] **Step 5: Run tests and verify end to end**
 
 Run: `pnpm vitest run packages/web/src/live && pnpm build`
 
 Restart `vite preview`, open `/live?team=<slug>` as an observer, click **Sign in as nick to answer**. Expected: the button is replaced in place by Approve / Deny / Deciding, the chip flips from `watching` to `nick · <team>`, and the roster shows nick `online` (ADR 155 inc 3 firing for the first time). Screenshot before and after.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 pnpm exec prettier --write packages/web/src/live/client.ts packages/web/src/live/client.test.ts packages/web/src/routes/live.tsx
@@ -948,7 +950,7 @@ git commit -m "One-click sign-in on /live (ADR 222)"
 - Consumes: `redeemSignin(team, nonce)` from `client.ts` (already exported, already used by `/board`).
 - Produces: `surfaceUrl(server, team, surface: 'board' | 'live')`, `signinUrl(server, team, nonce, surface)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // packages/cli/src/commands/board.test.ts
@@ -961,12 +963,12 @@ it('signs into either surface with the same one-shot nonce (ADR 222)', () => {
 });
 ```
 
-- [ ] **Step 2: Run and watch it fail**
+- [x] **Step 2: Run and watch it fail**
 
 Run: `pnpm vitest run packages/cli/src/commands/board.test.ts`
 Expected: FAIL — `signinUrl` takes three arguments.
 
-- [ ] **Step 3: Generalise the URL builders**
+- [x] **Step 3: Generalise the URL builders**
 
 ```ts
 export type SigninSurface = 'board' | 'live';
@@ -994,7 +996,7 @@ export function signinUrl(
 
 Extract the body of `boardCommand` into `signinCommand(parsed, surface)`, threading `surface` through `signinUrl` and every user-facing string (`opening the board` → `opening the office` for `live`). `boardCommand` becomes `signinCommand(parsed, 'board')`.
 
-- [ ] **Step 4: Add the command**
+- [x] **Step 4: Add the command**
 
 ```ts
 // packages/cli/src/commands/live.ts
@@ -1013,7 +1015,7 @@ export async function liveCommand(parsed: Parsed): Promise<number> {
 
 Register `live` in the command registry beside `board`, with the same `--print` / `--no-open` / `--as` / `--team` flags, and add it to the help text.
 
-- [ ] **Step 5: Redeem `#s=` on /live**
+- [x] **Step 5: Redeem `#s=` on /live**
 
 Port the `board.tsx:215-232` block into `live.tsx`'s hydration effect, **before** the `#w=` watch-link branch (a sign-in nonce outranks a watch token; they never appear together, and if they did the human's own identity is the right answer):
 
@@ -1036,13 +1038,13 @@ if (urlTeam && nonce) {
 }
 ```
 
-- [ ] **Step 6: Run everything and verify**
+- [x] **Step 6: Run everything and verify**
 
 Run: `pnpm build && pnpm typecheck && pnpm vitest run && pnpm lint && pnpm format:check && pnpm perf:check`
 
 Then, end to end: `node packages/cli/dist/index.js live --team <slug>` from a folder bound to your seat. Expected: the office opens, already signed in, chip reads `<you> · <team>`, and the terminal prints a fragment-free URL.
 
-- [ ] **Step 7: Commit and open the PR**
+- [x] **Step 7: Commit and open the PR**
 
 ```bash
 pnpm exec prettier --write packages/cli/src/commands/board.ts packages/cli/src/commands/live.ts packages/cli/src/commands/board.test.ts packages/web/src/routes/live.tsx
