@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Clock } from '../live/Clock';
 import liveCss from '../live/Live.css?url';
@@ -17,8 +17,16 @@ import {
   saveObserver,
   forgetObserver,
   genObserverName,
+  acquireObserver,
   acquireWatchLinkObserver,
+  redeemSignin,
 } from '../live/client';
+import {
+  fetchLocalIdentity,
+  forgetMemberIdentity,
+  loadMemberIdentity,
+  saveMemberIdentity,
+} from '../live/memberIdentity';
 import { firehoseSound, roomTone } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
 import { officeRoom } from '../live/officeRoom';
@@ -49,9 +57,15 @@ type Collapsed = Record<PanelId, boolean>;
 const NO_COLLAPSE: Collapsed = { office: false, roster: false, stream: false };
 
 function LivePage() {
+  const router = useRouter();
   const [team, setTeam] = useState('');
   const [advanced, setAdvanced] = useState({ open: false, as: '', token: '' });
   const [cfg, setCfg] = useState<LiveConfig | null>(null);
+  /** True when `cfg` is a real member (ADR 222) rather than an observer or a watch-link seat — the
+   *  difference between an office you can act in and one you can only read. */
+  const [signedIn, setSignedIn] = useState(false);
+  /** Connected via an explicit watch link — read-only by the team's choice, not by accident. */
+  const [watchLink, setWatchLink] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Collapsed>(NO_COLLAPSE);
@@ -93,6 +107,20 @@ function LivePage() {
     const staleToken = cfg?.token;
     if (!team || !staleToken) return;
     if (recoveredToken.current === staleToken) return; // already handling this exact credential
+    // A signed-in human is NOT silently demoted to an observer (ADR 222). Doing that would take the
+    // answer buttons away again with no explanation — the exact defect this arc exists to fix — so a
+    // dead member credential drops back to watching and says why.
+    if (signedIn) {
+      recoveredToken.current = staleToken;
+      forgetMemberIdentity(team);
+      setSignedIn(false);
+      setFormError('your sign-in expired — sign in again to answer asks');
+      void acquireObserver(team).then(setCfg, (e: unknown) => {
+        setFormError(e instanceof Error ? e.message : String(e));
+        setCfg(null);
+      });
+      return;
+    }
     if (recoverAttempts.current >= 2) {
       forgetObserver(team);
       setFormError('the live observer keeps being rejected — reconnect or check the daemon');
@@ -113,7 +141,7 @@ function LivePage() {
         setCfg(null);
       }
     })();
-  }, [cfg?.team, cfg?.token]);
+  }, [cfg?.team, cfg?.token, signedIn]);
   const armRecovery = useCallback(() => {
     recoverAttempts.current = 0;
   }, []);
@@ -129,6 +157,74 @@ function LivePage() {
   const board = useWorkingOn(cfg, envelopes);
   const entries = roomEntries(roster, board);
 
+  /**
+   * Does this machine hold an identity we could sign in as with one click (ADR 222)? Probed once per
+   * connected team and never polled — it is a fact about this machine, not a live signal, and the
+   * perf contract is unambiguous that idle cost is paid by every viewer forever. Skipped entirely
+   * once signed in, because then the answer cannot change anything.
+   *
+   * The name goes in state (the rail renders it); the credential stays in a ref, so it never enters
+   * the render path or a dependency array.
+   */
+  const [localIdentity, setLocalIdentity] = useState<string | null>(null);
+  const localCreds = useRef<{ as: string; credential: string } | null>(null);
+  useEffect(() => {
+    const slug = cfg?.team;
+    if (!slug || signedIn) return;
+    let cancelled = false;
+    void fetchLocalIdentity(slug).then((id) => {
+      if (cancelled) return;
+      localCreds.current = id;
+      setLocalIdentity(id?.as ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cfg?.team, signedIn]);
+
+  /**
+   * Route back to the credential form (ADR 222). The sign-in fields live on the connect screen, so
+   * an already-connected observer has to return to it — which is exactly the dead end the rail was
+   * reporting: there was no way back at all once a seat was cached.
+   */
+  const promptSignIn = useCallback(() => {
+    setAdvanced({ open: true, as: '', token: '' });
+    setFormError(null);
+    setCfg(null);
+  }, []);
+
+  /** Become yourself on this browser: remember the identity and reconnect as it (ADR 222). */
+  const signIn = useCallback((slug: string, id: { as: string; token: string }) => {
+    saveMemberIdentity(slug, id);
+    setSignedIn(true);
+    setFormError(null);
+    setCfg({ team: slug, as: id.as, token: id.token });
+  }, []);
+
+  /** Hand the screen back: drop the identity and fall back to watching. The escape hatch a cached
+   *  seat never had — before ADR 222 the only way out was clearing localStorage by hand. */
+  const signOut = useCallback(() => {
+    const slug = cfg?.team;
+    if (!slug) return;
+    forgetMemberIdentity(slug);
+    setSignedIn(false);
+    void acquireObserver(slug).then(setCfg, (e: unknown) =>
+      setFormError(e instanceof Error ? e.message : String(e)),
+    );
+  }, [cfg?.team]);
+
+  /**
+   * The rail's one button, both meanings (ADR 222). If this machine has an identity, becoming
+   * yourself is a click and nothing else happens. If it does not — off-machine, or no CLI identity
+   * here — the same button falls back to the credential form, which does work over the network.
+   */
+  const signInHere = useCallback(() => {
+    const id = localCreds.current;
+    const slug = cfg?.team;
+    if (id && slug) signIn(slug, { as: id.as, token: id.credential });
+    else promptSignIn();
+  }, [cfg?.team, signIn, promptSignIn]);
+
   const watch = async (explicit?: string) => {
     setFormError(null);
     const slug = (explicit ?? team).trim();
@@ -138,11 +234,21 @@ function LivePage() {
 
     // Advanced: connect as a specific seat the operator supplied (a credential authenticates HTTP + WS).
     if (!explicit && advanced.open && advanced.as.trim() && advanced.token.trim()) {
-      setCfg({ team: slug, as: advanced.as.trim(), token: advanced.token.trim() });
+      signIn(slug, { as: advanced.as.trim(), token: advanced.token.trim() });
+      return;
+    }
+
+    // A remembered member identity outranks this browser's observer (ADR 222): once you have signed
+    // in on this browser you are yourself, on every surface, until you say otherwise.
+    const member = loadMemberIdentity(slug);
+    if (member) {
+      setSignedIn(true);
+      setCfg({ team: slug, as: member.as, token: member.token });
       return;
     }
 
     // Default: reuse this browser's observer seat for the team, or provision one.
+    setSignedIn(false);
     let creds = loadObserver(slug);
     if (!creds) {
       setProvisioning(true);
@@ -209,6 +315,35 @@ function LivePage() {
     // fades in rather than zooming (see BoardOverlay's `origin`).
     const urlLane = params.get('lane');
     if (urlLane) setBoardLane(urlLane);
+    // `#s=<nonce>` — `musterd live` walked us here (ADR 222). Outranks the watch link below: they
+    // never appear together, and if they somehow did, your own identity is the right answer.
+    const nonce = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('s');
+    if (urlTeam && nonce) {
+      setTeam(urlTeam);
+      try {
+        window.localStorage.setItem(TEAM_KEY, urlTeam);
+      } catch {
+        /* private mode */
+      }
+      // Strip through the ROUTER's history, not `window.history.replaceState`. The raw call cleans
+      // the address bar but leaves the router's own location — captured at hydration, hash included
+      // — stale; on the success path the post-connect render settles the router, re-syncs its
+      // location and puts the spent nonce back in the bar (izzo's find, ADR 174 acceptance run).
+      // Replacing via the router updates both copies. Still before the redeem is sent, per ADR 170's
+      // guarantee that a slow response cannot leave a nonce on screen for a shoulder to read.
+      router.history.replace(`${window.location.pathname}${window.location.search}`);
+      setProvisioning(true);
+      void redeemSignin(urlTeam, nonce)
+        .then(({ as, credential }) => signIn(urlTeam, { as, token: credential }))
+        .catch((e: unknown) => {
+          // An expired or already-opened link is ordinary, not exceptional: say so in the daemon's
+          // own words and fall through to watching rather than dead-ending on a blank office.
+          setFormError(e instanceof Error ? e.message : String(e));
+          void watch(urlTeam);
+        })
+        .finally(() => setProvisioning(false));
+      return;
+    }
     const watchTok = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('w');
     if (urlTeam && urlAs && watchTok) {
       setTeam(urlTeam);
@@ -217,6 +352,10 @@ function LivePage() {
       } catch {
         /* private mode */
       }
+      setWatchLink(true);
+      // A watch link outranks a stored member identity (ADR 222) and is explicitly NOT you: handing
+      // the office to someone else must never hand them whoever last signed in on this browser.
+      setSignedIn(false);
       setCfg({ team: urlTeam, as: urlAs, token: watchTok });
     } else if (urlTeam) {
       void watch(urlTeam);
@@ -320,7 +459,17 @@ function LivePage() {
               onBoardHover={preloadBoard}
               // The asks & approvals rail (ADR 149) rides the top of the room itself — the office
               // frames its own asks (nick, 2026-07-28). Still renders nothing until an ask exists.
-              topSlot={<AsksStrip envelopes={envelopes} roster={roster} cfg={cfg!} />}
+              topSlot={
+                <AsksStrip
+                  envelopes={envelopes}
+                  roster={roster}
+                  cfg={cfg!}
+                  watchLink={watchLink}
+                  localIdentity={localIdentity}
+                  onSignIn={signInHere}
+                  onSignOut={signOut}
+                />
+              }
               workCues={WORK_CUES}
             />
             <RosterPanel

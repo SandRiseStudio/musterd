@@ -177,6 +177,10 @@ function AsksPreviewPage() {
         envelopes={SCENES[scene] ?? []}
         roster={asObserver ? ROSTER.filter((m) => m.name !== 'nick') : ROSTER}
         cfg={CFG}
+        // The scene is labelled "watch-link", so it must render as one: a viewer the team handed a
+        // read-only link gets no sign-in invitation at all (ADR 222). Without this the preview shows
+        // the off-machine `paste` state under a watch-link label — the wrong state for its own name.
+        watchLink={asObserver}
       />
 
       {/* Stand-in for the canvas: the whole point is that the sheet floats OVER this and never

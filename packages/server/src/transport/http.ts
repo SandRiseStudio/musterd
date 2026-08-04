@@ -48,7 +48,7 @@ import {
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { z } from 'zod';
-import { isLocalPeer, resolveRosterRoots } from '../config.js';
+import { isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
@@ -1233,6 +1233,53 @@ export async function handleHttp(
         return sendJson(res, 201, staged);
       }
 
+      /**
+       * `GET /teams/:slug/local-identity` (ADR 222) — hand a page on THIS machine the identity the
+       * CLI already holds, so signing into the office costs one click and no human ever handles a
+       * secret by hand.
+       *
+       * **No nonce, deliberately.** ADR 170's nonce exists to make a CLI→browser *link* inert; when
+       * the browser asks the daemon directly there is no link to make inert, nothing to expire, and
+       * nothing to leak into history.
+       *
+       * `isLocalPeer` is the entire security boundary and is load-bearing rather than a hardening
+       * detail: this route returns a member CREDENTIAL, so off-machine it would hand a second admin
+       * the FIRST admin's identity. The refusal is counted as ADR 170's `off_machine` miss — the
+       * pre-registered signal that earns the bounded-credential work both ADRs declined to do.
+       */
+      if (method === 'GET' && rest === '/local-identity') {
+        const team = requireTeam(ctx.db, slug);
+        requireLocalPeer(ctx, req, "read this machine's sign-in identity", () =>
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'signin.handoff_missed',
+            target: null,
+            result: 'deny',
+            detail: { reason: 'off_machine' },
+          }),
+        );
+        const local = readLocalIdentity(team.slug);
+        // The vault can name a seat this team has never heard of — a stale entry, a renamed seat, a
+        // team recreated under the same slug. Confirm before offering, so the page is never handed a
+        // credential that cannot connect and then blamed for the failure.
+        if (!local || !getMemberByName(ctx.db, team.id, local.name)) {
+          return sendJson(res, 200, { available: false });
+        }
+        // **The successful offer is deliberately NOT audited.** ADR 170's rows record discrete human
+        // acts — running `musterd board`, redeeming a nonce once. This route is probed automatically
+        // on every page load of an ambient surface the founder leaves open, so a row here would not
+        // record an act at all: it would record *when the human had the office on screen*. That is
+        // precisely the human-activity trail ADR 155 refuses to create ("no new record of when the
+        // human was at their desk", surveillance-asymmetry, ADR 145). Measured in the exercise run:
+        // four rows from three page loads, nobody having done anything.
+        //
+        // Nothing is lost. The ADR's evaluation measure is the first ask ever ANSWERED from a
+        // browser, which is read off `accept`/`decline`/`wait` envelopes, not off this route. The
+        // refusal below stays audited because a refused cross-machine attempt is a security event
+        // about an action someone took, not a note about where a human was sitting.
+        return sendJson(res, 200, { available: true, as: local.name, credential: local.key });
+      }
+
       const handoffMatch = rest.match(/^\/signin-handoff\/([^/]+)$/);
       if (method === 'GET' && handoffMatch) {
         const team = requireTeam(ctx.db, slug);
@@ -1258,7 +1305,11 @@ export async function handleHttp(
           });
           throw new MusterdError(
             'not_found',
-            'that sign-in link was already used or has expired — run `musterd board` again',
+            // Names both surfaces (ADR 222): a nonce carries no record of which one staged it, and
+            // telling someone who ran `musterd live` to run `musterd board` sends them to the wrong
+            // page. The remedy is the same command they used, whichever it was.
+            'that sign-in link was already used or has expired — run `musterd board` or ' +
+              '`musterd live` again',
           );
         }
         appendAudit(ctx.db, team.id, {

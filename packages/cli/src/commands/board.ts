@@ -17,14 +17,31 @@ import { resolveRead } from './helpers.js';
  * stays clean even though the browser got a live link.
  */
 
-/** The plain board URL — safe to print, carries nothing. */
-export function boardUrl(server: string, team: string): string {
-  return `${server.replace(/\/$/, '')}/board?team=${encodeURIComponent(team)}`;
+/**
+ * The two surfaces a human can be signed into (ADR 222). The board is a page you must decide to
+ * visit; the office is the one a human leaves open. The record says which of those gets used: the
+ * ADR 170 handoff was redeemed once, on release day, and never again.
+ */
+export type SigninSurface = 'board' | 'live';
+
+/** The plain surface URL — safe to print, carries nothing. */
+export function surfaceUrl(server: string, team: string, surface: SigninSurface): string {
+  return `${server.replace(/\/$/, '')}/${surface}?team=${encodeURIComponent(team)}`;
 }
 
-/** The signing-in URL: the same board, plus a one-shot nonce in the fragment. */
-export function signinUrl(server: string, team: string, nonce: string): string {
-  return `${boardUrl(server, team)}#s=${encodeURIComponent(nonce)}`;
+/** The plain board URL. Kept as its own name because the board's call sites read better for it. */
+export function boardUrl(server: string, team: string): string {
+  return surfaceUrl(server, team, 'board');
+}
+
+/** The signing-in URL: the same surface, plus a one-shot nonce in the fragment. */
+export function signinUrl(
+  server: string,
+  team: string,
+  nonce: string,
+  surface: SigninSurface = 'board',
+): string {
+  return `${surfaceUrl(server, team, surface)}#s=${encodeURIComponent(nonce)}`;
 }
 
 /**
@@ -44,8 +61,20 @@ export function buildOpenCommand(
   return null;
 }
 
+/** `musterd board` — ADR 170's original surface. */
 export async function boardCommand(parsed: Parsed): Promise<number> {
+  return signinCommand(parsed, 'board');
+}
+
+/**
+ * The shared body of `musterd board` and `musterd live` (ADR 222). One mechanism, two destinations:
+ * the surface only changes where the browser lands and what the messages call it. Everything that
+ * matters — a nonce rather than a credential, the fragment, the machine-local redemption, the
+ * fragment-free URL in scrollback — is identical, because it is the same one-shot relay.
+ */
+export async function signinCommand(parsed: Parsed, surface: SigninSurface): Promise<number> {
   const { team, server, http, identity } = resolveRead(parsed.flags);
+  const place = surface === 'live' ? 'the office' : 'the board';
 
   if (!identity) {
     throw new CliError(
@@ -53,13 +82,13 @@ export async function boardCommand(parsed: Parsed): Promise<number> {
       2,
     );
   }
-  // Only a human credential can sign a human into the board. An agent seat authenticates with the
-  // team agent key, which is a harness fact, not a person — and the board's write controls are gated
-  // on being a real rostered member, so handing an agent key to a browser would buy nothing anyway.
+  // Only a human credential can sign a human in. An agent seat authenticates with the team agent
+  // key, which is a harness fact, not a person — and both surfaces gate their controls on being a
+  // real rostered member, so handing an agent key to a browser would buy nothing anyway.
   if (!identity.key.startsWith(TOKEN_PREFIXES.credential)) {
     throw new CliError(
-      `${identity.name} authenticates as an agent — the board signs in humans. Run this where your ` +
-        `own seat is bound, or name it: musterd board --as <your seat>`,
+      `${identity.name} authenticates as an agent — ${place} signs in humans. Run this where your ` +
+        `own seat is bound, or name it: musterd ${surface} --as <your seat>`,
       2,
     );
   }
@@ -68,7 +97,7 @@ export async function boardCommand(parsed: Parsed): Promise<number> {
     member: identity.name,
     credential: identity.key,
   });
-  const url = signinUrl(server, team, nonce);
+  const url = signinUrl(server, team, nonce, surface);
   const seconds = Math.round(expires_in_ms / 1000);
 
   if (parsed.flags['print']) {
@@ -104,7 +133,7 @@ export async function boardCommand(parsed: Parsed): Promise<number> {
     // — the board URL is already printed, and the human can finish the job by hand.
   });
   process.stdout.write(
-    `${theme.accent('opening the board')} as ${theme.accent(identity.name)} — ${boardUrl(server, team)}\n`,
+    `${theme.accent(`opening ${place}`)} as ${theme.accent(identity.name)} — ${surfaceUrl(server, team, surface)}\n`,
   );
   return 0;
 }

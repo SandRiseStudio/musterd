@@ -4444,6 +4444,53 @@
   font-family: var(--font-mono, monospace);
   font-size: 10px;
 }
+
+/* ─── the way in, and who you are (ADR 222) ───────────────────────────────────────────────────────
+   The sign-in button occupies the slot Approve/Deny will occupy, so signing in swaps it in place and
+   the rail never reflows. Accent rather than success/danger on purpose: it is the way to an answer,
+   not an answer, and the two irreversible colours stay reserved for the two irreversible acts. */
+.lc-asks__signin {
+  color: var(--lc-accent);
+  border-color: color-mix(in srgb, var(--lc-accent) 50%, transparent);
+  background: color-mix(in srgb, var(--lc-accent) 12%, var(--lc-surface-2));
+  font-weight: 600;
+  /* The action never loses the space fight. Inside the office panel the rail is ~470px and its
+     content wants ~690px, so SOMETHING must give — and it must not be the one control that turns a
+     rail you can only read into one you can act on. */
+  flex: none;
+}
+/* …which means the disposable chrome gives way instead. These were `flex: none`, so they held their
+   full width while the ask itself shrank to zero and the row still overflowed its own pill. They are
+   the least load-bearing things on the rail: a count you can recover by opening the sheet, and a
+   link to another page. Ranked below both the ask and the way to answer it. */
+.lc-asks__rail .lc-asks__meta,
+.lc-asks__rail .lc-asks__link {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+/* Off this machine there is no one-click path to offer, so the invitation drops to a ghost rather
+   than dressing a credential form up as something it is not. It borrows `.lc-asks__link`, the rail's
+   existing ghost — same weight, same restraint, no new rule on a CSS budget with 8 bytes to spare. */
+.lc-asks__signin--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+/* The seat chip: present in every state, because "who am I about to approve as?" must never be a
+   question the reader has to go and answer somewhere else. Rides `.lc-ask__btn` for its shape and
+   states only the three things that differ — the rail already carries enough CSS to sit against the
+   budget ceiling, and restating a pill costs bytes every viewer pays for. */
+.lc-asks__me {
+  font-size: 10px;
+  padding: var(--lc-1) 7px;
+  border-color: var(--lc-border);
+}
+@media (hover: hover) and (pointer: fine) {
+  .lc-asks__signin:hover:not(:disabled) {
+    border-color: var(--lc-accent);
+    background: color-mix(in srgb, var(--lc-accent) 22%, var(--lc-surface-2));
+  }
+}
 @media (hover: hover) and (pointer: fine) {
   .lc-ask__btn--accept:hover:not(:disabled) {
     border-color: var(--lc-success);

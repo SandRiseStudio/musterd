@@ -223,6 +223,12 @@ export type AuditAction =
   | 'signin.handoff_staged'
   | 'signin.handoff_redeemed'
   | 'signin.handoff_missed'
+  // ADR 222 adds NO action of its own, on purpose. Its in-page sign-in route is probed automatically
+  // on every load of an ambient surface, so auditing a successful offer would record when the human
+  // had the office on screen rather than anything they did — the human-activity trail ADR 155
+  // refuses to create. Its off-machine refusal reuses `signin.handoff_missed` with
+  // `reason: 'off_machine'` instead of minting a second action, so the cross-device signal stays ONE
+  // series across both sign-in mechanisms rather than two half-series nobody thinks to add up.
   | 'team.archive';
 
 export interface AuditEntry {

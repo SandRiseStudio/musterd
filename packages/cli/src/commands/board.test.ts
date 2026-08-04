@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardUrl, buildOpenCommand, signinUrl } from './board.js';
+import { boardUrl, buildOpenCommand, signinUrl, surfaceUrl } from './board.js';
 
 /**
  * `musterd board` (ADR 170). The two properties worth pinning are both about the secret: the nonce
@@ -64,5 +64,41 @@ describe('buildOpenCommand — the platform opener, argv-shaped for testability'
 
   it('returns null on a platform with no opener, so the caller falls back to printing', () => {
     expect(buildOpenCommand('freebsd', 'http://x/y')).toBeNull();
+  });
+});
+
+/**
+ * ADR 222 — the same one-shot nonce signs you into either surface. `musterd live` exists because the
+ * board is a page you must decide to visit, and the record says that does not happen: the ADR 170
+ * handoff was redeemed once, on release day, and never again. The office is the surface a human
+ * actually leaves open, so it is the one that has to be signable-into.
+ */
+describe('signinUrl / surfaceUrl across surfaces (ADR 222)', () => {
+  it('signs into either surface with the same nonce, in the fragment either way', () => {
+    expect(signinUrl('http://h:1', 'revive', 'n1', 'board')).toBe(
+      'http://h:1/board?team=revive#s=n1',
+    );
+    expect(signinUrl('http://h:1', 'revive', 'n1', 'live')).toBe(
+      'http://h:1/live?team=revive#s=n1',
+    );
+    for (const surface of ['board', 'live'] as const) {
+      expect(
+        new URL(signinUrl('http://h:1', 'revive', 'n1', surface)).searchParams.get('s'),
+      ).toBeNull();
+    }
+  });
+
+  it('defaults to the board, so every existing ADR 170 call site is unchanged', () => {
+    expect(signinUrl('http://h:1', 'revive', 'n1')).toBe('http://h:1/board?team=revive#s=n1');
+  });
+
+  it('prints a nonce-free URL for either surface — scrollback stays clean on both', () => {
+    expect(surfaceUrl('http://h:1', 'a b', 'live')).toBe('http://h:1/live?team=a%20b');
+    expect(surfaceUrl('http://h:1/', 'revive', 'live')).toBe('http://h:1/live?team=revive');
+    expect(surfaceUrl('http://h:1', 'revive', 'live')).not.toContain('#');
+  });
+
+  it('boardUrl stays the board — the old name keeps its old meaning', () => {
+    expect(boardUrl('http://h:1', 'revive')).toBe(surfaceUrl('http://h:1', 'revive', 'board'));
   });
 });

@@ -13,6 +13,11 @@ import {
   redeemSignin,
   type LiveConfig,
 } from '../live/client';
+import {
+  forgetMemberIdentity,
+  loadMemberIdentity,
+  saveMemberIdentity,
+} from '../live/memberIdentity';
 import { filterLanes, UNOWNED } from '../live/boardWrite';
 import { useBoardData } from '../live/useBoardData';
 import { initial, kindOf, memberColor } from '../live/format';
@@ -38,21 +43,6 @@ export const Route = createFileRoute('/board')({
 const TEAM_KEY = 'musterd.board.team';
 const VIEW_KEY = 'musterd.board.view';
 const RAIL_KEY = 'musterd.board.rail';
-/** Signed-in member credential per team, so a human doesn't re-paste `mscr_` every visit (item 5). */
-const MEMBER_KEY = (team: string) => `musterd.board.member.v1.${team}`;
-
-function loadMember(team: string): { as: string; token: string } | null {
-  try {
-    const raw = window.localStorage.getItem(MEMBER_KEY(team));
-    if (!raw) return null;
-    const v = JSON.parse(raw) as { as?: unknown; token?: unknown };
-    return typeof v.as === 'string' && typeof v.token === 'string'
-      ? { as: v.as, token: v.token }
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * The work board (ADR 104). Read side: a kanban over `GET /lanes`, live via the firehose — one fetch,
@@ -84,7 +74,7 @@ function BoardPage() {
     setCfg((current) => {
       if (!current) return current;
       if (isMember) {
-        window.localStorage.removeItem(MEMBER_KEY(current.team));
+        forgetMemberIdentity(current.team);
         disconnect('That credential was rejected — sign in again.');
         return null;
       }
@@ -162,7 +152,7 @@ function BoardPage() {
       setTeam(slug);
       window.localStorage.setItem(TEAM_KEY, slug);
       if (member) {
-        window.localStorage.setItem(MEMBER_KEY(slug), JSON.stringify(member));
+        saveMemberIdentity(slug, member);
         setIsMember(true);
         setCfg({ team: slug, as: member.as, token: member.token });
         return;
@@ -191,7 +181,7 @@ function BoardPage() {
   };
 
   const signOut = () => {
-    if (cfg) window.localStorage.removeItem(MEMBER_KEY(cfg.team));
+    if (cfg) forgetMemberIdentity(cfg.team);
     setAdvanced({ open: false, as: '', token: '' });
     disconnect();
   };
@@ -235,7 +225,7 @@ function BoardPage() {
       return;
     }
     if (urlTeam) {
-      void connect(urlTeam, loadMember(urlTeam) ?? undefined);
+      void connect(urlTeam, loadMemberIdentity(urlTeam) ?? undefined);
     } else {
       const last = window.localStorage.getItem(TEAM_KEY) ?? '';
       setTeam(last);

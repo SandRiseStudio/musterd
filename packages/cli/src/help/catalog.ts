@@ -440,6 +440,21 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: ['musterd board', 'musterd board --team revive'],
   },
   {
+    name: 'live',
+    signature: '[--team <slug>] [--print] [--no-open]',
+    summary: 'open the office in your browser, signed in as yourself',
+    group: 'insight',
+    primary: false,
+    detail:
+      'Opens /live signed in as the seat this folder resolves to, so the asks waiting on you are ' +
+      'answerable rather than merely readable (ADR 222). Same one-shot nonce as `musterd board` — ' +
+      'dead after a single use or 60 seconds, redeemable only on this machine, and never a ' +
+      'credential in a link. The everyday path is the sign-in button on the rail itself; this is ' +
+      'the cold start, for when no browser is open yet. Signing in also marks you present on the ' +
+      'roster (ADR 155), which is what lets the ask clock treat you as reachable.',
+    examples: ['musterd live', 'musterd live --team revive'],
+  },
+  {
     name: 'archaeology',
     signature: '--start <sha> [--delivered <ref>] [--repo <path>] [--exclude <glob>,…] [--json]',
     summary: 'wasted-work % from git alone — the cookoff reference collector',
