@@ -1,8 +1,11 @@
-# 220 — Answerable asks on /live: the surface a human watches is the one they can act on
+# 221 — Answerable asks on /live: the surface a human watches is the one they can act on
 
 - Status: proposed — 2026-08-04. Authored by miley (lane `01KZ6Z1M71YT2YYBPRXZRRKSKN`). Raised by
   nick from the office itself: _"I can read them but I can't actually do anything about them."_
-  Number **220** — 219 was claimed concurrently by izzo (PR #628), the second 21x race in one day.
+  Number **221**, allocated with `pnpm adr:next` — this ADR lost 219 to izzo (PR #628) and then 220
+  to stanley (PR #630) while it was being written, which is the collision
+  [ADR 220](220-adr-numbers-allocated-against-open-prs.md) landed to end: read main by hand and two
+  authors correctly compute the same free number and are both wrong.
 - Date: 2026-08-04
 - Builds on: [ADR 149](149-ask-surfaces.md) (the asks rail this makes answerable),
   [ADR 147](147-human-ask-stream.md) (the ask stream and its answer acts),

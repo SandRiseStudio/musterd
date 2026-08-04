@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **ADR number is 220.** 219 was claimed concurrently by izzo (PR #628). Re-confirm against fresh `origin/main` immediately before creating the file — this is the second 21x race in one day. `pnpm adr-numbers:check` fails on a duplicate number or an H1 that does not match the filename.
+- **ADR number is 221**, allocated with `pnpm adr:next`. **Do not read `origin/main` by hand** — main by construction holds no in-flight work, so two authors reading it correctly compute the same free number and are both wrong. This arc lost 219 to izzo (#628) and then 220 to stanley (#630) exactly that way, and #630 is the ADR that added `pnpm adr:next` to end it. Re-run the tool at PR time. `pnpm adr-numbers:check` fails on a duplicate number or an H1 that does not match the filename.
 - **Every ADR ≥060 needs an `## Observability & Evaluation` section** or the doc gate fails.
 - **The rail costs the canvas exactly one line, in every state** (ADR 149). No state earns extra rows.
 - **Perf gate:** `pnpm perf:check` enforces byte budgets. This arc adds no dependency and no font. Do not raise a budget.
@@ -26,7 +26,7 @@
 
 | File                                            | Responsibility                                                                                                                |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `docs/decisions/220-answerable-asks-on-live.md` | Create — the decision, the measured zero baseline, the boundary.                                                              |
+| `docs/decisions/221-answerable-asks-on-live.md` | Create — the decision, the measured zero baseline, the boundary.                                                              |
 | `packages/web/src/live/memberIdentity.ts`       | Create — the single per-team member identity slot: load/save/forget + the legacy board-key migration. Pure storage, no React. |
 | `packages/web/src/live/memberIdentity.test.ts`  | Create — precedence and migration tests.                                                                                      |
 | `packages/web/src/routes/board.tsx`             | Modify — read/write through `memberIdentity` instead of its private `MEMBER_KEY`.                                             |
@@ -43,11 +43,11 @@
 
 ---
 
-### Task 1: ADR 220
+### Task 1: ADR 221
 
 **Files:**
 
-- Create: `docs/decisions/220-answerable-asks-on-live.md`
+- Create: `docs/decisions/221-answerable-asks-on-live.md`
 
 **Interfaces:**
 
@@ -56,11 +56,10 @@
 - [ ] **Step 1: Re-confirm the number is still free**
 
 ```bash
-git fetch origin -q
-for b in $(git branch -r --format='%(refname:short)' | grep -v HEAD); do git ls-tree --name-only "$b" docs/decisions/ 2>/dev/null; done | sed 's|.*/||' | grep -E '^2[12][0-9]-' | sort -u
+pnpm adr:next
 ```
 
-Expected: `219-quiescence-marks-a-busy-wake-candidate.md` is the highest. If a `220-` appears, take the next free number and update every reference in this plan.
+Expected: `next free ADR number: 221`. It allocates against the working tree, `origin/main` **and every open PR** — which is the point, and why the hand-rolled `git ls-tree` sweep this step used to carry is wrong: it cannot see a number claimed in a branch that has not been pushed as a PR yet. If the tool says something other than 221, take that number and update every reference in this plan.
 
 - [ ] **Step 2: Write the ADR**
 
@@ -76,9 +75,9 @@ Expected: PASS. `vocab:check` fails on `epic`/`milestone`/`sprint` — say Goal,
 - [ ] **Step 4: Commit**
 
 ```bash
-pnpm exec prettier --write docs/decisions/220-answerable-asks-on-live.md
-git add docs/decisions/220-answerable-asks-on-live.md
-git commit -m "ADR 220: answerable asks on /live"
+pnpm exec prettier --write docs/decisions/221-answerable-asks-on-live.md
+git add docs/decisions/221-answerable-asks-on-live.md
+git commit -m "ADR 221: answerable asks on /live"
 ```
 
 ---
@@ -164,7 +163,7 @@ Expected: FAIL — cannot resolve `./memberIdentity`.
 // packages/web/src/live/memberIdentity.ts
 /**
  * The signed-in member identity for a team — **one slot per browser per team, shared by every
- * route** (ADR 220). /live and /board used to keep separate ideas of who you are, and /live's was
+ * route** (ADR 221). /live and /board used to keep separate ideas of who you are, and /live's was
  * always an observer, so the office could show you what was waiting on you and never let you answer
  * it.
  *
@@ -238,7 +237,7 @@ Expected: PASS, 6 tests.
 ```bash
 pnpm exec prettier --write packages/web/src/live/memberIdentity.ts packages/web/src/live/memberIdentity.test.ts
 git add packages/web/src/live/memberIdentity.ts packages/web/src/live/memberIdentity.test.ts
-git commit -m "One member identity slot per browser per team (ADR 220)"
+git commit -m "One member identity slot per browser per team (ADR 221)"
 ```
 
 ---
@@ -282,7 +281,7 @@ Expected: PASS, no reference to `MEMBER_KEY` remains (`grep -rn "MEMBER_KEY" pac
 ```bash
 pnpm exec prettier --write packages/web/src/routes/board.tsx
 git add packages/web/src/routes/board.tsx
-git commit -m "/board reads its identity from the shared slot (ADR 220)"
+git commit -m "/board reads its identity from the shared slot (ADR 221)"
 ```
 
 ---
@@ -346,7 +345,7 @@ export type ResolvedIdentity =
   | { kind: 'watch'; as: string; token: string };
 
 /**
- * The total precedence order for who this page connects as (ADR 220):
+ * The total precedence order for who this page connects as (ADR 221):
  *   1. an explicit watch link (`?as=…#w=…`) — a URL instruction, and how a team deliberately hands
  *      the office to someone else; it must never be overridden by whoever last signed in here;
  *   2. the stored member identity for this team;
@@ -442,7 +441,7 @@ Open `/live?team=<slug>`, sign into `/board` first with a member credential, the
 ```bash
 pnpm exec prettier --write packages/web/src/routes/live.tsx packages/web/src/live/memberIdentity.ts packages/web/src/live/memberIdentity.test.ts
 git add packages/web/src/routes/live.tsx packages/web/src/live/memberIdentity.ts packages/web/src/live/memberIdentity.test.ts
-git commit -m "/live prefers a signed-in member over an observer (ADR 220)"
+git commit -m "/live prefers a signed-in member over an observer (ADR 221)"
 ```
 
 ---
@@ -466,7 +465,7 @@ Replace the `canAnswer` line at `:93`:
 
 ```ts
 // Answerable iff the connected seat is a real roster member — an observer is read-only by
-// construction (ADR 063). What is new (ADR 220) is that not-answerable is a *state we show*, not a
+// construction (ADR 063). What is new (ADR 221) is that not-answerable is a *state we show*, not a
 // silence: the action slot always says either what you can do or how to become able to.
 const canAnswer = roster.some((m) => m.name === cfg.as);
 ```
@@ -594,7 +593,7 @@ Check, in order: signed out on-machine → the ghost paste button and a `watchin
 ```bash
 pnpm exec prettier --write packages/web/src/live/AsksStrip.tsx packages/web/src/live/Live.css packages/web/src/routes/live.tsx packages/web/src/routes/asks-preview.tsx
 git add packages/web/src/live/AsksStrip.tsx packages/web/src/live/Live.css packages/web/src/routes/live.tsx packages/web/src/routes/asks-preview.tsx
-git commit -m "The asks rail says why it is read-only and offers the way in (ADR 220)"
+git commit -m "The asks rail says why it is read-only and offers the way in (ADR 221)"
 ```
 
 ---
@@ -666,7 +665,7 @@ Expected: PASS.
 ```bash
 pnpm exec prettier --write packages/web/src/live/AsksStrip.tsx packages/web/src/live/asks.test.ts
 git add packages/web/src/live/AsksStrip.tsx packages/web/src/live/asks.test.ts
-git commit -m "Answer buttons follow the ask, not the sender (ADR 220)"
+git commit -m "Answer buttons follow the ask, not the sender (ADR 221)"
 ```
 
 ---
@@ -688,7 +687,7 @@ git commit -m "Answer buttons follow the ask, not the sender (ADR 220)"
 
 ```ts
 // append near the other signin-handoff tests in packages/server/src/transport/integration.test.ts
-it("offers this machine's identity to a local page, and never off-machine (ADR 220)", async () => {
+it("offers this machine's identity to a local page, and never off-machine (ADR 221)", async () => {
   const team = await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
   expect(team.status).toBe(201);
 
@@ -720,7 +719,7 @@ Expected: FAIL — 404, no such route.
 ```ts
 // packages/server/src/config.ts, beside resolveRosterRoots
 /**
- * This machine's CLI identity for a team, read from the global `~/.musterd/config.json` (ADR 220).
+ * This machine's CLI identity for a team, read from the global `~/.musterd/config.json` (ADR 221).
  *
  * Same file and same rationale as {@link resolveRosterRoots} directly above: reading the global
  * config keeps the daemon decoupled from the CLI package while sharing the `~/.musterd/` home the
@@ -757,7 +756,7 @@ In `packages/server/src/store/audit.ts`, beside `'signin.handoff_staged'` at `:2
 ```ts
 // packages/server/src/transport/http.ts, immediately after the signin-handoff GET
 /**
- * `GET /teams/:slug/local-identity` (ADR 220) — hand a page on THIS machine the identity the CLI
+ * `GET /teams/:slug/local-identity` (ADR 221) — hand a page on THIS machine the identity the CLI
  * already holds, so signing into the office costs one click and no secret ever passes through a
  * human's hands.
  *
@@ -809,7 +808,7 @@ Expected: PASS.
 ```bash
 pnpm exec prettier --write packages/server/src/config.ts packages/server/src/store/audit.ts packages/server/src/transport/http.ts packages/server/src/transport/integration.test.ts
 git add packages/server/src/config.ts packages/server/src/store/audit.ts packages/server/src/transport/http.ts packages/server/src/transport/integration.test.ts
-git commit -m "The daemon offers this machine's sign-in identity, localhost only (ADR 220)"
+git commit -m "The daemon offers this machine's sign-in identity, localhost only (ADR 221)"
 ```
 
 ---
@@ -866,7 +865,7 @@ Expected: FAIL — `fetchLocalIdentity` is not exported.
 
 ```ts
 /**
- * Ask the daemon whether THIS machine has a sign-in identity for the team (ADR 220). Never throws:
+ * Ask the daemon whether THIS machine has a sign-in identity for the team (ADR 221). Never throws:
  * "no identity" and "you are not on this machine" are both ordinary answers that mean the same thing
  * to the rail — offer the paste path instead — and neither is worth an error banner.
  */
@@ -931,7 +930,7 @@ Restart `vite preview`, open `/live?team=<slug>` as an observer, click **Sign in
 ```bash
 pnpm exec prettier --write packages/web/src/live/client.ts packages/web/src/live/client.test.ts packages/web/src/routes/live.tsx
 git add packages/web/src/live/client.ts packages/web/src/live/client.test.ts packages/web/src/routes/live.tsx
-git commit -m "One-click sign-in on /live (ADR 220)"
+git commit -m "One-click sign-in on /live (ADR 221)"
 ```
 
 ---
@@ -953,7 +952,7 @@ git commit -m "One-click sign-in on /live (ADR 220)"
 
 ```ts
 // packages/cli/src/commands/board.test.ts
-it('signs into either surface with the same one-shot nonce (ADR 220)', () => {
+it('signs into either surface with the same one-shot nonce (ADR 221)', () => {
   expect(signinUrl('http://h:1', 'revive', 'n1', 'board')).toBe(
     'http://h:1/board?team=revive#s=n1',
   );
@@ -1003,7 +1002,7 @@ import type { Parsed } from '../args.js';
 import { signinCommand } from './board.js';
 
 /**
- * `musterd live` (ADR 220) — open the office signed in as yourself, so the asks waiting on you are
+ * `musterd live` (ADR 221) — open the office signed in as yourself, so the asks waiting on you are
  * answerable rather than merely readable. The cold-start sibling of the in-page button: same
  * one-shot nonce, same machine-local boundary, different surface.
  */
@@ -1048,7 +1047,7 @@ Then, end to end: `node packages/cli/dist/index.js live --team <slug>` from a fo
 ```bash
 pnpm exec prettier --write packages/cli/src/commands/board.ts packages/cli/src/commands/live.ts packages/cli/src/commands/board.test.ts packages/web/src/routes/live.tsx
 git add -A packages/cli packages/web
-git commit -m "musterd live — the CLI walks you into the office (ADR 220)"
+git commit -m "musterd live — the CLI walks you into the office (ADR 221)"
 git push -u origin HEAD
 gh pr create --fill
 gh pr merge --squash --auto --delete-branch

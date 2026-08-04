@@ -103,7 +103,7 @@ export function AsksStrip({
   const canAnswer = roster.some((m) => m.name === cfg.as);
 
   /**
-   * What the action slot holds when you cannot answer (ADR 220). Before this, it held nothing: the
+   * What the action slot holds when you cannot answer (ADR 221). Before this, it held nothing: the
    * buttons were absent and the silence unexplained, so a read-only rail was pixel-identical to an
    * answerable one with nothing open.
    *
@@ -210,7 +210,7 @@ export function AsksStrip({
               </span>
             )}
             {/* The way in sits exactly where the answer will sit, so one click swaps this for
-                Approve/Deny in place and the rail never moves (ADR 220). */}
+                Approve/Deny in place and the rail never moves (ADR 221). */}
             {askIsLoud(lead.state) && !canAnswer && wayIn === 'offer' && (
               <button
                 type="button"
@@ -262,7 +262,7 @@ export function AsksStrip({
           seat approvals →
         </a>
 
-        {/* Who you are about to answer as (ADR 220). Not decoration: with several teams on one
+        {/* Who you are about to answer as (ADR 221). Not decoration: with several teams on one
             machine you may be a different person on each, and approving as the wrong identity is
             unrecoverable — so the connected seat is never implicit. Signed in, it is also the way
             back out, the escape a cached seat never had. */}
