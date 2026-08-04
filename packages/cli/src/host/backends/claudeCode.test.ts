@@ -853,8 +853,12 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
     const c = ctx(async () => ({ occupied: true, provenance: 'wake' }));
     const actuation = await backend.wake(spec({ order: eligible() }), c);
     expect(calls[0]!.args).not.toContain('--resume');
-    expect(actuation.outcome).toMatchObject({ occupied: true, session: 'fresh' });
-    expect(c.lines.join('\n')).toMatch(/missing/i);
+    expect(actuation.outcome).toMatchObject({
+      occupied: true,
+      session: 'fresh',
+      exact_match: 'missing',
+    });
+    expect(c.lines.join('\n')).toMatch(/no local binding/i);
     child.exit(0);
     await actuation.settled;
   });
@@ -910,6 +914,57 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
     expect(actuation.outcome).toMatchObject({ occupied: true, session: 'fresh' });
     resumeChild.exit(1);
     freshChild.exit(0);
+    await actuation.settled;
+  });
+
+  it('reports exact_match on every branch — the axis ADR 210 evaluates on', async () => {
+    const cases: { name: string; deps: Partial<ClaudeCodeDeps>; expected: string }[] = [
+      {
+        name: 'bound',
+        deps: { readContinuity: () => registry([binding()]), statTranscript: healthyStat },
+        expected: 'bound',
+      },
+      {
+        name: 'missing',
+        deps: { readContinuity: () => registry([]), statTranscript: healthyStat },
+        expected: 'missing',
+      },
+      {
+        name: 'mismatched',
+        deps: {
+          readContinuity: () => registry([binding({ harness: 'codex' })]),
+          statTranscript: healthyStat,
+        },
+        expected: 'mismatched',
+      },
+      {
+        name: 'stale',
+        deps: { readContinuity: () => registry([binding()]), statTranscript: () => undefined },
+        expected: 'stale',
+      },
+    ];
+    for (const c of cases) {
+      const child = new FakeChild();
+      const { backend } = harness(child, { readSession: () => resumable(), ...c.deps });
+      const actuation = await backend.wake(
+        spec({ order: eligible() }),
+        ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      );
+      expect(actuation.outcome, c.name).toMatchObject({ exact_match: c.expected });
+      child.exit(0);
+      await actuation.settled;
+    }
+  });
+
+  it('a non-eligible wake reports NO exact_match — absent means never considered', async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child, { readSession: () => resumable() });
+    const actuation = await backend.wake(
+      spec({ order: order({ intended_delivery: 'fresh' }) }),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    expect(actuation.outcome).not.toHaveProperty('exact_match');
+    child.exit(0);
     await actuation.settled;
   });
 });

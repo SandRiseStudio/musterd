@@ -325,6 +325,69 @@ describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
     return leaseId;
   }
 
+  /** Enroll + one urgent act + claim the lease, without reporting it. */
+  async function freshLease(actId: string): Promise<string> {
+    await enrollAda();
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: makeEnvelope({
+          id: actId,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'Ada' },
+          act: 'message',
+          body: 'need you',
+          meta: { urgent: true, urgent_reason: 'wake me' },
+        }),
+      },
+      nickCred,
+    );
+    const leases = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'laptop.local' },
+      agentKey,
+    );
+    return leases.json.orders[0].lease_id as string;
+  }
+
+  // ADR 210's Eval splits the eligible cohort by exact-match result, so the result has to survive
+  // the wire onto BOTH audit rows the Eval reads. Before this it existed only in a host log line.
+  it('carries the exact-match result onto residency.woke and residency.wake_cost', async () => {
+    const leaseId = await freshLease('em1');
+    const primary = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, session: 'fresh', exact_match: 'stale' },
+      agentKey,
+    );
+    expect(primary.status).toBe(200);
+    expect(JSON.parse(audits('residency.woke')[0]!.detail as string)).toMatchObject({
+      exact_match: 'stale',
+    });
+
+    const supplement = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, cost_usd: 0.1, exact_match: 'stale' },
+      agentKey,
+    );
+    expect(supplement.status).toBe(200);
+    expect(JSON.parse(audits('residency.wake_cost')[0]!.detail as string)).toMatchObject({
+      exact_match: 'stale',
+    });
+  });
+
+  it('a report with no exact_match records none — absent means never considered', async () => {
+    const leaseId = await freshLease('em2');
+    await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, session: 'fresh' },
+      agentKey,
+    );
+    expect(JSON.parse(audits('residency.woke')[0]!.detail as string)).not.toHaveProperty(
+      'exact_match',
+    );
+  });
+
   it('a second report carrying cost lands as residency.wake_cost (200 cost_recorded)', async () => {
     const leaseId = await reportedLease();
     const supplement = await post(

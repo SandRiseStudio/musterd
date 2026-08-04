@@ -214,6 +214,27 @@ export const WAKE_DELIVERY_OUTCOMES = ['fresh', 'resumed', 'fresh_fallback'] as 
 export type WakeDeliveryOutcome = (typeof WAKE_DELIVERY_OUTCOMES)[number];
 export const WakeDeliveryOutcomeSchema = z.enum(WAKE_DELIVERY_OUTCOMES);
 
+/**
+ * ADR 210: why an eligible wake did or did not take the exact-match resume path. `delivery_outcome`
+ * says WHAT happened (fresh / resumed / fresh_fallback); this says WHY, which is the axis the ADR's
+ * Eval splits on — without it an eligible wake that spawned fresh is indistinguishable from one that
+ * was never eligible.
+ *
+ * - `bound`      — an exact (team, seat, thread, harness) binding passed the byte/age hygiene, so
+ *                  resume was attempted. The only value that implies a resume was tried.
+ * - `missing`    — no binding for this thread. The pre-capture world, and the common case early on.
+ * - `mismatched` — a registry or binding exists but is not this seat's or not this harness's. The
+ *                  ADR 143 posture: discarded, never adopted.
+ * - `stale`      — an exact binding matched but was unusable: transcript gone, past the GC horizon,
+ *                  or past the hygiene byte bound.
+ *
+ * Host-side only, and deliberately coarse: it is four words, never a path, an id, or a byte count
+ * tied to one. Absent ⇒ the wake was not `resume_eligible`, so no exact match was ever considered.
+ */
+export const WAKE_EXACT_MATCH_RESULTS = ['bound', 'missing', 'mismatched', 'stale'] as const;
+export type WakeExactMatchResult = (typeof WAKE_EXACT_MATCH_RESULTS)[number];
+export const WakeExactMatchResultSchema = z.enum(WAKE_EXACT_MATCH_RESULTS);
+
 export const WAKE_CONTEXT_KINDS = ['reply', 'handoff', 'review', 'work_order'] as const;
 export type WakeContextKind = (typeof WAKE_CONTEXT_KINDS)[number];
 export const WakeContextKindSchema = z.enum(WAKE_CONTEXT_KINDS);
@@ -417,6 +438,9 @@ export const WakeReportBodySchema = z.object({
   session: z.enum(['fresh', 'resumed']).optional(),
   /** ADR 209: actual delivery, distinguishing an initial fresh spawn from a failed-resume fallback. */
   delivery_outcome: WakeDeliveryOutcomeSchema.optional(),
+  /** ADR 210: why the exact-match rung resolved as it did. Set only when the order was
+   *  `resume_eligible`; absent means no exact match was ever considered. */
+  exact_match: WakeExactMatchResultSchema.optional(),
   /** Local transcript size examined by the host; no path or content crosses the boundary. */
   transcript_bytes: z.number().int().nonnegative().optional(),
   /** Local capture age examined by the host; no session identifier crosses the boundary. */
