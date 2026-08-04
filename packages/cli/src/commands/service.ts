@@ -6,8 +6,10 @@ import { flagStr, type Parsed } from '../args.js';
 import { configPath, loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { loadHostRegistry } from '../host/registry.js';
+import { infraTouchWarning } from '../infra-gate.js';
 import { osNotify, type NotifyItem } from '../notify/os.js';
 import { theme } from '../render/theme.js';
+import { sym } from '../render/ui.js';
 import { MIN_NODE_MAJOR } from '../runtime.js';
 import {
   installAutoRefresh,
@@ -791,6 +793,8 @@ export async function serviceCommand(
     sleep?: (ms: number) => Promise<void>;
     /** ADR 224 log trim (injected so the tick's tests never touch the real ~/.musterd logs). */
     trimLogs?: () => TrimmedLog[];
+    /** ADR 227 inc 2: the warn-only infra-touch gate (injected so tests never reach a daemon). */
+    infraGate?: (verb: string) => Promise<string | null>;
   } = {},
 ): Promise<number> {
   const sub = parsed.positionals[0];
@@ -899,6 +903,16 @@ export async function serviceCommand(
   if (parsed.flags['sweep'] === true) {
     const sweepCtx = deps.sweepCtx ?? resolveSweepCtx(ctx.run, parsed);
     return sweepServiceCommand(sub, sweepCtx, parsed, ok, fail);
+  }
+
+  // The warn-only infra-touch gate (ADR 227 inc 2), on the daemon-targeted verbs only — the
+  // `--live`/`--wake`/`--auto`/`--sweep` retargets above run no server and drop no teammate
+  // session, so they returned before this line. A non-`platform` agent seat gets one line naming
+  // the current holders (the daemon writes the audit row); everything else — holder, human shell,
+  // unbound folder, daemon unreachable — is silence, and either way the verb PROCEEDS.
+  if (sub === 'install' || sub === 'restart' || sub === 'refresh') {
+    const warn = await (deps.infraGate ?? infraTouchWarning)(sub);
+    if (warn) process.stdout.write(`${theme.warn(sym.warn)} ${theme.warn(warn)}\n`);
   }
 
   switch (sub) {

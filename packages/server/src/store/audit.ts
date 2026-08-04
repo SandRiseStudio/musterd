@@ -22,6 +22,8 @@ export type AuditAction =
   | 'key.rotate'
   | 'policy.change'
   | 'account_status.change'
+  // ADR 227 inc 2: a non-`platform` agent seat ran an infra verb — warned + recorded, never blocked.
+  | 'infra.touch.warned'
   // P3.2 (ADR 077): claim handshake + request lane.
   | 'claim.occupied'
   | 'claim.refused'
