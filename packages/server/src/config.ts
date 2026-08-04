@@ -121,7 +121,14 @@ export function readLocalIdentity(
     const raw = JSON.parse(readFileSync(cfgPath, 'utf8')) as {
       identities?: Record<string, { name?: unknown; key?: unknown }>;
     };
-    const id = raw.identities?.[team];
+    // `hasOwn` before the read: a team slug is a lookup key here, and inherited members of
+    // Object.prototype must never answer for one. `constructor` is the case that shows why it is not
+    // theoretical — `Object.prototype.constructor.name` is the string `'Object'`, so a guard that
+    // checked only `name` would accept it. Today the `key` check happens to catch it; that is luck,
+    // and this makes it intent.
+    const identities = raw.identities;
+    if (!identities || !Object.hasOwn(identities, team)) return null;
+    const id = identities[team];
     if (!id || typeof id.name !== 'string' || typeof id.key !== 'string') return null;
     // Only a human credential signs a human in. An agent seat authenticates with the team agent key,
     // which is a harness fact rather than a person — the same gate `musterd board` applies before it

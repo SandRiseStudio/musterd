@@ -5700,3 +5700,31 @@ describe('local sign-in identity is refused off this machine (ADR 222)', () => {
     expect(miss.detail.reason).toBe('off_machine');
   });
 });
+
+/**
+ * A team slug is a lookup key into the CLI's identity vault, so inherited members of
+ * Object.prototype must never answer for one (ADR 222). `constructor` is the case that shows this is
+ * not theoretical: `Object.prototype.constructor.name` is the string `'Object'`, so a guard checking
+ * only `name` would accept it as an identity.
+ */
+describe('the identity vault lookup cannot be answered by Object.prototype (ADR 222)', () => {
+  const configPath = join(mkdtempSync(join(tmpdir(), 'musterd-proto-')), 'config.json');
+
+  beforeEach(() => {
+    process.env['MUSTERD_CONFIG'] = configPath;
+    writeFileSync(configPath, JSON.stringify({ identities: {} }));
+  });
+
+  it.each(['__proto__', 'constructor', 'toString', 'hasOwnProperty'])(
+    'offers nothing for a team named %s, even with an empty vault',
+    async (slug) => {
+      const team = await post('/teams', { slug, creator: { name: 'nick', kind: 'human' } });
+      // Some of these may be refused as team slugs outright, which is also a correct answer — the
+      // point is that none of them ever yields a credential.
+      if (team.status !== 201) return;
+      const res = await get(`/teams/${encodeURIComponent(slug)}/local-identity`);
+      expect(res.json.available).toBe(false);
+      expect(res.json.credential).toBeUndefined();
+    },
+  );
+});
