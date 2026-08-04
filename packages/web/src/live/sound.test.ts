@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   EMPTY_LIFE,
+  firehoseSound,
+  roomTone,
   keyboardFor,
   keypressPlan,
   LIFE_EVENTS,
@@ -113,6 +115,33 @@ describe('the keyboard', () => {
   it('sits the body an octave-ish below the old bright band', () => {
     for (const seed of [1, 2, 3, 4, 5]) {
       expect(keyboardFor(seed).body).toBeLessThan(1400);
+    }
+  });
+});
+
+describe('enableForBroadcast (ADR 226)', () => {
+  it('turns each engine on without touching the operator’s stored preference', () => {
+    // Node env: stub just enough browser for the persistence check to be meaningful.
+    const store = new Map<string, string>([
+      ['musterd.live.sound', '0'],
+      ['musterd.live.roomtone', '0'],
+    ]);
+    vi.stubGlobal('window', {});
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    });
+    vi.stubGlobal('document', { hidden: true, addEventListener: () => {} });
+    try {
+      firehoseSound.enableForBroadcast();
+      roomTone.enableForBroadcast();
+      expect(firehoseSound.enabled).toBe(true);
+      expect(roomTone.enabled).toBe(true);
+      // A stream source must never rewrite the preference a human set on this machine.
+      expect(store.get('musterd.live.sound')).toBe('0');
+      expect(store.get('musterd.live.roomtone')).toBe('0');
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });
