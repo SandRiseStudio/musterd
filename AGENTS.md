@@ -88,14 +88,14 @@ What your change needs depends entirely on _what you changed_:
 5. **Never log secrets.** The team **agent key**, **grants**, and human **credentials** (`mskey_`/`msgr_`/`mscr_`) are shown once and stored only as `sha256` on the server / chmod-600 config on clients.
 6. **No new runtime dependency without an ADR** noting why and the alternative considered.
 7. **One Member is not one session.** Presence is where a Member is attached; the Member persists. Don't conflate them in schema, code, or naming.
-8. **Write work stays in a seat.** Do not use `superpowers:subagent-driven-development` or dispatch subagents that edit, claim, build, or commit — implement in your own seat, or hand the work to another seat with `team_send {act:'handoff'}`. A subagent writes under *your* identity with no seat, lane, or model of its own, so the [ADR 150](docs/decisions/150-structural-inducement-pretooluse-gates.md) lane gate cannot see it, [ADR 109](docs/decisions/109-seat-git-attribution.md) git attribution cannot trace it, and ADR 101/158 model attestation records its work as yours, at your model. Read-only fan-out — searching, mapping the codebase — is fine: knowledge needs no provenance.
+8. **Write work stays in a seat.** Do not use `superpowers:subagent-driven-development` or dispatch subagents that edit, claim, build, or commit — implement in your own seat, or hand the work to another seat with `team_send {act:'handoff'}`. A subagent writes under _your_ identity with no seat, lane, or model of its own, so the [ADR 150](docs/decisions/150-structural-inducement-pretooluse-gates.md) lane gate cannot see it, [ADR 109](docs/decisions/109-seat-git-attribution.md) git attribution cannot trace it, and ADR 101/158 model attestation records its work as yours, at your model. Read-only fan-out — searching, mapping the codebase — is fine: knowledge needs no provenance.
 
 ## Course-correction / deviation protocol
 
 When you find an error, contradiction, missing field, or a better approach:
 
 1. **Do not silently deviate.**
-2. Write `docs/decisions/NNN-<slug>.md` — **get NNN from `pnpm adr:next`, never by reading `origin/main` yourself** (ADR 220: a number is free only if no *open PR* claims it either). Template in `07-conventions.md`: Context, Problem, Decision, Consequences.
+2. Write `docs/decisions/NNN-<slug>.md` — **get NNN from `pnpm adr:next`, never by reading `origin/main` yourself** (ADR 220: a number is free only if no _open PR_ claims it either), then **push the branch as a draft PR straight away, before you write the ADR** ([ADR 223](docs/decisions/223-adr-numbers-are-published-not-just-read.md): the number is contested from the moment you take it, and `adr:next` can only see what has been published — an unpushed branch is invisible to every other seat for your whole authoring session). Template in `07-conventions.md`: Context, Problem, Decision, Consequences.
 3. Make the **smallest correct change**.
 4. Update the affected doc(s) **in the same commit**, referencing the ADR in the commit footer (`Refs ADR-00N`).
 
@@ -140,9 +140,10 @@ checks), so don't improvise a merge method or a catch-up strategy.
 **Hard rules:** never merge with a merge-commit or rebase-merge (disabled anyway); never `git push --force` (use `--force-with-lease`); never merge past a red `gates` run. Auto-delete clears the **remote** branch; you still clear the **local** one (step 6) — `git branch -d` won't (squash-merge isn't an ancestor), so use `-D` once the PR is merged. The `gates` check runs `build → typecheck → test → coverage → format:check → change-adr:check`. The `review` workflow ([ADR 180](docs/decisions/180-review-after-bugbot.md)) posts advisory findings on PRs touching `packages/protocol/src` or `packages/server/src`; read them, but they are not a gate and never block a merge.
 
 <!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
+
 ## Your musterd team
 
-You are **stanley** on the **revive** team. musterd is your coordination layer: your teammates — other agents *and* humans — are
+You are **stanley** on the **revive** team. musterd is your coordination layer: your teammates — other agents _and_ humans — are
 reachable through it, and humans on the team are peers, not approvers.
 
 **Your channel.** If this session has the `team_*` tools (the musterd MCP server), they are your
@@ -157,13 +158,13 @@ The loop — `team_*` tool form / `musterd` CLI form:
 - **Check your inbox at every task boundary.** `team_inbox_check` / `musterd inbox` — on start, when
   you finish a unit of work, and after being heads-down. Directed acts wait there for a reply.
 - **Report status as you work.** `team_send {act:'status_update'}` / `musterd send --act
-  status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
-- **Claim a lane *before* you build — reading the board is not enough.** `lane_claim` / `musterd lane
-  claim` the ONE you will do (`lane_open` if new); **never build in a lane a teammate owns.** Hand off
+status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
+- **Claim a lane _before_ you build — reading the board is not enough.** `lane_claim` / `musterd lane
+claim` the ONE you will do (`lane_open` if new); **never build in a lane a teammate owns.** Hand off
   with `team_send {act:'handoff'}`; after merge `lane_submit`, then accept or `lane_resolve`.
 - **Ask a human before you act big or stall.** For a costly / irreversible / out-of-scope action, or
   when only a human can unblock you: `team_send {act:'ask'}` / `musterd send --act ask` (`meta.species`
-  + `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
+  - `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
 
 Invoke the tools/commands for real and use what they return — never write down an imagined inbox or
 reply. Keep messages short: use the acts, do not narrate in free text.
@@ -172,6 +173,7 @@ reply. Keep messages short: use the acts, do not narrate in free text.
 waiting on the inbox without polling, or recovering from an error — read the **musterd skill**
 (`.claude/skills/musterd/SKILL.md`, `.cursor/rules/musterd.mdc`, or `.musterd/skill/SKILL.md`) or run
 `musterd help` for the full command reference.
+
 <!-- musterd:end -->
 
 <!-- musterd:end -->

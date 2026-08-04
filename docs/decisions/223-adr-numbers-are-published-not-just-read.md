@@ -28,11 +28,11 @@ recurrence with the tool unused is an adoption problem; **a recurrence with the 
 problem.** The tool was used, correctly, by both. So the finding stands as pre-registered: a read
 cannot reserve, and no improvement to the reading would have prevented this.
 
-What the incident adds is *why* the window was not small. stanley's PR #633 was created at 12:37 and
+What the incident adds is _why_ the window was not small. stanley's PR #633 was created at 12:37 and
 merged at 12:40 — the claim on 221 was visible to the open-PR scan for **three minutes**, at the very
 end of the work. ADR 220 assumed the PR opens "immediately after the first push" and that authoring
 therefore happens mostly in public. In practice an ADR is written, revised, and gated on an unpushed
-branch for the whole session, and the PR appears when the work is *finished*. The number is taken at
+branch for the whole session, and the PR appears when the work is _finished_. The number is taken at
 minute zero and published at minute ninety.
 
 So the exposure is not the gap between push and PR. It is the gap between **taking** a number and

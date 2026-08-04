@@ -126,6 +126,12 @@ if (quiet) {
   process.stdout.write(
     `\nName the file docs/decisions/${padded}-<slug>.md with a matching \`# ${padded} — …\` H1.\n`,
   );
+  // ADR 223: this answer is only correct until someone else runs the same command. Publishing the
+  // claim is what makes it visible to their `open PRs` line — an unpushed branch is invisible to
+  // every other seat for the whole authoring session, which is how ADR 221 collided.
+  process.stdout.write(
+    `Push the branch as a draft PR now, before writing it, so ${padded} is visible to the next seat (ADR 223).\n`,
+  );
 }
 
 if (!prs.consulted) {
