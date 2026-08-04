@@ -52,13 +52,23 @@ function prMerged(pr: number): boolean {
   }
 }
 
-/** The first `Status:` word of an ADR by number, lowercased — 'accepted' | 'proposed' | … | null if absent. */
-function adrStatusWord(n: number): string | null {
+/**
+ * The first `Status:` word of an ADR by number, lowercased — 'accepted' | 'proposed' | … Returns
+ * `{ status: null }` when the file exists but its Status line is unparseable, so the caller can say
+ * which of the two problems it is: a *missing ADR* and an *unreadable header* need opposite fixes,
+ * and conflating them sends you looking for a file that is plainly there (2026-08-04: ADR 227 was
+ * reported "no such file" while sitting in the directory — its header used `- **Status:**`, which
+ * the pattern did not admit). Both markdown conventions in the tree are accepted: the dominant
+ * plain `- Status:` and the bold `- **Status:**` a few recent ADRs use.
+ */
+function adrStatus(n: number): { found: boolean; status: string | null } {
   const prefix = String(n).padStart(3, '0') + '-';
   const file = readdirSync(adrDir).find((f) => f.startsWith(prefix) && f.endsWith('.md'));
-  if (!file) return null;
-  const m = readFileSync(join(adrDir, file), 'utf8').match(/^-\s*Status:\s*([A-Za-z-]+)/m);
-  return m ? m[1]!.toLowerCase() : null;
+  if (!file) return { found: false, status: null };
+  const m = readFileSync(join(adrDir, file), 'utf8').match(
+    /^-\s*(?:\*\*)?Status:?(?:\*\*)?:?\s*([A-Za-z-]+)/m,
+  );
+  return { found: true, status: m ? m[1]!.toLowerCase() : null };
 }
 
 const errors: string[] = [];
@@ -108,10 +118,15 @@ for (const item of ROADMAP_RAW) {
   // (3) frozenBy ⟺ shipped agreement — the bidirectional anchor against the ADR's own Status line.
   if (item.frozenBy !== undefined) {
     frozenByChecked++;
-    const st = adrStatusWord(item.frozenBy);
-    if (st === null) {
+    const { found, status: st } = adrStatus(item.frozenBy);
+    if (!found) {
       errors.push(
         `"${item.id}": frozenBy names ADR ${item.frozenBy}, but no such file in docs/decisions.`,
+      );
+    } else if (st === null) {
+      errors.push(
+        `"${item.id}": ADR ${item.frozenBy} exists but its status is unreadable — it needs a ` +
+          `\`- Status: <word>\` line near the top (bold \`- **Status:**\` is fine too).`,
       );
     } else if (shipped && st !== 'accepted') {
       errors.push(
