@@ -55,6 +55,7 @@ describe('team policy command', () => {
     expect(res.code).toBe(0);
     expect(res.out).toContain('team policy — dawn');
     expect(res.out).toContain('re-seat known agents: off');
+    expect(res.out).toContain('review loop: off');
     expect(res.out).toContain('dispatch loop: off');
   });
 
@@ -67,6 +68,15 @@ describe('team policy command', () => {
     expect(JSON.parse(show.out).loops).toEqual({ review: false, dispatch: true });
   });
 
+  it('turns the review loop on and reads it back', async () => {
+    const set = await capture(() => teamCommand(parseArgs(['policy', '--review-loop', 'on'])));
+    expect(set.code).toBe(0);
+    expect(set.out).toContain('review loop on');
+
+    const show = await capture(() => teamCommand(parseArgs(['policy', '--json'])));
+    expect(JSON.parse(show.out).loops).toEqual({ review: true, dispatch: false });
+  });
+
   it('changes the dispatch loop without clobbering another policy knob', async () => {
     await capture(() => teamCommand(parseArgs(['policy', '--reseat-known-agents', 'on'])));
     await capture(() => teamCommand(parseArgs(['policy', '--dispatch-loop', 'on'])));
@@ -76,9 +86,23 @@ describe('team policy command', () => {
     expect(JSON.parse(show.out).loops).toEqual({ review: false, dispatch: true });
   });
 
+  it('changes the review loop without clobbering dispatch', async () => {
+    await capture(() => teamCommand(parseArgs(['policy', '--dispatch-loop', 'on'])));
+    await capture(() => teamCommand(parseArgs(['policy', '--review-loop', 'on'])));
+
+    const show = await capture(() => teamCommand(parseArgs(['policy', '--json'])));
+    expect(JSON.parse(show.out).loops).toEqual({ review: true, dispatch: true });
+  });
+
   it('rejects a dispatch-loop value other than on or off', async () => {
     await expect(teamCommand(parseArgs(['policy', '--dispatch-loop', 'maybe']))).rejects.toThrow(
       /--dispatch-loop <on\|off>/,
+    );
+  });
+
+  it('rejects a review-loop value other than on or off', async () => {
+    await expect(teamCommand(parseArgs(['policy', '--review-loop', 'maybe']))).rejects.toThrow(
+      /--review-loop <on\|off>/,
     );
   });
 
