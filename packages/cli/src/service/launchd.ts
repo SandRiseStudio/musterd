@@ -408,9 +408,15 @@ fi
 git checkout --quiet --detach origin/main || true
 echo "$(date '+%F %T') building $(git rev-parse --short HEAD)"
 
-pnpm install --prefer-offline --silent 2>&1 || true
+# Hold the build transcript aside and print it ONLY if the build fails. A successful publish is a
+# one-line fact; its vite asset table is ~158 lines that nobody has ever read and that grew this log
+# to 4.6 MB across 395 builds (measured 2026-08-04). A FAILED build is the opposite — the transcript
+# is the entire reason the log exists — so failure dumps everything, install output included.
+BUILD_OUT="$(mktemp -t musterd-live-build)"
+trap 'rm -f "$BUILD_OUT"' EXIT
+pnpm install --prefer-offline --silent > "$BUILD_OUT" 2>&1 || true
 # Protocol first: web imports @musterd/protocol from dist; a new export is invisible until rebuilt.
-if pnpm --filter @musterd/protocol build 2>&1 && pnpm --filter @musterd/web build 2>&1; then
+if pnpm --filter @musterd/protocol build >> "$BUILD_OUT" 2>&1 && pnpm --filter @musterd/web build >> "$BUILD_OUT" 2>&1; then
   SRC="$WORKTREE/packages/web/dist/client"
   mkdir -p "$(dirname "$WEBROOT")"
   STAGE="$(dirname "$WEBROOT")/.web.next"
@@ -423,7 +429,8 @@ if pnpm --filter @musterd/protocol build 2>&1 && pnpm --filter @musterd/web buil
   git rev-parse HEAD > "$STAMP"
   echo "$(date '+%F %T') published $(git rev-parse --short HEAD) → $WEBROOT"
 else
-  echo "$(date '+%F %T') web build failed; keeping the previously published bundle"
+  echo "$(date '+%F %T') web build failed; keeping the previously published bundle. Build output:"
+  cat "$BUILD_OUT"
 fi
 `;
 }
