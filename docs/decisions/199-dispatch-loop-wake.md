@@ -146,6 +146,9 @@ Counted directly off the live `wake_leases` ledger, keyed on the shape each edge
 | **Continuation** | `act_id` null, `lane_id`   | 1          |
 | Reply doorbell   | `act_id`, `lane_id` null   | all others |
 
+> **The signature column above expired on 2026-08-03. Do not re-run this query — see the
+> re-measurement below.** The counts were right on the day; the discriminator was not durable.
+
 So the Eval bullet above is satisfied on one edge only. **Continuation is proven live** (seat `izzo`,
 lease `01KYX17NRG`, 5.1s, no defer veto). **The handoff edge has never fired in production** — it is
 implemented and unit-tested (`residency.test.ts:610`) and nothing more. That is not a defect in what
@@ -158,6 +161,50 @@ structurally, not incidentally: only `izzo`, `miley` and `dolly` are residency-e
 three are in constant use, so the eligible set is empty **by construction**. The durable unblock is
 enrolling a dormant seat (`grokbot` / `compo` / `gptbot`) as a permanent idle wake target, which is
 worth doing on its own merits.
+
+### Re-measured 2026-08-04 — conclusion stands, method does not (dolly)
+
+**The finding above survives: the handoff edge has still never fired. The query that produced it now
+returns a wrong answer, and a reader who re-ran it would conclude the opposite.**
+
+Re-running the 2026-08-01 query today returns **6** leases with `act_id` **and** `lane_id`, not 0.
+None of them are handoffs. Every one is an **ADR 191 review-loop wake** — `act='ask'`, body
+`[lane] acceptance requested: …`, four of them `gptbot` being woken to accept a lane. The review loop
+was armed after this section was written (first such lease `2026-08-03 13:51:30`), and it writes both
+fields, so the signature stopped separating the edges the moment it shipped.
+
+`detail.derivation: 'work_order'` does not rescue it either: all 7 such audit rows carry it — the one
+continuation lease **and** the 6 review wakes. Every work-order-derived edge looks alike in the
+ledger's own columns.
+
+**The durable discriminator is the type of the originating act**, which the lease can only reach by
+join. Re-measured that way:
+
+| Originating act               | Leases | `lane_id`          | Edge           |
+| ----------------------------- | ------ | ------------------ | -------------- |
+| `handoff` (15 distinct acts)  | 40     | **all null**       | reply doorbell |
+| `ask` (`[lane] acceptance …`) | 6      | set                | review wake    |
+| — (`detail.act = lane:<id>`)  | 1      | set, `act_id` null | continuation   |
+
+So 25 handoff acts have been sent on this team and **not one produced a work-order lease** — they all
+went through the doorbell path. Handoff remains **0**, for the same reason as before, now established
+by a test that cannot be confused by a neighbouring loop.
+
+**Why it decayed, and the general lesson.** The signature was never wrong — it was _unowned_. It read
+off two nullable columns whose meaning is set by whichever loops happen to be armed, so arming an
+unrelated loop silently redefined it. An Eval that keys on incidental column shape has a shelf life
+measured in features; one that keys on the thing it actually means (which act caused this?) does not.
+**Any future re-measurement of these edges must join `wake_leases.act_id → messages.act`.**
+
+**Setup precondition, restated 2026-08-04.** The structural blocker named above is **cleared**:
+`gptbot` is now residency-enrolled (`codex`, host `mac.lan`, authorized by nick) at `flow: auto`, and
+sits dormant while the claude-code seats work — exactly the permanent idle wake target this section
+asked for. It arrived via lane `01KYZAT6CP`, which enrolled it for **`loops.review`**. A different
+precondition now binds: team policy is `{"loops":{"review":true}}` — **`loops.dispatch` has never been
+armed**, so there is no dispatch loop to derive a work order from and a `lane_handoff` degrades to the
+doorbell by configuration, not by defect. Arming it is an admin action and a standing cost decision,
+so it is nick's call rather than a step the exercise can take for itself; the lane carries the
+write-up.
 
 Recorded in the ADR rather than only in the acceptance record because this lane closed
 **unconfirmed**: no eligible acceptor existed (the two live seats had converged on one model, and the
