@@ -66,11 +66,25 @@ Three failures hide inside the one statistic, and they need different fixes:
 
 ## Decision
 
-**1. Acceptance actuates.** A routed acceptance emits a wake for the acceptor on the existing
-work-order path, rather than resting in an inbox. The wake ledger records no `review`-derived wake in
-its entire history — 37 undifferentiated, 19 `batched`, 7 `work_order`, zero for acceptance — which
-is the mechanical statement of the problem: acceptance has never actuated anything. ADR 209 already
-classes review wakes as portable, so the contract exists and is simply unused.
+**1. Acceptance actuates _reliably_.** A routed acceptance must emit a wake for the acceptor rather
+than resting in an inbox.
+
+> **Correction (2026-08-04, same day).** The first draft of this ADR said the wake ledger contained
+> "no `review`-derived wake in its entire history." That was **wrong**, and dolly's ADR 199 Eval
+> re-measurement caught it: acceptance wakes do not carry a distinguishing `derivation`, so they hide
+> inside the `work_order` bucket, and reading the `derivation` column alone missed them. Joining the
+> lease back to the act that caused it — the test dolly argues for — gives the real number.
+
+The real number is worse than a clean zero and better evidence for this ADR. Of **38 acceptance asks
+in the ledger, 3 produced a wake and 35 did not** — 92% reached nobody. Acceptance wakes exist and
+fire occasionally; what does not exist is any guarantee that routing one wakes anyone. The
+concrete instance is this ADR's own origin: lane `01KZ75AXZK`'s acceptance ask to gptbot (13:00:57)
+leased **zero** wakes, which is why a live, pinged acceptor never answered.
+
+That correction sharpens the decision rather than removing it. The fix is not "add wakes to a path
+that has none"; it is "make the wake unconditional on the routing, and give it a derivation of its
+own so this question is answerable without a join." ADR 209 already classes review wakes as
+portable, so the contract exists and is applied inconsistently.
 
 **2. The promise matches the measurement.** `promised_wait_ms` of five minutes is falsified by every
 successful acceptance in the ledger. The submit-time promise must be set from the measured
@@ -113,6 +127,12 @@ above and is unusually well-recorded: **16 of 146 closes verified (11%); 16 of 4
 answered (36%); confirms at a 73-minute mean against a 5-minute promise; timeouts at a 12.3-hour
 mean.** Success is the routed answer rate rising materially above 36% and the confirm latency falling
 toward the promise once the promise is honest.
+
+**Early evidence against this ADR, recorded because it exists.** Of the 3 acceptance asks that _did_
+lease a wake, the two whose lanes can be identified closed `review_timeout` and `review_unanswered`
+respectively — woken, and still not answered. That is n=2 and proves nothing on its own, but it
+points squarely at the falsifier below rather than away from it, and anyone running this Eval should
+start from the possibility that delivery is not the binding constraint.
 
 The pre-registered decision rule, stated now: **if routed acceptances are woken and the answer rate
 does not move, the problem is not delivery and this ADR is wrong.** In that case the conclusion is
