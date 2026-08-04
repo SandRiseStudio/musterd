@@ -22,9 +22,17 @@ const opt = (flag, def) => {
 const PORT = Number(opt('--port', process.env.PORT ?? '4318'));
 const LOG = opt('--log', join(homedir(), '.musterd', 'otel-sink.log'));
 
+// One line, one destination. The file is the durable record (`--log`, what the docs tell you to
+// tail); stdout is for a human watching a terminal. Writing BOTH unconditionally meant that under
+// the LaunchAgent — where launchd captures stdout to a file of its own — every line was stored
+// twice, and `otel-sink.log` and `otel-sink.stdout.log` grew to 10.6 MB each, byte-identical.
+// No TTY means nobody is watching, so the file is the only destination that matters; the plist's
+// StandardOutPath then holds what it should have all along: a crash trace, if there ever is one.
+const INTERACTIVE = process.stdout.isTTY === true;
+
 function emit(line) {
   const stamped = `${new Date().toISOString()} ${line}`;
-  process.stdout.write(stamped + '\n');
+  if (INTERACTIVE) process.stdout.write(stamped + '\n');
   try {
     appendFileSync(LOG, stamped + '\n');
   } catch {
